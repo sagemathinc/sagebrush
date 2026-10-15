@@ -28,22 +28,56 @@ fn adam7_rows(w: u32, h: u32) -> usize {
         .sum()
 }
 
-/// The checksums of the chunks before the image data, which Pillow checks
-/// (the png crate lets an ancillary chunk's pass): a wrong one makes the file
-/// "broken".  One pass over those chunks, without allocating.
+/// The chunks a PNG file of `len` bytes may have, for an image of `rows`
+/// rows (Adam7's passes counted): any encoder's, which splits the image data
+/// into chunks of 8 KB or more, or one a row, and adds a few others.  The
+/// decoder's work for each chunk, also an empty one, is bounded by this,
+/// where the 256 MB file limit alone would allow millions (the module cannot
+/// be interrupted).
+pub fn max_chunks(len: usize, rows: usize) -> usize {
+    4096 + rows + len / 4096
+}
+
+/// One pass over the file's chunks, without allocating, before the decoder
+/// sees them: the checksums of the chunks before the image data, which
+/// Pillow checks (the png crate lets an ancillary chunk's pass; a wrong one
+/// makes the file "broken"), and the number of chunks, at most max_chunks.
 fn check_chunks(b: &[u8]) -> Result<(), String> {
-    let mut i = 8;
+    // (the rows, from the IHDR chunk, which comes first; a file without one
+    // is the decoder's to report)
+    let rows = if b.len() >= 8 + 8 + 13 && &b[12..16] == b"IHDR" {
+        let w = u32::from_be_bytes([b[16], b[17], b[18], b[19]]);
+        let h = u32::from_be_bytes([b[20], b[21], b[22], b[23]]);
+        if b[28] == 1 { adam7_rows(w, h) } else { h as usize }
+    } else {
+        0
+    };
+    let limit = max_chunks(b.len(), rows.min(7 * 16384));
+    let (mut i, mut count, mut data) = (8, 0usize, false);
     while i + 8 <= b.len() {
         let n = u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as usize;
         let kind = &b[i + 4..i + 8];
-        if kind == b"IDAT" || n > b.len() - i - 8 || b.len() - i - 8 - n < 4 {
+        count += 1;
+        if count > limit {
+            return Err(format!(
+                "a PNG file of more than {} chunks, the most Sagebrush reads for an image of {} rows in {} bytes",
+                limit, rows, b.len()
+            ));
+        }
+        if n > b.len() - i - 8 || b.len() - i - 8 - n < 4 {
             return Ok(()); // (the decoder reports a short file)
         }
-        let want = u32::from_be_bytes([b[i + 8 + n], b[i + 9 + n], b[i + 10 + n], b[i + 11 + n]]);
-        let mut h = crc32fast::Hasher::new();
-        h.update(&b[i + 4..i + 8 + n]);
-        if h.finalize() != want {
-            return Err(format!("a broken PNG file (bad checksum in its {} chunk)", String::from_utf8_lossy(kind)));
+        data |= kind == b"IDAT";
+        if !data {
+            let want = u32::from_be_bytes([b[i + 8 + n], b[i + 9 + n], b[i + 10 + n], b[i + 11 + n]]);
+            let mut h = crc32fast::Hasher::new();
+            h.update(&b[i + 4..i + 8 + n]);
+            if h.finalize() != want {
+                return Err(format!("a broken PNG file (bad checksum in its {} chunk)", String::from_utf8_lossy(kind)));
+            }
+        }
+        if kind == b"IEND" {
+            return Ok(());
         }
         i += 12 + n;
     }
@@ -243,11 +277,119 @@ pub fn encode(pix: &Pixmap, background: Option<crate::svg::Rgba>, dpi: f32, text
             let ppm = (dpi / 0.0254 + 0.5) as u32;
             enc.set_pixel_dims(Some(png::PixelDimensions { xppu: ppm, yppu: ppm, unit: png::Unit::Meter }));
         }
+        // (as Pillow writes them: tEXt when Latin-1 holds the text, else iTXt;
+        // the keyword must be Latin-1, 1 to 79 characters)
         for (k, v) in text {
-            enc.add_text_chunk(k.clone(), v.clone()).map_err(|e| format!("the PNG text {:?} ({})", k, e))?;
+            if k.is_empty() || k.chars().count() > 79 || k.chars().any(|c| c as u32 > 0xff) {
+                return Err(format!("the PNG text keyword {:?}: 1 to 79 Latin-1 characters", k));
+            }
+            if v.chars().all(|c| c as u32 <= 0xff) {
+                enc.add_text_chunk(k.clone(), v.clone()).map_err(|e| format!("the PNG text {:?} ({})", k, e))?;
+            } else {
+                enc.add_itxt_chunk(k.clone(), v.clone()).map_err(|e| format!("the PNG text {:?} ({})", k, e))?;
+            }
         }
         let mut w = enc.write_header().map_err(|e| e.to_string())?;
         w.write_image_data(&rgba).map_err(|e| e.to_string())?;
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_idats(k: usize) -> Vec<u8> {
+        let chunk = |kind: &[u8], data: &[u8]| {
+            let mut c = (data.len() as u32).to_be_bytes().to_vec();
+            c.extend_from_slice(kind);
+            c.extend_from_slice(data);
+            let mut h = crc32fast::Hasher::new();
+            h.update(&c[4..]);
+            c.extend_from_slice(&h.finalize().to_be_bytes());
+            c
+        };
+        let mut f = b"\x89PNG\r\n\x1a\n".to_vec();
+        f.extend(chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
+        for _ in 0..k {
+            f.extend(chunk(b"IDAT", &[]));
+        }
+        f.extend(chunk(b"IDAT", &[0x78, 0x9c, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01]));
+        f.extend(chunk(b"IEND", &[]));
+        f
+    }
+
+    #[test]
+    fn chunks_are_counted_through_the_image_data() {
+        // (HARD-6BC-2) a 1 x 1 gray image after k empty IDAT chunks: k + 3
+        // chunks in all, at most 4096 + 1 + len / 4096
+        let fits = |k: usize| k + 3 <= max_chunks(empty_idats(k).len(), 1);
+        let k = (4000..5000).take_while(|&k| fits(k)).last().unwrap();
+        assert!(check_chunks(&empty_idats(k)).is_ok());
+        assert!(decode(&empty_idats(k), 16, 256).is_ok());
+        let e = check_chunks(&empty_idats(k + 1)).err().unwrap();
+        assert!(e.starts_with("a PNG file of more than "), "{}", e);
+        assert!(decode(&empty_idats(200_000), 16, 256).is_err());
+    }
+
+    #[test]
+    fn adam7_rows_count_each_pass() {
+        // a 1 x 1 image has one row (pass 1); 8 x 8 has 1+1+1+2+2+4+4
+        assert_eq!(adam7_rows(1, 1), 1);
+        assert_eq!(adam7_rows(8, 8), 15);
+        // passes without columns have no rows: 1 pixel wide, 8 high
+        assert_eq!(adam7_rows(1, 8), 1 + 1 + 2 + 4);
+    }
+
+    #[test]
+    fn check_chunks_finds_a_bad_crc_before_the_image_data() {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let chunk = |kind: &[u8], data: &[u8]| {
+            let mut c = (data.len() as u32).to_be_bytes().to_vec();
+            c.extend_from_slice(kind);
+            c.extend_from_slice(data);
+            let mut h = crc32fast::Hasher::new();
+            h.update(kind);
+            h.update(data);
+            c.extend_from_slice(&h.finalize().to_be_bytes());
+            c
+        };
+        png.extend(chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
+        png.extend(chunk(b"tEXt", b"a\0b"));
+        assert!(check_chunks(&png).is_ok());
+        let n = png.len();
+        png[n - 1] ^= 1;
+        assert_eq!(check_chunks(&png).unwrap_err(), "a broken PNG file (bad checksum in its tEXt chunk)");
+        // a length past the end is the decoder's to report
+        let mut cut = png[..8].to_vec();
+        cut.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+        cut.extend_from_slice(b"IHDR");
+        assert!(check_chunks(&cut).is_ok());
+    }
+
+    #[test]
+    fn decode_refuses_large_images_before_allocating() {
+        // a header and image data: the size check comes first
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let ihdr = [0, 0, 0x40, 0x01, 0, 0, 0, 1, 8, 2, 0, 0, 0];
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&ihdr);
+        let mut h = crc32fast::Hasher::new();
+        h.update(b"IHDR");
+        h.update(&ihdr);
+        png.extend_from_slice(&h.finalize().to_be_bytes());
+        // (image data that is never read: the size is refused first)
+        let idat = [0x78u8, 0x9c, 0x03, 0x00];
+        png.extend_from_slice(&(idat.len() as u32).to_be_bytes());
+        png.extend_from_slice(b"IDAT");
+        png.extend_from_slice(&idat);
+        let mut h = crc32fast::Hasher::new();
+        h.update(b"IDAT");
+        h.update(&idat);
+        png.extend_from_slice(&h.finalize().to_be_bytes());
+        let err = decode(&png, 16384, 1 << 24).err().unwrap();
+        assert!(err.starts_with("a PNG image of 16385 x 1 pixels"), "{}", err);
+        assert_eq!(decode(b"GIF89a", 16384, 1 << 24).err().unwrap(), "not a PNG file");
+    }
 }

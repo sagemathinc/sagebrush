@@ -806,7 +806,10 @@ class Figure:
         # (the figure's dpi is what savefig uses by default; on screen the
         # SVG has 100 units per inch)
         self.dpi = float(dpi) if dpi is not None else float(rcParams.get("figure.dpi", 100.0))
-        self._facecolor = facecolor
+        # (the facecolor as it is when the figure is made, as matplotlib's;
+        # given, it also colors the figure's SVG)
+        self._facecolor_given = facecolor is not None
+        self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
         self.axes = []
         self._suptitle = None
         self._grid = (1, 1)
@@ -904,25 +907,37 @@ class Figure:
         format = format.lower()
         if format not in _SAVE_FORMATS:
             raise ValueError("Format %r is not supported (supported formats: %s)" % (format, ", ".join(sorted(_SAVE_FORMATS))))
+        if format not in ("png", "svg"):
+            raise NotImplementedError("savefig: Sagebrush saves PNG and SVG files, not %s" % format)
+        # the background, as matplotlib's: transparent=True makes the figure's
+        # default facecolor "none" (an explicit one still applies) and leaves
+        # the axes without their (white) patches
+        if transparent is None:
+            transparent = rcParams.get("savefig.transparent", False)
+        given = facecolor is not None
+        if facecolor is None:
+            facecolor = "none" if transparent else rcParams.get("savefig.facecolor", "auto")
+        if facecolor == "auto":
+            facecolor = self._facecolor
+            given = given or self._facecolor_given
+        background = _css_color(facecolor)
         if format == "svg":
             if metadata is not None:
                 raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
-            save_svg(self._svg(), fname)
+            # (Sagebrush's SVG has no background on screen: one asked for is added)
+            svg = self._svg()
+            if given and background != "none":
+                svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
+            _write(fname, svg, text=True)
             return
-        if format != "png":
-            raise NotImplementedError("savefig: Sagebrush saves PNG and SVG files, not %s" % format)
         if dpi is None:
             dpi = rcParams.get("savefig.dpi", "figure")
         if dpi == "figure":
             dpi = self.dpi
         dpi = float(dpi)
-        if transparent is None:
-            transparent = rcParams.get("savefig.transparent", False)
-        if facecolor is None:
-            facecolor = rcParams.get("savefig.facecolor", "auto")
-        if facecolor == "auto":
-            facecolor = self._facecolor if self._facecolor is not None else rcParams.get("figure.facecolor", "white")
-        background = None if transparent else _css_color(facecolor)
+        svg = self._svg()
+        if not transparent:
+            svg = _axes_patches(svg, self.axes)
         text = {"Software": "Sagebrush"}
         for k, v in (metadata or {}).items():
             if v is None:
@@ -930,12 +945,8 @@ class Figure:
             else:
                 text[k] = v
         import _png
-        png = _png.figure_png(self._svg(), self._size[0], self._size[1], dpi, background, list(text.items()))
-        if hasattr(fname, "write"):
-            fname.write(png)
-        else:
-            with open(fname, "wb") as f:
-                f.write(png)
+        png = _png.figure_png(svg, self._size[0], self._size[1], dpi, None if background == "none" else background, list(text.items()))
+        _write(fname, png)
 
     def show(self):
         _show(self, "figure")
@@ -956,13 +967,57 @@ _SAVE_FORMATS = ("avif", "eps", "gif", "jpeg", "jpg", "pdf", "pgf", "png", "ps",
 
 
 def _css_color(color):
-    """savefig's facecolor as a CSS color (#rrggbbaa for an RGBA tuple, so
-    that its alpha is kept exactly)."""
+    """savefig's facecolor as a CSS color, as matplotlib takes it ("none",
+    names, "#rrggbb[aa]", "C1", gray levels, RGB(A) tuples in [0, 1], whose
+    nan is 0); a tuple becomes #rrggbbaa, keeping its alpha exactly."""
+    if isinstance(color, str):
+        return "none" if color.lower() == "none" else to_color(color)
     if isinstance(color, (tuple, list)) and len(color) in (3, 4):
-        return "#" + "".join("%02x" % int(min(1.0, max(0.0, float(v))) * 255 + 0.5) for v in (list(color) + [1.0])[:4])
-    if isinstance(color, str) and color.lower() == "none":
-        return "none"
-    return to_color(color)
+        vals = [float(v) for v in color]
+        if any(v < 0 or v > 1 for v in vals):
+            raise ValueError("RGBA values should be within 0-1 range")
+        vals = [0.0 if v != v else v for v in vals] + [1.0] * (4 - len(vals))
+        return "#" + "".join("%02x" % int(v * 255 + 0.5) for v in vals)
+    raise ValueError("Invalid RGBA argument: %r" % (color[0] if isinstance(color, (tuple, list)) and color else color,))
+
+
+def _svg_background(svg, css, w, h):
+    """The figure's SVG on a rectangle of a color (an explicit facecolor)."""
+    i = svg.index(">", svg.index("<svg")) + 1
+    return svg[:i] + '<rect x="0" y="0" width="%s" height="%s" fill="%s"/>' % (w, h, css) + svg[i:]
+
+
+def _axes_patches(svg, axes):
+    """The figure's SVG with matplotlib's white axes patches, under each
+    axes' content (its panel's box; none for axis('off'))."""
+    import re
+    out, pos, k = [], 0, 0
+    for m in re.finditer(r'<g class="sb-panel"[^>]*data-box="([^"]*)"[^>]*>', svg):
+        ax = axes[k] if k < len(axes) else None
+        k += 1
+        out.append(svg[pos:m.end()])
+        pos = m.end()
+        if ax is not None and ax._opts.get("axes", True):
+            x, y, w, h = m.group(1).split()
+            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="#ffffff" stroke="none"/>' % (x, y, w, h))
+    out.append(svg[pos:])
+    return "".join(out)
+
+
+def _write(fname, data, text=False):
+    """data (str for an SVG) written to a file name or file object; text
+    goes to a binary file object as UTF-8, as matplotlib's SVG does."""
+    if hasattr(fname, "write"):
+        if text:
+            try:
+                fname.write(data)
+            except TypeError:
+                fname.write(data.encode("utf-8"))
+        else:
+            fname.write(data)
+        return
+    with open(fname, "w" if text else "wb") as f:
+        f.write(data)
 
 
 def _bisect(edges, v):
@@ -999,8 +1054,8 @@ def gca():
     return gcf().gca()
 
 
-def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze=True, **kw):
-    fig = figure(figsize=figsize)
+def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze=True, dpi=None, facecolor=None, **kw):
+    fig = figure(figsize=figsize, dpi=dpi, facecolor=facecolor)
     rows = [[fig.add_subplot(nrows, ncols, r * ncols + c + 1) for c in builtin_range(ncols)] for r in builtin_range(nrows)]
     if squeeze and nrows == 1 and ncols == 1:
         return fig, rows[0][0]
