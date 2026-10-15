@@ -166,6 +166,9 @@ axis at a time, without the locator's other options (`integer`,
 `symmetric`, `prune`, other steps) and without its classic or
 round-numbers modes. The named colors of `lib/matplotlib/colors.py`
 (`CSS4_COLORS`) are the CSS Color Module's, as matplotlib lists them.
+`lib/matplotlib/_names.py` lists the public names of matplotlib 3.11's
+`Axes`, `Figure` and `pyplot` (written by `test/mpl_names_gen.py`), so that
+an AttributeError can say which of them Sagebrush does not have yet.
 
 Copyright (c) 2012- Matplotlib Development Team; All Rights Reserved
 
