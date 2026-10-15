@@ -16,7 +16,7 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 
 import math
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
-                       show as _show, save_svg, TAB10, to_color, colormap, describe_svg)
+                       show as _show, save_svg, TAB10, to_color, colormap, describe_svg, mpl_ticks, DASHES)
 
 PT = 100 / 72  # pixels per point at 100 dpi
 
@@ -130,6 +130,74 @@ class Line2D:
         return "<matplotlib.lines.Line2D object at 0x%x>" % (id(self) & 0xffffffffffff)
 
 
+class _AxLine2D(Line2D):
+    """What axhline and axvline return: its data is matplotlib's, the line's
+    ends in axes fractions along the panel and its value along the other axis."""
+
+    def get_xdata(self):
+        p = self._prim
+        return [p.value, p.value] if p.vertical else list(p.span)
+
+    def get_ydata(self):
+        p = self._prim
+        return list(p.span) if p.vertical else [p.value, p.value]
+
+    def set_data(self, *args):
+        raise NotImplementedError("set_data of an axhline or axvline is not supported by sagebrush's matplotlib")
+
+    set_xdata = set_ydata = set_data
+
+
+# Line2D's properties (matplotlib.lines.Line2D.set): those a line drawn here
+# takes, and the rest, which are not supported
+_LINE2D_PROPS = {"agg_filter", "alpha", "animated", "antialiased", "aa", "clip_box", "clip_on", "clip_path", "color", "c",
+                 "dash_capstyle", "dash_joinstyle", "dashes", "data", "drawstyle", "ds", "figure", "fillstyle", "gapcolor",
+                 "gid", "in_layout", "label", "linestyle", "ls", "linewidth", "lw", "marker", "markeredgecolor", "mec",
+                 "markeredgewidth", "mew", "markerfacecolor", "mfc", "markerfacecoloralt", "mfcalt", "markersize", "ms",
+                 "markevery", "mouseover", "path_effects", "picker", "pickradius", "rasterized", "sketch_params", "snap",
+                 "solid_capstyle", "solid_joinstyle", "transform", "url", "visible", "xdata", "ydata", "zorder"}
+_LINE_ALIASES = {"c": "color", "ls": "linestyle", "lw": "linewidth"}
+
+
+def _line_props(kw):
+    """axhline's keywords (Line2D properties): color, linestyle, linewidth,
+    alpha, label and visible; another property is NotImplementedError, and
+    an unknown keyword matplotlib's AttributeError."""
+    o = {"color": None, "linestyle": "-", "linewidth": rcParams.get("lines.linewidth", 1.5), "alpha": None,
+         "label": None, "visible": True}
+    for k, v in kw.items():
+        if k not in _LINE2D_PROPS:
+            raise AttributeError("Line2D.set() got an unexpected keyword argument '%s'" % k)
+        k = _LINE_ALIASES.get(k, k)
+        if k not in o:
+            raise NotImplementedError("the Line2D property %r is not supported by sagebrush's matplotlib here" % k)
+        o[k] = v
+    if o["color"] is not None:
+        o["color"] = to_color(o["color"])
+    ls = o["linestyle"]
+    if not isinstance(ls, str):
+        raise NotImplementedError("dash patterns (%r) are not supported by sagebrush's matplotlib" % (ls,))
+    if ls not in DASHES and ls != "none":
+        raise ValueError("%r is not a valid value for ls." % ls)
+    if ls in ("None", "none", " ", ""):
+        o["visible"] = False  # (no line: nothing is drawn)
+    o["linewidth"] = float(o["linewidth"])
+    if o["label"] is not None:
+        o["label"] = None if str(o["label"]).startswith("_") else str(o["label"])
+    o["visible"] = bool(o["visible"])
+    return o
+
+
+def _handle_prim(h):
+    """The primitive a legend handle (what plot, bar, axhline... returned) draws"""
+    if isinstance(h, ErrorbarContainer):
+        h = h[0] if h[0] is not None else (h[2][0] if h[2] else None)
+    p = getattr(h, "_prim", None)
+    if p is None:
+        raise NotImplementedError("legend handles of type %s are not supported by sagebrush's matplotlib" % type(h).__name__)
+    return p
+
+
 class _Artist:
     def __init__(self, prim, kind):
         self._prim, self._kind = prim, kind
@@ -170,17 +238,22 @@ class Axes:
         self._rect = rect
         self._prims = []
         self._opts = {}
-        self._ci = 0
+        self._ci = self._pi = 0
 
     def __repr__(self):
         return "<Axes: >"
 
-    def _color(self, c=None):
+    def _color(self, c=None, patch=False):
+        """c, or the next color of the cycle: matplotlib's axes have two,
+        one for lines (plot, step, errorbar, hist) and one for patches and
+        collections (bar, barh, fill_between, scatter, pie)"""
         if c is not None:
             return to_color(c)
-        c = TAB10[self._ci % 10]
+        if patch:
+            self._pi += 1
+            return TAB10[(self._pi - 1) % 10]
         self._ci += 1
-        return c
+        return TAB10[(self._ci - 1) % 10]
 
     def _add(self, p):
         self._prims.append(p)
@@ -241,7 +314,7 @@ class Axes:
                 clim = (float(lo), float(hi))
             else:
                 colors = [to_color(v) for v in cl]
-        col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None))
+        col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None), True)
         sizes = None
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
@@ -269,8 +342,8 @@ class Axes:
             x0 = float(xi) - width / 2 if align == "center" else float(xi)
             rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
-        p = Rects(rects, color=self._color(None if colors else color), colors=colors, label=label,
-                  edgecolor=edgecolor, alpha=alpha)
+        p = Rects(rects, color=self._color(None if colors else color, True), colors=colors, label=label,
+                  edgecolor=edgecolor, alpha=alpha, legend_role="container")
         if tick_label is not None:
             self._opts["xticks"] = [float(v) for v in xs]
             self._opts["xticklabels"] = list(tick_label)
@@ -287,7 +360,7 @@ class Axes:
         ls_ = _list(left) if left is not None and not isinstance(left, (int, float)) else [left or 0] * len(ys)
         rects = [(l, float(yi) - height / 2, w, height) if w >= 0 else (l + w, float(yi) - height / 2, -w, height)
                  for yi, w, l in zip(ys, ws, ls_)]
-        p = Rects(rects, color=self._color(color), label=label, edgecolor=edgecolor, alpha=alpha)
+        p = Rects(rects, color=self._color(color, True), label=label, edgecolor=edgecolor, alpha=alpha, legend_role="container")
         self._opts.setdefault("_barsh", True)
         return _Artist(self._add(p), "container.BarContainer")
 
@@ -328,7 +401,9 @@ class Axes:
             self._add(Line(xs, ys, color=col, thickness=1.5 * PT, label=label))
         else:
             rects = [(edges[i], 0, edges[i + 1] - edges[i], counts[i]) for i in builtin_range(nb)]
-            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=edgecolor))
+            # (matplotlib's: the label on the first bar, and a BarContainer)
+            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=edgecolor,
+                            legend_role="both" if label is not None else "container"))
         self._opts.setdefault("_bars", True)
         import sys
         np = sys.modules.get("numpy")
@@ -340,7 +415,7 @@ class Axes:
         xs, a = _list(x), _list(y1)
         b = _list(y2) if not isinstance(y2, (int, float)) else [float(y2)] * len(xs)
         pts = list(zip(xs, a)) + list(zip(xs, b))[::-1]
-        p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=self._color(color or kw.get("facecolor")),
+        p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=self._color(color or kw.get("facecolor"), True),
                     alpha=0.5 if alpha is None else alpha, label=label)
         return _Artist(self._add(p), "collections.PolyCollection")
 
@@ -392,10 +467,11 @@ class Axes:
             for a, b in zip(lo, hi):
                 sx += [a[0], b[0], None]
                 sy += [a[1], b[1], None]
-            barlines.append(_Artist(self._add(Line(sx, sy, color=ecol, thickness=thick)), "collections.LineCollection"))
+            barlines.append(_Artist(self._add(Line(sx, sy, color=ecol, thickness=thick, legend_role="none")), "collections.LineCollection"))
             if capsize:
                 for ends in (lo, hi):
-                    p = Points([e[0] for e in ends], [e[1] for e in ends], color=ecol, marker=cap, size=float(capsize) * PT)
+                    p = Points([e[0] for e in ends], [e[1] for e in ends], color=ecol, marker=cap, size=float(capsize) * PT,
+                               legend_role="none")
                     caplines.append(_Artist(self._add(p), "lines.Line2D"))
         data = None
         if fmt not in ("none", "None"):
@@ -406,6 +482,10 @@ class Axes:
             else:
                 p = Points(xs, ys, color=col, marker=marker or "o", size=3.5, label=label)
             data = _Artist(self._add(p), "lines.Line2D")
+        # (the legend's entry is the ErrorbarContainer's, after the other artists)
+        handle = data or (barlines[0] if barlines else None)
+        if handle is not None:
+            handle._prim.options.update(legend_role="container", label=label)
         return ErrorbarContainer((data, tuple(caplines), tuple(barlines)), has_xerr=xe is not None, has_yerr=ye is not None)
 
     def step(self, x, y, *args, where="pre", **kw):
@@ -428,21 +508,31 @@ class Axes:
         if y is None:
             x, y = list(builtin_range(len(_list(x)))), x
         xs, ys = _list(x), _list(y)
-        col = self._color(kw.get("color"))
+        col = to_color(kw.get("color")) or TAB10[0]  # (matplotlib's stem: C0, not the next color)
         sx, sy = [], []
         for xi, yi in zip(xs, ys):
             sx += [xi, xi, None]
             sy += [0, yi, None]
-        self._add(Line(sx, sy, color=col, thickness=1.2))
-        self._add(Points(xs, ys, color=col, marker="o", size=4, label=kw.get("label")))
+        # (the legend's entry is the StemContainer's, after the other artists)
+        self._add(Line(sx, sy, color=col, thickness=1.2, legend_role="none"))
+        self._add(Points(xs, ys, color=col, marker="o", size=4, label=kw.get("label"), legend_role="container"))
 
-    def axhline(self, y=0, color=None, linestyle="-", linewidth=1, **kw):
-        self._add(AxLine(y, False, color=to_color(color or kw.get("c")) or "currentColor",
-                         linestyle=kw.get("ls", linestyle), thickness=kw.get("lw", linewidth) * PT))
+    def axhline(self, y=0, xmin=0, xmax=1, **kw):
+        """A horizontal line at y from xmin to xmax (fractions of the axes' width)."""
+        return self._axline(y, False, xmin, xmax, kw)
 
-    def axvline(self, x=0, color=None, linestyle="-", linewidth=1, **kw):
-        self._add(AxLine(x, True, color=to_color(color or kw.get("c")) or "currentColor",
-                         linestyle=kw.get("ls", linestyle), thickness=kw.get("lw", linewidth) * PT))
+    def axvline(self, x=0, ymin=0, ymax=1, **kw):
+        """A vertical line at x from ymin to ymax (fractions of the axes' height)."""
+        return self._axline(x, True, ymin, ymax, kw)
+
+    def _axline(self, v, vertical, lo, hi, kw):
+        o = _line_props(kw)
+        # (matplotlib's: rcParams lines.color C0 and lines.linewidth, not the
+        # color cycle)
+        p = AxLine(float(v), vertical, (float(lo), float(hi)), color=o["color"] or "#1f77b4",
+                   linestyle=o["linestyle"], thickness=o["linewidth"] * PT, alpha=o["alpha"], label=o["label"],
+                   hidden=not o["visible"])
+        return _AxLine2D(self._add(p))
 
     def text(self, x, y, s, fontsize=10, color=None, ha="left", va="baseline", rotation=0, transform=None, **kw):
         if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
@@ -476,9 +566,9 @@ class Axes:
             b = a + 2 * math.pi * v / total
             n = max(2, int(60 * (b - a) / math.pi))
             pts = [(0.0, 0.0)] + [(math.cos(a + (b - a) * k / n), math.sin(a + (b - a) * k / n)) for k in builtin_range(n + 1)]
-            c = to_color(colors[i]) if colors else TAB10[i % 10]
+            c = to_color(colors[i]) if colors else self._color(None, True)
             self._add(Polygon([q[0] for q in pts], [q[1] for q in pts], color=c,
-                              label=labels[i] if labels and not autopct else None, edgecolor="#ffffff"))
+                              label=labels[i] if labels else None, edgecolor="#ffffff"))
             mid = (a + b) / 2
             if labels:
                 self._add(Text(labels[i], 1.15 * math.cos(mid), 1.15 * math.sin(mid), fontsize=11, no_bbox=True))
@@ -693,13 +783,50 @@ class Axes:
     def grid(self, visible=True, **kw):
         self._opts["grid"] = bool(visible)
 
+    def _legend_handles(self):
+        """The artists a legend can show, in matplotlib's order: the axes'
+        lines, patches and collections as they were added, then its
+        containers (bar, barh, hist, errorbar, stem): [(primitive, label)],
+        the label None where the artist has none."""
+        children, containers = [], []
+        for p in self._prims:
+            role = p.options.get("legend_role", "child")
+            if p.kind in ("text", "arrow", "image") or role == "none":
+                continue
+            label = p.options.get("label")
+            if role in ("child", "both"):
+                children.append((p, label))
+            if role in ("container", "both"):
+                containers.append((p, label if role == "container" else None))
+        return children + containers
+
     def legend(self, *args, loc=None, **kw):
-        if args and isinstance(args[0], (list, tuple)):
-            labels = args[-1]
-            labelled = [p for p in self._prims if p.kind != "text"]
-            for p, s in zip(labelled, labels):
-                p.options["label"] = str(s)
+        """A legend of the labelled artists (labels starting with _ left out),
+        or legend(labels), legend(handles, labels), legend(handles=...),
+        as matplotlib's; its entries are those of the moment it is called."""
+        handles, labels = kw.pop("handles", None), kw.pop("labels", None)
+        if len(args) == 1:
+            labels = args[0]
+        elif len(args) == 2:
+            handles, labels = args
+        elif len(args) > 2:
+            raise TypeError("legend() takes from 0 to 2 positional arguments but %d were given" % len(args))
+        if handles is not None:
+            prims = [_handle_prim(h) for h in handles]
+            if labels is None:
+                labels = [p.options.get("label") for p in prims]
+            entries = [(p, str(s)) for p, s in zip(prims, labels) if s is not None]
+        elif labels is not None:
+            labels = list(labels)  # (a string: its characters, as matplotlib's)
+            if any(isinstance(s, (Line2D, _Artist)) for s in labels):
+                raise TypeError("A single argument passed to legend() must be a list of labels, but found an Artist in there.")
+            entries = [(p, str(s)) for (p, _), s in zip(self._legend_handles(), labels)]
+        else:
+            entries = [(p, str(s)) for p, s in self._legend_handles() if s is not None and not str(s).startswith("_")]
+        if kw:
+            raise NotImplementedError("legend(): %s not supported by sagebrush's matplotlib" % ", ".join(sorted(kw)))
         self._opts["legend"] = True
+        self._opts["legend_entries"] = entries
         if loc is not None:
             self._opts["legend_loc"] = loc if loc != "best" else "upper right"
 
@@ -723,12 +850,49 @@ class Axes:
             getattr(self, "set_" + k)(v)
 
     def cla(self):
-        self._prims, self._opts, self._ci = [], {}, 0
+        self._prims, self._opts, self._ci, self._pi = [], {}, 0, 0
         # (pyplot's current image goes with the axes it was in)
         if getattr(getattr(self.figure, "_gci", None), "_ax", None) is self:
             self.figure._gci = None
 
     clear = cla
+
+    def _tick_bins(self, size):
+        """How many tick intervals matplotlib's AutoLocator allows on each axis
+        (Axis.get_tick_space, at most 9): the axis length in points over 3
+        tick labels' size (x) or 2 (y), the size in pixels.  The length is
+        that of these axes in matplotlib's layout: on a grid, its default
+        subplot parameters (left 0.125, right 0.9, bottom 0.11, top 0.88,
+        wspace and hspace 0.2), as if tight_layout were not called."""
+        W, H = self.figure._size
+        _, _, w, h = self._rect
+        grid = getattr(self, "_grid", None)
+        if grid is not None and not self._opts.get("exact"):
+            nr, nc = grid
+            w *= nc * (0.9 - 0.125) / (nc + 0.2 * (nc - 1))
+            h *= nr * (0.88 - 0.11) / (nr + 0.2 * (nr - 1))
+        pt = size / PT
+        return {"x": min(9, max(1, int(math.floor(w * W * 72 / (pt * 3))))),
+                "y": min(9, max(1, int(math.floor(h * H * 72 / (pt * 2)))))}
+
+    def get_xticks(self):
+        """The tick positions: those set, or the locator's (also just outside
+        the limits, as matplotlib's)"""
+        return self._ticks("x")
+
+    def get_yticks(self):
+        return self._ticks("y")
+
+    def _ticks(self, axis):
+        import numpy as np
+        if self._opts.get(axis + "ticks") is not None:
+            return np.array(self._opts[axis + "ticks"], dtype=float)
+        p = self._panel()
+        if p.options.get(axis + "scale") == "log":
+            raise NotImplementedError("get_%sticks of a log axis is not supported by sagebrush's matplotlib" % axis)
+        r = p.ranges(500, 400)
+        lo, hi = (r[0], r[1]) if axis == "x" else (r[2], r[3])
+        return np.array(mpl_ticks(lo, hi, p.options["tick_bins"][axis]))
 
     def _panel(self):
         o = {k: v for k, v in self._opts.items() if not k.startswith("_")}
@@ -741,6 +905,8 @@ class Axes:
         o.setdefault("tick_format", "matplotlib")
         o.setdefault("frame", True)
         o.setdefault("margins", 0.05)
+        o.setdefault("autoscale", "matplotlib")
+        o.setdefault("tick_bins", self._tick_bins(o["tick_size"]))
         if o.get("legend") is None:
             o["legend"] = False  # matplotlib shows a legend only when asked
         prims = [p for p in self._prims if not p.options.get("hidden")]
@@ -838,6 +1004,7 @@ class Figure:
             if a._rect == rect:
                 return a
         ax = Axes(self, rect)
+        ax._grid = (nrows, ncols)
         self.axes.append(ax)
         return ax
 
