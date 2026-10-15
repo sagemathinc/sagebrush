@@ -389,12 +389,25 @@ def _int_array(name, v, what):
     return a, _m._dims(v)
 
 
+_EXACT = 2 ** 53  # (every integer up to it is a double)
+
+
+def _exact(name, vals):
+    """Python integers as doubles, refused unless each is one exactly"""
+    out = np.array([float(v) for v in vals], dtype=float)
+    for v, f in zip(vals, out.reshape(-1)):
+        if int(f) != v:
+            raise _err("%s: the result %d is not exactly a double (above 2^53); Sagebrush does not round it." % (name, v))
+    return out
+
+
 @_bi("sub2ind")
 def sub2ind_(nargout, *args):
     """ind = sub2ind(sz, I1, ..., In): the linear indices of the elements
     at subscripts I1, ..., In of an array of size sz: one subscript for
     each element of sz (trailing ones may be added).  The subscripts are
-    arrays of the same size, or scalars, which expand."""
+    arrays of the same size, or scalars, which expand.  The arithmetic is
+    exact; an index above 2^53 that is not exactly a double is an error."""
     if len(args) < 2:
         raise _err("Not enough input arguments.")
     d = _size_vec("sub2ind", args[0])
@@ -408,15 +421,27 @@ def sub2ind_(nargout, *args):
         raise _err("sub2ind: the subscripts must be the same size, or scalars.")
     shape = shapes.pop() if shapes else (1, 1)
     count = _m._prod(shape)
-    ind = np.zeros(count)
-    stride = 1
     for k, ((a, _), dk) in enumerate(zip(subs, d)):
-        f = a.reshape(-1).astype(float)
-        if f.size and np.max(f) > dk:
+        if a.size and float(np.max(a)) > dk:
             raise _err("sub2ind: subscript %d is out of range: at most %d." % (k + 1, dk))
-        ind = ind + (f - 1) * stride
-        stride *= dk
-    return _m._box((ind + 1).reshape(_m._stored(shape)))
+    if _m._prod(d) <= _EXACT:
+        # (every partial sum is an integer of at most prod(sz): exact in doubles)
+        ind = np.zeros(count)
+        stride = 1
+        for (a, _), dk in zip(subs, d):
+            ind = ind + (a.reshape(-1).astype(float) - 1) * stride
+            stride *= dk
+        return _m._box((ind + 1).reshape(_m._stored(shape)))
+    # (larger arrays: in integers, then refused if a result is not a double exactly)
+    cols = [[int(x) for x in a.reshape(-1)] for a, _ in subs]
+    out = []
+    for i in range(count):
+        v, stride = 0, 1
+        for col, dk in zip(cols, d):
+            v += (col[i if len(col) > 1 else 0] - 1) * stride
+            stride *= dk
+        out.append(v + 1)
+    return _m._box(_exact("sub2ind", out).reshape(_m._stored(shape)))
 
 
 @_bi("ind2sub")
@@ -425,21 +450,38 @@ def ind2sub_(nargout, *args):
     linear indices ind of an array of size sz, each the size of ind.  With
     fewer outputs than sz has elements, the last output counts along the
     remaining dimensions taken together; the last subscript is not bounded,
-    the array growing along its last dimension as indexing would."""
+    the array growing along its last dimension as indexing would.  sz has
+    two or more elements (a scalar is an error since R2024b: [n 1] for a
+    column).  The arithmetic is exact; a subscript above 2^53 that is not
+    exactly a double is an error."""
     if len(args) != 2:
         raise _err("Not enough input arguments." if len(args) < 2 else "Too many input arguments.")
     d = _size_vec("ind2sub", args[0])
+    if len(d) < 2:
+        # (R2024b: "a scalar input for sz results in an error")
+        raise _err("ind2sub: sz must be a vector of positive integers with two or more elements; for a column of n elements, give [n 1].")
     a, shape = _int_array("ind2sub", args[1], "ind")
     k = max(1, nargout)
     if k < len(d):
         d = d[:k - 1] + [_m._prod(d[k - 1:])]
     d = d + [1] * (k - len(d))
-    r = a.reshape(-1).astype(float) - 1
-    outs = []
-    for j in range(k - 1):
-        outs.append(np.mod(r, d[j]) + 1)
-        r = np.floor(r / d[j])
-    outs.append(r + 1)
+    if not a.size or float(np.max(a)) + max(d) < 2.0 ** 52:
+        # (then r // d and r mod d of doubles are exact: r/d rounds to no integer above it)
+        r = a.reshape(-1).astype(float) - 1
+        outs = []
+        for j in range(k - 1):
+            outs.append(np.mod(r, d[j]) + 1)
+            r = np.floor(r / d[j])
+        outs.append(r + 1)
+    else:
+        # (in integers, then refused if a subscript is not a double exactly)
+        rs = [int(x) - 1 for x in a.reshape(-1)]
+        cols = []
+        for j in range(k - 1):
+            cols.append([x % d[j] + 1 for x in rs])
+            rs = [x // d[j] for x in rs]
+        cols.append([x + 1 for x in rs])
+        outs = [_exact("ind2sub", c) for c in cols]
     outs = [_m._box(o.reshape(_m._stored(shape))) for o in outs]
     return outs[0] if k == 1 else outs
 
