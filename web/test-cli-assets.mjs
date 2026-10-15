@@ -7,10 +7,11 @@ import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { freePort } from "./test-port.mjs";
 
 const bundle = process.argv[2] ?? new URL("../build/cli/pyjs.cjs", import.meta.url).pathname;
 const dir = mkdtempSync(join(tmpdir(), "sb-assets-"));
-const port = 9800 + Math.floor(Math.random() * 150);
+const port = await freePort(); // (test-port.mjs: several runs share a machine)
 const server = spawn(process.execPath, [bundle, "notebook", dir, "--port", String(port), "--no-browser"], { stdio: ["ignore", "pipe", "inherit"] });
 let printed = "";
 server.stdout.on("data", (d) => (printed += d));

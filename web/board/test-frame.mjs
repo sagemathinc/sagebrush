@@ -15,6 +15,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { devtoolsPort } from "../test-port.mjs";
 
 const site = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -60,9 +61,10 @@ for (const spelling of ["%66rame/board/", "frame%2Fboard/", "frame/./board/", "F
   check(r.status !== 200 || /sandbox allow-scripts/.test(r.headers.get("content-security-policy") ?? ""), `/${spelling} is sandboxed too, or not served (${r.status})`);
 }
 
-const port = Number(process.env.CDP_PORT ?? 9876);
+let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-frame-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1100,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);

@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { engineIdText } from "../engine-id.mts";
+import { devtoolsPort } from "../test-port.mjs";
 
 const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -43,9 +44,10 @@ const site = `http://127.0.0.1:${server.address().port}/`;
 const own = JSON.parse(readFileSync(join(dist, "engine", "latest.json"), "utf8"));
 const ownDir = join(dist, "engine", own.id);
 
-const port = Number(process.env.CDP_PORT ?? 9465);
+let port = Number(process.env.CDP_PORT) || 0;
 const dir = mkdtempSync(join(tmpdir(), "sb-offline-")), profile = mkdtempSync(join(tmpdir(), "sb-offline-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
