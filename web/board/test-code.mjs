@@ -6,7 +6,7 @@
 // web/serve.py 8765), then
 //   node web/board/test-code.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -381,6 +381,72 @@ try {
         check((await camera()) === before, "the reader moved the view: it stays where they put it: " + before + " then " + (await camera()));
       }
     }
+  }
+
+  // ...nor when the reader's move is a flight not yet begun (Find, a double-click), or a key pressed during the refit's own flight (CORR-300-1)
+  {
+    // (a real picture, which the board mounts as an <img>: the refit waits for it to decode)
+    const leaf = JSON.parse(readFileSync(new URL("examples/gallery-hello.board.json", import.meta.url), "utf8")).images.leaf;
+    const doc = { title: "Refit", layout: "column", images: { pic: leaf }, nodes: [
+      { id: "pic", title: "A picture", image: "pic" },
+      { id: "long", title: "Long", code: "import time\ntime.sleep(1.5)\nfor i in range(120):\n    print(i)" },
+      { id: "bottom", title: "Bottom", text: "Pushed down by the output." },
+    ] };
+    const camera = () => ev("JSON.stringify(window.sagebrush.board.snapshot().camera)");
+    // (animation frames held: a flight asked for has not begun until the test lets them go)
+    const holdFrames = `(() => {
+      const raf = window.requestAnimationFrame, caf = window.cancelAnimationFrame;
+      let held = [], n = 1e9;
+      window.requestAnimationFrame = (f) => { held.push([++n, f]); return n; };
+      window.cancelAnimationFrame = (i) => { held = held.filter(([j]) => j !== i); caf(i); };
+      window.__frames = () => { window.requestAnimationFrame = raf; window.cancelAnimationFrame = caf; for (const [, f] of held) raf(f); held = []; };
+    })();`;
+    // (the refit held where it waits for pictures, until the test lets it go)
+    const open = async () => {
+      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+      await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+      await ev("(() => { const held = new Promise((r) => (window.__letGo = r)); HTMLImageElement.prototype.decode = function () { return held; }; return 1; })()");
+      await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
+      return until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /119\\n$/.test(os[0].output)) && window.sagebrush.board.snapshot().items.find((it) => it.id === 'bottom').y > 1500", 60000);
+    };
+    // Find: its result off screen, its flight asked for, and the refit let go in the same task
+    check(await open(), "the long item ran, the bottom item pushed down");
+    await ev(`(() => { ${holdFrames} const q = document.querySelector('[data-sbb=findq]'); q.value = 'Pushed'; q.dispatchEvent(new Event('input')); return 1; })()`);
+    // (Find's flight asked for, the camera not yet moved; then the refit looks)
+    await sleep(300);
+    await ev("window.__letGo(), 1");
+    await sleep(1000);
+    await ev("window.__frames(), 1");
+    await sleep(2500);
+    const found = JSON.parse(await camera());
+    check(found.z >= 0.5 && await ev("(() => { const s = window.sagebrush.board.snapshot(), v = s.view, b = s.items.find((it) => it.id === 'bottom'); return b.y >= v.y0 && b.y + b.h <= v.y1; })()"), "Find's flight, asked for before the refit looked, wins: " + JSON.stringify(found));
+    // a double-click on the picture: its flight asked for, and the refit let go in the same task
+    check(await open(), "the long item ran again, in a new page");
+    await ev(`(() => {
+      const s = window.sagebrush.board.snapshot(), c = s.camera, it = s.items.find((x) => x.id === "pic");
+      const r = document.querySelector(".board-world").parentElement.getBoundingClientRect();
+      const cx = r.left + (it.x + it.w / 2 - c.x) * c.z, cy = r.top + (it.y + it.h / 2 - c.y) * c.z;
+      ${holdFrames}
+      document.elementFromPoint(cx, cy).dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: cx, clientY: cy }));
+      return 1;
+    })()`);
+    await sleep(300);
+    await ev("window.__letGo(), 1");
+    await sleep(1000);
+    await ev("window.__frames(), 1");
+    await sleep(2500);
+    const doubled = JSON.parse(await camera());
+    check(doubled.z >= 1, "the double-click's flight, asked for before the refit looked, wins: " + JSON.stringify(doubled));
+    // a key zooming during the refit's own flight: the zoom stays
+    check(await open(), "the long item ran again, in a new page");
+    const start = await camera();
+    await ev("window.__letGo(), 1");
+    check(await until(`JSON.stringify(window.sagebrush.board.snapshot().camera) !== ${JSON.stringify(start)}`, 10000), "the refit's flight began");
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "+", text: "+", code: "Equal" });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "+", code: "Equal" });
+    const zoomed = await camera();
+    await sleep(1500);
+    check((await camera()) === zoomed, "the key's zoom stays, the flight stopped: " + zoomed + " then " + (await camera()));
   }
 
   // a board in another language after one in Sage, in the same page: a new interpreter, nothing of Sage's left (Sage's pi in MATLAB's 2*pi)

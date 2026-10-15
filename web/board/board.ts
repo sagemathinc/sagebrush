@@ -307,18 +307,28 @@ export class Board {
     this.request();
   }
 
-  /** Zoom by `factor`, keeping the screen point (sx, sy) where it is. */
+  /** How many times the camera has been told to move (zoomAt, panBy,
+   * setCamera, flyTo; a flight counts once, when asked for, before its first
+   * frame): whoever moved it last can tell whether anyone has since. */
+  moves = 0;
+
+  /** Zoom by `factor`, keeping the screen point (sx, sy) where it is (a flight under way stops). */
   zoomAt(factor: number, sx: number, sy: number) {
+    this.moves++;
+    cancelAnimationFrame(this.flight);
     const c = this.camera, z = Math.min(8, Math.max(0.02, c.z * factor));
     const wx = c.x + sx / c.z, wy = c.y + sy / c.z;
     this.camera = { x: wx - sx / z, y: wy - sy / z, z };
     this.request();
   }
   panBy(dx: number, dy: number) {
+    this.moves++;
+    cancelAnimationFrame(this.flight);
     this.camera = { ...this.camera, x: this.camera.x + dx / this.camera.z, y: this.camera.y + dy / this.camera.z };
     this.request();
   }
   setCamera(c: Camera) {
+    this.moves++;
     cancelAnimationFrame(this.flight);
     this.camera = c;
     this.request();
@@ -354,6 +364,7 @@ export class Board {
 
   /** Move the camera to `to` over `ms`, zooming geometrically. */
   flyTo(to: Camera, ms = 450) {
+    this.moves++;
     cancelAnimationFrame(this.flight);
     const from = this.camera, t0 = performance.now();
     const w = this.canvas.width / this.dpr / 2, h = this.canvas.height / this.dpr / 2;
