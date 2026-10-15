@@ -37,9 +37,57 @@ import { mountBoard, type BoardHost } from "./mount";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
 
 const q = new URLSearchParams(location.search);
+
+// Boards made here (New board, Duplicate, and the notebook's New whiteboard
+// and Whiteboard) are each a board of their own, `?doc=local:ID`, kept in
+// this browser as the edits of the others are, and listed (their title,
+// language and when last written) so that the notebook's Whiteboard opens
+// its language's latest: `?recent=MODE` (or a new one, if there is none);
+// `?new=MODE`, a new one.
+const LOCAL_LIST = "sagebrush-boards", MODES = ["python", "sage", "magma", "matlab"];
+type LocalBoard = { id: string; title: string; mode: string; at: number };
+const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
+function localBoards(): LocalBoard[] {
+  try {
+    const l = JSON.parse(localStorage.getItem(LOCAL_LIST) ?? "[]");
+    return Array.isArray(l) ? l.filter((b) => b && /^[0-9a-f]{12}$/.test(b.id) && MODES.includes(b.mode) && Number.isFinite(b.at)) : [];
+  } catch {
+    return [];
+  }
+}
+function listLocal(id: string, d: BoardDoc) {
+  const l = localBoards().filter((b) => b.id !== id);
+  l.push({ id, title: String(d.title ?? ""), mode: d.mode ?? "python", at: Date.now() });
+  try { localStorage.setItem(LOCAL_LIST, JSON.stringify(l)); } catch {}
+}
+/** A new board of this browser's, written here: its id */
+function makeLocal(d: BoardDoc): string {
+  const id = hex(6), key = "sagebrush-board:local:" + id;
+  try {
+    localStorage.setItem(key, JSON.stringify(d));
+    localStorage.setItem(key + "#here", "1");
+  } catch {}
+  listLocal(id, d);
+  return id;
+}
+const blankBoard = (mode: string): BoardDoc => ({ title: "Untitled board", ...(mode !== "python" ? { mode: mode as BoardDoc["mode"] } : {}), seed: hex(32), nodes: [] });
+const openLocal = (id: string) => location.assign(location.pathname + "?doc=local:" + id);
+{
+  const asked = q.get("new") ?? q.get("recent");
+  if (asked !== null && !embedded()) {
+    const mode = MODES.includes(asked) ? asked : "python";
+    const latest = q.has("recent") ? localBoards().filter((b) => b.mode === mode).sort((a, b) => b.at - a.at)[0] : undefined;
+    const id = latest?.id ?? makeLocal(blankBoard(mode));
+    q.delete("new");
+    q.delete("recent");
+    q.set("doc", "local:" + id);
+    history.replaceState(null, "", location.pathname + "?" + q.toString().replace("local%3A", "local:") + location.hash);
+  }
+}
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
 const source = embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
 const saveKey = "sagebrush-board:" + source;
+const local = /^local:[0-9a-f]{12}$/.test(source);
 // (a document's history in this browser: by its source and its name beside it)
 const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
 const bench = q.has("items") || q.has("strokes");
@@ -104,6 +152,12 @@ const host: BoardHost = {
         const { doc, notice } = await parentDoc;
         return { doc, original: doc, notice };
       }
+      // (a board of this browser's: as it was last written here, with no original to go back to)
+      if (local) {
+        let saved: BoardDoc | null = null;
+        try { saved = JSON.parse(localStorage.getItem(saveKey) ?? "null"); } catch {}
+        return { doc: isBoard(saved) ? saved! : blankBoard("python"), original: null };
+      }
       let notice = "";
       const url = new URL(source.startsWith("mermaid:") || source.startsWith("embedded:") ? "data:," : source, location.href);
       // (JSON, or a Mermaid flowchart, or Markdown with some, or a CoCalc whiteboard)
@@ -121,6 +175,7 @@ const host: BoardHost = {
     },
     save(d) {
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch {}
+      if (local) listLocal(source.slice(6), d);
     },
     revert() {
       try { localStorage.removeItem(saveKey); } catch {}
@@ -199,6 +254,11 @@ const host: BoardHost = {
   // (the engine's parts, compressed, with the Sage library: every language
   // runs, after the board's is changed too)
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),
+  // (boards of their own here, which this one stays beside; not in an exported file)
+  newBoard: file ? undefined : (mode) => openLocal(makeLocal(blankBoard(mode))),
+  duplicate: file ? undefined : (d) => openLocal(makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" })),
+  // (an exported file's or a frame's empty board opens as any other)
+  editBlank: !file,
 };
 
 const mounted = mountBoard(document.getElementById("board")!, host);

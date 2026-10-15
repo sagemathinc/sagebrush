@@ -91,9 +91,13 @@ try {
   check(k3.p.untimed === 0 && close(k3.p.fromRoot, k3.p.ms + k3.r.ms), "p's time from root is p's and r's: " + JSON.stringify(k3.p) + JSON.stringify(k3.r));
   check(close(k3.q.fromRoot, k3.q.ms) && close(k3.r.fromRoot, k3.r.ms), "q's and r's time from root are their own");
   check(!k3.p.widget && !k3.r.widget, "no widget moved");
-  // a new board gets a seed of its own
+  // a new board gets a seed of its own (a board of its own, at its own address: once it is there)
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
+  await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000);
   check(await until("window.sagebrush.board.json().then((t) => /\"seed\": \"[0-9a-f]{64}\"/.test(t) && !t.includes('aaaa'))", 10000), "a new board has a seed of its own");
+  // (back to the board the steps below load their documents into)
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
 
   // Step 2: previews.  s takes 2.5 s; d and p and big read it; f is on its own.
   // (an item over 1 s from root keeps one here, rather than 10 s)
@@ -224,13 +228,26 @@ try {
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "s").code = ${JSON.stringify(slowStamp + "\n1")}; }).then(() => 1)`);
   check(await until(`window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && os.find((o) => o.id === 's').output !== ${JSON.stringify(first.s.output)})`, 60000), "changed, s runs again, and d with it");
   check(await ev("!document.querySelector('[data-cached]')"), "...and no longer says it is cached");
-  // New board: the old board's cache goes (SEC-B88-3)
   for (let i = 0; i < 100 && (await countFor(id1)) < 3; i++) await sleep(100);
   check((await countFor(id1)) > 0, "the changed board's outputs are kept too");
+  // New board: a board of its own, at its own address, with its own name;
+  // the board it leaves stays, and so do its outputs (as the notebook's New notebook)
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
+  check(await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000), "New board: a board of its own");
+  const id2 = await ev("localStorage.getItem('sagebrush-board:' + decodeURIComponent(location.search.slice(5)) + '#outputs')");
+  check(!!id2 && id2 !== id1 && (await countFor(id1)) > 0, "...with its own name, the board it left keeping its outputs: " + JSON.stringify([id1, id2, await countFor(id1)]));
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  check((await ev(`localStorage.getItem(${JSON.stringify(idKey)})`)) === id1, "back on that board: the same name");
+  // (and done: what it ran, and wrote, written before another document takes its place)
+  await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === '' || o.state === 'stale'))", 60000);
+  await sleep(1500);
+  // another document loaded in its place (an empty one, as New board makes
+  // in a host without boards of their own): a new name, and the old board's entries gone (SEC-B88-3)
+  await ev(`window.sagebrush.board.load({ title: "Untitled board", nodes: [] }).then(() => 1)`);
   await sleep(500);
-  const id2 = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
-  check(id2 !== id1 && (await countFor(id1)) === 0, "New board: a new name, and the old board's entries gone");
+  const id2b = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
+  check(id2b !== id1 && (await countFor(id1)) === 0, "another document loaded in its place: a new name, and the old board's entries gone (SEC-B88-3): " + JSON.stringify([id1, id2b, await countFor(id1)]));
   // another document with the same seed, ids and code (anyone can copy a
   // board's), opened in a clean page where its items are new: its own
   // cache, so nothing of another's (SEC-B88-1).  First, a board whose
@@ -240,7 +257,7 @@ try {
   const orig = await outputs();
   const id3 = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   for (let i = 0; i < 100 && (await countFor(id3)) < 2; i++) await sleep(100);
-  check((await countFor(id3)) === 2, "...and its outputs are kept");
+  check((await countFor(id3)) === 2, "...and its outputs are kept: " + await countFor(id3));
   await ev("localStorage.clear(), 1");
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);

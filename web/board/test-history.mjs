@@ -121,14 +121,17 @@ try {
   const nb = await ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-history"); r.onupgradeneeded = () => {}; r.onsuccess = () => { const db = r.result; if (!db.objectStoreNames.contains("history")) return res(0); const q = db.transaction("history").objectStore("history").count(); q.onsuccess = () => res(q.result); }; r.onerror = () => res(-1); })`);
   check(nb === 0, "no board patch is in the notebook's history: " + nb);
 
-  // a history per document (William): New board, Revert and another document loaded each start one afresh, the one before gone; kept across a reload
+  // a history per document (William): New board is a board of its own with
+  // its own history, the one it left keeping its own; Revert and another
+  // document loaded each start one afresh, the one before gone; kept across a reload
   const groups = () => ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-board-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => { const by = {}; for (const row of q.result) by[row.nb] = (by[row.nb] ?? 0) + 1; r.result.close(); res(by); }; }; })`);
   check(Object.keys(await groups()).length === 1, "(one board's history so far: " + JSON.stringify(await groups()) + ")");
   // (reloaded, the history not opened before the next document: CORR-F75-1, daybreak)
   await send("Page.reload");
   await until(`${B}?.snapshot().items.length > 0`, 60000);
+  const leftAt = await ev("location.href");
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
-  await until(`${B}.snapshot().doc.title === "Untitled board"`, 5000);
+  await until(`/^\\?doc=local:/.test(location.search) && ${B}?.snapshot()?.doc?.title === "Untitled board"`, 30000);
   await sleep(500);
   const afterNew = await count();
   check(afterNew <= 1 && (await ev("document.querySelector('[data-sbb=tt]').hidden")), "New board: TimeTravel has only the new board's versions: " + afterNew + " of " + nv + " before");
@@ -136,17 +139,18 @@ try {
   check(await until(`${B}.versions().then((v) => v.length === 2)`, 5000), "...an edit of it: its second version: " + await count());
   await sleep(300);
   const g1 = await groups();
-  check(Object.keys(g1).length === 1, "...and the old board's history is gone: " + JSON.stringify(g1));
+  check(Object.keys(g1).length === 2, "...and the board it left keeps its history, as it is kept: " + JSON.stringify(g1));
   await send("Page.reload");
   await until(`${B}?.snapshot().doc?.title === "Untitled board"`, 60000);
   check((await count()) === 2, "reloaded: the new board's history is still its own: " + await count());
-  // Revert (the original again): a history afresh (reloaded first, the history not opened)
-  await send("Page.reload");
-  await until(`${B}?.snapshot().doc?.title === "Untitled board"`, 60000);
+  // Revert (the original again), on the board it left: a history afresh there (the page opened afresh, the history not opened)
+  await send("Page.navigate", { url: leftAt });
+  await until(`${B}?.snapshot().items.length > 0 && !document.querySelector('[data-sbb=revert]').hidden`, 60000);
+  const leftKey = Object.keys(await groups()).find((k) => !k.startsWith("board:local:"));
   await ev("document.querySelector('[data-sbb=revert]').click(), 1");
-  await until(`${B}.snapshot().doc.title !== "Untitled board"`, 5000);
-  await sleep(500);
-  check((await count()) <= 1 && Object.keys(await groups()).length <= 1, "Revert: a history afresh: " + await count() + " " + JSON.stringify(await groups()));
+  await sleep(800);
+  const g2 = await groups();
+  check((await count()) <= 1 && (g2[leftKey] ?? 0) <= 1 && Object.keys(g2).filter((k) => k.startsWith("board:local:")).length === 1, "Revert: a history afresh, the other board's kept: " + await count() + " " + JSON.stringify(g2));
   // another document loaded (the agent's load): its own
   await ev(`${B}.load({ title: "Another", nodes: [{ id: "x", title: "X" }] }).then(() => 1)`);
   await sleep(300);
