@@ -963,11 +963,14 @@ export class Emitter {
         if (h.name !== null) this.w(this.storeName(h.name, e));
         // Exceptions raised while handling get this one as __context__.
         const x = this.temp();
+        // (and it is the exception being handled, for sys.exception() and
+        // sys.exc_info(), while the handler runs)
+        this.w(`excEnter(${e});`);
         this.w("try {");
         this.fn.handlers.push(e);
         this.block(h.body);
         this.fn.handlers.pop();
-        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ == null) ${x}.__context__ = ${e}; throw ${x}; }`);
+        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ == null) ${x}.__context__ = ${e}; throw ${x}; } finally { excLeave(); }`);
         if (h.name !== null) {
           this.w(this.storeName(h.name, "undefined"));
           this.fn.assigned.delete(h.name);
@@ -1062,7 +1065,7 @@ const RUNTIME_NAMES = [
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
   "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf", "superAttr", "superNoArgs", "newCell", "classCellGet",
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
-  "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
+  "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "excEnter", "excLeave", "classDef",
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys", "INTR", "interrupted",
 ];
