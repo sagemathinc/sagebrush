@@ -194,6 +194,10 @@ print(S.gammainc(m, m), S.gammaincc(m, m), abs(S.gammainc_scaled(m, m) / r - 1) 
       S.gammainc_scaled(m, 0.9 * m, True), abs(S.gammainc_scaled(1.7e308, 1.79e308, True) * 0.09 / 1.7 - 1) < 4e-15,
       S.gammainc_scaled(1.7e308, 1.79e308), abs(S.gammainc_scaled(m, 0.3 * m) - 1 / 0.7) < 4e-15)
 print(kind(S.gammaincc, 1e307, 1e308))
+# (every series stops at its cap with NotCovered, never a silent value: each pushed outside the domain its caller keeps it in;
+# _polylog_mu's cap is not probed here, as reaching it takes exact Bernoulli numbers to B_248, some 18 s)
+print(" | ".join(kind(f, *a).split(" at ")[0] for f, a in [(S._erf_taylor, (30.0,)), (S._loggamma_near_2, (1.9,)), (S._psi_near_1, (1.9,)), (S._psi_near_2, (1.95,)),
+                                          (S._polylog_series, (2, 1 + 0j))]))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -246,5 +250,8 @@ print(kind(S.gammaincc, 1e307, 1e308))
     "0.001 0.002002 inf 5e-324 1.0 1.0 1e-320",
     "0.5 0.5 True True True inf True inf True",
     "NotCovered: gammainc: the continued fraction overflowed at a = 1e+307, x = 1e+308",
+    "NotCovered: erf: the Taylor series did not converge | NotCovered: loggamma: the series about 2 did not converge | " +
+      "NotCovered: psi: the series about 1 did not converge | NotCovered: psi: the series about 2 did not converge | " +
+      "NotCovered: polylog: the series did not converge",
   ]);
 });
