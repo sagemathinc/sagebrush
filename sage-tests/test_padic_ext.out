@@ -1,0 +1,1017 @@
+K.extension(x^2+19) -> 19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+L -> 19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+L.prime() -> 19
+L.precision_cap() -> 10
+L.uniformizer() -> alpha + O(alpha^11)
+L.degree() -> 2
+L.e() -> 2
+L.f() -> 1
+L.defining_polynomial() -> (1 + O(19^5))*x^2 + O(19^6)*x + 19 + O(19^6)
+L.base_ring() -> 19-adic Field with capped relative precision 5
+alpha -> alpha + O(alpha^11)
+alpha^2 -> alpha^2 + O(alpha^12)
+alpha^-1 -> alpha^-1 + O(alpha^9)
+1/alpha -> alpha^-1 + O(alpha^9)
+alpha + 1 -> 1 + alpha + O(alpha^10)
+L(5) -> 5 + O(alpha^10)
+L(19) -> 18*alpha^2 + alpha^4 + O(alpha^12)
+L(1/19) -> 18*alpha^-2 + 1 + O(alpha^8)
+L(-1) -> 18 + alpha^2 + O(alpha^10)
+L(2/3) -> 7 + 13*alpha^2 + 7*alpha^4 + 13*alpha^6 + 7*alpha^8 + O(alpha^10)
+(1+alpha)^-1 -> 1 + 18*alpha + alpha^2 + alpha^4 + 18*alpha^5 + alpha^6 + alpha^8 + 18*alpha^9 + O(alpha^10)
+(3 + 2*alpha)*(5 - alpha) -> 15 + 7*alpha + 17*alpha^2 + alpha^4 + O(alpha^10)
+alpha.valuation() -> 1
+L(19).valuation() -> 2
+alpha.precision_absolute() -> 11
+alpha.precision_relative() -> 10
+L(5).precision_absolute() -> 10
+L(0) -> 0
+L(0).valuation() -> +Infinity
+alpha.add_bigoh(3) -> alpha + O(alpha^3)
+L(5).add_bigoh(3) -> 5 + O(alpha^3)
+O(alpha^3) -> O(alpha^3)
+alpha + O(alpha^3) -> alpha + O(alpha^3)
+alpha.norm() -> 19 + O(19^6)
+alpha.trace() -> O(19^6)
+(1+alpha).norm() -> 1 + 19 + O(19^5)
+L(18) -> 18 + O(alpha^10)
+alpha.unit_part() -> 1 + O(alpha^10)
+(1+alpha) == 1+alpha -> True
+L(1) == 1 -> True
+alpha^2 == -19 -> True
+latex(1+alpha) -> 1 + \alpha + O(\alpha^{10})
+(19*alpha)^-1 -> 18*alpha^-3 + alpha^-1 + O(alpha^7)
+L(1/3) -> 13 + 7*alpha^2 + 13*alpha^4 + 7*alpha^6 + 13*alpha^8 + O(alpha^10)
+L(1/3)*3 -> 1 + O(alpha^10)
+repr(L(100)) -> 5 + 14*alpha^2 + alpha^4 + O(alpha^10)
+L(400) -> 1 + 17*alpha^2 + 2*alpha^4 + O(alpha^10)
+alpha^10 -> alpha^10 + O(alpha^20)
+alpha^11 -> alpha^11 + O(alpha^21)
+M -> 3-adic Eisenstein Extension Field in b defined by y^2 - 3*y + 3
+b -> b + O(b^13)
+b^2 -> b^2 + O(b^14)
+b^-1 -> b^-1 + O(b^11)
+b^3 -> b^3 + O(b^15)
+M(2) -> 2 + O(b^12)
+M(-1) -> 2 + b^2 + b^3 + b^4 + b^5 + b^6 + b^7 + b^8 + b^9 + b^10 + b^11 + O(b^12)
+(1+b)^-1 -> 1 + 2*b + b^2 + 2*b^4 + 2*b^6 + 2*b^8 + 2*b^10 + O(b^12)
+Zp ext -> 19-adic Eisenstein Extension Ring in a defined by z^2 + 19
+A -> 19-adic Eisenstein Extension Ring in a defined by z^2 + 19
+a^-1 -> a^-1 + O(a^9)
+A(5) -> 5 + O(a^10)
+series -> alpha + O(alpha^11) + (1 + O(alpha^10))*T + (alpha^-1 + O(alpha^9))*T^2 + O(T^3)
+series mul -> alpha + O(alpha^11) + (1 + alpha^2 + O(alpha^10))*T + (alpha + O(alpha^11))*T^2 + O(T^3)
+series inv -> 1 + O(alpha^10) + (18*alpha + alpha^3 + O(alpha^11))*T + (alpha^2 + O(alpha^12))*T^2 + O(T^3)
+L(5) + K(3) -> 8 + O(alpha^10)
+parent(L(5) + K(3)) -> 19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+alpha*K(19) -> 18*alpha^3 + alpha^5 + O(alpha^13)
+K(19, 3)*alpha -> 18*alpha^3 + alpha^5 + O(alpha^7)
+alpha + K(1, 2) -> 1 + alpha + O(alpha^4)
+Qp(19,5).extension(x^2+19, names="beta") -> 19-adic Eisenstein Extension Field in beta defined by x^2 + 19
+extension(x^2+38) -> 19-adic Eisenstein Extension Field in c defined by x^2 + 38
+R -> Univariate Polynomial Ring in x over 19-adic Field with capped relative precision 5
+x -> (1 + O(19^5))*x
+x^2 + 19 -> (1 + O(19^5))*x^2 + 19 + O(19^6)
+x^2 - 3*x + 3 -> (1 + O(19^5))*x^2 + (16 + 18*19 + 18*19^2 + 18*19^3 + 18*19^4 + O(19^5))*x + 3 + O(19^5)
+(x + 1)^2 -> (1 + O(19^5))*x^2 + (2 + O(19^5))*x + 1 + O(19^5)
+x^2 + 19 == x^2 + 19 -> True
+(x^2+19).degree() -> 2
+(x^2+19)(2) -> 4 + 19 + O(19^5)
+R(0) -> 0
+R(5) -> 5 + O(19^5)
+2*x -> (2 + O(19^5))*x
+x/19 -> (19^-1 + O(19^4))*x
+x - x -> O(19^5)*x
+K(1,2)*x + 3 -> (1 + O(19^2))*x + 3 + O(19^5)
+x^2 + K(19, 3) -> (1 + O(19^5))*x^2 + 19 + O(19^3)
+-x -> (18 + 18*19 + 18*19^2 + 18*19^3 + 18*19^4 + O(19^5))*x
+x*19 -> (19 + O(19^6))*x
+x^3 + 1/19 -> (1 + O(19^5))*x^3 + 19^-1 + O(19^4)
+(x^2+19).is_eisenstein() -> True
+PolynomialRing(K, "y") -> Univariate Polynomial Ring in y over 19-adic Field with capped relative precision 5
+Zp(19,5)["z"] -> Univariate Polynomial Ring in z over 19-adic Ring with capped relative precision 5
+z^2 + 19 -> (1 + O(19^5))*z^2 + 19 + O(19^6)
+S -> Univariate Polynomial Ring in z over 19-adic Ring with capped relative precision 5
+latex(x^2+19) -> \left(1 + O(19^{5})\right) x^{2} + 19 + O(19^{6})
+parent(x^2+19) -> Univariate Polynomial Ring in x over 19-adic Field with capped relative precision 5
+(x+1)*(x-1) -> (1 + O(19^5))*x^2 + O(19^5)*x + 18 + 18*19 + 18*19^2 + 18*19^3 + 18*19^4 + O(19^5)
+R.gen() -> (1 + O(19^5))*x
+(x^2+19).leading_coefficient() -> 1 + O(19^5)
+(x^2+19).coefficients() -> [19 + O(19^6), 1 + O(19^5)]
+(x^2+19)[0] -> 19 + O(19^6)
+K.extension(ZZ["w"]("w^2+19"), names="c") -> 19-adic Eisenstein Extension Field in c defined by w^2 + 19
+K.extension(QQ["w"]("w^2+19"), names="c") -> 19-adic Eisenstein Extension Field in c defined by w^2 + 19
+0 Qp L -> 3-adic Eisenstein Extension Field in a defined by x^2 - 3*x + 3
+0 Qp (L(-15) + L(1)*a) + L(25) -> 1 + a + a^4 + 2*a^5 + a^7 + O(a^8)
+0 Qp L(K(-15, 4))^-3 -> 2*a^-6 + a^-4 + a^-3 + 2*a^-2 + a + O(a^2)
+0 Qp (L(16) + L(27)*a).add_bigoh(4) - L(K(-16, 3)) -> 2 + 2*a^2 + 2*a^3 + O(a^4)
+0 Qp (L(16) + -12*a)*a^-1 + L(K(-2, 1)) -> a^-1 + 1 + a + O(a^2)
+0 Qp (24*a + K(25, 5)).trace() -> 2 + 3 + 3^2 + 3^3 + O(3^4)
+0 Qp (L(-20).valuation(), L(-20).precision_absolute(), L(-20).precision_relative()) -> (0, 8, 8)
+0 Qp (L(3) + L(-26)*a).norm() -> 3 + 2*3^2 + 3^4 + O(3^5)
+0 Qp (L(18) + L(25)*a).norm() -> 3 + 3^2 + 2*3^3 + 3^4 + O(3^5)
+0 Qp L(K(-5, 4))^1 -> 1 + 2*a^2 + 2*a^3 + 2*a^4 + 2*a^5 + 2*a^6 + 2*a^7 + O(a^8)
+0 Qp L(19) + K(1, 5) -> 2 + 2*a^4 + a^5 + a^7 + O(a^8)
+0 Qp (L(-10) + L(25)*a).add_bigoh(4).norm() -> 1 + O(3^2)
+0 Qp ((-27*a + K(22, 4)).valuation(), (-27*a + K(22, 4)).precision_absolute(), (-27*a + K(22, 4)).precision_relative()) -> (0, 8, 8)
+0 Qp L(-15) + (L(24) + -5*a)*a^2 -> 2*a^2 + 2*a^4 + 2*a^5 + a^6 + a^8 + a^9 + O(a^10)
+0 Qp (L(-22).valuation(), L(-22).precision_absolute(), L(-22).precision_relative()) -> (0, 8, 8)
+0 Zp L -> 3-adic Eisenstein Extension Ring in a defined by x^2 - 3*x + 3
+0 Zp (L(-8) + L(-4)*a).unit_part() -> 1 + 2*a + 2*a^3 + a^4 + 2*a^6 + a^7 + O(a^8)
+0 Zp L(K(-20, 3)) + (L(11) + L(25)*a).add_bigoh(8) -> a + a^3 + 2*a^5 + O(a^6)
+0 Zp (L(13) + L(-4)*a) * (-12*a + K(-9, 2)) -> a^3 + O(a^4)
+0 Zp L(K(-17, 1)) * (L(27) + L(-18)*a) -> a^5 + a^6 + O(a^7)
+0 Zp L(K(0, 3)) * L(-24) -> O(a^8)
+0 Zp L(K(15, 2)).unit_part() -> 1 + a + O(a^2)
+0 Zp (L(-20) + -24*a)*a^0 + L(K(16, 4)) -> 2 + 2*a^2 + a^3 + a^4 + a^5 + a^6 + 2*a^7 + O(a^8)
+0 Zp (L(-14) + 5*a)*a^0 - (L(-24) + L(-15)*a).add_bigoh(1) -> 1 + O(a)
+0 Zp (L(-19) + -24*a)*a^1 + K(20, 5) -> 2 + 2*a + a^3 + 2*a^4 + 2*a^5 + 2*a^6 + 2*a^7 + O(a^8)
+0 Zp (-27*a + K(-22, 6)) + (L(-8) + L(-27)*a).add_bigoh(7) -> a^2 + a^3 + a^4 + a^5 + 2*a^6 + O(a^7)
+0 Zp (L(27) + 25*a)*a^1 / (L(-23) + 27*a)*a^3 -> a^5 + 2*a^7 + 2*a^8 + a^9 + 2*a^10 + a^11 + 2*a^12 + O(a^13)
+0 Zp 1/(L(9) + L(3)*a) -> 2*a^-3 + 2 + 2*a^3 + O(a^5)
+0 Zp (L(-3) + -22*a)*a^2 == L(K(0, 4)) -> False
+1 Qp L -> 3-adic Eisenstein Extension Field in a defined by x^2 + 3*x + 3
+1 Qp (L(19) + L(27)*a) * -22/1 -> 2 + 2*a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + a^8 + a^9 + O(a^10)
+1 Qp (L(-13) + 27*a)*a^1 * L(-7) -> a + a^5 + a^6 + a^8 + a^9 + O(a^11)
+1 Qp (L(-16) + L(-8)*a).add_bigoh(6).unit_part() -> 2 + a + a^4 + O(a^6)
+1 Qp (L(-25) + L(-17)*a)^-1 -> 2 + 2*a + a^2 + 2*a^5 + 2*a^6 + a^7 + O(a^10)
+1 Qp L(K(27, 2)).unit_part() -> O(a^0)
+1 Qp (L(2) + L(2)*a).add_bigoh(4)^0 -> 1 + O(a^10)
+1 Qp (L(-10) + L(12)*a) / (8*a + K(-22, 7)) -> 1 + 2*a + 2*a^2 + a^3 + a^4 + a^5 + 2*a^8 + 2*a^9 + O(a^10)
+1 Qp (L(16) + L(-3)*a).add_bigoh(4) == (L(8) + L(-12)*a).add_bigoh(9) -> False
+1 Qp (L(6) + L(-23)*a) * L(-26) -> a + a^2 + a^3 + 2*a^7 + a^8 + a^9 + O(a^11)
+1 Qp ((-16*a + K(17, 4)).valuation(), (-16*a + K(17, 4)).precision_absolute(), (-16*a + K(17, 4)).precision_relative()) -> (0, 8, 8)
+1 Qp L(26).trace() -> 1 + 2*3 + 2*3^2 + 3^3 + O(3^5)
+1 Qp L(K(-16, 2)) * -18/7 -> 2*a^4 + 2*a^5 + O(a^8)
+1 Qp (L(-9) + L(-4)*a) * 22/9 -> 2*a^-3 + a^-2 + 2*a^-1 + 1 + a^2 + 2*a^3 + 2*a^4 + O(a^7)
+1 Qp L(20) - (L(-17) + L(7)*a).add_bigoh(6) -> 1 + 2*a + a^4 + O(a^6)
+1 Zp L -> 3-adic Eisenstein Extension Ring in a defined by x^2 + 3*x + 3
+1 Zp (L(K(0, 4)).valuation(), L(K(0, 4)).precision_absolute(), L(K(0, 4)).precision_relative()) -> (8, 8, 0)
+1 Zp (L(11) + -17*a)*a^0.trace() !! AttributeError
+1 Zp (L(-11) + L(7)*a).add_bigoh(2) == L(-3) -> False
+1 Zp ((-15*a + K(-20, 1)).valuation(), (-15*a + K(-20, 1)).precision_absolute(), (-15*a + K(-20, 1)).precision_relative()) -> (0, 2, 2)
+1 Zp (12*a + K(7, 2)) == (L(-7) + L(3)*a).add_bigoh(9) -> False
+1 Zp (8*a + K(11, 1)).trace() -> 1 + O(3)
+1 Zp (-14*a + K(-24, 5)) * 29/7 -> 2*a + a^2 + a^3 + 2*a^4 + a^5 + a^6 + 2*a^7 + O(a^10)
+1 Zp (L(-17) + L(5)*a).unit_part() -> 1 + 2*a + 2*a^3 + 2*a^4 + a^5 + a^6 + O(a^10)
+1 Zp L(K(-11, 4)).unit_part() -> 1 + a^2 + 2*a^3 + 2*a^5 + a^7 + O(a^8)
+1 Zp L(K(-18, 2)) * -12/1 -> O(a^6)
+1 Zp L(K(-23, 5)).unit_part() -> 1 + 2*a^2 + a^3 + a^6 + O(a^10)
+1 Zp L(K(26, 3))^-2 -> 1 + O(a^6)
+1 Zp (L(22) + -4*a)*a^0^-1 !! ZeroDivisionError
+1 Zp (L(17) + L(-7)*a).add_bigoh(6) + (L(-25) + L(-20)*a).add_bigoh(3) -> 1 + O(a^3)
+2 Qp L -> 3-adic Eisenstein Extension Field in a defined by x^2 + 3
+2 Qp (L(17) + 7*a)*a^2 + K(-8, 4) -> 1 + 2*a^2 + a^3 + a^5 + 2*a^6 + a^7 + O(a^8)
+2 Qp (L(21) + L(17)*a).add_bigoh(9) / (L(19) + L(9)*a) -> 2*a + 2*a^2 + a^3 + a^5 + 2*a^6 + 2*a^8 + O(a^9)
+2 Qp L(3)^-1 -> 2*a^-2 + 1 + O(a^10)
+2 Qp (L(-8) + L(22)*a).add_bigoh(9).norm() -> 1 + 3 + 2*3^3 + O(3^5)
+2 Qp (L(10) + 27*a)*a^-1 * L(K(0, 5)) -> O(a^9)
+2 Qp 1/L(K(-8, 3)) -> 1 + a^4 + O(a^6)
+2 Qp (L(-27) + L(6)*a).add_bigoh(12).unit_part() -> 1 + a^2 + a^3 + O(a^9)
+2 Qp (-24*a + K(-20, 3)).unit_part() -> 1 + a^2 + 2*a^3 + a^4 + a^5 + O(a^6)
+2 Qp ((L(-26) + L(13)*a).valuation(), (L(-26) + L(13)*a).precision_absolute(), (L(-26) + L(13)*a).precision_relative()) -> (0, 12, 12)
+2 Qp (L(16) + 16*a)*a^1 - (16*a + K(-2, 3)) -> 2 + a^2 + a^4 + O(a^6)
+2 Qp 1/L(-7) -> 2 + 2*a^2 + 2*a^6 + 2*a^8 + O(a^12)
+2 Qp L(22) * (13*a + K(-5, 8)) -> 1 + a + a^2 + a^3 + 2*a^5 + a^6 + 2*a^7 + 2*a^8 + a^9 + a^10 + 2*a^11 + O(a^12)
+2 Qp (L(27) + L(2)*a).norm() -> 3 + 3^2 + 3^6 + O(3^7)
+2 Qp (6*a + K(4, 2)).norm() -> 1 + 2*3 + O(3^2)
+2 Zp L -> 3-adic Eisenstein Extension Ring in a defined by x^2 + 3
+2 Zp (-24*a + K(-23, 7)) * L(K(-8, 2)) -> 1 + 2*a^2 + 2*a^3 + O(a^4)
+2 Zp L(-1) * -27/9 -> 2*a^2 + a^4 + O(a^14)
+2 Zp (L(0) + L(-20)*a).add_bigoh(4).trace() -> O(3^2)
+2 Zp 1/(L(27) + L(-11)*a) -> a^-1 + 2*a + a^4 + 2*a^5 + a^6 + a^7 + O(a^11)
+2 Zp (16*a + K(6, 7)).trace() -> 3 + 3^2 + O(3^7)
+2 Zp (-10*a + K(27, 6)) == (L(5) + L(-21)*a).add_bigoh(12) -> False
+2 Zp (L(22) + L(-4)*a) == (L(21) + 5*a)*a^2 -> False
+2 Zp (-12*a + K(-6, 2)) * (L(-22) + 1*a)*a^0 -> a^2 + a^3 + O(a^4)
+2 Zp L(K(13, 1)) - (L(14) + L(-4)*a).add_bigoh(10) -> 2 + a + O(a^2)
+2 Zp (4*a + K(-12, 1)) / (L(17) + -20*a)*a^2 -> 2*a^3 + O(a^4)
+2 Zp (-5*a + K(20, 6)).unit_part() -> 2 + a + 2*a^3 + 2*a^4 + O(a^12)
+2 Zp L(8).unit_part() -> 2 + a^2 + a^4 + O(a^12)
+2 Zp (-25*a + K(-12, 2)) + K(-17, 5) -> 1 + 2*a + a^2 + O(a^4)
+2 Zp L(K(11, 3)) + (L(-13) + L(17)*a).add_bigoh(4) -> 1 + 2*a + a^2 + a^3 + O(a^4)
+3 Qp L -> 3-adic Eisenstein Extension Field in a defined by x^2 - 6*x - 3
+3 Qp (L(-3) + 11*a)*a^-3.norm() !! AttributeError
+3 Qp L(K(-20, 4)) * 17/3 -> 2*a^-2 + a^-1 + a + 2*a^2 + 2*a^3 + 2*a^5 + O(a^6)
+3 Qp L(K(-5, 1)) / (L(9) + -26*a)*a^-1 -> a^-2 + O(a^0)
+3 Qp L(K(-11, 3)) - L(6) -> 1 + a^4 + 2*a^5 + O(a^6)
+3 Qp (7*a + K(-20, 4)) * 28/3 -> a^-2 + 1 + 2*a^2 + 2*a^4 + a^5 + O(a^6)
+3 Qp (L(-4) + L(1)*a).add_bigoh(5).unit_part() -> 2 + a + a^2 + a^3 + O(a^5)
+3 Qp (L(-5) + -23*a)*a^2 * (L(26) + L(-24)*a) -> 2*a^2 + 2*a^3 + a^4 + a^6 + a^7 + 2*a^9 + 2*a^10 + a^11 + O(a^12)
+3 Qp (L(-16) + 1*a)*a^-2 - (L(12) + 10*a)*a^0 -> 2*a^-2 + a^-1 + 2*a + 2*a^4 + a^5 + 2*a^6 + 2*a^7 + O(a^8)
+3 Qp (L(-19) + 5*a)*a^1.norm() !! AttributeError
+3 Qp L(K(-21, 2)) + K(8, 3) -> 2 + a^2 + a^3 + O(a^4)
+3 Qp (L(-10) + L(3)*a) * (L(-12) + 23*a)*a^-1 -> 1 + a + 2*a^2 + 2*a^3 + 2*a^4 + a^6 + 2*a^8 + a^9 + O(a^10)
+3 Qp L(K(26, 5)) + (L(21) + L(18)*a) -> 2 + 2*a^4 + 2*a^6 + a^9 + O(a^10)
+3 Qp (L(-21) + L(9)*a)^2 -> a^4 + 2*a^5 + a^6 + 2*a^9 + 2*a^10 + a^11 + 2*a^13 + O(a^14)
+3 Qp 1/(L(-2) + L(-16)*a) -> 1 + a + 2*a^2 + 2*a^4 + a^5 + a^6 + 2*a^7 + a^9 + O(a^10)
+3 Zp L -> 3-adic Eisenstein Extension Ring in a defined by x^2 - 6*x - 3
+3 Zp (L(20) + -27*a)*a^0^2 -> 2 + 2*a^4 + a^5 + a^7 + O(a^10)
+3 Zp (L(-6) + 4*a)*a^0 + K(8, 1) -> 2 + a + O(a^2)
+3 Zp (L(2) + -14*a)*a^3.unit_part() !! AttributeError
+3 Zp L(19) * 30/9 -> a^-2 + 2*a^-1 + a^4 + 2*a^5 + 2*a^6 + 2*a^7 + O(a^8)
+3 Zp L(K(11, 2))^-3 -> 2 + 2*a^2 + 2*a^3 + 2*a^5 + O(a^6)
+3 Zp ((12*a + K(1, 3)).valuation(), (12*a + K(1, 3)).precision_absolute(), (12*a + K(1, 3)).precision_relative()) -> (0, 6, 6)
+3 Zp L(-21)^-3 -> 2*a^-6 + 2*a^-4 + a^-3 + 2*a^-1 + a^2 + O(a^4)
+3 Zp L(K(-17, 5)) + K(3, 8) -> 1 + a^2 + a^3 + 2*a^4 + 2*a^5 + 2*a^8 + O(a^10)
+3 Zp ((L(-1) + L(-11)*a).valuation(), (L(-1) + L(-11)*a).precision_absolute(), (L(-1) + L(-11)*a).precision_relative()) -> (0, 10, 10)
+3 Zp L(K(14, 3)) == L(K(-1, 5)) -> False
+3 Zp (L(-23) + 2*a)*a^3 - L(K(23, 1)) -> 1 + O(a^2)
+3 Zp (-27*a + K(20, 7)).unit_part() -> 2 + 2*a^4 + a^5 + a^7 + O(a^10)
+3 Zp (L(-8) + L(-20)*a) * -29/9 -> a^-4 + 2*a^-3 + a^-2 + a^-1 + 1 + 2*a + a^2 + a^3 + 2*a^5 + O(a^6)
+3 Zp (L(-15) + L(14)*a).add_bigoh(4) == (-18*a + K(24, 3)) -> False
+4 Qp L -> 5-adic Eisenstein Extension Field in a defined by x^2 + 5
+4 Qp (L(-38) + L(-96)*a).add_bigoh(4) * 23/3 -> 2 + 4*a + 2*a^2 + 3*a^3 + O(a^4)
+4 Qp ((L(-119) + -42*a)*a^2.valuation(), (L(-119) + -42*a)*a^2.precision_absolute(), (L(-119) + -42*a)*a^2.precision_relative()) !! TypeError
+4 Qp (L(-32) + 102*a)*a^0 + (L(104) + L(-92)*a) -> 2 + a^2 + 3*a^3 + 3*a^4 + a^5 + O(a^8)
+4 Qp 1/(L(-51) + L(51)*a).add_bigoh(6) -> 4 + 4*a + a^4 + a^5 + O(a^6)
+4 Qp (7*a + K(119, 3))^1 -> 4 + 2*a + 2*a^2 + 4*a^3 + a^5 + O(a^6)
+4 Qp L(109) + K(30, 6) -> 4 + 3*a^2 + a^4 + 4*a^6 + O(a^8)
+4 Qp (L(28) + 84*a)*a^2 == (2*a + K(69, 1)) -> False
+4 Qp L(K(-15, 1)) / (L(-34) + -16*a)*a^2 -> O(a^4)
+4 Qp ((L(56) + -19*a)*a^-3.valuation(), (L(56) + -19*a)*a^-3.precision_absolute(), (L(56) + -19*a)*a^-3.precision_relative()) !! TypeError
+4 Qp L(K(89, 4)) + K(78, 2) -> 2 + 2*a^2 + O(a^4)
+4 Qp 1/(L(112) + L(-44)*a) -> 3 + a + 3*a^2 + 4*a^3 + 3*a^4 + 3*a^5 + 4*a^7 + O(a^8)
+4 Qp L(K(-25, 1)) - L(K(25, 1)) -> O(a^2)
+4 Qp (L(75) + 95*a)*a^0.trace() !! AttributeError
+4 Qp (L(22) + L(21)*a).add_bigoh(4) - L(K(80, 1)) -> 2 + a + O(a^2)
+4 Zp L -> 5-adic Eisenstein Extension Ring in a defined by x^2 + 5
+4 Zp (110*a + K(-121, 2)) + (L(82) + 90*a)*a^0 -> 1 + 3*a^2 + O(a^4)
+4 Zp (L(6) + -25*a)*a^2.trace() !! AttributeError
+4 Zp L(-52) * (L(108) + 97*a)*a^0 -> 4 + a + 4*a^2 + 4*a^3 + a^4 + 4*a^5 + a^7 + O(a^8)
+4 Zp L(K(-42, 4))^4 -> 1 + a^2 + 3*a^4 + 2*a^6 + O(a^8)
+4 Zp (L(-55) + L(-63)*a).norm() -> 4*5 + 4*5^2 + 2*5^3 + 5^4 + O(5^5)
+4 Zp L(K(112, 2)) + (83*a + K(-79, 5)) -> 3 + 3*a + 4*a^2 + 4*a^3 + O(a^4)
+4 Zp (L(102) + L(32)*a).add_bigoh(2) - (L(56) + L(53)*a).add_bigoh(2) -> 1 + 4*a + O(a^2)
+4 Zp L(K(-83, 2))^-1 -> 3 + O(a^4)
+4 Zp (L(4) + 2*a)*a^2.trace() !! AttributeError
+4 Zp (L(-102) + L(-45)*a).add_bigoh(7) + K(3, 6) -> 1 + 4*a^3 + a^4 + 4*a^5 + a^6 + O(a^7)
+4 Zp (L(11) + 75*a)*a^1 * (L(-113) + L(-93)*a) -> 2*a + 2*a^2 + 4*a^3 + a^5 + a^7 + a^8 + O(a^9)
+4 Zp L(K(110, 4)) * -1/25 -> 2*a^-2 + 1 + a^2 + O(a^4)
+4 Zp 1/(L(43) + L(-30)*a).add_bigoh(5) -> 2 + 4*a^2 + a^3 + 2*a^4 + O(a^5)
+5 Qp L -> 5-adic Eisenstein Extension Field in a defined by x^2 - 10*x + 15
+5 Qp (L(40) + L(-76)*a).unit_part() -> 4 + 4*a + 3*a^2 + 3*a^3 + 4*a^4 + 2*a^5 + 3*a^6 + 3*a^8 + 2*a^9 + a^10 + 3*a^11 + O(a^12)
+5 Qp L(-62) == L(29) -> False
+5 Qp L(39)^-3 -> 4 + 4*a^4 + 2*a^5 + 2*a^6 + a^7 + 4*a^8 + a^9 + 4*a^10 + O(a^12)
+5 Qp L(K(74, 6)).norm() -> 1 + 4*5^2 + 3*5^3 + 3*5^4 + 5^5 + O(5^6)
+5 Qp L(K(-39, 5)) / L(28) -> 2 + a^2 + 4*a^3 + 4*a^5 + 3*a^7 + 4*a^8 + O(a^10)
+5 Qp (L(-68).valuation(), L(-68).precision_absolute(), L(-68).precision_relative()) -> (0, 12, 12)
+5 Qp L(K(-49, 2))^4 -> 1 + O(a^4)
+5 Qp L(72) * 17/3 -> 3 + 3*a^2 + 2*a^3 + 3*a^5 + a^6 + 4*a^7 + 2*a^8 + 2*a^9 + 4*a^10 + O(a^12)
+5 Qp (L(123) + L(2)*a).add_bigoh(4) / L(9) -> 2 + 3*a + 2*a^2 + 3*a^3 + O(a^4)
+5 Qp (L(-113) + L(-121)*a).unit_part() -> 2 + 4*a + a^2 + 4*a^3 + 4*a^5 + a^7 + 2*a^9 + a^10 + 4*a^11 + O(a^12)
+5 Qp L(99) - (11*a + K(105, 3)) -> 4 + 4*a + 4*a^2 + 2*a^3 + a^4 + 2*a^5 + O(a^6)
+5 Qp L(-41) * (4*a + K(69, 3)) -> 1 + a + 2*a^2 + 4*a^3 + 3*a^4 + O(a^6)
+5 Qp (L(54) + -116*a)*a^-3 / (L(-111) + L(-33)*a) -> a^-3 + 3*a^-2 + 2*a^-1 + 3 + a + 2*a^2 + 4*a^4 + 3*a^6 + 3*a^7 + O(a^9)
+5 Qp (L(-123) + L(-124)*a).add_bigoh(7).norm() -> 4 + 2*5 + 5^2 + 5^3 + O(5^4)
+5 Zp L -> 5-adic Eisenstein Extension Ring in a defined by x^2 - 10*x + 15
+5 Zp (-44*a + K(-102, 2)) + K(-27, 8) -> 1 + a + 2*a^2 + a^3 + O(a^4)
+5 Zp (-112*a + K(-102, 5)).trace() -> 1 + 2*5^2 + 4*5^3 + 2*5^4 + O(5^5)
+5 Zp (L(-90) + L(29)*a) / L(-52) -> 3*a + 2*a^2 + 2*a^4 + 3*a^5 + 3*a^6 + 4*a^7 + 3*a^8 + a^12 + O(a^13)
+5 Zp (L(55) + L(11)*a).add_bigoh(6) * 9/3 -> 3*a + 4*a^2 + 4*a^3 + 2*a^4 + O(a^6)
+5 Zp L(-2) + K(58, 3) -> 1 + 3*a^2 + 2*a^3 + 4*a^4 + O(a^6)
+5 Zp (L(121) + -124*a)*a^1 + K(-55, 2) -> a + 3*a^2 + O(a^4)
+5 Zp (L(-58) + 47*a)*a^1 + (L(-77) + 100*a)*a^3 -> 2*a + 2*a^2 + 2*a^3 + 3*a^4 + 2*a^5 + a^6 + 4*a^7 + 4*a^8 + 2*a^9 + a^10 + 4*a^11 + a^12 + O(a^13)
+5 Zp L(44) + (L(81) + L(20)*a) -> 2*a^3 + 3*a^4 + 3*a^6 + 4*a^8 + a^9 + 4*a^10 + 3*a^11 + O(a^12)
+5 Zp L(26)^-1 -> 1 + a^4 + 3*a^5 + 4*a^6 + 2*a^7 + 2*a^8 + 3*a^9 + 2*a^10 + 4*a^11 + O(a^12)
+5 Zp (L(29) + -90*a)*a^2 + K(20, 2) -> a^2 + 3*a^3 + O(a^4)
+5 Zp (L(-14) + L(22)*a).add_bigoh(4) / (L(27) + 28*a)*a^1 -> 3*a + 4*a^2 + 3*a^3 + 3*a^4 + O(a^5)
+5 Zp (L(67) + 23*a)*a^1 - (-48*a + K(26, 5)) -> 4 + 2*a^3 + 3*a^4 + 2*a^5 + a^6 + 3*a^7 + 3*a^8 + O(a^10)
+5 Zp (L(-76) + L(-1)*a).add_bigoh(6) * 22/2 -> 4 + 4*a + a^2 + 3*a^4 + O(a^6)
+6 Qp L -> 7-adic Eisenstein Extension Field in a defined by x^2 + 14*x + 21
+6 Qp (L(-117) + 143*a)*a^2 * (L(25) + 18*a)*a^1 -> a^3 + 6*a^4 + 2*a^5 + a^8 + O(a^9)
+6 Qp (L(153) + L(322)*a).trace() -> 5 + 7 + 5*7^2 + O(7^3)
+6 Qp (-278*a + K(-247, 4)).unit_part() -> 5 + 2*a + 5*a^2 + 3*a^3 + 3*a^5 + O(a^6)
+6 Qp (L(-270) + L(-174)*a).add_bigoh(5) * (L(-215) + 40*a)*a^-2 -> 6*a^-2 + 3*a^-1 + 6 + 4*a + a^2 + O(a^3)
+6 Qp (214*a + K(-279, 5)) * L(K(210, 3)) -> 4*a^2 + 4*a^3 + 4*a^5 + O(a^6)
+6 Qp (L(149) + L(337)*a).add_bigoh(2) - L(K(137, 1)) -> 5 + a + O(a^2)
+6 Qp 1/L(314) -> 6 + 6*a^2 + 3*a^3 + 2*a^4 + a^5 + O(a^6)
+6 Qp L(159) == L(K(131, 1)) -> True
+6 Qp (-12*a + K(244, 5))^0 -> 1 + O(a^6)
+6 Qp (264*a + K(-220, 1)) + K(81, 3) -> 1 + 5*a + O(a^2)
+6 Qp (L(-55) + L(-269)*a).add_bigoh(4)^-3 -> 1 + 2*a + 4*a^2 + a^3 + O(a^4)
+6 Qp (L(-257) + L(277)*a)^4 -> 2 + 2*a + a^2 + 2*a^3 + 5*a^4 + 3*a^5 + O(a^6)
+6 Qp (L(-204) + L(-28)*a).add_bigoh(3) * 18/1 -> 3 + O(a^3)
+6 Zp L -> 7-adic Eisenstein Extension Ring in a defined by x^2 + 14*x + 21
+6 Zp (L(259) + -229*a)*a^0 + (L(-113) + L(-236)*a) -> 6 + 4*a + 5*a^2 + 5*a^3 + 5*a^4 + 6*a^5 + O(a^6)
+6 Zp L(K(341, 3)).norm() -> 4 + O(7^3)
+6 Zp (L(100) + L(107)*a).add_bigoh(4) - L(-308) -> 2 + 2*a + 4*a^2 + 4*a^3 + O(a^4)
+6 Zp (L(-181) + L(299)*a) * (L(15) + 234*a)*a^1 -> a + a^2 + 2*a^3 + 6*a^4 + 5*a^5 + a^6 + O(a^7)
+6 Zp L(K(-105, 1)) * L(-245) -> O(a^6)
+6 Zp (-129*a + K(64, 5)) * L(K(319, 1)) -> 4 + 2*a + O(a^2)
+6 Zp L(K(-78, 2)).norm() -> 1 + 7 + O(7^2)
+6 Zp (131*a + K(-115, 2)).norm() -> 2 + 6*7 + O(7^2)
+6 Zp 1/L(K(2, 1)) -> 4 + O(a^2)
+6 Zp 1/L(262) -> 5 + 6*a^2 + 3*a^3 + 2*a^4 + a^5 + O(a^6)
+6 Zp (L(67) + L(-88)*a) == (L(65) + L(298)*a) -> False
+6 Zp (L(-1) + L(342)*a)^4 -> 1 + 4*a + 6*a^2 + 4*a^3 + a^4 + O(a^6)
+6 Zp 1/L(-251) -> 1 + 2*a^2 + a^3 + 4*a^4 + 6*a^5 + O(a^6)
+6 Zp L(-86) * -10/7 -> 3*a^-2 + 2*a^-1 + 4 + 6*a^2 + 3*a^3 + O(a^4)
+7 Qp L -> 19-adic Eisenstein Extension Field in a defined by x^2 + 19
+7 Qp (-3786*a + K(6300, 2)).norm() -> 7 + 17*19 + O(19^2)
+7 Qp (L(4684) + L(-5324)*a).add_bigoh(9).unit_part() -> 10 + 15*a + a^2 + 15*a^3 + 13*a^4 + 5*a^5 + a^7 + O(a^9)
+7 Qp (L(-4508) + L(125)*a).add_bigoh(2).trace() -> 9 + O(19)
+7 Qp (-3239*a + K(-2290, 6)) + K(-2973, 4) -> 10*a + 11*a^2 + 5*a^4 + 10*a^5 + a^6 + a^7 + O(a^8)
+7 Qp L(1684) - L(K(-5797, 4)) -> 14 + 6*a^2 + 2*a^4 + 18*a^6 + O(a^8)
+7 Qp (L(2263) + L(-3550)*a).add_bigoh(8) * L(2399) -> 10 + 15*a + 8*a^2 + 6*a^3 + 10*a^4 + 7*a^5 + 7*a^6 + 7*a^7 + O(a^8)
+7 Qp (L(-4641) + -404*a)*a^1.norm() !! AttributeError
+7 Qp L(-1643)^0 -> 1 + O(a^10)
+7 Qp L(K(-510, 1)) == (-6616*a + K(2993, 3)) -> False
+7 Qp L(K(6135, 2)) * -22/361 -> 6*a^-4 + 17*a^-2 + O(a^0)
+7 Qp L(-1541) == L(2746) -> False
+7 Qp (L(834) + L(-3118)*a).add_bigoh(5) / (L(4255) + L(-869)*a).add_bigoh(2) -> 2 + 12*a + O(a^2)
+7 Qp L(-2346).unit_part() -> 10 + 10*a^2 + 13*a^4 + a^6 + O(a^10)
+7 Qp (L(5447) + 4110*a)*a^-3^3 -> 13*a^-27 + 6*a^-26 + 18*a^-25 + 12*a^-24 + 16*a^-23 + 12*a^-22 + O(a^-17)
+7 Zp L -> 19-adic Eisenstein Extension Ring in a defined by x^2 + 19
+7 Zp L(K(-434, 2)) == L(K(-5152, 3)) -> False
+7 Zp (699*a + K(3184, 5)) + K(1381, 8) -> 5 + 15*a + 7*a^2 + 2*a^3 + 13*a^4 + 2*a^5 + O(a^10)
+7 Zp 1/L(-1754) -> 3 + 5*a^2 + 8*a^4 + 2*a^6 + 15*a^8 + O(a^10)
+7 Zp 1/(33*a + K(1836, 1)) -> 8 + 16*a + O(a^2)
+7 Zp (L(-2280).valuation(), L(-2280).precision_absolute(), L(-2280).precision_relative()) -> (2, 12, 10)
+7 Zp (L(-1416) + L(-4314)*a).add_bigoh(2).trace() -> 18 + O(19)
+7 Zp (L(-2249) + 6798*a)*a^3.trace() !! AttributeError
+7 Zp (L(3924) + L(2630)*a).add_bigoh(9) * (-4966*a + K(-6684, 5)) -> 2 + 16*a^2 + 10*a^3 + a^4 + 2*a^5 + 2*a^6 + 8*a^7 + 12*a^8 + O(a^9)
+7 Zp (-5804*a + K(-5388, 2)).unit_part() -> 8 + 10*a + 18*a^2 + 2*a^3 + O(a^4)
+7 Zp (L(-6785) + L(445)*a).add_bigoh(9)^4 -> 16 + 10*a + 11*a^2 + a^3 + 14*a^4 + 9*a^5 + 12*a^6 + 14*a^7 + 9*a^8 + O(a^9)
+7 Zp (-3883*a + K(-805, 5)) + K(3274, 8) -> 18 + 12*a + 4*a^2 + 15*a^3 + 7*a^4 + 9*a^5 + a^7 + O(a^10)
+7 Zp (L(17).valuation(), L(17).precision_absolute(), L(17).precision_relative()) -> (0, 10, 10)
+7 Zp (L(-1118) + 3809*a)*a^3^-3 !! NotImplementedError
+7 Zp (L(-498) + 3683*a)*a^0 - (L(1459) + L(274)*a) -> 8*a + 8*a^2 + 11*a^3 + 14*a^4 + 10*a^5 + a^6 + O(a^10)
+8 Qp L -> 2-adic Eisenstein Extension Field in a defined by x^2 + 2*x + 2
+8 Qp L(7) / (L(-6) + L(-1)*a) -> a^-1 + 1 + a^2 + a^4 + a^5 + a^7 + a^8 + a^12 + a^13 + a^14 + O(a^15)
+8 Qp L(8).norm() -> 2^6 + O(2^14)
+8 Qp (L(5) + L(7)*a).trace() -> 2^2 + 2^3 + 2^4 + 2^5 + 2^6 + 2^7 + O(2^8)
+8 Qp L(K(8, 2)) == (-3*a + K(2, 9)) -> False
+8 Qp (L(3) + L(0)*a) / L(-2) -> a^-2 + a^-1 + 1 + a^2 + a^3 + a^4 + O(a^14)
+8 Qp (L(-5) + 6*a)*a^1^3 -> a + a^3 + a^5 + a^8 + a^9 + a^10 + O(a^17)
+8 Qp (L(-5) + L(1)*a).add_bigoh(5)^-2 -> 1 + a^2 + a^3 + a^4 + a^5 + a^6 + O(a^7)
+8 Qp (L(8) + 6*a)*a^3.unit_part() !! AttributeError
+8 Qp (-2*a + K(4, 7)) + K(-8, 4) -> a^3 + a^5 + a^6 + a^7 + O(a^8)
+8 Qp (3*a + K(-4, 1)) + (L(-4) + L(-5)*a) -> O(a^2)
+8 Qp L(0) + K(0, 3) -> O(a^6)
+8 Qp (L(-3) + L(0)*a).add_bigoh(5) / (L(-5) + L(-7)*a) -> 1 + a + a^3 + a^4 + O(a^5)
+8 Qp (L(-6) + L(4)*a).add_bigoh(9)^3 -> a^6 + a^7 + a^8 + a^9 + a^10 + O(a^13)
+8 Qp L(K(-6, 6)) / (L(1) + -2*a)*a^2 -> a^4 + a^5 + a^7 + a^8 + a^12 + a^13 + O(a^14)
+8 Zp L -> 2-adic Eisenstein Extension Ring in a defined by x^2 + 2*x + 2
+8 Zp (L(-1) + L(7)*a).add_bigoh(16)^2 -> 1 + a^2 + a^3 + a^4 + a^9 + a^10 + a^11 + a^14 + O(a^16)
+8 Zp (L(-8).valuation(), L(-8).precision_absolute(), L(-8).precision_relative()) -> (6, 22, 16)
+8 Zp (-4*a + K(8, 10)) * 11/1 -> a^5 + a^6 + a^8 + a^9 + a^12 + a^13 + a^14 + a^15 + a^16 + O(a^20)
+8 Zp L(6) + (L(-4) + L(-5)*a) -> a + a^2 + a^4 + a^5 + a^6 + a^7 + a^8 + O(a^17)
+8 Zp L(K(-4, 8)).trace() -> 2^3 + 2^4 + 2^5 + 2^6 + 2^7 + O(2^8)
+8 Zp L(K(-5, 1)) * 12/3 -> a^4 + O(a^6)
+8 Zp (L(0) + L(-8)*a).add_bigoh(13) / (L(8) + L(-4)*a).add_bigoh(3) !! PrecisionError
+8 Zp (L(-8) + 7*a)*a^0.trace() !! AttributeError
+8 Zp 1/(7*a + K(3, 3)) -> 1 + a + a^4 + O(a^6)
+8 Zp (L(8) + L(-2)*a) + L(K(7, 6)) -> 1 + a^2 + a^8 + O(a^12)
+8 Zp (L(1) + L(7)*a).trace() -> 2^2 + 2^4 + 2^5 + 2^6 + 2^7 + O(2^8)
+8 Zp (L(-4) + L(-3)*a).add_bigoh(4) == (L(7) + L(7)*a) -> False
+8 Zp 1/(7*a + K(-6, 6)) -> a^-1 + 1 + a + a^2 + a^8 + O(a^10)
+8 Zp (L(2) + -2*a)*a^2 == (L(4) + -5*a)*a^3 -> False
+9 Qp L -> 2-adic Eisenstein Extension Field in a defined by x^2 + 2
+9 Qp (L(K(-4, 6)).valuation(), L(K(-4, 6)).precision_absolute(), L(K(-4, 6)).precision_relative()) -> (4, 12, 8)
+9 Qp (L(-2) + L(-4)*a).trace() -> 2^2 + 2^3 + 2^4 + 2^5 + 2^6 + O(2^7)
+9 Qp L(K(-7, 6)) + (L(-4) + L(2)*a) -> 1 + a^3 + a^4 + a^5 + a^8 + a^10 + O(a^12)
+9 Qp 1/L(K(5, 1)) -> 1 + O(a^2)
+9 Qp L(-6).norm() -> 2^2 + 2^5 + O(2^8)
+9 Qp L(8)^3 -> a^18 + a^20 + O(a^30)
+9 Qp (-8*a + K(6, 4)).norm() -> 2^2 + O(2^5)
+9 Qp (L(6) + L(-6)*a).add_bigoh(3)^2 -> a^4 + O(a^6)
+9 Qp L(3) + (L(-4) + L(-2)*a).add_bigoh(5) -> 1 + a^2 + a^3 + O(a^5)
+9 Qp (L(6) + -8*a)*a^-3^-3 !! NotImplementedError
+9 Qp (L(8) + 8*a)*a^-1 - (L(-7) + 5*a)*a^3 -> a^3 + a^4 + a^8 + a^9 + a^10 + a^11 + O(a^15)
+9 Qp (L(-1) + L(6)*a) + K(-3, 6) -> a^3 + a^4 + a^6 + a^7 + a^9 + O(a^12)
+9 Qp L(-6).trace() -> 2^2 + 2^4 + 2^5 + 2^6 + O(2^7)
+9 Qp (L(3) + L(-3)*a) * (L(2) + 0*a)*a^0 -> a^2 + a^3 + a^5 + a^6 + a^7 + a^8 + O(a^14)
+9 Zp L -> 2-adic Eisenstein Extension Ring in a defined by x^2 + 2
+9 Zp L(6).trace() -> 2^2 + 2^3 + O(2^7)
+9 Zp L(K(-3, 3))^-2 -> 1 + a^6 + O(a^8)
+9 Zp (L(-4) + L(3)*a).add_bigoh(1).trace() -> O(2)
+9 Zp L(-3).norm() -> 1 + 2^3 + O(2^6)
+9 Zp ((L(3) + L(-1)*a).add_bigoh(11).valuation(), (L(3) + L(-1)*a).add_bigoh(11).precision_absolute(), (L(3) + L(-1)*a).add_bigoh(11).precision_relative()) -> (0, 11, 11)
+9 Zp L(-2)^1 -> a^2 + O(a^14)
+9 Zp L(-2) * 14/7 -> a^4 + a^6 + O(a^16)
+9 Zp (L(6) + 2*a)*a^2^-1 !! NotImplementedError
+9 Zp (L(6) + 1*a)*a^0 + (L(-6) + L(-3)*a) -> a^3 + O(a^13)
+9 Zp 1/L(-2) -> a^-2 + O(a^10)
+9 Zp ((L(-1) + L(-6)*a).valuation(), (L(-1) + L(-6)*a).precision_absolute(), (L(-1) + L(-6)*a).precision_relative()) -> (0, 12, 12)
+9 Zp (-4*a + K(-2, 2)) * (-4*a + K(1, 7)) -> a^2 + O(a^4)
+9 Zp (-2*a + K(1, 7)).unit_part() -> 1 + a^3 + O(a^12)
+10 Qp L -> 11-adic Eisenstein Extension Field in a defined by x^2 - 22
+10 Qp L(-847)^-2 -> a^-8 + 3*a^-6 + 8*a^-4 + 6*a^-2 + O(a^0)
+10 Qp (L(872) + L(876)*a) / (766*a + K(750, 6)) -> 7 + a + 7*a^2 + 5*a^3 + 9*a^4 + 9*a^5 + 9*a^6 + 9*a^7 + O(a^8)
+10 Qp L(K(-1255, 2)) / L(1154) -> 1 + 5*a^2 + O(a^4)
+10 Qp (L(K(-992, 1)).valuation(), L(K(-992, 1)).precision_absolute(), L(K(-992, 1)).precision_relative()) -> (0, 2, 2)
+10 Qp (L(86) + L(-265)*a) + K(17, 4) -> 4 + 10*a + 10*a^2 + 4*a^3 + 8*a^4 + 2*a^5 + a^6 + 4*a^7 + O(a^8)
+10 Qp (L(-369) + L(-1222)*a).add_bigoh(2)^-3 -> 3 + 4*a + O(a^2)
+10 Qp (L(883) + L(-329)*a) + (L(-629) + L(-959)*a) -> 1 + 10*a + 6*a^2 + 7*a^3 + 3*a^4 + 8*a^5 + 4*a^6 + 5*a^7 + O(a^8)
+10 Qp (L(1222) + L(554)*a).add_bigoh(6)^4 -> 1 + 5*a + 10*a^2 + a^3 + 5*a^5 + O(a^6)
+10 Qp L(1163) * -10/121 -> 10*a^-4 + 8*a^-2 + 8 + 9*a^2 + O(a^4)
+10 Qp (L(-407) + -334*a)*a^-1.norm() !! AttributeError
+10 Qp (L(222) + 1293*a)*a^0 * (337*a + K(-49, 2)) -> 1 + 6*a + 4*a^2 + 9*a^3 + O(a^4)
+10 Qp L(-887)^0 -> 1 + O(a^8)
+10 Qp (L(315) + 613*a)*a^-3.unit_part() !! AttributeError
+10 Qp (-328*a + K(-1159, 1)) - (363*a + K(-464, 3)) -> 9 + 2*a + O(a^2)
+10 Zp L -> 11-adic Eisenstein Extension Ring in a defined by x^2 - 22
+10 Zp (803*a + K(1322, 1)) * 22/11 -> 4 + O(a^2)
+10 Zp (L(-878) + L(-799)*a) / (L(1) + L(-1085)*a).add_bigoh(5) -> 2 + 7*a + 9*a^2 + 4*a^3 + 8*a^4 + O(a^5)
+10 Zp (L(816) + -676*a)*a^1 + (L(287) + -1184*a)*a^0 -> 1 + 6*a + 8*a^2 + 5*a^3 + 8*a^4 + 10*a^5 + a^6 + 5*a^7 + O(a^8)
+10 Zp L(-956) * 29/3 -> 6 + 5*a^2 + 10*a^4 + 6*a^6 + O(a^8)
+10 Zp (L(1260) + L(1091)*a).add_bigoh(4) + (L(-241) + L(-578)*a) -> 7 + 7*a + 2*a^2 + a^3 + O(a^4)
+10 Zp (L(-239) + L(494)*a)^0 -> 1 + O(a^8)
+10 Zp (-271*a + K(-658, 3)) / (L(250) + L(1113)*a).add_bigoh(6) -> 3 + 8*a + a^2 + 5*a^3 + 3*a^5 + O(a^6)
+10 Zp (-702*a + K(-1047, 5)) * (-398*a + K(687, 1)) -> 1 + 3*a + O(a^2)
+10 Zp 1/(L(-454) + L(575)*a) -> 7 + 7*a + a^2 + a^3 + 8*a^4 + 4*a^5 + 10*a^6 + 6*a^7 + O(a^8)
+10 Zp L(K(-299, 4)) * -16/7 -> 3 + 5*a^2 + 3*a^6 + O(a^8)
+10 Zp (262*a + K(634, 1)).trace() -> 3 + O(11)
+10 Zp (L(494) + -1278*a)*a^2 * 11/3 -> 9*a^4 + 7*a^5 + 7*a^6 + a^7 + 9*a^8 + 5*a^9 + 6*a^10 + 8*a^11 + O(a^12)
+10 Zp (L(-721) + L(178)*a).add_bigoh(6)^-1 -> 9 + 3*a + 5*a^2 + 2*a^3 + 10*a^4 + 4*a^5 + O(a^6)
+10 Zp (L(-287) + L(396)*a) / L(K(-609, 2)) -> 3 + 10*a^2 + a^3 + O(a^4)
+L(19^50).valuation() -> 100
+L(19^-50).valuation() -> -100
+L(19^50) + 1 -> 1 + O(alpha^10)
+L(2*19^41) -> 17*alpha^82 + alpha^84 + O(alpha^92)
+L(1/(3*19^31)) -> 6*alpha^-62 + 13*alpha^-60 + 7*alpha^-58 + 13*alpha^-56 + 7*alpha^-54 + O(alpha^-52)
+L(Qp(19, 5)(19^71)) -> 18*alpha^142 + alpha^144 + O(alpha^152)
+(L(2*19^41)*(1+alpha)).norm() -> 4*19^82 + 4*19^83 + O(19^87)
+ext x^2+3/2 -> 3-adic Eisenstein Extension Field in a defined by x^2 + 3/2
+ext x^2+(3/2)x+3 -> 3-adic Eisenstein Extension Field in a defined by x^2 + 3/2*x + 3
+ext x^2-(6/5)x+3/7 -> 3-adic Eisenstein Extension Field in a defined by x^2 - 6/5*x + 3/7
+def exact -> x^2 + 3/2
+def exact parent -> Univariate Polynomial Ring in x over Rational Field
+def -> (1 + O(3^6))*x^2 + O(3^7)*x + 2*3 + 3^2 + 3^3 + 3^4 + 3^5 + 3^6 + O(3^7)
+f(a) -> O(a^14)
+f(a).is_zero() -> True
+a^2 -> a^2 + O(a^14)
+a^-3 -> a^-3 + O(a^9)
+L(3) -> a^2 + 2*a^4 + O(a^14)
+L(1/2)*a -> 2*a + a^3 + O(a^13)
+(1+a)^-1 -> 1 + 2*a + a^2 + a^3 + a^4 + 2*a^5 + a^6 + a^7 + a^8 + 2*a^9 + a^10 + a^11 + O(a^12)
+(2+a)^5 -> 2 + 2*a + 2*a^6 + a^9 + 2*a^10 + a^11 + O(a^12)
+a.norm() -> 2*3 + 3^2 + 3^3 + 3^4 + 3^5 + 3^6 + O(3^7)
+(1+a).norm() -> 1 + 2*3 + 3^2 + 3^3 + 3^4 + 3^5 + O(3^6)
+def exact -> x^2 + 3/2*x + 3
+def exact parent -> Univariate Polynomial Ring in x over Rational Field
+def -> (1 + O(3^6))*x^2 + (2*3 + 3^2 + 3^3 + 3^4 + 3^5 + 3^6 + O(3^7))*x + 3 + O(3^7)
+f(a) -> O(a^14)
+f(a).is_zero() -> True
+a^2 -> a^2 + O(a^14)
+a^-3 -> a^-3 + O(a^9)
+L(3) -> 2*a^2 + 2*a^3 + 2*a^5 + a^6 + 2*a^7 + 2*a^9 + a^10 + a^11 + 2*a^12 + a^13 + O(a^14)
+L(1/2)*a -> 2*a + 2*a^3 + 2*a^4 + a^5 + a^6 + 2*a^9 + a^11 + a^12 + O(a^13)
+(1+a)^-1 -> 1 + 2*a + a^2 + 2*a^4 + a^6 + 2*a^10 + a^11 + O(a^12)
+(2+a)^5 -> 2 + 2*a + a^2 + a^3 + 2*a^4 + 2*a^5 + a^6 + 2*a^7 + a^9 + 2*a^10 + a^11 + O(a^12)
+a.norm() -> 3 + O(3^7)
+(1+a).norm() -> 1 + 2*3 + 3^2 + 3^3 + 3^4 + 3^5 + O(3^6)
+def exact -> x^2 - 6/5*x + 3/7
+def exact parent -> Univariate Polynomial Ring in x over Rational Field
+def -> (1 + O(3^6))*x^2 + (2*3 + 3^2 + 3^4 + 2*3^5 + 3^6 + O(3^7))*x + 3 + 3^2 + 2*3^4 + 3^5 + 2*3^6 + O(3^7)
+f(a) -> O(a^14)
+f(a).is_zero() -> True
+a^2 -> a^2 + O(a^14)
+a^-3 -> a^-3 + O(a^9)
+L(3) -> 2*a^2 + 2*a^3 + 2*a^4 + 2*a^5 + a^6 + a^8 + a^9 + 2*a^13 + O(a^14)
+L(1/2)*a -> 2*a + 2*a^3 + 2*a^4 + a^6 + a^7 + 2*a^8 + 2*a^9 + 2*a^10 + 2*a^12 + O(a^13)
+(1+a)^-1 -> 1 + 2*a + a^2 + 2*a^4 + a^5 + a^6 + 2*a^7 + a^8 + 2*a^10 + a^11 + O(a^12)
+(2+a)^5 -> 2 + 2*a + a^2 + a^3 + a^4 + a^7 + 2*a^8 + a^10 + O(a^12)
+a.norm() -> 3 + 3^2 + 2*3^4 + 3^5 + 2*3^6 + O(3^7)
+(1+a).norm() -> 1 + 2*3 + 2*3^2 + 2*3^3 + 2*3^5 + O(3^6)
+L4 -> 3-adic Eisenstein Extension Ring in d defined by x^2 - 3/2
+d^2, d^-1, L4(1/2) -> (d^2 + O(d^14), d^-1 + O(d^11), 2 + 2*d^2 + d^4 + d^6 + d^8 + d^10 + O(d^12))
+(b+1)^1.50000000000000 !! TypeError
+(b+1)^2.00000000000000 !! TypeError
+(b+1)^3/2 !! NotImplementedError
+(b+1)^1.5 !! TypeError
+s^3/2 !! TypeError
+s^1.50000000000000 !! TypeError
+s^1.5 !! TypeError
+s^2.00000000000000 -> (1 + O(3^6))*s^2
+s^2 -> (1 + O(3^6))*s^2
+s-s -> O(3^6)*s
+s-s degree -> -1
+s-s degree secure !! PrecisionError
+s-s lc -> 0
+s-s coefficients -> []
+s-s coefficients dense -> [0, O(3^6)]
+s-s list -> [0, O(3^6)]
+s-s is_eisenstein -> False
+s-s is_eisenstein secure !! PrecisionError
+R(0) -> 0
+R(0) degree -> -1
+R(0) degree secure -> -1
+R(0) lc -> 0
+R(0) coefficients -> []
+R(0) coefficients dense -> [0]
+R(0) list -> [0]
+[1,0] -> 0*s + 1 + O(3^6)
+[1,0] degree -> 0
+[1,0] degree secure !! PrecisionError
+[1,0] lc -> 1 + O(3^6)
+[1,0] coefficients -> [1 + O(3^6)]
+[1,0] coefficients dense -> [1 + O(3^6), 0]
+[1,0] list -> [1 + O(3^6), 0]
+[1,0] is_eisenstein -> False
+[1,0] is_eisenstein secure !! PrecisionError
+[1,O(3^2)] -> O(3^2)*s + 1 + O(3^6)
+[1,O(3^2)] degree -> 0
+[1,O(3^2)] degree secure !! PrecisionError
+[1,O(3^2)] lc -> 1 + O(3^6)
+[1,O(3^2)] coefficients -> [1 + O(3^6)]
+[1,O(3^2)] coefficients dense -> [1 + O(3^6), O(3^2)]
+[1,O(3^2)] list -> [1 + O(3^6), O(3^2)]
+[1,O(3^2)] is_eisenstein -> False
+[1,O(3^2)] is_eisenstein secure !! PrecisionError
+s^2+3 -> (1 + O(3^6))*s^2 + 3 + O(3^7)
+s^2+3 degree -> 2
+s^2+3 degree secure -> 2
+s^2+3 lc -> 1 + O(3^6)
+s^2+3 coefficients -> [3 + O(3^7), 1 + O(3^6)]
+s^2+3 coefficients dense -> [3 + O(3^7), 0, 1 + O(3^6)]
+s^2+3 list -> [3 + O(3^7), 0, 1 + O(3^6)]
+s^2+3 is_eisenstein -> True
+s^2+3 is_eisenstein secure -> True
+s^2-s^2+3s -> O(3^6)*s^2 + (3 + O(3^7))*s
+s^2-s^2+3s degree -> 1
+s^2-s^2+3s degree secure !! PrecisionError
+s^2-s^2+3s lc -> 3 + O(3^7)
+s^2-s^2+3s coefficients -> [3 + O(3^7)]
+s^2-s^2+3s coefficients dense -> [0, 3 + O(3^7), O(3^6)]
+s^2-s^2+3s list -> [0, 3 + O(3^7), O(3^6)]
+s^2-s^2+3s is_eisenstein -> False
+s^2-s^2+3s is_eisenstein secure !! PrecisionError
+c0=O(3) -> (1 + O(3^6))*s^2 + (3 + O(3^7))*s + O(3)
+c0=O(3) degree -> 2
+c0=O(3) degree secure -> 2
+c0=O(3) lc -> 1 + O(3^6)
+c0=O(3) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c0=O(3) coefficients dense -> [O(3), 3 + O(3^7), 1 + O(3^6)]
+c0=O(3) list -> [O(3), 3 + O(3^7), 1 + O(3^6)]
+c0=O(3) is_eisenstein !! PrecisionError
+c0=O(3) is_eisenstein secure !! PrecisionError
+c0=O(3^2) -> (1 + O(3^6))*s^2 + (3 + O(3^7))*s + O(3^2)
+c0=O(3^2) degree -> 2
+c0=O(3^2) degree secure -> 2
+c0=O(3^2) lc -> 1 + O(3^6)
+c0=O(3^2) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c0=O(3^2) coefficients dense -> [O(3^2), 3 + O(3^7), 1 + O(3^6)]
+c0=O(3^2) list -> [O(3^2), 3 + O(3^7), 1 + O(3^6)]
+c0=O(3^2) is_eisenstein -> False
+c0=O(3^2) is_eisenstein secure -> False
+c0=O(3^0) -> (1 + O(3^6))*s^2 + (3 + O(3^7))*s + O(3^0)
+c0=O(3^0) degree -> 2
+c0=O(3^0) degree secure -> 2
+c0=O(3^0) lc -> 1 + O(3^6)
+c0=O(3^0) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c0=O(3^0) coefficients dense -> [O(3^0), 3 + O(3^7), 1 + O(3^6)]
+c0=O(3^0) list -> [O(3^0), 3 + O(3^7), 1 + O(3^6)]
+c0=O(3^0) is_eisenstein !! PrecisionError
+c0=O(3^0) is_eisenstein secure !! PrecisionError
+c0=0 -> (1 + O(3^6))*s^2 + (3 + O(3^7))*s
+c0=0 degree -> 2
+c0=0 degree secure -> 2
+c0=0 lc -> 1 + O(3^6)
+c0=0 coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c0=0 coefficients dense -> [0, 3 + O(3^7), 1 + O(3^6)]
+c0=0 list -> [0, 3 + O(3^7), 1 + O(3^6)]
+c0=0 is_eisenstein -> False
+c0=0 is_eisenstein secure -> False
+c0=3+O(3^2) -> (1 + O(3^6))*s^2 + (3 + O(3^7))*s + 3 + O(3^2)
+c0=3+O(3^2) degree -> 2
+c0=3+O(3^2) degree secure -> 2
+c0=3+O(3^2) lc -> 1 + O(3^6)
+c0=3+O(3^2) coefficients -> [3 + O(3^2), 3 + O(3^7), 1 + O(3^6)]
+c0=3+O(3^2) coefficients dense -> [3 + O(3^2), 3 + O(3^7), 1 + O(3^6)]
+c0=3+O(3^2) list -> [3 + O(3^2), 3 + O(3^7), 1 + O(3^6)]
+c0=3+O(3^2) is_eisenstein -> True
+c0=3+O(3^2) is_eisenstein secure -> True
+c1=O(1) -> (1 + O(3^6))*s^2 + O(3^0)*s + 3 + O(3^7)
+c1=O(1) degree -> 2
+c1=O(1) degree secure -> 2
+c1=O(1) lc -> 1 + O(3^6)
+c1=O(1) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c1=O(1) coefficients dense -> [3 + O(3^7), O(3^0), 1 + O(3^6)]
+c1=O(1) list -> [3 + O(3^7), O(3^0), 1 + O(3^6)]
+c1=O(1) is_eisenstein -> True
+c1=O(1) is_eisenstein secure !! PrecisionError
+c1=O(3) -> (1 + O(3^6))*s^2 + O(3)*s + 3 + O(3^7)
+c1=O(3) degree -> 2
+c1=O(3) degree secure -> 2
+c1=O(3) lc -> 1 + O(3^6)
+c1=O(3) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c1=O(3) coefficients dense -> [3 + O(3^7), O(3), 1 + O(3^6)]
+c1=O(3) list -> [3 + O(3^7), O(3), 1 + O(3^6)]
+c1=O(3) is_eisenstein -> True
+c1=O(3) is_eisenstein secure -> True
+c1=O(3^-1) -> (1 + O(3^6))*s^2 + O(3^-1)*s + 3 + O(3^7)
+c1=O(3^-1) degree -> 2
+c1=O(3^-1) degree secure -> 2
+c1=O(3^-1) lc -> 1 + O(3^6)
+c1=O(3^-1) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+c1=O(3^-1) coefficients dense -> [3 + O(3^7), O(3^-1), 1 + O(3^6)]
+c1=O(3^-1) list -> [3 + O(3^7), O(3^-1), 1 + O(3^6)]
+c1=O(3^-1) is_eisenstein -> True
+c1=O(3^-1) is_eisenstein secure !! PrecisionError
+deg3 mid O(1) -> (1 + O(3^6))*s^3 + O(3^0)*s^2 + O(3^2)*s + 3 + O(3^7)
+deg3 mid O(1) degree -> 3
+deg3 mid O(1) degree secure -> 3
+deg3 mid O(1) lc -> 1 + O(3^6)
+deg3 mid O(1) coefficients -> [3 + O(3^7), 1 + O(3^6)]
+deg3 mid O(1) coefficients dense -> [3 + O(3^7), O(3^2), O(3^0), 1 + O(3^6)]
+deg3 mid O(1) list -> [3 + O(3^7), O(3^2), O(3^0), 1 + O(3^6)]
+deg3 mid O(1) is_eisenstein -> True
+deg3 mid O(1) is_eisenstein secure !! PrecisionError
+lead O(3^2) -> O(3^2)*s^2 + (3 + O(3^7))*s + 3 + O(3^7)
+lead O(3^2) degree -> 1
+lead O(3^2) degree secure !! PrecisionError
+lead O(3^2) lc -> 3 + O(3^7)
+lead O(3^2) coefficients -> [3 + O(3^7), 3 + O(3^7)]
+lead O(3^2) coefficients dense -> [3 + O(3^7), 3 + O(3^7), O(3^2)]
+lead O(3^2) list -> [3 + O(3^7), 3 + O(3^7), O(3^2)]
+lead O(3^2) is_eisenstein -> False
+lead O(3^2) is_eisenstein secure !! PrecisionError
+lead 3 -> (3 + O(3^7))*s^2 + (3 + O(3^7))*s + 3 + O(3^7)
+lead 3 degree -> 2
+lead 3 degree secure -> 2
+lead 3 lc -> 3 + O(3^7)
+lead 3 coefficients -> [3 + O(3^7), 3 + O(3^7), 3 + O(3^7)]
+lead 3 coefficients dense -> [3 + O(3^7), 3 + O(3^7), 3 + O(3^7)]
+lead 3 list -> [3 + O(3^7), 3 + O(3^7), 3 + O(3^7)]
+lead 3 is_eisenstein -> False
+lead 3 is_eisenstein secure -> False
+lead 1/3 -> (3^-1 + O(3^5))*s^2 + (3 + O(3^7))*s + 3 + O(3^7)
+lead 1/3 degree -> 2
+lead 1/3 degree secure -> 2
+lead 1/3 lc -> 3^-1 + O(3^5)
+lead 1/3 coefficients -> [3 + O(3^7), 3 + O(3^7), 3^-1 + O(3^5)]
+lead 1/3 coefficients dense -> [3 + O(3^7), 3 + O(3^7), 3^-1 + O(3^5)]
+lead 1/3 list -> [3 + O(3^7), 3 + O(3^7), 3^-1 + O(3^5)]
+lead 1/3 is_eisenstein -> False
+lead 1/3 is_eisenstein secure -> False
+mid 1/3 -> (1 + O(3^6))*s^2 + (3^-1 + O(3^5))*s + 3 + O(3^7)
+mid 1/3 degree -> 2
+mid 1/3 degree secure -> 2
+mid 1/3 lc -> 1 + O(3^6)
+mid 1/3 coefficients -> [3 + O(3^7), 3^-1 + O(3^5), 1 + O(3^6)]
+mid 1/3 coefficients dense -> [3 + O(3^7), 3^-1 + O(3^5), 1 + O(3^6)]
+mid 1/3 list -> [3 + O(3^7), 3^-1 + O(3^5), 1 + O(3^6)]
+mid 1/3 is_eisenstein -> False
+mid 1/3 is_eisenstein secure -> False
+s+3 -> (1 + O(3^6))*s + 3 + O(3^7)
+s+3 degree -> 1
+s+3 degree secure -> 1
+s+3 lc -> 1 + O(3^6)
+s+3 coefficients -> [3 + O(3^7), 1 + O(3^6)]
+s+3 coefficients dense -> [3 + O(3^7), 1 + O(3^6)]
+s+3 list -> [3 + O(3^7), 1 + O(3^6)]
+s+3 is_eisenstein -> True
+s+3 is_eisenstein secure -> True
+s -> (1 + O(3^6))*s
+s degree -> 1
+s degree secure -> 1
+s lc -> 1 + O(3^6)
+s coefficients -> [1 + O(3^6)]
+s coefficients dense -> [0, 1 + O(3^6)]
+s list -> [0, 1 + O(3^6)]
+s is_eisenstein -> False
+s is_eisenstein secure -> False
+O(3^3)s^2+s+3 -> O(3^3)*s^2 + (1 + O(3^6))*s + 3 + O(3^7)
+O(3^3)s^2+s+3 degree -> 1
+O(3^3)s^2+s+3 degree secure !! PrecisionError
+O(3^3)s^2+s+3 lc -> 1 + O(3^6)
+O(3^3)s^2+s+3 coefficients -> [3 + O(3^7), 1 + O(3^6)]
+O(3^3)s^2+s+3 coefficients dense -> [3 + O(3^7), 1 + O(3^6), O(3^3)]
+O(3^3)s^2+s+3 list -> [3 + O(3^7), 1 + O(3^6), O(3^3)]
+O(3^3)s^2+s+3 is_eisenstein -> True
+O(3^3)s^2+s+3 is_eisenstein secure !! PrecisionError
+Zp -> (1 + O(3^6))*s^2 + (3 + O(3^7))*s + 3 + O(3^7)
+Zp degree -> 2
+Zp degree secure -> 2
+Zp lc -> 1 + O(3^6)
+Zp coefficients -> [3 + O(3^7), 3 + O(3^7), 1 + O(3^6)]
+Zp coefficients dense -> [3 + O(3^7), 3 + O(3^7), 1 + O(3^6)]
+Zp list -> [3 + O(3^7), 3 + O(3^7), 1 + O(3^6)]
+Zp is_eisenstein -> True
+Zp is_eisenstein secure -> True
+base -> 3-adic Field with capped relative precision 6
+promote -> ((1 + O(3^6))*u, 3-adic Field with capped relative precision 6)
+promote -> ((3^-1 + O(3^5))*u, 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 3^-1 + O(3^5), 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 2 + 3 + 3^2 + 3^3 + 3^4 + 3^5 + O(3^6), 3-adic Field with capped relative precision 6)
+promote -> ((3 + O(3^7))*u, 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u, 3-adic Field with capped relative precision 8)
+promote -> ((1 + O(3^6))*u, 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 1 + O(3^6), 3-adic Field with capped relative precision 6)
+promote -> ((3 + O(3^7))*u, 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 2*3^-2 + 2*3^-1 + 2 + 2*3 + 2*3^2 + 2*3^3 + O(3^4), 3-adic Field with capped relative precision 6)
+R(u/3) -> (3^-1 + O(3^5))*u
+R(u/1) -> (1 + O(3^6))*u
+u/3 coefficient parent -> 3-adic Field with capped relative precision 6
+u/0 !! ZeroDivisionError
+base -> 3-adic Ring with capped relative precision 6
+promote -> ((1 + O(3^6))*u, 3-adic Field with capped relative precision 6)
+promote -> ((3^-1 + O(3^5))*u, 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 3^-1 + O(3^5), 3-adic Field with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 2 + 3 + 3^2 + 3^3 + 3^4 + 3^5 + O(3^6), 3-adic Field with capped relative precision 6)
+promote -> ((3 + O(3^7))*u, 3-adic Ring with capped relative precision 6)
+promote -> ((1 + O(3^6))*u, 3-adic Field with capped relative precision 8)
+promote -> ((1 + O(3^6))*u, 3-adic Ring with capped relative precision 8)
+promote -> ((1 + O(3^6))*u + 1 + O(3^6), 3-adic Ring with capped relative precision 6)
+promote -> ((3 + O(3^7))*u, 3-adic Ring with capped relative precision 6)
+promote -> ((1 + O(3^6))*u + 2*3^-2 + 2*3^-1 + 2 + 2*3 + 2*3^2 + 2*3^3 + O(3^4), 3-adic Field with capped relative precision 6)
+R(u/3) !! ValueError
+R(u/1) -> (1 + O(3^6))*u
+u/3 coefficient parent -> 3-adic Field with capped relative precision 6
+u/0 !! ZeroDivisionError
+S+T -> Univariate Polynomial Ring in u over 3-adic Field with capped relative precision 6
+S==T -> True
+hash zero -> (True, True, 1)
+hash one -> (True, True, 1)
+hash u+1 -> (True, 2)
+hash element !! TypeError
+set element !! TypeError
+relprec -1 -> (O(a^0), 0, True, 0, 0)
+relprec -1 3a -> O(a^3)
+relprec 0 -> (O(a^0), 0, True, 0, 0)
+relprec 0 3a -> O(a^3)
+relprec 1 -> (1 + O(a), 0, False, 1, 1)
+relprec 1 3a -> 2*a^3 + O(a^4)
+relprec 2 -> (1 + O(a^2), 0, False, 2, 2)
+relprec 2 3a -> 2*a^3 + O(a^5)
+absprec -1 -> O(a^-1)
+relprec -1 -> O(a^0)
+add_bigoh -1 -> O(a^-1)
+add_bigoh -1 a^-3 -> a^-3 + O(a^-1)
+absprec 0 -> O(a^0)
+relprec 0 -> O(a^0)
+add_bigoh 0 -> O(a^0)
+add_bigoh 0 a^-3 -> a^-3 + O(a^0)
+absprec 2 -> 1 + O(a^2)
+relprec 2 -> 1 + O(a^2)
+add_bigoh 2 -> 1 + O(a^2)
+add_bigoh 2 a^-3 -> a^-3 + O(a^2)
+absprec 2.00000000000000 -> 1 + O(a^2)
+relprec 2.00000000000000 -> 1 + O(a^2)
+add_bigoh 2.00000000000000 -> 1 + O(a^2)
+add_bigoh 2.00000000000000 a^-3 -> a^-3 + O(a^2)
+absprec 2 -> 1 + O(a^2)
+relprec 2 -> 1 + O(a^2)
+add_bigoh 2 -> 1 + O(a^2)
+add_bigoh 2 a^-3 -> a^-3 + O(a^2)
+absprec 1.50000000000000 !! TypeError
+relprec 1.50000000000000 !! TypeError
+add_bigoh 1.50000000000000 !! TypeError
+add_bigoh 1.50000000000000 a^-3 !! TypeError
+absprec 3/2 !! TypeError
+relprec 3/2 !! TypeError
+add_bigoh 3/2 !! TypeError
+add_bigoh 3/2 a^-3 !! TypeError
+absprec +Infinity -> 1 + O(a^12)
+relprec +Infinity -> 1 + O(a^12)
+add_bigoh +Infinity -> 1 + O(a^12)
+add_bigoh +Infinity a^-3 -> a^-3 + O(a^9)
+absprec 3 relprec 2 -> 1 + O(a^2)
+Qp relprec -1 !! ValueError
+Qp relprec 1.5 !! TypeError
+Qp absprec 1.5 !! TypeError
+Qp relprec 2.0 -> 1 + O(3^2)
+Qp add_bigoh 1.5 !! TypeError
+Qp add_bigoh 3/2 !! TypeError
+Qp add_bigoh oo -> 1 + O(3^6)
+Qp ^1.5 !! TypeError
+ring O(a^-2) -> O(a^-2)
+1/O(a^6) !! PrecisionError
+a.sqrt() !! NotImplementedError
+ext -> (3-adic Eisenstein Extension Field in a defined by x^2 - 3*x + 3, 12)
+a^2, a^-1, (1+a)^-1 -> (a^2 + O(a^14), a^-1 + O(a^11), 1 + 2*a + a^2 + 2*a^4 + 2*a^6 + 2*a^8 + 2*a^10 + O(a^12))
+M(-1), M(1/3) -> (2 + a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + a^8 + a^9 + a^10 + a^11 + O(a^12), 2*a^-2 + a^-1 + 1 + a + a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + a^8 + a^9 + O(a^10))
+defining -> (1 + O(3^7))*x^2 + (2*3 + 2*3^2 + 2*3^3 + 2*3^4 + 2*3^5 + 2*3^6 + O(3^7))*x + 3 + O(3^7)
+ext -> (3-adic Eisenstein Extension Field in a defined by x^2 - 3*x + 3, 8)
+a^2, a^-1, (1+a)^-1 -> (a^2 + O(a^10), a^-1 + O(a^7), 1 + 2*a + a^2 + 2*a^4 + 2*a^6 + O(a^8))
+M(-1), M(1/3) -> (2 + a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + O(a^8), 2*a^-2 + a^-1 + 1 + a + a^2 + a^3 + a^4 + a^5 + O(a^6))
+defining -> (1 + O(3^5))*x^2 + (2*3 + 2*3^2 + 2*3^3 + 2*3^4 + O(3^5))*x + 3 + O(3^5)
+ext -> (3-adic Eisenstein Extension Field in a defined by x^2 - 3*x + 3, 12)
+a^2, a^-1, (1+a)^-1 -> (a^2 + O(a^14), a^-1 + O(a^11), 1 + 2*a + a^2 + 2*a^4 + 2*a^6 + 2*a^8 + 2*a^10 + O(a^12))
+M(-1), M(1/3) -> (2 + a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + a^8 + a^9 + a^10 + a^11 + O(a^12), 2*a^-2 + a^-1 + 1 + a + a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + a^8 + a^9 + O(a^10))
+defining -> (1 + O(3^6))*x^2 + (2*3 + 2*3^2 + 2*3^3 + 2*3^4 + 2*3^5 + 2*3^6 + O(3^7))*x + 3 + O(3^7)
+ext -> (3-adic Eisenstein Extension Ring in a defined by x^2 - 3*x + 3, 8)
+a^2, a^-1, (1+a)^-1 -> (a^2 + O(a^10), a^-1 + O(a^7), 1 + 2*a + a^2 + 2*a^4 + 2*a^6 + O(a^8))
+M(-1), M(1/3) !! ValueError
+defining -> (1 + O(3^5))*x^2 + (2*3 + 2*3^2 + 2*3^3 + 2*3^4 + O(3^5))*x + 3 + O(3^5)
+ext -> (3-adic Eisenstein Extension Field in a defined by x^2 - 3*x + 3, 8)
+a^2, a^-1, (1+a)^-1 -> (a^2 + O(a^10), a^-1 + O(a^7), 1 + 2*a + a^2 + 2*a^4 + 2*a^6 + O(a^8))
+M(-1), M(1/3) -> (2 + a^2 + a^3 + a^4 + a^5 + a^6 + a^7 + O(a^8), 2*a^-2 + a^-1 + 1 + a + a^2 + a^3 + a^4 + a^5 + O(a^6))
+defining -> (1 + O(3^5))*x^2 + (2*3 + 2*3^2 + 2*3^3 + 2*3^4 + O(3^5))*x + 3 + O(3^5)
+low ext -> (3-adic Eisenstein Extension Field in a defined by x^2 - 3, 4)
+a^2, a^-1, (2+a)^-1, M(5) -> (a^2 + O(a^6), a^-1 + O(a^3), 2 + 2*a + 2*a^3 + O(a^4), 2 + a^2 + O(a^4))
+integer_ring -> (3-adic Eisenstein Extension Ring in a defined by x^2 - 3, 4, a^3 + O(a^7))
+mixed -> (1 + a + O(a^4), 1 + a + O(a^4), 2*a + O(a^5), 4)
+low ext -> (3-adic Eisenstein Extension Field in a defined by x^2 + 3, 8)
+a^2, a^-1, (2+a)^-1, M(5) -> (a^2 + O(a^10), a^-1 + O(a^7), 2 + 2*a + a^2 + 2*a^3 + a^4 + 2*a^6 + 2*a^7 + O(a^8), 2 + 2*a^2 + a^4 + O(a^8))
+integer_ring -> (3-adic Eisenstein Extension Ring in a defined by x^2 + 3, 8, a^3 + O(a^11))
+mixed -> (1 + a + O(a^8), 1 + a + O(a^4), 2*a + O(a^9), 8)
+low ext -> (3-adic Eisenstein Extension Field in a defined by x^2 + 3, 6)
+a^2, a^-1, (2+a)^-1, M(5) -> (a^2 + O(a^8), a^-1 + O(a^5), 2 + 2*a + a^2 + 2*a^3 + a^4 + O(a^6), 2 + 2*a^2 + a^4 + O(a^6))
+integer_ring -> (3-adic Eisenstein Extension Ring in a defined by x^2 + 3, 6, a^3 + O(a^9))
+mixed -> (1 + a + O(a^6), 1 + a + O(a^4), 2*a + O(a^7), 6)
+low ext -> (3-adic Eisenstein Extension Field in a defined by x^2 + 3*x + 3, 4)
+a^2, a^-1, (2+a)^-1, M(5) -> (a^2 + O(a^6), a^-1 + O(a^3), 2 + 2*a + a^2 + O(a^4), 2 + 2*a^2 + a^3 + O(a^4))
+integer_ring -> (3-adic Eisenstein Extension Ring in a defined by x^2 + 3*x + 3, 4, a^3 + O(a^7))
+mixed -> (1 + a + O(a^4), 1 + a + O(a^4), 2*a + O(a^5), 4)
+low ext -> (3-adic Eisenstein Extension Field in a defined by x^2 + 9*x - 3, 8)
+a^2, a^-1, (2+a)^-1, M(5) -> (a^2 + O(a^10), a^-1 + O(a^7), 2 + 2*a + 2*a^3 + 2*a^7 + O(a^8), 2 + a^2 + a^5 + O(a^8))
+integer_ring -> (3-adic Eisenstein Extension Ring in a defined by x^2 + 9*x - 3, 8, a^3 + O(a^11))
+mixed -> (1 + a + O(a^8), 1 + a + O(a^4), 2*a + O(a^9), 8)
+L(3^50) -> a^100 + a^102 + a^104 + 2*a^106 + 2*a^108 + 2*a^110 + O(a^112)
+L(2*3^41) -> 2*a^82 + 2*a^84 + 2*a^86 + 2*a^90 + 2*a^92 + O(a^94)
+L(1/(5*3^31)) -> 2*a^-62 + 2*a^-60 + a^-54 + a^-52 + O(a^-50)
+L(Qp(3,6)(3^71)) -> a^142 + a^144 + a^148 + a^150 + O(a^154)
+L(3^50) + 1 -> 1 + O(a^12)
+L(3^20)*(1+a) -> a^40 + a^41 + a^42 + a^43 + 2*a^44 + 2*a^45 + a^46 + a^47 + O(a^52)
+L(3^50) -> a^100 + 2*a^101 + 2*a^102 + a^103 + 2*a^104 + 2*a^105 + 2*a^106 + a^107 + 2*a^108 + a^109 + 2*a^111 + O(a^112)
+L(2*3^41) -> a^82 + 2*a^83 + a^85 + a^86 + a^87 + a^89 + a^90 + 2*a^92 + a^93 + O(a^94)
+L(1/(5*3^31)) -> a^-62 + 2*a^-61 + a^-59 + a^-56 + 2*a^-55 + 2*a^-54 + a^-52 + O(a^-50)
+L(Qp(3,6)(3^71)) -> 2*a^142 + a^143 + 2*a^144 + a^145 + 2*a^149 + a^150 + 2*a^151 + a^152 + 2*a^153 + O(a^154)
+L(3^50) + 1 -> 1 + O(a^12)
+L(3^20)*(1+a) -> a^40 + a^42 + 2*a^43 + 2*a^44 + a^45 + a^46 + a^47 + a^50 + O(a^52)
+base -> 3-adic Field with capped relative precision 6
+absprec H(1)+2^-80 !! TypeError
+relprec H(1)+2^-80 !! TypeError
+add_bigoh H(1)+2^-80 !! TypeError
+absprec H(2)-2^-90 !! TypeError
+relprec H(2)-2^-90 !! TypeError
+add_bigoh H(2)-2^-90 !! TypeError
+absprec H(-9007199254740993) -> O(3^-9007199254740993)
+relprec H(-9007199254740993) !! ValueError
+add_bigoh H(-9007199254740993) -> O(3^-9007199254740993)
+absprec H(9007199254740993) -> 1 + O(3^6)
+relprec H(9007199254740993) -> 1 + O(3^6)
+add_bigoh H(9007199254740993) -> 1 + O(3^6)
+absprec H(2) -> 1 + O(3^2)
+relprec H(2) -> 1 + O(3^2)
+add_bigoh H(2) -> 1 + O(3^2)
+absprec H(10)^400 -> 1 + O(3^6)
+relprec H(10)^400 -> 1 + O(3^6)
+add_bigoh H(10)^400 -> 1 + O(3^6)
+absprec RR(2) -> 1 + O(3^2)
+relprec RR(2) -> 1 + O(3^2)
+add_bigoh RR(2) -> 1 + O(3^2)
+absprec RR(1/3) !! TypeError
+relprec RR(1/3) !! TypeError
+add_bigoh RR(1/3) !! TypeError
+absprec RR(2^60+1) -> 1 + O(3^6)
+relprec RR(2^60+1) -> 1 + O(3^6)
+add_bigoh RR(2^60+1) -> 1 + O(3^6)
+absprec SR(2) -> 1 + O(3^2)
+relprec SR(2) -> 1 + O(3^2)
+add_bigoh SR(2) -> 1 + O(3^2)
+absprec SR(3)/2 !! TypeError
+relprec SR(3)/2 !! TypeError
+add_bigoh SR(3)/2 !! TypeError
+absprec SR(RR(2)) -> 1 + O(3^2)
+relprec SR(RR(2)) -> 1 + O(3^2)
+add_bigoh SR(RR(2)) -> 1 + O(3^2)
+absprec SR(RR(1.5)) !! TypeError
+relprec SR(RR(1.5)) !! TypeError
+add_bigoh SR(RR(1.5)) !! TypeError
+absprec RR(oo) !! TypeError
+relprec RR(oo) !! TypeError
+add_bigoh RR(oo) !! TypeError
+absprec float(oo) !! OverflowError
+relprec float(oo) !! OverflowError
+add_bigoh float(oo) !! OverflowError
+absprec RR(-oo) !! TypeError
+relprec RR(-oo) !! TypeError
+add_bigoh RR(-oo) !! TypeError
+absprec float(-oo) !! OverflowError
+relprec float(-oo) !! OverflowError
+add_bigoh float(-oo) !! OverflowError
+absprec float(nan) !! ValueError
+relprec float(nan) !! ValueError
+add_bigoh float(nan) !! ValueError
+absprec RR(NaN) !! TypeError
+relprec RR(NaN) !! TypeError
+add_bigoh RR(NaN) !! TypeError
+base -> 3-adic Ring with capped relative precision 6
+absprec H(1)+2^-80 !! TypeError
+relprec H(1)+2^-80 !! TypeError
+add_bigoh H(1)+2^-80 !! TypeError
+absprec H(2)-2^-90 !! TypeError
+relprec H(2)-2^-90 !! TypeError
+add_bigoh H(2)-2^-90 !! TypeError
+absprec H(-9007199254740993) -> O(3^-9007199254740993)
+relprec H(-9007199254740993) !! ValueError
+add_bigoh H(-9007199254740993) -> O(3^-9007199254740993)
+absprec H(9007199254740993) -> 1 + O(3^6)
+relprec H(9007199254740993) -> 1 + O(3^6)
+add_bigoh H(9007199254740993) -> 1 + O(3^6)
+absprec H(2) -> 1 + O(3^2)
+relprec H(2) -> 1 + O(3^2)
+add_bigoh H(2) -> 1 + O(3^2)
+absprec H(10)^400 -> 1 + O(3^6)
+relprec H(10)^400 -> 1 + O(3^6)
+add_bigoh H(10)^400 -> 1 + O(3^6)
+absprec RR(2) -> 1 + O(3^2)
+relprec RR(2) -> 1 + O(3^2)
+add_bigoh RR(2) -> 1 + O(3^2)
+absprec RR(1/3) !! TypeError
+relprec RR(1/3) !! TypeError
+add_bigoh RR(1/3) !! TypeError
+absprec RR(2^60+1) -> 1 + O(3^6)
+relprec RR(2^60+1) -> 1 + O(3^6)
+add_bigoh RR(2^60+1) -> 1 + O(3^6)
+absprec SR(2) -> 1 + O(3^2)
+relprec SR(2) -> 1 + O(3^2)
+add_bigoh SR(2) -> 1 + O(3^2)
+absprec SR(3)/2 !! TypeError
+relprec SR(3)/2 !! TypeError
+add_bigoh SR(3)/2 !! TypeError
+absprec SR(RR(2)) -> 1 + O(3^2)
+relprec SR(RR(2)) -> 1 + O(3^2)
+add_bigoh SR(RR(2)) -> 1 + O(3^2)
+absprec SR(RR(1.5)) !! TypeError
+relprec SR(RR(1.5)) !! TypeError
+add_bigoh SR(RR(1.5)) !! TypeError
+absprec RR(oo) !! TypeError
+relprec RR(oo) !! TypeError
+add_bigoh RR(oo) !! TypeError
+absprec float(oo) !! OverflowError
+relprec float(oo) !! OverflowError
+add_bigoh float(oo) !! OverflowError
+absprec RR(-oo) !! TypeError
+relprec RR(-oo) !! TypeError
+add_bigoh RR(-oo) !! TypeError
+absprec float(-oo) !! OverflowError
+relprec float(-oo) !! OverflowError
+add_bigoh float(-oo) !! OverflowError
+absprec float(nan) !! ValueError
+relprec float(nan) !! ValueError
+add_bigoh float(nan) !! ValueError
+absprec RR(NaN) !! TypeError
+relprec RR(NaN) !! TypeError
+add_bigoh RR(NaN) !! TypeError
+base -> 3-adic Eisenstein Extension Field in a defined by x^2 + 3
+absprec H(1)+2^-80 !! TypeError
+relprec H(1)+2^-80 !! TypeError
+add_bigoh H(1)+2^-80 !! TypeError
+absprec H(2)-2^-90 !! TypeError
+relprec H(2)-2^-90 !! TypeError
+add_bigoh H(2)-2^-90 !! TypeError
+absprec H(-9007199254740993) -> O(a^-9007199254740993)
+relprec H(-9007199254740993) -> O(a^0)
+add_bigoh H(-9007199254740993) -> O(a^-9007199254740993)
+absprec H(9007199254740993) -> 1 + O(a^12)
+relprec H(9007199254740993) -> 1 + O(a^12)
+add_bigoh H(9007199254740993) -> a + O(a^13)
+absprec H(2) -> 1 + O(a^2)
+relprec H(2) -> 1 + O(a^2)
+add_bigoh H(2) -> a + O(a^2)
+absprec H(10)^400 -> 1 + O(a^12)
+relprec H(10)^400 -> 1 + O(a^12)
+add_bigoh H(10)^400 -> a + O(a^13)
+absprec RR(2) -> 1 + O(a^2)
+relprec RR(2) -> 1 + O(a^2)
+add_bigoh RR(2) -> a + O(a^2)
+absprec RR(1/3) !! TypeError
+relprec RR(1/3) !! TypeError
+add_bigoh RR(1/3) !! TypeError
+absprec RR(2^60+1) -> 1 + O(a^12)
+relprec RR(2^60+1) -> 1 + O(a^12)
+add_bigoh RR(2^60+1) -> a + O(a^13)
+absprec SR(2) -> 1 + O(a^2)
+relprec SR(2) -> 1 + O(a^2)
+add_bigoh SR(2) -> a + O(a^2)
+absprec SR(3)/2 !! TypeError
+relprec SR(3)/2 !! TypeError
+add_bigoh SR(3)/2 !! TypeError
+absprec SR(RR(2)) -> 1 + O(a^2)
+relprec SR(RR(2)) -> 1 + O(a^2)
+add_bigoh SR(RR(2)) -> a + O(a^2)
+absprec SR(RR(1.5)) !! TypeError
+relprec SR(RR(1.5)) !! TypeError
+add_bigoh SR(RR(1.5)) !! TypeError
+absprec RR(oo) !! TypeError
+relprec RR(oo) !! TypeError
+add_bigoh RR(oo) -> a + O(a^13)
+absprec float(oo) !! OverflowError
+relprec float(oo) !! OverflowError
+add_bigoh float(oo) -> a + O(a^13)
+absprec RR(-oo) !! TypeError
+relprec RR(-oo) !! TypeError
+add_bigoh RR(-oo) !! TypeError
+absprec float(-oo) !! OverflowError
+relprec float(-oo) !! OverflowError
+add_bigoh float(-oo) !! OverflowError
+absprec float(nan) !! ValueError
+relprec float(nan) !! ValueError
+add_bigoh float(nan) !! ValueError
+absprec RR(NaN) !! TypeError
+relprec RR(NaN) !! TypeError
+add_bigoh RR(NaN) !! TypeError
+add_bigoh H(-9007199254740993) precision -> -9007199254740993
+s^H(2) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
+s^H(1)+2^-80 !! TypeError
+s^H(2)-2^-90 !! TypeError
+s^SR(2) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
+s^SR(3)/2 !! TypeError
+s^RR(2) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
+s^SR(RR(2)) -> (1 + O(3^6))*s^2 + (2 + O(3^6))*s + 1 + O(3^6)
+s^SR(RR(1.5)) !! TypeError
