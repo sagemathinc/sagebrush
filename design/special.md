@@ -58,9 +58,10 @@ zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 the error functions' with |z|^2, and E1's and Ei's with |x|. J_nu(x) is
 measured against its envelope sqrt(2/(pi x)) where it oscillates (|x| > nu,
 an absolute accuracy next to its zeros) and relatively below: within
-5e-15, except up to 3e-14 below the turning point for orders beyond about
-170, where Miller's normalization runs over nu steps (scipy.special.jv's
-errors there reach 4.5e-13). The series stops at nu = 170, where
+5e-15 for nu up to 3000. Miller's recurrence and the upward one run in
+double-double arithmetic: in doubles their roundings accumulated over the
+oscillating steps below the turning point, to 4.4e-14 at nu = 1213
+(scipy.special.jv's errors there reach 4.5e-13). The series stops at nu = 170, where
 Gamma(nu + 1) leaves the doubles and its prefactor would go through
 logarithms (2.8e-13 at the old boundary).
 matlab-tests/test_special.m checks the MATLAB functions against GNU Octave,

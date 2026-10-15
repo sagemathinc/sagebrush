@@ -59,7 +59,7 @@ const TOL: Record<string, [number, number, number?]> = {
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
-  besselj: [4e-14, 1e-300],
+  besselj: [6e-15, 1e-300],
 };
 // (J_nu(x) oscillates for |x| > nu with an envelope near sqrt(2/(pi |x|)):
 // there its error is measured against that, an absolute accuracy next to

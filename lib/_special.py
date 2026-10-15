@@ -1987,12 +1987,48 @@ def _besselj_hankel(nu, x):
     return _math.sqrt(2 / (_PI * x)) * (cw * p - sw * qv)
 
 
+def _bessel_dd_step(mu, m, x, xh, xl, fh, fl, gh, gl):
+    """(2 (mu + m)/x) f - g in double-double arithmetic, f = fh + fl and
+    g = gh + gl (the recurrence DLMF 10.6.1 either way), as hi + lo:
+    mu + m = u + ue exactly (Knuth's TwoSum), the quotient c = 2u/x as
+    ch + cl from its remainder 2u - ch x, and the products exactly by
+    Dekker's (x = xh + xl, split once by the caller)"""
+    C = 134217729.0
+    u = mu + m
+    bb = u - mu
+    ue = 2 * ((mu - (u - bb)) + (m - bb))
+    u *= 2
+    ch = u / x
+    p = ch * x
+    t = C * ch
+    ah = t - (t - ch)
+    al = ch - ah
+    cl = ((u - p) - (((ah * xh - p) + ah * xl + al * xh) + al * xl) + ue) / x
+    p = ch * fh
+    t = C * fh
+    bh = t - (t - fh)
+    bl = fh - bh
+    pe = ((ah * bh - p) + ah * bl + al * bh) + al * bl + ch * fl + cl * fh
+    sm = p - gh
+    bb = sm - p
+    se = ((p - (sm - bb)) + (-gh - bb)) + pe - gl
+    hi = sm + se
+    return hi, se - (hi - sm)
+
+
 def _besselj_miller(nu, x):
     """J_nu(x) by Miller's algorithm (DLMF 3.6(iii)): the recurrence DLMF
     10.6.1, J_(m-1) = (2m/x) J_m - J_(m+1), run downward from an order far
     above nu and x, where it is stable, then normalized by Neumann's
     expansion (DLMF 10.23(ii)), (x/2)^mu = Gamma(mu + 1) (J_mu + sum_{k>=1}
-    (mu + 2k) (mu+1)...(mu+k-1)/k! J_(mu+2k)), mu = nu - floor(nu)"""
+    (mu + 2k) (mu+1)...(mu+k-1)/k! J_(mu+2k)), mu = nu - floor(nu).
+
+    The recurrence and the sum are carried in double-double arithmetic
+    (each value hi + lo, the products and sums made exact by Dekker's
+    product and Knuth's TwoSum, inlined): below the turning point m = x the
+    recurrence oscillates, and in doubles its roundings accumulated over the
+    x steps to 4.4e-14 at (nu, x) = (1213.03, 939.63), daybreak's
+    CORR-C76-1; carried so, 1.4e-15"""
     n = int(_math.floor(nu))
     mu = nu - n
     top = max(n, int(_math.ceil(x))) + 30 + int(12 * x ** (1 / 3.0))
@@ -2000,10 +2036,15 @@ def _besselj_miller(nu, x):
         raise NotCovered("besselj: Sagebrush covers orders and arguments for which the recurrence needs at most %d steps (here about %d)" % (_BESSEL_MAX_N, top))
     if top % 2:
         top += 1
-    f_next, f = 0.0, 1e-300
+    C = 134217729.0  # (2^27 + 1, Veltkamp's splitting)
+    t = C * x
+    xh = t - (t - x)
+    xl = x - xh
+    fh, fl = 1e-300, 0.0  # (the unnormalized J at order mu + m)
+    nh, nl = 0.0, 0.0     # (and at mu + m + 1)
     want = None
     shift = 0             # (want's value is want * 2^-shift)
-    total = comp = 0.0    # (the Neumann sum, compensated: Kahan's summation)
+    th = tl = 0.0         # (the Neumann sum)
     h = 1.0     # ((mu+1)...(mu+k-1)/k!, for the order mu + 2k)
     # (the Neumann coefficients for the even offsets 2k <= top, built upward)
     kmax = top // 2
@@ -2013,28 +2054,39 @@ def _besselj_miller(nu, x):
             h *= (mu + k - 1) / k
         coef[k] = (mu + 2 * k) * h
     for m in range(top, -1, -1):
-        # (f is the unnormalized J at order mu + m)
         if m == n:
-            want = f
+            want = fh + fl
         if m % 2 == 0:
-            y = coef[m // 2] * f - comp
-            t = total + y
-            comp = (t - total) - y
-            total = t
+            # (th + tl += coef f: the product coef fh exactly, p + pe)
+            a = coef[m // 2]
+            p = a * fh
+            t = C * a
+            ah = t - (t - a)
+            al = a - ah
+            t = C * fh
+            bh = t - (t - fh)
+            bl = fh - bh
+            pe = ((ah * bh - p) + ah * bl + al * bh) + al * bl + a * fl
+            sm = th + p
+            bb = sm - th
+            se = ((th - (sm - bb)) + (p - bb)) + tl + pe
+            th = sm + se
+            tl = se - (th - sm)
         if m == 0:
             break
-        f_prev = (2 * (mu + m) / x) * f - f_next
-        f_next, f = f, f_prev
-        if abs(f) > 1e250:
+        (fh, fl), (nh, nl) = _bessel_dd_step(mu, m, x, xh, xl, fh, fl, nh, nl), (fh, fl)
+        if abs(fh) > 1e250:
             # (by 2^-830, exactly; the wanted value's scale is counted, not
             # applied, so that a small J does not underflow on the way)
-            f = _math.ldexp(f, -830)
-            f_next = _math.ldexp(f_next, -830)
-            total = _math.ldexp(total, -830)
-            comp = _math.ldexp(comp, -830)
+            fh = _math.ldexp(fh, -830)
+            fl = _math.ldexp(fl, -830)
+            nh = _math.ldexp(nh, -830)
+            nl = _math.ldexp(nl, -830)
+            th = _math.ldexp(th, -830)
+            tl = _math.ldexp(tl, -830)
             if want is not None:
                 shift += 830
-    r = want * (0.5 * x) ** mu / (_math.gamma(mu + 1) * total)
+    r = want * (0.5 * x) ** mu / (_math.gamma(mu + 1) * (th + tl))
     return _ldexp(r, -shift) if shift else r
 
 
@@ -2053,9 +2105,15 @@ def _besselj_forward(nu, x):
     b = _besselj_hankel(mu + 1, x)
     if b is None:
         return None
+    # (in double-double arithmetic, as Miller's: in doubles the roundings
+    # of the n oscillating steps accumulated to 7e-15 at (919.4, 971.9))
+    t = 134217729.0 * x
+    xh = t - (t - x)
+    xl = x - xh
+    ah, al, bh, bl = a, 0.0, b, 0.0
     for k in range(1, n):
-        a, b = b, (2 * (mu + k) / x) * b - a
-    return b
+        (ah, al), (bh, bl) = (bh, bl), _bessel_dd_step(mu, k, x, xh, xl, bh, bl, ah, al)
+    return bh + bl
 
 
 def _besselj_pos(nu, x):
@@ -2126,11 +2184,12 @@ def besselj(nu, x):
     nu).  J_nu(0) = 1 for nu = 0, else 0; J_nu(+-inf) = 0.  NotCovered for
     complex arguments, negative non-integer orders, infinite orders, and
     orders and arguments that would need a recurrence longer than 500000
-    steps.  Largest error found against mpmath (nu up to 1500, x up to
-    1e6), as a fraction of the envelope sqrt(2/(pi x)) where J oscillates
-    (|x| > nu) and of |J| below: 5e-15, except up to 3e-14 below the
-    turning point for orders beyond about 170, where Miller's normalization
-    runs over nu steps (scipy.special.jv's errors there are up to 4.5e-13)."""
+    steps.  Both recurrences run in double-double arithmetic, as in doubles
+    their roundings accumulated over the oscillating steps (to 4.4e-14 at
+    nu = 1213).  Largest error found against mpmath (nu up to 3000, x up
+    to 1e6), as a fraction of the envelope sqrt(2/(pi x)) where J
+    oscillates (|x| > nu) and of |J| below: 5e-15 (scipy.special.jv's
+    errors below the turning point are up to 4.5e-13)."""
     return _elementwise(_besselj1, nu, x)
 
 
