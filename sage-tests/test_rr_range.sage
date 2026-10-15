@@ -60,5 +60,9 @@ T0, B0 = RR(2)^-1100, RR(2)^1100
 t('float methods and CC', lambda: [T0.conjugate(), T0.as_integer_ratio() == (1, 2^1100), T0 == CC(0), CC(0) == T0, B0 == CC(float('inf')), CC(float('inf')) == B0, T0 != CC(0), (-B0).log(), (-B0).log(2)])
 p0 = 8192; R0 = RealField(p0); u0 = R0(2)^(1-p0); x0 = R0(1) + 3*u0
 t('power midpoint', lambda: [x0^R0(0.5) == x0.sqrt(), int((x0^R0(0.5) - 1)/u0), RealField(100, rnd='RNDU')(4)^RealField(100)(0.5), RealField(100, rnd='RNDU')(2).log(8)])
+# review of 953e012 (CORR-953-1): a boundary candidate whose exactness
+# needs a huge integer exponent (2^(2^-10000) in the directed modes)
+t('directed tiny exponents', lambda: [(p, rnd, [(RealField(p, rnd=rnd)(2)**(RealField(p, rnd=rnd)(2)**-k) - 1).exact_rational() for k in (5200, 10000)]) for p in (53, 100) for rnd in ('RNDU', 'RNDD', 'RNDZ', 'RNDA')])
+t('python complex', lambda: [T0 == complex(0), complex(0) == T0, T0 != complex(0), B0 == complex(float('inf'))])
 t('sum and product', lambda: [sum([RR(1e308)] * 4), prod([RR(1e100)] * 5), sum([S] * 3)])
 t('numpy-free floats', lambda: [float(RR(1e308) * 10) == float('inf'), float(RR(1e-320)) == 1e-320])
