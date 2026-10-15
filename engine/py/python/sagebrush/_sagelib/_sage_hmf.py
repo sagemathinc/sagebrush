@@ -736,8 +736,8 @@ def _weight(k):
     if isinstance(k, (tuple, list)):
         if len(k) != 2:
             raise ValueError("a weight over Q(sqrt(5)) is a pair (k1, k2)")
-        return (_exact_int(k[0], "a weight"), _exact_int(k[1], "a weight"))
-    k = _exact_int(k, "a weight")
+        return (_strict_int(k[0], "a weight"), _strict_int(k[1], "a weight"))
+    k = _strict_int(k, "a weight")
     return (k, k)
 
 
@@ -773,6 +773,17 @@ class HilbertCuspFormsWeight:
         74
         sage: HilbertModularForms(3, weight=(3, 3)).dimension()  # sagebrush only
         0
+
+    Weights are integers by exact type, as levels are::
+
+        sage: HilbertModularForms(3, weight=(2.0, 4))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a weight must be an integer, not 2.00000000000000 of type RealNumber
+        sage: HilbertModularForms(3, weight=(True, 4))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a weight must be an integer, not True of type bool
     """
 
     def __init__(self, level, weight):
@@ -1051,7 +1062,7 @@ class NewformOrbitWeight:
     def _eigen(self, B):
         """[(P, charpoly, h)] for the primes of norm <= B, computed once per
         bound."""
-        B = _exact_int(B, "the bound")
+        B = _strict_int(B, "the bound")
         if B not in self._data:
             L = self._space.level()
             d = _call("hmf_weight_newform_eigenvalues", level=[L._gen], weight=list(self._space.weight()), orbit=self._number, bound=B)
@@ -1133,7 +1144,7 @@ class NewformOrbitWeight:
             sage: f.aplist(12)  # sagebrush only
             [4*a - 12, -10*a, 12*a - 6, 11, 30*a + 2]
         """
-        B = _exact_int(B, "the bound")
+        B = _strict_int(B, "the bound")
         if self.dimension() != 1:
             return [self.hecke_eigenvalue(None)]  # raises NotImplementedError
         if B <= 2:
