@@ -1,4 +1,4 @@
-% psi, beta, betaln, erfcx, erfinv, erfcinv and expint: the examples on
+% psi, beta, betaln, erfcx, erfinv, erfcinv, expint and besselj: the examples on
 % their documentation pages and values across their ranges, to 10
 % significant digits (the last digits of special functions differ between
 % implementations; test/matlab.test.ts checks the precision, and the
@@ -18,6 +18,12 @@ p(expint([1e-8 0.5 3 30 -0.5 -3 -30 Inf -Inf]));
 p(expint([1+1i; -2-0.1i; 0.5i; -40+20i; 100; 3-700i]));
 p(beta(0, 0)); p(beta(0, 2)); p(betaln(0, 2)); p(expint(0)); p(psi(0));
 fprintf('%s %s %s %s\n', class(psi(single(2))), class(beta(single(2), 3)), class(erfinv(single(0.5))), class(expint(single(-1))));
+% besselj: the page's examples, real orders across the regions, negative integer orders, scale
+p(besselj(3, 0:5)); p(besselj(3, 0:5, 1)); p(besselj(0:4, 2.5)); p(besselj(0:4, 17.5));
+p(besselj(0.3, [0.01 1 7 40 1000])); p(besselj(2.5, [0.5 5 50])); p(besselj(-3, [1 4 9]));
+p(besselj(50, [10 45 50 55 100])); p(besselj(100, [1 90 110 1e4])); p(besselj(0, [1e5 1e6]));
+p(besselj([0 1 2], 0)); p(besselj(0.5, 0));
+fprintf('%s\n', class(besselj(single(1), 2)));
 p(double(psi(single(0.3))));
 
 function p(x)
