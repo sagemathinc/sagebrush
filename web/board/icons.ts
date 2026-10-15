@@ -24,6 +24,7 @@ const ICONS: Record<string, Shape[]> = {
   detail: [["circle", 10.5, 10.5, 6.5], ["path", "m15.5 15.5 5 5M7.5 10.5h6M10.5 7.5v6"]],
   link: [["path", "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"], ["path", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"]],
   title: [["path", "M5 7.5V5h14v2.5M12 5v14M9 19h6"]],
+  text: [["path", "M5 7h14M5 11h14M5 15h14M5 19h9"]],
   trash: [["path", "M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"]],
 };
 
