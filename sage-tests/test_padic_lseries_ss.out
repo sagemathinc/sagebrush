@@ -136,3 +136,21 @@ power_series(2) -> 4*alpha^-2 + 11*alpha^-1 + O(alpha^0) + O(T^5)
 37a1 3 series(5, prec=4) -> O(alpha^2) + (alpha^-2 + 1 + O(alpha))*T + (alpha^-2 + 2 + O(alpha))*T^2 + (2*alpha^-2 + O(alpha^-1))*T^3 + O(T^4)
 17a1 3 alpha(4)^2 -> alpha^2 + O(alpha^10)
 17a1 3 series(6, prec=6) -> alpha^-2 + alpha^-1 + 2 + O(alpha) + (2 + O(alpha))*T + (2*alpha^-3 + 2*alpha^-1 + 1 + O(alpha))*T^2 + (alpha^-3 + alpha^-2 + alpha^-1 + O(alpha^0))*T^3 + (2*alpha^-3 + alpha^-2 + O(alpha^0))*T^4 + (alpha^-2 + 2*alpha^-1 + O(alpha^0))*T^5 + O(T^6)
+enclosure 17a1 3 [2, 3, 4, 5, 6] True
+enclosure 37a1 3 [2, 3, 4, 5, 6] True
+enclosure 14a1 5 [2, 3, 4] True
+enclosure 389a1 5 [2, 3, 4] True
+enclosure 11a1 19 [2, 3] True
+s == s -> (True, False)
+s == power_series -> True
+s == s + O(T^2) -> True
+s == s + 1 -> False
+s == s + alpha^10 -> True
+(s - s).is_zero() -> True
+series(2) == itself -> (True, True, True)
+series(3) == itself -> (True, True, True)
+series(4) == itself -> (True, True, True)
+f == f -> (True, True, False, False)
+O(T^3) == 0 -> True
+zero to precision == 0 -> (True, True, False, False, True)
+Qp g == g -> (True, True, True, False, True)
