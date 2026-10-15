@@ -33,3 +33,24 @@ print(plt.gcf()._svg())
   const labels = [...svg.matchAll(/<text [^>]*text-anchor="middle"[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
   for (const v of ["0", "25", "50", "75", "100", "125", "150", "175", "200"]) assert.ok(labels.includes(v), v + " in " + labels);
 });
+
+test("the drawn legend has the entries legend() chose: from other axes, hidden, without a line, labelled with _ (CORR-17C-1)", () => {
+  const svg = run(["-c", `
+import io, matplotlib.pyplot as plt
+fig, axs = plt.subplots(1, 2)
+h = axs[0].plot([0, 1], [0, 1], label="From left")[0]
+axs[1].plot([0, 1], [1, 0])
+hidden = axs[1].axhline(0.5, label="Hidden entry", visible=False)
+bare = axs[1].axhline(0.2, label="No stroke", linestyle="none")
+under = axs[1].axhline(0.8, label="_explicit")
+axs[1].legend(handles=[h, hidden, bare, under])
+b = io.StringIO()
+fig.savefig(b, format="svg")
+print(b.getvalue())
+`]);
+  const legend = svg.slice(svg.lastIndexOf('<g class="sb-legend">'));
+  const texts = [...legend.matchAll(/<text [^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+  assert.deepEqual(texts, ["From left", "Hidden entry", "No stroke", "_explicit"]);
+  // (a swatch for the line from the left axes and the visible axhline only)
+  assert.equal([...legend.matchAll(/<path d="M[\d.]+ [\d.]+h22"/g)].length, 2);
+});
