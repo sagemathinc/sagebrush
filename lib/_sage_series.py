@@ -301,6 +301,19 @@ def _is_unit(c, B):
     return not _is_zero(c)
 
 
+def _exact_quo(x, c, B):
+    """x / c in the base B when it lies there (over ZZ when c divides x,
+    over Zp when v(x) >= v(c)), else None."""
+    if B is _sa().ZZ:
+        q, r = divmod(int(x), int(c))
+        return _sa().Integer(q) if r == 0 else None
+    if _is_padic(B):
+        if x.valuation() < c.valuation():
+            return None
+        return B(x / c)
+    return x / c
+
+
 def _is_zero(c):
     try:
         return not c
@@ -574,6 +587,7 @@ class Series:
         return R
 
     def __add__(self, o):
+        self._check_var(o, "+")
         lifted = self._lift_base(o)
         if lifted is not self:
             return lifted.__add__(o)
@@ -602,6 +616,7 @@ class Series:
         return Series(self._R, self._v, [-c for c in self._c], self._prec)
 
     def __sub__(self, o):
+        self._check_var(o, "-")
         lifted = self._lift_base(o)
         if lifted is not self:
             return lifted.__sub__(o)
@@ -620,6 +635,7 @@ class Series:
         return o + (-self)
 
     def __mul__(self, o):
+        self._check_var(o, "*")
         lifted = self._lift_base(o)
         if lifted is not self:
             return lifted.__mul__(o)
@@ -646,7 +662,13 @@ class Series:
 
     __rmul__ = __mul__
 
+    def _check_var(self, o, op):
+        """Series in different variables do not meet (Sage refuses)."""
+        if isinstance(o, Series) and o._R._name != self._R._name:
+            raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self._R, o._R))
+
     def __truediv__(self, o):
+        self._check_var(o, "/")
         B = self._R._base
         F = _frac(B)
         if F is not B and not isinstance(o, Series):
@@ -665,44 +687,58 @@ class Series:
             return NotImplemented
         if not o2._c:
             raise ZeroDivisionError("division by zero series")
+        if o2._R._laurent and not self._R._laurent:
+            # by a Laurent series: the quotient is one too (Sage: z/L(1) in L)
+            return self._over(self._R._base, laurent=True).__truediv__(o2)
         if F is not B:
             return self._ring_div(o2)
+        if not self._c and self._prec is None:
+            # an exact zero stays exact (Sage: 0/(1 + t) is 0)
+            return Series(self._R, 0, [], None)
         if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None:
             # exact division by a constant stays exact
             return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
         return self * o2.inverse()
 
     def _ring_div(self, g):
-        """self / g over a base that is not a field (ZZ, Zp), as Sage: by an
-        exact monomial c z^v it stays over the base when c is a unit and the
-        quotient is a power series, else it is a Laurent series over the
-        fraction field (z/(2 z) = 1/2, 1/z); by anything else the constant
+        """self / g over a base that is not a field (ZZ, Zp), as Sage (whose
+        output served as the oracle).  By an exact monomial c z^v: if c is a
+        unit, the quotient stays over the base when it is a power series or
+        self is a Laurent series; a Laurent series is divided coefficient by
+        coefficient when c divides each of them (2 w/2 = w; else Sage's
+        refusal); otherwise the quotient is a Laurent series over the
+        fraction field (z/(2 z) = 1/2, 1/z).  By anything else the constant
         term of g / z^v must be a unit (else ValueError), and the quotient
         stays over the base unless it needs negative powers in a power
-        series ring (then: Laurent over the fraction field)."""
+        series ring (then: Laurent over the fraction field).  An exact zero
+        stays exact.  (A Laurent divisor made self a Laurent series first.)"""
         R = self._R
         B = R._base
         vg = g._v
         vf = self._v if self._c else (self._prec if self._prec is not None else vg)
-        laurent = R._laurent or g._R._laurent
+        prec = None if self._prec is None else self._prec - vg
         if g._prec is None and len(g._c) == 1:
             c = g._c[0]
-            if _is_unit(c, B) and (vf >= vg or laurent):
+            if _is_unit(c, B) and (vf >= vg or R._laurent):
                 ci = R._div(1, c)
-                return Series(self._R if (vf >= vg or R._laurent) else g._R, self._v - vg, [x * ci for x in self._c],
-                              None if self._prec is None else self._prec - vg)
+                return Series(R, self._v - vg, [x * ci for x in self._c], prec)
             if R._laurent:
-                # (Sage: a Laurent series over ZZ divided by 2 w)
+                q = [_exact_quo(x, c, B) for x in self._c]
+                if all(t is not None for t in q):
+                    return Series(R, self._v - vg, q, prec)
+                # (Sage's refusals: over ZZ, and over Zp)
+                if _is_padic(B):
+                    raise ValueError("negative valuation")
                 raise ArithmeticError("division not defined")
         else:
             c0 = g._c[0]
             if not _is_unit(c0, B):
                 raise ValueError("constant term %r is not a unit" % (c0,))
-            if vf >= vg or laurent:
+            if vf >= vg or R._laurent:
+                if not self._c and self._prec is None:
+                    return Series(R, 0, [], None)
                 u = Series(g._R, 0, g._c, None if g._prec is None else g._prec - vg)
-                f = Series(R if (vf >= vg or R._laurent) else g._R, self._v - vg, self._c,
-                           None if self._prec is None else self._prec - vg)
-                return f * u.inverse()
+                return Series(R, self._v - vg, self._c, prec) * u.inverse()
         F = _frac(B)
         return self._over(F, laurent=True) / g._over(F, laurent=True)
 

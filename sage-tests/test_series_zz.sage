@@ -284,3 +284,225 @@ try:
     print('(1/2 + z)/(1 + z)', '=>', r.parent(), '|', r)
 except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
     print('(1/2 + z)/(1 + z)', '=>', type(ex).__name__, ex)
+
+# Laurent division, Laurent divisors, exact zeros and mismatched variables
+# (review D46): exact coefficient division in a Laurent ring; a Laurent
+# divisor gives a Laurent quotient; 0 over a valid divisor stays exact;
+# series in different variables do not meet
+P = Z
+L = Lz
+w = L.gen()
+LQ = LaurentSeriesRing(QQ, 'z')
+Q.<t> = QQ[[]]
+T2 = PowerSeriesRing(ZZ, 's').gen()
+Lz2 = LaurentSeriesRing(ZZ, 'z')
+try:
+    r = (2*w) / L(2)
+    print('(2*w) / L(2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*w) / L(2)', '=>', type(ex).__name__, ex)
+try:
+    r = (2*w) / (2*w)
+    print('(2*w) / (2*w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*w) / (2*w)', '=>', type(ex).__name__, ex)
+try:
+    r = (4*w) / (2*z)
+    print('(4*w) / (2*z)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(4*w) / (2*z)', '=>', type(ex).__name__, ex)
+try:
+    r = w / (2*w)
+    print('w / (2*w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('w / (2*w)', '=>', type(ex).__name__, ex)
+try:
+    r = (3*w)/L(2)
+    print('(3*w)/L(2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(3*w)/L(2)', '=>', type(ex).__name__, ex)
+try:
+    r = (2*w + 4*w^2)/L(2)
+    print('(2*w + 4*w^2)/L(2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*w + 4*w^2)/L(2)', '=>', type(ex).__name__, ex)
+try:
+    r = (2*w + 3*w^2)/L(2)
+    print('(2*w + 3*w^2)/L(2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*w + 3*w^2)/L(2)', '=>', type(ex).__name__, ex)
+try:
+    r = (2*w + O(w^3))/L(2)
+    print('(2*w + O(w^3))/L(2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*w + O(w^3))/L(2)', '=>', type(ex).__name__, ex)
+try:
+    r = (6*w^-1)/(3*w)
+    print('(6*w^-1)/(3*w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(6*w^-1)/(3*w)', '=>', type(ex).__name__, ex)
+try:
+    r = z/L(1)
+    print('z/L(1)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/L(1)', '=>', type(ex).__name__, ex)
+try:
+    r = z/w
+    print('z/w', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/w', '=>', type(ex).__name__, ex)
+try:
+    r = z/(w^-1)
+    print('z/(w^-1)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/(w^-1)', '=>', type(ex).__name__, ex)
+try:
+    r = z/LQ(1)
+    print('z/LQ(1)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/LQ(1)', '=>', type(ex).__name__, ex)
+try:
+    r = z/(2*w)
+    print('z/(2*w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/(2*w)', '=>', type(ex).__name__, ex)
+try:
+    r = z/(w + w^2)
+    print('z/(w + w^2)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/(w + w^2)', '=>', type(ex).__name__, ex)
+try:
+    r = (2*z)/(2*w)
+    print('(2*z)/(2*w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*z)/(2*w)', '=>', type(ex).__name__, ex)
+try:
+    r = z/(2 + w)
+    print('z/(2 + w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/(2 + w)', '=>', type(ex).__name__, ex)
+try:
+    r = Z(0)/(1 + z)
+    print('Z(0)/(1 + z)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Z(0)/(1 + z)', '=>', type(ex).__name__, ex)
+try:
+    r = Z(0)/Z(1).add_bigoh(3)
+    print('Z(0)/Z(1).add_bigoh(3)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Z(0)/Z(1).add_bigoh(3)', '=>', type(ex).__name__, ex)
+try:
+    r = Z(0)/(2 + z)
+    print('Z(0)/(2 + z)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Z(0)/(2 + z)', '=>', type(ex).__name__, ex)
+try:
+    r = Z(0)/(2*z)
+    print('Z(0)/(2*z)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Z(0)/(2*z)', '=>', type(ex).__name__, ex)
+try:
+    r = Z(0)/z
+    print('Z(0)/z', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Z(0)/z', '=>', type(ex).__name__, ex)
+try:
+    r = Q(0)/(1 + t)
+    print('Q(0)/(1 + t)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Q(0)/(1 + t)', '=>', type(ex).__name__, ex)
+try:
+    r = L(0)/(1 + w)
+    print('L(0)/(1 + w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('L(0)/(1 + w)', '=>', type(ex).__name__, ex)
+try:
+    r = L(0)/(2*w)
+    print('L(0)/(2*w)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('L(0)/(2*w)', '=>', type(ex).__name__, ex)
+try:
+    r = Z(0)/(1 + z + O(z^3))
+    print('Z(0)/(1 + z + O(z^3))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('Z(0)/(1 + z + O(z^3))', '=>', type(ex).__name__, ex)
+try:
+    r = (O(z^3))/(1 + z)
+    print('(O(z^3))/(1 + z)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(O(z^3))/(1 + z)', '=>', type(ex).__name__, ex)
+try:
+    r = z + (1/2 + t)
+    print('z + (1/2 + t)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z + (1/2 + t)', '=>', type(ex).__name__, ex)
+try:
+    r = z * (1/2 + t)
+    print('z * (1/2 + t)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z * (1/2 + t)', '=>', type(ex).__name__, ex)
+try:
+    r = z / (1/2 + t)
+    print('z / (1/2 + t)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z / (1/2 + t)', '=>', type(ex).__name__, ex)
+try:
+    r = (1/2 + t) + z
+    print('(1/2 + t) + z', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(1/2 + t) + z', '=>', type(ex).__name__, ex)
+try:
+    r = z + Q(1)
+    print('z + Q(1)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z + Q(1)', '=>', type(ex).__name__, ex)
+try:
+    r = z + T2
+    print('z + T2', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z + T2', '=>', type(ex).__name__, ex)
+try:
+    r = z * T2
+    print('z * T2', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z * T2', '=>', type(ex).__name__, ex)
+try:
+    r = z - T2
+    print('z - T2', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z - T2', '=>', type(ex).__name__, ex)
+try:
+    r = T2 - z
+    print('T2 - z', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('T2 - z', '=>', type(ex).__name__, ex)
+try:
+    r = z/T2
+    print('z/T2', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/T2', '=>', type(ex).__name__, ex)
+try:
+    r = z/Lz2(1)
+    print('z/Lz2(1)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/Lz2(1)', '=>', type(ex).__name__, ex)
+try:
+    r = z/Lz2.gen()
+    print('z/Lz2.gen()', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/Lz2.gen()', '=>', type(ex).__name__, ex)
+try:
+    r = z/(Lz2.gen()^-1)
+    print('z/(Lz2.gen()^-1)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/(Lz2.gen()^-1)', '=>', type(ex).__name__, ex)
+try:
+    r = (2*z)/(2*Lz2.gen())
+    print('(2*z)/(2*Lz2.gen())', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('(2*z)/(2*Lz2.gen())', '=>', type(ex).__name__, ex)
+try:
+    r = z/(2*Lz2.gen())
+    print('z/(2*Lz2.gen())', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
+    print('z/(2*Lz2.gen())', '=>', type(ex).__name__, ex)
