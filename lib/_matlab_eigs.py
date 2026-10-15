@@ -126,6 +126,10 @@ def _dense_lu(M):
 
 
 def _lu_solve(lu, b):
+    if np.iscomplexobj(b):
+        # (real factors: a complex right-hand side's real and imaginary parts
+        # solved each, so that a complex Ritz vector keeps its imaginary part)
+        return _lu_solve(lu, np.real(b)) + 1j * _lu_solve(lu, np.imag(b))
     perm, U = lu
     n = U.shape[0]
     x = np.array(b, dtype=float)[perm]
@@ -314,9 +318,11 @@ def eigs_(nargout, *args):
     order the page leaves open; a large sparse B (over 2000 rows) needs
     IsSymmetricDefinite, since Sagebrush cannot check it; the messages and
     the Display format are Sagebrush's.  The imaginary-part sigmas are
-    refused for a Hermitian problem.  Complex matrices, shifts and start vectors are
-    refused: Sagebrush's numpy has no complex eigenvalue or QR routines
-    yet"""
+    refused for a Hermitian problem.  Complex matrices, shifts and start vectors,
+    and an Afun whose results are complex, are refused: Sagebrush's numpy has
+    no complex eigenvalue or QR routines yet.  CholeskyPermutation p means
+    R'*R = B(p, p), as the page says, and is refused with a shift, as the
+    page says not to use it there"""
     args = list(args)
     if not args:
         raise _err("Not enough input arguments.")
@@ -421,9 +427,12 @@ def eigs_(nargout, *args):
     if A is None and not single:
         probe = _m._call(afun, [_m._unmat(_start_vector(n, opts.get("StartVector"), False).reshape((-1, 1)))])
         single = _m.class_(probe) == "single"
+        _real_result(probe)
     tol = num_opt("Tolerance", 1e-6 if single else 1e-14, False)
     maxit = int(num_opt("MaxIterations", 300, True))
-    fail = _text(opts["FailureTreatment"]).lower() if "FailureTreatment" in opts and _istext(opts["FailureTreatment"]) else "replacenan"
+    if "FailureTreatment" in opts and not _istext(opts["FailureTreatment"]):
+        raise _err("eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.")
+    fail = _text(opts["FailureTreatment"]).lower() if "FailureTreatment" in opts else "replacenan"
     if fail not in ("replacenan", "keep", "drop"):
         raise _err("eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.")
     display = flag_opt("Display")
@@ -433,11 +442,22 @@ def eigs_(nargout, *args):
         Rd = R.A if not R.sparse else np.array(_m._mat(_sp.full(R.S)))
         Bd = np.conj(Rd.T) @ Rd
         if "CholeskyPermutation" in opts:
-            p = np.array(_m._arr(opts["CholeskyPermutation"])).reshape(-1).astype(int) - 1
-            Bf = np.zeros_like(Bd)
-            Bf[np.ix_(p, p)] = Bd
-            Bd = Bf
+            # (R'*R = B(p, p), as chol(B(p, p)): B is R'*R with the
+            # permutation undone, B(i, j) = (R'*R)(q(i), q(j)), q = p's inverse)
+            if sigma is not None:
+                raise _err("eigs: CholeskyPermutation cannot be used with 'smallestabs' or a numeric sigma, "
+                           "as the documentation says.")
+            pv = opts["CholeskyPermutation"]
+            pa = np.array(_m._arr(pv)).reshape(-1) if _m._isnumlike(pv) and type(pv) is not _m.Char else None
+            if pa is None or np.iscomplexobj(pa) or pa.size != n or not np.all(pa == np.floor(pa)) \
+                    or sorted(int(v) for v in pa) != list(range(1, n + 1)):
+                raise _err("eigs: CholeskyPermutation must be a permutation of 1:n.")
+            q = np.zeros(n, dtype=int)
+            q[pa.astype(int) - 1] = np.arange(n)
+            Bd = Bd[q][:, q]
         B = _Matrix(_m._unmat(Bd))
+    elif "CholeskyPermutation" in opts:
+        raise _err("eigs: CholeskyPermutation is for IsCholesky true (B given as its Cholesky factor).")
     if (A is not None and A.cplx) or (B is not None and B.cplx) or isinstance(sigma, complex) \
             or ("StartVector" in opts and np.iscomplexobj(_m._arr(opts["StartVector"]))):
         raise _err("eigs: complex matrices, shifts and start vectors are not supported in Sagebrush.")
@@ -462,8 +482,11 @@ def eigs_(nargout, *args):
     def apply_a(x):
         if A is not None:
             return A.times(x)
+        if np.iscomplexobj(x):
+            # (a real operator, which is linear: a complex vector's parts each)
+            return apply_a(np.real(x)) + 1j * apply_a(np.imag(x))
         r = _m._call(afun, [_m._unmat(x.reshape((-1, 1)))])
-        y = np.array(_m._mat(r)).reshape(-1)
+        y = _real_result(r)
         if y.size != n:
             raise _err("eigs: Afun must return a vector of length n.")
         return y
@@ -570,6 +593,17 @@ def eigs_(nargout, *args):
     if nargout == 3:
         res.append(float(flag))
     return res
+
+
+def _real_result(r):
+    """Afun's result as a real vector: complex operators (a complex result
+    for a real vector) are refused, as complex matrices are"""
+    y = np.array(_m._mat(r)).reshape(-1)
+    if np.iscomplexobj(y):
+        if np.any(np.imag(y) != 0):
+            raise _err("eigs: Afun returned complex values: complex operators are not supported in Sagebrush.")
+        y = np.real(y)
+    return y
 
 
 def _spd(B):
