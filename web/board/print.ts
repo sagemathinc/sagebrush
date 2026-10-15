@@ -46,7 +46,16 @@ function backSvg(items: Item[], edges: Edge[], box: Sheet["box"]): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" class="pr-back" style="position:absolute;left:${box.x0}px;top:${box.y0}px;overflow:visible" width="${w}" height="${h}" viewBox="${box.x0} ${box.y0} ${w} ${h}" font-family="system-ui, sans-serif">${backShapes(items, edges, box)}</svg>`;
 }
 /** Groups' boxes (outer first), then edges and their labels, as SVG elements in world coordinates (also svg.ts's). */
-export function backShapes(items: Item[], edges: Edge[], box: Sheet["box"]): string {
+/** An edge's label's plate, wide enough for its 12 px text (an estimate; the SVG measures it). */
+export const edgeLabelWidth = (label: string) => label.length * 6.8 + 10;
+/** Where an edge's label's plate is, as backShapes() draws it. */
+export function edgeLabelBox(e: Edge, labelWidth: (label: string) => number = edgeLabelWidth): { x0: number; y0: number; x1: number; y1: number } | null {
+  const p = e.points;
+  if (!e.label || !p || p.length < 4) return null;
+  const x = e.lx ?? (p[0] + p[p.length - 2]) / 2, y = e.ly ?? (p[1] + p[p.length - 1]) / 2, w = labelWidth(e.label);
+  return { x0: x - w / 2, y0: y - 9, x1: x + w / 2, y1: y + 9 };
+}
+export function backShapes(items: Item[], edges: Edge[], box: Sheet["box"], labelWidth: (label: string) => number = edgeLabelWidth): string {
   const byId = new Map(items.map((it) => [it.id, it]));
   const out: string[] = [];
   // (clipped here to the sheet: Chrome's PDFs do not always clip shapes far
@@ -90,7 +99,7 @@ export function backShapes(items: Item[], edges: Edge[], box: Sheet["box"]): str
     if (end) out.push(tip(ex, ey, ux, uy));
     if (start) out.push(tip(p[0], p[1], vx, vy));
     if (e.label) {
-      const x = e.lx ?? (p[0] + ex) / 2, y = e.ly ?? (p[1] + ey) / 2, w = e.label.length * 6.8 + 10;
+      const x = e.lx ?? (p[0] + ex) / 2, y = e.ly ?? (p[1] + ey) / 2, w = labelWidth(e.label);
       labels.push(`<rect x="${x - w / 2}" y="${y - 9}" width="${w}" height="18" fill="#fafaf7" fill-opacity=".95"/><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="12" fill="#3d4a37">${esc(e.label)}</text>`);
     }
   }
