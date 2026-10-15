@@ -257,3 +257,22 @@ hurwitz_zeta(1.0, 1.0) -> +infinity
 hurwitz_zeta(1, x).subs(x=1.5).n() -> +infinity
 psi(gamma(x)).subs(x=2.5) -> -0.136417407831
 gamma(psi(x)).subs(x=2.5) -> 1.29308412137
+psi(CC(-1)) -> NaN
+log_gamma(CC(-1)) -> NaN + NaN*I
+log_gamma(CC(0)) -> NaN + NaN*I
+log_gamma(SR(0.0)) -> NaN + NaN*I
+log_gamma(0.0) -> +infinity
+beta(CC(-1), CC(2)) -> NaN + NaN*I
+beta(-1.0, 2.0) -> NaN
+zeta(CC(1)) -> Infinity
+zeta(1.0+0.0*I) -> Infinity
+zeta(SR(1.0)) -> Infinity
+zeta(x).subs(x=1.0) -> Infinity
+hurwitz_zeta(CC(1), 1.5) -> +infinity
+gamma(RR(-1)) -> NaN
+gen_legendre_P(10,-11,-0.99) -> 0.330413020652
+gen_legendre_P(20,-21,-0.99) -> 1.11011583768e-07
+gen_legendre_P(30,-31,-0.99) -> 2.61735464088e-16
+gen_legendre_P(25,-40,-0.5) -> 7.65376114143e-45
+gen_legendre_P(30,-32,0.97) -> 2.07724918343e-65
+gen_legendre_P(15,-16,0.0) -> 5.21108044226e-18
