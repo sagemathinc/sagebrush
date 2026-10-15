@@ -166,6 +166,11 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 
 export type BoardApi = ReturnType<typeof mountBoard>;
 
+/** The largest file Open… or a drop reads: well past a board downloaded as
+ * HTML with every language's engine in it (about 10 MB) and its pictures
+ * (CoCalc shows boards of up to 16 MB). */
+export const FILE_MAX = 128 * 2 ** 20;
+
 /** Mount a board in `root` (which the host places and sizes), with what the host provides. */
 // The code notes of a document, by id (every page, in groups too).
 function codeNotes(d: BoardDoc): Map<string, DocNote> {
@@ -1005,6 +1010,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     $("tour").hidden = false;
     caption(notice, "");
   }
+  // A file opened or dropped, as text: refused by its size, before it is
+  // read, past FILE_MAX (HARD-36E-2)
+  async function readFile(f: File): Promise<string> {
+    if (f.size > FILE_MAX) throw new Error(`too large to open: ${Math.ceil(f.size / 2 ** 20)} MB (at most ${FILE_MAX / 2 ** 20} MB)`);
+    return f.text();
+  }
   const picker = $("openfile") as HTMLInputElement;
   $("open").onclick = () => picker.click();
   // (a file read while another document is loaded, by an agent or the
@@ -1014,7 +1025,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const f = picker.files?.[0], g = loadGen;
     picker.value = "";
     if (!f) return;
-    const text = await f.text().catch(fail);
+    const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   };
   // (files dropped on this board)
@@ -1032,7 +1043,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     const f = files[0], g = loadGen;
     if (!f) return;
-    const text = await f.text().catch(fail);
+    const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   });
   // Import Mermaid…: a flowchart pasted in
