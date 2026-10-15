@@ -709,8 +709,12 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
       }));
     // (a group's members start at its origin: all of them, strokes too, as
-    // the editor keeps a group around its members, Editor.contain, UI-FD2-1)
-    const minX = Math.min(...[...pos.values()].map((p) => p.x)), minY = Math.min(...[...pos.values()].map((p) => p.y));
+    // the editor keeps a group around its members, Editor.contain, UI-FD2-1;
+    // but in a group a person sized, members placed stay where they are in
+    // it, as the editor leaves them (compact() does not close it up when one
+    // leaves), only those above or left of its origin brought in, B3)
+    let minX = Math.min(...[...pos.values()].map((p) => p.x)), minY = Math.min(...[...pos.values()].map((p) => p.y));
+    if ((n.w !== undefined || n.h !== undefined) && n.children.some((c) => c.x !== undefined && c.y !== undefined)) { minX = Math.min(0, minX); minY = Math.min(0, minY); }
     if (kids.length) for (const [id, p] of pos) pos.set(id, { x: p.x - minX, y: p.y - minY });
     let w = 0, h = 0;
     for (const k of kids) {
