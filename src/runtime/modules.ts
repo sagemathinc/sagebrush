@@ -5,8 +5,9 @@ import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
-import { builtins, stdout, stderr, stdin } from "./builtins";
+import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
+import * as PG from "./pygamma";
 import { floatRepr } from "./format";
 
 export const sysModules = new PyDict();
@@ -209,6 +210,7 @@ newBuiltinModule("sys", (m) => {
   m.maxunicode = 0x10ffff;
   m.byteorder = "little";
   m.platform = process.platform === "win32" ? "win32" : process.platform;
+  sysRef.m = m;
   m.stdout = stdout;
   m.stderr = stderr;
   m.stdin = stdin;
@@ -499,7 +501,8 @@ newBuiltinModule("math", (m) => {
     O.forEach(it, (v) => (r = O.mul(r, v)));
     return r;
   });
-  // erf, erfc, gamma, lgamma and exp2 (fdlibm.ts, libm.ts), raising as CPython's do
+  // erf, erfc and exp2 (fdlibm.ts, libm.ts), and gamma and lgamma as
+  // CPython computes them (pygamma.ts), raising as CPython's do
   unary("erf", FD.erf);
   unary("erfc", FD.erfc);
   unary("exp2", glibcExp2);
@@ -508,14 +511,18 @@ newBuiltinModule("math", (m) => {
   fn(m, "gamma", (x: any) => {
     const v = F(x);
     if (v === 0 || v === -Infinity || (v < 0 && Math.floor(v) === v)) notInteger(v);
-    const r = FD.tgamma(v);
+    const r = PG.tgamma(v);
     if (!Number.isFinite(r) && Number.isFinite(v)) range();
     return O.mkfloat(r);
   });
+  // (the C library's tgamma and lgamma, musl's and fdlibm's, which MATLAB
+  // mode keeps: Octave's are the C library's)
+  fn(m, "_libm_gamma", (x: any) => O.mkfloat(FD.tgamma(F(x))));
+  fn(m, "_libm_lgamma", (x: any) => O.mkfloat(FD.lgamma(F(x))));
   fn(m, "lgamma", (x: any) => {
     const v = F(x);
     if (v <= 0 && v !== -Infinity && Math.floor(v) === v) notInteger(v);
-    const r = FD.lgamma(v);
+    const r = PG.lgamma(v);
     if (!Number.isFinite(r) && Number.isFinite(v)) range();
     return O.mkfloat(r);
   });

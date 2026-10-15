@@ -149,6 +149,38 @@ def magma_rows():
     return [(a, [e for e in idx if a in e["areas"]], MAGMA_QUERIES.get(a, a)) for a in areas]
 
 
+# Python mode's libraries (lib/_python_docsearch.py): (module, area, a search to start from)
+PYTHON_AREAS = [
+    ("numpy", "numpy: arrays, elementwise math, reductions, sorting, sets", "array"),
+    ("numpy.linalg", "numpy.linalg: linear algebra", "linear system"),
+    ("numpy.fft", "numpy.fft: Fourier transforms", "fourier transform"),
+    ("numpy.random", "numpy.random: random numbers", "random"),
+    ("numpy.polynomial", "numpy.polynomial: polynomials", "polynomial"),
+    ("scipy.integrate", "scipy.integrate: integrals and ODEs", "integral"),
+    ("scipy.io", "scipy.io: MATLAB .mat files", "mat file"),
+    ("math", "math", "logarithm"),
+    ("cmath", "cmath: complex math", "complex"),
+    ("fractions", "fractions: exact rationals", "rational"),
+    ("itertools", "itertools", "combinations"),
+    ("functools", "functools", "decorator"),
+    ("collections", "collections", "counts"),
+    ("random", "random", "random"),
+    ("bisect", "bisect: sorted lists", "sorted"),
+    ("heapq", "heapq: heaps", "heap"),
+]
+
+
+def python_rows():
+    import _python_docsearch
+    idx = _python_docsearch.build_index()
+    rows = []
+    for module, area, query in PYTHON_AREAS:
+        entries = [e for e in idx if e["module"] == module]
+        if entries:
+            rows.append((area, entries, query))
+    return rows
+
+
 def matlab_rows():
     import _matlab
     import _matlab_docsearch
@@ -176,15 +208,22 @@ def build():
            "Generated from Sagebrush's search indexes (`sagebrush -m _capability_map`). Each area gives a search to",
            "start from: it finds some of the area's functions, not necessarily all of them. Search with",
            "`sagebrush --search WORDS --mode sage|python|magma|matlab` from a shell, or read the JSON indexes",
-           "(`docs-index.json` for the Sage library, which Python mode shares; `docs-index-magma.json`;",
-           "`docs-index-matlab.json`). The search box at https://sagebrush.space searches in Sage, Magma and MATLAB",
-           "notebooks; Python notebooks have no search there.", ""]
+           "(`docs-index.json` for the Sage library; `docs-index-python.json` for Python mode's libraries;",
+           "`docs-index-magma.json`; `docs-index-matlab.json`). The search box at https://sagebrush.space searches",
+           "in the notebook's language.", ""]
     rows = sage_rows()
     out += ["## Sage and Python", "",
             "Sage mode (`--sage`, `.sage` files) and Python mode share one library: %d documented functions and methods"
             % sum(len(r[1]) for r in rows),
             "(Python mode imports them, e.g. `from sage_all import *`).", ""]
     out += _table(rows, "sage") + [""]
+    rows = python_rows()
+    out += ["## Python", "",
+            "Python mode's libraries, beyond the language and the Sage library: %d functions and classes of numpy,"
+            % sum(len(r[1]) for r in rows),
+            "scipy.integrate, scipy.io and the standard library. The significant ones have examples whose output",
+            "the tests compare with CPython's, NumPy's and SciPy's.", ""]
+    out += _table(rows, "python") + [""]
     rows = magma_rows()
     n = len(_magma_docsearch.build_index())
     out += ["## Magma", "",

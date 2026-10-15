@@ -21,7 +21,7 @@ test("sagebrush --search --mode searches that language's index; the default is u
   assert.match(matlab.stdout, /^linsolve\(\)    \[matlab\]/);
   const sage = run("--search", "selmer", "rank");
   assert.match(sage.stdout, /^EllipticCurve_rational_field\.selmer_rank\(\)\n/);
-  assert.match(run("--search", "selmer", "rank", "--mode", "python").stdout, /^EllipticCurve_rational_field\.selmer_rank\(\)    \[python\]\n/);
+  assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve\(a, b\)    \[python\]\n/);
   const json = JSON.parse(run("--search", "unit", "group", "--mode", "magma", "--json").stdout);
   assert.equal(json[0].name, "UnitGroup");
   assert.equal(json[0].language, "magma");

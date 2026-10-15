@@ -35,10 +35,17 @@ Copyright (c) 2001 Python Software Foundation. See
   CPython's `long_true_divide` (`Objects/longobject.c`): the shift, the two
   extra bits and the sticky bit, a single round to even at the result's
   precision (subnormals included), then exact scaling.
+- `src/runtime/pygamma.ts`: `math.gamma` and `math.lgamma`, ported from
+  CPython 3.14's `Modules/mathmodule.c` (`m_tgamma`, `m_lgamma`, `m_sinpi`,
+  `lanczos_sum` and their Lanczos coefficients).
+- `src/runtime/builtins.ts`, `sum`: the compensated float and complex paths
+  of CPython's `builtin_sum_impl` (`Python/bltinmodule.c`; Neumaier's
+  algorithm).
 
 ### NumPy (BSD 3-Clause)
 
-`src/runtime/numpy.ts` (array printing), `src/runtime/numpy_random.ts`,
+`lib/numpy/__init__.py` (`poly1d.__str__` and `_raise_power`, from
+`numpy/lib/_polynomial_impl.py`), `src/runtime/numpy.ts` (array printing), `src/runtime/numpy_random.ts`,
 `src/runtime/ziggurat_data.ts` and `kernels/src/random.rs` (MT19937 with
 NumPy's seeding, PCG64 with SeedSequence, and the distributions) follow
 NumPy's code so that their output and random streams match NumPy's
