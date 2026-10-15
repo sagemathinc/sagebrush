@@ -60,7 +60,7 @@ export interface DocNote {
   preview?: Preview;
   /** Markdown shown only when zoomed in */
   detail?: string;
-  /** a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` */
+  /** a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)` */
   ref?: string;
   /** a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) */
   color?: string;
@@ -321,6 +321,29 @@ export function templateOf(d: BoardDoc, i: number): number {
 export function lookOf(d: BoardDoc, i: number): { slide?: SlideRect; background?: PageBackground } {
   const p = pageOf(d, i), t = templateOf(d, i), q = t >= 0 ? d.pages![t] : undefined;
   return { slide: p.slide ?? q?.slide, background: p.background ?? q?.background };
+}
+
+/** Where a link on the board goes (`#p2`, `#p2-3`, `#3`, `#page-id`,
+ * `#item-id`, `#page-id/item-id`; round 0's 15), from page `from`: a page
+ * (0-based), a step of its tour (-1: its start) and an item; null if it
+ * names nothing on the board. */
+export function boardLink(d: BoardDoc, from: number, href: string): { page: number; step: number; item?: string } | null {
+  if (!href.startsWith("#")) return null;
+  let h = href.slice(1);
+  try { h = decodeURIComponent(h); } catch {}
+  const n = pageCount(d), steps = (p: number) => pageView(d, p).steps?.length ?? 0;
+  const has = (p: number, id: string) => { const find = (ns: DocNode[]): boolean => ns.some((x) => x.id === id || (x.kind === "group" && find(x.children))); return find(pageView(d, p).nodes ?? []); };
+  let m = /^p(\d+)(?:-(\d+))?$/.exec(h);
+  if (m) { const p = Number(m[1]) - 1, k = m[2] ? Number(m[2]) - 1 : -1; return p >= 0 && p < n && k < steps(p) ? { page: p, step: k } : null; }
+  if ((m = /^(\d+)$/.exec(h))) { const k = Number(m[1]) - 1; return k >= 0 && k < steps(from) ? { page: from, step: k } : null; }
+  const pageNamed = (id: string) => (d.pages?.length ? d.pages.findIndex((p) => p.id === id) : -1);
+  const slash = h.indexOf("/");
+  if (slash > 0) { const p = pageNamed(h.slice(0, slash)), id = h.slice(slash + 1); return p >= 0 && has(p, id) ? { page: p, step: -1, item: id } : null; }
+  const p = pageNamed(h);
+  if (p >= 0) return { page: p, step: -1 };
+  if (has(from, h)) return { page: from, step: -1, item: h };
+  for (let q = 0; q < n; q++) if (has(q, h)) return { page: q, step: -1, item: h };
+  return null;
 }
 
 /** Page i as a one-page document, for layout() (the document's title, refBase and pictures; and
@@ -670,7 +693,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   };
   for (const n of roots) walk(n, null);
   // links: absolute, or paths under the document's refBase
-  const refOf = (n: DocNote) => n.ref && doc.refBase && !/^[a-z]+:/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
+  const refOf = (n: DocNote) => n.ref && doc.refBase && !/^([a-z]+:|#)/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
   // (a note's picture: its name and size, and where its bytes are when not in this browser)
   const imgOf = (n: DocNote) => { const i = n.image ? doc.images?.[n.image] : undefined; return i ? { key: n.image!, ...i } : undefined; };
   const edges = (doc.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);

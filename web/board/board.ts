@@ -202,6 +202,8 @@ export class Board {
   private backImage: { name: string; img: HTMLImageElement } | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
+  /** A link to a place on the board (`#…`): the words it shows (its page's or item's title), or null. */
+  linkLabel: ((ref: string) => string | null) | null = null;
   /** Drawing (the Draw tool): the pen's style, asked at each press (null:
    * the press doesn't draw); a stroke drawn, its points as InkCapture keeps them */
   pen: (() => InkStyle | null) | null = null;
@@ -676,7 +678,14 @@ export class Board {
       e.textContent = "Empty note: double-click to write";
       el.append(e);
     }
-    if (it.ref && /^https?:\/\//i.test(it.ref)) {
+    // (a place on the board: its page's or item's title, round 0's 15; the host goes there)
+    if (it.ref?.startsWith("#")) {
+      const a = document.createElement("a");
+      a.className = "board-ref";
+      a.href = it.ref;
+      a.textContent = "→ " + (this.linkLabel?.(it.ref) ?? it.ref.slice(1));
+      el.append(a);
+    } else if (it.ref && /^https?:\/\//i.test(it.ref)) {
       const a = document.createElement("a");
       a.className = "board-ref";
       a.href = it.ref;

@@ -128,7 +128,7 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `hideCode` | boolean | `true`: show only the code's output, not the code |
 | `preview` | object | a slow code item's output, kept to show before it runs (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
-| `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` |
+| `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)` |
 | `color` | string | a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) |
 | `shape` | `"rect"` \| `"round"` \| `"stadium"` \| `"circle"` \| `"diamond"` \| `"hexagon"` \| `"cylinder"` \| `"subroutine"` \| `"lean-right"` \| `"lean-left"` \| `"trapezoid"` \| `"inv-trapezoid"` \| `"flag"` | its outline (a flowchart's); its text is then centered |
 | `fit` | boolean | `true`: as wide as its text needs, up to `w` |
