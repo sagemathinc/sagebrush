@@ -979,10 +979,17 @@ def _rank(M):
     return _sa().Integer(int(np.linalg.matrix_rank(_array(M))))
 
 
+def _eig(np, a):
+    """eigenvalues and eigenvectors: real where they are real, as Sagebrush's
+    numpy gives them (np.linalg._eig); NumPy's own eig under CPython"""
+    f = getattr(np.linalg, "_eig", None)
+    return f(a) if f is not None else np.linalg.eig(a)
+
+
 def _eigenvalues(M, *args, **kwds):
     """The eigenvalues, in the order LAPACK gives them."""
     np = _np()
-    w = np.linalg.eigvals(_array(M))
+    w = _eig(np, _array(M))[0]
     out = []
     real = all(abs(complex(x).imag) == 0 for x in w.tolist())
     for x in w.tolist():
@@ -997,13 +1004,13 @@ def _eigenvalues(M, *args, **kwds):
 def _eigenvectors_right(M, *args, **kwds):
     """[(eigenvalue, [unit eigenvector], 1)], as LAPACK gives them."""
     np = _np()
-    w, v = np.linalg.eig(_array(M))
+    w, v = _eig(np, _array(M))
     return _pairs(M, w, v)
 
 
 def _eigenvectors_left(M, *args, **kwds):
     np = _np()
-    w, v = np.linalg.eig(_array(M).T)
+    w, v = _eig(np, _array(M).T)
     return _pairs(M, w, v)
 
 
@@ -1021,7 +1028,7 @@ def _pairs(M, w, v):
 
 def _eigenmatrix_right(M):
     np = _np()
-    w, v = np.linalg.eig(_array(M))
+    w, v = _eig(np, _array(M))
     n = len(w.tolist())
     import _sage_ffmat
     base = M._base

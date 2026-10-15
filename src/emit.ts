@@ -397,14 +397,16 @@ export class Emitter {
   consumingCall(e: Extract<A.Expr, { k: "Call" }>): string | null {
     const f = e.func;
     if (f.k !== "Name" || e.args.length !== 1 || e.keywords.length !== 0 || e.args[0].k !== "Comp" || e.args[0].kind !== "gen") return null;
-    const kinds: Record<string, string> = { tuple: "tuple", list: "list", set: "set", frozenset: "frozenset", sum: "sum", any: "any", all: "all", sorted: "list", min: "list", max: "list" };
+    // (sum collects the list and calls the builtin, which sums floats with
+    // CPython's compensation)
+    const kinds: Record<string, string> = { tuple: "tuple", list: "list", set: "set", frozenset: "frozenset", sum: "list", any: "any", all: "all", sorted: "list", min: "list", max: "list" };
     const kind = kinds[f.id];
     if (kind === undefined || resolve(this.fn.scope, f.id).kind !== "global" || this.moduleBinds(f.id)) return null;
     const comp = e.args[0];
     const fn = this.temp();
     const fast = this.comprehension(comp, kind);
     const slow = this.comprehension(comp);
-    const wrap: Record<string, string> = { tuple: `tuple(${fast})`, list: fast, set: fast, frozenset: `R.newSet(${fast}, true)`, sum: fast, any: fast, all: fast, sorted: `${fn}(${fast})`, min: `${fn}(${fast})`, max: `${fn}(${fast})` };
+    const wrap: Record<string, string> = { tuple: `tuple(${fast})`, list: fast, set: fast, frozenset: `R.newSet(${fast}, true)`, sum: `${fn}(${fast})`, any: fast, all: fast, sorted: `${fn}(${fast})`, min: `${fn}(${fast})`, max: `${fn}(${fast})` };
     return `((${fn} = ${this.load(f.id)}) === $B${prop(f.id)} ? ${wrap[f.id]} : callObj(${fn}, [${slow}]))`;
   }
 
