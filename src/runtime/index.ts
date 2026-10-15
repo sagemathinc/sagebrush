@@ -267,8 +267,7 @@ function layered(front: any, back: any): any {
 }
 
 export class CodeObject {
-  // (sage: compiled with Sage's syntax, by __pyjs_compile_sage__)
-  constructor(public src: string, public filename: string, public mode: string, public sage = false) {}
+  constructor(public src: string, public filename: string, public mode: string) {}
 }
 const codeType = Ty.builtinTypeFor("code", CodeObject, "builtins", () => raise(T.TypeError, "cannot create 'code' objects"));
 Ty.getset(codeType, "co_filename", (c) => c.filename);
@@ -285,29 +284,20 @@ function sourceOf(src: any, fn: string): [string, string] {
 
 export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   const [text, filename] = sourceOf(src, "exec");
-  (M.loader.exec as any)(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, sageOf(src));
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename);
   return null;
 }
 export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals);
   const [text, filename] = sourceOf(src, "eval");
-  return (M.loader.exec as any)(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename, sageOf(src));
+  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename);
 }
-const sageOf = (src: any) => (src instanceof CodeObject && src.sage ? { sage: true } : {});
 function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
   const [text] = sourceOf(src, "compile");
   if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
   M.loader.exec(text, null, mode === "eval" ? "check-eval" : "check", String(filename));
   return new CodeObject(text, String(filename), mode);
 }
-// compile() with Sage's syntax (2^10 is a power; integers are Integers): the
-// code %time and %timeit run in a Sage notebook (lib/_pyjs_magic.py)
-B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => {
-  const [text] = sourceOf(src, "compile");
-  if (mode !== "exec" && mode !== "eval") raise(T.ValueError, "__pyjs_compile_sage__() mode must be 'exec' or 'eval'");
-  (M.loader.exec as any)(text, null, mode === "eval" ? "check-eval" : "check", String(filename), { sage: true });
-  return new CodeObject(text, String(filename), mode, true);
-}, "__pyjs_compile_sage__");
 Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
@@ -354,6 +344,8 @@ B.builtins.__pyjs_help__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(
 // IPython's magics (src/magic-syntax.ts writes %name args as these calls)
 B.builtins.__pyjs_magic__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_magic"), "run_line_magic"), a), "__pyjs_magic__");
 B.builtins.__pyjs_cell_magic__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_magic"), "run_cell_magic"), a), "__pyjs_cell_magic__");
+// and the code %time and %timeit run, expanded in the cell, calls these: timer, time_value, keep, kept, timeit_run
+B.builtins.__pyjs_magic_api__ = Obj.builtin((name: any) => Obj.getattr(Obj.getattr(M.importModule("_pyjs_magic"), "API"), String(name)), "__pyjs_magic_api__");
 B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   if (v !== null) {
     B.builtins._ = v;

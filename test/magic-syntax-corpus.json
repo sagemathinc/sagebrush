@@ -1,0 +1,1602 @@
+[
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"a\\\n%time x b\"\nprint(repr(v7))",
+"'a%time x b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"\"\"{\"\"\"x\n%%time\n\"\"\"}\"\"\"\nv6 = '''it''s\n%timeit -n 1 f()'''\nv7 = f\"{'''a\n%matplotlib inline\n'''}\"\nprint(repr(v5), repr(v6), repr(v7))",
+"'x\\n%%time\\n' \"it''s\\n%timeit -n 1 f()\" 'a\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\"\nv4 = f\"{x!r:>{w}}\\\n!pip install numpy\"\nv3 = f\"\"\"{1}\n!pip install numpy\n{2}\"\"\"\nprint(repr(v3), repr(v4), repr(v7))",
+"'1\\n!pip install numpy\\n2' '  1!pip install numpy' '3\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = '''it''s\n!pip install numpy'''\nv7 = (\"#\" + \"\"\"\n%matplotlib inline\"\"\",\nf\"a{1}\\\n!ls -l\")\nv5 = '''\n!pip install numpy\n'''\nprint(repr(v5), repr(v7), repr(v9))",
+"'\\n!pip install numpy\\n' ('#\\n%matplotlib inline', 'a1!ls -l') \"it''s\\n!pip install numpy\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (\"#\" + \"\"\"\n%%time\"\"\",\nu'a\\\n!ls -l')\nprint(repr(v0))",
+"('#\\n%%time', 'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = \"a\\\n!pip install numpy b\"\nv0 = \"\\\\\"\nprint(repr(v0), repr(v8))",
+"'\\\\' 'a!pip install numpy b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (f\"a{1}\\\n%matplotlib inline\",\nb\"a\\\n!ls -l\")\nprint(repr(v8))",
+"('a1%matplotlib inline', b'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (b\"a\\\n%time x\",\nf\"\"\"{1}\n%time x\n{2}\"\"\")\nprint(repr(v6))",
+"(b'a%time x', '1\\n%time x\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"a{1}\\\n!pip install numpy\"\nprint(repr(v5))",
+"'a1!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (rb\"x\\\n  %autoreload 2\",\n\"a\\\n%matplotlib inline b\")\nv1 = ([5\n% 2],\n'a\\\n%%time')\nprint(repr(v1), repr(v9))",
+"([1], 'a%%time') (b'x\\\\\\n  %autoreload 2', 'a%matplotlib inline b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = [5\n% 2]\nprint(repr(v4))",
+"[1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = ((\"a\"\n\"b\"),\n(5 \\\n% 3))\nprint(repr(v4))",
+"('ab', 2)\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (u'a\\\n!ls -l',\n\"#\" + \"\"\"\n%timeit -n 1 f()\"\"\")\nv2 = \"\"\"a\n%matplotlib inline\n\"\"\"\nprint(repr(v0), repr(v2))",
+"('a!ls -l', '#\\n%timeit -n 1 f()') 'a\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = '''it''s\n!pip install numpy'''\nv6 = (\"#\" + \"\"\"\n!pip install numpy\"\"\",\nf\"{1 +\n2}{'''\n%matplotlib inline\n'''}\")\nprint(repr(v4), repr(v6))",
+"\"it''s\\n!pip install numpy\" ('#\\n!pip install numpy', '3\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"%d\" % 3\nv8 = ('''\n%matplotlib inline\n''',\n\"\\\\\")\nprint(repr(v3), repr(v8))",
+"'3' ('\\n%matplotlib inline\\n', '\\\\')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = r\"a\\\n!pip install numpy\"\nprint(repr(v2))",
+"'a\\\\\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = r\"a\\\n%time x\"\nprint(repr(v3))",
+"'a\\\\\\n%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"{1 +\n2}{'''\n%timeit -n 1 f()\n'''}\"\nprint(repr(v0))",
+"'3\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (f\"{x!r:>{w}}\\\n  %autoreload 2\",\n\"%d\" % 3)\nprint(repr(v1))",
+"('  1  %autoreload 2', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = rb\"x\\\n%matplotlib inline\"\nprint(repr(v2))",
+"b'x\\\\\\n%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (\"a\\\n!ls -l b\",\n\"#\" + \"\"\"\n%%time\"\"\")\nv5 = u'a\\\n%%time'\nprint(repr(v4), repr(v5))",
+"('a!ls -l b', '#\\n%%time') 'a%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"{}\"\\\n.format(1)\nv1 = (\"a\"\n\"b\")\nprint(repr(v1), repr(v5))",
+"'ab' '1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = ('''it''s\n!pip install numpy''',\nf\"{'''a\n%timeit -n 1 f()\n'''}\")\nv9 = ('''it''s\n%matplotlib inline''',\n(\"a\"\n\"b\"))\nprint(repr(v9))",
+"(\"it''s\\n%matplotlib inline\", 'ab')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\"\nv9 = (f\"{'''a\n%time x\n'''}\",\n'''\n  %autoreload 2\n''')\nprint(repr(v7), repr(v9))",
+"'x\\n!ls -l\\n' ('a\\n%time x\\n', '\\n  %autoreload 2\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"{1 +\n2}{'''\n%time x\n'''}\",\nb\"a\\\n  %autoreload 2\")\nprint(repr(v9))",
+"('3\\n%time x\\n', b'a  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = [5\n% 2]\nprint(repr(v2))",
+"[1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\",\n(\"a\"\n\"b\"))\nprint(repr(v4))",
+"('3\\n  %autoreload 2\\n', 'ab')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = r\"a\\\n!ls -l\"\nprint(repr(v5))",
+"'a\\\\\\n!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"%d\" % 3\nprint(repr(v4))",
+"'3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = ((\"a\"\n\"b\"),\n[5\n% 2])\nv3 = ('''\n!pip install numpy\n''',\nr\"a\\\n%timeit -n 1 f()\")\nprint(repr(v0), repr(v3))",
+"('ab', [1]) ('\\n!pip install numpy\\n', 'a\\\\\\n%timeit -n 1 f()')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"\"\"{1}\n!pip install numpy\n{2}\"\"\"\nv7 = (\"a\"\n\"b\")\nprint(repr(v5), repr(v7))",
+"'1\\n!pip install numpy\\n2' 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (u'a\\\n  %autoreload 2',\n\"\"\"a\n%timeit -n 1 f()\n\"\"\")\nprint(repr(v0))",
+"('a  %autoreload 2', 'a\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"a{1}\\\n%timeit -n 1 f()\"\nprint(repr(v8))",
+"'a1%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (f\"{f'''{1}\n  %autoreload 2\n'''}\",\n'''it''s\n!ls -l''')\nprint(repr(v0))",
+"('1\\n  %autoreload 2\\n', \"it''s\\n!ls -l\")\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{f'''{1}\n%%time\n'''}\"\nprint(repr(v1))",
+"'1\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"%d\" % 3\nprint(repr(v5))",
+"'3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\\\\\"\nv6 = (\"%d\" % 3,\n\"\"\"a\n!pip install numpy\n\"\"\")\nprint(repr(v5), repr(v6))",
+"'\\\\' ('3', 'a\\n!pip install numpy\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = rb\"x\\\n%timeit -n 1 f()\"\nv0 = f\"{f'''{1}\n!pip install numpy\n'''}\"\nv5 = '''\n!pip install numpy\n'''\nprint(repr(v0), repr(v4), repr(v5))",
+"'1\\n!pip install numpy\\n' b'x\\\\\\n%timeit -n 1 f()' '\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{'''a\n  %autoreload 2\n'''}\"\nv2 = (\"a\\\n%matplotlib inline b\",\n\"#\" + \"\"\"\n!pip install numpy\"\"\")\nprint(repr(v1), repr(v2))",
+"'a\\n  %autoreload 2\\n' ('a%matplotlib inline b', '#\\n!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = b\"a\\\n%timeit -n 1 f()\"\nprint(repr(v3))",
+"b'a%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = ((\"a\"\n\"b\"),\n'''\n!ls -l\n''')\nv9 = (\"\\\\\",\n\"a\\\n%matplotlib inline b\")\nv4 = u'a\\\n%timeit -n 1 f()'\nprint(repr(v0), repr(v4), repr(v9))",
+"('ab', '\\n!ls -l\\n') 'a%timeit -n 1 f()' ('\\\\', 'a%matplotlib inline b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = '''\n%matplotlib inline\n'''\nv7 = \"{}\"\\\n.format(1)\nprint(repr(v1), repr(v7))",
+"'\\n%matplotlib inline\\n' '1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{x!r:>{w}}\\\n%time x\"\nprint(repr(v1))",
+"'  1%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"a\\\n%timeit -n 1 f() b\"\nprint(repr(v2))",
+"'a%timeit -n 1 f() b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (f\"\"\"{1}\n%%time\n{2}\"\"\",\n\"%d\" % 3)\nprint(repr(v8))",
+"('1\\n%%time\\n2', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"{}\"\\\n.format(1)\nv4 = f\"a{1}\\\n  %autoreload 2\"\nv7 = \"a\\\n%time x b\"\nprint(repr(v4), repr(v7))",
+"'a1  %autoreload 2' 'a%time x b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = rb\"x\\\n!ls -l\"\nv6 = u'a\\\n%%time'\nv0 = (\"%d\" % 3,\n\"%d\" % 3)\nprint(repr(v0), repr(v6), repr(v9))",
+"('3', '3') 'a%%time' b'x\\\\\\n!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"a\\\n%timeit -n 1 f() b\"\nprint(repr(v5))",
+"'a%timeit -n 1 f() b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = \"%d\" % 3\nprint(repr(v9))",
+"'3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = ('a\\\n%%time',\nf\"{x!r:>{w}}\\\n%matplotlib inline\")\nv8 = (\"\"\"a\n!ls -l\n\"\"\",\n'''\n%%time\n''')\nv4 = f\"{f'''{1}\n%matplotlib inline\n'''}\"\nprint(repr(v4), repr(v5), repr(v8))",
+"'1\\n%matplotlib inline\\n' ('a%%time', '  1%matplotlib inline') ('a\\n!ls -l\\n', '\\n%%time\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"\\\\\"\nv9 = f\"\"\"{1}\n  %autoreload 2\n{2}\"\"\"\nprint(repr(v3), repr(v9))",
+"'\\\\' '1\\n  %autoreload 2\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = r\"a\\\n%time x\"\nprint(repr(v6))",
+"'a\\\\\\n%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (5 \\\n% 3)\nprint(repr(v0))",
+"2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = f\"a{1}\\\n!pip install numpy\"\nprint(repr(v6))",
+"'a1!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = f\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\"\nv6 = (\"a\\\n!ls -l b\",\nu'a\\\n%%time')\nprint(repr(v4), repr(v6))",
+"'x\\n!ls -l\\n' ('a!ls -l b', 'a%%time')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = '''it''s\n!pip install numpy'''\nprint(repr(v8))",
+"\"it''s\\n!pip install numpy\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = \"a\\\n!ls -l b\"\nv1 = (f\"{1 +\n2}{'''\n%time x\n'''}\",\n'''it''s\n%timeit -n 1 f()''')\nprint(repr(v1), repr(v8))",
+"('3\\n%time x\\n', \"it''s\\n%timeit -n 1 f()\") 'a!ls -l b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (\"%d\" % 3,\nrb\"x\\\n%matplotlib inline\")\nv7 = r\"a\\\n!ls -l\"\nprint(repr(v7), repr(v8))",
+"'a\\\\\\n!ls -l' ('3', b'x\\\\\\n%matplotlib inline')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = [5\n% 2]\nprint(repr(v9))",
+"[1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = u'a\\\n%timeit -n 1 f()'\nprint(repr(v4))",
+"'a%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = [5\n% 2]\nv4 = '''it''s\n%matplotlib inline'''\nv6 = '''\n  %autoreload 2\n'''\nprint(repr(v4), repr(v6), repr(v7))",
+"\"it''s\\n%matplotlib inline\" '\\n  %autoreload 2\\n' [1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n!pip install numpy\n\"\"\"\nprint(repr(v5))",
+"'a\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = f\"{x!r:>{w}}\\\n%timeit -n 1 f()\"\nprint(repr(v6))",
+"'  1%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"{x!r:>{w}}\\\n%timeit -n 1 f()\"\nprint(repr(v9))",
+"'  1%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = '''\n  %autoreload 2\n'''\nprint(repr(v8))",
+"'\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"\"\"{1}\n%%time\n{2}\"\"\",\nf\"\"\"{1}\n%%time\n{2}\"\"\")\nprint(repr(v9))",
+"('1\\n%%time\\n2', '1\\n%%time\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (b\"a\\\n!pip install numpy\",\nrb\"x\\\n!pip install numpy\")\nprint(repr(v4))",
+"(b'a!pip install numpy', b'x\\\\\\n!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = r\"a\\\n%time x\"\nprint(repr(v1))",
+"'a\\\\\\n%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (b\"a\\\n!ls -l\",\nf\"{1 +\n2}{'''\n%time x\n'''}\")\nprint(repr(v0))",
+"(b'a!ls -l', '3\\n%time x\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{f'''{1}\n%time x\n'''}\"\nv1 = ('''it''s\n%%time''',\n'a\\\n%matplotlib inline')\nprint(repr(v1), repr(v7))",
+"(\"it''s\\n%%time\", 'a%matplotlib inline') '1\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = [5\n% 2]\nprint(repr(v3))",
+"[1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = ('a\\\n%timeit -n 1 f()',\nr\"a\\\n!pip install numpy\")\nprint(repr(v4))",
+"('a%timeit -n 1 f()', 'a\\\\\\n!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = 'a\\\n  %autoreload 2'\nv4 = u'a\\\n%time x'\nprint(repr(v3), repr(v4))",
+"'a  %autoreload 2' 'a%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (\"%d\" % 3,\nu'a\\\n  %autoreload 2')\nprint(repr(v0))",
+"('3', 'a  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"a{1}\\\n!ls -l\"\nv2 = f\"\"\"{\"\"\"x\n%matplotlib inline\n\"\"\"}\"\"\"\nprint(repr(v2), repr(v7))",
+"'x\\n%matplotlib inline\\n' 'a1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = ((5 \\\n% 3),\n\"a\\\n%%time b\")\nprint(repr(v1))",
+"(2, 'a%%time b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (f\"{f'''{1}\n%timeit -n 1 f()\n'''}\",\nf\"a{1}\\\n!pip install numpy\")\nv9 = (f\"{(1,\n2)}\",\n\"a\\\n%time x b\")\nprint(repr(v1), repr(v9))",
+"('1\\n%timeit -n 1 f()\\n', 'a1!pip install numpy') ('(1, 2)', 'a%time x b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"#\" + \"\"\"\n%%time\"\"\"\nv7 = '''\n!pip install numpy\n'''\nprint(repr(v0), repr(v7))",
+"'#\\n%%time' '\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (f\"\"\"{1}\n%%time\n{2}\"\"\",\n(\"a\"\n\"b\"))\nprint(repr(v7))",
+"('1\\n%%time\\n2', 'ab')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = '''it''s\n%timeit -n 1 f()'''\nv5 = ((5 \\\n% 3),\nf\"a{1}\\\n%matplotlib inline\")\nprint(repr(v1), repr(v5))",
+"\"it''s\\n%timeit -n 1 f()\" (2, 'a1%matplotlib inline')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = \"#\" + \"\"\"\n  %autoreload 2\"\"\"\nv5 = (u'a\\\n%timeit -n 1 f()',\n\"a\\\n  %autoreload 2 b\")\nv7 = ([5\n% 2],\nu'a\\\n%matplotlib inline')\nprint(repr(v5), repr(v7), repr(v8))",
+"('a%timeit -n 1 f()', 'a  %autoreload 2 b') ([1], 'a%matplotlib inline') '#\\n  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"{}\"\\\n.format(1)\nprint(repr(v7))",
+"'1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"{f'''{1}\n%matplotlib inline\n'''}\"\nv7 = f\"{x!r:>{w}}\\\n%time x\"\nprint(repr(v5), repr(v7))",
+"'1\\n%matplotlib inline\\n' '  1%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"\"\"{1}\n%matplotlib inline\n{2}\"\"\",\nr\"a\\\n%%time\")\nprint(repr(v9))",
+"('1\\n%matplotlib inline\\n2', 'a\\\\\\n%%time')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = ('''\n  %autoreload 2\n''',\n\"\\\\\")\nprint(repr(v4))",
+"('\\n  %autoreload 2\\n', '\\\\')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"\\\\\"\nv3 = (\"{}\"\\\n.format(1),\n\"%d\" % 3)\nv8 = (5 \\\n% 3)\nprint(repr(v0), repr(v3), repr(v8))",
+"'\\\\' ('1', '3') 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = ('''it''s\n!ls -l''',\nr\"a\\\n%%time\")\nprint(repr(v7))",
+"(\"it''s\\n!ls -l\", 'a\\\\\\n%%time')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{'''a\n%timeit -n 1 f()\n'''}\"\nv3 = f\"\"\"{1}\n%timeit -n 1 f()\n{2}\"\"\"\nv3 = \"a\\\n  %autoreload 2 b\"\nprint(repr(v3), repr(v7))",
+"'a  %autoreload 2 b' 'a\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = '''\n!pip install numpy\n'''\nprint(repr(v1))",
+"'\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = '''\n!ls -l\n'''\nprint(repr(v3))",
+"'\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"a\\\n%time x b\"\nprint(repr(v2))",
+"'a%time x b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\"\nv0 = \"#\" + \"\"\"\n%matplotlib inline\"\"\"\nprint(repr(v0), repr(v1))",
+"'#\\n%matplotlib inline' 'x\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (r\"a\\\n!ls -l\",\nrb\"x\\\n  %autoreload 2\")\nprint(repr(v4))",
+"('a\\\\\\n!ls -l', b'x\\\\\\n  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = rb\"x\\\n%matplotlib inline\"\nv1 = f\"\"\"{\"\"\"x\n%time x\n\"\"\"}\"\"\"\nprint(repr(v1), repr(v2))",
+"'x\\n%time x\\n' b'x\\\\\\n%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (5 \\\n% 3)\nprint(repr(v8))",
+"2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (f\"{f'''{1}\n  %autoreload 2\n'''}\",\nr\"a\\\n!ls -l\")\nv0 = ('''it''s\n%time x''',\nf\"a{1}\\\n%%time\")\nv7 = [5\n% 2]\nprint(repr(v0), repr(v1), repr(v7))",
+"(\"it''s\\n%time x\", 'a1%%time') ('1\\n  %autoreload 2\\n', 'a\\\\\\n!ls -l') [1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"\"\"{\"\"\"x\n  %autoreload 2\n\"\"\"}\"\"\"\nv9 = \"%d\" % 3\nprint(repr(v0), repr(v9))",
+"'x\\n  %autoreload 2\\n' '3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = \"a\\\n%timeit -n 1 f() b\"\nprint(repr(v8))",
+"'a%timeit -n 1 f() b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"\"\"{1}\n!pip install numpy\n{2}\"\"\"\nv7 = r\"a\\\n%timeit -n 1 f()\"\nprint(repr(v0), repr(v7))",
+"'1\\n!pip install numpy\\n2' 'a\\\\\\n%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = r\"a\\\n%%time\"\nprint(repr(v4))",
+"'a\\\\\\n%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"a{1}\\\n  %autoreload 2\"\nv7 = (f\"{1 +\n2}{'''\n%time x\n'''}\",\nf\"a{1}\\\n!ls -l\")\nprint(repr(v0), repr(v7))",
+"'a1  %autoreload 2' ('3\\n%time x\\n', 'a1!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"\"\"{\"\"\"x\n%timeit -n 1 f()\n\"\"\"}\"\"\"\nprint(repr(v5))",
+"'x\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"{f'''{1}\n!pip install numpy\n'''}\"\nprint(repr(v2))",
+"'1\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"a{1}\\\n  %autoreload 2\"\nprint(repr(v1))",
+"'a1  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = f\"{(1,\n2)}\"\nprint(repr(v3))",
+"'(1, 2)'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = '''\n!ls -l\n'''\nprint(repr(v0))",
+"'\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"a\\\n!ls -l b\",\n'a\\\n%matplotlib inline')\nv1 = r\"a\\\n%time x\"\nprint(repr(v1), repr(v7))",
+"'a\\\\\\n%time x' ('a!ls -l b', 'a%matplotlib inline')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = \"\\\\\"\nv4 = f\"{1 +\n2}{'''\n%%time\n'''}\"\nprint(repr(v1), repr(v4))",
+"'\\\\' '3\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (\"a\"\n\"b\")\nv4 = rb\"x\\\n%matplotlib inline\"\nprint(repr(v4), repr(v8))",
+"b'x\\\\\\n%matplotlib inline' 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (\"%d\" % 3,\nrb\"x\\\n!pip install numpy\")\nv6 = (\"#\" + \"\"\"\n%timeit -n 1 f()\"\"\",\nf\"{1 +\n2}{'''\n  %autoreload 2\n'''}\")\nv5 = '''\n!ls -l\n'''\nprint(repr(v5), repr(v6), repr(v9))",
+"'\\n!ls -l\\n' ('#\\n%timeit -n 1 f()', '3\\n  %autoreload 2\\n') ('3', b'x\\\\\\n!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (\"a\\\n%matplotlib inline b\",\nf\"\"\"{\"\"\"x\n  %autoreload 2\n\"\"\"}\"\"\")\nprint(repr(v2))",
+"('a%matplotlib inline b', 'x\\n  %autoreload 2\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = u'a\\\n!ls -l'\nv4 = f\"{1 +\n2}{'''\n!pip install numpy\n'''}\"\nprint(repr(v4), repr(v9))",
+"'3\\n!pip install numpy\\n' 'a!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"\\\\\"\nv0 = (\"#\" + \"\"\"\n%matplotlib inline\"\"\",\nf\"{x!r:>{w}}\\\n%timeit -n 1 f()\")\nprint(repr(v0), repr(v2))",
+"('#\\n%matplotlib inline', '  1%timeit -n 1 f()') '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (\"a\\\n  %autoreload 2 b\",\n\"#\" + \"\"\"\n%%time\"\"\")\nprint(repr(v1))",
+"('a  %autoreload 2 b', '#\\n%%time')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n%matplotlib inline\n\"\"\"\nv8 = \"\\\\\"\nprint(repr(v5), repr(v8))",
+"'a\\n%matplotlib inline\\n' '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = '''\n%matplotlib inline\n'''\nprint(repr(v2))",
+"'\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"\"\"a\n%timeit -n 1 f()\n\"\"\"\nv9 = (f\"{1 +\n2}{'''\n%%time\n'''}\",\nf\"{x!r:>{w}}\\\n  %autoreload 2\")\nv0 = (\"#\" + \"\"\"\n  %autoreload 2\"\"\",\n'''it''s\n%matplotlib inline''')\nprint(repr(v0), repr(v7), repr(v9))",
+"('#\\n  %autoreload 2', \"it''s\\n%matplotlib inline\") 'a\\n%timeit -n 1 f()\\n' ('3\\n%%time\\n', '  1  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = ((\"a\"\n\"b\"),\nf\"{f'''{1}\n%%time\n'''}\")\nv8 = ('a\\\n  %autoreload 2',\n'a\\\n!pip install numpy')\nv0 = b\"a\\\n%matplotlib inline\"\nprint(repr(v0), repr(v4), repr(v8))",
+"b'a%matplotlib inline' ('ab', '1\\n%%time\\n') ('a  %autoreload 2', 'a!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"a\\\n%%time b\"\nv3 = \"a\\\n!pip install numpy b\"\nprint(repr(v3), repr(v7))",
+"'a!pip install numpy b' 'a%%time b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = '''it''s\n  %autoreload 2'''\nv5 = \"\\\\\"\nprint(repr(v2), repr(v5))",
+"\"it''s\\n  %autoreload 2\" '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (5 \\\n% 3)\nv8 = ([5\n% 2],\nr\"a\\\n%time x\")\nprint(repr(v0), repr(v8))",
+"2 ([1], 'a\\\\\\n%time x')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = f\"{x!r:>{w}}\\\n!pip install numpy\"\nprint(repr(v4))",
+"'  1!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"\"\"{1}\n%matplotlib inline\n{2}\"\"\"\nv7 = (5 \\\n% 3)\nprint(repr(v2), repr(v7))",
+"'1\\n%matplotlib inline\\n2' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = f\"a{1}\\\n%time x\"\nprint(repr(v6))",
+"'a1%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = b\"a\\\n!ls -l\"\nv6 = \"\\\\\"\nprint(repr(v5), repr(v6))",
+"b'a!ls -l' '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (f\"{x!r:>{w}}\\\n%%time\",\nf\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\")\nv9 = ([5\n% 2],\nu'a\\\n  %autoreload 2')\nv3 = rb\"x\\\n  %autoreload 2\"\nprint(repr(v3), repr(v5), repr(v9))",
+"b'x\\\\\\n  %autoreload 2' ('  1%%time', 'x\\n!ls -l\\n') ([1], 'a  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{x!r:>{w}}\\\n%timeit -n 1 f()\"\nv9 = \"\\\\\"\nprint(repr(v1), repr(v9))",
+"'  1%timeit -n 1 f()' '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"\\\\\",\nu'a\\\n!ls -l')\nv4 = '''\n%timeit -n 1 f()\n'''\nprint(repr(v4), repr(v5))",
+"'\\n%timeit -n 1 f()\\n' ('\\\\', 'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = ('''\n%time x\n''',\nf\"{'''a\n%%time\n'''}\")\nprint(repr(v7))",
+"('\\n%time x\\n', 'a\\n%%time\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"\"\"{1}\n%%time\n{2}\"\"\"\nprint(repr(v8))",
+"'1\\n%%time\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (f\"\"\"{1}\n!ls -l\n{2}\"\"\",\nf\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\")\nprint(repr(v3))",
+"('1\\n!ls -l\\n2', 'x\\n!ls -l\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = f\"{f'''{1}\n%matplotlib inline\n'''}\"\nprint(repr(v3))",
+"'1\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"#\" + \"\"\"\n  %autoreload 2\"\"\"\nprint(repr(v4))",
+"'#\\n  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = u'a\\\n%time x'\nv7 = (\"{}\"\\\n.format(1),\nb\"a\\\n%%time\")\nprint(repr(v1), repr(v7))",
+"'a%time x' ('1', b'a%%time')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"a\\\n%timeit -n 1 f() b\",\n\"{}\"\\\n.format(1))\nv5 = f\"{f'''{1}\n%matplotlib inline\n'''}\"\nprint(repr(v5), repr(v7))",
+"'1\\n%matplotlib inline\\n' ('a%timeit -n 1 f() b', '1')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"\"\"a\n!ls -l\n\"\"\"\nprint(repr(v3))",
+"'a\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = '''\n%%time\n'''\nprint(repr(v8))",
+"'\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (\"#\" + \"\"\"\n  %autoreload 2\"\"\",\nf\"\"\"{\"\"\"x\n%%time\n\"\"\"}\"\"\")\nv4 = '''it''s\n!ls -l'''\nv5 = \"%d\" % 3\nprint(repr(v2), repr(v4), repr(v5))",
+"('#\\n  %autoreload 2', 'x\\n%%time\\n') \"it''s\\n!ls -l\" '3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"a\"\n\"b\")\nprint(repr(v5))",
+"'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"\"\"a\n!ls -l\n\"\"\"\nprint(repr(v4))",
+"'a\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (\"a\"\n\"b\")\nprint(repr(v4))",
+"'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"\\\\\"\nv4 = (f\"{'''a\n%matplotlib inline\n'''}\",\n(5 \\\n% 3))\nv8 = (f\"{'''a\n!pip install numpy\n'''}\",\n\"{}\"\\\n.format(1))\nprint(repr(v0), repr(v4), repr(v8))",
+"'\\\\' ('a\\n%matplotlib inline\\n', 2) ('a\\n!pip install numpy\\n', '1')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = 'a\\\n%%time'\nprint(repr(v3))",
+"'a%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (\"a\"\n\"b\")\nv1 = ((5 \\\n% 3),\n(\"a\"\n\"b\"))\nprint(repr(v1), repr(v2))",
+"(2, 'ab') 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = u'a\\\n%matplotlib inline'\nprint(repr(v2))",
+"'a%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = ((\"a\"\n\"b\"),\nu'a\\\n%timeit -n 1 f()')\nprint(repr(v0))",
+"('ab', 'a%timeit -n 1 f()')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"\\\\\",\n'a\\\n  %autoreload 2')\nv4 = ((\"a\"\n\"b\"),\n'''it''s\n%%time''')\nv4 = f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\"\nprint(repr(v4), repr(v5))",
+"'3\\n  %autoreload 2\\n' ('\\\\', 'a  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = u'a\\\n%matplotlib inline'\nv3 = \"%d\" % 3\nprint(repr(v3))",
+"'3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (\"#\" + \"\"\"\n  %autoreload 2\"\"\",\n'a\\\n!ls -l')\nprint(repr(v1))",
+"('#\\n  %autoreload 2', 'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = ((\"a\"\n\"b\"),\nf\"a{1}\\\n!pip install numpy\")\nprint(repr(v1))",
+"('ab', 'a1!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (\"{}\"\\\n.format(1),\n\"\\\\\")\nv0 = (f\"\"\"{\"\"\"x\n  %autoreload 2\n\"\"\"}\"\"\",\nf\"\"\"{1}\n%time x\n{2}\"\"\")\nprint(repr(v0), repr(v3))",
+"('x\\n  %autoreload 2\\n', '1\\n%time x\\n2') ('1', '\\\\')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = [5\n% 2]\nprint(repr(v5))",
+"[1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = f\"{f'''{1}\n%matplotlib inline\n'''}\"\nprint(repr(v6))",
+"'1\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{f'''{1}\n%%time\n'''}\"\nprint(repr(v7))",
+"'1\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = 'a\\\n%matplotlib inline'\nv6 = '''it''s\n%time x'''\nv7 = f\"{(1,\n2)}\"\nprint(repr(v6), repr(v7), repr(v9))",
+"\"it''s\\n%time x\" '(1, 2)' 'a%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = b\"a\\\n!pip install numpy\"\nprint(repr(v1))",
+"b'a!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{1 +\n2}{'''\n%matplotlib inline\n'''}\"\nprint(repr(v7))",
+"'3\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"{x!r:>{w}}\\\n!ls -l\"\nprint(repr(v2))",
+"'  1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (f\"{'''a\n  %autoreload 2\n'''}\",\nu'a\\\n%%time')\nv6 = (f\"\"\"{1}\n%timeit -n 1 f()\n{2}\"\"\",\nr\"a\\\n!pip install numpy\")\nprint(repr(v3), repr(v6))",
+"('a\\n  %autoreload 2\\n', 'a%%time') ('1\\n%timeit -n 1 f()\\n2', 'a\\\\\\n!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"a\\\n%timeit -n 1 f() b\"\nprint(repr(v4))",
+"'a%timeit -n 1 f() b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"{}\"\\\n.format(1)\nprint(repr(v2))",
+"'1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"a\\\n%%time b\"\nv1 = (f\"a{1}\\\n!ls -l\",\n\"\\\\\")\nv9 = (5 \\\n% 3)\nprint(repr(v1), repr(v3), repr(v9))",
+"('a1!ls -l', '\\\\') 'a%%time b' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{(1,\n2)}\"\nv9 = f\"{f'''{1}\n%time x\n'''}\"\nv7 = (b\"a\\\n%matplotlib inline\",\nf\"{x!r:>{w}}\\\n%matplotlib inline\")\nprint(repr(v1), repr(v7), repr(v9))",
+"'(1, 2)' (b'a%matplotlib inline', '  1%matplotlib inline') '1\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n!ls -l\n\"\"\"\nprint(repr(v5))",
+"'a\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = '''it''s\n%timeit -n 1 f()'''\nv6 = f\"a{1}\\\n%time x\"\nprint(repr(v4), repr(v6))",
+"\"it''s\\n%timeit -n 1 f()\" 'a1%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"{1 +\n2}{'''\n%matplotlib inline\n'''}\"\nv2 = '''\n  %autoreload 2\n'''\nprint(repr(v2), repr(v8))",
+"'\\n  %autoreload 2\\n' '3\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = '''\n!pip install numpy\n'''\nv0 = f\"{1 +\n2}{'''\n!pip install numpy\n'''}\"\nprint(repr(v0))",
+"'3\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (f\"a{1}\\\n!pip install numpy\",\nb\"a\\\n  %autoreload 2\")\nv0 = ([5\n% 2],\n(5 \\\n% 3))\nv5 = \"a\\\n  %autoreload 2 b\"\nprint(repr(v0), repr(v5))",
+"([1], 2) 'a  %autoreload 2 b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (\"a\\\n!pip install numpy b\",\nf\"a{1}\\\n%time x\")\nprint(repr(v0))",
+"('a!pip install numpy b', 'a1%time x')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (b\"a\\\n%matplotlib inline\",\nr\"a\\\n  %autoreload 2\")\nprint(repr(v4))",
+"(b'a%matplotlib inline', 'a\\\\\\n  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"a\\\n  %autoreload 2 b\"\nv8 = '''it''s\n%time x'''\nprint(repr(v2), repr(v8))",
+"'a  %autoreload 2 b' \"it''s\\n%time x\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ((5 \\\n% 3),\nf\"\"\"{1}\n%matplotlib inline\n{2}\"\"\")\nprint(repr(v3))",
+"(2, '1\\n%matplotlib inline\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (\"\"\"a\n%matplotlib inline\n\"\"\",\nf\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\")\nprint(repr(v3))",
+"('a\\n%matplotlib inline\\n', 'x\\n!ls -l\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"\\\\\"\nprint(repr(v7))",
+"'\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"{x!r:>{w}}\\\n%timeit -n 1 f()\",\n\"\"\"a\n!ls -l\n\"\"\")\nprint(repr(v9))",
+"('  1%timeit -n 1 f()', 'a\\n!ls -l\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = ('a\\\n%timeit -n 1 f()',\n\"a\\\n%matplotlib inline b\")\nprint(repr(v0))",
+"('a%timeit -n 1 f()', 'a%matplotlib inline b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ('a\\\n%time x',\n\"\\\\\")\nv0 = ((5 \\\n% 3),\nf\"a{1}\\\n%matplotlib inline\")\nprint(repr(v0), repr(v3))",
+"(2, 'a1%matplotlib inline') ('a%time x', '\\\\')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"a{1}\\\n!ls -l\"\nprint(repr(v1))",
+"'a1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = '''it''s\n  %autoreload 2'''\nv7 = \"a\\\n!ls -l b\"\nv2 = b\"a\\\n!ls -l\"\nprint(repr(v2), repr(v5), repr(v7))",
+"b'a!ls -l' \"it''s\\n  %autoreload 2\" 'a!ls -l b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = ('a\\\n!ls -l',\n'a\\\n!ls -l')\nv0 = \"{}\"\\\n.format(1)\nprint(repr(v0), repr(v7))",
+"'1' ('a!ls -l', 'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = f\"{x!r:>{w}}\\\n!pip install numpy\"\nv0 = \"%d\" % 3\nv3 = f\"{x!r:>{w}}\\\n%timeit -n 1 f()\"\nprint(repr(v0), repr(v3), repr(v6))",
+"'3' '  1%timeit -n 1 f()' '  1!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"a{1}\\\n%%time\"\nv4 = \"#\" + \"\"\"\n%matplotlib inline\"\"\"\nv2 = f\"{x!r:>{w}}\\\n%matplotlib inline\"\nprint(repr(v2), repr(v4), repr(v8))",
+"'  1%matplotlib inline' '#\\n%matplotlib inline' 'a1%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = rb\"x\\\n!pip install numpy\"\nprint(repr(v3))",
+"b'x\\\\\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ('a\\\n  %autoreload 2',\n\"a\\\n!ls -l b\")\nv4 = [5\n% 2]\nv9 = 'a\\\n%timeit -n 1 f()'\nprint(repr(v3), repr(v4), repr(v9))",
+"('a  %autoreload 2', 'a!ls -l b') [1] 'a%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (u'a\\\n%%time',\n\"%d\" % 3)\nv3 = f\"\"\"{\"\"\"x\n!pip install numpy\n\"\"\"}\"\"\"\nprint(repr(v3), repr(v4))",
+"'x\\n!pip install numpy\\n' ('a%%time', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\",\n'''it''s\n%timeit -n 1 f()''')\nv6 = f\"{'''a\n%matplotlib inline\n'''}\"\nv6 = \"\"\"a\n!ls -l\n\"\"\"\nprint(repr(v1), repr(v6))",
+"('3\\n  %autoreload 2\\n', \"it''s\\n%timeit -n 1 f()\") 'a\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = ('''\n%%time\n''',\n(5 \\\n% 3))\nprint(repr(v8))",
+"('\\n%%time\\n', 2)\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = [5\n% 2]\nv2 = b\"a\\\n!ls -l\"\nv5 = f\"\"\"{1}\n%time x\n{2}\"\"\"\nprint(repr(v2), repr(v5))",
+"b'a!ls -l' '1\\n%time x\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = '''it''s\n%timeit -n 1 f()'''\nv1 = \"%d\" % 3\nv1 = f\"\"\"{1}\n%matplotlib inline\n{2}\"\"\"\nprint(repr(v1), repr(v5))",
+"'1\\n%matplotlib inline\\n2' \"it''s\\n%timeit -n 1 f()\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"a{1}\\\n%timeit -n 1 f()\"\nv8 = ((\"a\"\n\"b\"),\nf\"{'''a\n%time x\n'''}\")\nv3 = \"\\\\\"\nprint(repr(v3), repr(v7), repr(v8))",
+"'\\\\' 'a1%timeit -n 1 f()' ('ab', 'a\\n%time x\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"a\\\n!pip install numpy b\"\nprint(repr(v5))",
+"'a!pip install numpy b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (f\"\"\"{\"\"\"x\n!pip install numpy\n\"\"\"}\"\"\",\n'''\n!ls -l\n''')\nv1 = (\"a\"\n\"b\")\nv7 = \"\\\\\"\nprint(repr(v1), repr(v7))",
+"'ab' '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = ('''it''s\n!pip install numpy''',\nf\"a{1}\\\n!ls -l\")\nprint(repr(v5))",
+"(\"it''s\\n!pip install numpy\", 'a1!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"\"\"{\"\"\"x\n%%time\n\"\"\"}\"\"\"\nprint(repr(v5))",
+"'x\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = \"{}\"\\\n.format(1)\nprint(repr(v6))",
+"'1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ('a\\\n  %autoreload 2',\nf\"\"\"{\"\"\"x\n%timeit -n 1 f()\n\"\"\"}\"\"\")\nprint(repr(v3))",
+"('a  %autoreload 2', 'x\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = '''it''s\n%timeit -n 1 f()'''\nprint(repr(v2))",
+"\"it''s\\n%timeit -n 1 f()\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"{1 +\n2}{'''\n%%time\n'''}\"\nv6 = f\"a{1}\\\n!ls -l\"\nprint(repr(v2), repr(v6))",
+"'3\\n%%time\\n' 'a1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"\"\"{\"\"\"x\n  %autoreload 2\n\"\"\"}\"\"\"\nprint(repr(v9))",
+"'x\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"a\"\n\"b\")\nv1 = (\"\"\"a\n%timeit -n 1 f()\n\"\"\",\nf\"\"\"{\"\"\"x\n%timeit -n 1 f()\n\"\"\"}\"\"\")\nprint(repr(v1), repr(v7))",
+"('a\\n%timeit -n 1 f()\\n', 'x\\n%timeit -n 1 f()\\n') 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = 'a\\\n%timeit -n 1 f()'\nv0 = f\"{'''a\n%time x\n'''}\"\nprint(repr(v0), repr(v3))",
+"'a\\n%time x\\n' 'a%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (f\"{1 +\n2}{'''\n!pip install numpy\n'''}\",\n\"a\\\n%time x b\")\nprint(repr(v5))",
+"('3\\n!pip install numpy\\n', 'a%time x b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (\"a\"\n\"b\")\nv3 = '''it''s\n%matplotlib inline'''\nprint(repr(v3), repr(v6))",
+"\"it''s\\n%matplotlib inline\" 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (u'a\\\n%matplotlib inline',\nf\"{'''a\n%time x\n'''}\")\nv8 = \"\"\"a\n  %autoreload 2\n\"\"\"\nprint(repr(v7), repr(v8))",
+"('a%matplotlib inline', 'a\\n%time x\\n') 'a\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = \"%d\" % 3\nv6 = \"\"\"a\n%%time\n\"\"\"\nv0 = ((\"a\"\n\"b\"),\n\"%d\" % 3)\nprint(repr(v0), repr(v6))",
+"('ab', '3') 'a\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"\\\\\"\nv9 = (\"#\" + \"\"\"\n!ls -l\"\"\",\n\"#\" + \"\"\"\n%matplotlib inline\"\"\")\nprint(repr(v4), repr(v9))",
+"'\\\\' ('#\\n!ls -l', '#\\n%matplotlib inline')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"{1 +\n2}{'''\n!pip install numpy\n'''}\"\nprint(repr(v9))",
+"'3\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (5 \\\n% 3)\nv5 = \"a\\\n!ls -l b\"\nprint(repr(v3), repr(v5))",
+"2 'a!ls -l b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ((5 \\\n% 3),\n\"a\\\n%time x b\")\nprint(repr(v3))",
+"(2, 'a%time x b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = rb\"x\\\n%matplotlib inline\"\nprint(repr(v6))",
+"b'x\\\\\\n%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (f\"{x!r:>{w}}\\\n%time x\",\n\"%d\" % 3)\nv1 = f\"{1 +\n2}{'''\n%%time\n'''}\"\nprint(repr(v1), repr(v6))",
+"'3\\n%%time\\n' ('  1%time x', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"%d\" % 3,\n'''\n%time x\n''')\nv2 = b\"a\\\n  %autoreload 2\"\nprint(repr(v2), repr(v7))",
+"b'a  %autoreload 2' ('3', '\\n%time x\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (f\"a{1}\\\n  %autoreload 2\",\nf\"a{1}\\\n%time x\")\nprint(repr(v5))",
+"('a1  %autoreload 2', 'a1%time x')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (\"a\"\n\"b\")\nprint(repr(v2))",
+"'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = 'a\\\n%matplotlib inline'\nv7 = f\"{x!r:>{w}}\\\n%matplotlib inline\"\nv7 = ([5\n% 2],\nr\"a\\\n%%time\")\nprint(repr(v7), repr(v8))",
+"([1], 'a\\\\\\n%%time') 'a%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = ([5\n% 2],\n\"{}\"\\\n.format(1))\nv9 = u'a\\\n  %autoreload 2'\nprint(repr(v2), repr(v9))",
+"([1], '1') 'a  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = \"{}\"\\\n.format(1)\nv8 = f\"{'''a\n%timeit -n 1 f()\n'''}\"\nv4 = f\"{'''a\n!pip install numpy\n'''}\"\nprint(repr(v1), repr(v4), repr(v8))",
+"'1' 'a\\n!pip install numpy\\n' 'a\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (r\"a\\\n%timeit -n 1 f()\",\n(5 \\\n% 3))\nv2 = u'a\\\n%time x'\nv1 = (f\"{'''a\n  %autoreload 2\n'''}\",\n\"{}\"\\\n.format(1))\nprint(repr(v1), repr(v2), repr(v9))",
+"('a\\n  %autoreload 2\\n', '1') 'a%time x' ('a\\\\\\n%timeit -n 1 f()', 2)\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = f\"a{1}\\\n%timeit -n 1 f()\"\nprint(repr(v3))",
+"'a1%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (\"\\\\\",\nf\"{'''a\n%time x\n'''}\")\nv0 = b\"a\\\n  %autoreload 2\"\nv8 = f\"{'''a\n%%time\n'''}\"\nprint(repr(v0), repr(v8))",
+"b'a  %autoreload 2' 'a\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = \"{}\"\\\n.format(1)\nprint(repr(v1))",
+"'1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = '''\n!ls -l\n'''\nprint(repr(v2))",
+"'\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"\"\"{1}\n%%time\n{2}\"\"\",\n\"%d\" % 3)\nv0 = [5\n% 2]\nv7 = (\"a\\\n%timeit -n 1 f() b\",\nb\"a\\\n!pip install numpy\")\nprint(repr(v0), repr(v7), repr(v9))",
+"[1] ('a%timeit -n 1 f() b', b'a!pip install numpy') ('1\\n%%time\\n2', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = f\"{'''a\n%time x\n'''}\"\nprint(repr(v4))",
+"'a\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = [5\n% 2]\nv5 = (f\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\",\n'''\n  %autoreload 2\n''')\nprint(repr(v3), repr(v5))",
+"[1] ('x\\n!ls -l\\n', '\\n  %autoreload 2\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"\"\"{1}\n!ls -l\n{2}\"\"\"\nprint(repr(v0))",
+"'1\\n!ls -l\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = ([5\n% 2],\n\"#\" + \"\"\"\n%time x\"\"\")\nprint(repr(v8))",
+"([1], '#\\n%time x')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n%%time\n\"\"\"\nv5 = f\"{'''a\n%%time\n'''}\"\nprint(repr(v5))",
+"'a\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"a\\\n%%time b\"\nprint(repr(v4))",
+"'a%%time b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = \"{}\"\\\n.format(1)\nprint(repr(v9))",
+"'1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (5 \\\n% 3)\nprint(repr(v2))",
+"2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"\"\"{1}\n!pip install numpy\n{2}\"\"\"\nprint(repr(v8))",
+"'1\\n!pip install numpy\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"\"\"{\"\"\"x\n!pip install numpy\n\"\"\"}\"\"\"\nprint(repr(v8))",
+"'x\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = r\"a\\\n%time x\"\nprint(repr(v9))",
+"'a\\\\\\n%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = \"#\" + \"\"\"\n!pip install numpy\"\"\"\nv4 = f\"{(1,\n2)}\"\nprint(repr(v4), repr(v8))",
+"'(1, 2)' '#\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\",\n\"\"\"a\n!ls -l\n\"\"\")\nprint(repr(v7))",
+"('3\\n  %autoreload 2\\n', 'a\\n!ls -l\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (b\"a\\\n%%time\",\nf\"a{1}\\\n!pip install numpy\")\nv8 = f\"{f'''{1}\n%time x\n'''}\"\nprint(repr(v8))",
+"'1\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = [5\n% 2]\nv7 = \"a\\\n%time x b\"\nprint(repr(v2), repr(v7))",
+"[1] 'a%time x b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (\"a\\\n%matplotlib inline b\",\nf\"\"\"{\"\"\"x\n!pip install numpy\n\"\"\"}\"\"\")\nv6 = ([5\n% 2],\n(5 \\\n% 3))\nprint(repr(v6))",
+"([1], 2)\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"a\\\n%timeit -n 1 f() b\"\nv2 = 'a\\\n%%time'\nprint(repr(v0), repr(v2))",
+"'a%timeit -n 1 f() b' 'a%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (r\"a\\\n%time x\",\nf\"{(1,\n2)}\")\nv8 = (f\"\"\"{1}\n%time x\n{2}\"\"\",\nf\"{'''a\n%time x\n'''}\")\nprint(repr(v2), repr(v8))",
+"('a\\\\\\n%time x', '(1, 2)') ('1\\n%time x\\n2', 'a\\n%time x\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"\"\"{1}\n%time x\n{2}\"\"\"\nprint(repr(v5))",
+"'1\\n%time x\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"#\" + \"\"\"\n%time x\"\"\"\nprint(repr(v2))",
+"'#\\n%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"a\\\n!ls -l b\",\nf\"{'''a\n%timeit -n 1 f()\n'''}\")\nprint(repr(v7))",
+"('a!ls -l b', 'a\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = 'a\\\n!ls -l'\nprint(repr(v1))",
+"'a!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (f\"{'''a\n%%time\n'''}\",\nu'a\\\n!pip install numpy')\nv0 = 'a\\\n%timeit -n 1 f()'\nprint(repr(v0), repr(v1))",
+"'a%timeit -n 1 f()' ('a\\n%%time\\n', 'a!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"{'''a\n%matplotlib inline\n'''}\"\nprint(repr(v0))",
+"'a\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (f\"\"\"{1}\n%timeit -n 1 f()\n{2}\"\"\",\n(5 \\\n% 3))\nv0 = '''it''s\n  %autoreload 2'''\nv5 = (\"a\"\n\"b\")\nprint(repr(v0), repr(v3), repr(v5))",
+"\"it''s\\n  %autoreload 2\" ('1\\n%timeit -n 1 f()\\n2', 2) 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (f\"{1 +\n2}{'''\n%timeit -n 1 f()\n'''}\",\nf\"{1 +\n2}{'''\n!pip install numpy\n'''}\")\nprint(repr(v6))",
+"('3\\n%timeit -n 1 f()\\n', '3\\n!pip install numpy\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\"\nv4 = (\"a\"\n\"b\")\nprint(repr(v2), repr(v4))",
+"'3\\n  %autoreload 2\\n' 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"%d\" % 3\nv9 = ('a\\\n%matplotlib inline',\nf\"{1 +\n2}{'''\n  %autoreload 2\n'''}\")\nv1 = r\"a\\\n  %autoreload 2\"\nprint(repr(v0), repr(v1), repr(v9))",
+"'3' 'a\\\\\\n  %autoreload 2' ('a%matplotlib inline', '3\\n  %autoreload 2\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = f\"{f'''{1}\n%timeit -n 1 f()\n'''}\"\nv0 = rb\"x\\\n%matplotlib inline\"\nprint(repr(v0), repr(v3))",
+"b'x\\\\\\n%matplotlib inline' '1\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = f\"{x!r:>{w}}\\\n%matplotlib inline\"\nprint(repr(v4))",
+"'  1%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (f\"{1 +\n2}{'''\n%time x\n'''}\",\nf\"{1 +\n2}{'''\n  %autoreload 2\n'''}\")\nv3 = \"#\" + \"\"\"\n%time x\"\"\"\nprint(repr(v0), repr(v3))",
+"('3\\n%time x\\n', '3\\n  %autoreload 2\\n') '#\\n%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = f\"{'''a\n  %autoreload 2\n'''}\"\nprint(repr(v6))",
+"'a\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (\"a\\\n!ls -l b\",\nf\"{x!r:>{w}}\\\n!pip install numpy\")\nprint(repr(v9))",
+"('a!ls -l b', '  1!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (\"#\" + \"\"\"\n%matplotlib inline\"\"\",\nu'a\\\n%timeit -n 1 f()')\nv6 = (f\"{x!r:>{w}}\\\n%%time\",\nu'a\\\n  %autoreload 2')\nv7 = (u'a\\\n!ls -l',\nb\"a\\\n!ls -l\")\nprint(repr(v0), repr(v6), repr(v7))",
+"('#\\n%matplotlib inline', 'a%timeit -n 1 f()') ('  1%%time', 'a  %autoreload 2') ('a!ls -l', b'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (f\"\"\"{\"\"\"x\n!pip install numpy\n\"\"\"}\"\"\",\nf\"{x!r:>{w}}\\\n%time x\")\nv5 = \"{}\"\\\n.format(1)\nv1 = (f\"{x!r:>{w}}\\\n!pip install numpy\",\nf\"a{1}\\\n%matplotlib inline\")\nprint(repr(v1), repr(v2), repr(v5))",
+"('  1!pip install numpy', 'a1%matplotlib inline') ('x\\n!pip install numpy\\n', '  1%time x') '1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = f\"{f'''{1}\n  %autoreload 2\n'''}\"\nprint(repr(v3))",
+"'1\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"{'''a\n%timeit -n 1 f()\n'''}\"\nv4 = r\"a\\\n%%time\"\nprint(repr(v4), repr(v8))",
+"'a\\\\\\n%%time' 'a\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (f\"{x!r:>{w}}\\\n%matplotlib inline\",\n'''it''s\n%timeit -n 1 f()''')\nprint(repr(v3))",
+"('  1%matplotlib inline', \"it''s\\n%timeit -n 1 f()\")\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (f\"{1 +\n2}{'''\n%%time\n'''}\",\n\"#\" + \"\"\"\n%matplotlib inline\"\"\")\nprint(repr(v8))",
+"('3\\n%%time\\n', '#\\n%matplotlib inline')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"%d\" % 3\nv7 = (f\"{'''a\n  %autoreload 2\n'''}\",\nf\"{'''a\n%timeit -n 1 f()\n'''}\")\nprint(repr(v4), repr(v7))",
+"'3' ('a\\n  %autoreload 2\\n', 'a\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (f\"{'''a\n  %autoreload 2\n'''}\",\nf\"{x!r:>{w}}\\\n  %autoreload 2\")\nv1 = f\"{1 +\n2}{'''\n%matplotlib inline\n'''}\"\nv1 = (u'a\\\n!pip install numpy',\nf\"{x!r:>{w}}\\\n  %autoreload 2\")\nprint(repr(v1), repr(v8))",
+"('a!pip install numpy', '  1  %autoreload 2') ('a\\n  %autoreload 2\\n', '  1  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"{x!r:>{w}}\\\n%time x\"\nv0 = f\"\"\"{1}\n!ls -l\n{2}\"\"\"\nv1 = (\"\"\"a\n!pip install numpy\n\"\"\",\n'''\n%matplotlib inline\n''')\nprint(repr(v0), repr(v1))",
+"'1\\n!ls -l\\n2' ('a\\n!pip install numpy\\n', '\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"\"\"{1}\n!pip install numpy\n{2}\"\"\"\nv2 = f\"\"\"{\"\"\"x\n%%time\n\"\"\"}\"\"\"\nprint(repr(v2), repr(v9))",
+"'x\\n%%time\\n' '1\\n!pip install numpy\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = ([5\n% 2],\nf\"{f'''{1}\n%timeit -n 1 f()\n'''}\")\nv2 = (f\"\"\"{1}\n  %autoreload 2\n{2}\"\"\",\n\"a\\\n%timeit -n 1 f() b\")\nprint(repr(v2), repr(v4))",
+"('1\\n  %autoreload 2\\n2', 'a%timeit -n 1 f() b') ([1], '1\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"{x!r:>{w}}\\\n%matplotlib inline\"\nv9 = f\"{'''a\n%matplotlib inline\n'''}\"\nprint(repr(v8), repr(v9))",
+"'  1%matplotlib inline' 'a\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = ('''\n%time x\n''',\n\"\"\"a\n%matplotlib inline\n\"\"\")\nprint(repr(v8))",
+"('\\n%time x\\n', 'a\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (5 \\\n% 3)\nv9 = f\"{1 +\n2}{'''\n%matplotlib inline\n'''}\"\nprint(repr(v4), repr(v9))",
+"2 '3\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"#\" + \"\"\"\n%matplotlib inline\"\"\"\nv1 = '''it''s\n%%time'''\nprint(repr(v0), repr(v1))",
+"'#\\n%matplotlib inline' \"it''s\\n%%time\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = '''it''s\n%timeit -n 1 f()'''\nprint(repr(v4))",
+"\"it''s\\n%timeit -n 1 f()\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"{x!r:>{w}}\\\n  %autoreload 2\"\nprint(repr(v9))",
+"'  1  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"#\" + \"\"\"\n%%time\"\"\"\nv8 = (5 \\\n% 3)\nprint(repr(v2), repr(v8))",
+"'#\\n%%time' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"a{1}\\\n  %autoreload 2\"\nv5 = ('''it''s\n!ls -l''',\nrb\"x\\\n%%time\")\nv4 = u'a\\\n  %autoreload 2'\nprint(repr(v4), repr(v5), repr(v9))",
+"'a  %autoreload 2' (\"it''s\\n!ls -l\", b'x\\\\\\n%%time') 'a1  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (\"#\" + \"\"\"\n%time x\"\"\",\n\"\\\\\")\nprint(repr(v4))",
+"('#\\n%time x', '\\\\')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = ('''it''s\n%matplotlib inline''',\nr\"a\\\n!ls -l\")\nprint(repr(v7))",
+"(\"it''s\\n%matplotlib inline\", 'a\\\\\\n!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"\"\"a\n%timeit -n 1 f()\n\"\"\"\nprint(repr(v2))",
+"'a\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{x!r:>{w}}\\\n%%time\"\nprint(repr(v1))",
+"'  1%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (f\"a{1}\\\n!ls -l\",\n(\"a\"\n\"b\"))\nprint(repr(v7))",
+"('a1!ls -l', 'ab')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{f'''{1}\n%time x\n'''}\"\nv7 = \"#\" + \"\"\"\n%matplotlib inline\"\"\"\nv8 = f\"{x!r:>{w}}\\\n!ls -l\"\nprint(repr(v1), repr(v7), repr(v8))",
+"'1\\n%time x\\n' '#\\n%matplotlib inline' '  1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"#\" + \"\"\"\n!pip install numpy\"\"\"\nv3 = f\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\"\nprint(repr(v3), repr(v7))",
+"'x\\n!ls -l\\n' '#\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"\"\"{\"\"\"x\n%time x\n\"\"\"}\"\"\"\nprint(repr(v1))",
+"'x\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"\"\"{1}\n%time x\n{2}\"\"\"\nv7 = (b\"a\\\n  %autoreload 2\",\n\"\"\"a\n%matplotlib inline\n\"\"\")\nprint(repr(v1), repr(v7))",
+"'1\\n%time x\\n2' (b'a  %autoreload 2', 'a\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (f\"{1 +\n2}{'''\n%matplotlib inline\n'''}\",\nf\"\"\"{1}\n%matplotlib inline\n{2}\"\"\")\nv8 = f\"a{1}\\\n!pip install numpy\"\nprint(repr(v5), repr(v8))",
+"('3\\n%matplotlib inline\\n', '1\\n%matplotlib inline\\n2') 'a1!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (5 \\\n% 3)\nv7 = \"{}\"\\\n.format(1)\nv7 = rb\"x\\\n%timeit -n 1 f()\"\nprint(repr(v7))",
+"b'x\\\\\\n%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = ('a\\\n!ls -l',\nu'a\\\n!ls -l')\nprint(repr(v4))",
+"('a!ls -l', 'a!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (f\"{'''a\n%timeit -n 1 f()\n'''}\",\nf\"{x!r:>{w}}\\\n%timeit -n 1 f()\")\nprint(repr(v7))",
+"('a\\n%timeit -n 1 f()\\n', '  1%timeit -n 1 f()')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (5 \\\n% 3)\nv4 = (b\"a\\\n%matplotlib inline\",\nb\"a\\\n%timeit -n 1 f()\")\nprint(repr(v2), repr(v4))",
+"2 (b'a%matplotlib inline', b'a%timeit -n 1 f()')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = f\"{1 +\n2}{'''\n!pip install numpy\n'''}\"\nv7 = \"#\" + \"\"\"\n%matplotlib inline\"\"\"\nv0 = \"\"\"a\n  %autoreload 2\n\"\"\"\nprint(repr(v0), repr(v5), repr(v7))",
+"'a\\n  %autoreload 2\\n' '3\\n!pip install numpy\\n' '#\\n%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"a{1}\\\n%time x\"\nv6 = '''it''s\n!ls -l'''\nv8 = f\"{1 +\n2}{'''\n%matplotlib inline\n'''}\"\nprint(repr(v6), repr(v7), repr(v8))",
+"\"it''s\\n!ls -l\" 'a1%time x' '3\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"#\" + \"\"\"\n!pip install numpy\"\"\"\nv1 = f\"{1 +\n2}{'''\n!ls -l\n'''}\"\nv8 = (\"\\\\\",\n'''\n%timeit -n 1 f()\n''')\nprint(repr(v1), repr(v2), repr(v8))",
+"'3\\n!ls -l\\n' '#\\n!pip install numpy' ('\\\\', '\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (5 \\\n% 3)\nprint(repr(v6))",
+"2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = \"\\\\\"\nprint(repr(v2))",
+"'\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (rb\"x\\\n!pip install numpy\",\nf\"{f'''{1}\n%matplotlib inline\n'''}\")\nv3 = r\"a\\\n%%time\"\nv9 = f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\"\nprint(repr(v3), repr(v9))",
+"'a\\\\\\n%%time' '3\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = r\"a\\\n%%time\"\nv1 = '''\n%matplotlib inline\n'''\nprint(repr(v0), repr(v1))",
+"'a\\\\\\n%%time' '\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"\"\"a\n%time x\n\"\"\"\nprint(repr(v0))",
+"'a\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = 'a\\\n%time x'\nprint(repr(v8))",
+"'a%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (f\"a{1}\\\n%matplotlib inline\",\nr\"a\\\n%matplotlib inline\")\nv4 = (\"%d\" % 3,\nf\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\")\nprint(repr(v0), repr(v4))",
+"('a1%matplotlib inline', 'a\\\\\\n%matplotlib inline') ('3', 'x\\n!ls -l\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"a\\\n%%time b\"\nprint(repr(v3))",
+"'a%%time b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{'''a\n  %autoreload 2\n'''}\"\nprint(repr(v7))",
+"'a\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (\"a\"\n\"b\")\nv9 = (f\"{x!r:>{w}}\\\n%time x\",\nf\"a{1}\\\n!pip install numpy\")\nv7 = '''\n%matplotlib inline\n'''\nprint(repr(v1), repr(v7), repr(v9))",
+"'ab' '\\n%matplotlib inline\\n' ('  1%time x', 'a1!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = b\"a\\\n%timeit -n 1 f()\"\nv4 = '''\n  %autoreload 2\n'''\nv7 = (\"#\" + \"\"\"\n%time x\"\"\",\nf\"{(1,\n2)}\")\nprint(repr(v4), repr(v5), repr(v7))",
+"'\\n  %autoreload 2\\n' b'a%timeit -n 1 f()' ('#\\n%time x', '(1, 2)')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (f\"{x!r:>{w}}\\\n  %autoreload 2\",\nrb\"x\\\n!ls -l\")\nv4 = 'a\\\n  %autoreload 2'\nprint(repr(v2), repr(v4))",
+"('  1  %autoreload 2', b'x\\\\\\n!ls -l') 'a  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (u'a\\\n!ls -l',\n\"%d\" % 3)\nprint(repr(v9))",
+"('a!ls -l', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (rb\"x\\\n%time x\",\n\"#\" + \"\"\"\n%time x\"\"\")\nv4 = (5 \\\n% 3)\nprint(repr(v0), repr(v4))",
+"(b'x\\\\\\n%time x', '#\\n%time x') 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"{x!r:>{w}}\\\n  %autoreload 2\",\nf\"\"\"{\"\"\"x\n!pip install numpy\n\"\"\"}\"\"\")\nprint(repr(v9))",
+"('  1  %autoreload 2', 'x\\n!pip install numpy\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (\"a\"\n\"b\")\nprint(repr(v1))",
+"'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = ('a\\\n!ls -l',\nu'a\\\n%timeit -n 1 f()')\nv6 = f\"{f'''{1}\n!ls -l\n'''}\"\nv4 = (rb\"x\\\n%matplotlib inline\",\nf\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\")\nprint(repr(v4), repr(v6), repr(v8))",
+"(b'x\\\\\\n%matplotlib inline', 'x\\n!ls -l\\n') '1\\n!ls -l\\n' ('a!ls -l', 'a%timeit -n 1 f()')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"\"\"{\"\"\"x\n%matplotlib inline\n\"\"\"}\"\"\"\nprint(repr(v2))",
+"'x\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (f\"\"\"{\"\"\"x\n!ls -l\n\"\"\"}\"\"\",\n'''\n%matplotlib inline\n''')\nv5 = f\"{f'''{1}\n!pip install numpy\n'''}\"\nprint(repr(v4), repr(v5))",
+"('x\\n!ls -l\\n', '\\n%matplotlib inline\\n') '1\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"a{1}\\\n  %autoreload 2\"\nprint(repr(v9))",
+"'a1  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"#\" + \"\"\"\n%timeit -n 1 f()\"\"\"\nv5 = \"{}\"\\\n.format(1)\nv9 = \"a\\\n  %autoreload 2 b\"\nprint(repr(v5), repr(v7), repr(v9))",
+"'1' '#\\n%timeit -n 1 f()' 'a  %autoreload 2 b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = r\"a\\\n%timeit -n 1 f()\"\nprint(repr(v1))",
+"'a\\\\\\n%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"a{1}\\\n%%time\"\nv5 = \"a\\\n!pip install numpy b\"\nv2 = r\"a\\\n%%time\"\nprint(repr(v2), repr(v5), repr(v7))",
+"'a\\\\\\n%%time' 'a!pip install numpy b' 'a1%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"a\\\n!ls -l b\",\nf\"\"\"{\"\"\"x\n%time x\n\"\"\"}\"\"\")\nv5 = f\"{f'''{1}\n%time x\n'''}\"\nv9 = rb\"x\\\n!pip install numpy\"\nprint(repr(v5), repr(v9))",
+"'1\\n%time x\\n' b'x\\\\\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = ((\"a\"\n\"b\"),\n[5\n% 2])\nprint(repr(v9))",
+"('ab', [1])\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (f\"a{1}\\\n%timeit -n 1 f()\",\n\"a\\\n!ls -l b\")\nprint(repr(v3))",
+"('a1%timeit -n 1 f()', 'a!ls -l b')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = rb\"x\\\n%timeit -n 1 f()\"\nprint(repr(v7))",
+"b'x\\\\\\n%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = 'a\\\n%timeit -n 1 f()'\nv6 = (\"a\\\n  %autoreload 2 b\",\n'''\n!ls -l\n''')\nv5 = \"\"\"a\n!pip install numpy\n\"\"\"\nprint(repr(v0), repr(v5), repr(v6))",
+"'a%timeit -n 1 f()' 'a\\n!pip install numpy\\n' ('a  %autoreload 2 b', '\\n!ls -l\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = '''it''s\n%timeit -n 1 f()'''\nprint(repr(v1))",
+"\"it''s\\n%timeit -n 1 f()\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (rb\"x\\\n  %autoreload 2\",\n(\"a\"\n\"b\"))\nv6 = \"\\\\\"\nprint(repr(v4), repr(v6))",
+"(b'x\\\\\\n  %autoreload 2', 'ab') '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = r\"a\\\n%matplotlib inline\"\nv7 = f\"a{1}\\\n%matplotlib inline\"\nprint(repr(v7), repr(v8))",
+"'a1%matplotlib inline' 'a\\\\\\n%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"%d\" % 3\nv9 = (5 \\\n% 3)\nprint(repr(v7), repr(v9))",
+"'3' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = [5\n% 2]\nv8 = (\"{}\"\\\n.format(1),\nf\"{(1,\n2)}\")\nv2 = \"#\" + \"\"\"\n%timeit -n 1 f()\"\"\"\nprint(repr(v2), repr(v8))",
+"'#\\n%timeit -n 1 f()' ('1', '(1, 2)')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n%%time\n\"\"\"\nprint(repr(v5))",
+"'a\\n%%time\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"\"\"{1}\n!pip install numpy\n{2}\"\"\"\nv9 = (f\"{1 +\n2}{'''\n!pip install numpy\n'''}\",\n[5\n% 2])\nprint(repr(v2), repr(v9))",
+"'1\\n!pip install numpy\\n2' ('3\\n!pip install numpy\\n', [1])\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = 'a\\\n  %autoreload 2'\nprint(repr(v1))",
+"'a  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"\"\"a\n%timeit -n 1 f()\n\"\"\",\n\"{}\"\\\n.format(1))\nprint(repr(v5))",
+"('a\\n%timeit -n 1 f()\\n', '1')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (b\"a\\\n  %autoreload 2\",\nf\"{f'''{1}\n%matplotlib inline\n'''}\")\nprint(repr(v5))",
+"(b'a  %autoreload 2', '1\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = '''it''s\n!pip install numpy'''\nprint(repr(v0))",
+"\"it''s\\n!pip install numpy\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (f\"{'''a\n  %autoreload 2\n'''}\",\nf\"{'''a\n%%time\n'''}\")\nprint(repr(v0))",
+"('a\\n  %autoreload 2\\n', 'a\\n%%time\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = (\"\"\"a\n!ls -l\n\"\"\",\n'a\\\n  %autoreload 2')\nv3 = (f\"{x!r:>{w}}\\\n%%time\",\n'a\\\n  %autoreload 2')\nv0 = r\"a\\\n!pip install numpy\"\nprint(repr(v0), repr(v3), repr(v6))",
+"'a\\\\\\n!pip install numpy' ('  1%%time', 'a  %autoreload 2') ('a\\n!ls -l\\n', 'a  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"\"\"{1}\n%matplotlib inline\n{2}\"\"\"\nprint(repr(v9))",
+"'1\\n%matplotlib inline\\n2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (f\"\"\"{1}\n!ls -l\n{2}\"\"\",\n(5 \\\n% 3))\nv2 = f\"a{1}\\\n%matplotlib inline\"\nv9 = (\"{}\"\\\n.format(1),\nf\"\"\"{1}\n%timeit -n 1 f()\n{2}\"\"\")\nprint(repr(v2), repr(v9))",
+"'a1%matplotlib inline' ('1', '1\\n%timeit -n 1 f()\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = ([5\n% 2],\n\"\"\"a\n%%time\n\"\"\")\nv8 = 'a\\\n!ls -l'\nprint(repr(v8), repr(v9))",
+"'a!ls -l' ([1], 'a\\n%%time\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = 'a\\\n%%time'\nprint(repr(v9))",
+"'a%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (5 \\\n% 3)\nv1 = \"a\\\n%timeit -n 1 f() b\"\nprint(repr(v1), repr(v7))",
+"'a%timeit -n 1 f() b' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = 'a\\\n%time x'\nprint(repr(v0))",
+"'a%time x'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"\"\"a\n!ls -l\n\"\"\",\nf\"a{1}\\\n!ls -l\")\nv1 = ([5\n% 2],\nrb\"x\\\n  %autoreload 2\")\nprint(repr(v1), repr(v7))",
+"([1], b'x\\\\\\n  %autoreload 2') ('a\\n!ls -l\\n', 'a1!ls -l')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (u'a\\\n  %autoreload 2',\nr\"a\\\n  %autoreload 2\")\nprint(repr(v8))",
+"('a  %autoreload 2', 'a\\\\\\n  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"%d\" % 3,\n(\"a\"\n\"b\"))\nprint(repr(v7))",
+"('3', 'ab')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"{1 +\n2}{'''\n  %autoreload 2\n'''}\"\nprint(repr(v8))",
+"'3\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = f\"a{1}\\\n!pip install numpy\"\nv4 = (f\"{f'''{1}\n  %autoreload 2\n'''}\",\nf\"\"\"{\"\"\"x\n%time x\n\"\"\"}\"\"\")\nprint(repr(v3), repr(v4))",
+"'a1!pip install numpy' ('1\\n  %autoreload 2\\n', 'x\\n%time x\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (f\"\"\"{\"\"\"x\n%%time\n\"\"\"}\"\"\",\nr\"a\\\n%%time\")\nprint(repr(v9))",
+"('x\\n%%time\\n', 'a\\\\\\n%%time')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"a{1}\\\n!pip install numpy\"\nprint(repr(v0))",
+"'a1!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"\"\"{\"\"\"x\n%matplotlib inline\n\"\"\"}\"\"\"\nprint(repr(v9))",
+"'x\\n%matplotlib inline\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n  %autoreload 2\n\"\"\"\nv3 = f\"a{1}\\\n  %autoreload 2\"\nprint(repr(v3), repr(v5))",
+"'a1  %autoreload 2' 'a\\n  %autoreload 2\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (f\"{x!r:>{w}}\\\n%matplotlib inline\",\n(\"a\"\n\"b\"))\nv4 = (\"\\\\\",\nf\"{(1,\n2)}\")\nprint(repr(v4))",
+"('\\\\', '(1, 2)')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = 'a\\\n!ls -l'\nv9 = [5\n% 2]\nprint(repr(v7), repr(v9))",
+"'a!ls -l' [1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = '''\n!ls -l\n'''\nv2 = \"\\\\\"\nprint(repr(v1), repr(v2))",
+"'\\n!ls -l\\n' '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = (f\"{x!r:>{w}}\\\n!ls -l\",\nf\"\"\"{1}\n%time x\n{2}\"\"\")\nv1 = \"\"\"a\n%%time\n\"\"\"\nprint(repr(v1), repr(v2))",
+"'a\\n%%time\\n' ('  1!ls -l', '1\\n%time x\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = (rb\"x\\\n%matplotlib inline\",\nu'a\\\n%time x')\nv7 = u'a\\\n%matplotlib inline'\nv9 = (5 \\\n% 3)\nprint(repr(v3), repr(v7), repr(v9))",
+"(b'x\\\\\\n%matplotlib inline', 'a%time x') 'a%matplotlib inline' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"{}\"\\\n.format(1)\nv7 = (b\"a\\\n%%time\",\n'''it''s\n%time x''')\nprint(repr(v4), repr(v7))",
+"'1' (b'a%%time', \"it''s\\n%time x\")\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = f\"{'''a\n%time x\n'''}\"\nv9 = ([5\n% 2],\n(\"a\"\n\"b\"))\nprint(repr(v8), repr(v9))",
+"'a\\n%time x\\n' ([1], 'ab')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"{}\"\\\n.format(1),\nf\"{'''a\n%timeit -n 1 f()\n'''}\")\nprint(repr(v5))",
+"('1', 'a\\n%timeit -n 1 f()\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = (u'a\\\n%time x',\n\"%d\" % 3)\nprint(repr(v1))",
+"('a%time x', '3')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (b\"a\\\n%%time\",\nr\"a\\\n  %autoreload 2\")\nv3 = f\"\"\"{1}\n%timeit -n 1 f()\n{2}\"\"\"\nprint(repr(v3), repr(v5))",
+"'1\\n%timeit -n 1 f()\\n2' (b'a%%time', 'a\\\\\\n  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = \"\"\"a\n!ls -l\n\"\"\"\nv4 = (\"a\\\n  %autoreload 2 b\",\n'''it''s\n!ls -l''')\nprint(repr(v4), repr(v5))",
+"('a  %autoreload 2 b', \"it''s\\n!ls -l\") 'a\\n!ls -l\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = \"%d\" % 3\nv9 = f\"{(1,\n2)}\"\nprint(repr(v4), repr(v9))",
+"'3' '(1, 2)'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = \"a\\\n%time x b\"\nprint(repr(v1))",
+"'a%time x b'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = f\"{'''a\n%time x\n'''}\"\nv1 = f\"a{1}\\\n%%time\"\nv2 = (rb\"x\\\n!ls -l\",\nu'a\\\n%matplotlib inline')\nprint(repr(v1), repr(v2), repr(v7))",
+"'a1%%time' (b'x\\\\\\n!ls -l', 'a%matplotlib inline') 'a\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (f\"a{1}\\\n%matplotlib inline\",\n\"\\\\\")\nv0 = r\"a\\\n%timeit -n 1 f()\"\nprint(repr(v0), repr(v4))",
+"'a\\\\\\n%timeit -n 1 f()' ('a1%matplotlib inline', '\\\\')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"{}\"\\\n.format(1)\nv4 = ((5 \\\n% 3),\nb\"a\\\n!pip install numpy\")\nprint(repr(v0), repr(v4))",
+"'1' (2, b'a!pip install numpy')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = \"\"\"a\n%matplotlib inline\n\"\"\"\nv6 = 'a\\\n!ls -l'\nprint(repr(v6))",
+"'a!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"%d\" % 3\nprint(repr(v3))",
+"'3'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = \"\"\"a\n%timeit -n 1 f()\n\"\"\"\nv0 = f\"{f'''{1}\n%timeit -n 1 f()\n'''}\"\nprint(repr(v0), repr(v1))",
+"'1\\n%timeit -n 1 f()\\n' 'a\\n%timeit -n 1 f()\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"\"\"{1}\n%matplotlib inline\n{2}\"\"\"\nv5 = rb\"x\\\n!pip install numpy\"\nprint(repr(v0), repr(v5))",
+"'1\\n%matplotlib inline\\n2' b'x\\\\\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv1 = f\"{x!r:>{w}}\\\n  %autoreload 2\"\nv4 = (\"a\"\n\"b\")\nprint(repr(v1), repr(v4))",
+"'  1  %autoreload 2' 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (\"\\\\\",\nf\"a{1}\\\n%%time\")\nv7 = f\"{'''a\n!pip install numpy\n'''}\"\nprint(repr(v5), repr(v7))",
+"('\\\\', 'a1%%time') 'a\\n!pip install numpy\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (\"\"\"a\n!pip install numpy\n\"\"\",\nf\"{'''a\n%matplotlib inline\n'''}\")\nv5 = (\"{}\"\\\n.format(1),\nu'a\\\n  %autoreload 2')\nprint(repr(v5), repr(v7))",
+"('1', 'a  %autoreload 2') ('a\\n!pip install numpy\\n', 'a\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = \"#\" + \"\"\"\n  %autoreload 2\"\"\"\nprint(repr(v0))",
+"'#\\n  %autoreload 2'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = \"{}\"\\\n.format(1)\nprint(repr(v3))",
+"'1'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (5 \\\n% 3)\nv6 = f\"{x!r:>{w}}\\\n%%time\"\nv5 = (\"a\"\n\"b\")\nprint(repr(v4), repr(v5), repr(v6))",
+"2 'ab' '  1%%time'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (u'a\\\n  %autoreload 2',\n[5\n% 2])\nprint(repr(v7))",
+"('a  %autoreload 2', [1])\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = (u'a\\\n!ls -l',\n(5 \\\n% 3))\nv4 = ('a\\\n  %autoreload 2',\nf\"\"\"{\"\"\"x\n%matplotlib inline\n\"\"\"}\"\"\")\nprint(repr(v0), repr(v4))",
+"('a!ls -l', 2) ('a  %autoreload 2', 'x\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = ((\"a\"\n\"b\"),\nf\"\"\"{1}\n%time x\n{2}\"\"\")\nv5 = '''it''s\n%time x'''\nprint(repr(v5), repr(v6))",
+"\"it''s\\n%time x\" ('ab', '1\\n%time x\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = (\"\\\\\",\nf\"\"\"{1}\n%%time\n{2}\"\"\")\nprint(repr(v9))",
+"('\\\\', '1\\n%%time\\n2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (5 \\\n% 3)\nv6 = f\"\"\"{\"\"\"x\n%timeit -n 1 f()\n\"\"\"}\"\"\"\nv8 = f\"a{1}\\\n!ls -l\"\nprint(repr(v6), repr(v8))",
+"'x\\n%timeit -n 1 f()\\n' 'a1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ((\"a\"\n\"b\"),\nf\"{'''a\n%matplotlib inline\n'''}\")\nprint(repr(v3))",
+"('ab', 'a\\n%matplotlib inline\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = (u'a\\\n%time x',\nb\"a\\\n  %autoreload 2\")\nprint(repr(v7))",
+"('a%time x', b'a  %autoreload 2')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = rb\"x\\\n!pip install numpy\"\nprint(repr(v7))",
+"b'x\\\\\\n!pip install numpy'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = \"\"\"a\n%time x\n\"\"\"\nv1 = ((5 \\\n% 3),\n[5\n% 2])\nprint(repr(v1), repr(v9))",
+"(2, [1]) 'a\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = 'a\\\n  %autoreload 2'\nv5 = '''it''s\n!pip install numpy'''\nv8 = (f\"{x!r:>{w}}\\\n!pip install numpy\",\n\"\"\"a\n  %autoreload 2\n\"\"\")\nprint(repr(v0), repr(v5), repr(v8))",
+"'a  %autoreload 2' \"it''s\\n!pip install numpy\" ('  1!pip install numpy', 'a\\n  %autoreload 2\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = f\"{x!r:>{w}}\\\n!ls -l\"\nv5 = f\"{x!r:>{w}}\\\n!ls -l\"\nv2 = (f\"{f'''{1}\n%%time\n'''}\",\nu'a\\\n%timeit -n 1 f()')\nprint(repr(v2), repr(v5), repr(v9))",
+"('1\\n%%time\\n', 'a%timeit -n 1 f()') '  1!ls -l' '  1!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = \"\\\\\"\nv3 = (\"\"\"a\n%time x\n\"\"\",\n\"#\" + \"\"\"\n%timeit -n 1 f()\"\"\")\nprint(repr(v3), repr(v7))",
+"('a\\n%time x\\n', '#\\n%timeit -n 1 f()') '\\\\'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv3 = ('a\\\n%time x',\nf\"{'''a\n!pip install numpy\n'''}\")\nprint(repr(v3))",
+"('a%time x', 'a\\n!pip install numpy\\n')\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = r\"a\\\n!pip install numpy\"\nv7 = '''it''s\n%matplotlib inline'''\nprint(repr(v6), repr(v7))",
+"'a\\\\\\n!pip install numpy' \"it''s\\n%matplotlib inline\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv7 = '''it''s\n%%time'''\nprint(repr(v7))",
+"\"it''s\\n%%time\"\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv9 = \"#\" + \"\"\"\n%timeit -n 1 f()\"\"\"\nprint(repr(v9))",
+"'#\\n%timeit -n 1 f()'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (u'a\\\n%%time',\n'''it''s\n%matplotlib inline''')\nprint(repr(v4))",
+"('a%%time', \"it''s\\n%matplotlib inline\")\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv6 = \"\"\"a\n%time x\n\"\"\"\nv8 = r\"a\\\n%matplotlib inline\"\nv7 = f\"\"\"{\"\"\"x\n%%time\n\"\"\"}\"\"\"\nprint(repr(v6), repr(v7), repr(v8))",
+"'a\\n%time x\\n' 'x\\n%%time\\n' 'a\\\\\\n%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv4 = (f\"\"\"{1}\n!pip install numpy\n{2}\"\"\",\nb\"a\\\n%%time\")\nv8 = (\"a\"\n\"b\")\nprint(repr(v4), repr(v8))",
+"('1\\n!pip install numpy\\n2', b'a%%time') 'ab'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv2 = f\"{'''a\n%time x\n'''}\"\nprint(repr(v2))",
+"'a\\n%time x\\n'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"{(1,\n2)}\"\nprint(repr(v0))",
+"'(1, 2)'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = u'a\\\n%matplotlib inline'\nv8 = [5\n% 2]\nprint(repr(v5), repr(v8))",
+"'a%matplotlib inline' [1]\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv5 = (f\"{(1,\n2)}\",\n\"#\" + \"\"\"\n%matplotlib inline\"\"\")\nv5 = u'a\\\n%matplotlib inline'\nprint(repr(v5))",
+"'a%matplotlib inline'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = 'a\\\n!ls -l'\nprint(repr(v8))",
+"'a!ls -l'\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv8 = (5 \\\n% 3)\nv7 = f\"{(1,\n2)}\"\nprint(repr(v7), repr(v8))",
+"'(1, 2)' 2\n"
+],
+[
+"x = 1\nw = 3\ndef f():\n    return 2\nv0 = f\"a{1}\\\n  %autoreload 2\"\nprint(repr(v0))",
+"'a1  %autoreload 2'\n"
+]
+]

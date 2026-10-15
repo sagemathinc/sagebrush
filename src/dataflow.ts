@@ -14,6 +14,7 @@ import { preparse } from "./sagepre";
 import { magmaToPython } from "./magma";
 import { matlabToPython } from "./matlab";
 import { ipythonSyntax } from "./help-syntax";
+import { expandMagics, codeParser } from "./magic-syntax";
 
 type Node = { _type: string; [field: string]: any };
 
@@ -458,9 +459,10 @@ class Visitor {
 export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" | "matlab"; strict?: boolean } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
   source = source.replaceAll(" ", " ");
-  // (IPython's obj? help lines and magics, as the notebook runs them; the
-  // code %time and %timeit run is analyzed as code)
-  if (opts.mode !== "magma" && opts.mode !== "matlab") source = ipythonSyntax(source, { analysis: true });
+  // (IPython's obj? help lines and magics, as the notebook runs them: the
+  // code %time and %timeit run is in the tree, %timeit's in its own function)
+  const ipython = opts.mode !== "magma" && opts.mode !== "matlab";
+  if (ipython) source = ipythonSyntax(source);
   if (opts.mode === "sage") source = preparse(source);
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
   else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");
@@ -468,6 +470,7 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   // and its own names (_m, _L, temporaries) start with _, the cell's own)
   else if (opts.mode === "matlab") source = matlabToPython(source, "<cell>", { cell: true }).replace(/^import _matlab as _m\n_m\.begin\([^\n]*\)\n/, "");
   const tree = parse(source, "exec") as Node;
+  if (ipython) expandMagics(tree, codeParser(opts.mode === "sage"));
   const handlers = exceptNames(tree);
   const injected = opts.mode === "sage" ? sageInjected(tree) : [];
   // (strict: exactly marimo's analysis, without our corrections for Python's

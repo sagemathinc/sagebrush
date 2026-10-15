@@ -15,7 +15,7 @@ import { initParser, compile, execModule, R, libDir, findModuleSource } from "./
 import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
-import { MAGIC_PRE, MAGIC_POST } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
@@ -225,6 +225,8 @@ function repl(main: any, quiet: boolean): Promise<number> {
   // (the session's own Python around each input: %autoreload's hooks)
   const host = R.newModule("__sagebrush_host__");
   host.__builtins__ = R.builtins;
+  // get_ipython(), as in a notebook
+  guarded(() => R.loader.exec(GET_IPYTHON, host, "exec", "<init>"));
   rl.setPrompt(ps1());
   rl.prompt();
   return new Promise((resolveExit) => {
@@ -254,7 +256,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
           }
         }
         guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
-        const code = guarded(() => R.loader.exec(ipythonSyntax(src, opts()) + "\n", main, "single", "<stdin>", opts()));
+        const code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
         guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
         flushFiles();
         R.stdout.flush();

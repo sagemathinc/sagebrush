@@ -1,6 +1,8 @@
 """IPython's magics in Sagebrush's notebooks, kernel and console: the
-supported ones, and an error for every other (src/magic-syntax.ts turns
-`%name args` into __pyjs_magic__("name", "args")).
+supported ones, and an error for every other.  src/magic-syntax.ts turns
+`%name args` into __pyjs_magic__("name", "args"), and puts the code that
+%time, %timeit, %%time and %%timeit run into the cell itself, calling API
+below.
 
 Line magics:
     %matplotlib [inline]      figures are shown inline already
@@ -8,18 +10,21 @@ Line magics:
     %autoreload [0|1|2|off|explicit|all|now], %aimport [mod, -mod]
     %time STATEMENT           the wall time (Sagebrush cannot measure CPU time)
     %timeit [-n N -r R -p P -q -o] STATEMENT
-Cell magics: %%time, %%timeit.
+Cell magics: %%time (nothing after it on its line), %%timeit [options] [setup].
 Shell commands (!cmd, %system, %pip, ...) are errors: Sagebrush runs in the
 browser and has no shell or package installer.
 
 %autoreload reloads the changed modules of your files before each cell, as
-importlib.reload does, and then (as IPython's does) updates the classes
-they defined in place, so existing instances get the new methods.  Python
-code in Sagebrush cannot replace a function's code, so where IPython updates
-an old function in place, Sagebrush rebinds the names in your notebook and
-in your other modules that referred to it; an old function kept elsewhere
-(in a list, a closure, a default argument) is not updated."""
+importlib.reload does.  A class keeps its identity: the class first loaded
+gets the new version's attributes, so existing instances, and every name
+bound to it, follow the new code (as IPython's does).  Unlike IPython,
+Sagebrush cannot change a function's code in place; it rebinds the names in
+your notebook and in your other modules that referred to the old function,
+but an old function kept elsewhere (in a list, a closure, a default
+argument) keeps its old code, and a class whose methods use super() without
+arguments (or __class__) is not updated: autoreload says so."""
 import math
+import re
 import sys
 import time
 
@@ -58,35 +63,40 @@ def _format_time(seconds, precision=3):
     return "%.*g %s" % (precision, seconds * (1, 1e3, 1e6, 1e9)[order], units[order])
 
 
-def _compile(code, name, mode, sage=False):
-    return __pyjs_compile_sage__(code, name, mode) if sage else compile(code, name, mode)
+class _Timer:
+    """`with` this: the wall time of the block, printed as it ends (also when it raises)."""
+
+    def __enter__(self):
+        self.t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        print("Wall time: %s" % _format_time(time.perf_counter() - self.t0))
+        return False
 
 
-def _compile_either(code, name, sage):
-    """(code object, whether it is an expression)"""
-    try:
-        return _compile(code, name, "eval", sage), True
-    except SyntaxError:
-        return _compile(code, name, "exec", sage), False
+def _time_value(f):
+    """%time EXPR: f() timed, its value returned (and so shown)."""
+    with _Timer():
+        return f()
 
 
-def _time(line, body=None, sage=False):
-    code = line if body is None else body
-    if not code.strip():
-        raise UsageError("%time needs a statement to time" if body is None else "%%time needs a cell body")
-    ns = _user_ns()
-    obj, is_expr = _compile_either(code, "<timed eval>" if body is None else "<cell>", sage)
-    t0 = time.perf_counter()
-    try:
-        out = eval(obj, ns) if is_expr else exec(obj, ns)
-    finally:
-        wall = time.perf_counter() - t0
-        print("Wall time: %s" % _format_time(wall))
-    return out if is_expr and body is None else None
+_kept = [None]
+
+
+def _keep(value):
+    """%%time: its body's last expression, shown after the time."""
+    _kept[0] = value
+
+
+def _take_kept():
+    v = _kept[0]
+    _kept[0] = None
+    return v
 
 
 class TimeitResult:
-    """%timeit -o's result: loops, repeat, best, worst, all_runs, average, stdev."""
+    """%timeit -o's result: loops, repeat, best, worst, all_runs, timings, average, stdev."""
 
     def __init__(self, loops, repeat, best, worst, all_runs, precision):
         self.loops = loops
@@ -103,16 +113,16 @@ class TimeitResult:
         p = self._precision
         runs = "%d run%s" % (self.repeat, "" if self.repeat == 1 else "s")
         loops = "{:,} loop{}".format(self.loops, "" if self.loops == 1 else "s")
-        if self.repeat == 1:
-            return "%s per loop (mean of %s, %s each)" % (_format_time(self.average, p), runs, loops)
         return "%s ± %s per loop (mean ± std. dev. of %s, %s each)" % (
             _format_time(self.average, p), _format_time(self.stdev, p), runs, loops)
 
-    __repr__ = lambda self: "<TimeitResult : " + str(self) + ">"
+    def __repr__(self):
+        return "<TimeitResult : " + str(self) + ">"
 
 
 def _timeit_options(line):
-    """(number, repeat, precision, quiet, ret, statement) from %timeit's line."""
+    """(number, repeat, precision, quiet, ret, rest) from %timeit's line
+    (src/magic-syntax.ts splitTimeit splits it the same way)."""
     number, repeat, precision, quiet, ret = 0, 7, 3, False, False
     words = line.split(" ")
     i = 0
@@ -121,14 +131,14 @@ def _timeit_options(line):
         if w == "":
             i += 1
             continue
-        if not w.startswith("-") or w == "-":
+        if not (len(w) > 1 and w[0] == "-" and w[1].isalpha()):
             break
         flag, val = w[:2], w[2:]
         if flag in ("-n", "-r", "-p"):
             if val == "":
                 i += 1
                 if i >= len(words):
-                    raise UsageError("%timeit: option %s needs a value" % flag)
+                    raise UsageError("%%timeit: option %s needs a value" % flag)
                 val = words[i]
             try:
                 v = int(val)
@@ -146,32 +156,29 @@ def _timeit_options(line):
             quiet = True
         elif w == "-o":
             ret = True
-        elif w.startswith("-") and len(w) > 1 and w[1].isalpha():
-            raise UsageError("%%timeit: option %s is not supported in Sagebrush (it has -n, -r, -p, -q and -o)" % w)
         else:
-            break
+            raise UsageError("%%timeit: option %s is not supported in Sagebrush (it has -n, -r, -p, -q and -o)" % w)
         i += 1
     return number, repeat, precision, quiet, ret, " ".join(words[i:])
 
 
-def _timeit(line, body=None, sage=False):
-    number, repeat, precision, quiet, ret, rest = _timeit_options(line)
-    setup, stmt = ("pass", rest) if body is None else (rest or "pass", body)
-    if not stmt.strip():
-        raise UsageError("%timeit needs a statement to time" if body is None else "%%timeit needs a cell body")
-    ns = _user_ns()
-    # the statement in a loop, in a function whose globals are the notebook's
-    lines = ["def __pyjs_timeit_inner(_it, _timer):"]
-    lines += ["    " + l for l in setup.split("\n")]
-    lines += ["    _t0 = _timer()", "    for _i in _it:"]
-    lines += ["        " + l for l in stmt.strip("\n").split("\n")]
-    lines += ["        pass", "    return _timer() - _t0"]
-    local = {}
-    exec(_compile("\n".join(lines) + "\n", "<magic-timeit>", "exec", sage), ns, local)
-    inner = local["__pyjs_timeit_inner"]
+def _timeit_run(opts, inner, top=False):
+    """%timeit: inner(iterable, clock) runs the statement once per item and
+    returns the time taken; as IPython, -n's default is the smallest power of
+    10 taking at least 0.2 s.  top: inner is the cell's own name, removed."""
+    try:
+        number, repeat, precision, quiet, ret, rest = _timeit_options(opts)
+        if rest:
+            raise UsageError("%%timeit: unexpected %r among its options" % rest)
+        return _measure(inner, number, repeat, precision, quiet, ret)
+    finally:
+        if top:
+            inner.__globals__.pop(inner.__name__, None)
+
+
+def _measure(inner, number, repeat, precision, quiet, ret):
     timer = time.perf_counter
     if number == 0:
-        # as IPython: the smallest power of 10 with a total of at least 0.2 s
         for k in range(10):
             number = 10 ** k
             if inner(range(number), timer) >= 0.2:
@@ -187,7 +194,76 @@ def _timeit(line, body=None, sage=False):
     return result if ret else None
 
 
+class API:
+    """What the expanded %time and %timeit code calls (__pyjs_magic_api__)."""
+    timer = _Timer
+    time_value = staticmethod(_time_value)
+    keep = staticmethod(_keep)
+    kept = staticmethod(_take_kept)
+    timeit_run = staticmethod(_timeit_run)
+
+
+# %time and %timeit by name (get_ipython().run_line_magic("time", ...), or a
+# magic whose code does not parse: the error is the compiler's), in the
+# notebook's namespace
+
+def _compile_either(code, name):
+    """(code object, whether it is an expression)"""
+    try:
+        return compile(code, name, "eval"), True
+    except SyntaxError:
+        return compile(code, name, "exec"), False
+
+
+def _time(line, body=None):
+    if body is not None and line.strip():
+        raise UsageError("Can't use statement directly after '%%time'!")
+    code = line if body is None else body
+    if not code.strip():
+        raise UsageError("%time needs a statement to time" if body is None else "%%time needs a cell body")
+    obj, is_expr = _compile_either(code, "<timed eval>" if body is None else "<cell>")
+    ns = _user_ns()
+    with _Timer():
+        out = eval(obj, ns) if is_expr else exec(obj, ns)
+    return out if is_expr and body is None else None
+
+
+def _timeit(line, body=None):
+    number, repeat, precision, quiet, ret, rest = _timeit_options(line)
+    setup, stmt = ("pass", rest) if body is None else (rest or "pass", body)
+    if not stmt.strip():
+        raise UsageError("%timeit needs a statement to time" if body is None else "%%timeit needs a cell body")
+    lines = ["def _pyjs_timeit(_pyjs_it, _pyjs_clock):"]
+    lines += ["    " + l for l in setup.split("\n")]
+    lines += ["    _pyjs_t0 = _pyjs_clock()", "    for _pyjs_i in _pyjs_it:"]
+    lines += ["        " + l for l in stmt.strip("\n").split("\n")]
+    lines += ["        pass", "    return _pyjs_clock() - _pyjs_t0"]
+    local = {}
+    exec(compile("\n".join(lines) + "\n", "<magic-timeit>", "exec"), _user_ns(), local)
+    return _measure(local["_pyjs_timeit"], number, repeat, precision, quiet, ret)
+
+
 # ---------------------------------------------------------------- autoreload
+
+_ZERO_ARG_SUPER = re.compile(r"\bsuper\s*\(\s*\)|\b__class__\b")
+
+
+def _class_source(src, name):
+    """The text of `class name` in a module's source (its indented block), or None."""
+    lines = src.split("\n")
+    head = re.compile(r"^(\s*)class\s+%s\b" % re.escape(name))
+    for i, l in enumerate(lines):
+        m = head.match(l)
+        if m:
+            ind = len(m.group(1))
+            out = [l]
+            for l2 in lines[i + 1:]:
+                if l2.strip() and len(l2) - len(l2.lstrip()) <= ind:
+                    break
+                out.append(l2)
+            return "\n".join(out)
+    return None
+
 
 class _Autoreload:
     def __init__(self):
@@ -195,7 +271,6 @@ class _Autoreload:
         self.mtimes = {}       # module name -> mtime when last loaded or seen
         self.aimported = set()
         self.skipped = set()
-        self.failed = {}
 
     @staticmethod
     def user_modules():
@@ -238,48 +313,59 @@ class _Autoreload:
                 continue
             self.mtimes[name] = t
             try:
-                _reload(m, f)
-                self.failed.pop(name, None)
+                notes = _reload(m, f)
             except BaseException:
                 import traceback
-                self.failed[name] = t
                 print("[autoreload of %s failed: %s]" % (name, traceback.format_exc()), file=sys.stderr)
+                continue
+            for n in notes:
+                print("[autoreload of %s: %s]" % (name, n), file=sys.stderr)
 
 
 def _reload(mod, path):
     """Run the module's file again in its namespace, as importlib.reload does,
-    then update what referred to its old classes and functions."""
+    then keep its classes (updated) and rebind names bound to its old
+    functions.  Returns notes on what could not be updated."""
     with open(path) as fh:
         src = fh.read()
     old = dict(mod.__dict__)
     exec(compile(src, path, "exec"), mod.__dict__)
+    notes = []
     functions = {}
     for k, before in old.items():
         after = mod.__dict__.get(k, before)
         if after is before:
             continue
-        if isinstance(before, type) and isinstance(after, type):
+        if isinstance(before, type) and isinstance(after, type) and getattr(after, "__module__", None) == mod.__name__:
+            body = _class_source(src, after.__name__)
+            if body is None or _ZERO_ARG_SUPER.search(body):
+                notes.append("class %s uses super() without arguments (or __class__), which Sagebrush cannot "
+                             "move to the existing class: its existing instances keep the old methods, and "
+                             "%s.%s is the new class" % (after.__name__, mod.__name__, k))
+                functions[id(before)] = (before, after)
+                continue
             _update_class(before, after)
-            mod.__dict__[k] = after
+            # (the class first loaded stays the module's: its instances and names follow)
+            mod.__dict__[k] = before
+            functions[id(after)] = (after, before)
         elif callable(before) and not isinstance(before, type):
             functions[id(before)] = (before, after)
-    if not functions:
-        return
-    # names bound to the old functions, in the notebook and in the user's modules
-    spaces = [_user_ns()] + [m.__dict__ for _, m, _ in _Autoreload.user_modules() if m is not mod]
-    for d in spaces:
-        for k, v in list(d.items()):
-            hit = functions.get(id(v))
-            if hit is not None and hit[0] is v:
-                d[k] = hit[1]
+    if functions:
+        # names bound to the old objects, in the notebook and in the user's modules
+        spaces = [_user_ns()] + [m.__dict__ for _, m, _ in _Autoreload.user_modules() if m is not mod]
+        for d in spaces:
+            for k, v in list(d.items()):
+                hit = functions.get(id(v))
+                if hit is not None and hit[0] is v:
+                    d[k] = hit[1]
+    return notes
 
 
 _SKIP_CLASS_ATTRS = {"__dict__", "__weakref__", "__module__", "__qualname__"}
 
 
 def _update_class(old, new):
-    """Give the old class the new one's attributes, so its instances (and the
-    names bound to it) behave as the new code says (IPython's update_class)."""
+    """Give the old class the new one's attributes (IPython's update_class)."""
     for k in list(old.__dict__):
         if k not in _SKIP_CLASS_ATTRS and k not in new.__dict__:
             try:
@@ -392,9 +478,8 @@ _NO_INSTALL = {"pip", "conda", "mamba", "micromamba", "uv"}
 _CELL = {"time": _time, "timeit": _timeit}
 
 
-def run_line_magic(name, line, sage=False):
-    """Run the line magic %name with its argument line (IPython's run_line_magic);
-    sage: the code of %time and %timeit is Sage's."""
+def run_line_magic(name, line):
+    """Run the line magic %name with its argument line (IPython's run_line_magic)."""
     if name in _NO_SHELL:
         _no_shell(line)
     if name in _NO_INSTALL:
@@ -403,10 +488,10 @@ def run_line_magic(name, line, sage=False):
     if f is None:
         raise UsageError("Line magic function `%%%s` not found (Sagebrush has %s)."
                          % (name, ", ".join("%" + k for k in sorted(_LINE))))
-    return f(line, sage=sage) if name in ("time", "timeit") else f(line)
+    return f(line)
 
 
-def run_cell_magic(name, line, body, sage=False):
+def run_cell_magic(name, line, body=None):
     """Run the cell magic %%name with its line and body (IPython's run_cell_magic)."""
     if name in _NO_SHELL:
         _no_shell(line)
@@ -414,7 +499,7 @@ def run_cell_magic(name, line, body, sage=False):
     if f is None:
         raise UsageError("Cell magic `%%%%%s` not found (Sagebrush has %s)."
                          % (name, ", ".join("%%" + k for k in sorted(_CELL))))
-    return f(line, body, sage)
+    return f(line, body if body is not None else "")
 
 
 def pre_run_cell():
