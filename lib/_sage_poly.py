@@ -431,6 +431,9 @@ def PolynomialRing(base, *args, **kwds):
     for a in args:
         if isinstance(a, int) and not isinstance(a, bool):
             n = int(a)
+        elif type(a).__name__ == "Rational":
+            # (PolynomialRing(QQ, 4/2, 'x') was a ring in a variable named 2)
+            n = a.__index__()
         elif a is not None and names is None:
             names = a
     order = kwds.get("order")

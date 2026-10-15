@@ -113,3 +113,15 @@ t('latex', lambda: [latex(latex(1/2)), latex(TexString('a_b')), latex([latex(x^2
 K = QuadraticField(2, 'a'); RK = K['x', 'y']
 t('coercion maps', lambda: [QQ['x', 'y'].has_coerce_map_from(int), RK.has_coerce_map_from(QQ), RK.has_coerce_map_from(QQ['x', 'y']), RK.has_coerce_map_from(ZZ['y']), Zmod(4)['x', 'y'].has_coerce_map_from(Zmod(12)['x', 'y']), Zmod(12)['x', 'y'].has_coerce_map_from(Zmod(4)), GF(9, 'b')['x', 'y'].has_coerce_map_from(GF(3)), GF(9, 'b')['x', 'y'].has_coerce_map_from(Zmod(12)['x']), GF(5)['x', 'y'].has_coerce_map_from(QQ), QQ['x', 'y'].has_coerce_map_from(float), QQ['x', 'y'].has_coerce_map_from(K), GF(3)['x', 'y'].has_coerce_map_from(GF(9, 'b'))])
 t('coerce', lambda: [RK.coerce(1/2), RK.coerce(QQ['x', 'y'].gen(1))])
+
+# an integral rational as an integer, as on master where 6/3 was an int
+L = [10, 20, 30, 40]
+t('as index', lambda: [list(range(6/3)), list(range(1, 8/2, 2/1)), L[4/2], L[-2/2], L[0:4/2], L[::4/2], 'abc'[2/2], (1, 2, 3)[4/2]])
+t('as count', lambda: [bin(6/3), hex(30/2), oct(16/2), chr(130/2), factorial(6/3), sum(range(8/2)), '%x' % (30/2)])
+t('list methods', lambda: [[1, 2, 3].pop(2/2), identity_matrix(3)[4/2, 4/2], vector([1, 2, 3])[4/2], (QQ['y'].gen()^2 + 3)[4/2]])
+for f in [lambda: range(5/2), lambda: L[3/2], lambda: bin(5/2)]:
+    t('not integral', f)
+t('dimensions', lambda: [matrix(QQ, 4/2, 4/2, 1), matrix(ZZ, 4/2, 2, [1, 2, 3, 4]), zero_matrix(QQ, 4/2, 2), QQ^(4/2), MatrixSpace(QQ, 4/2), PolynomialRing(QQ, 4/2, 'x'), GF(4/2), Zmod(6/2)])
+t('shifts', lambda: [(6/3) << 1, (8/2) >> 1, (5/2) << 1, (5/2) >> 1, 1 << (4/2), 16 >> (4/2), parent((6/3) << 1), parent(1 << (4/2))])
+t('pow', lambda: [pow(3, 4/2, 5), pow(2, 10)])
+t('pow rational base', lambda: pow(2/1, 3, 7))

@@ -2410,6 +2410,9 @@ def matrix(*args, **kwds):
             return _sage_padic.padic_matrix(pb, args[0])
     if args and args[0] in (sa.ZZ, sa.QQ):
         base, args = args[0], args[1:]
+    # dimensions that are integral rationals, as Sage takes them
+    # (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational)
+    args = tuple(int(a) if k < 2 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
     if base is None and args and not isinstance(args[0], (list, tuple, range)) and _is_parent(args[0]):
         # a ring this function does not know: never iterated (Zp's K[0],
         # K[1], ... would build polynomial rings forever)
