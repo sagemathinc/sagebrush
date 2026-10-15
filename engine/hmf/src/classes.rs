@@ -232,6 +232,7 @@ fn product(alg: &QuatAlg, xs: &[BElt], ys: &[BElt], m: &BigInt) -> Lattice {
     let mut gens = vec![];
     for x in xs {
         for y in ys {
+            sagebrush_interrupt::check();
             gens.push(alg.mul(x, y));
         }
     }
@@ -271,9 +272,11 @@ pub(crate) struct Budget {
 /// 420 ns natively and 1550 ns in wasm32-wasip1 (Node's WASI). So the
 /// budget runs out within about 1 s natively and 4 s in wasm. That is about
 /// 5 times the most any class set of the 121 fields with d <= 200 uses
-/// (475084 nodes, at d = 195). The searches also check the interrupt flag
-/// (the Stop button) every 4096 nodes, and the enumeration of classes once
-/// per neighbour.
+/// (475084 nodes, at d = 195). The searches also call
+/// sagebrush_interrupt::check() at every node, and so do the exact LLL at
+/// every step and the enumeration of classes at every neighbour: check()
+/// asks the wasm host on every 1024th call, so the Stop button is seen
+/// within milliseconds (measured by tests/wasm-stop.mjs).
 pub(crate) const MAX_NODES: u64 = 2_500_000;
 /// Vectors kept by one search.
 const MAX_RESULTS: usize = 100_000;
@@ -541,9 +544,7 @@ fn lll_exact(g: &[Vec<BigInt>]) -> Result<Vec<Vec<BigInt>>, String> {
     let mut steps = 0u64;
     while k < n {
         steps += 1;
-        if steps % 64 == 0 {
-            sagebrush_interrupt::check();
-        }
+        sagebrush_interrupt::check();
         if steps > 1_000_000 {
             return Err("internal error: LLL did not terminate".into());
         }
@@ -1025,6 +1026,30 @@ mod tests {
         assert!(r.is_err());
         let s = t.elapsed().as_secs_f64();
         println!("{} nodes exhausted in {:.3} s ({:.1} ns per node)", NODES, s, s * 1e9 / NODES as f64);
+    }
+
+    /// Run in wasm by tests/wasm-stop.mjs, which answers the host's
+    /// interrupt poll with Stop after a delay: a search of up to MAX_NODES
+    /// nodes, which must notice it and trap.
+    #[test]
+    #[ignore]
+    fn stop_search() {
+        let f = QuadField::new(5).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let one = QFrac::one();
+        let b = Budget::new(MAX_NODES);
+        let r = short_vectors(o.alg(), o.basis(), &one, 1 << 40, false, &b, &mut |_| false);
+        println!("not interrupted: {:?}", r.map(|v| v.len()));
+    }
+
+    /// As stop_search, for a whole class set (Q(sqrt 79), 69 classes).
+    #[test]
+    #[ignore]
+    fn stop_class_set() {
+        let f = QuadField::new(79).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let r = ClassSet::new(&o);
+        println!("not interrupted: {:?}", r.map(|c| c.len()));
     }
 
     #[test]

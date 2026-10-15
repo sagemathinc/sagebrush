@@ -320,6 +320,9 @@ impl Lattice {
             r
         });
         for g in gens {
+            // cancellable: the HNF of a long list of generators is the main
+            // work outside the lattice searches
+            sagebrush_interrupt::check();
             let mut v = g.at_den(&den);
             for i in 0..8 {
                 if v[i].is_zero() {
