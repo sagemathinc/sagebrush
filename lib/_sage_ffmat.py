@@ -1108,13 +1108,14 @@ def matrix(base, *args, **kwds):
         [0 1 2]
         [3 4 0]
     """
+    from _sage_matrix import _bounded_list, _bounded_rows
     if not args:
         return FFMatrix(base, [], 0)
     if len(args) == 1:
         rows = args[0]
         if isinstance(rows, FFMatrix):
             return FFMatrix(base, rows._rows, rows.ncols())
-        rows = [list(r) for r in rows]
+        rows = _bounded_rows(rows)
         return FFMatrix(base, rows, len(rows[0]) if rows else 0)
     if len(args) == 2 and isinstance(args[1], (list, tuple)) and args[1] and isinstance(args[1][0], (list, tuple)):
         m = int(args[0])
@@ -1124,9 +1125,9 @@ def matrix(base, *args, **kwds):
     n = int(args[1]) if len(args) > 1 and not isinstance(args[1], (list, tuple, range)) else m
     entries = args[2] if len(args) > 2 else (args[1] if len(args) == 2 and isinstance(args[1], (list, tuple, range)) else 0)
     if isinstance(entries, (list, tuple, range)):
-        e = list(entries)
+        e = _bounded_list(entries, max(m * n, m))
         if e and isinstance(e[0], (list, tuple)):
-            return FFMatrix(base, e, n)
+            return FFMatrix(base, _bounded_rows(e, max(m * n, m)), n)
         if len(e) != m * n:
             raise ValueError("entries has the wrong length")
         return FFMatrix(base, [e[i * n:(i + 1) * n] for i in range(m)], n)

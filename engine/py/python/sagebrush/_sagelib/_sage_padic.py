@@ -1262,6 +1262,57 @@ def _is_padic_ring(R):
     return isinstance(R, pAdicGeneric_)
 
 
+# Limits (the arithmetic is entry by entry in Python): entries of one
+# matrix, multiplications of one product or power, bits of an exponent.
+# Beyond them NotImplementedError, never a hang.
+_PADIC_MATRIX_MAX_ENTRIES = 1 << 16
+_PADIC_MATRIX_MAX_WORK = 1 << 18
+_PADIC_MATRIX_MAX_EXPONENT_BITS = 4096
+
+
+def _matrix_dim(v, what):
+    """An exact non-negative integer dimension (2.9 and -1 are refused, as
+    by Sage)."""
+    if isinstance(v, float):
+        raise TypeError("the number of %s must be an integer, not %r" % (what, v))
+    try:
+        n = _operator.index(v)
+    except TypeError:
+        raise TypeError("the number of %s must be an integer, not %r" % (what, v))
+    if n < 0:
+        raise ArithmeticError("the number of %s must be non-negative, not %d" % (what, n))
+    return n
+
+
+def _check_entries(m, n):
+    if m * n > _PADIC_MATRIX_MAX_ENTRIES:
+        raise NotImplementedError("a %d x %d matrix over the p-adics exceeds sagebrush's limit of %d entries" % (m, n, _PADIC_MATRIX_MAX_ENTRIES))
+
+
+def _check_work(w, what):
+    if w > _PADIC_MATRIX_MAX_WORK:
+        raise NotImplementedError("%s over the p-adics needs about %d multiplications, beyond sagebrush's limit of %d" % (what, w, _PADIC_MATRIX_MAX_WORK))
+
+
+def _scalar_parent(B, c):
+    """(P, c in P) for a matrix over B with the scalar c: Sage's coercion,
+    (the pushout of B and c's parent: the same prime; integers stay in B, a
+    rational moves Zp to Qp, as Sage's pushout with QQ); other scalars are
+    refused."""
+    if isinstance(c, pAdicCappedRelativeElement):
+        if c._parent._p != B._p:
+            raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (B, c._parent))
+        P = _pushout(B, c._parent)
+        return P, P(c)
+    if isinstance(c, int) or type(c).__name__ == "Integer":
+        return B, B(c)
+    if isinstance(c, _F) or type(c).__name__ == "Rational":
+        q = _F(c.numerator, c.denominator)
+        P = B if B._field else B.fraction_field()
+        return P, P(q)
+    raise NotImplementedError("the scalar %r with a matrix over %r is not available in sagebrush yet" % (c, B))
+
+
 class PadicMatrix:
     """A dense matrix over Zp or Qp.
 
@@ -1279,9 +1330,19 @@ class PadicMatrix:
         sage: B.det(), B.trace()
         (4 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + O(5^5), O(5^2))
 
-    Elimination decides pivots on inexact entries, so it is refused here.
-    Rows, vectors, other bases, and scalars outside the ring are refused as
-    well (Sage computes all of these)::
+    Matrices and scalars over other p-adic rings of the same prime combine
+    as p-adic numbers do, over the pushout of the rings (a field if one is,
+    the larger cap), each entry keeping its own precision::
+
+        sage: Z = matrix(Zp(5, 4), 2, 2, [1, 5, 25, 7]); (A*Z).parent()
+        Full MatrixSpace of 2 by 2 dense matrices over 5-adic Field with capped relative precision 5
+        sage: Z * (1/5)
+        [      5^-1 + O(5^3)          1 + O(5^4)]
+        [         5 + O(5^5) 2*5^-1 + 1 + O(5^3)]
+
+    Elimination decides pivots on inexact entries, so it is refused here,
+    as are rows and vectors (Sage computes all of these).  Matrices, products
+    and powers beyond fixed sizes are refused rather than left to run::
 
         sage: A.rank()  # sagebrush only
         Traceback (most recent call last):
@@ -1295,20 +1356,32 @@ class PadicMatrix:
         Traceback (most recent call last):
         ...
         NotImplementedError: rows, slices and vectors of a matrix over 5-adic Field with capped relative precision 5 are not available in sagebrush yet
-        sage: matrix(Zp(5, 4), 2, 2, [1, 2, 3, 4]) * (1/5)  # sagebrush only
+        sage: A^(3/2)
         Traceback (most recent call last):
         ...
-        NotImplementedError: the scalar 1/5 with a matrix over 5-adic Ring with capped relative precision 4 is not available in sagebrush yet
+        NotImplementedError: non-integral exponents not supported
+        sage: matrix(K, 300, 300)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: a 300 x 300 matrix over the p-adics exceeds sagebrush's limit of 65536 entries
+        sage: A^(2^5000)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: an exponent of 5001 bits exceeds sagebrush's limit of 4096 for matrices over the p-adics
     """
 
     __hash__ = None
 
     def __init__(self, base, rows, ncols=None):
+        # (rows: lists, already read; entries converted into base: integers,
+        # rationals and p-adic numbers of the same prime, as Sage converts)
         self._base = base
-        self._rows = [[base(x) for x in r] for r in rows]
-        self._ncols = ncols if ncols is not None else (len(self._rows[0]) if self._rows else 0)
-        if any(len(r) != self._ncols for r in self._rows):
+        ncols = ncols if ncols is not None else (len(rows[0]) if rows else 0)
+        if any(len(r) != ncols for r in rows):
             raise ValueError("the rows of a matrix must all have the same length")
+        _check_entries(len(rows), ncols)
+        self._rows = [[base(x) for x in r] for r in rows]
+        self._ncols = ncols
 
     def _new(self, rows, ncols=None):
         return PadicMatrix(self._base, rows, self._ncols if ncols is None else ncols)
@@ -1380,59 +1453,64 @@ class PadicMatrix:
     def is_zero(self):
         return all(x.is_zero() for r in self._rows for x in r)
 
-    # ---- arithmetic
-    def _same(self, o):
-        """o as a matrix over this ring, None if it is not one."""
-        if isinstance(o, PadicMatrix):
-            if o._base != self._base:
-                raise NotImplementedError("combining matrices over %r and %r is not available in sagebrush yet" % (self._base, o._base))
-            return o
-        return None
+    # ---- arithmetic: Sage's coercion, as for p-adic numbers.  Two matrices
+    # (or a matrix and a p-adic scalar) of the same prime are combined over
+    # the pushout of their rings (a field if one is, the larger cap: each
+    # entry keeps its own precision); different primes are a TypeError.
+    def _over(self, P):
+        return self if P is self._base else PadicMatrix(P, self._rows, self._ncols)
 
-    def _scalar(self, c):
-        try:
-            return self._base(c)
-        except (TypeError, ValueError, ZeroDivisionError):
-            raise NotImplementedError("the scalar %r with a matrix over %r is not available in sagebrush yet" % (c, self._base))
+    def _common(self, o, op):
+        if o._base._p != self._base._p:
+            raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), o.parent()))
+        P = _pushout(self._base, o._base)
+        return self._over(P), o._over(P)
 
     def _scalar_matrix(self, c):
+        """c (in self's ring) times the identity."""
         if not self.is_square():
             raise TypeError("a scalar can only be added to a square matrix")
-        c = self._scalar(c)
         z = self._base(0)
         return self._new([[c if i == j else z for j in range(self._ncols)] for i in range(self.nrows())])
 
+    def _with_scalar(self, c):
+        """(self over P, c times the identity over P)."""
+        P, c = _scalar_parent(self._base, c)
+        a = self._over(P)
+        return a, a._scalar_matrix(c)
+
     def __add__(self, o):
-        m = self._same(o)
-        if m is None:
-            m = self._scalar_matrix(o)
-        if m.dimensions() != self.dimensions():
+        if isinstance(o, PadicMatrix):
+            a, m = self._common(o, "+")
+        else:
+            a, m = self._with_scalar(o)
+        if m.dimensions() != a.dimensions():
             raise TypeError("unsupported operand parent(s) for +: '%r' and '%r'" % (self.parent(), m.parent()))
-        return self._new([[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, m._rows)])
+        return a._new([[x + y for x, y in zip(r, t)] for r, t in zip(a._rows, m._rows)])
 
     __radd__ = __add__
 
     def __neg__(self):
-        return self._new([[-a for a in r] for r in self._rows])
+        return self._new([[-x for x in r] for r in self._rows])
 
     def __sub__(self, o):
-        m = self._same(o)
-        if m is None:
-            m = self._scalar_matrix(o)
-        return self + (-m)
+        if isinstance(o, PadicMatrix):
+            a, m = self._common(o, "-")
+        else:
+            a, m = self._with_scalar(o)
+        if m.dimensions() != a.dimensions():
+            raise TypeError("unsupported operand parent(s) for -: '%r' and '%r'" % (self.parent(), m.parent()))
+        return a._new([[x - y for x, y in zip(r, t)] for r, t in zip(a._rows, m._rows)])
 
     def __rsub__(self, o):
-        return (-self) + o
+        a, m = self._with_scalar(o)
+        return a._new([[y - x for x, y in zip(r, t)] for r, t in zip(a._rows, m._rows)])
 
-    def __mul__(self, o):
-        m = self._same(o)
-        if m is None:
-            if type(o).__name__ in ("Vector", "FFVector", "SeriesVector", "Matrix", "FFMatrix"):
-                raise TypeError("a matrix over %r times %s is not available in sagebrush yet" % (self._base, type(o).__name__))
-            c = self._scalar(o)
-            return self._new([[a * c for a in r] for r in self._rows])
+    def _product(self, m):
+        """self m, both over one ring (at most the work limit)."""
         if self._ncols != m.nrows():
             raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), m.parent()))
+        _check_work(self.nrows() * self._ncols * m._ncols, "this product")
         out = []
         for r in self._rows:
             row = []
@@ -1444,24 +1522,44 @@ class PadicMatrix:
             out.append(row)
         return self._new(out, m._ncols)
 
+    def __mul__(self, o):
+        if isinstance(o, PadicMatrix):
+            a, m = self._common(o, "*")
+            return a._product(m)
+        if type(o).__name__ in ("Vector", "FFVector", "SeriesVector", "Matrix", "FFMatrix"):
+            raise TypeError("a matrix over %r times %s is not available in sagebrush yet" % (self._base, type(o).__name__))
+        P, c = _scalar_parent(self._base, o)
+        a = self._over(P)
+        return a._new([[x * c for x in r] for r in a._rows])
+
     def __rmul__(self, o):
-        c = self._scalar(o)
-        return self._new([[c * a for a in r] for r in self._rows])
+        P, c = _scalar_parent(self._base, o)
+        a = self._over(P)
+        return a._new([[c * x for x in r] for r in a._rows])
 
     def __pow__(self, e):
-        e = int(e)
+        """A non-negative integer power (binary powering, within the work
+        limit); a non-integral exponent is refused, as by Sage."""
+        if isinstance(e, float) or not (isinstance(e, int) or type(e).__name__ == "Integer"
+                                        or ((isinstance(e, _F) or type(e).__name__ == "Rational") and e.denominator == 1)):
+            raise NotImplementedError("non-integral exponents not supported")
+        e = int(e.numerator) if (isinstance(e, _F) or type(e).__name__ == "Rational") else _operator.index(e)
         if not self.is_square():
             raise ArithmeticError("self must be a square matrix")
         if e < 0:
             raise NotImplementedError("the inverse of a matrix over %r is not available in sagebrush yet" % (self._base,))
-        r = self._scalar_matrix(1)
+        n = self.nrows()
+        if e.bit_length() > _PADIC_MATRIX_MAX_EXPONENT_BITS:
+            raise NotImplementedError("an exponent of %d bits exceeds sagebrush's limit of %d for matrices over the p-adics" % (e.bit_length(), _PADIC_MATRIX_MAX_EXPONENT_BITS))
+        _check_work(2 * e.bit_length() * n ** 3, "this power")
+        r = self._scalar_matrix(self._base(1))
         b = self
         while e:
             if e & 1:
-                r = r * b
+                r = r._product(b)
             e >>= 1
             if e:
-                b = b * b
+                b = b._product(b)
         return r
 
     def __invert__(self):
@@ -1471,16 +1569,14 @@ class PadicMatrix:
         raise NotImplementedError("division of a matrix over %r is not available in sagebrush yet" % (self._base,))
 
     def __eq__(self, o):
-        if isinstance(o, PadicMatrix):
-            if o._base != self._base:
-                return False
-            m = o
-        else:
-            try:
-                m = self._scalar_matrix(o)
-            except TypeError:
-                return False
-        return m.dimensions() == self.dimensions() and all(a == b for r, s in zip(self._rows, m._rows) for a, b in zip(r, s))
+        try:
+            if isinstance(o, PadicMatrix):
+                a, m = self._common(o, "==")
+            else:
+                a, m = self._with_scalar(o)
+        except (TypeError, NotImplementedError):
+            return False
+        return m.dimensions() == a.dimensions() and all(x == y for r, t in zip(a._rows, m._rows) for x, y in zip(r, t))
 
     def __ne__(self, o):
         return not self == o
@@ -1563,7 +1659,9 @@ class PadicMatrixSpace:
     """
 
     def __init__(self, base, nrows, ncols):
-        self._base, self._nrows, self._ncols = base, int(nrows), int(ncols)
+        self._base = base
+        self._nrows, self._ncols = _matrix_dim(nrows, "rows"), _matrix_dim(ncols, "columns")
+        _check_entries(self._nrows, self._ncols)
 
     def __repr__(self):
         return "Full MatrixSpace of %d by %d dense matrices over %r" % (self._nrows, self._ncols, self._base)
@@ -1607,29 +1705,37 @@ class PadicMatrixSpace:
 
 def padic_matrix(base, *args):
     """matrix(K, rows), matrix(K, m, n, entries or scalar), matrix(K, n, entries)
-    for K = Zp(p) or Qp(p) (lib/_sage_matrix.py dispatches here)."""
+    for K = Zp(p) or Qp(p) (lib/_sage_matrix.py dispatches here).  Inputs
+    are read boundedly (at most m n + 1 entries when the shape is given);
+    entries are converted into K (integers, rationals, p-adic numbers of
+    the same prime, as Sage converts them)."""
+    from _sage_matrix import _bounded_list, _bounded_rows
     args = list(args)
     _int = lambda v: isinstance(v, int) or type(v).__name__ == "Integer"
+    lim = _PADIC_MATRIX_MAX_ENTRIES
     if not args:
         return PadicMatrix(base, [], 0)
-    if len(args) == 1 and not _int(args[0]):
+    if len(args) == 1 and not _int(args[0]) and not isinstance(args[0], float):
         rows = args[0]
         if isinstance(rows, PadicMatrix):
             return PadicMatrix(base, rows._rows, rows.ncols())
-        rows = [list(r) for r in rows]
+        rows = _bounded_rows(rows, lim)
         return PadicMatrix(base, rows, len(rows[0]) if rows else 0)
-    m = int(args[0])
+    m = _matrix_dim(args[0], "rows")
     if len(args) == 1:
         n, ent = m, 0
-    elif _int(args[1]):
-        n = int(args[1])
+    elif _int(args[1]) or isinstance(args[1], float):
+        n = _matrix_dim(args[1], "columns")
         ent = args[2] if len(args) > 2 else 0
     else:
         n, ent = None, args[1]
-    if isinstance(ent, (list, tuple, range)) or (hasattr(ent, "__iter__") and not isinstance(ent, (str, pAdicCappedRelativeElement))):
-        e = list(ent)
+    if n is not None:
+        _check_entries(m, n)
+    if isinstance(ent, (list, tuple, range)) or (hasattr(ent, "__iter__") and not isinstance(ent, (str, pAdicCappedRelativeElement))) \
+            or (hasattr(ent, "__getitem__") and not isinstance(ent, (str, pAdicCappedRelativeElement))):
+        e = _bounded_list(ent, max(m * n, m) if n is not None else lim)
         if e and isinstance(e[0], (list, tuple)):
-            rows = [list(r) for r in e]
+            rows = _bounded_rows(e, max(m * n, m) if n is not None else lim)
             if len(rows) != m:
                 raise ValueError("entries do not fill a matrix with %d rows" % m)
             return PadicMatrix(base, rows, n if n is not None else (len(rows[0]) if rows else 0))

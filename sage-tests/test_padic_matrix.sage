@@ -104,3 +104,41 @@ C[0, 1] = 25
 t('setitem', lambda: (C, A))
 t('det 1x1', lambda: matrix(K, 1, 1, [1/25]).det())
 t('charpoly 1x1', lambda: matrix(K, 1, 1, [1/25]).charpoly())
+# review: the coercion lattice (as for p-adic numbers: the pushout of the
+# rings, the same prime), integral exponents, exact dimensions
+Q5 = Qp(5, 5); Z4 = Zp(5, 4); Q8 = Qp(5, 8)
+A = matrix(Q5, 2, 2, [1, 2, 3, 4]); ZA = matrix(Z4, 2, 2, [1, 5, 25, 7]); B8 = matrix(Q8, 2, 2, [1/5, 2, 3, 4])
+for name, f in [('A*ZA', lambda: A*ZA), ('ZA*A', lambda: ZA*A), ('A+ZA', lambda: A + ZA), ('ZA-A', lambda: ZA - A),
+                ('A*B8', lambda: A*B8), ('B8+A', lambda: B8 + A), ('ZA*Zp(5,6)', lambda: ZA*matrix(Zp(5, 6), 2, 2, [1, 2, 3, 4])),
+                ('A*Z4(2)', lambda: A*Z4(2)), ('Z4(2)*A', lambda: Z4(2)*A), ('ZA*Q5(2)', lambda: ZA*Q5(2)), ('ZA*Q8(1/5)', lambda: ZA*Q8(1/5)),
+                ('ZA*(1/5)', lambda: ZA*(1/5)), ('(1/5)*ZA', lambda: (1/5)*ZA), ('ZA+1/5', lambda: ZA + 1/5), ('1/5-ZA', lambda: 1/5 - ZA),
+                ('ZA*(2/3)', lambda: ZA*(2/3)), ('ZA+Q8(1)', lambda: ZA + Q8(1)),
+                ('matrix(Q5, ZA)', lambda: matrix(Q5, ZA)), ('matrix(Z4, A)', lambda: matrix(Z4, A)), ('matrix(Z4, B8)', lambda: matrix(Z4, B8)),
+                ('MS(Q5)(ZA)', lambda: MatrixSpace(Q5, 2)(ZA)), ('MS(Z4)(B8)', lambda: MatrixSpace(Z4, 2)(B8)),
+                ('nobase mixed', lambda: matrix([[Q5(1), Z4(2)], [Q8(3), 4]])), ('nobase Z 1/5', lambda: matrix([[Z4(1), 1/5]])),
+                ('matrix(Q5, [[Z4(2), Q8(1/5)]])', lambda: matrix(Q5, [[Z4(2), Q8(1/5)]])),
+                ('A == ZA', lambda: (A == ZA, A == matrix(Z4, A), matrix(Z4, A) == A)),
+                ('A^(4/2)', lambda: A^(4/2)), ('A^Integer(3)', lambda: A^Integer(3))]:
+    try:
+        X = f()
+        print(name, '::', X.parent() if hasattr(X, 'parent') else '', '::', X)
+    except Exception as e:
+        print(name, '::', type(e).__name__)
+t('A^(3/2)', lambda: A^(3/2))
+t('A^2.9', lambda: A^2.9)
+t('A^2.0', lambda: A^2.0)
+t('A*Qp(7)', lambda: A*matrix(Qp(7, 5), 2, 2, [1, 2, 3, 4]))
+t('A+Qp(7)(1)', lambda: A + Qp(7, 5)(1))
+t('mixed primes', lambda: matrix([[Q5(1), Qp(7)(1)]]))
+t('Q7 entry', lambda: matrix(Q5, [[Qp(7)(1)]]))
+t('Zp neg val', lambda: matrix(Z4, [[Q5(1/5)]]))
+t('zero -1', lambda: zero_matrix(Q5, -1, 2))
+t('MS -1', lambda: MatrixSpace(Q5, -1, 2))
+t('2.9 rows', lambda: matrix(Q5, 2.9, 2, 0))
+t('2 x 2.0', lambda: matrix(Q5, 2, 2.0, 0))
+t('identity -1', lambda: identity_matrix(Q5, -1))
+t('rows gen', lambda: matrix(Q5, (r for r in [[1, 2], [3, 4]])))
+t('entries gen', lambda: matrix(Q5, 2, 2, (i for i in range(4))))
+t('entries range', lambda: matrix(Q5, 2, 2, range(4)))
+t('too many', lambda: matrix(Q5, 2, 2, range(5)))
+t('too few', lambda: matrix(Q5, 2, 2, range(3)))
