@@ -127,6 +127,20 @@ export interface BoardHost {
 
 // (its stylesheet, once a page, first: the page's own rules win; it goes
 // with the last board unmounted)
+// Find's marked words: one highlight for the page ("sb-find", board.css),
+// made of every mounted board's own ranges, so that two boards don't take
+// each other's, and a board destroyed takes only its own (CORR-8CE-2)
+const findRanges = new Map<object, Range[]>();
+function setFindRanges(owner: object, ranges: Range[] | null) {
+  const reg = (CSS as any).highlights, H = (globalThis as any).Highlight;
+  if (ranges?.length) findRanges.set(owner, ranges);
+  else findRanges.delete(owner);
+  if (!reg || !H) return;
+  const all = [...findRanges.values()].flat();
+  if (all.length) reg.set("sb-find", new H(...all));
+  else reg.delete("sb-find");
+}
+
 let mounted = 0;
 function addStyle() {
   mounted++;
@@ -1338,6 +1352,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // page, in view, outlined, the words marked; Esc closes it
   const findBar = $("find"), findQ = $("findq") as HTMLInputElement;
   let found: FindEntry[] = [], foundAt = -1, findGen = 0;
+  // (this board's own part of the page's highlight: gone with it)
+  const findOwner = {};
+  offs.push(() => setFindRanges(findOwner, null));
   const indexes = new WeakMap<BoardDoc, FindEntry[]>();
   const findDoc = () => viewing ?? doc;
   const index = () => { const d = findDoc()!; let x = indexes.get(d); if (!x) indexes.set(d, (x = findIndex(d))); return x; };
@@ -1362,7 +1379,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   function unmark() {
     board.setFound(null);
-    (CSS as any).highlights?.delete("sb-find");
+    setFindRanges(findOwner, null);
   }
   // (as it is typed: the first item on the page shown or after it, else the first)
   function findNow() {
@@ -1411,7 +1428,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!reg || !H || g !== findGen) return;
     const el = board.element(id);
     if (!el) { if (tries > 0) requestAnimationFrame(() => markFound(id, g, tries - 1)); return; }
-    reg.set("sb-find", new H(...textRanges(el, findQ.value)));
+    setFindRanges(findOwner, textRanges(el, findQ.value));
   }
   on(window, "keydown", (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && doc && mine() && !presenting) {

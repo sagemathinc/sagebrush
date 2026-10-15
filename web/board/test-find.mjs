@@ -159,6 +159,24 @@ try {
   check(st.says === "1 of 3" && st.page === 0, "...and Enter goes on from the match it left: " + JSON.stringify(st));
   await escape();
 
+  // two boards on one page: each its own marked words in the page's one
+  // highlight; one destroyed takes its own, and only its own (CORR-8CE-2)
+  await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
+  await sleep(300);
+  await ev(`import('/board/board.js').then((m) => { const div = document.createElement('div'); div.id = 'second'; div.style.cssText = 'position:fixed;left:0;bottom:0;width:640px;height:360px'; document.body.append(div); window.__b2 = m.mountBoard(div, { ...m.host, store: undefined, address: undefined }); return window.__b2.agent.load(${JSON.stringify({ title: "Second", nodes: [{ id: "p", title: "pear and apple", x: 0, y: 0, w: 260 }] })}); }).then(() => 1)`);
+  await sleep(500);
+  const findIn = (root, q) => ev(`(() => { const f = document.querySelector('${root} [data-sbb=findq]'); f.value = ${JSON.stringify(q)}; f.dispatchEvent(new Event('input')); return 1; })()`);
+  await findIn("#board", "apple");
+  await sleep(800);
+  await findIn("#second", "pear");
+  await sleep(800);
+  const owners = () => ev("(() => { const h = CSS.highlights.get('sb-find'); const rs = h ? [...h] : []; return { first: rs.filter((r) => document.getElementById('board').contains(r.startContainer)).length, second: rs.filter((r) => document.getElementById('second')?.contains(r.startContainer)).length, detached: rs.filter((r) => !document.contains(r.startContainer)).length }; })()");
+  const both = await owners();
+  check(both.first > 0 && both.second > 0 && both.detached === 0, "two boards: each one's marked words in the highlight: " + JSON.stringify(both));
+  await ev("window.__b2.destroy().then(() => (document.getElementById('second').remove(), 1))");
+  await sleep(300);
+  const after = await owners();
+  check(after.first === both.first && after.second === 0 && after.detached === 0, "one destroyed: its own gone, the other's kept, nothing detached: " + JSON.stringify(after));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
