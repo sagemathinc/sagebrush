@@ -176,6 +176,11 @@ pub(crate) fn enumerate_limited(b: &[V8], g: &[[i128; 8]; 8], bound: i128, nodes
             return None;
         }
         *nodes -= 1;
+        // cancellable (Ctrl-C, or the page's interrupt in wasm): one relaxed
+        // load every 4096 nodes
+        if *nodes % 4096 == 0 {
+            sagebrush_interrupt::check();
+        }
         x[i] += 1;
         if x[i] > upper[i] {
             i += 1;
