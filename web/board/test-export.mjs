@@ -191,7 +191,36 @@ try {
       check(!(await ev("window.__pwn")), `${what}, ${how}: something of the file ran: __pwn = ${await ev("window.__pwn")}`);
     }
   }
-  check(!errors.length, "errors: " + errors.join(" | "));
+
+  // a file refused for what it says (its format, its ids): what it said is
+  // shown as text, never as Markdown, so no picture of it is fetched and no
+  // link of it made (SEC-36E-1; JSON as well as a board as HTML)
+  const PROBE = "![probe](https://example.invalid/leak)";
+  const REFUSED = [
+    ["a JSON board whose format is Markdown", JSON.stringify({ format: PROBE, nodes: [] }), "its format is"],
+    ["a board as HTML whose format is Markdown", `<!doctype html><html><head>\n${GEN}</head><body>${docTag(JSON.stringify({ format: PROBE, nodes: [] }).replace(/</g, "\\u003c"))}</body></html>`, "its format is"],
+    ["a board whose ids are Markdown links", JSON.stringify({ nodes: [{ id: "[x](javascript:window.__pwn=7)" }, { id: "[x](javascript:window.__pwn=7)" }] }), "[x](javascript:window.__pwn=7)"],
+  ];
+  requests = [];
+  for (const how of ["picked", "dropped"]) {
+    for (const [what, text, says] of REFUSED) {
+      await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => (window.__pwn = 0, 1))`);
+      if (how === "picked") {
+        const f = join(dir, "refused.json");
+        writeFileSync(f, text);
+        await pick(f);
+      } else {
+        await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(text)}], "refused.json", { type: "application/json" })); document.querySelector(".board").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); return 1; })()`);
+      }
+      await until("/could not be shown/.test(document.querySelector('[data-sbb=say]').textContent)", 5000).catch(() => {});
+      await sleep(300);
+      const said = await ev("(() => { const e = document.querySelector('[data-sbb=say]'); return { text: e.textContent, markup: e.querySelectorAll('img, a, code, em').length, strong: e.querySelector('strong')?.textContent }; })()");
+      check(said.markup === 0 && said.strong === "This board could not be shown:" && said.text.includes(says) && (what.includes("format") ? said.text.includes(PROBE) : true), `${what}, ${how}: refused, what it said shown as text: ` + JSON.stringify(said));
+      check(!(await ev("window.__pwn")), `${what}, ${how}: something of the file ran`);
+    }
+  }
+  check(!requests.some((u) => u.includes("example.invalid")), "no picture a refused file names is fetched: " + requests.filter((u) => u.includes("example.invalid")).join(", "));
+  check(!errors.filter((e) => !/example\.invalid/.test(e)).length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
   if (errors.length) fails.push("page errors: " + errors.join(" | "));
