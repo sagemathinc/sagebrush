@@ -65,13 +65,19 @@ def _err(s, why):
 def walk(s, emit, size):
     """interpret s; emit(text, state) for each run of text in one state:
     {size (px), rise (px, up), bold, italic (True, False or None: as the
-    text's own), color (#rrggbb or None), font (or None)}"""
+    text's own), color (#rrggbb or None), font (or None), stack}.  stack is
+    the scripts the run is in, outermost first, as (id, part): a subscript
+    and a superscript on the same base, one right after the other (x_1^2,
+    x^2_1), are one id, parts 0 and 1, drawn at the same place (stacked, as
+    Octave draws them); any other script is an id of its own, part 0"""
     s = str(s)
     n = len(s)
-    st = {"size": float(size), "rise": 0.0, "bold": None, "italic": None, "color": None, "font": None}
-    stack = []  # (state, closes a script) at each open brace
+    st = {"size": float(size), "rise": 0.0, "bold": None, "italic": None, "color": None, "font": None, "stack": ()}
+    stack = []  # (state, the script it closes or None) at each open brace
     buf = []
-    pending = []  # scripts of one character or symbol: (state to restore)
+    pending = []  # scripts of one character or symbol: (state to restore, script)
+    ids = [0]
+    last = [None]  # the script that ended last: (where, kind, id, level)
 
     def flush():
         if buf:
@@ -87,20 +93,31 @@ def walk(s, emit, size):
             _err(s, "\\%s's argument has no closing brace" % what)
         return s[i + 1:j], j + 1
 
-    def script(kind):
-        # a superscript or subscript: smaller, raised or lowered
+    def script(kind, at):
+        # a superscript or subscript: smaller, raised or lowered; the other
+        # kind's partner when that one ended just here, on the same base
         flush()
+        level = (len(stack), len(pending))
+        prev = last[0]
+        if prev and prev[0] == at and prev[1] != kind and prev[3] == level:
+            sid, part = prev[2], 1
+        else:
+            ids[0] += 1
+            sid, part = ids[0], 0
         old = dict(st)
         st["rise"] += (SUP if kind == "^" else SUB) * st["size"]
         st["size"] *= SCRIPT
-        return old
+        st["stack"] = old["stack"] + ((sid, part),)
+        return old, (kind, sid, level)
 
     def end_char_script():
         # (after the one character or symbol a script raised)
         while pending:
             flush()
+            old, info = pending.pop()
             st.clear()
-            st.update(pending.pop())
+            st.update(old)
+            last[0] = (i, info[0], info[1], info[2])
 
     i = 0
     while i < n:
@@ -178,12 +195,12 @@ def walk(s, emit, size):
         elif c in "^_":
             if i + 1 >= n:
                 _err(s, "%s with nothing after it" % c)
-            old = script(c)
+            old, info = script(c, i)
             if s[i + 1] == "{":
-                stack.append((old, True))
+                stack.append((old, info))
                 i += 2
             else:
-                pending.append(old)
+                pending.append((old, info))
                 i += 1
                 if s[i] in "{}^_":
                     _err(s, "%s%s: a superscript or subscript of a markup character" % (c, s[i]))
@@ -193,16 +210,18 @@ def walk(s, emit, size):
                     end_char_script()
         elif c == "{":
             flush()
-            stack.append((dict(st), False))
+            stack.append((dict(st), None))
             i += 1
         elif c == "}":
             if not stack:
                 _err(s, "a closing brace with no opening one")
             flush()
-            old, _ = stack.pop()
+            old, info = stack.pop()
             st.clear()
             st.update(old)
             i += 1
+            if info:
+                last[0] = (i, info[0], info[1], info[2])
             end_char_script()
         else:
             buf.append(c)
@@ -238,13 +257,36 @@ def _num(v):
     return ("%.2f" % v).rstrip("0").rstrip(".") or "0"
 
 
+WIDTH = 0.55  # (a character's width, of its font size: Sagebrush's estimate, for stacked scripts)
+
+
 def svg(s, size):
-    """s as SVG tspans, in a <text> of font size size (px)"""
+    """s as SVG tspans, in a <text> of font size size (px).  A stacked pair's
+    second script goes back by the first's width (estimated), and the text
+    after the pair goes on from the wider one"""
+    items = []
+    walk(s, lambda t, st: items.append((t, st)), size)
+    width = {}
+    for t, st in items:
+        for key in st["stack"]:
+            width[key] = width.get(key, 0.0) + len(t) * WIDTH * st["size"]
     out = []
     at = [0.0]
+    prev = [()]
 
     def emit(t, st):
         a = []
+        was, now = dict(prev[0]), dict(st["stack"])
+        dx = 0.0
+        for sid, part in prev[0]:
+            if part == 1 and sid not in now:
+                dx += max(0.0, width[(sid, 0)] - width[(sid, 1)])
+        for sid, part in st["stack"]:
+            if part == 1 and was.get(sid) != 1:
+                dx -= width[(sid, 0)]
+        prev[0] = st["stack"]
+        if abs(dx) > 1e-6:
+            a.append('dx="%s"' % _num(dx))
         if abs(st["size"] - size) > 1e-6:
             a.append('font-size="%s"' % _num(st["size"]))
         if abs(st["rise"] - at[0]) > 1e-6:
@@ -259,22 +301,30 @@ def svg(s, size):
         if st["font"]:
             a.append('font-family="%s"' % _esc(st["font"]))
         out.append("<tspan %s>%s</tspan>" % (" ".join(a), _esc(t)) if a else _esc(t))
-    walk(s, emit, size)
+    for t, st in items:
+        emit(t, st)
     return "".join(out)
 
 
-def runs(s):
+def runs(s, base):
     """s for the 3-D viewer's scene: its text when it has no markup's effect,
-    else runs {t: text, s: size and r: rise (of the text's own size), b, i,
-    c: #rrggbb, f: font}"""
+    else runs {t: text, s: size and r: rise (of the text's own size, base
+    pixels in the viewer: a \\fontsize's points become pixels as in the SVG),
+    b, i, c: #rrggbb, f: font, j: the stacked pairs it is in, [id, part]}"""
+    items = []
+    walk(s, lambda t, st: items.append((t, st)), float(base))
+    paired = {sid for t, st in items for sid, part in st["stack"] if part == 1}
     out = []
 
     def emit(t, st):
         r = {"t": t}
-        if abs(st["size"] - 1) > 1e-9:
-            r["s"] = round(st["size"], 4)
+        if abs(st["size"] - base) > 1e-9:
+            r["s"] = round(st["size"] / base, 4)
         if abs(st["rise"]) > 1e-9:
-            r["r"] = round(st["rise"], 4)
+            r["r"] = round(st["rise"] / base, 4)
+        j = [[sid, part] for sid, part in st["stack"] if sid in paired]
+        if j:
+            r["j"] = j
         for k, key in (("bold", "b"), ("italic", "i")):
             if st[k] is not None:
                 r[key] = st[k]
@@ -283,7 +333,8 @@ def runs(s):
         if st["font"]:
             r["f"] = st["font"]
         out.append(r)
-    walk(s, emit, 1.0)
+    for t, st in items:
+        emit(t, st)
     if all(len(r) == 1 for r in out):
         return "".join(r["t"] for r in out)
     return out

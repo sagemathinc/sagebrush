@@ -416,7 +416,14 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - `$` is a dollar sign (the shim's matplotlib `$...$` math is not used
     for MATLAB's figures: the shim's `markup` option);
   - scripts are 0.7 of their base's size, raised 0.385 or lowered 0.245 of
-    it (Sagebrush's choice); the 3-D view gets the same runs of styled text.
+    it (Sagebrush's choice); a subscript and a superscript on one base,
+    one right after the other (`x_1^2`, `x^2_1`), are stacked at the same
+    place, as Octave draws them (in the SVG the second goes back by the
+    first's estimated width, 0.55 of its size a character, Sagebrush's
+    estimate; the 3-D view stacks them exactly);
+  - the 3-D view gets the same runs of styled text, their sizes relative to
+    the viewer's own text sizes, so that a `\fontsize` is the same size
+    in points there as in the SVG.
 - **Contours:** contour lines come from marching squares (saddle cells are
   split by the centre's value), oriented with the higher values on the left
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`

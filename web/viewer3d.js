@@ -407,7 +407,9 @@
 
   // a scene's text: a string, or runs (MATLAB's TeX markup, lib/_matlab_tex.py):
   // {t: text, s: size and r: rise (of the text's own size), b: bold, i: italic,
-  // c: #rrggbb, f: font}, as spans (textContent, and style properties only)
+  // c: #rrggbb, f: font, j: the stacked script pairs it is in, [id, part],
+  // outermost first}, as spans (textContent, and style properties only).  A
+  // pair's two parts share one grid cell: drawn at the same place (x_1^2)
   function setRich(el, v) {
     if (el.sbRich === v) return;
     el.sbRich = v;
@@ -416,17 +418,43 @@
       return;
     }
     el.textContent = "";
-    for (const r of v) {
-      const sp = document.createElement("span"), size = r.s ?? 1;
-      sp.textContent = r.t;
-      if (r.s !== undefined) sp.style.fontSize = size + "em";
-      if (r.r) { sp.style.position = "relative"; sp.style.top = -r.r / size + "em"; }
-      if (r.b !== undefined) sp.style.fontWeight = r.b ? "bold" : "normal";
-      if (r.i !== undefined) sp.style.fontStyle = r.i ? "italic" : "normal";
-      if (sceneColor(r.c)) sp.style.color = r.c;
-      if (r.f) sp.style.fontFamily = r.f;
-      el.appendChild(sp);
+    appendRuns(el, v, 0);
+  }
+  function appendRuns(el, runs, level) {
+    for (let k = 0; k < runs.length;) {
+      const r = runs[k], g = Array.isArray(r.j) ? r.j[level] : null;
+      if (!g) {
+        el.appendChild(runSpan(r));
+        k++;
+        continue;
+      }
+      // (a pair at this level: its consecutive runs, by part, one cell each, over each other)
+      const parts = [[], []];
+      while (k < runs.length && Array.isArray(runs[k].j) && runs[k].j[level]?.[0] === g[0]) {
+        parts[runs[k].j[level][1] === 1 ? 1 : 0].push(runs[k]);
+        k++;
+      }
+      const box = document.createElement("span");
+      box.style.display = "inline-grid";
+      for (const part of parts) {
+        const cell = document.createElement("span");
+        cell.style.gridArea = "1 / 1";
+        appendRuns(cell, part, level + 1);
+        box.appendChild(cell);
+      }
+      el.appendChild(box);
     }
+  }
+  function runSpan(r) {
+    const sp = document.createElement("span"), size = r.s ?? 1;
+    sp.textContent = r.t;
+    if (r.s !== undefined) sp.style.fontSize = size + "em";
+    if (r.r) { sp.style.position = "relative"; sp.style.top = -r.r / size + "em"; }
+    if (r.b !== undefined) sp.style.fontWeight = r.b ? "bold" : "normal";
+    if (r.i !== undefined) sp.style.fontStyle = r.i ? "italic" : "normal";
+    if (sceneColor(r.c)) sp.style.color = r.c;
+    if (r.f) sp.style.fontFamily = r.f;
+    return sp;
   }
 
   // ---- a scene is untrusted data (a saved document's, from anywhere): it
@@ -489,8 +517,19 @@
     const rich = (v, max, what) => {
       if (typeof v === "string") return str(v, max, what);
       if (!Array.isArray(v) || v.length > LIMITS.runs) no("has a malformed " + what);
-      // (a span each, whatever its text: counted over the whole scene)
-      spans += v.length;
+      // (a span each, whatever its text, and three for each stacked pair (a
+      // box and its two cells, as appendRuns makes them): counted over the
+      // whole scene)
+      const pairs = new Set();
+      for (const r of v) {
+        if (!given(r?.j)) continue;
+        if (!Array.isArray(r.j) || r.j.length > 8) no("has a malformed " + what);
+        r.j.forEach((g, level) => {
+          if (!Array.isArray(g) || g.length !== 2 || !Number.isInteger(g[0]) || g[0] < 1 || g[0] > 1e6 || (g[1] !== 0 && g[1] !== 1)) no("has a malformed " + what);
+          pairs.add(level + ":" + g[0]);
+        });
+      }
+      spans += v.length + 3 * pairs.size;
       if (spans > LIMITS.spans) no("has more than " + LIMITS.spans + " runs of styled text");
       let len = 0;
       for (const r of v) {
