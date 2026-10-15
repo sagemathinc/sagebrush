@@ -28,3 +28,16 @@ for (const f of gallery) {
     assert.match(s.stdout, /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"[\s\S]*<\/svg>\n$/);
   });
 }
+
+test("the gallery: a grid holds plots only or none (a grid's cells are all as tall as its tallest item, so one plot among short items leaves gaps)", () => {
+  const draws = (code: string) => /\bplot\(|\bplt\.|\bhist\(/.test(code);
+  for (const f of gallery) {
+    const d = JSON.parse(readFileSync(examples + f, "utf8"));
+    for (const p of d.pages ?? [d]) {
+      if ((p.layout ?? d.layout) !== "grid") continue;
+      const code = (p.nodes ?? []).filter((n: any) => typeof n.code === "string");
+      const n = code.filter((x: any) => draws(x.code)).length;
+      assert.ok(n === 0 || n === code.length, `${f}: a grid with ${n} plot(s) among ${code.length} code items`);
+    }
+  }
+});

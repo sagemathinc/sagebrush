@@ -4,59 +4,88 @@
  "title": "Calculus in Sage",
  "mode": "sage",
  "intro": "Symbolic calculus: derivatives, integrals, series, limits, a sum and a differential equation, and a plot. One item defines the variable $x$; the others read it.",
- "layout": "grid",
- "columns": 3,
  "nodes": [
   {
-   "id": "var",
-   "title": "The variable",
-   "code": "x = var('x')"
+   "id": "calculus",
+   "kind": "group",
+   "title": "Derivatives, integrals, series",
+   "layout": "column",
+   "x": 0,
+   "y": 0,
+   "children": [
+    {
+     "id": "var",
+     "title": "The variable",
+     "code": "x = var('x')",
+     "w": 380
+    },
+    {
+     "id": "derivative",
+     "title": "A derivative",
+     "text": "$\\frac{d}{dx}\\, e^x \\sin x$",
+     "code": "diff(exp(x) * sin(x), x)",
+     "w": 380
+    },
+    {
+     "id": "integral",
+     "title": "An integral",
+     "text": "$\\int_0^\\infty x^2 e^{-x}\\, dx = \\Gamma(3)$",
+     "code": "integrate(x^2 * exp(-x), x, 0, oo)",
+     "w": 380
+    },
+    {
+     "id": "taylor",
+     "title": "A Taylor polynomial",
+     "text": "Of $\\cos x$ at $0$, to degree $8$.",
+     "code": "T = taylor(cos(x), x, 0, 8)\nT",
+     "w": 380
+    }
+   ]
   },
   {
-   "id": "derivative",
-   "title": "A derivative",
-   "text": "$\\frac{d}{dx}\\, e^x \\sin x$",
-   "code": "diff(exp(x) * sin(x), x)"
-  },
-  {
-   "id": "integral",
-   "title": "An integral",
-   "text": "$\\int_0^\\infty x^2 e^{-x}\\, dx = \\Gamma(3)$",
-   "code": "integrate(x^2 * exp(-x), x, 0, oo)"
-  },
-  {
-   "id": "taylor",
-   "title": "A Taylor polynomial",
-   "text": "Of $\\cos x$ at $0$, to degree $8$.",
-   "code": "T = taylor(cos(x), x, 0, 8)\nT"
-  },
-  {
-   "id": "limit",
-   "title": "A limit",
-   "text": "$\\lim_{x \\to 0} \\frac{\\sin x}{x}$",
-   "code": "limit(sin(x) / x, x=0)"
-  },
-  {
-   "id": "basel",
-   "title": "The Basel problem",
-   "text": "$\\sum_{n \\ge 1} 1/n^2$ (Euler, 1734)",
-   "code": "n = var('n')\nsum(1 / n^2, n, 1, oo)"
-  },
-  {
-   "id": "ode",
-   "title": "A differential equation",
-   "text": "$y' + y = 0$, $y(0) = 1$",
-   "code": "y = function('y')(x)\ndesolve(diff(y, x) + y == 0, y, ics=[0, 1])"
-  },
-  {
-   "id": "roots",
-   "title": "An equation",
-   "code": "solve(x^2 - 2*x - 3 == 0, x)"
+   "id": "more",
+   "kind": "group",
+   "title": "Limits, sums, equations",
+   "layout": "column",
+   "x": 488,
+   "y": 0,
+   "children": [
+    {
+     "id": "limit",
+     "title": "A limit",
+     "text": "$\\lim_{x \\to 0} \\frac{\\sin x}{x}$",
+     "code": "limit(sin(x) / x, x=0)",
+     "w": 380
+    },
+    {
+     "id": "basel",
+     "title": "The Basel problem",
+     "text": "$\\sum_{n \\ge 1} 1/n^2$ (Euler, 1734)",
+     "code": "n = var('n')\nsum(1 / n^2, n, 1, oo)",
+     "w": 380
+    },
+    {
+     "id": "ode",
+     "title": "A differential equation",
+     "text": "$y' + y = 0$, $y(0) = 1$",
+     "code": "y = function('y')(x)\ndesolve(diff(y, x) + y == 0, y, ics=[0, 1])",
+     "w": 380
+    },
+    {
+     "id": "roots",
+     "title": "An equation",
+     "code": "solve(x^2 - 2*x - 3 == 0, x)",
+     "w": 380
+    }
+   ]
   },
   {
    "id": "plot",
    "title": "$\\cos x$ and its Taylor polynomial",
-   "code": "plot(cos(x), (x, -5, 5)) + plot(T, (x, -5, 5), color='red', ymin=-2, ymax=2)"
+   "code": "plot(cos(x), (x, -5, 5)) + plot(T, (x, -5, 5), color='red', ymin=-2, ymax=2)",
+   "x": 976,
+   "y": 0,
+   "w": 420
   }
  ],
  "steps": [
