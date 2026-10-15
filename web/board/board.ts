@@ -12,7 +12,7 @@
 
 import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
-import { ICON_NAME } from "./doc";
+import { ICON_NAME, GROUP_PAD, GROUP_TITLE } from "./doc";
 
 /** A page's backdrop (doc.ts BoardPage's slide and background). */
 export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
@@ -895,28 +895,25 @@ export class Board {
       }
     }
     if (far) {
-      // groups' titles over their members, as large as their groups allow
-      // (between 11 and 22 pixels on screen), with a halo
+      // groups' titles, every one, in the band above its members the layout
+      // keeps for it: one size for each level of nesting (16, 14, then 13
+      // pixels on screen), smaller only as that band is on screen, never
+      // under 10 pixels; too long for the group, cut with "…"; with a halo
+      // (friction 10 and 11: a title was sized by its group's width, drawn
+      // over its members, and left out when long or around other groups)
       const groups = [...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind === "group" && it.title).sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
       ctx.lineJoin = "round";
-      // (a map's rule: a group is labeled while it is between 100 and 1,000
-      // pixels wide on screen, so the levels of nesting take turns; a group
-      // with no groups inside keeps its label when larger)
-      const parents = new Set(groups.map((g) => g.parent).filter(Boolean));
       for (const g of groups) {
-        const sw = g.w * c.z;
-        if (sw < 100 || (sw > 1000 && parents.has(g.id))) continue;
-        // the title, or without its parenthetical when that is larger
-        const size = (t: string) => Math.min(22, (g.w * c.z) / (t.length * 0.62), 11 + 11 / (1 + (g.depth ?? 0)));
-        const full = plainTitle(g.title!), short = full.replace(/\s*\(.*\)\s*$/, "");
-        const title = size(short) > size(full) + 3 ? short : full, px = size(title);
-        if (px < 11) continue;
+        const room = g.w * c.z - 12, band = ((g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE) - g.y) * c.z;
+        const px = Math.max(10, Math.min([16, 14][g.depth ?? 0] ?? 13, band - 6));
         ctx.font = `600 ${px / c.z}px system-ui, sans-serif`;
+        const title = fitText(ctx, plainTitle(g.title!), room / c.z);
+        if (!title) continue;
         ctx.lineWidth = 4 / c.z;
         ctx.strokeStyle = "rgba(250,250,247,.9)";
-        ctx.strokeText(title, g.x + 6 / c.z, g.y + (px + 4) / c.z, g.w - 12 / c.z);
+        ctx.strokeText(title, g.x + 6 / c.z, g.y + (px + 3) / c.z);
         ctx.fillStyle = "#1d241a";
-        ctx.fillText(title, g.x + 6 / c.z, g.y + (px + 4) / c.z, g.w - 12 / c.z);
+        ctx.fillText(title, g.x + 6 / c.z, g.y + (px + 3) / c.z);
       }
     }
     // ink (far out, strokes thinner than half a pixel are skipped, and when
@@ -1371,6 +1368,18 @@ function titleEl(title: string): HTMLElement {
   }
   b.append(title.slice(last));
   return b;
+}
+/** Text cut to a width with "…", in the canvas's font ("" when not even a letter and "…" fit). */
+export function fitText(ctx: CanvasRenderingContext2D, t: string, width: number): string {
+  if (ctx.measureText(t).width <= width) return t;
+  // (the longest start that fits, found by halves)
+  let lo = 0, hi = t.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(t.slice(0, mid).trimEnd() + "…").width <= width) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo ? t.slice(0, lo).trimEnd() + "…" : "";
 }
 /** A title as plain text (drawn on a canvas, or as an SVG label): its math as its TeX. */
 export function plainTitle(title: string): string {
