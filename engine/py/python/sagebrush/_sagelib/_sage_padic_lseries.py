@@ -856,9 +856,392 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
         return sa.vector(PS, [PS(v1, nterms), PS(v2, nterms)])
 
     def frobenius(self, prec=20, algorithm="mw"):
-        """Not available yet (Kedlaya's algorithm)."""
-        raise NotImplementedError("the Frobenius matrix on de Rham cohomology (Kedlaya's algorithm) is not available in sagebrush yet")
+        """The Frobenius phi on the Dieudonne module D_p(E), in the basis
+        omega, eta = x omega: phi^2 - (a_p/p) phi + 1/p = 0 (phi = F/p, F the
+        p-power Frobenius of Kedlaya's algorithm), for p >= 5.
+
+        F is computed modulo p^(prec+1) by Kedlaya's algorithm ([K] =
+        Kedlaya, J. Ramanujan Math. Soc. 16 (2001), arXiv math/0105031):
+        with Y = y + (a1 x + a3)/2, Y^2 = Q(x) = x^3 + (b2/4) x^2 + (b4/2) x +
+        b6/4, and omega = dx/(2Y), so the matrix on omega, eta is the one on
+        [K]'s basis dx/Y, x dx/Y ([K] section 3: H^1(A; K)^-).  Precision:
+
+        - the Frobenius lift ([K] section 3): 1/Y^sigma = Y^-p sum_k
+          binom(-1/2, k) p^k E^k Y^-2pk, p E = Q(x^p) - Q(x)^p; with the
+          factor p of F(x^i dx/Y) = p x^(pi+p-1) dx/Y^sigma, the term k is
+          divisible by p^(k+1) ([H] = Harrison, arXiv:1006.4206, Lemma 3.4,
+          eq. (2));
+        - reducing S dx/Y^m to the basis loses at most floor(log_p(m - 2))
+          digits ([H] Lemma 3.3(i): [K] Lemma 2 with log_p(2m - 1) for
+          Y^(2m+1), as corrected), and the final S dx/Y with deg S = D at most
+          floor(log_p(2D - 1)) ([H] Lemma 3.3(ii), [K] Lemma 3 as in its
+          errata); here D <= p + 2, so at most 1;
+        - hence a term k contributes modulo p^(k + 1 - L), L <= 2 +
+          floor(log_p(3k)), and the series stops at the first K with
+          K - floor(log_p(3(K + 1))) >= N (N = prec + 1); the arithmetic is
+          exact in Z/p^W, W = N + 3 + floor(log_p(3K)) (the divisions by
+          2k - 1 and 2m - 1 as in [K] section 4).
+
+        Two checks raise an error, never a value: the next two omitted terms
+        must vanish modulo p^N, and the characteristic polynomial of F must
+        be x^2 - a_p x + p modulo p^N ([K] section 3: F's eigenvalues are
+        those of Frobenius).  The entries are given as Sage gives them (to
+        absolute precision prec, the one of valuation -1 to prec - 1).
+
+        EXAMPLES::
+
+            sage: L = EllipticCurve('14a1').padic_lseries(5)
+            sage: phi = L.frobenius(5); phi
+            [                  2 + 5^2 + 5^4 + O(5^5)    3*5^-1 + 3 + 5 + 4*5^2 + 5^3 + O(5^4)]
+            [      3 + 3*5^2 + 4*5^3 + 3*5^4 + O(5^5) 3 + 4*5 + 3*5^2 + 4*5^3 + 3*5^4 + O(5^5)]
+            sage: -phi^2
+            [5^-1 + O(5^4)        O(5^4)]
+            [       O(5^5) 5^-1 + O(5^4)]
+
+        The determinant of phi is 1/p for every curve, model and basis.
+        The cup product on H^1 is alternating and non-degenerate, with values
+        in H^2, where F acts as p. So <F u, F v> = p <u, v>, and on a
+        2-dimensional space <F u, F v> = det(F) <u, v>. Hence det F = p and
+        det phi = p / p^2 = 1/p. ([K] section 3 also gives x^2 - a_p x + p
+        as the characteristic polynomial of F, which is checked here modulo
+        p^(prec + 1).) The matrix is computed afresh on every call::
+
+            sage: L = EllipticCurve('36a1').padic_lseries(5)
+            sage: L.frobenius(2).det()
+            5^-1 + O(5)
+            sage: phi = L.frobenius(6); phi.det(), phi.trace()  # sagebrush only (Sage after frobenius(2) on y^2 = x^3 + 1: TypeError, or a determinant other than 1/p)
+            (5^-1 + O(5^5), O(5^6))
+
+        An entry that is zero gets the absolute precision the bound proves.
+        Sage sometimes claims one more digit for it (O(5^7) here)::
+
+            sage: EllipticCurve('27a1').padic_lseries(5).frobenius(6)[0, 0]  # sagebrush only (Sage: O(5^7))
+            O(5^6)
+
+        With prec = 1 the matrix agrees with the one for prec = 2. Sage's
+        frobenius(1) does not: its first entry is O(5), against 2 + O(5^2)::
+
+            sage: EllipticCurve('14a1').padic_lseries(5).frobenius(1)  # sagebrush only (Sage: [O(5), 3*5^-1 + O(5^0); O(5), 2 + O(5)])
+            [       2 + O(5) 3*5^-1 + O(5^0)]
+            [       3 + O(5)        3 + O(5)]
+
+        Large primes and precisions are refused rather than left to run
+        (Sage computes them)::
+
+            sage: EllipticCurve('27a1').padic_lseries(2003).frobenius(2)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: the Frobenius matrix at p = 2003 to precision 2 is beyond sagebrush's limit (estimated work 100300225 > 1048576)
+            sage: EllipticCurve('14a1').padic_lseries(5).frobenius(408)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: the Frobenius matrix at p = 5 to precision 408 is beyond sagebrush's limit (estimated work 4223025 > 1048576)
+        """
+        sa = _sa()
+        if algorithm not in ("mw", "approx"):
+            raise ValueError("Unknown algorithm %s." % algorithm)
+        if algorithm == "approx":
+            raise NotImplementedError("algorithm='approx' (Bernardi and Perrin-Riou) is not available in sagebrush yet")
+        p = self._p
+        prec = _integer(prec)
+        if prec < 1:
+            raise ValueError("prec (=%s) must be a positive integer" % prec)
+        if p == 3:
+            raise NotImplementedError("the Frobenius matrix at p = 3 is not available in sagebrush yet (Sage refuses it too)")
+        if _kd_cost(p, prec + 1) > _KD_MAX_WORK:
+            raise NotImplementedError("the Frobenius matrix at p = %d to precision %d is beyond sagebrush's limit (estimated work %d > %d)" % (p, prec, _kd_cost(p, prec + 1), _KD_MAX_WORK))
+        a1, a2, a3, a4, a6 = [_F(int(x)) if not isinstance(x, _F) else x for x in self._E.a_invariants()]
+        Qc = [(a3 * a3 + 4 * a6) / 4, (2 * a4 + a1 * a3) / 2, (a1 * a1 + 4 * a2) / 4, _F(1)]
+        N = prec + 1
+        M = _kd_frobenius_matrix(Qc, p, N)
+        tr = M[0][0] + M[1][1]
+        det = M[0][0] * M[1][1] - M[0][1] * M[1][0]
+        if (tr - self._ap) % p ** N or (det - p) % p ** N:
+            raise ArithmeticError("internal error: the Frobenius matrix modulo %d^%d does not have characteristic polynomial x^2 - %d x + %d" % (p, N, self._ap, p))
+        K = sa.Qp(p, prec)
+        entries = []
+        for i in range(2):
+            for j in range(2):
+                ap_ = prec - 1 if (i, j) == (0, 1) else prec
+                entries.append(K(_F(M[i][j], p), absprec=ap_))
+        return sa.matrix(K, 2, 2, entries)
 
     def order_of_vanishing(self):
         """Not available at supersingular primes (as in Sage)."""
         raise NotImplementedError("the order of vanishing at a supersingular prime is not available")
+
+
+# ------------------------------------------------------------------ Kedlaya's algorithm (g = 1)
+# The matrix of the p-power Frobenius on H^1(A; K)^-, basis dx/y, x dx/y,
+# for y^2 = Q(x), Q monic cubic squarefree mod p, p >= 5.  [K] = K. Kedlaya,
+# J. Ramanujan Math. Soc. 16 (2001), arXiv math/0105031, sections 3-4;
+# [H] = M. Harrison, arXiv:1006.4206, Lemmas 3.3-3.4 (the corrected forms of
+# [K]'s Lemmas 2 and 3, as in [K]'s 2003 errata).
+
+# The work allowed for frobenius(), in the units of _kd_cost.
+_KD_MAX_WORK = 1 << 20
+
+
+def _kd_cost(p, N):
+    """The estimated work of _kd_frobenius_matrix(Q, p, N) for a dense Q
+    (the worst case: zero coefficients are skipped), in units of about 25
+    microseconds in the CLI: U = p^2 (K + 2)^2 (1 + W log2(p) / 1024), K
+    and W from _kd_plan.  The series has about k p live terms at step k,
+    each combined with about p digits of E, so about p^2 K^2 products of
+    W log2(p)-bit numbers; K + 2 counts the check of the next two terms,
+    and the bit size the cost of one product.  Fitted on 27a1's dense model
+    y^2 + y = x^3 + 3 x^2 + 3 x - 6 at p = 5 ... 197 and prec 3 ... 200
+    (2.2 to 2.6 10^-5 s per unit); it also gives the 88 s of p = 197, prec
+    8 and the 147 s of 14a1 at p = 5, prec 408 measured in review.  With
+    the limit 2^20 a call takes about half a minute at most (and Stop
+    interrupts it).  p^2 (N + 2)^2 <= U (K >= N) is checked first, so an
+    enormous N is refused without planning it."""
+    lower = p * p * (N + 2) ** 2
+    if lower > _KD_MAX_WORK:
+        return lower
+    K, W = _kd_plan(p, N)
+    return p * p * (K + 2) ** 2 * (1024 + W * p.bit_length()) // 1024
+
+
+def _kd_ilog(n, p):
+    """floor(log_p n) for n >= 1."""
+    k = 0
+    while n >= p:
+        n //= p
+        k += 1
+    return k
+
+
+def _kd_mod(q, P):
+    q = _F(q)
+    return q.numerator * pow(q.denominator, -1, P) % P
+
+
+def _kd_pmul(a, b, P):
+    out = [0] * (len(a) + len(b) - 1) if a and b else []
+    for i, x in enumerate(a):
+        if x:
+            for j, y in enumerate(b):
+                out[i + j] = (out[i + j] + x * y) % P
+    return out
+
+
+def _kd_trim(a):
+    while a and a[-1] == 0:
+        a.pop()
+    return a
+
+
+def _kd_divmod_Q(t, Q, P):
+    """(R, S) with t = R Q + S, deg S < 3 (Q monic cubic)."""
+    t = list(t)
+    n = len(t) - 1
+    if n < 3:
+        return [], t + [0] * (3 - len(t))
+    R = [0] * (n - 2)
+    for d in range(n, 2, -1):
+        c = t[d] % P
+        if c:
+            R[d - 3] = c
+            for i in range(4):
+                t[d - 3 + i] = (t[d - 3 + i] - c * Q[i]) % P
+    return R, [t[0] % P, t[1] % P, t[2] % P]
+
+
+def _kd_pdiv(c, d, p, P):
+    """c / d mod P for an integer d, d = p^v u: the representative of c
+    divided by p^v (Kedlaya [K] section 4: "any polynomial which, multiplied
+    by d, equals c"; the discrepancy below the working precision does not
+    reach the result, [K] Lemma 2 / [H] Lemma 3.3)."""
+    v = 0
+    while d % p == 0:
+        d //= p
+        v += 1
+    return (c % P) // p ** v * pow(d, -1, P) % P
+
+
+def _kd_frobenius_matrix(Qc, p, N):
+    """[[a, b], [c, d]] mod p^N: F(dx/y) = a dx/y + c x dx/y and
+    F(x dx/y) = b dx/y + d x dx/y (columns are images), for y^2 = Q(x),
+    Qc = [q0, q1, q2, 1] rationals (p-integral).  The next two omitted terms
+    are computed too and must contribute 0 modulo p^N (as _plan's bound
+    says), else an error is raised, never a value."""
+    K, W = _kd_plan(p, N)
+    M = _kd_frobenius(Qc, p, N, K, W)
+    # the next two omitted terms must contribute 0 modulo p^N (the
+    # truncation bound of _plan, checked)
+    T = _kd_frobenius(Qc, p, N, K + 2, W + 3, terms_from=K + 1)
+    if any(x % p ** N for row in T for x in row):
+        raise ArithmeticError("internal error: the omitted terms of the Frobenius series are not 0 modulo p^%d" % N)
+    return M
+
+
+def _kd_plan(p, N):
+    """(K, W): the series terms k <= K and the working modulus p^W, for
+    the matrix modulo p^N (p >= 5).
+
+    The term k of 1/y^sigma = y^-p sum_k binom(-1/2, k) p^k E^k y^-2pk
+    ([K] section 3) is divisible by p^k, and F(x^i dx/y) = p x^(p i + p - 1)
+    dx / y^sigma adds a factor p ([H] Lemma 3.4 eq. (2), k = 0), so the
+    term's forms, S(x) dx/y^m with m <= p(2k + 1), are divisible by
+    p^(k+1).  Reducing them to the basis loses at most floor(log_p(m - 2))
+    digits ([H] Lemma 3.3(i), the corrected [K] Lemma 2) plus, for the final
+    S(x) dx/y with deg S = D <= p + 2, floor(log_p(2D - 1)) <= 1 ([H] Lemma
+    3.3(ii), d = 3).  So the term contributes modulo p^(k + 1 - L(k)) with
+    L(k) <= 2 + floor(log_p(3k)) (p(2k + 1) <= 3pk), and k + 1 - L(k) >=
+    h(k) = k - 1 - floor(log_p(3k)), which never decreases with k.  K is
+    the first k with h(k + 1) >= N: every omitted term is 0 modulo p^N.
+    The included terms lose at most 2 + floor(log_p(3K)) digits to the
+    divisions, so W = N + 3 + floor(log_p(3K)) keeps the result exact
+    modulo p^N."""
+    if p < 5:
+        raise NotImplementedError("p >= 5 only")
+    K = 1
+    while (K + 1) - 1 - _kd_ilog(3 * (K + 1), p) < N:
+        K += 1
+    W = N + 3 + _kd_ilog(3 * K, p)
+    return K, W
+
+
+def _kd_frobenius(Qc, p, N, K, W, terms_from=0):
+    """The matrix modulo p^N from the series terms terms_from <= k <= K, at
+    working modulus p^W (terms_from > 0: the contribution of those terms
+    alone, for the truncation check)."""
+    P = p ** W
+    Q = [_kd_mod(c, P) for c in Qc]
+    Qd = [Q[1], 2 * Q[2] % P, 3 % P]
+    R, S = _kd_bezout(Q, Qd, p, P)
+    # E = (Q(x^p) - Q(x)^p) / p (degree <= 3p - 1: the x^3p terms cancel),
+    # and its Q-adic digits: E = sum_l e_l Q^l, deg e_l <= 2
+    P1 = p ** (W + 1)
+    Q1 = [_kd_mod(c, P1) for c in Qc]
+    Qxp = [0] * (3 * p + 1)
+    for i, c in enumerate(Q1):
+        Qxp[i * p] = c
+    Qp_ = [1]
+    for _ in range(p):
+        Qp_ = _kd_pmul(Qp_, Q1, P1)
+    diff = [(a - b) % P1 for a, b in zip(Qxp, Qp_)]
+    if any(x % p for x in diff):
+        raise ArithmeticError("internal error: Q(x^p) - Q(x)^p is not divisible by p")
+    E = _kd_trim([x // p % P for x in diff])
+    digits = []
+    rest = E
+    while rest:
+        rest, d = _kd_divmod_Q(rest, Q, P)
+        digits.append(d)
+        rest = _kd_trim(list(rest))
+    # the series 1/y^sigma = y^-p sum_j B_j(x) T^j, T = y^-2, deg B_j <= 2:
+    # term k = binom(-1/2, k) (p E T^p)^k, built term by term; p E T^p =
+    # sum_l p e_l Q^l T^p = sum_l p e_l T^(p - l) (Q = y^2 = 1/T)
+    B = {}
+    cur = {0: [1, 0, 0]}
+    c = _F(1)
+    for k in range(K + 1):
+        if k:
+            nxt = {}
+            for j, A in cur.items():
+                for l, e in enumerate(digits):
+                    prod = _kd_pmul(A, e, P)                 # degree <= 4
+                    m = j + p - l
+                    Rq, Sr = _kd_divmod_Q(prod, Q, P)
+                    nxt[m] = _kd_padd(nxt.get(m, [0, 0, 0]), [p * x % P for x in Sr], P)
+                    if _kd_trim(list(Rq)):
+                        nxt[m - 1] = _kd_padd(nxt.get(m - 1, [0, 0, 0]), [p * x % P for x in Rq], P)
+            cur = nxt
+            c = c * (_F(-1, 2) - (k - 1)) / k
+        if k >= terms_from:
+            ck = _kd_mod(c, P)
+            for j, A in cur.items():
+                B[j] = _kd_padd(B.get(j, [0, 0, 0]), [ck * x % P for x in A], P)
+    out = []
+    for i in (0, 1):
+        # F(x^i dx/y) = p x^(p i + p - 1) dx / y^sigma
+        #            = sum_j p x^(p i + p - 1) B_j(x) dx / y^(p + 2 j);
+        # by descending s = p + 2j, the x-degree is brought below 3 with
+        # Q = y^2 (the quotient moves to s - 2), down to s = 1 (the G part)
+        shift = p * i + p - 1
+        polys = {}
+        for j, A in B.items():
+            polys[p + 2 * j] = [0] * shift + [p * x % P for x in A]
+        forms = {}
+        G = []
+        top = max(polys) if polys else 1
+        carry = []
+        for s in range(top, 0, -2):
+            poly = _kd_padd(polys.get(s, []), carry, P)
+            if s == 1:
+                G = poly
+                break
+            Rq, Sr = _kd_divmod_Q(poly, Q, P)
+            forms[s] = Sr
+            carry = _kd_trim(list(Rq))
+        # [K] section 3: T dx/y^s, T = A Q + B Q', is cohomologous to
+        # (A + 2 B'/(s - 2)) dx/y^(s - 2)
+        for s in range(top, 2, -2):
+            T = forms.get(s)
+            if T is None or not any(T):
+                continue
+            Bp = _kd_divmod_Q(_kd_pmul(T, S, P), Q, P)[1]           # T S mod Q
+            num = _kd_psub(T, _kd_pmul(Bp, Qd, P), P)               # T - B Q' = A Q
+            A, _ = _kd_divmod_Q(num + [0] * max(0, 4 - len(num)), Q, P)
+            Bd = [Bp[1], 2 * Bp[2] % P]
+            red = _kd_padd(A, [_kd_pdiv(2 * x, s - 2, p, P) for x in Bd], P)
+            if s - 2 == 1:
+                G = _kd_padd(G, red, P)
+            else:
+                forms[s - 2] = _kd_padd(forms.get(s - 2, [0, 0, 0]), red, P)
+        # [K] section 3: (S Q' + 2 S' Q) dx/y is exact; S = x^(m-2) gives
+        # degree m with leading coefficient 2m - 1 (Q monic, g = 1)
+        G = _kd_trim(list(G))
+        while len(G) > 2:
+            m = len(G) - 1
+            lc = G[m]
+            if lc:
+                rel = _kd_padd([0] * (m - 2) + Qd, [0] * (m - 3) + [2 * (m - 2) * x % P for x in Q], P)
+                f = _kd_pdiv(lc, 2 * m - 1, p, P)
+                G = _kd_psub(G, [f * x % P for x in rel], P)
+            G = _kd_trim(G[:m])
+        G = G + [0] * (2 - len(G))
+        out.append([G[0] % p ** N, G[1] % p ** N])
+    return [[out[0][0], out[1][0]], [out[0][1], out[1][1]]]
+
+
+def _kd_padd(a, b, P):
+    n = max(len(a), len(b))
+    return [((a[i] if i < len(a) else 0) + (b[i] if i < len(b) else 0)) % P for i in range(n)]
+
+
+def _kd_psub(a, b, P):
+    n = max(len(a), len(b))
+    return [((a[i] if i < len(a) else 0) - (b[i] if i < len(b) else 0)) % P for i in range(n)]
+
+
+def _kd_bezout(Q, Qd, p, P):
+    """R, S with R Q + S Q' = 1 mod P (deg R <= 1, deg S <= 2), by solving
+    the 5x5 linear system mod P (its determinant is the resultant of Q and
+    Q', a unit since Q is squarefree mod p)."""
+    # unknowns r0, r1, s0, s1, s2; coefficients of x^0..x^4
+    rows = []
+    for d in range(5):
+        row = [Q[d] if d < 4 else 0, Q[d - 1] if 1 <= d <= 4 else 0,
+               Qd[d] if d < 3 else 0, Qd[d - 1] if 1 <= d <= 3 else 0, Qd[d - 2] if 2 <= d <= 4 else 0]
+        rows.append([x % P for x in row] + [1 if d == 0 else 0])
+    n = 5
+    for col in range(n):
+        piv = None
+        for r in range(col, n):
+            if rows[r][col] % p:
+                piv = r
+                break
+        if piv is None:
+            raise ArithmeticError("Q is not squarefree modulo p")
+        rows[col], rows[piv] = rows[piv], rows[col]
+        inv = pow(rows[col][col], -1, P)
+        rows[col] = [x * inv % P for x in rows[col]]
+        for r in range(n):
+            if r != col and rows[r][col]:
+                f = rows[r][col]
+                rows[r] = [(x - f * y) % P for x, y in zip(rows[r], rows[col])]
+    sol = [rows[r][n] for r in range(n)]
+    return sol[:2], sol[2:]
