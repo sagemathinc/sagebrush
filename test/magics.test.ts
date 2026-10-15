@@ -87,6 +87,10 @@ test("the reactive notebook's analysis: %time's code is the cell's, %timeit's is
   assert.deepEqual([[...c.defs], c.refs.has("outside"), c.refs.has("a")], [[], true, false]);
   // a refused %%time line: nothing in it, nor its body, is the cell's code
   assert.deepEqual([...analyzeCell("%%time q = 1\nr = 2").defs], []);
+  // %time's expression is in the cell's scope: a walrus defines (CORR-725-2)
+  assert.deepEqual([...analyzeCell("answer = 1\n%time (answer := 9)").defs], ["answer"]);
+  // the fresh names of %timeit's function are no definitions
+  assert.deepEqual([...analyzeCell("%timeit -n 1 -r 1 -q 1").defs], []);
 });
 
 test("notebook session: %time and %timeit run in the cell: renamed names, a function's locals, Sage", async () => {
@@ -97,6 +101,20 @@ test("notebook session: %time and %timeit run in the cell: renamed names, a func
   assert.equal((await s.run("%time _x = 8\nprint(_x)", { mangle: "c3" })).out, "WALL\n8\n");
   // a function's locals, as IPython
   assert.equal((await s.run("def inner():\n    z = 11\n    %time print(z)\ninner()")).out, "11\nWALL\n");
+  // an expression keeps its scope: a walrus, locals(), a class body (CORR-725-2)
+  assert.equal((await s.run("answer = 1\n%time (answer := 9)\nprint(answer)")).out, "WALL\n9\n");
+  assert.equal((await s.run("def ff():\n    x = 7\n    %time print(locals().get('x', 'missing'))\nff()")).out, "7\nWALL\n");
+  assert.equal((await s.run("class A:\n    x = 8\n    %time print(x)")).out, "8\nWALL\n");
+  assert.equal((await s.run("%time 6 * 7")).out, "WALL\n42\n");
+  // %timeit's own names collide with nothing (CORR-776-1)
+  assert.equal((await s.run("_pyjs_timeit = 17\n%timeit -n 1 -r 1 -q 1\nprint(_pyjs_timeit)")).out, "17\n");
+  assert.equal((await s.run("_pyjs_i = 17\n%timeit -n 1 -r 1 -q print(_pyjs_i)")).out, "17\n");
+  assert.equal((await s.run("_pyjs_it = 3\n_pyjs_clock = 4\n_pyjs_t0 = 5\n%timeit -n 2 -r 1 -q print(_pyjs_it + _pyjs_clock + _pyjs_t0)\nprint(sorted(k for k in globals() if k.startswith('_pyjs')))")).out, "12\n12\n['_pyjs_clock', '_pyjs_i', '_pyjs_it', '_pyjs_t0', '_pyjs_timeit']\n");
+  // line magics in a %%time body
+  assert.equal((await s.run("%%time\n%time 1 + 1\nprint('body')")).out, "WALL\nbody\nWALL\n");
+  assert.equal((await s.run("%%time\n%time 2 + 2")).out, "WALL\nWALL\n4\n");
+  assert.equal((await s.run("w = 1\n%%timeit -n 1 -r 1 -q\n%time (w := 5)\nprint(w)")).failed, true);  // (%%timeit must be first)
+  assert.deepEqual([...analyzeCell("%%time\n%time (q := 3)").defs], ["q"]);
   assert.equal((await s.run("%time for i in range(2): print(i)")).out, "0\n1\nWALL\n");
   assert.equal((await s.run("%time x = 41\nx + 1")).out, "WALL\n42\n");
   // %%time shows the last value; anything on its line is refused, the body not run (CORR-725-5)
@@ -108,7 +126,7 @@ test("notebook session: %time and %timeit run in the cell: renamed names, a func
   }
   // %timeit's assignments are its own; nothing is left behind
   await s.run("x = 5");
-  assert.equal((await s.run("%timeit -n 1 -r 1 x = 7\nprint(x, [k for k in globals() if 'timeit' in k])")).out, "T per loop (mean ± std. dev. of 1 run, 1 loop each)\n5 []\n");
+  assert.equal((await s.run("%timeit -n 1 -r 1 x = 7\nprint(x, [k for k in globals() if k.startswith('_pyjs_timeit_')])")).out, "T per loop (mean ± std. dev. of 1 run, 1 loop each)\n5 []\n");
   assert.equal((await s.run("%%timeit -n 2 -r 3 a = [0]\na[0] += x\nprint(a[0] >= 5)")).out.split("\n").filter((l) => l === "True").length, 6);
   // Sage's syntax
   assert.equal((await s.run("%time 2^10", { sage: true })).out, "WALL\n1024\n");
@@ -147,19 +165,22 @@ test("notebook session: %autoreload 2 reloads changed modules; existing instance
   const mod = join(dir, "sbar_mod.py");
   let mtime = 1000;
   const write = (src: string) => { writeFileSync(mod, src); utimesSync(mod, (mtime += 1000), mtime); };
-  write("def f():\n    return 1\nclass C:\n    def value(self):\n        return 1\nclass Base:\n    def value(self):\n        return 1\nclass Child(Base):\n    def value(self):\n        return super(Child, self).value() + 1\nclass Zero(Base):\n    def value(self):\n        return super().value() + 1\n");
+  // (Zero, Comment and Paren call super() without arguments, in three spellings)
+  const others = (v: number) => `class Zero(Base):\n    def value(self):\n        return super().value() + 1\nclass Comment(Base):\n    def value(self):\n        return super( # explanatory comment\n        ).value() + ${v}\nclass Paren(Base):\n    def value(self):\n        return (super)().value() + ${v}\n`;
+  write("def f():\n    return 1\nclass C:\n    def value(self):\n        return 1\nclass Base:\n    def value(self):\n        return 1\nclass Child(Base):\n    def value(self):\n        return super(Child, self).value() + 1\n" + others(1));
   const s = await session();
   // (without the extension, %autoreload is unknown, as in IPython; tests in
   // one process share the runtime, so unload it first)
   assert.match((await s.run("%unload_ext autoreload\n%autoreload 2")).err, /Line magic function `%autoreload` not found \(load it first: %load_ext autoreload\)/);
-  assert.equal((await s.run(`import sys\nsys.path.insert(0, ${JSON.stringify(dir)})\n%load_ext autoreload\n%autoreload 2\nimport sbar_mod\nfrom sbar_mod import f, C, Child, Zero\nc, ch, z = C(), Child(), Zero()\nprint(f(), c.value(), ch.value(), z.value())`)).out, "1 1 2 2\n");
+  assert.equal((await s.run(`import sys\nsys.path.insert(0, ${JSON.stringify(dir)})\n%load_ext autoreload\n%autoreload 2\nimport sbar_mod\nfrom sbar_mod import f, C, Child, Zero, Comment, Paren\nc, ch, z, cm, pa = C(), Child(), Zero(), Comment(), Paren()\nprint(f(), c.value(), ch.value(), z.value(), cm.value(), pa.value())`)).out, "1 1 2 2 2 2\n");
   // three edits (CORR-725-4): the existing instance follows each one
   for (const v of [2, 3, 4]) {
-    write(`def f():\n    return ${v}\nclass C:\n    def value(self):\n        return ${v}\nclass Base:\n    def value(self):\n        return ${10 * v}\nclass Child(Base):\n    def value(self):\n        return super(Child, self).value() + ${v}\nclass Zero(Base):\n    def value(self):\n        return super().value() + 1\n`);
-    const r = await s.run("print(f(), c.value(), C().value(), sbar_mod.C().value(), ch.value(), Child().value(), isinstance(c, sbar_mod.C), C is sbar_mod.C)");
-    assert.equal(r.out, `${v} ${v} ${v} ${v} ${11 * v} ${11 * v} True True\n`);
-    // super() without arguments: said, not silently half-done
-    assert.match(r.err, /\[autoreload of sbar_mod: class Zero uses super\(\) without arguments/);
+    write(`def f():\n    return ${v}\nclass C:\n    def value(self):\n        return ${v}\nclass Base:\n    def value(self):\n        return ${10 * v}\nclass Child(Base):\n    def value(self):\n        return super(Child, self).value() + ${v}\n` + others(v));
+    const r = await s.run("print(f(), c.value(), C().value(), sbar_mod.C().value(), ch.value(), Child().value(), isinstance(c, sbar_mod.C), C is sbar_mod.C)\nprint(z.value(), cm.value(), pa.value(), Comment().value(), Paren().value())");
+    // (the classes autoreload cannot update keep their old code, and their old base: Base's first version)
+    assert.equal(r.out, `${v} ${v} ${v} ${v} ${11 * v} ${11 * v} True True\n${10 * v + 1} ${10 * v + 1} ${10 * v + 1} ${11 * v} ${11 * v}\n`);
+    // super() without arguments, in any spelling: said, not silently half-done
+    for (const k of ["Zero", "Comment", "Paren"]) assert.match(r.err, new RegExp(`\\[autoreload of sbar_mod: class ${k} uses super\\(\\) without arguments`));
   }
   // %autoreload 0: no more reloading; %autoreload now: once
   await s.run("%autoreload 0");
