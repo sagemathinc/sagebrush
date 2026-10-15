@@ -261,14 +261,61 @@ ref = {
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
 out = []
+
+
+def add(name, args, v):
+    if isinstance(v, list):
+        out.append([name, [enc(a) for a in args], [repr(t) for t in v]])
+        return
+    c = complex(v)
+    wc = any(isinstance(a, complex) for a in args) or name in complex_valued or c.imag != 0
+    out.append([name, [enc(a) for a in args], enc(val(v, wc))])
+
+
 for name, pts in points.items():
     for args in pts:
-        v = ref[name](*args)
-        if isinstance(v, list):
-            out.append([name, [enc(a) for a in args], [repr(t) for t in v]])
-            continue
-        c = complex(v)
-        wc = any(isinstance(a, complex) for a in args) or name in complex_valued or c.imag != 0
-        out.append([name, [enc(a) for a in args], enc(val(v, wc))])
+        add(name, args, ref[name](*args))
+
+# (astra's review of special-hardening, CORR-957-1 and CORR-957-2, and the
+# value-comparing edge sweep: beta with a large negative argument, nearly
+# cancelling or not, both negative, a + b next to a pole of Gamma; polygamma
+# whose powers of 1/w underflow before the factorials restore them; erf
+# where the rounding of 2xy turned e^(-z^2)'s phase; zeta(2, a) for huge a.
+# Appended after the cases above, which stay as they were; beta's at
+# digits enough that a + b is exact)
+random.seed(957)
+
+
+def _noint(v):
+    return v if v != math.floor(v) else v + 0.5
+
+
+_neg_beta = [(-999999999999.5, 1000000000016.0), (-999999999.5, 1000000016.0), (-285980934477808.94, 0.10104657144202031),
+             (-0.003665719805022444, -8.996799190458725), (-0.012782929186446497, -952087114464834.6)]
+for _ in range(8):
+    _neg_beta += [(-_noint(LU(1e-3, 1e15)), LU(1e-3, 1e15)), (-_noint(LU(15, 1e15)), 0.0), (-_noint(LU(1e-3, 1e15)), -_noint(LU(1e-3, 1e15))),
+                  (-_noint(U(0, 40)), U(0, 60))]
+_neg_beta = [(a, b if b else -a + U(-30, 30)) for a, b in _neg_beta]
+
+
+def _beta_hi(a, b, log=False):
+    with mp.workdps(60 + 2 * int(math.log10(abs(a) + abs(b) + 1))):
+        v = mp.beta(mp.mpf(a), mp.mpf(b))
+        return mp.log(abs(v)) if log else +v
+
+
+for a, b in _neg_beta:
+    v = _beta_hi(a, b)
+    if mp.mpf(1e-300) < abs(v) < mp.mpf(1e300):
+        add("beta", (a, b), v)
+    add("betaln", (a, b), _beta_hi(a, b, True))
+for n, z in [(50, 1e7), (100, 1e4), (100, 290.0), (80, 2e3), (100, complex(1000, 1000)), (60, complex(3e5, -2e5)), (30, 1e9)]:
+    with mp.workdps(60):
+        add("polygamma", (n, z), mp.polygamma(n, z))
+for name, z in [("erf", complex(3e7, 3e7)), ("erf", complex(1e8, 1e8)), ("erfc", complex(3e7, 3e7)), ("erfi", complex(3e7, -3e7)),
+                ("erf", complex(4e5, -3e5)), ("erfc", complex(3e3, 2999.9))]:
+    add(name, (z,), ref[name](z))
+for s_, a in [(2.0, 1e300), (2.0, 1e308), (3.0, 1e100), (1.5, 1e50)]:
+    add("hurwitz_zeta", (s_, a), mp.zeta(s_, a))
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")
