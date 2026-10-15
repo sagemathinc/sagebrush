@@ -179,6 +179,9 @@ class bool(int, generic):
     """np.bool_ (an int subclass here; NumPy's is not, but it compares the same)."""
     __slots__ = ()
     __hash__ = int.__hash__
+    # NumPy's bool is no index: operator.index refuses it, by this name
+    # (its C type's; lib/_operator.py)
+    _pyjs_not_an_index = "numpy.bool"
 
     def __new__(cls, v=False):
         return int.__new__(cls, 1 if _builtins.bool(v) else 0)
@@ -1828,11 +1831,20 @@ def geterr():
 
 def _index(v):
     """operator.index, with CPython's TypeError"""
-    if isinstance(v, bool) or not hasattr(type(v), "__index__"):
-        if isinstance(v, bool):
-            return int(v)
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(v).__name__)
-    return type(v).__index__(v)
+    from _operator import index
+    return index(v)
+
+
+def _c_int(v):
+    """v as NumPy's C code takes an int argument: an index, which must fit a C int."""
+    if isinstance(v, float):
+        raise TypeError("integer argument expected, got float")
+    v = _index(v)
+    if not -2 ** 63 <= v < 2 ** 63:
+        raise OverflowError("Python int too large to convert to C long")
+    if not -2 ** 31 <= v < 2 ** 31:
+        raise OverflowError("Python int too large to convert to C int")
+    return v
 
 
 _PRINT_DEFAULTS = {"edgeitems": 3, "threshold": 1000, "floatmode": "maxprec", "precision": 8, "suppress": False,
@@ -1867,7 +1879,12 @@ def _formatter_functions(formatter):
 def _push_printoptions():
     o = _printopts
     fs = _formatter_functions(o["formatter"])
-    _np.set_printoptions(o["precision"], o["threshold"], o["edgeitems"], o["linewidth"], o["suppress"], o["sign"],
+    # Dragon4 takes the precision as a C int: one too large for that is an
+    # error once floats are printed (the TS printer raises for 2**31 or 2**63)
+    p = o["precision"]
+    if p >= 2 ** 31:
+        p = 2 ** 63 if p >= 2 ** 63 else 2 ** 31
+    _np.set_printoptions(p, o["threshold"], o["edgeitems"], o["linewidth"], o["suppress"], o["sign"],
                          o["floatmode"], o["nanstr"], o["infstr"], fs["bool"], fs["int"], fs["float"],
                          fs["complexfloat"], o["override_repr"])
 
@@ -1890,6 +1907,10 @@ def _checked_printoptions(precision=None, threshold=None, edgeitems=None, linewi
     if threshold is not None:
         if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
             raise TypeError("threshold must be numeric")
+        if isinstance(threshold, int) and not -2 ** 63 <= threshold < 2 ** 64:
+            # NumPy's np.isnan(threshold) on an int that only fits an object array
+            raise TypeError("ufunc 'isnan' not supported for the input types, and the inputs could not be safely coerced "
+                            "to any supported types according to the casting rule ''safe''")
         if threshold != threshold:
             raise ValueError("threshold must be non-NAN, try sys.maxsize for untruncated representation")
         new["threshold"] = threshold
@@ -1984,40 +2005,84 @@ def array_str(a, max_line_width=None, precision=None, suppress_small=None):
 _TRIMS = ("k", ".", "0", "-")
 
 
-def _dragon4_args(x, precision, unique, trim, min_digits):
-    if not unique and precision is None:
+def _none_or_positive_arg(x, name):
+    if x is None:
+        return -1
+    if x < 0:
+        raise ValueError("%s must be >= 0" % name)
+    return x
+
+
+def _dragon4_value(x):
+    """x as NumPy's Dragon4 entry points take it: a float32 scalar keeps its
+    own shortest digits; anything else becomes a float (a complex scalar its
+    real part, which NumPy does with a ComplexWarning Sagebrush does not have)."""
+    if isinstance(x, generic):
+        if isinstance(x, complexfloating):
+            return float(float32(x.real)) if isinstance(x, complex64) else float(x.real), False
+        return float(x), isinstance(x, float32)
+    if isinstance(x, ndarray):
+        if x.ndim:
+            raise TypeError("only 0-dimensional arrays can be converted to Python scalars")
+        return float(x[()]), False
+    if isinstance(x, (str, bytes, complex)) or not (hasattr(type(x), "__float__") or hasattr(type(x), "__index__")):
+        raise TypeError("must be real number, not %s" % type(x).__name__)
+    return float(x), False
+
+
+def _dragon4_args(x, args):
+    """The conversions NumPy's C entry points make, in their argument order:
+    each flag and size a C int (sizes are -1 for None), trim one of _TRIMS;
+    then precision is needed in non-unique mode.  Returns the float, whether
+    it is a float32, and the arguments (sizes None for -1, flags as bools)."""
+    out = {}
+    for name, v in args:
+        if name == "trim":
+            if v not in _TRIMS:
+                raise TypeError("if supplied, trim must be 'k', '.', '0' or '-' found `%100s`" % (v,))
+            out[name] = v
+        elif name in ("unique", "fractional", "sign"):
+            out[name] = _builtins.bool(_c_int(v))
+        else:
+            v = _c_int(v)
+            out[name] = None if v == -1 else v
+    if not out["unique"] and out["precision"] is None:
         raise TypeError("in non-unique mode `precision` must be supplied")
-    if trim not in _TRIMS:
-        raise TypeError("if supplied, trim must be 'k', '.', '0' or '-' found `%s`" % (trim,))
-    if precision is not None:
-        precision = _index(precision)
-        if precision < 0:
-            raise ValueError("precision must be >= 0")
-    if min_digits is not None:
-        min_digits = _index(min_digits)
-        if precision is not None and min_digits > precision:
-            raise ValueError("min_digits must be less than or equal to precision")
-    f32 = isinstance(x, float32) or (isinstance(x, ndarray) and x.dtype == float32)
-    return float(x), precision, min_digits, f32
+    v, f32 = _dragon4_value(x)
+    return v, f32, out
 
 
 def format_float_positional(x, precision=None, unique=True, fractional=True, trim="k", sign=False,
                             pad_left=None, pad_right=None, min_digits=None):
     """A float in positional notation: NumPy's Dragon4 (shortest unique
     digits, or exactly rounded ones, half to even)."""
-    v, precision, min_digits, f32 = _dragon4_args(x, precision, unique, trim, min_digits)
+    precision = _none_or_positive_arg(precision, "precision")
+    pad_left = _none_or_positive_arg(pad_left, "pad_left")
+    pad_right = _none_or_positive_arg(pad_right, "pad_right")
+    min_digits = _none_or_positive_arg(min_digits, "min_digits")
     if not fractional and precision == 0:
         raise ValueError("precision must be greater than 0 if fractional=False")
-    return _np.format_float_positional(v, precision, _builtins.bool(unique), _builtins.bool(fractional), trim, _builtins.bool(sign),
-                                       pad_left, pad_right, min_digits, f32)
+    if min_digits > 0 and precision > 0 and min_digits > precision:
+        raise ValueError("min_digits must be less than or equal to precision")
+    v, f32, o = _dragon4_args(x, [("precision", precision), ("unique", unique), ("fractional", fractional), ("trim", trim),
+                                  ("sign", sign), ("pad_left", pad_left), ("pad_right", pad_right), ("min_digits", min_digits)])
+    return _np.format_float_positional(v, o["precision"], o["unique"], o["fractional"], trim, o["sign"], o["pad_left"],
+                                       o["pad_right"], o["min_digits"], f32)
 
 
 def format_float_scientific(x, precision=None, unique=True, trim="k", sign=False, pad_left=None,
                             exp_digits=None, min_digits=None):
     """A float in scientific notation: NumPy's Dragon4."""
-    v, precision, min_digits, f32 = _dragon4_args(x, precision, unique, trim, min_digits)
-    return _np.format_float_scientific(v, precision, _builtins.bool(unique), trim, _builtins.bool(sign), pad_left, exp_digits,
-                                       min_digits, f32)
+    precision = _none_or_positive_arg(precision, "precision")
+    pad_left = _none_or_positive_arg(pad_left, "pad_left")
+    exp_digits = _none_or_positive_arg(exp_digits, "exp_digits")
+    min_digits = _none_or_positive_arg(min_digits, "min_digits")
+    if min_digits > 0 and precision > 0 and min_digits > precision:
+        raise ValueError("min_digits must be less than or equal to precision")
+    v, f32, o = _dragon4_args(x, [("precision", precision), ("unique", unique), ("trim", trim), ("sign", sign),
+                                  ("pad_left", pad_left), ("exp_digits", exp_digits), ("min_digits", min_digits)])
+    return _np.format_float_scientific(v, o["precision"], o["unique"], trim, o["sign"], o["pad_left"], o["exp_digits"],
+                                       o["min_digits"], f32)
 
 
 def isscalar(element):
@@ -2044,17 +2109,54 @@ def _nextafter32(a, b):
     return struct.unpack("<f", struct.pack("<I", i))[0]
 
 
+_NEXTAFTER_UNSUPPORTED = ("ufunc 'nextafter' not supported for the input types, and the inputs could not be safely "
+                          "coerced to any supported types according to the casting rule ''safe''")
+
+
+def _nextafter_dtype(x1, x2):
+    """NumPy 2's loop for nextafter: the first of float16, float32 and float64
+    that both operands cast to safely, a Python int, float or complex being
+    weak (NEP 50): an int counts as the other operand's type (int64 for a
+    bool), a float as the other's if that is a float, else float64."""
+    def weak(x):
+        if isinstance(x, (ndarray, generic)) or isinstance(x, _builtins.bool):
+            return None
+        return "i" if isinstance(x, int) else "f" if isinstance(x, float) else "c" if isinstance(x, complex) else None
+    w1, w2 = weak(x1), weak(x2)
+    if "c" in (w1, w2):
+        raise TypeError(_NEXTAFTER_UNSUPPORTED)
+    if w1 and w2:
+        kinds = [dtype(int64) if w == "i" else dtype(float64) for w in (w1, w2)]
+    elif w1 or w2:
+        w, strong = (w1, x2) if w1 else (w2, x1)
+        s = asarray(strong).dtype
+        if w == "i":
+            t = dtype(int64) if s.kind == "b" else s
+        else:
+            t = s if s.kind == "f" else dtype(float64)
+        kinds = [s, t]
+    else:
+        kinds = [asarray(x1).dtype, asarray(x2).dtype]
+    if _builtins.any(k.kind == "c" for k in kinds):
+        raise TypeError(_NEXTAFTER_UNSUPPORTED)
+    if _builtins.all(k.kind == "b" or (k.kind in "iu" and k.itemsize == 1) for k in kinds):
+        raise NotImplementedError("nextafter: NumPy computes this in float16 (for bool, int8 and uint8 inputs), "
+                                  "which Sagebrush does not have")
+    if _builtins.all(k == float32 or k.kind == "b" or (k.kind in "iu" and k.itemsize <= 2) for k in kinds):
+        return dtype(float32)
+    return dtype(float64)
+
+
 def nextafter(x1, x2, out=None, **kw):
-    """The next floating-point value after x1 towards x2, elementwise (float32
-    when both are float32)."""
+    """The next floating-point value after x1 towards x2, elementwise, in
+    NumPy 2's dtype (float32 for float32 with a Python float, for instance)."""
     if kw:
         raise NotImplementedError("nextafter: %s are not implemented in Sagebrush" % ", ".join(sorted(kw)))
-    a, b = asarray(x1), asarray(x2)
-    if a.dtype.kind == "c" or b.dtype.kind == "c":
-        raise TypeError("ufunc 'nextafter' not supported for the input types")
-    dt = float32 if (a.dtype == float32 and b.dtype == float32) else float64
-    a, b = broadcast_arrays(a.astype(dt), b.astype(dt))
-    step = _nextafter32 if dt is float32 else _math.nextafter
+    dt = _nextafter_dtype(x1, x2)
+    # a weak Python int goes straight to the loop's type (70000 with an int16)
+    a, b = (asarray(float(x) if isinstance(x, int) and not isinstance(x, _builtins.bool) else x).astype(dt) for x in (x1, x2))
+    a, b = broadcast_arrays(a, b)
+    step = _nextafter32 if dt == float32 else _math.nextafter
     vals = [step(p, q) for p, q in zip(a.ravel().tolist(), b.ravel().tolist())]
     res = array(vals, dtype=dt).reshape(a.shape)
     return _out(res[()] if res.ndim == 0 else res, out)

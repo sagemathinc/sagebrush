@@ -24,8 +24,14 @@ pass, and CI runs them.
   - `format_float_positional` and `format_float_scientific` follow NumPy's
     Dragon4 (`numpy/_core/src/multiarray/dragon4.c`): its digit rules (exact
     digits rounded half to even, `min_digits`, carries) and its formatting
-    (`trim`, padding).
-  - `numpy-tests/test_dragon4.py` compares about 1,500 random cases of each.
+    (`trim`, padding), including its argument checks and its 16,384-character
+    buffer: a positional result that would not fit is a RuntimeError, and a
+    scientific one is cut where NumPy cuts it.
+  - `numpy-tests/test_dragon4.py` compares about 1,500 random cases of each;
+    `test_printoptions_limits.py` compares the limits and argument checks.
+  - `nextafter` picks NumPy 2's loop with Python scalars weak, e.g. float32
+    for `np.float32(1)` and `2.0`. NumPy computes bool, int8 and uint8
+    inputs in float16, which Sagebrush refuses (see float16 below).
 - **Arithmetic:** NumPy 2 promotion, with Python scalars "weak" (NEP 50),
   and OverflowError for out-of-range Python ints. Float sums use NumPy's
   pairwise summation, so they agree to the last bit. `mean`, `var` and `std`

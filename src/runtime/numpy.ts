@@ -1720,21 +1720,23 @@ interface Dragon4 { precision: number | null; unique: boolean; trim: Trim; sign:
 // precision's zeros, 0.00, even in unique mode)
 // In unique mode, min_digits makes Dragon4 go on past the shortest digits to
 // its place, with the exact value's digits (0.3 to 20 places is
-// 0.29999999999999998890, and a large number's integer digits are exact).
-// nMin(exp): the digits min_digits asks for.
-function digitsOf(x: number, o: Dragon4, n: (exp: number) => number, nMin: (exp: number) => number): [string, number, boolean] {
+// 0.29999999999999998890, and a large number's integer digits are exact),
+// and zeros once those run out.  nMin(exp): the digits min_digits asks for.
+// Dragon4 never writes more than `room` digits (its output buffer).
+function digitsOf(x: number, o: Dragon4, n: (exp: number) => number, nMin: (exp: number) => number, room: number): [string, number, boolean] {
   const e = exactDigits(x);
-  const cut = (k: number): [string, number, boolean] => {
+  const cut = (k: number, pad = false): [string, number, boolean] => {
     const r = roundDigits(e[0], e[1], k);
-    return [r[0], r[1], r[0] === "" && e[0] !== ""];
+    return [pad && r[0].length < k ? r[0].padEnd(k, "0") : r[0], r[1], r[0] === "" && e[0] !== ""];
   };
+  const most = (exp: number) => Math.min(o.precision === null ? Infinity : n(exp), room);
   if (o.unique) {
     const s = shortestDigits(x, !!o.f32);
-    if (o.precision !== null && s[0].length > n(s[1])) return cut(n(e[1]));
-    if (o.minDigits != null && s[0].length < nMin(s[1])) return cut(nMin(e[1]));
+    if (s[0].length > most(s[1])) return cut(most(e[1]));
+    if (o.minDigits != null && s[0].length < Math.min(nMin(s[1]), room)) return cut(Math.min(nMin(e[1]), room), true);
     return [s[0], s[1], false];
   }
-  return o.precision === null ? [e[0], e[1], false] : cut(n(e[1]));
+  return o.precision === null ? [e[0], e[1], false] : cut(most(e[1]));
 }
 function nonFinite(x: number, sign: boolean): string {
   return x !== x ? "nan" : x < 0 ? "-inf" : sign ? "+inf" : "inf";
@@ -1743,68 +1745,143 @@ const signOf = (x: number, sign: boolean) => (x < 0 || Object.is(x, -0) ? "-" : 
 // The digits Dragon4 outputs, as [digits, exp] with value 0.d1d2... * 10^exp:
 // 0 is one digit 0 (at 10^0), and a value that rounds to 0 at a fraction
 // precision p a 0 at 10^-p (NumPy then prints 0.00).
-function dragonDigits(x: number, o: Dragon4, n: (exp: number) => number, nMin: (exp: number) => number, p: number): [string, number] {
+function dragonDigits(x: number, o: Dragon4, n: (exp: number) => number, nMin: (exp: number) => number, p: number, room: number): [string, number] {
   if (x === 0) return ["0", 1];
-  const [d, e, toZero] = digitsOf(x, o, n, nMin);
+  const [d, e, toZero] = digitsOf(x, o, n, nMin, room);
   return toZero ? ["0", 1 - p] : [d, e];
 }
+// NumPy formats into a buffer of DRAGON4_BUFFER chars (with the NUL): the two
+// formatters below follow dragon4.c's arithmetic on it, so a result that would
+// not fit is refused or cut exactly where NumPy refuses or cuts it.
+const DRAGON4_BUFFER = 16384;
+const tooLarge = () => raise(T.RuntimeError, "Float formatting result too large");
 // np.format_float_positional: NumPy's FormatPositional (dragon4.c)
 export function dragon4Positional(x: number, o: Dragon4 & { fractional?: boolean }): string {
   if (!Number.isFinite(x)) return nonFinite(x, o.sign);
   const fractional = o.fractional !== false;
   const p = o.precision ?? 0;
-  const [digits, exp] = dragonDigits(x, o, (e) => (fractional ? e + p : p), (e) => (fractional ? e : 0) + (o.minDigits ?? 0), p);
+  const minDigits = o.minDigits ?? -1, left = o.padLeft ?? -1, right = o.padRight ?? -1;
+  const max = DRAGON4_BUFFER - 1;
+  const buf: string[] = [];
+  let pos = 0;
   const sign = signOf(x, o.sign);
-  let whole: string, frac: string;
+  const hasSign = sign ? 1 : 0;
+  if (sign) buf[pos++] = sign;
+  const [digits, exp] = dragonDigits(x, o, (e) => (fractional ? e + p : p), (e) => (fractional ? e : 0) + (o.minDigits ?? 0), p, max - hasSign);
+  let numDigits = digits.length, numWhole: number, numFrac = 0;
   if (exp > 0) {
-    whole = digits.length <= exp ? digits.padEnd(exp, "0") : digits.slice(0, exp);
-    frac = digits.length <= exp ? "" : digits.slice(exp);
+    numWhole = exp;
+    if (numDigits <= numWhole) {
+      for (let i = 0; i < numDigits; i++) buf[pos++] = digits[i];
+      const count = numWhole - numDigits;
+      if (count > max - pos) tooLarge();
+      for (let i = 0; i < count; i++) buf[pos++] = "0";
+    } else {
+      numFrac = Math.min(numDigits - numWhole, max - numWhole - 1 - pos);
+      for (let i = 0; i < numWhole; i++) buf[pos++] = digits[i];
+      buf[pos++] = ".";
+      for (let i = 0; i < numFrac; i++) buf[pos++] = digits[numWhole + i];
+    }
   } else {
-    whole = "0";
-    frac = "0".repeat(-exp) + digits;
+    if (pos + 2 < max) {
+      const zeros = Math.min(-exp, max - 2 - pos);
+      const start = 2 + zeros;
+      const nd = Math.min(numDigits, max - start - pos);
+      for (let i = 0; i < zeros; i++) buf[pos + 2 + i] = "0";
+      for (let i = 0; i < nd; i++) buf[pos + start + i] = digits[i];
+      numFrac = nd + zeros;
+    }
+    if (pos + 1 < max) buf[pos + 1] = ".";
+    if (pos < max) buf[pos] = "0";
+    numWhole = 1;
+    pos += 2 + numFrac;
   }
-  let dot = !(o.trim === "-" && frac.length === 0);
-  const add = o.unique ? (o.minDigits ?? -1) : p;
-  const desired = fractional ? Math.max(add, 0) : add - whole.length;
+  if (o.trim !== "-" && numFrac === 0 && pos < max) buf[pos++] = ".";
+  const add = o.unique ? minDigits : (o.precision ?? -1);
+  const desired = fractional ? Math.max(add, 0) : add - numWhole;
   if (o.trim === "0") {
-    if (frac.length === 0) frac = "0";
-  } else if (o.trim === "k" && desired > frac.length) frac = frac.padEnd(desired, "0");
-  if (o.trim !== "k" && frac.length > 0) {
-    frac = frac.replace(/0+$/, "");
-    if (frac === "") {
-      if (o.trim === "0") frac = "0";
-      else if (o.trim === "-") dot = false;
+    if (numFrac === 0 && pos < max) { buf[pos++] = "0"; numFrac++; }
+  } else if (o.trim === "k" && desired > numFrac && pos < max) {
+    const count = desired - numFrac;
+    if (count > max - pos) tooLarge();
+    for (let i = 0; i < count; i++) buf[pos++] = "0";
+    numFrac += count;
+  }
+  if (o.trim !== "k" && numFrac > 0) {
+    while (buf[pos - 1] === "0") { pos--; numFrac--; }
+    if (buf[pos - 1] === ".") {
+      if (o.trim === "0") { buf[pos++] = "0"; numFrac++; }
+      else if (o.trim === "-") pos--;
     }
   }
-  let right = (dot ? "." : "") + frac;
-  if (o.padRight != null && o.padRight >= frac.length) right += (o.trim === "-" && frac.length === 0 ? " " : "") + " ".repeat(o.padRight - frac.length);
-  let left = sign + whole;
-  if (o.padLeft != null && o.padLeft > left.length) left = left.padStart(o.padLeft);
-  return left + right;
+  if (right >= numFrac) {
+    const count = right - numFrac;
+    if (o.trim === "-" && numFrac === 0 && pos < max) buf[pos++] = " ";
+    if (count > max - pos) tooLarge();
+    for (let i = 0; i < count; i++) buf[pos++] = " ";
+  }
+  let out = buf.slice(0, pos).join("");
+  if (left > numWhole + hasSign) {
+    const shift = left - (numWhole + hasSign);
+    if (pos > max - shift) tooLarge();
+    out = " ".repeat(shift) + out;
+  }
+  return out;
 }
-// np.format_float_scientific: NumPy's FormatScientific (dragon4.c); its
-// trim "-" keeps a point that has digits after it before trimming
+// np.format_float_scientific: NumPy's FormatScientific (dragon4.c), with its
+// buffer bookkeeping as it is (the zeros added for a precision are not counted
+// against the room left, so a long result can end past the buffer's size)
 export function dragon4Scientific(x: number, o: Dragon4 & { expDigits?: number | null }): string {
   if (!Number.isFinite(x)) return nonFinite(x, o.sign);
   const p = o.precision ?? 0;
-  const [digits, exp] = dragonDigits(x, o, () => p + 1, () => (o.minDigits ?? 0) + 1, p);
+  const left = o.padLeft ?? -1;
+  const buf: string[] = [];
+  let at = 0, room = DRAGON4_BUFFER;
+  const sign = signOf(x, o.sign);
+  const leftChars = 1 + (sign ? 1 : 0);
+  for (let i = 0; i < left - leftChars && room > 1; i++) { buf[at++] = " "; room--; }
+  if (sign && room > 1) { buf[at++] = sign; room--; }
+  // Dragon4 gets min_digits + 1 as a C int: from 2**31 - 1 that wraps to a
+  // negative, no minimum at all (the zeros are still added below)
+  const dragon = o.minDigits != null && o.minDigits >= 2147483647 ? { ...o, minDigits: null } : o;
+  const [digits, exp] = dragonDigits(x, dragon, () => p + 1, () => (o.minDigits ?? 0) + 1, p, room);
   const e = x === 0 ? 0 : exp - 1;
-  let frac = digits.slice(1);
-  const dot = frac.length > 0 || o.trim !== "-";
+  for (let i = 0; i < digits.length; i++) buf[at + i] = digits[i];
+  if (room > 1) { at++; room--; }
+  let numFrac = digits.length - 1;
+  if (numFrac > 0 && room > 1) {
+    numFrac = Math.min(numFrac, room - 2);
+    for (let i = numFrac; i > 0; i--) buf[at + i] = buf[at + i - 1];
+    buf[at] = ".";
+    at += 1 + numFrac;
+    room -= 1 + numFrac;
+  }
+  if (o.trim !== "-" && numFrac === 0 && room > 1) { buf[at++] = "."; room--; }
   const add = Math.max(o.unique ? (o.minDigits ?? -1) : p, 0);
   if (o.trim === "0") {
-    if (frac.length === 0) frac = "0";
-  } else if (o.trim === "k" && add > frac.length) frac = frac.padEnd(add, "0");
-  if (o.trim !== "k" && frac.length > 0) {
-    frac = frac.replace(/0+$/, "");
-    if (frac === "" && o.trim === "0") frac = "0";
+    if (numFrac === 0 && room > 1) { buf[at++] = "0"; room--; numFrac++; }
+  } else if (o.trim === "k" && add > numFrac) {
+    const zeros = Math.min(add - numFrac, room - 1);
+    for (let i = 0; i < zeros; i++) buf[at++] = "0";
+    numFrac += zeros;
   }
-  let left = signOf(x, o.sign) + digits[0];
-  if (o.padLeft != null && o.padLeft > left.length) left = left.padStart(o.padLeft);
-  let ed = o.expDigits ?? -1;
-  if (ed < 0) ed = 2;
-  if (ed > 5) ed = 5;
-  return left + (dot ? "." : "") + frac + "e" + (e < 0 ? "-" : "+") + String(Math.abs(e)).padStart(ed, "0");
+  if (o.trim !== "k" && numFrac > 0) {
+    at--;
+    while (buf[at] === "0") { at--; room++; numFrac--; }
+    if (o.trim === "0" && buf[at] === ".") { buf[++at] = "0"; room--; numFrac++; }
+    at++;
+  }
+  if (room > 1) {
+    let ed = o.expDigits ?? -1;
+    if (ed > 5) ed = 5;
+    if (ed < 0) ed = 2;
+    // at least ed digits, without leading zeros past them (exponent 0 with
+    // exp_digits=0 has no digits at all)
+    const digs = e === 0 ? "0".repeat(ed) : String(Math.abs(e)).padStart(ed, "0");
+    const text = ("e" + (e < 0 ? "-" : "+") + digs).slice(0, room - 1);
+    for (const c of text) buf[at++] = c;
+  }
+  return buf.slice(0, at).join("");
 }
 // (the array printer's former helpers, on Dragon4)
 function positional(x: number, precision: number, trimZeros: boolean, minDigits = 0): string {
@@ -1820,6 +1897,11 @@ function floatFormatter(vals: number[], signMode = printopts.sign as string): Fm
   const abs = finite.map(Math.abs).filter((v) => v !== 0);
   const floatmode = printopts.floatmode as string;
   let precision: number | null = floatmode === "unique" ? null : printopts.precision;
+  // NumPy hands the precision to Dragon4 as a C int (lib/numpy passes 2**31
+  // or 2**63 for any precision that large)
+  if (precision !== null && finite.length && precision > 2147483647) {
+    raise(T.OverflowError, `Python int too large to convert to C ${precision >= 2 ** 63 ? "long" : "int"}`);
+  }
   let expFormat = false;
   if (abs.length) {
     const mx = Math.max(...abs), mn = Math.min(...abs);
@@ -1868,6 +1950,9 @@ function floatFormatter(vals: number[], signMode = printopts.sign as string): Fm
   const width = padLeft + padRight + 1;
   const o = { precision, unique, trim, sign: plus, padLeft, minDigits, f32 };
   return (x) => {
+    // fitted to no finite values, NumPy's FloatingFormat has min_digits None,
+    // which Dragon4 refuses for a finite one (edgeitems <= 0 can show one)
+    if (finite.length === 0 && Number.isFinite(x)) raise(T.TypeError, "'NoneType' object cannot be interpreted as an integer");
     if (!Number.isFinite(x)) {
       const s = x !== x ? (plus ? "+" : "") + nanstr : (x < 0 ? "-" : plus ? "+" : "") + infstr;
       return s.padStart(width);
@@ -1879,7 +1964,7 @@ function floatFormatter(vals: number[], signMode = printopts.sign as string): Fm
 
 // NumPy's IntegerFormat, with the sign option
 function intFormatter(strs: string[], signMode: string): (s: string) => string {
-  if (!strs.length) return (s) => s;
+  if (!strs.length) return (s) => (signMode !== "-" && !s.startsWith("-") ? (signMode === "+" ? "+" : " ") + s : s);
   const neg = strs.some((s) => s.startsWith("-"));
   const mode = signMode === " " && neg ? "-" : signMode;
   const nums = strs.map((s) => BigInt(s));
@@ -1891,34 +1976,45 @@ function intFormatter(strs: string[], signMode: string): (s: string) => string {
   return (s) => (mode !== "-" && !s.startsWith("-") ? (mode === "+" ? "+" : " ") + s : s).padStart(w);
 }
 
-function elementFormatter(a: NDArray, items: number[] | [number, number][], positions: number[]): (i: number) => string {
+// The formatter for an array's elements, by their positions in a.data: its
+// widths come from the elements at `positions`.
+function elementFormatter(a: NDArray, positions: number[]): (p: number) => string {
   const dt = a.dt;
   // a formatter function for the kind: called with each element (as a NumPy scalar)
   const user = printopts.fmt[dt.cplx ? "c" : dt.kind === "b" ? "b" : dt.isInt ? "i" : "f"];
-  if (user) return (i) => F.str(Obj.callObj(user, [pyScalarOf(dt, a.data, positions[i])]));
+  if (user) return (p) => F.str(Obj.callObj(user, [pyScalarOf(dt, a.data, p)]));
   if (dt.kind === "b") {
-    const vals = items as number[];
     const w = a.ndim === 0 ? 0 : 5; // NumPy's BoolFormat: " True" in arrays
-    return (i) => (vals[i] ? "True" : "False").padStart(w);
+    return (p) => (a.data[p] ? "True" : "False").padStart(w);
   }
   if (dt.isInt) {
-    const strs = (items as number[]).map((v) => String(Number.isSafeInteger(v) ? v : BigInt(v)));
-    const f = intFormatter(strs, printopts.sign as string);
-    return (i) => f(strs[i]);
+    const str = (p: number) => {
+      const v = a.data[p] as number;
+      return String(Number.isSafeInteger(v) ? v : BigInt(v));
+    };
+    const f = intFormatter(positions.map(str), printopts.sign as string);
+    return (p) => f(str(p));
   }
   if (dt.cplx) {
-    const pairs = items as [number, number][];
-    const rf = floatFormatter(pairs.map((p) => p[0]));
-    const imf = floatFormatter(pairs.map((p) => p[1]), "+");
-    return (i) => {
-      const r = rf(pairs[i][0]);
-      const im = imf(pairs[i][1]);
+    const rf = floatFormatter(positions.map((p) => a.data[2 * p] as number));
+    const imf = floatFormatter(positions.map((p) => a.data[2 * p + 1] as number), "+");
+    return (p) => {
+      const r = rf(a.data[2 * p] as number);
+      const im = imf(a.data[2 * p + 1] as number);
       const sp = im.trimEnd().length;
       return r + im.slice(0, sp) + "j" + " ".repeat(im.length - sp);
     };
   }
-  const f = floatFormatter(items as number[]);
-  return (i) => f((items as number[])[i]);
+  const f = floatFormatter(positions.map((p) => a.data[p] as number));
+  return (p) => f(a.data[p] as number);
+}
+
+// The indices of range(n)[start:stop], with Python's slice rules
+function sliceRange(n: number, start: number, stop: number): number[] {
+  const at = (i: number) => (i < 0 ? Math.max(n + i, 0) : Math.min(i, n));
+  const out: number[] = [];
+  for (let i = at(start); i < at(stop); i++) out.push(i);
+  return out;
 }
 
 // The text of an array's elements: a port of NumPy's _formatArray and
@@ -1935,21 +2031,41 @@ export function arrayText(a: NDArray, sep: string, prefix: string, suffix = ""):
 function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): string {
   const summarize = a.size > printopts.threshold;
   const edge = printopts.edgeitems;
-  // the elements shown, in order, for one shared formatter
-  const shown: number[] = [];
-  const collect = (d: number, off: number) => {
+  // the elements the formatter is fitted to: NumPy's _leading_trailing,
+  // a[:edge] and a[-edge:] along each axis (with edgeitems <= 0 these are
+  // slices of most or all of it)
+  const fitted: number[] = [];
+  const fit = (d: number, off: number) => {
     const n = a.shape[d];
-    const idx = summarize && n > 2 * edge ? [...Array(edge).keys(), ...Array.from({ length: edge }, (_, i) => n - edge + i)] : [...Array(n).keys()];
+    const idx = summarize && n > 2 * edge ? [...sliceRange(n, 0, edge), ...sliceRange(n, -edge, n)] : sliceRange(n, 0, n);
     for (const i of idx) {
-      if (d === a.ndim - 1) shown.push(off + i * a.strides[d]);
-      else collect(d + 1, off + i * a.strides[d]);
+      if (d === a.ndim - 1) fitted.push(off + i * a.strides[d]);
+      else fit(d + 1, off + i * a.strides[d]);
     }
   };
-  if (a.ndim === 0) shown.push(a.offset);
-  else collect(0, a.offset);
-  const vals: any[] = a.dt.cplx ? shown.map((p) => [a.data[2 * p], a.data[2 * p + 1]]) : shown.map((p) => a.data[p]);
-  const fmt = elementFormatter(a, vals, shown);
-  if (a.ndim === 0) return fmt(0);
+  // the elements shown, in the order rec shows them (NumPy's _formatArray):
+  // the leading ones, the trailing ones and always the last
+  const shown: number[] = [];
+  const showIdx = (n: number) => {
+    const sum = summarize && 2 * edge < n;
+    const idx: number[] = [];
+    for (let i = 0; i < (sum ? edge : 0); i++) idx.push(i);
+    for (let i = sum ? edge : n; i > 1; i--) idx.push(n - i);
+    idx.push(n - 1);
+    return idx;
+  };
+  const show = (d: number, off: number) => {
+    for (const i of showIdx(a.shape[d])) {
+      if (d === a.ndim - 1) shown.push(off + i * a.strides[d]);
+      else show(d + 1, off + i * a.strides[d]);
+    }
+  };
+  if (a.ndim === 0) fitted.push(a.offset);
+  else fit(0, a.offset);
+  const fmtAt = elementFormatter(a, fitted);
+  if (a.ndim === 0) return fmtAt(a.offset);
+  show(0, a.offset);
+  const fmt = (i: number) => fmtAt(shown[i]);
   let pos = 0;
   const lineWidth = printopts.linewidth - suffix.length;
   const nextLinePrefix = " " + " ".repeat(prefix.length);
