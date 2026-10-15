@@ -282,9 +282,13 @@ export class InPlace {
     q(".ip-title")!.hidden = !this.title.hidden;
     // (+ Text for a note whose text isn't shown; a code item's comes with Enter in its title, as before)
     q(".ip-text")!.hidden = !this.text.el.hidden || this.hasCode;
+    // (the head's { }: its state, and its tooltip the action it now takes; its
+    // name stays "Show the code", pressed while the code shows, as a toggle's
+    // name should, WAI-ARIA APG, A11Y-9E1-2)
     const toggle = this.el.querySelector<HTMLElement>(":scope > .board-code-head > .board-code-toggle");
     toggle?.classList.toggle("off", this.hideCode);
     toggle?.setAttribute("aria-pressed", String(!this.hideCode));
+    if (toggle) toggle.title = this.hideCode ? "Show the code" : "Hide the code (its output stays)";
     if (!this.group) {
       q(".ip-run")!.hidden = !this.hasCode;
       q(".ip-hide")!.hidden = !this.hasCode;
