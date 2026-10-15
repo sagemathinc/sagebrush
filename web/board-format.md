@@ -154,6 +154,8 @@ A group: items laid out together, under a title. Groups nest; an edge may join a
 | `color` | string | a color |
 | `x` | number | its position, kept once a person moves it: leave it out |
 | `y` | number | as `x` |
+| `w` | number | its width at least, as a person made it by its corner (it is as wide as this, or as its items need, whichever is more) |
+| `h` | number | its height at least, as `w` |
 
 ### An edge
 

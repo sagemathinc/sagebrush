@@ -408,6 +408,8 @@ export class InPlace {
     on(document, "pointerdown", (e: PointerEvent) => {
       const t = e.target as Element;
       if (this.el.contains(t) || this.bar.contains(t) || t.closest?.(".sb-fileinput")) return;
+      // (its grip drags it, still being written, William's B2)
+      if (this.host.board.gripAt(e.clientX, e.clientY, e.pointerType === "touch") === this.id) return;
       this.end();
     }, true);
     const keys = (e: KeyboardEvent) => {
@@ -508,7 +510,6 @@ export class InPlace {
   }
   // (code left empty: no code)
   private codeNow() { return this.hasCode ? this.code!.value.replace(/\s+$/, "") : ""; }
-  private empty() { return !this.pic && !this.title.value.trim() && !this.text.value.trim() && !this.codeNow(); }
 
   /** Keep what is written: the visit's undo step, or part of it. */
   private async save() {
@@ -533,14 +534,14 @@ export class InPlace {
     })();
   }
 
-  /** Leave, keeping what is written (a new item left empty is not kept); done when it is kept. */
+  /** Leave, keeping what is written (a new item left empty is kept too, to
+   * be moved and written in later: William's B2); done when it is kept. */
   end(): Promise<void> {
     if (this.ending) return this.ending;
     if (this.ended) return Promise.resolve();
     this.close();
     return (this.ending = (async () => {
-      if (this.fresh && this.empty()) await this.host.commit((d) => this.host.remove(d, this.id), true);
-      else await this.save();
+      await this.save();
       this.finish();
     })());
   }
