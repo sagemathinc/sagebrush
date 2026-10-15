@@ -893,9 +893,13 @@ def lsqnonneg_(nargout, *args):
     (default 10*eps*norm(C,1)*length(C), as the page gives it).  The
     options are Display ('notify', 'final', 'off' or 'none') and TolX.
 
-    Sagebrush's own choices, where the page fixes nothing: TolX is the
-    threshold for entering (lambda above it), for a positive entry and for
-    reaching 0; the limit behind exitflag 0 is MaxIter if set and
+    TolX is the threshold for entering (lambda above it); a passive
+    solution's entries are tested for positivity exactly, and the variable
+    that limits the step back reaches 0 exactly, as in Lawson and Hanson's
+    steps 6 to 11, so that a solution of any scale is kept (TolX, which
+    scales with C, is a dual tolerance, not a size for x).
+
+    Sagebrush's own choices, where the page fixes nothing: the limit behind exitflag 0 is MaxIter if set and
     otherwise Lawson and Hanson's 3 times the number of variables;
     iterations counts the least-squares solves; a sparse C is used as a
     full matrix; and the message for exitflag 0 is Sagebrush's own"""
@@ -943,15 +947,22 @@ def lsqnonneg_(nargout, *args):
         passive[t] = True
         z = solve(passive)
         it += 1
-        while np.any(z[passive] <= tol):
+        # (Lawson and Hanson's steps 6 to 11: the passive solution's entries
+        # are tested for positivity exactly, whatever the scale of C; the
+        # step back stops where the first of them reaches 0, which leaves
+        # with every other passive variable at 0 or below)
+        while np.any(z[passive] <= 0):
             if it >= maxit:
                 flag = 0
                 break
-            neg = passive & (z.reshape(-1) <= tol)
+            neg = passive & (z.reshape(-1) <= 0)
             xs, zs = x.reshape(-1)[neg], z.reshape(-1)[neg]
-            alpha = float(np.min(xs / (xs - zs)))
-            x = x + alpha * (z - x)
-            passive &= ~(np.abs(x.reshape(-1)) <= tol)
+            gap = xs - zs
+            ratios = np.where(gap > 0, xs / np.where(gap > 0, gap, 1.0), 0.0)
+            k = int(np.argmin(ratios))
+            x = x + float(ratios[k]) * (z - x)
+            x[np.flatnonzero(neg)[k]] = 0.0
+            passive &= ~(x.reshape(-1) <= 0)
             x[~passive] = 0.0
             z = solve(passive)
             it += 1
