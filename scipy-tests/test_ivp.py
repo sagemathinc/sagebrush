@@ -1,5 +1,7 @@
 # solve_ivp's explicit Runge-Kutta methods follow SciPy's step control, so the
-# steps taken (their number, nfev, the messages) must be SciPy's exactly.  The
+# steps taken (their number, nfev, the messages) must be SciPy's exactly,
+# except at tight tolerances (accurate() below), where they are not
+# reproducible across CPUs even for SciPy itself.  The
 # values agree to 1e-6: the error estimates are sums with heavy cancellation
 # (DOP853's especially), which SciPy's BLAS adds in another order, so step
 # sizes differ in the 8th digit (DOP853's values, over long runs at loose
@@ -19,6 +21,18 @@ def summary(name, r):
         check(name + " y.imag", r.y.imag, *tol)
 
 
+def accurate(name, r, tol):
+    """A run at a tight tolerance, compared on a fixed grid of times only:
+    its steps depend on the last bits of the error estimates, which are sums
+    with heavy cancellation that SciPy adds with NumPy's BLAS, in an order
+    that depends on the CPU (on CI's runner the steps of RK45 at rtol 1e-9
+    moved by 1e-7).  Each run is within its own tolerance of the solution,
+    so the two agree to tol."""
+    print(name, r.status, r.success, r.message, r.t.shape, r.y.shape)
+    check(name + " t", r.t, 0.0, 0.0)
+    check(name + " y", r.y.real, tol, tol)
+
+
 def osc(t, y):
     return [y[1], -y[0] + 0.1 * math.sin(t)]
 
@@ -29,10 +43,14 @@ def vdp(t, y, mu):
 
 for method in ["RK45", "RK23", "DOP853"]:
     summary(method + " osc", solve_ivp(osc, [0, 10], [1.0, 0.0], method=method))
-    summary(method + " osc tight", solve_ivp(osc, [0, 10], [1.0, 0.0], method=method, rtol=1e-9, atol=1e-11))
-    # (DOP853 at rtol 1e-3 here: steps 2e-5 apart where y changes fast, so tighter)
-    tight = dict(rtol=1e-8, atol=1e-10) if method == "DOP853" else {}
-    summary(method + " vdp", solve_ivp(vdp, [0, 20], [2.0, 0.0], method=method, args=(1.0,), **tight))
+    accurate(method + " osc tight", solve_ivp(osc, [0, 10], [1.0, 0.0], method=method, rtol=1e-9, atol=1e-11,
+                                               t_eval=np.linspace(0, 10, 41)), 1e-7)
+    if method == "DOP853":
+        # (DOP853 at rtol 1e-3 here: steps 2e-5 apart where y changes fast, so tighter, on a grid)
+        accurate(method + " vdp", solve_ivp(vdp, [0, 20], [2.0, 0.0], method=method, args=(1.0,), rtol=1e-8, atol=1e-10,
+                                            t_eval=np.linspace(0, 20, 41)), 1e-6)
+    else:
+        summary(method + " vdp", solve_ivp(vdp, [0, 20], [2.0, 0.0], method=method, args=(1.0,)))
     summary(method + " backward", solve_ivp(lambda t, y: -2 * y, [3, 0], [1.0], method=method))
     summary(method + " max_step", solve_ivp(lambda t, y: np.cos(t) * y, [0, 5], [1.0], method=method, max_step=0.3))
     summary(method + " first_step", solve_ivp(lambda t, y: -y, [0, 2], [1.0], method=method, first_step=0.01))

@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: SciPy (the reference for scipy.io's MATLAB files in test/data.test.ts)
-        run: python3 -m pip install scipy
+        run: python3 -m pip install scipy==1.18.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
@@ -196,7 +196,7 @@ jobs:
         run: node scripts/third-party-notices.mjs --check
       - name: the TypeScript tests and the Sage, calculus, Magma and MATLAB suites on it
         run: |
-          python3 -m pip install scipy
+          python3 -m pip install scipy==1.18.1
           pnpm run build
           node scripts/build-cli.mjs
           node --test 'dist/test/*.test.js'
