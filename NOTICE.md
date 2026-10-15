@@ -41,6 +41,12 @@ Copyright (c) 2001 Python Software Foundation. See
 - `src/runtime/builtins.ts`, `sum`: the compensated float and complex paths
   of CPython's `builtin_sum_impl` (`Python/bltinmodule.c`; Neumaier's
   algorithm).
+- `src/runtime/modules.ts`, `math.fsum`, `math.remainder`, `math.isclose`,
+  `math.modf` and `math.fmod`: ported from CPython 3.14's
+  `Modules/mathmodule.c` (`math_fsum_impl` with Shewchuk's partials and its
+  half-even correction, `m_remainder`, `math_isclose_impl`,
+  `math_modf_impl`, `math_fmod_impl`); `src/runtime/ops.ts`, `floatDivmod`:
+  `_float_div_mod` (`Objects/floatobject.c`).
 
 ### NumPy (BSD 3-Clause)
 

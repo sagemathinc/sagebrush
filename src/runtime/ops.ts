@@ -93,6 +93,7 @@ const OPS: Record<string, [string, string, string]> = table({
   floordiv: ["__floordiv__", "__rfloordiv__", "//"],
   mod: ["__mod__", "__rmod__", "%"],
   pow: ["__pow__", "__rpow__", "** or pow()"],
+  divmod: ["__divmod__", "__rdivmod__", "divmod()"],
   lshift: ["__lshift__", "__rlshift__", "<<"],
   rshift: ["__rshift__", "__rrshift__", ">>"],
   and: ["__and__", "__rand__", "&"],
@@ -270,7 +271,7 @@ function truedivSlow(a: any, b: any): any {
   }
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float division by zero");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(x / y);
   }
   return binaryDunder(a, b, "truediv");
@@ -343,7 +344,7 @@ export function floordiv(a: any, b: any): any {
 function floordivSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) {
     const x = big(a), y = big(b);
-    if (y === 0n) raise(T.ZeroDivisionError, "integer division or modulo by zero");
+    if (y === 0n) raise(T.ZeroDivisionError, "division by zero");
     // One BigInt division; flooring only matters when the signs differ.
     let q = x / y;
     if (x < 0n !== y < 0n && q * y !== x) q -= 1n;
@@ -351,17 +352,19 @@ function floordivSlow(a: any, b: any): any {
   }
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float floor division by zero");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(floatDivmod(x, y)[0]);
   }
   return binaryDunder(a, b, "floordiv");
 }
 
-// CPython's _float_div_mod.
+// CPython's _float_div_mod.  (C's `if (mod)` is true for a nan, which JS's
+// `if (mod)` is not: the tests are `!== 0`, so an infinite or nan operand
+// gives nan, as in CPython, not 0.0.)
 export function floatDivmod(vx: number, wx: number): [number, number] {
   let mod = vx % wx;
   let div = (vx - mod) / wx;
-  if (mod) {
+  if (mod !== 0) {
     if (wx < 0 !== mod < 0) {
       mod += wx;
       div -= 1.0;
@@ -370,7 +373,7 @@ export function floatDivmod(vx: number, wx: number): [number, number] {
     mod = wx < 0 ? -0.0 : 0.0;
   }
   let floordiv: number;
-  if (div) {
+  if (div !== 0) {
     floordiv = Math.floor(div);
     if (div - floordiv > 0.5) floordiv += 1.0;
   } else {
@@ -404,14 +407,14 @@ export function mod(a: any, b: any): any {
 function modSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) {
     const x = big(a), y = big(b);
-    if (y === 0n) raise(T.ZeroDivisionError, "integer modulo by zero");
+    if (y === 0n) raise(T.ZeroDivisionError, "division by zero");
     let r = x % y;
     if (r !== 0n && r < 0n !== y < 0n) r += y;
     return normBig(r);
   }
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float modulo by zero");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     return mkfloat(floatDivmod(x, y)[1]);
   }
   return binaryDunder(a, b, "mod");
@@ -421,16 +424,13 @@ export function divmod(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return tuple([floordiv(a, b), mod(a, b)]);
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) {
-    if (y === 0) raise(T.ZeroDivisionError, "float divmod()");
+    if (y === 0) raise(T.ZeroDivisionError, "division by zero");
     const [q, r] = floatDivmod(x, y);
     return tuple([mkfloat(q), mkfloat(r)]);
   }
-  const f = special(a, "__divmod__");
-  if (f !== undefined) {
-    const r = f(a, b);
-    if (r !== NotImplemented) return r;
-  }
-  raise(T.TypeError, `unsupported operand type(s) for divmod(): '${typeName(a)}' and '${typeName(b)}'`);
+  // (the binary protocol: a subclass's __rdivmod__ first, then __divmod__,
+  // then the other operand's __rdivmod__)
+  return binaryDunder(a, b, "divmod");
 }
 
 export function pow(a: any, b: any, m?: any): any {
