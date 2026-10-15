@@ -2149,18 +2149,26 @@ def legend_(nargout, args):
         props[_m._text(pos[i])] = pos[i + 1]
     plotted = chosen if chosen is not None else [c for c in ax.children if isinstance(c, (Line, Scatter, Bar, Patch, Contour, Histogram, ConstantLine)) and not isinstance(c, Text)
                                                    and _m._text(c.props.get("HandleVisibility", _m.Char("on"))) != "off"]
+    # (the new names first, checked as the new legend's interpreter says,
+    # before anything changes: a refused call leaves the lines and the old
+    # legend as they were)
+    new = {}
     for k, c in enumerate(plotted):
         if k < len(names):
-            c.props["DisplayName"] = _m.Char(names[k])
+            new[id(c)] = names[k]
         elif not names and not _m._text(c.props.get("DisplayName", _m.Char(""))):
-            c.props["DisplayName"] = _m.Char("data%d" % (k + 1))
+            new[id(c)] = "data%d" % (k + 1)
     shown = plotted[:len(names)] if names else plotted
-    lg = Legend(None, String=_m.Cell([_m.Char(_m._text(c.props["DisplayName"])) for c in shown], (1, len(shown))))
-    lg.parent = ax
+    label = lambda c: new.get(id(c), _m._text(c.props.get("DisplayName", _m.Char(""))))
+    lg = Legend(None, String=_m.Cell([_m.Char(label(c)) for c in shown], (1, len(shown))))
+    lg.parent = ax  # (its axes, for its properties; not shown until ax.legend is it)
     lg.items = shown
     _apply(lg, props)
     for c in shown:
-        _tex_checked(lg, _m._text(c.props["DisplayName"]))
+        _tex_checked(lg, label(c))
+    for c in plotted:
+        if id(c) in new:
+            c.props["DisplayName"] = _m.Char(new[id(c)])
     ax.legend = lg
     ax.touch()
     return lg
@@ -3842,7 +3850,7 @@ def figure_scene(fig):
             p = _vec(c.props["Position"]) + [0.0, 0.0, 0.0]
             if not all(math.isfinite(v) for v in p[:3]):
                 continue
-            objs.append({"type": "text", "pos": p[:3], "text": _mtex.runs(_tex(c, _text_value(c.props["String"]))),
+            objs.append({"type": "text", "pos": p[:3], "text": _mtex.runs(_tex(c, _text_value(c.props["String"])), _SCENE_TEXT_PX),
                          "color": _hex(_rgbof(c.props["Color"]) or (0, 0, 0))})
         else:
             return None
@@ -3856,16 +3864,17 @@ def figure_scene(fig):
     ticklabels = []
     for i, k in enumerate("XYZ"):
         labs = _ticklabels(ax.get_prop(k + "TickLabel"))
-        ticklabels.append([_mtex.runs(_tex(ax, labs[j], "TickLabelInterpreter")) if j < len(labs) else _m._text(_m.num2str_(float(t)))
+        ticklabels.append([_mtex.runs(_tex(ax, labs[j], "TickLabelInterpreter"), _SCENE_TICK_PX) if j < len(labs) else _m._text(_m.num2str_(float(t)))
                            for j, t in enumerate(ticks[i])])
     v = _vec(ax.props["View"])
     t = _text_value(ax.title.props["String"])
     st = _text_value(ax.subtitle.props["String"])
     bg = _rgbof(fig.props.get("Color", _m.Char("w")))
     scene = {"version": 1, "lo": lo, "hi": hi, "scale": scale, "objects": objs, "frame": False, "axes": False,
-             "labels": [_mtex.runs(_tex(l, _text_value(l.props["String"]))) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
+             "labels": [_mtex.runs(_tex(l, _text_value(l.props["String"])), _SCENE_LABEL_PX) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
              # (text as MATLAB's TeX markup draws it: a string, or runs of styled text)
-             "title": _mtex.runs(_tex(ax.title, t)) if t else None, "subtitle": _mtex.runs(_tex(ax.subtitle, st)) if st else None,
+             "title": _mtex.runs(_tex(ax.title, t), _SCENE_TITLE_PX) if t else None,
+             "subtitle": _mtex.runs(_tex(ax.subtitle, st), _SCENE_TITLE_PX) if st else None,
              "title_weight": "bold" if _m._text(ax.title.props["FontWeight"]).lower() == "bold" else "normal",
              "subtitle_weight": "bold" if _m._text(ax.subtitle.props["FontWeight"]).lower() == "bold" else "normal",
              # (MATLAB's azimuth is from the negative y axis, the viewer's from the x axis)
@@ -3881,6 +3890,11 @@ def figure_scene(fig):
     return scene if _scene_within(scene) else None
 
 
+# the viewer's text sizes (px), to which a scene's styled runs are relative
+# (web/viewer3d.js: the title's, a MATLAB axis label's, a tick label's, a text's)
+_SCENE_TITLE_PX, _SCENE_LABEL_PX, _SCENE_TICK_PX, _SCENE_TEXT_PX = 15.0, 11.0, 10.0, 12.0
+
+
 def _scene_within(scene):
     """whether the viewer would take the scene (web/viewer3d.js's checkScene:
     its LIMITS on text and ticks, and positions near the box)"""
@@ -3890,9 +3904,12 @@ def _scene_within(scene):
     texts = [scene["title"] or "", scene["subtitle"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
     if any(n > 2000 or k > 200 for n, k in map(size, texts)) or len(texts) - 5 > 2000:
         return False
-    # (the styled runs in all: the viewer's spans, LIMITS.spans)
+    # (the styled runs in all: the viewer's spans, LIMITS.spans; and each run's
+    # size and rise within its LIMITS)
     rich = [t for t in texts + [s for t in scene["box"]["ticklabels"] for s in t] if not isinstance(t, str)]
-    if sum(len(t) for t in rich) > 20000:
+    if sum(len(t) + 3 * len({(k, g[0]) for r in t for k, g in enumerate(r.get("j", []))}) for t in rich) > 20000:
+        return False
+    if any(not (0.01 <= r.get("s", 1) <= 10 and abs(r.get("r", 0)) <= 10 and len(r.get("j", [])) <= 8) for t in rich for r in t):
         return False
     box = scene["box"]
     if any(len(t) > 100 for t in box["ticks"]) or any(n > 200 or k > 200 for t in box["ticklabels"] for n, k in map(size, t)):
