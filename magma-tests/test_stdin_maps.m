@@ -133,3 +133,10 @@ vk := 1;
 fe := map< Z -> Z | y :-> assigned vk select 1 else 0 >;
 delete vk;
 fe(0);
+// assigned r``e: the record is read first, so an `assigned r` inside the
+// computed field name comes after the import and is rejected
+GF2 := recformat< p, q >;
+rg := rec< GF2 | p := 5 >;
+fg := map< Z -> Z | y :-> assigned rg``(assigned rg select "p" else "q") >;
+fh := map< Z -> Z | y :-> assigned rg``(y gt 0 select "p" else "q") select 1 else 2 >;
+fh(1), fh(-1);

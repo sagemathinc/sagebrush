@@ -113,3 +113,30 @@ Fibonacci(30);
 Valuation(1/8, 2);
 Modinv(3, 7), InverseMod(3, 7);
 Quotrem(-17, 5);
+// a later loop of a comprehension is the outer one: earlier sets see its variable
+function Tri(n)
+  return [ <i, j> : j in [1 .. i], i in [1 .. n] ];
+end function;
+Tri(3);
+function TriSum(n)
+  return [ j : j in [1 .. i], i in [1 .. n] | i + j gt 3 ];
+end function;
+TriSum(3);
+function Inner(n)
+  return [ q9 : q9 in [1 .. n], r9 in [1 .. q9] ];
+end function;
+// _ is a missing return value: the variable it is assigned to is unassigned
+function Half(x)
+  if IsEven(x) then return true, x div 2; else return false, _; end if;
+end function;
+hv := 5;
+ok, hv := Half(7);
+ok;
+assigned hv;
+Half(7);
+Half(8);
+function HalfKnown(x)
+  a, b := Half(x);
+  return assigned b;
+end function;
+HalfKnown(8), HalfKnown(7);

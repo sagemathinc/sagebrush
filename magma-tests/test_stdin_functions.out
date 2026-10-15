@@ -1,0 +1,73 @@
+11
+3 [ 30, 4, 5 ]
+2
+2
+5
+7
+
+>> function needslater() return later + 1; end function;
+                                ^
+User error: Identifier 'later' has not been declared or assigned
+
+>> needslater();
+   ^
+User error: Identifier 'needslater' has not been declared or assigned
+
+>> g := func< t | t + notyet >;
+                      ^
+User error: Identifier 'notyet' has not been declared or assigned
+false
+true
+[ false, true, true ]
+
+>> function rw() x := base; base := 1; return x; end function;
+                            ^
+User error: Imported environment value 'base' cannot be used as a local
+
+>> rw();
+   ^
+User error: Identifier 'rw' has not been declared or assigned
+
+>> function ra() return base + (assigned base select 1 else 0); end function;
+                                ^
+User error: Imported environment value 'base' cannot be used as a local
+
+>> function el() lst[1] := 0; return lst; end function;
+                    ^
+User error: Identifier 'lst' has not been declared or assigned
+[ 0, 4, 5 ]
+[ 30, 4, 5 ]
+4 -1
+true false
+11
+4
+7
+
+>> mm := map< Z -> Z | y :-> y + undef >;
+                                 ^
+User error: Identifier 'undef' has not been declared or assigned
+21
+<3, "t"> <6, "s">
+2 6
+10 15 15
+6 15
+true true
+
+>> function del2() delete lv; return 0; end function;
+                          ^
+User error: Identifier 'lv' has not been declared or assigned
+false 8 false false 2 7
+
+>> function usesdv() return dv; end function;
+                            ^
+User error: Identifier 'dv' has not been declared or assigned
+
+>> fdv := func< t | t + dv >;
+                        ^
+User error: Identifier 'dv' has not been declared or assigned
+
+>> mdv := map< Z -> Z | t :-> t + dv >;
+                                  ^
+User error: Identifier 'dv' has not been declared or assigned
+false false false
+4
