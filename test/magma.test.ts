@@ -74,6 +74,53 @@ test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprim
   assert.match(flat, /Quadratic Field with defining polynomial x\^2 - 3 over the Rational Field/);
 });
 
+test("what Sagebrush lacks is refused in words, never a Python exception, class or function", () => {
+  // (the coverage run's 38 Handbook programs where Python's TypeError,
+  // AttributeError or IndexError reached the user; /scratch/coverage/magma)
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const src = [
+    "Integers(7);",
+    "P<a, b, c> := PolynomialRing(Rationals(), 3);",
+    "K := Integers(); K`__class__;",
+    "x := 5; x`real;",
+    "assigned x`real;",
+    "x`f := 1;",
+    "Newforms(1, 2);",
+    "Divisors([1]);",
+    "CuspidalSubspace(ModularForms(11, 2));",
+    "HeckePolynomial(CuspForms(11, 2), 2);",
+    "Zx<z> := PolynomialRing(Integers()); F<w> := NumberField(z^2 - 5);",
+    "E := EllipticCurve([0, w]);",
+    "CremonaReference(EllipticCurve([0, 0, 0, 0, 1000003]));",
+    "Integers(F);",
+    "SetSeed(1);",
+    "Random(1, 4);",
+  ].join("\n") + "\n";
+  const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
+  // (messages are wrapped at 80 columns, as Magma's are)
+  const flat = out.replace(/\s+/g, " ");
+  for (const said of [
+    "Runtime error in 'Integers': Integers(m), the integers modulo m, is not supported yet",
+    "Runtime error in 'PolynomialRing': PolynomialRing in more than one variable (or with weights) is not supported yet",
+    "Runtime error in `: the attribute __class__ of this object (not a record) is not supported yet",
+    "Runtime error in `: the attribute real of this object (not a record) is not supported yet",
+    "Runtime error in `: the attribute f of this object (not a record) is not supported yet",
+    "Runtime error: Newforms with these arguments is not supported yet",
+    "Runtime error in 'Divisors': Divisors of a SeqEnum is not supported yet",
+    "Runtime error in 'CuspidalSubspace': CuspidalSubspace of a",
+    "Runtime error in 'HeckePolynomial': HeckePolynomial of a",
+    "Runtime error in 'EllipticCurve': EllipticCurve with a coefficient in a FldNumElt is not supported yet",
+    "Runtime error: not supported yet: this curve is not in sagebrush's table",
+    "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
+    "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
+  ]) assert.ok(flat.includes(said), said + "\n" + out);
+  // Integers(F) is F's maximal order
+  assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
+  assert.doesNotMatch(out, /[A-Z][a-z]+Error: |Traceback|<class |<built-in|object has no attribute/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)

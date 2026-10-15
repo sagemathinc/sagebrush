@@ -1,0 +1,49 @@
+
+>> ord;
+   ^
+User error: Identifier 'ord' has not been declared or assigned
+
+>> x := len([1, 2]);
+        ^
+User error: Identifier 'len' has not been declared or assigned
+10
+4
+9
+[ <1, 1>, <1, 2>, <2, 1>, <2, 2> ]
+[ <1, 1, 5>, <1, 2, 5>, <2, 1, 5>, <2, 2, 5>, <1, 1, 6>, <1, 2, 6>, <2, 1, 6>, 
+<2, 2, 6> ]
+3
+1/2
+
+>> Q ! [3, 0];
+     ^
+Runtime error in '!': Division by zero
+LHS: FldRat
+RHS: [RngIntElt]
+
+>> Q ! [1, 2, 3];
+     ^
+Runtime error in '!': Sequence must have length 2 to lift into this field
+LHS: FldRat
+RHS: [RngIntElt]
+
+>> Q ! [1/2, 3];
+     ^
+Runtime error in '!': Should be a sequence of integers
+LHS: FldRat
+RHS: [FldRatElt]
+2/3*t + 1/2
+2*y + 1
+
+>> Z ! [1/2];
+     ^
+Runtime error in '!': Cannot coerce sequence element 1 into the coefficient ring
+
+
+>> l ! k.1;
+     ^
+Runtime error in '!': Arguments are not compatible
+LHS: FldNum
+RHS: FldNumElt
+2
+true
