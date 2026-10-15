@@ -188,3 +188,27 @@ test("board run: a board of a later version of the format is refused as the boar
   assert.equal(r.stdout, "");
   assert.match(r.stderr, /^sagebrush board run: -: this board is in version 99 of the format, from a later Sagebrush; this sagebrush \((dev|\d+\.\d+\.\d+\S*)\) reads version 1: update sagebrush \(npx sagebrush@latest\)\n$/);
 });
+
+test("board run: what it says of a board it refuses is one line, a newline or a tab in the format or the file's name escaped; what a cell prints keeps its lines (HARD-EC2-1)", () => {
+  const evil = JSON.stringify({ format: "evil\nINJECTED: ok\tX", nodes: [] });
+  let r = run(["-"], evil);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'sagebrush board run: -: not a Sagebrush board: its format is "evil\\x0aINJECTED: ok\\x09X"\n');
+  const dir = mkdtempSync(join(tmpdir(), "sb-run-"));
+  try {
+    const file = join(dir, "a\nINJECTED: ok\tb.json");
+    writeFileSync(file, evil);
+    r = run([file]);
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.split("\n").length, 2, r.stderr);
+    assert.ok(r.stderr.includes("a\\x0aINJECTED: ok\\x09b.json: not a Sagebrush board"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  r = run([examples + "live.json", "--x\ny"]);
+  assert.equal(r.status, 2);
+  assert.ok(r.stderr.startsWith("sagebrush board run: unknown option --x\\x0ay\n"), r.stderr);
+  r = run(["-"], board([{ id: "p", code: "print('one\\ttwo\\nthree')" }]));
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("one\ttwo\n       three\n"), r.stdout);
+});
