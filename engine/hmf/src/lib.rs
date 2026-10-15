@@ -15,6 +15,11 @@
 //! * `residue`: O_F/P^e in one Hermite-normal-form representation;
 //! * `p1`: P^1(O_F/N) as a product of local projective lines;
 //! * `quat`: the icosian ring and its 120 units;
+//! * `qresidue`: O_F/P^e over any real quadratic field;
+//! * `quatalg`: over any real quadratic field, a totally definite
+//!   quaternion algebra unramified at every finite place and a certified
+//!   maximal order in it, with local splittings (written from the
+//!   literature);
 //! * `split`: local splittings R/P^e R = M_2(O_F/P^e), from idempotents;
 //! * `orbits`: the orbits of the units on P^1(O_F/N);
 //! * `theta`: the Hecke elements Theta(p), by lattice enumeration;
@@ -38,6 +43,8 @@ mod par;
 pub mod orbits;
 pub mod p1;
 pub mod quat;
+pub mod qresidue;
+pub mod quatalg;
 pub mod rqf;
 pub mod residue;
 pub mod split;

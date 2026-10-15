@@ -72,7 +72,7 @@ fn dot(g: &[[i128; 8]; 8], u: &V8, v: &V8) -> i128 {
 /// LLL reduction (delta = 0.99) of the basis b for the form g, with exact
 /// integer inner products and floating-point Gram-Schmidt coefficients,
 /// recomputed once per step (Cohen, Algorithm 2.6.3).
-fn lll(b: &mut Vec<V8>, g: &[[i128; 8]; 8]) {
+pub(crate) fn lll(b: &mut Vec<V8>, g: &[[i128; 8]; 8]) {
     let n = b.len();
     let mut mu = vec![vec![0.0f64; n]; n];
     let mut bn = vec![0.0f64; n];
@@ -129,7 +129,7 @@ fn lll(b: &mut Vec<V8>, g: &[[i128; 8]; 8]) {
 /// The vectors x != 0 of the lattice with basis b (exact coordinates in
 /// Z^8 for the form g) with Q(x) = B(x, x)/2 <= bound, passed to f until it
 /// returns true (Fincke-Pohst). Returns whether f accepted one.
-fn enumerate(b: &[V8], g: &[[i128; 8]; 8], bound: i128, f: &mut dyn FnMut(&V8) -> bool) -> bool {
+pub(crate) fn enumerate(b: &[V8], g: &[[i128; 8]; 8], bound: i128, f: &mut dyn FnMut(&V8) -> bool) -> bool {
     let n = b.len();
     // Cholesky decomposition of the Gram matrix of b for Q = B/2 (Cohen 2.7.5)
     let mut q = vec![vec![0.0f64; n]; n];
