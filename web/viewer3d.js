@@ -227,8 +227,14 @@
           lines.push({ pos: lp, col: lc });
         }
       } else if (o.type === "marching_cubes") {
-        const m = marchingCubes(arr(o, "field", f32), o.shape, o.bounds, o.level, decoded.get(o)?.spacings ?? o.spacings, budgets.get(scene));
+        // (the scene's budget, what its other objects left: a wireframe's
+        // edges are twice the triangles' indices again)
+        const b = budgets.get(scene), wf = o.wireframe ? 3 : 1;
+        const m = marchingCubes(arr(o, "field", f32), o.shape, o.bounds, o.level, decoded.get(o)?.spacings ?? o.spacings,
+          b && { verts: Math.min(b.verts, b.plain), idx: Math.floor(b.idx / wf) });
+        if (b) { const nv = m.pos.length / 3; b.verts -= nv; b.plain -= nv; b.idx -= m.idx.length * wf; }
         const pos = toDisplay(m.pos), idx = m.idx, n = pos.length / 3;
+        for (let i = 0; i < pos.length; i++) if (!Number.isFinite(pos[i])) throw new Refused("has an isosurface whose positions are not finite");
         const col = vertexColors(o, n);
         let nor = null;
         if (!o.flat_shading) {
@@ -341,10 +347,9 @@
         const ids = loop.map((e) => vertex(i, j, k, e));
         for (let q = 1; q + 1 < ids.length; q++) idx.push(ids[0], ids[q], ids[q + 1]);
       }
-      // (the scene's budget, spent as the surface grows: refused past it)
-      if (budget && (pos.length / 3 > budget.verts || idx.length > budget.idx)) throw new Refused("has an isosurface of more vertices than its budget");
+      // (a limit: refused as soon as the surface grows past it)
+      if (budget && (pos.length / 3 > budget.verts || idx.length > budget.idx)) throw new Refused("has an isosurface bigger than its budget");
     }
-    if (budget) { budget.verts -= pos.length / 3; budget.idx -= idx.length; }
     return { pos: new Float32Array(pos), idx: new Uint32Array(idx) };
   }
 
@@ -406,9 +411,12 @@
   // only what the scene holds.
   const LIMITS = {
     objects: 20000, // scene objects
-    vertices: 4e6, // vertices drawn, all objects, after expansion
-    plainVertices: 2e6, // of those, built in plain arrays (version 1 objects, tubes)
-    indices: 32e6, // indices drawn (meshes of version 2, wireframes twice)
+    // every array build makes is charged before it is made, in vertices (a
+    // position, with the normal and color build gives it) and indices:
+    vertices: 4e6, // vertices built, all objects: an object's own, and those its drawing expands to
+    plainVertices: 2e6, // of those, built in plain arrays (version 1 objects, tubes, isosurfaces)
+    indices: 32e6, // indices drawn (meshes of version 2 and isosurfaces; a wireframe's edges twice again;
+    // WebGL1's 16-bit copies, for meshes of at most 65535 vertices, are half their bytes)
     binaryBytes: 256 * 2 ** 20, // decoded base64, all objects
     field: 2 ** 24, // an isosurface's field values
     voxels: 2 ** 25, // a volume's voxels (8 bits each)
@@ -472,6 +480,13 @@
         if (!(typeof v === "number" && Math.abs((v - mid[i % 3]) * sc[i % 3]) <= 1e6)) no("has a position that is not finite or far outside the box (" + what + ")");
       }
       return p.length / 3;
+    };
+    // a field's or a volume's [x0, x1, y0, y1, z0, z1]: its corners positions as
+    // any others; a volume's not flat (its ray marching divides by its size)
+    const bounds = (b, what, open) => {
+      nums(b, what + " bounds", 6);
+      positions([b[0], b[2], b[4], b[1], b[3], b[5]], what + " bounds");
+      for (let i = 0; i < 6; i += 2) if (open ? !(b[i + 1] > b[i]) : !(b[i + 1] >= b[i])) no("has malformed " + what + " bounds");
     };
     for (const k of ["frame", "axes", "fill", "fit"]) bool(scene[k], k);
     optStr(scene.title, LIMITS.text, "title");
@@ -561,7 +576,8 @@
           for (const v of o.colors) if (!(Number.isInteger(v) && v >= 0 && v <= 255)) no("has malformed mesh colors");
         }
         for (const k of ["flat", "lit", "offset"]) bool(o[k], k);
-        spend(o.idx.length, true);
+        // (build's per-vertex points and normals, then a vertex per index)
+        spend(nv + o.idx.length, true);
       } else if (o.type === "lines") {
         nums(o.pos, "line");
         positions(o.pos, "line");
@@ -610,22 +626,27 @@
         within(o.width, 0, 1e6, "line width");
         optStr(o.shader, 32, "shader");
         colors2(o, n);
-        // (as build: tubes, 36 vertices a segment, or plain segments)
+        // (as build: every position in display coordinates, with its color;
+        // then tubes, from a copy of the segments' ends, 36 vertices a
+        // segment, or plain segments)
+        spend(n, false);
         const r = (o.width || 0.01) * sc[0] / 2, segs = seg.length / 2;
         const tube = o.shader !== "simple" && segs <= 40000 && r * 400 > 1;
-        spend(tube ? 36 * segs : 2 * segs, tube);
+        spend(tube ? 38 * segs : 2 * segs, tube);
       } else if (o.type === "marching_cubes") {
         const n = shape3(o.shape, LIMITS.field, "field");
         const f = bin(o, "field", Float32Array);
         if (f.length !== n) no("has a malformed field");
         finiteArray(f, "field");
-        nums(o.bounds, "field bounds", 6);
+        bounds(o.bounds, "field", false);
         if (!num(o.level)) no("has a malformed level");
         if (given(o.spacings)) {
           if (!Array.isArray(o.spacings) || o.spacings.length !== 3) no("has malformed spacings");
+          // (along x, y, z: one fewer than the samples, the shape being [nz, ny, nx])
           const sp = o.spacings.map((s, i) => {
             if (!given(s)) return null;
             const a = bin({ s }, "s", Float32Array);
+            if (a.length !== o.shape[2 - i] - 1 || a.length < 1) no("has spacings of the wrong length");
             for (const v of a) if (!(Number.isFinite(v) && v > 0)) no("has malformed spacings");
             return a;
           });
@@ -640,7 +661,7 @@
         if (++vols > LIMITS.volumes) no("has more than " + LIMITS.volumes + " volumes");
         const n = shape3(o.shape, LIMITS.voxels, "volume");
         if (bin(o, "data", Uint8Array).length !== n) no("has a malformed volume");
-        nums(o.bounds, "volume bounds", 6);
+        bounds(o.bounds, "volume", true);
         cmap(o.color_map, "color map");
         const of = nums(o.opacity_function, "opacity function");
         if (of.length % 2 || of.length < 2 || of.length > 2 * LIMITS.opacityFunction) no("has a malformed opacity function");
@@ -660,7 +681,7 @@
       } else no("has an object of an unknown type");
     }
     // isosurfaces: what is left of the budgets, spent as they are built
-    budgets.set(scene, { verts: LIMITS.vertices - verts, idx: LIMITS.indices - idxs });
+    budgets.set(scene, { verts: LIMITS.vertices - verts, plain: LIMITS.plainVertices - plain, idx: LIMITS.indices - idxs });
   }
 
   function mount(container, scene) {
@@ -677,6 +698,7 @@
       return false;
     };
     const refused = (why) => explain("This is a still picture: the interactive 3D view was not shown, because the scene " + why + ".");
+    // (checked before a WebGL context is taken; built after, charged as it goes)
     const bad = checkScene(scene);
     if (bad) return refused(bad);
     const canvas = document.createElement("canvas");
@@ -691,7 +713,7 @@
     if (!prog) return explain("This is a still picture: the interactive 3D view could not start on this browser's graphics (its shaders did not compile).");
     let geo;
     try {
-      geo = build(scene);
+      geo = geometry(scene);
     } catch (e) {
       gl.getExtension("WEBGL_lose_context")?.loseContext();
       return refused(e instanceof Refused ? e.message : "is malformed");
@@ -1480,5 +1502,12 @@
       samples: u("samples"), alphaCoef: u("alphaCoef"), vol: u("vol"), lut: u("lut") };
   }
 
-  window.SagebrushViewer3d = { mount, marchingCubes, checkScene, LIMITS };
+  // a scene's geometry: checked, then built within its budgets (else Refused)
+  function geometry(scene) {
+    const why = checkScene(scene);
+    if (why) throw new Refused(why);
+    return build(scene);
+  }
+
+  window.SagebrushViewer3d = { mount, marchingCubes, checkScene, geometry, LIMITS };
 })();

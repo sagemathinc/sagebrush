@@ -3520,11 +3520,12 @@ _SCENE_MAX_OBJECTS = 10000
 
 
 def _scene_drawn(objs):
-    """the vertices the viewer draws for these version 1 objects"""
+    """the vertices the viewer builds for these version 1 objects (a mesh's
+    own, and one for each index)"""
     n = 0
     for o in objs:
         if o["type"] == "mesh":
-            n += len(o["idx"])
+            n += len(o["pos"]) // 3 + len(o["idx"])
         elif o["type"] == "lines":
             segs = len(o["pos"]) // 6
             n += 36 * segs if o.get("width", 1) >= 1.4 else 2 * segs
