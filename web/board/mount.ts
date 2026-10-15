@@ -45,6 +45,7 @@ import { Toolbar, defaultTools } from "./toolbar";
 import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
+import { findIndex, findIn, textRanges, type FindEntry } from "./find";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText, toMermaid, toMermaidMarkdown } from "./mermaid";
 import { canvasLeftOut, toCanvas } from "./canvas";
@@ -141,6 +142,7 @@ function addStyle() {
 const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More" aria-label="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
+<div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
@@ -707,6 +709,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
     $("hint").hidden = !editor.editing.value;
     root.classList.toggle("sbb-editing", editor.editing.value);
+    // (Find's bar under the Edit toolbar, once it is shown or gone)
+    requestAnimationFrame(placeFind);
   }));
   // the toolbar, in Edit mode: adds at the middle of the view
   const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2 }; };
@@ -1276,6 +1280,107 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     await editor.keepWriting();
     $("html").click();
   }, true);
+
+  // Find (Ctrl/Cmd+F, William): a small bar over the board, searching what
+  // its items say as written, in the document (find.ts); Enter and
+  // Shift+Enter go to the next and the previous item that says it, on its
+  // page, in view, outlined, the words marked; Esc closes it
+  const findBar = $("find"), findQ = $("findq") as HTMLInputElement;
+  let found: FindEntry[] = [], foundAt = -1, findGen = 0;
+  const indexes = new WeakMap<BoardDoc, FindEntry[]>();
+  const findDoc = () => viewing ?? doc;
+  const index = () => { const d = findDoc()!; let x = indexes.get(d); if (!x) indexes.set(d, (x = findIndex(d))); return x; };
+  // (under the top bar, or under the Edit toolbar when it shows)
+  function placeFind() {
+    if (findBar.hidden) return;
+    const tb = root.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect();
+    findBar.style.top = tb?.height ? `${Math.round(tb.bottom - root.getBoundingClientRect().top + 6)}px` : "";
+  }
+  function openFind() {
+    findBar.hidden = false;
+    placeFind();
+    findQ.focus();
+    findQ.select();
+  }
+  function closeFind() {
+    findBar.hidden = true;
+    found = [];
+    foundAt = -1;
+    findGen++;
+    unmark();
+  }
+  function unmark() {
+    board.setFound(null);
+    (CSS as any).highlights?.delete("sb-find");
+  }
+  // (as it is typed: the first item on the page shown or after it, else the first)
+  function findNow() {
+    if (!findDoc()) return;
+    found = findIn(index(), findQ.value);
+    foundAt = found.length ? Math.max(0, found.findIndex((e) => e.page >= pageIx)) : -1;
+    showFound().catch(fail);
+  }
+  // (the next or the previous, from the one shown; the document may have changed since)
+  function findStep(dir: 1 | -1) {
+    if (!findDoc()) return;
+    const id = found[foundAt]?.id;
+    found = findIn(index(), findQ.value);
+    const k = id ? found.findIndex((e) => e.id === id) : -1;
+    foundAt = !found.length ? -1 : k < 0 ? (dir > 0 ? 0 : found.length - 1) : (k + dir + found.length) % found.length;
+    showFound().catch(fail);
+  }
+  async function showFound() {
+    const g = ++findGen, e = found[foundAt];
+    $("findn").textContent = !findQ.value ? "" : found.length ? `${foundAt + 1} of ${found.length}` : "No matches";
+    findBar.classList.toggle("none", !!findQ.value && !found.length);
+    if (!e) return unmark();
+    if (e.page !== pageIx) await page(e.page);
+    if (g !== findGen || !board.item(e.id)) return;
+    board.setFound(e.id);
+    revealFound(e.id);
+    markFound(e.id, g);
+  }
+  // In view, below the bars, at the zoom it is (or close enough to read):
+  // the board moves only if the item is not wholly in view.
+  function revealFound(id: string) {
+    const b = board.bounds([id]);
+    if (!b) return;
+    const c = board.camera, i = board.insets, W = board.el.clientWidth, H = board.el.clientHeight;
+    const top = Math.max(i.top, findBar.getBoundingClientRect().bottom - board.el.getBoundingClientRect().top) + 8, bottom = H - i.bottom - 8;
+    const z = c.z >= 0.5 ? c.z : Math.min(1, board.cameraFor(b.x0, b.y0, b.x1, b.y1, 1).z);
+    const sx = (x: number) => (x - c.x) * c.z, sy = (y: number) => (y - c.y) * c.z;
+    if (z === c.z && sx(b.x0) >= i.left && sx(b.x1) <= W - i.right && sy(b.y0) >= top && sy(b.y1) <= bottom) return;
+    const y = (b.y1 - b.y0) * z <= bottom - top ? (b.y0 + b.y1) / 2 - (top + bottom) / 2 / z : b.y0 - top / z;
+    board.flyTo({ x: (b.x0 + b.x1) / 2 - (i.left + (W - i.left - i.right) / 2) / z, y, z });
+  }
+  // (its words marked, once it is mounted; not where a browser has no highlights)
+  function markFound(id: string, g: number, tries = 60) {
+    const reg = (CSS as any).highlights, H = (globalThis as any).Highlight;
+    if (!reg || !H || g !== findGen) return;
+    const el = board.element(id);
+    if (!el) { if (tries > 0) requestAnimationFrame(() => markFound(id, g, tries - 1)); return; }
+    reg.set("sb-find", new H(...textRanges(el, findQ.value)));
+  }
+  on(window, "keydown", (e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && doc && mine() && !presenting) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      openFind();
+    } else if (e.key === "Escape" && !findBar.hidden && mine() && (e.target === findQ || !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) && !board.editing && !root.querySelector("dialog[open]")) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeFind();
+    }
+  }, true);
+  findQ.addEventListener("input", findNow);
+  findQ.addEventListener("keydown", (e) => {
+    // (the board's keys are not for this field)
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+  });
+  $("findprev").onclick = () => findStep(-1);
+  $("findnext").onclick = () => findStep(1);
+  $("findx").onclick = closeFind;
 
   function outputs() {
     return doc ? codeOrder(doc).map(({ id, code: src }) => ({ id, code: src, state: code?.state(id) ?? "", output: code?.text(id) ?? "" })) : [];
