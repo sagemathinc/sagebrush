@@ -31,6 +31,8 @@ OCTAVE_SKIP = {
     "join": "string arrays: Octave has no string class",
     "string": "string arrays: Octave has no string class",
     "strlength": "not in Octave 11",
+    "split": "not in Octave 11",
+    "replace": "not in Octave 11",
 }
 # (compared to 12 significant digits: Octave's and Sagebrush's last bits differ)
 OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma"}

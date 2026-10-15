@@ -827,3 +827,36 @@ show(v);
 clear
 v = abs(3 + 4i);
 show(v);
+% dec2bin
+clear
+v = dec2bin(10);
+show(v);
+% dec2bin
+clear
+v = dec2bin(5, 8);
+show(v);
+% bin2dec
+clear
+v = bin2dec('1010');
+show(v);
+% dec2hex
+clear
+v = dec2hex(255);
+show(v);
+% hex2dec
+clear
+v = hex2dec('FF');
+show(v);
+% sub2ind
+clear
+v = sub2ind([3 4], 2, 3);
+show(v);
+% ind2sub
+clear
+[r, c] = ind2sub([3 4], 8);
+show(r);
+show(c);
+% mat2cell
+clear
+c = mat2cell([1 2 3 4], 1, [1 3]);
+show(c);
