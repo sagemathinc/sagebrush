@@ -738,7 +738,7 @@ newBuiltinModule("types", (m) => {
   m.SimpleNamespace = Ty.SimpleNamespace;
   m.UnionType = Ty.unionType;
   m.CodeType = T.code;
-  m.MappingProxyType = T.dict;
+  m.MappingProxyType = Ty.mappingproxy;
   m.GetSetDescriptorType = T.getset_descriptor;
   m.CellType = typeOf(Ty.newCell());
   for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "GenericAlias", "CapsuleType"]) {
@@ -757,10 +757,6 @@ newBuiltinModule("types", (m) => {
     for (const k of ["__name__", "__qualname__", "__module__", "__doc__"]) w[k] = f[k] ?? null;
     return w;
   });
-});
-
-newBuiltinModule("__future__", (m) => {
-  for (const f of ["annotations", "division", "absolute_import", "print_function", "unicode_literals", "generator_stop", "nested_scopes", "generators", "with_statement", "barry_as_FLUFL"]) m[f] = true;
 });
 
 // ------------------------------------------------------------------ _random: MT19937 exactly as CPython
