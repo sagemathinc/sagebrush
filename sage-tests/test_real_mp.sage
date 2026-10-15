@@ -247,3 +247,17 @@ for prec in [80, 100, 200]:
             g = (x0 + d).gamma()
             out.append('0' if g.is_zero() else str(g / u))
         print(prec, mode, out)
+# fourth review: log_gamma is finite for finite x > 0, so a huge argument
+# overflows in the field's rounding mode (the largest number in RNDZ, RNDD),
+# while log base 1 stays a pole; gamma and log_gamma at infinity and NaN
+for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
+    R = RealField(100, rnd=mode)
+    out = []
+    for x in [R(2)^(2^62 - 2), R(2)^(2^62 - 2) * 3 / 2, R(2)^(2^62 - 60), R(2)^(2^62 - 70), R(2)^(2^62 - 80), R(2)^(2^61)]:
+        v = x.log_gamma()
+        out.append((v.is_infinity(), v / x if not v.is_infinity() else v))
+    print(mode, out)
+    print(mode, R(2)^(-2^62) * 3, (R(2)^(-2^62) * 3).log_gamma(), (R(2)^(-2^61)).log_gamma(), R(2).log(1), R(1/2).log(1), (R(2)^(2^62-2)).arctan())
+for mode in ['RNDN', 'RNDZ', 'RNDD']:
+    R = RealField(100, rnd=mode)
+    print(mode, [(x.gamma(), x.log_gamma() if x != R(-oo) else None) for x in [R(oo), R(-oo), R('NaN')]])
