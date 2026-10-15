@@ -134,7 +134,6 @@ points["ellipj"] = points["ellipj"] + [(random.choice((1, -1)) * LU(1e-300, 1e-2
                                        for _ in range(30)] + [
     (random.choice((1, -1)) * LU(1e3, 1.7e308), random.choice((U(0, 1), 1 - LU(1e-16, 0.1)))) for _ in range(30)] + [
     (314159265358979328.0, 0.9999999990686774)]
-
 # (the regularized incomplete gamma functions P and Q: every region of
 # lib/_special.py's (series, continued fraction, Gautschi's small-x Q,
 # Temme's expansion for large a near x) and the boundaries between them;
@@ -163,6 +162,37 @@ points["gammainc_scaled"] = [(a, x, float(up)) for a, x, up in [
     (1.0, 1000.0, 1), (2.0, 1000.0, 1), (50.0, 2000.0, 1), (1e4, 1.2e4, 1), (1e4, 8e3, 0), (0.5, 1e-300, 0),
     (1.0, 5e-324, 0), (3.0, 1e-200, 0), (1e10, 1e10 + 5e5, 1), (1e10, 1e10 - 5e5, 0), (1e10, 1e10 + 5e5, 0),
     (20.0, 21.0, 0), (20.0, 21.0, 1), (0.3, 0.1, 1), (0.3, 0.1, 0), (5.0, 30.0, 0), (5.0, 30.0, 1), (0.01, 1.2, 1)]]
+# (Bessel J of real order and argument: each region of lib/_special.py's
+# (power series, Hankel's expansion, Miller's recurrence) and the
+# transition x near nu, integer and negative integer orders, large x, and
+# negative x (complex for non-integer orders); drawn last, so that the
+# cases above stay as they were)
+points["besselj"] = (
+    [(U(0, 200), U(1e-3, 300)) for _ in range(60)] + [(U(0, 3), LU(1e-4, 1e6)) for _ in range(40)]
+    + [(float(random.randint(0, 40)), U(0, 60)) for _ in range(40)] + [(float(-random.randint(1, 30)), U(0.1, 50)) for _ in range(20)]
+    + [(n, n * U(0.8, 1.2)) for n in (LU(5, 1000) for _ in range(30))]
+    + [(random.choice((float(random.randint(0, 10)), U(0, 10))), -U(0.01, 40)) for _ in range(30)]
+    + [(0.0, 2.404825557695773), (1.0, 3.8317059702075125), (0.5, 1e-300), (100.0, 1.0), (0.0, 1e300)]
+)
+# (daybreak's review of 088bc11, deterministic, after everything drawn: the
+# series/Miller boundary x = sqrt(2 (nu + 1)) at large orders, with its
+# neighbouring doubles; large orders below the turning point; the least
+# subnormal x)
+_bj = []
+for _k in range(0, 345, 12):
+    _nu = 155 + 0.25 * _k
+    _xb = math.sqrt(2.0) * math.sqrt(_nu + 1)
+    _bj += [(_nu, _xb), (_nu, math.nextafter(_xb, 0)), (_nu, math.nextafter(_xb, 100))]
+_bj += [(240.5, 21.977260975835907), (240.5, 21.977260975835915), (235.0, 21.725560982400427), (200.5, 20.07485989988473)]
+_bj += [(494.64835926046334, 284.56332208950073), (1134.5070496950125, 631.7690438100962), (311.12552474955464, 174.76213244286976),
+        (300.0, 50.0), (1000.0, 500.0), (1500.0, 1400.0)]
+_bj += [(0.5, 5e-324), (1.0, 5e-324), (0.5, 1e-310)]
+# (daybreak's review of c7653a7, CORR-C76-1, and the largest errors of the
+# recurrences in doubles found since: below the turning point (Miller's)
+# and above it (upward from Hankel's), now in double-double arithmetic)
+_bj += [(1213.0281254434196, 939.6256040528829), (816.4829854938145, 439.39218016459034), (1389.6506472836113, 1450.6133723750388),
+        (919.3838517917308, 971.908303269163), (159.4722416650559, 78.15146436342027)]
+points["besselj"] = points["besselj"] + _bj
 
 
 def ferrers_column(n, x):
@@ -257,6 +287,7 @@ ref = {
     "legendre_all": legendre_all,
     "gammainc": lambda a, x: _gammainc_ref(a, x, False), "gammaincc": lambda a, x: _gammainc_ref(a, x, True),
     "gammainc_scaled": _gammainc_scaled_ref,
+    "besselj": lambda nu, x: mp.besselj(nu, x),
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}

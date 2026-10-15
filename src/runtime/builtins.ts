@@ -3,7 +3,7 @@
 import { writeSync, readSync } from "fs";
 import {
   T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple,
-  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity,
+  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity, unbox,
 } from "./object";
 import * as O from "./ops";
 import { INTR } from "./interrupt";
@@ -35,6 +35,9 @@ export class StdStream {
   }
 }
 export const stdout = new StdStream(1, "<stdout>");
+// the sys module (modules.ts), whose stdout print() writes to: Python code
+// may replace sys.stdout (with an io.StringIO, say), as in CPython
+export const sysRef: { m: any } = { m: null };
 export const stderr = new StdStream(2, "<stderr>");
 const streamType = builtinType("TextIOWrapper", [T.object], () => raise(T.TypeError, "cannot create 'TextIOWrapper' instances"), "_io");
 Ty.bindClass(StdStream, streamType);
@@ -102,7 +105,13 @@ function printImpl(args: any[], sep: any, end: any, file: any, flush: any) {
     s += typeof a === "string" ? a : str(a);
   }
   s += end;
-  if (file === null || file === stdout) {
+  if (file === null) {
+    // (sys.stdout as it is now; None: print writes nothing, as in CPython)
+    const cur = sysRef.m === null ? stdout : sysRef.m.stdout;
+    if (cur === null) return null;
+    file = cur === undefined ? stdout : cur;
+  }
+  if (file === stdout) {
     stdout.write(s);
     if (O.truth(flush)) stdout.flush();
   } else if (file instanceof StdStream) {
@@ -195,34 +204,127 @@ function sum(it: any, start: any = 0): any {
     }
     return O.normBig(acc);
   }
-  let i = 0;
-  const next: () => any = Array.isArray(it) ? () => (i < it.length ? it[i++] : DONE) : ((iter) => () => iter.$next())(O.iter(it));
-  let v: any = DONE;
-  if (typeof s === "number" && isInt(s) && Math.abs(s) <= HALF_SAFE) {
-    // Python ints: a double accumulator kept below 2^52 in absolute value and
-    // flushed into a BigInt when it passes that, so a sum beyond 2^53 still
-    // adds doubles (sum(range(10**9)): 35 s with BigInt additions, 1.4 s
-    // this way); exact, as each step stays below 2^53.
-    let small = s, acc = 0n;
-    for (v = next(); v !== DONE; v = next()) {
-      if (typeof v === "number" && isInt(v)) {
-        if (v > HALF_SAFE || v < -HALF_SAFE) acc += BigInt(v);
-        else {
-          small += v;
-          if (small > HALF_SAFE || small < -HALF_SAFE) {
-            acc += BigInt(small);
-            small = 0;
-          }
-        }
-      } else if (typeof v === "bigint") acc += v;
-      else break; // not an int: the general loop below takes over
-    }
-    s = acc === 0n ? small : O.normBig(acc + BigInt(small));
-    if (v === DONE) return s;
-    s = O.add(s, v);
+  const acc = new SumAcc(s);
+  if (Array.isArray(it)) for (let i = 0; i < it.length; i++) acc.push(it[i]);
+  else {
+    const iter = O.iter(it);
+    for (let v = iter.$next(); v !== DONE; v = iter.$next()) acc.push(v);
   }
-  for (v = next(); v !== DONE; v = next()) s = O.add(s, v);
-  return s;
+  return acc.total();
+}
+// sum()'s total, item by item, as CPython's builtin_sum_impl keeps it: Python
+// ints first, then while the total is an exact float (or complex) and the
+// items are exact floats (or complex), or ints a C long holds, Neumaier's
+// compensated sum (3.12, 3.14), so sum([0.1] * 10) is 1.0; anything else is
+// added as it is.  An item is added when it comes, so a generator's items and
+// their __add__/__radd__ calls interleave as in CPython.  (The compiler's
+// sum(genexpr) uses it too: R.sumAcc.)
+export class SumAcc {
+  // 0: ints (a double kept below 2^52 in absolute value and flushed into a
+  // BigInt when it passes that: sum(range(10**9)) takes 1.4 s, not 35 s with
+  // BigInt additions; exact, as each step stays below 2^53), 1: float, 2:
+  // complex, 3: anything
+  mode = 3;
+  s: any;
+  small = 0;
+  big = 0n;
+  f: CompSum | null = null;
+  im: CompSum | null = null;
+  constructor(start: any) {
+    if (typeof start === "number" && isInt(start) && Math.abs(start) <= HALF_SAFE) {
+      this.mode = 0;
+      this.small = start;
+    } else this.enter(start, 1);
+  }
+  // the total is now s: the float, complex or general path, whichever is
+  // the first of them from `from` on that applies
+  enter(s: any, from: number) {
+    if (from <= 1 && exactFloat(s)) {
+      this.mode = 1;
+      this.f = new CompSum(O.fv(s)!);
+    } else if (from <= 2 && typeOf(s) === T.complex) {
+      this.mode = 2;
+      this.f = new CompSum(s.re);
+      this.im = new CompSum(s.im);
+    } else {
+      this.mode = 3;
+      this.s = s;
+    }
+  }
+  push(v: any) {
+    switch (this.mode) {
+      case 0:
+        if (typeof v === "number" && isInt(v)) {
+          if (v > HALF_SAFE || v < -HALF_SAFE) this.big += BigInt(v);
+          else {
+            this.small += v;
+            if (this.small > HALF_SAFE || this.small < -HALF_SAFE) {
+              this.big += BigInt(this.small);
+              this.small = 0;
+            }
+          }
+        } else if (typeof v === "bigint") this.big += v;
+        else this.enter(O.add(this.total(), v), 1);
+        return;
+      case 1: {
+        const x = exactFloat(v) ? O.fv(v)! : longValue(v);
+        if (x !== undefined) this.f!.add(x);
+        else this.enter(O.add(this.total(), v), 2);
+        return;
+      }
+      case 2: {
+        if (typeOf(v) === T.complex) {
+          this.f!.add(v.re);
+          this.im!.add(v.im);
+          return;
+        }
+        const x = exactFloat(v) ? O.fv(v)! : longValue(v);
+        if (x !== undefined) this.f!.add(x);
+        else this.enter(O.add(this.total(), v), 3);
+        return;
+      }
+      default:
+        this.s = O.add(this.s, v);
+    }
+  }
+  total(): any {
+    switch (this.mode) {
+      case 0:
+        return this.big === 0n ? this.small : O.normBig(this.big + BigInt(this.small));
+      case 1:
+        return O.mkfloat(this.f!.total());
+      case 2:
+        return T.complex(O.mkfloat(this.f!.total()), O.mkfloat(this.im!.total()));
+      default:
+        return this.s;
+    }
+  }
+}
+// an exact float (a JS number that is not an integer, or a boxed integral one)
+const exactFloat = (x: any) => (typeof x === "number" && !isInt(x)) || x instanceof FloatBox;
+// an int (or bool, or int subclass) as a double, if a C long holds it
+function longValue(x: any): number | undefined {
+  if (typeof x === "boolean") return +x;
+  if (typeof x === "number") return isInt(x) ? x : undefined;
+  const u = unbox(x);
+  if (typeof u === "number" && isInt(u) && u !== x) return u;
+  if (typeof u === "bigint" && u >= -(2n ** 63n) && u < 2n ** 63n) return Number(u);
+  return undefined;
+}
+// Neumaier's compensated sum, as CPython's sum keeps it
+class CompSum {
+  c = 0;
+  constructor(public f: number) {}
+  add(x: number) {
+    const t = this.f + x;
+    if (Math.abs(this.f) >= Math.abs(x)) this.c += this.f - t + x;
+    else this.c += x - t + this.f;
+    this.f = t;
+  }
+  // (the compensation only if finite: an infinite or overflowed sum stays one)
+  total() {
+    return this.c && Number.isFinite(this.c) ? this.f + this.c : this.f;
+  }
 }
 const HALF_SAFE = 2 ** 52;
 
@@ -458,6 +560,9 @@ define("max", (...a: any[]) => minmax("max", a, null, undefined, true));
 builtins.max.$kw = minmaxKw("max", true);
 define("sorted", sorted, [1, 1]);
 define("round", roundImpl, [1, 2]);
+// int.__round__ and float.__round__: how a subclass of int or float (numpy's
+// float64, say) rounds, to an exact int or float, as in CPython
+for (const t of [T.int, T.float]) Ty.method(t, "__round__", (x: any, nd: any = null) => roundImpl(unbox(x), nd));
 define("divmod", O.divmod, [2, 2]);
 define("pow", powImpl, [2, 3]);
 define("hash", hashImpl);

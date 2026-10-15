@@ -368,7 +368,7 @@ try {
 } finally {
   chrome.kill();
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 if (fails.length) {
   console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));

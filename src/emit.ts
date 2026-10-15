@@ -469,7 +469,7 @@ export class Emitter {
     // variables count as assigned.
     if (eager === "tuple" || eager === "list" || eager === "frozenset") body = `${r}.push(${this.ex(e.elt)});`;
     else if (eager === "set") body = `setAdd(${r}, ${this.ex(e.elt)});`;
-    else if (eager === "sum") body = `${r} = add(${r}, ${this.ex(e.elt)});`;
+    else if (eager === "sum") body = `${r}.push(${this.ex(e.elt)});`; // (R.sumAcc: the builtin's own total, item by item)
     else if (eager === "any") body = `if (${this.bool(e.elt)}) return true;`;
     else if (eager === "all") body = `if (!${this.bool(e.elt)}) return false;`;
     else if (e.kind === "gen") body = `yield ${this.ex(e.elt)};`;
@@ -479,8 +479,8 @@ export class Emitter {
     const locals = [...scope.bound].filter((n) => resolve(scope, n).kind === "local").map(js);
     const decls = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
     if (eager !== null) {
-      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "0", any: "", all: "" };
-      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r};`, any: "return false;", all: "return true;" };
+      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "R.sumAcc(0)", any: "", all: "" };
+      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r}.total();`, any: "return false;", all: "return true;" };
       const start = init[eager] ? `let ${r} = ${init[eager]}; ` : "";
       const decls2 = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
       const inner2 = `${decls2.length ? `let ${decls2.join(", ")}; ` : ""}${start}${loops.join(" ")} ${body} ${closes.reverse().join(" ")} ${fin[eager]}`;
