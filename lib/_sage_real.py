@@ -3708,6 +3708,16 @@ class RealIntervalElement:
 
         sage: I = RIF(1/3); I, I.lower(), I.upper(), I.endpoints()
         (0.3333333333333334?, 0.333333333333333, 0.333333333333334, (0.333333333333333, 0.333333333333334))
+
+    Powers are tight (an even power of an interval containing 0 starts at 0),
+    and the printing follows sage.rings.real_mpfi.printing_style:
+
+        sage: x = RIF(-1, 1); 1 - x^2, 1 - x*x, RIF(-2, -1)^3, RIF(1, 2)^-1, RIF(0, 4)
+        (1.?, 1.?, -1.?e1, 1.?, 1.?e1)
+        sage: sage.rings.real_mpfi.printing_style = 'brackets'
+        sage: 1 - x^2, RIF(2)
+        ([0.0000000000000000 .. 1.0000000000000000], [2.0000000000000000 .. 2.0000000000000000])
+        sage: sage.rings.real_mpfi.printing_style = 'question'
     """
 
     __slots__ = ("_F_", "_lo", "_hi")
@@ -3726,6 +3736,13 @@ class RealIntervalElement:
         return self._F_
 
     def __repr__(self):
+        """As Sage prints an interval: sage.rings.real_mpfi.printing_style
+        'question' (the default) or 'brackets' (examples in the class's
+        docstring)."""
+        import sys
+        m = sys.modules.get("sage.rings.real_mpfi")
+        if m is not None and m.__dict__.get("printing_style") == "brackets":
+            return self.str(style="brackets")
         from _sage_qqbar import _str_interval
         return _str_interval(self._lo, self._hi, self._F_._prec)
 
@@ -3741,7 +3758,11 @@ class RealIntervalElement:
         """
         if style == "brackets":
             D = 1 + int(math.ceil(self._F_._prec * _LOG10_2 - 1e-12))
-            return "[%s .. %s]" % (_format(self._lo, D, rnd="D"), _format(self._hi, D, rnd="U"))
+
+            def end(q, rnd):
+                # (a zero endpoint has D digits in all, as Sage prints it)
+                return "0." + "0" * (D - 1) if q == 0 else _format(q, D, rnd=rnd)
+            return "[%s .. %s]" % (end(self._lo, "D"), end(self._hi, "U"))
         return repr(self)
 
     def lower(self):
@@ -3852,11 +3873,33 @@ class RealIntervalElement:
         return self._o(o) / self
 
     def __pow__(self, n):
-        n = int(n)
-        r = self._F_(1)
-        for _ in range(abs(n)):
-            r = r * self
-        return r if n >= 0 else 1 / r
+        """x^n for an integer n: the tight interval of the endpoints' powers
+        (an even power of an interval containing 0 starts at 0, as in Sage:
+        RIF(-1, 1)^2 is [0, 1], not the product [-1, 1]), rounded outward
+        once (examples in the class's docstring)."""
+        if isinstance(n, bool) or not isinstance(n, int):
+            if isinstance(n, _F) and n.denominator == 1:
+                n = int(n)
+            else:
+                raise NotImplementedError("a power of an interval with a non-integer exponent is not available in sagebrush yet")
+        if n == 0:
+            return self._F_(1)
+        if n < 0:
+            return 1 / (self ** -n)
+        lo, hi = self._lo, self._hi
+        # (the exact endpoint powers: refused beyond a million bits rather
+        # than computed; the loop of products was unbounded in n)
+        bits = max(abs(lo.numerator).bit_length() + lo.denominator.bit_length(),
+                   abs(hi.numerator).bit_length() + hi.denominator.bit_length())
+        if n * bits > 1 << 20:
+            raise NotImplementedError("an interval power of more than 2^20 bits is not available in sagebrush yet")
+        if n % 2:
+            return self._F_._mk(lo ** n, hi ** n)
+        if lo >= 0:
+            return self._F_._mk(lo ** n, hi ** n)
+        if hi <= 0:
+            return self._F_._mk(hi ** n, lo ** n)
+        return self._F_._mk(_F(0), max(-lo, hi) ** n)
 
     def sqrt(self):
         """The square root (of a nonnegative interval).

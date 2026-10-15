@@ -160,16 +160,19 @@ def _str_interval(lo, hi, bits=53):
     if lo == hi:
         if lo.denominator == 1 and abs(lo) < 2 ** bits:
             return str(lo.numerator)
-    if lo < 0 < hi or (lo == 0) != (hi == 0):
-        # contains 0: 0.?e<k> with the least k such that [-10^k, 10^k] covers it
-        a = max(-lo, hi)
-        k = _floor_log10(a)
+    if lo < 0 < hi:
+        # straddles 0: 0 plus or minus one unit of the least scale 10^k that
+        # covers both ends (0.? or 0.?e<k>)
+        k = _floor_log10(max(-lo, hi))
         while math.floor(lo / _F(10) ** k) < -1 or math.ceil(hi / _F(10) ** k) > 1:
             k += 1
         while math.floor(lo / _F(10) ** (k - 1)) >= -1 and math.ceil(hi / _F(10) ** (k - 1)) <= 1:
             k -= 1
-        return "0.?e%d" % k
-    neg = hi < 0
+        return _zero_q(k)
+    # one sign (an end may be 0): the most digits m at a scale 10^k with the
+    # interval within (m - 1, m + 1) 10^k, m rounded away from 0 when two fit
+    # ([0, 1] is 1.?, [0, 4] is 1.?e1, as Sage prints them)
+    neg = hi <= 0
     a1, a2 = (-hi, -lo) if neg else (lo, hi)
     E = _floor_log10(a2)
     best = None
@@ -195,14 +198,26 @@ def _str_interval(lo, hi, bits=53):
     e10 = len(ds) - 1 + k
     sign = "-" if neg else ""
     if m == 0:
-        return "0.?e%d" % k
-    if e10 >= 6 or e10 <= -6:
+        return _zero_q(k)
+    if k > 0 or e10 >= 6 or e10 <= -6:
+        # (the uncertain digit is left of the units: scientific, -1.?e1 for
+        # [-8, -1], not -10.?, which would mean [-11, -9])
         return sign + ds[0] + "." + ds[1:] + "?e%d" % e10
-    if k >= 0:
-        return sign + ds + "0" * k + ".?"
+    if k == 0:
+        return sign + ds + ".?"
     if -k >= len(ds):
         return sign + "0." + "0" * (-k - len(ds)) + ds + "?"
     return sign + ds[:k] + "." + ds[k:] + "?"
+
+
+def _zero_q(k):
+    """0 plus or minus one unit of 10^k, as Sage prints it: 0.?, 0.000? down
+    to 10^-5, else 0.?e<k>."""
+    if k == 0:
+        return "0.?"
+    if -5 <= k < 0:
+        return "0." + "0" * (-k) + "?"
+    return "0.?e%d" % k
 
 
 def _str_civ(c):
