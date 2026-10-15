@@ -227,3 +227,12 @@ test("board run: its cells are the board's (doc.ts codeOrder), each with its cel
   assert.deepEqual(report.items.map((i: any) => i.stdout), alone);
   assert.equal(new Set(alone).size, 3);
 });
+
+test("board run: a board of a later version is refused in the same words as board render's (CLI_READER)", () => {
+  const later = JSON.stringify({ format: "sagebrush-board", version: 99, nodes: [{ id: "a", code: "print('ran')" }] });
+  const render = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "render", "-"], { encoding: "utf8", input: later });
+  const r = run(["-"], later);
+  assert.equal(r.status, 1);
+  assert.equal(render.status, 1);
+  assert.equal(r.stderr.replace(/^sagebrush board run: /, ""), render.stderr.replace(/^sagebrush board render: /, ""));
+});
