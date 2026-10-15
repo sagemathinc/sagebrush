@@ -65,7 +65,7 @@ authoritative.
 <!-- fields: written by scripts/board-format-fields.mjs from the doc comments of web/board/doc.ts; edit those, not this -->
 ## Fields
 
-Each kind of thing in a board, its fields, their types and what they mean. A type in words (item, edge, page, ...) is the section of that name; `[x]` is a list of them, `{name: x}` an object of them by name.
+Each kind of thing in a board, its fields, their types and what they mean. A type in words (note, edge, page, ...) is the section of that name, and `item` is any of note, group, ink or sticker; `[x]` is a list of them, `{name: x}` an object of them by name; `object` is one Sagebrush writes, whose fields this page doesn't list.
 
 ### The document
 
@@ -126,7 +126,7 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `text` | string | Markdown with math (`$...$`), shown at every zoom |
 | `code` | string | code in the board's language (`mode`), run in the reader's browser, its output under it; it makes the note a code item |
 | `hideCode` | boolean | `true`: show only the code's output, not the code |
-| `preview` | preview | a slow code item's output, kept to show before it runs (written by Sagebrush) |
+| `preview` | object | a slow code item's output, kept to show before it runs (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
 | `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` |
 | `color` | string | a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) |

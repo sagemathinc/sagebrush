@@ -36,7 +36,9 @@ const SECTIONS = [
   ["web/board/images.ts", "ImageInfo", "A picture (in `images`)"],
 ];
 // (a type that is a section: named as the section's item)
-const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", Preview: "preview" };
+const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", DocSticker: "sticker", DocInk: "ink" };
+// (a type Sagebrush writes, whose fields a writer never does: written as `object`)
+const OPAQUE = new Set(["Preview"]);
 
 const problems = [];
 
@@ -117,13 +119,17 @@ function typeText(type, f) {
   m = /^Record<string, (.+)>$/.exec(t);
   if (m) return `{name: ${typeText(m[1], f)}}`;
   if (NAMES[t]) return NAMES[t];
+  if (OPAQUE.has(t)) return "object";
   if (f.aliases[t]) return typeText(f.aliases[t], f);
   problems.push(`a type the field reference can't write out: ${t}`);
   return t;
 }
 
 const out = [BEGIN, "## Fields", ""];
-out.push("Each kind of thing in a board, its fields, their types and what they mean. A type in words (item, edge, page, ...) is the section of that name; `[x]` is a list of them, `{name: x}` an object of them by name.", "");
+// (the kinds of item, as doc.ts's DocNode lists them)
+const kinds = split(parse("web/board/doc.ts").aliases.DocNode ?? "", "|").map((m) => NAMES[m] ?? m);
+const either = kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " or " + kinds.at(-1) : kinds.join("");
+out.push("Each kind of thing in a board, its fields, their types and what they mean. A type in words (note, edge, page, ...) is the section of that name, and `item` is any of " + either + "; `[x]` is a list of them, `{name: x}` an object of them by name; `object` is one Sagebrush writes, whose fields this page doesn't list.", "");
 for (const [file, name, heading] of SECTIONS) {
   const f = parse(file), i = f.interfaces[name];
   if (!i) { problems.push(`no interface ${name} in ${file}`); continue; }
@@ -148,7 +154,7 @@ const sectioned = new Set(SECTIONS.map(([, name]) => name));
 const union = parse("web/board/doc.ts").aliases.DocNode;
 if (!union) problems.push("no type DocNode in web/board/doc.ts");
 else for (const m of split(union, "|")) if (!sectioned.has(m)) problems.push(`DocNode's ${m}: a kind of item with no section in the field reference (add it to SECTIONS)`);
-for (const name of Object.keys(NAMES)) if (name !== "DocNode" && name !== "Preview" && !sectioned.has(name)) problems.push(`${name}: written as "${NAMES[name]}", but no section has it`);
+for (const name of Object.keys(NAMES)) if (name !== "DocNode" && !sectioned.has(name)) problems.push(`${name}: written as "${NAMES[name]}", but no section has it`);
 
 if (problems.length) {
   process.stderr.write(`board-format-fields: ${problems.length} problem(s):\n  ${problems.join("\n  ")}\n`);

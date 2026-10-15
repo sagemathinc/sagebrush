@@ -92,3 +92,14 @@ test("a picture's name as the reference says it, letters, digits, _ and -, at mo
   assert.deepEqual(Object.keys(d.images ?? {}), names.slice(0, 3));
   assert.deepEqual((d.nodes ?? []).map((n: any) => n.image ?? null), [...names.slice(0, 3), null, null, null]);
 });
+
+test("every type the reference writes in words is a section's, item, or object (DOC-EC7-4)", () => {
+  const r = run(["--stdout"]);
+  assert.match(r.stdout, /`item` is any of note, group, ink or sticker;/);
+  assert.match(r.stdout, /\| `preview` \| object \| a slow code item's output, kept to show before it runs \(written by Sagebrush\) \|/);
+  const sections = new Set(["note", "group", "edge", "step", "page", "card", "background", "picture", "sticker", "ink"]);
+  for (const row of r.stdout.split("\n").filter((l) => /^\| `\w+` \|/.test(l))) {
+    const type = row.split(/(?<!\\)\|/)[2].replace(/`[^`]*`/g, "");
+    for (const w of type.match(/[a-z]+/g) ?? []) assert.ok(["string", "number", "boolean", "object", "item", "name"].includes(w) || sections.has(w), `${w} in ${row}`);
+  }
+});
