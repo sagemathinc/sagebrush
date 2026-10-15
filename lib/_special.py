@@ -2920,8 +2920,12 @@ def _hankel_pq(nu, x):
     """Hankel's P and Q (DLMF 10.17.3, 10.17.4): the even and odd parts of
     sum_k (-1)^... a_k(nu) / x^k with a_k(nu) = ((4 nu^2 - 1) (4 nu^2 - 9) ...
     (4 nu^2 - (2k - 1)^2)) / (k! 8^k) (DLMF 10.17.1); None if the terms stop
-    falling before eps (the omitted-term check: the ratio
-    |4 nu^2 - (2k-1)^2| / (8 k x) eventually grows like k/(2x))"""
+    falling before eps (the ratio |4 nu^2 - (2k-1)^2| / (8 k x) eventually
+    grows like k/(2x)).  The sums stop after a term t_k below 1e-17 of them;
+    by DLMF 10.17.14 with 10.17.15 (real x: the variation of t^-l is x^-l)
+    the remainder is then at most (2 e^A + 1) |t_k|, A = |nu^2 - 1/4|/x,
+    which is at most 1 where Hankel's expansion is used at nu (x >= nu^2)
+    and 0.15 at the low orders (nu < 2, x >= 25)"""
     p = 1.0
     qv = 0.0
     a = 1.0
@@ -3152,18 +3156,25 @@ def _besselj1(nu, x):
     sign = 1.0
     if nu < 0 and nu != _math.floor(nu):
         # (negative non-integer orders through Y: J_-a = cos(a pi) J_a - sin(a pi)
-        # Y_a, _bessel_jy_signed; J_-a(0) is the limit of (x/2)^-a / Gamma(1 - a),
-        # signed by 1/Gamma(1 - a); above the cut by DLMF 10.11.1)
+        # Y_a, _bessel_base and _bessel_parts; J_-a(0) is the limit of
+        # (x/2)^-a / Gamma(1 - a), signed by 1/Gamma(1 - a))
         if x == 0:
-            return _math.inf if _gamma1(1 + nu) > 0 else -_math.inf
+            # (the sign of 1/Gamma(1 - a), a = -nu in (n, n + 1): (-1)^n, as
+            # Gamma(z) has the sign (-1)^k on (-k, -k + 1); Gamma's value
+            # itself underflows to +0 for large a (astra's CORR-F00-2))
+            return -_math.inf if int(_math.floor(-nu)) % 2 else _math.inf
         if _math.isinf(x):
             return 0.0
+        jc = _bessel_base(nu)[0]
         if x > 0:
-            return _me_val(_bessel_jy_signed(nu, x, need_y=False)[0])
-        v = _bessel_jy_signed(nu, -x, need_y=False)[0]
+            return _bessel_parts(nu, x, [jc], x)[0]
+        # (DLMF 10.11.1: J_nu(-x) = e^(nu pi i) J_nu(x), its parts cos(nu pi)
+        # J_nu(x) and sin(nu pi) J_nu(x), each formed by _bessel_parts)
         c, s_ = _cospi(nu), _sinpi(nu)
-        return complex(_me_val((c * v[0], v[1])) + 0.0 if c else 0.0,
-                       _me_val((s_ * v[0], v[1])))
+        if c == 0:
+            return complex(0.0, _bessel_parts(nu, -x, [(s_ * jc[0], s_ * jc[1])], x)[0])
+        r, i = _bessel_parts(nu, -x, [(c * jc[0], c * jc[1]), (s_ * jc[0], s_ * jc[1])], x)
+        return complex(r + 0.0, i)
     if nu < 0:
         # (DLMF 10.4.1: J_-n = (-1)^n J_n)
         nu = -nu
@@ -3534,8 +3545,14 @@ def _bessely_pos_me(nu, x, coef=1.0):
         y1 = _me_add((y0 / fx, -ex), (-nrm * _math.sin(x), 0))
         return _bessely_up(0.5, n, x, (y0, 0), y1, coef)
     if x <= 2:
-        n = int(_math.floor(nu + 0.5))
+        # (n and mu = nu - n, |mu| <= 1/2, both exact: floor(nu + 0.5) rounded
+        # 0.5 - 2^-54 up to n = 1, and nu - 1 then to -1/2, the order 1/2
+        # instead (astra's CORR-F00-3); nu - floor(nu) and f - 1 are exact)
+        n = int(_math.floor(nu))
         mu = nu - n
+        if mu > 0.5:
+            n += 1
+            mu -= 1.0
         y0, y1 = _bessely_temme(mu, x)
         return _bessely_up(mu, n, x, y0, y1, coef)
     n = int(_math.floor(nu))
@@ -3551,58 +3568,65 @@ def _bessely_pos_me(nu, x, coef=1.0):
     return _bessely_up(mu, n, x, y0, y1, coef)
 
 
-def _bessel_jy_signed(nu, x, need_j=True, need_y=True):
-    """(J_nu(x), Y_nu(x)) for real nu and x > 0 as (m, e) pairs, either None
-    when not needed (and not needed for the other).  nu >= 0
-    directly; integer nu < 0 by DLMF 10.4.1; non-integer nu < 0 by
-    Y_-a = sin(a pi) J_a + cos(a pi) Y_a (from DLMF 10.4.5) and J_-a = cos(a pi)
-    J_a - sin(a pi) Y_a (from 10.4.3 and 10.4.6), a = -nu, the exactly
-    reduced sin and cos, an exact 0 coefficient dropping its term (and Y_a
-    not computed when no coefficient multiplies it).  J_a as a
-    double suffices: J_a leaves the doubles only below the turning point,
-    where |J_a Y_a| is near 1/(pi a) (DLMF 10.19.1), so |Y_a| > 2^1021 / a,
-    and a non-integer double a has |sin(a pi)| >= 2^-51 or a < 1 (with
-    |sin(a pi)| >= 2a there); the J term is then below 2^-1000 of the Y
-    term.  Each
-    connection is refused (NotCovered) where its two terms cancel: where
-    5e-15 (|t1| + |t2|), 5e-15 a bound on J_a's and Y_a's measured errors
-    (3.1e-15 at most), exceeds 1e-12 of max(|t1 + t2|, sqrt(2/(pi x)) for
-    x > |nu|)"""
+def _bessel_base(nu):
+    """J_nu and Y_nu as alpha J_b + beta Y_b, b = |nu|: ((alpha, beta) of J,
+    (alpha, beta) of Y).  nu >= 0 itself; integer nu = -n by DLMF 10.4.1,
+    (-1)^n; other nu = -a by Y_-a = sin(a pi) J_a + cos(a pi) Y_a (from
+    10.4.5) and J_-a = cos(a pi) J_a - sin(a pi) Y_a (10.4.3 with 10.4.6),
+    the exactly reduced sin and cos"""
     if nu >= 0:
-        return ((_besselj_pos(nu, x), 0) if need_j else None), (_bessely_pos_me(nu, x) if need_y else None)
+        return (1.0, 0.0), (0.0, 1.0)
     a = -nu
     if a == _math.floor(a):
         sg = -1.0 if int(a) % 2 else 1.0
-        y = _bessely_pos_me(a, x) if need_y else None
-        return ((sg * _besselj_pos(a, x), 0) if need_j else None), ((sg * y[0], y[1]) if need_y else None)
+        return (sg, 0.0), (0.0, sg)
     sa, ca = _sinpi(a), _cospi(a)
-    # (Y_a's coefficients still to come, for _bessely_up's overflow bound;
-    # none at a half-integer when only Y_-a = sin(a pi) J_a is wanted)
-    coefs = ([abs(ca)] if need_y and ca != 0 else []) + ([abs(sa)] if need_j else [])
-    ja = _besselj_pos(a, x)
-    ya = _bessely_pos_me(a, x, min(coefs)) if coefs else (0.0, 0)
-    nrm = _SQRT_2_PI / _math.sqrt(x) if x > a else 0.0
+    return (ca, -sa), (sa, ca)
 
-    def comb(c1, t1, c2, t2):
-        # c1 t1 + c2 t2 for doubles c, (m, e) pairs t, with the cancellation test
-        if c1 == 0:
-            return (c2 * t2[0], t2[1])
-        if c2 == 0:
-            return (c1 * t1[0], t1[1])
-        u1 = (c1 * t1[0], t1[1])
-        u2 = (c2 * t2[0], t2[1])
+
+def _bessel_parts(nu, t, comps, x):
+    """the doubles alpha J_b(t) + beta Y_b(t), b = |nu|, t > 0, for each
+    (alpha, beta) in comps: the final real and imaginary parts of J_nu or
+    Y_nu at x = +-t, every connection (_bessel_base) and continuation
+    coefficient already multiplied in, so that each part has one Y_b term
+    and is +-inf only where it is itself beyond the doubles (daybreak's and
+    astra's CORR-F00-1: Y_b became inf before a small coefficient brought a
+    part back, or two infinities made a NaN).  Y_b is an (m, e) pair, its
+    overflow bound (_bessely_up) taken at the least nonzero |beta|; J_b is
+    not computed where no alpha needs it, Y_b where no beta does.
+
+    J_b as a double suffices: J_b leaves the doubles only below the turning
+    point, where |J_b Y_b| is near 1/(pi b) (DLMF 10.19.1), so |Y_b| > 2^1021
+    / b, and every beta that is not 0 is a product of a non-integer order's
+    sin and cos, at least 2^-51 or 2b (b < 1); the J term is then below
+    2^-1000 of the Y term.  A part is refused (NotCovered) where its two
+    terms cancel: where 5e-15 (|alpha J| + |beta Y|), 5e-15 a bound on J_b's
+    and Y_b's measured errors (3.1e-15 at most), exceeds 1e-12 of max(|the
+    part|, max(|alpha|, |beta|) sqrt(2/(pi t)) for t > b)"""
+    b = abs(nu)
+    jb = _besselj_pos(b, t) if any(al != 0 for al, _ in comps) else 0.0
+    coefs = [abs(be) for _, be in comps if be != 0]
+    yb = _bessely_pos_me(b, t, min(coefs)) if coefs else (0.0, 0)
+    nrm = _SQRT_2_PI / _math.sqrt(t) if t > b else 0.0
+    out = []
+    for al, be in comps:
+        if be == 0:
+            out.append(al * jb)
+            continue
+        u2 = (be * yb[0], yb[1])
+        if al == 0 or jb == 0:
+            out.append(_me_val(u2))
+            continue
+        u1 = (al * jb, 0)
         r = _me_add(u1, u2)
-        lsum = _me_log2(_me_add((abs(u1[0]), u1[1]), (abs(u2[0]), u2[1])))
-        if lsum == -_math.inf or not _math.isfinite(r[0]):
-            return r
-        lr = _me_log2(r)
-        floor = _math.log2(nrm) if nrm else -_math.inf
-        if _math.log2(5e-15) + lsum > _math.log2(1e-12) + max(lr, floor):
-            raise NotCovered("bessely, besselj: the connection formula for order %r cancels at x = %r" % (nu, x))
-        return r
-    yv = comb(sa, (ja, 0), ca, ya) if need_y else None
-    jv = comb(ca, (ja, 0), -sa, ya) if need_j else None
-    return jv, yv
+        if _math.isfinite(r[0]):
+            lsum = _me_log2(_me_add((abs(u1[0]), 0), (abs(u2[0]), u2[1])))
+            lr = _me_log2(r)
+            floor = _math.log2(max(abs(al), abs(be)) * nrm) if nrm else -_math.inf
+            if _math.log2(5e-15) + lsum > _math.log2(1e-12) + max(lr, floor):
+                raise NotCovered("bessely, besselj: the connection formula for order %r cancels at x = %r" % (nu, x))
+        out.append(_me_val(r))
+    return out
 
 
 def _bessely1(nu, x):
@@ -3616,21 +3640,20 @@ def _bessely1(nu, x):
         return 0.0
     if x == 0:
         return _bessely_at0(nu)
+    jc, yc = _bessel_base(nu)
     if x > 0:
-        return _me_val(_bessel_jy_signed(nu, x, need_j=False)[1])
+        return _bessel_parts(nu, x, [yc], x)[0]
     # (DLMF 10.11.2 with m = 1, the value above the cut: Y_nu(-x) =
-    # e^(-nu pi i) Y_nu(x) + 2i cos(nu pi) J_nu(x); for integer orders
-    # (-1)^n (Y_n(x) + 2i J_n(x)))
+    # e^(-nu pi i) Y_nu(x) + 2i cos(nu pi) J_nu(x), real part cos(nu pi)
+    # Y_nu(x), imaginary part -sin(nu pi) Y_nu(x) + 2 cos(nu pi) J_nu(x); for
+    # integer orders (-1)^n (Y_n(x) + 2i J_n(x)))
     c, s = _cospi(nu), _sinpi(nu)
-    jv, yv = _bessel_jy_signed(nu, -x, need_j=c != 0)
-    re = _me_val((c * yv[0], yv[1])) + 0.0 if c else 0.0
+    re = (c * yc[0], c * yc[1])
+    im = (-s * yc[0] + 2 * c * jc[0], -s * yc[1] + 2 * c * jc[1])
     if c == 0:
-        im = _me_val((-s * yv[0], yv[1]))
-    elif s == 0:
-        im = _me_val((2 * c * jv[0], jv[1]))
-    else:
-        im = _me_val(_me_add((-s * yv[0], yv[1]), (2 * c * jv[0], jv[1])))
-    return complex(re, im)
+        return complex(0.0, _bessel_parts(nu, -x, [im], x)[0])
+    r, i = _bessel_parts(nu, -x, [re, im], x)
+    return complex(r + 0.0, i)
 
 
 def _bessely_at0(nu):

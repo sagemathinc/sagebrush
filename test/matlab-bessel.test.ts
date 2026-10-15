@@ -50,6 +50,7 @@ test("bessely: negative Z above the cut, zero, negative orders, the scale argume
     "fprintf('%g %g %.15g\\n', bessely(1000, 1), bessely(-1000.5, 1), bessely(171, 2));",
     "disp(size(bessely([0 1 2], [1 2 3]))); disp(size(bessely(0:3, 2))); disp(class(bessely(single(1), 2)));",
     "fprintf('%g\\n', bessely(0, Inf));",
+    "z = bessely(171.50000000000003, -1.8); fprintf('%.17g %.17g\\n', real(z), imag(z));",
     "try, bessely(-46.384401075334324, 45.581111665644976), catch e, disp(e.message), end",
     "try, bessely(1, 1+2i), catch e, disp(e.message), end",
     "try, bessely(1, 2, 3), catch e, disp(e.message), end",
@@ -68,6 +69,8 @@ test("bessely: negative Z above the cut, zero, negative orders, the scale argume
     "-Inf 0 -2.32373628765076e+306",
     "1     3", "1     4", "single",
     "NaN",
+    // (daybreak's CORR-F00-1: the real part cos(nu pi) Y_nu(1.8) is a double, -1.9058365700442774e302 at 100 digits)
+    "-1.9058365700442768e+302 -Inf",
     "bessely: the connection formula for order -46.384401075334324 cancels at x = 45.581111665644976.",
     "bessely: Sagebrush does not compute bessely of complex Z yet.",
     "bessely: scale must be 0 or 1.",
