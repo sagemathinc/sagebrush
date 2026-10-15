@@ -17,3 +17,5 @@ rayon = { version = "1.10", optional = true }
 sagebrush-arith = { path = "../arith" }
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-poly = { path = "../poly" }
+num-integer = "0.1"
+num-traits = "0.2"

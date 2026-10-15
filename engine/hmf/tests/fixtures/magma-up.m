@@ -18,7 +18,10 @@ for c in cases do
   for p in c[2] do
     T := HeckeOperator(M, p*O);
     a := Eltseq(c[1]); b := Eltseq(p);
-    printf "%o %o | %o %o | %o | %o\n", a[1], a[2], b[1], b[2], Trace(T), &cat[Sprintf("%o ", z) : z in Eltseq(CharacteristicPolynomial(T))];
+    cs := Eltseq(CharacteristicPolynomial(T));
+    line := Sprint(cs[1]);
+    for z in cs[2..#cs] do line cat:= " " cat Sprint(z); end for;
+    printf "%o %o | %o %o | %o | %o\n", a[1], a[2], b[1], b[2], Trace(T), line;
   end for;
 end for;
 quit;

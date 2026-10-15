@@ -39,6 +39,19 @@ lmfdb-2.2.5.1-rational.txt, for every rational newform (orbit of dimension
 its eigenvalues a_P at the primes P of norm <= RATIONAL_PRIME_NORM (at P | N
 the LMFDB's value, related to the Atkin-Lehner eigenvalue).
 
+lmfdb-2.2.5.1-eigen.txt, for every newform orbit of level norm <= EIGEN_LEVEL_NORM
+(rational or not), the characteristic polynomials over Q of its Hecke
+eigenvalues:
+
+    label | a b c | d | pa pb pc:f0,f1,... ... | z: f0,f1,...
+
+with d the dimension, then for each prime P of norm <= EIGEN_PRIME_NORM
+(those dividing N included: a_P is then the eigenvalue of U_P) the
+characteristic polynomial of a_P, constant term first, and last that of
+z = sum_k (k + 1) a_(P_k) over the primes P_k among those that do not divide
+N, in order (a check of the whole system of eigenvalues up to Galois
+conjugation, whenever z generates the coefficient field).
+
 lmfdb-2.2.5.1-hecke.txt, for every level N of norm <= HECKE_LEVEL_NORM and
 every prime P of norm <= HECKE_PRIME_NORM not dividing N, and for P = N
 when N is prime (then T_P is U_P):
@@ -72,6 +85,13 @@ Q_RATIONAL = (
     "join hmf_hecke h on h.label = f.label "
     f"where f.field_label = '{FIELD}' and f.weight = '[2, 2]' and f.dimension = 1 "
     f"and f.level_norm <= {RATIONAL_LEVEL_NORM}"
+)
+EIGEN_LEVEL_NORM = 500
+EIGEN_PRIME_NORM = 30
+Q_EIGEN = (
+    "select f.label, f.level_ideal, f.dimension, h.hecke_polynomial, h.hecke_eigenvalues from hmf_forms f "
+    "join hmf_hecke h on h.label = f.label "
+    f"where f.field_label = '{FIELD}' and f.weight = '[2, 2]' and f.level_norm <= {EIGEN_LEVEL_NORM}"
 )
 HECKE_LEVEL_NORM = 1000
 HECKE_PRIME_NORM = 30
@@ -247,6 +267,41 @@ def header(out, *queries):
         out.write(f"# query: {q}\n")
 
 
+def eigen_fixture():
+    import json
+    from fractions import Fraction
+
+    primes = json.loads(psql(Q_PRIMES)[0][0])
+    pl = [(i, ideal_hnf(s)) for i, s in enumerate(primes)]
+    pl = [(i, h) for i, (n, h) in pl if n <= EIGEN_PRIME_NORM]
+    rows = []
+    for label, level, dim, poly, eigs in psql(Q_EIGEN):
+        n, h = ideal_hnf(level)
+        f = parse_poly(poly, "x")
+        assert f[-1] == 1 and len(f) - 1 == int(dim)
+        eigs = json.loads(eigs)
+        parts = []
+        z = [Fraction(0)]
+        k = 0
+        for i, ph in pl:
+            a = parse_poly(eigs[i], "e")
+            parts.append(f"{ph[0]} {ph[1]} {ph[2]}:" + ",".join(map(str, charpoly_of_element(a, f))))
+            if not contains(ph, h):
+                k += 1
+                m = max(len(z), len(a))
+                z = [(z[t] if t < len(z) else 0) + (k + 1) * (a[t] if t < len(a) else 0) for t in range(m)]
+        zc = ",".join(map(str, charpoly_of_element(z, f)))
+        rows.append((n, label, h, int(dim), " ".join(parts), zc))
+    rows.sort()
+    path = os.path.join(HERE, f"lmfdb-{FIELD}-eigen.txt")
+    with open(path, "w") as out:
+        header(out, Q_PRIMES, Q_EIGEN)
+        out.write("# label | level HNF | dimension | prime HNF:charpoly of a_P ... | z: charpoly of sum (k+1) a_(P_k) over the good primes\n")
+        for _, label, h, d, parts, zc in rows:
+            out.write(f"{label} | {h[0]} {h[1]} {h[2]} | {d} | {parts} | z: {zc}\n")
+    print(f"wrote {len(rows)} newform orbits to {path}")
+
+
 def orbit_fixture():
     orbits = {}
     for level, d in psql(Q_ORBITS):
@@ -295,6 +350,7 @@ def main():
     import json
 
     hecke_fixture()
+    eigen_fixture()
     orbit_fixture()
     rational_fixture()
 
