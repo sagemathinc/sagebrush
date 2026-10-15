@@ -847,9 +847,14 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
       at += (kind === "row" ? n.w : n.h) + GAP;
     }
   } else if (kind === "grid") {
+    // (columns as wide as the widest box; each row as tall as its own tallest,
+    // so one tall box, a plot, leaves no gaps in the other rows)
     const cols = Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)));
-    const cw = Math.max(...nodes.map((n) => n.w), 0), ch = Math.max(...nodes.map((n) => n.h), 0);
-    nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: Math.floor(i / cols) * (ch + GAP) }));
+    const cw = Math.max(...nodes.map((n) => n.w), 0), rows: number[] = [];
+    nodes.forEach((n, i) => { const r = Math.floor(i / cols); rows[r] = Math.max(rows[r] ?? 0, n.h); });
+    const top = [0];
+    for (const h of rows) top.push(top[top.length - 1] + h + GAP);
+    nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: top[Math.floor(i / cols)] }));
   } else {
     for (const [id, p] of layered(nodes, links, dir)) out.set(id, p);
   }
