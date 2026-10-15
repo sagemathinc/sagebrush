@@ -261,6 +261,29 @@ try {
   await until("location.pathname === '/board/' && !!window.sagebrush?.board?.snapshot()?.doc", 60000);
   const kept = await ev(docsIn);
   ok(JSON.stringify(kept) === JSON.stringify([["latest edit kept"]]), "New whiteboard with a slow save: the edit made just before is saved before leaving: " + JSON.stringify(kept));
+  // (written elsewhere before each of its first n saves: a real conflict,
+  // merged and saved again, after astra's probe)
+  const conflictStore = (n) => ev(`import('/sagebrush-notebook.js').then(async (m) => { const db = await m.openDb(); const docs = await new Promise((r) => { const q = db.transaction('notebooks', 'readonly').objectStore('notebooks').getAll(); q.onsuccess = () => r(q.result); }); const d = docs.find((x) => x.name === 'WB save'); const store = new m.IdbStore(db, d.id), other = new m.IdbStore(db, d.id), save = store.save.bind(store); let k = 0; store.save = async (doc) => { if (k++ < ${n}) { const cur = await other.load(); await other.save({ ...cur, baseRev: cur.rev, other_writer: k }); } return save(doc); }; await window.sagebrush.notebook.attach(store); return 1; })`);
+  const editAndGo = (text, sel) => ev(`(() => { const ta = window.sagebrush.notebook.cells()[0].ta; ta.value = ${JSON.stringify(text)}; ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector(${JSON.stringify(sel)}).click(); return 1; })()`);
+  // written elsewhere each time, more often than it tries: the notebook
+  // stays open with the edit, from either entry (CORR-7F9-1)
+  for (const [sel, what] of [["#boardbtn", "⋯ Whiteboard"], ["[data-f=whiteboard]", "New whiteboard"]]) {
+    await send("Page.navigate", { url: url });
+    await ready();
+    await conflictStore(1e9);
+    await editAndGo(`conflicted (${what})`, sel);
+    await until("/whiteboard was not opened/.test(document.querySelector('#saved')?.textContent ?? '')", 20000).catch(() => {});
+    const at = await ev("({ path: location.pathname, code: window.sagebrush?.notebook?.cells()[0]?.ta.value ?? null, said: document.querySelector('#saved')?.textContent ?? null })");
+    ok(at.path === "/" && at.code === `conflicted (${what})`, `${what}, written elsewhere at every save: the notebook stays open with the edit, saying so: ${JSON.stringify(at)}`);
+  }
+  // written elsewhere twice: merged, the merge saved, then the whiteboard
+  await send("Page.navigate", { url: url });
+  await ready();
+  await conflictStore(2);
+  await editAndGo("kept after two conflicts", "#boardbtn");
+  await until("location.pathname === '/board/' && !!window.sagebrush?.board?.snapshot()?.doc", 60000);
+  const merged = await ev(docsIn);
+  ok(JSON.stringify(merged) === JSON.stringify([["kept after two conflicts"]]), "⋯ Whiteboard, written elsewhere twice: the merge is saved before leaving: " + JSON.stringify(merged));
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;
