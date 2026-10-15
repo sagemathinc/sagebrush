@@ -515,7 +515,8 @@ class Rational(_Fraction):
         if digits is not None or prec is not None:
             import _sage_real
             return _sage_real.N(self, prec, digits)
-        return RealNumber(float(self))
+        # (RR: past the doubles, 1/3^700, as Sage)
+        return RR(self)
 
     numerical_approx = N = n
 
@@ -593,7 +594,7 @@ from _sage_lang import (RealNumber, ellipsis_range, ellipsis_iter, symbolic_expr
                         SymbolicFunction, _install_int_methods, _CallableInt)
 
 
-from _sage_lang import _RealField
+from _sage_lang import _RealField, _RealBig
 RR = _RealField()
 
 from _sage_lang import proof
@@ -652,7 +653,7 @@ def n(x, prec=None, digits=None, algorithm=None):
             return _sage_real.N(x, p)
     if hasattr(x, "n") and not isinstance(x, (int, float)):
         return x.n()
-    return RealNumber(float(x))
+    return RR(x)
 
 
 numerical_approx = n
@@ -1530,6 +1531,15 @@ def sqrt(x):
         (4, 3/2, sqrt(2), 1.41421356237310)
     """
     if isinstance(x, float):
+        if isinstance(x, _RealBig):
+            # an element of RR past the doubles: its root in the MP field
+            # (CC holds doubles only)
+            r = (-x).sqrt() if x < 0 else x.sqrt()
+            if x > 0:
+                return r
+            if isinstance(r, _RealBig):
+                raise NotImplementedError("sqrt(%s): a complex number past the double range is not available in sagebrush yet" % x)
+            return CC(0, float(r))
         if x < 0:
             return CC(0, _math.sqrt(-x))
         return RealNumber(_math.sqrt(x))

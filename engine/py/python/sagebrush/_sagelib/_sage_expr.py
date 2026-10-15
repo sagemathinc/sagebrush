@@ -60,6 +60,9 @@ def _to_s(v):
         # exact ints first: formatting an int subclass must not round it
         return "n%d/%d;" % (int(v.numerator), int(v.denominator))
     if isinstance(v, float):
+        if _rr_args((v,)) == 2:
+            # (the engine's real numbers are doubles)
+            raise NotImplementedError("%s, an element of RR past the double range, has no symbolic form in sagebrush yet" % (v,))
         return _float_s(v)
     if isinstance(v, complex):
         if v.imag == 0:
@@ -602,6 +605,27 @@ class Expression:
         re, im = float(re), float(im)
         if im == 0:
             from _sage_lang import RealNumber
+            if re == re and not _NORMAL_MIN < abs(re) < _INF:
+                # an infinity, a zero or a subnormal double: RR's value may
+                # be past the doubles (n(exp(1000))), so the expression is
+                # evaluated in the 53-bit MP field, operation by operation as
+                # Sage evaluates it in RR (n(pi^-700) is RR(pi)^-700); where
+                # that is not available, an error rather than a wrong value
+                import _sage_real
+                import _sage_lang
+                from sage_all import RR
+                try:
+                    # (in RR's own MP field, whose arithmetic stays MP)
+                    v = _sage_real.evaluate(self, 53, _sage_lang._rr_mp())
+                except NotImplementedError as err:
+                    if _re.search(r"(?:^|\{)z", self._s):
+                        # (with a complex number in it, the expression is
+                        # CC's, whose numbers are doubles: as before)
+                        return RealNumber(re)
+                    raise NotImplementedError("the value of %s in RR (the doubles give %r): %s" % (self, re, err))
+                if not isinstance(v, _sage_real.RealNumberMP):
+                    raise NotImplementedError("the value of %s in RR: the doubles give %r, the MP evaluation %s" % (self, re, v))
+                return RR(v)
             return RealNumber(re)
         from _sage_matrix import ComplexNumber
         return ComplexNumber(re, im)
@@ -2440,18 +2464,115 @@ def _numeric_arg(a):
     return isinstance(a, float) or (isinstance(a, complex) and not isinstance(a, bool))
 
 
+_RealNumber = _RealBig = None
+
+
+def _rr_args(args):
+    """0 when no argument is an element of RR (a RealNumber) or one is
+    complex, 2 when one is past the doubles (an _RealBig), else 1 (a loop,
+    with isinstance tests only: the normal path of every function call goes
+    through here)."""
+    global _RealNumber, _RealBig
+    if _RealNumber is None:
+        from _sage_lang import RealNumber as _RealNumber, _RealBig
+    k = 0
+    for a in args:
+        if isinstance(a, _RealNumber):
+            if isinstance(a, _RealBig):
+                k = 2
+            elif k == 0:
+                k = 1
+        elif isinstance(a, complex):
+            return 0
+    return k
+
+
+def _rr_exact(r, fl):
+    """Whether the double r = f(*fl) is RR's value: r is a normal double or
+    NaN, or an argument is a zero, an infinity or NaN (where the functions
+    are exact).  Otherwise (an overflow, an underflow, a subnormal value)
+    RR's value is past the doubles."""
+    return r != r or _NORMAL_MIN < abs(r) < _INF or any(t == 0 or t != t or t in (_INF, -_INF) for t in fl)
+
+
+_NORMAL_MIN, _INF = 2.2250738585072014e-308, float("inf")
+_RR_WIDE = None
+
+
+def _rr_wide(v):
+    """v in a 117-bit real field: an identity (arccot(x) = arctan(1/x)) is
+    evaluated there and rounded once to 53 bits."""
+    global _RR_WIDE
+    if _RR_WIDE is None:
+        import _sage_real
+        _RR_WIDE = _sage_real.RealField_(117, "RNDN")
+    return _RR_WIDE(v)
+
+
+# RR's functions past the doubles, in the 53-bit MP field (lib/_sage_real.py:
+# correctly rounded), or by an identity at 117 bits rounded once
+_RR_MP_FUNCTIONS = {n: (lambda v, n=n: getattr(v, n)()) for n in (
+    "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+    "arcsinh", "arccosh", "arctanh", "exp", "log")}
+_RR_MP_FUNCTIONS.update({
+    "arccot": lambda v: (1 / _rr_wide(v)).arctan(),
+    "arcsec": lambda v: (1 / _rr_wide(v)).arccos(),
+    "arccsc": lambda v: (1 / _rr_wide(v)).arcsin(),
+    "coth": lambda v: 1 / _rr_wide(v).tanh(),
+    "sech": lambda v: 1 / _rr_wide(v).cosh(),
+    "csch": lambda v: 1 / _rr_wide(v).sinh()})
+
+
+def _rr_function(name, args, numeric):
+    """name(*args) in RR where the double result is not RR's value (an
+    argument or the value is past the doubles): computed in the MP field,
+    or NotImplementedError, never a double's infinity or zero."""
+    import _sage_lang
+    if len(args) == 1:
+        x = args[0]
+        if name in ("sgn", "heaviside"):
+            return numeric(x)  # (comparisons only, exact)
+        if name in ("floor", "ceil"):
+            return getattr(x, name)()
+        if name == "log" and x < 0:
+            # log|x| + pi I: log|x| is a double for every element of RR
+            from _sage_matrix import ComplexNumber
+            return ComplexNumber(float(_sage_lang._rr_from_mp(_sage_lang._rr_operand(-x).log())), _m.pi)
+        g = _RR_MP_FUNCTIONS.get(name)
+        if g is not None and x == x:
+            v = g(_sage_lang._rr_operand(x))
+            # (outside the real domain the value is complex, as in Sage)
+            if v._special != "nan":
+                return _sage_lang._rr_from_mp(v)
+    raise NotImplementedError("%s(%s): the value in RR, past the double range, is not available in sagebrush yet"
+                              % (name, ", ".join(map(str, args))))
+
+
 def _function(name, numeric=None, cnumeric=None):
     """A Sage function: numerical on floats, exact or symbolic otherwise
     (sin(0) = 0, sin(pi/6) = 1/2, sin(1) stays sin(1))."""
     def f(*args, **kw):
         if args and all(_numeric_arg(a) or isinstance(a, int) for a in args) and any(_numeric_arg(a) for a in args):
             if numeric is not None and not any(isinstance(a, complex) for a in args):
+                # RR's elements past the doubles (an _RealBig), and values
+                # past them, are computed in the MP field
+                rr = _rr_args(args)
+                if rr == 2:
+                    return _rr_function(name, args, numeric)
+                fl = [float(a) for a in args]
                 try:
-                    r = numeric(*[float(a) for a in args])
-                    from _sage_lang import RealNumber
-                    return RealNumber(r) if isinstance(r, float) else r
-                except (ValueError, OverflowError):
+                    r = numeric(*fl)
+                except OverflowError:
+                    if rr:
+                        return _rr_function(name, args, numeric)
+                except ValueError:
                     pass
+                else:
+                    if not isinstance(r, float):
+                        return r
+                    if rr and not _rr_exact(r, fl) and name not in ("sgn", "heaviside"):
+                        return _rr_function(name, args, numeric)
+                    return _RealNumber(r)
             r = _one("fun", name, *[_to_s(a) for a in args]).n()
             return r
         try:
@@ -2476,6 +2597,30 @@ def _function(name, numeric=None, cnumeric=None):
 
 
 
+def _rr_special_exact(name, v, fl):
+    """Whether the double v = name(*fl) is RR's value: v is a normal double
+    or NaN, an argument is a zero, an infinity or NaN, v is the infinity of
+    a pole, or a trivial zero of zeta.  Otherwise (an overflow, an
+    underflow, a subnormal value) RR's value is past the doubles."""
+    if _rr_exact(v, fl):
+        return True
+    if v in (_INF, -_INF):
+        return _is_pole(name, fl) or (name == "erfinv" and abs(fl[0]) == 1)
+    return v == 0 and name in ("zeta", "hurwitz_zeta") and fl[0] < 0 and fl[0] % 2 == 0 \
+        and (name == "zeta" or fl[1] == 1)
+
+
+def _rr_special(name, args):
+    """name(*args) in RR past the doubles: gamma and log_gamma in the MP
+    field; the other special functions raise NotImplementedError (never a
+    double's overflowed infinity or underflowed zero)."""
+    import _sage_lang
+    if name in ("gamma", "log_gamma") and len(args) == 1 and not (name == "log_gamma" and args[0] < 0):
+        return _sage_lang._rr_from_mp(getattr(_sage_lang._rr_operand(args[0]), name)())
+    raise NotImplementedError("%s(%s): the value in RR, past the double range, is not available in sagebrush yet"
+                              % (name, ", ".join(map(str, args))))
+
+
 def _special_function(name, nargs=(1,)):
     """A Sage special function (engine/sym special.rs for exact values and
     derivatives, lib/_special.py for numerical ones): a number at Python
@@ -2486,10 +2631,16 @@ def _special_function(name, nargs=(1,)):
             raise TypeError("%s() takes %s arguments (%d given)" % (name, " or ".join(map(str, nargs)), len(args)))
         if all(_numeric_arg(a) or isinstance(a, int) for a in args) and any(_numeric_arg(a) for a in args) \
                 and not (name == "psi" and len(args) == 2) and name != "zetaderiv":
+            rr = _rr_args(args)
+            if rr == 2:
+                return _rr_special(name, args)
+            fl = [complex(a) if isinstance(a, complex) else float(a) for a in args]
             try:
-                v = _special_value(name, [complex(a) if isinstance(a, complex) else float(a) for a in args])
+                v = _special_value(name, fl)
             except _Keep:
                 v = None
+            if rr and type(v) is float and not _NORMAL_MIN < abs(v) < _INF and not _rr_special_exact(name, v, fl):
+                return _rr_special(name, args)
             if v is _UnsignedInfinity:
                 return Expression("cu")
             if v is not None:

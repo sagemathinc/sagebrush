@@ -691,7 +691,13 @@ const absBig = (x: any): bigint => {
   const b = BigInt(x);
   return b < 0n ? -b : b;
 };
-method(int, "bit_length", (x: any) => (O.truth(x) ? absBig(x).toString(2).length : 0));
+// (in hexadecimal: a binary string of a 2^29-bit integer exceeds V8's
+// string length, so 2^(10^9) had no bit_length)
+method(int, "bit_length", (x: any) => {
+  if (!O.truth(x)) return 0;
+  const h = absBig(x).toString(16);
+  return (h.length - 1) * 4 + (32 - Math.clz32(parseInt(h[0], 16)));
+});
 method(int, "bit_count", (x: any) => [...absBig(x).toString(2)].filter((c) => c === "1").length);
 method(int, "conjugate", (x: any) => +x);
 method(int, "__index__", (x: any) => (typeof x === "boolean" ? +x : x));

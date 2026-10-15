@@ -205,6 +205,90 @@ def _pow_round(m, e, n, prec, rnd):
         W *= 2
 
 
+# log2(10) lies strictly between these (3.32192809488736234...)
+_LOG2_10_LO = _F(3321928094887362, 10 ** 15)
+_LOG2_10_HI = _F(3321928094887363, 10 ** 15)
+
+
+# 1/ln(2) lies strictly between these (1.44269504088896340...)
+_INV_LN2_LO = _F(14426950408889634, 10 ** 16)
+_INV_LN2_HI = _F(14426950408889635, 10 ** 16)
+
+
+def _log2_bounds(m, e):
+    """Rational lo <= log2(m 2^e) <= hi (m > 0), from m's bits alone.  With
+    m 2^e = 2^k y, y in [1, 2) and d = y - 1: d/(1 + d) <= ln y <= d; the
+    same around y/2 in [1/2, 1) (d' = y/2 - 1 < 0) is tight when y is near
+    2, so the two brackets intersect to one that excludes 0 for every m 2^e
+    other than a power of 2 (1.5 or 0.75: where bit lengths alone give
+    [0, 1] or [-1, 0])."""
+    b = m.bit_length()
+    k = e + b - 1
+    y = _F(m, 1 << (b - 1))
+    if y == 1:
+        return _F(k), _F(k)
+    d = y - 1
+    lo1, hi1 = k + d / y * _INV_LN2_LO, k + d * _INV_LN2_HI
+    d2 = y / 2 - 1
+    # (ln of y/2 is negative: the smaller magnitude d2/(1 + d2) ... d2,
+    # each scaled by the bound on 1/ln 2 that keeps it a bound)
+    lo2, hi2 = k + 1 + d2 / (1 + d2) * _INV_LN2_HI, k + 1 + d2 * _INV_LN2_LO
+    return max(lo1, lo2), min(hi1, hi2)
+
+
+def _beyond(lo, hi, neg):
+    """(m, e) past the exponent range when lo <= log2|x| <= hi puts x past
+    it for certain (|x| >= 2^EMAX: overflow; |x| < 2^(EMIN - 2): below half
+    the smallest number), for RealNumberMP to round by its mode; else None.
+    lo and hi are integers or Fractions, from bit lengths: no power is
+    formed."""
+    if lo >= _EMAX:
+        return (-1 if neg else 1), _EMAX + 8
+    if hi < _EMIN - 2:
+        return (-1 if neg else 1), _EMIN - 8
+    return None
+
+
+def _round_dec(M, E, prec, rnd):
+    """(m, e): M 10^E (M != 0) correctly rounded to prec bits, with the
+    exponent range decided on that final value (never on a separately
+    computed 10^E: 10^200 x 10^-(E + 200) is in range when 10^-E is not).
+    M 10^E = M 5^E 2^E: the 2^E is an exact shift and 5^|E| is bracketed by
+    binary powering cut to W bits, as in _pow_round.  This ends: for E < 0
+    the 5s of M are cancelled first, so the value is either exact (dyadic)
+    or not dyadic, never a rounding boundary; for E > 0 it is an integer
+    whose odd part, M's times 5^E, is exact once W holds it.  A value past
+    the exponent range for certain is decided first, from bit lengths and
+    bounds on log2(10): then |E| < 2^62 and 5^|E| is never formed for it."""
+    b = abs(M).bit_length()
+    t = _beyond(b - 1 + min(E * _LOG2_10_LO, E * _LOG2_10_HI), b + max(E * _LOG2_10_LO, E * _LOG2_10_HI), M < 0)
+    if t is not None:
+        return t
+    if E < 0:
+        N = -E
+        while N and M % 5 == 0:
+            M //= 5
+            N -= 1
+        if N == 0:
+            return _round_int(M, E, prec, rnd)
+    else:
+        N = E
+    W = prec + 2 * N.bit_length() + 20
+    while True:
+        lo, slo = _ipow(5, N, W, False)
+        hi, shi = _ipow(5, N, W, True)
+        if E >= 0:
+            r1 = _round_int(M * lo, slo + E, prec, rnd)
+            r2 = _round_int(M * hi, shi + E, prec, rnd)
+        else:
+            # M / 5^N lies between M/hi and M/lo
+            r1 = _round_q(M, hi, prec, rnd, E - shi)
+            r2 = _round_q(M, lo, prec, rnd, E - slo)
+        if r1 == r2:
+            return r1
+        W *= 2
+
+
 def _dround(v, rnd, neg):
     """The decimal mantissa rounding of _format: v >= 0 a Fraction."""
     N = math.floor(v)
@@ -466,12 +550,21 @@ def _exact_log(x, b):
     return None
 
 
-def _ziv_eval(R, fn, extra=40, limit=None, overflow=False):
+def _ziv_eval(R, fn, extra=40, limit=None, overflow=False, exact=None):
     """fn(F), F = RealField(p + extra), rounded in R.  fn must return the
     value within 2^8 units in the last place of F (relative), and the value
     must not be a rounding boundary of R; both ends of that interval must
-    round alike, else extra doubles."""
+    round alike, else extra doubles.
+
+    limit: past that many extra bits the interval still holds a rounding
+    boundary c = cm 2^ce (the value's nearest (p + 1)-bit number):
+    exact(cm, ce) tells whether the value is exactly c (True: c is rounded,
+    the correct rounding), is not (False: the extra bits keep doubling, up
+    to _ZIV_CAP(p, limit), as the value is then not a boundary), or cannot
+    be told within its budget (None): NotImplementedError, never an
+    unproved rounding.  (c stays a pair: 2^ce is never formed.)"""
     p = R._prec
+    checked = False
     while True:
         v = fn(RealField(p + extra))
         if overflow and v._special in ("+inf", "-inf"):
@@ -496,9 +589,88 @@ def _ziv_eval(R, fn, extra=40, limit=None, overflow=False):
         if lo == hi:
             return RealNumberMP(R, lo[0], lo[1])
         if limit is not None and extra > limit:
-            # (only an exact rounding boundary gets here)
-            return R(v)
+            if not checked:
+                checked = True
+                cm, ce = _round_int(v._m, v._e, p + 1, "RNDN")
+                t = exact(cm, ce) if exact is not None else None
+                if t:
+                    return RealNumberMP(R, *_round_int(cm, ce, p, R._rnd))
+                if t is None:
+                    raise NotImplementedError("the correct rounding of this value to %d bits is not decided within %d extra bits (it may be a rounding boundary) in sagebrush yet" % (p, extra))
+            if extra > _ZIV_CAP(p, limit):
+                raise NotImplementedError("the correct rounding of this value to %d bits is not decided within %d extra bits in sagebrush yet" % (p, extra))
         extra *= 2
+
+
+def _ZIV_CAP(p, limit):
+    """The most extra bits _ziv_eval spends on a value shown not to be a
+    rounding boundary (one that close to a boundary needs about p more
+    bits: the root of 1 + 3 2^(1-p) to p = 8192 bits needs 2p)."""
+    return max(16 * limit, 8 * p)
+
+
+def _odd2(n, d=1, s=0):
+    """(N, D, t) with n/d 2^s = N/D 2^t, N and D odd and coprime (n, d >
+    0 integers)."""
+    g = math.gcd(n, d)
+    n, d = n // g, d // g
+    a, b = (n & -n).bit_length() - 1, (d & -d).bit_length() - 1
+    return n >> a, d >> b, s + a - b
+
+
+def _iroot(n, k):
+    """The integer k-th root of n >= 1, rounded down (Newton's method from
+    above)."""
+    if k == 1:
+        return n
+    x = 1 << -(-n.bit_length() // k)
+    while True:
+        y = ((k - 1) * x + n // x ** (k - 1)) // k
+        if y >= x:
+            return x
+        x = y
+
+
+def _ipow_eq(A, m1, B, m2):
+    """Whether A^m1 == B^m2, for odd A, B >= 1 and coprime m1, m2 >= 1:
+    exactly when A = C^m2 and B = C^m1 for an integer C, so only roots no
+    larger than A and B are formed (C >= 3 when A > 1, so m2 < bitlen(A))."""
+    if A == 1 or B == 1:
+        return A == B
+    if m2 >= A.bit_length() or m1 >= B.bit_length():
+        return False
+    C = _iroot(A, m2)
+    if C ** m2 != A or (C.bit_length() - 1) * m1 >= B.bit_length():
+        return False
+    return C ** m1 == B
+
+
+def _pow_eq(a, n1, b, n2):
+    """Whether a^n1 == b^n2, exactly, for positive rationals a, b given as
+    _odd2 triples (N, D, t) and integers n1 > 0, n2 of any size: the odd
+    numerators and denominators and the powers of 2 must agree separately
+    (unique factorization), and an equality of odd powers is decided by
+    integer roots no larger than the operands (no float, no power formed)."""
+    if n2 < 0:
+        b, n2 = (b[1], b[0], -b[2]), -n2
+    if n2 == 0:
+        return a == (1, 1, 0)
+    if a[2] * n1 != b[2] * n2:
+        return False
+    g = math.gcd(n1, n2)
+    m1, m2 = n1 // g, n2 // g
+    return _ipow_eq(a[0], m1, b[0], m2) and _ipow_eq(a[1], m1, b[1], m2)
+
+
+def _dyadic_ratio(m, e):
+    """(n, d) with m 2^e = n/d (m != 0), or None when |e| (after m's
+    trailing zeros) exceeds _EXACT_BITS: an exponent of that size is not
+    formed as an integer."""
+    t = (abs(m) & -abs(m)).bit_length() - 1
+    m, e = m >> t, e + t
+    if abs(e) > _EXACT_BITS:
+        return None
+    return (m << e, 1) if e >= 0 else (m, 1 << -e)
 
 
 def _huge(m, e):
@@ -741,6 +913,11 @@ def _atan_inv(k, W):
     return s
 
 
+# The largest magnitude (log2 |x|) whose trigonometric functions are
+# computed (argument reduction takes pi to that many bits)
+_TRIG_MAX_MAG = 1 << 16
+
+
 def _pi(W):
     key = ("pi", W)
     if key not in _CACHE:
@@ -976,6 +1153,10 @@ class RealField_:
     _numeric = True
 
 
+    # (True only for the 53-bit field that holds RR's elements past the
+    # doubles: its arithmetic keeps MP values instead of returning RR)
+    _rr_internal = False
+
     def __init__(self, prec, rnd="RNDN"):
         self._prec, self._rnd = prec, rnd
 
@@ -1182,8 +1363,29 @@ class RealField_:
 
 
 
+_BIG = None
+
+
+def _rr_big_mp(x):
+    """The 53-bit value of x when x is an element of RR past the doubles
+    (lib/_sage_lang.py's _RealBig), else None.  (An isinstance test: a
+    missing attribute's lookup is slow in pyjs, and this is on every path.)"""
+    global _BIG
+    if _BIG is None:
+        import _sage_lang
+        _BIG = _sage_lang._RealBig
+    return x._mp if isinstance(x, _BIG) else None
+
+
 def _to_real(R, x, base=10):
     prec, rnd = R._prec, R._rnd
+    # (an element of RR past the doubles is its 53-bit value, not its float;
+    # a decimal literal's, its digits: RealField(100)(1e400) is 1e400)
+    big = _rr_big_mp(x)
+    if big is not None:
+        if x._lit is not None:
+            return _parse(R, x._lit)
+        x = big
     if isinstance(x, RealNumberMP):
         if x._special:
             return RealNumberMP(R, 0, 0, x._special)
@@ -1256,6 +1458,26 @@ def _parse(R, s, base=10):
         n = int(ip or "0", base) * base ** len(fp) + (int(fp, base) if fp else 0)
         q = _F(n, base ** len(fp))
         return _to_real(R, -q if neg else q)
+    m = _re.match(r"^([+-]?)(\d*)(?:\.(\d*))?[eE]([+-]?)(\d+)$", t)
+    if m and (m.group(2) or m.group(3)):
+        neg = m.group(1) == "-"
+        if not (m.group(2) or "").strip("0") and not (m.group(3) or "").strip("0"):
+            return RealNumberMP(R, 0, 0) if not neg else -RealNumberMP(R, 0, 0)
+        ed = m.group(5).lstrip("0")
+        if len(ed) > 25 and len(t) < 10 ** 20:
+            # an exponent of 10^24 or more, against a mantissa of fewer
+            # than 10^20 digits: past the range by its sign alone (the
+            # exponent is never converted: a 5000-digit one was)
+            big = (1, _EMAX + 8) if m.group(4) != "-" else (1, _EMIN - 8)
+            return RealNumberMP(R, -big[0] if neg else big[0], big[1])
+        Ex = int(ed or "0") * (-1 if m.group(4) == "-" else 1)
+        if abs(Ex) > 4096:
+            # a large decimal exponent (RR('1e1000000000')): not the exact
+            # rational, whose size is the exponent's, but M 10^E correctly
+            # rounded (_round_dec)
+            fp = m.group(3) or ""
+            M = int((m.group(2) or "0") + fp) * (-1 if neg else 1)
+            return RealNumberMP(R, *_round_dec(M, Ex - len(fp), R._prec, R._rnd))
     try:
         q = _F(t)
     except ValueError:
@@ -1506,7 +1728,7 @@ class RealNumberMP:
             prec = digits_to_prec(digits)
         if prec is None:
             prec = 53
-        return RealField(prec)(self) if int(prec) != 53 else _sa().RR(float(self))
+        return RealField(prec)(self) if int(prec) != 53 else _sa().RR(self)
 
     n = N = numerical_approx
 
@@ -1525,6 +1747,11 @@ class RealNumberMP:
     # ---- arithmetic
     def _other(self, o):
         """(o as a RealNumberMP, the field of the result), or (None, None)."""
+        mp = _rr_big_mp(o)
+        if mp is not None:
+            # an element of RR past the doubles: its 53-bit value, the
+            # result in RR when this field is not coarser
+            return mp, (RealField_(53, "RNDN") if self._R._prec > 53 else self._R)
         if isinstance(o, RealNumberMP):
             return o, (o._R if o._R._prec < self._R._prec else self._R)
         if isinstance(o, (int, _F)) or type(o).__name__ in ("Integer", "Rational"):
@@ -1543,8 +1770,11 @@ class RealNumberMP:
         if rev:
             a, b = b, a
         r = _arith(a, b, op, R)
-        if R._prec == 53 and R._rnd == "RNDN":
-            return _sa().RR(float(r))
+        if R._prec == 53 and R._rnd == "RNDN" and not R._rr_internal:
+            # (53 bits to nearest is RR: a double, or past the doubles an RR
+            # element held at 53 bits; the field RR uses internally for that
+            # keeps its MP values)
+            return _sa().RR(r)
         return r
 
     def __add__(self, o): return self._binop(o, "+")
@@ -1588,6 +1818,13 @@ class RealNumberMP:
                 if n > 0:
                     return self
                 return RealNumberMP(R, 0, 0, "+inf")
+            # past the exponent range for certain: decided from bit lengths
+            # before any powering (RR(3)^(2^20000) squared a 20000-bit
+            # exponent's worth of big integers to reach infinity)
+            lo, hi = _log2_bounds(abs(self._m), self._e)
+            t = _beyond(min(n * lo, n * hi), max(n * lo, n * hi), self._m < 0 and n % 2 == 1)
+            if t is not None:
+                return RealNumberMP(R, *t)
             # correctly rounded, by bracketed binary powering (any n)
             m, e = _pow_round(self._m, self._e, n, R._prec, R._rnd)
             return RealNumberMP(R, m, e)
@@ -1598,7 +1835,29 @@ class RealNumberMP:
         if x._m < 0:
             # a negative real to a real power: complex
             return ComplexField(R._prec)(x) ** ComplexField(R._prec)(y)
-        return (y * x.log()).exp()
+        if x._special or y._special or not x._m or x == 1:
+            return (y * x.log()).exp()
+        # exp(y log x), correctly rounded (Ziv): an error d in y log x is a
+        # relative error d in the power, so y log x is computed with as many
+        # more bits as its magnitude has (beyond 2^80 the power is past any
+        # exponent and rounds to an infinity or zero)
+        # (log2 |y log x| <= log2 |y| + log2 (|exponent of x| + 1), summed
+        # rather than multiplied: |y| may be near the largest double)
+        yf = abs(float(y))
+        lx = abs(x._e + abs(x._m).bit_length()) + 1
+        mag = min(80, max(0, math.ceil(math.log2(yf) + math.log2(lx)) + 2)) if 0 < yf < float("inf") else 80
+
+        def fn(F):
+            H = RealField(F._prec + mag)
+            return F((H(y) * H(x).log()).exp())
+
+        def exact(cm, ce):
+            # x^y == c, y = n/d (d a power of 2)  <=>  c^d == x^n
+            nd = _dyadic_ratio(y._m, y._e)
+            if nd is None or cm <= 0:
+                return None
+            return _pow_eq(_odd2(cm, 1, ce), nd[1], _odd2(x._m, 1, x._e), nd[0])
+        return _ziv_eval(R, fn, limit=4096, overflow=True, exact=exact)
 
     def __rpow__(self, b):
         return self._R(b) ** self
@@ -1608,6 +1867,7 @@ class RealNumberMP:
         """The sign of self - o, "nan" when unordered, None when o is not a
         number; infinities by their sign (a finite number, however large,
         is below +infinity: no float conversion)."""
+        o = _rr_big_mp(o) or o
         if isinstance(o, RealNumberMP):
             if o._special or self._special:
                 return _cmp_special(self._special, o._special)
@@ -1898,7 +2158,28 @@ class RealNumberMP:
             k = _exact_log(self, base)
             if k is not None:
                 return R(k)
-            return _ziv_eval(R, lambda F: F(self).log() / F(base).log(), limit=4096)
+            def exact(cm, ce):
+                # log_b x == c = n/d  <=>  x^d == b^n
+                if cm == 0:
+                    return self == 1
+                nd = _dyadic_ratio(cm, ce)
+                b = _rr_big_mp(base) or base
+                if nd is None:
+                    return None
+                if isinstance(b, RealNumberMP):
+                    if b._special or b._m <= 0:
+                        return None
+                    bt = _odd2(b._m, 1, b._e)
+                else:
+                    try:
+                        bq = _F(b)
+                    except (TypeError, ValueError):
+                        return None
+                    if bq <= 0:
+                        return None
+                    bt = _odd2(bq.numerator, bq.denominator)
+                return _pow_eq(_odd2(self._m, 1, self._e), nd[1], bt, nd[0])
+            return _ziv_eval(R, lambda F: F(self).log() / F(base).log(), limit=4096, exact=exact)
         return R._ziv(lambda W: _log_fx(self._m, self._e, W), W)
 
     ln = log
@@ -1926,6 +2207,11 @@ class RealNumberMP:
     def _trig_W(self):
         # tiny arguments: sin x is about x, so -log2|x| more fixed-point
         # bits keep the relative precision (sin(2^-300) is not 0)
+        if self._m and not self._special and self._mag() > _TRIG_MAX_MAG:
+            # (reducing x mod pi needs pi to as many bits as x has before
+            # the point: seconds at 2^15, minutes at 2^17)
+            raise NotImplementedError("the sine and cosine of a number of magnitude 2^%d (above 2^%d) are not available in sagebrush yet"
+                                      % (self._mag(), _TRIG_MAX_MAG))
         return self._R._prec + 30 + (max(0, -self._mag()) if self._m else 0)
 
     def _trig(self):
@@ -3102,7 +3388,7 @@ class ComplexNumberMP:
 
 # ------------------------------------------------------------------ symbolic evaluation
 
-def evaluate(expr, prec):
+def evaluate(expr, prec, R=None):
     """The value of a constant symbolic expression to prec bits: a
     RealNumberMP, or a ComplexNumberMP if it is not real.
 
@@ -3112,7 +3398,8 @@ def evaluate(expr, prec):
         sage: evaluate(pi + sqrt(2), 100)  # sagebrush only
         4.5558062159628882872643321075
     """
-    R = RealField(prec) if prec != 53 else RealField_(53, "RNDN")
+    if R is None:
+        R = RealField(prec) if prec != 53 else RealField_(53, "RNDN")
     v = _ev(expr._s, R, prec)
     return v
 
@@ -3169,6 +3456,9 @@ def _ev(s, R, prec):
         return _simplify(r)
     if tag == "pow":
         b, x = args
+        if op[1] == "ce":
+            # e^x is exp(x), as in Sage (not a rounded e to the power x)
+            return _simplify(x.exp())
         # an exact rational exponent of a real base
         if not cx:
             xs = op[2]
@@ -3258,7 +3548,7 @@ def N(x, prec=None, digits=None):
         v = evaluate(x, prec + 20)
         if isinstance(v, ComplexNumberMP):
             return ComplexField(prec)(v) if prec != 53 else _sa().CC(complex(v))
-        return RealField(prec)(v) if prec != 53 else _sa().RR(float(v))
+        return RealField(prec)(v) if prec != 53 else _sa().RR(v)
     if isinstance(x, (RealNumberMP, ComplexNumberMP)):
         return x.n(prec)
     return RealField(prec)(x)
