@@ -4030,10 +4030,33 @@ class MPolynomialIdeal:
             [{y: 1, x: 1}, {y: -1, x: -1}]
             sage: T.<a,b> = QQ[]; T.ideal((a-2)*(a+3)*(a-5), b*(b-1)).variety()
             [{b: 1, a: 5}, {b: 1, a: 2}, {b: 1, a: -3}, {b: 0, a: 5}, {b: 0, a: 2}, {b: 0, a: -3}]
+
+        Over AA, QQbar and the real and complex fields, the points are
+        computed exactly and converted (correctly rounded within an ulp),
+        the real points first, then increasing with the last variable most
+        significant:
+
+            sage: S.<a,b,c> = QQ[]; I = S.ideal(a^2 - 2, b^2 - a, c - a*b)
+            sage: I.variety(RR)
+            [{c: -1.68179283050743, b: -1.18920711500272, a: 1.41421356237310}, {c: 1.68179283050743, b: 1.18920711500272, a: 1.41421356237310}]
+            sage: len(I.variety(CC)), I.variety(CC)[1]
+            (4, {c: 1.68179283050743, b: 1.18920711500272, a: 1.41421356237310})
+
+        An ill-conditioned system (the sagebook, p. 212), whose three real
+        points AA also gives (Sage's own floating answer there is wrong):
+
+            sage: R.<x,y> = QQ[]; J = ideal([x^7 - (100*x - 1)^2, y - x^7 + 1])
+            sage: J.variety(RealField(51))
+            [{y: -0.999999999999990, x: 0.00999999900000035}, {y: -0.999999999999990, x: 0.0100000010000003}, {y: 396340.890166545, x: 6.30556899864138}]
         """
         R = self._ring
         if self.dimension() != 0:
             raise ValueError("The dimension of the ideal is %d, but it should be 0" % self.dimension())
+        if ring is not None and _algebraic_target(ring):
+            # (numerical fields gave wrong points: the floating values of one
+            # variable substituted and intersected as sets, so J.variety(RR)
+            # lost points or gave none; the sagebook, p. 212)
+            return self._variety_algebraic(ring)
         L = MPolynomialRing(self._field_ring()._base, None, R._names, "lex")
         G = groebner_basis([MPolynomial(L, g._d) for g in self._gens], L)
         n = R._n
@@ -4075,6 +4098,263 @@ class MPolynomialIdeal:
         out.sort(key=lambda d: [_sortkey(d[g]) for g in reversed(gens)], reverse=True)
         return out
 
+    def _variety_algebraic(self, ring):
+        """The points in AA, QQbar or a real or complex field, computed
+        exactly: a rational univariate representation of the radical (a
+        separating linear form t whose powers 1, ..., t^(D-1) are a basis of
+        R/rad(I), D the number of points), each variable a polynomial in t
+        with rational coefficients, and t's minimal polynomial factored over
+        QQ. A point's coordinates are algebraic numbers, converted to the ring
+        (a real ring keeps the real points)."""
+        import _sage_qqbar as qb
+        from _sage_matrix import _numeric_field_kind
+        sa = _sa()
+        R = self._ring
+        if R._base is not sa.QQ and R._base is not sa.ZZ:
+            raise NotImplementedError("variety over %r of an ideal over %r is not available in sagebrush yet" % (ring, R._base))
+        I = self if R._base is sa.QQ else MPolynomialIdeal(self._field_ring(), [self._field_ring()(g) for g in self._gens])
+        I = I.radical()
+        B = I.normal_basis()
+        D = len(B)
+        if D == 0:
+            return []
+        if D > _VARIETY_MAX_POINTS:
+            raise NotImplementedError("variety over %r of an ideal with %d points (more than %d) is not available in sagebrush yet" % (ring, D, _VARIETY_MAX_POINTS))
+        Q = I._ring
+        index = {next(iter(b._d)): k for k, b in enumerate(B)}
+
+        def coords(f):
+            v = [_F(0)] * D
+            for e, c in I.reduce(f)._d.items():
+                v[index[e]] = _F(c)
+            return v
+        n = Q._n
+        xs = [coords(Q.gen(i)) for i in range(n)]
+        one = coords(Q(1))
+        for c in range(1, (n - 1) * D * (D - 1) // 2 + 2):
+            # t = x_0 + c x_1 + c^2 x_2 + ...: two points have the same t for
+            # at most n - 1 values of c, so one of these c separates them all
+            # (the first one, almost always)
+            t = sum((c ** i) * Q.gen(i) for i in range(n))
+            M = [coords(t * b) for b in B]  # column j: t * B[j]
+            P = [one]
+            for _ in range(D):
+                v = P[-1]
+                P.append([sum(M[j][r] * v[j] for j in range(D)) for r in range(D)])
+            V = [[P[k][r] for k in range(D)] for r in range(D)]
+            sol = _solve_columns(V, [P[D]] + xs)
+            if sol is not None:
+                break
+        else:
+            raise RuntimeError("internal error: no separating linear form found")
+        chi = [-a for a in sol[0]] + [_F(1)]  # t^D - sum a_k t^k
+        kind = _numeric_field_kind(ring)
+        reals = ring is qb.AA or kind == "real"
+        T = sa.PolynomialRing(sa.QQ, "T")
+        gens = R.gens()
+        out = []
+        for g, _ in T(chi).factor():
+            gc = [_F(x) for x in g.list()]
+            # each coordinate modulo the factor: a polynomial in its root
+            rems = [_poly_rem(sol[1 + i], gc) for i in range(n)]
+            if kind is not None:
+                for pt in _numeric_points(gc, rems, ring, kind):
+                    out.append({gens[i]: pt[i] for i in range(n - 1, -1, -1)})
+                continue
+            try:
+                for z in qb._roots_of(qb._primitive(gc), qb.AlgebraicNumber):
+                    if reals and not z._is_real():
+                        continue
+                    pt = {}
+                    for i in range(n - 1, -1, -1):
+                        r = rems[i]
+                        if z._gen is None or len(r) == 1:
+                            v = qb.AlgebraicNumber(None, [sum(cf * z._q() ** k for k, cf in enumerate(r)) if z._gen is None else r[0]])
+                        else:
+                            v = _clean_algebraic(qb.AlgebraicNumber(z._gen, r))
+                        pt[gens[i]] = ring(v)
+                    out.append(pt)
+            except ArithmeticError:
+                # (QQbar's isolation of a generator with large coefficients)
+                raise NotImplementedError("variety over %r of this ideal (the generators of its points could not be isolated) is not available in sagebrush yet" % (ring,)) from None
+        try:
+            # the real points first, then increasing, the last variable most
+            # significant, by real then imaginary part (as Sage lists them,
+            # in AA and QQbar and in the numerical fields alike)
+            def key(d):
+                k = []
+                for g in reversed(gens):
+                    z = complex(d[g])
+                    k += [z.real, z.imag]
+                return [any(k[1::2])] + k
+            out.sort(key=key)
+        except ArithmeticError:
+            raise NotImplementedError("variety over %r of this ideal (its points could not be compared) is not available in sagebrush yet" % (ring,)) from None
+        return out
+
+
+
+def _clean_algebraic(v):
+    """v with a part that is exactly 0 dropped, and a part that is exactly a
+    small rational replaced by it (tested exactly), so that a coordinate
+    prints as Sage's does: -1.414213562373095? and -I, not
+    -1.414213562373095? + 0.?e-18*I and 0.?e-18 - 1.000000000000000?*I. Left
+    as it is when an exact test fails."""
+    import _sage_qqbar as qb
+
+    def rat(a):
+        try:
+            q = _F(float(a)).limit_denominator(10 ** 9)
+        except (OverflowError, ValueError):
+            return a
+        return qb.QQbar(q) if a == q else a
+    try:
+        im = v.imag()
+        if im == 0:
+            return qb.QQbar(rat(v.real()))
+        re = v.real()
+        if re == 0:
+            return qb.QQbar.gen() * rat(im)
+        return v
+    except ArithmeticError:
+        return v
+
+
+_VARIETY_MAX_POINTS = 100
+
+
+def _algebraic_target(ring):
+    """Whether variety(ring) goes through the exact algebraic points: AA,
+    QQbar and the real and complex fields (RR, RealField(p), RDF, CC,
+    ComplexField(p), CDF)."""
+    import _sage_qqbar
+    if ring is _sage_qqbar.AA or ring is _sage_qqbar.QQbar:
+        return True
+    from _sage_matrix import _numeric_field_kind
+    return _numeric_field_kind(ring) is not None
+
+
+def _poly_rem(c, g):
+    """c modulo g (rational coefficient lists, constant first)."""
+    c = [_F(x) for x in c]
+    g = [_F(x) for x in g]
+    while len(g) > 1 and g[-1] == 0:
+        g.pop()
+    d = len(g) - 1
+    while len(c) - 1 >= d and c:
+        if c[-1] == 0:
+            c.pop()
+            continue
+        q = c[-1] / g[-1]
+        k = len(c) - 1 - d
+        for j in range(d + 1):
+            c[k + j] -= q * g[j]
+        c.pop()
+    return c or [_F(0)]
+
+
+def _numeric_points(g, rems, ring, kind):
+    """For each root theta of the irreducible g (rational coefficients) that
+    the ring keeps (real roots for a real field), the coordinates
+    rems[i](theta) in the ring. A coordinate that is rational (a constant
+    remainder, 0 included) is exact. The others are evaluated exactly at a
+    decimal approximation of theta (certified to its digits), with digits
+    doubled until the derivative bound puts the error below 2^-(p+10) of the
+    value; refused beyond 20000 digits."""
+    import _sage_qqbar as qb
+    from sagebrush import nf
+    sa = _sa()
+    gi = [int(x) for x in qb._primitive(g)]
+    prec = int(ring.prec()) if hasattr(ring, "prec") else 53
+    eps = _F(1, 2 ** (prec + 10))
+    complex_ring = kind == "complex"
+    R = sa.RealField(prec) if complex_ring and type(ring).__name__ != "ComplexDoubleField_" else None
+
+    def conv(re, im):
+        if not complex_ring:
+            return ring(re)
+        if R is None:
+            return ring(float(re), float(im))
+        return ring(R(re), R(im))
+    alg = []  # the exact roots of g (qqbar), computed when first needed
+
+    def exact_zero(tr, ti, r, part):
+        """Whether the real (part 0) or imaginary (part 1) part of r(theta)
+        is exactly 0, theta the root of g nearest (tr, ti); None if qqbar
+        cannot tell."""
+        try:
+            if not alg:
+                alg.extend(qb._roots_of(gi, qb.AlgebraicNumber))
+            z = min(alg, key=lambda z: abs(z._gen.z[0] - tr) + abs(z._gen.z[1] - ti))
+            v = qb.AlgebraicNumber(z._gen, r)
+            return (v.real() if part == 0 else v.imag()) == 0
+        except ArithmeticError:
+            return None
+    digits = max(30, prec * 30103 // 100000 + 20)
+    while True:
+        if digits > 20000:
+            raise NotImplementedError("variety over %r: the points could not be evaluated to its precision within 20000 digits" % (ring,))
+        rts = nf.complex_roots(gi, digits)
+        pts, ok = [], True
+        for re_s, im_s, _ in rts:
+            real_root = im_s == "0"
+            if not complex_ring and not real_root:
+                continue
+            tr, ti = _F(re_s), _F(im_s)
+            mod = abs(tr) + abs(ti)
+            delta = mod * _F(10) ** (1 - digits) + _F(10) ** (-digits)
+            pt = []
+            for r in rems:
+                if len(r) == 1:
+                    pt.append(conv(r[0], _F(0)))
+                    continue
+                vr, vi = _F(0), _F(0)
+                for cf in reversed(r):  # Horner, exact
+                    vr, vi = vr * tr - vi * ti + cf, vr * ti + vi * tr
+                bound = sum(k * abs(cf) * (mod + delta) ** (k - 1) for k, cf in enumerate(r) if k) * delta
+                # each part to 2^-(p+10) of itself: a real root's coordinates
+                # are real (and nonzero: r is not 0 modulo the minimal g); a
+                # part too small to certify is tested exactly
+                comps = [vr] if real_root else [vr, vi]
+                vals = []
+                for part, c in enumerate(comps):
+                    if bound <= eps * abs(c):
+                        vals.append(c)
+                        continue
+                    z = exact_zero(tr, ti, r, part) if not real_root else None
+                    if z:
+                        vals.append(_F(0))
+                    else:
+                        ok = False
+                        break
+                if not ok:
+                    break
+                pt.append(conv(vals[0], vals[1] if len(vals) > 1 else _F(0)))
+            if not ok:
+                break
+            pts.append(pt)
+        if ok:
+            return pts
+        digits *= 2
+
+
+def _solve_columns(V, rhs):
+    """Solutions x of V x = b for each column b in rhs (exact rationals,
+    V square), or None if V is singular."""
+    n = len(V)
+    A = [list(V[i]) + [b[i] for b in rhs] for i in range(n)]
+    for col in range(n):
+        piv = next((r for r in range(col, n) if A[r][col] != 0), None)
+        if piv is None:
+            return None
+        A[col], A[piv] = A[piv], A[col]
+        pv = A[col][col]
+        A[col] = [x / pv for x in A[col]]
+        for r in range(n):
+            if r != col and A[r][col] != 0:
+                f = A[r][col]
+                A[r] = [x - f * y for x, y in zip(A[r], A[col])]
+    return [[A[i][n + k] for i in range(n)] for k in range(len(rhs))]
 
 
 def _sortkey(v):

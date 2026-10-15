@@ -4032,20 +4032,22 @@ class MPolynomialIdeal:
             [{b: 1, a: 5}, {b: 1, a: 2}, {b: 1, a: -3}, {b: 0, a: 5}, {b: 0, a: 2}, {b: 0, a: -3}]
 
         Over AA, QQbar and the real and complex fields, the points are
-        computed exactly and converted (correctly rounded within an ulp):
+        computed exactly and converted (correctly rounded within an ulp),
+        the real points first, then increasing with the last variable most
+        significant:
 
             sage: S.<a,b,c> = QQ[]; I = S.ideal(a^2 - 2, b^2 - a, c - a*b)
             sage: I.variety(RR)
-            [{c: 1.68179283050743, b: 1.18920711500272, a: 1.41421356237310}, {c: -1.68179283050743, b: -1.18920711500272, a: 1.41421356237310}]
+            [{c: -1.68179283050743, b: -1.18920711500272, a: 1.41421356237310}, {c: 1.68179283050743, b: 1.18920711500272, a: 1.41421356237310}]
             sage: len(I.variety(CC)), I.variety(CC)[1]
-            (4, {c: 1.68179283050743*I, b: -1.18920711500272*I, a: -1.41421356237310})
+            (4, {c: 1.68179283050743, b: 1.18920711500272, a: 1.41421356237310})
 
         An ill-conditioned system (the sagebook, p. 212), whose three real
         points AA also gives (Sage's own floating answer there is wrong):
 
             sage: R.<x,y> = QQ[]; J = ideal([x^7 - (100*x - 1)^2, y - x^7 + 1])
             sage: J.variety(RealField(51))
-            [{y: 396340.890166545, x: 6.30556899864138}, {y: -0.999999999999990, x: 0.0100000010000003}, {y: -0.999999999999990, x: 0.00999999900000035}]
+            [{y: -0.999999999999990, x: 0.00999999900000035}, {y: -0.999999999999990, x: 0.0100000010000003}, {y: 396340.890166545, x: 6.30556899864138}]
         """
         R = self._ring
         if self.dimension() != 0:
@@ -4169,18 +4171,53 @@ class MPolynomialIdeal:
                         if z._gen is None or len(r) == 1:
                             v = qb.AlgebraicNumber(None, [sum(cf * z._q() ** k for k, cf in enumerate(r)) if z._gen is None else r[0]])
                         else:
-                            v = qb.AlgebraicNumber(z._gen, r)
+                            v = _clean_algebraic(qb.AlgebraicNumber(z._gen, r))
                         pt[gens[i]] = ring(v)
                     out.append(pt)
             except ArithmeticError:
                 # (QQbar's isolation of a generator with large coefficients)
                 raise NotImplementedError("variety over %r of this ideal (the generators of its points could not be isolated) is not available in sagebrush yet" % (ring,)) from None
         try:
-            out.sort(key=lambda d: [_sortkey(d[g]) for g in reversed(gens)], reverse=True)
+            # the real points first, then increasing, the last variable most
+            # significant, by real then imaginary part (as Sage lists them,
+            # in AA and QQbar and in the numerical fields alike)
+            def key(d):
+                k = []
+                for g in reversed(gens):
+                    z = complex(d[g])
+                    k += [z.real, z.imag]
+                return [any(k[1::2])] + k
+            out.sort(key=key)
         except ArithmeticError:
             raise NotImplementedError("variety over %r of this ideal (its points could not be compared) is not available in sagebrush yet" % (ring,)) from None
         return out
 
+
+
+def _clean_algebraic(v):
+    """v with a part that is exactly 0 dropped, and a part that is exactly a
+    small rational replaced by it (tested exactly), so that a coordinate
+    prints as Sage's does: -1.414213562373095? and -I, not
+    -1.414213562373095? + 0.?e-18*I and 0.?e-18 - 1.000000000000000?*I. Left
+    as it is when an exact test fails."""
+    import _sage_qqbar as qb
+
+    def rat(a):
+        try:
+            q = _F(float(a)).limit_denominator(10 ** 9)
+        except (OverflowError, ValueError):
+            return a
+        return qb.QQbar(q) if a == q else a
+    try:
+        im = v.imag()
+        if im == 0:
+            return qb.QQbar(rat(v.real()))
+        re = v.real()
+        if re == 0:
+            return qb.QQbar.gen() * rat(im)
+        return v
+    except ArithmeticError:
+        return v
 
 
 _VARIETY_MAX_POINTS = 100
