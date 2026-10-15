@@ -754,26 +754,15 @@ class Series:
         if o2._R._laurent and not self._R._laurent:
             # by a Laurent series: the quotient is one too (Sage: z/L(1) in L)
             return self._over(self._R._base, laurent=True).__truediv__(o2)
-        if F is not B and not _is_padic(B):
+        if F is not B:
+            # over ZZ or Zp: Sage's rule for a base that is not a field
             return self._ring_div(o2)
-        if F is B and not self._c and self._prec is None:
+        if not self._c and self._prec is None:
             # an exact zero stays exact (Sage: 0/(1 + t) is 0)
             return Series(self._R, 0, [], None)
         if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None and not _is_padic(B):
             # exact division by a constant stays exact
             return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
-        if _is_padic(B) and not B._field and o2._v > 0:
-            # (Sage) the quotient stays over the ring when it is a power
-            # series with a unit to invert, else it is a Laurent series over
-            # the fraction field: T^2/(T + T^2) over Zp, 1/T and T/(5 T) over Qp
-            vg = o2._v
-            u = Series(o2._R, 0, o2._c, None if o2._prec is None else o2._prec - vg)
-            vf = self._v if self._c else (self._prec if self._prec is not None else 0)
-            if vf >= vg and u._c[0].valuation() == 0:
-                f = Series(self._R, self._v - vg, self._c, None if self._prec is None else self._prec - vg)
-                return f * u.inverse()
-            F = B.fraction_field()
-            return self._over(F, laurent=True) / o2._over(F, laurent=True)
         return self * o2.inverse()
 
     def _ring_div(self, g):
