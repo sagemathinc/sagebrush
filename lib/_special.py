@@ -2891,21 +2891,19 @@ def _besselj_series(nu, x):
             raise NotCovered("besselj: the power series did not converge at nu = %r, x = %r" % (nu, x))
     if nu == 0:
         return s
-    # ((x/2)^nu and Gamma(nu + 1) each to an ulp or so, where they are
-    # doubles (nu <= 170 here); exp of their logarithms' difference would
-    # round the exponent, losing |that exponent| ulps, so it is used only
-    # where (x/2)^nu leaves the doubles, with log x - log 2, as 0.5 x
-    # underflows for the least subnormal x)
-    if x < 1e-300:
-        # (x^nu 2^-nu: 0.5 x would underflow first for the least subnormals,
-        # and these results round once into the subnormals, to 0 where they
-        # are below half the least)
-        return x ** nu * 0.5 ** nu / _gamma_nu1(nu) * s
-    pw = (0.5 * x) ** nu
-    if 1e-290 < pw < 1e290:
-        return pw / _gamma_nu1(nu) * s
-    lg = _math.lgamma(nu) + _math.log(nu) if nu >= 1 else _math.lgamma(nu + 1)
-    return _math.exp(nu * (_math.log(x) - _math.log(2.0)) - lg) * s
+    # ((x/2)^nu / Gamma(nu + 1) as f^nu 2^((E - 1) nu) / Gamma(nu + 1), x = f 2^E
+    # with f in [1/2, 1) and Gamma(nu + 1) = g 2^G likewise: (E - 1) nu is
+    # split exactly (Dekker's product) into an integer, a fraction and its
+    # correction, so that no rounded logarithm or exponent is multiplied by
+    # |nu log x| (exp of the logarithms lost that many ulps where (x/2)^nu
+    # left [1e-290, 1e290]: J_1.246(3.1e-240) was 1.5e-13 off); the power of
+    # 2 is applied once, rounding once into the subnormals, to 0 below half
+    # the least)
+    f, ex = _math.frexp(x)
+    g, ge = _math.frexp(_gamma_nu1(nu))
+    hi, lo = _two_prod(float(ex - 1), nu)
+    n = _math.floor(hi)
+    return _ldexp_inf(2.0 ** ((hi - n) + lo) * (f ** nu / g) * s, int(n) - ge)
 
 
 def _gamma_nu1(nu):
@@ -2918,13 +2916,16 @@ def _gamma_nu1(nu):
     return _math.gamma(nu + 1)
 
 
-def _besselj_hankel(nu, x):
-    """J_nu(x) for large x by Hankel's expansion, DLMF 10.17.3: sqrt(2/(pi
-    x)) (cos w P - sin w Q), w = x - nu pi/2 - pi/4, P and Q the even and
-    odd parts of sum_k (-1)^... a_k(nu) / x^k with a_k(nu) = ((4 nu^2 - 1)
-    (4 nu^2 - 9) ... (4 nu^2 - (2k - 1)^2)) / (k! 8^k) (DLMF 10.17.1);
-    cos w and sin w from cos x, sin x and the exactly reduced cos and sin of
-    pi (nu/2 + 1/4).  None if the terms stop falling before eps"""
+def _hankel_pq(nu, x):
+    """Hankel's P and Q (DLMF 10.17.3, 10.17.4): the even and odd parts of
+    sum_k (-1)^... a_k(nu) / x^k with a_k(nu) = ((4 nu^2 - 1) (4 nu^2 - 9) ...
+    (4 nu^2 - (2k - 1)^2)) / (k! 8^k) (DLMF 10.17.1); None if the terms stop
+    falling before eps (the ratio |4 nu^2 - (2k-1)^2| / (8 k x) eventually
+    grows like k/(2x)).  The sums stop after a term t_k below 1e-17 of them;
+    by DLMF 10.17.14 with 10.17.15 (real x: the variation of t^-l is x^-l)
+    the remainder is then at most (2 e^A + 1) |t_k|, A = |nu^2 - 1/4|/x,
+    which is at most 1 where Hankel's expansion is used at nu (x >= nu^2)
+    and 0.15 at the low orders (nu < 2, x >= 25)"""
     p = 1.0
     qv = 0.0
     a = 1.0
@@ -2954,15 +2955,30 @@ def _besselj_hankel(nu, x):
             break
         if k > 200:
             return None
-    # (cos and sin of pi (nu/2 + 1/4) by the addition formula from those of
-    # pi nu/2, exact, as nu/2 + 1/4 rounded as one double drops the 1/4 for
-    # nu >= 2^52: J_(1e20)(1e200) was 3.4e-2 off)
+    return p, qv
+
+
+def _hankel_phase(nu, x):
+    """cos w and sin w, w = x - nu pi/2 - pi/4: cos and sin of pi (nu/2 + 1/4)
+    by the addition formula from those of pi nu/2, exact, as nu/2 + 1/4
+    rounded as one double drops the 1/4 for nu >= 2^52 (J_(1e20)(1e200) was
+    3.4e-2 off)"""
     h = 0.5 * nu
     ch, shh = _cospi(h), _sinpi(h)
     cr, sr = (ch - shh) * _SQRT_HALF, (shh + ch) * _SQRT_HALF
     cx, sx = _math.cos(x), _math.sin(x)
-    cw = cx * cr + sx * sr
-    sw = sx * cr - cx * sr
+    return cx * cr + sx * sr, sx * cr - cx * sr
+
+
+def _besselj_hankel(nu, x):
+    """J_nu(x) for large x by Hankel's expansion, DLMF 10.17.3: sqrt(2/(pi
+    x)) (cos w P - sin w Q) (_hankel_pq, _hankel_phase); None if the terms
+    stop falling before eps"""
+    pq = _hankel_pq(nu, x)
+    if pq is None:
+        return None
+    p, qv = pq
+    cw, sw = _hankel_phase(nu, x)
     # (sqrt(2/pi) / sqrt(x), as pi x overflows beyond 5.7e307 and 2/(pi x)
     # is subnormal from 2.8e305 on: J_0(1e308) was 0, not -2.5e-155)
     return _SQRT_2_PI / _math.sqrt(x) * (cw * p - sw * qv)
@@ -3138,9 +3154,28 @@ def _besselj1(nu, x):
     if _math.isinf(nu):
         raise NotCovered("besselj: Sagebrush covers finite orders")
     sign = 1.0
+    if nu < 0 and nu != _math.floor(nu):
+        # (negative non-integer orders through Y: J_-a = cos(a pi) J_a - sin(a pi)
+        # Y_a, _bessel_base and _bessel_parts; J_-a(0) is the limit of
+        # (x/2)^-a / Gamma(1 - a), signed by 1/Gamma(1 - a))
+        if x == 0:
+            # (the sign of 1/Gamma(1 - a), a = -nu in (n, n + 1): (-1)^n, as
+            # Gamma(z) has the sign (-1)^k on (-k, -k + 1); Gamma's value
+            # itself underflows to +0 for large a (astra's CORR-F00-2))
+            return -_math.inf if int(_math.floor(-nu)) % 2 else _math.inf
+        if _math.isinf(x):
+            return 0.0
+        jc = _bessel_base(nu)[0]
+        if x > 0:
+            return _bessel_parts(nu, x, [jc], x)[0]
+        # (DLMF 10.11.1: J_nu(-x) = e^(nu pi i) J_nu(x), its parts cos(nu pi)
+        # J_nu(x) and sin(nu pi) J_nu(x), each formed by _bessel_parts)
+        c, s_ = _cospi(nu), _sinpi(nu)
+        if c == 0:
+            return complex(0.0, _bessel_parts(nu, -x, [(s_ * jc[0], s_ * jc[1])], x)[0])
+        r, i = _bessel_parts(nu, -x, [(c * jc[0], c * jc[1]), (s_ * jc[0], s_ * jc[1])], x)
+        return complex(r + 0.0, i)
     if nu < 0:
-        if nu != _math.floor(nu):
-            raise NotCovered("besselj: Sagebrush covers negative orders only when they are integers")
         # (DLMF 10.4.1: J_-n = (-1)^n J_n)
         nu = -nu
         if int(nu) % 2:
@@ -3169,8 +3204,11 @@ def besselj(nu, x):
     and nu <= 0.95 x, and otherwise Miller's backward recurrence (3.6(iii),
     10.6.1) normalized by Neumann's expansion (10.23(ii)).  Negative integer orders by 10.4.1,
     negative x by 10.11.1 (the value above the cut: complex for non-integer
-    nu).  J_nu(0) = 1 for nu = 0, else 0; J_nu(+-inf) = 0.  NotCovered for
-    complex arguments, negative non-integer orders, infinite orders, and
+    nu); negative non-integer orders through Y (bessely), J_-a = cos(a pi)
+    J_a - sin(a pi) Y_a, refused where the two terms cancel.  J_nu(0) = 1
+    for nu = 0, else 0, and +-inf for negative non-integer orders (signed by
+    1/Gamma(1 + nu)); J_nu(+-inf) = 0.  NotCovered for
+    complex arguments, infinite orders, and
     orders and arguments that would need a recurrence longer than 500000
     steps.  Both recurrences run in double-double arithmetic, as in doubles
     their roundings accumulated over the oscillating steps (to 4.4e-14 at
@@ -3180,6 +3218,485 @@ def besselj(nu, x):
     5e-15 (scipy.special.jv's errors below the turning point are up to
     4.5e-13)."""
     return _elementwise(_besselj1, nu, x)
+
+
+# ------------------------------------------------------------------ Bessel functions of the second kind
+
+# (values beyond the doubles' exponent range are carried as (m, e), the
+# value m 2^e, m a double; the exponent is applied once, at the end)
+
+def _me_norm(m, e):
+    """(m, e) with m in [1/2, 1) in modulus (or 0)"""
+    if m == 0 or not _math.isfinite(m):
+        return m, 0 if m == 0 else e
+    f, j = _math.frexp(m)
+    return f, e + j
+
+
+def _me_add(a, b):
+    """a + b for (m, e) pairs, at the larger exponent: the smaller term is
+    scaled down exactly, or rounded below a unit of the larger"""
+    (ma, ea), (mb, eb) = _me_norm(*a), _me_norm(*b)
+    if ma == 0:
+        return mb, eb
+    if mb == 0:
+        return ma, ea
+    e = max(ea, eb)
+    return _ldexp(ma, ea - e) + _ldexp(mb, eb - e), e
+
+
+def _me_log2(a):
+    """log2 |m 2^e|, -inf for 0"""
+    m, e = a
+    if m == 0:
+        return -_math.inf
+    f, j = _math.frexp(m)
+    return _math.log2(abs(f)) + j + e
+
+
+def _me_val(a):
+    """the double m 2^e: +-inf beyond the doubles, rounded once into the
+    subnormals or to 0 below them"""
+    m, e = a
+    if m == 0 or not _math.isfinite(m):
+        return m
+    return _ldexp_inf(m, e)
+
+
+# ---- 1/Gamma coefficients (scripts/gen-rgamma-coeffs.py): c_1 .. c_28 of DLMF 5.7.1
+_RGAMMA_C = (
+    1.0,
+    0.5772156649015329,
+    -0.6558780715202539,
+    -0.04200263503409524,
+    0.16653861138229148,
+    -0.04219773455554433,
+    -0.009621971527876973,
+    0.0072189432466631,
+    -0.0011651675918590652,
+    -0.00021524167411495098,
+    0.0001280502823881162,
+    -2.013485478078824e-05,
+    -1.2504934821426706e-06,
+    1.133027231981696e-06,
+    -2.056338416977607e-07,
+    6.116095104481416e-09,
+    5.002007644469223e-09,
+    -1.18127457048702e-09,
+    1.0434267116911005e-10,
+    7.782263439905071e-12,
+    -3.696805618642206e-12,
+    5.100370287454476e-13,
+    -2.0583260535665066e-14,
+    -5.348122539423018e-15,
+    1.2267786282382608e-15,
+    -1.1812593016974588e-16,
+    1.1866922547516004e-18,
+    1.4123806553180319e-18,
+)
+# ---- end
+
+
+def _temme_gamma12(mu):
+    """Temme's Gamma_1(mu) = (1/Gamma(1 - mu) - 1/Gamma(1 + mu)) / (2 mu) and
+    Gamma_2(mu) = (1/Gamma(1 - mu) + 1/Gamma(1 + mu)) / 2 for |mu| <= 1/2,
+    from the series of 1/Gamma (DLMF 5.7.1): 1/Gamma(1 + mu) = sum_j
+    c_(j+1) mu^j, so Gamma_1 = -(c_2 + c_4 mu^2 + ...) and Gamma_2 = c_1 +
+    c_3 mu^2 + ..., without the cancellation of the closed form at mu = 0;
+    also 1/Gamma(1 + mu) and 1/Gamma(1 - mu)"""
+    m2 = mu * mu
+    g1 = g2 = 0.0
+    for j in range(len(_RGAMMA_C) - 1, -1, -1):
+        if j % 2:
+            g1 = g1 * m2 + _RGAMMA_C[j]  # (c_(j+1), j odd: c_2, c_4, ...)
+        else:
+            g2 = g2 * m2 + _RGAMMA_C[j]
+    g1 = -g1
+    return g1, g2, g2 - mu * g1, g2 + mu * g1
+
+
+def _bessely_temme(mu, x):
+    """(Y_mu(x), Y_(mu+1)(x)) as (m, e) pairs, |mu| <= 1/2, 0 < x <= 2, by
+    Temme's series (N. M. Temme, J. Comput. Phys. 21 (1976) 343-350):
+    Y_mu = -sum_k c_k g_k, Y_(mu+1) = -(2/x) sum_k c_k h_k, c_k =
+    (-x^2/4)^k / k!, g_k = f_k + (2/mu) sin^2(mu pi/2) q_k, h_k = p_k - k g_k,
+    p_k = p_(k-1)/(k - mu), q_k = q_(k-1)/(k + mu), f_k = (k f_(k-1) +
+    p_(k-1) + q_(k-1)) / (k^2 - mu^2), from p_0 = (x/2)^-mu Gamma(1 + mu)/pi,
+    q_0 = (x/2)^mu Gamma(1 - mu)/pi and f_0 = (2/pi) (mu pi / sin(mu pi))
+    (cosh(sigma) Gamma_1 + (sinh(sigma)/sigma) log(2/x) Gamma_2), sigma = mu
+    log(2/x).  log(2/x) is log 2 - log x, so that the least subnormal x is
+    safe; |sigma| <= 373 keeps e^sigma a double; 2/x goes into the exponent.
+    NotCovered if the series does not reach eps by 100 terms (it needs at
+    most 14 for x <= 2)"""
+    l2x = _math.log(2.0) - _math.log(x)
+    sigma = mu * l2x
+    g1, g2, rgp, rgm = _temme_gamma12(mu)
+    # ((x/2)^-mu = e^sigma as x^-mu 2^mu, each power rounded once: e^sigma of
+    # the rounded sigma lost |sigma| eps, 5.5e-14 at x = 2.4e-261, and x/2
+    # underflows for the least subnormal; for |sigma| >= 1 cosh and sinh from
+    # it, below 1 directly, where |sigma| eps is small, with sinh's series
+    # where sinh(sigma)/sigma would cancel)
+    es = 1.0 if mu == 0 else (x ** -mu) * (2.0 ** mu)
+    if abs(sigma) < 1:
+        ch = _math.cosh(sigma)
+        shc = 1.0 + sigma * sigma / 6.0 if abs(sigma) < 1e-4 else _math.sinh(sigma) / sigma
+        t2 = shc * l2x * g2
+    else:
+        ch = 0.5 * (es + 1.0 / es)
+        t2 = 0.5 * (es - 1.0 / es) / mu * g2  # (sinh(sigma)/sigma log(2/x) = sinh(sigma)/mu)
+    p = es / (_PI * rgp)
+    q = 1.0 / (es * _PI * rgm)
+    # (mu pi / sin(mu pi), 1 at mu = 0)
+    fac = 1.0 if mu == 0 else mu * _PI / _sinpi(mu)
+    f = (2.0 / _PI) * fac * (ch * g1 + t2)
+    if mu == 0:
+        r = 0.0
+    else:
+        sh = _sinpi(0.5 * mu)
+        r = 2.0 * sh * sh / mu
+    c = 1.0
+    d = -0.25 * x * x
+    g = f + r * q
+    sg = g
+    sh_ = p
+    for k in range(1, 101):
+        c *= d / k
+        f = (k * f + p + q) / (k * k - mu * mu)
+        p /= k - mu
+        q /= k + mu
+        g = f + r * q
+        h = p - k * g
+        sg += c * g
+        sh_ += c * h
+        if abs(c * g) <= 1e-17 * abs(sg) and abs(c * h) <= 1e-17 * abs(sh_):
+            break
+    else:
+        raise NotCovered("bessely: Temme's series did not converge at mu = %r, x = %r" % (mu, x))
+    xm, xe = _math.frexp(x)
+    return (-sg, 0), (-sh_ * (2.0 / xm), -xe)
+
+
+def _lentz_tiny(v):
+    return v if v != 0 else 1e-300
+
+
+def _bessely_steed(mu, x):
+    """(Y_mu(x), Y_(mu+1)(x)) for 0 <= mu < 1 and x > 2 by Steed's method
+    (A. R. Barnett, D. H. Feng, J. W. Steed and L. J. B. Goldfarb, Comput.
+    Phys. Commun. 8 (1974) 377-395; I. J. Thompson and A. R. Barnett,
+    J. Comput. Phys. 64 (1986) 490-509), both logarithmic derivatives at
+    order mu:
+    CF1, f = J'_mu/J_mu = mu/x - J_(mu+1)/J_mu, the ratio by the continued
+    fraction 1/(b_1 - 1/(b_2 - ...)), b_k = 2 (mu + k)/x (DLMF 10.10.1 and
+    10.6.2), at most ceil(x) + 200 terms;
+    CF2, p + iq = H'_mu/H_mu = -1/(2x) + i + (i/x) a_1/(b_1 + a_2/(b_2 + ...)),
+    a_k = (k - 1/2)^2 - mu^2, b_k = 2 (x + k i), at most 1000 terms;
+    both by the modified Lentz method to |delta - 1| <= 2^-60, NotCovered if
+    not met.  The Wronskian 2/(pi x) (DLMF 10.5.2) gives |J_mu| =
+    sqrt(W/(q + gamma (p - f))) with gamma = (p - f)/q, Y_mu = gamma J_mu,
+    Y'_mu = p Y_mu + q J_mu (from H' = (p + iq) H: no division by Y_mu,
+    astra's correction), Y_(mu+1) = (mu/x) Y_mu - Y'_mu (DLMF 10.6.2).  The
+    sign of J_mu, which CF1 does not give, comes from besselj's J_mu, or
+    near its zeros from the sign of J'_mu = (mu/x) J_mu - J_(mu+1); the two
+    J_mu must agree to 1e-13 of sqrt(2/(pi x)), or NotCovered"""
+    eps = 2.0 ** -60
+    # (CF1: K = b_1 - 1/(b_2 - 1/(b_3 - ...)), the ratio J_(mu+1)/J_mu = 1/K)
+    b = 2.0 * (mu + 1) / x
+    fk = _lentz_tiny(b)
+    cc = fk
+    dd = 0.0
+    k1 = int(_math.ceil(x)) + 200
+    for k in range(2, k1 + 1):
+        b = 2.0 * (mu + k) / x
+        dd = 1.0 / _lentz_tiny(b - dd)
+        cc = _lentz_tiny(b - 1.0 / cc)
+        delta = cc * dd
+        fk *= delta
+        if abs(delta - 1.0) <= eps:
+            break
+    else:
+        raise NotCovered("bessely: the continued fraction CF1 did not converge at mu = %r, x = %r" % (mu, x))
+    f = mu / x - 1.0 / fk
+    # (CF2: T = a_1 / (b_1 + a_2/(b_2 + ...)); at mu = 1/2, a_1 = 0 and H is elementary)
+    a1 = 0.25 - mu * mu
+    if a1 == 0:
+        t = 0j
+    else:
+        bk = complex(2.0 * x, 2.0)
+        fk2 = bk
+        cc2 = bk
+        dd2 = 0j
+        for k in range(2, 1001):
+            ak = (k - 0.5) ** 2 - mu * mu
+            bk = complex(2.0 * x, 2.0 * k)
+            dd2 = bk + ak * dd2
+            dd2 = 1.0 / (dd2 if dd2 != 0 else 1e-300)
+            cc2 = bk + ak / cc2
+            if cc2 == 0:
+                cc2 = 1e-300
+            delta = cc2 * dd2
+            fk2 *= delta
+            if abs(delta - 1.0) <= eps:
+                break
+        else:
+            raise NotCovered("bessely: the continued fraction CF2 did not converge at mu = %r, x = %r" % (mu, x))
+        t = a1 / fk2
+    pq = complex(-0.5 / x, 1.0) + complex(0.0, 1.0 / x) * t
+    p, q = pq.real, pq.imag
+    w = 2.0 / (_PI * x)
+    gam = (p - f) / q
+    jm = _math.sqrt(w / (q + gam * (p - f)))
+    nrm = _math.sqrt(w)
+    jb = _besselj_pos(mu, x)
+    if abs(jb) >= 0.1 * nrm:
+        s = 1.0 if jb > 0 else -1.0
+    else:
+        jpb = (mu / x) * jb - _besselj_pos(mu + 1, x)
+        s = (1.0 if jpb > 0 else -1.0) * (1.0 if f > 0 else -1.0)
+    jm *= s
+    if not abs(jm - jb) <= 1e-13 * nrm:
+        raise NotCovered("bessely: Steed's J_mu and besselj's disagree at mu = %r, x = %r" % (mu, x))
+    ym = gam * jm
+    ypm = p * ym + q * jm
+    return (ym, 0), ((mu / x) * ym - ypm, 0)
+
+
+def _bessely_hankel(nu, x):
+    """Y_nu(x) by Hankel's expansion, DLMF 10.17.4: sqrt(2/(pi x)) (sin w P +
+    cos w Q), with besselj's P, Q, phase and prefactor; None if its
+    omitted-term check fails"""
+    pq = _hankel_pq(nu, x)
+    if pq is None:
+        return None
+    p, qv = pq
+    cw, sw = _hankel_phase(nu, x)
+    return _SQRT_2_PI / _math.sqrt(x) * (sw * p + cw * qv)
+
+
+def _bessely_up(mu, n, x, y0, y1, coef):
+    """Y_(mu+n)(x) as an (m, e) pair from Y_mu = y0 and Y_(mu+1) = y1 ((m, e)
+    pairs) by the recurrence DLMF 10.6.1 upward, Y is dominant there, in
+    double-double arithmetic (_bessel_dd_step) with the exponent carried.
+    For x < 1 the recurrence runs with x' = x 2^s in [1, 2) (exact): Y_(k+1) =
+    2^s ((2 (mu+k)/x') Y_k - 2^-s Y_(k-1)), each step's 2^s going into the
+    exponent, so that 2 (mu+k)/x never overflows (it was inf at x = 5e-324)
+    and the earlier term, negligible there, may underflow; the mantissas are
+    renormalized by an exact 2^-500 past 2^500.  At most _BESSEL_MAX_N steps
+    (NotCovered beyond), unless a bound proves the final value beyond the
+    doubles first: past the turning point (order > x) with |Y_(k+1)| >=
+    |Y_k| of one sign, |Y| only grows from there, so once coef |Y| >= 2^1030
+    (coef the least nonzero modulus of the coefficients that will multiply
+    Y_nu afterwards) the result is (+-inf, 0), the sign of the mantissa"""
+    if n == 0:
+        return y0
+    if n == 1:
+        return y1
+    a = _me_norm(*y0)
+    bb = _me_norm(*y1)
+    e = max(a[1], bb[1])
+    ah, al = _ldexp(a[0], a[1] - e), 0.0
+    bh, bl = _ldexp(bb[0], bb[1] - e), 0.0
+    sh = 0
+    xs = x
+    if x < 1:
+        sh = 1 - _math.frexp(x)[1]
+        xs = _ldexp(x, sh)
+    C = 134217729.0
+    t = C * xs
+    xh = t - (t - xs)
+    xl = xs - xh
+    lc = _math.log2(coef) if coef > 0 else 0.0
+    for k in range(1, n):
+        if k > _BESSEL_MAX_N:
+            raise NotCovered("bessely: Sagebrush covers orders for which the recurrence needs at most %d steps (here %d)" % (_BESSEL_MAX_N, n))
+        if sh:
+            gh, gl = _ldexp(ah, -sh), _ldexp(al, -sh)
+            ah, al = _ldexp(bh, -sh), _ldexp(bl, -sh)
+            bh, bl = _bessel_dd_step(mu, k, xs, xh, xl, bh, bl, gh, gl)
+            e += sh
+        else:
+            (ah, al), (bh, bl) = (bh, bl), _bessel_dd_step(mu, k, xs, xh, xl, bh, bl, ah, al)
+        if abs(bh) > 2.0 ** 500:
+            ah, al, bh, bl = (_math.ldexp(v, -500) for v in (ah, al, bh, bl))
+            e += 500
+        if mu + k + 1 > x and bh * ah > 0 and abs(bh) >= abs(ah) and _math.log2(abs(bh)) + e + lc >= 1030:
+            return (_math.copysign(_math.inf, bh), 0)
+    return (bh + bl, e)
+
+
+def _bessely_pos_me(nu, x, coef=1.0):
+    """Y_nu(x) for nu >= 0 and x > 0 as an (m, e) pair; coef as for
+    _bessely_up.  Hankel's expansion at nu for x >= max(25, nu^2); otherwise
+    Y_mu and Y_(mu+1) by the elementary forms (half-integer nu, DLMF
+    10.16.1), Temme's series (x <= 2, |mu| <= 1/2), Steed's method (2 < x <
+    25, 0 <= mu < 1) or Hankel's expansion (x >= 25), then upward"""
+    if x >= 25 and nu <= _math.sqrt(x):
+        v = _bessely_hankel(nu, x)
+        if v is not None:
+            return (v, 0)
+    if nu - _math.floor(nu) == 0.5:
+        # (DLMF 10.16.1: Y_(1/2) = -sqrt(2/(pi x)) cos x, and Y_(3/2) =
+        # (1/2)/x Y_(1/2) - Y'_(1/2) = Y_(1/2)/x - sqrt(2/(pi x)) sin x, 10.6.2)
+        n = int(_math.floor(nu))
+        nrm = _SQRT_2_PI / _math.sqrt(x)
+        y0 = -nrm * _math.cos(x)
+        # (y0 / x as an (m, e) pair: it is beyond the doubles for x below 2.7e-206)
+        fx, ex = _math.frexp(x)
+        y1 = _me_add((y0 / fx, -ex), (-nrm * _math.sin(x), 0))
+        return _bessely_up(0.5, n, x, (y0, 0), y1, coef)
+    if x <= 2:
+        # (n and mu = nu - n, |mu| <= 1/2, both exact: floor(nu + 0.5) rounded
+        # 0.5 - 2^-54 up to n = 1, and nu - 1 then to -1/2, the order 1/2
+        # instead (astra's CORR-F00-3); nu - floor(nu) and f - 1 are exact)
+        n = int(_math.floor(nu))
+        mu = nu - n
+        if mu > 0.5:
+            n += 1
+            mu -= 1.0
+        y0, y1 = _bessely_temme(mu, x)
+        return _bessely_up(mu, n, x, y0, y1, coef)
+    n = int(_math.floor(nu))
+    mu = nu - n
+    if x >= 25:
+        a = _bessely_hankel(mu, x)
+        b = _bessely_hankel(mu + 1, x)
+        if a is not None and b is not None:
+            return _bessely_up(mu, n, x, (a, 0), (b, 0), coef)
+        if x > 1e4:
+            raise NotCovered("bessely: Hankel's expansion did not reach eps at mu = %r, x = %r" % (mu, x))
+    y0, y1 = _bessely_steed(mu, x)
+    return _bessely_up(mu, n, x, y0, y1, coef)
+
+
+def _bessel_base(nu):
+    """J_nu and Y_nu as alpha J_b + beta Y_b, b = |nu|: ((alpha, beta) of J,
+    (alpha, beta) of Y).  nu >= 0 itself; integer nu = -n by DLMF 10.4.1,
+    (-1)^n; other nu = -a by Y_-a = sin(a pi) J_a + cos(a pi) Y_a (from
+    10.4.5) and J_-a = cos(a pi) J_a - sin(a pi) Y_a (10.4.3 with 10.4.6),
+    the exactly reduced sin and cos"""
+    if nu >= 0:
+        return (1.0, 0.0), (0.0, 1.0)
+    a = -nu
+    if a == _math.floor(a):
+        sg = -1.0 if int(a) % 2 else 1.0
+        return (sg, 0.0), (0.0, sg)
+    sa, ca = _sinpi(a), _cospi(a)
+    return (ca, -sa), (sa, ca)
+
+
+def _bessel_parts(nu, t, comps, x):
+    """the doubles alpha J_b(t) + beta Y_b(t), b = |nu|, t > 0, for each
+    (alpha, beta) in comps: the final real and imaginary parts of J_nu or
+    Y_nu at x = +-t, every connection (_bessel_base) and continuation
+    coefficient already multiplied in, so that each part has one Y_b term
+    and is +-inf only where it is itself beyond the doubles (daybreak's and
+    astra's CORR-F00-1: Y_b became inf before a small coefficient brought a
+    part back, or two infinities made a NaN).  Y_b is an (m, e) pair, its
+    overflow bound (_bessely_up) taken at the least nonzero |beta|; J_b is
+    not computed where no alpha needs it, Y_b where no beta does.
+
+    J_b as a double suffices: J_b leaves the doubles only below the turning
+    point, where |J_b Y_b| is near 1/(pi b) (DLMF 10.19.1), so |Y_b| > 2^1021
+    / b, and every beta that is not 0 is a product of a non-integer order's
+    sin and cos, at least 2^-51 or 2b (b < 1); the J term is then below
+    2^-1000 of the Y term.  A part is refused (NotCovered) where its two
+    terms cancel: where 5e-15 (|alpha J| + |beta Y|), 5e-15 a bound on J_b's
+    and Y_b's measured errors (3.1e-15 at most), exceeds 1e-12 of max(|the
+    part|, max(|alpha|, |beta|) sqrt(2/(pi t)) for t > b)"""
+    b = abs(nu)
+    jb = _besselj_pos(b, t) if any(al != 0 for al, _ in comps) else 0.0
+    coefs = [abs(be) for _, be in comps if be != 0]
+    yb = _bessely_pos_me(b, t, min(coefs)) if coefs else (0.0, 0)
+    nrm = _SQRT_2_PI / _math.sqrt(t) if t > b else 0.0
+    out = []
+    for al, be in comps:
+        if be == 0:
+            out.append(al * jb)
+            continue
+        u2 = (be * yb[0], yb[1])
+        if al == 0 or jb == 0:
+            out.append(_me_val(u2))
+            continue
+        u1 = (al * jb, 0)
+        r = _me_add(u1, u2)
+        if _math.isfinite(r[0]):
+            lsum = _me_log2(_me_add((abs(u1[0]), 0), (abs(u2[0]), u2[1])))
+            lr = _me_log2(r)
+            floor = _math.log2(max(abs(al), abs(be)) * nrm) if nrm else -_math.inf
+            if _math.log2(5e-15) + lsum > _math.log2(1e-12) + max(lr, floor):
+                raise NotCovered("bessely, besselj: the connection formula for order %r cancels at x = %r" % (nu, x))
+        out.append(_me_val(r))
+    return out
+
+
+def _bessely1(nu, x):
+    if isinstance(nu, complex) or isinstance(x, complex):
+        raise NotCovered("bessely: Sagebrush covers real orders and arguments")
+    if _isnan(nu) or _isnan(x):
+        return _math.nan
+    if _math.isinf(nu):
+        raise NotCovered("bessely: Sagebrush covers finite orders")
+    if _math.isinf(x):
+        return 0.0
+    if x == 0:
+        return _bessely_at0(nu)
+    jc, yc = _bessel_base(nu)
+    if x > 0:
+        return _bessel_parts(nu, x, [yc], x)[0]
+    # (DLMF 10.11.2 with m = 1, the value above the cut: Y_nu(-x) =
+    # e^(-nu pi i) Y_nu(x) + 2i cos(nu pi) J_nu(x), real part cos(nu pi)
+    # Y_nu(x), imaginary part -sin(nu pi) Y_nu(x) + 2 cos(nu pi) J_nu(x); for
+    # integer orders (-1)^n (Y_n(x) + 2i J_n(x)))
+    c, s = _cospi(nu), _sinpi(nu)
+    re = (c * yc[0], c * yc[1])
+    im = (-s * yc[0] + 2 * c * jc[0], -s * yc[1] + 2 * c * jc[1])
+    if c == 0:
+        return complex(0.0, _bessel_parts(nu, -x, [im], x)[0])
+    r, i = _bessel_parts(nu, -x, [re, im], x)
+    return complex(r + 0.0, i)
+
+
+def _bessely_at0(nu):
+    """Y_nu(0): -inf for nu >= 0; for integer nu = -n, (-1)^n (-inf); for
+    other nu < 0 the limit of cos(nu pi) Y_(-nu) (the J term is 0 at 0):
+    -sign(cos(nu pi)) inf, and 0 at half-integers, where Y_-(n+1/2) =
+    (-1)^n J_(n+1/2) (Octave 11 agrees at each)"""
+    if nu >= 0:
+        return -_math.inf
+    a = -nu
+    if a == _math.floor(a):
+        return _math.inf if int(a) % 2 else -_math.inf
+    c = _cospi(a)
+    if c == 0:
+        return 0.0
+    return -_math.inf if c > 0 else _math.inf
+
+
+def bessely(nu, x):
+    """the Bessel function of the second kind Y_nu(x) (DLMF 10.2.3), real
+    order nu and real x.  For x > 0, nu >= 0: Hankel's expansion 10.17.4
+    for x >= max(25, nu^2), with its omitted-term check; otherwise Y_mu and
+    Y_(mu+1) at the low orders, by the elementary forms 10.16.1 (half-integer
+    nu), Temme's series for x <= 2 (J. Comput. Phys. 21, 1976), Steed's
+    method for 2 < x < 25 (Barnett et al. 1974, Thompson and Barnett 1986)
+    or Hankel's expansion for x >= 25, then the recurrence 10.6.1 upward in
+    double-double arithmetic, the exponent carried so that nothing
+    overflows on the way; -inf where Y_nu is beyond the doubles.  Negative
+    orders by 10.4.1 (integers) and the connection formula from 10.4.5,
+    refused where its terms cancel; negative x by 10.11.2 (the value above
+    the cut: complex).  Y_nu(0) = -inf for nu >= 0, with the parity sign for
+    negative integers (Y_-1(0) = +inf), and the limit for other negative
+    orders; Y_nu(+-inf) = 0.  NotCovered for complex arguments, infinite
+    orders, continued fractions not converging, and recurrences beyond
+    500000 steps where the value could still be a double.  Largest error
+    found against mpmath, in some 76000 random points across the regions
+    (orders to 1500, x from 1e-300 to 3000, negative orders and x), as a
+    fraction of max(|Y|, sqrt(2/(pi |x|))) for |x| > |nu| (the envelope of
+    the oscillations: an absolute accuracy next to the zeros) and of |Y|
+    below: 3.1e-15; at negative non-integer orders where the connection
+    formula's terms cancel, up to 200-fold before the refusal, 8.4e-16 times
+    (|t1| + |t2|)/|t1 + t2|"""
+    return _elementwise(_bessely1, nu, x)
 
 
 # ------------------------------------------------------------------ Legendre functions

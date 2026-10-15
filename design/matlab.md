@@ -771,7 +771,7 @@ The rest:
   the pages say nothing, `psi(k, 0)` is the limit from the right (-Inf for
   even k, Inf for odd k) and `psi(Inf)` is Inf; Octave gives NaN and
   -0.5772. These functions, `erfcx`, `erfinv`, `erfcinv`, `expint`,
-  `gammainc`, `besselj`, `ellipke`, `ellipj` and `legendre` are thin wrappers
+  `gammainc`, `besselj`, `bessely`, `ellipke`, `ellipj` and `legendre` are thin wrappers
   (lib/_matlab_special.py) over the shared numerics in lib/_special.py
   (design/special.md). `ellipke` and `ellipj` refuse M outside [0, 1], as
   their pages require (Octave answers), and accept `tol` but always
@@ -780,10 +780,20 @@ The rest:
 - `gammainc` of a negative X (its values there are complex; the page
   warns they can be inaccurate) or an infinite A; `gammainc(X, 0)` is 1, the
   page's limit;
-- `besselj` of complex Z or of a negative non-integer order (it needs Y,
-  `bessely`, not there yet). A negative Z gives the value above the cut,
-  e^(i nu pi) J_nu(-Z), real for integer orders; `besselj(nu, Inf)` is NaN,
-  as Octave gives it;
+- `besselj` and `bessely` of complex Z. A negative Z gives the value above
+  the cut, e^(i nu pi) J_nu(-Z) and e^(-i nu pi) Y_nu(-Z) + 2i cos(nu pi)
+  J_nu(-Z) (DLMF 10.11.1, 10.11.2): `besselj` is real there for integer
+  orders, `bessely` always complex. `besselj(nu, Inf)` and `bessely(nu, Inf)`
+  are NaN, as Octave gives them; Octave's `besselj(nu, -Inf)` is NaN-NaNi.
+  Negative non-integer orders use the connection formulas (DLMF 10.4.5,
+  10.4.3 with 10.4.6) and are refused where their two terms cancel, near
+  the zeros just below Z = |nu|. `bessely(nu, 0)` is -Inf for nu >= 0, Inf
+  or -Inf by parity for negative integers, 0 at negative half-integers and
+  the sign of -cos(nu pi) otherwise, as in Octave. Values beyond the doubles
+  are -Inf or Inf, where Octave gives Inf+Infi for some (`bessely(171, 2)`
+  is -2.3e306, a double, where Octave gives Inf+Infi). At a negative
+  half-integer order and negative Z, the real part that is exactly 0 comes
+  out as 0 (Octave: about 1e-16);
 - the random sparse matrices' exact places and values: `sprand`'s and
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of
