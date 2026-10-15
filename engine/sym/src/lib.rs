@@ -27,6 +27,7 @@ pub mod ratint;
 pub mod series;
 pub mod simplify;
 pub mod solve;
+pub mod special;
 
 pub use err::{catch, SymError};
 pub use expr::Expr;

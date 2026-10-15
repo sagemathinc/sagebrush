@@ -55,6 +55,9 @@ pub fn depends(e: &Expr, x: &str) -> bool {
 }
 
 fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
+    if crate::special::is_special(f) {
+        return crate::special::diff(f, a, x);
+    }
     match f {
         Fun::User(name) => {
             // chain rule through the arguments: sum D[i](f)(args) * args[i]'
@@ -166,7 +169,8 @@ fn diff_fun(e: &Expr, f: &Fun, a: &[Expr], x: &str) -> Expr {
         }
         Fun::Erf => mul(vec![int(2), exp(&neg(&u2)), pow(&pi(), &rat(-1, 2))]),
         Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Heaviside => zero(),
-        Fun::Factorial | Fun::Gamma => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
+        Fun::Gamma => mul2(e, &fun1(Fun::Psi, u)),
+        Fun::Factorial => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
         Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::Arg => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
         _ => return mul2(&fun(Fun::Deriv(f.name().into(), vec![0]), vec![u.clone()]), &du),
     };

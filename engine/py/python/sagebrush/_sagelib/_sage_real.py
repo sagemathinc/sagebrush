@@ -2189,6 +2189,11 @@ def _ev(s, R, prec):
     if tag.startswith("fun:"):
         name = tag[4:]
         a = args[0]
+        # the special functions: gamma and log_gamma of real arguments only
+        # (the other ones are 53-bit only, from lib/_special.py)
+        from _sage_expr import _SPECIAL_NAMES
+        if name in _SPECIAL_NAMES and not (name in ("gamma", "log_gamma") and len(args) == 1 and not isinstance(a, ComplexNumberMP)):
+            raise NotImplementedError("%s at more than 53 bits is not available in sagebrush yet" % name)
         if name in ("abs",):
             return a.abs() if isinstance(a, ComplexNumberMP) else abs(a)
         if isinstance(a, ComplexNumberMP):
