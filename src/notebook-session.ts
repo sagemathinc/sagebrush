@@ -40,6 +40,7 @@ import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
+import { unbox } from "./runtime/object";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -73,12 +74,13 @@ export function exitText(code: unknown): string {
 
 /** How a SystemExit's status ends a cell, by Python's rule (its type, not
  * how this runtime holds it, CORR-588-1): None, or an integer (bool and int
- * subclasses too) that is 0, ends it well; another integer fails it, saying
+ * subclasses too, their integer as stored) that is 0, ends it well; another integer fails it, saying
  * nothing; anything else fails it, its text written (exitText). */
 export function exitStatus(code: unknown): { ok: boolean; text: string | null } {
   if (code === null || code === undefined) return { ok: true, text: null };
   try {
-    if (R.typeOf(code).$mro.includes(R.T.int)) return { ok: !R.truth(code), text: null };
+    // (its integer as stored, as CPython reads it: an int subclass's __bool__ is not asked, CORR-AD9-1)
+    if (R.typeOf(code).$mro.includes(R.T.int)) return { ok: BigInt(unbox(code)) === 0n, text: null };
   } catch {}
   return { ok: false, text: exitText(code) };
 }
