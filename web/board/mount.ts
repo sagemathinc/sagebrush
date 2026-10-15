@@ -596,8 +596,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     look();
   }
 
-  /** Show page i (0-based), from its start. */
-  async function page(i: number) {
+  /** Show page i (0-based), from its start (`end`: at its tour's last step). */
+  async function page(i: number, end = false) {
     if (!doc) return;
     // (first: what is being written is kept on its own page)
     editor.clear();
@@ -606,7 +606,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (Find's item outlined and marked only on its own page: another item
     // there may have its id, CORR-8CE-1)
     if (found[foundAt] && found[foundAt].page !== pageIx) unmark();
-    step(-1, true);
+    step(end ? steps().length - 1 : -1, true);
   }
 
   // the page picker: shown when there are pages
@@ -644,8 +644,21 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     else caption(ss[at].say ?? "", `${at + 1} / ${ss.length}`);
     look(now);
     host.address?.set(hashFor(at));
-    ($("prev") as HTMLButtonElement).disabled = at < 0;
-    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
+    // (back and on across pages: only the board's own start and end stop them, B4)
+    ($("prev") as HTMLButtonElement).disabled = at < 0 && pageIx <= 0;
+    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1 && pageIx >= pageTotal() - 1;
+  }
+  // The tour on, and back: past a page's last step to the next page's start,
+  // and back before its start to the previous page's last step, so that →
+  // alone goes through every tour of every page (William's B4)
+  const pageTotal = () => (doc ? pageCount(viewing ?? doc) : 0);
+  function onward() {
+    if (at < steps().length - 1) step(at + 1);
+    else if (pageIx < pageTotal() - 1) page(pageIx + 1).catch(fail);
+  }
+  function back() {
+    if (at > -1) step(at - 1);
+    else if (pageIx > 0) page(pageIx - 1, true).catch(fail);
   }
 
   // (the camera on the step shown: the whole board, or its slide's card, or the step's items)
@@ -668,16 +681,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     $("say").classList.toggle("open");
     board.insets = { ...board.insets, bottom: $("tour").hidden ? 0 : $("tour").offsetHeight + 18 };
   };
-  $("prev").onclick = () => step(at - 1);
-  $("next").onclick = () => step(at + 1);
+  $("prev").onclick = back;
+  $("next").onclick = onward;
   $("fit").onclick = () => board.focus();
   on(window, "keydown", (e: KeyboardEvent) => {
     if (!mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
     // (items selected in Edit: the arrow keys move them; in Edit, Space held pans)
     if (editor.hasSelection && e.key.startsWith("Arrow")) return;
     if (editor.on && e.key === " ") return;
-    if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
-    else if (e.key === "ArrowLeft") step(at - 1);
+    if (e.key === "ArrowRight" || e.key === " ") onward();
+    else if (e.key === "ArrowLeft") back();
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
     else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") step(-1);
     else if (e.key === "PageDown") page(pageIx + 1).catch(fail);
