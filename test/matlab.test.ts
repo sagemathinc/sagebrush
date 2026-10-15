@@ -674,3 +674,44 @@ test("eigs: the page's output orders, k beyond n, failure treatment and flag, op
   // (the warning when not every value converged and flag is not asked for)
   assert.equal((r.stderr.match(/Warning: eigs: 0 of the 6 requested eigenvalues converged\./g) || []).length, 3);
 });
+
+test("eigs: a complex Afun refused; complex pairs through real solves; CholeskyPermutation; FailureTreatment's values", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (an operator with complex results: refused, in the dense and the iterative paths, never a wrong answer)
+    "try, eigs(@(x) 1i*x, 4, 1), catch err, disp(err.message), end",
+    "try, eigs(@(x) 1i*x, 40, 1), catch err, disp(err.message), end",
+    "disp(eigs(@(x) [2 0; 0 3]*x, 2, 1));",
+    // (generalized and shift-invert problems with a complex pair: the real LU keeps the Ritz vectors' imaginary parts)
+    "A = blkdiag([0 -5; 5 0], diag(1:25)); [V,D,f] = eigs(A, eye(27), 2, 'LI', 'SubspaceDimension', 26, 'MaxIterations', 3, 'Tolerance', 1e-8);",
+    "disp(f); disp(mat2str(round(sort(imag(diag(D)))'))); disp(norm(A*V - V*D, 'fro') < 1e-6);",
+    "A = blkdiag([0 -1; 1 0], diag(5:29)); [V,D,f] = eigs(A, 2, 'SM', 'MaxIterations', 3);",
+    "disp(f); disp(mat2str(round(sort(imag(diag(D)))'))); disp(norm(A*V - V*D, 'fro') < 1e-10);",
+    "fn = @(x) A \\ x; [V,D,f] = eigs(fn, 27, 2, 'SM', 'MaxIterations', 3); disp(f); disp(mat2str(round(sort(imag(diag(D)))')));",
+    // (CholeskyPermutation p: R'*R = B(p, p); a nonidentity factor and permutation give B's eigenvalues)
+    "disp(mat2str(eigs(diag(1:4), eye(4), 2, 'LM', 'IsCholesky', true, 'CholeskyPermutation', [2 1 3 4])'));",
+    "Bm = [4 1 0 0; 1 3 1 0; 0 1 5 2; 0 0 2 6]; Am = diag([1 2 3 4]) + 0.1*ones(4); p = [3 1 4 2]; R = chol(Bm(p,p));",
+    "disp(max(abs(eigs(Am, Bm, 2) - eigs(Am, R, 2, 'largestabs', 'IsCholesky', true, 'CholeskyPermutation', p))) < 1e-12);",
+    "try, eigs(diag(1:4), eye(4), 2, 'smallestabs', 'IsCholesky', true, 'CholeskyPermutation', [2 1 3 4]), catch err, disp(err.message), end",
+    "try, eigs(diag(1:4), eye(4), 2, 'LM', 'IsCholesky', true, 'CholeskyPermutation', [1 1 3 4]), catch err, disp(err.message), end",
+    "try, eigs(diag(1:4), eye(4), 2, 'LM', 'CholeskyPermutation', [2 1 3 4]), catch err, disp(err.message), end",
+    // (FailureTreatment: one of the three words, as a name-value pair or a field)
+    "try, eigs(diag(1:5), 2, 'LM', 'FailureTreatment', 17), catch err, disp(err.message), end",
+    "o.fail = 17; try, eigs(diag(1:5), 2, 'LM', o), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.equal(r.stderr, "");
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), [
+    "eigs: Afun returned complex values: complex operators are not supported in Sagebrush.",
+    "eigs: Afun returned complex values: complex operators are not supported in Sagebrush.",
+    "3",
+    "0", "[-5 5]", "1",
+    "0", "[-1 1]", "1",
+    "0", "[-1 1]",
+    "[4 3]",
+    "1",
+    "eigs: CholeskyPermutation cannot be used with 'smallestabs' or a numeric sigma, as the documentation says.",
+    "eigs: CholeskyPermutation must be a permutation of 1:n.",
+    "eigs: CholeskyPermutation is for IsCholesky true (B given as its Cholesky factor).",
+    "eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.",
+    "eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.",
+  ]);
+});
