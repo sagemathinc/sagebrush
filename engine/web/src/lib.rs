@@ -276,6 +276,30 @@ fn big(v: &[BigInt]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
 
+/// The number field of "t" (monic integer coefficients, constant first).
+fn nf_field(v: &Value) -> Result<sagebrush_poly::nf::Field, String> {
+    sagebrush_poly::nf::Field::new(&bigs(v.get("t"))?)
+}
+
+/// A polynomial over the field: {"num": [[coordinates], ...], "den": d}.
+fn kpoly(v: Option<&Value>, n: usize) -> Result<sagebrush_poly::nf::KPoly, String> {
+    let v = v.ok_or("missing polynomial")?;
+    let num = v.get("num").and_then(Value::as_array).ok_or("a polynomial needs \"num\"")?;
+    let num: Vec<Vec<BigInt>> = num.iter().map(|c| bigs(Some(c))).collect::<Result<_, _>>()?;
+    if num.iter().any(|c| c.len() > n) {
+        return Err(format!("each coefficient has at most {} coordinates", n));
+    }
+    let den = big1(v.get("den"))?;
+    if den.sign() == sagebrush_bigint::Sign::NoSign {
+        return Err("zero denominator".into());
+    }
+    Ok(sagebrush_poly::nf::KPoly::new(n, num, den))
+}
+
+fn kpoly_json(f: &sagebrush_poly::nf::KPoly) -> Value {
+    json!({ "num": f.num.iter().map(|c| big(c)).collect::<Vec<_>>(), "den": f.den.to_string() })
+}
+
 // ---------------------------------------------------------------- permutation groups
 
 fn perms(n: usize, v: Option<&Value>) -> Result<Vec<sagebrush_group::Perm>, String> {
@@ -640,6 +664,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             let (c, fs) = sagebrush_poly::factor(&f);
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
+        }
+        // ---- polynomials over a number field Q[y]/(T), T monic (poly/src/nf.rs) ----
+        "nf_factor" => {
+            let k = nf_field(v)?;
+            let f = kpoly(v.get("f"), k.degree())?;
+            let ((u, d), fs) = k.factor(&f)?;
+            Ok(json!({ "unit": { "num": [big(&u)], "den": d.to_string() },
+                       "factors": fs.iter().map(|(g, e)| json!([kpoly_json(g), e])).collect::<Vec<_>>() }))
+        }
+        "nf_gcd" => {
+            let k = nf_field(v)?;
+            let (f, g) = (kpoly(v.get("f"), k.degree())?, kpoly(v.get("g"), k.degree())?);
+            let (h, _, _) = k.gcd(&f, &g)?;
+            Ok(json!({ "gcd": kpoly_json(&h) }))
         }
         // ---- sagebrush.linalg: exact matrices over Z (and Q, scaled) ----
         "mat_det" => {
