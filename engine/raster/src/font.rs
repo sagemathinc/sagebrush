@@ -153,3 +153,25 @@ pub fn face(bold: bool) -> &'static Face {
         REGULAR.get_or_init(|| Face::parse(include_bytes!("../glyphs-dejavu-sans.bin"), None))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn varints_are_zigzag_little_first() {
+        let b = [0u8, 1, 2, 0xac, 0x02, 0xff, 0x01];
+        let mut i = 0;
+        let got: Vec<i32> = (0..5).map(|_| super::varint(&b, &mut i)).collect();
+        assert_eq!(got, vec![0, -1, 1, 150, -128]);
+        assert_eq!(i, b.len());
+    }
+
+    #[test]
+    fn the_faces_load_and_bold_falls_back_to_regular() {
+        let (r, b) = (super::face(false), super::face(true));
+        assert!(r.has('A') && r.has('\u{2212}') && r.has('\u{3b1}'));
+        // (a symbol bold lacks is drawn with the regular face)
+        assert!(b.has('\u{2211}'));
+        assert!(!r.has('\u{3042}'));
+        assert!(r.advance('W') > r.advance('i'));
+    }
+}

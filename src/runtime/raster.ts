@@ -29,7 +29,8 @@ interface Raster {
 
 let R: Raster | null = null;
 
-function rasterBytes(): Uint8Array {
+// (exported for test/png.test.ts)
+export function rasterBytes(): Uint8Array {
   const g = globalThis as any;
   if (typeof g.__SAGEBRUSH_RASTER__ === "string") {
     const bin = atob(g.__SAGEBRUSH_RASTER__);
@@ -38,6 +39,10 @@ function rasterBytes(): Uint8Array {
     return b;
   }
   if (g.__SAGEBRUSH_RASTER_URL__) {
+    // only the bytes the page was built with run (design/security.md,
+    // SEC-522-1): without the hash they are not fetched at all
+    const want = g.__SAGEBRUSH_RASTER_SHA256__;
+    if (typeof want !== "string" || !/^[0-9a-f]{64}$/.test(want)) throw new Error("the PNG module has no SHA-256 to check, so it is not loaded");
     let b: Uint8Array;
     if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") b = g.__SAGEBRUSH_FETCH_SYNC__(String(g.__SAGEBRUSH_RASTER_URL__));
     else {
@@ -48,8 +53,7 @@ function rasterBytes(): Uint8Array {
       if (x.status !== 200) throw new Error(`could not load the PNG module (HTTP ${x.status})`);
       b = new Uint8Array(x.response);
     }
-    // only the bytes the page was built with run (design/security.md, SEC-522-1)
-    if (typeof g.__SAGEBRUSH_RASTER_SHA256__ === "string" && sha256Hex(b) !== g.__SAGEBRUSH_RASTER_SHA256__) throw new Error("the PNG module fetched is not the one this page was built with");
+    if (sha256Hex(b) !== want) throw new Error("the PNG module fetched is not the one this page was built with");
     return b;
   }
   const fs = g.process?.getBuiltinModule?.("fs"), path = g.process?.getBuiltinModule?.("path");
@@ -116,8 +120,19 @@ newBuiltinModule("_sbraster", (m) => {
   m.render = Obj.builtin((svg: any, scale: any, width: any, height: any, background: any, dpi: any, text: any) => {
     const enc = new TextEncoder();
     const s = enc.encode(String(svg));
-    const pairs = O.toArray(text).map((kv: any) => O.toArray(kv).map(String).join("\x1f")).join("\x1e");
-    const t = enc.encode(pairs);
+    // (each key and value as UTF-8 after its length, u32 little-endian: any
+    // character may be in them)
+    const parts: Uint8Array[] = [];
+    for (const kv of O.toArray(text)) {
+      for (const x of O.toArray(kv)) {
+        const b = enc.encode(String(x));
+        const n = new Uint8Array(4);
+        new DataView(n.buffer).setUint32(0, b.length, true);
+        parts.push(n, b);
+      }
+    }
+    const t = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+    parts.reduce((at, p) => (t.set(p, at), at + p.length), 0);
     const bg = enc.encode(background === null ? "" : String(background));
     let out: Uint8Array;
     try {

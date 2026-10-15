@@ -767,6 +767,45 @@ struct Ctx<'a> {
     h: u32,
     out: Out,
     frame_drawn: bool,
+    // the rasters alive at once: the picture, and the layers of the opacity
+    // groups and the masks of the clip paths being drawn, nested (bytes, and
+    // how many layers and masks)
+    live: u64,
+    nested: u32,
+}
+
+/// Opacity groups and clip paths nested deeper than this are refused: each
+/// keeps a raster the size of the picture while its content is drawn.
+pub const MAX_NESTED_RASTERS: u32 = 16;
+/// The bytes the picture, its layers and its masks may take at once.
+pub const MAX_LIVE_RASTER_BYTES: u64 = 256 << 20;
+
+impl Ctx<'_> {
+    /// Accounts for a layer or mask of `bytes` before it is allocated, or
+    /// refuses it.
+    fn reserve(&mut self, bytes: u64) -> Result<(), String> {
+        if self.nested >= MAX_NESTED_RASTERS {
+            return Err(format!("opacity groups and clip paths nested more than {} deep", MAX_NESTED_RASTERS));
+        }
+        if self.live + bytes > MAX_LIVE_RASTER_BYTES {
+            return Err(format!(
+                "a drawing of {} x {} pixels whose nested opacity groups and clip paths need more than {} MB at once",
+                self.w, self.h, MAX_LIVE_RASTER_BYTES >> 20
+            ));
+        }
+        self.live += bytes;
+        self.nested += 1;
+        Ok(())
+    }
+
+    fn release(&mut self, bytes: u64) {
+        self.live -= bytes;
+        self.nested -= 1;
+    }
+
+    fn area(&self) -> u64 {
+        self.w as u64 * self.h as u64
+    }
 }
 
 fn length(el: &Element, k: &str, default: f32) -> Result<f32, String> {
@@ -897,7 +936,8 @@ fn draw_path(pix: &mut Pixmap, path: &tiny_skia::Path, st: &Style, t: Transform,
     }
 }
 
-fn clip_mask(ctx: &Ctx, el: &Element, t: Transform, parent: Option<&Mask>) -> Result<Option<Mask>, String> {
+/// The mask of el's clip-path (accounted for in ctx: the caller releases it).
+fn clip_mask<'a>(ctx: &mut Ctx<'a>, el: &Element, t: Transform, parent: Option<&Mask>) -> Result<Option<Mask>, String> {
     let Some(v) = properties(el).into_iter().rev().find(|(k, _)| k == "clip-path").map(|(_, v)| v) else {
         return Ok(None);
     };
@@ -906,7 +946,7 @@ fn clip_mask(ctx: &Ctx, el: &Element, t: Transform, parent: Option<&Mask>) -> Re
         return Ok(None);
     }
     let id = v.strip_prefix("url(#").and_then(|r| r.strip_suffix(')')).ok_or_else(|| format!("the clip-path {}", v))?;
-    let cp = ctx.clips.get(id).ok_or_else(|| format!("no clipPath {}", id))?;
+    let cp: &'a Element = *ctx.clips.get(id).ok_or_else(|| format!("no clipPath {}", id))?;
     if cp.attr("clipPathUnits").map(|u| u != "userSpaceOnUse").unwrap_or(false) {
         return Err("a clipPath in objectBoundingBox units".into());
     }
@@ -914,6 +954,7 @@ fn clip_mask(ctx: &Ctx, el: &Element, t: Transform, parent: Option<&Mask>) -> Re
         Some(s) => t.pre_concat(transform(s)?),
         None => t,
     };
+    ctx.reserve(ctx.area())?;
     let mut m = Mask::new(ctx.w, ctx.h).ok_or("a clip mask")?;
     for c in &cp.children {
         if let Node::El(e) = c {
@@ -1127,13 +1168,19 @@ fn draw(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, parent: &Style, pt: Trans
     let mask = own_mask.as_ref().or(pmask);
     if opacity < 1.0 {
         // a group's opacity: drawn apart, then composited
+        ctx.reserve(4 * ctx.area())?;
         let mut layer = Pixmap::new(ctx.w, ctx.h).ok_or("a layer")?;
         draw_content(ctx, &mut layer, el, &st, t, mask)?;
         let paint = PixmapPaint { opacity, ..PixmapPaint::default() };
         pix.draw_pixmap(0, 0, layer.as_ref(), &paint, Transform::identity(), None);
-        return Ok(());
+        ctx.release(4 * ctx.area());
+    } else {
+        draw_content(ctx, pix, el, &st, t, mask)?;
     }
-    draw_content(ctx, pix, el, &st, t, mask)
+    if own_mask.is_some() {
+        ctx.release(ctx.area());
+    }
+    Ok(())
 }
 
 fn draw_content(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Transform, mask: Option<&Mask>) -> Result<(), String> {
@@ -1197,8 +1244,51 @@ pub fn render(svg: &str, scale: f32, size: Option<(u32, u32)>, background: Optio
     }
     let mut clips = HashMap::new();
     collect_clips(&root, &mut clips);
-    let mut ctx = Ctx { clips, w: pw, h: ph, out: Out { missing: vec![] }, frame_drawn: false };
+    let mut ctx = Ctx { clips, w: pw, h: ph, out: Out { missing: vec![] }, frame_drawn: false, live: 4 * pw as u64 * ph as u64, nested: 0 };
     let t = Transform::from_scale(scale * w / vw, scale * h / vh).pre_translate(-vx, -vy);
     draw(&mut ctx, &mut pix, &root, &Style::root(), t, None)?;
     Ok((pix, ctx.out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nested(depth: usize, size: u32, attr: &str) -> String {
+        let mut s = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{0}" height="{0}"><defs><clipPath id="c"><rect x="0" y="0" width="{0}" height="{0}"/></clipPath></defs>"#,
+            size
+        );
+        for _ in 0..depth {
+            s += &format!("<g {}>", attr);
+        }
+        s += r#"<rect x="0" y="0" width="1" height="1" fill="red"/>"#;
+        for _ in 0..depth {
+            s += "</g>";
+        }
+        s + "</svg>"
+    }
+
+    #[test]
+    fn nested_layers_and_masks_are_limited_before_they_are_allocated() {
+        // (HARD-6BC-1) 16 nested opacity groups or clip paths are drawn, 17 refused
+        for attr in [r#"opacity="0.5""#, r#"clip-path="url(#c)""#] {
+            assert!(render(&nested(16, 8, attr), 1.0, None, None).is_ok(), "{}", attr);
+            let e = render(&nested(17, 8, attr), 1.0, None, None).err().unwrap();
+            assert_eq!(e, "opacity groups and clip paths nested more than 16 deep");
+        }
+        // at 4096 x 4096 (64 MB the picture and a layer, 16 MB a mask), the
+        // 256 MB budget allows 3 nested layers, not 4 (refused before the
+        // fourth is allocated)
+        let e = render(&nested(4, 4096, r#"opacity="0.5""#), 1.0, None, None).err().unwrap();
+        assert_eq!(e, "a drawing of 4096 x 4096 pixels whose nested opacity groups and clip paths need more than 256 MB at once");
+        let mut ctx = Ctx { clips: HashMap::new(), w: 4096, h: 4096, out: Out { missing: vec![] }, frame_drawn: false, live: 64 << 20, nested: 0 };
+        ctx.reserve(64 << 20).unwrap();
+        ctx.reserve(16 << 20).unwrap();
+        ctx.reserve(64 << 20).unwrap();
+        assert!(ctx.reserve(64 << 20).is_err());
+        ctx.release(64 << 20);
+        ctx.release(16 << 20);
+        assert_eq!((ctx.live, ctx.nested), ((64 + 64) << 20, 1));
+    }
 }

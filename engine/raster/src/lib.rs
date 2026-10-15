@@ -9,8 +9,9 @@
 //! - rs_render(svg, svg_len, scale, width, height, background,
 //!   background_len, dpi, text, text_len): an RGBA PNG of width x height
 //!   pixels (0 x 0: the drawing's size), at scale pixels per SVG unit, on
-//!   background (a CSS color; empty or "none": transparent).  text holds the PNG
-//!   text chunks as key \x1f value pairs separated by \x1e.  The reply is
+//!   background (a CSS color; empty or "none": transparent).  text holds the
+//!   PNG text chunks: key, value, key, value, ..., each UTF-8 after its byte
+//!   length (u32, little-endian).  The reply is
 //!   u32 png_len (little-endian), the PNG, then the characters the font
 //!   lacked, UTF-8.
 //! - rs_decode(png, len): u32 width, u32 height, u32 channels (1: a 2-D
@@ -79,15 +80,18 @@ pub unsafe extern "C" fn rs_render(svg: *const u8, svg_len: usize, scale: f32, w
 
 fn render(svg: &[u8], scale: f32, size: Option<(u32, u32)>, background: &[u8], dpi: f32, text: &[u8]) -> Result<Vec<u8>, String> {
     let svg = std::str::from_utf8(svg).map_err(|_| "an SVG that is not UTF-8".to_string())?;
-    let text = std::str::from_utf8(text).map_err(|_| "PNG text that is not UTF-8".to_string())?;
-    let pairs: Vec<(String, String)> = text
-        .split('\x1e')
-        .filter(|p| !p.is_empty())
-        .map(|p| {
-            let (k, v) = p.split_once('\x1f').unwrap_or((p, ""));
-            (k.to_string(), v.to_string())
-        })
-        .collect();
+    let mut strings = vec![];
+    let mut i = 0;
+    while i < text.len() {
+        let n = u32::from_le_bytes(text.get(i..i + 4).ok_or("PNG text cut short")?.try_into().unwrap()) as usize;
+        let s = text.get(i + 4..i + 4 + n).ok_or("PNG text cut short")?;
+        strings.push(String::from_utf8(s.to_vec()).map_err(|_| "PNG text that is not UTF-8".to_string())?);
+        i += 4 + n;
+    }
+    if strings.len() % 2 != 0 {
+        return Err("a PNG text key without its value".into());
+    }
+    let pairs: Vec<(String, String)> = strings.chunks(2).map(|kv| (kv[0].clone(), kv[1].clone())).collect();
     let background = std::str::from_utf8(background).map_err(|_| "a background color that is not UTF-8".to_string())?;
     let bg = if background.is_empty() { None } else { svg::color(background)? };
     // drawn on nothing, the background composited when written (pngio::encode)
@@ -146,4 +150,14 @@ pub fn base64(s: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn base64_decodes_and_refuses_other_characters() {
+        assert_eq!(super::base64("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(super::base64("aGVs\nbG8").unwrap(), b"hello");
+        assert!(super::base64("a$b").is_err());
+    }
 }
