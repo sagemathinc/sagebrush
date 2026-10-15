@@ -52,3 +52,49 @@ test("board render: a page that is not there, a file that is not there, no file"
   assert.match(n.stderr, /ENOENT/);
   assert.equal(cli([]).status, 2);
 });
+
+test("board render: a board of a later version of the format, or another format, is refused as the board refuses it, and nothing drawn", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
+  try {
+    const out = join(dir, "later.svg");
+    const later = JSON.stringify({ format: "sagebrush-board", version: 99, nodes: [{ id: "a", title: "A" }] });
+    let r = cli(["-"], later);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    // (the command line's own words: which sagebrush refused it, and what to do)
+    assert.match(r.stderr, /^sagebrush board render: -: this board is in version 99 of the format, from a later Sagebrush; this sagebrush \((dev|\d+\.\d+\.\d+\S*)\) reads version 1: update sagebrush \(npx sagebrush@latest\)\n$/);
+    r = cli(["-", "-o", out], later);
+    assert.equal(r.status, 1);
+    assert.throws(() => readFileSync(out), "no file written");
+    // (another format, its name quoted, no control character reaching the terminal)
+    r = cli(["-"], JSON.stringify({ format: "evil\u001b[31m", nodes: [] }));
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    assert.ok(r.stderr.includes("not a Sagebrush board: its format is") && !r.stderr.includes("\u001b"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("board render: what it says of a board it refuses is one line: a newline or a tab in the format, or in the file's name, escaped (HARD-EC2-1)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
+  try {
+    const evil = JSON.stringify({ format: "evil\nINJECTED: ok\tX", nodes: [] });
+    let r = cli(["-"], evil);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, 'sagebrush board render: -: not a Sagebrush board: its format is "evil\\x0aINJECTED: ok\\x09X"\n');
+    const file = join(dir, "a\nINJECTED: ok\tb.json");
+    writeFileSync(file, evil);
+    r = cli([file]);
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.split("\n").length, 2, r.stderr);
+    assert.ok(r.stderr.includes("a\\x0aINJECTED: ok\\x09b.json: not a Sagebrush board"), r.stderr);
+    // (an option it does not know, likewise)
+    r = cli(["--x\ny", "-"], evil);
+    assert.equal(r.status, 2);
+    assert.ok(r.stderr.startsWith("sagebrush board render: unknown option --x\\x0ay\nusage:"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
