@@ -2198,6 +2198,39 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
   const t = moveAxisToEnd(a, axis);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1];
   const out = empty(arg ? t.shape : t.shape, arg ? D.int64 : a.dt);
+  if (a.dt.cplx) {
+    // NumPy's complex order: by real part, then imaginary part, with nan
+    // placed last: R + Rj < R + nanj < nan + Rj < nan + nanj (stable)
+    const re = new Float64Array(n), im = new Float64Array(n);
+    const ix = new Array(n);
+    const ccmp = (i: number, j: number) => {
+      const ri = re[i] !== re[i], rj = re[j] !== re[j], ii = im[i] !== im[i], ij = im[j] !== im[j];
+      if (ri !== rj) return ri ? 1 : -1;
+      if (ii !== ij) return ii ? 1 : -1;
+      if (!ri && re[i] !== re[j]) return re[i] < re[j] ? -1 : 1;
+      if (!ii && im[i] !== im[j]) return im[i] < im[j] ? -1 : 1;
+      return i - j;
+    };
+    loop1(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, (base, k) => {
+      for (let i = 0; i < n; i++) {
+        re[i] = t.data[2 * (base + i * st)];
+        im[i] = t.data[2 * (base + i * st) + 1];
+        ix[i] = i;
+      }
+      ix.sort(ccmp);
+      for (let i = 0; i < n; i++) {
+        if (arg) out.data[k * n + i] = ix[i];
+        else {
+          out.data[2 * (k * n + i)] = re[ix[i]];
+          out.data[2 * (k * n + i) + 1] = im[ix[i]];
+        }
+      }
+    });
+    const order = a.shape.map((_, i) => i).filter((i) => i !== axis);
+    const inv = new Array(a.ndim);
+    [...order, axis].forEach((src, dst) => (inv[src] = dst));
+    return ascontig(transpose(out, inv));
+  }
   const vals = new Float64Array(n);
   const idx = new Array(n);
   const cmp = (i: number, j: number) => {

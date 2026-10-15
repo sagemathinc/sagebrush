@@ -728,6 +728,7 @@ something plausible. Examples:
 - `funm` of a defective matrix except by exp, cos, sin, cosh, sinh, log and
   sqrt;
 - `interp2`'s 'cubic' on a non-uniform grid, and 'makima' and 'pchip';
+- `var` and `std` with a vector of weights (w other than 0 or 1);
 - what the pages of lib/_matlab_more.py's functions leave open:
   - `split` with its default delimiter, of text that begins or ends with
     whitespace or has adjacent whitespace characters;
@@ -770,12 +771,15 @@ The rest:
   the pages say nothing, `psi(k, 0)` is the limit from the right (-Inf for
   even k, Inf for odd k) and `psi(Inf)` is Inf; Octave gives NaN and
   -0.5772. These functions, `erfcx`, `erfinv`, `erfcinv`, `expint`,
-  `besselj`, `ellipke`, `ellipj` and `legendre` are thin wrappers
+  `gammainc`, `besselj`, `ellipke`, `ellipj` and `legendre` are thin wrappers
   (lib/_matlab_special.py) over the shared numerics in lib/_special.py
   (design/special.md). `ellipke` and `ellipj` refuse M outside [0, 1], as
   their pages require (Octave answers), and accept `tol` but always
   compute to full accuracy; `ellipj` also refuses an infinite U, where
   Octave gives NaN;
+- `gammainc` of a negative X (its values there are complex; the page
+  warns they can be inaccurate) or an infinite A; `gammainc(X, 0)` is 1, the
+  page's limit;
 - `besselj` of complex Z or of a negative non-integer order (it needs Y,
   `bessely`, not there yet). A negative Z gives the value above the cut,
   e^(i nu pi) J_nu(-Z), real for integer orders; `besselj(nu, Inf)` is NaN,

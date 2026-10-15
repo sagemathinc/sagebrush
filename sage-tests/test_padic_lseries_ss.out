@@ -1,0 +1,156 @@
+11a1 19 a_p 0
+  n=2 prec=5 -> 4*alpha^-2 + 11*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> 4*alpha^-2 + 11*alpha^-1 + 8 + 12*alpha + O(alpha^2) + (4*alpha^-2 + O(alpha^-1))*T + (4*alpha^-2 + O(alpha^-1))*T^2 + (O(alpha^-1))*T^3 + (13*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+11a1 29 a_p 0
+  n=2 prec=5 -> 6*alpha^-2 + 17*alpha^-1 + O(alpha^0) + O(T^5)
+37a1 3 a_p -3
+  n=2 prec=5 -> O(T^3)
+  n=3 prec=5 -> O(alpha^2) + (alpha^-2 + O(alpha^-1))*T + (alpha^-2 + O(alpha^-1))*T^2 + O(T^5)
+  n=4 prec=5 -> O(alpha) + (alpha^-2 + O(alpha^0))*T + (alpha^-2 + O(alpha^0))*T^2 + O(T^5)
+37a1 17 a_p 0
+  n=2 prec=5 -> O(T^5)
+  n=3 prec=5 -> O(alpha^2) + (4*alpha^-2 + O(alpha^-1))*T + (11*alpha^-2 + O(alpha^-1))*T^2 + (16*alpha^-2 + O(alpha^-1))*T^3 + (4*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+37a1 19 a_p 0
+  n=2 prec=5 -> O(T^5)
+  n=3 prec=5 -> O(alpha^2) + (13*alpha^-2 + O(alpha^-1))*T + (16*alpha^-2 + O(alpha^-1))*T^2 + (6*alpha^-2 + O(alpha^-1))*T^3 + (16*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+14a1 5 a_p 0
+  n=2 prec=5 -> alpha^-2 + 3*alpha^-1 + O(alpha^0) + (O(alpha^-2))*T + (O(alpha^-2))*T^2 + (O(alpha^-2))*T^3 + (2*alpha^-3 + O(alpha^-2))*T^4 + O(T^5)
+  n=3 prec=5 -> alpha^-2 + 3*alpha^-1 + 2 + 4*alpha + O(alpha^2) + (4*alpha^-2 + O(alpha^-1))*T + (alpha^-2 + O(alpha^-1))*T^2 + (4*alpha^-2 + O(alpha^-1))*T^3 + (2*alpha^-3 + 3*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+  n=4 prec=5 -> alpha^-2 + 3*alpha^-1 + 2 + O(alpha) + (4*alpha^-2 + 2*alpha^-1 + O(alpha^0))*T + (alpha^-2 + 4*alpha^-1 + O(alpha^0))*T^2 + (4*alpha^-2 + O(alpha^0))*T^3 + (2*alpha^-3 + 3*alpha^-2 + alpha^-1 + O(alpha^0))*T^4 + O(T^5)
+14a1 11 a_p 0
+  n=2 prec=5 -> 2*alpha^-2 + 7*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> 2*alpha^-2 + 7*alpha^-1 + 4 + 8*alpha + O(alpha^2) + (7*alpha^-2 + O(alpha^-1))*T + (2*alpha^-2 + O(alpha^-1))*T^2 + (4*alpha^-2 + O(alpha^-1))*T^3 + (3*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+  n=4 prec=5 -> 2*alpha^-2 + 7*alpha^-1 + 4 + O(alpha) + (7*alpha^-2 + 8*alpha^-1 + O(alpha^0))*T + (2*alpha^-2 + alpha^-1 + O(alpha^0))*T^2 + (4*alpha^-2 + 10*alpha^-1 + O(alpha^0))*T^3 + (3*alpha^-2 + 8*alpha^-1 + O(alpha^0))*T^4 + O(T^5)
+14a1 23 a_p 0
+  n=2 prec=5 -> 4*alpha^-2 + 15*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> 4*alpha^-2 + 15*alpha^-1 + 8 + 16*alpha + O(alpha^2) + (12*alpha^-2 + O(alpha^-1))*T + (2*alpha^-2 + O(alpha^-1))*T^2 + (7*alpha^-2 + O(alpha^-1))*T^3 + (15*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+15a1 7 a_p 0
+  n=2 prec=5 -> alpha^-2 + 5*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> alpha^-2 + 5*alpha^-1 + 2 + 6*alpha + O(alpha^2) + (6*alpha^-2 + O(alpha^-1))*T + (O(alpha^-1))*T^2 + (alpha^-2 + O(alpha^-1))*T^3 + (2*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+  n=4 prec=5 -> alpha^-2 + 5*alpha^-1 + 2 + O(alpha) + (6*alpha^-2 + 2*alpha^-1 + O(alpha^0))*T + (3*alpha^-1 + O(alpha^0))*T^2 + (alpha^-2 + 6*alpha^-1 + O(alpha^0))*T^3 + (2*alpha^-2 + alpha^-1 + O(alpha^0))*T^4 + O(T^5)
+15a1 23 a_p 0
+  n=2 prec=5 -> 3*alpha^-2 + 17*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> 3*alpha^-2 + 17*alpha^-1 + 6 + 18*alpha + O(alpha^2) + (12*alpha^-2 + O(alpha^-1))*T + (19*alpha^-2 + O(alpha^-1))*T^2 + (15*alpha^-2 + O(alpha^-1))*T^3 + (18*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+43a1 7 a_p 0
+  n=2 prec=5 -> O(T^5)
+  n=3 prec=5 -> O(alpha^2) + (5*alpha^-2 + O(alpha^-1))*T + (O(alpha^-1))*T^2 + (6*alpha^-2 + O(alpha^-1))*T^3 + (alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+  n=4 prec=5 -> O(alpha) + (5*alpha^-2 + O(alpha^0))*T + O(alpha^0)*T^2 + (6*alpha^-2 + 6*alpha^-1 + O(alpha^0))*T^3 + (alpha^-2 + alpha^-1 + O(alpha^0))*T^4 + O(T^5)
+17a1 3 a_p 0
+  n=2 prec=5 -> alpha^-2 + alpha^-1 + O(alpha^0) + (O(alpha^-2))*T + (2*alpha^-3 + O(alpha^-2))*T^2 + O(T^3)
+  n=3 prec=5 -> alpha^-2 + alpha^-1 + 2 + 2*alpha + O(alpha^2) + (O(alpha^-1))*T + (2*alpha^-3 + O(alpha^-1))*T^2 + O(T^5)
+  n=4 prec=5 -> alpha^-2 + alpha^-1 + 2 + O(alpha) + O(alpha^0)*T + (2*alpha^-3 + 2*alpha^-1 + O(alpha^0))*T^2 + (alpha^-3 + O(alpha^-2))*T^3 + (2*alpha^-3 + O(alpha^-2))*T^4 + O(T^5)
+17a1 11 a_p 0
+  n=2 prec=5 -> 3*alpha^-2 + 5*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> 3*alpha^-2 + 5*alpha^-1 + 6 + 6*alpha + O(alpha^2) + (10*alpha^-2 + O(alpha^-1))*T + (2*alpha^-2 + O(alpha^-1))*T^2 + (3*alpha^-2 + O(alpha^-1))*T^3 + O(T^5)
+  n=4 prec=5 -> 3*alpha^-2 + 5*alpha^-1 + 6 + O(alpha) + (10*alpha^-2 + 2*alpha^-1 + O(alpha^0))*T + (2*alpha^-2 + O(alpha^0))*T^2 + (3*alpha^-2 + 7*alpha^-1 + O(alpha^0))*T^3 + (3*alpha^-1 + O(alpha^0))*T^4 + O(T^5)
+19a1 23 a_p 0
+  n=2 prec=5 -> 8*alpha^-2 + 7*alpha^-1 + O(alpha^0) + O(T^5)
+  n=3 prec=5 -> 8*alpha^-2 + 7*alpha^-1 + 16 + 8*alpha + O(alpha^2) + (22*alpha^-2 + O(alpha^-1))*T + (9*alpha^-2 + O(alpha^-1))*T^2 + (7*alpha^-2 + O(alpha^-1))*T^3 + (14*alpha^-2 + O(alpha^-1))*T^4 + O(T^5)
+17a1 3 n 2 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+17a1 3 n 2 prec 3 nterms 3 precs [(-2, 0), (-2, -2), (-3, -2)] parent 4 prec 3
+17a1 3 n 2 prec 5 nterms 3 precs [(-2, 0), (-2, -2), (-3, -2)] parent 4 prec 3
+17a1 3 n 2 prec 8 nterms 3 precs [(-2, 0), (-2, -2), (-3, -2)] parent 4 prec 3
+17a1 3 n 3 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+17a1 3 n 3 prec 3 nterms 3 precs [(-2, 2), (-1, -1), (-3, -1)] parent 6 prec 3
+17a1 3 n 3 prec 5 nterms 3 precs [(-2, 2), (-1, -1), (-3, -1)] parent 6 prec 5
+17a1 3 n 3 prec 8 nterms 7 precs [(-2, 2), (-1, -1), (-3, -1), (-3, -3), (-3, -3), (-3, -3), (-4, -3)] parent 6 prec 8
+17a1 3 n 4 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+17a1 3 n 4 prec 3 nterms 3 precs [(-2, 1), (0, 0), (-3, 0)] parent 6 prec 3
+17a1 3 n 4 prec 5 nterms 5 precs [(-2, 1), (0, 0), (-3, 0), (-3, -2), (-3, -2)] parent 6 prec 5
+17a1 3 n 4 prec 8 nterms 7 precs [(-2, 1), (0, 0), (-3, 0), (-3, -2), (-3, -2), (-2, -2), (-4, -2)] parent 6 prec 8
+17a1 3 n 5 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+17a1 3 n 5 prec 3 nterms 3 precs [(-2, 2), (0, 1), (-3, 1)] parent 8 prec 3
+17a1 3 n 5 prec 5 nterms 5 precs [(-2, 2), (0, 1), (-3, 1), (-3, -1), (-3, -1)] parent 8 prec 5
+17a1 3 n 5 prec 8 nterms 7 precs [(-2, 2), (0, 1), (-3, 1), (-3, -1), (-3, -1), (-2, -1), (-4, -1)] parent 8 prec 8
+17a1 3 n 6 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+17a1 3 n 6 prec 3 nterms 3 precs [(-2, 1), (0, 1), (-3, 1)] parent 8 prec 3
+17a1 3 n 6 prec 5 nterms 5 precs [(-2, 1), (0, 1), (-3, 1), (-3, 0), (-3, 0)] parent 8 prec 5
+17a1 3 n 6 prec 8 nterms 8 precs [(-2, 1), (0, 1), (-3, 1), (-3, 0), (-3, 0), (-2, 0), (-4, 0), (-1, 0)] parent 8 prec 8
+17a1 3 n 7 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+17a1 3 n 7 prec 3 nterms 3 precs [(-2, 2), (0, 2), (-3, 2)] parent 10 prec 3
+17a1 3 n 7 prec 5 nterms 5 precs [(-2, 2), (0, 2), (-3, 2), (-3, 1), (-3, 1)] parent 10 prec 5
+17a1 3 n 7 prec 8 nterms 8 precs [(-2, 2), (0, 2), (-3, 2), (-3, 1), (-3, 1), (-2, 1), (-4, 1), (-1, 1)] parent 10 prec 8
+14a1 5 n 2 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+14a1 5 n 2 prec 3 nterms 1 precs [(-2, 0)] parent 4 prec 3
+14a1 5 n 2 prec 5 nterms 5 precs [(-2, 0), (-2, -2), (-2, -2), (-2, -2), (-3, -2)] parent 4 prec 5
+14a1 5 n 2 prec 8 nterms 5 precs [(-2, 0), (-2, -2), (-2, -2), (-2, -2), (-3, -2)] parent 4 prec 5
+14a1 5 n 3 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+14a1 5 n 3 prec 3 nterms 3 precs [(-2, 2), (-2, -1), (-2, -1)] parent 6 prec 3
+14a1 5 n 3 prec 5 nterms 5 precs [(-2, 2), (-2, -1), (-2, -1), (-2, -1), (-3, -1)] parent 6 prec 5
+14a1 5 n 3 prec 8 nterms 5 precs [(-2, 2), (-2, -1), (-2, -1), (-2, -1), (-3, -1)] parent 6 prec 8
+14a1 5 n 4 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+14a1 5 n 4 prec 3 nterms 3 precs [(-2, 1), (-2, 0), (-2, 0)] parent 6 prec 3
+14a1 5 n 4 prec 5 nterms 5 precs [(-2, 1), (-2, 0), (-2, 0), (-2, 0), (-3, 0)] parent 6 prec 5
+14a1 5 n 4 prec 8 nterms 8 precs [(-2, 1), (-2, 0), (-2, 0), (-2, 0), (-3, 0), (-3, -2), (-3, -2), (-3, -2)] parent 6 prec 8
+14a1 5 n 5 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+14a1 5 n 5 prec 3 nterms 3 precs [(-2, 2), (-2, 1), (-2, 1)] parent 8 prec 3
+14a1 5 n 5 prec 5 nterms 5 precs [(-2, 2), (-2, 1), (-2, 1), (-2, 1), (-3, 1)] parent 8 prec 5
+14a1 5 n 5 prec 8 nterms 8 precs [(-2, 2), (-2, 1), (-2, 1), (-2, 1), (-3, 1), (-3, -1), (-3, -1), (-3, -1)] parent 8 prec 8
+37a1 3 n 2 prec 1 nterms 0 precs [] parent 40 prec 1
+37a1 3 n 2 prec 3 nterms 0 precs [] parent 4 prec 3
+37a1 3 n 2 prec 5 nterms 0 precs [] parent 4 prec 3
+37a1 3 n 2 prec 8 nterms 0 precs [] parent 4 prec 3
+37a1 3 n 3 prec 1 nterms 0 precs [] parent 40 prec 1
+37a1 3 n 3 prec 3 nterms 3 precs [(2, 2), (-2, -1), (-2, -1)] parent 6 prec 3
+37a1 3 n 3 prec 5 nterms 3 precs [(2, 2), (-2, -1), (-2, -1)] parent 6 prec 5
+37a1 3 n 3 prec 8 nterms 8 precs [(2, 2), (-2, -1), (-2, -1), (-3, -3), (-3, -3), (-3, -3), (-3, -3), (-4, -3)] parent 6 prec 8
+37a1 3 n 4 prec 1 nterms 0 precs [] parent 40 prec 1
+37a1 3 n 4 prec 3 nterms 3 precs [(1, 1), (-2, 0), (-2, 0)] parent 6 prec 3
+37a1 3 n 4 prec 5 nterms 3 precs [(1, 1), (-2, 0), (-2, 0)] parent 6 prec 5
+37a1 3 n 4 prec 8 nterms 8 precs [(1, 1), (-2, 0), (-2, 0), (-2, -2), (-2, -2), (-2, -2), (-2, -2), (-4, -2)] parent 6 prec 8
+37a1 3 n 5 prec 1 nterms 0 precs [] parent 40 prec 1
+37a1 3 n 5 prec 3 nterms 3 precs [(2, 2), (-2, 1), (-2, 1)] parent 8 prec 3
+37a1 3 n 5 prec 5 nterms 5 precs [(2, 2), (-2, 1), (-2, 1), (-2, -1), (-2, -1)] parent 8 prec 5
+37a1 3 n 5 prec 8 nterms 8 precs [(2, 2), (-2, 1), (-2, 1), (-2, -1), (-2, -1), (-2, -1), (-2, -1), (-4, -1)] parent 8 prec 8
+37a1 3 n 6 prec 1 nterms 0 precs [] parent 40 prec 1
+37a1 3 n 6 prec 3 nterms 3 precs [(1, 1), (-2, 1), (-2, 1)] parent 8 prec 3
+37a1 3 n 6 prec 5 nterms 5 precs [(1, 1), (-2, 1), (-2, 1), (-2, 0), (-2, 0)] parent 8 prec 5
+37a1 3 n 6 prec 8 nterms 8 precs [(1, 1), (-2, 1), (-2, 1), (-2, 0), (-2, 0), (-2, 0), (-2, 0), (-4, 0)] parent 8 prec 8
+11a1 19 n 2 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+11a1 19 n 2 prec 3 nterms 1 precs [(-2, 0)] parent 4 prec 3
+11a1 19 n 2 prec 5 nterms 1 precs [(-2, 0)] parent 4 prec 5
+11a1 19 n 2 prec 8 nterms 1 precs [(-2, 0)] parent 4 prec 8
+11a1 19 n 3 prec 1 nterms 1 precs [(-2, 38)] parent 40 prec 1
+11a1 19 n 3 prec 3 nterms 3 precs [(-2, 2), (-2, -1), (-2, -1)] parent 6 prec 3
+11a1 19 n 3 prec 5 nterms 5 precs [(-2, 2), (-2, -1), (-2, -1), (-1, -1), (-2, -1)] parent 6 prec 5
+11a1 19 n 3 prec 8 nterms 8 precs [(-2, 2), (-2, -1), (-2, -1), (-1, -1), (-2, -1), (-2, -1), (-2, -1), (-2, -1)] parent 6 prec 8
+L -> 19-adic L-series of Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+is_ordinary -> (False, True)
+alpha(5) -> alpha + O(alpha^11)
+alpha(1) -> alpha + O(alpha^3)
+alpha()^2 -> alpha^2 + O(alpha^42)
+alpha parent -> 19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+measure(1, 2, 5) -> 6*alpha^-3 + 3*alpha^-2 + 6*alpha^-1 + 4 + 6*alpha + 4*alpha^2 + 6*alpha^3 + 4*alpha^4 + 6*alpha^5 + 4*alpha^6 + O(alpha^7)
+measure(5, 1, 3) -> 15*alpha^-2 + 13*alpha^-1 + 16 + 14*alpha + 16*alpha^2 + 14*alpha^3 + O(alpha^4)
+measure(0, 2, 5) -> 15*alpha^-3 + 4*alpha^-2 + 16*alpha^-1 + 4 + 16*alpha + 4*alpha^2 + 16*alpha^3 + 4*alpha^4 + 16*alpha^5 + 4*alpha^6 + O(alpha^7)
+series(1) !! ValueError
+series(2, prec=1) -> 4*alpha^-2 + 11*alpha^-1 + 8 + 12*alpha + 8*alpha^2 + 12*alpha^3 + 8*alpha^4 + 12*alpha^5 + 8*alpha^6 + 12*alpha^7 + 8*alpha^8 + 12*alpha^9 + 8*alpha^10 + 12*alpha^11 + 8*alpha^12 + 12*alpha^13 + 8*alpha^14 + 12*alpha^15 + 8*alpha^16 + 12*alpha^17 + 8*alpha^18 + 12*alpha^19 + 8*alpha^20 + 12*alpha^21 + 8*alpha^22 + 12*alpha^23 + 8*alpha^24 + 12*alpha^25 + 8*alpha^26 + 12*alpha^27 + 8*alpha^28 + 12*alpha^29 + 8*alpha^30 + 12*alpha^31 + 8*alpha^32 + 12*alpha^33 + 8*alpha^34 + 12*alpha^35 + 8*alpha^36 + 12*alpha^37 + O(alpha^38) + O(T)
+series(2, prec=0) !! ValueError
+series(0) !! ValueError
+series(2, prec=2.5) !! TypeError
+series(2) parent -> Power Series Ring in T over 19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+power_series(2) -> 4*alpha^-2 + 11*alpha^-1 + O(alpha^0) + O(T^5)
+37a1 3 alpha(4)^2 -> alpha^2 + O(alpha^10)
+37a1 3 alpha parent -> 3-adic Eisenstein Extension Field in alpha defined by x^2 + 3*x + 3
+37a1 3 measure(2, 3, 4) -> 2*alpha^-4 + 2*alpha^-3 + alpha^-2 + O(alpha^4)
+37a1 3 series(5, prec=4) -> O(alpha^2) + (alpha^-2 + 1 + O(alpha))*T + (alpha^-2 + 2 + O(alpha))*T^2 + (2*alpha^-2 + O(alpha^-1))*T^3 + O(T^4)
+17a1 3 alpha(4)^2 -> alpha^2 + O(alpha^10)
+17a1 3 series(6, prec=6) -> alpha^-2 + alpha^-1 + 2 + O(alpha) + (2 + O(alpha))*T + (2*alpha^-3 + 2*alpha^-1 + 1 + O(alpha))*T^2 + (alpha^-3 + alpha^-2 + alpha^-1 + O(alpha^0))*T^3 + (2*alpha^-3 + alpha^-2 + O(alpha^0))*T^4 + (alpha^-2 + 2*alpha^-1 + O(alpha^0))*T^5 + O(T^6)
+enclosure 17a1 3 [2, 3, 4, 5, 6] True
+enclosure 37a1 3 [2, 3, 4, 5, 6] True
+enclosure 14a1 5 [2, 3, 4] True
+enclosure 389a1 5 [2, 3, 4] True
+enclosure 11a1 19 [2, 3] True
+s == s -> (True, False)
+s == power_series -> True
+s == s + O(T^2) -> True
+s == s + 1 -> False
+s == s + alpha^10 -> True
+(s - s).is_zero() -> True
+series(2) == itself -> (True, True, True)
+series(3) == itself -> (True, True, True)
+series(4) == itself -> (True, True, True)
+f == f -> (True, True, False, False)
+O(T^3) == 0 -> True
+zero to precision == 0 -> (True, True, False, False, True)
+Qp g == g -> (True, True, True, False, True)

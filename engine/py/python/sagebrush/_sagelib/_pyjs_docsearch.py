@@ -5,8 +5,9 @@ method of the Sage library, its signature and its docstring.
     sagebrush --search "elliptic rank"   from a shell (--json: machine-readable)
     sagebrush --search "class group" --mode magma
                                          another language's index: sage (the
-                                         default) and python search the Sage
-                                         library, which Python mode imports;
+                                         default) the Sage library; python
+                                         Python mode's numpy, scipy and
+                                         standard library (lib/_python_docsearch.py);
                                          magma and matlab the functions those
                                          modes bind (lib/_magma_docsearch.py,
                                          lib/_matlab_docsearch.py)
@@ -21,14 +22,14 @@ in the MCP server (sagebrush/mcp_server.py), which read the JSON index.
 import re as _re
 
 # the public API (the modules of test/doctest-coverage.json)
-PUBLIC = ["sage_all", "_sage_modular", "_sage_poly", "_sage_nf", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_nfpoly", "_sage_padic", "_sage_padic_lseries", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "_sage_polyhedra", "_sage_coding", "_sage_manifolds", "_sage_milp", "sage_permgroup", "_sage_matrix",
+PUBLIC = ["sage_all", "_sage_modular", "_sage_poly", "_sage_nf", "_sage_ff", "_sage_ffmat", "_sage_qqbar", "_sage_mpoly", "_sage_frac", "_sage_real", "_sage_rdf", "_sage_series", "_sage_nfpoly", "_sage_padic", "_sage_padic_ext", "_sage_padic_lseries", "_sage_graph", "_sage_sandpile", "_sage_lie", "_sage_crystals", "_sage_polyhedra", "_sage_coding", "_sage_manifolds", "_sage_milp", "sage_permgroup", "_sage_matrix",
           "_sage_lang", "_sage_expr", "_interact", "sage_plot", "sage_plot3d"]
 
 _INDEX = None
 _OTHER = {}  # mode -> its index
 
 # --mode: the language whose functions are searched, and its index's module
-MODES = {"sage": None, "python": None, "magma": "_magma_docsearch", "matlab": "_matlab_docsearch"}
+MODES = {"sage": None, "python": "_python_docsearch", "magma": "_magma_docsearch", "matlab": "_matlab_docsearch"}
 
 
 def _signature(name, doc_obj, kind):
@@ -102,17 +103,25 @@ def index():
 
 
 def index_for(mode=None):
-    """The index of a language (None, "sage" or "python": the Sage
-    library's)."""
+    """The index of a language (None or "sage": the Sage library's)."""
     if mode is not None and mode not in MODES:
         raise ValueError("--mode must be one of %s, not %r" % (", ".join(MODES), mode))
     if mode is None or MODES[mode] is None:
         return index()
     if mode not in _OTHER:
         try:
+            # (the CPython package ships Python mode's index, made by the CLI:
+            # scripts/sync-python-package.sh)
+            import json, os
+            with open(os.path.join(os.path.dirname(__file__), "docs-index-%s.json" % mode)) as f:
+                _OTHER[mode] = json.load(f)
+            return _OTHER[mode]
+        except Exception:  # (as index(): no file here, or none readable)
+            pass
+        try:
             module = __import__(MODES[mode])
         except ImportError:
-            # (the CPython package has the Sage library only)
+            # (the CPython package has no Magma or MATLAB index)
             raise ValueError("this installation has no %s index" % mode)
         _OTHER[mode] = module.build_index()
     return _OTHER[mode]

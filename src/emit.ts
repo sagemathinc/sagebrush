@@ -40,6 +40,10 @@ class Fn {
     public scope: Scope,
     public parent: Fn | null,
     public selfName: string, // JS name of the function, for prologue references
+    // the Python name of its first positional parameter, for super() (".0"
+    // for a generator expression, whose first argument is its iterator; a
+    // list, set or dict comprehension has its function's, being inlined in
+    // CPython)
     public firstParam: string | null
   ) {}
 }
@@ -55,6 +59,7 @@ export class Emitter {
   line = 1;
   hoisted: string[] = [];
   private counter = 0;
+  private cells = 0;
 
   constructor(
     private top: Scope,
@@ -102,7 +107,18 @@ export class Emitter {
   }
 
   load(id: string): string {
+    // (naming super in a function of a class gives the class its cell, as in
+    // CPython, whatever the name is used for)
+    if (id === "super" && this.fn.scope.kind !== "class" && this.fn.scope.kind !== "module") {
+      const r = resolve(this.fn.scope, "__class__");
+      if (r.kind === "classcell") this.cellOf(r.scope);
+    }
     return this.loadRes(resolve(this.fn.scope, id), id);
+  }
+  // the JS name of a class's cell (scope.ts: cellName), the class now making one
+  cellOf(cls: Scope): string {
+    if (cls.cellName === null) cls.cellName = `$cc${this.cells++}`;
+    return cls.cellName;
   }
   loadRes(r: Resolution, id: string): string {
     switch (r.kind) {
@@ -117,6 +133,8 @@ export class Emitter {
       }
       case "class":
         return `($ns.has(${q(id)}) ? $ns.get(${q(id)}) : ${this.loadRes(r.outer, id)})`;
+      case "classcell":
+        return `classCellGet(${this.cellOf(r.scope)})`;
     }
   }
   // A statement storing `value` into a name.
@@ -132,6 +150,9 @@ export class Emitter {
         return `$g${prop(id)} = ${value};`;
       case "class":
         return `$ns.set(${q(id)}, ${value});`;
+      case "classcell":
+        // (nonlocal __class__)
+        return `${this.cellOf(r.scope)}.v = ${value};`;
     }
   }
 
@@ -171,7 +192,7 @@ export class Emitter {
       case "Call":
         return this.call(e);
       case "Attribute":
-        return `${this.site("siteGet", e.attr)}(${this.ex(e.value)})`;
+        return `${this.site("siteGet", e.attr)}(${this.attrBase(e.value)})`;
       case "Subscript":
         return `getitem(${this.ex(e.value)}, ${this.ex(e.index)})`;
       case "Slice":
@@ -305,10 +326,7 @@ export class Emitter {
 
   call(e: Extract<A.Expr, { k: "Call" }>): string {
     const f = e.func;
-    if (f.k === "Name" && f.id === "super" && e.args.length === 0 && e.keywords.length === 0 && resolve(this.fn.scope, "super").kind === "global" && !this.moduleBinds("super")) {
-      const cls = this.classCell();
-      if (cls !== null && this.fn.firstParam !== null) return `superOf(${cls}, ${this.fn.firstParam})`;
-    }
+    if (this.isZeroArgSuper(e)) return this.zeroArgSuper(false);
     const intro = this.introspectionCall(e);
     if (intro !== null) return intro;
     const consumed = this.consumingCall(e);
@@ -317,7 +335,7 @@ export class Emitter {
     if (simple) {
       if (f.k === "Attribute") {
         const s = this.site("siteCall", f.attr, e.args.length);
-        return `${s}(${[this.ex(f.value), ...e.args.map((a) => this.ex(a))].join(", ")})`;
+        return `${s}(${[this.attrBase(f.value), ...e.args.map((a) => this.ex(a))].join(", ")})`;
       }
       // Evaluate the callee and arguments into temporaries so the generated
       // code stays linear in the nesting depth.
@@ -390,10 +408,39 @@ export class Emitter {
     return `((${fn} = ${this.load(f.id)}) === $B${prop(f.id)} ? ${wrap[f.id]} : callObj(${fn}, [${slow}]))`;
   }
 
-  // JS variable holding the class being defined, for zero-argument super().
-  classCell(): string | null {
-    for (let s: Scope | null = this.fn.scope; s !== null; s = s.parent) if (s.kind === "class") return "__class__$";
-    return null;
+  // super(), with no arguments, naming the builtin
+  isZeroArgSuper(e: A.Expr): boolean {
+    if (e.k !== "Call" || e.func.k !== "Name" || e.func.id !== "super" || e.args.length !== 0 || e.keywords.length !== 0) return false;
+    const r = resolve(this.fn.scope, "super");
+    return (r.kind === "global" || (r.kind === "class" && !this.fn.scope.bound.has("super") && r.outer.kind === "global")) && !this.moduleBinds("super");
+  }
+
+  // The object of an attribute load or method call: super().x is CPython's
+  // LOAD_SUPER_ATTR, which loads __class__ and the first argument as
+  // variables (their NameError and UnboundLocalError) before super's checks.
+  attrBase(v: A.Expr): string {
+    return this.isZeroArgSuper(v) ? this.zeroArgSuper(true) : this.ex(v);
+  }
+
+  // super() with no arguments, as CPython's super_init_without_args: the
+  // code's first argument (none: "no arguments"; deleted: "arg[0] deleted")
+  // and its free __class__ (none: "cell not found"), the class's cell or a
+  // variable of a function between.  As an attribute's object (attrForm),
+  // when there is a __class__, CPython loads the two as variables first.
+  zeroArgSuper(attrForm: boolean): string {
+    if (this.fn.scope.kind === "class" || this.fn.scope.kind === "module") return "superNoArgs()";
+    // (naming super gives the class its cell even where the call then fails)
+    const r = resolve(this.fn.scope, "__class__");
+    if (r.kind === "classcell") this.cellOf(r.scope);
+    const fp = this.fn.firstParam;
+    if (fp === null) return "superNoArgs()";
+    if (attrForm && (r.kind === "classcell" || r.kind === "free")) {
+      const obj = fp === ".0" ? "$it0" : this.load(fp);
+      return `superAttr(${this.loadRes(r, "__class__")}, ${obj})`;
+    }
+    const obj = fp === ".0" ? "$it0" : js(fp);
+    const cell = r.kind === "classcell" ? this.cellOf(r.scope) : r.kind === "free" ? `newCell(${js("__class__")})` : "null";
+    return `superOf(${cell}, ${obj})`;
   }
 
   // ------------------------------------------------------------ comprehensions
@@ -402,7 +449,7 @@ export class Emitter {
     const scope = this.fn.scope.child(e);
     const first = `iter(${this.ex(e.generators[0].iter)})`;
     const saved = this.fn;
-    this.fn = new Fn(scope, saved, "", saved.firstParam);
+    this.fn = new Fn(scope, saved, "", e.kind === "gen" ? ".0" : saved.firstParam);
     const its: string[] = [];
     let body: string;
     const r = "$r";
@@ -422,7 +469,7 @@ export class Emitter {
     // variables count as assigned.
     if (eager === "tuple" || eager === "list" || eager === "frozenset") body = `${r}.push(${this.ex(e.elt)});`;
     else if (eager === "set") body = `setAdd(${r}, ${this.ex(e.elt)});`;
-    else if (eager === "sum") body = `${r} = add(${r}, ${this.ex(e.elt)});`;
+    else if (eager === "sum") body = `${r}.push(${this.ex(e.elt)});`; // (R.sumAcc: the builtin's own total, item by item)
     else if (eager === "any") body = `if (${this.bool(e.elt)}) return true;`;
     else if (eager === "all") body = `if (!${this.bool(e.elt)}) return false;`;
     else if (e.kind === "gen") body = `yield ${this.ex(e.elt)};`;
@@ -432,8 +479,8 @@ export class Emitter {
     const locals = [...scope.bound].filter((n) => resolve(scope, n).kind === "local").map(js);
     const decls = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
     if (eager !== null) {
-      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "0", any: "", all: "" };
-      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r};`, any: "return false;", all: "return true;" };
+      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "R.sumAcc(0)", any: "", all: "" };
+      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r}.total();`, any: "return false;", all: "return true;" };
       const start = init[eager] ? `let ${r} = ${init[eager]}; ` : "";
       const decls2 = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
       const inner2 = `${decls2.length ? `let ${decls2.join(", ")}; ` : ""}${start}${loops.join(" ")} ${body} ${closes.reverse().join(" ")} ${fin[eager]}`;
@@ -518,7 +565,7 @@ export class Emitter {
     const self = "lambda$$";
     const [ps, pro, defaults, kwdefaults, sig] = this.params(e.args, self);
     const saved = this.fn;
-    this.fn = new Fn(scope, saved, self, e.args.args.length ? js(e.args.args[0].name) : null);
+    this.fn = new Fn(scope, saved, self, e.args.args.length ? e.args.args[0].name : null);
     for (const n of [...e.args.args, ...e.args.kwonly]) this.fn.assigned.add(n.name);
     if (e.args.vararg) this.fn.assigned.add(e.args.vararg);
     if (e.args.kwarg) this.fn.assigned.add(e.args.kwarg);
@@ -734,6 +781,7 @@ export class Emitter {
         const r = resolve(this.fn.scope, t.id);
         if (r.kind === "global") return this.w(`if ($g${prop(t.id)} === undefined) gname(${q(t.id)}); delete $g${prop(t.id)};`);
         if (r.kind === "class") return this.w(`if (!$ns.delete(${q(t.id)})) gname(${q(t.id)});`);
+        if (r.kind === "classcell") return this.w(`classCellGet(${this.cellOf(r.scope)}); ${this.cellOf(r.scope)}.v = undefined;`);
         this.w(`${this.load(t.id)}; ${js(t.id)} = undefined;`);
         this.fn.assigned.delete(t.id);
         return;
@@ -835,7 +883,7 @@ export class Emitter {
     let doc = "null";
     let body = st.body;
     if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") doc = q(body[0].value.value.v);
-    const { lines, decls } = this.nested(scope, self, p.args.length ? js(p.args[0].name) : null, params, () => {
+    const { lines, decls } = this.nested(scope, self, p.args.length ? p.args[0].name : null, params, () => {
       for (const s of body) this.stmt(s);
       this.w("return null;");
     });
@@ -873,13 +921,16 @@ export class Emitter {
     const c = this.temp();
     this.w(`${c} = (function ${js(st.name)}$() {`);
     this.indent++;
-    this.w(`const $ns = new Map(); let __class__$;`);
+    // the class cell, when its functions use __class__ or super()
+    const cell = scope.cellName;
+    this.w(`const $ns = new Map();${cell ? ` const ${cell} = newCell();` : ""}`);
     if (decls.length) this.w(`let ${decls.join(", ")};`);
     this.indent--;
     this.splice(lines);
     this.line = st.line;
     this.indent++;
-    this.w(`return (__class__$ = classDef(${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}]));`);
+    if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
+    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}]${cell ? `, ${cell}` : ""});`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
@@ -1009,7 +1060,7 @@ const RUNTIME_NAMES = [
   "sagediv", "isagediv", "sagepow", "isagepow",
   "neg", "pos", "invert", "truth", "lt", "le", "gt", "ge", "eq", "ne", "is", "contains",
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
-  "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf",
+  "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf", "superAttr", "superNoArgs", "newCell", "classCellGet",
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",

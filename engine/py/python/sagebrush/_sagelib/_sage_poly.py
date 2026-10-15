@@ -393,6 +393,9 @@ def PolynomialRing(base, *args, **kwds):
     import _sage_nfpoly
     if _sage_nfpoly.is_number_field(base):
         return _sage_nfpoly.PolynomialRing_nf(base, names)
+    if type(base).__name__ in ("pAdicRingCappedRelative", "pAdicFieldCappedRelative"):
+        import _sage_padic_ext
+        return _sage_padic_ext.PolynomialRing_padic(base, names)
     if base is not ZZ and base is not QQ:
         raise NotImplementedError("polynomial rings over %r are not available in sagebrush yet" % (base,))
     key = (base._name, names)

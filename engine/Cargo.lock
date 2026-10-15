@@ -529,6 +529,7 @@ dependencies = [
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-classgroup",
+ "sagebrush-interrupt",
  "sagebrush-poly",
 ]
 

@@ -5,6 +5,7 @@ print_pos and print_max_terms).  The arithmetic and its precision are
 lib/_padic.py's, which Magma mode shares; this layer adds the parents,
 coercion and printing, matched to Sage's (used as a black-box oracle)."""
 
+import operator as _operator
 from fractions import Fraction as _F
 
 from _padic import Padic as _Padic, PrecisionError, NotASquare
@@ -382,11 +383,32 @@ class pAdicGeneric_:
 
     # -------------------------------------------------------- conversion
     def __getitem__(self, names):
-        # K[['T']]: power series (polynomial rings over p-adics: not yet)
+        # K[['T']]: power series; K['x'], K[] (preparsed R.<x> = K[]): a
+        # univariate polynomial ring (lib/_sage_padic_ext.py)
         if isinstance(names, list):
             import _sage_series
             return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
-        raise NotImplementedError("polynomial rings over p-adic rings are not available in sagebrush yet")
+        if isinstance(names, tuple):
+            if len(names) != 1:
+                raise NotImplementedError("multivariate polynomial rings over p-adic rings are not available in sagebrush yet")
+            names = names[0]
+        import _sage_padic_ext
+        return _sage_padic_ext.PolynomialRing_padic(self, str(names))
+
+    def extension(self, modulus, prec=None, names=None, print_mode=None, implementation=None, **kwds):
+        """The extension by a root of modulus: totally ramified quadratic
+        (monic Eisenstein) polynomials only (lib/_sage_padic_ext.py).
+
+        EXAMPLES::
+
+            sage: R.<x> = Qp(19, 5)[]
+            sage: L.<alpha> = Qp(19, 5).extension(x^2 + 19); L
+            19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+            sage: Zp(19, 5).extension(x^2 + 19, names='a')
+            19-adic Eisenstein Extension Ring in a defined by x^2 + 19
+        """
+        import _sage_padic_ext
+        return _sage_padic_ext.extension(self, modulus, names=names, prec=prec, print_mode=print_mode, implementation=implementation, **kwds)
 
     def __call__(self, x=0, absprec=None, relprec=None):
         """Convert x (an integer, rational, p-adic number, element of
@@ -399,8 +421,9 @@ class pAdicGeneric_:
             (2 + 5 + O(5^3), 5^2 + O(5^8), 3 + O(5^2), O(5^4))
         """
         p, cap = self._p, self._prec
-        absprec = None if absprec is None else int(absprec)
-        relprec = None if relprec is None else int(relprec)
+        absprec, relprec = _prec_arg(absprec), _prec_arg(relprec)
+        if relprec is not None and relprec < 0:
+            raise ValueError("n must be nonnegative")
         if isinstance(x, pAdicCappedRelativeElement):
             if x._parent._p != p:
                 raise TypeError("no conversion between %r and %r" % (x._parent, self))
@@ -463,6 +486,74 @@ class pAdicFieldCappedRelative(pAdicGeneric_):
         3*5^-3 + 4*5^-2 + 4*5^-1 + 4 + 4*5 + 4*5^2 + O(5^3)
     """
     _field = True
+
+
+def _exact_number(n):
+    """The exact rational value of an integer, rational, real (of any
+    precision: its exact binary value, never rounded through a double) or
+    numeric symbolic constant (validated by the number it wraps); TypeError
+    for anything else, an infinity or NaN (a Python float infinity or NaN
+    raises OverflowError or ValueError, as in Sage)."""
+    if isinstance(n, (int, _F)):
+        return _F(n)
+    if isinstance(n, float):
+        if n in (float("inf"), float("-inf")) and type(n) is float:
+            # (Sage's error for a Python infinity; TypeError for a real one)
+            raise OverflowError("cannot convert float infinity to integer")
+        if n != n and type(n) is float:
+            # (Sage's error for a Python NaN)
+            raise ValueError("cannot convert float NaN to integer")
+        if n != n or n in (float("inf"), float("-inf")):
+            raise TypeError("unable to convert %r to an integer" % (n,))
+        return _F(n)
+    if hasattr(n, "exact_rational"):
+        for t in ("is_infinity", "is_NaN"):
+            if hasattr(n, t) and getattr(n, t)():
+                raise TypeError("unable to convert %r to an integer" % (n,))
+        try:
+            return _F(n.exact_rational())
+        except (TypeError, ValueError, OverflowError, ArithmeticError):
+            raise TypeError("unable to convert %r to an integer" % (n,))
+    if type(n).__name__ == "Expression":
+        try:
+            v = n.pyobject()
+        except (TypeError, ValueError, AttributeError):
+            raise TypeError("unable to convert %r to an integer" % (n,))
+        # (the wrapped number, validated by its own exact value: SR(RR(2))
+        # holds a double, SR(RealField(100)(...)) a 100-bit real)
+        if type(v).__name__ != "Expression":
+            return _exact_number(v)
+    raise TypeError("unable to convert %r to an integer" % (n,))
+
+
+def _prec_arg(n):
+    """A precision argument as an int, None for None or +Infinity: an
+    integral rational or real is accepted, a fractional one refused (as
+    Sage), never truncated or rounded.  The exact value is checked (a
+    100-bit 1 + 2^-80 is fractional)."""
+    if n is None or isinstance(n, int):
+        return n
+    if type(n).__name__ == "Expression" and str(n) == "+Infinity":
+        return None
+    q = _exact_number(n)
+    if q.denominator != 1:
+        if isinstance(n, _F):
+            raise TypeError("no conversion of this rational to integer")
+        raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
+    return q.numerator
+
+
+def _int_exponent(n):
+    """An integer exponent as an int; a float, even 2.0, raises TypeError
+    (as Sage)."""
+    if isinstance(n, int):
+        return n
+    if isinstance(n, float):
+        raise TypeError("exponent must be an integer or rational, not %r" % (n,))
+    try:
+        return _operator.index(n)
+    except (TypeError, AttributeError):
+        raise TypeError("exponent must be an integer or rational, not %r" % (n,))
 
 
 def _pushout(A, B):
@@ -769,8 +860,17 @@ class pAdicCappedRelativeElement:
 
             sage: Zp(5, 6)(23).add_bigoh(2)
             3 + 4*5 + O(5^2)
+
+        The precision is checked by its exact value, not rounded::
+
+            sage: Zp(5, 6)(23).add_bigoh(RealField(100)(2) + 2^-80)
+            Traceback (most recent call last):
+            ...
+            TypeError: Attempt to coerce non-integral RealNumber to Integer
         """
-        n = int(absprec)
+        n = _prec_arg(absprec)
+        if n is None:
+            return self
         P = self._parent
         if n < 0 and not P._field:
             P = P.fraction_field()
@@ -951,7 +1051,7 @@ class pAdicCappedRelativeElement:
             n = n.numerator
         if isinstance(n, pAdicCappedRelativeElement):
             raise NotImplementedError("p-adic exponents are not available in sagebrush yet")
-        n = int(n)
+        n = _int_exponent(n)
         P = self._parent
         y = self._x.pow(n, P._prec)
         return (P.fraction_field() if n < 0 else P)._element(y)
