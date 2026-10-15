@@ -337,6 +337,9 @@ def PolynomialRing(base, *args, **kwds):
     names = str(names).strip()
     if _sage_ff._is_ff_base(base):
         return _sage_ff._poly_ring_from_names(base, names)
+    import _sage_nfpoly
+    if _sage_nfpoly.is_number_field(base):
+        return _sage_nfpoly.PolynomialRing_nf(base, names)
     if base is not ZZ and base is not QQ:
         raise NotImplementedError("polynomial rings over %r are not available in sagebrush yet" % (base,))
     key = (base._name, names)
@@ -573,7 +576,8 @@ class Polynomial:
             elif q == 1:
                 t = mono
             else:
-                t = num + (" " if q.denominator != 1 else "") + mono
+                # (Sage: 2x over ZZ, but 2 t over QQ)
+                t = num + (" " if q.denominator != 1 or self._ring._base is QQ else "") + mono
             out.append(("-" if neg else "+", t))
         s = ("-" if out[0][0] == "-" else "") + out[0][1]
         for sign, t in out[1:]:
@@ -813,6 +817,11 @@ class Polynomial:
         if R is QQ or R is ZZ:
             return PolynomialRing(R, self._ring._name)(self._c)
         if isinstance(R, PolynomialRing_):
+            return R(self._c)
+        import _sage_nfpoly
+        if _sage_nfpoly.is_number_field(R):
+            return _sage_nfpoly.PolynomialRing_nf(R, self._ring._name)(self._c)
+        if isinstance(R, _sage_nfpoly.PolynomialRing_nf_):
             return R(self._c)
         raise NotImplementedError("change_ring to %r" % (R,))
 
