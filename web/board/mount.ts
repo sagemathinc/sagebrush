@@ -125,9 +125,10 @@ export interface BoardHost {
   exportPython?(d: BoardDoc): string | null;
   /** New board: a new board of its own, in this language, opened in this
    * one's place (this one stays as it is); none: this board emptied, as an
-   * edit (Undo brings it back) */
+   * edit (Undo brings it back).  Throws, saying why, if it can't be kept
+   * (this board then stays) */
   newBoard?(mode: string): void;
-  /** Duplicate: a copy of this board as a board of its own, opened in its place; none: no Duplicate */
+  /** Duplicate: a copy of this board as a board of its own, opened in its place; none: no Duplicate.  Throws as newBoard does */
   duplicate?(d: BoardDoc): void;
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
@@ -701,15 +702,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       if (destroyed && g === loadGen) {
         // (and a version of it: recorded before the history is closed, CORR-54B-2)
         const kept = cleanDoc(d);
-        host.store?.save(kept);
+        try { host.store?.save(kept); } catch {}
         if (!remembered && prev && prev !== replaced) toRecord.push(prev);
         remembered = true;
         toRecord.push(kept);
       }
       return;
     }
-    // (the document as shown: its pictures' bytes are kept apart, by the host's images)
-    host.store?.save(doc!);
+    // (the document as shown: its pictures' bytes are kept apart, by the
+    // host's images; not kept, said, HARD-7F9-1)
+    try { host.store?.save(doc!); } catch (e: any) { say(`**Not kept in this browser:** ${String(e?.message ?? e)}. Download the board (File) to keep it.`); }
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
@@ -1132,14 +1134,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   // (a board of its own, where the host keeps several: what is being written kept first)
   $("duplicate").hidden = !host.duplicate;
+  // (one that can't be kept: not gone to, this board staying, and why said)
+  const elsewhereNot = (what: string, f: () => void) => { try { f(); } catch (e: any) { say(`**${what}:** ${String(e?.message ?? e)}.`); } };
   $("duplicate").onclick = async () => {
     await editor.keepWriting();
-    if (doc) host.duplicate!(doc);
+    if (doc) elsewhereNot("No copy made", () => host.duplicate!(doc!));
   };
   $("newboard").onclick = async () => {
     if (!host.newBoard) return emptyBoard();
     await editor.keepWriting();
-    host.newBoard(doc?.mode ?? "python");
+    elsewhereNot("No new board made", () => host.newBoard!(doc?.mode ?? "python"));
   };
   const emptyBoard = () => (newOutputs(true), (writtenHere = host.store?.writtenHere?.(true) ?? false), editor.commit((d) => {
     for (const k of Object.keys(d)) delete (d as any)[k];

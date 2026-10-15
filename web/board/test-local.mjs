@@ -86,6 +86,76 @@ try {
   check((await here()).items === 1, "...and the copy is as it was");
   await go(a.search);
   check((await here()).title === "Sage sketch", "...and so is the first");
+  // a board of this browser's, written and read again: as written
+  await go("?new=sage");
+  await ev("window.sagebrush.board.edit((d) => { d.title = 'Kept'; d.nodes = [{ id: 'k', title: 'here' }]; }).then(() => 1)");
+  const kept = (await here()).search;
+  await send("Page.reload");
+  await until("!!window.sagebrush?.board?.snapshot()?.doc", 60000);
+  const k2 = await here();
+  check(k2.search === kept && k2.title === "Kept" && k2.items === 1 && k2.mode === "sage", "written, reloaded: as written: " + JSON.stringify(k2));
+
+  // ?new and ?recent together: new, its own language; either repeated: its first (CORR-7F9-3)
+  await go("?new=magma&recent=sage");
+  const both = await here();
+  check(LOCAL.test(both.search) && both.mode === "magma" && both.items === 0, "?new=magma&recent=sage: a new Magma board: " + JSON.stringify(both));
+  await go("?recent=sage&new=sage");
+  check((await here()).items === 0 && (await here()).search !== kept, "?recent=sage&new=sage: a new board, not the latest");
+  await go("?new=matlab&new=sage");
+  check((await here()).mode === "matlab", "?new repeated: its first");
+  await go("?recent=matlab&recent=sage");
+  check((await here()).mode === "matlab", "?recent repeated: its first");
+
+  // the list: records of boards gone or not boards dropped, and ?recent
+  // goes on to the next, or makes a new one; titles cut, one record an id,
+  // none from the future, at most 200 (HARD-7F9-2)
+  const now = Date.now();
+  await ev(`(() => {
+    const l = [
+      { id: "aaaaaaaaaaaa", title: "gone", mode: "sage", at: ${now} + 5000 },
+      { id: "bbbbbbbbbbbb", title: "not a board", mode: "sage", at: ${now} + 4000 },
+      { id: "dddddddddddd", title: "future", mode: "sage", at: 1e15 },
+      { id: "${kept.slice(11)}", title: "x".repeat(10000), mode: "sage", at: ${now} - 1000 },
+      { id: "${kept.slice(11)}", title: "dup", mode: "sage", at: ${now} - 9000 },
+      ...Array.from({ length: 300 }, (_, i) => ({ id: (1e11 + i).toString(16).padStart(12, "0"), title: "m" + i, mode: "magma", at: ${now} - 100000 - i })),
+    ];
+    localStorage.setItem("sagebrush-boards", JSON.stringify(l));
+    localStorage.setItem("sagebrush-board:local:bbbbbbbbbbbb", "{not json");
+    return 1;
+  })()`);
+  await go("?recent=sage");
+  const rec = await here();
+  check(rec.search === kept && rec.title === "Kept", "?recent=sage: past a record of a board gone, one not a board, and one from the future, the latest that is there: " + JSON.stringify(rec));
+  const l2 = await list();
+  check(!l2.some((b) => b.id === "aaaaaaaaaaaa" || b.id === "bbbbbbbbbbbb" || b.id === "dddddddddddd"), "...those records dropped: " + JSON.stringify(l2.slice(0, 4).map((b) => b.id)));
+  check(l2.length <= 200 && l2.filter((b) => b.id === kept.slice(11)).length === 1 && l2.every((b) => b.title.length <= 200), "...at most 200 records, one an id, titles cut: " + l2.length);
+  // (only gone ones of this language: a new one)
+  await ev(`localStorage.setItem("sagebrush-boards", JSON.stringify([{ id: "cccccccccccc", title: "gone", mode: "matlab", at: ${now} }])), 1`);
+  await go("?recent=matlab");
+  const fresh = await here();
+  check(LOCAL.test(fresh.search) && fresh.search !== "?doc=local:cccccccccccc" && fresh.mode === "matlab" && fresh.items === 0, "?recent=matlab, its only record a board gone: a new MATLAB board: " + JSON.stringify(fresh));
+
+  // storage full: no board made, nothing presented as kept (HARD-7F9-1)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "if (sessionStorage.getItem('full')) { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (this === localStorage) throw new DOMException('full', 'QuotaExceededError'); return set.call(this, k, v); }; }" });
+  await ev("sessionStorage.setItem('full', '1'), 1");
+  const before = JSON.stringify(await list());
+  await go("?new=sage");
+  const full = await here();
+  check(full.search === "?new=sage" && full.mode === "sage" && /isn't kept/.test(await ev("document.querySelector('[data-sbb=say]').textContent")), "?new=sage, storage full: the address as it was, a Sage board that says it isn't kept: " + JSON.stringify(full));
+  check(JSON.stringify(await list()) === before, "...and nothing listed");
+  await ev("window.sagebrush.board.edit((d) => { d.nodes = [{ id: 'w', title: 'written' }]; }).then(() => 1)");
+  check(/Not kept/.test(await ev("document.querySelector('[data-sbb=say]').textContent")), "...an edit: it says it isn't kept");
+  // (a board of this browser's, storage full meanwhile: New board and Duplicate go nowhere, and say why)
+  await ev("sessionStorage.removeItem('full'), 1");
+  await go(kept);
+  await ev("(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (this === localStorage) throw new DOMException('full', 'QuotaExceededError'); return set.call(this, k, v); }; return 1; })()");
+  await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
+  await sleep(800);
+  check((await here()).search === kept && /No new board/.test(await ev("document.querySelector('[data-sbb=say]').textContent")), "New board, storage full: this board stays, saying why: " + await ev("document.querySelector('[data-sbb=say]').textContent"));
+  await ev("document.querySelector('[data-sbb=duplicate]').click(), 1");
+  await sleep(800);
+  check((await here()).search === kept && /No copy/.test(await ev("document.querySelector('[data-sbb=say]').textContent")), "Duplicate, storage full: this board stays, saying why");
+
   // an example board (not blank) opens as before: not in Edit, Revert there once edited
   await go("?doc=examples/primes.json");
   check(!(await here()).editing, "an example board opens out of Edit");
