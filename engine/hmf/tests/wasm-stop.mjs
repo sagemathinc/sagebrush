@@ -7,7 +7,10 @@
 //         --features sagebrush-interrupt/wasm-host --no-run
 //     node engine/hmf/tests/wasm-stop.mjs <the .wasm> stop_search 300
 //     node engine/hmf/tests/wasm-stop.mjs <the .wasm> stop_class_set 300
+//     node engine/hmf/tests/wasm-stop.mjs <the .wasm> field::tests::stop_factor 300
+//     node engine/hmf/tests/wasm-stop.mjs <the .wasm> defnew::tests::stop_newspaces 300
 //
+// (a test name without a module path is one of classes::tests).
 // Exit status 0 if the computation trapped within 100 ms of Stop and, after
 // the first poll's start-up interval (setting up the field and the order,
 // and compiling), the host was polled at least every 20 ms; 1 otherwise.
@@ -17,7 +20,7 @@ import { performance } from 'node:perf_hooks';
 
 const [wasmPath, test, delayArg] = process.argv.slice(2);
 const delay = Number(delayArg ?? 300);
-const wasi = new WASI({ version: 'preview1', args: ['t', test, '--ignored', '--nocapture', '--test-threads=1', '--exact', `classes::tests::${test}`], env: {}, preopens: {} });
+const wasi = new WASI({ version: 'preview1', args: ['t', test, '--ignored', '--nocapture', '--test-threads=1', '--exact', test.includes('::') ? test : `classes::tests::${test}`], env: {}, preopens: {} });
 const mod = await WebAssembly.compile(await readFile(wasmPath));
 let t0 = null, stopAt = null, last = null, maxGap = 0, polls = 0;
 const gaps = [];

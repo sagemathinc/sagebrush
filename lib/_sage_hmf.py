@@ -1466,17 +1466,14 @@ class EllipticCurveFactor:
 # definite.rs, defnew.rs; the JSON functions hmfq_* of engine/web/src/hmfq.rs)
 
 def _squarefree_part(n):
-    """(d, m) with n = m^2 d, d squarefree (n > 0)."""
-    d, m, p = 1, 1, 2
-    while p * p <= n:
-        while n % (p * p) == 0:
-            n //= p * p
-            m *= p
-        if n % p == 0:
-            n //= p
-            d *= p
-        p += 1
-    return d * n, m
+    """(d, m) with n = m^2 d, d squarefree, for 0 < n <= 2^62: by the
+    engine's bounded factorization (daybreak HARD-3AE-1: trial division
+    here had no bound). Larger n are refused before any work."""
+    if not 0 < n <= 1 << 62:
+        raise ValueError("the discriminant %s of the defining polynomial is too large (Hilbert modular forms are implemented "
+                         "for discriminants up to 2^62)" % n)
+    r = _call("hmfq_squarefree", n=n)
+    return int(r["d"]), int(r["m"])
 
 
 class _QuadraticField:
@@ -1727,6 +1724,16 @@ class QuadraticHilbertModularForms:
         Traceback (most recent call last):
         ...
         ValueError: Hilbert modular forms are implemented over real quadratic fields only, not Number Field in b with defining polynomial x^3 - 2
+        sage: HilbertModularForms(NumberField(x^2 - (2^61 - 1), 'b'), 1)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: the discriminant 9223372036854775804 of the defining polynomial is too large (Hilbert modular forms are implemented for discriminants up to 2^62)
+        sage: HilbertModularForms(NumberField(x^2 - 1000003, 'b'), 1)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: the discriminant 4000012 of F is above 2^20 (unsupported)
+        sage: HilbertModularForms(NumberField(x^2 - 5*1000003^2, 'b'), 1).dimension()  # sagebrush only
+        1
         sage: K = NumberField(x^2 - 3, 'c')
         sage: HilbertModularForms(K, F.primes_above(5)[0])  # sagebrush only
         Traceback (most recent call last):

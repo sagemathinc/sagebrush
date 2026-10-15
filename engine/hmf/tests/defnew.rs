@@ -38,10 +38,10 @@ fn up_vs_magma() {
         });
         assert_eq!(sp.cusp_dimension(), p[2].parse::<usize>().unwrap());
         let q = nums(p[3]);
-        let pr = f.primes_above(q[0]).unwrap().into_iter().find(|pr| f.contains(&pr.ideal, &QElt::new(q[1], q[2])).unwrap()).unwrap();
-        assert!(f.ideal_div(&level, &pr.ideal).unwrap().is_some());
+        let pr = f.primes_above(q[0]).unwrap().into_iter().find(|pr| f.contains(&pr.ideal(), &QElt::new(q[1], q[2])).unwrap()).unwrap();
+        assert!(f.ideal_div(&level, &pr.ideal()).unwrap().is_some());
         let want: Vec<BigInt> = p[4].split_whitespace().map(|t| t.parse().unwrap()).collect();
-        assert_eq!(sp.cusp_charpoly(&pr).unwrap(), want, "d = {}, N = {:?}, P = {:?}", d, level.hnf(), pr.ideal.hnf());
+        assert_eq!(sp.cusp_charpoly(&pr).unwrap(), want, "d = {}, N = {:?}, P = {:?}", d, level.hnf(), pr.ideal().hnf());
         n += 1;
     }
     assert_eq!(n, 111);
@@ -90,7 +90,7 @@ fn up_eigenvalue_at_a_non_principal_prime() {
     let f = QuadField::new(10).unwrap();
     let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
     let p = f.primes_above(5).unwrap()[0];
-    let ns = Newspaces::new(&o, &p.ideal).unwrap();
+    let ns = Newspaces::new(&o, &p.ideal()).unwrap();
     assert_eq!(ns.new_dimension().unwrap(), 4);
     let orbits = ns.newform_orbits().unwrap();
     assert_eq!(orbits.dimensions(), vec![4]);
@@ -124,7 +124,7 @@ fn agrees_with_the_sqrt5_newforms() {
         assert_eq!(no.dimensions(), od, "level {:?}", lev.hnf);
         // per orbit, the characteristic polynomials of its a_P, N(P) <= 20
         let primes = primes_of_bounded_norm(20);
-        let qps: Vec<QPrime> = primes.iter().map(|p| f.primes_above(p.p as i64).unwrap().into_iter().find(|q| q.ideal == to_q(p.hnf.a, p.hnf.b, p.hnf.c)).unwrap()).collect();
+        let qps: Vec<QPrime> = primes.iter().map(|p| f.primes_above(p.p as i64).unwrap().into_iter().find(|q| q.ideal() == to_q(p.hnf.a, p.hnf.b, p.hnf.c)).unwrap()).collect();
         let mut a: Vec<Vec<Vec<BigInt>>> = (0..oo.orbits.len())
             .map(|k| {
                 let es = old.orbit_eigenspace(&oo, k).unwrap();

@@ -32,7 +32,7 @@ fn class_orders_vs_magma() {
         let q: i64 = p[1].parse().unwrap();
         let xy: Vec<i64> = p[2].split_whitespace().map(|x| x.parse().unwrap()).collect();
         let ideal = f.ideal(&[QElt::int(q), QElt::new(xy[0], xy[1])]).unwrap();
-        assert!(f.primes_above(q).unwrap().iter().any(|pr| pr.ideal == ideal), "d = {}: ({}, {} + {}w) is not a prime", d, q, xy[0], xy[1]);
+        assert!(f.primes_above(q).unwrap().iter().any(|pr| pr.ideal() == ideal), "d = {}: ({}, {} + {}w) is not a prime", d, q, xy[0], xy[1]);
         let (o, op): (usize, usize) = (p[3].parse().unwrap(), p[4].parse().unwrap());
         assert_eq!((g.class_order(&ideal, false).unwrap(), g.class_order(&ideal, true).unwrap()), (o, op), "d = {}, P = ({}, {} + {}w)", d, q, xy[0], xy[1]);
         n += 1;

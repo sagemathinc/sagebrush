@@ -60,7 +60,7 @@ fn dembele_voight_example_8_6() {
         prime(&f, &[g(31, 3)]),
         prime(&f, &[g(-31, 3)]),
     ];
-    assert_eq!(ps.iter().map(|p| p.norm).collect::<Vec<_>>(), vec![2, 3, 3, 5, 5, 7, 7]);
+    assert_eq!(ps.iter().map(|p| p.norm()).collect::<Vec<_>>(), vec![2, 3, 3, 5, 5, 7, 7]);
     let ts: Vec<Vec<Vec<i64>>> = ps.iter().map(|p| dense(&sp, p)).collect();
     // T = T_(3, w+1) + 5 T_(2, w) + 7 T_(5, w+1)
     let n = sp.dimension();
@@ -116,7 +116,7 @@ fn icosians(bound: u64) -> usize {
         assert_eq!(new.dimension(), old.dimension(), "level {:?}", lev.hnf);
         // the new part, against newspace.rs (checked against LMFDB)
         if let Some(p) = primes_of_bounded_norm(30).into_iter().find(|p| lev.factors.iter().all(|(q, _)| q.hnf != p.hnf)) {
-            let qp = f.primes_above(p.p as i64).unwrap().into_iter().find(|q| q.ideal == to_q(p.hnf.a, p.hnf.b, p.hnf.c)).unwrap();
+            let qp = f.primes_above(p.p as i64).unwrap().into_iter().find(|q| q.ideal() == to_q(p.hnf.a, p.hnf.b, p.hnf.c)).unwrap();
             let theirs = sagebrush_hmf::newspace::Newspaces::new(lev.clone()).unwrap().new_charpoly(&vec![(p, 1)]).unwrap().new;
             let ours = sagebrush_hmf::definite::new_charpoly(&o, &ql, &qp).unwrap();
             assert_eq!(ours, theirs, "new part at level {:?}", lev.hnf);
@@ -125,7 +125,7 @@ fn icosians(bound: u64) -> usize {
             if lev.factors.iter().any(|(q, _)| q.hnf == p.hnf) {
                 continue;
             }
-            let qp = f.primes_above(p.p as i64).unwrap().into_iter().find(|q| q.ideal == to_q(p.hnf.a, p.hnf.b, p.hnf.c)).unwrap();
+            let qp = f.primes_above(p.p as i64).unwrap().into_iter().find(|q| q.ideal() == to_q(p.hnf.a, p.hnf.b, p.hnf.c)).unwrap();
             let a = ZMat::from_rows(old.hecke_matrix(&p).unwrap().dense().into_iter().map(|r| r.into_iter().map(BigInt::from).collect()).collect());
             let b = ZMat::from_rows(dense(&new, &qp).into_iter().map(|r| r.into_iter().map(BigInt::from).collect()).collect());
             assert_eq!(charpoly(&a), charpoly(&b), "level {:?}, P = {:?}", lev.hnf, p.hnf);
@@ -173,9 +173,9 @@ fn cusp_spaces_vs_magma() {
         if q[0] == 0 {
             continue;
         }
-        let pr = f.primes_above(q[0]).unwrap().into_iter().find(|pr| f.contains(&pr.ideal, &QElt::new(q[1], q[2])).unwrap()).unwrap();
+        let pr = f.primes_above(q[0]).unwrap().into_iter().find(|pr| f.contains(&pr.ideal(), &QElt::new(q[1], q[2])).unwrap()).unwrap();
         let want: Vec<BigInt> = p[4].split_whitespace().map(|t| t.parse().unwrap()).collect();
-        assert_eq!(sp.cusp_charpoly(&pr).unwrap(), want, "d = {}, N = {:?}, P = {:?}", d, level.hnf(), pr.ideal.hnf());
+        assert_eq!(sp.cusp_charpoly(&pr).unwrap(), want, "d = {}, N = {:?}, P = {:?}", d, level.hnf(), pr.ideal().hnf());
         n_polys += 1;
     }
     assert_eq!((n_dims, n_polys), (299, 267));

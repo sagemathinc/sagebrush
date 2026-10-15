@@ -22,6 +22,10 @@
 //!
 //! A check is one relaxed atomic load: put them in loops whose iterations
 //! take microseconds to milliseconds, not in the innermost arithmetic.
+//! Between coarser units of work (a millisecond or more each, such as a
+//! block of rows of a dense elimination) use [`check_coarse`], which in wasm
+//! asks the host at every call: 1024 such units between two questions
+//! would leave Stop unanswered for seconds.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
@@ -58,6 +62,16 @@ pub fn requested() -> bool {
 #[inline]
 pub fn check() {
     poll_host();
+    if REQUESTED.load(Relaxed) {
+        interrupt()
+    }
+}
+
+/// As [`check`], at a checkpoint between coarse units of work: in wasm the
+/// host is asked at every call (one import call), not every 1024th.
+#[inline]
+pub fn check_coarse() {
+    poll_host_now();
     if REQUESTED.load(Relaxed) {
         interrupt()
     }
@@ -109,6 +123,16 @@ fn poll_host() {
     #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
     {
         if POLLS.fetch_add(1, Relaxed) % 1024 == 0 && unsafe { interrupted() } != 0 {
+            REQUESTED.store(true, Relaxed);
+        }
+    }
+}
+
+#[inline]
+fn poll_host_now() {
+    #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
+    {
+        if unsafe { interrupted() } != 0 {
             REQUESTED.store(true, Relaxed);
         }
     }
@@ -228,5 +252,18 @@ mod tests {
         // other panics pass through
         let other = std::panic::catch_unwind(|| catch(|| panic!("a bug")));
         assert!(other.is_err());
+        // check_coarse unwinds in the same way (in this one test: the flag
+        // is global to the process)
+        let r = catch(|| {
+            for i in 0.. {
+                if i == 3 {
+                    request();
+                }
+                check_coarse();
+            }
+        });
+        assert_eq!(r, Err(Interrupted));
+        clear();
+        assert_eq!(catch(check_coarse), Ok(()));
     }
 }

@@ -321,11 +321,31 @@ pub fn sqrt_mod_p(a: u64, p: u64) -> Option<u64> {
     Some(r)
 }
 
-/// Factorization of a positive integer by trial division.
-pub fn factor_u64(mut n: u64) -> Vec<(u64, u32)> {
-    let mut f = vec![];
+/// The work limit of [`factor_u64`], in Pollard-Brent steps over all its
+/// composite cofactors. After trial division by the primes below 2^10, a
+/// composite cofactor m < 2^64 has a prime factor below m^(1/2) < 2^32,
+/// found in about 2^16 steps expected (the rho heuristic, Brent 1980): the
+/// limit allows 64 times that before the factorization fails with an error
+/// (daybreak HARD-3AE-2: trial division by every odd number took seconds,
+/// without an interrupt check).
+pub const FACTOR_STEPS: u64 = 1 << 22;
+
+/// The factorization of n > 0, primes increasing: trial division by the
+/// primes below 2^10, then Miller-Rabin (deterministic below 2^64, is_prime)
+/// and Pollard-Brent rho within FACTOR_STEPS steps, with interrupt checks;
+/// an Err if the steps run out.
+pub fn factor_u64(n: u64) -> Result<Vec<(u64, u32)>, String> {
+    factor_u64_steps(n, FACTOR_STEPS)
+}
+
+/// factor_u64 with a given step limit (for tests).
+pub fn factor_u64_steps(mut n: u64, steps: u64) -> Result<Vec<(u64, u32)>, String> {
+    if n == 0 {
+        return Err("cannot factor 0".into());
+    }
+    let mut f: Vec<(u64, u32)> = vec![];
     let mut p = 2u64;
-    while p * p <= n {
+    while p < 1024 && p * p <= n {
         if n % p == 0 {
             let mut e = 0;
             while n % p == 0 {
@@ -336,10 +356,105 @@ pub fn factor_u64(mut n: u64) -> Vec<(u64, u32)> {
         }
         p += if p == 2 { 1 } else { 2 };
     }
-    if n > 1 {
-        f.push((n, 1));
+    let mut budget = steps;
+    let mut large: Vec<u64> = vec![];
+    let mut stack = if n > 1 { vec![n] } else { vec![] };
+    while let Some(m) = stack.pop() {
+        sagebrush_interrupt::check();
+        if is_prime(m) {
+            large.push(m);
+            continue;
+        }
+        let r = isqrt_u64(m);
+        if r * r == m {
+            stack.push(r);
+            stack.push(r);
+            continue;
+        }
+        let d = pollard_brent(m, &mut budget).ok_or_else(|| format!("could not factor {} within the work limit (unsupported)", n))?;
+        stack.push(d);
+        stack.push(m / d);
     }
-    f
+    large.sort_unstable();
+    for q in large {
+        match f.last_mut() {
+            Some((r, e)) if *r == q => *e += 1,
+            _ => f.push((q, 1)),
+        }
+    }
+    Ok(f)
+}
+
+/// floor(sqrt n).
+fn isqrt_u64(n: u64) -> u64 {
+    let mut r = (n as f64).sqrt() as u64;
+    while (r as u128) * (r as u128) > n as u128 {
+        r -= 1;
+    }
+    while ((r + 1) as u128) * ((r + 1) as u128) <= n as u128 {
+        r += 1;
+    }
+    r
+}
+
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// A proper factor of the odd composite n (not a prime power), by Brent's
+/// variant of Pollard's rho (Brent, "An improved Monte Carlo factorization
+/// algorithm", BIT 20 (1980)), with x -> x^2 + c for c = 1, 2, ...; None if
+/// the steps in `budget` run out first.
+fn pollard_brent(n: u64, budget: &mut u64) -> Option<u64> {
+    let mulm = |x: u64, y: u64| (x as u128 * y as u128 % n as u128) as u64;
+    const M: u64 = 128;
+    for c in 1..n {
+        let f = |x: u64| ((x as u128 * x as u128 + c as u128) % n as u128) as u64;
+        let (mut y, mut r, mut q, mut g) = (2u64, 1u64, 1u64, 1u64);
+        let (mut x, mut ys) = (y, y);
+        while g == 1 {
+            x = y;
+            for _ in 0..r {
+                y = f(y);
+            }
+            *budget = budget.checked_sub(r)?;
+            let mut k = 0;
+            while k < r && g == 1 {
+                sagebrush_interrupt::check();
+                ys = y;
+                let steps = M.min(r - k);
+                for _ in 0..steps {
+                    // a check per step: check() asks the wasm host every
+                    // 1024 calls, so every 1024 steps
+                    sagebrush_interrupt::check();
+                    y = f(y);
+                    q = mulm(q, x.abs_diff(y));
+                }
+                *budget = budget.checked_sub(steps)?;
+                g = gcd_u64(q, n);
+                k += M;
+            }
+            r *= 2;
+        }
+        if g == n {
+            // backtrack from ys one step at a time
+            loop {
+                ys = f(ys);
+                *budget = budget.checked_sub(1)?;
+                g = gcd_u64(x.abs_diff(ys), n);
+                if g > 1 {
+                    break;
+                }
+            }
+        }
+        if g != n {
+            return Some(g);
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -457,7 +572,7 @@ impl Ideal {
         }
         let mut factors = vec![];
         let mut rest = g;
-        for (p, _) in factor_u64(n as u64) {
+        for (p, _) in factor_u64(n as u64)? {
             for pr in primes_above(p) {
                 let mut e = 0;
                 while let Some(q) = rest.div_exact(pr.gen) {
@@ -595,6 +710,21 @@ pub fn ideals_of_bounded_norm(bound: u64) -> Vec<Ideal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// For tests/wasm-stop.mjs (the Stop button in wasm): seconds of
+    /// Pollard-Brent factorizations of products of two primes near 2^31,
+    /// which must notice Stop and trap.
+    #[test]
+    #[ignore]
+    fn stop_factor() {
+        let mut n = 0;
+        for p in (2147483000u64..2147483647).rev().filter(|&p| is_prime(p)) {
+            for q in (2147480000u64..2147483000).rev().filter(|&q| is_prime(q)).take(40) {
+                n += factor_u64(p * q).map(|f| f.len()).unwrap_or(0);
+            }
+        }
+        println!("not interrupted: {}", n);
+    }
 
     #[test]
     fn arithmetic() {
