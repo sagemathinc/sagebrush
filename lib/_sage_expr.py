@@ -3128,9 +3128,14 @@ def _legendre_neg_order(k, mu, x):
             v, e = v * 2.0 ** -1000, e + 1000
         while e > 1000 and math.isfinite(v):
             v, e = v * 2.0 ** 1000, e - 1000
-        v = v * 2.0 ** e
+        try:
+            v = v * 2.0 ** e
+        except OverflowError:
+            # 2.0 ** e itself overflows when a step above already made v
+            # infinite and left e > 1023
+            v = math.inf
         if v == 0 or not math.isfinite(v):
-            raise NotImplementedError("gen_legendre_P(%d, %d, %r) is outside the double range" % (k, -mu, x))
+            raise NotImplementedError("gen_legendre_P(%d, %d, %r) is outside the double range" % (k, -mu, float(x)))
         return RealNumber(v)
     X = _expr(x)
     t = (1 - X) / 2
@@ -3161,6 +3166,10 @@ def gen_legendre_P(n, m, x):
         -15*(-x^2 + 1)^(3/2)
         sage: gen_legendre_P(4, 2, 0.3)
         -2.52525000000000
+        sage: gen_legendre_P(0, -101, -0.9999999999999999)  # beyond the double range  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: gen_legendre_P(0, -101, -0.9999999999999999) is outside the double range
     """
     k, j = _small_int(n), _small_int(m)
     if k is None or j is None:
