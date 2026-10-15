@@ -300,6 +300,7 @@
 </footer>
 <div id="filemenu" class="menu" role="menu" aria-label="Notebook" hidden>
   <button role="menuitem" data-f="new">New notebook</button>
+  <button role="menuitem" data-f="whiteboard" title="A new board, in this notebook's language, ready to write in">New whiteboard</button>
   <button role="menuitem" data-f="open">Open…</button>
   <button role="menuitem" data-f="examples">Examples…</button>
   <button role="menuitem" data-f="openfile" hidden>Open file…</button>
@@ -324,6 +325,7 @@
   <hr>
   <button role="menuitem" id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
   <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
+  <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
@@ -1407,6 +1409,8 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 // (the ⋯ menu's items have their own handlers; a pick closes it)
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
+// ⋯ Whiteboard: the latest board in the notebook's language, or a new one (board/page.ts ?recent=); this notebook stays saved
+$("#boardbtn").onclick = () => { saveNow(); location.assign("/board/?recent=" + encodeURIComponent(nb.mode)); };
 fileMenu.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -1417,6 +1421,8 @@ fileMenu.addEventListener("click", async (e) => {
       exDlg.querySelector("#exlist button")?.focus();
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
+    // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
+    case "whiteboard": saveNow(); location.assign("/board/?new=" + encodeURIComponent(nb.mode)); break;
     case "open": await showOpen(); break;
     case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, share_id: undefined, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
