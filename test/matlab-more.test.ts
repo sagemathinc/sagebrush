@@ -136,6 +136,17 @@ test("dimension, size and count arguments must be real, finite, integer scalars:
   ]);
 });
 
+test("var and std: w is 0 or 1; a weight vector, or any other w, is refused with its own message (astra's note)", () => {
+  assert.deepEqual(values(["var([1 2 3])", "var([1 2 3], 1)", "std([1 2 3], 0)", "var([1 2; 3 5], 0, 2)", "var([1 2 3], [])",
+                           "var([1 2 3], [1 1 1])", "var([1 2 3], 2)", "var([1 2 3], 0.5)", "std([1 2 3], [1 2 1])"]), [
+    "1", "0.6667", "1", "0.5000|2.0000", "1",
+    "ERROR var: Sagebrush computes w = 0 or w = 1 only; weighted variances (a vector of weights) are not supported yet.",
+    "ERROR var: Sagebrush computes w = 0 or w = 1 only; weighted variances (a vector of weights) are not supported yet.",
+    "ERROR var: Sagebrush computes w = 0 or w = 1 only; weighted variances (a vector of weights) are not supported yet.",
+    "ERROR std: Sagebrush computes w = 0 or w = 1 only; weighted standard deviations (a vector of weights) are not supported yet.",
+  ]);
+});
+
 test("dec2bin and dec2hex: fractions, two's complement, and their refusals", () => {
   assert.deepEqual(values([
     "dec2bin(-1.5)", "dec2bin(-2^63)", "dec2bin('a')", "dec2hex(2^64 - 2^12)",

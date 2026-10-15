@@ -728,6 +728,7 @@ something plausible. Examples:
 - `funm` of a defective matrix except by exp, cos, sin, cosh, sinh, log and
   sqrt;
 - `interp2`'s 'cubic' on a non-uniform grid, and 'makima' and 'pchip';
+- `var` and `std` with a vector of weights (w other than 0 or 1);
 - what the pages of lib/_matlab_more.py's functions leave open:
   - `split` with its default delimiter, of text that begins or ends with
     whitespace or has adjacent whitespace characters;
