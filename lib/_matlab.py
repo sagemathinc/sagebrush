@@ -3150,6 +3150,9 @@ def _brief(v, in_cell):
             return "0×0 char" if in_cell else "''"
         return "%s char" % _dimstr(d) if in_cell else "[%s char]" % _dimstr(d)
     if t is Str:
+        if v.s is None:
+            # (a missing string: <missing>, unquoted, as a string array shows it)
+            return "[<missing>]" if in_cell else "<missing>"
         return '["%s"]' % v.s if in_cell else '"%s"' % _newlines_shown(v.s)
     if t is Cell:
         if not in_cell and len(v.a) == 1 and _isnumlike(v.a[0]) and _numel(v.a[0]) == 1:

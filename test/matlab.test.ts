@@ -628,6 +628,8 @@ test("a newline in a struct's text field or a string array's element is displaye
     "err = struct('message', sprintf('Error using average>check_inputs (line 11)\\nInput must be a vector.'), 'identifier', 'AVG:NotAVector')",
     "s = struct('n', \"x\" + newline)",
     "t = [\"This is line one.\" + newline; \"Here is line two.\" + newline]",
+    // (a missing string in a struct: <missing>, as in a string array)
+    "m = [\"a\", \"b\"]; m(4) = \"x\"; v = struct('a', m(3))",
   ].join("\n")], { encoding: "utf8" });
   assert.deepEqual(out.split("\n").filter((s: string) => s.trim() !== "" && !/=|with fields|string array/.test(s)), [
     "       message: 'Error using average>check_inputs (line 11)↵Input must be a vector.'",
@@ -635,5 +637,6 @@ test("a newline in a struct's text field or a string array's element is displaye
     "    n: \"x↵\"",
     "    \"This is line one.↵\"",
     "    \"Here is line two.↵\"",
+    "    a: <missing>",
   ]);
 });
