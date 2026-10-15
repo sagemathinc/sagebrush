@@ -47,8 +47,17 @@
 //! every vector found is checked exactly. Before an isomorphism test, two
 //! invariants of the classes are compared: the weight, and the numbers of
 //! x in the left order with Tr nrd(x) = 3, 4, 5, 6 (isomorphic ideals have
-//! conjugate left orders). A failed search could only add a class twice,
-//! and then the classes would exceed the mass, which is an error.
+//! conjugate left orders). The Fincke-Pohst search is in floating point
+//! (with a safety margin, on the exactly reduced basis). If it missed an
+//! isomorphism, a class would be added twice. A sum above the mass is an
+//! error, but that does not catch every miss: a duplicate can fill the
+//! remaining mass exactly (@sagebrush-astra's review of 06f0def).
+//! Isomorphisms that are found are checked exactly.
+//!
+//! The starting order may be any certified maximal order (a left order of
+//! an ideal, say). The known multiples m Lambda inside the lattices built
+//! here scale by the order's `lambda_multiple` m0 (the least m0 with
+//! m0 Lambda inside O), which is computed exactly.
 
 use crate::qresidue::QLocalRing;
 use crate::quatalg::{BElt, Lattice, MaximalOrder, QuatAlg};
@@ -199,6 +208,7 @@ impl IdealClass {
 
 /// Cl O, with the data to place any right O-ideal in its class.
 pub struct ClassSet {
+    budget: Budget,
     order: MaximalOrder,
     class_group: ClassGroup,
     classes: Vec<IdealClass>,
@@ -229,8 +239,10 @@ fn product(alg: &QuatAlg, xs: &[BElt], ys: &[BElt], m: &BigInt) -> Lattice {
 }
 
 /// I^-1 = conj(I) nrd(I)^-1 = conj(I) conj(nrd I) / N(nrd I), which
-/// contains conj(I), so N(nrd I) Lambda.
-fn inverse(alg: &QuatAlg, ideal: &RightIdeal) -> Result<Lattice, String> {
+/// contains conj(I), so N(nrd I) m0 Lambda, for m0 Lambda inside the right
+/// order O: I contains nrd(I) O (locally I = x O, and nrd(x) O = x conj(x)
+/// O lies in x O), and conj(Lambda) = Lambda.
+fn inverse(alg: &QuatAlg, ideal: &RightIdeal, m0: &BigInt) -> Result<Lattice, String> {
     let f = alg.field();
     let nn = BigInt::from(ideal.nrd.norm());
     let nconj = f.ideal_conj(&ideal.nrd)?;
@@ -241,7 +253,35 @@ fn inverse(alg: &QuatAlg, ideal: &RightIdeal) -> Result<Lattice, String> {
             gens.push(alg.mul(&cx, &central(&s)).div_int(&nn));
         }
     }
-    Ok(Lattice::from_gens_containing(&gens, &nn))
+    Ok(Lattice::from_gens_containing(&gens, &(&nn * m0)))
+}
+
+/// The work budget of one computation (a class set, or a Hecke operator),
+/// shared by all its lattice searches (@sagebrush-daybreak's HARD-06F-1):
+/// Fincke-Pohst search nodes, decremented as they are visited. Running out is
+/// an error, never a partial result.
+#[derive(Debug)]
+pub(crate) struct Budget {
+    nodes: std::sync::atomic::AtomicU64,
+}
+
+/// Fincke-Pohst nodes for one computation.
+pub(crate) const MAX_NODES: u64 = 4_000_000_000;
+/// Vectors kept by one search.
+const MAX_RESULTS: usize = 100_000;
+/// Bits of the entries of a Gram matrix given to the exact LLL.
+const MAX_GRAM_BITS: u64 = 4096;
+
+impl Budget {
+    pub(crate) fn new(nodes: u64) -> Budget {
+        Budget { nodes: std::sync::atomic::AtomicU64::new(nodes) }
+    }
+    fn take(&self) -> u64 {
+        self.nodes.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+    fn put(&self, n: u64) {
+        self.nodes.store(n, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Tr_{F/Q} of an element of F, as a rational.
@@ -252,7 +292,7 @@ fn trace_q(f: &QuadField, x: &QFrac) -> Rat {
 /// The vectors x != 0 of the lattice with basis `basis` with
 /// Tr_{F/Q}(nrd(x) mu) <= bound (mu totally positive), passed to `keep`;
 /// the search stops at the first x that `keep` accepts if `first`.
-fn short_vectors(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: bool, keep: &mut dyn FnMut(&BElt) -> bool) -> Result<Vec<BElt>, String> {
+fn short_vectors(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: bool, budget: &Budget, keep: &mut dyn FnMut(&BElt) -> bool) -> Result<Vec<BElt>, String> {
     let f = alg.field();
     // the Gram matrix of B(x, y) = Tr(trd(x conj y) mu), with Q(x) = B(x, x)/2
     let mut gram = vec![vec![Rat::zero(); 8]; 8];
@@ -306,7 +346,9 @@ fn short_vectors(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: b
         .collect();
     crate::theta::lll(&mut b, &g);
     let mut out = vec![];
-    crate::theta::enumerate(&b, &g, bound_c, &mut |v| {
+    let mut overflow = false;
+    let mut nodes = budget.take();
+    let done = crate::theta::enumerate_limited(&b, &g, bound_c, &mut nodes, &mut |v| {
         let mut x = BElt::integral(std::array::from_fn(|_| BigInt::zero()));
         for (s, &vs) in v.iter().enumerate() {
             if vs != 0 {
@@ -316,10 +358,21 @@ fn short_vectors(alg: &QuatAlg, basis: &[BElt], mu: &QFrac, bound: i64, first: b
         }
         if keep(&x) {
             out.push(x);
+            if out.len() >= MAX_RESULTS {
+                overflow = true;
+                return true;
+            }
             return first;
         }
         false
     });
+    budget.put(nodes);
+    if done.is_none() {
+        return Err("the lattice search exceeded its work budget (unsupported)".into());
+    }
+    if overflow {
+        return Err(format!("a lattice search found more than {} vectors (unsupported)", MAX_RESULTS));
+    }
     Ok(out)
 }
 
@@ -346,6 +399,15 @@ fn dot(g: &[Vec<BigInt>], u: &[BigInt], v: &[BigInt]) -> BigInt {
 /// lambda_ij, and only unimodular steps (swaps and integral translations).
 fn lll_exact(g: &[Vec<BigInt>]) -> Result<Vec<Vec<BigInt>>, String> {
     let n = g.len();
+    // the bit budget, checked before any reduction: the d_i are bounded by
+    // products of i diagonal entries and the lambda_ij by those of the d's
+    // (Cohen, section 2.6.3), so they stay below (n + 1) times the input
+    // size; anything larger is refused as an error
+    let bits = g.iter().flatten().map(|x| x.bits()).max().unwrap_or(0);
+    if bits > MAX_GRAM_BITS {
+        return Err(format!("a Gram matrix with {}-bit entries is too large (unsupported)", bits));
+    }
+    let cap = (n as u64 + 2) * (bits + 64);
     let mut b: Vec<Vec<BigInt>> = (0..n).map(|i| (0..n).map(|j| if i == j { BigInt::one() } else { BigInt::zero() }).collect()).collect();
     // d[0] = 1, d[i + 1] = d_i of Cohen (1-based); lam[k][j] = lambda_kj
     let mut d = vec![BigInt::one(); n + 1];
@@ -396,6 +458,9 @@ fn lll_exact(g: &[Vec<BigInt>]) -> Result<Vec<Vec<BigInt>>, String> {
             }
         }
         red(k, k - 1, &mut b, &mut lam, &d);
+        if d[k + 1].bits() > cap || lam[k][k - 1].bits() > cap || b[k].iter().any(|x| x.bits() > cap) {
+            return Err("internal error: the exact LLL exceeded its bit budget".into());
+        }
         // Lovasz: 100 d_k d_(k-2) < 99 d_(k-1)^2 - 100 lambda^2 means swap
         let lhs = BigInt::from(100) * &d[k + 1] * &d[k - 1];
         let rhs = BigInt::from(99) * &d[k] * &d[k] - BigInt::from(100) * &lam[k][k - 1] * &lam[k][k - 1];
@@ -436,17 +501,33 @@ impl ClassSet {
     /// Cl O, with representatives whose reduced norms are prime to n (the
     /// neighbours are taken at primes not dividing n).
     pub fn coprime_to(order: &MaximalOrder, n: &QIdeal) -> Result<ClassSet, String> {
+        const MAX_CLASSES: usize = 5000;
         let alg = order.alg().clone();
         let f = *alg.field();
         f.check(n)?;
+        // every weight is at least 1, so H >= mass: refuse before any work
+        // when the mass exceeds the cap. First a cheap lower bound (sigma_1(m)
+        // >= m in Siegel's formula and h_F >= 1): mass >= sum (D - b^2)/4 / 120
+        let dd = f.disc as i128;
+        let mut lower: i128 = 0;
+        let mut b: i128 = dd % 2;
+        while b * b < dd {
+            lower += if b == 0 { (dd - b * b) / 4 } else { 2 * ((dd - b * b) / 4) };
+            b += 2;
+        }
+        if lower > 120 * MAX_CLASSES as i128 {
+            return Err(format!("the class number exceeds {} (the mass is at least {}/120; unsupported)", MAX_CLASSES, lower));
+        }
         let class_group = f.class_group();
         let mass = zeta_minus_one(&f)?.mul(&Rat::new(BigInt::from(class_group.h()), BigInt::from(2)));
-        let mut set = ClassSet { order: order.clone(), class_group, classes: vec![], mass, primes: vec![] };
+        if mass.gt(&Rat::new(BigInt::from(MAX_CLASSES as i64), BigInt::one())) {
+            return Err(format!("the class number exceeds {} (the mass is {}; unsupported)", MAX_CLASSES, mass));
+        }
+        let mut set = ClassSet { budget: Budget::new(MAX_NODES), order: order.clone(), class_group, classes: vec![], mass, primes: vec![] };
         let o = RightIdeal { lattice: order.lattice().clone(), nrd: f.unit_ideal() };
         let first = set.make_class(o)?;
         let mut sum = Rat::new(BigInt::one(), BigInt::from(first.weight()));
         set.classes.push(first);
-        const MAX_CLASSES: usize = 5000;
         // the primes S grow one at a time, in order of norm, when the classes
         // closed under the neighbours at all of S fall short of the mass (as
         // in Kirschmer-Voight, Algorithm 7.4, every class gets the neighbours
@@ -541,20 +622,21 @@ impl ClassSet {
     fn make_class(&self, ideal: RightIdeal) -> Result<IdealClass, String> {
         let alg = self.alg();
         let f = alg.field();
-        let nn = BigInt::from(ideal.nrd.norm());
+        let m0 = self.order.lambda_multiple();
+        let nm = BigInt::from(ideal.nrd.norm()) * m0;
         // O_L(I) = I I^-1, containing I conj(I), which contains
-        // N(nrd I)^2 Lambda
-        let inv = inverse(alg, &ideal)?.basis();
-        let lat = product(alg, &ideal.lattice.basis(), &inv, &(&nn * &nn));
+        // (N(nrd I) m0)^2 Lambda (Lambda Lambda = Lambda)
+        let inv = inverse(alg, &ideal, m0)?.basis();
+        let lat = product(alg, &ideal.lattice.basis(), &inv, &(&nm * &nm));
         let left_order = MaximalOrder::from_lattice(alg, lat)?;
         let one = QFrac::one();
-        let units_one = short_vectors(alg, left_order.basis(), &one, 2, false, &mut |x| alg.nrd(x) == one)?;
+        let units_one = short_vectors(alg, left_order.basis(), &one, 2, false, &self.budget, &mut |x| alg.nrd(x) == one)?;
         let cg = &self.class_group;
         let units_eps = if cg.eps_norm == 1 {
             let eps = cg.eps.frac();
             // 1/eps = conj(eps) when N(eps) = 1
             let inv = f.conj(&cg.eps).frac();
-            short_vectors(alg, left_order.basis(), &inv, 2, false, &mut |x| alg.nrd(x) == eps)?
+            short_vectors(alg, left_order.basis(), &inv, 2, false, &self.budget, &mut |x| alg.nrd(x) == eps)?
         } else {
             vec![]
         };
@@ -562,7 +644,7 @@ impl ClassSet {
             return Err("internal error: the unit group is inconsistent".into());
         }
         let mut theta = [0usize; THETA];
-        short_vectors(alg, left_order.basis(), &one, THETA as i64 + 2, false, &mut |x| {
+        short_vectors(alg, left_order.basis(), &one, THETA as i64 + 2, false, &self.budget, &mut |x| {
             let t = trace_q(f, &alg.nrd(x));
             if let Some(v) = t.num.to_usize().filter(|_| t.den.is_one()) {
                 if (3..THETA + 3).contains(&v) {
@@ -606,9 +688,10 @@ impl ClassSet {
         let b_ideal = f.ideal_mul(&j.nrd, &f.ideal_conj(&ik.nrd)?)?;
         let beta = cg.totally_positive_generator(&b_ideal)?.ok_or("internal error: nrd(J) nrd(I)^-1 is not narrowly principal")?;
         // J I_k^-1, containing J conj(I_k), which contains
-        // N(nrd J) N(nrd I_k) Lambda
+        // N(nrd J) N(nrd I_k) m0^2 Lambda
         let ikb = ik.lattice.basis();
-        let lat = product(alg, &j.lattice.basis(), &self.classes[k].inverse, &(&nj * &nk));
+        let m0 = self.order.lambda_multiple();
+        let lat = product(alg, &j.lattice.basis(), &self.classes[k].inverse, &(&nj * &nk * m0 * m0));
         let mut zs = vec![QElt::int(1)];
         if cg.eps_norm == 1 {
             zs.push(cg.eps.clone());
@@ -617,7 +700,7 @@ impl ClassSet {
             let bz = f.mul(&beta, &z);
             let nu = QFrac::new(bz.a.clone(), bz.b.clone(), nk.clone());
             let mu = f.finv(&nu);
-            let found = short_vectors(alg, &lat.basis(), &mu, 2, true, &mut |x| alg.nrd(x) == nu)?;
+            let found = short_vectors(alg, &lat.basis(), &mu, 2, true, &self.budget, &mut |x| alg.nrd(x) == nu)?;
             if let Some(x) = found.into_iter().next() {
                 // check: x I_k is inside J, and nrd(x I_k) = nrd(J)
                 if ikb.iter().all(|y| j.lattice.contains(&alg.mul(&x, y))) {
@@ -636,10 +719,10 @@ impl ClassSet {
         let f = alg.field();
         let q = p.norm as u64;
         let ni = BigInt::from(i.nrd.norm());
-        let m = &ni * BigInt::from(q);
+        // P I contains N(P) N(nrd I) m0 Lambda, as I contains nrd(I) O
+        let m = &ni * BigInt::from(q) * self.order.lambda_multiple();
         let ib = i.lattice.basis();
         let pb: Vec<BElt> = ideal_basis(&p.ideal).iter().map(central).collect();
-        // P I, containing N(P) N(nrd I) Lambda
         let mut pi_gens = vec![];
         for s in &pb {
             for x in &ib {
@@ -785,6 +868,86 @@ mod tests {
             let cs = ClassSet::new(&o).unwrap();
             assert_eq!(cs.len(), 1);
             assert_eq!(cs.classes()[0].weight(), w);
+        }
+    }
+
+    #[test]
+    fn caps_before_work() {
+        // HARD-06F-1 (daybreak): over Q(sqrt 10001) the mass 123904/3 exceeds
+        // the class cap, so the class set is refused at once
+        let f = QuadField::new(10001).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let t = std::time::Instant::now();
+        let e = ClassSet::new(&o).err().expect("refused");
+        assert!(e.contains("class number exceeds 5000"), "{}", e);
+        assert!(t.elapsed().as_secs() < 5);
+        // a field large enough for the cheap bound alone
+        let f = QuadField::new(1_000_003).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let e = ClassSet::new(&o).err().expect("refused");
+        assert!(e.contains("at least"), "{}", e);
+        // an exhausted node budget is an error, not a partial search
+        let f = QuadField::new(5).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let one = QFrac::one();
+        let tiny = Budget::new(10);
+        assert!(short_vectors(o.alg(), o.basis(), &one, 40, false, &tiny, &mut |_| true).is_err());
+        let ample = Budget::new(MAX_NODES);
+        assert_eq!(short_vectors(o.alg(), o.basis(), &one, 2, false, &ample, &mut |x| o.alg().nrd(x) == one).unwrap().len(), 120);
+        // too many results is an error
+        assert!(short_vectors(o.alg(), o.basis(), &one, 400, false, &ample, &mut |_| true).unwrap_err().contains("more than"));
+        // the exact LLL refuses oversized input before reducing
+        let mut g = vec![vec![BigInt::zero(); 8]; 8];
+        for (i, row) in g.iter_mut().enumerate() {
+            row[i] = BigInt::from(1) << 5000usize;
+        }
+        assert!(lll_exact(&g).unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn any_maximal_order_starts() {
+        // CORR-06F-1 (astra): the left orders need not contain Lambda; the
+        // class set computed from each of them has the same weights
+        for d in [3i64, 6, 10, 21, 29] {
+            let f = QuadField::new(d).unwrap();
+            let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+            assert_eq!(o.lambda_multiple(), &BigInt::one());
+            let a = ClassSet::new(&o).unwrap();
+            let mut want: Vec<usize> = a.classes().iter().map(|c| c.weight()).collect();
+            want.sort_unstable();
+            for c in a.classes() {
+                let ol = c.left_order();
+                let b = ClassSet::new(ol).unwrap_or_else(|e| panic!("d = {}: {}", d, e));
+                let mut got: Vec<usize> = b.classes().iter().map(|c| c.weight()).collect();
+                got.sort_unstable();
+                assert_eq!(got, want, "d = {}", d);
+            }
+        }
+    }
+
+    #[test]
+    fn lambda_multiples() {
+        // m Lambda inside L exactly for the multiples of lambda_multiple()
+        let e = |s: usize, k: i64| {
+            let mut c: [BigInt; 8] = std::array::from_fn(|_| BigInt::zero());
+            c[s] = BigInt::from(k);
+            BElt::integral(c)
+        };
+        // L = Z e_0 + 6 Z e_1 + 10 Z e_2 + 30 Lambda: the multiple is 30
+        let l = Lattice::from_gens_containing(&[e(0, 1), e(1, 6), e(2, 10)], &BigInt::from(30));
+        assert_eq!(l.lambda_multiple(), BigInt::from(30));
+        let f = QuadField::new(10).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        for c in ClassSet::new(&o).unwrap().classes() {
+            let ol = c.left_order();
+            let m = ol.lambda_multiple().clone();
+            assert!((0..8).all(|s| ol.lattice().contains(&e(s, 1).div_int(&BigInt::one()).scale_int(&m))));
+            for p in [2i64, 3, 5, 7] {
+                if (&m % BigInt::from(p)).is_zero() {
+                    let mp = &m / BigInt::from(p);
+                    assert!(!(0..8).all(|s| ol.lattice().contains(&e(s, 1).scale_int(&mp))));
+                }
+            }
         }
     }
 
