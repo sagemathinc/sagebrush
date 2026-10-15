@@ -119,6 +119,7 @@ jobs:
           bun web/board/test-fromhtml.mjs
           bun web/board/test-svg.mjs
           bun web/board/test-layout-speed.mjs
+          bun web/board/test-graph.mjs
           bun web/board/test-history-speed.mjs
           bun web/board/test-preview.mjs
           bun web/board/test-outcache.mjs
