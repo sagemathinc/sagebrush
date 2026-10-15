@@ -186,3 +186,29 @@ for x, y in [(H(2)^(2^40), H(2)^(2^40) + 1), (H(3)^(10^9), H(3)^(10^9 - 1)), (H(
 for x in [H(-2.5), H(2.5), H(3.5), H(-3.5), H(2)^-(2^40), -H(2)^-(2^40), H(2)^1000 + H(0.5)]:
     t('integer parts', lambda: (x.floor(), x.ceil(), x.round(), x.trunc(), x.is_integer()))
 
+# review repros: underflow decided on the exact value (sticky bit),
+# infinities compared and combined by sign, gamma/sinh/log_gamma at the top
+# of the range in every rounding mode, float() at the double boundaries,
+# tiny gamma in every mode (Sage's cosh at the sinh edge below is left out:
+# it is +infinity in Sage though the value is 0.59 times the largest number)
+R = RealField(100)
+u = R(2)^(-2^62)
+a = (R(1) + R(2)^(-99)) * u
+b = R(1)/2 - R(2)^(-101)
+t('underflow', lambda: ((a*b).is_zero(), a*b == u, (a*(R(1)/2)).is_zero(), (u*(R(1)/2 + R(2)^-100)).is_zero(), (u*u).is_zero()))
+h = R(2)^(2^40)
+t('infinity order', lambda: (h == R(oo), h < R(oo), -h == R(-oo), -h > R(-oo), R(oo) > h, R('NaN') == R('NaN'), R('NaN') < 1, R('NaN') != R('NaN')))
+t('infinity arithmetic', lambda: (R(oo) - h, R(oo) * h, h / R(oo), R(oo) + R(-oo), R(oo) * 0, R(-oo) * -h, h - R(oo)))
+for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
+    S = RealField(100, rnd=mode)
+    x = S(878668439483319573475365403401)/S(2)^38
+    t('edge ' + mode, lambda: (S(2^61).gamma(), x.sinh(), (-x).sinh(), (S(2)^1015).log_gamma(), (S(2)^62).sinh(), (-S(2)^62).sinh(), (S(2)^62).cosh()))
+    y = S(2)^(-2^21)
+    t('tiny gamma ' + mode, lambda: (y.gamma(), (-y).gamma(), (3*y).gamma(), (S(2)^-200).gamma(), (-S(2)^-200).gamma(), (S(3)^-150).gamma(), (S(2)^-200).log_gamma()))
+for k in [1023, 1024, 1025, 1026]:
+    t('float 2^%d' % k, lambda: (float(R(2)^k), float(-R(2)^k), float(R(2)^k - R(2)^(k-60))))
+t('float tiny', lambda: (float(R(2)^-1074), float(R(2)^-1075), float(R(2)^-1075 * 3), float(R(2)^-1076), float(R(3)^-680), float(R(2)^-1022 * (1 - R(2)^-60))))
+# format(x, spec): Sage's printed digits formatted as a Decimal, never
+# through a double (a 100-bit 1/3 with '.30f'; 2^2000 with '.3e')
+for x in [R(2)^2000, R(1)/3, R(2)^-2000, -R(2.5e-7), R(0), R(12345.6789), R(2)^(2^40), R(oo), R(-oo), R('NaN')]:
+    t('format', lambda: [format(x, s) for s in ['.3e', '.30f', 'g', '>14.5G', '+.2%', '#.0f', '012.3e', ',.2f', '', '10']])
