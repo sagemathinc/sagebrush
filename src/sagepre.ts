@@ -180,8 +180,15 @@ function generators(line: string): string {
   return `${indent}${name} = ${rhs}; (${names.join(", ")},) = ${name}._first_ngens(${names.length})${rest}`;
 }
 
-/** The index of a '#' starting a comment (outside strings), or -1. */
-function commentStart(s: string): number {
+/** The index of a '#' starting a comment (outside strings), or -1; with
+ * lits, s is stripLiterals' output, where a comment is the placeholder of
+ * a literal starting with '#'. */
+function commentStart(s: string, lits?: string[]): number {
+  if (lits) {
+    const re = /\0(\d+)\0/g;
+    for (let m = re.exec(s); m; m = re.exec(s)) if (lits[+m[1]].startsWith("#")) return m.index;
+    return -1;
+  }
   let quote = "";
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
@@ -214,14 +221,14 @@ function topLevelSemicolon(s: string): number {
 
 // f(x,y) = expr at the start of a statement (Sage's preparse_calculus).
 const CALC = /^(\s*)([\p{L}_][\p{L}\p{N}_]*)\s*\(([^()=]+)\)\s*=(?!=)\s*(.+)$/u;
-function calculus(line: string): string {
+function calculus(line: string, lits?: string[]): string {
   const m = CALC.exec(line);
   if (!m) return line;
   const [, indent, f, args, rhs] = m;
   const vars = args.split(",").map((v) => v.trim());
   if (!vars.every((v) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(v))) return line;
   // f(x) = x^2; f: the definition ends at a top-level ';' or a comment
-  const hash = commentStart(rhs);
+  const hash = commentStart(rhs, lits);
   const body = hash < 0 ? rhs : rhs.slice(0, hash);
   const comment = hash < 0 ? "" : "  " + rhs.slice(hash);
   const semi = topLevelSemicolon(body);
@@ -244,7 +251,7 @@ export function preparse(source: string): string {
   if (!/\.\.|\d|\.<|\)\s*=(?!=)/.test(source)) return source;
   const [code, lits] = stripLiterals(source);
   let L = expression(code);
-  L = L.split("\n").map((line) => calculus(generators(line))).join("\n");
+  L = L.split("\n").map((line) => calculus(generators(line), lits)).join("\n");
   // f-strings: their fields are code (prefix letters stay before the placeholder)
   return L.replace(/([rRbBuUfF]*)\0(\d+)\0/g, (_, prefix: string, k: string) =>
     prefix + (/[fF]/.test(prefix) ? preparseFString(lits[+k], (c) => expression(stripLiterals(c)[0]) === c ? c : restore(expression(stripLiterals(c)[0]), stripLiterals(c)[1])) : lits[+k]));

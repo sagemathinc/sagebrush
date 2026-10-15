@@ -8,6 +8,13 @@ Dense; entries are Python ints or Sage Rationals."""
 from fractions import Fraction as _F
 
 
+
+def _is_symbolic_function(v):
+    """Whether v is a callable expression f(x) = ... (_sage_lang's
+    SymbolicFunction, whose type shows as Sage's Expression)."""
+    import _sage_lang
+    return isinstance(v, _sage_lang.SymbolicFunction)
+
 def _sa():
     import sage_all
     return sage_all
@@ -35,6 +42,10 @@ class Vector(list):
         sage: v + v, 2*v, v * v
         ((2, 4, 6), (2, 4, 6), 14)
     """
+
+    def _latex_(self):
+        import _sage_expr
+        return _sage_expr._latex_vector(self)
 
     def __init__(self, entries=()):
         # (read boundedly: a Vector is built from any iterable)
@@ -77,7 +88,7 @@ class Vector(list):
         try:
             return Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
-            if type(other).__name__ == "SymbolicFunction":
+            if _is_symbolic_function(other):
                 return NotImplemented
             return Vector(_norm(a / other) for a in self)
 
@@ -564,7 +575,7 @@ class Matrix:
         for r in self._rows:
             row = []
             for e in r:
-                if type(e).__name__ == "SymbolicFunction":
+                if _is_symbolic_function(e):
                     row.append(e(*args, **kw))
                 else:
                     ex = _expr(e)
@@ -836,8 +847,8 @@ class Matrix:
         return m
 
     def _latex_(self):
-        body = r" \\ ".join(" & ".join(repr(x) for x in r) for r in self._rows)
-        return r"\left(\begin{array}{%s}%s\end{array}\right)" % ("r" * self.ncols(), body)
+        import _sage_expr
+        return _sage_expr._latex_matrix(self._rows, self.ncols())
 
     def transpose(self):
         """The transpose (also .T).
@@ -2858,6 +2869,9 @@ class ComplexField_:
 
     def __repr__(self):
         return "Complex Field with 53 bits of precision"
+
+    def _latex_(self):
+        return "\\Bold{C}"
 
     def zero(self):
         """0.

@@ -804,17 +804,38 @@ class SymbolicFunction:
         return self._expr.subs(sub)
 
     def variables(self):
-        """The arguments (as Sage's variables()).
+        """The variables of the expression (not the arguments: g(x) = 1
+        has none), as in Sage.
 
         EXAMPLES::
 
             sage: f(x, y) = x*y
             sage: f.variables()
             (x, y)
+            sage: g(x, y) = x + 1
+            sage: g.variables(), g.arguments()
+            ((x,), (x, y))
+        """
+        if not self._vec:
+            e = self._expr
+            return tuple(e.variables()) if hasattr(e, "variables") else ()
+        exprs = self._expr
+        seen = {}
+        for e in exprs:
+            for v in (e.variables() if hasattr(e, "variables") else ()):
+                seen[str(v)] = v
+        return tuple(seen[k] for k in sorted(seen))
+
+    def arguments(self):
+        """The arguments.
+
+        EXAMPLES::
+
+            sage: f(x, y) = x*y
+            sage: f.arguments()
+            (x, y)
         """
         return self._args
-
-    arguments = variables
 
     def expression(self):
         """The expression, as an ordinary symbolic expression.
@@ -1023,6 +1044,13 @@ class SymbolicFunction:
         return f
 
 
+# (Sage's callable expressions are symbolic Expressions: type(f) shows the
+# same class as an Expression's, as Expression's own does)
+SymbolicFunction.__name__ = SymbolicFunction.__qualname__ = "Expression"
+SymbolicFunction.__module__ = "sage.symbolic.expression"
+SymbolicFunction._defined_in = "_sage_lang"
+
+
 class _Text:
     def __init__(self, s):
         self._s = s
@@ -1106,11 +1134,32 @@ def _install_int_methods(sa):
         return r if r * r == n else sa.sqrt(n)
 
     def nth_root(n, k, truncate_mode=False):
-        r = round(abs(n) ** (1.0 / k))
-        for c in (r - 1, r, r + 1):
-            if c ** k == abs(n):
-                return -c if n < 0 else c
-        raise ValueError("%d is not a %dth power" % (n, k))
+        # exact (integer Newton's method: a float root was wrong past 2^53
+        # and overflowed past 2^1024), and an even root of a negative
+        # number is an error, as in Sage (-4 had the root -2)
+        k = int(k)
+        if k < 1:
+            raise ValueError("k=%d must be positive" % k)
+        if n < 0 and k % 2 == 0:
+            raise ValueError("cannot take even root of negative number")
+        a = abs(int(n))
+        if a < 2 or k == 1:
+            c = a
+        else:
+            c = 1 << -(-a.bit_length() // k)
+            while True:
+                d = ((k - 1) * c + a // c ** (k - 1)) // k
+                if d >= c:
+                    break
+                c = d
+        exact = c ** k == a
+        r = -c if n < 0 else c
+        if truncate_mode:
+            return r, exact
+        if not exact:
+            sfx = "th" if 10 <= k % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(k % 10, "th")
+            raise ValueError("%d is not a %d%s power" % (n, k, sfx))
+        return r
 
     def binary(n):
         return bin(n)[2:] if n >= 0 else "-" + bin(n)[3:]

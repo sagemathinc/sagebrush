@@ -549,9 +549,234 @@ class Rational(_Fraction):
         """
         return self._denominator == 1
 
+    # Sage's Rational methods (an integral rational, 4/2, is a Rational:
+    # these are what Integer offers that a Rational has too, with QQ's
+    # meaning: a field has no primes, every nonzero element is a unit)
+
+    def parent(self):
+        """The Rational Field.
+
+        EXAMPLES::
+
+            sage: (4/2).parent(), (2/3).parent()
+            (Rational Field, Rational Field)
+        """
+        return QQ
+
+    def abs(self):
+        """The absolute value.
+
+        EXAMPLES::
+
+            sage: (-3/4).abs()
+            3/4
+        """
+        return abs(self)
+
+    def str(self):
+        """The string form.
+
+        EXAMPLES::
+
+            sage: (3/4).str(), (4/2).str()
+            ('3/4', '2')
+        """
+        return repr(self)
+
+    def is_integral(self):
+        """Whether the denominator is 1.
+
+        EXAMPLES::
+
+            sage: (4/2).is_integral(), (3/4).is_integral()
+            (True, False)
+        """
+        return self._denominator == 1
+
+    def is_zero(self):
+        """Whether it is 0.
+
+        EXAMPLES::
+
+            sage: (0/2).is_zero(), (1/2).is_zero()
+            (True, False)
+        """
+        return self._numerator == 0
+
+    def is_one(self):
+        """Whether it is 1.
+
+        EXAMPLES::
+
+            sage: (2/2).is_one(), (1/2).is_one()
+            (True, False)
+        """
+        return self._numerator == 1 and self._denominator == 1
+
+    def is_unit(self):
+        """Whether it is a unit of QQ: nonzero.
+
+        EXAMPLES::
+
+            sage: (1/2).is_unit(), (0/1).is_unit()
+            (True, False)
+        """
+        return self._numerator != 0
+
+    def is_prime(self):
+        """False: QQ is a field, with no primes (also for 10/2).
+
+        EXAMPLES::
+
+            sage: (10/2).is_prime()
+            False
+        """
+        return False
+
+    def is_square(self):
+        """Whether it is the square of a rational.
+
+        EXAMPLES::
+
+            sage: (9/4).is_square(), (3/4).is_square(), (-4/1).is_square()
+            (True, False, False)
+        """
+        n, d = self._numerator, self._denominator
+        return n >= 0 and _math.isqrt(n) ** 2 == n and _math.isqrt(d) ** 2 == d
+
+    def nth_root(self, n):
+        """The rational n-th root; ValueError when there is none.
+
+        EXAMPLES::
+
+            sage: (9/4).nth_root(2), (-8/27).nth_root(3)
+            (3/2, -2/3)
+        """
+        a = Integer(self._numerator).nth_root(n)
+        b = Integer(self._denominator).nth_root(n)
+        return Rational._from_coprime_ints(int(a), int(b))
+
+    def sqrt(self, *args, **kwds):
+        """The square root, exact or symbolic (as sqrt(q)).
+
+        EXAMPLES::
+
+            sage: (9/4).sqrt(), (3/4).sqrt(), (-4/1).sqrt()
+            (3/2, 1/2*sqrt(3), 2*I)
+        """
+        return sqrt(self, *args, **kwds)
+
+    def squarefree_part(self):
+        """The squarefree part of numerator times denominator (the same
+        square class).
+
+        EXAMPLES::
+
+            sage: (3/4).squarefree_part(), (9/4).squarefree_part(), (-8/2).squarefree_part()
+            (3, 1, -1)
+        """
+        return Integer(self._numerator * self._denominator).squarefree_part()
+
+    def factor(self):
+        """The factorization, with negative exponents for the denominator.
+
+        EXAMPLES::
+
+            sage: (3/4).factor(), (-8/2).factor(), (10/2).factor()
+            (2^-2 * 3, -1 * 2^2, 5)
+        """
+        if self._numerator == 0:
+            raise ArithmeticError("factorization of 0 is not defined")
+        pairs = [(p, e) for p, e in factor(abs(self._numerator))] + [(p, -e) for p, e in factor(self._denominator)]
+        return Factorization(sorted(pairs), -1 if self._numerator < 0 else 1)
+
+    def gcd(self, other):
+        """gcd(a, c)/lcm(b, d) for a/b and c/d, as in Sage.
+
+        EXAMPLES::
+
+            sage: (3/4).gcd(6), (9/4).gcd(6), (-8/2).gcd(6)
+            (3/4, 3/4, 2)
+        """
+        o = QQ(other)
+        return _intdiv(_math.gcd(self._numerator, o._numerator), _math.lcm(self._denominator, o._denominator))
+
+    def lcm(self, other):
+        """lcm(a, c)/gcd(b, d) for a/b and c/d, as in Sage.
+
+        EXAMPLES::
+
+            sage: (3/4).lcm(6), (9/4).lcm(6), (-8/2).lcm(6)
+            (6, 18, 12)
+        """
+        o = QQ(other)
+        return _intdiv(_math.lcm(self._numerator, o._numerator), _math.gcd(self._denominator, o._denominator))
+
+    def xgcd(self, other):
+        """(g, s, t) with g = self.gcd(other) = s self + t other: from the
+        integers' xgcd of the numerators, scaled by b/L and d/L (L = lcm(b, d)).
+
+        EXAMPLES::
+
+            sage: (9/4).xgcd(6), (3/4).xgcd(6), (-8/2).xgcd(6)
+            ((3/4, 1, -1/4), (3/4, 1, 0), (2, 1, 1))
+        """
+        o = QQ(other)
+        a, b, c, d = self._numerator, self._denominator, o._numerator, o._denominator
+        L = _math.lcm(b, d)
+        g, s, t = Integer(a).xgcd(c)
+        return (_intdiv(int(g), L), _intdiv(int(s) * b, L), _intdiv(int(t) * d, L))
+
+    def quo_rem(self, other):
+        """(self/other, 0): QQ is a field.
+
+        EXAMPLES::
+
+            sage: (10/2).quo_rem(3)
+            (5/3, 0)
+        """
+        return (self / QQ(other), Rational._from_coprime_ints(0, 1))
+
+    def mod(self, n):
+        """0: QQ is a field, and n generates the whole of it.
+
+        EXAMPLES::
+
+            sage: (3/4).mod(7)
+            0
+        """
+        return Rational._from_coprime_ints(0, 1)
+
+    def round(self, mode="away"):
+        """The nearest integer, halves away from zero (Sage's default).
+
+        EXAMPLES::
+
+            sage: (5/2).round(), (-5/2).round(), (9/4).round()
+            (3, -3, 2)
+        """
+        if mode != "away":
+            raise NotImplementedError("rounding mode %r is not available for rationals in sagebrush yet" % (mode,))
+        n, d = self._numerator, self._denominator
+        q = (2 * abs(n) + d) // (2 * d)
+        return Integer(q if n >= 0 else -q)
+
+    def inverse_mod(self, m):
+        """Refused, as in Sage (a TypeError).
+
+        EXAMPLES::
+
+            sage: (3/4).inverse_mod(7)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            TypeError: inverse_mod of a rational is not defined: use Mod(numerator, m)/denominator
+        """
+        raise TypeError("inverse_mod of a rational is not defined: use Mod(numerator, m)/denominator")
+
 
 def _intdiv(a, b):
-    # The runtime's `/` on two ints in Sage mode.
+    # The runtime's `/` on two ints in Sage mode: a Rational, also when it
+    # is integral (parent(4/2) is the Rational Field, as in Sage).
     if b == 0:
         raise ZeroDivisionError("rational division by zero")
     a, b = int(a), int(b)
@@ -561,8 +786,6 @@ def _intdiv(a, b):
     if g != 1:
         a //= g
         b //= g
-    if b == 1:
-        return Integer(a)
     return Rational._from_coprime_ints(a, b)
 
 
@@ -1666,6 +1889,123 @@ def _sorted_dict_repr(d):
     except TypeError:
         return None
     return "{" + ", ".join("%r: %s" % (k, _sorted_dict_repr(d[k]) if type(d[k]) is dict else repr(d[k])) for k in keys) + "}"
+
+
+class _UnavailableInterface:
+    """An interface to another program (gp, maxima, singular, ...), as Sage
+    has: Sagebrush runs in the browser, with no other programs to start, so
+    using one is an explicit refusal (NotImplementedError), not a NameError.
+
+    EXAMPLES::
+
+        sage: gp  # sagebrush only
+        PARI/GP interpreter (not available in Sagebrush)
+        sage: maxima('2 + 2')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the Maxima interface is not available in Sagebrush (it runs no other programs); use Sagebrush's own functions
+    """
+
+    def __init__(self, name, system):
+        self._name, self._system = name, system
+
+    def __repr__(self):
+        return "%s (not available in Sagebrush)" % self._system
+
+    def _refuse(self, *args, **kwds):
+        raise NotImplementedError("the %s interface is not available in Sagebrush (it runs no other programs); use Sagebrush's own functions" % self._name)
+
+    __call__ = _refuse
+
+    def __getattr__(self, name):
+        # (a method, gp.eval: a callable that refuses; the attributes tools
+        # probe for, fget or keys, are absent)
+        if name.startswith("_") or name in _PROBED:
+            raise AttributeError(name)
+        return self._refuse
+
+
+_PROBED = frozenset(("fget", "fset", "fdel", "keys", "items", "values", "shape", "dtype", "tolist",
+                     "read", "write", "close", "next", "send", "throw", "parent"))
+
+_INTERFACES = {
+    "gp": ("PARI/GP", "PARI/GP interpreter"), "pari": ("PARI", "Interface to the PARI C library"),
+    "maxima": ("Maxima", "Maxima"), "maxima_calculus": ("Maxima", "Maxima_lib"),
+    "singular": ("Singular", "Singular"), "gap": ("GAP", "Gap"), "libgap": ("GAP", "C library interface to GAP"),
+    "macaulay2": ("Macaulay2", "Macaulay2"), "mathematica": ("Mathematica", "Mathematica"),
+    "maple": ("Maple", "Maple"), "kash": ("KASH", "Kash"), "magma": ("Magma", "Magma"),
+    "octave": ("Octave", "Octave"), "matlab": ("MATLAB", "Matlab"), "mupad": ("MuPAD", "MuPAD"),
+    "axiom": ("Axiom", "Axiom"), "fricas": ("FriCAS", "FriCAS"), "giac": ("Giac", "Giac"),
+    "lie": ("LiE", "LiE Interpreter"), "r": ("R", "R Interpreter"), "polymake": ("polymake", "Polymake"),
+    "scilab": ("Scilab", "Scilab"), "mwrank": ("mwrank", "Mwrank"), "qepcad": ("QEPCAD", "QEPCAD"),
+}
+for _n, (_label, _sys) in _INTERFACES.items():
+    globals()[_n] = _UnavailableInterface(_label, _sys)
+    __all__.append(_n)
+del _n, _label, _sys
+
+
+def load(filename, *args, **kwds):
+    """Load a file into the session, as Sage's load(): a missing file is
+    Sage's error; reading a file is not available in Sagebrush yet.
+
+    EXAMPLES::
+
+        sage: load("no-such-file.sage")  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        OSError: did not find file 'no-such-file.sage' to load or attach
+        sage: load("setup")  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        FileNotFoundError: [Errno 2] No such file or directory: 'setup.sobj'
+    """
+    import os
+    name = str(filename)
+    root, ext = os.path.splitext(name)
+    if ext in ("", ".sobj"):
+        path = name if ext else name + ".sobj"
+        if not os.path.exists(path):
+            raise FileNotFoundError(2, "No such file or directory", path)
+        raise NotImplementedError("loading a saved object (.sobj) is not available in Sagebrush yet")
+    if not os.path.exists(name):
+        raise OSError("did not find file %r to load or attach" % name)
+    raise NotImplementedError("load() of a file is not available in Sagebrush yet: paste or import its code")
+
+
+def attach(*filenames):
+    """Attach files to the session, as Sage's attach(): a missing file is
+    Sage's error; attaching is not available in Sagebrush yet.
+
+    EXAMPLES::
+
+        sage: attach("no-such-file.sage")  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        OSError: did not find file 'no-such-file.sage' to load or attach
+    """
+    import os
+    for f in filenames:
+        if not os.path.exists(str(f)):
+            raise OSError("did not find file %r to load or attach" % str(f))
+    raise NotImplementedError("attach() is not available in Sagebrush yet")
+
+
+def save(obj, filename=None, *args, **kwds):
+    """Save an object to a file (Sage's .sobj): not available in Sagebrush
+    yet.
+
+    EXAMPLES::
+
+        sage: save(1, "one")  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: save() (Sage's .sobj files) is not available in Sagebrush yet
+    """
+    raise NotImplementedError("save() (Sage's .sobj files) is not available in Sagebrush yet")
+
+
+__all__ += ["load", "attach", "save"]
 
 
 def _install_displayhook():
