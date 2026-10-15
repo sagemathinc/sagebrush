@@ -741,6 +741,11 @@ def _atan_inv(k, W):
     return s
 
 
+# The largest magnitude (log2 |x|) whose trigonometric functions are
+# computed (argument reduction takes pi to that many bits)
+_TRIG_MAX_MAG = 1 << 16
+
+
 def _pi(W):
     key = ("pi", W)
     if key not in _CACHE:
@@ -976,6 +981,10 @@ class RealField_:
     _numeric = True
 
 
+    # (True only for the 53-bit field that holds RR's elements past the
+    # doubles: its arithmetic keeps MP values instead of returning RR)
+    _rr_internal = False
+
     def __init__(self, prec, rnd="RNDN"):
         self._prec, self._rnd = prec, rnd
 
@@ -1182,8 +1191,24 @@ class RealField_:
 
 
 
+_BIG = None
+
+
+def _rr_big_mp(x):
+    """The 53-bit value of x when x is an element of RR past the doubles
+    (lib/_sage_lang.py's _RealBig), else None.  (An isinstance test: a
+    missing attribute's lookup is slow in pyjs, and this is on every path.)"""
+    global _BIG
+    if _BIG is None:
+        import _sage_lang
+        _BIG = _sage_lang._RealBig
+    return x._mp if isinstance(x, _BIG) else None
+
+
 def _to_real(R, x, base=10):
     prec, rnd = R._prec, R._rnd
+    # (an element of RR past the doubles is its 53-bit value, not its float)
+    x = _rr_big_mp(x) or x
     if isinstance(x, RealNumberMP):
         if x._special:
             return RealNumberMP(R, 0, 0, x._special)
@@ -1256,6 +1281,18 @@ def _parse(R, s, base=10):
         n = int(ip or "0", base) * base ** len(fp) + (int(fp, base) if fp else 0)
         q = _F(n, base ** len(fp))
         return _to_real(R, -q if neg else q)
+    m = _re.match(r"^([+-]?)(\d*)(?:\.(\d*))?[eE]([+-]?\d+)$", t)
+    if m and (m.group(2) or m.group(3)) and abs(int(m.group(4))) > 4096:
+        # a large decimal exponent (RR('1e1000000000')): not the exact
+        # rational, whose size is the exponent's, but M 10^E correctly
+        # rounded (Ziv; 10^E is a correctly rounded power, within 2.5 units
+        # of the working field with M's rounding and the product's)
+        fp = m.group(3) or ""
+        M = int((m.group(2) or "0") + fp) * (-1 if m.group(1) == "-" else 1)
+        E = int(m.group(4)) - len(fp)
+        if not M:
+            return RealNumberMP(R, 0, 0) if m.group(1) != "-" else -RealNumberMP(R, 0, 0)
+        return _ziv_eval(R, lambda F: F(M) * (F(10) ** E), overflow=True)
     try:
         q = _F(t)
     except ValueError:
@@ -1506,7 +1543,7 @@ class RealNumberMP:
             prec = digits_to_prec(digits)
         if prec is None:
             prec = 53
-        return RealField(prec)(self) if int(prec) != 53 else _sa().RR(float(self))
+        return RealField(prec)(self) if int(prec) != 53 else _sa().RR(self)
 
     n = N = numerical_approx
 
@@ -1525,6 +1562,11 @@ class RealNumberMP:
     # ---- arithmetic
     def _other(self, o):
         """(o as a RealNumberMP, the field of the result), or (None, None)."""
+        mp = _rr_big_mp(o)
+        if mp is not None:
+            # an element of RR past the doubles: its 53-bit value, the
+            # result in RR when this field is not coarser
+            return mp, (RealField_(53, "RNDN") if self._R._prec > 53 else self._R)
         if isinstance(o, RealNumberMP):
             return o, (o._R if o._R._prec < self._R._prec else self._R)
         if isinstance(o, (int, _F)) or type(o).__name__ in ("Integer", "Rational"):
@@ -1543,8 +1585,11 @@ class RealNumberMP:
         if rev:
             a, b = b, a
         r = _arith(a, b, op, R)
-        if R._prec == 53 and R._rnd == "RNDN":
-            return _sa().RR(float(r))
+        if R._prec == 53 and R._rnd == "RNDN" and not R._rr_internal:
+            # (53 bits to nearest is RR: a double, or past the doubles an RR
+            # element held at 53 bits; the field RR uses internally for that
+            # keeps its MP values)
+            return _sa().RR(r)
         return r
 
     def __add__(self, o): return self._binop(o, "+")
@@ -1598,7 +1643,20 @@ class RealNumberMP:
         if x._m < 0:
             # a negative real to a real power: complex
             return ComplexField(R._prec)(x) ** ComplexField(R._prec)(y)
-        return (y * x.log()).exp()
+        if x._special or y._special or not x._m or x == 1:
+            return (y * x.log()).exp()
+        # exp(y log x), correctly rounded (Ziv): an error d in y log x is a
+        # relative error d in the power, so y log x is computed with as many
+        # more bits as its magnitude has (beyond 2^80 the power is past any
+        # exponent and rounds to an infinity or zero)
+        yf = abs(float(y))
+        lx = abs(x._e + abs(x._m).bit_length()) + 1
+        mag = min(80, max(0, math.ceil(math.log2(yf * lx)) + 2)) if 0 < yf < float("inf") else 80
+
+        def fn(F):
+            H = RealField(F._prec + mag)
+            return F((H(y) * H(x).log()).exp())
+        return _ziv_eval(R, fn, limit=4096, overflow=True)
 
     def __rpow__(self, b):
         return self._R(b) ** self
@@ -1608,6 +1666,7 @@ class RealNumberMP:
         """The sign of self - o, "nan" when unordered, None when o is not a
         number; infinities by their sign (a finite number, however large,
         is below +infinity: no float conversion)."""
+        o = _rr_big_mp(o) or o
         if isinstance(o, RealNumberMP):
             if o._special or self._special:
                 return _cmp_special(self._special, o._special)
@@ -1926,6 +1985,11 @@ class RealNumberMP:
     def _trig_W(self):
         # tiny arguments: sin x is about x, so -log2|x| more fixed-point
         # bits keep the relative precision (sin(2^-300) is not 0)
+        if self._m and not self._special and self._mag() > _TRIG_MAX_MAG:
+            # (reducing x mod pi needs pi to as many bits as x has before
+            # the point: seconds at 2^15, minutes at 2^17)
+            raise NotImplementedError("the sine and cosine of a number of magnitude 2^%d (above 2^%d) are not available in sagebrush yet"
+                                      % (self._mag(), _TRIG_MAX_MAG))
         return self._R._prec + 30 + (max(0, -self._mag()) if self._m else 0)
 
     def _trig(self):
@@ -3102,7 +3166,7 @@ class ComplexNumberMP:
 
 # ------------------------------------------------------------------ symbolic evaluation
 
-def evaluate(expr, prec):
+def evaluate(expr, prec, R=None):
     """The value of a constant symbolic expression to prec bits: a
     RealNumberMP, or a ComplexNumberMP if it is not real.
 
@@ -3112,7 +3176,8 @@ def evaluate(expr, prec):
         sage: evaluate(pi + sqrt(2), 100)  # sagebrush only
         4.5558062159628882872643321075
     """
-    R = RealField(prec) if prec != 53 else RealField_(53, "RNDN")
+    if R is None:
+        R = RealField(prec) if prec != 53 else RealField_(53, "RNDN")
     v = _ev(expr._s, R, prec)
     return v
 
@@ -3169,6 +3234,9 @@ def _ev(s, R, prec):
         return _simplify(r)
     if tag == "pow":
         b, x = args
+        if op[1] == "ce":
+            # e^x is exp(x), as in Sage (not a rounded e to the power x)
+            return _simplify(x.exp())
         # an exact rational exponent of a real base
         if not cx:
             xs = op[2]
@@ -3258,7 +3326,7 @@ def N(x, prec=None, digits=None):
         v = evaluate(x, prec + 20)
         if isinstance(v, ComplexNumberMP):
             return ComplexField(prec)(v) if prec != 53 else _sa().CC(complex(v))
-        return RealField(prec)(v) if prec != 53 else _sa().RR(float(v))
+        return RealField(prec)(v) if prec != 53 else _sa().RR(v)
     if isinstance(x, (RealNumberMP, ComplexNumberMP)):
         return x.n(prec)
     return RealField(prec)(x)
