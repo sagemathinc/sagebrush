@@ -9570,5 +9570,7 @@ def _handle_blocks(v):
 import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
 import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)
 import _matlab_data  # noqa: E402,F401  (data analysis and signal functions)
+import _matlab_ode  # noqa: E402,F401  (odeset, odeget, ode45, ode23, deval)
+import _matlab_funfun  # noqa: E402,F401  (function functions: optimization options and solvers)
 import _matlab_eigs  # noqa: E402,F401  (eigs)
 import _matlab_special  # noqa: E402,F401  (special functions)
