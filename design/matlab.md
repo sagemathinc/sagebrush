@@ -569,6 +569,16 @@ A notebook cell, or a Jupyter cell, is translated in cell mode
   `cell_error()` tell the host.
 - Function files (`name.m`) load through the same host operation as in the
   CLI, where there is a file system.
+- The search box finds MATLAB's built-ins (lib/_matlab_docsearch.py,
+  docs-index-matlab.json), with a short example for the most used ones
+  (lib/_matlab_examples.py): one to three lines written for Sagebrush,
+  shown after MATLAB's prompt `>>` with the output Sagebrush prints, and
+  insertable into a new cell. test/matlab-doc-examples.test.ts runs every
+  example and compares its output exactly; matlab-tests/test_doc_examples.m
+  (made by matlab-tests/doc_examples.py --octave) compares the values they
+  make with Octave's, except where Octave lacks the function or knowingly
+  differs (doc_examples.py's OCTAVE_SKIP, with the reason).
+  `doc_examples.py --update` rewrites the outputs after a display change.
 
 ## Published examples as a test
 
