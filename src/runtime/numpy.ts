@@ -1654,15 +1654,23 @@ function squeezeMatmul(out: NDArray, a: NDArray, b: NDArray, ct: DType): any {
 
 // ------------------------------------------------------------------ printing (NumPy's arrayprint)
 
-export const printopts = Obj.table({ precision: 8, threshold: 1000, edgeitems: 3, linewidth: 75, suppress: false, sign: "-" });
+export const printopts = Obj.table({
+  precision: 8, threshold: 1000, edgeitems: 3, linewidth: 75, suppress: false, sign: "-",
+  floatmode: "maxprec", nanstr: "nan", infstr: "inf",
+  // formatter's functions by kind (bool, int, float, complex), resolved from
+  // the formatter dict (lib/numpy set_printoptions); override_repr
+  fmt: { b: null, i: null, f: null, c: null } as Record<string, any>,
+  overrideRepr: null as any,
+});
 
 // Shortest round-trip digits of x: [digits, exponent] with x = 0.d1d2... * 10^exp
 // (round-tripping through float32 while a float32 array is being printed).
 let printingF32 = false;
-function shortestDigits(x: number): [string, number] {
-  const s = printingF32 ? shortestF32(Math.abs(x)) : Math.abs(x).toExponential();
+function shortestDigits(x: number, f32 = printingF32): [string, number] {
+  if (x === 0) return ["", 0];
+  const s = f32 ? shortestF32(Math.abs(x)) : Math.abs(x).toExponential();
   const [m, e] = s.split("e");
-  return [m.replace(".", ""), Number(e) + 1];
+  return [m.replace(".", "").replace(/0+$/, ""), Number(e) + 1];
 }
 function shortestF32(x: number): string {
   for (let p = 1; p < 10; p++) {
@@ -1671,124 +1679,342 @@ function shortestF32(x: number): string {
   }
   return x.toExponential(8);
 }
-
-// np.format_float_positional with unique=True, fractional=True.
-function positional(x: number, precision: number, trimZeros: boolean, minDigits = 0): string {
-  if (x === 0) {
-    const neg = Object.is(x, -0) ? "-" : "";
-    return neg + "0." + "0".repeat(minDigits);
-  }
-  const [digits, exp] = shortestDigits(x);
-  let frac = Math.max(0, digits.length - exp);
-  let s: string;
-  if (frac > precision) {
-    s = Math.abs(x).toFixed(precision);
-    frac = precision;
-  } else {
-    const intPart = exp > 0 ? (digits.slice(0, exp) + "0".repeat(Math.max(0, exp - digits.length))) : "0";
-    const fracPart = exp >= 0 ? digits.slice(exp) : "0".repeat(-exp) + digits;
-    s = intPart + "." + fracPart;
-  }
-  if (!s.includes(".")) s += ".";
-  let [ip, fp] = s.split(".");
-  if (trimZeros) fp = fp.replace(/0+$/, "");
-  if (fp.length < minDigits) fp = fp + "0".repeat(minDigits - fp.length);
-  return (x < 0 ? "-" : "") + ip + "." + fp;
+// The exact decimal digits of |x| (a double is a dyadic rational): [digits,
+// exponent] as above, without trailing zeros.
+const dv64 = new DataView(new ArrayBuffer(8));
+function exactDigits(x: number): [string, number] {
+  x = Math.abs(x);
+  if (x === 0) return ["", 0];
+  dv64.setFloat64(0, x);
+  const hi = dv64.getUint32(0), lo = dv64.getUint32(4), be = (hi >>> 20) & 0x7ff;
+  let m = (BigInt(hi & 0xfffff) << 32n) | BigInt(lo);
+  let e2: number;
+  if (be === 0) e2 = -1074;
+  else { m |= 1n << 52n; e2 = be - 1075; }
+  let s: string, exp: number;
+  if (e2 >= 0) { s = (m << BigInt(e2)).toString(); exp = s.length; }
+  else { s = (m * 5n ** BigInt(-e2)).toString(); exp = s.length + e2; }
+  return [s.replace(/0+$/, ""), exp];
 }
-// np.format_float_scientific with unique=True: mantissa digits, exponent.
-function scientific(x: number, precision: number, minDigits: number, expDigits: number): string {
-  if (x === 0) return (Object.is(x, -0) ? "-" : "") + "0." + "0".repeat(minDigits) + "e+" + "0".repeat(Math.max(2, expDigits));
-  let [digits, exp] = shortestDigits(x);
-  if (digits.length - 1 > precision) {
-    const t = Math.abs(x).toExponential(precision);
-    const [m, e] = t.split("e");
-    digits = m.replace(".", "");
-    exp = Number(e) + 1;
+// digits (of an exact value) cut to their first n, rounding half to even,
+// as NumPy's Dragon4 does: rounding down keeps the digits generated (zeros
+// too: 1.04 to one place is 1.0), rounding up drops the 9s it carries
+// through (1.96 is 2.), and may add a digit in front (exp + 1); 0 is ["", 0]
+function roundDigits(digits: string, exp: number, n: number): [string, number] {
+  if (n >= digits.length) return [digits, exp];
+  if (n <= 0 && !(n === 0 && (digits[0] > "5" || (digits[0] === "5" && digits.length > 1)))) return ["", 0];
+  const keep = digits.slice(0, n), rest = digits.slice(n);
+  const up = rest[0] > "5" || (rest[0] === "5" && (rest.length > 1 || (keep.length > 0 && Number(keep[keep.length - 1]) % 2 === 1)));
+  if (!up) return [keep, exp];
+  let i = keep.length - 1;
+  while (i >= 0 && keep[i] === "9") i--;
+  if (i < 0) return ["1", exp + 1];
+  return [keep.slice(0, i) + String(Number(keep[i]) + 1), exp];
+}
+
+export type Trim = "k" | "." | "0" | "-";
+interface Dragon4 { precision: number | null; unique: boolean; trim: Trim; sign: boolean; padLeft?: number | null; padRight?: number | null; minDigits?: number | null; f32?: boolean }
+// the digits of |x| per NumPy's unique/precision rules; n(exp) is the number of
+// digits a precision allows, given the exponent
+// (and whether a value that is not 0 rounded to 0: NumPy then prints the
+// precision's zeros, 0.00, even in unique mode)
+// In unique mode, min_digits makes Dragon4 go on past the shortest digits to
+// its place, with the exact value's digits (0.3 to 20 places is
+// 0.29999999999999998890, and a large number's integer digits are exact),
+// and zeros once those run out.  nMin(exp): the digits min_digits asks for.
+// Dragon4 never writes more than `room` digits (its output buffer).
+function digitsOf(x: number, o: Dragon4, n: (exp: number) => number, nMin: (exp: number) => number, room: number): [string, number, boolean] {
+  const e = exactDigits(x);
+  const cut = (k: number, pad = false): [string, number, boolean] => {
+    const r = roundDigits(e[0], e[1], k);
+    return [pad && r[0].length < k ? r[0].padEnd(k, "0") : r[0], r[1], r[0] === "" && e[0] !== ""];
+  };
+  const most = (exp: number) => Math.min(o.precision === null ? Infinity : n(exp), room);
+  if (o.unique) {
+    const s = shortestDigits(x, !!o.f32);
+    if (s[0].length > most(s[1])) return cut(most(e[1]));
+    if (o.minDigits != null && s[0].length < Math.min(nMin(s[1]), room)) return cut(Math.min(nMin(e[1]), room), true);
+    return [s[0], s[1], false];
   }
-  let frac = digits.slice(1).replace(/0+$/, "");
-  if (frac.length < minDigits) frac += "0".repeat(minDigits - frac.length);
-  const e = exp - 1;
-  const es = String(Math.abs(e)).padStart(Math.max(2, expDigits), "0");
-  return (x < 0 ? "-" : "") + digits[0] + "." + frac + "e" + (e < 0 ? "-" : "+") + es;
+  return o.precision === null ? [e[0], e[1], false] : cut(most(e[1]));
+}
+function nonFinite(x: number, sign: boolean): string {
+  return x !== x ? "nan" : x < 0 ? "-inf" : sign ? "+inf" : "inf";
+}
+const signOf = (x: number, sign: boolean) => (x < 0 || Object.is(x, -0) ? "-" : sign ? "+" : "");
+// The digits Dragon4 outputs, as [digits, exp] with value 0.d1d2... * 10^exp:
+// 0 is one digit 0 (at 10^0), and a value that rounds to 0 at a fraction
+// precision p a 0 at 10^-p (NumPy then prints 0.00).
+function dragonDigits(x: number, o: Dragon4, n: (exp: number) => number, nMin: (exp: number) => number, p: number, room: number): [string, number] {
+  if (x === 0) return ["0", 1];
+  const [d, e, toZero] = digitsOf(x, o, n, nMin, room);
+  return toZero ? ["0", 1 - p] : [d, e];
+}
+// NumPy formats into a buffer of DRAGON4_BUFFER chars (with the NUL): the two
+// formatters below follow dragon4.c's arithmetic on it, so a result that would
+// not fit is refused or cut exactly where NumPy refuses or cuts it.
+const DRAGON4_BUFFER = 16384;
+const tooLarge = () => raise(T.RuntimeError, "Float formatting result too large");
+// np.format_float_positional: NumPy's FormatPositional (dragon4.c)
+export function dragon4Positional(x: number, o: Dragon4 & { fractional?: boolean }): string {
+  if (!Number.isFinite(x)) return nonFinite(x, o.sign);
+  const fractional = o.fractional !== false;
+  const p = o.precision ?? 0;
+  const minDigits = o.minDigits ?? -1, left = o.padLeft ?? -1, right = o.padRight ?? -1;
+  const max = DRAGON4_BUFFER - 1;
+  const buf: string[] = [];
+  let pos = 0;
+  const sign = signOf(x, o.sign);
+  const hasSign = sign ? 1 : 0;
+  if (sign) buf[pos++] = sign;
+  const [digits, exp] = dragonDigits(x, o, (e) => (fractional ? e + p : p), (e) => (fractional ? e : 0) + (o.minDigits ?? 0), p, max - hasSign);
+  let numDigits = digits.length, numWhole: number, numFrac = 0;
+  if (exp > 0) {
+    numWhole = exp;
+    if (numDigits <= numWhole) {
+      for (let i = 0; i < numDigits; i++) buf[pos++] = digits[i];
+      const count = numWhole - numDigits;
+      if (count > max - pos) tooLarge();
+      for (let i = 0; i < count; i++) buf[pos++] = "0";
+    } else {
+      numFrac = Math.min(numDigits - numWhole, max - numWhole - 1 - pos);
+      for (let i = 0; i < numWhole; i++) buf[pos++] = digits[i];
+      buf[pos++] = ".";
+      for (let i = 0; i < numFrac; i++) buf[pos++] = digits[numWhole + i];
+    }
+  } else {
+    if (pos + 2 < max) {
+      const zeros = Math.min(-exp, max - 2 - pos);
+      const start = 2 + zeros;
+      const nd = Math.min(numDigits, max - start - pos);
+      for (let i = 0; i < zeros; i++) buf[pos + 2 + i] = "0";
+      for (let i = 0; i < nd; i++) buf[pos + start + i] = digits[i];
+      numFrac = nd + zeros;
+    }
+    if (pos + 1 < max) buf[pos + 1] = ".";
+    if (pos < max) buf[pos] = "0";
+    numWhole = 1;
+    pos += 2 + numFrac;
+  }
+  if (o.trim !== "-" && numFrac === 0 && pos < max) buf[pos++] = ".";
+  const add = o.unique ? minDigits : (o.precision ?? -1);
+  const desired = fractional ? Math.max(add, 0) : add - numWhole;
+  if (o.trim === "0") {
+    if (numFrac === 0 && pos < max) { buf[pos++] = "0"; numFrac++; }
+  } else if (o.trim === "k" && desired > numFrac && pos < max) {
+    const count = desired - numFrac;
+    if (count > max - pos) tooLarge();
+    for (let i = 0; i < count; i++) buf[pos++] = "0";
+    numFrac += count;
+  }
+  if (o.trim !== "k" && numFrac > 0) {
+    while (buf[pos - 1] === "0") { pos--; numFrac--; }
+    if (buf[pos - 1] === ".") {
+      if (o.trim === "0") { buf[pos++] = "0"; numFrac++; }
+      else if (o.trim === "-") pos--;
+    }
+  }
+  if (right >= numFrac) {
+    const count = right - numFrac;
+    if (o.trim === "-" && numFrac === 0 && pos < max) buf[pos++] = " ";
+    if (count > max - pos) tooLarge();
+    for (let i = 0; i < count; i++) buf[pos++] = " ";
+  }
+  let out = buf.slice(0, pos).join("");
+  if (left > numWhole + hasSign) {
+    const shift = left - (numWhole + hasSign);
+    if (pos > max - shift) tooLarge();
+    out = " ".repeat(shift) + out;
+  }
+  return out;
+}
+// np.format_float_scientific: NumPy's FormatScientific (dragon4.c), with its
+// buffer bookkeeping as it is (the zeros added for a precision are not counted
+// against the room left, so a long result can end past the buffer's size)
+export function dragon4Scientific(x: number, o: Dragon4 & { expDigits?: number | null }): string {
+  if (!Number.isFinite(x)) return nonFinite(x, o.sign);
+  const p = o.precision ?? 0;
+  const left = o.padLeft ?? -1;
+  const buf: string[] = [];
+  let at = 0, room = DRAGON4_BUFFER;
+  const sign = signOf(x, o.sign);
+  const leftChars = 1 + (sign ? 1 : 0);
+  for (let i = 0; i < left - leftChars && room > 1; i++) { buf[at++] = " "; room--; }
+  if (sign && room > 1) { buf[at++] = sign; room--; }
+  // Dragon4 gets min_digits + 1 as a C int: from 2**31 - 1 that wraps to a
+  // negative, no minimum at all (the zeros are still added below)
+  const dragon = o.minDigits != null && o.minDigits >= 2147483647 ? { ...o, minDigits: null } : o;
+  const [digits, exp] = dragonDigits(x, dragon, () => p + 1, () => (o.minDigits ?? 0) + 1, p, room);
+  const e = x === 0 ? 0 : exp - 1;
+  for (let i = 0; i < digits.length; i++) buf[at + i] = digits[i];
+  if (room > 1) { at++; room--; }
+  let numFrac = digits.length - 1;
+  if (numFrac > 0 && room > 1) {
+    numFrac = Math.min(numFrac, room - 2);
+    for (let i = numFrac; i > 0; i--) buf[at + i] = buf[at + i - 1];
+    buf[at] = ".";
+    at += 1 + numFrac;
+    room -= 1 + numFrac;
+  }
+  if (o.trim !== "-" && numFrac === 0 && room > 1) { buf[at++] = "."; room--; }
+  const add = Math.max(o.unique ? (o.minDigits ?? -1) : p, 0);
+  if (o.trim === "0") {
+    if (numFrac === 0 && room > 1) { buf[at++] = "0"; room--; numFrac++; }
+  } else if (o.trim === "k" && add > numFrac) {
+    const zeros = Math.min(add - numFrac, room - 1);
+    for (let i = 0; i < zeros; i++) buf[at++] = "0";
+    numFrac += zeros;
+  }
+  if (o.trim !== "k" && numFrac > 0) {
+    at--;
+    while (buf[at] === "0") { at--; room++; numFrac--; }
+    if (o.trim === "0" && buf[at] === ".") { buf[++at] = "0"; room--; numFrac++; }
+    at++;
+  }
+  if (room > 1) {
+    let ed = o.expDigits ?? -1;
+    if (ed > 5) ed = 5;
+    if (ed < 0) ed = 2;
+    // at least ed digits, without leading zeros past them (exponent 0 with
+    // exp_digits=0 has no digits at all)
+    const digs = e === 0 ? "0".repeat(ed) : String(Math.abs(e)).padStart(ed, "0");
+    const text = ("e" + (e < 0 ? "-" : "+") + digs).slice(0, room - 1);
+    for (const c of text) buf[at++] = c;
+  }
+  return buf.slice(0, at).join("");
+}
+// (the array printer's former helpers, on Dragon4)
+function positional(x: number, precision: number, trimZeros: boolean, minDigits = 0): string {
+  return dragon4Positional(x, { precision, unique: true, trim: trimZeros ? "." : "k", sign: false, minDigits });
 }
 
 type Fmt = (x: number) => string;
-function floatFormatter(vals: number[], signPlus = false): Fmt {
+// NumPy's FloatingFormat (numpy/_core/arrayprint.py, legacy=False): one
+// format for the values shown, by floatmode, suppress and sign.  signMode
+// is the sign option ("-", "+" or " "); the imaginary parts use "+".
+function floatFormatter(vals: number[], signMode = printopts.sign as string): Fmt {
   const finite = vals.filter((v) => Number.isFinite(v));
   const abs = finite.map(Math.abs).filter((v) => v !== 0);
-  const prec = printopts.precision;
+  const floatmode = printopts.floatmode as string;
+  let precision: number | null = floatmode === "unique" ? null : printopts.precision;
+  // NumPy hands the precision to Dragon4 as a C int (lib/numpy passes 2**31
+  // or 2**63 for any precision that large)
+  if (precision !== null && finite.length && precision > 2147483647) {
+    raise(T.OverflowError, `Python int too large to convert to C ${precision >= 2 ** 63 ? "long" : "int"}`);
+  }
   let expFormat = false;
   if (abs.length) {
     const mx = Math.max(...abs), mn = Math.min(...abs);
     if (mx >= 1e8 || (!printopts.suppress && (mn < 0.0001 || mx / mn > 1000))) expFormat = true;
   }
-  const sign = (s: string) => (signPlus && !s.startsWith("-") ? "+" + s : s);
-  let padLeft = 0, padRight = 0;
-  let precision = prec, expSize = 0;
-  if (finite.length && expFormat) {
-    const strs = finite.map((v) => scientific(v, prec, 0, 2));
-    const fracs = strs.map((s) => s.split("e")[0].split(".")[1]);
-    const ints = strs.map((s) => sign(s).split(".")[0]);
-    const exps = strs.map((s) => s.split("e")[1]);
-    expSize = Math.max(...exps.map((e) => e.length)) - 1;
+  const plus = signMode === "+";
+  const f32 = printingF32;
+  let padLeft = 0, padRight = 0, expSize = -1, trim: Trim = ".", unique = true, minDigits: number | null = 0;
+  if (finite.length === 0) {
+    trim = "."; unique = true; minDigits = null;
+  } else if (expFormat) {
+    const fixed = floatmode === "fixed";
+    const strs = finite.map((v) => dragon4Scientific(v, { precision, unique: !fixed, trim: fixed ? "k" : ".", sign: plus, f32 }));
+    const parts = strs.map((s) => s.split("e"));
+    const ints = parts.map((p) => p[0].split(".")[0]);
+    const fracs = parts.map((p) => p[0].split(".")[1] ?? "");
+    expSize = Math.max(...parts.map((p) => p[1].length)) - 1;
+    trim = "k";
     precision = Math.max(...fracs.map((f) => f.length));
+    minDigits = precision;
+    unique = !fixed;
     padLeft = Math.max(...ints.map((s) => s.length));
     padRight = expSize + 2 + precision;
-  } else if (finite.length) {
-    const strs = finite.map((v) => sign(positional(v, prec, true)));
+  } else {
+    const fixed = floatmode === "fixed";
+    const strs = finite.map((v) => dragon4Positional(v, { precision, unique: !fixed, trim: fixed ? "k" : ".", sign: plus, f32 }));
     padLeft = Math.max(...strs.map((s) => s.split(".")[0].length));
-    padRight = Math.max(...strs.map((s) => s.split(".")[1].length));
+    padRight = Math.max(...strs.map((s) => s.split(".")[1]?.length ?? 0));
+    unique = !fixed;
+    if (fixed || floatmode === "maxprec_equal") {
+      precision = minDigits = padRight;
+      trim = "k";
+    } else {
+      trim = ".";
+      minDigits = 0;
+    }
   }
-  // room for nan and inf (FloatingFormat.fillFormat)
+  // sign " ": room for a sign that is not there
+  if (signMode === " " && !finite.some((v) => v < 0 || Object.is(v, -0))) padLeft += 1;
+  const nanstr = String(printopts.nanstr), infstr = String(printopts.infstr);
   if (finite.length !== vals.length) {
-    const neginf = signPlus || vals.some((v) => v === -Infinity) ? 1 : 0;
+    const neginf = signMode !== "-" || vals.some((v) => v === -Infinity) ? 1 : 0;
     const offset = padRight + 1;
-    padLeft = Math.max(padLeft, 3 - offset, 3 + neginf - offset);
+    padLeft = Math.max(padLeft, nanstr.length - offset, infstr.length + neginf - offset);
   }
   const width = padLeft + padRight + 1;
-  const fmt: Fmt = expFormat
-    ? (x) => {
-        const s = sign(scientific(x, precision, precision, expSize));
-        const [ip, rest] = s.split(".");
-        return ip.padStart(padLeft) + "." + rest.padEnd(padRight);
-      }
-    : (x) => {
-        const s = sign(positional(x, prec, true));
-        const [ip, fp] = s.split(".");
-        return ip.padStart(padLeft) + "." + fp.padEnd(padRight);
-      };
+  const o = { precision, unique, trim, sign: plus, padLeft, minDigits, f32 };
   return (x) => {
-    if (Number.isFinite(x)) return fmt(x);
-    const s = x !== x ? (signPlus ? "+nan" : "nan") : x > 0 ? (signPlus ? "+inf" : "inf") : "-inf";
-    return s.padStart(width);
+    // fitted to no finite values, NumPy's FloatingFormat has min_digits None,
+    // which Dragon4 refuses for a finite one (edgeitems <= 0 can show one)
+    if (finite.length === 0 && Number.isFinite(x)) raise(T.TypeError, "'NoneType' object cannot be interpreted as an integer");
+    if (!Number.isFinite(x)) {
+      const s = x !== x ? (plus ? "+" : "") + nanstr : (x < 0 ? "-" : plus ? "+" : "") + infstr;
+      return s.padStart(width);
+    }
+    if (expFormat) return dragon4Scientific(x, { ...o, expDigits: expSize });
+    return dragon4Positional(x, { ...o, padRight });
   };
 }
 
-function elementFormatter(a: NDArray, items: number[] | [number, number][]): (i: number) => string {
+// NumPy's IntegerFormat, with the sign option
+function intFormatter(strs: string[], signMode: string): (s: string) => string {
+  if (!strs.length) return (s) => (signMode !== "-" && !s.startsWith("-") ? (signMode === "+" ? "+" : " ") + s : s);
+  const neg = strs.some((s) => s.startsWith("-"));
+  const mode = signMode === " " && neg ? "-" : signMode;
+  const nums = strs.map((s) => BigInt(s));
+  let max = nums[0], min = nums[0];
+  for (const v of nums) { if (v > max) max = v; if (v < min) min = v; }
+  let w = String(max).length;
+  if (max >= 0n && (mode === "+" || mode === " ")) w += 1;
+  w = Math.max(w, String(min).length);
+  return (s) => (mode !== "-" && !s.startsWith("-") ? (mode === "+" ? "+" : " ") + s : s).padStart(w);
+}
+
+// The formatter for an array's elements, by their positions in a.data: its
+// widths come from the elements at `positions`.
+function elementFormatter(a: NDArray, positions: number[]): (p: number) => string {
   const dt = a.dt;
+  // a formatter function for the kind: called with each element (as a NumPy scalar)
+  const user = printopts.fmt[dt.cplx ? "c" : dt.kind === "b" ? "b" : dt.isInt ? "i" : "f"];
+  if (user) return (p) => F.str(Obj.callObj(user, [pyScalarOf(dt, a.data, p)]));
   if (dt.kind === "b") {
-    const vals = items as number[];
     const w = a.ndim === 0 ? 0 : 5; // NumPy's BoolFormat: " True" in arrays
-    return (i) => (vals[i] ? "True" : "False").padStart(w);
+    return (p) => (a.data[p] ? "True" : "False").padStart(w);
   }
   if (dt.isInt) {
-    const strs = (items as number[]).map((v) => String(Number.isSafeInteger(v) ? v : BigInt(v)));
-    const w = Math.max(0, ...strs.map((s) => s.length));
-    return (i) => strs[i].padStart(w);
+    const str = (p: number) => {
+      const v = a.data[p] as number;
+      return String(Number.isSafeInteger(v) ? v : BigInt(v));
+    };
+    const f = intFormatter(positions.map(str), printopts.sign as string);
+    return (p) => f(str(p));
   }
   if (dt.cplx) {
-    const pairs = items as [number, number][];
-    const rf = floatFormatter(pairs.map((p) => p[0]));
-    const imf = floatFormatter(pairs.map((p) => p[1]), true);
-    return (i) => {
-      const r = rf(pairs[i][0]);
-      const im = imf(pairs[i][1]);
+    const rf = floatFormatter(positions.map((p) => a.data[2 * p] as number));
+    const imf = floatFormatter(positions.map((p) => a.data[2 * p + 1] as number), "+");
+    return (p) => {
+      const r = rf(a.data[2 * p] as number);
+      const im = imf(a.data[2 * p + 1] as number);
       const sp = im.trimEnd().length;
       return r + im.slice(0, sp) + "j" + " ".repeat(im.length - sp);
     };
   }
-  const f = floatFormatter(items as number[]);
-  return (i) => f((items as number[])[i]);
+  const f = floatFormatter(positions.map((p) => a.data[p] as number));
+  return (p) => f(a.data[p] as number);
+}
+
+// The indices of range(n)[start:stop], with Python's slice rules
+function sliceRange(n: number, start: number, stop: number): number[] {
+  const at = (i: number) => (i < 0 ? Math.max(n + i, 0) : Math.min(i, n));
+  const out: number[] = [];
+  for (let i = at(start); i < at(stop); i++) out.push(i);
+  return out;
 }
 
 // The text of an array's elements: a port of NumPy's _formatArray and
@@ -1805,21 +2031,41 @@ export function arrayText(a: NDArray, sep: string, prefix: string, suffix = ""):
 function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): string {
   const summarize = a.size > printopts.threshold;
   const edge = printopts.edgeitems;
-  // the elements shown, in order, for one shared formatter
-  const shown: number[] = [];
-  const collect = (d: number, off: number) => {
+  // the elements the formatter is fitted to: NumPy's _leading_trailing,
+  // a[:edge] and a[-edge:] along each axis (with edgeitems <= 0 these are
+  // slices of most or all of it)
+  const fitted: number[] = [];
+  const fit = (d: number, off: number) => {
     const n = a.shape[d];
-    const idx = summarize && n > 2 * edge ? [...Array(edge).keys(), ...Array.from({ length: edge }, (_, i) => n - edge + i)] : [...Array(n).keys()];
+    const idx = summarize && n > 2 * edge ? [...sliceRange(n, 0, edge), ...sliceRange(n, -edge, n)] : sliceRange(n, 0, n);
     for (const i of idx) {
-      if (d === a.ndim - 1) shown.push(off + i * a.strides[d]);
-      else collect(d + 1, off + i * a.strides[d]);
+      if (d === a.ndim - 1) fitted.push(off + i * a.strides[d]);
+      else fit(d + 1, off + i * a.strides[d]);
     }
   };
-  if (a.ndim === 0) shown.push(a.offset);
-  else collect(0, a.offset);
-  const vals: any[] = a.dt.cplx ? shown.map((p) => [a.data[2 * p], a.data[2 * p + 1]]) : shown.map((p) => a.data[p]);
-  const fmt = elementFormatter(a, vals);
-  if (a.ndim === 0) return fmt(0);
+  // the elements shown, in the order rec shows them (NumPy's _formatArray):
+  // the leading ones, the trailing ones and always the last
+  const shown: number[] = [];
+  const showIdx = (n: number) => {
+    const sum = summarize && 2 * edge < n;
+    const idx: number[] = [];
+    for (let i = 0; i < (sum ? edge : 0); i++) idx.push(i);
+    for (let i = sum ? edge : n; i > 1; i--) idx.push(n - i);
+    idx.push(n - 1);
+    return idx;
+  };
+  const show = (d: number, off: number) => {
+    for (const i of showIdx(a.shape[d])) {
+      if (d === a.ndim - 1) shown.push(off + i * a.strides[d]);
+      else show(d + 1, off + i * a.strides[d]);
+    }
+  };
+  if (a.ndim === 0) fitted.push(a.offset);
+  else fit(0, a.offset);
+  const fmtAt = elementFormatter(a, fitted);
+  if (a.ndim === 0) return fmtAt(a.offset);
+  show(0, a.offset);
+  const fmt = (i: number) => fmtAt(shown[i]);
   let pos = 0;
   const lineWidth = printopts.linewidth - suffix.length;
   const nextLinePrefix = " " + " ".repeat(prefix.length);
@@ -1870,7 +2116,13 @@ function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): st
   return rec(0, nextLinePrefix, lineWidth);
 }
 
-export function arrayRepr(a: NDArray): string {
+export function arrayRepr(a: NDArray, override = true): string {
+  // np.set_printoptions(override_repr=f): repr(array) is f(array)
+  if (override && printopts.overrideRepr) {
+    const r = Obj.callObj(printopts.overrideRepr, [a]);
+    if (typeof r !== "string") raise(T.TypeError, `__repr__ returned non-string (type ${Obj.typeName(r)})`);
+    return r;
+  }
   const skipDtype = a.dt === D.float64 || a.dt === D.int64 || a.dt === D.bool || a.dt === D.complex128;
   if (a.size === 0) {
     const sh = a.ndim === 1 ? "" : `shape=${shapeStr(a.shape).replace(/,/g, ", ").replace(", )", ",)")}, `;
@@ -1889,6 +2141,8 @@ export function arrayRepr(a: NDArray): string {
 }
 export function arrayStr(a: NDArray): string {
   if (a.size === 0) return "[]";
+  // a 0-d array prints as its element does
+  if (a.ndim === 0) return F.str(pyScalarOf(a.dt, a.data, a.offset));
   return arrayText(a, " ", "");
 }
 
@@ -2403,14 +2657,35 @@ newBuiltinModule("_numpy", (m) => {
     typeDtypes.set(cls, D[name]);
     return null;
   });
-  fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any) => {
-    if (precision !== null) printopts.precision = Number(precision);
-    if (threshold !== null) printopts.threshold = Number(threshold);
-    if (edgeitems !== null) printopts.edgeitems = Number(edgeitems);
-    if (linewidth !== null) printopts.linewidth = Number(linewidth);
-    if (suppress !== null) printopts.suppress = !!suppress;
+  // (lib/numpy's set_printoptions validates and passes every option)
+  fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, overrideRepr: any) => {
+    printopts.precision = Number(precision);
+    printopts.threshold = Number(threshold);
+    printopts.edgeitems = Number(edgeitems);
+    printopts.linewidth = Number(linewidth);
+    printopts.suppress = O.truth(suppress);
+    printopts.sign = String(sign);
+    printopts.floatmode = String(floatmode);
+    printopts.nanstr = String(nanstr);
+    printopts.infstr = String(infstr);
+    printopts.fmt = { b: fb, i: fi, f: ff, c: fc };
+    printopts.overrideRepr = overrideRepr;
     return null;
   });
+  // np.array2string's text (prefix: what the first line follows, for the indent)
+  fn("array_text", (a: any, sep: any, prefix: any, suffix: any) => {
+    const arr = asarray(a);
+    if (arr.size === 0) return "[]";
+    return arrayText(arr, String(sep), String(prefix), String(suffix));
+  });
+  fn("array_repr", (a: any) => arrayRepr(asarray(a), false));
+  fn("array_str", (a: any) => arrayStr(asarray(a)));
+  const trimOf = (t: any): Trim => t as Trim;
+  const optInt = (v: any) => (v === null || v === undefined ? null : Number(v));
+  fn("format_float_positional", (x: any, precision: any, unique: any, fractional: any, trim: any, sign: any, padLeft: any, padRight: any, minDigits: any, f32: any) =>
+    dragon4Positional(toNum(x), { precision: optInt(precision), unique: O.truth(unique), fractional: O.truth(fractional), trim: trimOf(trim), sign: O.truth(sign), padLeft: optInt(padLeft), padRight: optInt(padRight), minDigits: optInt(minDigits), f32: O.truth(f32) }));
+  fn("format_float_scientific", (x: any, precision: any, unique: any, trim: any, sign: any, padLeft: any, expDigits: any, minDigits: any, f32: any) =>
+    dragon4Scientific(toNum(x), { precision: optInt(precision), unique: O.truth(unique), trim: trimOf(trim), sign: O.truth(sign), padLeft: optInt(padLeft), expDigits: optInt(expDigits), minDigits: optInt(minDigits), f32: O.truth(f32) }));
   fn("printopt", (k: string) => (typeof k === "string" && Object.hasOwn(printopts, k) ? (printopts as any)[k] : null));
   fn("format_float", (x: any) => positional(toNum(x), printopts.precision, true));
   fn("format_f32", (x: any) => {

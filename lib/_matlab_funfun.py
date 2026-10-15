@@ -314,7 +314,11 @@ def _fzero_search(F, x0, show, outs):
     k = 0
     while True:
         k += 1
-        step = R(_math.ldexp(dx, k // 2) * (_math.sqrt(2) if k % 2 else 1.0))
+        try:
+            step = R(_math.ldexp(dx, k // 2) * (_math.sqrt(2) if k % 2 else 1.0))
+        except OverflowError:
+            # (math.ldexp raises, as CPython's, beyond the doubles: out of range, below)
+            step = _math.inf
         na, nb = R(x0 - step), R(x0 + step)
         if not (_math.isfinite(na) and _math.isfinite(nb)):
             return a, fa, b, fb, k - 1, -6, None, None
