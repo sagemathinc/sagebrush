@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync } from "fs";
 import { boardFromText } from "../web/board/mermaid";
 import { boardSvg } from "../web/board/svg";
-import { formatError, pageCount } from "../web/board/doc";
+import { badPictureNames, formatError, pageCount } from "../web/board/doc";
 import { oneLine } from "./terminal-text";
 
 const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
@@ -21,6 +21,16 @@ const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
 /** The command line as a reader of boards, in what it says of one it can't
  * read: which sagebrush refused it, and what to do (formatError). */
 export const CLI_READER = { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" };
+
+/** What the command line says of a board's pictures whose names the board
+ * leaves out (doc.ts badPictureNames): the rule, and the names, so that
+ * whoever wrote the board can rename them; null if there are none. */
+export function pictureWarning(d: unknown): string | null {
+  const bad = badPictureNames(d);
+  if (!bad.length) return null;
+  const shown = bad.slice(0, 10).map((n) => JSON.stringify(n.length > 60 ? n.slice(0, 60) + "…" : n));
+  return oneLine(`pictures left out: a picture's name is letters, digits, _ and -, at most 100 characters (plot-1, not "plot 1" or "figure.png"), and ${bad.length === 1 ? "this one is" : "these are"} not: ${shown.join(", ")}${bad.length > 10 ? `, and ${bad.length - 10} more` : ""}`);
+}
 
 /** The `board` command; returns the exit code. */
 export async function boardCommand(argv: string[]): Promise<number> {
@@ -54,6 +64,9 @@ export async function boardCommand(argv: string[]): Promise<number> {
     process.stderr.write(`sagebrush board render: ${oneLine(String(file))}: ${oneLine(String(e?.message ?? e))}\n`);
     return 1;
   }
+  // (pictures the board leaves out for their names: said, so they can be renamed)
+  const pics = pictureWarning(doc);
+  if (pics) process.stderr.write(`sagebrush board render: ${pics}\n`);
   const pages = pageCount(doc);
   if (!Number.isInteger(page) || page < 1 || page > pages) { process.stderr.write(`sagebrush board render: --page: from 1 to ${pages}\n`); return 2; }
   const { svg, left, overflow } = boardSvg(doc, { page: page - 1 });
