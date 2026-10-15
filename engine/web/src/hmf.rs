@@ -268,4 +268,29 @@ mod tests {
         let r = call(r#"{"fn":"hmf_weight_dimension","level":[[3,1]],"weight":[2,3]}"#);
         assert!(r.contains("parity"), "{}", r);
     }
+
+    /// daybreak HARD-DDD-1: requests whose coefficient bounds were once
+    /// infinite (and looped forever) or are merely enormous are refused at
+    /// once.
+    #[test]
+    fn hmf_weight_refusals() {
+        let t = std::time::Instant::now();
+        // the original repro: weight (199, 199) now exceeds the coefficient
+        // module limit
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[1,0]],"weight":[199,199],"p":[[47,0]]}"#);
+        assert!(r.contains("coefficient module"), "{}", r);
+        // an odd weight: the space is 0, its charpoly 1, before any bound
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[1,0]],"weight":[15,15],"p":[[47,0]]}"#);
+        assert_eq!(r, r#"{"ok":[["1","0"]]}"#);
+        // a full-space charpoly beyond the bit budget: dimension 2250, a
+        // prime of norm 3137^2
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[20,0]],"weight":[16,16],"p":[[3137,0]]}"#);
+        assert!(r.contains("bits per coefficient"), "{}", r);
+        // new charpolys of a separating operator beyond the budget, refused
+        // before the separation test: new dimension 1653 at the prime level
+        // (20 + 9w) of norm 499, T_2 bounded by 5 4^99
+        let r = call(r#"{"fn":"hmf_weight_newform_orbits","level":[[20,9]],"weight":[2,200]}"#);
+        assert!(r.contains("bits per coefficient"), "{}", r);
+        assert!(t.elapsed().as_secs() < 60, "refusals took {:?}", t.elapsed());
+    }
 }

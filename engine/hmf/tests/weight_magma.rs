@@ -14,6 +14,11 @@
 //!   through one explicit isomorphism of the fields they generate
 //!   (weight_joint/mod.rs).
 //!
+//! * the 42 spaces where Magma raised an error (daybreak TEST-DDD-3):
+//!   Sagebrush's newspace, orbits and exact eigenvalues there, checked
+//!   against Magma's full-space characteristic polynomials (H lines) by
+//!   the product of the new and old parts, and internally.
+//!
 //! Dembélé 2005, Examples 3.5-3.7 and Tables 1 and 2, are checked too.
 
 mod joint;
@@ -220,4 +225,98 @@ fn dembele_examples() {
     assert_eq!(hs[0], vec![vec![f(-16, -88)], vec![f(70, -30)]]);
     // Example 3.7
     assert_eq!(WeightSpace::new(Ideal::principal(Elt::int(30)).unwrap(), w).unwrap().dimension(), 74);
+}
+
+/// The 42 spaces at prime levels where Magma raised an error (E lines):
+/// for every prime P of norm <= 11 not dividing the level N, Magma's
+/// full-space characteristic polynomial of T_P (an H line) must be the
+/// product over our newform orbits of the characteristic polynomials of
+/// a_P, times the square of that at level (1) (old forms from level one
+/// occur d(N) = 2 times at a prime level). And every exact eigenvalue
+/// a_P = h(theta)/g'(theta) at the primes of norm <= 30 must be a root of
+/// the characteristic polynomial c over F of a_P on its orbit:
+/// sum c_i h^i g'^(d - i) = 0 modulo g, exactly in O_F[x].
+#[test]
+fn magma_error_spaces() {
+    let es = lines("E ");
+    assert_eq!(es.len(), 42);
+    let hs = lines("H ");
+    let one = Ideal::principal(Elt::int(1)).unwrap();
+    let primes30 = sagebrush_hmf::field::primes_of_bounded_norm(30);
+    let mut checked = 0;
+    for e in &es {
+        let lev = level(&e[0]);
+        assert!(lev.factors.len() == 1 && lev.factors[0].1 == 1, "level {} is not prime", e[0]);
+        let k = weight(&e[1]);
+        let what = format!("level {} weight {}", e[0], e[1]);
+        let ns = WeightNewspaces::new(lev.clone(), k).unwrap();
+        let o = ns.newform_orbits().unwrap();
+        assert_eq!(o.orbits.iter().map(|g| g.len() - 1).sum::<usize>(), ns.new_dimension().unwrap(), "{}", what);
+        let ones = WeightNewspaces::new(one.clone(), k).unwrap();
+        let o1 = ones.newform_orbits().unwrap();
+        let mine: Vec<&Vec<String>> = hs.iter().filter(|h| h[0] == e[0] && h[1] == e[1]).collect();
+        assert_eq!(mine.len(), 5, "{}: H lines", what);
+        for h in mine {
+            let p = prime(&h[2]);
+            let want: FPoly = h[3].split(';').map(fint).collect();
+            // Magma's full space against ours
+            assert_eq!(ns.hecke_charpoly(&p).unwrap(), want, "{}: T_P at {}", what, h[2]);
+            if lev.factors[0].0 == p {
+                continue;
+            }
+            let mut prod: FPoly = vec![FInt::one()];
+            for cp in ns.orbit_charpolys(&o, &[p]).unwrap() {
+                prod = sagebrush_hmf::fpoly::mul(&prod, &cp[0]);
+            }
+            for cp in ones.orbit_charpolys(&o1, &[p]).unwrap() {
+                prod = sagebrush_hmf::fpoly::mul(&prod, &cp[0]);
+                prod = sagebrush_hmf::fpoly::mul(&prod, &cp[0]);
+            }
+            assert_eq!(prod, want, "{}: new times old at {}", what, h[2]);
+            checked += 1;
+        }
+        let (cps, hs2) = ns.orbit_data(&o, &primes30).unwrap();
+        for ((g, crow), hrow) in o.orbits.iter().zip(&cps).zip(&hs2) {
+            for (cp, h) in crow.iter().zip(hrow) {
+                assert!(is_root(cp, g, h), "{}: an exact eigenvalue is not a root of its orbit charpoly", what);
+            }
+        }
+    }
+    assert_eq!(checked, 205);
+}
+
+/// f modulo the monic g, in O_F[x].
+fn rem_monic(f: &[FInt], g: &[FInt]) -> FPoly {
+    let d = g.len() - 1;
+    let mut r: FPoly = f.to_vec();
+    while r.len() > d {
+        let c = r.pop().unwrap();
+        let k = r.len() - d; // the popped term was c x^(k + d)
+        for i in 0..d {
+            r[k + i] = r[k + i].sub(&c.mul(&g[i]));
+        }
+    }
+    sagebrush_hmf::fpoly::trim(r)
+}
+
+/// Whether a = h(theta)/g'(theta) is a root of c in F[x]/(g):
+/// sum_i c_i h^i g'^(n - i) = 0 modulo g, n = deg c.
+fn is_root(c: &[FInt], g: &[FInt], h: &[FInt]) -> bool {
+    use sagebrush_hmf::fpoly::mul;
+    let n = c.len() - 1;
+    let gd: FPoly = g.iter().enumerate().skip(1).map(|(j, x)| FInt::new(&x.a * BigInt::from(j as i64), &x.b * BigInt::from(j as i64))).collect();
+    // powers h^i and g'^i modulo g
+    let mut hp: Vec<FPoly> = vec![vec![FInt::one()]];
+    let mut gp: Vec<FPoly> = vec![vec![FInt::one()]];
+    for _ in 0..n {
+        hp.push(rem_monic(&mul(hp.last().unwrap(), h), g));
+        gp.push(rem_monic(&mul(gp.last().unwrap(), &gd), g));
+    }
+    let mut s: FPoly = vec![];
+    for (i, ci) in c.iter().enumerate() {
+        let t = rem_monic(&mul(&mul(&hp[i], &gp[n - i]), &[ci.clone()]), g);
+        let len = s.len().max(t.len());
+        s = (0..len).map(|k| s.get(k).cloned().unwrap_or_else(FInt::zero).add(&t.get(k).cloned().unwrap_or_else(FInt::zero))).collect();
+    }
+    sagebrush_hmf::fpoly::trim(s).is_empty()
 }

@@ -15,7 +15,14 @@
 //!   embedding, and v + m/2 = mu/2), so for the sup norm over P^1 the
 //!   operator T_p (N(p) + 1 terms) has norm at most (N(p) + 1) N(p)^(mu/2),
 //!   and U_p (N(p) terms) at most N(p)^(1 + mu/2). This holds under both
-//!   embeddings of F, which exchange (k1, k2).
+//!   embeddings of F, which exchange (k1, k2). The bounds and the numbers
+//!   of moduli they require are computed in exact integer arithmetic
+//!   (hecke_bound, fpoly::coefficient_bits and fpoly::pairs_needed: bit
+//!   lengths of integer bounds, and moduli above 2^61), and a request
+//!   needing more than fpoly::MAX_BITS bits per coefficient is refused
+//!   before any modular work (daybreak HARD-DDD-1 and PROOF-DDD-2); so is
+//!   a space of dimension above MAX_DIMENSION. A space of dimension 0 has
+//!   characteristic polynomial 1 without any bound.
 //! * A separating operator T (its new characteristic polynomial squarefree
 //!   and prime to the old part, decided modulo a prime of F: monic
 //!   polynomials) gives the Galois orbits of newforms over F: the
@@ -40,13 +47,18 @@
 //!   place, h = g' c modulo g.
 
 use crate::field::{primes_of_bounded_norm, Hnf, Ideal, Prime};
-use crate::fpoly::{self, coefficient_bits, pairs_for_bits, FPoly, PairCrt};
+use crate::fpoly::{self, bitlen, coefficient_bits, pairs_for_bits, FPoly, PairCrt};
 use crate::newspace::{divisors, HeckeOp};
 use crate::weight::{place_pairs, Place, Weight, WeightSpace};
 use sagebrush_arith::nmod_mat::Mat;
 use sagebrush_arith::nmod_poly;
+use num_traits::One;
+use sagebrush_bigint::BigInt;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+/// The largest S_k(N) handled: the modular linear algebra is dense.
+pub const MAX_DIMENSION: usize = 4000;
 
 /// The newform orbits of a level: the separating operator and the
 /// characteristic polynomial over F of it on each orbit (irreducible over F,
@@ -66,11 +78,14 @@ pub struct WeightNewspaces {
 }
 
 /// A bound for the absolute values of the eigenvalues of T_p (U_p if p
-/// divides the level) in weight k, under every embedding.
-pub fn hecke_bound(w: &Weight, p: &Prime, level: &Ideal) -> f64 {
-    let n = p.norm as f64;
-    let terms = if level.factors.iter().any(|(q, _)| q == p) { n } else { n + 1.0 };
-    terms * n.powf(w.mu() as f64 / 2.0)
+/// divides the level) in weight k, under every embedding, as an exact
+/// integer: (N(p) + 1) N(p)^ceil(mu/2), N(p) terms for U_p (mu is even on
+/// every nonzero space, where this is the bound of the module
+/// documentation; rounding up keeps it a bound otherwise).
+pub fn hecke_bound(w: &Weight, p: &Prime, level: &Ideal) -> BigInt {
+    let n = BigInt::from(p.norm);
+    let terms = if level.factors.iter().any(|(q, _)| q == p) { n.clone() } else { &n + BigInt::one() };
+    terms * num_traits::pow(n, ((w.mu() + 1) / 2) as usize)
 }
 
 impl WeightNewspaces {
@@ -78,7 +93,11 @@ impl WeightNewspaces {
         let divisors = divisors(&level);
         let mut spaces = HashMap::new();
         for (m, _) in &divisors {
-            spaces.insert(m.hnf, WeightSpace::new(m.clone(), weight)?);
+            let s = WeightSpace::new(m.clone(), weight)?;
+            if s.dimension() > MAX_DIMENSION {
+                return Err(format!("S_k at level ({}) has dimension {}, above the limit of {}", m.gen, s.dimension(), MAX_DIMENSION));
+            }
+            spaces.insert(m.hnf, s);
         }
         Ok(WeightNewspaces { level, weight, spaces, divisors, orbits: Mutex::new(None) })
     }
@@ -118,8 +137,8 @@ impl WeightNewspaces {
     /// A bound for the eigenvalues of op on S_k(M), M | N, under every
     /// embedding (op involves only primes not dividing N, or the level's
     /// U_p at level N).
-    pub fn op_bound(&self, op: &HeckeOp) -> f64 {
-        op.iter().map(|(p, c)| c.unsigned_abs() as f64 * hecke_bound(&self.weight, p, &self.level)).sum()
+    pub fn op_bound(&self, op: &HeckeOp) -> BigInt {
+        op.iter().map(|(p, c)| BigInt::from(c.unsigned_abs()) * hecke_bound(&self.weight, p, &self.level)).sum()
     }
 
     /// The matrix of op on S_k(M) at the place pl.
@@ -181,7 +200,7 @@ impl WeightNewspaces {
         self.check_op(op)?;
         let nd = self.new_dimensions()?;
         let d = nd.values().copied().max().unwrap_or(0);
-        let pairs = pairs_for_bits(coefficient_bits(d, self.op_bound(op)));
+        let pairs = pairs_for_bits(coefficient_bits(d, &self.op_bound(op)))?;
         let res: Vec<Result<(HashMap<Hnf, Vec<u64>>, HashMap<Hnf, Vec<u64>>), String>> = crate::par::map_range(pairs.len(), |k| {
             Ok((self.new_charpolys_mod(op, &pairs[k].0)?.0, self.new_charpolys_mod(op, &pairs[k].1)?.0))
         });
@@ -205,7 +224,10 @@ impl WeightNewspaces {
     /// on all of S_k(N).
     pub fn hecke_charpoly(&self, p: &Prime) -> Result<FPoly, String> {
         let n = self.top().dimension();
-        let pairs = pairs_for_bits(coefficient_bits(n, hecke_bound(&self.weight, p, &self.level)));
+        if n == 0 {
+            return Ok(vec![fpoly::FInt::one()]);
+        }
+        let pairs = pairs_for_bits(coefficient_bits(n, &hecke_bound(&self.weight, p, &self.level)))?;
         let res: Vec<Result<(Vec<u64>, Vec<u64>), String>> = crate::par::map_range(pairs.len(), |k| {
             let s = self.top();
             Ok((s.hecke_mod(p, &pairs[k].0)?.charpoly(), s.hecke_mod(p, &pairs[k].1)?.charpoly()))
@@ -250,6 +272,10 @@ impl WeightNewspaces {
                 })
                 .filter(|&(_, c)| c != 0)
                 .collect();
+            // the recovery of its charpoly must fit the budget, which is
+            // checked before the costly separation test
+            let d = self.new_dimension()?;
+            fpoly::pairs_needed(coefficient_bits(d, &self.op_bound(&op)))?;
             if self.separates(&op, &pl)? {
                 let cp = self.new_charpoly(&op)?;
                 return Ok((op, cp));
@@ -265,7 +291,7 @@ impl WeightNewspaces {
             return Ok(o.clone());
         }
         let (op, cp) = self.separating_operator()?;
-        let orbits = fpoly::factor_squarefree(&cp, self.op_bound(&op))?;
+        let orbits = fpoly::factor_squarefree(&cp, &self.op_bound(&op))?;
         let o = WeightOrbits { op, orbits };
         *self.orbits.lock().unwrap() = Some(o.clone());
         Ok(o)
@@ -289,29 +315,30 @@ impl WeightNewspaces {
     #[allow(clippy::type_complexity)]
     pub fn orbit_data(&self, orbits: &WeightOrbits, primes: &[Prime]) -> Result<(Vec<Vec<FPoly>>, Vec<Vec<FPoly>>), String> {
         let r = self.op_bound(&orbits.op);
-        let mut bits: f64 = 0.0;
+        let mut bits: u64 = 0;
         for g in &orbits.orbits {
             let d = g.len() - 1;
             for p in primes {
                 let b = hecke_bound(&self.weight, p, &self.level);
-                bits = bits.max(coefficient_bits(d, b));
-                bits = bits.max((d as f64 * b).log2() + (d as f64 - 1.0) * (1.0 + r).log2() + 1.0);
+                bits = bits.max(coefficient_bits(d, &b));
+                // the Lagrange bound d B (1 + R)^(d - 1), in integers
+                bits = bits.max(bitlen(&BigInt::from(d)) + bitlen(&b) + (d as u64).saturating_sub(1) * bitlen(&(&r + BigInt::one())));
             }
         }
+        let need = fpoly::pairs_needed(bits)?;
         // places where the reductions are faithful, enough of them
         type Res = Vec<Vec<(Vec<u64>, Vec<u64>)>>;
         let mut kept: Vec<((Place, Place), Res, Res)> = vec![];
-        let mut have = 0.0;
         for (tries, pp) in place_pairs().enumerate() {
-            if tries > 400 {
+            if tries > need + 400 {
                 return Err("too many unusable places".into());
             }
+            assert!(pp.0.p() >> 61 >= 1, "a modulus below 2^61");
             let (Some(a), Some(b)) = (self.orbit_charpolys_mod(orbits, primes, &pp.0)?, self.orbit_charpolys_mod(orbits, primes, &pp.1)?) else {
                 continue;
             };
-            have += (pp.0.p() as f64).log2();
             kept.push((pp, a, b));
-            if have > bits + 2.0 {
+            if kept.len() >= need {
                 break;
             }
         }
