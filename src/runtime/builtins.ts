@@ -535,6 +535,7 @@ const define = (name: string, v: any, range?: [number, number]) => {
     const kw = v.$kw, sg = v.$sig;
     v = checkArity(v, name, false, range);
     builtin(v, name);
+    v.__module__ = "builtins";
     if (kw !== undefined) v.$kw = kw;
     if (sg !== undefined) v.$sig = sg;
   }

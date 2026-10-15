@@ -30,6 +30,7 @@ export function newBuiltinModule(name: string, fill: (m: any) => void) {
 
 function fn(m: any, name: string, f: any) {
   builtin(f, name);
+  f.__module__ = m.__name__; // (as CPython's: math.isclose.__module__ is 'math')
   m[name] = f;
 }
 
