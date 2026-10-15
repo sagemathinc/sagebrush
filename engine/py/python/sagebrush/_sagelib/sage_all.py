@@ -291,7 +291,7 @@ def VectorSpace(base, n):
         return _sage_ffmat.VectorSpace(base, n)
     if base is QQ:
         import _sage_matrix
-        return _sage_matrix.VectorSpace_QQ(int(n))
+        return _sage_matrix.VectorSpace_QQ(n)
     raise NotImplementedError("VectorSpace over %r is not available in sagebrush yet" % (base,))
 
 

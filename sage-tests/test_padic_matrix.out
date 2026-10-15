@@ -219,3 +219,28 @@ entries range :: [         0 1 + O(5^5)]
 [2 + O(5^5) 3 + O(5^5)]
 too many :: ValueError
 too few :: ValueError
+matrix(QQ, -1, 2) :: ArithmeticError
+matrix(QQ, 2, -1) :: ArithmeticError
+matrix(-2) :: ArithmeticError
+zero_matrix(QQ, -1, 2) :: ArithmeticError
+identity_matrix(-1) :: ArithmeticError
+MatrixSpace(QQ, -1) :: ArithmeticError
+matrix(GF(5), -1, 2) :: ArithmeticError
+VectorSpace(QQ, -1) :: ValueError
+VectorSpace(QQ, 2.5) :: TypeError
+GF(5)^2.5 :: TypeError
+GF(5)^-1 :: ValueError
+matrix(QQ, 2, 2, range(5)) :: ValueError
+matrix(QQ, 2, 2, range(3)) :: ValueError
+block_matrix(1, 1, [identity_matrix(QQ, 2)]) :: [1 0]
+[0 1]
+block_matrix(2, [1, 2, 3]) :: ValueError
+diagonal_matrix(QQ, (i for i in range(3))) :: [0 0 0]
+[0 1 0]
+[0 0 2]
+vector(i for i in range(3)) :: (0, 1, 2)
+vector([1, 2, 3]).cross_product([1, 2]) :: TypeError
+augment wrong :: TypeError
+stack wrong :: TypeError
+[1,2,3,4] in V3 :: False
+zero_matrix(QQ, 3, 0) :: []

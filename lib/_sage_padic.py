@@ -1285,8 +1285,11 @@ def _matrix_dim(v, what):
 
 
 def _check_entries(m, n):
-    if m * n > _PADIC_MATRIX_MAX_ENTRIES:
-        raise NotImplementedError("a %d x %d matrix over the p-adics exceeds sagebrush's limit of %d entries" % (m, n, _PADIC_MATRIX_MAX_ENTRIES))
+    """Each dimension and the number of entries at most the limit (a
+    65537 x 0 matrix still has 65537 rows to hold)."""
+    L = _PADIC_MATRIX_MAX_ENTRIES
+    if m > L or n > L or m * n > L:
+        raise NotImplementedError("a %d x %d matrix over the p-adics exceeds sagebrush's limit of %d entries (and rows, columns)" % (m, n, L))
 
 
 def _check_work(w, what):
@@ -1363,7 +1366,15 @@ class PadicMatrix:
         sage: matrix(K, 300, 300)  # sagebrush only
         Traceback (most recent call last):
         ...
-        NotImplementedError: a 300 x 300 matrix over the p-adics exceeds sagebrush's limit of 65536 entries
+        NotImplementedError: a 300 x 300 matrix over the p-adics exceeds sagebrush's limit of 65536 entries (and rows, columns)
+        sage: matrix(K, 65537, 0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: a 65537 x 0 matrix over the p-adics exceeds sagebrush's limit of 65536 entries (and rows, columns)
+        sage: matrix(K, 512, 1) * matrix(K, 1, 512)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: a 512 x 512 matrix over the p-adics exceeds sagebrush's limit of 65536 entries (and rows, columns)
         sage: A^(2^5000)  # sagebrush only
         Traceback (most recent call last):
         ...
@@ -1510,6 +1521,10 @@ class PadicMatrix:
         """self m, both over one ring (at most the work limit)."""
         if self._ncols != m.nrows():
             raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), m.parent()))
+        # the output's size, then the work, before either is spent (an
+        # m x 0 times 0 x n product does no multiplications but has m n
+        # entries)
+        _check_entries(self.nrows(), m._ncols)
         _check_work(self.nrows() * self._ncols * m._ncols, "this product")
         out = []
         for r in self._rows:
