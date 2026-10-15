@@ -317,13 +317,13 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
     let mut last_r: Option<f64> = None;
     let mut batches: Vec<Batch> = vec![];
     for batch in [6usize, 12, 24] {
-        let extras: Vec<usize> = (0..batch).map(|t| others[(used + t) * 7919 % others.len().max(1)]).collect();
+        // (with no rows outside sel, the units are those of the rows the
+        // elimination reduced to zero: one pass, no kernel vectors; indexing
+        // the empty others[] panicked, D = 2077)
+        let extras: Vec<usize> = if others.is_empty() { vec![] } else { (0..batch).map(|t| others[(used + t) * 7919 % others.len()]).collect() };
         used += batch;
-        if others.is_empty() {
-            break;
-        }
         let vs: Vec<Vec<i64>> = extras.iter().map(|&k| dense[k].clone()).collect();
-        let (det, ys) = kernel_crt(&a, &vs);
+        let (det, ys) = if vs.is_empty() { (BigInt::one(), vec![]) } else { kernel_crt(&a, &vs) };
         batches.push((det.clone(), ys.clone(), extras.clone()));
         if prec == 0 {
             // The lambdas are exact integer combinations of the relations'
@@ -355,6 +355,9 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
         let quarter = BigInt::one() << (prec as usize - 2);
         lambdas.extend(more.into_iter().filter(|l| l.abs() > quarter));
         if lambdas.is_empty() {
+            if others.is_empty() {
+                break;
+            }
             continue;
         }
         let two_r = real_gcd(&lambdas, &(BigInt::one() << err_bits as usize)).unwrap_or_default();
@@ -436,7 +439,7 @@ fn try_lattice(cache: &mut LogCache, d: &BigInt, rels: &[Relation], elems: &[Ele
         }
         // more units help only while R* is too big; once a new batch leaves
         // it unchanged, h* is (the lattice needs more relations)
-        if ratio > 64.0 || last_r.is_some_and(|lr: f64| (lr - r).abs() <= 1e-9 * r) {
+        if ratio > 64.0 || others.is_empty() || last_r.is_some_and(|lr: f64| (lr - r).abs() <= 1e-9 * r) {
             break;
         }
         last_r = Some(r);
