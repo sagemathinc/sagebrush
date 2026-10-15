@@ -121,3 +121,92 @@ cell 1x2 {double 1x1 1, double 1x1 2}
 struct {a=double 1x1 1, b=char 1x4 ['text']}
 cell 2x1 {char 1x1 ['a'], char 1x1 ['b']}
 logical 1x2 [true false]
+double 1x3 [11 12 13]
+double 1x2 [4 5]
+double 1x2 [-2 3]
+double 1x3 [4 10 18]
+double 2x1 [3;7]
+double 1x3 [2 4 2.25]
+double 1x2 [3 2]
+double 1x2 [1 2]
+double 1x3 [1 4 9]
+double 2x2 [1 3;0 1]
+logical 1x3 [false true false]
+logical 1x3 [true false true]
+logical 1x3 [true false false]
+logical 1x3 [false true false]
+logical 1x3 [true false true]
+logical 1x3 [false true true]
+logical 1x3 [true false false]
+logical 1x3 [true false true]
+logical 1x3 [false true false]
+logical 1x3 [false true true]
+double 2x1 [1-2i;3-0i]
+double 2x2 [1 0;0.33333333333333331 1]
+double 2x2 [3 4;0 0.66666666666666674]
+double 2x2 [0 1;1 0]
+double 2x2 [2 1;0 1.4142135623730951]
+double 2x2 [5 2.2000000000000002;0 0.39999999999999991]
+double 2x1 [4;3]
+double 2x2 [0.03999999999999998 0.079999999999999974;0.07999999999999996 0.15999999999999995]
+double 2x2 [1 1;0 1]
+double 1x1 4
+double 2x1 [0.80000000000000004;1.3999999999999999]
+logical 1x1 true
+cell 1x3 {char 1x1 ['1'], char 1x2 ['22'], char 1x3 ['333']}
+double 1x2 [2 5]
+logical 1x1 true
+logical 1x2 [true false]
+logical 1x1 true
+logical 1x1 true
+char 1x1 ['3']
+double 1x3 [1 2 3]
+char 1x2 ['Hi']
+char 1x5 ['[   ]']
+char 1x4 ['[hi]']
+logical 1x3 [false true false]
+logical 1x3 [false true false]
+char 1x3 ['cba']
+char 1x10 ['05/01/2024']
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+int8 1x3 [100 127 -128]
+single 1x1 0.3333333432674408
+int16 1x1 4
+uint8 1x1 255
+int16 1x1 -32768
+double 1x1 1.7976931348623157e+308
+double 1x1 2.2204460492503131e-16
+double 1x1 9007199254740992
+int32 1x1 3
+double 1x1 8
+double 1x1 14
+double 1x1 6
+double 1x1 16
+double 1x3 [1 24 1.7724538509059999]
+double 1x1 0.083333333333333329
+double 1x2 [0 0.84270079294971489]
+double 1x1 0.15729920705028513
+double 3x1 [-0.125;-1.299038105676658;2.25]
+double 1x1 0.21938393439552051
+double 2x3 [1 2 3;1 2 3]
+double 2x3 [1 1 1;2 2 2]
+double 2x3 [1 1 1;2 2 2]
+double 2x3 [1 2 3;1 2 3]
+double 1x1 3
+logical 1x3 [true false false]
+double 3x2 [1 2;2 0;3 1]
+double 2x1 [40;20]
+double 1x1 7
+double 1x1 7
+double 2x2 [1 3;3 7]
+double 1x1 5
