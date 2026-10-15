@@ -143,6 +143,11 @@ pub fn ec_map(n: u64, aps: &[(u64, i64)]) -> Result<EcMap, String> {
     if n < 11 {
         return Err("there are no elliptic curves of conductor below 11".into());
     }
+    // the level bound before any factorization (sturm_bound), whether or
+    // not there are pairs for validate() to see
+    if n > 1 << 31 {
+        return Err(format!("level N = {} out of range", n));
+    }
     for &(q, a) in aps {
         crate::validate(n, q, None)?;
         if (a as i128) * (a as i128) > 4 * q as i128 {
@@ -151,7 +156,7 @@ pub fn ec_map(n: u64, aps: &[(u64, i64)]) -> Result<EcMap, String> {
     }
     let aps = aps.to_vec();
     // the Sturm bound for weight 2 on Gamma0(n): [SL2(Z) : Gamma0(n)] / 6
-    let sturm = sturm_bound(n);
+    let sturm = sturm_bound(n)?;
     let have: std::collections::HashSet<u64> = aps.iter().map(|e| e.0).collect();
     if let Some(q) = (2..=sturm).find(|&q| crate::exact::is_prime(q) && n % q != 0 && !have.contains(&q)) {
         return Err(format!("a_q is needed for every prime q <= {} (the Sturm bound) not dividing N; {} is missing", sturm, q));
@@ -218,13 +223,14 @@ pub fn ec_map(n: u64, aps: &[(u64, i64)]) -> Result<EcMap, String> {
     Err("the modular symbol map did not stabilize".into())
 }
 
-/// [SL2(Z) : Gamma0(n)] / 6 = n prod_(p | n) (1 + 1/p) / 6, rounded up.
-fn sturm_bound(n: u64) -> u64 {
+/// [SL2(Z) : Gamma0(n)] / 6 = n prod_(p | n) (1 + 1/p) / 6, rounded up
+/// (checked: ec_map's level bound keeps it far below 2^64).
+fn sturm_bound(n: u64) -> Result<u64, String> {
     let mut idx = n;
     for (p, _) in crate::exact::factor(n) {
-        idx = idx / p * (p + 1);
+        idx = (idx / p).checked_mul(p + 1).ok_or_else(|| format!("level N = {} out of range", n))?;
     }
-    idx.div_ceil(6)
+    Ok(idx.div_ceil(6))
 }
 
 /// X spans the common kernel of T_q - a_q for the q used, which the other
@@ -391,6 +397,29 @@ mod tests {
         let mut aps = aps([0, -1, 1, -10, -20], 11);
         aps.push((1073741789, 0));
         assert!(ec_map(11, &aps).is_ok());
+    }
+
+    /// The Sturm bound is checked arithmetic: 2^64 - 1 = 3 * 5 * 17 * 257 *
+    /// 641 * 65537 * 6700417 overflows at the first factor.
+    #[test]
+    fn sturm_bound_is_checked() {
+        assert_eq!(sturm_bound(11), Ok(2));
+        assert_eq!(sturm_bound(37), Ok(7));
+        assert!(sturm_bound(u64::MAX).is_err());
+    }
+
+    /// A level above 2^31 is refused at once, with or without pairs (an
+    /// empty list used to reach the trial division in sturm_bound).
+    #[test]
+    fn refuses_large_levels() {
+        for n in [(1u64 << 31) + 1, 18446743979220271189, u64::MAX] {
+            for list in [vec![], vec![(2, -2)]] {
+                let t = std::time::Instant::now();
+                let e = ec_map(n, &list).err().unwrap();
+                assert_eq!(e, format!("level N = {} out of range", n));
+                assert!(t.elapsed().as_secs() < 1);
+            }
+        }
     }
 
     #[test]
