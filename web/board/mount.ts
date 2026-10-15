@@ -180,10 +180,14 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
   }
   return out;
 }
-// Code items in reading order with their previews (code.ts shows a preview, and doesn't run it, when it opens).
+// Code items in reading order with their previews (code.ts shows a preview,
+// and doesn't run it, when it opens).  Only an item whose cell is its id's:
+// one whose id other pages' items have too is a cell by its page, and its
+// cell (and its seed) changes as those come and go, so a preview kept may be
+// another cell's: it has none, and runs (CORR-79B-3).
 function withPreviews(d: BoardDoc, order: CodeCell[]) {
   const notes = codeNotes(d);
-  return order.map(({ id, code }) => { const p = notes.get(id)?.preview; return p ? { id, code, preview: p } : { id, code }; });
+  return order.map(({ id, code, item }) => { const p = id === item ? notes.get(id)?.preview : undefined; return p ? { id, code, preview: p } : { id, code }; });
 }
 
 export function mountBoard(root: HTMLElement, host: BoardHost) {
@@ -477,11 +481,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const got = await c.previews(ids);
     if (!got.size || code !== c || loads !== loaded) return;
     await editor.commit((d) => {
-      const notes = codeNotes(d);
+      const notes = codeNotes(d), own = new Set(codeOrder(d).filter((x) => x.id === x.item).map((x) => x.id));
       for (const [id, { preview: p, gen }] of got) {
         const n = notes.get(id);
         if (!n || c.generation(id) !== gen) continue;
-        if (p === null) delete n.preview;
+        // (a cell by its page keeps none: withPreviews)
+        if (p === null || !own.has(id)) delete n.preview;
         else if (!sameOutputs(p, n.preview)) n.preview = p;
       }
       const kept = new Map([...notes].filter(([, n]) => n.preview).map(([id, n]) => [id, n.preview!]));

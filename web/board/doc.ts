@@ -505,16 +505,26 @@ export function codeOrder(d: BoardDoc): CodeCell[] {
     for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code, page: i, item: it.id });
   }
   // (an id is one item's on its page, and may be another's on another
-  // page: on one interpreter, those cells are told apart by their page)
+  // page: on one interpreter, those cells are told apart by their page,
+  // id@pN; and should an item have that very id, id@pN~2, ~3, ...: one cell
+  // each, whatever ids a board has, CORR-79B-1)
   const count = new Map<string, number>();
   for (const c of out) count.set(c.item, (count.get(c.item) ?? 0) + 1);
-  for (const c of out) if (count.get(c.item)! > 1) c.id = `${c.item}@p${c.page + 1}`;
+  const taken = new Set(out.map((c) => c.item));
+  for (const c of out) {
+    if (count.get(c.item)! < 2) continue;
+    let id = `${c.item}@p${c.page + 1}`;
+    for (let k = 2; taken.has(id); k++) id = `${c.item}@p${c.page + 1}~${k}`;
+    taken.add(id);
+    c.id = id;
+  }
   return out;
 }
 
 /** A code item as a cell of the board's interpreter: `id`, the cell's (its
  * item's id, or, for an id that items on several pages have, `id@pN`, N
- * its page from 1); `page` (from 0) and `item`, the item's on its page. */
+ * its page from 1, `~2`, `~3`, ... after it should that be an item's id);
+ * `page` (from 0) and `item`, the item's on its page. */
 export interface CodeCell { id: string; code: string; page: number; item: string }
 
 // Boxes in rows (a box whose top is above the middle of the row's shortest
