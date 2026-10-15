@@ -1149,8 +1149,10 @@ class Panel:
             elif p.kind == "points":
                 out.append(_marker(p.options.get("marker", "o"), lx + 18, cy, 3.5, to_color(p.options.get("color"), "#1f77b4")))
             else:
-                out.append('<rect x="%s" y="%s" width="22" height="10" fill="%s"%s/>' % (
-                    _fmt(lx + 7), _fmt(cy - 5), c, ' fill-opacity="%s"' % _fmt(p.options["alpha"]) if p.options.get("alpha") is not None else ""))
+                ec = to_color(p.options.get("legend_edge"))  # (a swatch's outline, if its entry asks for one)
+                out.append('<rect x="%s" y="%s" width="22" height="10" fill="%s"%s%s/>' % (
+                    _fmt(lx + 7), _fmt(cy - 5), c, ' fill-opacity="%s"' % _fmt(p.options["alpha"]) if p.options.get("alpha") is not None else "",
+                    ' stroke="%s" stroke-width="1"' % _esc(ec) if ec else ""))
             out.append('<text x="%s" y="%s" dominant-baseline="middle" font-size="11">%s</text>' % (_fmt(lx + 35), _fmt(cy), _rich(s)))
         out.append("</g>")
         return "".join(out)

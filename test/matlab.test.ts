@@ -806,3 +806,39 @@ test("ellipke, ellipj and legendre keep their documented domains", () => {
     "single", "single",
   ]);
 });
+
+test("a legend in 3-D axes is drawn: surfaces' swatches (colormapped at the middle of CLim), lines, markers, stems", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    // (the colormap's middle color: row floor(m / 2) + 1 of m)
+    // (close all: the session's figures are those earlier tests left)
+    "close all; surf(peaks(20)); legend('peaks'); cm = colormap; fprintf('#%02x%02x%02x %d\\n', round(cm(floor(size(cm, 1) / 2) + 1, :) * 255), size(cm, 1))",
+    "mesh(peaks(20)); legend('m')",
+    "surf(peaks(5)); shading interp; legend('i')",
+    "surf(peaks(5), 'FaceColor', 'r'); hold on; t = 0:0.1:5; plot3(t, t, t, 'k--'); scatter3([1 2], [1 2], [1 2], 'filled');\n" +
+      "stem3([1 2], [2 1], [3 4]); legend('surface', 'line', 'points', 'stems', 'Location', 'northwest'); hold off",
+    "plot3(1:3, 1:3, 1:3); legend('a'); legend('off')",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const legend = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return svg.match(/<g class="sb-legend">.*?<\/g>/)?.[0] ?? null;
+  };
+  const swatch = (id: number) => legend(id)?.match(/<rect x="[^"]*" y="[^"]*" width="22" height="10"([^/]*)\/>/)?.[1].trim();
+  const [mid, rows] = msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join("").trim().split(" ");
+  assert.match(mid, /^#[0-9a-f]{6}$/);
+  assert.equal(rows, "256");
+  assert.equal(swatch(1), `fill="${mid}" stroke="#000000" stroke-width="1"`);
+  assert.match(legend(1)!, />peaks<\/text>/);
+  assert.equal(swatch(2), `fill="#ffffff" stroke="${mid}" stroke-width="1"`);
+  assert.equal(swatch(3), `fill="${mid}"`);
+  const four = legend(4)!;
+  assert.deepEqual([...four.matchAll(/>([a-z]+)<\/text>/g)].map((m) => m[1]), ["surface", "line", "points", "stems"]);
+  assert.match(four, /<rect x="27" y="28" width="22" height="10" fill="#ff0000" stroke="#000000"/);
+  assert.match(four, /stroke="#000000" stroke-width="[\d.]+" stroke-dasharray/);
+  assert.equal((four.match(/<circle /g) ?? []).length, 2);
+  assert.equal(legend(5), null);
+});
