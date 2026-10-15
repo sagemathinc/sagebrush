@@ -298,6 +298,126 @@ try {
   check((await node("same-edit"))?.title === "NEW B", "...and leaving Edit writes nothing of the old document into the new one: " + JSON.stringify(await node("same-edit")));
   // (and the board itself: an item edited where it is is not kept as edited into another epoch)
   check(await ev("(() => { const b = window.board; b.editElement('same-edit'); b.epoch++; b.setItems(b.itemsIn(-1e9, -1e9, 1e9, 1e9), b.edgeList()); b.render(); return b.editing === null && b.cache.get('same-edit')?.dataset.key.startsWith(b.epoch + '['); })()"), "the board: an element being edited is not kept into another epoch");
+  await ev("window.sagebrush.board.editing(false), 1");
+
+  // William: the text being edited does not move as editing starts.  Each
+  // part double-clicked where its first line begins: that line's first
+  // letter, on the screen, before and after (as shown: its text; being
+  // written: the highlighted copy under the field, or where the field puts
+  // it); the item high enough that its toolbar has no room above it.
+  const STILL = { title: "Still", nodes: [
+    { id: "full", title: "TTLA full note", text: "TXTA the text of it, long enough to wrap onto a second line here", detail: "DTLA the detail of it, shown close up", ref: "https://example.org/REFA", x: 0, y: 0, w: 320 },
+    { id: "code1", title: "CTTL with a title", text: "CTXT its text", code: "CODEA = 2\nb = 3", x: 400, y: 0, w: 380 },
+    { id: "code2", code: "CODEB = 2\nb = 3", x: 400, y: 300, w: 380 },
+    { id: "plain", text: "PLNA only text here", x: 0, y: 400, w: 260 },
+    { id: "multi", text: "## HDGA a heading\n\nPRGA first paragraph\n\n- LSTA an item\n- LSTB another\n\n> QUTA a quote\n\nPRGB last", x: 0, y: 1000, w: 300 },
+    { id: "grp", kind: "group", title: "GRPT the group", text: "GRPX its text", x: 0, y: 600, children: [{ id: "inner", title: "INNT inner", x: 0, y: 0 }] },
+    // (untitled notes of other parts than text: only a detail, only a link, a picture and a detail, CORR-9E1-1)
+    { id: "detailOnly", detail: "DONA only a detail", x: 800, y: 400, w: 260 },
+    { id: "refOnly", ref: "https://example.org/RONA", x: 800, y: 700, w: 260 },
+    { id: "picDetail", image: "dot", detail: "PDTA a picture's detail", x: 800, y: 1000, w: 200 },
+  ], images: { dot: { w: 4, h: 1, src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" } } };
+  // (the first letter of the text, or the field, holding `marker`)
+  const firstLine = (marker, edited) => ev(`(() => {
+    const root = ${edited} ? window.board.editingElement : document.querySelector('.board-world');
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      const el = t.parentElement;
+      if (!t.textContent.includes(${JSON.stringify(marker)}) || el.closest('textarea, [hidden], .board-measure')) continue;
+      // (its line's first letter: a highlighted copy's first, its Markdown's, as "## " or "- ")
+      const pre = ${edited} && el.closest('pre'), first = pre ? document.createTreeWalker(pre, NodeFilter.SHOW_TEXT).nextNode() : t;
+      const r = document.createRange(); r.setStart(first, 0); r.setEnd(first, 1);
+      const b = r.getBoundingClientRect();
+      if (b.width > 0) return { top: b.top, left: b.left, via: el.tagName };
+    }
+    // (a field shown as itself, a title or the link: a copy of it laid out as it is)
+    for (const f of root.querySelectorAll('textarea, input')) {
+      if (!f.value.includes(${JSON.stringify(marker)}) || f.previousElementSibling?.tagName === 'PRE') continue;
+      const cs = getComputedStyle(f), fr = f.getBoundingClientRect(), m = document.createElement('div');
+      for (const p of ['font', 'letterSpacing', 'paddingTop', 'paddingLeft', 'paddingRight', 'borderTopWidth', 'borderLeftWidth', 'borderRightWidth', 'borderStyle', 'boxSizing', 'lineHeight', 'overflowWrap']) m.style[p] = cs[p];
+      Object.assign(m.style, { position: 'fixed', left: fr.left + 'px', top: fr.top + 'px', width: fr.width + 'px', whiteSpace: 'pre-wrap', visibility: 'hidden', margin: '0' });
+      // (an input's line is in its middle)
+      if (f.tagName === 'INPUT') Object.assign(m.style, { height: fr.height + 'px', display: 'flex', alignItems: 'center', whiteSpace: 'pre' });
+      m.textContent = f.value;
+      document.body.append(m);
+      const r = document.createRange(); r.setStart(m.firstChild, 0); r.setEnd(m.firstChild, 1);
+      const b = r.getBoundingClientRect(); m.remove();
+      return { top: b.top, left: b.left, via: f.tagName };
+    }
+    return null;
+  })()`);
+  for (const [id, markers] of [["full", ["TTLA", "TXTA", "DTLA", "REFA"]], ["code1", ["CTTL", "CTXT", "CODEA"]], ["code2", ["CODEB"]], ["plain", ["PLNA"]], ["multi", ["HDGA", "PRGA", "LSTA", "QUTA", "PRGB"]], ["grp", ["GRPT", "GRPX"]], ["detailOnly", ["DONA"]], ["refOnly", ["RONA"]], ["picDetail", ["PDTA"]]]) {
+    for (const mk of markers) {
+      await ev(`window.sagebrush.board.load(${JSON.stringify(STILL)}).then(() => (window.sagebrush.board.editing(true), 1))`);
+      await until(`!!window.board.item(${JSON.stringify(id)})`, 5000);
+      await ev(`(() => { const b = window.board.bounds([${JSON.stringify(id)}]); window.board.setCamera({ x: b.x0 - 100, y: b.y0 - 120, z: 1 }); window.board.render(); return 1; })()`);
+      await sleep(300);
+      const was = {}, now = {};
+      for (const m of markers) was[m] = await firstLine(m, false);
+      if (!was[mk]) { check(false, `${mk}: not shown`); continue; }
+      const at = was[mk];
+      // (a link's own click opens it: its double-click as the page gets it)
+      if (mk === "REFA" || mk === "RONA") await ev(`(() => { const x = ${at.left + 3}, y = ${at.top + 5}; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()`);
+      else await dblclick(at.left + 3, at.top + 5);
+      const started = await until(`window.board.editing === ${JSON.stringify(id)}`, 3000);
+      await sleep(300);
+      // (the part double-clicked, and every other part of the item with it)
+      for (const m of markers) {
+        now[m] = started ? await firstLine(m, true) : null;
+        const dy = now[m] && now[m].top - was[m].top, dx = now[m] && now[m].left - was[m].left;
+        check(started && now[m] && Math.abs(dy) < 0.5 && Math.abs(dx) < 0.5, `${id}, ${mk} double-clicked: ${m === mk ? "its" : m + "'s"} first line stays where it was as editing starts: ` + JSON.stringify({ started, dy, dx, was: was[m], now: now[m] }));
+      }
+      await key("Escape");
+      await sleep(200);
+      if (await editing()) await outside();
+    }
+  }
+  // (a note with text and no title: no title field until + Title asks for it)
+  await ev(`window.sagebrush.board.load(${JSON.stringify(STILL)}).then(() => (window.sagebrush.board.editing(true), 1))`);
+  await show("plain");
+  const rp = await firstLine("PLNA", false);
+  await dblclick(rp.left + 3, rp.top + 5);
+  await until("window.board.editing === 'plain'", 3000);
+  check(await ev("document.querySelector('.board-editing .be-title').hidden && !document.querySelector('.ip-bar .ip-title').hidden"), "an untitled note: no title field, and + Title: " + await bar());
+  await ev("document.querySelector('.ip-bar .ip-title').click(), 1");
+  check(await ev("!document.querySelector('.board-editing .be-title').hidden && document.activeElement === document.querySelector('.board-editing .be-title') && document.querySelector('.ip-bar .ip-title').hidden"), "+ Title: its field, being written");
+  await type("Named");
+  await key("Escape");
+  await sleep(300);
+  check((await node("plain"))?.title === "Named", "...and kept: " + JSON.stringify(await node("plain")));
+  // (a note of only a detail: no title field and no text field above it, + Title and + Text offering them)
+  await ev(`window.sagebrush.board.load(${JSON.stringify(STILL)}).then(() => (window.sagebrush.board.editing(true), 1))`);
+  await show("detailOnly");
+  const rd = await firstLine("DONA", false);
+  await dblclick(rd.left + 3, rd.top + 5);
+  await until("window.board.editing === 'detailOnly'", 3000);
+  check(await ev("(() => { const e = document.querySelector('.board-editing'); return e.querySelector('.be-title').hidden && e.querySelector('.be-text').hidden && document.activeElement === e.querySelector('.be-detail') && !document.querySelector('.ip-bar .ip-title').hidden && !document.querySelector('.ip-bar .ip-text').hidden; })()"), "a note of only a detail: its detail being written, no title or text field, + Title and + Text: " + await bar());
+  await ev("document.querySelector('.ip-bar .ip-text').click(), 1");
+  check(await ev("(() => { const e = document.querySelector('.board-editing'); return !e.querySelector('.be-text').hidden && e.querySelector('.be-text').contains(document.activeElement) && document.querySelector('.ip-bar .ip-text').hidden; })()"), "+ Text: its field, being written");
+  await type("Words");
+  await key("Escape");
+  await sleep(300);
+  if (await editing()) await outside();
+  check((await node("detailOnly"))?.text === "Words" && (await node("detailOnly"))?.detail === "DONA only a detail", "...and kept: " + JSON.stringify(await node("detailOnly")));
+  // (a code item's ▶ and { }, where they are, while it is being written: run it as written, hide it)
+  await show("code1");
+  const rk = await firstLine("CODEA", false);
+  await dblclick(rk.left + 3, rk.top + 5);
+  await until("window.board.editing === 'code1'", 3000);
+  check(await ev("(() => { const h = document.querySelector('.board-editing .board-code-head'); return !!h.querySelector('.board-code-run').offsetParent && !!h.querySelector('.board-code-toggle').offsetParent; })()"), "being written, a code item keeps ▶ and { } where they are");
+  await ev("(() => { const t = document.querySelector('.board-editing .be-code'); t.value = 'CODEA = 5\\nprint(CODEA * 2)'; t.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()");
+  await ev("document.querySelector('.board-editing .board-code-run').click(), 1");
+  check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'code1')?.output === '10\\n')", 30000) && (await editing()) === "code1", "▶ runs the code as it is written, still being written: " + JSON.stringify(await ev("window.sagebrush.board.outputs()")));
+  // ({ }: a toggle named "Show the code", pressed while the code shows; its tooltip the action it takes, A11Y-9E1-2)
+  const toggleState = () => ev("(() => { const t = document.querySelector('.board-editing .board-code-toggle'); return [t.getAttribute('aria-label'), t.getAttribute('aria-pressed'), t.title]; })()");
+  check(JSON.stringify(await toggleState()) === JSON.stringify(["Show the code", "true", "Hide the code (its output stays)"]), "{ } with the code shown: " + JSON.stringify(await toggleState()));
+  await ev("document.querySelector('.board-editing .board-code-toggle').click(), 1");
+  check(await until("document.querySelector('.board-editing .be-codepart').hidden && document.querySelector('.board-editing .board-code-toggle').classList.contains('off')", 2000) && (await editing()) === "code1", "{ } hides the code, still being written");
+  check(JSON.stringify(await toggleState()) === JSON.stringify(["Show the code", "false", "Show the code"]), "{ } with the code hidden: " + JSON.stringify(await toggleState()));
+  await key("Escape");
+  await sleep(300);
+  if (await editing()) await outside();
+  check((await node("code1"))?.hideCode === true, "...and that is kept: " + JSON.stringify(await node("code1")));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

@@ -11,11 +11,18 @@ Semantics kept from MATLAB:
   shows C's rows top to bottom.  Arrays cross into matplotlib through
   _m._mat (MATLAB orientation), the one place the axes are reversed back.
 
-Not yet: true 3-D (surf and mesh are shown from above), contour lines
-(contour draws filled bands), and raster output (print and saveas write SVG).
+A figure whose one axes is 3-D (surf, mesh, plot3, scatter3, stem3) is also
+shown as an interactive 3-D view in the notebook (web/viewer3d.js: drag to
+rotate, scroll to zoom), with MATLAB's axes and colors; its SVG is shown
+everywhere else, and is the picture when the view cannot start.
+
+Not yet: an interactive view for figures with several axes, or with patches
+or a legend in the 3-D axes (they show the SVG), and raster output (print
+and saveas write SVG).
 """
 
 import math
+import _matlab_tex as _mtex
 
 import numpy as np
 
@@ -242,6 +249,27 @@ def _text_value(v):
     return _m._text(_m.num2str_(v))
 
 
+def _tex(h, s, prop="Interpreter"):
+    """s as the TeX markup the figure's text is drawn from (lib/_matlab_tex.py),
+    as h's interpreter says: 'tex' (the default) as it is, 'none' its
+    markup characters escaped; 'latex' is not supported"""
+    it = _m._text(h.props.get(prop, _m.Char("tex"))).lower() if h is not None else "tex"
+    if it == "tex":
+        return s
+    if it == "none":
+        return _mtex.literal(s)
+    if it == "latex":
+        raise _m._err("The 'latex' interpreter is not supported in Sagebrush: use 'tex' (MATLAB's TeX markup) or 'none'.")
+    raise _m._err("%s must be 'tex', 'latex' or 'none'." % prop)
+
+
+def _tex_checked(h, s, prop="Interpreter"):
+    """_tex, and the markup checked now (an error at the call, not when drawn)"""
+    t = _tex(h, s, prop)
+    _mtex.check(t)
+    return t
+
+
 class Axes(GObj):
     _mclass = "matlab.graphics.axis.Axes"
     TYPE = "axes"
@@ -250,7 +278,7 @@ class Axes(GObj):
         GObj.__init__(self, fig)
         self.grid = grid  # (m, n, [indices]) of subplot, or None
         self.color_index = 0
-        self.title = Text(None)
+        self.title = Text(None, FontWeight=_m.Char("bold"))  # (TitleFontWeight's documented default)
         self.xlabel = Text(None)
         self.ylabel = Text(None)
         self.zlabel = Text(None)
@@ -268,6 +296,7 @@ class Axes(GObj):
                 "ZTickLabel": _m.Cell([], (0, 1)), "ZTickLabelMode": _m.Char("auto"),
                 "PlotBoxAspectRatio": np.array([[1.0], [1.0], [1.0]]), "PlotBoxAspectRatioMode": _m.Char("auto"),
                 "XGrid": _m.Char("off"), "YGrid": _m.Char("off"), "ZGrid": _m.Char("off"), "Box": _m.Char("on"),
+                "TickLabelInterpreter": _m.Char("tex"),
                 "FontSize": 10.0, "XTick": np.zeros((0, 0)), "YTick": np.zeros((0, 0)), "XTickMode": _m.Char("auto"),
                 "YTickMode": _m.Char("auto"), "XTickLabel": _m.Cell([], (0, 1)), "YTickLabel": _m.Cell([], (0, 1)),
                 "XTickLabelMode": _m.Char("auto"), "YTickLabelMode": _m.Char("auto"),
@@ -361,8 +390,10 @@ class Axes(GObj):
                 c.delete()
             self.children = []
             self.color_index = 0
+            # (the title and labels too: their defaults, the title bold)
             for t in (self.title, self.xlabel, self.ylabel, self.zlabel, self.subtitle):
-                t.props["String"] = _m.Char("")
+                t.props.update(t.defaults())
+            self.title.props["FontWeight"] = _m.Char("bold")
             self.legend = None
             for k in ("XLimMode", "YLimMode", "ZLimMode", "CLimMode", "XTickMode", "YTickMode", "XTickLabelMode", "YTickLabelMode"):
                 self.props[k] = _m.Char("auto")
@@ -372,6 +403,8 @@ class Axes(GObj):
             self.props["YDir"] = _m.Char("normal")
             self.props["DataAspectRatioMode"] = _m.Char("auto")
             self.props["View"] = np.array([[0.0], [90.0]])
+            for k in ("XGrid", "YGrid", "ZGrid"):
+                self.props[k] = _m.Char("off")
         self.touch()
 
     def data_range(self, axis):
@@ -650,7 +683,7 @@ class Legend(GObj):
 
     def defaults(self):
         return {"String": _m.Cell([], (1, 0)), "Location": _m.Char("northeast"), "Visible": _m.Char("on"), "FontSize": 9.0,
-                "Box": _m.Char("on"), "Orientation": _m.Char("vertical"), "Title": None}
+                "Box": _m.Char("on"), "Orientation": _m.Char("vertical"), "Title": None, "Interpreter": _m.Char("tex")}
 
 
 class Colorbar(GObj):
@@ -1049,11 +1082,23 @@ def clf_(nargout, args):
 
 @_fn("cla")
 def cla_(nargout, args):
-    ax = args[0] if args and isinstance(args[0], Axes) else gca()
-    keep = ax.props["NextPlot"]
-    ax.props["NextPlot"] = _m.Char("replace")
-    ax.newplot()
-    ax.props["NextPlot"] = keep
+    """cla: the plotted objects (visible handles) deleted, the color order
+    started again; the title, labels and axes' properties kept.  cla reset:
+    the axes' properties too, to their defaults (as a new plot's)"""
+    args = list(args)
+    ax = args.pop(0) if args and isinstance(args[0], Axes) else gca()
+    if args and not (len(args) == 1 and _m._istext(args[0]) and _m._text(args[0]).lower() == "reset"):
+        raise _m._err("cla: the only option is 'reset'.")
+    if args:
+        ax.props["NextPlot"] = _m.Char("replace")
+        ax.newplot()
+    else:
+        for c in list(ax.children):
+            c.delete()
+        ax.children = []
+        ax.color_index = 0
+        ax.legend = None
+    ax.figure().dirty = True
 
 
 @_fn("close")
@@ -2036,11 +2081,32 @@ def _label(prop):
     def g(nargout, args):
         ax, args = _axes_arg(args)
         target = ax.get_prop(prop)
+        sub = None
+        if prop == "Title" and len(args) >= 2 and len(args) % 2 == 0:
+            # (title(titletext, subtitletext, Name, Value, ...): the even count
+            # leaves the subtitle second)
+            sub, args = args[1], [args[0]] + list(args[2:])
         pos, props = _split_props(args, 1)
-        target.props["String"] = _m.cp(pos[0]) if pos else _m.Char("")
-        _apply(target, props)
+        if len(pos) > 1:
+            raise _m._err("Too many input arguments.")
+        # (refused markup or interpreter: the title and subtitle as they were)
+        saved = [(h, dict(h.props)) for h in (target, ax.subtitle)]
+        try:
+            target.props["String"] = _m.cp(pos[0]) if pos else _m.Char("")
+            _apply(target, props)
+            if sub is not None:
+                # (title(titletext, subtitletext, Name, Value): the properties are both lines')
+                ax.subtitle.props["String"] = _m.cp(sub)
+                _apply(ax.subtitle, props)
+                _tex_checked(ax.subtitle, _text_value(ax.subtitle.props["String"]))
+            _tex_checked(target, _text_value(target.props["String"]))
+        except BaseException:
+            for h, p in saved:
+                h.props.clear()
+                h.props.update(p)
+            raise
         ax.touch()
-        return target
+        return [target, ax.subtitle] if prop == "Title" and nargout >= 2 else target
     return g
 
 
@@ -2083,16 +2149,26 @@ def legend_(nargout, args):
         props[_m._text(pos[i])] = pos[i + 1]
     plotted = chosen if chosen is not None else [c for c in ax.children if isinstance(c, (Line, Scatter, Bar, Patch, Contour, Histogram, ConstantLine)) and not isinstance(c, Text)
                                                    and _m._text(c.props.get("HandleVisibility", _m.Char("on"))) != "off"]
+    # (the new names first, checked as the new legend's interpreter says,
+    # before anything changes: a refused call leaves the lines and the old
+    # legend as they were)
+    new = {}
     for k, c in enumerate(plotted):
         if k < len(names):
-            c.props["DisplayName"] = _m.Char(names[k])
+            new[id(c)] = names[k]
         elif not names and not _m._text(c.props.get("DisplayName", _m.Char(""))):
-            c.props["DisplayName"] = _m.Char("data%d" % (k + 1))
+            new[id(c)] = "data%d" % (k + 1)
     shown = plotted[:len(names)] if names else plotted
-    lg = Legend(None, String=_m.Cell([_m.Char(_m._text(c.props["DisplayName"])) for c in shown], (1, len(shown))))
-    lg.parent = ax
+    label = lambda c: new.get(id(c), _m._text(c.props.get("DisplayName", _m.Char(""))))
+    lg = Legend(None, String=_m.Cell([_m.Char(label(c)) for c in shown], (1, len(shown))))
+    lg.parent = ax  # (its axes, for its properties; not shown until ax.legend is it)
     lg.items = shown
     _apply(lg, props)
+    for c in shown:
+        _tex_checked(lg, label(c))
+    for c in plotted:
+        if id(c) in new:
+            c.props["DisplayName"] = _m.Char(new[id(c)])
     ax.legend = lg
     ax.touch()
     return lg
@@ -2215,6 +2291,13 @@ def text_(nargout, args):
     for k in range(len(xs)):
         t = Text(ax, String=_m.cp(each[k] if each else s), Position=np.array([[xs[k]], [ys[k]], [z]]))
         _apply(t, props)
+        try:
+            _tex_checked(t, _text_value(t.props["String"]))
+        except BaseException:
+            # (a refused text is not left in the axes, nor those made before it)
+            for u in out + [t]:
+                u.delete()
+            raise
         out.append(t)
     return _harr(out)
 
@@ -2242,11 +2325,42 @@ _FUNCS["yline"] = _constline("y")
 
 @_fn("view")
 def view_(nargout, args):
-    ax = gca()
-    if not args:
-        return ax.props["View"]
-    v = _vec(args[0])
-    ax.props["View"] = np.array([[0.0], [90.0]]) if v == [2.0] else (np.array([[-37.5], [30.0]]) if v == [3.0] else _colvec(v[:2]))
+    """view(az, el), view(v) ([az el], or [x y z] toward the camera), view(2),
+    view(3), view(ax, ...); [caz, cel] = view(...): the angles"""
+    args = list(args)
+    ax = args.pop(0) if args and isinstance(args[0], Axes) else gca()
+    if args:
+        if len(args) == 2:
+            az, el = _f(args[0]), _f(args[1])
+        elif len(args) == 1:
+            v = _vec(args[0])
+            if v == [2.0]:
+                az, el = 0.0, 90.0
+            elif v == [3.0]:
+                az, el = -37.5, 30.0
+            elif len(v) == 2:
+                az, el = v
+            elif len(v) == 3:
+                # (the direction toward the camera: x = cos(el) sin(az),
+                # y = -cos(el) cos(az), z = sin(el), as _viewmtx's depth row)
+                r = math.sqrt(sum(t * t for t in v))
+                if r == 0:
+                    raise _m._err("view: the line of sight must not be [0 0 0].")
+                az = math.degrees(math.atan2(v[0], -v[1])) if v[0] or v[1] else 0.0
+                el = math.degrees(math.asin(max(-1.0, min(1.0, v[2] / r))))
+            else:
+                raise _m._err("view: the argument must be 2, 3, [az el] or [x y z].")
+        else:
+            raise _m._err("Too many input arguments.")
+        ax.props["View"] = _colvec([az, el])
+        ax.figure().dirty = True
+    v = _vec(ax.props["View"])
+    if nargout >= 2:
+        return [v[0], v[1]]
+    if nargout == 1 or not args:
+        # (the documented outputs are [caz, cel]; one output is another
+        # contract, not implemented)
+        raise _m._err("view: one output is not supported; use [caz, cel] = view.")
 
 
 @_fn("set")
@@ -2371,7 +2485,7 @@ def print_(nargout, args):
         _m.warning_("Only SVG output is supported: writing %s.svg" % base)
     path = base + ".svg"
     from _graphics import save_svg
-    save_svg(render(fig)._svg(), path)
+    save_svg(figure_svg(fig), path)
 
 
 @_fn("axes")
@@ -2687,13 +2801,31 @@ def render(fig):
             max_ = mfig.add_axes(list(ax.manual_pos))
         else:
             max_ = mfig.add_subplot(1, 1, 1)
+        # (MATLAB's text: TeX markup, not the shim's $...$ math)
+        max_._opts["markup"] = _mtex.MARKUP
         if ax.is3d():
             _draw_axes3d(ax, max_, mfig, _MCmap(ax.get_prop("Colormap")), _vec(ax.get_prop("CLim")))
         else:
             _draw_axes(ax, max_, mfig)
     if getattr(fig, "suptitle", None):
+        mfig._markup = _mtex.MARKUP
         mfig.suptitle(fig.suptitle)
     return mfig
+
+
+def _set_title(ax, mx):
+    """the title in its FontWeight (bold by default), and after it the subtitle in its own"""
+    t = _text_value(ax.title.props["String"])
+    st = _text_value(ax.subtitle.props["String"])
+    weight = lambda h: "bold" if _m._text(h.props["FontWeight"]).lower() == "bold" else "normal"
+    if t:
+        mx.set_title(_tex(ax.title, t))
+        mx._opts["title_weight"] = weight(ax.title)
+        if st:
+            mx._opts["subtitle"] = (_tex(ax.subtitle, st), weight(ax.subtitle))
+    elif st:
+        mx.set_title(_tex(ax.subtitle, st))
+        mx._opts["title_weight"] = weight(ax.subtitle)
 
 
 def _draw_axes(ax, mx, mfig):
@@ -2708,7 +2840,7 @@ def _draw_axes(ax, mx, mfig):
     for c in ax.children:
         if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
             continue
-        label = _m._text(c.props.get("DisplayName", _m.Char(""))) if id(c) in labels else None
+        label = _tex(ax.legend, _m._text(c.props.get("DisplayName", _m.Char("")))) if id(c) in labels else None
         if isinstance(c, Histogram):
             e = _vec(c.props["BinEdges"])
             v = _vec(c.props["Values"])
@@ -2763,7 +2895,7 @@ def _draw_axes(ax, mx, mfig):
                 _draw_contour_lines(c, mx, cmap, clim)
         elif isinstance(c, Text):
             p = _vec(c.props["Position"])
-            mx.text(p[0], _fy(p[1]), _text_value(c.props["String"]), fontsize=_f(c.props["FontSize"]),
+            mx.text(p[0], _fy(p[1]), _tex(c, _text_value(c.props["String"])), fontsize=_f(c.props["FontSize"]),
                     color=_hex(_rgbof(c.props["Color"])), ha=_m._text(c.props["HorizontalAlignment"]),
                     va=_VA.get(_m._text(c.props["VerticalAlignment"]).lower(), "center"), rotation=_f(c.props["Rotation"]))
         elif isinstance(c, ConstantLine):
@@ -2773,14 +2905,11 @@ def _draw_axes(ax, mx, mfig):
                 mx.axvline(_f(c.props["Value"]), color=col, linestyle=ls)
             else:
                 mx.axhline(_f(c.props["Value"]), color=col, linestyle=ls)
-    t = _text_value(ax.title.props["String"])
-    st = _text_value(ax.subtitle.props["String"])
-    if t or st:
-        mx.set_title(t + ("\n" + st if st else ""))
+    _set_title(ax, mx)
     if _text_value(ax.xlabel.props["String"]):
-        mx.set_xlabel(_text_value(ax.xlabel.props["String"]))
+        mx.set_xlabel(_tex(ax.xlabel, _text_value(ax.xlabel.props["String"])))
     if _text_value(ax.ylabel.props["String"]):
-        mx.set_ylabel(_text_value(ax.ylabel.props["String"]))
+        mx.set_ylabel(_tex(ax.ylabel, _text_value(ax.ylabel.props["String"])))
     if _m._text(ax.props["XScale"]) == "log":
         mx.set_xscale("log")
     if _m._text(ax.props["YScale"]) == "log":
@@ -2813,13 +2942,13 @@ def _draw_axes(ax, mx, mfig):
         labs = None
         if _m._text(ax.props["XTickLabelMode"]) == "manual":
             labs = _ticklabels(ax.props["XTickLabel"])
-        mx.set_xticks(ticks, labs)
+        mx.set_xticks(ticks, [_tex(ax, l, "TickLabelInterpreter") for l in labs] if labs is not None else None)
     elif _m._text(ax.props["XTickLabelMode"]) == "manual":
-        mx.set_xticklabels(_ticklabels(ax.props["XTickLabel"]))
+        mx.set_xticklabels([_tex(ax, l, "TickLabelInterpreter") for l in _ticklabels(ax.props["XTickLabel"])])
     if _m._text(ax.props["YTickMode"]) == "manual":
         yt = _vec(ax.props["YTick"])
         labs = _ticklabels(ax.props["YTickLabel"]) if _m._text(ax.props["YTickLabelMode"]) == "manual" else ([_m._text(_m.num2str_(t)) for t in yt] if _FLIP else None)
-        mx.set_yticks([_fy(t) for t in yt], labs)
+        mx.set_yticks([_fy(t) for t in yt], [_tex(ax, l, "TickLabelInterpreter") for l in labs] if labs is not None else None)
     if _m._text(ax.props["XGrid"]) == "on" or _m._text(ax.props["YGrid"]) == "on":
         mx.grid(True)
     if _m._text(ax.props["DataAspectRatioMode"]) == "manual":
@@ -3244,6 +3373,38 @@ class _Faces(_Primitive):
         return "%s of %d faces" % (self.what, len(self.faces))
 
 
+class _LegendSwatch(_Primitive):
+    """a legend entry alone, nothing drawn in the axes: a 3-D surface's swatch"""
+    kind = "polygon"
+
+    def __init__(self, label, fill, edge):
+        _Primitive.__init__(self, label=label, color=fill or "none", legend_edge=edge)
+
+    def bbox(self):
+        return None
+
+    def svg(self, P):
+        return ""
+
+    def describe(self):
+        return 'legend entry "%s"' % self.options["label"]
+
+
+def _surface_swatch(c, cmap, clim):
+    """a surface's legend colors (fill, edge): its FaceColor and EdgeColor, colormapped
+    ones ('flat', 'interp') at the middle of CLim, as Octave's legend draws them"""
+    pal = _palette(cmap)
+    lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+    mid = pal[_cindex((lo + hi) / 2, lo, hi, len(pal))]
+
+    def one(v):
+        mode = _m._text(v).lower() if _m._istext(v) else None
+        if mode in ("flat", "interp", "texturemap"):
+            return mid
+        return None if mode == "none" else _hex(_rgbof(v))
+    return one(c.props["FaceColor"]), one(c.props["EdgeColor"])
+
+
 def _palette(cmap):
     return [_hex(tuple(r)) for r in cmap.M]
 
@@ -3356,8 +3517,17 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     faces.sort(key=lambda f: f[0])
     if faces:
         mx._add(_Faces([f[1:] for f in faces]))
+    # (the legend's entries, in the children's order, as in 2-D)
+    shown = set()
+    if ax.legend is not None and _m._text(ax.legend.props["Visible"]) == "on":
+        shown = set(id(c) for c in getattr(ax.legend, "items", []))
     for c in ax.children:
         if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
+            continue
+        label = _tex(ax.legend, _m._text(c.props.get("DisplayName", _m.Char("")))) if id(c) in shown else None
+        if isinstance(c, Surface):
+            if label:
+                mx._add(_LegendSwatch(label, *_surface_swatch(c, cmap, clim)))
             continue
         if isinstance(c, Stem) and _m._numel(c.props["ZData"]):
             col = _hex(_rgbof(c.props["Color"]))
@@ -3371,7 +3541,8 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
             mx._add(GLine(sx, sy, color=col, thickness=1.0))
             fill = c.props["MarkerFaceColor"]
             mx.plot(px, py, linestyle="none", marker=_mpl_marker(_m._text(c.props["Marker"])) or "o", color=col,
-                    markersize=_f(c.props["MarkerSize"]), markerfacecolor=col if not (_m._istext(fill) and _m._text(fill) == "none") else "none")
+                    markersize=_f(c.props["MarkerSize"]), markerfacecolor=col if not (_m._istext(fill) and _m._text(fill) == "none") else "none",
+                    **({"label": label} if label else {}))
             continue
         if isinstance(c, (Line, Scatter)) and not isinstance(c, (Stem, ErrorBar, Area)):
             xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
@@ -3379,13 +3550,13 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
             pts = [proj(x, y, z) for x, y, z in zip(xs, ys, zs)]
             xy = ([p[0] for p in pts], [p[1] for p in pts])
             if isinstance(c, Line):
-                _draw_line(c, mx, None, xy=xy)
+                _draw_line(c, mx, label, xy=xy)
             else:
-                _draw_scatter(c, mx, None, cmap, clim, xy=xy)
+                _draw_scatter(c, mx, label, cmap, clim, xy=xy)
         elif isinstance(c, Text):
             p = _vec(c.props["Position"]) + [0.0, 0.0]
             q = proj(p[0], p[1], p[2])
-            mx.text(q[0], q[1], _text_value(c.props["String"]), fontsize=_f(c.props["FontSize"]),
+            mx.text(q[0], q[1], _tex(c, _text_value(c.props["String"])), fontsize=_f(c.props["FontSize"]),
                     color=_hex(_rgbof(c.props["Color"])), ha=_m._text(c.props["HorizontalAlignment"]),
                     va=_VA.get(_m._text(c.props["VerticalAlignment"]).lower(), "center"))
     # tick labels: x on the front edge (y = front) at the bottom (z = z0), y likewise,
@@ -3419,14 +3590,14 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
             q = proj(*p)
             k = all_ticks.index(t) if t in all_ticks else -1
             lab = ticklabels[i][k] if 0 <= k < len(ticklabels[i]) else _m._text(_m.num2str_(float(t)))
-            mx.text(q[0] + 0.04 * dx, q[1] + 0.04 * dy, lab, fontsize=9, color="#262626", ha=ha, va=va)
+            mx.text(q[0] + 0.04 * dx, q[1] + 0.04 * dy, _tex(ax, lab, "TickLabelInterpreter"), fontsize=9, color="#262626", ha=ha, va=va)
         lab = _text_value(labels[i].props["String"])
         if lab:
             p = list(base)
             p[i] = mid[i]
             q = proj(*p)
             off = 0.24 if i < 2 else 0.22
-            mx.text(q[0] + off * dx, q[1] + off * dy, lab, fontsize=10, color="#262626", ha="center", va="center",
+            mx.text(q[0] + off * dx, q[1] + off * dy, _tex(labels[i], lab), fontsize=10, color="#262626", ha="center", va="center",
                     rotation=90 if i == 2 else 0)
     corners = [proj(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
     sx = [c[0] for c in corners]
@@ -3436,18 +3607,376 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     mx.set_ylim(min(sy) - pad, max(sy) + pad * 0.6)
     mx.set_aspect("equal")
     mx.axis("off")
-    t = _text_value(ax.title.props["String"])
-    st = _text_value(ax.subtitle.props["String"])
-    if t or st:
-        mx.set_title(t + ("\n" + st if st else ""))
+    _set_title(ax, mx)
+    if shown:
+        mx.legend(loc=_LOC.get(_m._text(ax.legend.props["Location"]).lower(), "upper right"))
     if ax.colorbar is not None and _m._text(ax.colorbar.props.get("Visible", _m.Char("on"))) == "on":
         fx, fy, fw, fh = mx._rect
         mx._rect = (fx, fy, fw * 0.92, fh)
         mfig.colorbar(_ColorbarBands(cmap, clim), ax=mx)
 
 
+# ------------------------------------------------------------------ the figure as shown: SVG, and a 3-D scene
+
+# the text and axis lines: dark gray, the documented default of the axes'
+# XColor, YColor and ZColor ([0.15 0.15 0.15]), on the figure's own color,
+# whatever the page's theme
+_INK = "#262626"
+
+
+def figure_svg(fig, mfig=None):
+    """fig's SVG on the figure's Color (white unless set: Sagebrush's choice;
+    MATLAB documents another default), its text and axis lines in _INK.  The
+    shim paints them currentColor: the root's color says which, so the text
+    itself is left as it is; legends get a white box, not the page's"""
+    svg = (mfig or render(fig))._svg()
+    bg = _rgbof(fig.props.get("Color", _m.Char("w")))
+    i = svg.find("<svg")
+    j = svg.find(">", i) if i >= 0 else -1
+    if j < 0:
+        return svg
+    # (the root tag's attribute values are escaped: ' style="' is its own)
+    tag, style = svg[i:j], "color:%s;--sb-legend-bg:#ffffff" % _INK
+    tag = tag.replace(' style="', ' style="%s;' % style, 1) if ' style="' in tag else tag + ' style="%s"' % style
+    rect = '<rect width="100%%" height="100%%" fill="%s"/>' % _hex(bg) if bg is not None else ""
+    return svg[:i] + tag + ">" + rect + svg[j + 1:]
+
+
+# a scene of more vertices than this is shown as its SVG only (the interactive
+# view's data would be too big for a notebook's output); nor one that draws
+# more than _SCENE_MAX_DRAWN vertices, counted as the viewer counts them
+# (web/viewer3d.js's LIMITS, which are twice these: lines 1.4 wide and wider
+# are tubes, 36 vertices a segment), or has more than _SCENE_MAX_OBJECTS objects
+_SCENE_MAX_VERTICES = 250000
+_SCENE_MAX_DRAWN = 1000000
+_SCENE_MAX_OBJECTS = 10000
+
+
+def _scene_drawn(objs):
+    """the vertices the viewer builds for these version 1 objects (a mesh's
+    own, and one for each index)"""
+    n = 0
+    for o in objs:
+        if o["type"] == "mesh":
+            n += len(o["pos"]) // 3 + len(o["idx"])
+        elif o["type"] == "lines":
+            segs = len(o["pos"]) // 6
+            n += 36 * segs if o.get("width", 1) >= 1.4 else 2 * segs
+        elif o["type"] == "points":
+            n += len(o["pos"]) // 3
+    return n
+
+
+def _r5(v):
+    # (coordinates in the scene: 5 significant digits, as Sage's scenes)
+    return float("%.5g" % v)
+
+
+def _point_size(ms):
+    # (the viewer's discs are sqrt(size) * 2.4 pixels across; MATLAB's
+    # markers ms points, about 4/3 ms pixels)
+    return (ms * 4 / 3 / 2.4) ** 2
+
+
+def _scene_surface(c, cmap, clim, objs, budget):
+    """a Surface's faces (a mesh, unlit: its colors as MATLAB gives them) and
+    edges (lines), as FaceColor and EdgeColor say ('flat': the face's first
+    vertex's CData, as the SVG; 'interp': each vertex's own color)"""
+    Zm = _m._mat(c.props["ZData"])
+    m, n = Zm.shape
+    if m < 2 or n < 2:
+        return True
+    if 4 * m * n > budget[0]:
+        return False
+    budget[0] -= 4 * m * n
+    z = Zm.real.tolist() if Zm.dtype.kind == "c" else Zm.tolist()
+    GX, GY = _grid_xy(c.props["XData"], c.props["YData"], m, n)
+    C = c.props.get("CData")
+    cz = _m._mat(C).tolist() if C is not None and _m._numel(C) == m * n else z
+    pal = _palette(cmap)
+    lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+    fc, ec = c.props["FaceColor"], c.props["EdgeColor"]
+    fmode = _m._text(fc).lower() if _m._istext(fc) else None
+    emode = _m._text(ec).lower() if _m._istext(ec) else None
+    ffix = None if fmode in ("flat", "interp", "none", "texturemap") else _hex(_rgbof(fc))
+    efix = None if emode in ("flat", "interp", "none") else _hex(_rgbof(ec))
+
+    def ok(i, j):
+        return all(math.isfinite(v) for v in (GX[i][j], GY[i][j], z[i][j]))
+
+    def rgb(v):
+        k = _cindex(v, lo, hi, len(pal))
+        h = pal[k] if k is not None else None
+        return [int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)] if h else None
+
+    def vert(i, j):
+        return [_r5(GX[i][j]), _r5(GY[i][j]), _r5(z[i][j])]
+    quads = [(i, j) for i in range(m - 1) for j in range(n - 1) if ok(i, j) and ok(i, j + 1) and ok(i + 1, j + 1) and ok(i + 1, j)]
+    edges = emode != "none" and (efix is not None or emode in ("flat", "interp"))
+    if fmode not in ("none", None) or ffix:
+        pos, idx, col = [], [], []
+        for i, j in quads:
+            if fmode in ("flat", "texturemap"):
+                rc = rgb(cz[i][j])
+                cs = [rc] * 4
+            elif fmode == "interp":
+                cs = [rgb(cz[a][b]) for a, b in ((i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j))]
+            else:
+                cs = [[int(ffix[1:3], 16), int(ffix[3:5], 16), int(ffix[5:7], 16)]] * 4
+            if any(t is None for t in cs):
+                continue
+            b = len(pos) // 3
+            for (a, bb), cc in zip(((i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j)), cs):
+                pos.extend(vert(a, bb))
+                col.extend(cc)
+            idx.extend((b, b + 1, b + 2, b, b + 2, b + 3))
+        if idx:
+            alpha = c.props.get("FaceAlpha", 1.0)
+            o = {"type": "mesh", "pos": pos, "idx": idx, "colors": col, "color": "#000000", "lit": False,
+                 "opacity": float(_f(alpha)) if not _m._istext(alpha) else 1.0}
+            if edges:
+                o["offset"] = True
+            objs.append(o)
+    if edges:
+        # (each grid segment once; by color, a lines object per color)
+        groups = {}
+        for i in range(m):
+            for j in range(n):
+                if not ok(i, j):
+                    continue
+                for a, b in ((i, j + 1), (i + 1, j)):
+                    if a < m and b < n and ok(a, b):
+                        h = efix or (lambda v: _hex(tuple(t / 255 for t in v)) if v else None)(rgb(cz[i][j]))
+                        if h:
+                            groups.setdefault(h, []).extend(vert(i, j) + vert(a, b))
+        w = float(_f(c.props.get("LineWidth", 0.5)))
+        for h, pos in groups.items():
+            objs.append({"type": "lines", "pos": pos, "color": h, "width": min(w, 1.0)})
+    return True
+
+
+def _scene_line(c, objs):
+    xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
+    zs = _vec(c.props["ZData"]) if _m._numel(c.props["ZData"]) else [0.0] * len(xs)
+    col = _hex(_rgbof(c.props["Color"]) or (0, 0, 0))
+    pts = list(zip(xs, ys, zs))
+    if _m._text(c.props["LineStyle"]) != "none":
+        pos = []
+        for a, b in zip(pts, pts[1:]):
+            if all(math.isfinite(v) for v in a + b):
+                pos.extend(_r5(v) for v in a + b)
+        if pos:
+            objs.append({"type": "lines", "pos": pos, "color": col, "width": float(_f(c.props["LineWidth"]))})
+    mk = _m._text(c.props["Marker"])
+    if mk not in ("none", ""):
+        pos = [_r5(v) for p in pts if all(math.isfinite(t) for t in p) for v in p]
+        if pos:
+            fill = c.props["MarkerFaceColor"]
+            fc = _rgbof(fill)
+            objs.append({"type": "points", "pos": pos, "color": _hex(fc) if fc else col, "size": _point_size(float(_f(c.props["MarkerSize"])))})
+
+
+def _scene_scatter(c, cmap, clim, objs):
+    xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
+    zs = _vec(c.props["ZData"]) if _m._numel(c.props["ZData"]) else [0.0] * len(xs)
+    n = len(xs)
+    C = c.props["CData"]
+    pal = _palette(cmap)
+    lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+    if _m._istext(C) or _m._numel(C) == 3 and n != 3:
+        cols = [_hex(_rgbof(C) or COLOR_ORDER[0])] * n
+    elif _m._numel(C) == n:
+        cols = [pal[k] if k is not None else None for k in (_cindex(v, lo, hi, len(pal)) for v in _vec(C))]
+    elif _m._numel(C) == 3 * n:
+        rows = _m._mat(C).tolist()
+        cols = [_hex(tuple(r)) for r in rows]
+    else:
+        cols = [_hex(COLOR_ORDER[0])] * n
+    sz = _vec(c.props["SizeData"]) or [36.0]
+    groups = {}
+    for k in range(n):
+        p = (xs[k], ys[k], zs[k])
+        if cols[k] is None or not all(math.isfinite(t) for t in p):
+            continue
+        s_ = sz[k] if len(sz) == n else sz[0]
+        groups.setdefault((cols[k], s_), []).extend(_r5(v) for v in p)
+    for (h, s_), pos in groups.items():
+        objs.append({"type": "points", "pos": pos, "color": h, "size": _point_size(math.sqrt(max(s_, 0.0)))})
+
+
+def _scene_stem(c, objs):
+    col = _hex(_rgbof(c.props["Color"]) or COLOR_ORDER[0])
+    pos, tips = [], []
+    for x, y, z in zip(_vec(c.props["XData"]), _vec(c.props["YData"]), _vec(c.props["ZData"])):
+        if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
+            pos.extend([x, y, 0.0, x, y, z])
+            tips.extend([x, y, z])
+    if pos:
+        objs.append({"type": "lines", "pos": pos, "color": col, "width": float(_f(c.props["LineWidth"]))})
+        objs.append({"type": "points", "pos": tips, "color": col, "size": _point_size(float(_f(c.props["MarkerSize"])))})
+
+
+def figure_scene(fig):
+    """the scene of the 3-D viewer (web/viewer3d.js) for a figure whose one
+    axes is 3-D: its surfaces, lines, markers and text in the axes' limits,
+    seen from its View, with MATLAB's axes (a grid on the back planes, its
+    ticks and labels), orthographic, on the figure's color.  None when the
+    figure has other axes, or something the viewer does not show (patches,
+    legends, ...): then only the SVG is shown."""
+    axes = [a for a in fig.children if isinstance(a, Axes) and a.valid]
+    if len(axes) != 1 or not axes[0].is3d() or getattr(fig, "suptitle", None):
+        return None
+    ax = axes[0]
+    if getattr(ax, "legend", None) is not None and _m._text(ax.legend.props.get("Visible", _m.Char("on"))) == "on":
+        return None
+    cmap = _MCmap(ax.get_prop("Colormap"))
+    clim = _vec(ax.get_prop("CLim"))
+    proj = _Proj(ax)
+    objs = []
+    budget = [_SCENE_MAX_VERTICES]
+    for c in ax.children:
+        if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
+            continue
+        if isinstance(c, Surface):
+            if not _scene_surface(c, cmap, clim, objs, budget):
+                return None
+        elif type(c) is Stem and _m._numel(c.props["ZData"]):
+            _scene_stem(c, objs)
+        elif type(c) is Line:
+            _scene_line(c, objs)
+        elif type(c) is Scatter:
+            _scene_scatter(c, cmap, clim, objs)
+        elif isinstance(c, Text):
+            p = _vec(c.props["Position"]) + [0.0, 0.0, 0.0]
+            if not all(math.isfinite(v) for v in p[:3]):
+                continue
+            objs.append({"type": "text", "pos": p[:3], "text": _mtex.runs(_tex(c, _text_value(c.props["String"])), _SCENE_TEXT_PX),
+                         "color": _hex(_rgbof(c.props["Color"]) or (0, 0, 0))})
+        else:
+            return None
+    n_vert = sum(len(o["pos"]) // 3 for o in objs)
+    if n_vert > _SCENE_MAX_VERTICES or _scene_drawn(objs) > _SCENE_MAX_DRAWN or len(objs) > _SCENE_MAX_OBJECTS:
+        return None
+    lo = [l[0] for l in proj.lim]
+    hi = [l[1] for l in proj.lim]
+    scale = [2 * proj.size[i] / proj.spans[i] for i in range(3)]
+    ticks = [[t for t in _vec(ax.get_prop(k + "Tick"))] for k in "XYZ"]
+    ticklabels = []
+    for i, k in enumerate("XYZ"):
+        labs = _ticklabels(ax.get_prop(k + "TickLabel"))
+        ticklabels.append([_mtex.runs(_tex(ax, labs[j], "TickLabelInterpreter"), _SCENE_TICK_PX) if j < len(labs) else _m._text(_m.num2str_(float(t)))
+                           for j, t in enumerate(ticks[i])])
+    v = _vec(ax.props["View"])
+    t = _text_value(ax.title.props["String"])
+    st = _text_value(ax.subtitle.props["String"])
+    bg = _rgbof(fig.props.get("Color", _m.Char("w")))
+    scene = {"version": 1, "lo": lo, "hi": hi, "scale": scale, "objects": objs, "frame": False, "axes": False,
+             "labels": [_mtex.runs(_tex(l, _text_value(l.props["String"])), _SCENE_LABEL_PX) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
+             # (text as MATLAB's TeX markup draws it: a string, or runs of styled text)
+             "title": _mtex.runs(_tex(ax.title, t), _SCENE_TITLE_PX) if t else None,
+             "subtitle": _mtex.runs(_tex(ax.subtitle, st), _SCENE_TITLE_PX) if st else None,
+             "title_weight": "bold" if _m._text(ax.title.props["FontWeight"]).lower() == "bold" else "normal",
+             "subtitle_weight": "bold" if _m._text(ax.subtitle.props["FontWeight"]).lower() == "bold" else "normal",
+             # (MATLAB's azimuth is from the negative y axis, the viewer's from the x axis)
+             "azimuth": v[0] - 90.0, "elevation": max(-89.0, min(89.0, v[1])),
+             "projection": "orthographic", "background": _hex(bg) if bg else "#ffffff", "ink": _INK,
+             "box": {"ticks": ticks, "ticklabels": ticklabels, "grid": "#dfdfdf"}}
+    if ax.colorbar is not None and _m._text(ax.colorbar.props.get("Visible", _m.Char("on"))) == "on" and len(clim) == 2:
+        cm = []
+        M = cmap.M
+        for k, r in enumerate(M):
+            cm.extend([k / max(1, len(M) - 1), float(r[0]), float(r[1]), float(r[2])])
+        scene["colorbar"] = {"color_map": cm, "range": [clim[0], clim[1]]}
+    return scene if _scene_within(scene) else None
+
+
+# the viewer's text sizes (px), to which a scene's styled runs are relative
+# (web/viewer3d.js: the title's, a MATLAB axis label's, a tick label's, a text's)
+_SCENE_TITLE_PX, _SCENE_LABEL_PX, _SCENE_TICK_PX, _SCENE_TEXT_PX = 15.0, 11.0, 10.0, 12.0
+
+
+def _run_elements(runs, level):
+    """the elements the viewer makes for styled runs (web/viewer3d.js's
+    runElements: a span a run, a box and two cells a group of a pair)"""
+    n, k = 0, 0
+    while k < len(runs):
+        j = runs[k].get("j", [])
+        if len(j) <= level:
+            n += 1
+            k += 1
+            continue
+        sid, parts = j[level][0], ([], [])
+        while k < len(runs) and len(runs[k].get("j", [])) > level and runs[k]["j"][level][0] == sid:
+            parts[runs[k]["j"][level][1]].append(runs[k])
+            k += 1
+        n += 3 + _run_elements(parts[0], level + 1) + _run_elements(parts[1], level + 1)
+    return n
+
+
+def _scene_within(scene):
+    """whether the viewer would take the scene (web/viewer3d.js's checkScene:
+    its LIMITS on text and ticks, and positions near the box)"""
+    def size(v):
+        # (a text's characters, and its runs: the viewer's limits)
+        return (len(v), 1) if isinstance(v, str) else (sum(len(r["t"]) for r in v), len(v))
+    texts = [scene["title"] or "", scene["subtitle"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
+    if any(n > 2000 or k > 200 for n, k in map(size, texts)) or len(texts) - 5 > 2000:
+        return False
+    # (the styled runs in all: the viewer's spans, LIMITS.spans; and each run's
+    # size and rise within its LIMITS)
+    rich = [t for t in texts + [s for t in scene["box"]["ticklabels"] for s in t] if not isinstance(t, str)]
+    if sum(_run_elements(t, 0) for t in rich) > 20000:
+        return False
+    if any(not (0.01 <= r.get("s", 1) <= 10 and abs(r.get("r", 0)) <= 10 and len(r.get("j", [])) <= 8) for t in rich for r in t):
+        return False
+    box = scene["box"]
+    if any(len(t) > 100 for t in box["ticks"]) or any(n > 200 or k > 200 for t in box["ticklabels"] for n, k in map(size, t)):
+        return False
+    if not all(math.isfinite(v) for v in scene["lo"] + scene["hi"] + scene["scale"] + [scene["azimuth"]]):
+        return False
+    mid = [(a + b) / 2 for a, b in zip(scene["lo"], scene["hi"])]
+    for o in scene["objects"]:
+        p = o["pos"]
+        if any(abs((p[i] - mid[i % 3]) * scene["scale"][i % 3]) > 1e6 for i in range(len(p))):
+            return False
+    return True
+
+
+class FigureView:
+    """a figure as shown: its SVG everywhere, and for one 3-D axes also the
+    interactive 3-D view (drag to rotate), as Sage's 3-D graphics show"""
+
+    def __init__(self, fig, mfig=None):
+        self.svg = figure_svg(fig, mfig)
+        self.scene = figure_scene(fig)
+
+    def _repr_svg_(self):
+        return self.svg
+
+    def description(self):
+        from _graphics import describe_svg
+        return describe_svg(self.svg)
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        if self.scene is None:
+            return {"image/svg+xml": self.svg, "text/plain": self.description()}
+        import json
+        from sage_plot3d import SCENE_MIME, viewer_html, jupyter_bundle, _in_jupyter
+        title = self.description()
+        self.scene["description"] = title
+        scene = json.dumps(self.scene, separators=(",", ":"))
+        if _in_jupyter():
+            def page():
+                s = dict(self.scene, fill=True)
+                return viewer_html(json.dumps(s, separators=(",", ":")), self.svg, title, standalone=True, full=True)
+            return jupyter_bundle(scene, self.svg, title, page)
+        return {SCENE_MIME: scene, "image/svg+xml": self.svg, "text/html": viewer_html(scene, self.svg, title),
+                "text/plain": title}
+
+
 def flush():
     """show every visible figure drawn or changed since it was last shown"""
+    from _graphics import show as _gshow
     for f in list(_state["figs"]):
         if not f.valid or not f.dirty:
             continue
@@ -3456,7 +3985,7 @@ def flush():
             continue
         if not any(isinstance(a, Axes) and a.valid and (a.children or _text_value(a.title.props["String"])) for a in f.children):
             continue
-        render(f).show()
+        _gshow(FigureView(f), "figure")
 
 
 

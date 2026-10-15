@@ -42,8 +42,22 @@ show(get(gca, 'XLim'));
 show(get(gca, 'XLimMode'));
 grid on
 show(get(gca, 'XGrid'));
+title('Kept');
 cla
 show(numel(get(gca, 'Children')));
+% (cla keeps the axes' properties, and the title; cla reset resets them)
+show(get(gca, 'XLimMode'));
+show(get(gca, 'XGrid'));
+show(get(get(gca, 'Title'), 'String'));
+cla reset
+show(get(gca, 'XLimMode'));
+show(get(gca, 'XGrid'));
+% (a new plot with hold off resets the grid; with hold on keeps it)
+plot(1:3); grid on; plot(1:4);
+show(get(gca, 'XGrid'));
+grid on; hold on; plot(1:2);
+show(get(gca, 'XGrid'));
+hold off
 im = imagesc([1 2 3; 4 5 6]);
 show(size(get(im, 'CData')));
 show(get(im, 'CDataMapping'));

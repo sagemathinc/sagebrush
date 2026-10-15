@@ -1732,11 +1732,16 @@ function openDoc(e) {
   $("#docinsert").hidden = !e.examples || e.lang !== nb.mode;
   docDlg.showModal();
 }
-// the sage: lines of a docstring (with their ....: continuations), as a cell
-function docExamples(doc) {
+// the sage: lines of a docstring (with their ....: continuations), as a cell;
+// for MATLAB's, the lines after its prompt, >> (lib/_matlab_docsearch.py)
+function docExamples(doc, lang) {
   const out = [];
   for (const line of doc.split("\n")) {
     const t = line.trim();
+    if (lang === "matlab") {
+      if (line.startsWith(">> ")) out.push(line.slice(3));
+      continue;
+    }
     if (t.startsWith("sage: ")) out.push(t.slice(6));
     else if (t.startsWith("....: ")) out.push(t.slice(6));
     else if (t === "....:") out.push("");
@@ -1745,7 +1750,7 @@ function docExamples(doc) {
 }
 $("#docclose").onclick = () => docDlg.close();
 $("#docinsert").onclick = () => {
-  const code = docExamples(docOpen?.doc ?? "");
+  const code = docExamples(docOpen?.doc ?? "", docOpen?.lang);
   docDlg.close();
   if (!code || docOpen.lang !== nb.mode) return;
   const cell = nb.addCell(code, null, true);

@@ -125,6 +125,79 @@ try {
   console.log(`5,000 notes: the first search ${first.ms.toFixed(1)} ms (the index made), the next ${again.ms.toFixed(1)} ms`);
   check(again.says === "1 of 1" && s.id === "n4321" && s.inView && s.marked === 1, "on a large board, the one note that says it: " + JSON.stringify(s));
   check(first.ms < 500 && again.ms < 50, `searched quickly: ${first.ms.toFixed(1)} ms, then ${again.ms.toFixed(1)} ms`);
+  // ids repeat across pages (unique only on a page): Enter and Shift+Enter
+  // step through every match by its page and id; a page changed by hand
+  // leaves no other item outlined or marked (CORR-8CE-1)
+  await escape();
+  const REP = { title: "Repeated", pages: [
+    { title: "P1", nodes: [{ id: "a", title: "kiwi one", x: 0, y: 0, w: 260 }, { id: "z", title: "plain", x: 400, y: 0, w: 260 }] },
+    { title: "P2", nodes: [{ id: "a", title: "plum", x: 0, y: 0, w: 260 }, { id: "b", title: "kiwi two", x: 400, y: 0, w: 260 }] },
+    { title: "P3", nodes: [{ id: "a", title: "kiwi three", x: 0, y: 0, w: 260 }] },
+  ] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(REP)}).then(() => 1)`);
+  await sleep(300);
+  await ctrlF();
+  await ev("(() => { const q = document.querySelector('[data-sbb=findq]'); q.value = 'kiwi'; q.dispatchEvent(new Event('input')); return 1; })()");
+  await sleep(500);
+  const seen = [];
+  let st = await state();
+  seen.push([st.says, st.page, st.id]);
+  for (let i = 0; i < 3; i++) { await enter(); await sleep(400); st = await state(); seen.push([st.says, st.page, st.id]); }
+  check(JSON.stringify(seen) === JSON.stringify([["1 of 3", 0, "a"], ["2 of 3", 1, "b"], ["3 of 3", 2, "a"], ["1 of 3", 0, "a"]]), "Enter through matches whose ids repeat on other pages: " + JSON.stringify(seen));
+  await enter(true);
+  await sleep(400);
+  st = await state();
+  check(st.says === "3 of 3" && st.page === 2 && st.id === "a", "Shift+Enter back to the last: " + JSON.stringify(st));
+  // (page 2 chosen by hand, whose "a" says plum)
+  await ev("(() => { const p = document.querySelector('[data-sbb=pgsel]'); p.value = '1'; p.dispatchEvent(new Event('change')); return 1; })()");
+  await sleep(600);
+  st = await state();
+  check(st.page === 1 && st.found === 0 && st.marked === 0, "a page changed by hand: no item on it outlined or marked: " + JSON.stringify(st));
+  await enter();
+  await sleep(400);
+  st = await state();
+  check(st.says === "1 of 3" && st.page === 0, "...and Enter goes on from the match it left: " + JSON.stringify(st));
+  await escape();
+
+  // another document loaded while Find is open: the old matches gone (no
+  // stale count, no word of the new one marked), the query asked of the new
+  // one (CORR-F33-1)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "First", nodes: [{ id: "a", title: "apple", x: 0, y: 0, w: 260 }] })}).then(() => 1)`);
+  await sleep(300);
+  await ctrlF();
+  await ev("(() => { const q = document.querySelector('[data-sbb=findq]'); q.value = 'apple'; q.dispatchEvent(new Event('input')); return 1; })()");
+  await sleep(500);
+  st = await state();
+  check(st.says === "1 of 1" && st.marked === 1, "apple, found: " + JSON.stringify(st));
+  const marks = () => ev("(() => { const h = CSS.highlights.get('sb-find'); return h ? [...h].map((r) => r.toString()) : []; })()");
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Second", nodes: [{ id: "a", title: "banana", x: 0, y: 0, w: 260 }] })}).then(() => 1)`);
+  await sleep(600);
+  st = await state();
+  check(st.says === "No matches" && st.found === 0 && JSON.stringify(await marks()) === "[]", "another document loaded: no stale count, nothing of it marked: " + JSON.stringify([st, await marks()]));
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Third", nodes: [{ id: "a", title: "crab apple", x: 0, y: 0, w: 260 }] })}).then(() => 1)`);
+  await sleep(600);
+  st = await state();
+  check(st.says === "1 of 1" && JSON.stringify(await marks()) === JSON.stringify(["apple"]), "...and one that says it: found in it: " + JSON.stringify([st, await marks()]));
+  await escape();
+
+  // two boards on one page: each its own marked words in the page's one
+  // highlight; one destroyed takes its own, and only its own (CORR-8CE-2)
+  await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
+  await sleep(300);
+  await ev(`import('/board/board.js').then((m) => { const div = document.createElement('div'); div.id = 'second'; div.style.cssText = 'position:fixed;left:0;bottom:0;width:640px;height:360px'; document.body.append(div); window.__b2 = m.mountBoard(div, { ...m.host, store: undefined, address: undefined }); return window.__b2.agent.load(${JSON.stringify({ title: "Second", nodes: [{ id: "p", title: "pear and apple", x: 0, y: 0, w: 260 }] })}); }).then(() => 1)`);
+  await sleep(500);
+  const findIn = (root, q) => ev(`(() => { const f = document.querySelector('${root} [data-sbb=findq]'); f.value = ${JSON.stringify(q)}; f.dispatchEvent(new Event('input')); return 1; })()`);
+  await findIn("#board", "apple");
+  await sleep(800);
+  await findIn("#second", "pear");
+  await sleep(800);
+  const owners = () => ev("(() => { const h = CSS.highlights.get('sb-find'); const rs = h ? [...h] : []; return { first: rs.filter((r) => document.getElementById('board').contains(r.startContainer)).length, second: rs.filter((r) => document.getElementById('second')?.contains(r.startContainer)).length, detached: rs.filter((r) => !document.contains(r.startContainer)).length }; })()");
+  const both = await owners();
+  check(both.first > 0 && both.second > 0 && both.detached === 0, "two boards: each one's marked words in the highlight: " + JSON.stringify(both));
+  await ev("window.__b2.destroy().then(() => (document.getElementById('second').remove(), 1))");
+  await sleep(300);
+  const after = await owners();
+  check(after.first === both.first && after.second === 0 && after.detached === 0, "one destroyed: its own gone, the other's kept, nothing detached: " + JSON.stringify(after));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

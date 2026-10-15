@@ -19,6 +19,38 @@ and runs on a runtime library with MATLAB's semantics:
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
+  - **lib/_matlab_ode.py**: odeset, odeget, ode45, ode23 and deval:
+    the Dormand-Prince (1980) and Bogacki-Shampine (1989) pairs, with
+    Shampine's (1986) interpolant for ode45 and cubic Hermite
+    interpolation for ode23; the step size control is SciPy's (BSD, from
+    Hairer, Norsett and Wanner II.4; see NOTICE.md), Sagebrush's choice,
+    so steps and Stats counts differ from MATLAB's published ones while
+    solutions agree to the tolerances; the error test is odeset's
+    documented one. Also Sagebrush's own: RelTol raised to 100*eps,
+    events located by regula falsi on the interpolant, the smallest step
+    (100 spacings of the floating-point numbers at t, so that a step
+    cannot straddle a pole where the error estimates of its two sides
+    cancel) and the warning when a step must be smaller, a plot after (not during) the
+    integration when there is no output, and sol.idata's contents. Mass,
+    NonNegative and the DAE options are refused;
+  - **lib/_matlab_funfun.py**: function functions: the optimization options
+    (optimset, optimget, from their documentation pages: the eight
+    documented options, each solver's documented defaults, a default that
+    depends on the problem left empty for the solver to apply) and the
+    solvers: fzero is Brent's method (Brent 1973, chapter 4; Forsythe,
+    Malcolm and Moler 1976, section 7.2), which its page cites, after an
+    outward search for a sign change whose steps the published iterative
+    displays fix; fminbnd is Brent's localmin (Brent 1973, chapter 5;
+    Forsythe, Malcolm and Moler 1976, section 8.2), with the tolerance
+    whose bound its page gives; fminsearch is the Nelder-Mead method of
+    Lagarias, Reeds, Wright and Wright (1998) in the steps MATLAB's
+    "fminsearch Algorithm" page spells out; lsqnonneg is Lawson and
+    Hanson's NNLS (1974, chapter 23); quad is Gander and Gautschi's
+    adaptive Simpson step (2000, section 3) with the page's absolute
+    tolerance per subinterval; integral and quadgk are Shampine's
+    vectorized adaptive Gauss-Kronrod quadrature (2008), with the (7, 15)
+    pair computed for Sagebrush from its definition; integral2 and
+    integral3 iterate it;
   - **lib/_matlab_eigs.py**: eigs, a direct (thick) Ritz-vector
     restarted Arnoldi method, the Lanczos form for a Hermitian operator,
     with the interface of its documentation page. The Arnoldi extension and
@@ -320,6 +352,17 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     default is the changed "gem" palette of R2025a (its colororder page
     gives the new triplets); Sagebrush deliberately keeps the older one;
   - LineSpec strings (`'r--o'`) work, and so do name-value properties;
+  - titles are bold and subtitles normal, as the documented defaults of
+    TitleFontWeight and SubtitleFontWeight; a title's own `FontWeight`
+    is kept. The subtitle is a line under the title, as documented, in
+    the title's size (Sagebrush's choice), and the axes gives up that
+    line's height (the interactive 3-D view shows it the same way);
+    `title(titletext, subtitletext)` sets both. A new plot with hold off
+    resets the title, labels and grid to their defaults, as NextPlot
+    'replace' resets the axes, and so does `cla reset`; plain `cla` deletes
+    only the plotted objects (those with visible handles), as documented.
+    `title(titletext, subtitletext, Name, Value)` gives both lines the
+    properties, as the documented example's Color;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,
@@ -352,10 +395,85 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     corner's CData, `'interp'` averages the four);
   - `mesh` has white faces and height-colored edges;
   - `shading` sets both colors.
+  - A legend lists lines, markers and stems as in 2-D, and a surface as a
+    swatch of its FaceColor edged in its EdgeColor; a colormapped one
+    (`'flat'`, `'interp'`) takes the colormap's color at the middle of
+    CLim. MATLAB does not document its legend's surface icon; this is
+    Octave's choice.
   - Seen from above (`view(2)`, `pcolor`), a surface is the same faces in
     data coordinates.
   - Hold off resets the view to 2-D (`newplot`); `surf` and `plot3` then
     turn it to 3-D.
+  - `view` takes (az, el), [az el], [x y z] (the direction toward the
+    camera, converted to the angles of a unit vector along it, as the
+    documented example's), 2, 3 and an axes first; `[caz, cel] = view(...)`
+    sets and returns the angles. One output (or `view` alone) is refused:
+    the documentation gives only `[caz, cel]`.
+- **The interactive 3-D view:** in the notebook and Jupyter, a figure with
+  one 3-D axes is also sent as a scene (the 3-D mime type of Sage's
+  `plot3d`, lib/sage_plot3d.py), and web/viewer3d.js shows it in WebGL
+  over the SVG, so it can be dragged to rotate it, as a MATLAB figure can:
+  - `figure_scene` gives the scene the axes' limits, box proportions, ticks
+    and tick labels, (az, el) (the viewer's azimuth is measured from +x,
+    MATLAB's from −y, so it is az − 90), the title and labels, and a
+    colorbar if one is shown;
+  - the scene asks for options that Sage's scenes do not use: an
+    orthographic projection, the figure's background and text colors, and
+    MATLAB's box (the back planes with their grid lines, and the axis edges
+    nearest the viewer, chosen again as it turns), with the SVG's grid
+    color;
+  - surfaces are unlit quadrilaterals colored as in the SVG, under their
+    edges (drawn with a polygon offset so they stay visible);
+  - other figures are the SVG alone: several axes, a `sgtitle`, a legend,
+    patches or other objects in the 3-D axes, or a scene too big: over
+    250,000 vertices given, over a million drawn (counted as the viewer
+    counts them: lines 1.4 wide and wider are tubes of 36 vertices a
+    segment), or beyond the viewer's limits on text and ticks;
+  - the viewer checks every scene before building anything from it (a
+    saved document's scene is untrusted): its form, finite numbers,
+    indices in range, and limits on what it would draw after expansion
+    (web/viewer3d.js's `checkScene` and `LIMITS`). A scene it refuses
+    stays the static picture, with a line saying why.
+- **The figure's background** is its `Color`, behind the axes and the
+  text, in the SVG too. Unless set it is white: Sagebrush's choice (MATLAB
+  documents [0.94 0.94 0.94] as the default, and [0.9608 0.9608 0.9608]
+  in the light theme from R2025a). Text and axis lines are the documented
+  default axis color, [0.15 0.15 0.15], rather than the page's color: the
+  SVG's root sets `color`, which the shim's `currentColor` paints take, so
+  the text itself is never rewritten. Legends have a white box.
+- **Text: TeX markup** (lib/_matlab_tex.py). Titles, subtitles, axis
+  labels, legends, `text` and tick labels are drawn as their interpreter
+  says (`Interpreter`, the axes' `TickLabelInterpreter`; 'tex' by
+  default), in the SVG and in the interactive 3-D view:
+  - 'tex' is the markup of the documentation's "TeX Markup" table: `^`
+    and `_` (the next character, or the characters in braces), `\bf`,
+    `\it`, `\sl`, `\rm`, `\fontname{}`, `\fontsize{}` (points),
+    `\color{}` and `\color[rgb]{}`, the table's 102 special characters,
+    and a backslash before `\ { } _ ^` for the character itself.
+    Modifiers last to the end of the text or of the braces they are in
+    (braces group as in TeX and in Octave; Octave keeps a space after a
+    command, and so does Sagebrush);
+  - anything else is an error when the text is set (`title`, `xlabel`,
+    `text`, `legend`) or drawn, never drawn as typed: another command after
+    a backslash (`C:\Users` too: write `\\`), a script with nothing to
+    raise, unbalanced braces, and the `\color` names whose colors the
+    documentation does not give (gray, darkGreen, orange, lightBlue: use
+    `\color[rgb]`). A refused call changes nothing;
+  - 'none' draws the text as typed; 'latex' is refused;
+  - `$` is a dollar sign (the shim's matplotlib `$...$` math is not used
+    for MATLAB's figures: the shim's `markup` option);
+  - scripts are 0.7 of their base's size, raised 0.385 or lowered 0.245 of
+    it (Sagebrush's choice); a subscript and a superscript on one base,
+    one right after the other (`x_1^2`, `x^2_1`), are stacked at the same
+    place, as Octave draws them, and the text after follows the wider. The
+    3-D view stacks them in one grid cell. An SVG cannot measure its text
+    where it is made, so each run of a pair is given its length
+    (textLength, lengthAdjust spacingAndGlyphs), which makes the advances
+    exact: the length is Sagebrush's estimate from rough character
+    classes, and the glyphs are fitted to it;
+  - the 3-D view gets the same runs of styled text, their sizes relative to
+    the viewer's own text sizes, so that a `\fontsize` is the same size
+    in points there as in the SVG.
 - **Contours:** contour lines come from marching squares (saddle cells are
   split by the centre's value), oriented with the higher values on the left
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`
@@ -419,7 +537,9 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
 - **Not yet:**
   - lighting (`camlight`, `lighting` and `material` do nothing);
   - polar axes, `annotation`, `uifigure` and apps, `animatedline`;
-  - raster output: `print`, `saveas` and `exportgraphics` write SVG.
+  - raster output: `print`, `saveas` and `exportgraphics` write SVG;
+  - an interactive view of the figures that show the SVG alone (see the
+    interactive 3-D view above).
 
 Tests:
 - **test_plot** compares objects' properties after plotting (limits, data,
@@ -449,6 +569,16 @@ A notebook cell, or a Jupyter cell, is translated in cell mode
   `cell_error()` tell the host.
 - Function files (`name.m`) load through the same host operation as in the
   CLI, where there is a file system.
+- The search box finds MATLAB's built-ins (lib/_matlab_docsearch.py,
+  docs-index-matlab.json), with a short example for the most used ones
+  (lib/_matlab_examples.py): one to three lines written for Sagebrush,
+  shown after MATLAB's prompt `>>` with the output Sagebrush prints, and
+  insertable into a new cell. test/matlab-doc-examples.test.ts runs every
+  example and compares its output exactly; matlab-tests/test_doc_examples.m
+  (made by matlab-tests/doc_examples.py --octave) compares the values they
+  make with Octave's, except where Octave lacks the function or knowingly
+  differs (doc_examples.py's OCTAVE_SKIP, with the reason).
+  `doc_examples.py --update` rewrites the outputs after a display change.
 
 ## Published examples as a test
 
@@ -548,6 +678,8 @@ since it compares against the committed outputs.
   narrower.
 - **Random numbers:** Octave's `randn` is not MATLAB's ziggurat; Sagebrush's
   `rand`, `randn` and `randi` give MATLAB's numbers.
+- **`[caz, cel] = view(v)`** sets the view and returns its angles in
+  MATLAB. Octave refuses to set and get it in one call.
 - **Sparse matrices:**
   - `max(S, F)`, `dot`, `unique`, and `lu`'s permutation are sparse in
     MATLAB and full in Octave;
@@ -624,6 +756,61 @@ The rest:
   it picks "nice" edges, so Sagebrush's rules are its own (Scott's width
   rounded to Heckbert's nice numbers, 1, 2, 5 or 10 times a power of 10)
   and its edges can differ from MATLAB's;
+- fzero's search from x0 = 0, where the published displays' step (x0/50)
+  is none, is on Octave's scale for a zero start, 0.1 (step 0.1/50):
+  Octave's fzero tries the same multiples of x0 from any start (0.99 x0,
+  1.025 x0, 0.95 x0, ...) and from 0 exactly those of 0.1 (0.099, 0.1025,
+  0.095, ...), as observed with Octave 11.1;
+- fzero's details that neither its page nor a published display fixes are
+  Sagebrush's own: the end of
+  a search that would overflow (exitflag -6), never giving exitflag -5
+  (its page says what it means, a possible singular point, but not how it
+  is detected; a sign change at a pole ends like any other), an error for
+  a NaN or complex value inside the interval, when output functions are called, and the messages
+  other than "Zero found in the interval [a, b]". PlotFcns is refused;
+- fminbnd's likewise: x1 > x2 returns NaN (exitflag -2) without calling
+  fun, a complex value is an error even with FunValCheck off, MaxFunEvals
+  and MaxIter are checked after the convergence test, and the messages
+  other than the converged one are Sagebrush's own. PlotFcns is refused;
+- fminsearch's likewise: the page says it stops when both TolX and TolFun
+  hold, and the measures are Sagebrush's (every vertex within TolX of the
+  best in each component, every value within TolFun of the best), as are
+  a complex value being an error and the messages other than the
+  converged one. PlotFcns is refused;
+- lsqnonneg's likewise: TolX as the threshold for entering (a dual
+  tolerance; a passive solution's positivity is tested exactly and the
+  variable limiting the step back reaches 0 exactly, as in Lawson and
+  Hanson's steps 6 to 11, so that a solution of any scale is kept), the
+  iteration limit when MaxIter is
+  unset (Lawson and Hanson's 3 times the number of variables), what
+  counts as an iteration (a least-squares solve), and the message for
+  exitflag 0. Display 'iter', which its page does not list, is refused;
+- quad's evaluation limit is GNU Octave's for its adaptive Simpson
+  quadrature, quadv: observed with Octave 11.1, it stops at exactly 10001
+  evaluations, whatever the integrand. Sagebrush's quad never goes beyond
+  10001: a subinterval whose step or halves would is accepted with the
+  value it has, and a warning says the tolerance may not be met;
+- quad's own choices: a subinterval with an Inf or NaN value is not
+  subdivided (with a warning), the trace's number format, and a single
+  result for single limits or values;
+- integral's error test for an array-valued integrand is component by
+  component, each component's error estimate against its own tolerance,
+  as the page's abs(q - Q) <= max(AbsoluteTolerance,
+  RelativeTolerance*abs(q)) reads for each element: a large component does
+  not hide a small one's error (Octave's integral too gets the small one
+  right);
+- integral's and quadgk's likewise: how the initial 10 subintervals are
+  made (each break interval cut into equal pieces, the paper's 150
+  samples for one interval), the change of variable for (-Inf, Inf)
+  (x = t/(1-t^2)), the parametrization of a complex path, minus the reversed integral
+  for xmin > xmax, and the warnings' wording past the published start of
+  quadgk's interval-limit warning;
+- integral2's and integral3's: "auto" is the page's "iterated" method
+  (integral over x of integral over y, and z), since the "tiled" method,
+  Shampine's 2-D program, is not available here and is refused; the inner
+  integrals use the same tolerances, and their warnings are reported
+  once. Waypoints, complex integrands and limits, and a Method that is
+  not text are refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
