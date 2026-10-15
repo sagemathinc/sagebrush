@@ -27,7 +27,7 @@ import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, 
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 
 export type Mode = "sage" | "python" | "magma" | "matlab";
 
@@ -558,7 +558,7 @@ export function kernelWorker(mode: Mode) {
       }
     } else {
       run(MAGIC_PRE, host, "exec", "<autoreload>");
-      run(ipythonSyntax(m.code, { sage: mode === "sage" }) + "\n", main, "cell", "<cell>", { sage: mode === "sage" });
+      run(ipythonSyntax(m.code) + "\n", main, "cell", "<cell>", { sage: mode === "sage", transform: magicTransform(mode === "sage") });
     }
     run(FLUSH, host, "exec", "<figures>");
     flush();

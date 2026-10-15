@@ -27,6 +27,7 @@ export function helpSyntax(src: string): string {
 
 // IPython's syntax in a notebook cell or interactive input: magics
 // (src/magic-syntax.ts) and help lines.
-export function ipythonSyntax(src: string, opts: { sage?: boolean; analysis?: boolean } = {}): string {
-  return helpSyntax(magicSyntax(src, opts));
+// The code magics run is then expanded in the parsed tree (magicTransform).
+export function ipythonSyntax(src: string): string {
+  return helpSyntax(magicSyntax(src));
 }

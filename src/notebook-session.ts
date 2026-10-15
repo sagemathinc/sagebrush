@@ -36,7 +36,7 @@
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir } from "./compile";
 import { needsMore, complete, ipythonSyntax } from "./interactive";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
@@ -335,9 +335,11 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
             });
           }
         };
-        const transform = (t: any) => { if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
+        // (the code of %time and %timeit in the cell's tree first, so the rest applies to it too)
+        const magics = magicTransform(!!m.sage);
+        const transform = (t: any) => { magics(t); if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
         run(MAGIC_PRE, host, "exec", "<autoreload>");
-        ok = run(ipythonSyntax(code, { sage: !!m.sage }) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length || inits.length ? { transform } : {}) });
+        ok = run(ipythonSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

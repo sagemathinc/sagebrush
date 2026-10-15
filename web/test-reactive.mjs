@@ -125,6 +125,14 @@ try {
   await run(0);
   ok((await out(0)) === "6" && (await ev("(async () => 1)()")) === 1, "rerunning it");
 
+  // IPython's magics: %timeit's assignments are its own, not a second
+  // definition of x; %time sees the cell's own _ names
+  await fileNew();
+  await set(["x = 5", "%timeit -n 1 -r 1 x = 7", "print(x)", "_x = 3\n%time _x + 1"]);
+  r = await run([0, 1, 2, 3]);
+  ok(JSON.stringify(r?.errors) === "[]" && (await out(2)) === "5", `%timeit x = 7 does not define x: print(x) is 5 (${JSON.stringify(r?.errors)}, ${await out(2)})`);
+  ok(/^Wall time: .*4$/s.test(await out(3)), `%time _x + 1 reads the cell's _x (${JSON.stringify(await out(3))})`);
+
   // agents: a batch of edits run once; the graph; mutation tracking; verify finds hidden state
   await fileNew();
   let e = await ev(`(async () => { const nb = sagebrush.notebook; const first = nb.cells()[0].id; const r = await nb.applyEdits({ set: [{ id: first, code: "v = [1, 2, 3]" }], insert: [{ code: "v.append(4)" }, { code: "print(len(v))" }, { code: "# notes", type: "markdown" }] }, { budget: Infinity }); return { ...r, first }; })()`);
