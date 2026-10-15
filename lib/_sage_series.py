@@ -541,8 +541,11 @@ class Series:
     # ---- arithmetic
     def _coerce(self, o):
         if isinstance(o, Series):
-            if o._R == self._R:
+            if o._R is self._R:
                 return o
+            if o._R == self._R:
+                # the same ring but another default precision: self's (Sage)
+                return Series(self._R, o._v, o._c, o._prec)
             if o._R._laurent and not self._R._laurent and o._R._base == self._R._base:
                 return o
             return self._R(o)
@@ -562,7 +565,15 @@ class Series:
         laurent = R._laurent or (isinstance(o, Series) and o._R._laurent)
         if base is R._base and laurent == R._laurent:
             return self
-        return self._over(base, laurent=laurent)
+        # the default precision as Sage: the other operand's parent when it
+        # is the common one, the larger of the two when the common parent is
+        # new (QQ[[z]], default 5, meets ZZ((z)), default 20, in QQ((z))
+        # with 20), self's with a scalar (the review's CORR-6F0-1)
+        dp = R._dp
+        if isinstance(o, Series):
+            S = o._R
+            dp = S._dp if (base is S._base and laurent == S._laurent) else max(R._dp, S._dp)
+        return self._over(base, laurent=laurent, dp=dp)
 
     def _target_base(self, o):
         """The coefficient ring of self's parent with o: the fraction field
@@ -585,15 +596,16 @@ class Series:
             return B
         return F
 
-    def _over(self, base, laurent=None):
-        """self in the series ring over base (a Laurent series ring if asked)."""
+    def _over(self, base, laurent=None, dp=None):
+        """self in the series ring over base (a Laurent series ring if asked;
+        default precision dp, else self's)."""
         R = self._R
         lau = R._laurent if laurent is None else laurent
-        return (LaurentSeriesRing if lau else PowerSeriesRing)(base, R._name, R._dp)(self)
+        return (LaurentSeriesRing if lau else PowerSeriesRing)(base, R._name, R._dp if dp is None else dp)(self)
 
     def _ring_for(self, o, v):
         R = self._R
-        if isinstance(o, Series) and o._R._laurent:
+        if isinstance(o, Series) and o._R._laurent and not R._laurent:
             R = o._R
         if v < 0 and not R._laurent:
             R = R.laurent_series_ring()

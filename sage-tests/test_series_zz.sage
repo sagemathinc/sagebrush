@@ -953,3 +953,21 @@ try:
     print(3, 'P(1)/w', '=>', r.parent(), '|', r)
 except (ValueError, ArithmeticError, ZeroDivisionError, TypeError) as ex:
     print(3, 'P(1)/w', '=>', type(ex).__name__, ex)
+
+# Different default precisions (review CORR-6F0-1): the common parent keeps
+# the default of the operand whose parent it is, and takes the larger one
+# when it is new; both operand orders over ZZ and QQ
+import itertools
+for (b1, b2) in itertools.product([ZZ, QQ], [ZZ, QQ]):
+    for (k1, k2) in itertools.product([PowerSeriesRing, LaurentSeriesRing], [PowerSeriesRing, LaurentSeriesRing]):
+        for d1, d2 in [(5, 20), (20, 5)]:
+            R1 = k1(b1, 'z', default_prec=d1); R2 = k2(b2, 'z', default_prec=d2)
+            for op in ['+', '*', '/']:
+                a, b = R1(1) + R1.gen(), R2(1) + R2.gen()
+                r = a + b if op == '+' else (a * b if op == '*' else a / b)
+                print(R1, d1, op, R2, d2, '=>', r.parent(), r.parent().default_prec(), '|', r)
+Pd = PowerSeriesRing(QQ, 'z', default_prec=5); Ld = LaurentSeriesRing(ZZ, 'z', default_prec=20)
+qd = Pd.gen(); wd = Ld.gen()
+rd = (1 + qd)/(1 + wd)
+print(rd.parent(), rd.parent().default_prec(), rd)
+print(1/(qd + Ld(1)))
