@@ -3098,9 +3098,13 @@ def _legendre_neg_order(k, mu, x):
             raise NotImplementedError("gen_legendre_P of degree above 2000 at a number is not available in sagebrush yet")
         # The series alternates and cancels (gen_legendre_P(30, -31, -0.99)
         # is 2.6e-16 from terms near 1), so it is summed exactly, at the
-        # exact rational the float x is; w^floor(mu/2) F / mu! is rounded
-        # once, and an odd mu adds one factor sqrt(w) (both correctly
-        # rounded): the result is within a few units in the last place.
+        # exact rational the float x is.  q = w^floor(mu/2) F / mu! is split
+        # exactly as Q 2^e with 1/2 <= |Q| < 2; Q (and for an odd mu
+        # Q sqrt(w)) is rounded in the normal range, and the scaling by 2^e
+        # comes last, so a subnormal result is rounded once there instead
+        # of losing digits in a subnormal q (gen_legendre_P(0, -883,
+        # -0.9999) = 1.666e-321 was 1.398e-321): within a few units in the
+        # last place.
         X = Fraction(x)
         t = (1 - X) / 2
         f, term = Fraction(0), Fraction(1)
@@ -3109,12 +3113,24 @@ def _legendre_neg_order(k, mu, x):
             term = term * (k + 1 + i) * (-k + i) / ((mu + 1 + i) * (i + 1)) * t
         w = (1 - X) / (1 + X)
         q = w ** (mu // 2) * f / math.factorial(mu)
-        v = float(q)
+        from _sage_lang import RealNumber
+        if q == 0:
+            return RealNumber(0.0)
+        e = abs(q.numerator).bit_length() - q.denominator.bit_length()
+        Q = q / 2 ** e if e >= 0 else q * 2 ** -e
+        v = float(Q)
         if mu % 2:
             v *= math.sqrt(float(w))
-        if q != 0 and (v == 0 or not math.isfinite(v)):
+        # v 2^e with one rounding, in steps of 2^-1000 that keep v normal
+        # (and exact) until the last (the browser runtime's math.ldexp
+        # rounds subnormal results to 0: ldexp(128.0, -1080) gave 0.0)
+        while e < -1000 and v != 0:
+            v, e = v * 2.0 ** -1000, e + 1000
+        while e > 1000 and math.isfinite(v):
+            v, e = v * 2.0 ** 1000, e - 1000
+        v = v * 2.0 ** e
+        if v == 0 or not math.isfinite(v):
             raise NotImplementedError("gen_legendre_P(%d, %d, %r) is outside the double range" % (k, -mu, x))
-        from _sage_lang import RealNumber
         return RealNumber(v)
     X = _expr(x)
     t = (1 - X) / 2
