@@ -864,8 +864,11 @@ class Matrix:
 
     def _scalar_matrix(self, c, op):
         """c times the identity, for M + c, c - M and the like (Sage reads
-        a scalar as that multiple of the identity of a square matrix)."""
+        a scalar as that multiple of the identity of a square matrix; 0 is
+        the zero matrix of any shape)."""
         n = self.nrows()
+        if c == 0:
+            return Matrix(self._base, [[0] * self.ncols() for _ in range(n)])
         if n != self.ncols():
             raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), _sa().parent(c) if hasattr(_sa(), "parent") else type(c)))
         I = Matrix(self._base, [[int(i == j) for j in range(n)] for i in range(n)])
@@ -885,30 +888,30 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g + other
-        if isinstance(other, (int, _F)) and not isinstance(other, bool):
-            return self + self._scalar_matrix(other, "+")
+        if isinstance(other, (int, _F)):
+            return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)])
 
     def __radd__(self, other):
-        if isinstance(other, (int, _F)) and not isinstance(other, bool):
-            return self._scalar_matrix(other, "+") + self
+        if isinstance(other, (int, _F)):
+            return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+") + self
         return NotImplemented
 
     def __sub__(self, other):
         g = self._generic(other)
         if g is not None:
             return g - other
-        if isinstance(other, (int, _F)) and not isinstance(other, bool):
-            return self - self._scalar_matrix(other, "-")
+        if isinstance(other, (int, _F)):
+            return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)])
 
     def __rsub__(self, other):
-        if isinstance(other, (int, _F)) and not isinstance(other, bool):
-            return self._scalar_matrix(other, "-") - self
+        if isinstance(other, (int, _F)):
+            return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-") - self
         return NotImplemented
 
     def __neg__(self):
@@ -1818,9 +1821,6 @@ class _AmbientOther:
     def __repr__(self):
         if repr(self._R) == "Symbolic Ring":
             return "Vector space of dimension %d over Symbolic Ring" % self._n
-        if type(self._R).__name__ == "SeriesRing_":
-            # (power series in one variable over a field: a PID, as Sage says)
-            return "Ambient free module of rank %d over the principal ideal domain %r" % (self._n, self._R)
         return "Vector space of dimension %d over %r" % (self._n, self._R)
 
     def base_ring(self):
@@ -1871,6 +1871,10 @@ def vector(*args):
     ring = None
     if len(args) == 2:
         ring, args = args[0], args[1:]
+    if type(ring).__name__ == "SeriesRing_" and not ring._laurent:
+        # a vector of power series (the D_p-valued p-adic L-series): the
+        # entries in the ring, the ring kept through arithmetic
+        return SeriesVector(ring, args[0])
     ff = _ff_base_of(args[0])
     if ff is not None:
         return _sage_ffmat.vector(ff, args[0])
@@ -1880,10 +1884,143 @@ def vector(*args):
         if ring is sa.ZZ and any(not isinstance(x, int) for x in v):
             raise TypeError("no conversion of this rational to integer")
         v._ring = ring
-    elif type(ring).__name__ == "SeriesRing_" and not ring._laurent:
-        # (a vector of power series: the D_p-valued p-adic L-series)
-        v._ring = ring
     return v
+
+
+def _series_entry(R, x):
+    """x as an element of the power series ring R, or TypeError."""
+    if isinstance(x, str):
+        raise TypeError("unable to convert %s to an element of %r" % (x, R))
+    ff = _ff_base_of([x])
+    if ff is not None and ff is not R._base:
+        # (a finite-field element is not in a series ring over another field)
+        raise TypeError("unable to convert %s to an element of %r" % (x, R))
+    try:
+        y = R(x)
+    except (TypeError, ValueError, ArithmeticError):
+        raise TypeError("unable to convert %s to an element of %r" % (x, R))
+    # (R's conversion must not have changed the value: 1/2 is not in ZZ[[s]])
+    if not (y == x if not isinstance(x, (list, tuple)) else True):
+        raise TypeError("unable to convert %s to an element of %r" % (x, R))
+    return y
+
+
+class SeriesVector(Vector):
+    """A vector over a power series ring R: entries in R, kept in R by
+    +, -, negation and scalar multiplication (as Sage's free module).
+
+    EXAMPLES::
+
+        sage: R = PowerSeriesRing(QQ, 'T'); T = R.gen(); v = vector(R, [T, 1])
+        sage: v + v, -v, T*v, v.parent()
+        ((2*T, 2), (-T, -1), (T^2, T), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over Rational Field)
+    """
+
+    def __init__(self, R, entries):
+        list.__init__(self, [_series_entry(R, x) for x in entries])
+        self._ring = R
+
+    def _same(self, other):
+        if not isinstance(other, SeriesVector) or other._ring is not self._ring:
+            other = SeriesVector(self._ring, other)
+        if len(other) != len(self):
+            raise ArithmeticError("vectors of different lengths")
+        return other
+
+    def __add__(self, other):
+        o = self._same(other)
+        return SeriesVector(self._ring, [a + b for a, b in zip(self, o)])
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        o = self._same(other)
+        return SeriesVector(self._ring, [a - b for a, b in zip(self, o)])
+
+    def __rsub__(self, other):
+        return self._same(other) - self
+
+    def __neg__(self):
+        return SeriesVector(self._ring, [-a for a in self])
+
+    def __mul__(self, other):
+        if isinstance(other, (list, tuple)):
+            return self.dot_product(other)
+        if isinstance(other, Matrix):
+            raise NotImplementedError("vector-matrix products over power series rings are not available in sagebrush yet")
+        c = _series_entry(self._ring, other)
+        return SeriesVector(self._ring, [a * c for a in self])
+
+    def __rmul__(self, other):
+        c = _series_entry(self._ring, other)
+        return SeriesVector(self._ring, [c * a for a in self])
+
+    def __truediv__(self, other):
+        raise NotImplementedError("division of vectors over power series rings is not available in sagebrush yet")
+
+    def dot_product(self, other):
+        o = self._same(other)
+        r = self._ring(0)
+        for a, b in zip(self, o):
+            r = r + a * b
+        return r
+
+    def base_ring(self):
+        return self._ring
+
+    def parent(self):
+        return SeriesModule(self._ring, len(self))
+
+    def list(self):
+        return list(self)
+
+    def __hash__(self):
+        raise TypeError("unhashable: a mutable vector")
+
+
+class SeriesModule:
+    """The free module R^n over a power series ring R.
+
+    EXAMPLES::
+
+        sage: M = vector(PowerSeriesRing(ZZ, 's'), [1, 2]).parent(); M
+        Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring
+        sage: M.rank(), M([3, 4]), M.zero()
+        (2, (3, 4), (0, 0))
+    """
+
+    def __init__(self, R, n):
+        self._R, self._n = R, n
+
+    def __repr__(self):
+        kind = "principal ideal domain" if self._R._base.is_field() else "integral domain"
+        return "Ambient free module of rank %d over the %s %r" % (self._n, kind, self._R)
+
+    def __eq__(self, o):
+        return isinstance(o, SeriesModule) and o._R is self._R and o._n == self._n
+
+    def __ne__(self, o):
+        return not self.__eq__(o)
+
+    def __hash__(self):
+        return hash(("SeriesModule", id(self._R), self._n))
+
+    def base_ring(self):
+        return self._R
+
+    def rank(self):
+        return _sa().Integer(self._n)
+
+    degree = dimension = rank
+
+    def zero(self):
+        return SeriesVector(self._R, [0] * self._n)
+
+    def __call__(self, entries):
+        v = SeriesVector(self._R, entries)
+        if len(v) != self._n:
+            raise TypeError("entries must be a list of length %d" % self._n)
+        return v
 
 
 def _ff_base_of(entries):

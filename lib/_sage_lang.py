@@ -1165,7 +1165,7 @@ def _install_int_methods(sa):
         "xgcd": lambda n, m: sa.xgcd(n, m),
         "mod": lambda n, m: n % m,
         "quo_rem": quo_rem,
-        "valuation": lambda n, p: sa.oo if n == 0 else sa.valuation(n, p),
+        "valuation": lambda n, p: sa.oo if (sa._valuation_base(p) and n == 0) else sa.valuation(n, p),
         "euler_phi": lambda n: sa.euler_phi(n),
         "sigma": lambda n, k=1: sa.sigma(n, k),
         "moebius": lambda n: sa.moebius(n),
