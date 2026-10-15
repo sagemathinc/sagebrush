@@ -248,7 +248,8 @@ const staticmethod = builtinType("staticmethod", [object], (f: any) => new PySta
 bindClass(PyStaticMethod, staticmethod);
 method(staticmethod, "__get__", (s: PyStaticMethod, _o: any, _t: any) => s.f);
 // (callable since CPython 3.10: a staticmethod used directly, as a __get__)
-method(staticmethod, "__call__", (s: PyStaticMethod, ...a: any[]) => callObj(s.f, a));
+const staticCall = method(staticmethod, "__call__", (s: PyStaticMethod, ...a: any[]) => callObj(s.f, a));
+staticCall.$kw = (pos: any[], names: string[], values: any[]) => callKw(pos[0].f, pos.slice(1), names, values);
 getset(staticmethod, "__func__", (s) => s.f);
 const classmethod = builtinType("classmethod", [object], (f: any) => new PyClassMethod(f));
 bindClass(PyClassMethod, classmethod);
