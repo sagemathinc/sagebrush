@@ -256,7 +256,7 @@ class Axes(GObj):
         GObj.__init__(self, fig)
         self.grid = grid  # (m, n, [indices]) of subplot, or None
         self.color_index = 0
-        self.title = Text(None)
+        self.title = Text(None, FontWeight=_m.Char("bold"))  # (TitleFontWeight's documented default)
         self.xlabel = Text(None)
         self.ylabel = Text(None)
         self.zlabel = Text(None)
@@ -2733,6 +2733,21 @@ def render(fig):
     return mfig
 
 
+def _set_title(ax, mx):
+    """the title in its FontWeight (bold by default), and after it the subtitle in its own"""
+    t = _text_value(ax.title.props["String"])
+    st = _text_value(ax.subtitle.props["String"])
+    weight = lambda h: "bold" if _m._text(h.props["FontWeight"]).lower() == "bold" else "normal"
+    if t:
+        mx.set_title(t)
+        mx._opts["title_weight"] = weight(ax.title)
+        if st:
+            mx._opts["subtitle"] = (st, weight(ax.subtitle))
+    elif st:
+        mx.set_title(st)
+        mx._opts["title_weight"] = weight(ax.subtitle)
+
+
 def _draw_axes(ax, mx, mfig):
     cmap = _MCmap(ax.get_prop("Colormap"))
     clim = _vec(ax.get_prop("CLim"))
@@ -2810,10 +2825,7 @@ def _draw_axes(ax, mx, mfig):
                 mx.axvline(_f(c.props["Value"]), color=col, linestyle=ls)
             else:
                 mx.axhline(_f(c.props["Value"]), color=col, linestyle=ls)
-    t = _text_value(ax.title.props["String"])
-    st = _text_value(ax.subtitle.props["String"])
-    if t or st:
-        mx.set_title(t + ("\n" + st if st else ""))
+    _set_title(ax, mx)
     if _text_value(ax.xlabel.props["String"]):
         mx.set_xlabel(_text_value(ax.xlabel.props["String"]))
     if _text_value(ax.ylabel.props["String"]):
@@ -3515,10 +3527,7 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     mx.set_ylim(min(sy) - pad, max(sy) + pad * 0.6)
     mx.set_aspect("equal")
     mx.axis("off")
-    t = _text_value(ax.title.props["String"])
-    st = _text_value(ax.subtitle.props["String"])
-    if t or st:
-        mx.set_title(t + ("\n" + st if st else ""))
+    _set_title(ax, mx)
     if shown:
         mx.legend(loc=_LOC.get(_m._text(ax.legend.props["Location"]).lower(), "upper right"))
     if ax.colorbar is not None and _m._text(ax.colorbar.props.get("Visible", _m.Char("on"))) == "on":
