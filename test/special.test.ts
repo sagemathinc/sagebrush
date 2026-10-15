@@ -279,6 +279,15 @@ print(" ".join(repr(S.bessely(nu, x)) for nu, x in [(0.0, 0.0), (1.0, 0.0), (-1.
       (-0.7, 0.0), (1.0, inf), (1.0, -inf), (nan, 1.0), (1000.0, 1.0), (-1000.5, 1.0), (171.0, 2.0), (0.5, -2.0), (10.5, -1e-300)]),
       repr(S.besselj(-0.3, 0.0)), repr(S.besselj(-1.3, 0.0)), repr(S.besselj(-5.5, -1e-300)))
 print(" ".join(kind(S.bessely, *a).split(" (")[0] for a in [(1.0, 1 + 2j), (inf, 1.0), (-46.384401075334324, 45.581111665644976), (6e5, 5.9e5)]))
+# (daybreak's and astra's CORR-F00-1: above the cut, next to half-integer orders, a part a small cos(nu pi) brings back
+# into the doubles while the other part overflows; against mpmath at 100 digits.  astra's CORR-F00-2: the zero limit's
+# sign where Gamma(1 + nu) underflows.  CORR-F00-3: orders next to 1/2 at tiny x, which floor(nu + 0.5) rounded to 1/2)
+cut = [(S.bessely(171.50000000000003, -1.8), -1.9058365700442773596e302, -inf), (S.bessely(170.49999999999997, -1.8), -1.0060416367911410904e300, inf),
+       (S.bessely(-170.49999999999997, -1.5), -2.8391236801351695835e300, inf), (S.besselj(-170.49999999999997, -1.8), 1.0060416367911410904e300, -inf),
+       (S.besselj(-171.50000000000003, -1.8), -1.9058365700442773596e302, -inf)]
+print([abs(v.real - r) <= 1e-15 * abs(r) and v.imag == i for v, r, i in cut], [S.besselj(n, 0.0) for n in (-1000.5, -1001.5, -1002.5, -400.25, -401.25)],
+      [abs(S.bessely(nu, x) / r - 1) <= 3e-15 for nu, x, r in [(0.49999999999999994, 1e-300, -7.9788456080283480667e149),
+                                                                 (0.49999999999999994, 5e-324, -3.5896138570489026e161)]])
 # (the least subnormal x, daybreak's CORR-088-3: J_(1/2) ~ sqrt(2x/pi), J_1 and J_2 round to 0; huge finite orders,
 # API-088-4: J below the doubles is 0, and the turning point at 1e308 is refused, never an OverflowError)
 print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.besselj(2.0, 5e-324)), repr(S.besselj(1e308, 1.0)),
@@ -402,6 +411,7 @@ print([all(abs(a - b) <= tol * abs(b) for a, b in zip(part(v), part(r))) for v, 
     "NotCovered: bessely: Sagebrush covers real orders and arguments NotCovered: bessely: Sagebrush covers finite orders " +
       "NotCovered: bessely, besselj: the connection formula for order -46.384401075334324 cancels at x = 45.581111665644976 " +
       "NotCovered: bessely: Sagebrush covers orders for which the recurrence needs at most 500000 steps",
+    "[True, True, True, True, True] [inf, -inf, inf, inf, -inf] [True, True]",
     "1.7735048886036e-162 0.0 0.0 0.0 0.0 " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps",

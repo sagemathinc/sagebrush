@@ -445,5 +445,12 @@ for _name, _pts in (("bessely", _by), ("besselj", _bjn)):
             if mv > mp.mpf(2) ** 1023 or (mv != 0 and mv < mp.mpf(2) ** -1000) or _conn_amp(_name, nu, x) > 4:
                 continue
         add(_name, (nu, x), v)
+# (astra's review of f00113c, CORR-F00-3: the doubles on both sides of half-integer orders at tiny x, where floor(nu +
+# 0.5) and nu - n rounded the order to the half-integer; at 60 digits, appended after everything above)
+for nu, x in [(0.49999999999999994, 1e-300), (0.5000000000000001, 1e-300), (0.49999999999999994, 5e-324), (0.5000000000000001, 1e-200),
+              (1.4999999999999998, 1e-100), (1.5000000000000002, 1e-100), (2.4999999999999996, 1e-60), (2.5000000000000004, 1e-60),
+              (0.49999999999999994, 1.5), (1.4999999999999998, 2.0)]:
+    with mp.workdps(60):
+        add("bessely", (nu, x), mp.bessely(nu, x))
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")
