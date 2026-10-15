@@ -2789,11 +2789,22 @@ def _besselj_series(nu, x):
         # (x^nu 2^-nu: 0.5 x would underflow first for the least subnormals,
         # and these results round once into the subnormals, to 0 where they
         # are below half the least)
-        return x ** nu * 0.5 ** nu / _math.gamma(nu + 1) * s
+        return x ** nu * 0.5 ** nu / _gamma_nu1(nu) * s
     pw = (0.5 * x) ** nu
     if 1e-290 < pw < 1e290:
-        return pw / _math.gamma(nu + 1) * s
-    return _math.exp(nu * (_math.log(x) - _math.log(2.0)) - _math.lgamma(nu + 1)) * s
+        return pw / _gamma_nu1(nu) * s
+    lg = _math.lgamma(nu) + _math.log(nu) if nu >= 1 else _math.lgamma(nu + 1)
+    return _math.exp(nu * (_math.log(x) - _math.log(2.0)) - lg) * s
+
+
+def _gamma_nu1(nu):
+    """Gamma(nu + 1) for 0 < nu <= 170: nu Gamma(nu) from nu >= 1, as nu + 1
+    rounds there (by up to half an ulp of nu + 1, times psi(nu + 1) in
+    Gamma: J_63.59(6.48) was 2.9e-14 off); below 1, nu + 1 loses only bits
+    beyond an ulp of 1, where psi is at most 0.42"""
+    if nu >= 1:
+        return nu * _math.gamma(nu)
+    return _math.gamma(nu + 1)
 
 
 def _besselj_hankel(nu, x):
@@ -2824,12 +2835,22 @@ def _besselj_hankel(nu, x):
             break
         if k > 200:
             return None
-    r = 0.5 * nu + 0.25
-    cr, sr = _cospi(r), _sinpi(r)
+    # (cos and sin of pi (nu/2 + 1/4) by the addition formula from those of
+    # pi nu/2, exact, as nu/2 + 1/4 rounded as one double drops the 1/4 for
+    # nu >= 2^52: J_(1e20)(1e200) was 3.4e-2 off)
+    h = 0.5 * nu
+    ch, shh = _cospi(h), _sinpi(h)
+    cr, sr = (ch - shh) * _SQRT_HALF, (shh + ch) * _SQRT_HALF
     cx, sx = _math.cos(x), _math.sin(x)
     cw = cx * cr + sx * sr
     sw = sx * cr - cx * sr
-    return _math.sqrt(2 / (_PI * x)) * (cw * p - sw * qv)
+    # (sqrt(2/pi) / sqrt(x), as pi x overflows beyond 5.7e307 and 2/(pi x)
+    # is subnormal from 2.8e305 on: J_0(1e308) was 0, not -2.5e-155)
+    return _SQRT_2_PI / _math.sqrt(x) * (cw * p - sw * qv)
+
+
+_SQRT_HALF = 0.7071067811865476   # (sqrt(1/2), correctly rounded)
+_SQRT_2_PI = 0.7978845608028654   # (sqrt(2/pi), correctly rounded)
 
 
 def _bessel_dd_step(mu, m, x, xh, xl, fh, fl, gh, gl):
@@ -3032,9 +3053,10 @@ def besselj(nu, x):
     steps.  Both recurrences run in double-double arithmetic, as in doubles
     their roundings accumulated over the oscillating steps (to 4.4e-14 at
     nu = 1213).  Largest error found against mpmath (nu up to 3000, x up
-    to 1e6), as a fraction of the envelope sqrt(2/(pi x)) where J
-    oscillates (|x| > nu) and of |J| below: 5e-15 (scipy.special.jv's
-    errors below the turning point are up to 4.5e-13)."""
+    to 1e6, and Hankel's region up to x = 1.8e308), as a fraction of the
+    envelope sqrt(2/(pi x)) where J oscillates (|x| > nu) and of |J| below:
+    5e-15 (scipy.special.jv's errors below the turning point are up to
+    4.5e-13)."""
     return _elementwise(_besselj1, nu, x)
 
 
