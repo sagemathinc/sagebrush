@@ -15,6 +15,7 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 """
 
 import math
+import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color, colormap, describe_svg)
 
@@ -799,9 +800,13 @@ class _AxesArray:
 
 
 class Figure:
-    def __init__(self, figsize=None, dpi=None, **kw):
+    def __init__(self, figsize=None, dpi=None, facecolor=None, **kw):
         fs = figsize or (6.4, 4.8)
         self._size = (float(fs[0]), float(fs[1]))
+        # (the figure's dpi is what savefig uses by default; on screen the
+        # SVG has 100 units per inch)
+        self.dpi = float(dpi) if dpi is not None else float(rcParams.get("figure.dpi", 100.0))
+        self._facecolor = facecolor
         self.axes = []
         self._suptitle = None
         self._grid = (1, 1)
@@ -875,8 +880,62 @@ class Figure:
     def description(self):
         return describe_svg(self._svg())
 
-    def savefig(self, fname, format=None, dpi=None, bbox_inches=None, **kw):
-        save_svg(self._svg(), fname)
+    def savefig(self, fname, *, transparent=None, dpi=None, format=None, metadata=None, bbox_inches=None,
+                pad_inches=None, facecolor=None, edgecolor=None, **kw):
+        """The figure as a PNG (the default, as in matplotlib: rcParams
+        "savefig.format") or SVG file, by `format` or the file name's
+        extension; a name without one gets ".png"."""
+        if kw:
+            raise NotImplementedError("savefig: %s %s not implemented in Sagebrush"
+                                      % (", ".join(sorted(kw)), "is" if len(kw) == 1 else "are"))
+        if bbox_inches is None:
+            bbox_inches = rcParams.get("savefig.bbox")
+        if bbox_inches is not None:
+            raise NotImplementedError("savefig: bbox_inches=%r is not implemented in Sagebrush" % (bbox_inches,))
+        if format is None:
+            if hasattr(type(fname), "__fspath__"):
+                fname = os.fspath(fname)
+            if isinstance(fname, str):
+                format = os.path.splitext(fname)[1][1:]
+            if format is None or format == "":
+                format = rcParams.get("savefig.format", "png")
+                if isinstance(fname, str):
+                    fname = fname.rstrip(".") + "." + format
+        format = format.lower()
+        if format not in _SAVE_FORMATS:
+            raise ValueError("Format %r is not supported (supported formats: %s)" % (format, ", ".join(sorted(_SAVE_FORMATS))))
+        if format == "svg":
+            if metadata is not None:
+                raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
+            save_svg(self._svg(), fname)
+            return
+        if format != "png":
+            raise NotImplementedError("savefig: Sagebrush saves PNG and SVG files, not %s" % format)
+        if dpi is None:
+            dpi = rcParams.get("savefig.dpi", "figure")
+        if dpi == "figure":
+            dpi = self.dpi
+        dpi = float(dpi)
+        if transparent is None:
+            transparent = rcParams.get("savefig.transparent", False)
+        if facecolor is None:
+            facecolor = rcParams.get("savefig.facecolor", "auto")
+        if facecolor == "auto":
+            facecolor = self._facecolor if self._facecolor is not None else rcParams.get("figure.facecolor", "white")
+        background = None if transparent else _css_color(facecolor)
+        text = {"Software": "Sagebrush"}
+        for k, v in (metadata or {}).items():
+            if v is None:
+                text.pop(k, None)
+            else:
+                text[k] = v
+        import _png
+        png = _png.figure_png(self._svg(), self._size[0], self._size[1], dpi, background, list(text.items()))
+        if hasattr(fname, "write"):
+            fname.write(png)
+        else:
+            with open(fname, "wb") as f:
+                f.write(png)
 
     def show(self):
         _show(self, "figure")
@@ -889,6 +948,21 @@ class Figure:
 
 
 builtin_range = range
+
+# savefig's formats: matplotlib's (the ones other than PNG and SVG raise
+# NotImplementedError)
+_SAVE_FORMATS = ("avif", "eps", "gif", "jpeg", "jpg", "pdf", "pgf", "png", "ps", "raw", "rgba", "svg", "svgz", "tif",
+                 "tiff", "webp")
+
+
+def _css_color(color):
+    """savefig's facecolor as a CSS color (#rrggbbaa for an RGBA tuple, so
+    that its alpha is kept exactly)."""
+    if isinstance(color, (tuple, list)) and len(color) in (3, 4):
+        return "#" + "".join("%02x" % int(min(1.0, max(0.0, float(v))) * 255 + 0.5) for v in (list(color) + [1.0])[:4])
+    if isinstance(color, str) and color.lower() == "none":
+        return "none"
+    return to_color(color)
 
 
 def _bisect(edges, v):
@@ -908,8 +982,8 @@ _figs = []
 _cur = [None]
 
 
-def figure(num=None, figsize=None, dpi=None, **kw):
-    f = Figure(figsize, dpi)
+def figure(num=None, figsize=None, dpi=None, facecolor=None, **kw):
+    f = Figure(figsize, dpi, facecolor)
     _figs.append(f)
     _cur[0] = f
     return f
@@ -972,6 +1046,12 @@ def show(*args, **kw):
 
 def savefig(fname, **kw):
     gcf().savefig(fname, **kw)
+
+
+def imread(fname, format=None):
+    """matplotlib's imread, for PNG files (lib/_png.py)."""
+    import _png
+    return _png.read(fname, format)
 
 
 def _flush_figures():
