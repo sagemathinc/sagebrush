@@ -409,3 +409,156 @@ class CallStatic:
 
 
 print(CallClass()(1, k=2), CallProp()(1, k=2), CallStatic()(1, k=2), staticmethod(lambda **k: k)(k=3))
+
+
+# sagebrush-astra on 866d675: __get__ added to the attribute's type after
+# the override test has seen it (CORR-866-1: distinct, shared, inherited
+# attributes), and a metaclass __getattribute__/__getattr__ that is not a
+# plain function, bound through its __get__ (CORR-866-2).
+def _rget(label, f):
+    try:
+        return f()
+    except Exception as e:
+        return label + ":" + type(e).__name__
+
+
+class GHook:
+    def __call__(self, other):
+        return "raw right"
+
+
+class GA:
+    __radd__ = GHook()
+
+    def __add__(self, other):
+        return "left"
+
+
+class GB(GA):
+    __radd__ = GHook()
+
+
+class GHook2:
+    def __call__(self, other):
+        return "raw right"
+
+    def __eq__(self, other):
+        return False
+
+    def __ne__(self, other):
+        return True
+
+    __hash__ = object.__hash__
+
+
+_gh = GHook2()
+
+
+class GC:
+    __radd__ = _gh
+
+    def __add__(self, other):
+        return "left"
+
+
+class GD(GC):
+    __radd__ = _gh
+
+
+class GHook3:
+    def __call__(self, other):
+        return "raw right"
+
+
+class GE:
+    __radd__ = GHook3()
+
+    def __add__(self, other):
+        return "left"
+
+
+class GF(GE):
+    pass
+
+
+_before = [GA() + GB(), GC() + GD(), GE() + GF()]
+GHook.__get__ = lambda self, obj, cls: (lambda other: "bound right") if obj is not None else None
+GHook2.__get__ = lambda self, obj, cls: (lambda other: "bound right") if obj is not None else self
+GHook3.__get__ = lambda self, obj, cls: (lambda other: "bound right") if obj is not None else object()
+_after = [GA() + GB(), GC() + GD(), GE() + GF()]
+del GHook.__get__
+print(_before, _after, GA() + GB())
+
+
+def _meta_pair(hook, name="__getattribute__", base=type):
+    class Meta(base):
+        pass
+
+    class A(metaclass=Meta):
+        def __add__(self, other):
+            return "left"
+
+        def __radd__(self, other):
+            return "base right"
+
+    class B(A):
+        def __radd__(self, other):
+            return "right"
+
+    setattr(Meta, name, hook)
+    return _rget("meta", lambda: A() + B())
+
+
+class _NoAttrMeta(type):
+    def __getattribute__(cls, name):
+        raise AttributeError(name)
+
+
+_seen = []
+
+
+class _Getter:
+    def __call__(self, *a):
+        _seen.append(len(a))
+        return object()
+
+
+print(
+    _meta_pair(staticmethod(lambda name: object())),
+    _meta_pair(classmethod(lambda mcls, name: _seen.append(mcls.__name__) or object())),
+    _meta_pair(_Getter()),
+    _meta_pair(staticmethod(lambda name: "same"), "__getattr__", _NoAttrMeta),
+    _seen,
+)
+
+
+# A metaclass with only __getattr__ (type's own __getattribute__): the
+# override test falls back to it, and an error other than AttributeError
+# propagates (astra's category (b) on 866d675).
+def _getattr_only(mode):
+    log = []
+
+    class Meta(type):
+        def __getattr__(cls, name):
+            if name == "__radd__":
+                log.append(cls.__name__)
+                if mode == "hide":
+                    raise AttributeError(name)
+                if mode == "value":
+                    raise ValueError("visible")
+                if mode == "mutation":
+                    A.__add__ = lambda s, o: "new left"
+                return cls.__name__
+            raise AttributeError(name)
+
+    class A(metaclass=Meta):
+        def __add__(self, other):
+            return "left"
+
+    class B(A):
+        pass
+
+    return _rget(mode, lambda: A() + B()), log
+
+
+print([_getattr_only(m) for m in ["different", "hide", "value", "mutation"]])

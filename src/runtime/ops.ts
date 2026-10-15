@@ -146,19 +146,26 @@ function nonFunctionDunder(g: any, name: string): any {
 // there means not overridden (the left is not looked up); present there and
 // absent on the left means overridden; otherwise the two are compared with
 // !=.  For plain classes holding functions (or nothing) the lookup has no
-// user code and is just the raw one, compared by identity.
+// user code and is just the raw one, compared by identity.  The metaclass's
+// hooks are bound as CPython binds them, through their type's __get__ (a
+// staticmethod gets the name alone, a classmethod the metaclass).
 const ABSENT = {};
+function metaHook(meta: any, name: string): any {
+  const f = lookupType(meta, name);
+  return f === undefined || typeof f === "function" ? f : nonFunctionDunder(f, name);
+}
 function classAttrOpt(cls: any, name: string): any {
   const meta = cls.$meta ?? T.type;
   try {
     if (meta !== T.type) {
-      const ga = lookupType(meta, "__getattribute__");
-      if (ga !== undefined && ga !== lookupType(T.type, "__getattribute__")) {
+      const raw = lookupType(meta, "__getattribute__");
+      const own = raw !== undefined && raw !== lookupType(T.type, "__getattribute__");
+      const gf = metaHook(meta, "__getattr__");
+      if (own || gf !== undefined) {
         try {
-          return callObj(ga, [cls, name]);
+          return own ? callObj(metaHook(meta, "__getattribute__"), [cls, name]) : getattr(cls, name);
         } catch (e) {
-          const gf = isinstance(e, T.AttributeError) ? lookupType(meta, "__getattr__") : undefined;
-          if (gf === undefined) throw e;
+          if (gf === undefined || !isinstance(e, T.AttributeError)) throw e;
           return callObj(gf, [cls, name]);
         }
       }
@@ -171,24 +178,29 @@ function classAttrOpt(cls: any, name: string): any {
 }
 // The class attribute name of t as getattr(t, name) gives it when that
 // runs no user code (a plain metaclass, an attribute whose type has no
-// __get__: functions, None, callable instances), else NEEDS_GET; cached
-// per type version, as special()'s lookups.
+// __get__: functions, None, callable instances), else NEEDS_GET.  Cached
+// per version of t, as special()'s lookups, and, for an attribute that is
+// an object, per version of the attribute's own type: that type can gain or
+// lose __get__ without t changing.
 const NEEDS_GET = {};
+type RawAttr = { raw: any; at: any; atVer: number; plain: boolean };
 function plainClassAttr(t: any, name: string): any {
   let c = t.$rc;
   if (c === undefined || t.$rcVer !== t.$ver) {
     c = t.$rc = Object.create(null);
     t.$rcVer = t.$ver;
   }
-  let v = c[name];
-  if (v === undefined) {
+  let e: RawAttr | undefined = c[name];
+  if (e === undefined) {
     const raw = lookupType(t, name);
-    v = raw === undefined ? MISSING
-      : raw === null || typeof raw === "function" || lookupType(typeOf(raw), "__get__") === undefined ? raw
-      : NEEDS_GET;
-    c[name] = v;
+    const at = raw === undefined || raw === null || typeof raw === "function" ? null : typeOf(raw);
+    e = c[name] = { raw: raw === undefined ? MISSING : raw, at, atVer: -1, plain: at === null };
   }
-  return v;
+  if (e.at !== null && e.atVer !== e.at.$ver) {
+    e.plain = lookupType(e.at, "__get__") === undefined;
+    e.atVer = e.at.$ver;
+  }
+  return e.plain ? e.raw : NEEDS_GET;
 }
 function overloaded(ta: any, tb: any, name: string): boolean {
   if ((ta.$meta ?? T.type) === T.type && (tb.$meta ?? T.type) === T.type) {
