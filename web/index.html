@@ -1410,7 +1410,18 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
 // ⋯ Whiteboard: the latest board in the notebook's language, or a new one (board/page.ts ?recent=); this notebook stays saved
-$("#boardbtn").onclick = () => { saveNow(); location.assign("/board/?recent=" + encodeURIComponent(nb.mode)); };
+$("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb.mode));
+// (to the board once this notebook is saved, every change of it; not saved:
+// it stays open, and says so, CORR-7F9-1)
+async function toBoard(url) {
+  try {
+    await nb.saved();
+  } catch (e) {
+    savedEl.textContent = "not saved: " + (e?.message ?? e) + " (the whiteboard was not opened)";
+    return;
+  }
+  location.assign(url);
+}
 fileMenu.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -1422,7 +1433,7 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
-    case "whiteboard": saveNow(); location.assign("/board/?new=" + encodeURIComponent(nb.mode)); break;
+    case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     case "open": await showOpen(); break;
     case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, share_id: undefined, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
