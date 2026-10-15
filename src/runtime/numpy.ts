@@ -1483,6 +1483,25 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   const out = empty(a.shape, rt);
   const t = moveAxisToEnd(a, ax), o = moveAxisToEnd(out, ax);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1], ost = o.strides[o.ndim - 1];
+  if (rt.cplx) {
+    // complex: (re, im) pairs, at data[2p] and data[2p + 1]
+    const cin = a.dt.cplx, f32 = rt === D.complex64;
+    loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
+      let re = isProd ? 1 : 0, im = 0;
+      for (let i = 0; i < n; i++) {
+        const s = p + i * st, xr = cin ? t.data[2 * s] : t.data[s], xi = cin ? t.data[2 * s + 1] : 0;
+        if (isProd) [re, im] = [re * xr - im * xi, re * xi + im * xr];
+        else [re, im] = [re + xr, im + xi];
+        if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
+        const d = q + i * ost;
+        o.data[2 * d] = re;
+        o.data[2 * d + 1] = im;
+      }
+    });
+    return out;
+  }
+  // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
+  if (a.dt.cplx) raise(T.TypeError, `${isProd ? "cumprod" : "cumsum"}: a complex array accumulated in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
   loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
     let acc = isProd ? 1 : 0;
     for (let i = 0; i < n; i++) {
