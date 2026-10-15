@@ -21,3 +21,22 @@ g = G0(); show('edges iter', lambda: (g.delete_edges(e for e in [(1, 5)]), g.siz
 
 d = DiGraph([(1, 2), (2, 1)]); d.delete_edges([(1, 2)]); show('digraph', lambda: d.edges(sort=True))
 g = G0(); show('edge with label arg', lambda: (g.delete_edge((1, 5, None)), g.size()))
+
+# labels and malformed edges (astra's CORR-C4A-1/2 on c4a4f79)
+for C in (Graph, DiGraph):
+    for action in ("g.delete_edges([(0,1,'blue')])", "g.delete_edges([(0,1,'red')])", "g.delete_edges([(0,1,None)])", "g.delete_edges([(0,1,'red','extra')])"):
+        g=C([(0,1,'red')])
+        try:
+            eval(action)
+            result='ok'
+        except Exception as err:
+            result=type(err).__name__ + ': ' + str(err)
+        print(C.__name__, action, result, g.edges(sort=True))
+    g=C([(0,1),(1,2)])
+    try:
+        g.delete_vertices([0,42])
+    except Exception as err:
+        print(C.__name__, 'atomic missing vertex', type(err).__name__, g.vertices(sort=True), g.edges(sort=True))
+    g=C([(0,1),(1,2)])
+    g.delete_vertices(v for v in [0,0,1])
+    print(C.__name__, 'duplicates generator', g.vertices(sort=True), g.edges(sort=True))

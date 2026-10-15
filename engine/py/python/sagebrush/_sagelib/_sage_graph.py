@@ -22,6 +22,21 @@ def _sorted(vs):
         return sorted(vs, key=repr)
 
 
+
+def _edge_spec(e, single):
+    """(u, v, label) from an edge given as a pair or a triple; other lengths
+    are Sage's errors (its messages differ between delete_edge and
+    delete_edges)."""
+    n = len(e)  # (TypeError "object of type 'int' has no len()")
+    if n == 3:
+        return tuple(e)
+    if n == 2:
+        u, v = e
+        return u, v, None
+    if n > 3:
+        raise ValueError("too many values to unpack (expected 2, got %d)" % n if single else "too many values to unpack (expected 2)")
+    raise ValueError("need more than %d value%s to unpack" % (n, "" if n == 1 else "s"))
+
 class GenericGraph:
     """Common code of Graph and DiGraph.
 
@@ -160,10 +175,23 @@ class GenericGraph:
             2
             sage: G.delete_edge(0, 2); G.delete_edge(7, 8); G.size()
             2
+            sage: g = Graph([(0, 1, 'red')]); g.delete_edge(0, 1, 'blue'); g.delete_edges([(0, 1, 'blue')]); g.size()
+            1
+            sage: g.delete_edges([(0, 1, 'red', 'extra')])
+            Traceback (most recent call last):
+            ...
+            ValueError: too many values to unpack (expected 2)
+            sage: g.delete_edges([(0, 1, 'red')]); g.size()
+            0
         """
         if v is None:
-            u, v = u[0], u[1]
-        self._adj.get(u, {}).pop(v, None)
+            u, v, label = _edge_spec(u, True)
+        nbrs = self._adj.get(u, {})
+        if v not in nbrs or (label is not None and nbrs[v] != label):
+            # a missing edge, or one with another label (a label of None
+            # matches any edge), is left alone, as in Sage
+            return
+        nbrs.pop(v)
         if self._directed:
             self._in.get(v, {}).pop(u, None)
         else:
@@ -180,7 +208,7 @@ class GenericGraph:
             [(1, 9, None), (2, 9, None)]
         """
         for e in edges:
-            self.delete_edge(e)
+            self.delete_edge(*_edge_spec(e, False))
 
     def delete_vertices(self, vertices):
         """Remove several vertices and their edges; if one is not in the
@@ -197,11 +225,19 @@ class GenericGraph:
         """
         vs = list(vertices)
         for v in vs:
-            if v not in self._adj:
+            if not self._has(v):
                 raise ValueError("vertex (%s) not in the graph" % (v,))
         for v in vs:
             if v in self._adj:
                 self.delete_vertex(v)
+
+    def _has(self, v):
+        # (an unhashable vertex is not in the graph: Sage's ValueError, not
+        # a TypeError)
+        try:
+            return v in self._adj
+        except TypeError:
+            return False
 
     def delete_vertex(self, v):
         """Remove a vertex and its edges (a ValueError if it is not in the
@@ -216,7 +252,7 @@ class GenericGraph:
             ...
             ValueError: vertex (42) not in the graph
         """
-        if v not in self._adj:
+        if not self._has(v):
             raise ValueError("vertex (%s) not in the graph" % (v,))
         for w in list(self._adj[v]):
             self.delete_edge(v, w)
