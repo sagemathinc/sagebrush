@@ -528,6 +528,7 @@ dependencies = [
  "rayon",
  "sagebrush-arith",
  "sagebrush-bigint",
+ "sagebrush-classgroup",
  "sagebrush-poly",
 ]
 
