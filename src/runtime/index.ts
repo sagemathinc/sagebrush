@@ -665,6 +665,8 @@ export const R: any = {
   withEnter,
   withExit,
   reraise,
+  excEnter: (e: any) => { Obj.handledExceptions.push(e); },
+  excLeave: () => { Obj.handledExceptions.pop(); },
   PyBytes: Obj.PyBytes,
   dflt,
   kwdflt,

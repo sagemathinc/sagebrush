@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr } from "./object";
+import { globalsDict, hooks, setattr, putAttr, handledExceptions } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
@@ -233,7 +233,13 @@ newBuiltinModule("sys", (m) => {
   fn(m, "audit", (..._a: any[]) => null);
   fn(m, "addaudithook", (_f: any) => null);
   fn(m, "getsizeof", (_x: any) => 64);
-  fn(m, "exc_info", () => tuple([null, null, null]));
+  // (the exception an except clause is handling, innermost; None outside one)
+  const handled = () => (handledExceptions.length ? handledExceptions[handledExceptions.length - 1] : null);
+  fn(m, "exception", () => handled());
+  fn(m, "exc_info", () => {
+    const e = handled();
+    return e === null ? tuple([null, null, null]) : tuple([typeOf(e), e, e.__traceback__ ?? null]);
+  });
   m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
 });
 dictSet(sysModules, "builtins", builtins);

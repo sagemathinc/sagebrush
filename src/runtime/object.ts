@@ -1365,6 +1365,10 @@ export function globalsDict(g: any): PyDict {
 // The namespace object behind a globals dict, or a proxy over a plain dict
 // (exec/eval with an explicit globals mapping).
 export const NS_DICT = Symbol("globals dict");
+
+// The exceptions being handled, innermost last: an except clause's body runs
+// with its exception here (sys.exception(), sys.exc_info())
+export const handledExceptions: any[] = [];
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
