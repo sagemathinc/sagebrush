@@ -18,6 +18,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "weight2", "n": 11, "q": 2}),
         json!({"fn": "batch_exact", "levels": [11, 14], "q": 2}),
         json!({"fn": "level_data", "n": 11}),
+        json!({"fn": "ec_modsym", "n": 11, "aps": [[2, -2], [3, -1]], "cusps": [[1, 7], [0, 1]]}),
         json!({"fn": "commute", "n": 11, "q": 2, "r": 3}),
         json!({"fn": "estimate", "n": 11, "q": 2}),
         json!({"fn": "estimate_newforms", "n": 11, "k": 2, "bound": 10}),

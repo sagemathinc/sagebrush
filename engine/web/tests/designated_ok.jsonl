@@ -2,3 +2,4 @@
 {"fn":"factor_mod","f":[4,8,5],"p":2}
 {"fn":"factor_mod","f":[1,0,1],"p":4294967291}
 {"fn":"rational_newforms","n":11,"bound":20,"details":true}
+{"fn":"ec_modsym","n":11,"aps":[[2,-2],[3,-1],[1073741789,0]],"cusps":[[1,7]]}

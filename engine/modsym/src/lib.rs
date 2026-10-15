@@ -21,6 +21,7 @@ pub mod estimate;
 pub mod cusps;
 pub mod dims;
 pub mod dirichlet;
+pub mod ec_map;
 pub mod exact;
 pub mod general;
 pub mod general_exact;
@@ -132,4 +133,43 @@ pub fn hecke_commute(n: u64, q: u64, r: u64, p: u64) -> Result<bool, String> {
     let sp = Space::new(&pres, p);
     let (a, b) = (sp.hecke_matrix(&pres, q), sp.hecke_matrix(&pres, r));
     Ok(linalg::matmul(&a, &b, p) == linalg::matmul(&b, &a, p))
+}
+
+thread_local! {
+    /// The last few modular symbol maps (ec_map.rs), by (N, a_q list).
+    static EC_MAPS: std::cell::RefCell<Vec<((u64, Vec<(u64, i64)>), std::rc::Rc<ec_map::EcMap>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The modular symbol map of the elliptic curve of conductor n with these
+/// a_q (ec_map.rs): X(0:1) and {0, a/b} for each cusp, in the map's
+/// primitive integral units.  The map is cached for the last few curves.
+pub fn ec_modsym_values(n: u64, aps: &[(u64, i64)], cusps: &[(i64, i64)]) -> Result<(sagebrush_bigint::BigInt, Vec<sagebrush_bigint::BigInt>), String> {
+    check_level(n)?;
+    for &(a, b) in cusps {
+        if b == 0 || a.unsigned_abs() >= 1 << 62 || b.unsigned_abs() >= 1 << 62 {
+            return Err("each cusp a/b needs b != 0 and |a|, |b| < 2^62".into());
+        }
+    }
+    let key = (n, aps.to_vec());
+    let cached = EC_MAPS.with(|c| c.borrow().iter().find(|(k, _)| *k == key).map(|(_, m)| m.clone()));
+    let m = match cached {
+        Some(m) => m,
+        None => {
+            let m = std::rc::Rc::new(ec_map::ec_map(n, aps)?);
+            EC_MAPS.with(|c| {
+                let mut c = c.borrow_mut();
+                if c.len() >= 4 {
+                    c.remove(0);
+                }
+                c.push((key, m.clone()));
+            });
+            m
+        }
+    };
+    let vals = cusps.iter().map(|&(a, b)| {
+        let (a, b) = if b < 0 { (-a, -b) } else { (a, b) };
+        let g = p1::gcd(a.unsigned_abs(), b as u64) as i64;
+        m.eval(a / g, b / g)
+    }).collect();
+    Ok((m.at_zero_symbol(), vals))
 }
