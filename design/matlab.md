@@ -66,6 +66,12 @@ and runs on a runtime library with MATLAB's semantics:
     double, the order for a numeric sigma (nearest first), which the page
     leaves open, IsSymmetricDefinite required for a sparse B of more than
     2000 rows, and the messages;
+  - **lib/_matlab_more.py**: split and replace, dec2bin, dec2hex, bin2dec
+    and hex2dec, sub2ind and ind2sub, and mat2cell, from their
+    documentation pages. Negative numbers in dec2bin and dec2hex are two's
+    complement in the narrowest of 8, 16, 32 and 64 bits holding every
+    element, as Octave does; the pages show 8 bits for -1 and -16. What
+    the pages leave open is refused (Not yet);
   - lib/_matlab_sparse.py, lib/_matlab_mat.py and lib/_matlab_plot.py
     (below).
 
@@ -289,7 +295,9 @@ from versions 7.0 to 26.1.
 - **Complex numbers:** the real part right-aligned in 9, then ` + `, then
   the imaginary part.
 - **Character vectors** print in quotes. Cells print elements as `{[3]}`,
-  `{'abc'}` and `{3×3 double}`.
+  `{'abc'}`, `{3×3 double}` and `{5×1 string}`. N-D cell and string
+  arrays print page by page (`A(:,:,1) =`) under a `  3×3×2 cell array`
+  header.
 - **Structs** print `x = ` (with a space, as MATLAB writes objects), then
   `  struct with fields:` and the names right-aligned.
 - **Formats:** `short`, `long` and `compact` work, and so do:
@@ -671,7 +679,14 @@ since it compares against the committed outputs.
 - **`mat2str` of a char array** works in MATLAB (`'it''s'`). Octave rejects
   it.
 - **`mat2str(zeros(1,0))`** is `zeros(1,0)` in MATLAB and `[]` in Octave.
-- **`contains`** is not in Octave 11.
+- **`contains`**, `split`, `replace` and string arrays are not in Octave 11.
+- **`dec2bin(-1.5)`** rounds down, to -2's `11111110`, as its page says.
+  Octave rounds towards zero. `dec2hex(10.5)` is an error in MATLAB. Octave
+  gives `A`.
+- **`bin2dec('0b111s32')`** and `hex2dec('0xFFs8')` read the literals'
+  prefixes and suffixes (7 and -1). Octave gives NaN.
+- **`sub2ind(sz, [1 2 3], 2)`** expands the scalar subscript (R2024a).
+  Octave asks for subscripts of the same size.
 - **Local functions:** MATLAB puts a script's local functions at its end.
   Octave needs them before they are called.
 - **Display:** Octave prints `x = 5` on one line, and its matrix columns are
@@ -712,7 +727,20 @@ something plausible. Examples:
   POSDEF for a matrix without that property;
 - `funm` of a defective matrix except by exp, cos, sin, cosh, sinh, log and
   sqrt;
-- `interp2`'s 'cubic' on a non-uniform grid, and 'makima' and 'pchip'.
+- `interp2`'s 'cubic' on a non-uniform grid, and 'makima' and 'pchip';
+- what the pages of lib/_matlab_more.py's functions leave open:
+  - `split` with its default delimiter, of text that begins or ends with
+    whitespace or has adjacent whitespace characters;
+  - `replace` where two of the substrings begin at the same character and
+    the first listed is not the longest;
+  - `dec2bin` and `dec2hex` of an empty array, or of negative values of an
+    integer class;
+  - `bin2dec` and `hex2dec` of empty text, or of spaces between digits;
+  - `sub2ind` with fewer subscripts than sz has elements;
+  - `sub2ind` and `ind2sub` results above 2^53 that are not exactly
+    doubles (their arithmetic is exact; the result would be rounded);
+  - `split`'s and `replace`'s pattern objects, which Sagebrush lacks, and
+    `join` with an array of delimiters.
 
 The rest:
 - polar axes, lighting and apps (see Graphics);
