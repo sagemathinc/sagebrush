@@ -39,7 +39,7 @@
   {
    "id": "classes",
    "title": "Class numbers",
-   "text": "Of $\\mathbb{Q}(\\sqrt{-d})$: the class number is $1$ for exactly nine $d$ (Heegner, Baker, Stark).",
+   "text": "Of $\\mathbb{Q}(\\sqrt{-d})$: for squarefree $d > 0$, the class number is $1$ for exactly nine $d$, the nine imaginary quadratic fields of class number $1$ (Heegner, Baker, Stark).",
    "code": "[(d, QuadraticField(-d).class_number()) for d in [1, 2, 3, 5, 6, 7, 11, 19, 23, 43, 67, 163]]"
   },
   {
