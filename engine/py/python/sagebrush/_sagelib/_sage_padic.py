@@ -471,6 +471,27 @@ def _pushout(A, B):
     return B
 
 
+def _coerces(Y, X):
+    """Whether Sage coerces the parent Y into X (same p): a ring into any
+    field; within rings, or within fields, a smaller cap into a larger."""
+    if Y is X:
+        return True
+    if Y._field != X._field:
+        return X._field
+    return Y._prec <= X._prec
+
+
+def _series_pushout(X, Y):
+    """The base of a series over X combined with an element of Y (as Sage):
+    X when Y coerces into it, else the p-adics with the larger cap, a field
+    if either is (Zp(5, 20)[[T]] plus an element of Qp(5, 4) is over
+    Qp(5, 20): the coefficients keep their precision, unlike _pushout's
+    choice for one element operation; the review's CORR-D9E-1)."""
+    if _coerces(Y, X):
+        return X
+    return _parent(X._p, max(X._prec, Y._prec), X._field or Y._field, X._mode, X._pos, X._max_terms)
+
+
 class pAdicCappedRelativeElement:
     """An element of Zp(p, prec) or Qp(p, prec): p^v u + O(p^(v + r)).
 
