@@ -225,13 +225,24 @@ newBuiltinModule("sys", (m) => {
   m.flags.optimize = 0;
   m.flags.int_max_str_digits = intDigits.max;
   fn(m, "get_int_max_str_digits", () => intDigits.max);
-  fn(m, "set_int_max_str_digits", (maxdigits: any) => {
-    const n = Number(O.index(maxdigits));
-    if (n !== 0 && !(n >= 640)) raise(T.ValueError, "maxdigits must be >= 640 or 0 for unlimited");
+  // (as CPython's: the exact integer, in C int range, checked before
+  // anything is changed, CORR-606-2)
+  const setDigits = (maxdigits: any) => {
+    const i = O.index(maxdigits);
+    const b = typeof i === "bigint" ? i : BigInt(i);
+    if (b > 2147483647n || b < -2147483648n) raise(T.OverflowError, "Python int too large to convert to C int");
+    const n = Number(b);
+    if (n !== 0 && n < 640) raise(T.ValueError, "maxdigits must be >= 640 or 0 for unlimited");
     intDigits.max = n;
     m.flags.int_max_str_digits = n;
     return null;
-  });
+  };
+  fn(m, "set_int_max_str_digits", setDigits);
+  m.set_int_max_str_digits.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (names.length !== 1 || names[0] !== "maxdigits" || pos.length !== 0)
+      raise(T.TypeError, names.find((k) => k !== "maxdigits") !== undefined ? `set_int_max_str_digits() got an unexpected keyword argument '${names.find((k) => k !== "maxdigits")}'` : "set_int_max_str_digits() takes exactly one argument");
+    return setDigits(values[0]);
+  };
   let limit = 1000;
   fn(m, "getrecursionlimit", () => limit);
   fn(m, "setrecursionlimit", (n: any) => ((limit = Number(n)), null));

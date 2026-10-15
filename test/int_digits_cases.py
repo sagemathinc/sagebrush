@@ -47,3 +47,16 @@ show("unlimited", lambda: str(x))
 sys.set_int_max_str_digits(640)
 show("640: 641 digits", lambda: str(10 ** 640))
 show("640: parse 641", lambda: int("1" * 641))
+
+# (the setter checks the exact integer, in C int range, first, and leaves
+# the limit unchanged on failure, CORR-606-2)
+sys.set_int_max_str_digits(4300)
+for n in (10**400, -10**400, 2**31, 2**31 - 1, -2**31, -2**31 - 1, 2**63, 639, True, 1.5, "7", None):
+    try:
+        sys.set_int_max_str_digits(n)
+        print(repr(n)[:12], "ok", sys.get_int_max_str_digits(), type(sys.get_int_max_str_digits()).__name__)
+    except Exception as e:
+        print(repr(n)[:12], type(e).__name__, e, sys.get_int_max_str_digits())
+    sys.set_int_max_str_digits(4300)
+sys.set_int_max_str_digits(maxdigits=1000)
+print("kw", sys.get_int_max_str_digits(), sys.flags.int_max_str_digits)

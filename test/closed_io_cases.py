@@ -76,3 +76,41 @@ print(open(path).read() == "one\ntwo\n")
 show("open r+b", lambda: open(path, "r+b"), binary=True)
 show("open ab", lambda: open(os.path.join(d, "a.bin"), "ab"), binary=True)
 show("open a+", lambda: open(os.path.join(d, "a2.txt"), "a+"))
+
+# (readlines' hint: positive hints around line boundaries, and invalid ones,
+# CORR-606-3)
+makers = [("StringIO", lambda: io.StringIO("one\ntwo\nthree\n")), ("BytesIO", lambda: io.BytesIO(b"one\ntwo\nthree\n")),
+          ("text", lambda: open(path)), ("binary", lambda: open(path, "rb"))]
+with open(path, "w") as f:
+    f.write("one\ntwo\nthree\n")
+for name, mk in makers:
+    for h in (1, 3, 4, 5, 8, 9, 0, -1, None, "bad", 1.5, True):
+        f = mk()
+        try:
+            r = f.readlines(h)
+            print(name, repr(h), r, repr(f.read()))
+        except Exception as e:
+            print(name, repr(h), type(e).__name__, e)
+
+# (a bad argument on a closed stream: which is refused first, CORR-606-4)
+for name, mk, bad in (("StringIO", lambda: io.StringIO(), None), ("StringIO", lambda: io.StringIO(), 5), ("StringIO", lambda: io.StringIO(), b"x"),
+                      ("BytesIO", lambda: io.BytesIO(), "x"), ("BytesIO", lambda: io.BytesIO(), None),
+                      ("text", lambda: open(os.path.join(d, "w2.txt"), "w"), None), ("text", lambda: open(os.path.join(d, "w2.txt"), "w"), 5),
+                      ("binary", lambda: open(os.path.join(d, "w2.bin"), "wb"), "x")):
+    f = mk()
+    f.close()
+    for op in ("write", "writelines"):
+        try:
+            getattr(f, op)(bad if op == "write" else [bad])
+            print(name, op, repr(bad), "ok")
+        except Exception as e:
+            print(name, op, repr(bad), type(e).__name__, e)
+
+# (what a write takes: bytes-like objects only)
+import array
+for b in (5, bytearray(b"ab"), memoryview(b"cd"), [1], 2.5, array.array("b", [1, 2])):
+    f = io.BytesIO()
+    try:
+        print(type(b).__name__, f.write(b), f.getvalue())
+    except Exception as e:
+        print(type(b).__name__, type(e).__name__, e)
