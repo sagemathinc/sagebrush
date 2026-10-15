@@ -36,6 +36,7 @@ import { Reactive, SCOPE_SEP, type Analysis, type CellState, type RunReport } fr
 import type { CellError } from "./notebook-graph";
 import { analyzeCell, ImportStarError } from "./dataflow";
 import { renameRedefinitions } from "./rename";
+import { oneLine, textLines } from "./terminal-text";
 
 const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--store-previews [-o OUT] [--preview-ms MS]]
   run every code item of a board as the board runs it in a browser (its
@@ -87,7 +88,7 @@ export function boardRunWorker(data: { dir: string }) {
 // (seconds: Node's timers are at most 2^31 - 1 ms, CORR-CD6-4)
 const MAX_TIMEOUT = 2147483;
 // (a message on stderr: a board's text, a file's name, an option, as anyone wrote them, HARD-CD6-3)
-const say = (msg: string) => process.stderr.write(`sagebrush board run: ${safe(msg)}\n`);
+const say = (msg: string) => process.stderr.write(`sagebrush board run: ${oneLine(msg)}\n`);
 
 /** The `board run` command; returns the exit code. */
 export async function boardRun(argv: string[]): Promise<number> {
@@ -117,7 +118,8 @@ export async function boardRun(argv: string[]): Promise<number> {
   let doc: BoardDoc;
   try {
     const d = boardFromText(readFileSync(file === "-" ? 0 : file, "utf8"), file === "-" ? undefined : basename(file));
-    const bad = formatError(d);
+    // (as the board says it, in the command line's words: which sagebrush can't read it, and what to do)
+    const bad = formatError(d, { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" });
     if (bad) throw new Error(bad);
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     doc = cleanDoc(d);
@@ -314,18 +316,18 @@ export async function boardRun(argv: string[]): Promise<number> {
       process.stdout.write(JSON.stringify({ file, title: doc.title ?? null, mode, ok: allOk, items: list, ...(wrote ? { wrote } : {}) }, null, 2) + "\n");
     } else {
       const w = process.stdout;
-      if (!list.length) w.write(`${safe(file)}: no code items\n`);
+      if (!list.length) w.write(`${oneLine(file)}: no code items\n`);
       for (const r of list) {
-        const head = `${String(r.n).padStart(3)}  ${r.status.toUpperCase().padEnd(8)} ${r.title ? safe(JSON.stringify(r.title)) + " " : ""}(${safe(JSON.stringify(r.id))}${r.page ? `, page ${r.page}` : ""})${r.ms !== undefined ? `  ${r.ms} ms` : ""}`;
+        const head = `${String(r.n).padStart(3)}  ${r.status.toUpperCase().padEnd(8)} ${r.title ? oneLine(JSON.stringify(r.title)) + " " : ""}(${oneLine(JSON.stringify(r.id))}${r.page ? `, page ${r.page}` : ""})${r.ms !== undefined ? `  ${r.ms} ms` : ""}`;
         w.write(head + "\n");
         // (a picture as what it is and its size, not its text: a figure's text says little)
         const body = r.status === "ok" ? [r.stdout, ...r.outputs.map((o) => (o.bytes ? `[${o.type}, ${Math.max(1, Math.round(o.bytes / 1024))} kB]` : o.text ?? ""))].filter(Boolean).join("\n") : r.error ?? "";
-        if (body.trim()) w.write(indent(cutLines(safe(body.replace(/\n+$/, "")), 40)) + "\n");
+        if (body.trim()) w.write(indent(cutLines(textLines(body.replace(/\n+$/, "")), 40)) + "\n");
       }
       const parts = (["ok", "failed", "error", "timeout", "not run"] as Status[]).filter((s) => count(s)).map((s) => `${count(s)} ${s}`);
-      if (list.length) w.write(`${safe(file)}: ${parts.join(", ")} (of ${list.length} code item${list.length === 1 ? "" : "s"}, ${mode})\n`);
-      if (wrote) w.write(`wrote ${safe(wrote)}, with ${[...notes.values()].filter((n) => n.preview).length} preview(s)\n`);
-      if (dead && workerErr.length) process.stderr.write(safe(workerErr.join("")).slice(0, 4000));
+      if (list.length) w.write(`${oneLine(file)}: ${parts.join(", ")} (of ${list.length} code item${list.length === 1 ? "" : "s"}, ${mode})\n`);
+      if (wrote) w.write(`wrote ${oneLine(wrote)}, with ${[...notes.values()].filter((n) => n.preview).length} preview(s)\n`);
+      if (dead && workerErr.length) process.stderr.write(textLines(workerErr.join("")).slice(0, 4000));
     }
     return allOk ? 0 : 1;
   } finally {
@@ -409,7 +411,5 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
   return out;
 }
 
-// (text for a terminal: no control characters but newlines and tabs; a board's text and its code's output are anyone's)
-const safe = (s: string) => s.replace(/[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 const indent = (s: string) => s.split("\n").map((l) => "       " + l).join("\n");
 const cutLines = (s: string, max: number) => { const ls = s.split("\n"); return ls.length <= max ? s : [...ls.slice(0, max - 5), `… ${ls.length - max + 1} more lines …`, ...ls.slice(-4)].join("\n"); };
