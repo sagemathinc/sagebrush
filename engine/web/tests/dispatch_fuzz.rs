@@ -18,6 +18,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "weight2", "n": 11, "q": 2}),
         json!({"fn": "batch_exact", "levels": [11, 14], "q": 2}),
         json!({"fn": "level_data", "n": 11}),
+        json!({"fn": "ec_modsym", "n": 11, "aps": [[2, -2], [3, -1]], "cusps": [[1, 7], [0, 1]]}),
         json!({"fn": "commute", "n": 11, "q": 2, "r": 3}),
         json!({"fn": "estimate", "n": 11, "q": 2}),
         json!({"fn": "estimate_newforms", "n": 11, "k": 2, "bound": 10}),
@@ -71,6 +72,8 @@ fn requests() -> Vec<Value> {
         json!({"fn": "hmf_newform_orbits", "level": [[-5, 18]]}),
         json!({"fn": "hmf_rational_newforms", "level": [[-2, 5]], "bound": 30}),
         json!({"fn": "hmf_newform_eigenvalues", "level": [[-5, 18]], "orbit": 1, "bound": 30}),
+        json!({"fn": "hmf_weight_newform_eigenvalues", "level": [[7, 2]], "weight": [2, 4], "orbit": 0, "bound": 20}),
+        json!({"fn": "hmf_weight_hecke_charpoly", "level": [[6, 0]], "weight": [4, 4], "p": [[3, 0]]}),
     ]
 }
 
