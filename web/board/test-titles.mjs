@@ -84,6 +84,76 @@ try {
   check(near && near.text === NEAR.nodes[0].title && near.ws === "nowrap" && near.to === "ellipsis" && near.h <= near.lh, "near, a group's title is one line, cut with … when too long: " + JSON.stringify(near));
   check(near?.cut, "...this one is cut: " + JSON.stringify(near));
 
+  // UI-0CC-1: far out, the band too small on screen, a title is never drawn
+  // over its group's members: above the group where nothing is, else not
+  // at all (zooms 0.3 down to 0.05; astra's group, its child 600 and 2000 wide)
+  const zoomTo = (z) => ev(`(() => { const b = window.board.bounds(), c = window.board.cameraFor(b.x0, b.y0, b.x1, b.y1); window.board.setCamera({ x: (b.x0 + b.x1) / 2 - window.board.el.clientWidth / 2 / ${z}, y: (b.y0 + b.y1) / 2 - window.board.el.clientHeight / 2 / ${z}, z: ${z} }); window.board.render(); return 1; })()`);
+  for (const w of [600, 2000]) {
+    const LOW = { title: "Low", nodes: [{ id: "g", kind: "group", title: "Group title above its child", children: [{ id: "a", title: "Child", w, h: 300 }] }] };
+    await ev(`window.sagebrush.board.load(${JSON.stringify(LOW)}).then(() => 1)`);
+    await until("!!window.board.item('a')");
+    for (const z of [0.3, 0.2, 0.1, 0.05]) {
+      await zoomTo(z);
+      const a = await box("a"), g = await box("g"), t = (await drawn()).filter((d) => /^Group|^G.*…$/.test(d.t) && d.t !== "Child");
+      const over = t.filter((d) => { const f = Number(/(\d+(?:\.\d+)?)px/.exec(d.font)[1]); return d.x < a.x + a.w && d.x + d.w > a.x && d.y - 0.8 * f < a.y + a.h && d.y + 0.25 * f > a.y; });
+      check(!over.length, `UI-0CC-1: width ${w}, zoom ${z}: the title not drawn over the group's child: ` + JSON.stringify(over.map((d) => [d.t, Math.round(d.y)])) + " child from " + a.y);
+      if (w === 2000 && z <= 0.2) check(t.some((d) => d.y < g.y), `UI-0CC-1: width ${w}, zoom ${z}: drawn above the group, where nothing is: ` + JSON.stringify(t.map((d) => [d.t, Math.round(d.y), g.y])));
+    }
+  }
+  // nested, far out: the inner group's title above it only where the outer's is not
+  {
+    const NEST = { title: "Nest", nodes: [{ id: "o", kind: "group", title: "Outer group", children: [{ id: "i", kind: "group", title: "Inner group", children: [{ id: "n", title: "Note", w: 900, h: 200 }] }] }] };
+    await ev(`window.sagebrush.board.load(${JSON.stringify(NEST)}).then(() => 1)`);
+    await until("!!window.board.item('n')");
+    await zoomTo(0.12);
+    const ts = (await drawn()).filter((d) => /group/.test(d.t)), n = await box("n");
+    const rect = (d) => { const f = Number(/(\d+(?:\.\d+)?)px/.exec(d.font)[1]); return { x0: d.x, x1: d.x + d.w, y0: d.y - 0.8 * f, y1: d.y + 0.25 * f }; };
+    const clash = ts.some((d, i) => ts.some((e, j) => j > i && rect(d).x0 < rect(e).x1 && rect(e).x0 < rect(d).x1 && rect(d).y0 < rect(e).y1 && rect(e).y0 < rect(d).y1));
+    check(!clash && ts.every((d) => rect(d).y1 <= n.y + 0.5), "nested, far out: no two titles over each other, none over the note: " + JSON.stringify(ts.map((d) => [d.t, Math.round(d.y)])));
+  }
+
+  // UI-0CC-2: a title cut (or not drawn) shown whole: a hover over its band
+  // (a tooltip), a click there in reading (and again, hidden), and Find
+  const LONG = { title: "Long", nodes: [{ id: "lg", kind: "group", title: "Workbench, browser and tools, and a great deal more besides (8)", children: [{ id: "c1", title: "Child", w: 160 }] }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(LONG)}).then(() => 1)`);
+  await until("!!window.board.item('c1')");
+  await ev("window.sagebrush.board.editing(false), (() => { const g = window.board.item('lg'); window.board.setCamera({ x: g.x - 40, y: g.y - 40, z: 1 }); window.board.render(); return 1; })()");
+  await sleep(400);
+  const bandAt = () => ev("(() => { const g = window.board.item('lg'), r = window.board.el.getBoundingClientRect(), c = window.board.camera; return { x: r.left + (g.x + 30 - c.x) * c.z, y: r.top + (g.y + 20 - c.y) * c.z }; })()");
+  let p = await bandAt();
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
+  await sleep(100);
+  check((await ev("window.board.el.title")) === LONG.nodes[0].title, "UI-0CC-2: a hover over a group's title band: its whole title, as a tooltip: " + (await ev("window.board.el.title")));
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y + 200 });
+  await sleep(100);
+  check(!(await ev("window.board.el.title")), "...and none away from it");
+  const whole = () => ev("(() => { const b = window.board.cache.get('lg')?.querySelector(':scope > b'); return !!b && getComputedStyle(b).whiteSpace !== 'nowrap' && b.scrollWidth <= b.clientWidth + 1 && window.board.cache.get('lg').classList.length > 0; })()");
+  const click = async (x, y) => { await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 }); await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 }); await sleep(250); };
+  check(!(await whole()), "(near, its title cut to one line)");
+  await click(p.x, p.y);
+  check(await whole(), "UI-0CC-2: a click on its band shows its whole title");
+  check(await ev("(() => { const g = window.board.cache.get('lg'), b = g.querySelector(':scope > b'); return b.getBoundingClientRect().right > g.getBoundingClientRect().right && !/paint/.test(getComputedStyle(g).contain); })()"), "...on one line past its narrow group, not clipped to it");
+  await click(p.x, p.y);
+  check(!(await whole()), "...a second, cut again");
+  // far out: the whole title drawn on a click
+  await zoomTo(0.3);
+  p = await bandAt();
+  await click(p.x, p.y);
+  check((await drawn()).some((d) => d.t === LONG.nodes[0].title), "UI-0CC-2: far out, a click on its band draws its whole title");
+  await click(p.x, p.y + 150);
+  check(!(await drawn()).some((d) => d.t === LONG.nodes[0].title), "...a click elsewhere, cut again");
+  // Find: the group found, its whole title shown
+  await ev("(() => { const g = window.board.item('lg'); window.board.setCamera({ x: g.x - 40, y: g.y - 40, z: 1 }); window.board.render(); return 1; })()");
+  await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers: 2 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers: 2 });
+  await sleep(200);
+  await send("Input.insertText", { text: "great deal more" });
+  await sleep(300);
+  await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await sleep(900);
+  check(await whole(), "UI-0CC-2: Find, matching the title's end: its whole title shown");
+
   check(!errors.length, "no errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

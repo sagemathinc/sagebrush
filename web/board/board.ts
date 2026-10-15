@@ -220,6 +220,10 @@ export class Board {
   dropTarget: string | null = null;
   private selection = new Set<string>();
   private foundId: string | null = null; // (the item Find shows, outlined)
+  private revealed: string | null = null; // (a group whose whole title is shown: a click on its title's band, UI-0CC-2)
+  private titleRects = new Map<string, { x0: number; y0: number; x1: number; y1: number }>(); // (far out, where groups' titles were drawn)
+  /** A click on a group's title band (or elsewhere: null), for the host to reveal it, or not, in reading. */
+  onTitleClick: ((id: string | null) => void) | null = null;
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -486,6 +490,7 @@ export class Board {
       }
       el.classList.toggle("selected", this.selection.has(it.id));
       el.classList.toggle("found", it.id === this.foundId);
+      el.classList.toggle("reveal", it.id === this.revealed);
       if (el.dataset.untypeset) { delete el.dataset.untypeset; this.typesetSoon(el); }
       frag.append(el);
       this.mounted.set(it.id, el);
@@ -895,25 +900,47 @@ export class Board {
       }
     }
     if (far) {
-      // groups' titles, every one, in the band above its members the layout
-      // keeps for it: one size for each level of nesting (16, 14, then 13
-      // pixels on screen), smaller only as that band is on screen, never
-      // under 10 pixels; too long for the group, cut with "…"; with a halo
-      // (friction 10 and 11: a title was sized by its group's width, drawn
-      // over its members, and left out when long or around other groups)
+      // groups' titles, never over their members (friction 10 and 11: a
+      // title was sized by its group's width, drawn over its members, and
+      // left out when long or around other groups; astra's UI-0CC-1):
+      // - in the band above its members the layout keeps for it, at one size
+      //   for each level of nesting (16, 14, then 13 pixels on screen),
+      //   smaller as that band is on screen, down to 10 pixels;
+      // - the band smaller than that, above the group, at 10 pixels, where
+      //   nothing else is (an item, or a title drawn);
+      // - else not drawn: the band's tooltip, a click on it, and Find show it;
+      // cut with "…" to the group's width, with a halo; the group revealed
+      // (a click on its band, or Find's), its whole title on a plate.
       const groups = [...this.boxes.query(v.x0, v.y0, v.x1, v.y1, new Set())].filter((it) => it.kind === "group" && it.title).sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
       ctx.lineJoin = "round";
+      const taken: { x0: number; y0: number; x1: number; y1: number }[] = [];
+      const holds = (a: Item, g: Item) => a.kind === "group" && a.x <= g.x && a.y <= g.y && a.x + a.w >= g.x + g.w && a.y + a.h >= g.y + g.h;
+      this.titleRects.clear();
       for (const g of groups) {
-        const room = g.w * c.z - 12, band = ((g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE) - g.y) * c.z;
-        const px = Math.max(10, Math.min([16, 14][g.depth ?? 0] ?? 13, band - 6));
+        const whole = g.id === this.revealed || g.id === this.foundId, full = plainTitle(g.title!);
+        const band = ((g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE) - g.y) * c.z;
+        let px = Math.min([16, 14][g.depth ?? 0] ?? 13, band - 6), top = g.y;
+        if (px < 10) px = 10;
         ctx.font = `600 ${px / c.z}px system-ui, sans-serif`;
-        const title = fitText(ctx, plainTitle(g.title!), room / c.z);
+        const title = whole ? full : fitText(ctx, full, (g.w * c.z - 12) / c.z);
         if (!title) continue;
+        const tw = ctx.measureText(title).width + 12 / c.z, th = (px + 6) / c.z;
+        if (band - 6 < 10 && !whole) {
+          // (above the group, where nothing is)
+          top = g.y - th;
+          const r = { x0: g.x, y0: top, x1: g.x + tw, y1: g.y };
+          const busy = [...this.boxes.query(r.x0, r.y0, r.x1, r.y1, new Set())].some((it) => it !== g && !holds(it, g) && it.kind !== "ink") || taken.some((t) => t.x0 < r.x1 && r.x0 < t.x1 && t.y0 < r.y1 && r.y0 < t.y1);
+          if (busy) continue;
+        }
+        const r = { x0: g.x, y0: top, x1: g.x + tw, y1: top + th };
+        taken.push(r);
+        this.titleRects.set(g.id, r);
+        if (whole) { ctx.fillStyle = "rgba(250,250,247,.96)"; ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); }
         ctx.lineWidth = 4 / c.z;
         ctx.strokeStyle = "rgba(250,250,247,.9)";
-        ctx.strokeText(title, g.x + 6 / c.z, g.y + (px + 3) / c.z);
+        ctx.strokeText(title, g.x + 6 / c.z, top + (px + 3) / c.z);
         ctx.fillStyle = "#1d241a";
-        ctx.fillText(title, g.x + 6 / c.z, g.y + (px + 3) / c.z);
+        ctx.fillText(title, g.x + 6 / c.z, top + (px + 3) / c.z);
       }
     }
     // ink (far out, strokes thinner than half a pixel are skipped, and when
@@ -1069,11 +1096,30 @@ export class Board {
     this.request();
   }
 
-  /** Outline the item Find shows (or none). */
+  /** Outline the item Find shows (or none); a group's, its whole title shown. */
   setFound(id: string | null) {
     if (this.foundId) this.cache.get(this.foundId)?.classList.remove("found");
     this.foundId = id;
     if (id) this.cache.get(id)?.classList.add("found");
+    this.request();
+  }
+  /** Show a group's whole title, over its members (or none's): its title cut, or not drawn, UI-0CC-2. */
+  reveal(id: string | null) {
+    if (this.revealed) this.cache.get(this.revealed)?.classList.remove("reveal");
+    this.revealed = id;
+    if (id) this.cache.get(id)?.classList.add("reveal");
+    this.request();
+  }
+  get revealedId() { return this.revealed; }
+  /** The group whose title is at a point on the page: its band, or where its title is drawn (the innermost). */
+  titleAt(cx: number, cy: number): { id: string; title: string } | null {
+    const w = this.toWorld(cx, cy);
+    const gs = [...this.boxes.query(w.x - 1, w.y - 200, w.x + 1, w.y + 1, new Set())].filter((g) => g.kind === "group" && g.title).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+    for (const g of gs) {
+      const t = this.titleRects.get(g.id), band = g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE;
+      if ((w.x >= g.x && w.x <= g.x + g.w && w.y >= g.y && w.y < band) || (t && w.x >= t.x0 && w.x <= t.x1 && w.y >= t.y0 && w.y <= t.y1)) return { id: g.id, title: plainTitle(g.title!) };
+    }
+    return null;
   }
   /** An item's element, if it is mounted. */
   element(id: string): HTMLElement | null {
@@ -1287,6 +1333,20 @@ export class Board {
         if (t === "pointerup" && ids.length) this.onErase?.(ids);
         this.request();
       }
+    });
+    // a group's title: its whole on a hover over its band (a tooltip), and
+    // a click there, for the host (UI-0CC-2)
+    this.el.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "touch" || down.size) return;
+      const t = this.titleAt(e.clientX, e.clientY)?.title ?? null;
+      if ((this.el.getAttribute("title") ?? null) !== t) { if (t) this.el.title = t; else this.el.removeAttribute("title"); }
+    });
+    // (a click, not the end of a drag)
+    let pressed: { x: number; y: number } | null = null;
+    this.el.addEventListener("pointerdown", (e) => { pressed = { x: e.clientX, y: e.clientY }; }, true);
+    this.el.addEventListener("click", (e) => {
+      if (e.detail > 1 || (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 6)) return;
+      this.onTitleClick?.(this.titleAt(e.clientX, e.clientY)?.id ?? null);
     });
     // (a double tap: touch screens' double-click, which not every browser
     // makes into a dblclick; one it does make is then ignored)
