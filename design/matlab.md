@@ -311,8 +311,11 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     the title's size (Sagebrush's choice), and the axes gives up that
     line's height (the interactive 3-D view shows it the same way);
     `title(titletext, subtitletext)` sets both. A new plot with hold off
-    resets the title and labels to their defaults, as NextPlot 'replace'
-    resets the axes;
+    resets the title, labels and grid to their defaults, as NextPlot
+    'replace' resets the axes, and so does `cla reset`; plain `cla` deletes
+    only the plotted objects (those with visible handles), as documented.
+    `title(titletext, subtitletext, Name, Value)` gives both lines the
+    properties, as the documented example's Color;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,

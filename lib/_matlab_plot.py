@@ -380,6 +380,8 @@ class Axes(GObj):
             self.props["YDir"] = _m.Char("normal")
             self.props["DataAspectRatioMode"] = _m.Char("auto")
             self.props["View"] = np.array([[0.0], [90.0]])
+            for k in ("XGrid", "YGrid", "ZGrid"):
+                self.props[k] = _m.Char("off")
         self.touch()
 
     def data_range(self, axis):
@@ -1057,11 +1059,23 @@ def clf_(nargout, args):
 
 @_fn("cla")
 def cla_(nargout, args):
-    ax = args[0] if args and isinstance(args[0], Axes) else gca()
-    keep = ax.props["NextPlot"]
-    ax.props["NextPlot"] = _m.Char("replace")
-    ax.newplot()
-    ax.props["NextPlot"] = keep
+    """cla: the plotted objects (visible handles) deleted, the color order
+    started again; the title, labels and axes' properties kept.  cla reset:
+    the axes' properties too, to their defaults (as a new plot's)"""
+    args = list(args)
+    ax = args.pop(0) if args and isinstance(args[0], Axes) else gca()
+    if args and not (len(args) == 1 and _m._istext(args[0]) and _m._text(args[0]).lower() == "reset"):
+        raise _m._err("cla: the only option is 'reset'.")
+    if args:
+        ax.props["NextPlot"] = _m.Char("replace")
+        ax.newplot()
+    else:
+        for c in list(ax.children):
+            c.delete()
+        ax.children = []
+        ax.color_index = 0
+        ax.legend = None
+    ax.figure().dirty = True
 
 
 @_fn("close")
@@ -2055,7 +2069,9 @@ def _label(prop):
         target.props["String"] = _m.cp(pos[0]) if pos else _m.Char("")
         _apply(target, props)
         if sub is not None:
+            # (title(titletext, subtitletext, Name, Value): the properties are both lines')
             ax.subtitle.props["String"] = _m.cp(sub)
+            _apply(ax.subtitle, props)
         ax.touch()
         return [target, ax.subtitle] if prop == "Title" and nargout >= 2 else target
     return g
@@ -3804,6 +3820,7 @@ def figure_scene(fig):
              "labels": [_text_value(l.props["String"]) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
              "title": t or None, "subtitle": st or None,
              "title_weight": "bold" if _m._text(ax.title.props["FontWeight"]).lower() == "bold" else "normal",
+             "subtitle_weight": "bold" if _m._text(ax.subtitle.props["FontWeight"]).lower() == "bold" else "normal",
              # (MATLAB's azimuth is from the negative y axis, the viewer's from the x axis)
              "azimuth": v[0] - 90.0, "elevation": max(-89.0, min(89.0, v[1])),
              "projection": "orthographic", "background": _hex(bg) if bg else "#ffffff", "ink": _INK,
