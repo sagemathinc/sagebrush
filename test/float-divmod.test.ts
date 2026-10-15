@@ -16,3 +16,10 @@ test("float //, % and divmod, and math's fmod, remainder, isclose, fsum and modf
   const w = want.split("\n"), g = got.split("\n");
   for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], "line " + (i + 1));
 });
+
+test("keyword arguments from **mappings as CPython merges them: duplicates, string keys, any mapping (CORR-2ED-2)", () => {
+  const cases = __dirname + "/../../test/kwargs_merge_cases.py";
+  const want = execFileSync("python3", [cases], { encoding: "utf8" });
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", cases], { encoding: "utf8" });
+  assert.equal(got, want);
+});

@@ -403,6 +403,7 @@ method(fnType, "__call__", (f: any, ...a: any[]) => f(...a));
 const bfType = builtinType("builtin_function_or_method", [object], () => raise(T.TypeError, "cannot create 'builtin_function_or_method' instances"));
 getset(bfType, "__name__", (f) => f.__name__ ?? f.name);
 getset(bfType, "__qualname__", (f) => f.__qualname__ ?? f.name);
+getset(bfType, "__module__", (f) => f.__module__ ?? null); // (a module's functions: its name, as CPython's)
 method(bfType, "__call__", (f: any, ...a: any[]) => f(...a));
 
 const methodType = builtinType("method", [object], (f: any, self: any) => bindMethod(f, self));

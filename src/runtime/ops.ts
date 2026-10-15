@@ -7,6 +7,7 @@ import {
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
 } from "./object";
 import { glibcPow } from "./libm";
+import { INTR } from "./interrupt";
 
 const isInt = Number.isInteger;
 const isSafe = Number.isSafeInteger;
@@ -1234,13 +1235,29 @@ export function stopIteration(value: any): any {
   return T.StopIteration(...(value === undefined || value === null ? [] : [value]));
 }
 
+// (Stop is polled every 1024 items: a builtin consuming a long iterable,
+// math.fsum(range(10**12)) say, can be interrupted)
 export function forEach(x: any, f: (v: any) => void) {
   if (Array.isArray(x)) {
-    for (let i = 0; i < x.length; i++) f(x[i]);
+    for (let i = 0; i < x.length; i++) {
+      if ((i & 1023) === 1023) pollInterrupt();
+      f(x[i]);
+    }
     return;
   }
   const it = iter(x);
-  for (let v = it.$next(); v !== DONE; v = it.$next()) f(v);
+  let n = 0;
+  for (let v = it.$next(); v !== DONE; v = it.$next()) {
+    if ((++n & 1023) === 0) pollInterrupt();
+    f(v);
+  }
+}
+
+function pollInterrupt() {
+  if (INTR[0]) {
+    INTR[0] = 0;
+    raise(T.KeyboardInterrupt);
+  }
 }
 
 export function toArray(x: any): any[] {
