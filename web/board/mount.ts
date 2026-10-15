@@ -265,6 +265,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let docPixels = new PixelBudget();
   // (whether the document was written in this browser: its remote pictures shown at once)
   let writtenHere = false;
+  // (why the last save of what was written failed; null once one is kept)
+  let unkept: unknown = null;
   function newOutputs(fresh: boolean) {
     // (first: what is being written was the document's before, CORR-A48-4)
     editor.drop();
@@ -711,7 +713,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     // (the document as shown: its pictures' bytes are kept apart, by the
     // host's images; not kept, said, HARD-7F9-1)
-    try { host.store?.save(doc!); } catch (e: any) { say(`**Not kept in this browser:** ${String(e?.message ?? e)}. Download the board (File) to keep it.`); }
+    try { host.store?.save(doc!); unkept = null; } catch (e: any) { unkept = e; say(`**Not kept in this browser:** ${String(e?.message ?? e)}. Download the board (File) to keep it.`); }
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
@@ -1135,7 +1137,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (a board of its own, where the host keeps several: what is being written kept first)
   $("duplicate").hidden = !host.duplicate;
   // (one that can't be kept: not gone to, this board staying, and why said)
-  const elsewhereNot = (what: string, f: () => void) => { try { f(); } catch (e: any) { say(`**${what}:** ${String(e?.message ?? e)}.`); } };
+  // (nor while what was written here isn't kept: kept now, or this board
+  // stays, HARD-933-1)
+  const elsewhereNot = (what: string, f: () => void) => {
+    if (unkept && doc && host.store) {
+      try { host.store.save(doc); unkept = null; } catch (e: any) { return say(`**${what}:** this board isn't kept in this browser (${String(e?.message ?? e)}), so it stays open. Download it (File) to keep it.`); }
+    }
+    try { f(); } catch (e: any) { say(`**${what}:** ${String(e?.message ?? e)}.`); }
+  };
   $("duplicate").onclick = async () => {
     await editor.keepWriting();
     if (doc) elsewhereNot("No copy made", () => host.duplicate!(doc!));
