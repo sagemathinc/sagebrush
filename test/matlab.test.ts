@@ -752,3 +752,22 @@ test("ellipke, ellipj and legendre keep their documented domains", () => {
     "single", "single",
   ]);
 });
+
+test("a newline in a struct's text field or a string array's element is displayed as ↵, as MATLAB's published displays show it", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "err = struct('message', sprintf('Error using average>check_inputs (line 11)\\nInput must be a vector.'), 'identifier', 'AVG:NotAVector')",
+    "s = struct('n', \"x\" + newline)",
+    "t = [\"This is line one.\" + newline; \"Here is line two.\" + newline]",
+    // (a missing string in a struct: <missing>, as in a string array)
+    "m = [\"a\", \"b\"]; m(4) = \"x\"; v = struct('a', m(3))",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.split("\n").filter((s: string) => s.trim() !== "" && !/=|with fields|string array/.test(s)), [
+    "       message: 'Error using average>check_inputs (line 11)↵Input must be a vector.'",
+    "    identifier: 'AVG:NotAVector'",
+    "    n: \"x↵\"",
+    "    \"This is line one.↵\"",
+    "    \"Here is line two.↵\"",
+    "    a: <missing>",
+  ]);
+});
