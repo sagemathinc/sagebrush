@@ -258,3 +258,110 @@ def outside(self): return super().v
 t("outside attr", lambda: outside(1))
 def outside0(): return super().v
 t("outside0 attr", outside0)
+
+
+# super() in functions with no positional parameter still gives the class its
+# cell (astra's delta probe on 45c7eae)
+run('no_positional_cell', '''
+seen=[]
+class M(type):
+    def __new__(m,n,b,d):
+        seen.append('__classcell__' in d)
+        return type.__new__(m,n,b,d)
+class C(metaclass=M):
+    def method(): return super()
+result=seen
+''')
+run('dropped_static_cell', '''
+class M(type):
+    def __new__(m,n,b,d):
+        d.pop('__classcell__',None)
+        return type.__new__(m,n,b,d)
+class C(metaclass=M):
+    @staticmethod
+    def method(): return super()
+result='created'
+''')
+run('lambda_cell', '''
+seen=[]
+class M(type):
+    def __new__(m,n,b,d):
+        seen.append('__classcell__' in d)
+        return type.__new__(m,n,b,d)
+class C(metaclass=M):
+    method=lambda:super()
+result=seen
+''')
+run('nested_no_positional_cell', '''
+seen=[]
+class M(type):
+    def __new__(m,n,b,d):
+        seen.append('__classcell__' in d)
+        return type.__new__(m,n,b,d)
+class C(metaclass=M):
+    def method(self):
+        def inner(): return super()
+        return inner()
+result=seen
+''')
+run('nonlocal_delete', '''
+class C:
+    def clear(self):
+        nonlocal __class__
+        del __class__
+    def owner(self): return __class__
+c=C();c.clear();result=c.owner()
+''')
+run('nonlocal_intervening_function', '''
+class C:
+    def method(self):
+        __class__=int
+        def inner():
+            nonlocal __class__
+            __class__=str
+        inner()
+        return __class__
+    def owner(self):return __class__
+result=C().method() is str,C().owner() is C
+''')
+run('nested_defaults', '''
+class Outer:
+    def method(self):
+        class Inner:
+            def owner(self, default=__class__):return default,__class__
+        owners=Inner().owner()
+        return owners[0] is Outer,owners[1] is Inner
+result=Outer().method()
+''')
+run('read_only_descriptor_delete', '''
+del (1).real
+''')
+run('cell_delete_twice', '''
+from types import CellType
+c=CellType(3)
+del c.cell_contents
+del c.cell_contents
+result='deleted twice'
+''')
+run('wrong_descriptor_receiver', '''
+from types import CellType
+CellType.cell_contents.__delete__(3)
+''')
+
+
+# each function without a positional parameter that calls super(): the class
+# has its cell (seen by a metaclass, and missed when dropped), and the call
+# is still "super(): no arguments"
+FORMS = {
+    "method": "    def f(): return super()\n    call = lambda: C.f()\n",
+    "staticmethod": "    @staticmethod\n    def f(): return super()\n    call = staticmethod(lambda: C.f())\n",
+    "lambda": "    f = lambda: super()\n    call = lambda: C.f()\n",
+    "nested def": "    def g(self):\n        def h(): return super()\n        return h()\n    call = lambda: C().g()\n",
+}
+for form, body in FORMS.items():
+    for drop in (False, True):
+        src = ("seen = []\nclass M(type):\n    def __new__(m, n, b, d):\n        seen.append('__classcell__' in d)\n"
+               + ("        d.pop('__classcell__', None)\n" if drop else "")
+               + "        return type.__new__(m, n, b, d)\nclass C(metaclass=M):\n" + body
+               + "try:\n    C.call()\nexcept RuntimeError as e:\n    result = (seen, str(e))\n")
+        run("%s, cell %s" % (form, "dropped" if drop else "kept"), src)

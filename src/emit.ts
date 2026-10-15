@@ -428,9 +428,12 @@ export class Emitter {
   // variable of a function between.  As an attribute's object (attrForm),
   // when there is a __class__, CPython loads the two as variables first.
   zeroArgSuper(attrForm: boolean): string {
-    const fp = this.fn.firstParam;
-    if (fp === null || this.fn.scope.kind === "class" || this.fn.scope.kind === "module") return "superNoArgs()";
+    if (this.fn.scope.kind === "class" || this.fn.scope.kind === "module") return "superNoArgs()";
+    // (naming super gives the class its cell even where the call then fails)
     const r = resolve(this.fn.scope, "__class__");
+    if (r.kind === "classcell") this.cellOf(r.scope);
+    const fp = this.fn.firstParam;
+    if (fp === null) return "superNoArgs()";
     if (attrForm && (r.kind === "classcell" || r.kind === "free")) {
       const obj = fp === ".0" ? "$it0" : this.load(fp);
       return `superAttr(${this.loadRes(r, "__class__")}, ${obj})`;
