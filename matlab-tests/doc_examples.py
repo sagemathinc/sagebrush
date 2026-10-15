@@ -27,9 +27,13 @@ OCTAVE_SKIP = {
     "disp": "prints: MATLAB's and Octave's displays differ",
     "fprintf": "prints",
     "nthroot": "MATLAB's nthroot(-27, 3) is exactly -3, Octave's is not (design/matlab.md)",
+    "histcounts": "not in Octave 11",
+    "join": "string arrays: Octave has no string class",
+    "string": "string arrays: Octave has no string class",
+    "strlength": "not in Octave 11",
 }
 # (compared to 12 significant digits: Octave's and Sagebrush's last bits differ)
-OCTAVE_ROUND = {"inv", "polyfit"}
+OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma"}
 
 
 def codes():
@@ -81,8 +85,8 @@ def value_program(cs):
     for name, code in cs:
         if name in OCTAVE_SKIP:
             continue
-        m = re.match(r"^\[(.*)\]\s*=\s*(.*)$", code)
-        n = re.match(r"^(\w+)\s*=\s*(.*)$", code)
+        m = re.match(r"^\[(.*)\]\s*=(?!=)\s*(.*)$", code)
+        n = re.match(r"^(\w+)\s*=(?!=)\s*(.*)$", code)
         sh = (lambda v: "show(round(%s * 1e12) / 1e12);" % v) if name in OCTAVE_ROUND else (lambda v: "show(%s);" % v)
         if m:
             names = [v.strip() for v in m.group(1).split(",")]
