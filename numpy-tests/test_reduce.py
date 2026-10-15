@@ -55,3 +55,19 @@ print(np.cumsum(zc.astype(np.complex64)), np.cumprod(zc.astype(np.complex64)))
 zm = np.array([[1 + 1j, 2, 3j], [3, 4j, -1]])
 print(np.cumsum(zm, axis=0), np.cumsum(zm, axis=1), np.cumsum(zm), np.cumprod(zm, axis=1))
 print(np.cumsum(np.array([1, 2, 3]), dtype=complex), np.cumsum(zm[:, ::2], axis=0))
+
+# the first element is copied, not combined with 0 or 1 (+0.0 + -0.0 is +0.0;
+# (1 + 0j) * (inf + 1j) has a nan)
+inf, nan = float("inf"), float("nan")
+for first in [complex(inf, 1), complex(-inf, 1), complex(1, inf), complex(1, -inf), complex(nan, 2), complex(2, nan),
+              complex(inf, inf), complex(-0.0, -0.0), complex(0.0, -0.0)]:
+    for dt in [np.complex128, np.complex64]:
+        zf = np.array([first, 2 + 1j], dtype=dt)
+        print(np.cumprod(zf), np.cumsum(zf), np.cumprod(zf[:1]), np.cumsum(zf[:1]))
+for first in [inf, -inf, nan, -0.0]:
+    rf = np.array([first, 2.0])
+    print(np.cumprod(rf, dtype=complex), np.cumsum(rf, dtype=complex), np.cumprod(rf), np.cumsum(rf),
+          np.cumsum(rf.astype(np.float32)), np.cumsum(rf[:1]))
+zm2 = np.array([[complex(inf, 1), 1j], [complex(nan, 2), 2]])
+print(np.cumprod(zm2, axis=0), np.cumprod(zm2, axis=1), np.cumsum(zm2, axis=0), np.cumprod(zm2.T, axis=1))
+print(np.cumsum(np.array([-0.0, -0.0])), np.cumsum(np.array([[-0.0], [-0.0]]), axis=0), np.cumprod(np.array([], dtype=complex)), np.cumsum(np.zeros((2, 0)), axis=1))
