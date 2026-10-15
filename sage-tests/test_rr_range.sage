@@ -66,5 +66,8 @@ t('directed tiny exponents', lambda: [(p, rnd, [(RealField(p, rnd=rnd)(2)**(Real
 t('python complex', lambda: [T0 == complex(0), complex(0) == T0, T0 != complex(0), B0 == complex(float('inf'))])
 # review of d3a0a83 (HARD-D3A-1/2): ranges decided before any big power
 t('range before powering', lambda: [RR(3)^(2^20000), RR(3)^(-(2^20000)), RR(-3)^(2^20000+1), RealField(100, rnd='RNDU')(3)^(-(2^20000)), RealField(100, rnd='RNDD')(3)^(2^20000), RR('1e' + '9'*5000), RR('-1.5e' + '9'*5000), RR('1e-' + '9'*5000), RR('0e' + '9'*5000), RealField(100, rnd='RNDU')('1e-' + '9'*5000), RR(2)^(2^62 - 2), RR(3)^(2^61)])
+# review of 28886cfb (HARD-288-1): bases near 1, where bit lengths alone
+# do not bound log2|x| away from 0
+t('near-1 bases, huge exponents', lambda: [RR(1.5)^(2^20000), RR(0.75)^(2^20000), RR(-1.5)^(2^20000+1), (1 + RR(2)^-52)^(2^20000), (1 - RR(2)^-53)^(2^20000), RR(1.5)^(-(2^20000)), RealField(100, rnd='RNDU')(0.75)^(2^20000), RealField(100, rnd='RNDD')(1.5)^(2^20000), RR(1)^(2^20000), RR(-1)^(2^20000+1), (1 + RR(2)^-52)^(2^60)])
 t('sum and product', lambda: [sum([RR(1e308)] * 4), prod([RR(1e100)] * 5), sum([S] * 3)])
 t('numpy-free floats', lambda: [float(RR(1e308) * 10) == float('inf'), float(RR(1e-320)) == 1e-320])

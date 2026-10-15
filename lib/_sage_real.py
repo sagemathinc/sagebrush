@@ -210,6 +210,32 @@ _LOG2_10_LO = _F(3321928094887362, 10 ** 15)
 _LOG2_10_HI = _F(3321928094887363, 10 ** 15)
 
 
+# 1/ln(2) lies strictly between these (1.44269504088896340...)
+_INV_LN2_LO = _F(14426950408889634, 10 ** 16)
+_INV_LN2_HI = _F(14426950408889635, 10 ** 16)
+
+
+def _log2_bounds(m, e):
+    """Rational lo <= log2(m 2^e) <= hi (m > 0), from m's bits alone.  With
+    m 2^e = 2^k y, y in [1, 2) and d = y - 1: d/(1 + d) <= ln y <= d; the
+    same around y/2 in [1/2, 1) (d' = y/2 - 1 < 0) is tight when y is near
+    2, so the two brackets intersect to one that excludes 0 for every m 2^e
+    other than a power of 2 (1.5 or 0.75: where bit lengths alone give
+    [0, 1] or [-1, 0])."""
+    b = m.bit_length()
+    k = e + b - 1
+    y = _F(m, 1 << (b - 1))
+    if y == 1:
+        return _F(k), _F(k)
+    d = y - 1
+    lo1, hi1 = k + d / y * _INV_LN2_LO, k + d * _INV_LN2_HI
+    d2 = y / 2 - 1
+    # (ln of y/2 is negative: the smaller magnitude d2/(1 + d2) ... d2,
+    # each scaled by the bound on 1/ln 2 that keeps it a bound)
+    lo2, hi2 = k + 1 + d2 / (1 + d2) * _INV_LN2_HI, k + 1 + d2 * _INV_LN2_LO
+    return max(lo1, lo2), min(hi1, hi2)
+
+
 def _beyond(lo, hi, neg):
     """(m, e) past the exponent range when lo <= log2|x| <= hi puts x past
     it for certain (|x| >= 2^EMAX: overflow; |x| < 2^(EMIN - 2): below half
@@ -1795,8 +1821,8 @@ class RealNumberMP:
             # past the exponent range for certain: decided from bit lengths
             # before any powering (RR(3)^(2^20000) squared a 20000-bit
             # exponent's worth of big integers to reach infinity)
-            L = self._e + abs(self._m).bit_length()
-            t = _beyond(min(n * (L - 1), n * L), max(n * (L - 1), n * L), self._m < 0 and n % 2 == 1)
+            lo, hi = _log2_bounds(abs(self._m), self._e)
+            t = _beyond(min(n * lo, n * hi), max(n * lo, n * hi), self._m < 0 and n % 2 == 1)
             if t is not None:
                 return RealNumberMP(R, *t)
             # correctly rounded, by bracketed binary powering (any n)
