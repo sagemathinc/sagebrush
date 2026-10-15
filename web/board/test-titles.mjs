@@ -106,6 +106,29 @@ try {
       if (w === 2000 && z <= 0.2) check(t.some((d) => d.y < g.y), `UI-0CC-1: width ${w}, zoom ${z}: drawn above the group, where nothing is: ` + JSON.stringify(t.map((d) => [d.t, Math.round(d.y), g.y])));
     }
   }
+  // a title drawn above its group: hovered and clicked where it is drawn (astra, on ec472da)
+  {
+    const LOW = { title: "Low", nodes: [{ id: "g", kind: "group", title: "Group title above its child", children: [{ id: "a", title: "Child", w: 2000, h: 300 }] }] };
+    await ev(`window.sagebrush.board.load(${JSON.stringify(LOW)}).then(() => 1)`);
+    await until("!!window.board.item('a')");
+    await ev("window.sagebrush.board.editing(false), 1");
+    await zoomTo(0.1);
+    const g = await box("g"), t = (await drawn()).find((d) => d.t.startsWith("Group") && d.y < g.y);
+    // (the middle of its first letters, on the page)
+    const p = t && (await ev(`(() => { const r = window.board.el.getBoundingClientRect(), c = window.board.camera; return { x: r.left + (${t.x} - c.x) * c.z + 8, y: r.top + (${t.y} - c.y) * c.z - 4 }; })()`));
+    if (p) {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
+      await sleep(100);
+      check((await ev("window.board.el.title")) === "Group title above its child", "a title drawn above its group: hovered there, its tooltip: " + (await ev("window.board.el.title")));
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", clickCount: 1 });
+      await sleep(250);
+      check((await ev("window.board.revealedId")) === "g", "...and a click there shows it whole: " + (await ev("window.board.revealedId")));
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", clickCount: 1 });
+      await sleep(250);
+    } else check(false, "(the title drawn above its group at zoom 0.1)");
+  }
   // nested, far out: the inner group's title above it only where the outer's is not
   {
     const NEST = { title: "Nest", nodes: [{ id: "o", kind: "group", title: "Outer group", children: [{ id: "i", kind: "group", title: "Inner group", children: [{ id: "n", title: "Note", w: 900, h: 200 }] }] }] };

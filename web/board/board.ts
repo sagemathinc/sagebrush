@@ -864,6 +864,8 @@ export class Board {
   }
 
   private draw(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
+    // (near, no title is drawn on the canvas: none to hover there)
+    if (!far) this.titleRects.clear();
     const ctx = this.ctx, c = this.camera, d = this.dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1161,10 +1163,18 @@ export class Board {
   /** The group whose title is at a point on the page: its band, or where its title is drawn (the innermost). */
   titleAt(cx: number, cy: number): { id: string; title: string } | null {
     const w = this.toWorld(cx, cy);
-    const gs = [...this.boxes.query(w.x - 1, w.y - 200, w.x + 1, w.y + 1, new Set())].filter((g) => g.kind === "group" && g.title).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+    // (a title drawn, far out: where it was drawn, above its group too, the
+    // innermost (drawn last); astra, on ec472da: a title above its group is
+    // outside the group's box, so the box query below can't find it)
+    let drawn: string | null = null;
+    for (const [id, t] of this.titleRects) if (w.x >= t.x0 && w.x <= t.x1 && w.y >= t.y0 && w.y <= t.y1) drawn = id;
+    const dg = drawn ? this.byId.get(drawn) : undefined;
+    if (dg?.title) return { id: dg.id, title: plainTitle(dg.title) };
+    // (else a group's band, the innermost)
+    const gs = [...this.boxes.query(w.x - 1, w.y - 1, w.x + 1, w.y + 1, new Set())].filter((g) => g.kind === "group" && g.title).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
     for (const g of gs) {
-      const t = this.titleRects.get(g.id), band = g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE;
-      if ((w.x >= g.x && w.x <= g.x + g.w && w.y >= g.y && w.y < band) || (t && w.x >= t.x0 && w.x <= t.x1 && w.y >= t.y0 && w.y <= t.y1)) return { id: g.id, title: plainTitle(g.title!) };
+      const band = g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE;
+      if (w.x >= g.x && w.x <= g.x + g.w && w.y >= g.y && w.y < band) return { id: g.id, title: plainTitle(g.title!) };
     }
     return null;
   }
