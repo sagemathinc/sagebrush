@@ -64,7 +64,7 @@ export interface DocNote {
   ref?: string;
   /** a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) */
   color?: string;
-  /** its outline (a flowchart's); its text is then centered */
+  /** its outline (a flowchart's); its text is then centered. `diamond` (a decision) is pointed at its left and right and flat at its top and bottom, so that its text fits a note's width, not a true rhombus (which would need twice its text's width and height); `hexagon` is the same, less pointed */
   shape?: NoteShape;
   /** `true`: as wide as its text needs, up to `w` */
   fit?: boolean;

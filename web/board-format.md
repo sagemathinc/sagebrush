@@ -196,7 +196,7 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `detail` | string | Markdown shown only when zoomed in |
 | `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)` |
 | `color` | string | a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) |
-| `shape` | `"rect"` \| `"round"` \| `"stadium"` \| `"circle"` \| `"diamond"` \| `"hexagon"` \| `"cylinder"` \| `"subroutine"` \| `"lean-right"` \| `"lean-left"` \| `"trapezoid"` \| `"inv-trapezoid"` \| `"flag"` | its outline (a flowchart's); its text is then centered |
+| `shape` | `"rect"` \| `"round"` \| `"stadium"` \| `"circle"` \| `"diamond"` \| `"hexagon"` \| `"cylinder"` \| `"subroutine"` \| `"lean-right"` \| `"lean-left"` \| `"trapezoid"` \| `"inv-trapezoid"` \| `"flag"` | its outline (a flowchart's); its text is then centered. `diamond` (a decision) is pointed at its left and right and flat at its top and bottom, so that its text fits a note's width, not a true rhombus (which would need twice its text's width and height); `hexagon` is the same, less pointed |
 | `fit` | boolean | `true`: as wide as its text needs, up to `w` |
 | `x` | number | its position, kept once a person moves it: leave it out, and the board places it |
 | `y` | number | as `x` |
