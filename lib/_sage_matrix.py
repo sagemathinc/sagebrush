@@ -1868,7 +1868,9 @@ def _bounded_list(obj, limit=None, what="entries"):
     ValueError."""
     if limit is None:
         limit = _MAX_ENTRIES
-    if isinstance(obj, (list, tuple)):
+    # (only an exact list or tuple is read directly: a subclass can
+    # override __iter__, so it goes through the bounded iterator)
+    if type(obj) is list or type(obj) is tuple:
         if len(obj) > limit:
             raise ValueError("more than %d %s" % (limit, what))
         return list(obj)
@@ -1984,7 +1986,8 @@ def vector(*args):
 def _ff_base_of(entries):
     """The finite field of the entries, if they are finite-field elements."""
     import _sage_ff
-    for x in entries:
+    # (read boundedly: a list subclass may iterate without end)
+    for x in _bounded_list(entries):
         if isinstance(x, (_sage_ff.IntegerMod, _sage_ff.FiniteFieldElement)):
             return x.parent()
         if isinstance(x, (list, tuple)):
@@ -2068,7 +2071,8 @@ def _padic_base_of(rows):
     TypeError (as Sage); other entries than integers and rationals with
     p-adic ones are refused."""
     import _sage_padic
-    flat = [x for r in rows for x in (r if isinstance(r, (list, tuple)) else [r])]
+    # (read boundedly: a list subclass may iterate without end)
+    flat = [x for r in _bounded_list(rows, what="rows") for x in (_bounded_list(r) if isinstance(r, (list, tuple)) else [r])]
     parents = [x.parent() for x in flat if isinstance(x, _sage_padic.pAdicCappedRelativeElement)]
     if not parents:
         return None

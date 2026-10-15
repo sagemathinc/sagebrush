@@ -311,6 +311,8 @@ class FFMatrix:
         rows = _read_rows(rows)
         ncols = ncols if ncols is not None else (len(rows[0]) if rows else 0)
         _shape(len(rows), ncols)
+        if any(len(r) != ncols for r in rows):
+            raise ValueError("the rows of a matrix must all have %d entries" % ncols)
         self._base = base
         self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols
