@@ -530,16 +530,18 @@ class Matrix:
     def __init__(self, base, rows, ncols=None):
         # read boundedly and check the shape before converting anything
         rows = _read_rows(rows)
-        _shape(len(rows), len(rows[0]) if rows else (ncols or 0))
-        self._rows = [[_norm(x) for x in r] for r in rows]
+        width = ncols if ncols is not None else (len(rows[0]) if rows else 0)
+        _shape(len(rows), width)
         # rows of one length (a ragged [[1, 2], [3]] lost the 2 on
-        # transposing: the systematic review's API-F6)
-        if any(len(r) != len(self._rows[0]) for r in self._rows):
+        # transposing: the systematic review's API-F6), checked before
+        # any entry is converted
+        if any(len(r) != width for r in rows):
             raise ValueError("the rows of a matrix must have the same length")
+        self._rows = [[_norm(x) for x in r] for r in rows]
         self._immutable = False
         # the number of columns, kept when there are no rows (a 0 x 3
         # matrix was 0 x 0: the systematic review's LIN-F4)
-        self._nc = len(self._rows[0]) if self._rows else (ncols or 0)
+        self._nc = width
         if base is _sa().ZZ and any(not isinstance(x, int) for r in self._rows for x in r):
             raise TypeError("matrix entries are not all integers")
         self._base = base
@@ -1903,23 +1905,26 @@ def _kernel(a, base):
 _MAX_ENTRIES = 1 << 22
 
 
-def _bounded_list(obj, limit=None, what="entries"):
+def _bounded_list(obj, limit=None, what="entries", total=None):
     """list(obj), reading at most limit + 1 items: more than limit is a
-    ValueError."""
+    ValueError (reported as more than total, when limit is what is left
+    of a budget of total)."""
     if limit is None:
         limit = _MAX_ENTRIES
+    if total is None:
+        total = limit
     # (only an exact list or tuple is read directly: a subclass can
     # override __iter__, so it goes through the bounded iterator)
     if type(obj) is list or type(obj) is tuple:
         if len(obj) > limit:
-            raise ValueError("more than %d %s" % (limit, what))
+            raise ValueError("more than %d %s" % (total, what))
         return list(obj)
     if isinstance(obj, (str, bytes)):
         raise TypeError("%r is not a list of %s" % (obj, what))
     import itertools
     out = list(itertools.islice(iter(obj), limit + 1))
     if len(out) > limit:
-        raise ValueError("more than %d %s" % (limit, what))
+        raise ValueError("more than %d %s" % (total, what))
     return out
 
 
@@ -1970,7 +1975,7 @@ def _read_rows(rows, limit=None):
     for r in rows:
         if isinstance(r, str):
             raise TypeError("a row of a matrix must be a list, not a string")
-        r = _bounded_list(r, limit - used)
+        r = _bounded_list(r, limit - used, total=limit)
         used += len(r)
         out.append(r)
     return out
@@ -1984,7 +1989,7 @@ def _bounded_rows(obj, limit=None):
     out, used = [], 0
     for r in rows:
         if isinstance(r, (list, tuple)) or (hasattr(r, "__iter__") and not isinstance(r, str)) or type(r).__name__ in ("Vector", "FFVector"):
-            r = _bounded_list(r, limit - used)
+            r = _bounded_list(r, limit - used, total=limit)
         else:
             r = [r]
         used += len(r)
@@ -2231,15 +2236,22 @@ class SeriesModule:
         return v
 
 
-def _ff_base_of(entries):
+def _ff_base_of(entries, _left=None):
     """The finite field of the entries, if they are finite-field elements."""
     import _sage_ff
-    # (read boundedly: a list subclass may iterate without end)
-    for x in _bounded_list(entries):
+    # (read boundedly: a list subclass may iterate without end; the nested
+    # lists share one budget of entries, so [row] * 2^22 with a shared row
+    # of 2^22 entries is refused rather than scanned 2^44 times)
+    if _left is None:
+        xs, _left = _bounded_list(entries, what="rows"), [_MAX_ENTRIES]
+    else:
+        xs = _bounded_list(entries, _left[0], total=_MAX_ENTRIES)
+        _left[0] -= len(xs)
+    for x in xs:
         if isinstance(x, (_sage_ff.IntegerMod, _sage_ff.FiniteFieldElement)):
             return x.parent()
         if isinstance(x, (list, tuple)):
-            b = _ff_base_of(x)
+            b = _ff_base_of(x, _left)
             if b is not None:
                 return b
     return None
@@ -2319,8 +2331,16 @@ def _padic_base_of(rows):
     TypeError (as Sage); other entries than integers and rationals with
     p-adic ones are refused."""
     import _sage_padic
-    # (read boundedly: a list subclass may iterate without end)
-    flat = [x for r in _bounded_list(rows, what="rows") for x in (_bounded_list(r) if isinstance(r, (list, tuple)) else [r])]
+    # (read boundedly: a list subclass may iterate without end; the rows
+    # share one budget of entries, as in _read_rows)
+    flat, left = [], _MAX_ENTRIES
+    for r in _bounded_list(rows, what="rows"):
+        if isinstance(r, (list, tuple)):
+            r = _bounded_list(r, left, total=_MAX_ENTRIES)
+            left -= len(r)
+            flat.extend(r)
+        else:
+            flat.append(r)
     parents = [x.parent() for x in flat if isinstance(x, _sage_padic.pAdicCappedRelativeElement)]
     if not parents:
         return None
