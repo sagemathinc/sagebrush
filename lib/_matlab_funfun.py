@@ -1167,7 +1167,11 @@ def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
     Gauss value.  With tol = max(atol, rtol*|Q|), the computation ends when
     the summed estimates are at most tol; otherwise the subintervals whose
     estimates are at most tol times their share of the interval's length
-    are accepted, and the rest bisected (section 3).  It stops, with a
+    are accepted, and the rest bisected (section 3).  For an array-valued
+    integrand all of this is component by component (each component's
+    estimates against its own tol), as integral's page states its error
+    test, abs(q - Q) <= max(AbsoluteTolerance, RelativeTolerance*abs(q)),
+    for each element; the bound returned is the largest component's.  It stops, with a
     warning, when bisecting would make more than maxint subintervals
     (section 3), when a subinterval's ends in x are within 100*eps of each
     other relatively (section 6), or when a value is Inf or NaN after the
@@ -1201,15 +1205,24 @@ def _gk_core(F, breaks, xmap, atol, rtol, maxint, solver, nocount_warning):
         y = y.reshape((len(subs), 15) + y.shape[1:])
         Qs = np.tensordot(y, _GK_KRONROD, axes=([1], [0])) * (hh if y.ndim == 2 else hh[:, None])
         Gs = np.tensordot(y, _GK_GAUSS, axes=([1], [0])) * (hh if y.ndim == 2 else hh[:, None])
-        Es = np.abs(Qs - Gs) if y.ndim == 2 else np.max(np.abs(Qs - Gs), axis=1)
+        # (an array-valued integrand's error estimates are its components',
+        # each held to its own tolerance, max(atol, rtol*|Q_k|), as the
+        # page's abs(q - Q) <= max(AbsoluteTolerance, RelativeTolerance*abs(q))
+        # says for each element: a large component does not hide a small one's)
+        Es = np.abs(Qs - Gs)
         Q = QOK + np.sum(Qs, axis=0)
-        E = EOK + np.sum(Es)
-        tol = max(atol, rtol * float(np.max(np.abs(Q))))
-        if E <= tol:
+        Ec = EOK + np.sum(Es, axis=0)
+        E = float(np.max(Ec))
+        tol = np.maximum(atol, rtol * np.abs(Q))
+        if np.all(Ec <= tol):
             return Q, E
-        ok = Es <= (2 / (B - A)) * hh * tol
-        QOK = QOK + np.sum(Qs[ok], axis=0)
-        EOK = EOK + np.sum(Es[ok])
+        share = ((2 / (B - A)) * hh).reshape((-1,) + (1,) * (Es.ndim - 1))
+        ok = np.all((Es <= share * tol).reshape((len(subs), -1)), axis=1)
+        if np.any(ok):
+            # (only when there are some: Sagebrush's numpy sums an empty array
+            # along an axis to NaN)
+            QOK = QOK + np.sum(Qs[ok], axis=0)
+            EOK = EOK + np.sum(Es[ok], axis=0)
         subs = [s for s, k in zip(subs, ok) if not k]
         if not subs:
             return Q, E

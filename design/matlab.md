@@ -617,11 +617,16 @@ The rest:
 - quad's own choices: a subinterval with an Inf or NaN value is not
   subdivided (with a warning), the trace's number format, and a single
   result for single limits or values;
+- integral's error test for an array-valued integrand is component by
+  component, each component's error estimate against its own tolerance,
+  as the page's abs(q - Q) <= max(AbsoluteTolerance,
+  RelativeTolerance*abs(q)) reads for each element: a large component does
+  not hide a small one's error (Octave's integral too gets the small one
+  right);
 - integral's and quadgk's likewise: how the initial 10 subintervals are
   made (each break interval cut into equal pieces, the paper's 150
   samples for one interval), the change of variable for (-Inf, Inf)
-  (x = t/(1-t^2)), the parametrization of a complex path, the infinity
-  norm for an array-valued integrand's error, minus the reversed integral
+  (x = t/(1-t^2)), the parametrization of a complex path, minus the reversed integral
   for xmin > xmax, and the warnings' wording past the published start of
   quadgk's interval-limit warning;
 - `normest`'s estimates on the way and its count: it is Higham's power
