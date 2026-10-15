@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -51,11 +51,16 @@ print(l.get_label(), type(l).__name__)
   assert.equal(lines[2], "diag Line2D");
 });
 
-test("show() on the command line writes an SVG file", () => {
-  const out = cli("-c", "import matplotlib.pyplot as plt\nplt.plot([1, 4, 9])\nplt.show()");
-  const m = /Saved (\S+\.svg) \(Plot: line through 3 points/.exec(out);
-  assert.ok(m, out);
-  assert.match(readFileSync(m![1], "utf8"), /<svg /);
+test("show() on the command line writes an SVG file (kept with --figures DIR)", () => {
+  const keep = mkdtempSync(join(tmpdir(), "sb-show-"));
+  try {
+    const out = cli("--figures", keep, "-c", "import matplotlib.pyplot as plt\nplt.plot([1, 4, 9])\nplt.show()");
+    const m = /Saved (\S+\.svg) \(Plot: line through 3 points/.exec(out);
+    assert.ok(m, out);
+    assert.match(readFileSync(m![1], "utf8"), /<svg /);
+  } finally {
+    rmSync(keep, { recursive: true, force: true });
+  }
 });
 
 test("interact runs once with its defaults without a notebook", () => {
