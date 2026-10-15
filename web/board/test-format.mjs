@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, cleanDoc } from "./doc.ts";
+import { canonical, cleanDoc, layout } from "./doc.ts";
 import { boardFromText } from "./mermaid.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -70,6 +70,20 @@ check(st.nodes.map((n) => n.id).join() === "e,i,z" && JSON.stringify(st.nodes[2]
 
 // what the board does not keep is not in its file
 check(!canonical({ nodes: [{ id: "a", title: "A", junk: 1 }], junk: 2 }).includes("junk"), "what a board does not keep is left out of its file");
+
+// a group's size, as a person made it (William's B3): kept when a positive
+// number of units, in its file after its place; its box the larger of it and
+// what its items need
+const sizedG = (w, h) => cleanDoc({ nodes: [{ id: "g", kind: "group", children: [{ id: "n", title: "N" }], x: 0, y: 0, w, h }] }).nodes[0];
+check(sizedG(480, 320).w === 480 && sizedG(480, 320).h === 320, "a group's size is kept: " + JSON.stringify(sizedG(480, 320)));
+check([[-5, 0], ["480", null], [Infinity, NaN], [1e9, 1e9]].every(([w, h]) => !("w" in sizedG(w, h)) && !("h" in sizedG(w, h))), "...not when it is not a positive number of units (at most 100000)");
+check(/"x": 0,\n\s*"y": 0,\n\s*"w": 480,\n\s*"h": 320/.test(canonical({ nodes: [{ id: "g", kind: "group", children: [], x: 0, y: 0, w: 480, h: 320 }] })), "...in its file after its place");
+const gBox = (w, h) => layout({ nodes: [{ id: "g", kind: "group", title: "G", children: [{ id: "n", title: "A note", text: "Some text" }], w, h }] }).items.find((i) => i.id === "g");
+const natural = gBox(undefined, undefined);
+check(gBox(900, 700).w === 900 && gBox(900, 700).h === 700, "a group made larger than its items need is that large: " + JSON.stringify(gBox(900, 700)));
+check(gBox(10, 10).w === natural.w && gBox(10, 10).h === natural.h, "...made smaller, as large as its items need: " + JSON.stringify([gBox(10, 10), natural]));
+const emptyG = layout({ nodes: [{ id: "e", kind: "group", children: [], w: 480, h: 320 }] }).items[0];
+check(emptyG.empty === true && emptyG.w === 480 && emptyG.h === 320, "an empty group is as large as it was made, and says it is empty: " + JSON.stringify(emptyG));
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);

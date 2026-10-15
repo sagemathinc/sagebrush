@@ -9,7 +9,7 @@
 
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
-import { inkNode, STICKER_SIZE, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { inkNode, STICKER_SIZE, GROUP_PAD, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
@@ -126,6 +126,7 @@ export class Editor {
     // (the resize handle's cursor)
     board.el.addEventListener("pointermove", (e) => {
       const at = this.on && !this.panel && e.pointerType === "mouse" && this.atHandle(e);
+      if (this.on && !this.panel && e.pointerType === "mouse" && this.board.gripAt(e.clientX, e.clientY)) { board.el.style.cursor = "move"; return; }
       // (and a slide's card: its edge moves it, its corner resizes it)
       const card = !at && this.on && !this.panel && e.pointerType === "mouse" && !this.drawing.value && !this.erasing.value ? this.cardAt(e) : null;
       board.el.style.cursor = at || card === "corner" ? "nwse-resize" : card === "edge" ? "move" : "";
@@ -139,6 +140,7 @@ export class Editor {
       const on = this.editing.value;
       if (!on) { this.select(null); this.close(); this.connecting.value = false; }
       this.board.el.classList.toggle("editing", on);
+      this.board.request(); // (an empty group says how to fill it only in Edit)
     }), effect(() => {
       this.board.el.classList.toggle("connecting", this.connecting.value);
       if (!this.connecting.value && this.connectFrom) { this.connectFrom = null; this.select(null); }
@@ -255,6 +257,8 @@ export class Editor {
     this.board.select(this.selected);
     // (one note or sticker selected, in Edit: its corner resizes it)
     this.board.handle = this.on && !this.inplace && this.selected.length === 1 && sized(this.board.item(this.selected[0])) ? this.selected[0] : null;
+    // (and its grip, at its top left, which drags it: also while it is being written, William's B2)
+    this.board.grip = this.on && this.selected.length === 1 && this.board.item(this.selected[0]) ? this.selected[0] : null;
     this.board.request();
     if (this.selected.length) this.selectEdge(null);
   }
@@ -271,6 +275,9 @@ export class Editor {
   // holds; a click (not a drag, which pans) selects nothing.
   private backgroundDown(e: PointerEvent): boolean {
     if (!this.on || this.panel || this.connecting.value) return false;
+    // (the grip, outside its item: drags it)
+    const gripped = this.gripped(e);
+    if (gripped) return this.down(gripped, e);
     const card = this.cardAt(e);
     if (card) return this.moveCard(card, e);
     // (the resize handle reaches past its item's corner)
@@ -354,8 +361,16 @@ export class Editor {
     }
   }
 
+  // (the item whose grip is under the pointer, if any)
+  private gripped(e: PointerEvent): Item | null {
+    const id = this.connecting.value ? null : this.board.gripAt(e.clientX, e.clientY, e.pointerType === "touch");
+    return id ? this.board.item(id) ?? null : null;
+  }
   private down(it: Item, e: PointerEvent): boolean {
     if (!this.on || this.panel) return false;
+    // (a press on the selected item's grip, over another item: that one is dragged)
+    const gripped = this.gripped(e);
+    if (gripped && gripped.id !== it.id) return this.down(gripped, e);
     // (in Edit a press on an item moves or selects it: no text selection, and
     // none left from before, which the browser would start dragging instead)
     e.preventDefault();
@@ -489,6 +504,8 @@ export class Editor {
         g.node.y = Math.round((now.y - o.y) * 10) / 10;
         const list = into ? (into.node as DocGroup).children : (this.pg(d).nodes ??= []);
         list.push(g.node);
+        // (dropped on another of the group's items: moved to the nearest place clear of them, B3)
+        if (into) this.clearOf(g.node, list);
         this.contain(into ? (into.node as DocGroup) : null, list, d);
       });
     };
@@ -508,6 +525,53 @@ export class Editor {
     return true;
   }
 
+  // A group: its corner sets its width and height, never less than its
+  // items need (to their far edges, and its padding); what it was given is
+  // kept, and it is that large from then on (William's B3).
+  private resizeGroup(it: Item, e: PointerEvent): boolean {
+    const d0 = this.doc(), f = d0 && find(this.pg(d0), it.id);
+    if (!f || f.node.kind !== "group") return false;
+    const z = this.board.camera.z, x0 = e.clientX, y0 = e.clientY, w0 = it.w, h0 = it.h;
+    const kids = f.node.children.map((c) => this.board.item(c.id)).filter((k): k is Item => !!k);
+    const needW = Math.max(200, ...kids.map((k) => k.x + k.w - it.x + GROUP_PAD));
+    const needH = Math.max((it.inner ? it.inner.y - it.y : GROUP_PAD) + GROUP_PAD, ...kids.map((k) => k.y + k.h - it.y + GROUP_PAD));
+    let w = w0, h = h0;
+    this.hold(true);
+    const move = (m: PointerEvent) => {
+      w = Math.round(Math.max(needW, w0 + (m.clientX - x0) / z));
+      h = Math.round(Math.max(needH, h0 + (m.clientY - y0) / z));
+      this.board.resizeItem(it.id, w, h);
+    };
+    const up = (u: PointerEvent) => {
+      this.gesture = null;
+      if (u.type === "pointerup") move(u);
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      this.hold(false);
+      if (w === w0 && h === h0) return;
+      this.commit((d) => {
+        const g = find(this.pg(d), it.id);
+        if (!g || g.node.kind !== "group") return;
+        // (it, its items, and everything around it keep their places)
+        this.freezeUp(d, g);
+        this.freeze(d, g.node, g.node.children);
+        g.node.w = w;
+        g.node.h = h;
+      });
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", up);
+    this.gesture = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      this.hold(false);
+    };
+    return true;
+  }
+
   // Resizing: one selected note (a picture, or any note) or sticker has a
   // handle at its bottom right corner (the board draws it): dragging it sets
   // the width; a picture keeps its shape, a sticker stays square, and a
@@ -521,6 +585,7 @@ export class Editor {
   }
   private resize(it: Item, e: PointerEvent): boolean {
     e.preventDefault();
+    if (it.kind === "group") return this.resizeGroup(it, e);
     const z = this.board.camera.z, x0 = e.clientX, w0 = it.w, ratio = it.kind === "sticker" ? 1 : it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref ? it.image.h / it.image.w : 0;
     let w = w0;
     this.hold(true);
@@ -747,10 +812,31 @@ export class Editor {
       if (up) this.contain(up.parent, up.siblings, d);
     }
   }
+  // An item dropped on another of its group's items: moved to the nearest
+  // place clear of them all, beside or below one of them (William's B3).
+  private clearOf(node: DocNode, siblings: DocNode[]) {
+    const me = this.board.item(node.id);
+    if (!me || node.x === undefined || node.y === undefined) return;
+    const others = siblings.flatMap((s) => {
+      const it = s !== node && s.kind !== "ink" ? this.board.item(s.id) : undefined;
+      return it && s.x !== undefined && s.y !== undefined ? [{ x: s.x, y: s.y, w: it.w, h: it.h }] : [];
+    });
+    const hits = (x: number, y: number) => others.some((o) => x < o.x + o.w + CLEAR && x + me.w + CLEAR > o.x && y < o.y + o.h + CLEAR && y + me.h + CLEAR > o.y);
+    if (!hits(node.x, node.y)) return;
+    let best: { x: number; y: number } | null = null, far = Infinity;
+    for (const o of others) {
+      for (const p of [{ x: o.x + o.w + CLEAR, y: node.y }, { x: node.x, y: o.y + o.h + CLEAR }, { x: o.x + o.w + CLEAR, y: o.y }, { x: o.x, y: o.y + o.h + CLEAR }]) {
+        const dist = Math.hypot(p.x - node.x, p.y - node.y);
+        if (dist < far && !hits(p.x, p.y)) { far = dist; best = p; }
+      }
+    }
+    if (best) { node.x = Math.round(best.x * 10) / 10; node.y = Math.round(best.y * 10) / 10; }
+  }
   // A member taken out: the group closes up around the rest (its corner moves
   // in as far as they allow, the rest staying where they are).
+  // (a group a person sized keeps its size and place: it does not shrink, B3)
   private compact(parent: DocGroup | null, siblings: DocNode[]) {
-    if (!parent || !siblings.length) return;
+    if (!parent || !siblings.length || parent.w !== undefined || parent.h !== undefined) return;
     const minX = Math.min(...siblings.map((s) => s.x ?? 0)), minY = Math.min(...siblings.map((s) => s.y ?? 0));
     if (minX > 0 || minY > 0) {
       const dx = Math.max(0, minX), dy = Math.max(0, minY);
@@ -830,23 +916,48 @@ export class Editor {
     return true;
   }
 
-  /** A new note where (x, y) is (the world; at the top level), being written. */
-  addNote(x: number, y: number) {
+  // Where a new item w by h goes, centred on (cx, cy) if that is clear of
+  // what is shown, else the nearest place that is (the toolbar's additions,
+  // in the middle of the view: not on top of what is there, B3); its top left.
+  private clearSpot(cx: number, cy: number, w: number, h: number): { x: number; y: number } {
+    const free = (x: number, y: number) => !this.board.near(x - CLEAR, y - CLEAR, x + w + CLEAR, y + h + CLEAR).some((it) => it.kind !== "ink");
+    const x0 = cx - w / 2, y0 = cy - h / 2, step = 40;
+    if (free(x0, y0)) return { x: Math.round(x0), y: Math.round(y0) };
+    for (let r = 1; r <= 40; r++) {
+      let best: { x: number; y: number } | null = null, far = Infinity;
+      for (let i = -r; i <= r; i++) for (const [dx, dy] of [[i, -r], [i, r], [-r, i], [r, i]]) {
+        const x = x0 + dx * step, y = y0 + dy * step, dist = Math.hypot(dx, dy);
+        if (dist < far && free(x, y)) { far = dist; best = { x, y }; }
+      }
+      if (best) return { x: Math.round(best.x), y: Math.round(best.y) };
+    }
+    return { x: Math.round(x0), y: Math.round(y0) };
+  }
+
+  /** A new note where (x, y) is (the world; at the top level), being written
+   * (`clear`: near there, clear of what is shown). */
+  addNote(x: number, y: number, clear = false) {
     const id = "n" + Math.random().toString(36).slice(2, 8);
+    const at = clear ? this.clearSpot(x, y, 260, 70) : { x: Math.round(x - 130), y: Math.round(y - 30) };
     // (the others at the top level keep their places)
-    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, title: "", text: "", x: Math.round(x - 130), y: Math.round(y - 30) }); }).then(() => this.open(id, true));
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, title: "", text: "", ...at }); }).then(() => this.open(id, true));
   }
 
-  /** A new empty group where (x, y) is (at the top level): notes are dragged into it. */
-  addGroup(x: number, y: number) {
+  /** A new empty group where (x, y) is (at the top level; `clear`: near
+   * there, clear of what is shown): notes are dragged into it. */
+  addGroup(x: number, y: number, clear = false) {
     const id = "g" + Math.random().toString(36).slice(2, 8);
-    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, kind: "group", title: "", children: [], x: Math.round(x - 100), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
+    const at = clear ? this.clearSpot(x, y, GROUP_W, GROUP_H) : { x: Math.round(x - GROUP_W / 2), y: Math.round(y - GROUP_H / 2) };
+    // (large enough to drop things in and move them about: a person resizes it by its corner, B3)
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, kind: "group", title: "", children: [], ...at, w: GROUP_W, h: GROUP_H }); }).then(() => this.open(id, true));
   }
 
-  /** A new note with code where (x, y) is (the world; at the top level), its code being written. */
-  addCode(x: number, y: number) {
+  /** A new note with code where (x, y) is (the world; at the top level;
+   * `clear`: near there, clear of what is shown), its code being written. */
+  addCode(x: number, y: number, clear = false) {
     const id = "c" + Math.random().toString(36).slice(2, 8);
-    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, code: "", x: Math.round(x - 220), y: Math.round(y - 40) }); }).then(() => this.open(id, true));
+    const at = clear ? this.clearSpot(x, y, 440, 80) : { x: Math.round(x - 220), y: Math.round(y - 40) };
+    return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, code: "", ...at }); }).then(() => this.open(id, true));
   }
 
   /** Show or hide a code item's code (its output stays). */
@@ -1020,8 +1131,12 @@ export class Editor {
   }
 }
 
-// (an item resized by its corner: a note, or a sticker)
-const sized = (it: Item | null | undefined) => it?.kind === "note" || it?.kind === "sticker";
+// (an item resized by its corner: a note, a sticker, or a group, B3)
+const sized = (it: Item | null | undefined) => it?.kind === "note" || it?.kind === "sticker" || it?.kind === "group";
+// (a new group's size: room to drop things in and move them about, B3)
+const GROUP_W = 480, GROUP_H = 320;
+// (the gap kept between an item dropped into a group and its other items)
+const CLEAR = 16;
 
 /** Remove a node (a group with its members) and the edges to and from it. */
 export function remove(d: BoardDoc | BoardPage, id: string) {

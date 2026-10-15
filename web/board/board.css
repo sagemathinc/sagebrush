@@ -180,6 +180,9 @@
 .ip-bar { position: fixed; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px; background: #fff; border: 1px solid rgba(0, 0, 0, .12); border-radius: 9px; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); }
 .ip-bar > button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 6px; border-color: transparent; background: none; color: #33402f; }
 .ip-bar > button:hover { background: #eef2ea; }
+/* a note with nothing in it: in Edit it says so (board.ts), else nothing shows (B2) */
+.board-empty { color: #8a8f99; font-style: italic; }
+.board:not(.editing) .board-empty { visibility: hidden; }
 .ip-bar > button[hidden] { display: none; }
 .ip-bar > button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
 .ip-bar .ip-plus { font-size: 12px; font-weight: 700; margin-right: 1px; }

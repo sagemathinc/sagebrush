@@ -53,6 +53,8 @@ export interface Item {
   depth?: number;
   /** groups: where their members' positions are measured from */
   inner?: { x: number; y: number };
+  /** groups: none in it (in Edit it says how to fill it, B3) */
+  empty?: boolean;
   /** the group holding it */
   parent?: string;
   /** notes: an outline other than a rectangle (doc.ts's NoteShape) */
@@ -170,6 +172,9 @@ export class Board {
   marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
   /** the item with a resize handle at its bottom right corner (Edit: the one selected note) */
   handle: string | null = null;
+  /** the item with a grip just outside its top left corner, which drags it
+   * (Edit: the one selected, or the one being written, William's B2) */
+  grip: string | null = null;
   guides: { xs: number[]; ys: number[] } | null = null;
   /** a press on the background (no item there): return true to take it (the board does not pan) */
   onBackgroundDown: ((e: PointerEvent) => boolean) | null = null;
@@ -638,6 +643,14 @@ export class Board {
       }
     }
     if (it.detail) md(it.detail, "board-detail");
+    // (a note with nothing in it, kept to be written in later: in Edit it says so, B2)
+    if (it.kind === "note" && !it.title && !it.text && !it.image && it.code === undefined && !it.detail && !it.ref) {
+      const e = document.createElement("div");
+      e.className = "board-empty";
+      e.setAttribute("aria-hidden", "true");
+      e.textContent = "Empty note: double-click to write";
+      el.append(e);
+    }
     if (it.ref && /^https?:\/\//i.test(it.ref)) {
       const a = document.createElement("a");
       a.className = "board-ref";
@@ -745,6 +758,14 @@ export class Board {
       ctx.lineWidth = (g.id === this.dropTarget ? 3 : 1) / c.z;
       ctx.strokeStyle = g.id === this.dropTarget ? "#2a6f2f" : "rgba(0,0,0,.18)";
       ctx.stroke();
+      // (an empty group, in Edit: how to fill it, B3)
+      if (g.empty && !far && this.el.classList.contains("editing")) {
+        ctx.fillStyle = "#8a8f99";
+        ctx.font = "italic 14px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Empty group: drag items into it", g.x + g.w / 2, g.y + g.h / 2);
+        ctx.textAlign = "start";
+      }
     }
     // notes in view still waiting for their elements: placeholders
     if (!far && this.unbuilt) {
@@ -985,6 +1006,24 @@ export class Board {
         ctx.strokeRect(it.x + it.w - s / 2, it.y + it.h - s / 2, s, s);
       }
     }
+    // (the grip: a rounded tab of six dots, at the same size on the screen at any zoom)
+    const g = this.grip && !far ? this.byId.get(this.grip) : undefined;
+    if (g) {
+      const b = gripBox(g, c.z), r = 4 / c.z;
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#2a6f2f";
+      ctx.lineWidth = 1.5 / c.z;
+      ctx.beginPath();
+      ctx.roundRect(b.x, b.y, b.w, b.h, r);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#2a6f2f";
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 3; j++) {
+        ctx.beginPath();
+        ctx.arc(b.x + b.w * (i ? 0.66 : 0.34), b.y + b.h * (0.27 + j * 0.23), 1.7 / c.z, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
     if (this.guides) {
       ctx.strokeStyle = "#d6336c";
       ctx.lineWidth = 1 / c.z;
@@ -1032,6 +1071,14 @@ export class Board {
     return { x: c.x + (cx - r.left) / c.z, y: c.y + (cy - r.top) / c.z };
   }
   /** The page rectangle (client coordinates) of an item. */
+  /** The grip's item, if the point (on the page) is on it (a finger's reach a little more). */
+  gripAt(cx: number, cy: number, touch = false): string | null {
+    const it = this.grip ? this.byId.get(this.grip) : undefined, c = this.camera;
+    if (!it || c.z < FAR) return null;
+    const b = gripBox(it, c.z), r = this.el.getBoundingClientRect(), reach = touch ? 10 : 3;
+    const x0 = r.left + (b.x - c.x) * c.z, y0 = r.top + (b.y - c.y) * c.z;
+    return cx >= x0 - reach && cx <= x0 + b.w * c.z + reach && cy >= y0 - reach && cy <= y0 + b.h * c.z + reach ? it.id : null;
+  }
   clientRect(id: string) {
     const it = this.byId.get(id), r = this.el.getBoundingClientRect(), c = this.camera;
     return it ? { left: r.left + (it.x - c.x) * c.z, top: r.top + (it.y - c.y) * c.z, width: it.w * c.z, height: it.h * c.z } : null;
@@ -1380,6 +1427,9 @@ export function plainTitle(title: string): string {
 // What a note shows far out: its title, or else its text's first line
 // without Markdown (a flowchart's notes have only text)
 const farLabels = new WeakMap<Item, string>();
+// The grip's box (world units), left of an item's top left corner: 16 by 26
+// pixels on the screen, 4 from the item
+const gripBox = (it: { x: number; y: number }, z: number) => ({ x: it.x - 20 / z, y: it.y, w: 16 / z, h: 26 / z });
 export function farLabel(it: Item): string {
   if (it.title) return plainTitle(it.title);
   let t = farLabels.get(it);

@@ -104,6 +104,10 @@ export interface DocGroup {
   x?: number;
   /** as `x` */
   y?: number;
+  /** its width at least, as a person made it by its corner (it is as wide as this, or as its items need, whichever is more) */
+  w?: number;
+  /** its height at least, as `w` */
+  h?: number;
 }
 
 // A pen stroke (ink.ts): where the pen went, with its pressure, drawn as
@@ -398,7 +402,8 @@ export function cleanDoc(d: any): BoardDoc {
     if (!n || typeof n !== "object" || n.id == null) return null;
     if (n.kind === "group") {
       return strip({ id: String(n.id), kind: "group" as const, title: str(n.title), text: str(n.text), layout: one(n.layout, LAYOUTS), columns: num(n.columns), direction: one(n.direction, DIRS),
-        children: (Array.isArray(n.children) ? n.children : []).map(node).filter((c: DocNode | null): c is DocNode => !!c), color: safeColor(n.color), x: num(n.x), y: num(n.y) });
+        children: (Array.isArray(n.children) ? n.children : []).map(node).filter((c: DocNode | null): c is DocNode => !!c), color: safeColor(n.color), x: num(n.x), y: num(n.y),
+        w: groupSide(n.w), h: groupSide(n.h) });
     }
     // (a stroke: its points as numbers, three a point, and its place; else none)
     if (n.kind === "ink") {
@@ -507,6 +512,8 @@ export function formatError(d: any, o: { reader?: string; remedy?: string } = {}
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
+// (a group's size as a person made it: a positive number of units, at most a large board's)
+const groupSide = (v: unknown) => { const n = num(v); return n !== undefined && n > 0 && n <= 100000 ? n : undefined; };
 /** A group's padding, and its title's height (its members' origin is below them). */
 export const GROUP_PAD = PAD, GROUP_TITLE = TITLE;
 
@@ -711,14 +718,15 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       w = Math.max(w, p.x + k.b.w);
       h = Math.max(h, p.y + k.b.h);
     }
-    const bw = Math.max(w + 2 * PAD, 200);
+    // (as large as its items need, or as a person made it, whichever is larger, B3)
+    const bw = Math.max(w + 2 * PAD, 200, n.w ?? 0);
     const top = PAD + (n.title ? TITLE : 0) + (n.text ? (measure ? measure({ id: n.id, text: n.text }, bw - 2 * PAD) : 28) + 8 : 0);
     innerTop.set(n.id, top);
     for (const k of kids) {
       const p = pos.get(k.c.id)!;
       rel.set(k.c.id, { x: PAD + p.x, y: top + p.y });
     }
-    const b = { w: bw, h: h + top + PAD };
+    const b = { w: bw, h: Math.max(h + top + PAD, n.h ?? 0) };
     size.set(n.id, b);
     return b;
   };
@@ -733,7 +741,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const place = (n: DocNode, x: number, y: number, depth: number, parent?: string) => {
     const b = size.get(n.id)!;
     if (n.kind === "group") {
-      items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth, parent, inner: { x: x + PAD, y: y + innerTop.get(n.id)! } });
+      items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth, parent, inner: { x: x + PAD, y: y + innerTop.get(n.id)! }, ...(n.children.length ? {} : { empty: true }) });
       for (const c of n.children) {
         const p = rel.get(c.id)!;
         place(c, x + p.x, y + p.y, depth + 1, n.id);
