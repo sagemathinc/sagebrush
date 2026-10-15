@@ -137,12 +137,19 @@ fn gcd_big(a: &BigInt, b: &BigInt) -> BigInt {
 
 /// The map for the curve of conductor n with Fourier coefficients a_q
 /// (`aps`: (q, a_q) for primes q not dividing n, ascending; as many as
-/// needed are used).
+/// needed are used).  Each q must be a prime below 2^30 not dividing n,
+/// and each a_q must satisfy the Hasse bound a_q^2 <= 4q.
 pub fn ec_map(n: u64, aps: &[(u64, i64)]) -> Result<EcMap, String> {
     if n < 11 {
         return Err("there are no elliptic curves of conductor below 11".into());
     }
-    let aps: Vec<(u64, i64)> = aps.iter().copied().filter(|&(q, _)| n % q != 0).collect();
+    for &(q, a) in aps {
+        crate::validate(n, q, None)?;
+        if (a as i128) * (a as i128) > 4 * q as i128 {
+            return Err(format!("a_{} = {} violates the Hasse bound a_q^2 <= 4q", q, a));
+        }
+    }
+    let aps = aps.to_vec();
     // the Sturm bound for weight 2 on Gamma0(n): [SL2(Z) : Gamma0(n)] / 6
     let sturm = sturm_bound(n);
     let have: std::collections::HashSet<u64> = aps.iter().map(|e| e.0).collect();
@@ -222,10 +229,16 @@ fn sturm_bound(n: u64) -> u64 {
 
 /// X spans the common kernel of T_q - a_q for the q used, which the other
 /// Hecke operators preserve (they commute): so T_r X = b_r X with b_r an
-/// integer, |b_r| <= r + 1 < p.  Checking T_r X = a_r X modulo p (with X
-/// mod p nonzero) for every given r (every good prime up to the Sturm
-/// bound, at least) therefore proves b_r = a_r: X is the eigenvector of
-/// these eigenvalues, not of another eigenform sharing the first few.
+/// integer (X is primitive integral and T_r integral), and b_r is a Hecke
+/// eigenvalue of weight 2 on Gamma0(n): r + 1 (Eisenstein) or at most
+/// 2 sqrt(r) in absolute value (cuspidal: Deligne), so |b_r| <= r + 1.
+/// ec_map checks a_r^2 <= 4r, so |a_r| < r + 1, and r is a prime below
+/// 2^30, so r <= 2^30 - 35 (the largest one) and |b_r - a_r| < 2(r + 1)
+/// < 2^31 - 1 = p: two distinct such integers are not congruent modulo p
+/// (both sides of the bound are needed, hence the factor 2).  Checking T_r X = a_r X modulo p (with X mod p
+/// nonzero) for every given r (every good prime up to the Sturm bound, at
+/// least) therefore proves b_r = a_r: X is the eigenvector of these
+/// eigenvalues, not of another eigenform sharing the first few.
 fn all_eigenvalues_match(pres: &Presentation, x: &[BigInt], aps: &[(u64, i64)], p: u64, sturm: u64) -> Result<(), String> {
     let pb = BigInt::from(p);
     let psi: Vec<u64> = pres.sym_of_gen.iter().map(|&(i, neg)| {
@@ -362,6 +375,22 @@ mod tests {
         b[0].1 += 1;
         assert!(ec_map(37, &b).is_err());
         assert!(ec_map(37, &aps([0, 0, 1, -1, 0], 37)).is_ok());
+    }
+
+    /// Bad pairs are refused before any modular work: q = 2^30 (heilbronn's
+    /// range), a composite or bad q, and a_q off the Hasse bound (a_3 of
+    /// 11a1 shifted by the check prime, which agrees modulo it).
+    #[test]
+    fn refuses_bad_pairs() {
+        let p = 2147483647i64;
+        for bad in [vec![(1 << 30, 0), (2, -2)], vec![(2, -2), (4, 0)], vec![(2, -2), (11, 1)], vec![(2, -2), (3, -1 + p)], vec![(2, -2), (3, -1 - p)], vec![(2, -2), (3, 4)]] {
+            let mut aps = aps([0, -1, 1, -10, -20], 11);
+            aps.extend(bad.iter().copied());
+            assert!(ec_map(11, &aps).is_err(), "{:?}", bad);
+        }
+        let mut aps = aps([0, -1, 1, -10, -20], 11);
+        aps.push((1073741789, 0));
+        assert!(ec_map(11, &aps).is_ok());
     }
 
     #[test]
