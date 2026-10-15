@@ -15,6 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const DIST = join(here, "dist");
 const PAGE = `<!doctype html><meta charset="utf-8"><body><script type="module">
 import { WorkerKernel, RunnerWorker } from "/sagebrush-notebook.js";
+import { devtoolsPort } from "./test-port.mjs";
 const bytes = async (n) => (await fetch("/" + n)).arrayBuffer();
 const files = { "sagebrush-worker.js": await bytes("sagebrush-worker.js"), "sagebrush-engine.wasm": await bytes("sagebrush-engine.wasm"), "sagebrush-precompiled.json": await bytes("sagebrush-precompiled.json") };
 const kernel = new WorkerKernel({ createWorker: () => new RunnerWorker(null, { files }) });
@@ -38,10 +39,11 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-const port = +(process.env.CDP_PORT ?? 9611);
+let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-files-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);

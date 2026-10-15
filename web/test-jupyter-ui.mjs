@@ -8,12 +8,14 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort } from "./test-port.mjs";
 const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-jupyter-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (the DevTools port: CDP_PORT, so that runs of several agents do not collide)
-const cdpPort = Number(process.env.CDP_PORT ?? 9338);
+let cdpPort = Number(process.env.CDP_PORT) || 0;
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "--window-size=1200,1600", "about:blank"], { stdio: "ignore" });
+if (!cdpPort) cdpPort = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);

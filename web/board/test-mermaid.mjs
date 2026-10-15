@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { devtoolsPort } from "../test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [mermaidDir, ...inputs] = process.argv.slice(2);
@@ -40,9 +41,10 @@ const server = createServer((req, res) => {
 }).listen(0);
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const port = 9471, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let port = Number(process.env.CDP_PORT) || 0, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-mm-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);

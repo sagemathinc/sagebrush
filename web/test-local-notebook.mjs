@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort, freePort } from "./test-port.mjs";
 
 const bundle = process.argv[2] ?? new URL("../build/cli/pyjs.cjs", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -20,7 +21,7 @@ const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if 
 const dir = mkdtempSync(join(tmpdir(), "sb-local-"));
 mkdirSync(join(dir, "sub"));
 writeFileSync(join(dir, "sub", "data.csv"), "x,y\n1,2\n3,4\n");
-const port = 9400 + Math.floor(Math.random() * 400);
+const port = await freePort();
 const server = spawn(process.execPath, [bundle, "notebook", dir, "--port", String(port), "--no-browser"], { stdio: ["ignore", "pipe", "inherit"] });
 let printed = "";
 server.stdout.on("data", (d) => (printed += d));
@@ -33,9 +34,11 @@ ok((await fetch(base + "/")).status === 403, "no access without the token");
 ok((await fetch(base + "/", { headers: { Host: "evil.example" } })).status === 403, "other host names are refused (DNS rebinding)");
 
 const profile = mkdtempSync(join(tmpdir(), "sb-local-chrome-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=9339", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let cdpPort = Number(process.env.CDP_PORT) || 0;
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!cdpPort) cdpPort = await devtoolsPort(profile);
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9339/json")).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();

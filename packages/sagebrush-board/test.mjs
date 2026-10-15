@@ -29,6 +29,7 @@ writeFileSync(join(site, "index.html"), `<!doctype html><html><head><meta charse
 <div style="position:absolute;left:0;top:580px"><div id="top">The host's top</div><span id="title">The host's title</span><div id="menu">The host's menu</div><div class="menu">The host's .menu</div><button id="hostbtn">The host's button</button></div>
 <script type="module">
 import { mountBoard } from "./index.js";
+import { devtoolsPort } from "../../web/test-port.mjs";
 const images = { url: () => undefined, put: async () => "", ensure: async () => {}, absorb: async () => {}, inline: async (d) => d };
 const host = (doc) => {
   const kept = { saves: 0, doc: null };
@@ -48,8 +49,9 @@ const server = createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const url = `http://127.0.0.1:${server.address().port}/`;
-const port = Number(process.env.CDP_PORT ?? 9463);
+let port = Number(process.env.CDP_PORT) || 0;
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1300,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
