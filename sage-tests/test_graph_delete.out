@@ -10,3 +10,15 @@ delete_vertices missing !! ValueError vertex (42) not in the graph
 edges iter -> (None, 4)
 digraph -> [(2, 1, None)]
 edge with label arg -> (None, 4)
+Graph g.delete_edges([(0,1,'blue')]) ok [(0, 1, 'red')]
+Graph g.delete_edges([(0,1,'red')]) ok []
+Graph g.delete_edges([(0,1,None)]) ok []
+Graph g.delete_edges([(0,1,'red','extra')]) ValueError: too many values to unpack (expected 2) [(0, 1, 'red')]
+Graph atomic missing vertex ValueError [0, 1, 2] [(0, 1, None), (1, 2, None)]
+Graph duplicates generator [2] []
+DiGraph g.delete_edges([(0,1,'blue')]) ok [(0, 1, 'red')]
+DiGraph g.delete_edges([(0,1,'red')]) ok []
+DiGraph g.delete_edges([(0,1,None)]) ok []
+DiGraph g.delete_edges([(0,1,'red','extra')]) ValueError: too many values to unpack (expected 2) [(0, 1, 'red')]
+DiGraph atomic missing vertex ValueError [0, 1, 2] [(0, 1, None), (1, 2, None)]
+DiGraph duplicates generator [2] []
