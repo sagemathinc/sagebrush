@@ -8,7 +8,7 @@ import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
 import * as PG from "./pygamma";
-import { floatRepr } from "./format";
+import { floatRepr, intDigits } from "./format";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -223,6 +223,15 @@ newBuiltinModule("sys", (m) => {
   m.meta_path = [];
   m.flags = Ty.newModule("flags");
   m.flags.optimize = 0;
+  m.flags.int_max_str_digits = intDigits.max;
+  fn(m, "get_int_max_str_digits", () => intDigits.max);
+  fn(m, "set_int_max_str_digits", (maxdigits: any) => {
+    const n = Number(O.index(maxdigits));
+    if (n !== 0 && !(n >= 640)) raise(T.ValueError, "maxdigits must be >= 640 or 0 for unlimited");
+    intDigits.max = n;
+    m.flags.int_max_str_digits = n;
+    return null;
+  });
   let limit = 1000;
   fn(m, "getrecursionlimit", () => limit);
   fn(m, "setrecursionlimit", (n: any) => ((limit = Number(n)), null));

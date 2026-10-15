@@ -12,11 +12,20 @@ class UnsupportedOperation(OSError, ValueError):
     pass
 
 
+# (a closed stream's ValueError: CPython's messages differ between the C
+# methods, without a full stop, and IOBase's, with one)
+_CLOSED = "I/O operation on closed file."
+
+
 class IOBase:
     closed = False
 
     def _unsupported(self, name):
         raise UnsupportedOperation(name)
+
+    def _checkClosed(self, msg=_CLOSED):
+        if self.closed:
+            raise ValueError(msg)
 
     def seek(self, pos, whence=0):
         self._unsupported("seek")
@@ -48,6 +57,7 @@ class IOBase:
         return False
 
     def isatty(self):
+        self._checkClosed()
         return False
 
     def fileno(self):
@@ -73,13 +83,16 @@ class IOBase:
         return bytes(res)
 
     def readlines(self, hint=None):
+        self._checkClosed()
         return list(self)
 
     def writelines(self, lines):
+        self._checkClosed()
         for line in lines:
             self.write(line)
 
     def __iter__(self):
+        self._checkClosed()
         return self
 
     def __next__(self):
@@ -135,6 +148,18 @@ class BytesIO(BufferedIOBase):
     def getvalue(self):
         self._check()
         return bytes(self._buf)
+
+    def flush(self):
+        self._check()
+
+    def __iter__(self):
+        return self  # (CPython's BytesIO: even closed; next() then refuses)
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
 
     def getbuffer(self):
         return self._buf
@@ -200,12 +225,15 @@ class BytesIO(BufferedIOBase):
         return size
 
     def seekable(self):
+        self._check()
         return True
 
     def readable(self):
+        self._check()
         return True
 
     def writable(self):
+        self._check()
         return True
 
     def close(self):
@@ -218,12 +246,17 @@ class StringIO(TextIOBase):
         self._pos = 0
         self.closed = False
 
+    def _check(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file")
+
     def _value(self):
         if len(self._parts) > 1:
             self._parts = ["".join(self._parts)]
         return self._parts[0] if self._parts else ""
 
     def write(self, s):
+        self._check()
         if not isinstance(s, str):
             raise TypeError(f"string argument expected, got '{type(s).__name__}'")
         v = self._value()
@@ -235,13 +268,16 @@ class StringIO(TextIOBase):
         return len(s)
 
     def writelines(self, lines):
+        self._checkClosed()
         for line in lines:
             self.write(line)
 
     def getvalue(self):
+        self._check()
         return self._value()
 
     def read(self, size=-1):
+        self._check()
         v = self._value()
         end = len(v) if size is None or size < 0 else self._pos + size
         s = v[self._pos : end]
@@ -249,6 +285,7 @@ class StringIO(TextIOBase):
         return s
 
     def readline(self, size=-1):
+        self._check()
         v = self._value()
         i = v.find("\n", self._pos)
         end = len(v) if i < 0 else i + 1
@@ -258,7 +295,8 @@ class StringIO(TextIOBase):
         self._pos = end
         return s
 
-    def readlines(self):
+    def readlines(self, hint=None):
+        self._checkClosed()
         out = []
         while True:
             line = self.readline()
@@ -267,20 +305,42 @@ class StringIO(TextIOBase):
             out.append(line)
 
     def __iter__(self):
-        return iter(self.readlines())
+        self._checkClosed()
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
 
     def seek(self, pos, whence=0):
+        self._check()
         self._pos = pos if whence == 0 else (self._pos + pos if whence == 1 else len(self._value()) + pos)
         return self._pos
 
     def tell(self):
+        self._check()
         return self._pos
 
     def truncate(self, size=None):
+        self._check()
         v = self._value()
         size = self._pos if size is None else size
         self._parts = [v[:size]]
         return size
+
+    def readable(self):
+        self._check()
+        return True
+
+    def writable(self):
+        self._check()
+        return True
+
+    def seekable(self):
+        self._check()
+        return True
 
     def close(self):
         self.closed = True
@@ -289,6 +349,7 @@ class StringIO(TextIOBase):
         pass
 
     def __enter__(self):
+        self._checkClosed()
         return self
 
     def __exit__(self, *exc):

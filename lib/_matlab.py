@@ -25,6 +25,9 @@ assignment may change an array in place.
 import math as _math
 import sys as _sys
 
+# (MATLAB has no limit on an integer's digits: CPython's 4300 is lifted)
+_sys.set_int_max_str_digits(0)
+
 import numpy as np
 
 __all__ = []

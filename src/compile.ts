@@ -51,14 +51,9 @@ export function compile(source: string, filename: string, moduleName: string, ev
 
 function syntaxError(e: PySyntaxError): any {
   const cls = (R.T as any)[e.type] ?? R.T.SyntaxError;
-  const err = cls(e.msg);
-  err.filename = e.filename;
-  err.lineno = e.lineno;
-  err.text = e.text;
-  err.offset = e.offset;
-  err.end_lineno = e.end_lineno;
-  err.end_offset = e.end_offset;
-  return err;
+  // (CPython's args: (msg, (filename, lineno, offset, text, end_lineno, end_offset)))
+  const none = (v: any) => (v === undefined ? null : v);
+  return cls(e.msg, R.tuple([none(e.filename), none(e.lineno), none(e.offset), none(e.text), none(e.end_lineno), none(e.end_offset)]));
 }
 
 // A per-user cache of compiled library modules (and V8's code cache for
@@ -236,6 +231,40 @@ export function execModule(source: string, filename: string, name: string, isPac
 // source does not parse
 R.builtins.__pyjs_class_cells__ = (src: any) => JSON.stringify(classCellReport(String(src)));
 
+// compile(src, filename, "single"), as CPython's: one interactive statement,
+// that is one logical line (statements joined by ;) or one compound
+// statement; else the SyntaxError where the first one ends (the REPL, the
+// console and doctests, which run "single" too, take several)
+const COMPOUND = new Set(["If", "While", "For", "FunctionDef", "ClassDef", "Try", "With", "Match"]);
+function checkSingle(src: string, filename: string, opts: CompileOptions): void {
+  const body: any[] = parse(src, filename, "exec", opts).body;
+  if (body.length < 2) return;
+  const first = body[0];
+  const compound = COMPOUND.has(first.k);
+  const second = compound ? body[1] : body.find((s) => s.line !== first.line);
+  if (second === undefined) return;
+  const lines = src.split("\n");
+  const withNewline = (n: number) => lines[n - 1] + (n < lines.length ? "\n" : "");
+  if (compound) {
+    // (after a compound statement: "invalid syntax" at the next one's first
+    // token, a decorator's line being where a decorated definition starts)
+    let n = second.line;
+    while (n - 1 > first.line && lines[n - 2].trim().startsWith("@")) n--;
+    const t = lines[n - 1];
+    const off = t.length - t.trimStart().length + 1;
+    const tok = /^[A-Za-z_]\w*|^\S/.exec(t.trimStart())?.[0].length ?? 1;
+    throw new PySyntaxError("invalid syntax", filename, n, withNewline(n), off, n, off + tok);
+  }
+  // (a simple statement: at the end of its last line, past blank and
+  // comment lines; at its comment if it has one)
+  let n = second.line - 1;
+  while (n > first.line && (lines[n - 1].trim() === "" || lines[n - 1].trim().startsWith("#"))) n--;
+  const t = lines[n - 1];
+  const hash = t.indexOf("#");
+  const [off, end] = [hash >= 0 ? hash + 1 : t.length + 1, t.length + 2];
+  throw new PySyntaxError("multiple statements found while compiling a single statement", filename, n, withNewline(n), off, n, end);
+}
+
 // exec/eval/compile: compile `src` and run it with `ns` as its globals.
 let execCounter = 0;
 R.loader.exec = (src: string, ns: any, mode: string, filename: string, opts: CompileOptions = {}) => {
@@ -243,11 +272,12 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string, opts: Com
   let compiled: Compiled;
   try {
     compiled = compile(src, filename, "__main__", evalMode, mode === "cell" ? "cell" : mode === "single", opts);
+    if (mode === "check-single") checkSingle(src, filename, opts);
   } catch (e) {
     if (e instanceof PySyntaxError) throw syntaxError(e);
     throw e;
   }
-  if (mode === "check" || mode === "check-eval") return null;
+  if (mode === "check" || mode === "check-eval" || mode === "check-single") return null;
   const jsName = `py:<exec-${++execCounter}>`; // no spaces: it may become a //# sourceURL
   R.scripts.set(jsName, { filename, lines: src.split("\n"), lineMap: compiled.lineMap });
   return runInThisContext(compiled.code, { filename: jsName })(ns, R);
