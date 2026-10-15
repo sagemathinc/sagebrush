@@ -226,6 +226,20 @@ try {
   await ready();
   await until("document.querySelector('#nbname').value === 'Shared notebook'");
   ok((await ev("document.querySelector('#mode').value")) === "matlab", "a MATLAB share link reopens in MATLAB mode");
+  // the whiteboard (William): File > New whiteboard just under New notebook, ⋯ Whiteboard beside Console
+  ok(await ev("(() => { const f = [...document.querySelectorAll('#filemenu [data-f]')].map((b) => b.dataset.f); return f.indexOf('whiteboard') === f.indexOf('new') + 1; })()"), "File: New whiteboard, just under New notebook");
+  ok(await ev("document.querySelector('#consolebtn').nextElementSibling?.id === 'boardbtn'"), "⋯: Whiteboard, beside Console");
+  // New whiteboard: a blank board in the notebook's language (MATLAB here), in Edit, at an address of its own
+  await ev("document.querySelector('[data-f=whiteboard]').click(), 1");
+  await until("location.pathname === '/board/' && /^\\?doc=local:[0-9a-f]{12}$/.test(location.search) && document.querySelector('[data-sbb=edit]')?.getAttribute('aria-pressed') === 'true'", 60000);
+  const wb = await ev("({ search: location.search, mode: window.sagebrush.board.snapshot().doc.mode, items: window.sagebrush.board.snapshot().items.length })");
+  ok(wb.mode === "matlab" && wb.items === 0, "New whiteboard: a blank MATLAB board, in Edit: " + JSON.stringify(wb));
+  // ⋯ Whiteboard, back in the notebook: that board again, the latest in its language
+  await send("Page.navigate", { url: mlink });
+  await ready();
+  await ev("document.querySelector('#boardbtn').click(), 1");
+  await until(`location.pathname === '/board/' && location.search === ${JSON.stringify(wb.search)}`, 60000);
+  ok(true, "⋯ Whiteboard: the latest board in the notebook's language");
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;
