@@ -379,5 +379,11 @@ for nu, x in [(0.0, 1e308), (0.5, 1.7976931348623157e308), (3.0, -1e308), (170.5
               (6.703903964971298e153, 1.7976931348623157e308)]:
     with mp.workdps(400):
         add("besselj", (nu, x), mp.besselj(nu, x))
+# (astra's review of special-exp-scaled, CORR-BDA-1: next to the diagonals |y| = |x|, where y^2 - x^2 is rounded
+# in two large parts of opposite signs; values that are doubles, from the evidence's 1200-case sample, at 400
+# digits for the phases 2xy up to 1e145; appended after everything above, which stays as it was)
+for _name, _z in [('faddeeva', (1.2006036180144659e+72-1.200603618014463e+72j)), ('faddeeva', (-2.104474631877373e+134-2.104474631877362e+134j)), ('faddeeva', (2.8619453541290903e+112-2.8619453541290847e+112j)), ('erfcx', (-1.200603618014463e+72-1.2006036180144659e+72j)), ('erfcx', (9.718944007437277e+43-9.718944007437251e+43j)), ('erfcx', (2.104474631877362e+134+2.104474631877373e+134j)), ('erfc', (2135542.5293178386-2135542.5293178526j)), ('erfc', (1.5164976930292614e+53-1.5164976930292614e+53j)), ('erfc', (878721725.8967097+878721725.8967097j)), ('erfc', (328389669.45668226-328389669.45668256j)), ('erf', (328389669.45668226-328389669.45668256j)), ('erf', (782509955.4290123+782509955.4290124j)), ('erf', (-196623916.44464168+196623916.44464174j)), ('erf', (-485357365.03365934+485357365.03365964j)), ('erfi', (328389669.45668256+328389669.45668226j)), ('erfi', (-782509955.4290124+782509955.4290123j)), ('erfi', (-196623916.44464174-196623916.44464168j)), ('erfi', (-485357365.03365964-485357365.03365934j))]:
+    with mp.workdps(400):
+        add(_name, (_z,), ref[_name](mp.mpc(_z.real, _z.imag)))
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")
