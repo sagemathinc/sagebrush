@@ -74,8 +74,10 @@ try {
   check(!(await ev(`[...document.querySelectorAll("#docresults li")].some((li) => li.textContent.startsWith("linspace("))`)), "and no MATLAB ones");
 
   await choose("python");
-  hits = await search("galois");
-  check(hits.length === 1 && /no function search for Python/.test(hits[0]), "in a Python notebook, it says there is no search yet: " + JSON.stringify(hits[0]));
+  hits = await search("galois group");
+  check(!hits.some((t) => /galois/i.test(t)), "in a Python notebook, the search has no Sage functions: " + JSON.stringify(hits[0]?.slice(0, 80)));
+  hits = await search("linspace");
+  check(hits.some((t) => t.startsWith("numpy.linspace")), "and finds NumPy's: " + JSON.stringify(hits[0]?.slice(0, 60)));
 
   // a function's examples: inserted only into a notebook of its language, which never changes
   await choose("sage");

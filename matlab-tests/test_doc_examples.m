@@ -788,6 +788,22 @@ show(v);
 clear
 v = expint(1);
 show(v);
+% gammainc
+clear
+v = gammainc(1, 2);
+show(round(v * 1e12) / 1e12);
+% gammainc
+clear
+v = gammainc([1 3], 2, 'upper');
+show(round(v * 1e12) / 1e12);
+% besselj
+clear
+v = besselj(0, 1);
+show(round(v * 1e12) / 1e12);
+% besselj
+clear
+v = besselj(1:3, 2.5);
+show(round(v * 1e12) / 1e12);
 % meshgrid
 clear
 [X, Y] = meshgrid(1:3, 1:2);

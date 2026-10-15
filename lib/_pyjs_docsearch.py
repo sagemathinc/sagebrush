@@ -5,8 +5,9 @@ method of the Sage library, its signature and its docstring.
     sagebrush --search "elliptic rank"   from a shell (--json: machine-readable)
     sagebrush --search "class group" --mode magma
                                          another language's index: sage (the
-                                         default) and python search the Sage
-                                         library, which Python mode imports;
+                                         default) the Sage library; python
+                                         Python mode's numpy, scipy and
+                                         standard library (lib/_python_docsearch.py);
                                          magma and matlab the functions those
                                          modes bind (lib/_magma_docsearch.py,
                                          lib/_matlab_docsearch.py)
@@ -28,7 +29,7 @@ _INDEX = None
 _OTHER = {}  # mode -> its index
 
 # --mode: the language whose functions are searched, and its index's module
-MODES = {"sage": None, "python": None, "magma": "_magma_docsearch", "matlab": "_matlab_docsearch"}
+MODES = {"sage": None, "python": "_python_docsearch", "magma": "_magma_docsearch", "matlab": "_matlab_docsearch"}
 
 
 def _signature(name, doc_obj, kind):
@@ -102,17 +103,25 @@ def index():
 
 
 def index_for(mode=None):
-    """The index of a language (None, "sage" or "python": the Sage
-    library's)."""
+    """The index of a language (None or "sage": the Sage library's)."""
     if mode is not None and mode not in MODES:
         raise ValueError("--mode must be one of %s, not %r" % (", ".join(MODES), mode))
     if mode is None or MODES[mode] is None:
         return index()
     if mode not in _OTHER:
         try:
+            # (the CPython package ships Python mode's index, made by the CLI:
+            # scripts/sync-python-package.sh)
+            import json, os
+            with open(os.path.join(os.path.dirname(__file__), "docs-index-%s.json" % mode)) as f:
+                _OTHER[mode] = json.load(f)
+            return _OTHER[mode]
+        except Exception:  # (as index(): no file here, or none readable)
+            pass
+        try:
             module = __import__(MODES[mode])
         except ImportError:
-            # (the CPython package has the Sage library only)
+            # (the CPython package has no Magma or MATLAB index)
             raise ValueError("this installation has no %s index" % mode)
         _OTHER[mode] = module.build_index()
     return _OTHER[mode]

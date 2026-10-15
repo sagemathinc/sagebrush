@@ -19,17 +19,22 @@ for pair in $pairs; do
     mkdir -p "$(dirname "$dst")"; cp "$src" "$dst"
   fi
 done
-# the documentation index (lib/_pyjs_docsearch.py), for search_doc and the MCP
-# server's search_docs, made by the CLI bundle (npm run build:cli)
-# (a private temporary file: several worktrees and agents run this at once)
+# the documentation indexes (lib/_pyjs_docsearch.py, and Python mode's,
+# lib/_python_docsearch.py), for search_doc and the MCP server's search_docs,
+# made by the CLI bundle (npm run build:cli); the package cannot build
+# Python mode's itself: under CPython, numpy is NumPy, not Sagebrush's
+# (private temporary files: several worktrees and agents run this at once)
 if [ -f build/cli/pyjs.cjs ]; then
   index=$(mktemp)
   trap 'rm -f "$index"' EXIT
-  node build/cli/pyjs.cjs -m _pyjs_docsearch --index > "$index"
-  if [ "$1" = "--check" ]; then
-    cmp -s "$index" $DEST/_sagelib/docs-index.json || { echo "out of date: $DEST/_sagelib/docs-index.json (run scripts/sync-python-package.sh)"; bad=1; }
-  else
-    cp "$index" $DEST/_sagelib/docs-index.json
-  fi
+  for pair in _pyjs_docsearch:docs-index.json _python_docsearch:docs-index-python.json; do
+    mod=${pair%%:*}; out=$DEST/_sagelib/${pair#*:}
+    node build/cli/pyjs.cjs -m $mod --index > "$index"
+    if [ "$1" = "--check" ]; then
+      cmp -s "$index" $out || { echo "out of date: $out (run scripts/sync-python-package.sh)"; bad=1; }
+    else
+      cp "$index" $out && chmod 644 $out
+    fi
+  done
 fi
 exit $bad

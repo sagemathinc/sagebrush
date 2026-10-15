@@ -709,7 +709,7 @@ try {
 } finally {
   ws.close();
   chrome.kill();
-  try { rmSync(profile, { recursive: true, force: true }); } catch {}
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
 if (fails.length) {
   console.log("FAIL\n  " + fails.join("\n  "));

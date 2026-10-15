@@ -44,7 +44,10 @@ const notices = ["LICENSE-MIT", "LICENSE-APACHE", "cdn/LICENSE-CPython.txt", "LI
 const buildId = computeBuildId(root, lib);
 writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
-writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n`);
+// (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
+// first written or read: src/runtime/raster.ts)
+writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n` +
+  `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
 // (`bun web/build.ts`, which needs lib.gen.js: so on a fresh checkout run this
 // script, the web build, then this script again).  Python runs natively

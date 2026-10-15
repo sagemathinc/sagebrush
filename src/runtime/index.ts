@@ -18,6 +18,7 @@ import "./numpy_random";
 import "./numpy_linalg";
 import "./numpy_fft";
 import "./engine";
+import "./raster";
 import * as Cx from "./complex";
 O.complexHooks.pow = Cx.complexPow;
 
@@ -588,6 +589,7 @@ export const R: any = {
   NotImplemented: Obj.NotImplemented,
   Ellipsis: Obj.Ellipsis,
   tuple,
+  sumAcc: (start: any) => new B.SumAcc(start),
   raise,
   raiseExc: Obj.raiseExc,
   toPyExc: Obj.toPyExc,

@@ -905,7 +905,7 @@ def mpower(a, b):
             A = A @ A
             p >>= 1
         return _finish(_farr(_unmat(R)), cls)
-    w, V = np.linalg.eig(A)
+    w, V = np.linalg._eig(A)
     R = V @ np.diag(w.astype(np.complex128) ** p) @ np.linalg.inv(V)
     return _finish(_farr(_unmat(R)), cls)
 
@@ -4231,7 +4231,8 @@ def _gamma(x):
         if x <= 0:
             return _math.inf
         return float(_math.factorial(int(x) - 1)) if x <= 171 else _math.inf
-    return _math.gamma(x)
+    # (the C library's, as Octave's; math.gamma is CPython's own)
+    return _math._libm_gamma(x)
 
 
 def _lgamma(x):
@@ -4239,7 +4240,7 @@ def _lgamma(x):
         return _math.nan
     if x <= 0 and x == _math.floor(x):
         return _math.inf
-    return _math.lgamma(x)
+    return _math._libm_lgamma(x)
 
 
 _unary("gamma", lambda A: _vec_math(_gamma, A, _math.inf))
@@ -4741,7 +4742,13 @@ def _var_impl(x, args, sq):
     rest = []
     if args:
         if _numel(args[0]) > 0 and not _istext(args[0]):
-            w = _int_arg(args[0])
+            a0 = args[0]
+            # (w is 0 or 1, the normalization, or a vector of weights, which
+            # Sagebrush does not compute: refused, not read as a scalar)
+            if _numel(a0) != 1 or not _isnumlike(a0) or _arr(a0).dtype.kind == "c" or _scalar(a0) not in (0.0, 1.0):
+                raise _err("%s: Sagebrush computes w = 0 or w = 1 only; weighted %s (a vector of weights) are not supported yet."
+                           % ("std" if sq else "var", "standard deviations" if sq else "variances"))
+            w = int(_scalar(a0))
         rest = list(args[1:])
     if _dims(x) == (0, 0) and not rest:
         return _math.nan
@@ -5728,7 +5735,7 @@ def eig_(nargout, x, *args):
             w, V = np.linalg.eigh(A)
             W = V
         else:
-            w, V = np.linalg.eig(A)
+            w, V = np.linalg._eig(A)
     else:
         B = B.astype(float)
         if algo == "qz":
@@ -5756,7 +5763,7 @@ def eig_(nargout, x, *args):
             if n and c * _EPS_D > 1e-8:
                 raise _err("eig: B is badly conditioned (cond(B)*eps > 1e-8, Sagebrush's limit for solving through "
                            "B \\ A), and the QZ algorithm it needs is not supported in Sagebrush.")
-            w, V = np.linalg.eig(np.linalg.solve(B, A) if n else A)
+            w, V = np.linalg._eig(np.linalg.solve(B, A) if n else A)
     if np.iscomplexobj(w) and not np.any(np.imag(w)):
         w = np.real(w)
         V = np.real(V)
@@ -5784,7 +5791,7 @@ def _left_vectors(A, B, w):
     the transposed problem A.' z = mu B.' z (u = conj(z)), each matched to
     the nearest unused mu, of 2-norm 1"""
     At = A.T if B is None else np.linalg.solve(B.T, A.T)
-    mu, Z = np.linalg.eig(At)
+    mu, Z = np.linalg._eig(At)
     mu, Z = np.asarray(mu), np.asarray(Z)
     used = [False] * len(mu)
     cols = []
@@ -6009,7 +6016,7 @@ def roots_(p):
         C[0, :] = -c[1:] / c[0]
         for k in range(1, n):
             C[k, k - 1] = 1
-        r = np.linalg.eigvals(C)
+        r = np.linalg._eigvals(C)
     r = np.concatenate([r, np.zeros(trailing)])
     if r.size == 0:
         return np.zeros((0, 1))
@@ -6020,7 +6027,7 @@ def roots_(p):
 def poly_(r):
     v = _farr(r).reshape(-1)
     if not _isvec(r) and _numel(r) > 1:
-        v = np.linalg.eigvals(_mat(r))
+        v = np.linalg._eigvals(_mat(r))
     c = np.array([1.0 + 0j])
     for z in v:
         c = np.concatenate([c, [0]]) - z * np.concatenate([[0], c])

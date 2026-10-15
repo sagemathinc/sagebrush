@@ -180,11 +180,25 @@ class QRResult(_Result):
     _fields = ("Q", "R")
 
 
-def eig(a):
+def _eig(a):
+    """eig with real results where they are real (Sagebrush's own callers:
+    MATLAB's eig, Sage's matrices, np.roots)"""
     a = _float(a)
     _square(a)
-    w, v = _stacked(_L.eig, a)
-    return EigResult(w, v)
+    return _stacked(_L.eig, a)
+
+
+def _eigvals(a):
+    return _eig(a)[0]
+
+
+def eig(a):
+    """Eigenvalues and right eigenvectors, complex (as NumPy 2.5 returns
+    them, also when they are real)."""
+    # (complex64 for float32, as NumPy's)
+    t = _np.complex64 if _np.asarray(a).dtype == _np.float32 else _np.complex128
+    w, v = _eig(a)
+    return EigResult(_np.asarray(w).astype(t), _np.asarray(v).astype(t))
 
 
 def eigvals(a):
