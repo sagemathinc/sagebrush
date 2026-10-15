@@ -593,6 +593,50 @@ class Rational(_Fraction):
         """
         return self._denominator == 1
 
+    def __index__(self):
+        """An integral rational as an index or a count, as in Sage (range(6/3)
+        and L[4/2] failed once 4/2 was a Rational); TypeError otherwise.
+
+        EXAMPLES::
+
+            sage: list(range(6/3)), [10, 20, 30][4/2], bin(6/3), factorial(6/3)
+            ([0, 1], 30, '0b10', 2)
+            sage: range(5/2)
+            Traceback (most recent call last):
+            ...
+            TypeError: unable to convert rational 5/2 to an integer
+        """
+        if self._denominator != 1:
+            raise TypeError("unable to convert rational %s to an integer" % self)
+        return int(self._numerator)
+
+    def __lshift__(self, n):
+        """self * 2^n, a Rational, as in Sage (and >>, self / 2^n).
+
+        EXAMPLES::
+
+            sage: (6/3) << 1, (5/2) << 1, (8/2) >> 1, (5/2) >> 1, 1 << (4/2), 16 >> (4/2)
+            (4, 5, 2, 5/4, 4, 4)
+        """
+        import operator
+        n = operator.index(n)
+        return self * Integer(2) ** n if n >= 0 else self / Integer(2) ** -n
+
+    def __rshift__(self, n):
+        import operator
+        n = operator.index(n)
+        return self / Integer(2) ** n if n >= 0 else self * Integer(2) ** -n
+
+    def __rlshift__(self, a):
+        if isinstance(a, int):
+            return Integer(a) << self.__index__()
+        return NotImplemented
+
+    def __rrshift__(self, a):
+        if isinstance(a, int):
+            return Integer(a) >> self.__index__()
+        return NotImplemented
+
     def is_zero(self):
         """Whether it is 0.
 
@@ -807,6 +851,32 @@ class Rational(_Fraction):
             TypeError: inverse_mod of a rational is not defined: use Mod(numerator, m)/denominator
         """
         raise TypeError("inverse_mod of a rational is not defined: use Mod(numerator, m)/denominator")
+
+
+def pow(base, exp, mod=None):
+    """Python's pow, with integral rationals taken as integers by the
+    three-argument form, as in Sage (pow(3, 4/2, 5) failed once 4/2 was a
+    Rational: the builtin wants exact ints).
+
+    EXAMPLES::
+
+        sage: pow(3, 4/2, 5), pow(2, 10)
+        (4, 1024)
+        sage: pow(2/1, 3, 7)
+        Traceback (most recent call last):
+        ...
+        TypeError: the 3-argument version of pow() is not supported
+    """
+    import builtins
+    if mod is None:
+        return builtins.pow(base, exp)
+    if isinstance(base, Rational):
+        raise TypeError("the 3-argument version of pow() is not supported")
+    base, exp, mod = (a.__index__() if isinstance(a, Rational) else a for a in (base, exp, mod))
+    return builtins.pow(base, exp, mod)
+
+
+__all__.append("pow")
 
 
 def _intdiv(a, b):
