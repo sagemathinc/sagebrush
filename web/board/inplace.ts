@@ -101,6 +101,8 @@ export class InPlace {
       first = this.text.field!;
     } else {
       first = (hit as HTMLTextAreaElement | HTMLInputElement | null) ?? (this.hasCode && !this.hideCode ? this.code! : this.title);
+      // (not a field it doesn't show: an untitled item's first that it does, its detail or link)
+      if (first.hidden) first = this.detail ?? this.ref ?? (this.title.hidden = false, this.title);
       const k = shown ? Math.min(shown.offset, first.value.length) : (hit && p && caretAt(first, p.x, p.y)) ?? first.value.length;
       first.focus({ preventScroll: true });
       first.setSelectionRange(k, k);
@@ -149,9 +151,10 @@ export class InPlace {
       if (run) run.onclick = (e) => { e.stopPropagation(); this.run(); };
       if (toggle) toggle.onclick = (e) => { e.stopPropagation(); this.toggleCode(); };
       for (const b of [run, toggle]) b?.addEventListener("mousedown", (e) => e.preventDefault());
-    } else if (!n.title && n.text && !this.fresh) {
-      // (an item with text and no title shows none: its field only once
-      // + Title asks for it, the text staying where it was)
+    } else if (!n.title && !this.fresh && (n.text || n.detail || n.ref || this.pic)) {
+      // (an item with no title shows none: its field only once + Title asks
+      // for it, what it shows staying where it was: its text, picture,
+      // detail or link, CORR-9E1-1)
       this.title.hidden = true;
     }
     const { board } = this.host;
@@ -163,8 +166,10 @@ export class InPlace {
     });
     const text = this.text.el;
     text.classList.add("be-text");
-    // (a code item without text: none shown, until Enter in its title)
-    text.hidden = !n.text && n.code !== undefined;
+    // (no text: none shown where its field would push down what the item
+    // shows under it, its code, detail or link, until Enter in its title or
+    // + Text asks for it; a new item's shown, to write in, CORR-9E1-1)
+    text.hidden = !n.text && (n.code !== undefined || (!this.fresh && !!(n.detail || n.ref)));
     const parts: (HTMLElement | null)[] = [head ?? this.title, this.pic ? this.picture() : null, text];
     if (!this.group) {
       parts.push(this.codeField(n.code ?? ""), out);
@@ -253,7 +258,7 @@ export class InPlace {
     const sw = button("ip-color", "Color");
     sw.append(Object.assign(document.createElement("span"), { className: "ip-swatch" }));
     sw.onclick = () => this.palette();
-    b.append(tool("ip-title", "Add a title", "title", () => this.addPart("title"), true));
+    b.append(tool("ip-title", "Add a title", "title", () => this.addPart("title"), true), tool("ip-text", "Add text", "text", () => this.addPart("text"), true));
     if (!this.group) {
       b.append(
         tool("ip-run", "Run (Shift+Enter), and what depends on it", "run", () => this.run()),
@@ -275,6 +280,8 @@ export class InPlace {
   private refresh() {
     const q = (s: string) => this.bar.querySelector<HTMLElement>(s);
     q(".ip-title")!.hidden = !this.title.hidden;
+    // (+ Text for a note whose text isn't shown; a code item's comes with Enter in its title, as before)
+    q(".ip-text")!.hidden = !this.text.el.hidden || this.hasCode;
     const toggle = this.el.querySelector<HTMLElement>(":scope > .board-code-head > .board-code-toggle");
     toggle?.classList.toggle("off", this.hideCode);
     toggle?.setAttribute("aria-pressed", String(!this.hideCode));
@@ -295,8 +302,16 @@ export class InPlace {
     else this.el.style.removeProperty("--c");
   }
 
-  private addPart(k: "title" | "code" | "detail" | "ref") {
+  private addPart(k: "title" | "text" | "code" | "detail" | "ref") {
     let f: HTMLTextAreaElement | HTMLInputElement;
+    if (k === "text") {
+      this.text.el.hidden = false;
+      this.text.focus("end");
+      this.refresh();
+      this.fit();
+      this.place();
+      return;
+    }
     if (k === "title") {
       this.title.hidden = false;
       f = this.title;
