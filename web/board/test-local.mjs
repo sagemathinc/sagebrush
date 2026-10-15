@@ -155,6 +155,33 @@ try {
   await ev("document.querySelector('[data-sbb=duplicate]').click(), 1");
   await sleep(800);
   check((await here()).search === kept && /No copy/.test(await ev("document.querySelector('[data-sbb=say]').textContent")), "Duplicate, storage full: this board stays, saying why");
+  // (this board's own save failed, and there is room again by New board or
+  // Duplicate (or room for a small board, not this one): what was written
+  // kept first, or this board stays, HARD-933-1)
+  const keptKey = "sagebrush-board:local:" + kept.slice("?doc=local:".length);
+  const failKept = `(() => { const set = window.__set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (this === localStorage && k === ${JSON.stringify(keptKey)}) throw new DOMException('full', 'QuotaExceededError'); return set.call(this, k, v); }; return 1; })()`;
+  const stored = () => ev(`JSON.parse(localStorage.getItem(${JSON.stringify(keptKey)})).title`);
+  const said = () => ev("document.querySelector('[data-sbb=say]').textContent");
+  for (const [button, what] of [["newboard", "New board"], ["duplicate", "Duplicate"]]) {
+    await go(kept);
+    const was = await stored();
+    await ev(failKept);
+    await ev(`window.sagebrush.board.edit((d) => { d.title = 'Unsaved ${what}'; d.nodes.push({ id: 'u-${button}', title: 'unsaved' }); }).then(() => 1)`);
+    check(await stored() === was && /Not kept/.test(await said()), `${what}: its save failed first: ${await stored()} | ${await said()}`);
+    await ev("Storage.prototype.setItem = window.__set, 1");
+    await ev(`document.querySelector('[data-sbb=${button}]').click(), 1`);
+    await until(`location.search !== ${JSON.stringify(kept)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
+    check(await stored() === `Unsaved ${what}`, `${what} after a failed save, room again: what was written is kept before it goes: ${await stored()}`);
+  }
+  await go(kept);
+  await ev(failKept);
+  await ev("window.sagebrush.board.edit((d) => { d.title = 'Still unsaved'; }).then(() => 1)");
+  for (const [button, what] of [["newboard", "No new board"], ["duplicate", "No copy"]]) {
+    await ev(`document.querySelector('[data-sbb=${button}]').click(), 1`);
+    await sleep(800);
+    const h = await here();
+    check(h.search === kept && h.title === "Still unsaved" && new RegExp(`${what}.*stays open`).test(await said()), `${button}, this board's save failing still: it stays, saying why: ${JSON.stringify(h)} | ${await said()}`);
+  }
 
   // an example board (not blank) opens as before: not in Edit, Revert there once edited
   await go("?doc=examples/primes.json");
