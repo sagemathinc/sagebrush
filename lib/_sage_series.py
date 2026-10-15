@@ -86,6 +86,9 @@ class SeriesRing_:
             if self._base is _sa().ZZ and q.denominator != 1:
                 raise ArithmeticError("%s/%s is not in Integer Ring (use a series ring over QQ)" % (a, b))
             return _norm(q)
+        if _is_padic(self._base) and not self._base._field:
+            # stay in Zp: b is a unit there (inverse() checks)
+            return a * self._base(b).inverse_of_unit()
         return a / b
 
     def __repr__(self):
@@ -525,7 +528,7 @@ class Series:
             if _is_zero(c):
                 continue
             e = self._v + i
-            parts.append(_term(c, e, name))
+            parts.append(_term(c, e, name, self._R._laurent))
         if self._prec is not None:
             parts.append((False, "O(%s)" % (_mono(name, self._prec) if self._prec != 0 else "1")))
         if not parts:
@@ -579,11 +582,14 @@ class Series:
         return self._over(base, laurent=laurent, dp=dp)
 
     def _target_base(self, o):
-        """The coefficient ring of self's parent with o: for p-adic bases the
-        pushout of the two (as Sage: Zp(5, 4)[[T]] times an element of Zp(5)
-        lands in Zp(5, 20)[[T]], a field's in Qp's); else the fraction field
-        of the base when o needs it (ZZ[[z]] meets 1/2 or a series over QQ
-        in QQ[[z]]), else the base."""
+        """The coefficient ring of self's parent with o.  p-adic bases: an
+        element of Y joins a series over X in X if Y coerces into X, else
+        over the p-adics with the larger cap, a field if either is
+        (Zp(5, 4)[[T]] times an element of Zp(5) lands in Zp(5, 20)[[T]];
+        Zp(5, 20)[[T]] plus one of Qp(5, 4) in Qp(5, 20)[[T]]); two series
+        meet in the base that the other coerces into, else in the same
+        pushout.  ZZ: the fraction field when o needs it (ZZ[[z]] meets 1/2
+        or a series over QQ in QQ[[z]]).  Otherwise the base."""
         B = self._R._base
         if _is_padic(B):
             if isinstance(o, Series):
@@ -594,8 +600,10 @@ class Series:
                 return B
             if P is B or not _is_padic(P) or P.prime() != B.prime():
                 return B
-            from _sage_padic import _pushout
-            return _pushout(B, P)
+            from _sage_padic import _series_pushout, _coerces
+            if isinstance(o, Series) and not _coerces(P, B) and _coerces(B, P):
+                return P
+            return _series_pushout(B, P)
         F = _frac(B)
         if F is B:
             return B
@@ -713,6 +721,19 @@ class Series:
     def __truediv__(self, o):
         self._check_var(o, "/")
         B = self._R._base
+        if _is_padic(B) and not isinstance(o, Series):
+            # by a scalar: over the fraction field (Sage: T/2 and T/Zp(5)(2)
+            # are over Qp; the review's CORR-D9E-2), joined with the
+            # scalar's own fraction field
+            F = B if B._field else B.fraction_field()
+            if type(o).__name__ == "pAdicCappedRelativeElement" and o.parent().prime() == B.prime():
+                from _sage_padic import _series_pushout
+                F = _series_pushout(F, o.parent().fraction_field())
+            s = self if F is B else self._over(F)
+            c = F(o)
+            if c.is_zero():
+                raise ZeroDivisionError("division by zero")
+            return Series(s._R, s._v, [x / c for x in s._c], s._prec)
         F = _frac(B)
         if F is not B and not isinstance(o, Series):
             # by a scalar: over the fraction field (Sage: z/2 and z/1 are in
@@ -733,14 +754,26 @@ class Series:
         if o2._R._laurent and not self._R._laurent:
             # by a Laurent series: the quotient is one too (Sage: z/L(1) in L)
             return self._over(self._R._base, laurent=True).__truediv__(o2)
-        if F is not B:
+        if F is not B and not _is_padic(B):
             return self._ring_div(o2)
-        if not self._c and self._prec is None:
+        if F is B and not self._c and self._prec is None:
             # an exact zero stays exact (Sage: 0/(1 + t) is 0)
             return Series(self._R, 0, [], None)
-        if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None:
+        if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None and not _is_padic(B):
             # exact division by a constant stays exact
             return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
+        if _is_padic(B) and not B._field and o2._v > 0:
+            # (Sage) the quotient stays over the ring when it is a power
+            # series with a unit to invert, else it is a Laurent series over
+            # the fraction field: T^2/(T + T^2) over Zp, 1/T and T/(5 T) over Qp
+            vg = o2._v
+            u = Series(o2._R, 0, o2._c, None if o2._prec is None else o2._prec - vg)
+            vf = self._v if self._c else (self._prec if self._prec is not None else 0)
+            if vf >= vg and u._c[0].valuation() == 0:
+                f = Series(self._R, self._v - vg, self._c, None if self._prec is None else self._prec - vg)
+                return f * u.inverse()
+            F = B.fraction_field()
+            return self._over(F, laurent=True) / o2._over(F, laurent=True)
         return self * o2.inverse()
 
     def _ring_div(self, g):
@@ -1128,17 +1161,20 @@ def _mono(name, e):
     return name if e == 1 else "%s^%d" % (name, e)
 
 
-def _term(c, e, name):
+def _term(c, e, name, laurent=False):
     """(negative, text) of the term c*x^e."""
-    s = repr(_out(c))
-    neg = s.startswith("-")
-    if neg:
-        s = s[1:]
-    if e == 0:
-        # (Sage never parenthesizes the constant term: 5 + O(5^4) + O(5)*T)
+    full = repr(_out(c))
+    neg = full.startswith("-")
+    s = full[1:] if neg else full
+    compound = " + " in s or " - " in s
+    if e == 0 and not (laurent and compound):
+        # (Sage parenthesizes no constant term of a power series, 5 + O(5^4)
+        # + O(5)*T, but a compound one of a Laurent series: t^-1 + (a + 1))
         return neg, s
-    if " + " in s or " - " in s:
-        s = "(" + s + ")"
+    if compound:
+        # the whole coefficient, sign included: (-a - 1)*s, not -(a - 1)*s
+        s, neg = "(" + full + ")", False
+        return neg, s if e == 0 else s + "*" + _mono(name, e)
     m = _mono(name, e)
     if s == "1":
         return neg, m
