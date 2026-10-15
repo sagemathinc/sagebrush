@@ -25,7 +25,7 @@ import { SchemaValidator, didYouMean, step } from "./json-schema";
 import { CLI_READER } from "./board-cli";
 import { oneLine, textLines } from "./terminal-text";
 
-const USAGE = `usage: sagebrush board check FILE [--json] [--no-run] [--timeout S]
+const USAGE = `usage: sagebrush board check FILE [--json] [--no-run] [--timeout S] [--figures DIR]
   check a board (a .board.json file) before anyone opens it, and report
   every problem at once: its JSON, its header and version, every field
   against the format (web/board-format.schema.json; an unknown field with
@@ -35,6 +35,7 @@ const USAGE = `usage: sagebrush board check FILE [--json] [--no-run] [--timeout 
   --json      the report as JSON
   --no-run    don't run the code items
   --timeout S the seconds a code item may run (default 60)
+  --figures DIR  save the code items' figures in DIR (as board run does)
   The exit status is 1 if there is any error (warnings don't count).
   The code runs here, as you, as \`sagebrush -c\` runs it: check boards you trust.
 `;
@@ -266,12 +267,13 @@ const say = (msg: string) => process.stderr.write(`sagebrush board check: ${oneL
 /** The `board check` command; returns the exit code. */
 export async function boardCheck(argv: string[]): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) { process.stdout.write(USAGE); return 0; }
-  let file: string | null = null, json = false, run = true, timeout = 60;
+  let file: string | null = null, json = false, run = true, timeout = 60, figures: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") json = true;
     else if (a === "--no-run") run = false;
     else if (a === "--timeout") timeout = Number(argv[++i]);
+    else if (a === "--figures") { figures = argv[++i] ?? null; if (figures === null) { say("--figures takes a directory"); return 2; } }
     else if (a.startsWith("-") && a !== "-") { say(`unknown option ${a}`); process.stderr.write(USAGE); return 2; }
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
@@ -295,7 +297,7 @@ export async function boardCheck(argv: string[]): Promise<number> {
   // (only a board the board would show: else the problems above say why)
   if (run && doc && (formatError(doc, CLI_READER) || !isBoard(doc))) notRun = "the board can't be shown (see the errors above), so its code items were not run";
   else if (run && doc) {
-    const { runBoard } = await import("./board-run");
+    const { runBoard, saveFigures } = await import("./board-run");
     let r;
     try {
       r = await runBoard(cleanDoc(doc), timeout);
@@ -304,6 +306,8 @@ export async function boardCheck(argv: string[]): Promise<number> {
       r = null;
     }
     if (r) code = { mode: r.mode, items: r.list };
+    // (its figures, if asked)
+    if (r && figures !== null) { const why = saveFigures(r, figures); if (why) problems.push({ level: "error", path: "", message: why }); }
   }
   if (code) {
     const r = { list: code.items };
@@ -320,7 +324,9 @@ export async function boardCheck(argv: string[]): Promise<number> {
     process.stdout.write(JSON.stringify({ file, ok: errors === 0, errors, warnings, problems, code: code ? { mode: code.mode, items: code.items } : null, ...(notRun ? { notRun } : {}) }, null, 2) + "\n");
   } else {
     const w = process.stdout, name = oneLine(file === "-" ? "(standard input)" : basename(file));
-    const ran = code ? `; ${code.items.length} code item${code.items.length === 1 ? "" : "s"} run (${code.mode}): ${code.items.filter((i) => i.status === "ok").length} ok` : notRun ? `; ${notRun}` : run ? "" : "; code items not run (--no-run)";
+    const nfig = code ? code.items.reduce((n, i) => n + i.outputs.filter((o: any) => o.figure).length, 0) : 0;
+    const figs = nfig ? `, ${nfig} figure${nfig === 1 ? "" : "s"}${figures !== null ? ` saved in ${oneLine(figures)}` : ""}` : "";
+    const ran = code ? `; ${code.items.length} code item${code.items.length === 1 ? "" : "s"} run (${code.mode}): ${code.items.filter((i) => i.status === "ok").length} ok${figs}` : notRun ? `; ${notRun}` : run ? "" : "; code items not run (--no-run)";
     w.write(errors || warnings ? `${name}: ${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}${ran}\n` : `${name}: no problems${ran}\n`);
     for (const p of problems) {
       const lines = textLines(p.message).split("\n");

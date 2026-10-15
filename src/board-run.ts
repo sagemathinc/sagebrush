@@ -24,7 +24,7 @@
 //
 // Loaded only for `board run` (src/cli.ts), so nothing else starts slower.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { createHash } from "crypto";
@@ -40,13 +40,16 @@ import { oneLine, textLines } from "./terminal-text";
 import { CLI_READER, pictureWarning } from "./board-cli";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 
-const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--store-previews [-o OUT] [--preview-ms MS]]
+const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--figures DIR] [--store-previews [-o OUT] [--preview-ms MS]]
   run every code item of a board as the board runs it in a browser (its
   language, its reactive order and its seeds), and report each item's
   output, or its error; the exit status is 1 if an item failed, has an
   error, was not run or ran out of time
   --json            the report as JSON
   --timeout S       the seconds an item may run (default 60); longer is an error
+  --figures DIR     save each item's figures (plots, pictures) in DIR, as
+                    ITEM-1.svg and so on (never over a file that is there);
+                    the report says each figure's size and what it shows
   --store-previews  write the board with its slow items' outputs as their
                     previews, so it shows them at once: to OUT, else to
                     NAME.previews.board.json beside FILE (not over a file
@@ -70,8 +73,16 @@ interface ItemReport {
   ms?: number;
   stdout: string;
   stderr: string;
-  outputs: { type: string; text?: string; bytes?: number }[];
+  outputs: { type: string; text?: string; bytes?: number; figure?: Figure }[];
   error?: string;
+}
+/** A figure an item shows (a plot's SVG, a picture): its size in pixels,
+ * what it shows (an SVG plot's title), and where --figures saved it. */
+export interface Figure {
+  w?: number;
+  h?: number;
+  title?: string;
+  path?: string;
 }
 
 // ---- the worker thread: the board's interpreter
@@ -96,7 +107,7 @@ const say = (msg: string) => process.stderr.write(`sagebrush board run: ${oneLin
 /** The `board run` command; returns the exit code. */
 export async function boardRun(argv: string[]): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) { process.stdout.write(USAGE); return 0; }
-  let file: string | null = null, out: string | null = null, json = false, store = false, timeout = 60, previewMs = PREVIEW_MS;
+  let file: string | null = null, out: string | null = null, json = false, store = false, timeout = 60, previewMs = PREVIEW_MS, figures: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") json = true;
@@ -104,6 +115,7 @@ export async function boardRun(argv: string[]): Promise<number> {
     else if (a === "-o" || a === "--output") out = argv[++i] ?? null;
     else if (a === "--timeout") timeout = Number(argv[++i]);
     else if (a === "--preview-ms") previewMs = Number(argv[++i]);
+    else if (a === "--figures") { figures = argv[++i] ?? null; if (figures === null) { say("--figures takes a directory"); return 2; } }
     else if (a.startsWith("-") && a !== "-") { say(`unknown option ${a}`); process.stderr.write(USAGE); return 2; }
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
@@ -135,6 +147,11 @@ export async function boardRun(argv: string[]): Promise<number> {
   }
   const run = await runBoard(doc, timeout);
   const { mode, items, reports, notes, outputs } = run;
+  // (the figures, if asked: in DIR)
+  if (figures !== null) {
+    const why = saveFigures(run, figures);
+    if (why) { say(why); return 1; }
+  }
   // the board with its previews, if asked
   let wrote: string | null = null;
   if (store && target) {
@@ -177,7 +194,7 @@ export async function boardRun(argv: string[]): Promise<number> {
       const head = `${String(r.n).padStart(3)}  ${r.status.toUpperCase().padEnd(8)} ${r.title ? oneLine(JSON.stringify(r.title)) + " " : ""}(${oneLine(JSON.stringify(r.id))}${r.page ? `, page ${r.page}` : ""})${r.ms !== undefined ? `  ${r.ms} ms` : ""}`;
       w.write(head + "\n");
       // (a picture as what it is and its size, not its text: a figure's text says little)
-      const body = r.status === "ok" ? [r.stdout, ...r.outputs.map((o) => (o.bytes ? `[${o.type}, ${Math.max(1, Math.round(o.bytes / 1024))} kB]` : o.text ?? ""))].filter(Boolean).join("\n") : r.error ?? "";
+      const body = r.status === "ok" ? [r.stdout, ...r.outputs.map(outputLine)].filter(Boolean).join("\n") : r.error ?? "";
       if (body.trim()) w.write(indent(cutLines(textLines(body.replace(/\n+$/, "")), 40)) + "\n");
     }
     const parts = (["ok", "failed", "error", "timeout", "not run"] as Status[]).filter((s) => count(s)).map((s) => `${count(s)} ${s}`);
@@ -407,6 +424,76 @@ function collect(list: any[], m: any, kept: { run: number }) {
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
 }
 
+/** An output in a report's words: a figure as its size and what it shows
+ * (and where it was saved); a picture of no known size as its kind and bytes. */
+export function outputLine(o: ItemReport["outputs"][number]): string {
+  const f = o.figure;
+  if (f) {
+    const size = f.w && f.h ? ` ${f.w}×${f.h}` : "";
+    const title = f.title ? `: ${f.title.length > 200 ? f.title.slice(0, 200) + "…" : f.title}` : "";
+    return `figure${size}${title}${f.path ? ` (saved ${oneLine(f.path)})` : ""}`;
+  }
+  return o.bytes ? `[${o.type}, ${Math.max(1, Math.round(o.bytes / 1024))} kB]` : o.text ?? "";
+}
+
+// A display's picture as a figure: an SVG's size (its width and height, or
+// its viewBox) and title; a raster picture's size (image-size.ts).
+const unescape = (s: string) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+function figureOf(type: string, data: string): Figure | null {
+  if (type === "image/svg+xml") {
+    const root = /<svg\b[^>]*>/.exec(data)?.[0] ?? "";
+    const num = (name: string) => { const m = new RegExp(`\\b${name}="([\\d.]+)(px)?"`).exec(root); return m ? Math.round(Number(m[1])) : undefined; };
+    let w = num("width"), h = num("height");
+    const vb = /viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"/.exec(root);
+    if ((w === undefined || h === undefined) && vb) { w = Math.round(Number(vb[1])); h = Math.round(Number(vb[2])); }
+    const t = /<title>([^<]*)<\/title>/.exec(data);
+    return { ...(w && h ? { w, h } : {}), ...(t ? { title: unescape(t[1]) } : {}) };
+  }
+  if (/^image\/(png|jpeg|gif|webp)$/.test(type)) {
+    const size = imageSize(type, data);
+    return size ? { w: size.w, h: size.h } : {};
+  }
+  return null;
+}
+const EXT: Record<string, string> = { "image/svg+xml": "svg", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+
+/** Each item's figures written to dir (made if it isn't there), as
+ * ITEM-1.svg and so on, never over a file that is there; each figure's
+ * report then says where.  Why not, if it can't. */
+export function saveFigures(run: BoardRun, dir: string): string | null {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (e: any) {
+    return `--figures: can't make ${oneLine(dir)}: ${oneLine(String(e?.code ?? e?.message ?? e))}`;
+  }
+  try {
+    saveEach(run, dir);
+  } catch (e: any) {
+    return String(e?.message ?? e);
+  }
+  return null;
+}
+function saveEach(run: BoardRun, dir: string) {
+  for (const { key } of run.items) {
+    const r = run.reports.get(key)!;
+    const pictures = (run.outputs.get(key) ?? []).filter((o: any) => o.output_type === "display_data").map((o: any) => Object.keys(o.data ?? {}).find((t) => t in EXT) ? o.data : null).filter(Boolean);
+    const figs = r.outputs.filter((o) => o.figure);
+    // (an item's id as a file's name: letters, digits, _ and -, and its page's mark)
+    const base = key.replace(/[^\w-]+/g, "_").slice(0, 60) || "item";
+    pictures.forEach((data: any, k: number) => {
+      const type = Object.keys(data).find((t) => t in EXT)!, text = String(data[type]);
+      let path: string, n = k + 1;
+      do path = join(dir, `${base}-${n++}.${EXT[type]}`); while (existsSync(path));
+      try {
+        writeFileSync(path, type === "image/svg+xml" ? text : Buffer.from(text, "base64"), { flag: "wx" });
+        if (figs[k]?.figure) figs[k].figure!.path = path;
+      } catch (e: any) {
+        throw new Error(`--figures: can't write ${oneLine(path)}: ${oneLine(String(e?.code ?? e?.message ?? e))}`);
+      }
+    });
+  }
+}
+
 // stdout, stderr, and each display's text (or its kind and size)
 function summary(list: any[]): Pick<ItemReport, "stdout" | "stderr" | "outputs"> {
   let stdout = "", stderr = "";
@@ -416,7 +503,8 @@ function summary(list: any[]): Pick<ItemReport, "stdout" | "stderr" | "outputs">
     else {
       const d = o.data ?? {}, text = d["text/plain"] ?? d["text/markdown"] ?? d["text/latex"];
       const other = Object.keys(d).find((t) => !t.startsWith("text/"));
-      if (other && !/^text\/plain$/.test(other)) outputs.push({ type: other, bytes: String(d[other]).length, ...(typeof text === "string" ? { text } : {}) });
+      const figure = other ? figureOf(other, String(d[other])) : null;
+      if (other && !/^text\/plain$/.test(other)) outputs.push({ type: other, bytes: String(d[other]).length, ...(typeof text === "string" ? { text } : {}), ...(figure ? { figure } : {}) });
       else if (typeof text === "string") outputs.push({ type: d["text/plain"] !== undefined ? "text/plain" : Object.keys(d)[0], text });
     }
   }
