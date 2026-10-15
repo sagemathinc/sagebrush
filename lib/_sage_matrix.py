@@ -862,21 +862,54 @@ class Matrix:
             return _sage_ffmat.FFMatrix(base, self._rows, self.ncols())
         return None
 
+    def _scalar_matrix(self, c, op):
+        """c times the identity, for M + c, c - M and the like (Sage reads
+        a scalar as that multiple of the identity of a square matrix)."""
+        n = self.nrows()
+        if n != self.ncols():
+            raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), _sa().parent(c) if hasattr(_sa(), "parent") else type(c)))
+        I = Matrix(self._base, [[int(i == j) for j in range(n)] for i in range(n)])
+        return I * c
+
     def __add__(self, other):
+        """Entrywise sum; a scalar is that multiple of the identity.
+
+        EXAMPLES::
+
+            sage: M = matrix(QQ, [[1, 2], [3, 4]]); M + 1/2, 1 - M
+            (
+            [3/2   2]  [ 0 -2]
+            [  3 9/2], [-3 -3]
+            )
+        """
         g = self._generic(other)
         if g is not None:
             return g + other
+        if isinstance(other, (int, _F)) and not isinstance(other, bool):
+            return self + self._scalar_matrix(other, "+")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)])
+
+    def __radd__(self, other):
+        if isinstance(other, (int, _F)) and not isinstance(other, bool):
+            return self._scalar_matrix(other, "+") + self
+        return NotImplemented
 
     def __sub__(self, other):
         g = self._generic(other)
         if g is not None:
             return g - other
+        if isinstance(other, (int, _F)) and not isinstance(other, bool):
+            return self - self._scalar_matrix(other, "-")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)])
+
+    def __rsub__(self, other):
+        if isinstance(other, (int, _F)) and not isinstance(other, bool):
+            return self._scalar_matrix(other, "-") - self
+        return NotImplemented
 
     def __neg__(self):
         return Matrix(self._base, [[-a for a in r] for r in self._rows])
@@ -1785,6 +1818,9 @@ class _AmbientOther:
     def __repr__(self):
         if repr(self._R) == "Symbolic Ring":
             return "Vector space of dimension %d over Symbolic Ring" % self._n
+        if type(self._R).__name__ == "SeriesRing_":
+            # (power series in one variable over a field: a PID, as Sage says)
+            return "Ambient free module of rank %d over the principal ideal domain %r" % (self._n, self._R)
         return "Vector space of dimension %d over %r" % (self._n, self._R)
 
     def base_ring(self):
@@ -1843,6 +1879,9 @@ def vector(*args):
     if ring is sa.QQ or ring is sa.ZZ:
         if ring is sa.ZZ and any(not isinstance(x, int) for x in v):
             raise TypeError("no conversion of this rational to integer")
+        v._ring = ring
+    elif type(ring).__name__ == "SeriesRing_" and not ring._laurent:
+        # (a vector of power series: the D_p-valued p-adic L-series)
         v._ring = ring
     return v
 

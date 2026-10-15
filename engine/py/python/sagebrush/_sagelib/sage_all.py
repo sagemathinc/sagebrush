@@ -471,6 +471,18 @@ class Rational(_Fraction):
         """
         return _CallableInt(self._numerator)
 
+    def valuation(self, p):
+        """The exponent of the prime p in self (+Infinity for 0).
+
+        EXAMPLES::
+
+            sage: QQ(9/4).valuation(3), QQ(9/4).valuation(2), QQ(-50/7).valuation(5), QQ(0).valuation(3)
+            (2, -2, 2, +Infinity)
+        """
+        if self._numerator == 0:
+            return oo
+        return Integer(valuation(self, p))
+
     @property
     def denominator(self):
         """The denominator.
