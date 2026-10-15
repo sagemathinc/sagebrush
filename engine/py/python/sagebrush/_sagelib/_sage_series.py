@@ -498,8 +498,13 @@ class Series:
 
             sage: R.<t> = QQ[[]]; O(t^3).is_zero(), t.is_zero()
             (True, False)
+            sage: K = Qp(3, 5)
+            sage: S.<T> = K[[]]
+            sage: f = K(0, 2) + K(0, 1)*T + O(T^3); f, f.is_zero()
+            (O(T^3), True)
         """
-        return not self._c
+        # (p-adic coefficients O(p^k) count as 0, as in Sage)
+        return all(not c for c in self._c)
 
     def __bool__(self):
         return bool(self._c)
@@ -524,7 +529,10 @@ class Series:
     def __repr__(self):
         name = self._R._name
         parts = []
-        for i, c in enumerate(self._c):
+        # a series whose coefficients are all 0 to their precision shows
+        # only its O() (Sage: O(T^3), not O(3^2) + O(3)*T + O(T^3))
+        cs = [] if self.is_zero() else self._c
+        for i, c in enumerate(cs):
             if _is_zero(c):
                 continue
             e = self._v + i
@@ -1152,6 +1160,17 @@ def _mono(name, e):
 
 def _term(c, e, name, laurent=False):
     """(negative, text) of the term c*x^e."""
+    if type(c).__name__ == "pAdicCappedRelativeElement":
+        # (Sage: a p-adic coefficient is not atomic: it is parenthesized
+        # whenever it shows a + or a -, as (O(5^-1))*T, and so is the
+        # constant term of a Laurent series then)
+        s = repr(c)
+        compound = "+" in s or "-" in s
+        if e == 0 and not (laurent and compound):
+            return False, s
+        if compound:
+            s = "(" + s + ")"
+        return False, s if e == 0 else s + "*" + _mono(name, e)
     full = repr(_out(c))
     neg = full.startswith("-")
     s = full[1:] if neg else full
