@@ -141,6 +141,14 @@ for (const [file, name, heading] of SECTIONS) {
 }
 out.push(END);
 const section = out.join("\n");
+// (every kind of item a section, as doc.ts's DocNode lists them; and every
+// type written as a section's name one: a new kind of item is never left
+// out unseen, HARD-EC7-1)
+const sectioned = new Set(SECTIONS.map(([, name]) => name));
+const union = parse("web/board/doc.ts").aliases.DocNode;
+if (!union) problems.push("no type DocNode in web/board/doc.ts");
+else for (const m of split(union, "|")) if (!sectioned.has(m)) problems.push(`DocNode's ${m}: a kind of item with no section in the field reference (add it to SECTIONS)`);
+for (const name of Object.keys(NAMES)) if (name !== "DocNode" && name !== "Preview" && !sectioned.has(name)) problems.push(`${name}: written as "${NAMES[name]}", but no section has it`);
 
 if (problems.length) {
   process.stderr.write(`board-format-fields: ${problems.length} problem(s):\n  ${problems.join("\n  ")}\n`);
