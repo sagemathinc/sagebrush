@@ -1087,6 +1087,22 @@ test("integral2 and integral3 reproduce their published examples by the iterated
   ]);
 });
 
+test("integral2 and integral3 refuse complex integrands and limits, and a Method that is not text, before integrating", () => {
+  const out = require("node:child_process").execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, integral2(@(x,y) (1+2i)*ones(size(x)), 0, 1, 0, 1), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) (1+2i)*ones(size(x)), 0, 1, 0, 1, 0, 1), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) (1+2i), 0, 1, 0, 1, 'Vectorized', false), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) (1+2i), 0, 1, 0, 1, 0, 1, 'Vectorized', false), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) x.*y, 0, 1, @(x) 1i*x, 1), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) x.*y, 0, 1, 0, 1, 'Method', 17), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) x, 0, 1, 0, 1, 0, 1, 'Method', 17), catch e, disp(e.message), end",
+    "fprintf('%.15g %.15g\\n', integral2(@(x,y) x.*y, 0, 1, 0, @(x) x), integral3(@(x,y,z) x + y + z, 0, 1, 0, 1, 0, 1, 'Method', 'iterated'));",
+  ].join("\n")], { encoding: "utf8" });
+  const no = (s: string) => s + ": complex integrands and limits are not supported in Sagebrush.";
+  assert.deepEqual(out.trim().split("\n"), [no("integral2"), no("integral3"), no("integral2"), no("integral3"), no("integral2"),
+    'integral2: Method must be "auto", "tiled" or "iterated".', 'integral3: Method must be "auto", "tiled" or "iterated".', "0.125 1.5"]);
+});
+
 test("ode45 and ode23: OutputFcn in the solution-structure form too; deval only on the solution's own interval", () => {
   const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
     // (a stop request ends the integration whatever the outputs, with OutputSel too)

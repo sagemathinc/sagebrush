@@ -648,7 +648,8 @@ The rest:
   (integral over x of integral over y, and z), since the "tiled" method,
   Shampine's 2-D program, is not available here and is refused; the inner
   integrals use the same tolerances, and their warnings are reported
-  once. Waypoints are refused;
+  once. Waypoints, complex integrands and limits, and a Method that is
+  not text are refused;
 - `normest`'s estimates on the way and its count: it is Higham's power
   method (the estimate ||S x|| for a unit x) with MATLAB's documented
   stopping rule, and MATLAB documents neither its own estimate formula
