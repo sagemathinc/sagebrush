@@ -181,3 +181,10 @@ test("board run: an item whose own id is another's cell's (x, x, x@p2): three ce
   assert.equal(status, 0);
   assert.deepEqual(report.items.map((i: any) => [i.n, i.id, i.page, i.stdout]), [[1, "x", 1, "first\n"], [2, "x", 2, "second\n"], [3, "x@p2", 3, "real\n"]]);
 });
+
+test("board run: a board of a later version of the format is refused as the board refuses it, nothing run", () => {
+  const r = run(["-"], JSON.stringify({ format: "sagebrush-board", version: 99, nodes: [{ id: "a", code: "print('ran')" }] }));
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^sagebrush board run: -: this board is in version 99 of the format, from a later Sagebrush; this sagebrush \((dev|\d+\.\d+\.\d+\S*)\) reads version 1: update sagebrush \(npx sagebrush@latest\)\n$/);
+});
