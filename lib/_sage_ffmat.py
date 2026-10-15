@@ -1096,7 +1096,9 @@ def MatrixSpace(base, nrows, ncols=None, sparse=False):
         sage: MatrixSpace(GF(2), 20, 40, sparse=True).random_element().rank() <= 20
         True
     """
-    return FFMatrixSpace(base, int(nrows), int(nrows if ncols is None else ncols))
+    from _sage_matrix import _shape
+    m, n = _shape(nrows, nrows if ncols is None else ncols)
+    return FFMatrixSpace(base, m, n)
 
 
 def matrix(base, *args, **kwds):
@@ -1108,7 +1110,7 @@ def matrix(base, *args, **kwds):
         [0 1 2]
         [3 4 0]
     """
-    from _sage_matrix import _bounded_list, _bounded_rows
+    from _sage_matrix import _bounded_list, _bounded_rows, _shape, _dim
     if not args:
         return FFMatrix(base, [], 0)
     if len(args) == 1:
@@ -1118,11 +1120,14 @@ def matrix(base, *args, **kwds):
         rows = _bounded_rows(rows)
         return FFMatrix(base, rows, len(rows[0]) if rows else 0)
     if len(args) == 2 and isinstance(args[1], (list, tuple)) and args[1] and isinstance(args[1][0], (list, tuple)):
-        m = int(args[0])
-        rows = [list(r) for r in args[1]]
+        m = _dim(args[0])
+        rows = _bounded_rows(args[1])
+        if len(rows) != m:
+            raise ValueError("entries do not fill a matrix with %d rows" % m)
         return FFMatrix(base, rows, len(rows[0]))
-    m = int(args[0])
-    n = int(args[1]) if len(args) > 1 and not isinstance(args[1], (list, tuple, range)) else m
+    m = _dim(args[0])
+    n = _dim(args[1], "columns") if len(args) > 1 and not isinstance(args[1], (list, tuple, range)) else m
+    m, n = _shape(m, n)
     entries = args[2] if len(args) > 2 else (args[1] if len(args) == 2 and isinstance(args[1], (list, tuple, range)) else 0)
     if isinstance(entries, (list, tuple, range)):
         e = _bounded_list(entries, max(m * n, m))
@@ -1189,7 +1194,8 @@ class FFVectorSpace:
         """
         if x == 0 and not isinstance(x, (list, tuple, FFVector)):
             return FFVector(self._base, [0] * self._n)
-        v = FFVector(self._base, list(x))
+        from _sage_matrix import _bounded_list
+        v = FFVector(self._base, _bounded_list(x, self._n))
         if len(v) != self._n:
             raise TypeError("entries must be a list of length %d" % self._n)
         return v
@@ -1266,7 +1272,8 @@ class FFVectorSpace:
             [1 0 0 0 0 1 1 0]
             [0 1 0 0 0 1 1 0]
         """
-        return FFSubspace(self._base, self._n, [list(g) for g in gens])
+        from _sage_matrix import _bounded_rows
+        return FFSubspace(self._base, self._n, _bounded_rows(gens))
 
     span = subspace
 
@@ -1442,9 +1449,11 @@ def VectorSpace(base, n):
         sage: VectorSpace(GF(2), 8)
         Vector space of dimension 8 over Finite Field of size 2
     """
-    key = (id(base), int(n))
+    from _sage_matrix import _vector_dim
+    n = _vector_dim(n)
+    key = (id(base), n)
     if key not in _SPACES:
-        _SPACES[key] = (base, FFVectorSpace(base, int(n)))
+        _SPACES[key] = (base, FFVectorSpace(base, n))
     return _SPACES[key][1]
 
 
@@ -1456,4 +1465,5 @@ def vector(base, entries):
         sage: vector(GF(5), [1, 2, 3]).parent()
         Vector space of dimension 3 over Finite Field of size 5
     """
-    return FFVector(base, list(entries))
+    from _sage_matrix import _bounded_list
+    return FFVector(base, _bounded_list(entries))

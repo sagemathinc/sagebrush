@@ -192,7 +192,7 @@ class Vector(list):
             sage: vector([1, 0, 0]).cross_product(vector([0, 1, 0]))
             (0, 0, 1)
         """
-        a, b = list(self), list(other)
+        a, b = list(self), _bounded_list(other, 3)
         if len(a) != 3 or len(b) != 3:
             raise TypeError("the cross product is defined for vectors of length 3")
         return Vector(_norm(x) for x in (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]))
@@ -332,6 +332,7 @@ class MatrixSpace_:
         [3 4]
     """
     def __init__(self, base, nrows, ncols):
+        nrows, ncols = _shape(nrows, ncols)
         self._base, self._nrows, self._ncols = base, nrows, ncols
 
     def __repr__(self):
@@ -787,7 +788,10 @@ class Matrix:
             [1 0 8]
         """
         if not isinstance(right, Matrix):
-            right = Matrix(self._base, [[x] for x in right])
+            try:
+                right = Matrix(self._base, [[x] for x in _bounded_list(right, self.nrows())])
+            except ValueError:
+                raise TypeError("the vector has more entries than the matrix has rows (%d)" % self.nrows())
         if right.nrows() != self.nrows():
             raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), right.nrows()))
         base = self._base if self._base is right._base else _sa().QQ
@@ -807,7 +811,10 @@ class Matrix:
             [3 1]
         """
         if not isinstance(bottom, Matrix):
-            bottom = Matrix(self._base, [list(bottom)])
+            try:
+                bottom = Matrix(self._base, [_bounded_list(bottom, self.ncols())])
+            except ValueError:
+                raise TypeError("number of columns must be the same: more than %d entries" % self.ncols())
         if bottom.ncols() != self.ncols():
             raise TypeError("number of columns must be the same, %d != %d" % (self.ncols(), bottom.ncols()))
         base = self._base if self._base is bottom._base else _sa().QQ
@@ -1017,7 +1024,7 @@ class Matrix:
             [   1 -1/2    0]
         """
         if self.ncols() == 0:
-            n = self.nrows()
+            n, _ = _shape(self.nrows(), self.nrows())
             return FreeModule_(self._base, n, [[int(i == j) for j in range(n)] for i in range(n)])
         return _kernel(self.transpose(), self._base)
 
@@ -1517,7 +1524,7 @@ class FreeModule_:
             return Vector([])
         m = Matrix(_sa().QQ, self._basis)
         try:
-            return m.solve_left(Vector(_norm(x) for x in v))
+            return m.solve_left(Vector(_norm(x) for x in _bounded_list(v, self._degree)))
         except ValueError:
             raise ArithmeticError("vector is not in free module")
 
@@ -1533,7 +1540,7 @@ class FreeModule_:
             [0 0 1]
         """
         from sagebrush import linalg
-        rows = [[_F(x) for x in g] for g in gens]
+        rows = [[_F(x) for x in g] for g in _bounded_rows(gens)]
         if not rows:
             return FreeModule_(self._base, self._degree, [])
         R, _ = linalg.rref(rows)
@@ -1545,7 +1552,10 @@ class FreeModule_:
         return isinstance(other, FreeModule_) and (self._base, self._degree, self._basis) == (other._base, other._degree, other._basis)
 
     def __contains__(self, v):
-        v = list(v)
+        try:
+            v = _bounded_list(v, self._degree)
+        except ValueError:
+            return False
         if len(v) != self._degree:
             return False
         if not self._basis:
@@ -1657,7 +1667,7 @@ class VectorSpace_QQ(FreeModule_):
     """
 
     def __init__(self, n):
-        self._base, self._degree = _sa().QQ, n
+        self._base, self._degree = _sa().QQ, _vector_dim(n)
         self._basis = None
 
     def __repr__(self):
@@ -1673,7 +1683,7 @@ class VectorSpace_QQ(FreeModule_):
         """
         if isinstance(x, int) and x == 0:
             return Vector([0] * self._degree)
-        v = list(x)
+        v = _bounded_list(x, self._degree)
         if len(v) != self._degree:
             raise TypeError("entries must be a list of length %d" % self._degree)
         w = Vector(_norm(_F(t)) for t in v)
@@ -1689,7 +1699,7 @@ class VectorSpace_QQ(FreeModule_):
             [(1, 0), (0, 1)]
         """
         import _sage_ffmat
-        n = self._degree
+        n, _ = _shape(self._degree, self._degree)
         return _sage_ffmat._Basis([Vector(int(i == j) for j in range(n)) for i in range(n)])
 
     gens = basis
@@ -1750,6 +1760,7 @@ class VectorSpace_QQ(FreeModule_):
 
     def __contains__(self, v):
         try:
+            v = _bounded_list(v, self._degree)
             return len(v) == self._degree and all(_F(x) is not None for x in v)
         except (TypeError, ValueError):
             return False
@@ -1765,7 +1776,14 @@ class _AmbientZZ(FreeModule_):
     """ZZ^n."""
 
     def __init__(self, n):
-        self._base, self._degree, self._basis = _sa().ZZ, n, [[int(i == j) for j in range(n)] for i in range(n)]
+        self._base, self._degree = _sa().ZZ, n
+
+    @property
+    def _basis(self):
+        # (built when asked for: vector(range(10^6)).parent() would build
+        # a 10^6 x 10^6 identity)
+        n, _ = _shape(self._degree, self._degree)
+        return [[int(i == j) for j in range(n)] for i in range(n)]
 
     def __repr__(self):
         return "Ambient free module of rank %d over the principal ideal domain Integer Ring" % self._degree
@@ -1778,7 +1796,7 @@ class _AmbientZZ(FreeModule_):
             sage: vector([1, 2]).parent()([3, 4])
             (3, 4)
         """
-        return Vector(_norm(t) for t in x)
+        return Vector(_norm(t) for t in _bounded_list(x, self._degree))
 
 
 class _AmbientOther:
@@ -1806,6 +1824,7 @@ def _kernel(a, base):
     from sagebrush import linalg
     n = a.ncols()
     if a.nrows() == 0:
+        _shape(n, n)
         k = [[int(i == j) for j in range(n)] for i in range(n)]
     else:
         k = linalg.kernel(a._rows) if n else []
@@ -1846,6 +1865,42 @@ def _bounded_list(obj, limit=None, what="entries"):
     if len(out) > limit:
         raise ValueError("more than %d %s" % (limit, what))
     return out
+
+
+def _dim(v, what="rows", negative=ArithmeticError):
+    """An exact non-negative integer dimension: a float is a TypeError and
+    a negative number an ArithmeticError (a ValueError for a vector space),
+    as in Sage."""
+    import operator
+    if isinstance(v, float):
+        raise TypeError("the number of %s must be an integer, not %r" % (what, v))
+    try:
+        n = operator.index(v)
+    except TypeError:
+        raise TypeError("the number of %s must be an integer, not %r" % (what, v))
+    if n < 0:
+        raise negative("the number of %s must be non-negative, not %d" % (what, n))
+    return n
+
+
+def _vector_dim(n):
+    """The degree of a vector space: as _dim, at most the entry limit."""
+    n = _dim(n, "entries", ValueError)
+    if n > _MAX_ENTRIES:
+        raise NotImplementedError("a vector space of dimension %d exceeds sagebrush's limit of %d" % (n, _MAX_ENTRIES))
+    return n
+
+
+def _shape(m, n, limit=None):
+    """(m, n) checked before anything is allocated: exact non-negative
+    integers, each and their product at most limit (NotImplementedError
+    beyond; a 65537 x 0 matrix still allocates 65537 rows)."""
+    if limit is None:
+        limit = _MAX_ENTRIES
+    m, n = _dim(m, "rows"), _dim(n, "columns")
+    if m > limit or n > limit or m * n > limit:
+        raise NotImplementedError("a %d x %d matrix exceeds sagebrush's limit of %d entries (and rows, columns)" % (m, n, limit))
+    return m, n
 
 
 def _bounded_rows(obj, limit=None):
@@ -2038,7 +2093,7 @@ def matrix(*args, **kwds):
         # K[1], ... would build polynomial rings forever)
         raise NotImplementedError("matrices over %r are not available in sagebrush yet" % (args[0],))
     if len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
-        r, c = args[0], args[1]
+        r, c = _shape(args[0], args[1])
         ent = args[2] if len(args) > 2 else 0
         ncols = c
         if isinstance(ent, (int, _F)) or type(ent).__name__ == "Rational":
@@ -2055,7 +2110,7 @@ def matrix(*args, **kwds):
     elif len(args) == 2 and isinstance(args[0], int) and not isinstance(args[1], int):
         # matrix(QQ, nrows, entries): the number of columns from the entries
         ent = _bounded_list(args[1])
-        r = args[0]
+        r = _dim(args[0])
         if ent and isinstance(ent[0], (list, tuple)):
             rows = _bounded_rows(ent)
         else:
@@ -2064,7 +2119,8 @@ def matrix(*args, **kwds):
             c = len(ent) // r
             rows = [ent[i * c:(i + 1) * c] for i in range(r)]
     elif len(args) == 1 and isinstance(args[0], int):
-        rows = [[0] * args[0] for _ in range(args[0])]
+        n, _ = _shape(args[0], args[0])
+        rows = [[0] * n for _ in range(n)]
     else:
         rows = _bounded_list(args[0] if args else [], what="rows")
         if rows and not any(isinstance(r, (list, tuple)) or hasattr(r, "__iter__") and not isinstance(r, str) for r in rows):
@@ -2125,17 +2181,24 @@ def block_matrix(*args, **kwds):
     if args and args[0] in (sa.ZZ, sa.QQ):
         base = args.pop(0)
     subdivide = kwds.get("subdivide", True)
+    # (every input read boundedly; the grid and then the output's size are
+    # checked before anything is built)
     if len(args) == 3:
-        nr, nc, flat = args[0], args[1], list(args[2])
+        nr, nc = _shape(args[0], args[1])
+        flat = _bounded_list(args[2], nr * nc)
+        if len(flat) != nr * nc:
+            raise ValueError("expected %d blocks, got %d" % (nr * nc, len(flat)))
         grid = [flat[i * nc:(i + 1) * nc] for i in range(nr)]
     elif len(args) == 2:
-        nr, flat = args[0], list(args[1])
+        nr, flat = _dim(args[0]), _bounded_list(args[1])
+        if nr == 0 or len(flat) % nr:
+            raise ValueError("the blocks do not fill %d rows" % nr)
         nc = len(flat) // nr
         grid = [flat[i * nc:(i + 1) * nc] for i in range(nr)]
     else:
-        L = list(args[0])
+        L = _bounded_list(args[0], what="blocks")
         if L and isinstance(L[0], (list, tuple)):
-            grid = [list(r) for r in L]
+            grid = _bounded_rows(L)
         else:
             k = int(round(len(L) ** 0.5))
             if k * k != len(L):
@@ -2150,6 +2213,7 @@ def block_matrix(*args, **kwds):
     for j, w in enumerate(widths):
         if w is None:
             widths[j] = heights[j] if j < len(heights) else 1
+    _shape(sum(heights), sum(widths))
     if base is None:
         base = sa.QQ if any(is_m(b) and b._base is sa.QQ for r in grid for b in r) or any(
             not is_m(b) and _F(b).denominator != 1 for r in grid for b in r) else sa.ZZ
@@ -2184,10 +2248,15 @@ def block_diagonal_matrix(*blocks, **kwds):
         [0 0|1 2]
         [0 0|3 4]
     """
-    if len(blocks) == 1 and isinstance(blocks[0], (list, tuple)):
+    if len(blocks) == 1 and not isinstance(blocks[0], Matrix):
         blocks = blocks[0]
-    blocks = list(blocks)
+    blocks = _bounded_list(blocks, what="blocks")
+    if not all(isinstance(b, Matrix) for b in blocks):
+        raise NotImplementedError("block_diagonal_matrix of other than matrices over ZZ or QQ is not available in sagebrush yet")
     k = len(blocks)
+    # the k^2 blocks and the output, before building them
+    _shape(k, k)
+    _shape(sum(b.nrows() for b in blocks), sum(b.ncols() for b in blocks))
     grid = [[blocks[i] if i == j else Matrix(blocks[i]._base, [[0] * blocks[j].ncols() for _ in range(blocks[i].nrows())]) for j in range(k)] for i in range(k)]
     return block_matrix(grid, subdivide=kwds.get("subdivide", True))
 
@@ -2232,7 +2301,7 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
         raise NotImplementedError("random matrices over %r are not available in sagebrush yet" % (base,))
     import random as _r
     sa = _sa()
-    n = nrows if ncols is None else ncols
+    nrows, n = _shape(nrows, nrows if ncols is None else ncols)
     if algorithm == "unimodular":
         # a product of random elementary matrices
         m = [[int(i == j) for j in range(n)] for i in range(nrows)]
@@ -2289,6 +2358,7 @@ def identity_matrix(base, n=None):
     if _is_padic(base):
         import _sage_padic
         return _sage_padic.padic_matrix(base, n, n, 1)
+    n, _ = _shape(n, n)
     return Matrix(base, [[int(i == j) for j in range(n)] for i in range(n)])
 
 
@@ -2313,7 +2383,8 @@ def zero_matrix(base, nrows=None, ncols=None):
     if base not in (sa.ZZ, sa.QQ):
         # zero_matrix(n) or zero_matrix(m, n)
         base, nrows, ncols = sa.ZZ, base, nrows
-    return Matrix(base, [[0] * (nrows if ncols is None else ncols) for _ in range(nrows)])
+    nrows, ncols = _shape(nrows, nrows if ncols is None else ncols)
+    return Matrix(base, [[0] * ncols for _ in range(nrows)], ncols)
 
 
 def diagonal_matrix(*args):
@@ -2330,7 +2401,8 @@ def diagonal_matrix(*args):
     base = None
     if args and args[0] in (sa.ZZ, sa.QQ):
         base, args = args[0], args[1:]
-    d = list(args[0])
+    d = _bounded_list(args[0])
+    _shape(len(d), len(d))
     m = matrix([[d[i] if i == j else 0 for j in range(len(d))] for i in range(len(d))])
     return m if base is None else m.change_ring(base)
 
