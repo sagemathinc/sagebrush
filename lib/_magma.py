@@ -591,7 +591,7 @@ def _to(a, b, c):
 
 def _check_index(n, i):
     if not isinstance(i, int) or isinstance(i, bool):
-        raise MagmaError("Bad argument types\nArgument types given: %s" % Type(i))
+        raise MagmaError("Bad argument types\nArgument types given: %s" % _type_of(i))
     if i < 1 or i > n:
         raise MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (abs(i), i, n) if i < 1 else "Sequence element %d not defined" % i)
 
@@ -778,7 +778,7 @@ class MRec:
         if c is None:
             return v
         if isinstance(c, _Cat):
-            return v if Type(v) == c else None
+            return v if _type_of(v) == c else None
         try:
             return _coerce(c, v)
         except Exception:
@@ -866,7 +866,7 @@ def _struct_name(S):
     """A map's domain or codomain as Magma prints it in the map: "RngInt: x"
     when a global variable x holds it, else the structure itself."""
     n = _global_name(S)
-    return "%s: %s" % (Type(S), n) if n is not None else _inline(S)
+    return "%s: %s" % (_type_of(S), n) if n is not None else _inline(S)
 
 
 class MMap:
@@ -1069,7 +1069,7 @@ def _unsupported(name, pos=None):
 def _bool(v):
     if isinstance(v, bool):
         return v
-    raise MagmaError("Bad argument types: expected a boolean, got %s" % Type(v))
+    raise MagmaError("Bad argument types: expected a boolean, got %s" % _type_of(v))
 
 
 def _num(x):
@@ -1686,7 +1686,7 @@ def _struct_eq(a, b, op, pos):
 def _eq(a, b, pos=None, op="eq"):
     if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
         # Magma has no equality of record formats
-        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (Type(a), Type(b)), "'%s'" % op, True, pos)
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(a), _type_of(b)), "'%s'" % op, True, pos)
     da, db = _desc(a), _desc(b)
     if da is not None and db is not None:
         code = _common(da, db)
@@ -2056,6 +2056,9 @@ def _reduce(op, s, pos=None):
 def _gen(R, i):
     if hasattr(R, "_magma_gen"):
         return R._magma_gen(i)
+    if not callable(getattr(R, "gen", None)):
+        # (not a Python AttributeError)
+        raise MagmaError("generators of this structure (its .i) are not supported yet")
     return R.gen(i - 1)
 
 
@@ -2109,7 +2112,7 @@ class MReal:
             return MReal._frac(_Fraction(x), prec)
         if isinstance(x, float):
             return MReal._frac(_Fraction(x), prec)
-        raise MagmaError("cannot convert %s to a real" % Type(x))
+        raise MagmaError("cannot convert %s to a real" % _type_of(x))
 
     @staticmethod
     def _frac(f, prec):
@@ -2553,15 +2556,29 @@ def _type_name(x):
         return "FldRat"
     if type(x).__name__ == "MList":
         return "List"
-    if x is _ZZ:
-        return "RngInt"
-    if x is _QQ:
-        return "FldRat"
+    # (number fields: Magma 2.18's names; a field made by QuadraticField is
+    # its own type, with its own order and elements)
+    if isinstance(x, _MNumberField):
+        return "FldQuad" if x._quadratic else "FldNum"
+    if isinstance(x, _MOrder):
+        return "RngQuad" if x.K._quadratic else "RngOrd"
+    if isinstance(x, _MNFElt):
+        return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
     return None
 
 
-def Type(x):
+def _type_of(x):
+    """x's type, for messages; Python's name for a type Magma mode doesn't
+    name yet."""
     return _Cat(_type_name(x) or _type(x))
+
+
+def Type(x):
+    t = _type_name(x) or _type(x)
+    if t == type(x).__name__:
+        # (not a Magma type's name, but Python's: never given as a value)
+        raise MagmaError("Type of this object is not supported yet", "'Type'")
+    return _Cat(t)
 
 
 def _type(x):
@@ -2606,7 +2623,7 @@ def _ext_type(x):
         return "Map[%s, %s]" % (_ext_type(x.dom), _ext_type(x.cod))
     if isinstance(x, MRec):
         return "Rec"
-    return str(Type(x))
+    return str(_type_of(x))
 
 
 def _ring_cat(b):
@@ -3757,7 +3774,17 @@ class _MNumberField(_snf.NumberField_absolute):
         return self.degree()
 
     def _magma_discriminant(self):
-        return self.discriminant()
+        # Magma's Discriminant(K) is its defining polynomial's (its equation
+        # order's), not the maximal order's: 729 for x^3 - 9*x - 9, whose
+        # maximal order's is 81; but a field made by QuadraticField (FldQuad)
+        # gives the field's, 5 for QuadraticField(5) (checked against Magma
+        # 2.18)
+        if self._quadratic:
+            # Q(sqrt(s)), s squarefree: s or 4s, without the general route
+            # (which could factor s again)
+            s = -int(self._f[0])
+            return s if s % 4 == 1 else 4 * s
+        return _m_num(self.polynomial().discriminant())
 
     def _magma_coerce(self, x):
         return self(x)
@@ -3790,7 +3817,8 @@ class _MOrder:
         return self.K.degree()
 
     def _magma_discriminant(self):
-        return self.K.discriminant()
+        # (a quadratic field's maximal order: its field's, s or 4s)
+        return self.K._magma_discriminant() if self.K._quadratic else self.K.discriminant()
 
 
 def _field(x):
@@ -3810,11 +3838,52 @@ def NumberField(f, *, Check=True):
         raise MagmaError("NumberField: %s" % e)
 
 
+# (the squarefree part's work: trial division by the primes up to this,
+# then what is left must be decided without factoring it, HARD-731-1)
+_SQUAREFREE_TRIAL = 10 ** 5
+
+
+def _squarefree_part(d):
+    """The squarefree part of the integer d, with its sign (0 for 0), by
+    bounded work: trial division by the primes up to _SQUAREFREE_TRIAL,
+    then the cofactor m, all of whose primes are larger, is decided when it
+    is 1, a square, a prime, or below the bound cubed (then a product of two
+    different primes); else refused rather than factored without a bound
+    (a 78-digit semiprime would take ECM minutes; Magma 2.18 also tries to
+    factor it)."""
+    if d == 0:
+        return 0
+    s, m = (-1 if d < 0 else 1), abs(d)
+    for p in _sa.prime_range(2, _SQUAREFREE_TRIAL + 1):
+        if p * p > m:
+            break
+        e = 0
+        while m % p == 0:
+            m //= p
+            e += 1
+        if e % 2:
+            s *= p
+    if m == 1:
+        return s
+    r = _math.isqrt(m)
+    if r * r == m:
+        return s
+    if m < _SQUAREFREE_TRIAL ** 3 or _sa.is_prime(m):
+        # (no prime below the bound left: m is a prime, or below the bound
+        # cubed, two different primes, as it isn't a square)
+        return s * m
+    raise MagmaError("QuadraticField: the squarefree part of %d was not found within the limit (its prime factors above %d are not known); this is not supported yet" % (d, _SQUAREFREE_TRIAL), "'QuadraticField'")
+
+
 def QuadraticField(d):
-    d = int(d)
-    if _sa.is_square(d):
-        raise MagmaError("QuadraticField: the argument must not be a square")
-    return _MNumberField([-d, 0, 1], quadratic=True)
+    # (an integer only: int() would take 25/7 as 3)
+    if isinstance(d, bool) or not isinstance(d, int):
+        raise MagmaError("Bad argument types\nArgument types given: %s" % _type_of(d), "'QuadraticField'")
+    # Magma's field is Q(sqrt(s)), s the squarefree part of d: x^2 - 3 for 12
+    s = _squarefree_part(d)
+    if s in (0, 1):
+        raise MagmaError("QuadraticField of a square (Magma's rational field) is not supported yet")
+    return _MNumberField([-s, 0, 1], quadratic=True)
 
 
 def MaximalOrder(K):
