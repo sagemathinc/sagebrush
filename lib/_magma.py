@@ -89,15 +89,26 @@ def _report(e, line, col):
         # (before running it) and goes on, in a file too
         name = m.group(1)
         name = name[:-1] if name.endswith("_") else name
-        line, col = _undeclared(name, line, col)
-        _sys.stdout.write("%sUser error: Identifier '%s' has not been declared or assigned\n" % (_where(line, col), name))
+        line, col = getattr(e, "_mpos", None) or _undeclared(name, line, col)
+        if _is_intrinsic_name(name):
+            # one of Magma's intrinsics that Sagebrush doesn't have: said so,
+            # not as an undeclared name (Magma has it)
+            _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush\n" % (_where(line, col), name))
+        else:
+            _sys.stdout.write("%sUser error: Identifier '%s' has not been declared or assigned\n" % (_where(line, col), name))
         if _src[2] is None:
             raise SystemExit(1)  # no recovery: a cell stops, as before
         return
     if isinstance(e, _UserError):
         _sys.stdout.write("Runtime error: %s\n" % e)
     else:
-        msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
+        um = _re.search(r"local variable '([A-Za-z_][A-Za-z0-9_]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
+        if um:
+            # a function's local read before it is assigned: Magma's words
+            v = um.group(1)
+            msg = "Variable '%s' has not been initialized" % (v[:-1] if v.endswith("_") and v[:-1] in _PYKW else v)
+        else:
+            msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
         where = getattr(e, "where", None)
         blank = "\n" if getattr(e, "blank", True) else ""
         line, col = getattr(e, "pos", None) or (line, col)
@@ -174,6 +185,24 @@ def _first(v):
     return v[0] if isinstance(v, Multi) else v
 
 
+class _NoValue:
+    """A missing return value (return x, _;): a variable assigned it by a
+    multiple assignment becomes unassigned, and printing leaves it out."""
+
+    def __repr__(self):
+        return "_"
+
+
+_NOVAL = _NoValue()
+
+
+def _present(v):
+    """A value assigned to an element or a field: not a missing one."""
+    if v is _NOVAL:
+        raise MagmaError("assigning a missing return value (_) to an element or field is not supported yet")
+    return v
+
+
 def _values(v, n):
     if isinstance(v, Multi):
         if len(v) < n:
@@ -196,6 +225,136 @@ def _refk(r, k):
 def _named(f, name):
     f.__name__ = name
     return f
+
+
+class _Undeclared:
+    """What a function, func< > or map rule captures for a free name that is
+    one of Magma's intrinsics Sagebrush doesn't have (Magma accepts the
+    definition).  It never acts as a value: every read of the name in the
+    body checks for it and is the error "'X' is a Magma intrinsic not
+    implemented in Sagebrush" (src/magma.ts, `x if x is not _mU else
+    _m._missing(...)`; map rules: _val); a nested definition's capture
+    passes it on.  Its own operations fail too, should it be reached any
+    other way (CORR-55A-1)."""
+
+    __slots__ = ()
+
+    def _fail(self, *args, **kw):
+        raise MagmaError("a Magma intrinsic not implemented in Sagebrush was used")
+
+    __call__ = __getitem__ = __iter__ = __len__ = __bool__ = __eq__ = __ne__ = __hash__ = _fail
+    __repr__ = __str__ = __neg__ = __pos__ = __lt__ = __le__ = __gt__ = __ge__ = _fail
+    __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = __truediv__ = __rtruediv__ = _fail
+    __pow__ = __rpow__ = __mod__ = __rmod__ = __floordiv__ = __rfloordiv__ = _fail
+
+    def __getattr__(self, attr):
+        self._fail()
+
+
+_UNDECLARED = _Undeclared()
+
+
+def _missing(name, pos=None):
+    """A read of a captured name that is an intrinsic Sagebrush doesn't
+    have: the error, where it is read (_report says what it is)."""
+    e = NameError("name '%s' is not defined" % name)
+    e._mpos = pos
+    raise e
+
+
+_INTRINSIC_NAMES = None
+
+
+def _is_intrinsic_name(name):
+    """Whether name is one of Magma's intrinsics (the names its Handbook
+    documents; lib/_magma_names.py, loaded the first time it is needed)."""
+    global _INTRINSIC_NAMES
+    if _INTRINSIC_NAMES is None:
+        import _magma_names
+        _INTRINSIC_NAMES = frozenset(_magma_names.NAMES.split())
+    return name in _INTRINSIC_NAMES
+
+
+def _capture(read, name, pos=None):
+    """A function's, func< >'s or map rule's capture of a free name, when
+    it is made: its value (copied).  A name not bound then is
+    - one of Magma's intrinsics that Sagebrush doesn't have yet:
+      _UNDECLARED, an error where it is read (Magma accepts the
+      definition);
+    - anything else: Magma rejects the definition (the undeclared-identifier
+      error, at the name's first read), so it is not made.
+    This is decided when the definition runs, so an assignment that was
+    skipped or failed, or a delete in another cell, counts as Magma counts
+    it."""
+    try:
+        v = read()
+        # (an enclosing definition's capture of it: passed on)
+        if v is _UNDECLARED:
+            return v
+        v = _own(v)
+    except NameError:
+        if _is_intrinsic_name(name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name):
+            return _UNDECLARED
+        e = NameError("name '%s' is not defined" % name)
+        e._mpos = pos
+        raise e
+    # an unresolved forward (declared in another input): called from the
+    # body, as a call from a body is in Magma
+    return _CellCall(v) if isinstance(v, _Cell) else v
+
+
+class _CellCall:
+    """A function's capture of an unresolved forward cell."""
+
+    __slots__ = ("cell",)
+
+    def __init__(self, cell):
+        self.cell = cell
+
+    def __call__(self, *args, **kw):
+        return self.cell.get()(*args, **kw)
+
+    def __repr__(self):
+        return repr(self.cell)
+
+
+class _Cell:
+    """forward f: the cell a function made before f's definition reads f
+    from when it is called.  Each execution of the forward statement makes
+    a new one; the next definition of f fills it (later ones don't)."""
+
+    __slots__ = ("name", "value")
+
+    def __init__(self, name):
+        self.name, self.value = name, None
+
+    def get(self):
+        """The function, from inside a function's body."""
+        if self.value is None:
+            raise MagmaError("Illegal call of unresolved forward declared user program")
+        return self.value
+
+    def set(self, f):
+        self.value = f
+
+    def __call__(self, *args, **kw):
+        # called through the name (also from a function made in a later
+        # input, which captured the cell as the name's value)
+        if self.value is None:
+            raise MagmaError("Illegal call of unresolved forward declared user program", "procedure call")
+        return self.value(*args, **kw)
+
+    def __repr__(self):
+        return "Unresolved forward declared user program %s" % self.name
+
+
+def _define_top(g, name, f):
+    """A top-level definition of f fills the unresolved forward the name
+    holds, if it holds one (from a forward in this input or an earlier
+    one); a local definition never does."""
+    c = g.get(name)
+    if isinstance(c, _Cell) and c.value is None:
+        c.value = f
 
 
 # ------------------------------------------------------------------ collections
@@ -393,6 +552,8 @@ def _frange(a, b, c):
 def _own(v, name=None):
     """Value semantics: an assigned (or passed) container is a copy.  The
     name of the variable assigned lets some structures print it (2*C.1 = 0)."""
+    if v is _UNDECLARED:
+        v._fail()
     if name is not None and hasattr(v, "_magma_assigned"):
         v._magma_assigned(name)
     if isinstance(v, MSeq):
@@ -867,32 +1028,20 @@ class _Unset:
 _UNSET = _Unset()  # a map rule's snapshot of a name not assigned then
 
 
-_CAPTURED = set()  # the names map rules have captured
-
-
-def _snap(read, name):
+def _snap(read, name, pos=None):
     """A map rule's snapshot of a free variable when the map is made: its
-    value (copied, value semantics), or _UNSET if it is not assigned."""
-    _CAPTURED.add(name)
-    try:
-        return _own(read())
-    except NameError:
-        return _UNSET
+    value (copied, value semantics; a later delete doesn't reach it); for
+    a name not bound then, as _capture."""
+    return _capture(read, name, pos)
 
 
-def _delete_check(name):
-    """delete x: in Magma a map rule that captured x sees it unassigned
-    afterwards (though a later assignment doesn't reach the rule); that
-    isn't modelled, so deleting a captured variable is refused."""
-    if name in _CAPTURED:
-        raise MagmaError("deleting a variable that a map rule has captured is not supported yet")
-
-
-def _val(v, name):
+def _val(v, name, pos=None):
     """A captured variable read in a map rule: an error (as Magma's) only
     if it was not assigned when the map was made."""
     if v is _UNSET:
         raise MagmaError("Variable '%s' has not been initialized" % (name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name))
+    if v is _UNDECLARED:
+        _missing(name, pos)
     return v
 
 
@@ -1282,7 +1431,7 @@ def _div(a, b, pos=None, op="/"):
 def _idiv(a, b, pos=None):
     if _int(a) and _int(b):
         if b == 0:
-            raise MagmaError("Division by zero")
+            raise MagmaError("Division by zero", "'div'")
         return a // b
     _arith("div", (a, b), pos)
     if hasattr(a, "quo_rem"):
@@ -1293,7 +1442,7 @@ def _idiv(a, b, pos=None):
 def _mod(a, b, pos=None):
     if _int(a) and _int(b):
         if b == 0:
-            raise MagmaError("Division by zero")
+            raise MagmaError("Division by zero", "'mod'")
         return a % b
     _arith("mod", (a, b), pos)
     if hasattr(a, "quo_rem"):
@@ -2239,7 +2388,7 @@ def _flat(vals):
     out = []
     for v in vals:
         if isinstance(v, Multi):
-            out.extend(list(v) if v.show is None else list(v)[: v.show])
+            out.extend(x for x in (list(v) if v.show is None else list(v)[: v.show]) if x is not _NOVAL)
         else:
             out.append(v)
     return out
@@ -2250,7 +2399,7 @@ def _show_values(v):
         return
     if isinstance(v, Multi):
         vals = list(v) if v.show is None else list(v)[: v.show]
-        _print_line(vals)
+        _print_line([x for x in vals if x is not _NOVAL])
         return
     _print_line([v])
 
