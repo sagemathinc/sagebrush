@@ -1,6 +1,6 @@
 """MATLAB's special functions psi, beta, betaln, gammainc, erfcx, erfinv, erfcinv, besselj,
-expint, ellipke, ellipj and legendre, for lib/_matlab.py: thin wrappers that give the numerics in
-lib/_special.py (shared with Sagebrush's scipy.special and Sage) MATLAB's
+bessely, expint, ellipke, ellipj and legendre, for lib/_matlab.py: thin wrappers
+that give the numerics in lib/_special.py (shared with Sagebrush's scipy.special and Sage) MATLAB's
 argument rules, classes and values at the poles, as the functions'
 documentation pages describe them.
 """
@@ -205,32 +205,26 @@ def _expint_value(v):
 _unary("expint", _expint_value, allow_complex=True)
 
 
-# ------------------------------------------------------------------ besselj
+# ------------------------------------------------------------------ besselj, bessely
 
-@_bi("besselj")
-def besselj_(nargout, *args):
-    """J = besselj(nu, Z), besselj(nu, Z, scale): the Bessel function of the
-    first kind J_nu(Z), as the documentation page describes it, nu real, nu
-    and Z the same size or one of them a scalar; scale 1 multiplies by
-    exp(-abs(imag(Z))), which is 1 for the real Z Sagebrush covers.
-    lib/_special.py's besselj (DLMF chapter 10: the power series, Hankel's
-    expansion, Miller's backward recurrence).  Negative Z gives the value
-    above the cut, e^(i nu pi) J_nu(-Z), complex for non-integer nu.
-    besselj(nu, Inf) is NaN, as Octave gives it (the page says nothing).
-    Sagebrush does not compute complex Z or negative non-integer orders
-    (they need Y_nu, bessely)"""
+def _bessel_jy(name, f, args):
+    """besselj and bessely's shared argument rules: nu real, nu and Z the
+    same size or one of them a scalar, scale 0 or 1 (exp(-abs(imag(Z))) is 1
+    for the real Z Sagebrush covers); f the scalar function from
+    lib/_special.py, its refusals becoming MATLAB errors; the value at
+    +-Inf is NaN, as Octave gives it (the pages say nothing)"""
     if not 2 <= len(args) <= 3:
         raise _err("Too many input arguments." if len(args) > 3 else "Not enough input arguments.")
     if len(args) == 3:
-        sv = _m._farr(args[2], "besselj") if _m._isnumlike(args[2]) else None
+        sv = _m._farr(args[2], name) if _m._isnumlike(args[2]) else None
         if sv is None or sv.size != 1 or float(sv.reshape(-1)[0].real) not in (0.0, 1.0) or sv.dtype.kind == "c":
-            raise _err("besselj: scale must be 0 or 1.")
-    (N, cn), (Z, cz) = _values("besselj", args[0]), _values("besselj", args[1])
-    _real("besselj", N, "nu")
+            raise _err("%s: scale must be 0 or 1." % name)
+    (N, cn), (Z, cz) = _values(name, args[0]), _values(name, args[1])
+    _real(name, N, "nu")
     if Z.dtype.kind == "c":
-        raise _err("besselj: Sagebrush does not compute besselj of complex Z yet.")
+        raise _err("%s: Sagebrush does not compute %s of complex Z yet." % (name, name))
     if N.size != 1 and Z.size != 1 and N.shape != Z.shape:
-        raise _err("besselj: nu and Z must be the same size, or one of them a scalar.")
+        raise _err("%s: nu and Z must be the same size, or one of them a scalar." % name)
     Nb, Zb = np.broadcast_arrays(N, Z)
     out = []
     for nu, z in zip(Nb.reshape(-1), Zb.reshape(-1)):
@@ -239,13 +233,43 @@ def besselj_(nargout, *args):
             out.append(_math.nan)
             continue
         try:
-            out.append(_sf._besselj1(nu, z))
+            out.append(f(nu, z))
         except ValueError as e:
             msg = str(e).split(": ", 1)[-1]
-            raise _err("besselj: %s." % msg)
+            raise _err("%s: %s." % (name, msg))
     cplx = any(isinstance(v, complex) for v in out)
     r = np.array(out if out else [], dtype=complex if cplx else float).reshape(Nb.shape)
     return _m._finish(r, "single" if "single" in (cn, cz) else "double")
+
+
+@_bi("besselj")
+def besselj_(nargout, *args):
+    """J = besselj(nu, Z), besselj(nu, Z, scale): the Bessel function of the
+    first kind J_nu(Z), as the documentation page describes it (_bessel_jy's
+    argument rules).  lib/_special.py's besselj (DLMF chapter 10: the power
+    series, Hankel's expansion, Miller's backward recurrence; negative
+    non-integer orders through Y_nu, J_-a = cos(a pi) J_a - sin(a pi) Y_a,
+    refused where the two terms cancel).  Negative Z gives the value above
+    the cut, e^(i nu pi) J_nu(-Z), complex for non-integer nu.  Sagebrush
+    does not compute complex Z"""
+    return _bessel_jy("besselj", _sf._besselj1, args)
+
+
+@_bi("bessely")
+def bessely_(nargout, *args):
+    """Y = bessely(nu, Z), bessely(nu, Z, scale): the Bessel function of the
+    second kind Y_nu(Z), as the documentation page describes it (_bessel_jy's
+    argument rules), real where Z is positive.  lib/_special.py's bessely
+    (DLMF chapter 10: Temme's series, Steed's method and Hankel's expansion
+    at the low orders, then the recurrence upward; the connection formula
+    for negative orders, refused where its two terms cancel).  Negative Z
+    gives the value above the cut, e^(-i nu pi) Y_nu(-Z) + 2i cos(nu pi)
+    J_nu(-Z), complex.  bessely(nu, 0) is -Inf for nu >= 0, with the parity
+    sign for negative integers, 0 at negative half-integers, and the sign
+    of -cos(nu pi) otherwise; results beyond the doubles are -Inf or Inf
+    (Octave gives Inf+Infi for some of them).  Sagebrush does not compute
+    complex Z"""
+    return _bessel_jy("bessely", _sf._bessely1, args)
 
 
 # ------------------------------------------------------------------ ellipke, ellipj
