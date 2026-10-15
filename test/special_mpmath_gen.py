@@ -288,6 +288,7 @@ ref = {
     "gammainc": lambda a, x: _gammainc_ref(a, x, False), "gammaincc": lambda a, x: _gammainc_ref(a, x, True),
     "gammainc_scaled": _gammainc_scaled_ref,
     "besselj": lambda nu, x: mp.besselj(nu, x),
+    "bessely": lambda nu, x: mp.bessely(nu, x),
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
@@ -391,5 +392,58 @@ for _name, _x in [("erfi", 26.3), ("erfi", -25.9), ("erfi", 26.64), ("erfi", 21.
                   ("erfcx", -19.279872930719144), ("erfcx", -12.25)]:
     with mp.workdps(60):
         add(_name, (_x,), ref[_name](mp.mpf(_x)))
+# (Bessel Y of real order and argument, and J of negative non-integer
+# orders: each of lib/_special.py's regions (Temme's series x <= 2, Steed's
+# method 2 < x < 25, Hankel's expansion beyond, the recurrence upward, the
+# elementary half-integer forms), tiny x, the transition x near nu, negative
+# orders and negative x; at 60 digits, from a generator of their own,
+# appended after everything above, which stays as it was.  Negative
+# non-integer orders are kept where the connection formula's two terms
+# amplify the rounding at most 4-fold (by mpmath's values of them): the
+# refusals next to the zeros below x = |nu| are tested in special.test.ts)
+_ry = random.Random(20261015)
+_by = ([(_ry.uniform(0, 3), math.exp(_ry.uniform(math.log(1e-300), math.log(2)))) for _ in range(40)]
+       + [(_ry.uniform(0, 3), _ry.uniform(2, 25)) for _ in range(40)]
+       + [(_ry.uniform(0, 30), _ry.uniform(25, 3000)) for _ in range(30)]
+       + [(n, n * _ry.uniform(0.7, 1.3)) for n in (math.exp(_ry.uniform(math.log(5), math.log(1500))) for _ in range(30))]
+       + [(_ry.uniform(0, 200), _ry.uniform(0.01, 300)) for _ in range(30)]
+       + [(float(_ry.randint(0, 40)), _ry.uniform(0.01, 60)) for _ in range(20)]
+       + [(_ry.randint(0, 30) + 0.5, _ry.uniform(1e-3, 60)) for _ in range(15)]
+       + [(float(-_ry.randint(1, 30)), _ry.uniform(0.1, 50)) for _ in range(15)]
+       + [(-_ry.uniform(0, 3), math.exp(_ry.uniform(math.log(1e-300), math.log(25)))) for _ in range(40)]
+       + [(-_ry.uniform(0, 300), _ry.uniform(0.01, 400)) for _ in range(60)]
+       + [(-(_ry.randint(0, 30) + 0.5), _ry.uniform(1e-3, 60)) for _ in range(10)]
+       + [(_ry.uniform(-40, 40), -math.exp(_ry.uniform(math.log(1e-5), math.log(1e3)))) for _ in range(40)]
+       + [(0.0, 0.8935769662791675), (1.0, 2.197141326031017), (0.5, 1e-300), (1.5, 5e-324), (0.3, 5e-324), (1e-300, 1.0),
+          (0.4999999999999, 1.5), (3.0, 2.0), (171.0, 2.0), (0.0, 1e300), (2.0, 25.0), (2.0, 24.999999999999996),
+          (0.7, 2.0), (0.7, 2.0000000000000004), (-0.5, 2.0), (-2.5, 1.0), (-0.3, -2.0), (-3.0, -2.0), (10.5, -1e-100)])
+_bjn = ([(-_ry.uniform(0, 3), math.exp(_ry.uniform(math.log(1e-300), math.log(25)))) for _ in range(30)]
+        + [(-_ry.uniform(0, 300), _ry.uniform(0.01, 400)) for _ in range(40)]
+        + [(-(_ry.randint(0, 30) + 0.5), _ry.uniform(1e-3, 60)) for _ in range(10)]
+        + [(-_ry.uniform(0, 40), -math.exp(_ry.uniform(math.log(1e-5), math.log(1e3)))) for _ in range(20)]
+        + [(-0.5, 2.0), (-2.5, 1.0), (-0.5, -2.0), (-10.7, 3.0), (-100.3, 30.0)]
+        # (the power series' (x/2)^nu where it leaves [1e-290, 1e290], found by the oracle check: 1.5e-13 off)
+        + [(1.2462384823611856, 3.093124819853594e-240), (2.5, 1e-200), (170.0, 1e-3), (0.3, 1e-320), (150.5, 3.0)])
+
+
+def _conn_amp(name, nu, x):
+    # (|t1| + |t2| / |t1 + t2| of the connection formula at -nu > 0, x > 0; 1 elsewhere)
+    if nu >= 0 or nu == math.floor(nu) or x <= 0:
+        return 1
+    a = mp.mpf(-nu)
+    sa, ca = mp.sinpi(a), mp.cospi(a)
+    j, y = mp.besselj(a, x), mp.bessely(a, x)
+    t = (sa * j, ca * y) if name == "bessely" else (ca * j, -sa * y)
+    return (abs(t[0]) + abs(t[1])) / abs(t[0] + t[1])
+
+
+for _name, _pts in (("bessely", _by), ("besselj", _bjn)):
+    for nu, x in _pts:
+        with mp.workdps(60):
+            v = (mp.bessely if _name == "bessely" else mp.besselj)(nu, x)
+            mv = abs(mp.mpc(v))
+            if mv > mp.mpf(2) ** 1023 or (mv != 0 and mv < mp.mpf(2) ** -1000) or _conn_amp(_name, nu, x) > 4:
+                continue
+        add(_name, (nu, x), v)
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")

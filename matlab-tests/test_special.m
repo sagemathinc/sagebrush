@@ -1,4 +1,4 @@
-% psi, beta, betaln, erfcx, erfinv, erfcinv, expint, gammainc and besselj: the examples on
+% psi, beta, betaln, erfcx, erfinv, erfcinv, expint, gammainc, besselj and bessely: the examples on
 % their documentation pages and values across their ranges, to 10
 % significant digits (the last digits of special functions differ between
 % implementations; test/matlab.test.ts checks the precision, and the
@@ -34,6 +34,15 @@ p(besselj(0.3, [0.01 1 7 40 1000])); p(besselj(2.5, [0.5 5 50])); p(besselj(-3, 
 p(besselj(50, [10 45 50 55 100])); p(besselj(100, [1 90 110 1e4])); p(besselj(0, [1e5 1e6]));
 p(besselj([0 1 2], 0)); p(besselj(0.5, 0));
 fprintf('%s\n', class(besselj(single(1), 2)));
+% bessely: the page's examples, real orders across the regions, negative orders, the values at 0,
+% scale; and besselj at negative non-integer orders
+p(bessely(3, 0:5)); p(bessely(3, 0:5, 1)); p(bessely(0:4, 2.5)); p(bessely(0:4, 17.5));
+p(bessely(0.3, [1e-5 0.01 1 7 40 1000])); p(bessely(2.5, [0.5 5 50])); p(bessely(-3, [1 4 9]));
+p(bessely(50, [10 45 50 55 100])); p(bessely(100, [90 110 1e4])); p(bessely(0, [1e5 1e6]));
+p(bessely(-0.3, [0.5 2 30])); p(bessely(-2.5, [1 10])); p(bessely(-10.7, [3 20]));
+p(bessely([0 1 -1 -2 -0.5 -0.3 -0.7], 0));
+p(besselj(-0.3, [0.5 2 30])); p(besselj(-2.5, [1 10])); p(besselj(-10.7, [3 20])); p(besselj([-0.5 -0.3 -1.3], 0));
+fprintf('%s\n', class(bessely(single(1), 2)));
 p(double(psi(single(0.3))));
 
 function p(x)
