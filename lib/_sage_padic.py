@@ -382,11 +382,32 @@ class pAdicGeneric_:
 
     # -------------------------------------------------------- conversion
     def __getitem__(self, names):
-        # K[['T']]: power series (polynomial rings over p-adics: not yet)
+        # K[['T']]: power series; K['x'], K[] (preparsed R.<x> = K[]): a
+        # univariate polynomial ring (lib/_sage_padic_ext.py)
         if isinstance(names, list):
             import _sage_series
             return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
-        raise NotImplementedError("polynomial rings over p-adic rings are not available in sagebrush yet")
+        if isinstance(names, tuple):
+            if len(names) != 1:
+                raise NotImplementedError("multivariate polynomial rings over p-adic rings are not available in sagebrush yet")
+            names = names[0]
+        import _sage_padic_ext
+        return _sage_padic_ext.PolynomialRing_padic(self, str(names))
+
+    def extension(self, modulus, prec=None, names=None, print_mode=None, implementation=None, **kwds):
+        """The extension by a root of modulus: totally ramified quadratic
+        (monic Eisenstein) polynomials only (lib/_sage_padic_ext.py).
+
+        EXAMPLES::
+
+            sage: R.<x> = Qp(19, 5)[]
+            sage: L.<alpha> = Qp(19, 5).extension(x^2 + 19); L
+            19-adic Eisenstein Extension Field in alpha defined by x^2 + 19
+            sage: Zp(19, 5).extension(x^2 + 19, names='a')
+            19-adic Eisenstein Extension Ring in a defined by x^2 + 19
+        """
+        import _sage_padic_ext
+        return _sage_padic_ext.extension(self, modulus, names=names, prec=prec, print_mode=print_mode, implementation=implementation, **kwds)
 
     def __call__(self, x=0, absprec=None, relprec=None):
         """Convert x (an integer, rational, p-adic number, element of
