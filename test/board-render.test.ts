@@ -52,3 +52,26 @@ test("board render: a page that is not there, a file that is not there, no file"
   assert.match(n.stderr, /ENOENT/);
   assert.equal(cli([]).status, 2);
 });
+
+test("board render: a board of a later version of the format, or another format, is refused as the board refuses it, and nothing drawn", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
+  try {
+    const out = join(dir, "later.svg");
+    const later = JSON.stringify({ format: "sagebrush-board", version: 99, nodes: [{ id: "a", title: "A" }] });
+    let r = cli(["-"], later);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    // (the command line's own words: which sagebrush refused it, and what to do)
+    assert.match(r.stderr, /^sagebrush board render: -: this board is in version 99 of the format, from a later Sagebrush; this sagebrush \((dev|\d+\.\d+\.\d+\S*)\) reads version 1: update sagebrush \(npx sagebrush@latest\)\n$/);
+    r = cli(["-", "-o", out], later);
+    assert.equal(r.status, 1);
+    assert.throws(() => readFileSync(out), "no file written");
+    // (another format, its name quoted, no control character reaching the terminal)
+    r = cli(["-"], JSON.stringify({ format: "evil\u001b[31m", nodes: [] }));
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    assert.ok(r.stderr.includes("not a Sagebrush board: its format is") && !r.stderr.includes("\u001b"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
