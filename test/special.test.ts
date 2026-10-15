@@ -59,7 +59,12 @@ const TOL: Record<string, [number, number, number?]> = {
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
+  gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300], gammainc_scaled: [6e-15, 1e-300],
 };
+// (P's and Q's relative error grows with the size of their exponent, the
+// rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda):
+// it is measured per unit max(1, |log value|))
+const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled"]);
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
   const worst: Record<string, number> = {};
@@ -91,7 +96,8 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
       return;
     }
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
-    const e = Math.hypot(gr - wr, gi - wi) / Math.max(TOL[name][1], Math.hypot(wr, wi));
+    let e = Math.hypot(gr - wr, gi - wi) / Math.max(TOL[name][1], Math.hypot(wr, wi));
+    if (LOG_SCALED.has(name) && wr > 0) e /= Math.max(1, Math.abs(Math.log(wr)));
     if (TOL[name][2] !== undefined && Array.isArray(args[0])) {
       const key = name + " (complex s, per unit |Im s|)";
       worst[key] = Math.max(worst[key] ?? 0, e / Math.max(1, Math.abs(num(args[0][1]))));
@@ -170,6 +176,24 @@ col = S.legendre_all(200, 0.0)
 print(all(t == t for t in col), col[151], col[150] != 0)
 # (_ldexp rounds once, as CPython's math.ldexp: Sagebrush's math.ldexp gives nan, 0.0 and inf for these)
 print(repr(S._ldexp(-0.0, 1027)), repr(S._ldexp(2.0 ** 60, -1100)), kind(lambda: S._ldexp(1.0, 1024)), repr(S._ldexp(3.0, -1075)))
+# (the incomplete gamma functions: their limits and edges, and what they do not cover)
+print(repr(S.gammainc(0.0, 2.0)), repr(S.gammaincc(0.0, 2.0)), repr(S.gammainc(2.0, 0.0)), repr(S.gammaincc(2.0, float("inf"))),
+      repr(S.gammainc_scaled(2.0, 0.0)), repr(S.gammainc_scaled(2.0, 0.0, True)), repr(S.gammainc(nan, 1.0)))
+print(" ".join(kind(f, *a) for f, a in [(S.gammainc, (-1.0, 2.0)), (S.gammaincc, (1.0, -2.0)), (S.gammainc, (complex(1, 1), 1.0)), (S.gammainc, (inf, 1.0))]))
+# (the scaled forms where the prefactor under- or overflows, and the least subnormal x: daybreak's HARD-05E-1, CORR-05E-2)
+print("%.12g %.12g" % (S.gammainc_scaled(1.0, 1000.0, True), S.gammainc_scaled(2.0, 1000.0, True)), repr(S.gammainc_scaled(0.0, 1000.0)),
+      repr(S.gammainc(1.0, 5e-324)), repr(S.gammainc_scaled(1.0, 5e-324)), repr(S.gammaincc(1.0, 5e-324)), repr(S.gammainc(1.0, 1e-320)))
+# (near the largest doubles, daybreak's CORR-9BD-1: at x = a both scaled forms are sqrt(pi a / 2) + 1/3, Temme's
+# leading terms; at lambda = 0.9 the series' sum is 1/(1 - lambda) and for x - a >> sqrt(a) a F is a/(x - a), each to
+# about 1e-300; the larger forms overflow; the continued fraction's coefficients n (n - a) overflow, refused)
+import math
+m = 1e308
+r = math.sqrt(math.pi / 2) * math.sqrt(m)
+print(S.gammainc(m, m), S.gammaincc(m, m), abs(S.gammainc_scaled(m, m) / r - 1) < 4e-16,
+      abs(S.gammainc_scaled(m, m, True) / r - 1) < 4e-16, abs(S.gammainc_scaled(m, 0.9 * m) - 10) < 4e-15,
+      S.gammainc_scaled(m, 0.9 * m, True), abs(S.gammainc_scaled(1.7e308, 1.79e308, True) * 0.09 / 1.7 - 1) < 4e-15,
+      S.gammainc_scaled(1.7e308, 1.79e308), abs(S.gammainc_scaled(m, 0.3 * m) - 1 / 0.7) < 4e-15)
+print(kind(S.gammaincc, 1e307, 1e308))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -216,5 +240,11 @@ print(repr(S._ldexp(-0.0, 1027)), repr(S._ldexp(2.0 ** 60, -1100)), kind(lambda:
     "0.999994083212 -0.003439991520 0.003440126883",
     "True -0.0 True",
     "-0.0 8.487983164e-314 OverflowError: math range error 1e-323",
+    "1.0 0.0 0.0 0.0 1.0 inf nan",
+    "NotCovered: gammainc: Sagebrush covers a >= 0 NotCovered: gammaincc: Sagebrush covers x >= 0 " +
+      "NotCovered: gammainc: Sagebrush covers real arguments NotCovered: gammainc: Sagebrush covers finite a",
+    "0.001 0.002002 inf 5e-324 1.0 1.0 1e-320",
+    "0.5 0.5 True True True inf True inf True",
+    "NotCovered: gammainc: the continued fraction overflowed at a = 1e+307, x = 1e+308",
   ]);
 });
