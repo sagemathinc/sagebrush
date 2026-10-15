@@ -268,7 +268,9 @@ class NumberField_absolute:
             (\\Bold{Q}[a]/(a^{2} - 5), \\Bold{Q}(\\sqrt{2}), \\Bold{Q}(\\zeta_{5}))
         """
         v = _latex_name(self)
-        if v.startswith("\\sqrt") or v.startswith("\\zeta"):
+        n = getattr(self, "_cyclotomic_order", None)
+        if v.startswith("\\sqrt") or (n is not None and self._name == "zeta%d" % n):
+            # QuadraticField, and a cyclotomic field under its default name
             return "\\Bold{Q}(%s)" % v
         terms = []
         f = self._f
@@ -788,17 +790,11 @@ def _poly_divmod(a, b):
 
 def _latex_name(K):
     """The generator's name in LaTeX, as Sage writes it."""
-    import re
     f = K._f
     if getattr(K, "_emb", None) and len(f) == 3 and f[1] == 0 and f[2] == 1:
         return "\\sqrt{%d}" % (-f[0])  # QuadraticField(D)
-    n = getattr(K, "_cyclotomic_order", None)
-    if n is not None and K._name == "zeta%d" % n:
-        return "\\zeta_{%d}" % n
-    m = re.match(r"^([A-Za-z]+)(\d+)$", K._name)
-    if m:
-        return "%s_{%s}" % (m.group(1), m.group(2))
-    return K._name
+    from _sage_poly import _latex_variable_name
+    return _latex_variable_name(K._name)
 
 
 class NumberFieldElement:

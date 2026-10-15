@@ -29,3 +29,15 @@ f = S([u + v*w for u, v in c])
 print(f.degree(), f.is_squarefree())
 print(f.factor())
 print(f.roots())
+
+# LaTeX of generator and variable names, as Sage: Greek letters, digit and
+# underscore subscripts, \mathit for other longer names (review CORR-980-1)
+for name in ['a12', 'theta_1', 'alpha', 'zeta5', 'x_12', 'Omega84', 'abc', 'sigma_alpha', 'Alpha', 'b_c1']:
+    K = NumberField(x^3 - x - 1, name)
+    a = K.gen()
+    R = PolynomialRing(K, 'y_2'); y = R.gen()
+    print(latex(K), '|', latex(a^2/2 - 3*a/7 + 5/11), '|', latex(R), '|', latex((a + 1)*y^2 - a*y/2 + 3/7))
+for K in [CyclotomicField(5), CyclotomicField(5, 'alpha'), NumberField(x^4 + x^3 + x^2 + x + 1, 'zeta5'), QuadraticField(5, 'theta_1'), QuadraticField(-3, 'b2'), NumberField(x^2 - 5, 'sqrt5')]:
+    print(latex(K), '|', latex(K.gen()^2 + K.gen()/3), '|', latex(K['Omega84']))
+for name in ['a', 'abc', 'sigma', 'sigma_k', 'sigma389', 'beta_00', 'Omega84', 'sigma_alpha', 'nothing1', 'nothing_abc', 'alpha_beta_gamma12', 'x_ast', 'alpha', 'theta_1', 'y_2', 'a12', 'zeta5', 'x_12', 'Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega', 'Zeta', 'Eta', 'Iota', 'Kappa', 'Mu', 'Nu', 'Rho', 'Tau', 'Chi', 'Omicron', 'omicron', 'varepsilon', 'vartheta', 'varpi', 'varrho', 'varsigma', 'varphi', 'lambda_', 'ell', 'hbar', 'aleph', 'ast', 'star', 'x_star', 'infty', 'x1_2', 'a12b', 'ab1c2', 'a_1_2', 'w_', 'a__b', 'x_y_z', 'xy_1', 'X', 'XY', 'Xy12', 'b0', 'b00', 'b01', 'pi2', 'pi_2', 'epsilon', 'eta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'rho', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega', 'gamma', 'delta', 'zeta', 'theta', 'beta', 'alpha1', 'alpha_1', 'alpha_beta', 'a_alpha', 'a_bc', 'ab_c', 'x_10', 'x10', 'x_a1', 'theta_1_2', 'th', 'thet', 'alphas', 'Alphas', 'nabla', 'partial', 'x_prime', 'x_p', 'x_i_j', 'zeta_5', 'gen', 'w2x', 'q_00_1', 'uz', 'P', 'e5gx8d3', 'n', 'f_ep', 'f_d7h', 'o8d78z', 'dc', 'Jis_j5h', 'K6l', 'g7mxg', 'Je7dn2', 'R_u08', 'Dtp', 'Yp', 'ft42v', 'Us9e', 'h_kvj', 'Fce6', 'Kuvw928', 'Zefr', 'Eedt7_', 'sywb0w', 'kh2dn', 'Xip', 'z2fk', 'C6ri', 'B6r_wyo', 'j', 'lo', 'Qa', 'F8lqsaj', 'Ax7ui', 'S3d06zz', 'zg1z', 'de', 'nkhv', 'M', 'g', 'K5', 'gbe', 'nyjqw', 'M1h', 'h2011tf', 'Vq1', 'S4', 'b4', 'x5', 'b4tfq4x', 'ko5', 'I3vompz', 'Vom42wb', 'br1qm9w', 'Cwxfogo', 'Ev', 'na1w', 'Zfhym1', 'lvfz', 'Dfkk', 'i', 'j0j91', 'Qj6', 'Jb', 'ag4i_mn', 'bns', 'G8', 'u5_', 'V08', 'H3i5', 'j3b_l', 'Xjlj1h6', 'd44', 'Jg6d', 'pr', 'cg3_6be', 'C39', 'Gr']:
+    print(name, latex(QQ[name]), latex(ZZ[name].gen()^2*3 - ZZ[name].gen()), latex(QQ[name].gen()^2*3 - QQ[name].gen()/2))

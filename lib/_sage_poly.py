@@ -28,6 +28,47 @@ def _poly_repr(coeffs, name):
     return r(coeffs, name)
 
 
+# Greek letters with a LaTeX command (Sage leaves Alpha, omicron, varpi, ...
+# alone), and two symbols
+_LATEX_LETTERS = frozenset(
+    "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi pi rho sigma tau upsilon "
+    "phi chi psi omega varphi Gamma Delta Theta Lambda Xi Pi Sigma Phi Psi Omega ast star".split())
+
+
+def _latex_variable_name(x, is_fname=False):
+    """A variable name in LaTeX, by Sage's documented rules
+    (sage.misc.latex.latex_variable_name; its output served as the oracle):
+    a single letter stays; a Greek letter gets its command; any other
+    longer name is \\mathit{...} ({\\rm ...} for a function name); an
+    underscore starts a subscript, recursively, and otherwise trailing
+    digits are the subscript.
+
+    EXAMPLES::
+
+        sage: from _sage_poly import _latex_variable_name as L  # sagebrush only
+        sage: [L(n) for n in ['a12', 'alpha', 'theta_1', 'x_y_z', 'abc', 'Omega84', 'Alpha']]  # sagebrush only
+        ['a_{12}', '\\alpha', '\\theta_{1}', 'x_{y_{z}}', '\\mathit{abc}', '\\Omega_{84}', '\\mathit{Alpha}']
+    """
+    def atom(t):
+        if t in _LATEX_LETTERS:
+            return "\\" + t
+        if len(t) <= 1:
+            return t
+        return ("{\\rm %s}" if is_fname else "\\mathit{%s}") % t
+
+    x = str(x)
+    if "_" in x:
+        head, tail = x.split("_", 1)
+        h = atom(head)
+        return h if not tail else "%s_{%s}" % (h, _latex_variable_name(tail, is_fname))
+    i = len(x)
+    while i > 0 and x[i - 1].isdigit():
+        i -= 1
+    if i == 0 or i == len(x):
+        return x if i == 0 else atom(x)
+    return "%s_{%s}" % (atom(x[:i]), x[i:])
+
+
 class _Ring:
     """ZZ and QQ, which also make polynomial rings: ZZ['x']."""
 
@@ -185,6 +226,16 @@ class PolynomialRing_:
 
     def __repr__(self):
         return "Univariate Polynomial Ring in %s over %r" % (self._name, self._base)
+
+    def _latex_(self):
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: latex(QQ['alpha']), latex(ZZ['y_2'])
+            (\\Bold{Q}[\\alpha], \\Bold{Z}[y_{2}])
+        """
+        return "\\Bold{%s}[%s]" % ("Q" if self._base is QQ else "Z", _latex_variable_name(self._name))
 
     def __eq__(self, other):
         return isinstance(other, PolynomialRing_) and other._base is self._base and other._name == self._name
@@ -560,7 +611,7 @@ class Polynomial:
         # Sage's form: x^{20} - \frac{1}{2} x + 3
         if not self._c:
             return "0"
-        v = self._ring._name
+        v = _latex_variable_name(self._ring._name)
         out = []
         for i in range(len(self._c) - 1, -1, -1):
             c = self._c[i]
