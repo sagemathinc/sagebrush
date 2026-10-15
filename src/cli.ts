@@ -276,7 +276,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
 async function main() {
   const argv = process.argv.slice(2);
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2)
-  if (argv[0] === "board" && argv[1] === "render") {
+  if (argv[0] === "board" && (argv[1] === "render" || argv[1] === "run")) {
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;
@@ -453,3 +453,5 @@ function execModuleAsMain(name: string): any {
 if (isMainThread) main();
 else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
 else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);
+// (`board run`'s interpreter, src/board-run.ts)
+else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boardRunWorker(workerData.sagebrushBoardRun));

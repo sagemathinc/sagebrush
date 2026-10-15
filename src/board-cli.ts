@@ -12,10 +12,15 @@ import { pageCount } from "../web/board/doc";
 const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
   a board as an SVG file (to OUT, else to standard output); --page N: its
   Nth page (from 1)
+       sagebrush board run FILE [--json] [--timeout S] [--store-previews]
+  run its code items as the board does, and report each one's output or
+  error (sagebrush board run --help)
 `;
 
 /** The `board` command; returns the exit code. */
 export async function boardCommand(argv: string[]): Promise<number> {
+  // (sagebrush board run: src/board-run.ts)
+  if (argv[0] === "run") return (await import("./board-run")).boardRun(argv.slice(1));
   if (argv[0] !== "render" || argv.includes("-h") || argv.includes("--help")) {
     (argv[0] === "render" || !argv.length ? process.stdout : process.stderr).write(USAGE);
     return argv[0] === "render" || !argv.length ? 0 : 2;
