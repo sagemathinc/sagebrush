@@ -720,6 +720,10 @@ test("fzero reproduces its published examples: results, output structures and it
     "x = fzero(@(x) x - 2, [0 4], optimset('Display', 'final')); x = fzero(@(x) x - 2, [0 4]); x = fzero(@(x) x - 2, [0 4], optimset('Display', 'off'));",
     "[x,f,e,o] = fzero(@cos, [1 2], optimset('OutputFcn', @(x, v, s) v.iteration >= 2, 'Display', 'off')); fprintf('%d %d\\n', e, o.iterations);",
   ].join("\n")), ["1.8115", "Zero found in the interval [0, 4]", "-1 2"]);
+  // (from x0 = 0: Octave's scale for a zero start, 0.1, in the published step, dx = 0.1/50 times sqrt(2)^k)
+  const zero = run("x = fzero(@(x) x - 1, 0, optimset('Display', 'iter'));");
+  assert.ok(zero.includes("    3     -0.00282843      -1.00283    0.00282843     -0.997172               search"), zero.slice(0, 5).join("\n"));
+  assert.ok(zero.includes("    5          -0.004        -1.004         0.004        -0.996               search"));
 });
 
 test("fzero's other exits: no sign change, overflow, a sign change at a pole (never -5), and its refusals", () => {
@@ -969,6 +973,16 @@ test("integral and quadgk reproduce their published examples", () => {
     "0.4597 0.7081 0.6633 0.4134 0.1433 ", "0.6667", "-1.3179", "0.0000 3.1416", "-0.0082 0.5723", "1.6656e-06 1"]);
 });
 
+test("integral: an array-valued integrand's components each meet their own tolerance; a large one does not hide a small one's error", () => {
+  const out = require("node:child_process").execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "exact = (1 - cos(1000))/1000; q1 = integral(@(x) sin(1000*x), 0, 1);",
+    "q = integral(@(x) [1e12; sin(1000*x)], 0, 1, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1)/1e12 - 1) < 1e-14, abs(q(2) - exact) < 1e-14);",
+    "q = integral(@(x) [sin(1000*x); 1e12], 0, 1, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1) - exact) < 1e-14, abs(q(1) - q1) < 1e-14);",
+    "q = integral(@(x) [1e-8*sin(x); x.^2], 0, pi, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1) - 2e-8) < 1e-20, abs(q(2) - pi^3/3) < 1e-12);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1 1", "1 1", "1 1"]);
+});
+
 test("integral and quadgk: infinite and reversed limits, waypoints, warnings and refusals", () => {
   const { execFileSync } = require("node:child_process");
   const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
@@ -1071,4 +1085,51 @@ test("integral2 and integral3 reproduce their published examples by the iterated
     "integral2: the integrand and limit functions must return arrays the size of their inputs; use array operators (.*, ./, .^) or set Vectorized to false.",
     "integral3: unknown option 'Bogus'.",
   ]);
+});
+
+test("ode45 and ode23: OutputFcn in the solution-structure form too; deval only on the solution's own interval", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a stop request ends the integration whatever the outputs, with OutputSel too)
+    "for solver = {@ode45, @ode23}",
+    "  o = odeset('OutputFcn', @(t,y,flag) isempty(flag), 'MaxStep', .2);",
+    "  s = solver{1}(@(t,y) 1, [0 2], 0, o); [t, y] = solver{1}(@(t,y) 1, [0 2], 0, o);",
+    "  o2 = odeset(o, 'OutputSel', 2); s2 = solver{1}(@(t,y) [1; 2], [0 2], [0; 0], o2);",
+    "  fprintf('%.12g %.12g %.12g\\n', s.x(end), t(end), s2.x(end));",
+    "end",
+    // (a terminal event inside a step: deval at, just inside, and beyond the end; forward and backward)
+    "s = ode45(@(t,y) 1, [0 2], 0, odeset('Events', @(t,y) deal(t - .35, 1, 1), 'MaxStep', .2));",
+    "fprintf('%.12g %.12g %.12g\\n', s.x(end), deval(s, .35), deval(s, .3499)); try, deval(s, .36), catch e, disp(e.message), end",
+    "s = ode45(@(t,y) -1, [2 0], 2, odeset('Events', @(t,y) deal(t - 1.65, 1, 0), 'MaxStep', .2));",
+    "fprintf('%.12g %.12g %.12g\\n', s.x(end), deval(s, 1.65), deval(s, 1.6501)); try, deval(s, 1.64), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    "0.0001 0.0001 0.0001", "0.0001 0.0001 0.0001",
+    "0.35 0.35 0.3499", "deval: the points must lie in the interval of integration, [sol.x(1) sol.x(end)].",
+    "1.65 2.35 2.3499", "deval: the points must lie in the interval of integration, [sol.x(1) sol.x(end)].",
+  ]);
+});
+
+test("quad stops at GNU Octave's adaptive Simpson limit, 10001 evaluations exactly, with a warning", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "[q, n] = quad(@(x) sin(1000*x), 0, 1, 1e-14); disp(n);",
+    "[q, n] = quad(@(x) 1./(x + 1e-12), 0, 1, 1e-14); disp(n);",
+    "[q, n] = quad(@(x) exp(x), 0, 1); disp(n < 10001);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), ["10001", "10001", "1"]);
+  assert.equal((r.stderr.match(/Warning: quad: the limit of 10001 function evaluations was reached; the tolerance may not be met\./g) || []).length, 2);
+});
+
+test("lsqnonneg keeps a solution of any scale: positivity tested exactly, as Lawson and Hanson's steps 6 to 11", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a scaled identity: TolX grows with C, but x = 1e-8 is a solution, not a zero)
+    "[x,r,res,e,o,l] = lsqnonneg(1e8*eye(2), ones(2,1)); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    // (mixed active and passive variables, at two scales: the same x, the duals scaled, optimality held)
+    "[x,r,res,e,o,l] = lsqnonneg(eye(2), [1;-2]); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    "[x,r,res,e,o,l] = lsqnonneg(1e8*eye(2), 1e8*[1;-2]); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    "C = [0.0372 0.2869; 0.6861 0.7071; 0.6233 0.6245; 0.6344 0.6170]; d = [0.8587; 0.1781; 0.0747; 0.8405];",
+    "[x1,r1] = lsqnonneg(C, d); [x2,r2,~,e2,~,l2] = lsqnonneg(1e-6*C, d);",
+    "fprintf('%d %d %d\\n', abs(x2(2)*1e-6 - x1(2)) < 1e-12, abs(r2 - r1) < 1e-12, e2); disp(all(x2 >= 0) && all(l2 <= 1e-10) && abs(l2(2)) < 1e-10);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1e-08 1e-08 0 1 0 0", "1 0 4 1 0 -2", "1 0 4e+16 1 0 -2e+16", "1 1 1", "   1"]);
 });
