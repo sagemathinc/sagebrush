@@ -1,0 +1,289 @@
+Number Field in a with defining polynomial x^2 - 5 | \Bold{Q}[a]/(a^{2} - 5) | \Bold{Q}[a]/(a^{2} - 5)[y] | -2 a + \frac{8}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (a - 5)*y^2 + (5*a + 5)*y - 5*a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y + 1/2*a - 1/2) * (y + 1/2*a + 1/2) * (y - 2)^3 | roots [(-1/2*a + 1/2, 1), (-1/2*a - 1/2, 1), (2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y + \frac{1}{2} a - \frac{1}{2}) \cdot (y + \frac{1}{2} a + \frac{1}{2}) \cdot (y - 2)^{3}
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - 5
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - 5 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-2*a - 4)*y^2 + 9*a*y + 5*a - 25
+    factor (y - 5) * (y - a) * (y - a + 1) | roots [(5, 1), (a, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a - 4)*y^2 + 9*a*y + 5*a - 25 | latex (y - 5) \cdot (y - a) \cdot (y - a + 1)
+   y^5 - 17/3*a*y^4 + 36*y^3 + 37/3*a*y^2 - 19/4*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 9 | (5*a - 13)*y - 9*a + 22 | xgcd (1, -1/4*a - 1/4, (1/4*a + 1/4)*y - 1/4*a - 1/4)
+Number Field in a with defining polynomial x^2 - x - 1 | \Bold{Q}[a]/(a^{2} - a - 1) | \Bold{Q}[a]/(a^{2} - a - 1)[y] | -\frac{5}{3} a + \frac{4}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 - y^2 + (3*a + 2)*y - 2*a - 1
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a - 1
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a - 1 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 - 3*a*y^2 + (3*a + 2)*y - a - 1
+    factor (y - a - 1) * (y - a) * (y - a + 1) | roots [(a + 1, 1), (a, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 - 3*a*y^2 + (3*a + 2)*y - a - 1 | latex (y - a - 1) \cdot (y - a) \cdot (y - a + 1)
+   y^5 - 17/3*a*y^4 + (7*a + 8)*y^3 + (10/3*a + 3)*y^2 + (-a - 3/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 7*a - 13 | 7*y - 6*a - 1 | xgcd (1, -a, a*y - a)
+Number Field in a with defining polynomial x^2 + 1 | \Bold{Q}[a]/(a^{2} + 1) | \Bold{Q}[a]/(a^{2} + 1)[y] | -2 a + \frac{2}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (a + 1)*y^2 + (-a - 1)*y + a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y - a) * (y + a) * (y + 1) | roots [(1, 1), (a, 1), (-a, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y - a) \cdot (y + a) \cdot (y + 1)
+   y^6 + 1
+    factor (y - a) * (y + a) * (y^2 - a*y - 1) * (y^2 + a*y - 1) | roots [(a, 1), (-a, 1)] | sqfree True
+    gcd 1 | sqd y^6 + 1 | latex (y - a) \cdot (y + a) \cdot (y^{2} - a y - 1) \cdot (y^{2} + a y - 1)
+   y^3 + (-2*a + 2)*y^2 - 3*a*y - a - 1
+    factor (y - a) * (y - a + 1) * (y + 1) | roots [(a, 1), (a - 1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a + 2)*y^2 - 3*a*y - a - 1 | latex (y - a) \cdot (y - a + 1) \cdot (y + 1)
+   y^5 - 17/3*a*y^4 - 6*y^3 - 17/3*a*y^2 + 5/4*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 15 | (5*a + 17)*y - 15*a - 14 | xgcd (1, 1/2*a + 1/2, (-1/2*a - 1/2)*y + 1/2*a + 1/2)
+Number Field in a with defining polynomial x^2 + x + 1 | \Bold{Q}[a]/(a^{2} + a + 1) | \Bold{Q}[a]/(a^{2} + a + 1)[y] | -\frac{7}{3} a + \frac{2}{3}
+   y^2 - a
+    factor (y - a - 1) * (y + a + 1) | roots [(a + 1, 1), (-a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y - a - 1) \cdot (y + a + 1)
+   y^4 + (-a - 1)*y^3 + (2*a + 1)*y^2 - a*y - 1
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y - a) * (y + a + 1) * (y^3 - 2) | roots [(a, 1), (-a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y - a) \cdot (y + a + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 + a + 1
+    factor (y^3 + a) * (y^3 - a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 + a + 1 | latex (y^{3} + a) \cdot (y^{3} - a)
+   y^3 + (-a + 2)*y^2 + (-a + 2)*y - a + 1
+    factor (y - a) * (y + a + 1) * (y - a + 1) | roots [(a, 1), (-a - 1, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a + 2)*y^2 + (-a + 2)*y - a + 1 | latex (y - a) \cdot (y + a + 1) \cdot (y - a + 1)
+   y^5 - 17/3*a*y^4 + (-7*a - 6)*y^3 + (-8/3*a + 3)*y^2 + (a + 5/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 5*a - 15 | (10*a + 17)*y - 20*a - 13 | xgcd (1, 1/3*a + 2/3, (-1/3*a - 2/3)*y + 1/3*a + 2/3)
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? | \Bold{Q}(\sqrt{2}) | \Bold{Q}(\sqrt{2})[y] | -2 \sqrt{2} + \frac{5}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - \sqrt{2})
+   y^4 + (-a - 1)*y^3 + (a - 2)*y^2 + (2*a + 2)*y - 2*a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + \sqrt{2}) \cdot (y - \sqrt{2})^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + \sqrt{2} y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 \sqrt{2} + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - 2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - 2 | latex (y^{3} - \sqrt{2}) \cdot (y^{3} + \sqrt{2})
+   y^3 + (-2*a - 1)*y^2 + 3*a*y + 2*a - 4
+    factor (y - 2) * (y - a) * (y - a + 1) | roots [(2, 1), (a, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a - 1)*y^2 + 3*a*y + 2*a - 4 | latex (y - 2) \cdot (y - \sqrt{2}) \cdot (y - \sqrt{2} + 1)
+   y^5 - 17/3*a*y^4 + 15*y^3 + 10/3*a*y^2 - 7/4*y + 1/12*a
+    factor (y + 1/3*a) * (y - 3/2*a - 2)^2 * (y - 3/2*a + 2)^2 | roots [(-1/3*a, 1), (3/2*a + 2, 2), (3/2*a - 2, 2)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} \sqrt{2}) \cdot (y - \frac{3}{2} \sqrt{2} - 2)^{2} \cdot (y - \frac{3}{2} \sqrt{2} + 2)^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 12 | (5*a + 2)*y - 12*a + 4 | xgcd (1, -a - 1, (a + 1)*y - a - 1)
+Number Field in a with defining polynomial x^2 + 5 with a = 2.236067977499790?*I | \Bold{Q}(\sqrt{-5}) | \Bold{Q}(\sqrt{-5})[y] | -2 \sqrt{-5} - \frac{2}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - \sqrt{-5})
+   y^4 + (-a - 1)*y^3 + (a + 5)*y^2 + (-5*a - 5)*y + 5*a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + \sqrt{-5}) \cdot (y - \sqrt{-5})^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + \left(\sqrt{-5}\right) y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 \sqrt{-5} + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 + 5
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 + 5 | latex (y^{3} - \sqrt{-5}) \cdot (y^{3} + \sqrt{-5})
+   y^3 + (-2*a + 6)*y^2 - 11*a*y - 5*a - 25
+    factor (y - a) * (y - a + 1) * (y + 5) | roots [(a, 1), (a - 1, 1), (-5, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a + 6)*y^2 - 11*a*y - 5*a - 25 | latex (y - \sqrt{-5}) \cdot (y - \sqrt{-5} + 1) \cdot (y + 5)
+   y^5 - 17/3*a*y^4 - 34*y^3 - 53/3*a*y^2 + 21/4*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} \sqrt{-5}) \cdot (y^{2} + \left(-3 \sqrt{-5}\right) y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 19 | (5*a + 37)*y - 19*a - 38 | xgcd (1, 1/6*a + 1/6, (-1/6*a - 1/6)*y + 1/6*a + 1/6)
+Number Field in a with defining polynomial x^3 - 2 | \Bold{Q}[a]/(a^{3} - 2) | \Bold{Q}[a]/(a^{3} - 2)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^2 + 2)*y - 2
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y - a) * (y^2 + y + 1) * (y^2 + a*y + a^2) | roots [(a, 1)] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y - a) \cdot (y^{2} + y + 1) \cdot (y^{2} + a y + a^{2})
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (-a + 4)*y - 2*a + 2
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (-a + 4)*y - 2*a + 2 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (-8/3*a + 6)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + 6*a^2 - 14*a - 6 | xgcd (1, -a^2 - a - 1, (a^2 + a + 1)*y - a^2 - a - 1)
+Number Field in a with defining polynomial x^3 - x - 1 | \Bold{Q}[a]/(a^{3} - a - 1) | \Bold{Q}[a]/(a^{3} - a - 1)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^2 + a + 1)*y - a - 1
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (a + 2)*y - a^2 + 1
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (a + 2)*y - a^2 + 1 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (1/3*a + 3)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + 6*a^2 - 13*a - 7 | xgcd (1, -a^2 - a, (a^2 + a)*y - a^2 - a)
+Number Field in a with defining polynomial x^4 + 1 | \Bold{Q}[a]/(a^{4} + 1) | \Bold{Q}[a]/(a^{4} + 1)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^3 + a^2)*y - a^3
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y - a^2) * (y + a^2) | roots [(1, 1), (-1, 1), (a^2, 1), (-a^2, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y - a^{2}) \cdot (y + a^{2})
+   y^6 - a^2
+    factor (y - a^3) * (y + a^3) * (y^2 - a^3*y - a^2) * (y^2 + a^3*y - a^2) | roots [(a^3, 1), (-a^3, 1)] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y - a^{3}) \cdot (y + a^{3}) \cdot (y^{2} - a^{3} y - a^{2}) \cdot (y^{2} + a^{3} y - a^{2})
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 + 1
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 + 1 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (3*a^3 - 8/3*a)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + a^3 + 6*a^2 - 14*a - 8 | xgcd (1, 1/2*a^3 + 1/2*a^2 + 1/2*a + 1/2, (-1/2*a^3 - 1/2*a^2 - 1/2*a - 1/2)*y + 1/2*a^3 + 1/2*a^2 + 1/2*a + 1/2)
+Number Field in a with defining polynomial x^4 - 2 | \Bold{Q}[a]/(a^{4} - 2) | \Bold{Q}[a]/(a^{4} - 2)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^3 + a^2)*y - a^3
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 - 2
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 - 2 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (3*a^3 - 8/3*a)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + a^3 + 6*a^2 - 14*a - 8 | xgcd (1, -a^3 - a^2 - a - 1, (a^3 + a^2 + a + 1)*y - a^3 - a^2 - a - 1)
+Cyclotomic Field of order 5 and degree 4 | \Bold{Q}[a]/(a^{4} + a^{3} + a^{2} + a + 1) | \Bold{Q}[a]/(a^{4} + a^{3} + a^{2} + a + 1)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor (y - a^3) * (y + a^3) | roots [(a^3, 1), (-a^3, 1)] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y - a^{3}) \cdot (y + a^{3})
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^3 + a^2)*y - a^3
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y - a^2) * (y + a^2) * (y^2 - a^2*y - a^3 - a^2 - a - 1) * (y^2 + a^2*y - a^3 - a^2 - a - 1) | roots [(a^2, 1), (-a^2, 1)] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y - a^{2}) \cdot (y + a^{2}) \cdot (y^{2} - a^{2} y - a^{3} - a^{2} - a - 1) \cdot (y^{2} + a^{2} y - a^{3} - a^{2} - a - 1)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + 2*a^3 + a^2 + a + 1
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + 2*a^3 + a^2 + a + 1 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (3*a^3 - 8/3*a)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + a^3 + 6*a^2 - 14*a - 8 | xgcd (1, 1/5*a^3 + 2/5*a^2 + 3/5*a + 4/5, (-1/5*a^3 - 2/5*a^2 - 3/5*a - 4/5)*y + 1/5*a^3 + 2/5*a^2 + 3/5*a + 4/5)
+74 False
+(z - 10*w + 18)^2 * (z + 18*w - 6)^2 * (z + 22*w + 22)^2 * (z + 20*w + 30)^2 * (z - 16*w - 24)^3 * (z + 12*w - 48)^3 * z^3 * (z - 4*w + 60)^3 * (z - 30*w - 12)^4 * (z - 34*w + 26)^4 * (z + 20*w - 47)^4 * (z + 36*w - 34)^4 * (z + 20*w + 8)^4 * (z + 48*w - 16)^4 * (z - 40*w + 28)^6 * (z - 22)^6 * (z - 24*w + 30)^6 * (z + 12*w + 18)^6 * (z^3 + (-2*w - 58)*z^2 + (184*w - 758)*z - 18660*w + 51540)^2
+[(10*w - 18, 2), (-18*w + 6, 2), (-22*w - 22, 2), (-20*w - 30, 2), (16*w + 24, 3), (-12*w + 48, 3), (0, 3), (4*w - 60, 3), (30*w + 12, 4), (34*w - 26, 4), (-20*w + 47, 4), (-36*w + 34, 4), (-20*w - 8, 4), (-48*w + 16, 4), (40*w - 28, 6), (22, 6), (24*w - 30, 6), (-12*w - 18, 6)]
