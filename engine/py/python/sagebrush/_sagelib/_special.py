@@ -50,6 +50,27 @@ def _elementwise(f, *args):
     return np.array(vals, dtype=complex if cplx else float).reshape(shape)
 
 
+def _cabs(z):
+    """|z|, inf where it is beyond the doubles (abs raises OverflowError
+    there: abs(1.7e308 + 1.7e308j))"""
+    try:
+        return abs(z)
+    except OverflowError:
+        return _math.inf
+
+
+def _modulus_within(name, f, i):
+    """f, refusing a finite complex argument i whose modulus is beyond the
+    doubles (NotCovered), where f's methods take |z| or log z: abs and
+    cmath.log raise OverflowError there"""
+    def g(*a):
+        z = a[i]
+        if isinstance(z, complex) and not _bad(z) and _cabs(z) == _math.inf:
+            raise NotCovered("%s: Sagebrush covers complex arguments whose modulus is within the doubles" % name)
+        return f(*a)
+    return g
+
+
 def _bad(z):
     """whether a float or complex has a NaN or infinite part"""
     if isinstance(z, complex):
@@ -271,7 +292,7 @@ def loggamma(z):
     1e3 outside |z| < 15, and up to 1.6e-14 (an absolute error, from the
     recurrence) for |z| < 15 where |log Gamma(z)| < 1, except within 1 of
     z = 1 and z = 2, where the relative error stays near 1e-16"""
-    return _elementwise(_loggamma1, z)
+    return _elementwise(_modulus_within("loggamma", _loggamma1, 0), z)
 
 
 def _loggamma1(z):
@@ -304,7 +325,7 @@ def gamma(z):
     found against mpmath: real x 6e-16 for |x| <= 171; complex z 3.6e-14
     for |z| <= 42, growing in proportion to |log Gamma(z)| (the exponential
     turns loggamma's absolute error into a relative one)"""
-    return _elementwise(_gamma1, z)
+    return _elementwise(_modulus_within("gamma", _gamma1, 0), z)
 
 
 def _gamma1(z):
@@ -436,7 +457,7 @@ def psi(z):
     Largest error found against mpmath, as a fraction of max(1, |psi(z)|):
     1.3e-15 for real x in [-50, 100], 1.6e-15 for complex |z| <= 140;
     the relative error is larger near psi's zeros"""
-    return _elementwise(_psi1, z)
+    return _elementwise(_modulus_within("psi", _psi1, 0), z)
 
 
 def _polygamma1(n, z):
@@ -465,6 +486,18 @@ def _polygamma1(n, z):
         for coef in reversed(_cot_derivative_poly(n)):
             v = v * c + coef
         return sgn * _polygamma1(n, 1 - x) - _PI ** (n + 1) * v
+    if x < 0 and abs(z.imag) < _POLYGAMMA_Y:
+        # (the same reflection next to the negative real axis, where the
+        # recurrence's terms on either side of a pole cancel: 0.056 off at
+        # psi^(100)(-0.5 + 1e-15i).  cot(pi z) = (sin 2 pi x - i sinh 2 pi y) /
+        # (2 (sin^2 pi x + sinh^2 pi y)), its denominator without the
+        # cancellation of cosh 2 pi y - cos 2 pi x.  For complex c, P_n's
+        # terms can cancel (c near the imaginary axis, |c| ~ 1): the sum of
+        # their moduli bounds the rounding, and where it would lose more than
+        # three digits the recurrence below is taken instead)
+        v = _polygamma_reflect(n, z)
+        if v is not None:
+            return v
     if x < 0.5 and abs(z.imag) >= _POLYGAMMA_Y:
         if z.imag < 0:
             return _polygamma1(n, z.conjugate()).conjugate()
@@ -500,17 +533,33 @@ def _polygamma1(n, z):
     if m:
         k = np.arange(m, dtype=float)
         w = (z + k) if cplx else (x + k)
-        # (sum_k n!/w_k^(n+1) as n!/w0^(n+1) sum_k (w0/w_k)^(n+1), with w0 the
-        # w_k of least modulus, whose term is the largest: the ratios are at
-        # most 1, so only terms negligible beside w0's underflow, and n!/w0^(n+1)
-        # is scaled as below)
         i0 = int(np.argmin(np.abs(w)))
-        w0 = complex(w[i0]) if cplx else float(w[i0])
-        r = complex(np.sum((w0 / w) ** (n + 1))) if cplx else float(np.sum((w0 / w) ** (n + 1.0)))
-        try:
+        if cplx:
+            # (sum_k n!/w_k^(n+1) as 2^(-e(n+1)) n! sum_k (2^e/w_k)^(n+1), 2^e
+            # from the largest part of the w_k of least modulus, so that no
+            # (2^e/w_k)^(n+1) leaves the doubles (|2^e/w_k| <= 2): a power of
+            # two changes no rounding, so the terms either side of the real
+            # axis cancel exactly as unscaled, where a common complex factor
+            # w0^(n+1) mixed the parts, 2e-9 off at psi^(40)(-0.5 + 1e-9i),
+            # astra's CORR-D69-1.  w 2^-e in two factors, as 2^-e alone leaves
+            # the doubles for e near +-1074, and 2^1024 itself overflows)
+            w0 = complex(w[i0])
+            _, ex = _math.frexp(max(abs(w0.real), abs(w0.imag)))
+            e1 = -ex // 2
+            ws = (w * 2.0 ** e1) * 2.0 ** (-ex - e1)
+            r = fact_n * complex(np.sum((1.0 / ws) ** (n + 1)))
+            try:
+                rec = complex(_ldexp(r.real, -ex * (n + 1)), _ldexp(r.imag, -ex * (n + 1)))
+            except OverflowError:
+                raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
+        else:
+            # (real w_k > 0, no cancellation: n!/w0^(n+1) sum_k (w0/w_k)^(n+1),
+            # w0 the least, whose ratio is exactly 1, so that the largest term
+            # is one rounded power, not 1/w0's rounding raised to the n+1,
+            # 8.5e-15 at psi^(100)(0.1885); n!/w0^(n+1) scaled by _c_wpow)
+            w0 = float(w[i0])
+            r = float(np.sum((w0 / w) ** (n + 1.0)))
             rec = _c_wpow(fact_n * r, w0, n + 1)
-        except OverflowError:
-            raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
     w = z + m
     # (DLMF 5.15.9: (-1)^(n+1) [ (n-1)!/w^n + n!/(2 w^(n+1))
     #   + sum_k B_2k (2k+n-1)! / ((2k)! w^(2k+n)) ]; each term c w^-k scaled
@@ -554,6 +603,34 @@ def _c_wpow(c, w, k):
         return _math.inf
 
 
+def _polygamma_reflect(n, z):
+    """psi^(n)(z) by DLMF 5.15.6 for complex z with Re z < 0, or None where
+    the rounding of pi^(n+1) P_n(cot pi z) - (-1)^n psi^(n)(1 - z), bounded
+    by eps times the sum of the terms' moduli, exceeds 1e-13 of the result"""
+    x, y = z.real, z.imag
+    sh = _math.sinh(_PI * y)
+    sx = _sinpi(x)
+    den = 2 * (sx * sx + sh * sh)
+    if den == 0:
+        # (z within 1e-154 of a pole: |psi^(n)(z)| >= n!/|z + k|^(n+1) is
+        # beyond the doubles)
+        raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
+    c = complex(_sinpi(2 * x) / den, -_math.sinh(2 * _PI * y) / den)
+    v = 0j
+    a = 0.0
+    ac = abs(c)
+    for coef in reversed(_cot_derivative_poly(n)):
+        v = v * c + coef
+        a = a * ac + abs(coef)
+    p = _PI ** (n + 1)
+    q = _polygamma1(n, 1 - z)
+    r = (-1.0 if n % 2 else 1.0) * q - complex(p * v.real, p * v.imag)
+    bound = 4 * n * 2.2e-16 * (p * a + abs(q))
+    if not bound <= 1e-13 * abs(r):
+        return None
+    return r
+
+
 def _cot_derivative_poly(n):
     """the coefficients (constant first) of P_n, with
     d^n/dx^n cot(x) = P_n(cot x)"""
@@ -572,14 +649,19 @@ def polygamma(n, z):
     """psi^(n)(z), the n-th derivative of psi, for integers n >= 0 and real
     or complex z: the recurrence DLMF 5.15.5 upward to Re z >= 15 + 2n and
     the asymptotic series DLMF 5.15.9, and the reflection DLMF 5.15.6 for
-    real z < 0 and for complex z with Re z < 1/2 and |Im z| >= 1 (nearer
-    the real axis the recurrence, which takes -Re z terms, so NotCovered
-    below Re z = -1e6 there).  NotCovered for n > 100.  PoleError at 0,
-    -1, -2, ...
+    real z < 0 and for complex z with Re z < 0 (with cot's derivatives as a
+    polynomial in cot for |Im z| < 1, or else the recurrence where that
+    polynomial would lose more than three digits, and as a q-series for
+    |Im z| >= 1, Re z < 1/2; the recurrence takes -Re z terms, so
+    NotCovered below Re z = -1e6 there).  NotCovered for n > 100 and where
+    |psi^(n)(z)| or |z| is beyond the doubles.  PoleError at 0, -1, -2, ...
     Largest relative error found against mpmath for n = 1..20: 4.6e-15
-    for real x in [-40, 50], 4.3e-15 for complex |z| <= 420; for n up to
-    100 and |z| up to 1e12, 2e-14 (largest for negative x); larger near
-    the zeros"""
+    for real x in [-40, 50], 4.3e-15 for complex |z| <= 420, 1e-14 next to
+    the negative real axis; for n up to 100 and |z| up to 1e12, 4e-14
+    (largest for negative Re z); larger near the zeros and where the
+    function's condition is large (8e-13 at psi^(100)(-0.5 - 0.0311i),
+    where 101 arg(0.5 + 0.0311i) is near 2 pi and the value's leading
+    part nearly vanishes)"""
     def one(n, z):
         if isinstance(n, complex) or n != _math.floor(n) or n < 0:
             raise ValueError("polygamma: n must be an integer >= 0")
@@ -588,7 +670,7 @@ def polygamma(n, z):
             # evaluation is not written)
             raise NotCovered("polygamma: Sagebrush covers n <= 100")
         return _polygamma1(int(n), z)
-    return _elementwise(one, n, z)
+    return _elementwise(_modulus_within("polygamma", one, 1), n, z)
 
 
 # ------------------------------------------------------------------ zeta functions
@@ -606,10 +688,8 @@ def _em_tail(s, a, N, m=12):
         try:
             p1 = v ** (1 - s)
         except OverflowError:
-            # (s < 1 and a near the largest doubles: zeta(s, a), about
-            # a^(1-s)/(s-1), is beyond them)
-            return -_math.inf
-    if p1 == 0:
+            p1 = None
+    if p1 is not None and p1 == 0:
         # (v = N + a >= 20: with (N+a)^(1-s) below the doubles every term is,
         # their logarithms (1-s) log v + O(m log |s|); and (s)_(2j-1), which
         # overflows for huge s, would make 0 * inf = nan)
@@ -626,6 +706,12 @@ def _em_tail(s, a, N, m=12):
         t += _B2K[j - 1] / fact * poch * q
         poch *= (s + 2 * j - 1) * (s + 2 * j)
         q *= vinv2
+    if p1 is None:
+        # ((N+a)^(1-s) beyond the doubles, s < 1 and a near the largest:
+        # the power in halves, so that the quotient by s - 1 can bring the
+        # product back, zeta(-0.5, 4e205) = -1.69e308; inf where it cannot)
+        h = v ** ((1 - s) / 2)
+        return (h * t) * h
     return p1 * t
 
 
@@ -727,7 +813,7 @@ def zeta(s):
     (from the rounding of the phases Im s log k: 1.5e-12 at |Im s| = 1e3,
     1.8e-11 at 1e4), so the relative error is larger where |zeta| is small,
     near its zeros"""
-    return _elementwise(_zeta1, s)
+    return _elementwise(_modulus_within("zeta", _zeta1, 0), s)
 
 
 def _hurwitz1(s, a):
@@ -1560,7 +1646,7 @@ def _erfc_right(z, name):
 
 
 def _erf_c(z, name="erf"):
-    if abs(z) < 0.5:
+    if _cabs(z) < 0.5:
         return _erf_taylor(z)
     if z.real >= 0:
         v = _erfc_right(z, name)
@@ -1830,6 +1916,9 @@ def _e1_asym(z):
     # -arg z away at Im z = 1e308, E1(1e308 i) off by a factor i)
     lz = _cmath.log(z)
     v = _cexp(complex(-z.real - lz.real, -z.imag)) * _cmath.exp(complex(0.0, -lz.imag)) * s
+    if _isnan(v):
+        # (e^-z infinite, its phase's parts times it inf * 0)
+        raise NotCovered("exp_integral_e1: |E1(z)| is beyond the doubles at z = %r" % (z,))
     if z.real < 0 and z.imag == 0:
         v = complex(v.real, -_math.copysign(_PI, z.imag))
     return v
@@ -1839,7 +1928,7 @@ def _e1_c(z):
     x, y = z.real, z.imag
     if z == 0:
         raise PoleError("E1 has a logarithmic singularity at 0")
-    r = abs(z)
+    r = _cabs(z)
     if r <= 2 or (r + x <= 3 and r <= 700):
         # (the series loses e^(|z| + Re z) to cancellation, so it serves
         # near 0 and next to the negative real axis, where the continued
@@ -2050,7 +2139,7 @@ def _lambertw_upper(z, k):
                 v = (v + c) * p
             return -1 + v
         w = -1 + p * (cs[0] + p * (cs[1] + p * cs[2]))
-    elif k == 0 and abs(z) <= 3:
+    elif k == 0 and _cabs(z) <= 3:
         w = _cmath.log(1 + z)
     elif k == -1 and z.imag == 0 and -0.1 < z.real < 0:
         # (the real branch W_-1 on (-1/e, 0): DLMF 4.13.11's leading terms
@@ -2129,7 +2218,7 @@ def lambert_w(z, k=0):
     z = 0 for k != 0.  Largest relative error found against mpmath: 9e-16,
     for every branch tried (|k| <= 10^6, 1e-300 <= |z| <= 1e300, next to
     the branch point and the cuts)"""
-    return _elementwise(_lambertw1, z, k)
+    return _elementwise(_modulus_within("lambert_w", _lambertw1, 0), z, k)
 
 
 # ------------------------------------------------------------------ polylogarithm
@@ -2309,12 +2398,12 @@ def polylog(s, z):
     error found against mpmath: 2e-14 for 1 <= s <= 100 (largest at large
     orders and large |z|), growing for negative orders to 1e-13 at s = -20
     (and near Li_s's zeros)"""
-    return _elementwise(_polylog1, s, z)
+    return _elementwise(_modulus_within("polylog", _polylog1, 1), s, z)
 
 
 def dilog(z):
     """the dilogarithm Li_2(z) (DLMF 25.12.1), as polylog(2, z)"""
-    return _elementwise(_polylog1, 2.0, z)
+    return _elementwise(_modulus_within("dilog", _polylog1, 1), 2.0, z)
 
 
 # ------------------------------------------------------------------ elliptic integrals and functions

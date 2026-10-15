@@ -317,5 +317,23 @@ for name, z in [("erf", complex(3e7, 3e7)), ("erf", complex(1e8, 1e8)), ("erfc",
     add(name, (z,), ref[name](z))
 for s_, a in [(2.0, 1e300), (2.0, 1e308), (3.0, 1e100), (1.5, 1e50)]:
     add("hurwitz_zeta", (s_, a), mp.zeta(s_, a))
+# (astra's review of d691440, CORR-D69-1: polygamma next to the negative
+# real axis, where the recurrence's terms either side of a pole cancel;
+# her two examples, and a grid of orders, real parts and small imaginary
+# parts, at digits enough for the cancellation)
+_pg = [(40, complex(-0.5, 1e-9)), (30, complex(-1.5, 1e-9))]
+_pg += [(n, complex(x, y)) for n in (10, 40, 100) for x in (-0.5, -3.5, -37.5, -0.25, -12.3)
+        for y in (1e-3, -1e-9, 1e-15)]
+_pg += [(100, complex(-1.5, 0.0)), (20, complex(-2.75, 0.5)), (5, complex(-30.2, -0.9))]
+for n, z in _pg:
+    with mp.workdps(320):
+        add("polygamma", (n, z), mp.polygamma(n, mp.mpc(z.real, z.imag)))
+# (astra's zeta(-0.5, 4e205), about -1.69e308, whose power a^1.5 overflows
+# before the quotient by s - 1 brings it back: Euler-Maclaurin's terms
+# a^(1-s)/(s-1) + a^-s/2 + s a^(-s-1)/12, at a = 4e205 the rest below 1e-600
+# of them; mpmath's zeta takes too long there)
+with mp.workdps(60):
+    _a, _s = mp.mpf(4e205), mp.mpf(-0.5)
+    add("hurwitz_zeta", (-0.5, 4e205), _a ** (1 - _s) / (_s - 1) + _a ** (-_s) / 2 + _s * _a ** (-_s - 1) / 12)
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")

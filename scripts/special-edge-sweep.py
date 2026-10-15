@@ -5,7 +5,11 @@ _special's own (a raw OverflowError, ZeroDivisionError, 'math domain
 error', or a call taking more than 5 s); with --oracle, also every value
 that disagrees with mpmath: a relative error above 1e-12 of max(1,
 |log |value||), a 0 or inf where mpmath's value is within the doubles, a
-finite value where it is not.  Run with CPython (and mpmath for --oracle):
+finite value where it is not.  The oracle covers the functions in MPF
+below, not faddeeva, polylog, the elliptic and Legendre functions or the
+incomplete gamma functions (test/special.test.ts's fixture checks those),
+and it skips a point where mpmath fails or takes more than 10 s.  Run
+with CPython (and mpmath for --oracle):
 
     python3 scripts/special-edge-sweep.py lib/_special.py [--oracle]
 """
@@ -17,7 +21,7 @@ ORACLE = "--oracle" in sys.argv
 big = [1.7976931348623157e308, 1e308, 1e300, 1e200, 1e20]
 small = [5e-324, 1e-310, 1e-300, 1e-200]
 reals = [0.0, -0.0, 0.5, 1.0, 2.0, -1.5, -3.0] + big + [-v for v in big] + small + [-v for v in small]
-cplx = [complex(a, b) for a in (0.0, 1e308, -1e308, 1.0, 1e-300) for b in (1e308, -1e308, 1e-300, 1.0)]
+cplx = [complex(a, b) for a in (0.0, 1e308, -1e308, 1.0, 1e-300, 1.7976931348623157e308) for b in (1e308, -1e308, 1e-300, 1.0, 1.7976931348623157e308)]
 ones = [(v,) for v in reals + cplx]
 # (large negative non-integers next to their partners, where log Gammas cancel)
 negbig = [-999999999.5, -999999999999.5, -1e15 - 0.5, -123456.25, -20.5]
