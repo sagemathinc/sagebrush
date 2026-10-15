@@ -552,25 +552,38 @@ class Series:
             return None
 
     def _lift_base(self, o):
-        """self, moved to the series ring over the fraction field of its base
-        when o needs it (as Sage: ZZ[[z]] meets 1/2 or a series over QQ in
-        QQ[[z]]); else self."""
+        """self, moved to the common parent Sage uses with o when that
+        differs, else self: the series ring over _target_base(o), and a
+        Laurent series ring if either operand is one (QQ[[z]] meets a
+        Laurent series over ZZ in QQ((z)), whichever comes first; the
+        review's CORR-078-1)."""
+        R = self._R
+        base = self._target_base(o)
+        laurent = R._laurent or (isinstance(o, Series) and o._R._laurent)
+        if base is R._base and laurent == R._laurent:
+            return self
+        return self._over(base, laurent=laurent)
+
+    def _target_base(self, o):
+        """The coefficient ring of self's parent with o: the fraction field
+        of the base when o needs it (ZZ[[z]] meets 1/2 or a series over QQ
+        in QQ[[z]]), else the base."""
         B = self._R._base
         F = _frac(B)
         if F is B:
-            return self
+            return B
         if isinstance(o, Series):
-            return self._over(F) if o._R._base is F else self
+            return F if o._R._base is F else B
         try:
             B(o)
-            return self
+            return B
         except (TypeError, ValueError, ArithmeticError):
             pass
         try:
             F(o)
         except (TypeError, ValueError, ArithmeticError):
-            return self
-        return self._over(F)
+            return B
+        return F
 
     def _over(self, base, laurent=None):
         """self in the series ring over base (a Laurent series ring if asked)."""
