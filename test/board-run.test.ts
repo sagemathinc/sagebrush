@@ -119,7 +119,7 @@ test("board run: what it is told wrong, a board that is not one, and text for a 
   assert.ok(!existsSync("x.json"));
 });
 
-test("board run: an id on two pages is two items, each run, reported and given its preview (CORR-CD6-1)", () => {
+test("board run: an id on two pages is two items, each run and reported, neither keeping a preview (CORR-CD6-1)", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-run-"));
   try {
     const f = join(dir, "p.board.json"), copy = join(dir, "p.previews.board.json");
@@ -128,8 +128,9 @@ test("board run: an id on two pages is two items, each run, reported and given i
     const { status, report } = json([f, "--store-previews", "--preview-ms", "0"]);
     assert.equal(status, 0);
     assert.deepEqual(report.items.map((i: any) => [i.n, i.id, i.page, i.title, i.status, i.stdout]), [[1, "same", 1, "One", "ok", "first\n"], [2, "same", 2, "Two", "ok", "second\n"]]);
+    // (a cell by its page keeps no preview, as the board's: its cell, and seed, change as pages come and go)
     const d = JSON.parse(readFileSync(copy, "utf8"));
-    assert.deepEqual(d.pages.map((p: any) => p.nodes[0].preview.outputs[0].text), ["first\n", "second\n"]);
+    assert.deepEqual(d.pages.map((p: any) => p.nodes[0].preview), [undefined, undefined]);
     assert.match(run([f]).stdout, /\("same", page 2\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -172,4 +173,11 @@ test("board run: --timeout is a number of seconds a timer can wait; --preview-ms
   }
   assert.equal(run([examples + "live.json", "--timeout", "2147483"]).status, 0);
   for (const t of ["Infinity", "-1"]) assert.match(run([examples + "live.json", "--store-previews", "--preview-ms", t]).stderr, /--preview-ms takes a number of milliseconds, 0 or more/);
+});
+
+test("board run: an item whose own id is another's cell's (x, x, x@p2): three cells, each run and reported (CORR-239-1)", () => {
+  const page = (title: string, id: string, said: string) => ({ title, nodes: [{ id, title, code: `print(${JSON.stringify(said)})`, x: 0, y: 0, w: 300 }] });
+  const { status, report } = json(["-"], JSON.stringify({ format: "sagebrush-board", version: 1, title: "Three", pages: [page("One", "x", "first"), page("Two", "x", "second"), page("Three", "x@p2", "real")] }));
+  assert.equal(status, 0);
+  assert.deepEqual(report.items.map((i: any) => [i.n, i.id, i.page, i.stdout]), [[1, "x", 1, "first\n"], [2, "x", 2, "second\n"], [3, "x@p2", 3, "real\n"]]);
 });

@@ -129,21 +129,30 @@ export async function boardRun(argv: string[]): Promise<number> {
   const seed = typeof doc.seed === "string" && /^[0-9a-f]{64}$/.test(doc.seed) ? doc.seed : BOARD_SEED;
   // the code items, page by page, each page in reading order (as doc.ts
   // codeOrder runs them); an id is one item's on a page, and may be
-  // another's on another page: those are told apart by their page in the
-  // scheduler and the report (`key`), and keep their ids for their seeds
-  // (CORR-CD6-1)
+  // another's on another page: those are cells by their page (`key`), as
+  // the board's (doc.ts codeOrder): id@pN, or, when that is taken (an
+  // item's id, or a cell already), id@pN~2, ~3, ...: one cell for each code
+  // item, whatever ids a board has (CORR-CD6-1, CORR-239-1)
   const pages = pageCount(doc);
   const all = Array.from({ length: pages }, (_, page) => codeOrder(pageView(doc, page)).map((it) => ({ ...it, page }))).flat();
-  const repeated = new Set(all.map((it) => it.id).filter((id, k, ids) => ids.indexOf(id) !== k));
-  const items = all.map((it) => ({ ...it, key: repeated.has(it.id) ? `${it.id}@p${it.page + 1}` : it.id }));
-  const byKey = new Map(items.map((it) => [it.key, it]));
+  const count = new Map<string, number>();
+  for (const it of all) count.set(it.id, (count.get(it.id) ?? 0) + 1);
+  const taken = new Set(all.map((it) => it.id));
+  const items = all.map((it) => {
+    if (count.get(it.id)! < 2) return { ...it, key: it.id };
+    let key = `${it.id}@p${it.page + 1}`;
+    for (let k = 2; taken.has(key); k++) key = `${it.id}@p${it.page + 1}~${k}`;
+    taken.add(key);
+    return { ...it, key };
+  });
   const notes = new Map<string, DocNote>();
   for (let page = 0; page < pages; page++) {
     const on = codeNotes(pageView(doc, page));
     for (const it of items) if (it.page === page && on.has(it.id)) notes.set(it.key, on.get(it.id)!);
   }
   const reports = new Map<string, ItemReport>(items.map(({ key, id, page }, i) => [key, { n: i + 1, id, ...(pages > 1 ? { page: page + 1 } : {}), title: notes.get(key)?.title, status: "not run", stdout: "", stderr: "", outputs: [] }]));
-  const seedOf = (key: string) => hex(`${seed}:${byKey.get(key)?.id ?? key}`);
+  // (each cell's seed from its id, as the board's notebook draws it: an id one item has is its cell's)
+  const seedOf = (key: string) => hex(`${seed}:${key}`);
   const label = (id: string) => { const r = reports.get(id); return r ? `item ${r.n}${r.title ? ` ${JSON.stringify(r.title)}` : ""}` : "an item"; };
 
   // the interpreter, and what each run sends back
@@ -272,9 +281,12 @@ export async function boardRun(argv: string[]): Promise<number> {
     let wrote: string | null = null;
     if (store && target) {
       const at = new Date().toISOString(), kept = new Map<string, Preview>();
-      for (const { key: id } of items) {
+      for (const { key: id, id: item } of items) {
         const r = reports.get(id)!, n = notes.get(id);
-        if (!n || (r.status !== "ok" && r.status !== "failed")) continue;
+        if (!n) continue;
+        // (a cell by its page keeps no preview, as the board's: its cell, and seed, change as pages come and go)
+        if (id !== item) { delete n.preview; continue; }
+        if (r.status !== "ok" && r.status !== "failed") continue;
         const total = reactive.fromRoot(id).ms;
         const p = total > previewMs || previewMs === 0 ? await makePreview(previewable(outputs.get(id) ?? []), { at, ms: reactive.times.get(id) ?? 0, total }, keepRaster) : null;
         if (p) n.preview = p;
