@@ -1559,17 +1559,25 @@ def _cexp_mul(u, w, lo=0.0):
     if not (_math.isfinite(t) and _math.isfinite(lo) and _math.isfinite(big) and _math.isfinite(y)):
         return complex(_math.nan, _math.nan)
     _, j = _math.frexp(big)
-    mw = complex(_ldexp(w.real, -j), _ldexp(w.imag, -j))
     rough = (t + lo) / _LOG2_HI + j
     if rough < -1200:
         return 0j
     if rough > 1100:
-        v = complex(_math.cos(y), _math.sin(y)) * mw
+        v = complex(_math.cos(y), _math.sin(y)) * complex(_ldexp(w.real, -j), _ldexp(w.imag, -j))
         return complex(_math.copysign(_math.inf, v.real) if v.real else 0.0,
                        _math.copysign(_math.inf, v.imag) if v.imag else 0.0)
     k, r = _reduce_exp(t, lo)
-    v = _cmath.exp(complex(r, y)) * mw
-    return complex(_ldexp_inf(v.real, k + j), _ldexp_inf(v.imag, k + j))
+    # (each part of w scaled by its own exponent and each of the four
+    # products by its own 2^(k + j): one common scale, from the larger part,
+    # pushed the smaller below the doubles, e^0 (1e308 + 1e-100i) lost its
+    # 1e-100i, astra's note on f938c7d)
+    er = _math.exp(r)
+    c, s_ = er * _math.cos(y), er * _math.sin(y)
+    mr, jr = _math.frexp(w.real)
+    mi, ji = _math.frexp(w.imag)
+    re = _ldexp_inf(c * mr, k + jr) - _ldexp_inf(s_ * mi, k + ji)
+    im = _ldexp_inf(s_ * mr, k + jr) + _ldexp_inf(c * mi, k + ji)
+    return complex(re, im)
 
 
 def _cexp(u):
@@ -1844,19 +1852,20 @@ def _erfcx1(z):
         return 0.0
     if z >= 0:
         return _faddeeva_upper(complex(0.0, z)).real
-    # (DLMF 7.4.3 again: erfcx(-x) = 2 e^(x^2) - erfcx(x))
-    try:
-        e = _math.exp(z * z)
-    except OverflowError:
+    # (DLMF 7.4.3 again: erfcx(-x) = 2 e^(x^2) - erfcx(x), with x^2 exact
+    # and 2 e^(x^2) scaled, as for erfi)
+    if z < -1e150:
         return _math.inf
-    return 2 * e - _faddeeva_upper(complex(0.0, -z)).real
+    xx, xx_err = _two_prod(z, z)
+    return _exp_mul(xx, 2.0, xx_err) - _faddeeva_upper(complex(0.0, -z)).real
 
 
 def erfcx(z):
     """the scaled complementary error function e^(z^2) erfc(z) = w(iz), real
     or complex (DLMF 7.2.3).  Largest relative error found against mpmath:
-    8e-16 for real x in [-26, 1e10], 1.2e-15 for complex z; for real
-    x < -26 it grows with x^2, the rounding of e^(x^2)'s exponent"""
+    2e-16 for real x in [-26.6, 1e10] (for x < 0, 2 e^(x^2) with x^2 taken
+    exactly and the exponential scaled; it overflows to inf where erfcx
+    leaves the doubles, near x = -26.63), 1.2e-15 for complex z"""
     return _elementwise(_erfcx1, z)
 
 
@@ -1893,8 +1902,14 @@ def _erfi1(z):
     # odd in x)
     if abs(z) == _math.inf:
         return z
+    if abs(z) > 1e150:
+        return _math.copysign(_math.inf, z)  # (e^(x^2) / (x sqrt(pi)) beyond the doubles)
+    # (x^2 exactly, as xx + xx_err (Dekker's product), and e^(x^2) Im w(x)
+    # scaled (_exp_mul): x^2 rounded once put its error times x^2 into the
+    # exponent, 7e-14 at x = 26)
     v = _faddeeva_upper(complex(abs(z), 0.0)).imag
-    r = _math.exp(z * z + _math.log(v)) if z * z < 800 else _math.inf
+    xx, xx_err = _two_prod(z, z)
+    r = _exp_mul(xx, v, xx_err)
     return r if z > 0 else -r
 
 
@@ -1902,8 +1917,8 @@ def erfi(z):
     """the imaginary error function erfi z = -i erf(iz), real or complex:
     for real x the Taylor series for |x| < 1/2 and e^(x^2) Im w(x) beyond;
     for complex z from erf.  Largest relative error found against mpmath:
-    for complex z as erf's; for real x in [-26, 26] 7e-14, growing with
-    x^2 (the rounding of e^(x^2)'s exponent)"""
+    for complex z as erf's; for real x 1e-15 (x^2 taken exactly and
+    e^(x^2) Im w(x) scaled; +-inf beyond the doubles, from |x| = 26.65)"""
     return _elementwise(_erfi1, z)
 
 
