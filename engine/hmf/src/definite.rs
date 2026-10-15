@@ -12,7 +12,8 @@
 //! those of classes.rs, chosen with reduced norms prime to N(N) (Kirschmer-
 //! Voight, Proposition 7.3), so that each O_L(I_i) agrees with O at N.
 //!
-//! Hecke operators T_P for P not dividing N (DV, (4.2) and section 8). A
+//! Hecke operators T_P for P not dividing N (DV, (4.2) and section 8), and
+//! U_P for P dividing N (see `hecke_matrix`). A
 //! point (I_i, x) has the N(P) + 1 P-neighbours J of I_i, each with the same
 //! level structure x (P is prime to N). J lies in the class of some I_j: J =
 //! a I_j, with a in I_i I_j^-1 and nrd(a) O_F = P nrd(I_i) nrd(I_j)^-1, and
@@ -208,6 +209,32 @@ impl DefiniteSpace {
     pub fn classes(&self) -> &ClassSet {
         &self.classes
     }
+
+    /// For each basis element, the index (0..h+) of the narrow class of the
+    /// reduced norm of its ideal class: the fibers of the map to Cl+(F)
+    /// through which the Eisenstein series factor. Every narrow class occurs
+    /// (nrd maps Cl O onto Cl+(F)); checked.
+    pub fn narrow_fibers(&self) -> Result<Vec<usize>, String> {
+        let cg = self.classes.class_group();
+        let mut keys = vec![];
+        for c in self.classes.classes() {
+            keys.push(cg.narrow_class(&c.ideal().nrd())?);
+        }
+        let mut distinct = keys.clone();
+        distinct.sort();
+        distinct.dedup();
+        if distinct.len() != cg.narrow_h() {
+            return Err("internal error: the classes do not cover the narrow class group".into());
+        }
+        let mut out = vec![0usize; self.dim];
+        for (i, k) in keys.iter().enumerate() {
+            let idx = distinct.iter().position(|x| x == k).unwrap();
+            for b in self.offset[i]..self.offset[i] + self.reps[i].len() {
+                out[b] = idx;
+            }
+        }
+        Ok(out)
+    }
     pub fn level(&self) -> QIdeal {
         self.level
     }
@@ -264,6 +291,21 @@ impl DefiniteSpace {
             e[k] = self.locals[k].act(&m[k], d[k]).ok_or("internal error: an element acted singularly on P^1")?;
         }
         Ok(self.combine(&e))
+    }
+
+    /// The image of x, or None if the matrix is singular on x at the factor
+    /// `degenerate` (an Err at any other factor).
+    fn act_or_degenerate(&self, m: &[Mat], x: u64, degenerate: Option<usize>) -> Result<Option<u64>, String> {
+        let d = self.digits(x);
+        let mut e = vec![0u32; d.len()];
+        for k in 0..d.len() {
+            match self.locals[k].act(&m[k], d[k]) {
+                Some(y) => e[k] = y,
+                None if Some(k) == degenerate => return Ok(None),
+                None => return Err("internal error: an element acted singularly on P^1".into()),
+            }
+        }
+        Ok(Some(self.combine(&e)))
     }
 
     fn orbits(&self, mats: &[Vec<Mat>]) -> Result<(Vec<u32>, Vec<u64>), String> {
@@ -366,11 +408,22 @@ impl DefiniteSpace {
 
     /// The matrix of T_P for P not dividing N: row b is the image of the
     /// basis element b; rows sum to N(P) + 1.
+    ///
+    /// For P dividing N this is U_P, with rows summing to N(P) (as for the
+    /// Q(sqrt 5) code). Of the N(P) + 1 elements a, those for which conj(a)
+    /// is singular modulo P on the point x are left out. conj(a) a = nrd(a)
+    /// lies in P, so conj(a) is singular modulo P with a rank-one kernel, the
+    /// line of a, and the N(P) + 1 lines are distinct (the neighbours are), so
+    /// exactly one a is left out for each x (checked): the sum runs over the
+    /// N(P) single cosets of the double coset of diag(pi, 1) for the Eichler
+    /// order of level P^e (Dembélé 2005, section 3: "one must restrict the
+    /// summation to the u whose action is nondegenerate").
     pub fn hecke_matrix(&self, p: &QPrime) -> Result<HeckeMatrix, String> {
         let f = self.field();
-        if f.ideal_div(&self.level, &p.ideal)?.is_some() {
-            return Err("T_P for P dividing the level is not implemented".into());
-        }
+        f.check(&p.ideal)?;
+        // the factor of P^e in N, if P divides N
+        let degenerate = self.locals.iter().position(|l| l.ring.prime().ideal == p.ideal);
+        let want = if degenerate.is_some() { p.norm } else { p.norm + 1 };
         if self.dim > MAX_DIMENSION {
             return Err(format!("dimension {} is above {} (unsupported)", self.dim, MAX_DIMENSION));
         }
@@ -390,8 +443,12 @@ impl DefiniteSpace {
                 sagebrush_interrupt::check();
                 let mut cols: Vec<u32> = vec![];
                 for (j, m) in &mats {
-                    let y = self.act(m, x)?;
-                    cols.push((self.offset[*j] + self.orbit[*j][y as usize] as usize) as u32);
+                    if let Some(y) = self.act_or_degenerate(m, x, degenerate)? {
+                        cols.push((self.offset[*j] + self.orbit[*j][y as usize] as usize) as u32);
+                    }
+                }
+                if cols.len() as i128 != want {
+                    return Err(format!("internal error: {} terms in a row of the Hecke operator instead of {}", cols.len(), want));
                 }
                 cols.sort_unstable();
                 let mut row: Vec<(u32, u32)> = vec![];
@@ -415,13 +472,16 @@ impl DefiniteSpace {
     }
 
     /// The characteristic polynomial of T_P on S_2(N): the Eisenstein factor
-    /// (x^m - (N(P) + 1)^m)^(h+/m) divided out (checked to divide).
+    /// (x^m - (N(P) + 1)^m)^(h+/m) divided out (checked to divide). For P
+    /// dividing N (U_P) the factor is (x^m - N(P)^m)^(h+/m): the N(P) terms
+    /// of a row all move the narrow class of nrd by [P].
     pub fn cusp_charpoly(&self, p: &QPrime) -> Result<Vec<BigInt>, String> {
         let full = self.charpoly(p)?;
         let cg = self.classes.class_group();
         let m = cg.class_order(&p.ideal, true)?;
         let hp = cg.narrow_h();
-        let a = BigInt::from(p.norm + 1).pow(m as u32);
+        let divides = self.field().ideal_div(&self.level, &p.ideal)?.is_some();
+        let a = BigInt::from(if divides { p.norm } else { p.norm + 1 }).pow(m as u32);
         let mut eis = vec![BigInt::zero(); m + 1];
         eis[0] = -a;
         eis[m] = BigInt::one();

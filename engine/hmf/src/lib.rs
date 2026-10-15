@@ -25,6 +25,8 @@
 //! * `definite`: M_2(N) over any real quadratic field, by the definite
 //!   method: the basis of orbits, Hecke operators T_P, and the cusp and
 //!   new characteristic polynomials;
+//! * `defnew`: over any real quadratic field, the new subspaces, the
+//!   Galois orbits of newforms and their Hecke eigenvalues;
 //! * `split`: local splittings R/P^e R = M_2(O_F/P^e), from idempotents;
 //! * `orbits`: the orbits of the units on P^1(O_F/N);
 //! * `theta`: the Hecke elements Theta(p), by lattice enumeration;
@@ -41,6 +43,7 @@
 
 pub mod classes;
 pub mod definite;
+pub mod defnew;
 pub mod degeneracy;
 pub mod eigen;
 pub mod field;
