@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const port = 9457, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const port = Number(process.env.CDP_PORT ?? 9457), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-img-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;

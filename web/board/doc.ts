@@ -205,7 +205,7 @@ export interface BoardPage {
   id?: string;
   /** the page's title (plain text) */
   title?: string;
-  /** Markdown shown before the page's tour */
+  /** Markdown shown before the page's tour (without it, the page's title is shown; on the first page, the document's `intro`) */
   intro?: string;
   /** how the page's items are laid out (default `graph`) */
   layout?: DocGroup["layout"];
@@ -265,7 +265,7 @@ export interface BoardDoc {
   images?: Record<string, ImageInfo>;
   /** several pages; a document with pages has no `nodes`, `edges` or `steps` of its own */
   pages?: BoardPage[];
-  /** Markdown shown before the tour starts */
+  /** Markdown shown before the tour starts (with pages: on the first page, if it has no `intro` of its own) */
   intro?: string;
   /** the base URL for `ref` links that are paths (e.g. a repository's blob URL) */
   refBase?: string;
@@ -319,11 +319,12 @@ export function lookOf(d: BoardDoc, i: number): { slide?: SlideRect; background?
   return { slide: p.slide ?? q?.slide, background: p.background ?? q?.background };
 }
 
-/** Page i as a one-page document, for layout() (the document's title, refBase and pictures). */
+/** Page i as a one-page document, for layout() (the document's title, refBase and pictures; and
+ * on the first page, without an intro of its own, the document's: friction 7). */
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro, layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */

@@ -256,6 +256,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const byPage = new Set<string>();
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
+  let pageGen = 0; // page()'s: only the page asked for last starts its tour
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
   let routingGen = 0, routed = false;
 
@@ -410,7 +411,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (not while it is being renamed)
     if (!$("title").querySelector("input")) $("title").textContent = d.title ?? "";
     // (the tour's caption: not over TimeTravel's bar; a notice, until the next edit)
-    $("tour").hidden = view || (!v.steps?.length && !v.intro && !notice);
+    // (and on a board of pages, always: its arrows go on to the next page, UI-118-2)
+    $("tour").hidden = view || (!v.steps?.length && !v.intro && !notice && pageCount(d) < 2);
     if (notice && !view && !v.steps?.length && !v.intro) caption(notice, "");
     pageBar();
     // (compared with the original as it is shown: cleaned, so that its keys'
@@ -563,6 +565,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     writtenHere = stored ? host.store?.writtenHere?.() ?? false : host.store?.writtenHere?.(false) ?? false;
     const m = /^#(?:p(\d+)(?:-(\d+))?|(\d+))$/.exec(host.address?.get() ?? "");
     pageIx = m?.[1] ? Number(m[1]) - 1 : 0;
+    // (a page of the old document still being drawn: not shown over this one)
+    pageGen++;
     closeTimeTravel(false);
     if (!(await show(d))) return;
     if (boardHistory) remember();
@@ -596,17 +600,21 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     look();
   }
 
-  /** Show page i (0-based), from its start. */
-  async function page(i: number) {
+  /** Show page i (0-based), from its start (`end`: at its tour's last step). */
+  async function page(i: number, end = false) {
     if (!doc) return;
     // (first: what is being written is kept on its own page)
     editor.clear();
+    const g = ++pageGen;
     pageIx = Math.max(0, Math.min(pageCount(viewing ?? doc) - 1, i));
-    if (!(await redraw())) return;
+    // (the cursor the new page's, page and step together, while it is drawn;
+    // and only the page asked for last is shown, as its tour starts, UI-118-1)
+    at = end ? steps().length - 1 : -1;
+    if (!(await redraw()) || g !== pageGen) return;
     // (Find's item outlined and marked only on its own page: another item
     // there may have its id, CORR-8CE-1)
     if (found[foundAt] && found[foundAt].page !== pageIx) unmark();
-    step(-1, true);
+    step(end ? steps().length - 1 : -1, true);
   }
 
   // the page picker: shown when there are pages
@@ -640,12 +648,46 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function step(i: number, now = false) {
     const ss = steps();
     at = Math.max(-1, Math.min(ss.length - 1, i));
-    if (at < 0) caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
+    if (at < 0) caption(intro(), ss.length ? `${ss.length} step${ss.length === 1 ? "" : "s"}` : "");
     else caption(ss[at].say ?? "", `${at + 1} / ${ss.length}`);
     look(now);
     host.address?.set(hashFor(at));
-    ($("prev") as HTMLButtonElement).disabled = at < 0;
-    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
+    // (back and on across pages: only the board's own start and end stop them, B4)
+    ($("prev") as HTMLButtonElement).disabled = at < 0 && pageIx <= 0;
+    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1 && pageIx >= pageTotal() - 1;
+  }
+  // The tour on, and back: past a page's last step to the next page's start,
+  // and back before its start to the previous page's last step, so that →
+  // alone goes through every tour of every page (William's B4)
+  const pageTotal = () => (doc ? pageCount(viewing ?? doc) : 0);
+  const onward = () => (at < steps().length - 1 ? step(at + 1) : pageIx < pageTotal() - 1 ? page(pageIx + 1) : undefined);
+  const back = () => (at > -1 ? step(at - 1) : pageIx > 0 ? page(pageIx - 1, true) : undefined);
+  // The reader's moves (the arrows, keys, the page picker), one after
+  // another: one asked for while a page is still being drawn is made from
+  // where that page lands, never from the old page's step (astra's
+  // UI-118-1); one still waiting as another document loads (or a file is
+  // opened, or dropped) is dropped, and a new document's moves don't wait
+  // for the last one's (astra, on 3df6006)
+  let moving: Promise<unknown> = Promise.resolve(), waiting = 0, movesOf = 0;
+  function go(move: () => unknown) {
+    const g = loadGen;
+    if (movesOf !== g) { movesOf = g; moving = Promise.resolve(); waiting = 0; }
+    const run = () => (g === loadGen && !destroyed ? move() : undefined);
+    if (!waiting) {
+      const r = run();
+      if (!(r instanceof Promise)) return;
+      moving = r;
+    } else moving = moving.then(run);
+    waiting++;
+    moving = moving.catch(fail).finally(() => { if (movesOf === g) waiting--; });
+  }
+  /** What the caption says before a page's tour: its intro, or else its title, as text (friction 9). */
+  function intro(): string | HTMLElement {
+    const v = doc && pageView(doc, pageIx);
+    if (v?.intro) return v.intro;
+    const t = document.createElement("strong");
+    t.textContent = doc?.pages?.length ? pageOf(doc, pageIx).title || `Page ${pageIx + 1}` : doc?.title ?? "";
+    return t;
   }
 
   // (the camera on the step shown: the whole board, or its slide's card, or the step's items)
@@ -668,20 +710,20 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     $("say").classList.toggle("open");
     board.insets = { ...board.insets, bottom: $("tour").hidden ? 0 : $("tour").offsetHeight + 18 };
   };
-  $("prev").onclick = () => step(at - 1);
-  $("next").onclick = () => step(at + 1);
+  $("prev").onclick = () => go(back);
+  $("next").onclick = () => go(onward);
   $("fit").onclick = () => board.focus();
   on(window, "keydown", (e: KeyboardEvent) => {
     if (!mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
     // (items selected in Edit: the arrow keys move them; in Edit, Space held pans)
     if (editor.hasSelection && e.key.startsWith("Arrow")) return;
     if (editor.on && e.key === " ") return;
-    if (e.key === "ArrowRight" || e.key === " ") step(at + 1);
-    else if (e.key === "ArrowLeft") step(at - 1);
+    if (e.key === "ArrowRight" || e.key === " ") go(onward);
+    else if (e.key === "ArrowLeft") go(back);
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
-    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") step(-1);
-    else if (e.key === "PageDown") page(pageIx + 1).catch(fail);
-    else if (e.key === "PageUp") page(pageIx - 1).catch(fail);
+    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") go(() => step(-1));
+    else if (e.key === "PageDown") go(() => page(pageIx + 1));
+    else if (e.key === "PageUp") go(() => page(pageIx - 1));
     else if (e.key === "+" || e.key === "=") board.zoomAt(1.25, board.el.clientWidth / 2, board.el.clientHeight / 2);
     else if (e.key === "-") board.zoomAt(0.8, board.el.clientWidth / 2, board.el.clientHeight / 2);
     else return;
@@ -864,9 +906,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) {
     b.onclick = () => editor.commit((d) => { const m = b.dataset.mode; if (m === "sage" || m === "magma" || m === "matlab") d.mode = m; else delete d.mode; });
   }
-  $("pgprev").onclick = () => page(pageIx - 1).catch(fail);
-  $("pgnext").onclick = () => page(pageIx + 1).catch(fail);
-  ($("pgsel") as HTMLSelectElement).onchange = (e) => { page(Number((e.target as HTMLSelectElement).value)).catch(fail); (e.target as HTMLElement).blur(); };
+  $("pgprev").onclick = () => go(() => page(pageIx - 1));
+  $("pgnext").onclick = () => go(() => page(pageIx + 1));
+  ($("pgsel") as HTMLSelectElement).onchange = (e) => { const n = Number((e.target as HTMLSelectElement).value); go(() => page(n)); (e.target as HTMLElement).blur(); };
   // a document's own nodes, edges and tour become its first page
   const PAGE_KEYS = ["intro", "layout", "columns", "direction", "slide", "background", "nodes", "edges", "steps"] as const;
   function paged(d: BoardDoc): BoardPage[] {
@@ -1089,8 +1131,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     pageIx = 0;
     newOutputs(true);
     writtenHere = host.store?.writtenHere?.(false) ?? false;
+    // (another document: what the last one was still drawing (a page, an
+    // edit) not shown over it, its reader's moves dropped, as for a load;
+    // astra, on 3df6006)
+    loadGen++;
+    pageGen++;
     await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
-    board.focus(undefined, true);
+    // (its own caption from its start: not the last document's intro and
+    // tour, the welcome's on /board/, friction 7)
+    step(-1, true);
     sayConverted();
   }
   // (a CoCalc board, converted: said in the caption, with what was left out,
