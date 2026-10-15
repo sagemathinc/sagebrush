@@ -4741,7 +4741,13 @@ def _var_impl(x, args, sq):
     rest = []
     if args:
         if _numel(args[0]) > 0 and not _istext(args[0]):
-            w = _int_arg(args[0])
+            a0 = args[0]
+            # (w is 0 or 1, the normalization, or a vector of weights, which
+            # Sagebrush does not compute: refused, not read as a scalar)
+            if _numel(a0) != 1 or not _isnumlike(a0) or _arr(a0).dtype.kind == "c" or _scalar(a0) not in (0.0, 1.0):
+                raise _err("%s: Sagebrush computes w = 0 or w = 1 only; weighted %s (a vector of weights) are not supported yet."
+                           % ("std" if sq else "var", "standard deviations" if sq else "variances"))
+            w = int(_scalar(a0))
         rest = list(args[1:])
     if _dims(x) == (0, 0) and not rest:
         return _math.nan
