@@ -17,11 +17,14 @@
 //! * Hecke operators T_p for p not dividing N (`Space::hecke_matrix`);
 //! * `degeneracy`: PSAGE's degeneracy maps from level N to N/p;
 //! * `newspace`: new dimensions and characteristic polynomials, Galois
-//!   orbits of newforms, rational newforms and their a_p.
+//!   orbits of newforms, rational newforms and their a_p;
+//! * `eigen`: the Hecke eigenvalues of every newform, in its coefficient
+//!   field.
 //!
 //! Invalid input is an `Err`, never a panic.
 
 pub mod degeneracy;
+pub mod eigen;
 pub mod field;
 pub mod newspace;
 mod par;
@@ -152,7 +155,8 @@ impl Space {
         Ok(HeckeMatrix { dim: self.dimension(), rows })
     }
 
-    /// Some rows of the matrix of T_p, sharing the work for p.
+    /// Some rows of the matrix of T_p (U_p if p divides N), sharing the work
+    /// for p.
     pub fn hecke_rows(&self, p: &Prime, rows: &[usize]) -> Result<Vec<Vec<(u32, u32)>>, String> {
         if let Some(&i) = rows.iter().find(|&&i| i >= self.dimension()) {
             return Err(format!("basis index {} out of range", i));
@@ -161,7 +165,7 @@ impl Space {
         Ok(rows.iter().map(|&i| self.hecke_row_with(&mats, i)).collect())
     }
 
-    /// Row i of the matrix of T_p alone (PSAGE's
+    /// Row i of the matrix of T_p (U_p if p divides N) alone (PSAGE's
     /// hecke_operator_on_basis_element), as (column, entry) pairs.
     pub fn hecke_row(&self, p: &Prime, i: usize) -> Result<Vec<(u32, u32)>, String> {
         if i >= self.dimension() {

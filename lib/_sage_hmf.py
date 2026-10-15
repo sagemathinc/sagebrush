@@ -16,7 +16,8 @@ Differences from PSAGE:
   trace, which may differ from Sage's gens_reduced().
 * decomposition() and new_decomposition() return newform orbits (the
   Hecke operator used, its characteristic polynomial on the orbit, the
-  dimension), not subspace objects; methods that would return a subspace
+  dimension, and the Hecke eigenvalues in the coefficient field:
+  hecke_eigenvalue(), aplist()), not subspace objects; methods that would return a subspace
   (new_subspace(), subspace(), basis(), vector_space()) raise
   NotImplementedError. PSAGE's new_subspace() was the kernel of one
   degeneracy map per prime, which is too large when forms of level N/p
@@ -440,7 +441,8 @@ class HilbertModularForms:
     T = hecke_matrix
 
     def hecke_operator_on_basis_element(self, P, i):
-        """Row i of the matrix of T_P alone, as a list.
+        """Row i of the matrix of T_P alone (of U_P if P divides the level;
+        see hecke_matrix), as a list.
 
         EXAMPLES::
 
@@ -568,7 +570,7 @@ class HilbertModularForms:
         """
         d = _call("hmf_newform_orbits", level=[self._level._gen])
         op = [(SqrtFiveIdeal([P["gen"]]), c) for P, c in d["op"]]
-        return [NewformOrbit(self._level, op, [int(c) for c in g]) for g in d["orbits"]]
+        return [NewformOrbit(self._level, op, [int(c) for c in g], k) for k, g in enumerate(d["orbits"])]
 
     def decomposition(self, B=None, verbose=False):
         """The Galois orbits of newforms of every level M dividing N, as
@@ -629,6 +631,9 @@ class NewformOrbit:
     """A Galois orbit of newforms: the characteristic polynomial of a Hecke
     operator T = sum c_P T_P (which separates the newforms of its level) on
     the orbit, irreducible over Q; its degree is the orbit's dimension.
+    Its Hecke eigenvalues lie in the coefficient field K = Q(e), with e a
+    root of that polynomial (the eigenvalue of T); they are proven (each is
+    checked as an identity T_P v = c(T) v in integers).
 
     EXAMPLES::
 
@@ -637,10 +642,13 @@ class NewformOrbit:
         [Newform orbit of dimension 1 at level 6 (of norm 36)]
     """
 
-    def __init__(self, level, op, charpoly):
+    def __init__(self, level, op, charpoly, number=0):
         self._level = level
         self._op = op
         self._charpoly = charpoly
+        self._number = number
+        self._field = None
+        self._eigen = {}
 
     def __repr__(self):
         return "Newform orbit of dimension %d at level %s (of norm %d)" % (
@@ -690,6 +698,71 @@ class NewformOrbit:
         """
         from _sage_poly import QQ, PolynomialRing
         return PolynomialRing(QQ, var)(self._charpoly)
+
+    def coefficient_field(self):
+        """The field Q(e) of the Hecke eigenvalues, e a root of charpoly()
+        (for a rational orbit, a field of degree one).
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import HilbertModularForms, SqrtFiveIdeal  # sagebrush only
+            sage: f = HilbertModularForms(SqrtFiveIdeal([[-5, 18]])).new_decomposition()[0]  # sagebrush only
+            sage: f.coefficient_field()  # sagebrush only
+            Number Field in e with defining polynomial x^2 + 5*x + 5
+        """
+        if self._field is None:
+            from _sage_nf import NumberField
+            self._field = NumberField(self.charpoly(), "e")
+        return self._field
+
+    def _eigenvalues(self, B):
+        """[(P, a_P)] for the primes of norm <= B, computed once per bound."""
+        B = _exact_int(B, "the bound")
+        if B not in self._eigen:
+            from fractions import Fraction
+            K = self.coefficient_field()
+            d = _call("hmf_newform_eigenvalues", level=[self._level._gen], orbit=self._number, bound=B)
+            self._eigen[B] = [(SqrtFiveIdeal([P["gen"]]), K([Fraction(int(c), int(den)) for c in num]))
+                              for P, num, den in d["aplist"]]
+        return self._eigen[B]
+
+    def hecke_eigenvalue(self, P):
+        """The eigenvalue a_P of T_P (U_P if P divides the level) on the
+        newform with T-eigenvalue e, in the coefficient field.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import HilbertModularForms, SqrtFiveIdeal  # sagebrush only
+            sage: H = HilbertModularForms(SqrtFiveIdeal([[-5, 18]]))  # sagebrush only
+            sage: f, g = H.new_decomposition()  # sagebrush only
+            sage: f.operator(), f.hecke_eigenvalue(2), f.hecke_eigenvalue(3)  # sagebrush only
+            ([(Fractional ideal (2), 1)], e, 3*e + 6)
+            sage: f.hecke_eigenvalue(3).charpoly(), g.hecke_eigenvalue(3).charpoly()  # sagebrush only
+            (x^2 + 3*x - 9, x^4 - 5*x^3 + 3*x^2 + 6*x - 4)
+            sage: f.hecke_eigenvalue(H.level())  # sagebrush only
+            1
+        """
+        P = _prime(P)
+        for Q, a in self._eigenvalues(P.norm()):
+            if Q == P:
+                return a
+        raise ValueError("%s is not a prime" % (P,))
+
+    def aplist(self, B):
+        """The eigenvalues a_P for the primes P of norm less than B, in the
+        order of primes_of_bounded_norm(B), in the coefficient field.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import HilbertModularForms, SqrtFiveIdeal  # sagebrush only
+            sage: f = HilbertModularForms(SqrtFiveIdeal([[-5, 18]])).new_decomposition()[0]  # sagebrush only
+            sage: f.aplist(12)  # sagebrush only
+            [e, -2*e - 7, 3*e + 6, -3, -e - 5]
+        """
+        B = _exact_int(B, "the bound")
+        if B <= 2:
+            return []
+        return [a for _, a in self._eigenvalues(B - 1)]
 
 
 class EllipticCurveFactor:
