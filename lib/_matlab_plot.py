@@ -11,8 +11,14 @@ Semantics kept from MATLAB:
   shows C's rows top to bottom.  Arrays cross into matplotlib through
   _m._mat (MATLAB orientation), the one place the axes are reversed back.
 
-Not yet: true 3-D (surf and mesh are shown from above), contour lines
-(contour draws filled bands), and raster output (print and saveas write SVG).
+A figure whose one axes is 3-D (surf, mesh, plot3, scatter3, stem3) is also
+shown as an interactive 3-D view in the notebook (web/viewer3d.js: drag to
+rotate, scroll to zoom), with MATLAB's axes and colors; its SVG is shown
+everywhere else, and is the picture when the view cannot start.
+
+Not yet: an interactive view for figures with several axes, or with patches
+or a legend in the 3-D axes (they show the SVG), and raster output (print
+and saveas write SVG).
 """
 
 import math
@@ -2242,11 +2248,40 @@ _FUNCS["yline"] = _constline("y")
 
 @_fn("view")
 def view_(nargout, args):
-    ax = gca()
-    if not args:
-        return ax.props["View"]
-    v = _vec(args[0])
-    ax.props["View"] = np.array([[0.0], [90.0]]) if v == [2.0] else (np.array([[-37.5], [30.0]]) if v == [3.0] else _colvec(v[:2]))
+    """view(az, el), view(v) ([az el], or [x y z] toward the camera), view(2),
+    view(3), view(ax, ...); [caz, cel] = view(...): the angles (one output: caz)"""
+    args = list(args)
+    ax = args.pop(0) if args and isinstance(args[0], Axes) else gca()
+    if args:
+        if len(args) == 2:
+            az, el = _f(args[0]), _f(args[1])
+        elif len(args) == 1:
+            v = _vec(args[0])
+            if v == [2.0]:
+                az, el = 0.0, 90.0
+            elif v == [3.0]:
+                az, el = -37.5, 30.0
+            elif len(v) == 2:
+                az, el = v
+            elif len(v) == 3:
+                # (the direction toward the camera: x = cos(el) sin(az),
+                # y = -cos(el) cos(az), z = sin(el), as _viewmtx's depth row)
+                r = math.sqrt(sum(t * t for t in v))
+                if r == 0:
+                    raise _m._err("view: the line of sight must not be [0 0 0].")
+                az = math.degrees(math.atan2(v[0], -v[1])) if v[0] or v[1] else 0.0
+                el = math.degrees(math.asin(max(-1.0, min(1.0, v[2] / r))))
+            else:
+                raise _m._err("view: the argument must be 2, 3, [az el] or [x y z].")
+        else:
+            raise _m._err("Too many input arguments.")
+        ax.props["View"] = _colvec([az, el])
+        ax.figure().dirty = True
+    v = _vec(ax.props["View"])
+    if nargout >= 2:
+        return [v[0], v[1]]
+    if nargout == 1 or not args:
+        return v[0]
 
 
 @_fn("set")
@@ -2371,7 +2406,7 @@ def print_(nargout, args):
         _m.warning_("Only SVG output is supported: writing %s.svg" % base)
     path = base + ".svg"
     from _graphics import save_svg
-    save_svg(render(fig)._svg(), path)
+    save_svg(figure_svg(fig), path)
 
 
 @_fn("axes")
@@ -3446,8 +3481,281 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
         mfig.colorbar(_ColorbarBands(cmap, clim), ax=mx)
 
 
+# ------------------------------------------------------------------ the figure as shown: SVG, and a 3-D scene
+
+# MATLAB's text and axis lines: dark gray on the figure's own color, whatever
+# the page's theme (the shim draws them in the page's color, currentColor)
+_INK = "#262626"
+
+
+def figure_svg(fig, mfig=None):
+    """fig's SVG as MATLAB shows it: the figure's Color behind it (white by
+    default), the text and axis lines in MATLAB's dark gray"""
+    svg = (mfig or render(fig))._svg()
+    bg = _rgbof(fig.props.get("Color", _m.Char("w")))
+    i = svg.find("<svg")
+    j = svg.find(">", i) if i >= 0 else -1
+    if j > 0 and bg is not None:
+        svg = svg[:j + 1] + '<rect width="100%%" height="100%%" fill="%s"/>' % _hex(bg) + svg[j + 1:]
+    return svg.replace("currentColor", _INK)
+
+
+# a scene of more vertices than this is shown as its SVG only (the interactive
+# view's data would be too big for a notebook's output)
+_SCENE_MAX_VERTICES = 250000
+
+
+def _r5(v):
+    # (coordinates in the scene: 5 significant digits, as Sage's scenes)
+    return float("%.5g" % v)
+
+
+def _point_size(ms):
+    # (the viewer's discs are sqrt(size) * 2.4 pixels across; MATLAB's
+    # markers ms points, about 4/3 ms pixels)
+    return (ms * 4 / 3 / 2.4) ** 2
+
+
+def _scene_surface(c, cmap, clim, objs, budget):
+    """a Surface's faces (a mesh, unlit: its colors as MATLAB gives them) and
+    edges (lines), as FaceColor and EdgeColor say ('flat': the face's first
+    vertex's CData, as the SVG; 'interp': each vertex's own color)"""
+    Zm = _m._mat(c.props["ZData"])
+    m, n = Zm.shape
+    if m < 2 or n < 2:
+        return True
+    if 4 * m * n > budget[0]:
+        return False
+    budget[0] -= 4 * m * n
+    z = Zm.real.tolist() if Zm.dtype.kind == "c" else Zm.tolist()
+    GX, GY = _grid_xy(c.props["XData"], c.props["YData"], m, n)
+    C = c.props.get("CData")
+    cz = _m._mat(C).tolist() if C is not None and _m._numel(C) == m * n else z
+    pal = _palette(cmap)
+    lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+    fc, ec = c.props["FaceColor"], c.props["EdgeColor"]
+    fmode = _m._text(fc).lower() if _m._istext(fc) else None
+    emode = _m._text(ec).lower() if _m._istext(ec) else None
+    ffix = None if fmode in ("flat", "interp", "none", "texturemap") else _hex(_rgbof(fc))
+    efix = None if emode in ("flat", "interp", "none") else _hex(_rgbof(ec))
+
+    def ok(i, j):
+        return all(v == v for v in (GX[i][j], GY[i][j], z[i][j]))
+
+    def rgb(v):
+        k = _cindex(v, lo, hi, len(pal))
+        h = pal[k] if k is not None else None
+        return [int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)] if h else None
+
+    def vert(i, j):
+        return [_r5(GX[i][j]), _r5(GY[i][j]), _r5(z[i][j])]
+    quads = [(i, j) for i in range(m - 1) for j in range(n - 1) if ok(i, j) and ok(i, j + 1) and ok(i + 1, j + 1) and ok(i + 1, j)]
+    edges = emode != "none" and (efix is not None or emode in ("flat", "interp"))
+    if fmode not in ("none", None) or ffix:
+        pos, idx, col = [], [], []
+        for i, j in quads:
+            if fmode in ("flat", "texturemap"):
+                rc = rgb(cz[i][j])
+                cs = [rc] * 4
+            elif fmode == "interp":
+                cs = [rgb(cz[a][b]) for a, b in ((i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j))]
+            else:
+                cs = [[int(ffix[1:3], 16), int(ffix[3:5], 16), int(ffix[5:7], 16)]] * 4
+            if any(t is None for t in cs):
+                continue
+            b = len(pos) // 3
+            for (a, bb), cc in zip(((i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j)), cs):
+                pos.extend(vert(a, bb))
+                col.extend(cc)
+            idx.extend((b, b + 1, b + 2, b, b + 2, b + 3))
+        if idx:
+            alpha = c.props.get("FaceAlpha", 1.0)
+            o = {"type": "mesh", "pos": pos, "idx": idx, "colors": col, "color": "#000000", "lit": False,
+                 "opacity": float(_f(alpha)) if not _m._istext(alpha) else 1.0}
+            if edges:
+                o["offset"] = True
+            objs.append(o)
+    if edges:
+        # (each grid segment once; by color, a lines object per color)
+        groups = {}
+        for i in range(m):
+            for j in range(n):
+                if not ok(i, j):
+                    continue
+                for a, b in ((i, j + 1), (i + 1, j)):
+                    if a < m and b < n and ok(a, b):
+                        h = efix or (lambda v: _hex(tuple(t / 255 for t in v)) if v else None)(rgb(cz[i][j]))
+                        if h:
+                            groups.setdefault(h, []).extend(vert(i, j) + vert(a, b))
+        w = float(_f(c.props.get("LineWidth", 0.5)))
+        for h, pos in groups.items():
+            objs.append({"type": "lines", "pos": pos, "color": h, "width": min(w, 1.0)})
+    return True
+
+
+def _scene_line(c, objs):
+    xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
+    zs = _vec(c.props["ZData"]) if _m._numel(c.props["ZData"]) else [0.0] * len(xs)
+    col = _hex(_rgbof(c.props["Color"]) or (0, 0, 0))
+    pts = list(zip(xs, ys, zs))
+    if _m._text(c.props["LineStyle"]) != "none":
+        pos = []
+        for a, b in zip(pts, pts[1:]):
+            if all(v == v for v in a + b):
+                pos.extend(_r5(v) for v in a + b)
+        if pos:
+            objs.append({"type": "lines", "pos": pos, "color": col, "width": float(_f(c.props["LineWidth"]))})
+    mk = _m._text(c.props["Marker"])
+    if mk not in ("none", ""):
+        pos = [_r5(v) for p in pts if all(t == t for t in p) for v in p]
+        if pos:
+            fill = c.props["MarkerFaceColor"]
+            fc = _rgbof(fill)
+            objs.append({"type": "points", "pos": pos, "color": _hex(fc) if fc else col, "size": _point_size(float(_f(c.props["MarkerSize"])))})
+
+
+def _scene_scatter(c, cmap, clim, objs):
+    xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
+    zs = _vec(c.props["ZData"]) if _m._numel(c.props["ZData"]) else [0.0] * len(xs)
+    n = len(xs)
+    C = c.props["CData"]
+    pal = _palette(cmap)
+    lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+    if _m._istext(C) or _m._numel(C) == 3 and n != 3:
+        cols = [_hex(_rgbof(C) or COLOR_ORDER[0])] * n
+    elif _m._numel(C) == n:
+        cols = [pal[k] if k is not None else None for k in (_cindex(v, lo, hi, len(pal)) for v in _vec(C))]
+    elif _m._numel(C) == 3 * n:
+        rows = _m._mat(C).tolist()
+        cols = [_hex(tuple(r)) for r in rows]
+    else:
+        cols = [_hex(COLOR_ORDER[0])] * n
+    sz = _vec(c.props["SizeData"]) or [36.0]
+    groups = {}
+    for k in range(n):
+        p = (xs[k], ys[k], zs[k])
+        if cols[k] is None or not all(t == t for t in p):
+            continue
+        s_ = sz[k] if len(sz) == n else sz[0]
+        groups.setdefault((cols[k], s_), []).extend(_r5(v) for v in p)
+    for (h, s_), pos in groups.items():
+        objs.append({"type": "points", "pos": pos, "color": h, "size": _point_size(math.sqrt(max(s_, 0.0)))})
+
+
+def _scene_stem(c, objs):
+    col = _hex(_rgbof(c.props["Color"]) or COLOR_ORDER[0])
+    pos, tips = [], []
+    for x, y, z in zip(_vec(c.props["XData"]), _vec(c.props["YData"]), _vec(c.props["ZData"])):
+        if x == x and y == y and z == z:
+            pos.extend([x, y, 0.0, x, y, z])
+            tips.extend([x, y, z])
+    if pos:
+        objs.append({"type": "lines", "pos": pos, "color": col, "width": float(_f(c.props["LineWidth"]))})
+        objs.append({"type": "points", "pos": tips, "color": col, "size": _point_size(float(_f(c.props["MarkerSize"])))})
+
+
+def figure_scene(fig):
+    """the scene of the 3-D viewer (web/viewer3d.js) for a figure whose one
+    axes is 3-D: its surfaces, lines, markers and text in the axes' limits,
+    seen from its View, with MATLAB's axes (a grid on the back planes, its
+    ticks and labels), orthographic, on the figure's color.  None when the
+    figure has other axes, or something the viewer does not show (patches,
+    legends, ...): then only the SVG is shown."""
+    axes = [a for a in fig.children if isinstance(a, Axes) and a.valid]
+    if len(axes) != 1 or not axes[0].is3d() or getattr(fig, "suptitle", None):
+        return None
+    ax = axes[0]
+    if getattr(ax, "legend", None) is not None and _m._text(ax.legend.props.get("Visible", _m.Char("on"))) == "on":
+        return None
+    cmap = _MCmap(ax.get_prop("Colormap"))
+    clim = _vec(ax.get_prop("CLim"))
+    proj = _Proj(ax)
+    objs = []
+    budget = [_SCENE_MAX_VERTICES]
+    for c in ax.children:
+        if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
+            continue
+        if isinstance(c, Surface):
+            if not _scene_surface(c, cmap, clim, objs, budget):
+                return None
+        elif type(c) is Stem and _m._numel(c.props["ZData"]):
+            _scene_stem(c, objs)
+        elif type(c) is Line:
+            _scene_line(c, objs)
+        elif type(c) is Scatter:
+            _scene_scatter(c, cmap, clim, objs)
+        elif isinstance(c, Text):
+            p = _vec(c.props["Position"]) + [0.0, 0.0, 0.0]
+            objs.append({"type": "text", "pos": p[:3], "text": _text_value(c.props["String"]),
+                         "color": _hex(_rgbof(c.props["Color"]) or (0, 0, 0))})
+        else:
+            return None
+    n_vert = sum(len(o["pos"]) // 3 for o in objs)
+    if n_vert > _SCENE_MAX_VERTICES:
+        return None
+    lo = [l[0] for l in proj.lim]
+    hi = [l[1] for l in proj.lim]
+    scale = [2 * proj.size[i] / proj.spans[i] for i in range(3)]
+    ticks = [[t for t in _vec(ax.get_prop(k + "Tick"))] for k in "XYZ"]
+    ticklabels = []
+    for i, k in enumerate("XYZ"):
+        labs = _ticklabels(ax.get_prop(k + "TickLabel"))
+        ticklabels.append([labs[j] if j < len(labs) else _m._text(_m.num2str_(float(t))) for j, t in enumerate(ticks[i])])
+    v = _vec(ax.props["View"])
+    t = _text_value(ax.title.props["String"])
+    st = _text_value(ax.subtitle.props["String"])
+    bg = _rgbof(fig.props.get("Color", _m.Char("w")))
+    scene = {"version": 1, "lo": lo, "hi": hi, "scale": scale, "objects": objs, "frame": False, "axes": False,
+             "labels": [_text_value(l.props["String"]) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
+             "title": (t + (" - " + st if st else "")) or None,
+             # (MATLAB's azimuth is from the negative y axis, the viewer's from the x axis)
+             "azimuth": v[0] - 90.0, "elevation": max(-89.0, min(89.0, v[1])),
+             "projection": "orthographic", "background": _hex(bg) if bg else "#ffffff", "ink": _INK,
+             "box": {"ticks": ticks, "ticklabels": ticklabels, "grid": "#dfdfdf"}}
+    if ax.colorbar is not None and _m._text(ax.colorbar.props.get("Visible", _m.Char("on"))) == "on" and len(clim) == 2:
+        cm = []
+        M = cmap.M
+        for k, r in enumerate(M):
+            cm.extend([k / max(1, len(M) - 1), float(r[0]), float(r[1]), float(r[2])])
+        scene["colorbar"] = {"color_map": cm, "range": [clim[0], clim[1]]}
+    return scene
+
+
+class FigureView:
+    """a figure as shown: its SVG everywhere, and for one 3-D axes also the
+    interactive 3-D view (drag to rotate), as Sage's 3-D graphics show"""
+
+    def __init__(self, fig, mfig=None):
+        self.svg = figure_svg(fig, mfig)
+        self.scene = figure_scene(fig)
+
+    def _repr_svg_(self):
+        return self.svg
+
+    def description(self):
+        from _graphics import describe_svg
+        return describe_svg(self.svg)
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        if self.scene is None:
+            return {"image/svg+xml": self.svg, "text/plain": self.description()}
+        import json
+        from sage_plot3d import SCENE_MIME, viewer_html, jupyter_bundle, _in_jupyter
+        title = self.description()
+        self.scene["description"] = title
+        scene = json.dumps(self.scene, separators=(",", ":"))
+        if _in_jupyter():
+            def page():
+                s = dict(self.scene, fill=True)
+                return viewer_html(json.dumps(s, separators=(",", ":")), self.svg, title, standalone=True, full=True)
+            return jupyter_bundle(scene, self.svg, title, page)
+        return {SCENE_MIME: scene, "image/svg+xml": self.svg, "text/html": viewer_html(scene, self.svg, title),
+                "text/plain": title}
+
+
 def flush():
     """show every visible figure drawn or changed since it was last shown"""
+    from _graphics import show as _gshow
     for f in list(_state["figs"]):
         if not f.valid or not f.dirty:
             continue
@@ -3456,7 +3764,7 @@ def flush():
             continue
         if not any(isinstance(a, Axes) and a.valid and (a.children or _text_value(a.title.props["String"])) for a in f.children):
             continue
-        render(f).show()
+        _gshow(FigureView(f), "figure")
 
 
 

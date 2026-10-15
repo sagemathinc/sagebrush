@@ -341,6 +341,31 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     data coordinates.
   - Hold off resets the view to 2-D (`newplot`); `surf` and `plot3` then
     turn it to 3-D.
+  - `view` takes (az, el), [az el], [x y z] (the direction toward the
+    camera, converted to the angles of a unit vector along it, as the
+    documented example's), 2, 3 and an axes first; `[caz, cel] = view(...)`
+    sets and returns the angles, one output being caz.
+- **The interactive 3-D view:** in the notebook and Jupyter, a figure with
+  one 3-D axes is also sent as a scene (the 3-D mime type of Sage's
+  `plot3d`, lib/sage_plot3d.py), and web/viewer3d.js shows it in WebGL
+  over the SVG, so it can be dragged to rotate it, as a MATLAB figure can:
+  - `figure_scene` gives the scene the axes' limits, box proportions, ticks
+    and tick labels, (az, el) (the viewer's azimuth is measured from +x,
+    MATLAB's from −y, so it is az − 90), the title and labels, and a
+    colorbar if one is shown;
+  - the scene asks for options that Sage's scenes do not use: an
+    orthographic projection, the figure's background and text colors, and
+    MATLAB's box (the back planes with their grid lines, and the axis edges
+    nearest the viewer, chosen again as it turns), with the SVG's grid
+    color;
+  - surfaces are unlit quadrilaterals colored as in the SVG, under their
+    edges (drawn with a polygon offset so they stay visible);
+  - other figures are the SVG alone: several axes, a `sgtitle`, a legend,
+    patches or other objects in the 3-D axes, or a surface over 250,000
+    vertices.
+- **The figure's background** is its `Color` (white by default, as
+  MATLAB's), behind the axes and the text, in the SVG too. Text is
+  MATLAB's dark gray rather than the page's color.
 - **Contours:** contour lines come from marching squares (saddle cells are
   split by the centre's value), oriented with the higher values on the left
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`
@@ -404,7 +429,9 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
 - **Not yet:**
   - lighting (`camlight`, `lighting` and `material` do nothing);
   - polar axes, `annotation`, `uifigure` and apps, `animatedline`;
-  - raster output: `print`, `saveas` and `exportgraphics` write SVG.
+  - raster output: `print`, `saveas` and `exportgraphics` write SVG;
+  - an interactive view of the figures that show the SVG alone (see the
+    interactive 3-D view above).
 
 Tests:
 - **test_plot** compares objects' properties after plotting (limits, data,
@@ -533,6 +560,8 @@ since it compares against the committed outputs.
   narrower.
 - **Random numbers:** Octave's `randn` is not MATLAB's ziggurat; Sagebrush's
   `rand`, `randn` and `randi` give MATLAB's numbers.
+- **`[caz, cel] = view(v)`** sets the view and returns its angles in
+  MATLAB. Octave refuses to set and get it in one call.
 - **Sparse matrices:**
   - `max(S, F)`, `dot`, `unique`, and `lu`'s permutation are sparse in
     MATLAB and full in Octave;
