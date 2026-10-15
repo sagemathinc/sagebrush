@@ -248,14 +248,18 @@ try {
   await outside();
   check((await node("g")).title.endsWith(" two"), "a group's title is kept");
 
-  // a new note from the toolbar: written where it is; left empty, no note and no undo step
-  const before = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc)");
+  // a new note from the toolbar: written where it is; left empty, it is
+  // kept, to be moved and written in later, saying so in Edit (William's
+  // B2); one undo takes it back, not the edit before it
+  const n0 = await ev("window.sagebrush.board.snapshot().doc.nodes.length");
   await ev("document.querySelector('.board-toolbar [data-tool=note]').click(), 1");
   check(await until("document.activeElement === document.querySelector('.board-editing .be-title')", 3000), "Note: a new note, its title being written");
+  const emptyId = await ev("window.board.editing");
   await outside();
-  check((await ev("JSON.stringify(window.sagebrush.board.snapshot().doc)")) === before, "left empty, it is not kept");
+  check((await ev("window.sagebrush.board.snapshot().doc.nodes.length")) === n0 + 1 && !!(await node(emptyId)), "left empty, it is kept (B2)");
+  check(await until(`(() => { const e = [...document.querySelectorAll('.board-empty')].at(-1); return !!e && getComputedStyle(e).visibility === 'visible' && /Empty note/.test(e.textContent); })()`, 3000), "...and in Edit it says it is an empty note");
   await undoKey();
-  check(!(await node("g")).title.endsWith(" two"), "...and leaves no undo step (undo takes back the edit before it)");
+  check(!(await node(emptyId)) && (await node("g")).title.endsWith(" two"), "...one undo takes it back, not the edit before it");
   // a new note, dragged by its frame while it is written, then written in (William's I5)
   await ev("document.querySelector('.board-toolbar [data-tool=note]').click(), 1");
   check(await until("!!window.board.editing && document.activeElement === document.querySelector('.board-editing .be-title')", 3000), "Note: a new note being written");
@@ -420,6 +424,151 @@ try {
   await sleep(300);
   if (await editing()) await outside();
   check((await node("code1"))?.hideCode === true, "...and that is kept: " + JSON.stringify(await node("code1")));
+
+  // William's B2 and B3: a grip that drags the item selected, or the one
+  // being written; a new item placed clear of what is there; groups made
+  // large, resized by their corner and never smaller than their items;
+  // things dropped into one landing clear of each other; one a person sized
+  // not shrinking when an item leaves it
+  const GB = { title: "Groups", nodes: [{ id: "p", title: "Pin", text: "A note", x: 0, y: 0 }, { id: "q", title: "Quill", text: "Another", x: 0, y: 200 }, { id: "r", title: "Rook", text: "A third", x: 0, y: 400 }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(GB)}).then(() => 1)`);
+  await until("!!window.board.item('r')", 10000);
+  await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: -150, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  const gripOf = (id) => ev(`(() => { const r = window.board.clientRect(${JSON.stringify(id)}); return { x: r.left - 12, y: r.top + 13 }; })()`);
+  const dragFrom = async (x, y, dx, dy) => {
+    await mouse("mousePressed", x, y);
+    for (let i = 1; i <= 8; i++) await mouse("mouseMoved", x + (dx * i) / 8, y + (dy * i) / 8, { buttons: 1 });
+    await mouse("mouseReleased", x + dx, y + dy);
+    await sleep(350);
+  };
+  const box = (id) => ev(`(() => { const i = window.board.item(${JSON.stringify(id)}); return i && { x: i.x, y: i.y, w: i.w, h: i.h }; })()`);
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  // a note selected: its grip, outside its top left, drags it
+  const rpin = await rect("p");
+  await click(rpin.left + 60, rpin.top + 30);
+  await sleep(200);
+  check(await ev("window.board.grip === 'p'"), "B2: a note selected has a grip");
+  const gp = await gripOf("p"), p0 = await node("p");
+  await dragFrom(gp.x, gp.y, 200, 40);
+  const p1 = await node("p");
+  check(Math.abs(p1.x - (p0.x + 200)) <= 12 && Math.abs(p1.y - (p0.y + 40)) <= 12, "B2: its grip drags it: " + JSON.stringify([p0.x, p0.y, p1.x, p1.y]));
+  // a new note being written: its grip drags it, still being written; placed clear of what is there
+  await ev("document.querySelector('.board-toolbar [data-tool=note]').click(), 1");
+  await until("!!window.board.editing", 3000);
+  const wn = await ev("window.board.editing");
+  check(await ev(`window.board.grip === ${JSON.stringify(wn)}`), "B2: a new note being written has a grip");
+  const shown = await Promise.all(["p", "q", "r"].map(box));
+  const wb = await box(wn);
+  check(shown.every((o) => !overlap(wb, o)), "B3: a new note from the toolbar is placed clear of what is there: " + JSON.stringify([wb, shown]));
+  const gw = await gripOf(wn);
+  await dragFrom(gw.x, gw.y, 150, 0);
+  check((await editing()) === wn && Math.abs((await box(wn)).x - (wb.x + 150)) <= 12, "B2: ...its grip drags it, and it is still being written: " + JSON.stringify([wb.x, (await box(wn)).x, await editing()]));
+  await key("Escape");
+  await sleep(300);
+  // a new group: large, placed clear of what is there
+  await ev("document.querySelector('.board-toolbar [data-tool=group]').click(), 1");
+  await until("!!window.board.editing", 3000);
+  const gid = await ev("window.board.editing");
+  await key("Escape");
+  await sleep(300);
+  const gn = await node(gid), gi = await box(gid);
+  check(gn?.w === 480 && gn?.h === 320 && Math.round(gi.w) === 480 && Math.round(gi.h) === 320, "B3: a new group is large, 480 by 320: " + JSON.stringify([gn, gi]));
+  const around = await Promise.all(["p", "q", "r", wn].map(box));
+  check(around.every((o) => !overlap(gi, o)), "B3: ...and placed clear of what is there: " + JSON.stringify([gi, around]));
+  // two notes dropped into it at the same place: the second lands clear of the first
+  await ev("window.board.focus(undefined, true), 1");
+  await sleep(300);
+  const dropIn = async (id) => {
+    const a = await rect(id), g = await rect(gid);
+    await dragFrom(a.left + 20, a.top + 12, g.left + g.width / 2 - (a.left + 20), g.top + g.height / 2 - (a.top + 12));
+  };
+  await dropIn("q");
+  await dropIn("r");
+  const kids = ((await node(gid))?.children ?? []).map((c) => c.id);
+  const iq = await box("q"), ir = await box("r");
+  check(kids.includes("q") && kids.includes("r"), "B3: two notes dropped into the group are its items: " + JSON.stringify(kids));
+  check(!overlap(iq, ir), "B3: ...the second, dropped where the first is, lands clear of it: " + JSON.stringify([iq, ir]));
+  // resized by its corner, both ways
+  // (selected by a click in its bottom-left corner: its items stay where they were dropped, in its middle)
+  const gr = await rect(gid);
+  await click(gr.left + 25, gr.top + gr.height - 25);
+  await sleep(200);
+  check(await ev(`window.board.handle === ${JSON.stringify(gid)} && window.board.grip === ${JSON.stringify(gid)}`), "B3: a group selected has a resize handle (and a grip)");
+  // (from its size as shown: its items may need more than it was made)
+  const z = await ev("window.board.camera.z"), g0 = await box(gid), gr2 = await rect(gid);
+  await dragFrom(gr2.left + gr2.width, gr2.top + gr2.height, 100, 60);
+  const g1 = await node(gid), gb1 = await box(gid);
+  check(Math.abs(g1.w - (g0.w + 100 / z)) <= 3 && Math.abs(g1.h - (g0.h + 60 / z)) <= 3 && Math.abs(gb1.w - g1.w) <= 1 && Math.abs(gb1.h - g1.h) <= 1, "B3: its corner resizes it, both ways: " + JSON.stringify([g0.w, g0.h, g1.w, g1.h, gb1.w, gb1.h, z]));
+  // never smaller than its items need
+  const gr3 = await rect(gid);
+  await dragFrom(gr3.left + gr3.width, gr3.top + gr3.height, -2000, -2000);
+  const gb2 = await box(gid), mq = await box("q"), mr = await box("r");
+  check([mq, mr].every((m) => m.x >= gb2.x && m.y >= gb2.y && m.x + m.w <= gb2.x + gb2.w + 1 && m.y + m.h <= gb2.y + gb2.h + 1), "B3: ...never smaller than its items need: " + JSON.stringify([gb2, mq, mr]));
+  // an item taken out: the group a person sized keeps its size and place
+  const before3 = await box(gid), ar = await rect("r"), grr = await rect(gid);
+  await dragFrom(ar.left + 20, ar.top + 12, grr.left + grr.width + 160 - (ar.left + 20), 0);
+  const after3 = await box(gid), kids3 = ((await node(gid))?.children ?? []).map((c) => c.id);
+  check(!kids3.includes("r") && kids3.includes("q"), "B3: an item dragged out of the group leaves it: " + JSON.stringify(kids3));
+  check(Math.abs(after3.w - before3.w) <= 1 && Math.abs(after3.h - before3.h) <= 1 && Math.abs(after3.x - before3.x) <= 1 && Math.abs(after3.y - before3.y) <= 1, "B3: ...and the group keeps its size and place: " + JSON.stringify([before3, after3]));
+  // its top-left item taken out of a group a person sized: the other items
+  // stay where they are (astra's, on bdc8eef); and one dragged above and
+  // left of its origin: the group moves out to hold it, the others staying
+  const SZ = { title: "Sized", nodes: [{ id: "sg", kind: "group", x: 100, y: 100, w: 700, h: 400, children: [{ id: "sa", title: "A", x: 0, y: 0, w: 160 }, { id: "sb", title: "B", x: 300, y: 160, w: 160 }] }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(SZ)}).then(() => 1)`);
+  await until("!!window.board.item('sb')", 10000);
+  await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: 0, y: 0, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  const sg0 = await box("sg"), sb0 = await box("sb"), sa = await rect("sa"), sgr = await rect("sg");
+  await dragFrom(sa.left + 20, sa.top + 12, sgr.left + sgr.width + 120 - (sa.left + 20), 0);
+  const sg1 = await box("sg"), sb1 = await box("sb"), skids = ((await node("sg"))?.children ?? []).map((c) => c.id);
+  check(!skids.includes("sa") && Math.abs(sg1.x - sg0.x) <= 1 && Math.abs(sg1.y - sg0.y) <= 1 && Math.abs(sg1.w - sg0.w) <= 1 && Math.abs(sg1.h - sg0.h) <= 1, "B3: a sized group's top-left item taken out: the group stays: " + JSON.stringify([skids, sg0, sg1]));
+  check(Math.abs(sb1.x - sb0.x) <= 1 && Math.abs(sb1.y - sb0.y) <= 1, "B3: ...and its other item stays where it is: " + JSON.stringify([sb0, sb1]));
+  await ev(`window.sagebrush.board.load(${JSON.stringify(SZ)}).then(() => 1)`);
+  await until("!!window.board.item('sb')", 10000);
+  await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: 0, y: 0, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  // (by less than the group's margin: let go inside the group, so still its item)
+  const sb2 = await box("sb"), sa2 = await rect("sa"), sa2w = await box("sa"), sg2 = await box("sg");
+  await dragFrom(sa2.left + 4, sa2.top + 4, -12, -10);
+  const sg3 = await box("sg"), sb3 = await box("sb"), sa3 = await box("sa"), skids3 = ((await node("sg"))?.children ?? []).map((c) => c.id);
+  check(skids3.includes("sa") && sg3.x < sg2.x - 5 && sg3.y < sg2.y - 5, "B3: an item dragged above and left of a sized group's origin: the group moves out to hold it: " + JSON.stringify([skids3, sg2, sg3]));
+  check(Math.abs(sb3.x - sb2.x) <= 1 && Math.abs(sb3.y - sb2.y) <= 1, "B3: ...its other item stays where it is: " + JSON.stringify([sb2, sb3]));
+  check(Math.abs(sa3.x - (sa2w.x - 12)) <= 2 && Math.abs(sa3.y - (sa2w.y - 10)) <= 2, "B3: ...and it is where it was dropped: " + JSON.stringify([sa2w, sa3]));
+  // the selected item's grip over another note's link: the grip's, by mouse
+  // and by touch, the link not followed (astra's UI-BDC-2)
+  const LK = { title: "Link under", nodes: [{ id: "under", text: "[Under WWWWWWWWWWWWWWWWWWWWWWWWWWW](#noop)", x: 0, y: 0, w: 260 }, { id: "over", title: "Selected", x: 250, y: 20, w: 260 }] };
+  for (const how of ["mouse", "touch"]) {
+    await ev(`window.sagebrush.board.load(${JSON.stringify(LK)}).then(() => 1)`);
+    await until("!!window.board.item('over')", 10000);
+    await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: -100, y: -100, z: 1 }), window.board.render(), 1");
+    await sleep(300);
+    const ro = await rect("over");
+    await click(ro.left + 150, ro.top + 30);
+    await sleep(250);
+    const hash0 = await ev("location.hash"), o0 = await box("over"), gp2 = await gripOf("over");
+    const onLink = await ev(`!!document.elementFromPoint(${gp2.x}, ${gp2.y})?.closest('a')`);
+    if (how === "mouse") await dragFrom(gp2.x, gp2.y, 80, 100);
+    else {
+      const t = (type, x, y) => send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      await t("touchStart", gp2.x, gp2.y);
+      for (let i = 1; i <= 8; i++) { await t("touchMove", gp2.x + 10 * i, gp2.y + 12.5 * i); await sleep(16); }
+      await t("touchEnd");
+      await sleep(350);
+    }
+    const o1 = await box("over");
+    check(onLink && Math.abs(o1.x - (o0.x + 80)) <= 12 && Math.abs(o1.y - (o0.y + 100)) <= 12, `B2: the selected item's grip over another note's link drags it (${how}): ` + JSON.stringify([onLink, o0, o1]));
+    check((await ev("location.hash")) === hash0, `B2: ...and the link is not followed (${how}): ` + (await ev("location.hash")));
+  }
+  // ...and once that drag is done, out of Edit with no other press, the
+  // link opened from the keyboard is the link's (astra's UI-36C-1: the
+  // guard was left on until the next press on the board)
+  await ev("window.sagebrush.board.editing(false), 1");
+  await sleep(300);
+  const focused = await ev(`(() => { const a = [...document.querySelectorAll('.board-item a')].find((x) => /Under/.test(x.textContent)); if (!a) return false; window.__cl = null; document.addEventListener('click', (e) => { window.__cl = e.defaultPrevented; e.preventDefault(); }, { once: true }); a.focus(); return document.activeElement === a; })()`);
+  await key("Enter");
+  await sleep(200);
+  check(focused && (await ev("window.__cl")) === false, "B2: after a grip drag, a link opened by Enter out of Edit is not held back: " + JSON.stringify([focused, await ev("window.__cl")]));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
