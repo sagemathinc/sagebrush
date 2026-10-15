@@ -167,3 +167,66 @@ l = [1]; m = l
 l += (2, 3)
 l *= 2
 print(l, l is m)
+
+# A special method set to None, or to a callable that is not a function:
+# None raises TypeError ('NoneType' object is not callable; for __contains__
+# and __iter__ the operation is unavailable), a callable instance is called
+# without self, as CPython does
+class Called:
+    def __call__(self, *a):
+        return ("called", len(a))
+
+
+class Dunders:
+    __add__ = Called()
+    __iadd__ = Called()
+    __neg__ = Called()
+
+
+class Nones(list):
+    __iadd__ = None
+    __imul__ = None
+
+
+class NoneOps:
+    __add__ = None
+    __isub__ = None
+    __neg__ = None
+    __eq__ = None
+    __lt__ = None
+    __len__ = None
+    __contains__ = None
+    __iter__ = None
+
+    def __getitem__(self, i):
+        return i
+
+
+def attempt(f):
+    try:
+        return f()
+    except TypeError as e:
+        return "TypeError: %s" % e
+
+
+def iadd(a, b):
+    a += b
+    return a
+
+
+def imul(a, b):
+    a *= b
+    return a
+
+
+def isub(a, b):
+    a -= b
+    return a
+
+
+d = Dunders()
+print(d + 1, iadd(Dunders(), 1), -d)
+n = NoneOps()
+for f in (lambda: iadd(Nones([1]), [2]), lambda: imul(Nones([1]), 2), lambda: n + 1, lambda: isub(NoneOps(), 1),
+          lambda: -n, lambda: n == 1, lambda: n < 1, lambda: len(n), lambda: 1 in n, lambda: list(n)):
+    print(attempt(f))
