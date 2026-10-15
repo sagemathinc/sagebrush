@@ -38,3 +38,30 @@ test("Stop interrupts math.fsum and math.prod over a long range (HARD-2ED-1)", a
   assert.equal(await interruptAfter("import math\nmath.fsum(range(10**12))", 300), "KeyboardInterrupt");
   assert.equal(await interruptAfter("import math\nmath.prod(range(1, 10**12))", 300), "KeyboardInterrupt");
 });
+
+test("an iterator stopped by Stop loses no item: every item taken was used (CORR-F45-2)", async () => {
+  // (l += It() goes through ops.forEach, and It's __next__ has no loop of
+  // its own to poll Stop; after the KeyboardInterrupt the list must hold
+  // every item __next__ gave)
+  const last = await interruptAfter(
+    [
+      "class It:",
+      "    fetched = 0",
+      "    def __iter__(self):",
+      "        return self",
+      "    def __next__(self):",
+      "        It.fetched += 1",
+      "        return It.fetched",
+      "l = []",
+      "try:",
+      "    l += It()",
+      "except KeyboardInterrupt:",
+      "    raise ValueError('%d %d' % (len(l), It.fetched))",
+    ].join("\n"),
+    300,
+  );
+  const m = /^ValueError: (\d+) (\d+)$/.exec(last);
+  assert.ok(m, last);
+  assert.ok(Number(m![1]) > 1024, last);
+  assert.equal(m![1], m![2]);
+});

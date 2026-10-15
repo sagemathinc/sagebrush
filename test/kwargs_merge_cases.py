@@ -72,3 +72,45 @@ cases = [
 for c in cases:
     print(show(c))
 print(show(lambda: f(**Seen({"a": 1, "b": 2}))), Seen.log)
+# a name given twice is refused before the mapping's __getitem__ is called
+Seen.log = []
+print(show(lambda: f(a=0, **Seen({"b": 2, "a": 1, "c": 3}))), Seen.log)
+Seen.log = []
+print(show(lambda: f(**{"b": 0}, **Seen({"a": 1, "b": 2}))), Seen.log)
+
+
+# the calls builtins make on an iterator, logged: how many __next__ calls,
+# and where a failing one stops them (the items before it used, none after)
+class LogIt:
+    def __init__(self, n, fail=None):
+        self.n, self.fail, self.log = n, fail, []
+
+    def __iter__(self):
+        self.log.append("iter")
+        return self
+
+    def __next__(self):
+        k = len([e for e in self.log if e != "iter"])
+        self.log.append(k)
+        if k == self.fail:
+            raise ValueError("item %d" % k)
+        if k >= self.n:
+            raise StopIteration
+        return float(k)
+
+
+for name, use in [("fsum", lambda it: math.fsum(it)), ("prod", lambda it: math.prod(it)), ("sum", lambda it: sum(it)),
+                  ("list +=", lambda it: (lambda l: (l.__iadd__(it), len(l))[1])([])), ("set", lambda it: len(set(it))),
+                  ("dict.fromkeys", lambda it: len(dict.fromkeys(it))), ("max", lambda it: max(it)),
+                  ("sorted", lambda it: len(sorted(it)))]:
+    for n, fail in [(0, None), (3, None), (3000, None), (3000, 1500), (3000, 1024), (5, 0)]:
+        it = LogIt(n, fail)
+        r = show(lambda: use(it))
+        calls = [e for e in it.log if e != "iter"]
+        print(name, n, fail, r, it.log.count("iter"), len(calls), calls[-1] if calls else None)
+held = []
+it = LogIt(3000, 1500)
+try:
+    held += it
+except ValueError as e:
+    print("held", e, len(held), held[-1], next(iter([len(it.log)])))
