@@ -3,6 +3,13 @@ method of the Sage library, its signature and its docstring.
 
     search_doc("elliptic rank")          in Sage mode (notebook, console, CLI)
     sagebrush --search "elliptic rank"   from a shell (--json: machine-readable)
+    sagebrush --search "class group" --mode magma
+                                         another language's index: sage (the
+                                         default) and python search the Sage
+                                         library, which Python mode imports;
+                                         magma and matlab the functions those
+                                         modes bind (lib/_magma_docsearch.py,
+                                         lib/_matlab_docsearch.py)
     sagebrush -m _pyjs_docsearch --index the index as JSON (sagebrush.space and
                                          the MCP server's search_docs tool)
 
@@ -18,6 +25,10 @@ PUBLIC = ["sage_all", "_sage_modular", "_sage_poly", "_sage_nf", "_sage_ff", "_s
           "_sage_lang", "_sage_expr", "_interact", "sage_plot", "sage_plot3d"]
 
 _INDEX = None
+_OTHER = {}  # mode -> its index
+
+# --mode: the language whose functions are searched, and its index's module
+MODES = {"sage": None, "python": None, "magma": "_magma_docsearch", "matlab": "_matlab_docsearch"}
 
 
 def _signature(name, doc_obj, kind):
@@ -90,6 +101,23 @@ def index():
     return _INDEX
 
 
+def index_for(mode=None):
+    """The index of a language (None, "sage" or "python": the Sage
+    library's)."""
+    if mode is not None and mode not in MODES:
+        raise ValueError("--mode must be one of %s, not %r" % (", ".join(MODES), mode))
+    if mode is None or MODES[mode] is None:
+        return index()
+    if mode not in _OTHER:
+        try:
+            module = __import__(MODES[mode])
+        except ImportError:
+            # (the CPython package has the Sage library only)
+            raise ValueError("this installation has no %s index" % mode)
+        _OTHER[mode] = module.build_index()
+    return _OTHER[mode]
+
+
 def _words(s):
     return [w for w in _re.split(r"[^a-z0-9]+", s.lower()) if w]
 
@@ -121,19 +149,20 @@ def score(entry, words, phrase):
     return total
 
 
-def search(query, limit=20):
-    """The best matches for query: [(score, entry)]."""
+def search(query, limit=20, mode=None):
+    """The best matches for query: [(score, entry)], in the index of the
+    language `mode` (default: the Sage library)."""
     words = _words(query)
     if not words:
         return []
     phrase = query.strip().lower()
-    hits = [(score(e, words, phrase), e) for e in index()]
+    hits = [(score(e, words, phrase), e) for e in index_for(mode)]
     hits = [h for h in hits if h[0] > 0]
     hits.sort(key=lambda h: (-h[0], len(h[1]["name"]), h[1]["name"]))
     return hits[:limit]
 
 
-def search_doc(query, limit=20):
+def search_doc(query, limit=20, mode=None):
     """Search the documentation of Sagebrush's functions: every word of the
     query must occur in the name or the docstring.  obj? then shows one in
     full.
@@ -145,27 +174,39 @@ def search_doc(query, limit=20):
             The F_2-dimension of the 2-Selmer group (here for curves without
         ...
     """
-    hits = search(query, limit)
+    hits = search(query, limit, mode)
     if not hits:
         print("no function's documentation contains all of: %s" % query)
         return
     for _, e in hits:
         head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
-        print(head + ("    [open problem]" if e["open_problem"] else ""))
+        tag = "    [%s]" % mode if mode else ""
+        print(head + tag + ("    [open problem]" if e["open_problem"] else ""))
         s = e["summary"]
         print("    " + (s if len(s) <= 150 else s[:147] + "..."))
 
 
 def main(argv):
     import json
+    argv = list(argv)
+    mode = None
+    if "--mode" in argv:
+        k = argv.index("--mode")
+        mode = argv[k + 1] if k + 1 < len(argv) else ""
+        del argv[k:k + 2]
+        if mode not in MODES:
+            print("sagebrush --search: --mode must be one of %s" % ", ".join(MODES))
+            return 2
     if "--index" in argv:
-        print(json.dumps(index(), separators=(",", ":")))
+        print(json.dumps(index_for(mode), separators=(",", ":")))
         return 0
     query = " ".join(a for a in argv if not a.startswith("--"))
     if "--json" in argv:
-        print(json.dumps([dict(e, score=s) for s, e in search(query, 50)], indent=1))
+        hits = search(query, 50, mode)
+        lang = {"language": mode} if mode else {}
+        print(json.dumps([dict(e, score=s, **lang) for s, e in hits], indent=1))
         return 0
-    search_doc(query, 30)
+    search_doc(query, 30, mode)
     return 0
 
 
