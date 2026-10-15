@@ -60,9 +60,9 @@ const TOL: Record<string, [number, number, number?]> = {
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
   gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300], gammainc_scaled: [6e-15, 1e-300],
-  besselj: [6e-15, 1e-300],
+  besselj: [6e-15, 1e-300], bessely: [3e-15, 1e-300],
 };
-// (J_nu(x) oscillates for |x| > nu with an envelope near sqrt(2/(pi |x|)):
+// (J_nu(x) and Y_nu(x) oscillate for |x| > |nu| with an envelope near sqrt(2/(pi |x|)):
 // there its error is measured against that, an absolute accuracy next to
 // its zeros, and relative to |J| below the oscillations)
 const besselFloor = (args: any[]): number => {
@@ -112,7 +112,7 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
       return;
     }
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
-    let e = Math.hypot(gr - wr, gi - wi) / Math.max(name === "besselj" ? besselFloor(args) : TOL[name][1], Math.hypot(wr, wi));
+    let e = Math.hypot(gr - wr, gi - wi) / Math.max(name === "besselj" || name === "bessely" ? besselFloor(args) : TOL[name][1], Math.hypot(wr, wi));
     if (LOG_SCALED.has(name) && wr !== 0) e /= Math.max(1, Math.abs(Math.log(Math.abs(wr))));
     if (name === "polygamma" && num(args[0]) > 20) {
       const key = "polygamma (n > 20)";
@@ -271,7 +271,14 @@ e1ref = [(complex(-716, 1), complex(-6.8253476368320043e307, 1.0597220277097455e
 print([abs(S.exp_integral_e1(z) - r) <= 1e-13 * abs(r) for z, r in e1ref])
 # (Bessel J: its edges, the side of the cut for negative x, and what it does not cover)
 print(repr(S.besselj(0.0, 0.0)), repr(S.besselj(2.5, 0.0)), repr(S.besselj(-3.0, 0.0)), repr(S.besselj(1.0, inf)), "%.12gj" % S.besselj(0.5, -2.0).imag, repr(S.besselj(nan, 1.0)))
-print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1.0, 1 + 2j)), (S.besselj, (inf, 1.0)), (S.besselj, (6e5, 6e5))]))
+print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-130.90617429837465, 129.18409377916606)), (S.besselj, (1.0, 1 + 2j)), (S.besselj, (inf, 1.0)), (S.besselj, (6e5, 6e5))]))
+# (Bessel Y: its values at 0 (Octave's), at +-inf, below the doubles and beyond them, the cut, and its refusals: the
+# connection formula next to a zero of Y_nu below x = |nu|, and the recurrence's step limit next to the turning point;
+# J's negative non-integer orders at 0, signed by 1/Gamma(1 + nu))
+print(" ".join(repr(S.bessely(nu, x)) for nu, x in [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (-2.0, 0.0), (-0.5, 0.0), (-1.5, 0.0), (-0.3, 0.0),
+      (-0.7, 0.0), (1.0, inf), (1.0, -inf), (nan, 1.0), (1000.0, 1.0), (-1000.5, 1.0), (171.0, 2.0), (0.5, -2.0), (10.5, -1e-300)]),
+      repr(S.besselj(-0.3, 0.0)), repr(S.besselj(-1.3, 0.0)), repr(S.besselj(-5.5, -1e-300)))
+print(" ".join(kind(S.bessely, *a).split(" (")[0] for a in [(1.0, 1 + 2j), (inf, 1.0), (-46.384401075334324, 45.581111665644976), (6e5, 5.9e5)]))
 # (the least subnormal x, daybreak's CORR-088-3: J_(1/2) ~ sqrt(2x/pi), J_1 and J_2 round to 0; huge finite orders,
 # API-088-4: J below the doubles is 0, and the turning point at 1e308 is refused, never an OverflowError)
 print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.besselj(2.0, 5e-324)), repr(S.besselj(1e308, 1.0)),
@@ -385,9 +392,16 @@ print([all(abs(a - b) <= tol * abs(b) for a, b in zip(part(v), part(r))) for v, 
     "[True, True]",
     // (J_(1/2)(-2) = e^(i pi/2) J_(1/2)(2) = i sqrt(2/(2 pi)) sin 2 = 0.5130161365618278i)
     "1.0 0.0 -0.0 0.0 0.513016136562j nan",
-    "NotCovered: besselj: Sagebrush covers negative orders only when they are integers " +
+    "NotCovered: bessely, besselj: the connection formula for order -130.90617429837465 cancels at x = 129.18409377916606 " +
       "NotCovered: besselj: Sagebrush covers real orders and arguments NotCovered: besselj: Sagebrush covers finite orders " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps (here about 601042)",
+    // (Y_(-1000.5)(1) = J_1000.5(1), about 5.2e-2871, and Y_1000(1) about -1.4e2865; Y_171(2) = -2.32373628765076e306;
+    // Y_(1/2)(-2) = e^(-i pi/2) Y_(1/2)(2) = i sqrt(2/(2 pi)) cos 2; Y_(10.5)(-x) = -i Y_(10.5)(x), and J_(-5.5)(-x) = i J_(-5.5)(x)
+    // = i Y_5.5(x), at x = 1e-300 beyond the doubles; J_(-0.3)(0) = +inf and J_(-1.3)(0) = -inf, as 1/Gamma(0.7) > 0 > 1/Gamma(-0.3))
+    "-inf -inf inf -inf 0.0 0.0 -inf inf 0.0 0.0 nan -inf 0.0 -2.3237362876507632e+306 -0.2347857104062485j infj inf -inf -infj",
+    "NotCovered: bessely: Sagebrush covers real orders and arguments NotCovered: bessely: Sagebrush covers finite orders " +
+      "NotCovered: bessely, besselj: the connection formula for order -46.384401075334324 cancels at x = 45.581111665644976 " +
+      "NotCovered: bessely: Sagebrush covers orders for which the recurrence needs at most 500000 steps",
     "1.7735048886036e-162 0.0 0.0 0.0 0.0 " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps",

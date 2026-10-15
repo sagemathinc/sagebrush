@@ -42,7 +42,8 @@ calls = {
     "legendre_p": [(n, x) for n in (0, 3, 100) for x in (0.0, 1.0, 5e-324, -1.0)],
     "gammainc": [(a, x) for a in (0.0, 0.5, 1e308, 1e-300, 5e-324) for x in (0.0, 5e-324, 1e308, 1.7976931348623157e308, 1.0)],
     "gammaincc": [(a, x) for a in (0.0, 0.5, 1e308, 1e-300, 5e-324) for x in (0.0, 5e-324, 1e308, 1.7976931348623157e308, 1.0)],
-    "besselj": [(nu, x) for nu in (0.0, 0.5, 3.0, -2.0, 170.5, 1e308, 1e20) for x in reals],
+    "besselj": [(nu, x) for nu in (0.0, 0.5, 3.0, -2.0, -0.3, -2.5, -170.7, 170.5, 1e308, 1e20) for x in reals],
+    "bessely": [(nu, x) for nu in (0.0, 0.5, 3.0, -2.0, -0.3, -2.5, -170.7, 170.5, 1e308, 1e20, -1e20 - 0.5) for x in reals],
 }
 if ORACLE:
     import mpmath as M
@@ -54,7 +55,7 @@ if ORACLE:
         "beta": M.beta, "betaln": lambda a, b: M.log(abs(M.beta(a, b))),
         # (on the cut x > 1 _special takes the limit from above, as complex(x, 0.0); mpmath's real x the one from below)
         "dilog": lambda z: M.conj(M.polylog(2, z)) if not isinstance(z, M.mpc) and z > 1 else M.polylog(2, z),
-        "besselj": M.besselj,
+        "besselj": M.besselj, "bessely": M.bessely,
     }
     # (the arguments' magnitudes span up to 1e630: digits enough that a + b and the like are exact;
     # polygamma(100, -1.5) cancels 70 digits in mpmath)
