@@ -611,6 +611,9 @@ fn latex(e: &Expr) -> (String, u8) {
         Kind::Fun(Fun::Abs, a) => (format!("{{\\left| {} \\right|}}", latex(&a[0]).0), P_ATOM),
         Kind::Fun(f, a) => {
             let args: Vec<String> = a.iter().map(|x| latex(x).0).collect();
+            if let Some(s) = crate::special::latex(f, &args) {
+                return (s, P_ATOM);
+            }
             (format!("{}\\left({}\\right)", latex_fun_name(f), args.join(", ")), P_ATOM)
         }
         Kind::Rel(r, a, b) => {

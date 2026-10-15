@@ -179,6 +179,8 @@ class Expression:
     __slots__ = ("_s", "_repr", "_fast", "_h", "__weakref__")
 
     def __init__(self, s):
+        if _SPECIAL_RE.search(s) and _FLOAT_RE.search(s):
+            s = _complete_special(s)
         self._s, self._repr, self._fast, self._h = s, None, None, None
 
     def __reduce__(self):
@@ -596,7 +598,7 @@ class Expression:
             # any precision: _sage_real evaluates the expression tree
             import _sage_real
             return _sage_real.N(self, prec, digits)
-        re, im = _call("n", self._s)
+        re, im = _call("n", _lower_special(self._s))
         re, im = float(re), float(im)
         if im == 0:
             from _sage_lang import RealNumber
@@ -634,7 +636,7 @@ class Expression:
     def __float__(self):
         if self._names():
             raise TypeError("unable to simplify to float approximation")
-        re, im = _call("n", self._s)
+        re, im = _call("n", _lower_special(self._s))
         if float(im) != 0:
             raise TypeError("unable to simplify to float approximation")
         return float(re)
@@ -642,7 +644,7 @@ class Expression:
     def __complex__(self):
         if self._names():
             raise TypeError("unable to simplify to complex approximation")
-        re, im = _call("n", self._s)
+        re, im = _call("n", _lower_special(self._s))
         return complex(float(re), float(im))
 
     def __int__(self):
@@ -1560,40 +1562,358 @@ def _var_name(v):
     raise TypeError("%s is not a valid variable." % (v,))
 
 
-def _lanczos_gamma(z):
-    # Lanczos approximation (g = 7, n = 9): about 15 digits.
-    if z < 0.5:
-        return _m.pi / (_m.sin(_m.pi * z) * _lanczos_gamma(1 - z))
-    z -= 1
-    c = (0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
-         -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
-         1.5056327351493116e-7)
-    a = c[0] + sum(c[i] / (z + i) for i in range(1, 9))
-    t = z + 7.5
-    return _m.sqrt(2 * _m.pi) * t ** (z + 0.5) * _m.exp(-t) * a
+# ------------------------------------------------------------------ special functions
+#
+# The numerical values of the special functions (gamma, erf, psi, zeta,
+# ...) come from lib/_special.py, the numerical core that MATLAB mode and
+# scipy.special share; the engine knows their exact values, canonical
+# forms and derivatives (engine/sym special.rs) and leaves a call with
+# float arguments as a call, which _complete_special evaluates here.
+
+import re as _re
+import cmath as _cmath
 
 
-_gamma = getattr(_m, "gamma", None) or _lanczos_gamma
+class _LazySpecial:
+    """lib/_special.py, imported when first used: it needs numpy, which the
+    CPython package (sagebrush.sage) does not require for the rest of the
+    Sage layer."""
+    _mod = None
+
+    def __getattr__(self, name):
+        m = _LazySpecial._mod
+        if m is None:
+            try:
+                import _special as m
+            except ImportError as e:
+                raise NotImplementedError("numerical values of special functions need numpy (%s)" % e)
+            _LazySpecial._mod = m
+        return getattr(m, name)
 
 
-def _series_erf(z):
-    # Taylor series for |z| <= 2.5; the continued fraction for erfc beyond
-    if abs(z) <= 2.5:
-        t, s, n = z, z, 0
-        while abs(t) > 1e-17 * abs(s):
-            n += 1
-            t *= -z * z / n
-            s += t / (2 * n + 1)
-        return 2 / _m.sqrt(_m.pi) * s
-    a = abs(z)
-    f = 0.0
-    for k in range(60, 0, -1):
-        f = k / 2 / (a + f)
-    r = 1 - _m.exp(-a * a) / _m.sqrt(_m.pi) / (a + f)
-    return r if z > 0 else -r
+_sf = _LazySpecial()
+
+_SPECIAL_NAMES = ("gamma", "erf", "psi", "log_gamma", "zeta", "zetaderiv", "hurwitz_zeta", "beta", "erfc", "erfi",
+                  "erfinv", "exp_integral_e1", "Ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec")
+_SPECIAL_RE = _re.compile(r"F\d+:(?:%s)\d+\{" % "|".join(_SPECIAL_NAMES))
+_FLOAT_RE = _re.compile(r"\{[fg][0-9a-f]")
 
 
-_erf = getattr(_m, "erf", None) or _series_erf
+class _Keep(Exception):
+    """Sage leaves this call unevaluated (no value, or one Sagebrush does not
+    compute yet)."""
+
+
+def _int_param(v, what):
+    if isinstance(v, complex):
+        if v.imag != 0:
+            raise _Keep
+        v = v.real
+    if v != int(v):
+        raise _sf.NotCovered("a non-integer %s is not available in sagebrush yet" % what)
+    return int(v)
+
+
+def _below_cut(z):
+    """A real z > 1 as z - 0i: on the cut (1, oo) of polylog, Sage gives the
+    limit from below (dilog(2.0) = 2.467... - 2.177...*I)."""
+    return complex(z, -0.0) if isinstance(z, float) and z > 1 else z
+
+
+def _bernoulli_even(J):
+    """B_2, B_4, ..., B_2J as Fractions."""
+    from fractions import Fraction
+    from math import comb
+    b = [Fraction(1)]
+    for m in range(1, 2 * J + 1):
+        b.append(-sum(comb(m + 1, k) * b[k] for k in range(m)) / (m + 1))
+    return [b[2 * j] for j in range(1, J + 1)]
+
+
+_EM_B = None
+
+
+def _expm1(z):
+    """e^z - 1 without cancellation for small z, real or complex."""
+    if not isinstance(z, complex):
+        return _m.expm1(z)
+    if abs(z) < 1e-3:
+        return z * (1 + z / 2 * (1 + z / 3 * (1 + z / 4 * (1 + z / 5))))
+    return _cmath.exp(z) - 1
+
+
+def _zeta_near0(s):
+    """zeta(s) for |s| < 1e-3 (real or complex), by Euler-Maclaurin summation
+    (DLMF 25.2.9) with N = 10 and 12 Bernoulli corrections, at s itself:
+    _special's reflection through zeta(1 - s) loses s when |s| is tiny
+    (1 - s rounds to 1; its error is about eps/|s|, harmless above 1e-3,
+    as compared with mpmath).  With k^(-s) = 1 + expm1(-s log k), the integer
+    parts of the sum, of N^(1-s)/(s - 1) and of N^(-s)/2 add up to exactly
+    -1/2, and every other term is O(s): no cancellation.  The first
+    neglected correction, about 2 |s| 24! / ((2 pi)^26 N^25), is below
+    1e-22."""
+    global _EM_B
+    if _EM_B is None:
+        _EM_B = [float(x) for x in _bernoulli_even(12)]
+    N = 10
+    e = [0.0] + [_expm1(-s * _m.log(k)) for k in range(1, N + 1)]
+    # sum_(k<N) k^-s + N^(1-s)/(s-1) + N^-s/2 + 1/2
+    t = sum(e[1:N]) - N * s / (1 - s) - N * e[N] / (1 - s) + e[N] / 2
+    # B_2j/(2j)! s (s + 1) ... (s + 2j - 2) N^(-s-2j+1)
+    poch, fact = s, 2.0
+    for j, b in enumerate(_EM_B, 1):
+        t += b / fact * poch * (1 + e[N]) / N ** (2 * j - 1)
+        poch *= (s + 2 * j - 1) * (s + 2 * j)
+        fact *= (2 * j + 1) * (2 * j + 2)
+    return t - 0.5
+
+
+def _is_npi(z):
+    """Whether z (float or complex) is a nonpositive integer."""
+    if isinstance(z, complex):
+        if z.imag != 0:
+            return False
+        z = z.real
+    return z <= 0 and z == int(z)
+
+
+def _beta_complex(a, b):
+    """B(a, b) = Gamma(a) (Gamma(b)/Gamma(a + b)) for complex a, b (DLMF
+    5.12.1): 0 where only Gamma(a + b) has a pole (it is not divided by),
+    and the quotient first, so B(1e-200(1 + i), 1e-200(1 - i)) = 1e200
+    does not overflow on the way.  Where a gamma value itself overflows
+    (B(90 + i, 90 - i)), NotImplementedError: exp of a sum of log Gammas
+    would lose digits in proportion to their size (2e-13 there)."""
+    if _is_npi(a) or _is_npi(b):
+        raise _sf.PoleError("beta has a pole there")
+    if _is_npi(a + b):
+        return 0.0
+    def g(z):
+        # Gamma(z) = Gamma(1 + z)/z near 0, where exp(log Gamma(z)) would
+        # turn log Gamma's absolute error (log Gamma is about -log z) into a
+        # relative one (3.5e-14 at z = 1e-200(1 + i))
+        return _sf.gamma(z + 1) / z if abs(z) < 0.5 else _sf.gamma(z)
+    try:
+        ga, gb, gs = g(a), g(b), g(a + b)
+        r = ga * (gb / gs)
+    except OverflowError:
+        ga = r = float("inf")
+        gb = gs = 1.0
+    if not all(_cmath.isfinite(v) and v != 0 for v in (ga, gb, gs, r)):
+        raise _sf.NotCovered("beta%r: its gamma values leave the double range; not available in sagebrush yet" % ((a, b),))
+    return r
+
+
+def _special_raw(name, a):
+    """name(*a) for Python floats or complexes, from _special."""
+    if name == "gamma":
+        return _sf.gamma(a[0])
+    if name == "erf":
+        return _sf.erf(a[0])
+    if name == "psi":
+        return _sf.psi(a[0]) if len(a) == 1 else _sf.polygamma(_int_param(a[0], "n"), a[1])
+    if name == "log_gamma":
+        return _sf.loggamma(a[0])
+    if name == "zeta":
+        if abs(a[0]) < 1e-3:
+            return _zeta_near0(a[0])
+        return _sf.zeta(a[0])
+    if name == "hurwitz_zeta":
+        if isinstance(a[1], complex):
+            raise _sf.NotCovered("hurwitz_zeta at a complex a is not available in sagebrush yet")
+        return _sf.hurwitz_zeta(a[0], a[1])
+    if name == "beta":
+        if any(isinstance(t, complex) for t in a):
+            return _beta_complex(a[0], a[1])
+        return _sf.beta(a[0], a[1])
+    if name in ("erfc", "erfi", "exp_integral_e1"):
+        return getattr(_sf, name)(a[0])
+    if name == "dilog":
+        return _sf.dilog(_below_cut(a[0]))
+    if name == "erfinv":
+        if isinstance(a[0], complex):
+            raise _sf.NotCovered("erfinv at a complex argument is not available in sagebrush yet")
+        v = _sf.erfinv(a[0])
+        if v != v:
+            raise _Keep     # no real value: Sage keeps erfinv(1.5)
+        return v
+    if name == "Ei":
+        if isinstance(a[0], complex):
+            raise _sf.NotCovered("Ei at a complex argument is not available in sagebrush yet")
+        return _sf.exp_integral_ei(a[0])
+    if name == "polylog":
+        return _sf.polylog(_int_param(a[0], "s"), _below_cut(a[1]))
+    if name == "lambert_w":
+        return _sf.lambert_w(a[0]) if len(a) == 1 else _sf.lambert_w(a[1], _int_param(a[0], "k"))
+    if name in ("elliptic_kc", "elliptic_ec"):
+        m = a[0]
+        if isinstance(m, complex) or m > 1:
+            raise _sf.NotCovered("%s(m) for m > 1 or complex m is not available in sagebrush yet" % name)
+        return (_sf.ellipk if name == "elliptic_kc" else _sf.ellipe)(m)
+    raise _sf.NotCovered("%s is not evaluated numerically in sagebrush yet" % name)
+
+
+class _UnsignedInfinity:
+    """Sage's unsigned infinity (gamma at a pole given as a complex number)."""
+
+
+class _AmbiguousPole(NotImplementedError):
+    """A pole whose value in Sage depends on whether the argument is a real or
+    a complex number, reached through a symbolic expression, where the
+    engine keeps -1.0 + 0.0*I as the real -1.0: refused rather than guessed
+    (Sage: gamma(-1.0 + 0.0*I) is Infinity, gamma(SR(-1.0)) NaN)."""
+
+
+# the functions whose value at a pole, reached through a symbolic
+# expression, Sage gives differently for real and complex arguments
+# (gamma(SR(-1.0)) NaN, gamma(-1.0 + 0.0*I) Infinity; beta NaN or NaN + NaN*I);
+# zeta's (Infinity), log_gamma's (NaN + NaN*I) and hurwitz_zeta's (+infinity)
+# are the same both ways there
+_KIND_POLES = ("gamma", "beta")
+
+
+def _is_pole(name, a):
+    """Whether the arguments a are a pole of name: _special's PoleError there
+    is the function's own, not one met inside a transformation (zeta's
+    reflection through zeta(1 - s) at a tiny s, say)."""
+    x = a[-1]
+    if name in ("gamma", "log_gamma") or name == "psi" and len(a) == 1:
+        return _is_npi(x)
+    if name == "beta":
+        return _is_npi(a[0]) or _is_npi(a[1])
+    if name in ("zeta", "hurwitz_zeta"):
+        return a[0] == 1
+    if name in ("exp_integral_e1", "Ei"):
+        return x == 0
+    if name in ("polylog", "elliptic_kc"):
+        return x == 1
+    return False
+
+
+def _pole_value(name, a, cx):
+    """What Sage gives at a pole of name (arguments a, cx: whether each was
+    given as a complex number, None when that is unknown: through the
+    engine), or _Keep."""
+    if not _is_pole(name, a):
+        raise _sf.NotCovered("%s%r: _special met a pole of an intermediate step; this point is not available in sagebrush yet" % (name, tuple(a)))
+    x = a[-1]
+    inf, nan = float("inf"), float("nan")
+    if cx is None:
+        if name in _KIND_POLES:
+            raise _AmbiguousPole("%s(%s) is a pole where Sage's value depends on whether the argument is real or complex, which this expression no longer tells; evaluate %s at a RealNumber or ComplexNumber" % (name, ", ".join(map(repr, a)), name))
+        # through an expression Sage gives these as for complex arguments
+        cx = [name in ("zeta", "log_gamma")] * len(a)
+    if name == "gamma":
+        if cx[-1]:
+            return _UnsignedInfinity
+        return _m.copysign(inf, x) if x == 0 else nan
+    if name == "zeta" and cx[0]:
+        return _UnsignedInfinity
+    if name == "beta":
+        return complex(nan, nan) if any(cx) else nan
+    if name == "psi" and len(a) == 1:
+        return nan
+    if name == "log_gamma":
+        return inf if x == 0 and not cx[-1] else complex(nan, nan)
+    if name in ("zeta", "hurwitz_zeta", "exp_integral_e1", "elliptic_kc"):
+        return inf
+    if name == "Ei":
+        return -inf
+    if name == "polylog":
+        return complex(nan, nan)
+    raise _Keep
+
+
+def _special_value(name, a, kinds=True):
+    """name(*a) at Python floats or complexes as Sage evaluates it: a float
+    or complex (Sage's NaN or infinity at a pole); _Keep where Sage keeps
+    the call; NotImplementedError (_special.NotCovered) where Sage has a
+    value that Sagebrush does not compute.  kinds=False: the arguments come
+    from the engine, which does not tell -1.0 + 0.0*I from -1.0, so a pole
+    whose value depends on that raises _AmbiguousPole."""
+    cx = [isinstance(t, complex) for t in a] if kinds else None
+    a = [t.real if isinstance(t, complex) and t.imag == 0 else t for t in a]
+    try:
+        return _special_raw(name, a)
+    except _sf.PoleError:
+        return _pole_value(name, a, cx)
+    except _sf.NotCovered:
+        raise
+    except (ValueError, TypeError, OverflowError):
+        raise _Keep
+
+
+def _sp(name, *args):
+    """name(*args) for compiled expressions (fast_callable, plots): a float
+    or complex, NaN where there is no value."""
+    try:
+        v = _special_value(name, [complex(t) if isinstance(t, complex) else float(t) for t in args])
+    except (_Keep, NotImplementedError):
+        return float("nan")
+    return float("inf") if v is _UnsignedInfinity else v
+
+
+def _gamma(x):
+    return _sp("gamma", x)
+
+
+def _num_pair(s):
+    """(re, im) of a numeric serialized expression, from the engine."""
+    re, im = _call("n", s)
+    return float(re), float(im)
+
+
+def _py_val(re, im):
+    return complex(re, im) if im != 0 else re
+
+
+def _encode_value(v):
+    if v is _UnsignedInfinity:
+        return "cu"
+    if isinstance(v, complex):
+        return _call("complex", repr(v.real), repr(v.imag))[0]
+    return _call("float", repr(float(v)))[0]
+
+
+def _complete_special(s):
+    """s with each call of a special function at float arguments that Sage
+    evaluates at once (gamma(2.5), zeta(2.5 + 1.0*I)) replaced by its value,
+    repeatedly, so a call whose argument became a float that way is
+    evaluated too (psi(gamma(2.5)))."""
+    for _ in range(64):
+        rules = []
+        for c in _call("special_calls", s, "float"):
+            op = _call("operator", c)
+            name, args = op[0][4:], op[1:]
+            try:
+                v = _special_value(name, [_py_val(*_num_pair(t)) for t in args], kinds=False)
+            except _AmbiguousPole:
+                raise
+            except (_Keep, NotImplementedError):
+                continue
+            rules += [c, _encode_value(v)]
+        if not rules:
+            break
+        s = _call("subs", s, *rules)[0]
+    return s
+
+
+def _lower_special(s):
+    """s with every special-function call without symbols replaced by its
+    numerical value (for n(): the engine's own numerics stop at them)."""
+    if not _SPECIAL_RE.search(s):
+        return s
+    rules = []
+    for c in _call("special_calls", s, "const"):
+        op = _call("operator", c)
+        name, args = op[0][4:], op[1:]
+        vals = [_py_val(*_num_pair(_lower_special(t))) for t in args]
+        try:
+            v = _special_value(name, vals, kinds=False)
+        except _Keep:
+            raise ValueError("cannot evaluate %s numerically" % _call("str", c)[0])
+        rules += [c, _encode_value(v)]
+    return _call("subs", s, *rules)[0] if rules else s
 
 
 class _Math:
@@ -1604,7 +1924,6 @@ _M = _Math()
 for _k in dir(_m):
     if not _k.startswith("_"):
         setattr(_M, _k, getattr(_m, _k))
-_M.gamma, _M.erf = _gamma, _erf
 
 
 def _sgn(v):
@@ -1615,7 +1934,7 @@ def _undefined(name):
     raise ValueError("cannot evaluate %s numerically" % name)
 
 
-_FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sgn": _sgn, "_undefined": _undefined,
+_FAST_GLOBALS = {"_m": _M, "_gamma": _gamma, "_sp": _sp, "_sgn": _sgn, "_undefined": _undefined,
                  "__builtins__": {"abs": abs, "complex": complex, "float": float}}
 
 
@@ -2155,6 +2474,38 @@ def _function(name, numeric=None, cnumeric=None):
     return f
 
 
+
+def _special_function(name, nargs=(1,)):
+    """A Sage special function (engine/sym special.rs for exact values and
+    derivatives, lib/_special.py for numerical ones): a number at Python
+    floats and complexes where Sage evaluates there, else an expression
+    (whose float calls the engine leaves to _complete_special)."""
+    def f(*args):
+        if len(args) not in nargs:
+            raise TypeError("%s() takes %s arguments (%d given)" % (name, " or ".join(map(str, nargs)), len(args)))
+        if all(_numeric_arg(a) or isinstance(a, int) for a in args) and any(_numeric_arg(a) for a in args) \
+                and not (name == "psi" and len(args) == 2) and name != "zetaderiv":
+            try:
+                v = _special_value(name, [complex(a) if isinstance(a, complex) else float(a) for a in args])
+            except _Keep:
+                v = None
+            if v is _UnsignedInfinity:
+                return Expression("cu")
+            if v is not None:
+                if isinstance(v, complex):
+                    from _sage_matrix import ComplexNumber
+                    return ComplexNumber(v.real, v.imag)
+                from _sage_lang import RealNumber
+                return RealNumber(v)
+        r = Expression(_call("fun", name, *[_expr(a)._s for a in args])[0])
+        if all(not isinstance(a, Expression) and not _is_poly(a) for a in args):
+            v = _py_number(r._s)
+            if v is not None:
+                return v
+        return r
+    f.__name__ = name
+    return f
+
 # The docstrings of the elementary functions (made by one factory, so they
 # have no def to hold them); their examples are doctests like any others.
 _FUNCTION_DOCS = {
@@ -2384,26 +2735,204 @@ _FUNCTION_DOCS = {
         -2
         sage: ceil(pi)
         4""",
-    'gamma': """The gamma function.
+    'gamma': """The gamma function: exact at integers and half-integers,
+    numerical at floats (real or complex; lib/_special.py), NaN or an
+    infinity at its poles as in Sage.
 
     EXAMPLES::
 
-        sage: gamma(5)
-        24
-        sage: gamma(1/2)
-        sqrt(pi)
-        sage: gamma(2.5)
-        1.32934038817914""",
-    'erf': """The error function.
+        sage: gamma(5), gamma(1/2), gamma(0)
+        (24, sqrt(pi), Infinity)
+        sage: gamma(2.5), gamma(-1.0)
+        (1.32934038817914, NaN)
+        sage: gamma(x).diff(x)
+        gamma(x)*psi(x)
+        sage: gamma(CC(-1)), gamma(RR(-1))
+        (Infinity, NaN)
+        sage: gamma(-1.0 + 0.0*I)  # the engine keeps -1.0 + 0.0*I as -1.0  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        _sage_expr._AmbiguousPole: gamma(-1.0) is a pole where Sage's value depends on whether the argument is real or complex, which this expression no longer tells; evaluate gamma at a RealNumber or ComplexNumber""",
+    'erf': """The error function (numerical values from lib/_special.py, real
+    or complex).
 
     EXAMPLES::
 
-        sage: erf(0)
-        0
+        sage: erf(0), erf(oo)
+        (0, 1)
         sage: erf(1.0)
         0.842700792949715
         sage: erf(x).diff(x)
         2*e^(-x^2)/sqrt(pi)""",
+    'psi': """psi(x), the digamma function Gamma'(x)/Gamma(x), and psi(n, x), its
+    n-th derivative (the polygamma function): exact at integers and
+    half-integers, numerical (lib/_special.py) at floats for psi(x) and
+    by n() for psi(n, x), as in Sage.
+
+    EXAMPLES::
+
+        sage: psi(1), psi(5), psi(1/3)
+        (-euler_gamma, -euler_gamma + 25/12, psi(1/3))
+        sage: psi(1, 1), psi(2, 1), psi(3, 1/2)
+        (1/6*pi^2, -2*zeta(3), pi^4)
+        sage: psi(2.5), psi(1, 2.5).n()
+        (0.703156640645243, 0.490357756100235)
+        sage: psi(x).diff(x), psi(1, x).diff(x)
+        (psi(1, x), psi(2, x))
+        sage: psi((-2^64 + 1)/2)  # not computed beyond |x| = 600  # sagebrush only
+        psi(-18446744073709551615/2)""",
+    'log_gamma': """The principal branch of log Gamma(x) (as Sage's log_gamma: complex
+    for negative x).
+
+    EXAMPLES::
+
+        sage: log_gamma(1), log_gamma(5), log_gamma(0)
+        (0, log(24), +Infinity)
+        sage: log_gamma(10.0)
+        12.8018274800815
+        sage: log_gamma(x).diff(x)
+        psi(x)
+        sage: log_gamma(-3/2).n(100)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: log_gamma of a negative real at more than 53 bits is not available in sagebrush yet""",
+    'zeta': """The Riemann zeta function: exact at even positive and nonpositive
+    integers, numerical (lib/_special.py) at floats, real or complex.
+
+    EXAMPLES::
+
+        sage: zeta(2), zeta(4), zeta(0), zeta(-1), zeta(3)
+        (1/6*pi^2, 1/90*pi^4, -1/2, -1/12, zeta(3))
+        sage: zeta(3).n()
+        1.20205690315959
+        sage: zeta(x).diff(x)
+        zetaderiv(1, x)
+        sage: zeta(-2^63)  # not computed beyond |s| = 600  # sagebrush only
+        zeta(-9223372036854775808)""",
+    'zetaderiv': """zetaderiv(n, s), the n-th derivative of the Riemann zeta function
+    (symbolic only: its numerical values are not available in sagebrush yet).
+
+    EXAMPLES::
+
+        sage: zeta(2*x).diff(x)
+        2*zetaderiv(1, 2*x)""",
+    'hurwitz_zeta': """The Hurwitz zeta function zeta(s, a) = sum_(k >= 0) (k + a)^(-s): exact
+    at integers s >= 2 for integer and half-integer a, and at integers
+    s <= 0 (Bernoulli polynomials); numerical for real a > 0.
+
+    EXAMPLES::
+
+        sage: hurwitz_zeta(2, 1/2), hurwitz_zeta(3, 2), hurwitz_zeta(-1, 2)
+        (1/2*pi^2, zeta(3) - 1, -13/12)
+        sage: hurwitz_zeta(2.0, 0.5)
+        4.93480220054468
+        sage: hurwitz_zeta(-2^63, 1/3)  # sagebrush only
+        hurwitz_zeta(-9223372036854775808, 1/3)""",
+    'beta': """The beta function B(a, b) = Gamma(a) Gamma(b)/Gamma(a + b).
+
+    EXAMPLES::
+
+        sage: beta(2, 3), beta(1, x)
+        (1/12, 1/x)
+        sage: beta(2.5, 1.5)
+        0.196349540849362
+        sage: y = var('y'); beta(x, y).diff(x)
+        -(psi(x + y) - psi(x))*beta(x, y)
+        sage: beta(CC(90, 1), CC(90, -1))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        _special.NotCovered: beta((90+1j), (90-1j)): its gamma values leave the double range; not available in sagebrush yet""",
+    'erfc': """The complementary error function 1 - erf(x).
+
+    EXAMPLES::
+
+        sage: erfc(0), erfc(oo)
+        (1, 0)
+        sage: erfc(1.0)
+        0.157299207050285
+        sage: erfc(x).diff(x)
+        -2*e^(-x^2)/sqrt(pi)""",
+    'erfi': """The imaginary error function -i erf(i x).
+
+    EXAMPLES::
+
+        sage: erfi(0), erfi(1.0)
+        (0, 1.65042575879754)
+        sage: erfi(x).diff(x)
+        2*e^(x^2)/sqrt(pi)""",
+    'erfinv': """The inverse error function (real arguments in [-1, 1]).
+
+    EXAMPLES::
+
+        sage: erfinv(0), erfinv(0.5)
+        (0, 0.476936276204470)
+        sage: erfinv(x).diff(x)
+        1/2*sqrt(pi)*e^(erfinv(x)^2)""",
+    'exp_integral_e1': """The exponential integral E1(x) = int_x^oo e^(-t)/t dt (principal
+    branch: complex for negative x).
+
+    EXAMPLES::
+
+        sage: exp_integral_e1(1.0)  # abs tol 1e-14
+        0.219383934395520
+        sage: exp_integral_e1(x).diff(x)
+        -e^(-x)/x""",
+    'Ei': """The exponential integral Ei(x) (also exp_integral_ei; real
+    arguments).
+
+    EXAMPLES::
+
+        sage: Ei(1.0), Ei(-1.0)  # abs tol 1e-14
+        (1.89511781635594, -0.219383934395520)
+        sage: Ei(x).diff(x)
+        e^x/x""",
+    'dilog': """The dilogarithm Li_2(x) (polylog(2, x)); on its cut x > 1 Sage's
+    value, the limit from below.
+
+    EXAMPLES::
+
+        sage: dilog(1), dilog(-1), dilog(0.5)
+        (1/6*pi^2, -1/12*pi^2, 0.582240526465012)
+        sage: dilog(x).diff(x)
+        -log(-x + 1)/x""",
+    'polylog': """The polylogarithm Li_s(x) = sum_(k >= 1) x^k/k^s (numerical values
+    for integer orders s).
+
+    EXAMPLES::
+
+        sage: polylog(2, x), polylog(1, x), polylog(3, 1)
+        (dilog(x), -log(-x + 1), zeta(3))
+        sage: polylog(3, 0.5)
+        0.537213193608040
+        sage: polylog(3, x).diff(x)
+        dilog(x)/x""",
+    'lambert_w': """The Lambert W function: lambert_w(x), the principal branch, or
+    lambert_w(k, x), the branch k.
+
+    EXAMPLES::
+
+        sage: lambert_w(0), lambert_w(e), lambert_w(1)
+        (0, 1, lambert_w(1))
+        sage: lambert_w(1.0), lambert_w(-1, -0.1)
+        (0.567143290409784, -3.57715206395730)
+        sage: lambert_w(x).diff(x)
+        lambert_w(x)/(x*lambert_w(x) + x)""",
+    'elliptic_kc': """The complete elliptic integral of the first kind K(m) (parameter m;
+    numerical values for m < 1).
+
+    EXAMPLES::
+
+        sage: elliptic_kc(0), elliptic_kc(0.5)
+        (1/2*pi, 1.85407467730137)""",
+    'elliptic_ec': """The complete elliptic integral of the second kind E(m) (parameter
+    m; numerical values for m <= 1).
+
+    EXAMPLES::
+
+        sage: elliptic_ec(0), elliptic_ec(1), elliptic_ec(0.5)
+        (1/2*pi, 1, 1.35064388104768)
+        sage: elliptic_ec(x).diff(x)
+        1/2*(elliptic_ec(x) - elliptic_kc(x))/x""",
     'sgn': """The sign: -1, 0 or 1 (also sign).
 
     EXAMPLES::
@@ -2462,10 +2991,212 @@ exp = _register(["exp"], _m.exp)
 _log1 = _register(["log", "ln"], _m.log)
 floor = _register(["floor"], _m.floor)
 ceil = ceiling = _register(["ceil", "ceiling"], _m.ceil)
-gamma = _register(["gamma"], _gamma)
-erf = _register(["erf"], _erf)
+def _register_special(names, nargs=(1,)):
+    f = _special_function(names[0], nargs)
+    f.__doc__ = _FUNCTION_DOCS.get(names[0])
+    for n in names:
+        _functions[n] = f
+    return f
+
+
+gamma = _register_special(["gamma"])
+erf = _register_special(["erf"])
+psi = _register_special(["psi"], (1, 2))
+log_gamma = _register_special(["log_gamma"])
+zeta = _register_special(["zeta"])
+zetaderiv = _register_special(["zetaderiv"], (2,))
+hurwitz_zeta = _register_special(["hurwitz_zeta"], (2,))
+beta = _register_special(["beta"], (2,))
+erfc = _register_special(["erfc"])
+erfi = _register_special(["erfi"])
+erfinv = _register_special(["erfinv"])
+exp_integral_e1 = _register_special(["exp_integral_e1"])
+Ei = exp_integral_ei = _register_special(["Ei", "exp_integral_ei"])
+dilog = _register_special(["dilog"])
+polylog = _register_special(["polylog"], (2,))
+lambert_w = _register_special(["lambert_w"], (1, 2))
+elliptic_kc = _register_special(["elliptic_kc"])
+elliptic_ec = _register_special(["elliptic_ec"])
 sgn = sign = _register(["sgn", "sign"], _sgn)
 heaviside = _register(["heaviside"], lambda t: 1.0 if t > 0 else 0.0)
+
+
+def _small_int(v):
+    """v as a Python int if it is an exact integer (int, Integer or an
+    integer expression), else None."""
+    if isinstance(v, bool) or isinstance(v, (float, complex)):
+        return None
+    if isinstance(v, int):
+        return int(v)
+    try:
+        e = _expr(v)
+    except TypeError:
+        return None
+    w = _py_number(e._s)
+    if w is not None and not isinstance(w, float) and w == int(w):
+        return int(w)
+    return None
+
+
+def _legendre_poly(k, t):
+    """P_k(t), by (j + 1) P_(j+1) = (2j + 1) t P_j - j P_(j-1)."""
+    p0, p1 = _expr(1), t
+    if k == 0:
+        return p0
+    for j in range(1, k):
+        p0, p1 = p1, (((2 * j + 1) * t * p1 - j * p0) / (j + 1)).expand()
+    return p1
+
+
+def legendre_P(n, x):
+    """The Legendre polynomial P_n(x) (DLMF 18.3): a polynomial for an
+    integer n (P_(-n-1) = P_n), a number at a number x, the unevaluated
+    legendre_P(n, x) for a symbolic n.  Floats from lib/_special.py.
+
+    EXAMPLES::
+
+        sage: legendre_P(4, x)
+        35/8*x^4 - 15/4*x^2 + 3/8
+        sage: legendre_P(5, 1/2), legendre_P(3, 2.0)
+        (23/256, 17.0000000000000)
+        sage: legendre_P(3, x).diff(x)
+        15/2*x^2 - 3/2
+    """
+    k = _small_int(n)
+    if k is None:
+        if _numeric_arg(n) and _numeric_arg(x):
+            raise NotImplementedError("legendre_P of a non-integer degree is not available in sagebrush yet")
+        return _one("fun", "legendre_P", _expr(n)._s, _expr(x)._s)
+    if k < 0:
+        k = -k - 1
+    if _numeric_arg(x):
+        v = _sf.legendre_p(k, complex(x) if isinstance(x, complex) else float(x))
+        if isinstance(v, complex):
+            from _sage_matrix import ComplexNumber
+            return ComplexNumber(v.real, v.imag)
+        from _sage_lang import RealNumber
+        return RealNumber(v)
+    r = _legendre_poly(k, _expr(x))
+    if not isinstance(x, Expression) and not _is_poly(x):
+        v = _py_number(r._s)
+        if v is not None:
+            return v
+    return r
+
+
+def _legendre_neg_order(k, mu, x):
+    """P_k^(-mu)(x) for an integer mu > k >= 0, where it is not 0: DLMF 14.3.1,
+    ((1 - x)/(1 + x))^(mu/2) / mu! F(k + 1, -k; mu + 1; (1 - x)/2), whose
+    hypergeometric series ends at the term (1 - x)^k (P_0^(-1)(x) =
+    sqrt((1 - x)/(1 + x)))."""
+    import math
+    from fractions import Fraction
+    if isinstance(x, (float, complex)):
+        if isinstance(x, complex) or not -1 < x <= 1:
+            raise NotImplementedError("gen_legendre_P(%d, %d, x) at a number x outside (-1, 1] is not available in sagebrush yet" % (k, -mu))
+        if k > 2000:
+            raise NotImplementedError("gen_legendre_P of degree above 2000 at a number is not available in sagebrush yet")
+        # The series alternates and cancels (gen_legendre_P(30, -31, -0.99)
+        # is 2.6e-16 from terms near 1), so it is summed exactly, at the
+        # exact rational the float x is.  q = w^floor(mu/2) F / mu! is split
+        # exactly as Q 2^e with 1/2 <= |Q| < 2; Q (and for an odd mu
+        # Q sqrt(w)) is rounded in the normal range, and the scaling by 2^e
+        # comes last, so a subnormal result is rounded once there instead
+        # of losing digits in a subnormal q (gen_legendre_P(0, -883,
+        # -0.9999) = 1.666e-321 was 1.398e-321): within a few units in the
+        # last place.
+        X = Fraction(x)
+        t = (1 - X) / 2
+        f, term = Fraction(0), Fraction(1)
+        for i in range(k + 1):
+            f += term
+            term = term * (k + 1 + i) * (-k + i) / ((mu + 1 + i) * (i + 1)) * t
+        w = (1 - X) / (1 + X)
+        q = w ** (mu // 2) * f / math.factorial(mu)
+        from _sage_lang import RealNumber
+        if q == 0:
+            return RealNumber(0.0)
+        e = abs(q.numerator).bit_length() - q.denominator.bit_length()
+        Q = q / 2 ** e if e >= 0 else q * 2 ** -e
+        v = float(Q)
+        if mu % 2:
+            v *= math.sqrt(float(w))
+        # v 2^e with one rounding, in steps of 2^-1000 that keep v normal
+        # (and exact) until the last (the browser runtime's math.ldexp
+        # rounds subnormal results to 0: ldexp(128.0, -1080) gave 0.0)
+        while e < -1000 and v != 0:
+            v, e = v * 2.0 ** -1000, e + 1000
+        while e > 1000 and math.isfinite(v):
+            v, e = v * 2.0 ** 1000, e - 1000
+        v = v * 2.0 ** e
+        if v == 0 or not math.isfinite(v):
+            raise NotImplementedError("gen_legendre_P(%d, %d, %r) is outside the double range" % (k, -mu, x))
+        return RealNumber(v)
+    X = _expr(x)
+    t = (1 - X) / 2
+    f = _expr(0)
+    for i in range(k + 1):
+        c = Fraction(math.prod(range(k + 1, k + 1 + i)) * math.prod(range(-k, -k + i)), math.prod(range(mu + 1, mu + 1 + i)) * math.factorial(i))
+        f = f + _expr(c) * t ** i
+    r = ((1 - X) / (1 + X)) ** (_expr(mu) / 2) / math.factorial(mu) * f.expand()
+    if not isinstance(x, Expression) and not _is_poly(x):
+        v = _py_number(r._s)
+        if v is not None:
+            return v
+    return r
+
+
+def gen_legendre_P(n, m, x):
+    """The associated Legendre function P_n^m(x) = (-1)^m (1 - x^2)^(m/2)
+    d^m P_n(x)/dx^m (DLMF 14.7.8, with the Condon-Shortley phase (-1)^m,
+    as Sage's gen_legendre_P) for integers n and m, and P_n^(-m) =
+    (-1)^m (n - m)!/(n + m)! P_n^m; the unevaluated gen_legendre_P(n, m, x)
+    for symbolic n or m.  Floats in [-1, 1] from lib/_special.py.
+
+    EXAMPLES::
+
+        sage: gen_legendre_P(2, 2, x)
+        -3*x^2 + 3
+        sage: gen_legendre_P(3, 3, x)
+        -15*(-x^2 + 1)^(3/2)
+        sage: gen_legendre_P(4, 2, 0.3)
+        -2.52525000000000
+    """
+    k, j = _small_int(n), _small_int(m)
+    if k is None or j is None:
+        if all(_numeric_arg(a) or isinstance(a, int) for a in (n, m, x)):
+            raise NotImplementedError("gen_legendre_P of a non-integer degree or order is not available in sagebrush yet")
+        return _one("fun", "gen_legendre_P", _expr(n)._s, _expr(m)._s, _expr(x)._s)
+    if k < 0:
+        k = -k - 1
+    if j < -k:
+        return _legendre_neg_order(k, -j, x)
+    if j > k:
+        if isinstance(x, float):
+            from _sage_lang import RealNumber
+            return RealNumber(0.0)
+        return _expr(0)
+    if isinstance(x, float) and -1 <= x <= 1:
+        from _sage_lang import RealNumber
+        return RealNumber(_sf.assoc_legendre_p(k, j, float(x)))
+    t = Expression(_sym_s("_t_legendre"))
+    a = abs(j)
+    d = _legendre_poly(k, t)
+    for _ in range(a):
+        d = d.diff(t)
+    d = d.factor()
+    # written as Sage writes it: -(x^2 - 1) for (1 - x^2) at even orders
+    if a % 2 == 0:
+        r = (-1) ** (a // 2 + a) * (t ** 2 - 1) ** (a // 2) * d
+    else:
+        r = (-1) ** a * (1 - t ** 2) ** (_expr(a) / 2) * d
+    if j < 0:
+        import math
+        r = (-1) ** a * _expr(math.factorial(k - a)) / math.factorial(k + a) * r
+    r = r.subs({t: _expr(x)})
+    if isinstance(x, (float, complex)):
+        return r.n()
+    return r
 
 
 def log(v, b=None):
