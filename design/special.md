@@ -34,6 +34,7 @@ precision, with no MATLAB types:
 | `polylog(s, z)`, `dilog(z)` | integer orders -20 <= s <= 100: the series 25.12.10, the expansion in log z (25.12.12, and its limit at integers, where two poles cancel into H_(n-1) - log(-log z)), the inversion 25.12.13 (with 25.11.14's Bernoulli polynomials at integers), and for s <= 0 the Eulerian polynomials (26.14.4, 26.14.6) |
 | `ellipk(m)`, `ellipe(m)` | m <= 1: K by the AGM (19.8.5); E by the series 19.5.2 (m <= 1/2) and 19.12.2 (in 1 - m), and 19.7.2's imaginary-modulus transformation for m < 0, since 19.8.6's AGM sum cancels |
 | `ellipj(u, m)` | finite real u, 0 <= m <= 1: the AGM with phases (22.20), after reducing u by the periods to [0, K/2] (Table 22.4.3's translations by K and 2K, so that cn keeps its relative accuracy next to its zeros; beyond 8K in exact integer fixed point, with K to some 130 bits more than log2(\|u\|/K)); the Maclaurin series 22.10.1-22.10.3 below 1e-3; the ascending Landen transformation (22.7) for m > 0.9 |
+| `gammainc(a, x)`, `gammaincc(a, x)`, `gammainc_scaled(a, x, upper)` | the regularized P and Q, real a, x >= 0, in Gautschi's regions (ACM TOMS 5, 1979): the series 8.7.1 for P above a = x + 1/4, below it Q by Legendre's continued fraction 8.9.2 (modified Lentz) for x > 1.5 and by 8.7.1's series for gamma, with 1 - x^a/Gamma(a+1) by expm1, for x <= 1.5; for a >= 12 near x (\|eta\| <= 0.6) Temme's uniform expansion 8.12.3-8.12.4, its coefficients' Taylor series in eta computed exactly by scripts/gen-gammainc-temme.py (c_k = (c_(k-1)' + gamma_k eta/(lambda - 1))/eta, gamma_k from 1/Gamma*); the prefactor x^a e^-x/Gamma(a+1) in Temme's form, through lambda - 1 - log lambda, for a >= 1; the scaled forms (MATLAB's 'scaledlower', 'scaledupper') of the smaller of P and Q within each method (the series' sum, a times the continued fraction, Temme's expansion with erfcx), so that they survive where P or Q underflows |
 | `legendre_p(n, x)`, `assoc_legendre_p(n, m, x)`, `legendre_all(n, x, normalization)` | integer degree and order, real x in [-1, 1]: the degree recurrence 14.10.3 with exact coefficients from the diagonal (14.7.8), and next to +-1 (n^2 (1 - |x|)/2 <= 1) the terminating hypergeometric series 14.3.1 with 14.9.3 and 14.7.17; the scale kept as an exact power of 2 and the factorial ratios as exact integers |
 
 The phase conventions of the Legendre functions:
@@ -54,15 +55,17 @@ functions are within a few units in the last place. The larger errors
 follow the functions' own condition numbers or the method's: for complex s,
 zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 8 |Im s| eps of max(1, |zeta|), from the rounding of the phases Im s log k),
-the error functions' with |z|^2, and E1's and Ei's with |x|.
+the error functions' with |z|^2, E1's and Ei's with |x|, and the
+incomplete gamma functions' with the size of their exponent (about
+4e-15 max(1, |log value|), the rounding of log x^a e^-x / Gamma(a+1)).
 matlab-tests/test_special.m checks the MATLAB functions against GNU Octave,
 to 10 digits, on the examples from their documentation pages and more.
 
 ## Not yet
 
-- The incomplete gamma and beta functions (unregularized, regularized and
-  log-scale; the upper incomplete gamma for a <= 0). They wait for the
-  DiDonato-Morris and Temme papers.
+- The incomplete beta functions, the unregularized and log-scale incomplete
+  gamma functions, and the incomplete gamma functions of negative or
+  complex arguments (NotCovered).
 - Incomplete elliptic integrals, Carlson's integrals, complex arguments
   of the elliptic functions, and Legendre functions of non-integer degree
   or order or of the second kind.
