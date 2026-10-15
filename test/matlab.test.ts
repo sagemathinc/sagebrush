@@ -676,6 +676,100 @@ test("repelem takes a string scalar and string arrays, and only numeric scalar o
     "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
 });
 
+test("eigs: the page's output orders, k beyond n, failure treatment and flag, option structures, a Cholesky B, and the refusals", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "n = 100; e = ones(n,1); T = spdiags([-e 2*e -e], -1:1, n, n);",
+    "disp(mat2str(round(eigs(T, 3, 'smallestabs')' * 1e6) / 1e6));",
+    "disp(mat2str(round(eigs(T, 3, 'smallestreal')' * 1e6) / 1e6));",
+    "disp(mat2str(round(eigs(diag(1:10), 5, 'bothendsreal')')));",
+    "R = [0 -5; 5 0]; C = blkdiag(R, 2*R, diag(1:20));",
+    "disp(mat2str(round(imag(eigs(C, 3, 'bothendsimag', 'SubspaceDimension', 12))')));",
+    "disp(mat2str(round(imag(eigs(C, 2, 'largestimag', 'SubspaceDimension', 12))')));",
+    "disp(mat2str(size(eigs(diag(1:5), 9))));",
+    "d = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8); disp(mat2str(isnan(d')));",
+    "[V, D, flag] = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8); disp(flag);",
+    "d = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8, 'FailureTreatment', 'drop'); disp(numel(d) < 6);",
+    "d = eigs(T, 6, 'largestabs', 'MaxIterations', 1, 'SubspaceDimension', 8, 'FailureTreatment', 'keep'); disp(any(isnan(d)));",
+    "opts.tol = 1e-10; opts.p = 30; disp(round(eigs(T, 1, 'largestabs', opts) * 1e6) / 1e6);",
+    "B = spdiags([e 4*e e], -1:1, n, n); Rb = chol(full(B)); d1 = eigs(T, B, 3); d2 = eigs(T, Rb, 3, 'largestabs', 'IsCholesky', true); disp(max(abs(d1 - d2)) < 1e-10);",
+    "disp(class(eigs(single(diag(1:30)), 2)));",
+    "try, eigs(T, 3, 'bogus'), catch err, disp(err.message), end",
+    "try, eigs(T, 3, 'si'), catch err, disp(err.message), end",
+    "try, eigs(T, 10, 'largestabs', 'SubspaceDimension', 10), catch err, disp(err.message), end",
+    "try, eigs(T + 1i*speye(n), 3), catch err, disp(err.message), end",
+    "try, eigs(diag(1:20), 3, 4), catch err, disp(err.message), end",
+    "try, eigs(T, 3, 'largestabs', 'Tolerance', -1), catch err, disp(err.message), end",
+    // (the smallest subspace the page allows, k+1 (Hermitian) or k+2: the vectors returned match the values)
+    "[V,D,flag] = eigs(T,6,'largestabs','SubspaceDimension',7,'FailureTreatment','keep'); disp(max(abs(diag(V'*T*V) - diag(D))) < 1e-10);",
+    "N = spdiags([(1:60)' ones(60,1) -ones(60,1)], [0 1 -1], 60, 60); [V,D,flag] = eigs(N,3,'largestabs','SubspaceDimension',5,'FailureTreatment','keep');",
+    "r = 0; for j = 1:3, r = max(r, norm(N*V(:,j) - D(j,j)*V(:,j))); end, disp(r < 1e-6 || flag == 1);",
+    "try, eigs(diag(1:10),2,'largestimag'), catch err, disp(err.message), end",
+    // (shift-invert needs no inverse of B, which may then be singular; tiny but nonsingular A - sigma*B is fine)
+    "disp(eigs(diag([1 2 3 4]), diag([1 1 0 0]), 1, 0.5, 'IsSymmetricDefinite', true));",
+    "disp(mat2str(eigs(diag([1 2 3 4]*1e-100), 2, 0)' * 1e100, 6));",
+    // (a repeated eigenvalue: V is still B-orthonormal)
+    "Bm = [2 1 0;1 2 1;0 1 2]; [V,D] = eigs(3*Bm, Bm, 3); disp(max(max(abs(V'*Bm*V - eye(3)))) < 1e-12);",
+    // (single precision from A, B, StartVector or Afun's result only)
+    "disp(class(eigs(diag(1:30), single(2)))); disp(class(eigs(diag(1:30), 2, 'largestabs', 'StartVector', single(ones(30,1)))));",
+    "disp(class(eigs(@(x) single(diag(1:30))*x, 30, 2)));",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), [
+    "[0.000967 0.003869 0.008701]", "[0.000967 0.003869 0.008701]", "[1 2 8 9 10]", "[10 -10 5]", "[10 5]", "[5 1]",
+    "[true true true true true true]", "1", "1", "0", "3.9990", "1", "single",
+    "eigs: unknown sigma 'bogus'.",
+    "eigs: unknown sigma 'si' (for a real A, 'si' is not one of the page's names).",
+    "eigs: SubspaceDimension must be at least k+1 (k+2 when the problem is not Hermitian).",
+    "eigs: complex matrices, shifts and start vectors are not supported in Sagebrush.",
+    "eigs: the shifted operator A - sigma*B is singular; sigma may not be an eigenvalue. Use a sigma near the eigenvalue instead.",
+    "eigs: Tolerance must be a positive number.",
+    "1", "1", "eigs: 'largestimag' is for nonsymmetric problems; a symmetric (Hermitian) problem's eigenvalues are real.",
+    "1", "[1 2]", "1", "double", "single", "single",
+  ]);
+  // (the warning when not every value converged and flag is not asked for)
+  assert.equal((r.stderr.match(/Warning: eigs: 0 of the 6 requested eigenvalues converged\./g) || []).length, 3);
+});
+
+test("eigs: a complex Afun refused; complex pairs through real solves; CholeskyPermutation; FailureTreatment's values", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (an operator with complex results: refused, in the dense and the iterative paths, never a wrong answer)
+    "try, eigs(@(x) 1i*x, 4, 1), catch err, disp(err.message), end",
+    "try, eigs(@(x) 1i*x, 40, 1), catch err, disp(err.message), end",
+    "disp(eigs(@(x) [2 0; 0 3]*x, 2, 1));",
+    // (generalized and shift-invert problems with a complex pair: the real LU keeps the Ritz vectors' imaginary parts)
+    "A = blkdiag([0 -5; 5 0], diag(1:25)); [V,D,f] = eigs(A, eye(27), 2, 'LI', 'SubspaceDimension', 26, 'MaxIterations', 3, 'Tolerance', 1e-8);",
+    "disp(f); disp(mat2str(round(sort(imag(diag(D)))'))); disp(norm(A*V - V*D, 'fro') < 1e-6);",
+    "A = blkdiag([0 -1; 1 0], diag(5:29)); [V,D,f] = eigs(A, 2, 'SM', 'MaxIterations', 3);",
+    "disp(f); disp(mat2str(round(sort(imag(diag(D)))'))); disp(norm(A*V - V*D, 'fro') < 1e-10);",
+    "fn = @(x) A \\ x; [V,D,f] = eigs(fn, 27, 2, 'SM', 'MaxIterations', 3); disp(f); disp(mat2str(round(sort(imag(diag(D)))')));",
+    // (CholeskyPermutation p: R'*R = B(p, p); a nonidentity factor and permutation give B's eigenvalues)
+    "disp(mat2str(eigs(diag(1:4), eye(4), 2, 'LM', 'IsCholesky', true, 'CholeskyPermutation', [2 1 3 4])'));",
+    "Bm = [4 1 0 0; 1 3 1 0; 0 1 5 2; 0 0 2 6]; Am = diag([1 2 3 4]) + 0.1*ones(4); p = [3 1 4 2]; R = chol(Bm(p,p));",
+    "disp(max(abs(eigs(Am, Bm, 2) - eigs(Am, R, 2, 'largestabs', 'IsCholesky', true, 'CholeskyPermutation', p))) < 1e-12);",
+    "try, eigs(diag(1:4), eye(4), 2, 'smallestabs', 'IsCholesky', true, 'CholeskyPermutation', [2 1 3 4]), catch err, disp(err.message), end",
+    "try, eigs(diag(1:4), eye(4), 2, 'LM', 'IsCholesky', true, 'CholeskyPermutation', [1 1 3 4]), catch err, disp(err.message), end",
+    "try, eigs(diag(1:4), eye(4), 2, 'LM', 'CholeskyPermutation', [2 1 3 4]), catch err, disp(err.message), end",
+    // (FailureTreatment: one of the three words, as a name-value pair or a field)
+    "try, eigs(diag(1:5), 2, 'LM', 'FailureTreatment', 17), catch err, disp(err.message), end",
+    "o.fail = 17; try, eigs(diag(1:5), 2, 'LM', o), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.equal(r.stderr, "");
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), [
+    "eigs: Afun returned complex values: complex operators are not supported in Sagebrush.",
+    "eigs: Afun returned complex values: complex operators are not supported in Sagebrush.",
+    "3",
+    "0", "[-5 5]", "1",
+    "0", "[-1 1]", "1",
+    "0", "[-1 1]",
+    "[4 3]",
+    "1",
+    "eigs: CholeskyPermutation cannot be used with 'smallestabs' or a numeric sigma, as the documentation says.",
+    "eigs: CholeskyPermutation must be a permutation of 1:n.",
+    "eigs: CholeskyPermutation is for IsCholesky true (B given as its Cholesky factor).",
+    "eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.",
+    "eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.",
+  ]);
+});
+
 test("numgrid and delsq reproduce the published L-shaped grids, counts and nonzeros, and refuse the regions nothing pins", () => {
   const { execFileSync } = require("node:child_process");
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
@@ -895,4 +989,23 @@ test("titles are bold by default (TitleFontWeight), subtitles not, on a line und
   assert.equal(msgs.filter((m) => m.id === 11 && m.stream).map((m) => m.text).join(""), "     1     0     0\n     0     0     0\ncla: the only option is 'reset'.\n");
   assert.equal(title(4), "<text>Plain</text>");
   assert.equal(title(5), "<text>Only</text>");
+});
+
+test("a newline in a struct's text field or a string array's element is displayed as ↵, as MATLAB's published displays show it", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "err = struct('message', sprintf('Error using average>check_inputs (line 11)\\nInput must be a vector.'), 'identifier', 'AVG:NotAVector')",
+    "s = struct('n', \"x\" + newline)",
+    "t = [\"This is line one.\" + newline; \"Here is line two.\" + newline]",
+    // (a missing string in a struct: <missing>, as in a string array)
+    "m = [\"a\", \"b\"]; m(4) = \"x\"; v = struct('a', m(3))",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.split("\n").filter((s: string) => s.trim() !== "" && !/=|with fields|string array/.test(s)), [
+    "       message: 'Error using average>check_inputs (line 11)↵Input must be a vector.'",
+    "    identifier: 'AVG:NotAVector'",
+    "    n: \"x↵\"",
+    "    \"This is line one.↵\"",
+    "    \"Here is line two.↵\"",
+    "    a: <missing>",
+  ]);
 });

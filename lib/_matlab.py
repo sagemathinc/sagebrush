@@ -3130,6 +3130,14 @@ def _g5(x):
     return "%.5g" % x
 
 
+def _newlines_shown(s):
+    """text as a struct's field or a string array's element shows it: each
+    newline as the sign ↵, as MATLAB's published displays show them (the
+    message of lasterror's structure; extract's 2-by-1 string array of
+    lines)"""
+    return s.replace("\n", "\u21b5")
+
+
 def _brief(v, in_cell):
     """a value as one item of a struct's or a cell's display"""
     t = type(v)
@@ -3137,12 +3145,15 @@ def _brief(v, in_cell):
     cls = class_(v)
     if t is Char:
         if len(d) == 2 and d[0] == 1:
-            return "'%s'" % v.text()
+            return "'%s'" % (v.text() if in_cell else _newlines_shown(v.text()))
         if d == (0, 0):
             return "0×0 char" if in_cell else "''"
         return "%s char" % _dimstr(d) if in_cell else "[%s char]" % _dimstr(d)
     if t is Str:
-        return '["%s"]' % v.s if in_cell else '"%s"' % v.s
+        if v.s is None:
+            # (a missing string: <missing>, unquoted, as a string array shows it)
+            return "[<missing>]" if in_cell else "<missing>"
+        return '["%s"]' % v.s if in_cell else '"%s"' % _newlines_shown(v.s)
     if t is Cell:
         if not in_cell and len(v.a) == 1 and _isnumlike(v.a[0]) and _numel(v.a[0]) == 1:
             # (a struct's field holding a 1-by-1 cell of a scalar: its element, b: {[1]})
@@ -3287,7 +3298,8 @@ def _blocks(v):
             return [], ["  %s empty string array" % _dimstr(d)], True
         rows = d[0]
         cols = _prod(d[1:])
-        texts = [['"%s"' % v.a[j * rows + i] if v.a[j * rows + i] is not None else "<missing>" for i in range(rows)] for j in range(cols)]
+        texts = [['"%s"' % _newlines_shown(v.a[j * rows + i]) if v.a[j * rows + i] is not None else "<missing>"
+                  for i in range(rows)] for j in range(cols)]
         w = [max(len(t) for t in c) for c in texts]
         lines = ["".join("    " + texts[j][i].ljust(w[j]) for j in range(cols)) for i in range(rows)]
         return ["  %s string array" % _dimstr(d)], ["\n".join(lines)], True
@@ -9558,4 +9570,5 @@ def _handle_blocks(v):
 import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
 import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)
 import _matlab_data  # noqa: E402,F401  (data analysis and signal functions)
+import _matlab_eigs  # noqa: E402,F401  (eigs)
 import _matlab_special  # noqa: E402,F401  (special functions)

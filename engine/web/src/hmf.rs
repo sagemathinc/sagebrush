@@ -5,6 +5,9 @@
 //! build it once.
 
 use sagebrush_hmf::field::{primes_of_bounded_norm, Elt, Hnf, Ideal, Prime};
+use sagebrush_hmf::fpoly::{FInt, FPoly};
+use sagebrush_hmf::weight::Weight;
+use sagebrush_hmf::weightnew::WeightNewspaces;
 use sagebrush_hmf::newspace::{aplists, HeckeOp, Newspaces};
 use sagebrush_hmf::Space;
 use serde_json::{json, Value};
@@ -16,6 +19,44 @@ const CACHE: usize = 4;
 thread_local! {
     static SPACES: RefCell<Vec<(Hnf, Rc<Space>)>> = RefCell::new(vec![]);
     static NEWSPACES: RefCell<Vec<(Hnf, Rc<Newspaces>)>> = RefCell::new(vec![]);
+    static WEIGHT_NEWSPACES: RefCell<Vec<((Hnf, Weight), Rc<WeightNewspaces>)>> = RefCell::new(vec![]);
+}
+
+/// The weight [k1, k2] in "weight", other than [2, 2].
+fn weight(v: &Value) -> Result<Weight, String> {
+    let k = v.get("weight").and_then(Value::as_array).ok_or("missing argument 'weight': [k1, k2]")?;
+    let k: Vec<u32> = k.iter().map(|x| x.as_u64().filter(|&x| x <= 1000).map(|x| x as u32).ok_or("weights are integers")).collect::<Result<_, _>>()?;
+    match k.as_slice() {
+        [2, 2] => Err("weight [2, 2] is the hmf_* space without a weight".into()),
+        &[a, b] => Weight::new(a, b),
+        _ => Err("a weight is [k1, k2]".into()),
+    }
+}
+
+fn weight_newspaces(n: &Ideal, w: Weight) -> Result<Rc<WeightNewspaces>, String> {
+    let key = (n.hnf, w);
+    if let Some(x) = WEIGHT_NEWSPACES.with(|c| c.borrow().iter().find(|(h, _)| *h == key).map(|(_, x)| x.clone())) {
+        return Ok(x);
+    }
+    let x = Rc::new(WeightNewspaces::new(n.clone(), w)?);
+    WEIGHT_NEWSPACES.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= CACHE {
+            c.remove(0);
+        }
+        c.push((key, x.clone()));
+    });
+    Ok(x)
+}
+
+fn fint_json(c: &FInt) -> Value {
+    json!([c.a.to_string(), c.b.to_string()])
+}
+
+/// A polynomial over O_F: its coefficients [a, b] (a + b w, strings),
+/// constant term first.
+fn fpoly_json(f: &FPoly) -> Value {
+    json!(f.iter().map(fint_json).collect::<Vec<_>>())
 }
 
 fn elt(v: &Value) -> Result<Elt, String> {
@@ -161,6 +202,44 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
                            "op_eigenvalue": f.op_eigenvalue,
                            "aplist": l.iter().map(|(p, a)| json!([prime_json(p), a])).collect::<Vec<_>>() })).collect::<Vec<_>>() }))
         }
+        // weight [k1, k2] != [2, 2] (engine/hmf/src/weight.rs): S_k(N) and
+        // its new subspace
+        "hmf_weight_dimension" => {
+            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            Ok(json!({ "dim": ns.top().dimension(), "new_dim": ns.new_dimension()? }))
+        }
+        // the characteristic polynomial over O_F of T_p (U_p if p | N) on S_k(N)
+        "hmf_weight_hecke_charpoly" => {
+            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            Ok(fpoly_json(&ns.hecke_charpoly(&prime(v, "p")?)?))
+        }
+        // the Galois orbits over F of the newforms: the separating operator
+        // and its characteristic polynomial over O_F on each orbit
+        "hmf_weight_newform_orbits" => {
+            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            let o = ns.newform_orbits()?;
+            Ok(json!({ "op": op_json(&o.op), "orbits": o.orbits.iter().map(fpoly_json).collect::<Vec<_>>() }))
+        }
+        // for the k-th orbit and the primes of norm <= bound: the
+        // characteristic polynomial over O_F of a_p on the orbit, and h with
+        // a_p = h(theta)/g'(theta)
+        "hmf_weight_newform_eigenvalues" => {
+            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            let k = v.get("orbit").and_then(Value::as_u64).ok_or("missing integer argument 'orbit'")? as usize;
+            let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
+            if bound > 10_000 {
+                return Err("bound must be at most 10^4".into());
+            }
+            let o = ns.newform_orbits()?;
+            if k >= o.orbits.len() {
+                return Err(format!("orbit {} out of range: there are {}", k, o.orbits.len()));
+            }
+            let one = sagebrush_hmf::weightnew::WeightOrbits { op: o.op.clone(), orbits: vec![o.orbits[k].clone()] };
+            let primes = primes_of_bounded_norm(bound);
+            let (cps, hs) = ns.orbit_data(&one, &primes)?;
+            Ok(json!({ "g": fpoly_json(&o.orbits[k]),
+                       "aplist": primes.iter().zip(cps[0].iter().zip(&hs[0])).map(|(p, (c, h))| json!([prime_json(p), fpoly_json(c), fpoly_json(h)])).collect::<Vec<_>>() }))
+        }
         _ => Err(format!("unknown function {}", f)),
     }
 }
@@ -181,5 +260,37 @@ mod tests {
         assert!(r.contains("not a prime ideal"), "{}", r);
         let r = call(r#"{"fn":"hmf_ideal","gens":[[0,0]]}"#);
         assert!(r.contains("error"), "{}", r);
+        // weight (2, 4) at level (3 + w): Dembélé 2005, Example 3.5
+        let r = call(r#"{"fn":"hmf_weight_dimension","level":[[3,1]],"weight":[2,4]}"#);
+        assert_eq!(r, r#"{"ok":{"dim":1,"new_dim":1}}"#);
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[3,1]],"weight":[2,4],"p":[[2,0]]}"#);
+        assert_eq!(r, r#"{"ok":[["12","-4"],["1","0"]]}"#);
+        let r = call(r#"{"fn":"hmf_weight_dimension","level":[[3,1]],"weight":[2,3]}"#);
+        assert!(r.contains("parity"), "{}", r);
+    }
+
+    /// daybreak HARD-DDD-1: requests whose coefficient bounds were once
+    /// infinite (and looped forever) or are merely enormous are refused at
+    /// once.
+    #[test]
+    fn hmf_weight_refusals() {
+        let t = std::time::Instant::now();
+        // the original repro: weight (199, 199) now exceeds the coefficient
+        // module limit
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[1,0]],"weight":[199,199],"p":[[47,0]]}"#);
+        assert!(r.contains("coefficient module"), "{}", r);
+        // an odd weight: the space is 0, its charpoly 1, before any bound
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[1,0]],"weight":[15,15],"p":[[47,0]]}"#);
+        assert_eq!(r, r#"{"ok":[["1","0"]]}"#);
+        // a full-space charpoly beyond the bit budget: dimension 2250, a
+        // prime of norm 3137^2
+        let r = call(r#"{"fn":"hmf_weight_hecke_charpoly","level":[[20,0]],"weight":[16,16],"p":[[3137,0]]}"#);
+        assert!(r.contains("bits per coefficient"), "{}", r);
+        // new charpolys of a separating operator beyond the budget, refused
+        // before the separation test: new dimension 1653 at the prime level
+        // (20 + 9w) of norm 499, T_2 bounded by 5 4^99
+        let r = call(r#"{"fn":"hmf_weight_newform_orbits","level":[[20,9]],"weight":[2,200]}"#);
+        assert!(r.contains("bits per coefficient"), "{}", r);
+        assert!(t.elapsed().as_secs() < 60, "refusals took {:?}", t.elapsed());
     }
 }

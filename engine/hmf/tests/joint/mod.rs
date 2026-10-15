@@ -119,7 +119,7 @@ impl Field {
 
 /// The solution x of sum_j x_j cols[j] = b, if the cols are independent
 /// (exact Gaussian elimination), else None.
-fn solve(cols: &[Vec<Q>], b: &[Q]) -> Option<Vec<Q>> {
+pub fn solve(cols: &[Vec<Q>], b: &[Q]) -> Option<Vec<Q>> {
     let d = cols.len();
     // rows of the augmented matrix [cols | b]
     let mut m: Vec<Vec<Q>> = (0..b.len()).map(|i| cols.iter().map(|c| c[i].clone()).chain(std::iter::once(b[i].clone())).collect()).collect();
