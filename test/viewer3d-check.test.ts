@@ -11,7 +11,7 @@ const cli = (...args: string[]) => execFileSync(process.execPath, [__dirname + "
 const g = globalThis as any;
 g.window = {};
 new Function(readFileSync(__dirname + "/../../web/viewer3d.js", "utf8"))();
-const { checkScene, LIMITS, marchingCubes } = g.window.SagebrushViewer3d;
+const { checkScene, geometry, LIMITS, marchingCubes } = g.window.SagebrushViewer3d;
 
 async function matlabScenes(cells: string[]) {
   const { notebookSession } = require("../src/notebook-session");
@@ -111,9 +111,51 @@ test("checkScene refuses hostile scenes: malformed, not finite, out of range, or
     if (want === null) assert.equal(got, null, what);
     else assert.match(String(got), want, what);
   }
+  // (a field's spacings: one fewer than its samples along each axis, or refused)
+  const field = (shape: number[], extra: any = {}) => ({ version: 2, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2], objects: [{
+    type: "marching_cubes", shape, field: b64(new Array(shape[0] * shape[1] * shape[2]).fill(0), Float32Array),
+    bounds: [0, 1, 0, 1, 0, 1], level: 0.5, color: "#ff0000", ...extra }] });
+  assert.equal(checkScene(field([2, 3, 4], { spacings: [b64([1, 1, 1], Float32Array), b64([1, 1], Float32Array), null] })), null);
+  assert.match(String(checkScene(field([2, 3, 4], { spacings: [b64([1, 1], Float32Array), null, null] }))), /spacings of the wrong length/);
+  // (bounds: positions as any others, finite and near the box; a volume's not flat)
+  assert.match(String(checkScene(field([2, 2, 2], { bounds: [0, 1e308, 0, 1, 0, 1] }))), /far outside the box \(field bounds\)/);
+  const volume = (bounds: number[]) => ({ version: 2, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2], objects: [{ type: "volume", shape: [2, 2, 2],
+    data: b64(new Array(8).fill(1), Uint8Array), bounds, color_map: [0, 0, 0, 0, 1, 1, 1, 1], opacity_function: [0, 0, 1, 1] }] });
+  assert.equal(checkScene(volume([0, 1, 0, 1, 0, 1])), null);
+  assert.match(String(checkScene(volume([0, 1e308, 0, 1, 0, 1]))), /far outside the box \(volume bounds\)/);
+  assert.match(String(checkScene(volume([0, 1, 0, 0, 0, 1]))), /malformed volume bounds/);
+  // every array build makes is charged: a mesh's own vertices, whether or not
+  // an index reaches them, and every position of a line2 (with LIMITS lowered)
+  const lowered = (k: string, v: number, f: () => void) => {
+    const old = LIMITS[k];
+    LIMITS[k] = v;
+    try { f(); } finally { LIMITS[k] = old; }
+  };
+  const box = { lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2] };
+  lowered("plainVertices", 10, () => {
+    assert.match(String(checkScene({ version: 1, ...box, objects: [{ type: "mesh", pos: new Array(60).fill(0), idx: [], color: "#000000" }] })), /more than 10 vertices/);
+    assert.equal(checkScene({ version: 1, ...box, objects: [{ type: "mesh", pos: new Array(15).fill(0), idx: [], color: "#000000" }] }), null);
+  });
+  lowered("vertices", 10, () => {
+    const line2 = { type: "line2", positions: b64(new Array(60).fill(0), Float32Array), segments: b64([], Uint32Array), color: "#000000", shader: "simple" };
+    assert.match(String(checkScene({ version: 2, ...box, objects: [line2] })), /more than 10 vertices/);
+  });
+  // an isosurface's wireframe: its triangles' indices and twice them again,
+  // charged as it is built (at the boundary: the triangles alone fit)
+  const n16 = 16, S = new Array(n16 ** 3);
+  for (let k = 0; k < n16; k++) for (let j = 0; j < n16; j++) for (let i = 0; i < n16; i++) S[(k * n16 + j) * n16 + i] = Math.hypot(i - 7.5, j - 7.5, k - 7.5);
+  const sphere = (wireframe: boolean) => ({ version: 2, lo: [-1, -1, -1], hi: [1, 1, 1], scale: [1, 1, 1], objects: [{
+    type: "marching_cubes", shape: [n16, n16, n16], field: b64(S, Float32Array), bounds: [-1, 1, -1, 1, -1, 1], level: 5, color: "#ff0000", wireframe }] });
+  const tris = geometry(sphere(false)).meshes[0].idx.length;
+  assert.equal(tris, 2868);
+  lowered("indices", tris, () => {
+    assert.equal(geometry(sphere(false)).meshes[0].idx.length, tris);
+    assert.throws(() => geometry(sphere(true)), /isosurface bigger than its budget/);
+  });
+  lowered("indices", 3 * tris, () => assert.ok(geometry(sphere(true)).meshes[0].wire));
   // an isosurface spends what the scene's other objects leave, as it grows
   const n = 16, F = new Float32Array(n * n * n);
   for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) F[(k * n + j) * n + i] = Math.hypot(i - 7.5, j - 7.5, k - 7.5);
   assert.ok(marchingCubes(F, [n, n, n], [-1, 1, -1, 1, -1, 1], 5).idx.length > 300);
-  assert.throws(() => marchingCubes(F, [n, n, n], [-1, 1, -1, 1, -1, 1], 5, null, { verts: 50, idx: 1e9 }), /more vertices than its budget/);
+  assert.throws(() => marchingCubes(F, [n, n, n], [-1, 1, -1, 1, -1, 1], 5, null, { verts: 50, idx: 1e9 }), /bigger than its budget/);
 });
