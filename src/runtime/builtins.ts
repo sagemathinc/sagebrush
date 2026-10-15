@@ -204,65 +204,101 @@ function sum(it: any, start: any = 0): any {
     }
     return O.normBig(acc);
   }
-  let i = 0;
-  const next: () => any = Array.isArray(it) ? () => (i < it.length ? it[i++] : DONE) : ((iter) => () => iter.$next())(O.iter(it));
-  let v: any = DONE;
-  if (typeof s === "number" && isInt(s) && Math.abs(s) <= HALF_SAFE) {
-    // Python ints: a double accumulator kept below 2^52 in absolute value and
-    // flushed into a BigInt when it passes that, so a sum beyond 2^53 still
-    // adds doubles (sum(range(10**9)): 35 s with BigInt additions, 1.4 s
-    // this way); exact, as each step stays below 2^53.
-    let small = s, acc = 0n;
-    for (v = next(); v !== DONE; v = next()) {
-      if (typeof v === "number" && isInt(v)) {
-        if (v > HALF_SAFE || v < -HALF_SAFE) acc += BigInt(v);
-        else {
-          small += v;
-          if (small > HALF_SAFE || small < -HALF_SAFE) {
-            acc += BigInt(small);
-            small = 0;
+  const acc = new SumAcc(s);
+  if (Array.isArray(it)) for (let i = 0; i < it.length; i++) acc.push(it[i]);
+  else {
+    const iter = O.iter(it);
+    for (let v = iter.$next(); v !== DONE; v = iter.$next()) acc.push(v);
+  }
+  return acc.total();
+}
+// sum()'s total, item by item, as CPython's builtin_sum_impl keeps it: Python
+// ints first, then while the total is an exact float (or complex) and the
+// items are exact floats (or complex), or ints a C long holds, Neumaier's
+// compensated sum (3.12, 3.14), so sum([0.1] * 10) is 1.0; anything else is
+// added as it is.  An item is added when it comes, so a generator's items and
+// their __add__/__radd__ calls interleave as in CPython.  (The compiler's
+// sum(genexpr) uses it too: R.sumAcc.)
+export class SumAcc {
+  // 0: ints (a double kept below 2^52 in absolute value and flushed into a
+  // BigInt when it passes that: sum(range(10**9)) takes 1.4 s, not 35 s with
+  // BigInt additions; exact, as each step stays below 2^53), 1: float, 2:
+  // complex, 3: anything
+  mode = 3;
+  s: any;
+  small = 0;
+  big = 0n;
+  f: CompSum | null = null;
+  im: CompSum | null = null;
+  constructor(start: any) {
+    if (typeof start === "number" && isInt(start) && Math.abs(start) <= HALF_SAFE) {
+      this.mode = 0;
+      this.small = start;
+    } else this.enter(start, 1);
+  }
+  // the total is now s: the float, complex or general path, whichever is
+  // the first of them from `from` on that applies
+  enter(s: any, from: number) {
+    if (from <= 1 && exactFloat(s)) {
+      this.mode = 1;
+      this.f = new CompSum(O.fv(s)!);
+    } else if (from <= 2 && typeOf(s) === T.complex) {
+      this.mode = 2;
+      this.f = new CompSum(s.re);
+      this.im = new CompSum(s.im);
+    } else {
+      this.mode = 3;
+      this.s = s;
+    }
+  }
+  push(v: any) {
+    switch (this.mode) {
+      case 0:
+        if (typeof v === "number" && isInt(v)) {
+          if (v > HALF_SAFE || v < -HALF_SAFE) this.big += BigInt(v);
+          else {
+            this.small += v;
+            if (this.small > HALF_SAFE || this.small < -HALF_SAFE) {
+              this.big += BigInt(this.small);
+              this.small = 0;
+            }
           }
-        }
-      } else if (typeof v === "bigint") acc += v;
-      else break; // not an int: the general loop below takes over
-    }
-    s = acc === 0n ? small : O.normBig(acc + BigInt(small));
-    if (v === DONE) return s;
-    s = O.add(s, v);
-  }
-  // CPython's float and complex paths (3.12, 3.14): while the total is an
-  // exact float (or complex) and the items are exact floats (or complex), or
-  // ints a C long holds, it is summed with Neumaier's compensation, so
-  // sum([0.1] * 10) is 1.0; anything else is added as it is.
-  if (exactFloat(s)) {
-    const f = new CompSum(O.fv(s)!);
-    for (v = next(); v !== DONE; v = next()) {
-      const x = exactFloat(v) ? O.fv(v)! : longValue(v);
-      if (x === undefined) break;
-      f.add(x);
-    }
-    s = O.mkfloat(f.total());
-    if (v === DONE) return s;
-    s = O.add(s, v);
-  }
-  if (typeOf(s) === T.complex) {
-    const re = new CompSum(s.re), im = new CompSum(s.im);
-    for (v = next(); v !== DONE; v = next()) {
-      if (typeOf(v) === T.complex) {
-        re.add(v.re);
-        im.add(v.im);
-        continue;
+        } else if (typeof v === "bigint") this.big += v;
+        else this.enter(O.add(this.total(), v), 1);
+        return;
+      case 1: {
+        const x = exactFloat(v) ? O.fv(v)! : longValue(v);
+        if (x !== undefined) this.f!.add(x);
+        else this.enter(O.add(this.total(), v), 2);
+        return;
       }
-      const x = exactFloat(v) ? O.fv(v)! : longValue(v);
-      if (x === undefined) break;
-      re.add(x);
+      case 2: {
+        if (typeOf(v) === T.complex) {
+          this.f!.add(v.re);
+          this.im!.add(v.im);
+          return;
+        }
+        const x = exactFloat(v) ? O.fv(v)! : longValue(v);
+        if (x !== undefined) this.f!.add(x);
+        else this.enter(O.add(this.total(), v), 3);
+        return;
+      }
+      default:
+        this.s = O.add(this.s, v);
     }
-    s = T.complex(O.mkfloat(re.total()), O.mkfloat(im.total()));
-    if (v === DONE) return s;
-    s = O.add(s, v);
   }
-  for (v = next(); v !== DONE; v = next()) s = O.add(s, v);
-  return s;
+  total(): any {
+    switch (this.mode) {
+      case 0:
+        return this.big === 0n ? this.small : O.normBig(this.big + BigInt(this.small));
+      case 1:
+        return O.mkfloat(this.f!.total());
+      case 2:
+        return T.complex(O.mkfloat(this.f!.total()), O.mkfloat(this.im!.total()));
+      default:
+        return this.s;
+    }
+  }
 }
 // an exact float (a JS number that is not an integer, or a boxed integral one)
 const exactFloat = (x: any) => (typeof x === "number" && !isInt(x)) || x instanceof FloatBox;

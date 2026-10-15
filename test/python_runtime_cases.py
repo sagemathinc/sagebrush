@@ -63,6 +63,57 @@ for c in cases:
     print(repr(sum(c)), repr(sum(c, 0.0)), repr(sum(c, -0.0)), repr(sum(x for x in c)))
 print(repr(sum([], -0.0)), repr(sum([0.5, 0.25], 1)), repr(sum([0.1] * 10, 1j)), repr(sum(0.1 for _ in range(10))))
 
+# sum takes the items one at a time, adding each as it comes, as CPython: a
+# generator's next() and the additions interleave (also in sum(genexpr),
+# which the compiler runs as a loop), through every path (int, float,
+# complex, anything) (CORR-97B-2)
+state = [1]
+log = []
+
+
+class Item:
+    def __init__(self, n):
+        self.n = n
+
+    def __radd__(self, other):
+        state[0] *= 2
+        log.append(("add", self.n))
+        return other + self.n
+
+
+def items(first=()):
+    yield from first
+    for k in range(3):
+        log.append(("yield", k))
+        yield Item(state[0])
+
+
+for first in [(), (1, 2), (0.5, 0.25), (1, 0.5, 1j), (2 ** 70,)]:
+    state[0] = 1
+    del log[:]
+    a = sum(x for x in items(first))
+    log1 = log[:]
+    state[0] = 1
+    del log[:]
+    print(repr(a), repr(sum(items(first))), log1 == log, log)
+
+
+def endless():
+    k = 0
+    while True:
+        log.append(k)
+        yield 0.5 if k < 3 else "x"
+        k += 1
+
+
+del log[:]
+for f in (lambda: sum(endless()), lambda: sum(v for v in endless())):
+    try:
+        f()
+    except TypeError as e:
+        print(type(e).__name__, e, log)
+    del log[:]
+
 # round() of int and float subclasses (int.__round__, float.__round__)
 for v in [F(2.5), F(2.567), I(15), True, 3.5]:
     for nd in [None, 1, -1]:

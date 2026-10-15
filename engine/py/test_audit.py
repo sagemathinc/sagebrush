@@ -680,3 +680,18 @@ if have_numpy:
 else:
     raises(NotImplementedError, _gamma, 2.5)
 print("special functions ok (numpy: %s)" % have_numpy)
+
+
+# PKG-97B-1: the installed package searches Python mode's index, which it
+# ships (docs-index-python.json: it cannot build it, as there numpy is NumPy)
+import io as _io
+import contextlib as _contextlib
+from sagebrush.sage import search_doc as _search_doc
+_out = _io.StringIO()
+with _contextlib.redirect_stdout(_out):
+    _search_doc("linear system", mode="python", limit=1)
+assert _out.getvalue().startswith("numpy.linalg.solve(a, b)    [python]"), _out.getvalue()
+assert _os.sep + "_sagelib" + _os.sep in _sys.modules["_pyjs_docsearch"].__file__, _sys.modules["_pyjs_docsearch"].__file__
+assert "_python_docsearch" not in _sys.modules
+assert "magma" in raises(ValueError, _search_doc, "x", mode="magma")
+print("Python mode's search index ok")

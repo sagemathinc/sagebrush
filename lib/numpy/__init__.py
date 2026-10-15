@@ -256,10 +256,56 @@ def _scalar_round(self, ndigits=None):
     scalar rounded as np.round rounds it, of its own type"""
     if ndigits is None:
         return _builtins.round(_PLAIN[type(self)](self))
+    name = _INT_TYPES.get(type(self))
+    if name is not None:
+        # (exactly: Sagebrush's int64 arrays hold doubles, its scalars hold ints)
+        d = _index(ndigits)
+        if d >= 0:
+            return type(self)(int(self))
+        # NumPy's integer rounding: through doubles, x / 10**-d rounded to
+        # even, times 10**-d, then converted back to the type
+        try:
+            f = 10.0 ** -d
+        except OverflowError:
+            f = _math.inf
+        q = float(int(self)) / f
+        r = (float(_builtins.round(q)) if _math.isfinite(q) else q) * f
+        return type(self)(_c_double_to_int(r, name))
     return around(self, ndigits)
 
 
-for _cls in [float64, float32] + [_g[_n] for _n in _INT_NAMES]:
+def _c_double_to_int(r, name):
+    """The double r as NumPy's conversion to the integer type `name` gives it on
+    x86-64, also out of range (where NumPy warns of an invalid cast): the
+    types narrower than int32 through int32, uint32 through int64, and an
+    out-of-range or NaN conversion to (u)int32/64 gives the least int."""
+    def cvt(v, bits):
+        lo = -(1 << (bits - 1))
+        if not _math.isfinite(v):
+            return lo
+        t = int(v)
+        return t if lo <= t < -lo else lo
+
+    def wrap(v, bits, signed):
+        v &= (1 << bits) - 1
+        return v - (1 << bits) if signed and v >= 1 << (bits - 1) else v
+    signed = not name.startswith("u")
+    bits = int(name[3:] if signed else name[4:])
+    if bits < 32:
+        return wrap(cvt(r, 32), bits, signed)
+    if name == "int32":
+        return cvt(r, 32)
+    if name == "uint32":
+        return wrap(cvt(r, 64), 32, False)
+    if name == "int64":
+        return cvt(r, 64)
+    if r >= 2.0 ** 63:  # uint64
+        return wrap(cvt(r - 2.0 ** 63, 64) ^ (1 << 63), 64, False)
+    return wrap(cvt(r, 64), 64, False)
+
+
+_INT_TYPES = {_g[_n]: _n for _n in _INT_NAMES}
+for _cls in (float64, float32) + tuple(_INT_TYPES):
     _cls.__round__ = _scalar_round
 
 double = float_ = float64

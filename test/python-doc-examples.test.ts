@@ -31,3 +31,21 @@ test("the Python search index: every entry summarized, the examples after a Pyth
   assert.equal(by("scipy.integrate.bisect_left"), undefined);
   assert.equal(by("functools.RLock"), undefined);
 });
+
+test("the CPython package searches Python mode's index it ships (docs-index-python.json), as made by the CLI", () => {
+  // (only the package's own files, CPython isolated from the environment; it
+  // cannot build the index itself: there numpy is NumPy, not Sagebrush's)
+  const lib = __dirname + "/../../engine/py/python/sagebrush/_sagelib";
+  const code = [
+    "import sys, json",
+    "sys.path.insert(0, sys.argv[1])",
+    "import _pyjs_docsearch as d",
+    "print(json.dumps([d.index_for('python') == json.load(open(sys.argv[1] + '/docs-index-python.json')),",
+    "  [e['name'] for _, e in d.search('linear system', 3, 'python')], 'numpy' in sys.modules]))",
+  ].join("\n");
+  const [same, names, numpy] = JSON.parse(execFileSync("python3", ["-I", "-c", code, lib], { encoding: "utf8" }));
+  assert.equal(same, true);
+  assert.equal(names[0], "numpy.linalg.solve");
+  assert.equal(numpy, false);
+  assert.deepEqual(JSON.parse(cli("-m", "_python_docsearch", "--index")), JSON.parse(execFileSync("cat", [lib + "/docs-index-python.json"], { encoding: "utf8" })));
+});
