@@ -221,6 +221,19 @@ try {
   const m3d = "[...document.querySelectorAll('.cell')].at(-1).querySelector('figure.plot3d')";
   ok(await ev(`!!${m3d}?.querySelector('svg')`), "a MATLAB 3-D figure shows as a 3D figure with its SVG");
   await sleep(500);
+  // a scene the viewer refuses (a saved document's is untrusted): the SVG stays, saying why
+  const refused = await ev(`(() => {
+    const d = document.createElement('div');
+    d.innerHTML = '<svg></svg>';
+    document.body.appendChild(d);
+    const r = window.SagebrushViewer3d.mount(d, { version: 1, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2],
+      objects: [{ type: 'lines', color: '#000000', width: 2, pos: new Array(6 * 125000).fill(0) }] });
+    const why = d.querySelector('.sb3d-why')?.textContent ?? '';
+    const still = d.querySelector('svg').style.display !== 'none' && !d.querySelector('canvas');
+    d.remove();
+    return r === false && still ? why : 'mounted';
+  })()`);
+  ok(/more than 2000000 vertices/.test(refused), "...a scene too big once drawn is refused: the SVG stays, saying why: " + JSON.stringify(refused.slice(0, 120)));
   if (await ev(`!!${m3d}.querySelector('canvas')`)) {
     const at = await ev(`(() => { const c = ${m3d}.querySelector('canvas'); c.scrollIntoView(); const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, az: c.sagebrush.view.az }; })()`);
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });

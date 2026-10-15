@@ -187,7 +187,10 @@ test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view)
     "surf(peaks(5)); legend('p')",
     "surf(peaks(300))",
     "plot(1:3); set(gcf, 'Color', [0.94 0.94 0.94])",
-    "plot3([0 1], [0 1], [0 1]); view([1 1 1]); [caz, cel] = view; fprintf('%.4f %.4f\\n', caz, cel); [caz, cel] = view([-5 -2 5]); fprintf('%.4f %.4f\\n', caz, cel); view(gca, 2); caz = view; [~, cel] = view(gca); fprintf('%g %g\\n', caz, cel)",
+    "plot(1:2); title(\"currentColor label\")",
+    // (250,000 vertices given, 4.5 million drawn as the viewer's tubes)
+    "t = linspace(0, 1, 125001); plot3(t, t, t, 'LineWidth', 2)",
+    "plot3([0 1], [0 1], [0 1]); view([1 1 1]); [caz, cel] = view; fprintf('%.4f %.4f\\n', caz, cel); [caz, cel] = view([-5 -2 5]); fprintf('%.4f %.4f\\n', caz, cel); view(gca, 2); [caz, cel] = view(gca); fprintf('%g %g\\n', caz, cel); try, v = view; catch e, disp(e.message), end; try, view, catch e, disp(e.message), end",
   ];
   for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
   const shown = (id: number) => msgs.find((m) => m.id === id && m.display)?.display;
@@ -210,15 +213,19 @@ test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view)
   const c = scene(3);
   assert.deepEqual([c.azimuth, c.elevation, c.labels[0]], [-60, 20, "x"]);
   assert.deepEqual(c.objects.map((o: any) => [o.type, o.color, o.pos.length / 3]), [["lines", "#ff0000", 20], ["points", "#ff0000", 11]]);
-  // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2))
-  assert.equal(msgs.filter((m) => m.id === 8 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n");
-  for (const id of [4, 5, 6, 7, 8]) {
+  // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2);
+  // one output, not the documented [caz, cel], refused)
+  assert.equal(msgs.filter((m) => m.id === 10 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n" + "view: one output is not supported; use [caz, cel] = view.\n".repeat(2));
+  for (const id of [4, 5, 6, 7, 8, 9, 10]) {
     assert.ok(shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": the SVG only");
   }
   // (the figure's Color behind the SVG; MATLAB's dark gray, not the page's color)
   assert.match(shown(1)["image/svg+xml"], /^<svg[^>]*><rect width="100%" height="100%" fill="#ffffff"\/>/);
   assert.match(shown(7)["image/svg+xml"], /<rect width="100%" height="100%" fill="#f0f0f0"\/>/);
-  for (const id of [1, 7]) assert.doesNotMatch(shown(id)["image/svg+xml"], /currentColor/);
+  // (the ink: the root's color, for the shim's currentColor; the text itself untouched)
+  for (const id of [1, 7]) assert.match(shown(id)["image/svg+xml"], /^<svg [^>]*style="color:#262626;--sb-legend-bg:#ffffff"/);
+  assert.match(shown(8)["image/svg+xml"], />currentColor label</);
+  assert.match(shown(8)["image/svg+xml"], /aria-label="[^"]*currentColor label/);
 });
 
 test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); no renaming", () => {
