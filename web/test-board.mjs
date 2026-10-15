@@ -493,7 +493,11 @@ try {
       check((await docOf()).nodes.length === n0 + 1, "Note adds a note, being written where it is");
       await ev("document.querySelector('.board-editing .be-title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
       await sleep(400);
-      check((await docOf()).nodes.length === n0, "a new note left empty is not kept");
+      // (left empty, it is kept, to be moved and written in later, William's B2: then undone, for what follows)
+      check((await docOf()).nodes.length === n0 + 1, "a new note left empty is kept");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))");
+      await sleep(300);
+      check((await docOf()).nodes.length === n0, "...and one undo takes it back");
       await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
       check(await ev("document.querySelectorAll('.board-toolbar-panel .tb-use').length >= 8"), "⋯ lists every tool");
       await ev("(() => { const b = document.querySelector('.board-toolbar-panel input[data-tool=group]'); b.checked = false; b.dispatchEvent(new Event('change')); })()");
