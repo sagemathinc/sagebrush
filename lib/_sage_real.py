@@ -425,8 +425,17 @@ def _exp_big(x, R, shift=0, sign=1, delta_bits=None):
 
 
 def _exact_log(x, b):
-    """k when the positive finite x is exactly b^k, b an integer >= 2 (or a
-    real equal to one), else None."""
+    """k when the positive finite x is exactly b^k, b an integer >= 2 or
+    the reciprocal 1/c of one (or a real equal to one of these), else None
+    (an exact result is a rounding boundary that a checked evaluation
+    cannot settle in the directed modes: log(2^-100, 1/2) is 100)."""
+    try:
+        q = (None if b._special else b._q()) if isinstance(b, RealNumberMP) else _F(b)
+    except (TypeError, ValueError, NotImplementedError, OverflowError):
+        q = None
+    if q is not None and q > 0 and q.numerator == 1 and q.denominator >= 2:
+        k = _exact_log(x, q.denominator)
+        return None if k is None else -k
     try:
         if isinstance(b, RealNumberMP):
             if b._special or not b.is_integer():
@@ -1857,6 +1866,12 @@ class RealNumberMP:
             (0.69314718055994530941723212146, 3.0000000)
             sage: RealField(100)(1/3).log(10), RealField(100)(1000).log(10)
             (-0.47712125471966243729502790325, 3.0000000000000000000000000000)
+
+        An exact result is exact in every rounding mode (Sage divides two
+        rounded logarithms: 100.00000000000000000000000001 here)::
+
+            sage: RealField(100, rnd='RNDA')(2^-100).log(1/2)  # sagebrush only
+            100.00000000000000000000000000
         """
         R = self._R
         if self._special:
@@ -2322,11 +2337,26 @@ class RealNumberMP:
             raise NotImplementedError("log_gamma(-infinity) is not available in sagebrush yet (Sage raises an error too)")
         if not self._special and self._m > 0:
             E = self._mag()
-            # (log Gamma is finite for every finite x > 0, so an infinity
-            # from the working field is overflow: log_gamma(2^(2^62 - 2))
-            # is the largest number in RNDZ and RNDD, as in Sage)
+            # (log Gamma is finite for every finite x > 0; the working
+            # computation returns +infinity only when it proves the result
+            # beyond the range, which is then rounded as overflow:
+            # log_gamma(2^(2^62 - 2)) is the largest number in RNDZ and RNDD,
+            # as in Sage; the working field always has >= p + 40 bits)
             if E > 7 and _log_gamma_stirling(RealField(R._prec + 40)(self)) is not None:
-                return _ziv_eval(R, lambda F: _log_gamma_stirling(F(self)) or F(self).gamma().log(), overflow=True)
+                def fn(F):
+                    v = _log_gamma_stirling(F(self))
+                    if v is not None:
+                        # (finite, or +infinity only as a proof that the
+                        # result overflows: _log_gamma_stirling)
+                        return v
+                    # (Stirling's 19 terms fall short at this working
+                    # precision; an infinite Gamma(x) would say nothing
+                    # about log Gamma(x))
+                    g = F(self).gamma()
+                    if g._special:
+                        raise NotImplementedError("log_gamma(%s) at this precision is not available in sagebrush yet" % self)
+                    return g.log()
+                return _ziv_eval(R, fn, overflow=True)
             if E < -(R._prec + 40):
                 # -log x - euler_gamma x + ...: the linear term is far below
                 return _ziv_eval(R, lambda F: -F(self).log(), overflow=True)
@@ -2493,7 +2523,8 @@ def _gamma_reflected(x):
         F = RealField(max(p + B + G, exact))
         X = F(x)
         lg = _log_gamma_stirling(1 - X)
-        if lg is None:
+        if lg is None or lg._special:
+            # (an infinite log Gamma(1 - x) would need |x| near 2^(2^62))
             break
         # |sin(pi x)| = sin(pi f), f = min(frac(x), 1 - frac(x)) (no
         # cancellation near pi)
@@ -2517,11 +2548,25 @@ def _gamma_reflected(x):
 
 def _log_gamma_stirling(x):
     """log Gamma(x) for x >= 128 in x's field F, to a few units in the last
-    place: (x - 1/2) log x - x + log(2 pi)/2 + sum B_2k / (2k (2k-1) x^(2k-1)),
-    summed while the terms matter (the series' error is below its first
-    omitted term); None when 19 terms do not get below the last place."""
+    place: x (log x - 1) - (log x)/2 + log(2 pi)/2 + sum B_2k / (2k (2k-1)
+    x^(2k-1)), summed while the terms matter (for x > 0 the series' error is
+    below its first omitted term, DLMF 5.11.ii); None when 19 terms do not
+    get below the last place.
+
+    Only A = x (log x - 1) can leave the exponent range (the other terms are
+    below 2^63).  (x - 1/2) log x, the former arrangement, could overflow
+    while log Gamma(x) is representable.  When A rounds to +infinity at W
+    bits, x (log x - 1) >= (1 - 2^(2 - W)) 2^EMAX, so log Gamma(x) >=
+    (1 - 2^(2 - W)) 2^EMAX - 2^63, above the largest number of any field of
+    at most W - 40 bits plus half its last place: the result overflows,
+    and +infinity is returned as that proof (callers at p <= W - 40 bits
+    round it as overflow)."""
     F = x.parent()
-    lg = (x - F(_F(1, 2))) * x.log() - x + (2 * F.pi()).log() / 2
+    L = x.log()
+    A = x * (L - 1)
+    if A._special:
+        return A
+    lg = A - L / 2 + (2 * F.pi()).log() / 2
     B = _bernoulli_list(40)
     xp = x
     x2 = x * x
