@@ -205,6 +205,24 @@ def _pow_round(m, e, n, prec, rnd):
         W *= 2
 
 
+# log2(10) lies strictly between these (3.32192809488736234...)
+_LOG2_10_LO = _F(3321928094887362, 10 ** 15)
+_LOG2_10_HI = _F(3321928094887363, 10 ** 15)
+
+
+def _beyond(lo, hi, neg):
+    """(m, e) past the exponent range when lo <= log2|x| <= hi puts x past
+    it for certain (|x| >= 2^EMAX: overflow; |x| < 2^(EMIN - 2): below half
+    the smallest number), for RealNumberMP to round by its mode; else None.
+    lo and hi are integers or Fractions, from bit lengths: no power is
+    formed."""
+    if lo >= _EMAX:
+        return (-1 if neg else 1), _EMAX + 8
+    if hi < _EMIN - 2:
+        return (-1 if neg else 1), _EMIN - 8
+    return None
+
+
 def _round_dec(M, E, prec, rnd):
     """(m, e): M 10^E (M != 0) correctly rounded to prec bits, with the
     exponent range decided on that final value (never on a separately
@@ -213,7 +231,13 @@ def _round_dec(M, E, prec, rnd):
     binary powering cut to W bits, as in _pow_round.  This ends: for E < 0
     the 5s of M are cancelled first, so the value is either exact (dyadic)
     or not dyadic, never a rounding boundary; for E > 0 it is an integer
-    whose odd part, M's times 5^E, is exact once W holds it."""
+    whose odd part, M's times 5^E, is exact once W holds it.  A value past
+    the exponent range for certain is decided first, from bit lengths and
+    bounds on log2(10): then |E| < 2^62 and 5^|E| is never formed for it."""
+    b = abs(M).bit_length()
+    t = _beyond(b - 1 + min(E * _LOG2_10_LO, E * _LOG2_10_HI), b + max(E * _LOG2_10_LO, E * _LOG2_10_HI), M < 0)
+    if t is not None:
+        return t
     if E < 0:
         N = -E
         while N and M % 5 == 0:
@@ -1408,18 +1432,26 @@ def _parse(R, s, base=10):
         n = int(ip or "0", base) * base ** len(fp) + (int(fp, base) if fp else 0)
         q = _F(n, base ** len(fp))
         return _to_real(R, -q if neg else q)
-    m = _re.match(r"^([+-]?)(\d*)(?:\.(\d*))?[eE]([+-]?\d+)$", t)
-    if m and (m.group(2) or m.group(3)) and abs(int(m.group(4))) > 4096:
-        # a large decimal exponent (RR('1e1000000000')): not the exact
-        # rational, whose size is the exponent's, but M 10^E correctly
-        # rounded (Ziv; 10^E is a correctly rounded power, within 2.5 units
-        # of the working field with M's rounding and the product's)
-        fp = m.group(3) or ""
-        M = int((m.group(2) or "0") + fp) * (-1 if m.group(1) == "-" else 1)
-        E = int(m.group(4)) - len(fp)
-        if not M:
-            return RealNumberMP(R, 0, 0) if m.group(1) != "-" else -RealNumberMP(R, 0, 0)
-        return RealNumberMP(R, *_round_dec(M, E, R._prec, R._rnd))
+    m = _re.match(r"^([+-]?)(\d*)(?:\.(\d*))?[eE]([+-]?)(\d+)$", t)
+    if m and (m.group(2) or m.group(3)):
+        neg = m.group(1) == "-"
+        if not (m.group(2) or "").strip("0") and not (m.group(3) or "").strip("0"):
+            return RealNumberMP(R, 0, 0) if not neg else -RealNumberMP(R, 0, 0)
+        ed = m.group(5).lstrip("0")
+        if len(ed) > 25 and len(t) < 10 ** 20:
+            # an exponent of 10^24 or more, against a mantissa of fewer
+            # than 10^20 digits: past the range by its sign alone (the
+            # exponent is never converted: a 5000-digit one was)
+            big = (1, _EMAX + 8) if m.group(4) != "-" else (1, _EMIN - 8)
+            return RealNumberMP(R, -big[0] if neg else big[0], big[1])
+        Ex = int(ed or "0") * (-1 if m.group(4) == "-" else 1)
+        if abs(Ex) > 4096:
+            # a large decimal exponent (RR('1e1000000000')): not the exact
+            # rational, whose size is the exponent's, but M 10^E correctly
+            # rounded (_round_dec)
+            fp = m.group(3) or ""
+            M = int((m.group(2) or "0") + fp) * (-1 if neg else 1)
+            return RealNumberMP(R, *_round_dec(M, Ex - len(fp), R._prec, R._rnd))
     try:
         q = _F(t)
     except ValueError:
@@ -1760,6 +1792,13 @@ class RealNumberMP:
                 if n > 0:
                     return self
                 return RealNumberMP(R, 0, 0, "+inf")
+            # past the exponent range for certain: decided from bit lengths
+            # before any powering (RR(3)^(2^20000) squared a 20000-bit
+            # exponent's worth of big integers to reach infinity)
+            L = self._e + abs(self._m).bit_length()
+            t = _beyond(min(n * (L - 1), n * L), max(n * (L - 1), n * L), self._m < 0 and n % 2 == 1)
+            if t is not None:
+                return RealNumberMP(R, *t)
             # correctly rounded, by bracketed binary powering (any n)
             m, e = _pow_round(self._m, self._e, n, R._prec, R._rnd)
             return RealNumberMP(R, m, e)

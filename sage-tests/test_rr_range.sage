@@ -64,5 +64,7 @@ t('power midpoint', lambda: [x0^R0(0.5) == x0.sqrt(), int((x0^R0(0.5) - 1)/u0), 
 # needs a huge integer exponent (2^(2^-10000) in the directed modes)
 t('directed tiny exponents', lambda: [(p, rnd, [(RealField(p, rnd=rnd)(2)**(RealField(p, rnd=rnd)(2)**-k) - 1).exact_rational() for k in (5200, 10000)]) for p in (53, 100) for rnd in ('RNDU', 'RNDD', 'RNDZ', 'RNDA')])
 t('python complex', lambda: [T0 == complex(0), complex(0) == T0, T0 != complex(0), B0 == complex(float('inf'))])
+# review of d3a0a83 (HARD-D3A-1/2): ranges decided before any big power
+t('range before powering', lambda: [RR(3)^(2^20000), RR(3)^(-(2^20000)), RR(-3)^(2^20000+1), RealField(100, rnd='RNDU')(3)^(-(2^20000)), RealField(100, rnd='RNDD')(3)^(2^20000), RR('1e' + '9'*5000), RR('-1.5e' + '9'*5000), RR('1e-' + '9'*5000), RR('0e' + '9'*5000), RealField(100, rnd='RNDU')('1e-' + '9'*5000), RR(2)^(2^62 - 2), RR(3)^(2^61)])
 t('sum and product', lambda: [sum([RR(1e308)] * 4), prod([RR(1e100)] * 5), sum([S] * 3)])
 t('numpy-free floats', lambda: [float(RR(1e308) * 10) == float('inf'), float(RR(1e-320)) == 1e-320])
