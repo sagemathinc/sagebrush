@@ -36,3 +36,20 @@ for c in colors:
 for c, alpha in [((1, 0, 0, 0.5), 0.8), ("#ff000080", 1.0), (("r", 0.5), 0.3)]:
     print("fill alpha", repr(c), alpha, center(lambda ax: ax.fill_between([0, 1], [0, 0], [1, 1], color=c, alpha=alpha, linewidth=0)))
     print("line alpha", repr(c), alpha, center(lambda ax: ax.plot([0, 1], [0.5, 0.5], color=c, alpha=alpha, linewidth=40)))
+# set_alpha and set_color afterwards: the alpha set replaces the color's
+# while it is set, and the color's own comes back with set_alpha(None)
+# (CORR-F02-1)
+
+
+def mutate(steps):
+    def draw(ax):
+        line = ax.plot([0, 1], [0.5, 0.5], color=(1, 0, 0, 0.2), linewidth=40)[0]
+        for name, v in steps:
+            getattr(line, name)(v)
+    return draw
+
+
+for steps in [[("set_alpha", 0.6)], [("set_alpha", 0.6), ("set_alpha", None)], [("set_alpha", 0.8), ("set_color", (1, 0, 0, 0.4))],
+              [("set_color", (0, 0, 1, 0.4))], [("set_alpha", 0.8), ("set_color", "#00ff0066"), ("set_alpha", None)],
+              [("set_color", "blue"), ("set_alpha", 0.5)]]:
+    print("line", steps, center(mutate(steps)))
