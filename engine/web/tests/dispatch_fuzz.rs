@@ -68,6 +68,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "hmf_new_dimension", "level": [[6, 0]]}),
         json!({"fn": "hmf_newform_orbits", "level": [[-5, 18]]}),
         json!({"fn": "hmf_rational_newforms", "level": [[-2, 5]], "bound": 30}),
+        json!({"fn": "hmf_newform_eigenvalues", "level": [[-5, 18]], "orbit": 1, "bound": 30}),
     ]
 }
 

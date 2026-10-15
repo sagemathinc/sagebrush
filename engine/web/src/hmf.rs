@@ -125,6 +125,28 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
             Ok(json!({ "op": op_json(&o.op),
                        "orbits": o.orbits.iter().map(|g| g.iter().map(|c| c.to_string()).collect::<Vec<_>>()).collect::<Vec<_>>() }))
         }
+        // the Hecke eigenvalues of the k-th newform orbit (in the order of
+        // hmf_newform_orbits) at the primes of norm <= bound: polynomials in
+        // a root theta of the orbit's polynomial g, num / den
+        "hmf_newform_eigenvalues" => {
+            let ns = newspaces(&ideal(v, "level")?)?;
+            let k = v.get("orbit").and_then(Value::as_u64).ok_or("missing integer argument 'orbit'")? as usize;
+            let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
+            if bound > 100_000 {
+                return Err("bound must be at most 10^5".into());
+            }
+            let o = ns.newform_orbits()?;
+            if k >= o.orbits.len() {
+                return Err(format!("orbit {} out of range: there are {}", k, o.orbits.len()));
+            }
+            let e = ns.orbit_eigenspace(&o, k)?;
+            let mut aps = vec![];
+            for p in primes_of_bounded_norm(bound) {
+                let a = e.eigenvalue(&ns, &p)?;
+                aps.push(json!([prime_json(&p), a.num.iter().map(|c| c.to_string()).collect::<Vec<_>>(), a.den.to_string()]));
+            }
+            Ok(json!({ "g": e.g.iter().map(|c| c.to_string()).collect::<Vec<_>>(), "aplist": aps }))
+        }
         "hmf_rational_newforms" => {
             let ns = newspaces(&ideal(v, "level")?)?;
             let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
