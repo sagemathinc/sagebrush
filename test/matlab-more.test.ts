@@ -118,6 +118,24 @@ test("join: its page's examples, an array of delimiters rebuilding split's text,
   ]);
 });
 
+test("dimension, size and count arguments must be real, finite, integer scalars: refused, not truncated to a first element (CORR-E0C-2)", () => {
+  assert.deepEqual(values([
+    'join(["a","b";"c","d"], "-", [2, 1])', 'join(["a","b";"c","d"], "-", 2+3i)', 'join(["a","b";"c","d"], [2, 1])', 'join(["a","b";"c","d"], 2+3i)',
+    'split("a b", " ", [1 2])', "zeros(2, [3 4])", "zeros(2+1i)", "zeros(Inf)", "flip(1:3, [2 1])", "nchoosek(5, [2 3])", "dec2bin(5, [8 9])",
+    "cumsum([1 2], Inf)", "sum([1 2; 3 4], 2+3i)", "triu(magic(3), [1 2])",
+    // (what stays valid: vector dims where MATLAB documents them, and a complex value with no imaginary part)
+    "sum([1 2; 3 4], [2 1])", "circshift(1:4, [1 2])", "mean([1 2; 3 4], 2+0i)", "zeros([1 2])",
+  ]), [
+    "ERROR Expected a scalar dimension, not an array of 2 elements.", "ERROR Expected a real dimension, not a complex number.",
+    "ERROR Expected a scalar dimension, not an array of 2 elements.", "ERROR Expected a real dimension, not a complex number.",
+    "ERROR Expected a scalar dimension, not an array of 2 elements.", "ERROR Size inputs must be scalars.", "ERROR Size inputs must be real.",
+    "ERROR Size inputs must be finite.", "ERROR Expected a scalar argument, not an array of 2 elements.", "ERROR Expected a scalar argument, not an array of 2 elements.",
+    "ERROR Expected a scalar minDigits, not an array of 2 elements.", "ERROR Expected a finite dimension.", "ERROR Expected a real dimension, not a complex number.",
+    "ERROR Expected a scalar argument, not an array of 2 elements.",
+    "10", "3     4     1     2", "1.5000|3.5000", "0     0",
+  ]);
+});
+
 test("dec2bin and dec2hex: fractions, two's complement, and their refusals", () => {
   assert.deepEqual(values([
     "dec2bin(-1.5)", "dec2bin(-2^63)", "dec2bin('a')", "dec2hex(2^64 - 2^12)",
