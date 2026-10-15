@@ -513,8 +513,8 @@ impl MaximalOrder {
             (true, true, Some(a), Some(b)) if a.unsigned_abs() < 1 << 31 && b.unsigned_abs() < 1 << 31 => (a, b),
             _ => return Err("maximal orders are implemented only for a, b in Z (|a|, |b| < 2^31)".into()),
         };
-        let fa = factor_u64(a.unsigned_abs());
-        let fb = factor_u64(b.unsigned_abs());
+        let fa = factor_u64(a.unsigned_abs())?;
+        let fb = factor_u64(b.unsigned_abs())?;
         let mut odd: Vec<(u64, bool)> = vec![]; // (r, r | b)
         for (fs, in_b) in [(&fa, false), (&fb, true)] {
             for &(r, e) in fs.iter() {

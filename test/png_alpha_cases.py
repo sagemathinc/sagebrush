@@ -53,3 +53,20 @@ for steps in [[("set_alpha", 0.6)], [("set_alpha", 0.6), ("set_alpha", None)], [
               [("set_color", (0, 0, 1, 0.4))], [("set_alpha", 0.8), ("set_color", "#00ff0066"), ("set_alpha", None)],
               [("set_color", "blue"), ("set_alpha", 0.5)]]:
     print("line", steps, center(mutate(steps)))
+# axhline (python-mpl-legend) with the same alpha rules: the color's own,
+# alpha= replacing it, set_alpha(None) bringing it back, set_color under
+# an alpha set, and "none" in any case
+
+
+def axhline(steps=(), **kw):
+    def draw(ax):
+        h = ax.axhline(0.5, linewidth=40, **kw)
+        for name, v in steps:
+            getattr(h, name)(v)
+    return draw
+
+
+for kw, steps in [({"color": (1, 0, 0, 0.2)}, []), ({"color": (1, 0, 0, 0.2), "alpha": 0.6}, []),
+                  ({"color": (1, 0, 0, 0.2)}, [("set_alpha", 0.6), ("set_alpha", None)]),
+                  ({"color": "red", "alpha": 0.5}, [("set_color", (0, 0, 1, 0.4))]), ({"color": "NONE"}, [])]:
+    print("axhline", kw, steps, center(axhline(steps, **kw)))
