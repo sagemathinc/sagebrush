@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, utimesSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { magicSyntax, classesUsingCell } from "../src/magic-syntax";
+import { magicSyntax, classCellReport } from "../src/magic-syntax";
 import { analyzeCell } from "../src/dataflow";
 import { needsMore } from "../src/interactive";
 
@@ -160,23 +160,23 @@ test("notebook session: the supported magics run; every other is an error", asyn
   }
 });
 
-test("autoreload's check: which classes may use the __class__ cell, found in the parsed source", () => {
-  const cells = (src: string) => classesUsingCell(src)?.sort() ?? null;
+test("autoreload's check: which top-level classes may be updated (no __class__ cell), from the parsed source", () => {
+  const rep = (src: string) => { const r = classCellReport(src); return r === null ? null : { ...r }; };
   // astra's three layouts (CORR-725-4): a class header over lines, a comment at column 0, a method header over lines
-  assert.deepEqual(cells("class Child(\n    Base,\n):\n    def value(self):\n        return super().value() + 1\n"), ["Child"]);
-  assert.deepEqual(cells("class Child(Base):\n# a comment at column 0\n    def value(self):\n        return super().value() + 1\n"), ["Child"]);
-  assert.deepEqual(cells("class Child(Base):\n    def value(\nself):\n        return super().value() + 1\n"), ["Child"]);
-  // every spelling of super, __class__, f-strings, a nested class, a lambda
+  assert.deepEqual(rep("class Child(\n    Base,\n):\n    def value(self):\n        return super().value() + 1\n"), { Child: false });
+  assert.deepEqual(rep("class Child(Base):\n# a comment at column 0\n    def value(self):\n        return super().value() + 1\n"), { Child: false });
+  assert.deepEqual(rep("class Child(Base):\n    def value(\nself):\n        return super().value() + 1\n"), { Child: false });
+  // every spelling of super, __class__, f-strings, a lambda, a nested class's
   for (const body of ["super().v()", "super( # c\n).v()", "(super)().v()", "s = super", "super(C).v()", "super(*a)", "__class__", "f'{super().v()}'", "(lambda: super().v())()"]) {
-    assert.deepEqual(cells(`class C(B):\n    def v(self):\n        ${body}\n`), ["C"], body);
+    assert.deepEqual(rep(`class C(B):\n    def v(self):\n        ${body}\n`), { C: false }, body);
   }
-  assert.deepEqual(cells("class Outer:\n    class Inner(B):\n        def v(self):\n            return super().v()\n"), ["Inner", "Outer"]);
+  assert.deepEqual(rep("class Outer:\n    class Inner(B):\n        def v(self):\n            return super().v()\n"), { Outer: false });
   // what the kept class satisfies: super(Name, obj), and obj.__class__ (an attribute, not the cell)
-  assert.deepEqual(cells("class C(B):\n    def v(self):\n        return super(C, self).v() + super(mod.C, self).w() + len(self.__class__.__name__)\n"), []);
-  // super outside any class body is not a class's
-  assert.deepEqual(cells("def f():\n    return super\nclass C:\n    x = 1\n"), []);
+  assert.deepEqual(rep("class C(B):\n    def v(self):\n        return super(C, self).v() + super(mod.C, self).w() + len(self.__class__.__name__)\n"), { C: true });
+  // classes in if/try at the top level count; in a function they do not; two statements of one name are not safe
+  assert.deepEqual(rep("if X:\n    class A:\n        pass\ntry:\n    class B:\n        pass\nexcept E:\n    class B:\n        pass\ndef f():\n    class F:\n        pass\n"), { A: true, B: false });
   // source that does not parse: no class is updated
-  assert.equal(cells("class C(:\n"), null);
+  assert.equal(rep("class C(:\n"), null);
 });
 
 test("notebook session: %autoreload 2 reloads changed modules; existing instances follow every edit", async () => {
@@ -185,7 +185,7 @@ test("notebook session: %autoreload 2 reloads changed modules; existing instance
   let mtime = 1000;
   const write = (src: string) => { writeFileSync(mod, src); utimesSync(mod, (mtime += 1000), mtime); };
   // (Zero, Comment and Paren call super() without arguments, in three spellings)
-  const others = (v: number) => `class Zero(Base):\n    def value(self):\n        return super().value() + 1\nclass Comment(Base):\n    def value(self):\n        return super( # explanatory comment\n        ).value() + ${v}\nclass Paren(Base):\n    def value(self):\n        return (super)().value() + ${v}\nclass Multi(\n    Base,\n):\n# a comment at column 0\n    def value(\nself):\n        return super().value() + ${v}\n`;
+  const others = (v: number) => `class Zero(Base):\n    def value(self):\n        return super().value() + 1\nclass Comment(Base):\n    def value(self):\n        return super( # explanatory comment\n        ).value() + ${v}\nclass Paren(Base):\n    def value(self):\n        return (super)().value() + ${v}\nclass Multi(\n    Base,\n):\n# a comment at column 0\n    def value(\nself):\n        return super().value() + ${v}\nclass Named(Base):\n    def value(self):\n        return super(Named, self).value() + ${v}\nNamed.__name__ = "Renamed"\n`;
   write("def f():\n    return 1\nclass C:\n    def value(self):\n        return 1\nclass Base:\n    def value(self):\n        return 1\nclass Child(Base):\n    def value(self):\n        return super(Child, self).value() + 1\n" + others(1));
   const s = await session();
   // (without the extension, %autoreload is unknown, as in IPython; tests in
@@ -200,6 +200,8 @@ test("notebook session: %autoreload 2 reloads changed modules; existing instance
     assert.equal(r.out, `${v} ${v} ${v} ${v} ${11 * v} ${11 * v} True True\n${10 * v + 1} ${10 * v + 1} ${10 * v + 1} ${11 * v} ${11 * v}\n`);
     // super() without arguments, in any spelling: said, not silently half-done
     for (const k of ["Zero", "Comment", "Paren", "Multi"]) assert.match(r.err, new RegExp(`\\[autoreload of sbar_mod: class ${k} uses super\\(\\) without arguments`));
+    // a class whose name is not its statement's (astra on 1427376): not tied, so not updated
+    assert.match(r.err, /\[autoreload of sbar_mod: class Named cannot be tied to a class statement of sbar_mod/);
   }
   // %autoreload 0: no more reloading; %autoreload now: once
   await s.run("%autoreload 0");
