@@ -722,7 +722,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (a slide: its card)
       const s = doc && lookOf(doc, pageIx).slide;
       if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
-      else board.focus(undefined, now);
+      // (the whole board, as legible as it can be: from its start if it is large, friction 6)
+      else board.overview(now);
     } else {
       const s = ss[at];
       board.focus(typeof s.focus === "string" ? [s.focus] : s.focus, now);
@@ -748,7 +749,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (e.key === "ArrowRight" || e.key === " ") go(onward);
     else if (e.key === "ArrowLeft") go(back);
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
-    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") go(() => step(-1));
+    else if (e.key === "Escape" && !editor.escapes) go(() => step(-1));
+    // (0, as the button that says so: everything, out of the tour; Esc, the board as it opens)
+    else if (e.key === "0") go(() => { step(-1); board.focus(); });
     else if (e.key === "?") help();
     else if (e.key === "PageDown") go(() => page(pageIx + 1));
     else if (e.key === "PageUp") go(() => page(pageIx - 1));
