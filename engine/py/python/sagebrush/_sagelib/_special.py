@@ -1352,6 +1352,14 @@ def _erf1(z):
     if isinstance(z, complex):
         if _bad(z):
             return _erf_bad("erf", z)
+        # (on the axes exactly: erf(iy) = i erfi(y) and erf(x + 0i) = erf(x),
+        # DLMF 7.2.4 and 7.4.1, the zero part keeping the argument's sign, as
+        # erf is odd and erf(conj z) = conj erf(z); the general formula left
+        # a real part of 1e-16 at 2i)
+        if z.real == 0:
+            return complex(z.real, _erfi1(z.imag))
+        if z.imag == 0:
+            return complex(_math.erf(z.real), z.imag)
         return _erf_c(z)
     return _math.erf(z)
 
@@ -1360,6 +1368,11 @@ def _erfc1(z):
     if isinstance(z, complex):
         if _bad(z):
             return _erf_bad("erfc", z)
+        # (on the axes exactly: erfc(iy) = 1 - i erfi(y), erfc(x + 0i) = erfc(x))
+        if z.real == 0:
+            return complex(1.0, -_erfi1(z.imag))
+        if z.imag == 0:
+            return complex(_math.erfc(z.real), -z.imag)
         return _erfc_c(z)
     return _math.erfc(z)
 
@@ -1414,6 +1427,12 @@ def _erfi1(z):
     if isinstance(z, complex):
         if _bad(z):
             return _erf_bad("erfi", z)
+        # (on the axes exactly: erfi(iy) = i erf(y) and erfi(x + 0i) = erfi(x),
+        # DLMF 7.5.1; the general formula left a real part of 1e-19 at i)
+        if z.real == 0:
+            return complex(z.real, _math.erf(z.imag))
+        if z.imag == 0:
+            return complex(_erfi1(z.real), z.imag)
         return -1j * _erf_c(1j * z)
     if _math.isnan(z):
         return z

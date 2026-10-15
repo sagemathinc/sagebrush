@@ -211,6 +211,11 @@ zref = [(1e-16, -0.50000000000000009189), (-1e-17, -0.49999999999999999081), (co
         (0.03, -0.52849887255537702034), (-0.049, -0.45726839624509547995), (complex(-0.02, 0.03), complex(-0.48116447625400678751, -0.026374490214081654222)),
         (5e-324, -0.5)]
 print([abs(S.zeta(z) - r) <= 3e-15 * abs(r) for z, r in zref], repr(S.zeta(1e-16)), repr(S.zeta(5e-324)))
+# (the error functions on the axes, exactly: erf(iy) = i erfi(y), erfi(iy) = i erf(y), erfc(iy) = 1 - i erfi(y), and on
+# the real axis their real values, each zero part with the argument's sign: @sagebrush-sage's report of erf(2i) =
+# 1.1e-16 + 18.56i and erfi(i) = 1.1e-19 + 0.84i)
+print(repr(S.erf(2j)), repr(S.erfi(1j)), repr(S.erfc(2j)), repr(S.erf(complex(-0.0, 2))), repr(S.erf(complex(1.5, -0.0))),
+      repr(S.erfi(complex(0.7, 0.0))), repr(S.erfc(complex(0.5, 0.0))))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -270,5 +275,8 @@ print([abs(S.zeta(z) - r) <= 3e-15 * abs(r) for z, r in zref], repr(S.zeta(1e-16
     // 744.440071921381, W_-1(2^-1074) = -751.061568323038 - 3.14578107543527i, Li_2(1 + 1e-300 i) = pi^2/6 + ...)
     "inf 0j 1e-300 0j inf 2.36327180121 0.0 -2.98932864875e+37 744.440071921 -751.061568323-3.14578107544j inf 1.0 0.0 1.64493406685 0.166666666667",
     "[True, True, True, True, True, True, True] -0.5000000000000001 -0.5",
+    // (mpmath: erfi(2) = 18.5648024145755526, erf(1) = 0.842700792949714869)
+    "18.564802414575553j 0.8427007929497149j (1-18.564802414575553j) (-0+18.564802414575553j) (0.9661051464753108-0j) " +
+      "(0.9402829338335074+0j) (0.4795001221869535-0j)",
   ]);
 });
