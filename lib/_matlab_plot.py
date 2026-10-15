@@ -3281,6 +3281,38 @@ class _Faces(_Primitive):
         return "%s of %d faces" % (self.what, len(self.faces))
 
 
+class _LegendSwatch(_Primitive):
+    """a legend entry alone, nothing drawn in the axes: a 3-D surface's swatch"""
+    kind = "polygon"
+
+    def __init__(self, label, fill, edge):
+        _Primitive.__init__(self, label=label, color=fill or "none", legend_edge=edge)
+
+    def bbox(self):
+        return None
+
+    def svg(self, P):
+        return ""
+
+    def describe(self):
+        return 'legend entry "%s"' % self.options["label"]
+
+
+def _surface_swatch(c, cmap, clim):
+    """a surface's legend colors (fill, edge): its FaceColor and EdgeColor, colormapped
+    ones ('flat', 'interp') at the middle of CLim, as Octave's legend draws them"""
+    pal = _palette(cmap)
+    lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+    mid = pal[_cindex((lo + hi) / 2, lo, hi, len(pal))]
+
+    def one(v):
+        mode = _m._text(v).lower() if _m._istext(v) else None
+        if mode in ("flat", "interp", "texturemap"):
+            return mid
+        return None if mode == "none" else _hex(_rgbof(v))
+    return one(c.props["FaceColor"]), one(c.props["EdgeColor"])
+
+
 def _palette(cmap):
     return [_hex(tuple(r)) for r in cmap.M]
 
@@ -3393,8 +3425,17 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     faces.sort(key=lambda f: f[0])
     if faces:
         mx._add(_Faces([f[1:] for f in faces]))
+    # (the legend's entries, in the children's order, as in 2-D)
+    shown = set()
+    if ax.legend is not None and _m._text(ax.legend.props["Visible"]) == "on":
+        shown = set(id(c) for c in getattr(ax.legend, "items", []))
     for c in ax.children:
         if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
+            continue
+        label = _m._text(c.props.get("DisplayName", _m.Char(""))) if id(c) in shown else None
+        if isinstance(c, Surface):
+            if label:
+                mx._add(_LegendSwatch(label, *_surface_swatch(c, cmap, clim)))
             continue
         if isinstance(c, Stem) and _m._numel(c.props["ZData"]):
             col = _hex(_rgbof(c.props["Color"]))
@@ -3408,7 +3449,8 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
             mx._add(GLine(sx, sy, color=col, thickness=1.0))
             fill = c.props["MarkerFaceColor"]
             mx.plot(px, py, linestyle="none", marker=_mpl_marker(_m._text(c.props["Marker"])) or "o", color=col,
-                    markersize=_f(c.props["MarkerSize"]), markerfacecolor=col if not (_m._istext(fill) and _m._text(fill) == "none") else "none")
+                    markersize=_f(c.props["MarkerSize"]), markerfacecolor=col if not (_m._istext(fill) and _m._text(fill) == "none") else "none",
+                    **({"label": label} if label else {}))
             continue
         if isinstance(c, (Line, Scatter)) and not isinstance(c, (Stem, ErrorBar, Area)):
             xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
@@ -3416,9 +3458,9 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
             pts = [proj(x, y, z) for x, y, z in zip(xs, ys, zs)]
             xy = ([p[0] for p in pts], [p[1] for p in pts])
             if isinstance(c, Line):
-                _draw_line(c, mx, None, xy=xy)
+                _draw_line(c, mx, label, xy=xy)
             else:
-                _draw_scatter(c, mx, None, cmap, clim, xy=xy)
+                _draw_scatter(c, mx, label, cmap, clim, xy=xy)
         elif isinstance(c, Text):
             p = _vec(c.props["Position"]) + [0.0, 0.0]
             q = proj(p[0], p[1], p[2])
@@ -3477,6 +3519,8 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     st = _text_value(ax.subtitle.props["String"])
     if t or st:
         mx.set_title(t + ("\n" + st if st else ""))
+    if shown:
+        mx.legend(loc=_LOC.get(_m._text(ax.legend.props["Location"]).lower(), "upper right"))
     if ax.colorbar is not None and _m._text(ax.colorbar.props.get("Visible", _m.Char("on"))) == "on":
         fx, fy, fw, fh = mx._rect
         mx._rect = (fx, fy, fw * 0.92, fh)

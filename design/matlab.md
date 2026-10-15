@@ -337,6 +337,11 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     corner's CData, `'interp'` averages the four);
   - `mesh` has white faces and height-colored edges;
   - `shading` sets both colors.
+  - A legend lists lines, markers and stems as in 2-D, and a surface as a
+    swatch of its FaceColor edged in its EdgeColor; a colormapped one
+    (`'flat'`, `'interp'`) takes the colormap's color at the middle of
+    CLim. MATLAB does not document its legend's surface icon; this is
+    Octave's choice.
   - Seen from above (`view(2)`, `pcolor`), a surface is the same faces in
     data coordinates.
   - Hold off resets the view to 2-D (`newplot`); `surf` and `plot3` then
