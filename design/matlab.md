@@ -344,7 +344,8 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - `view` takes (az, el), [az el], [x y z] (the direction toward the
     camera, converted to the angles of a unit vector along it, as the
     documented example's), 2, 3 and an axes first; `[caz, cel] = view(...)`
-    sets and returns the angles, one output being caz.
+    sets and returns the angles. One output (or `view` alone) is refused:
+    the documentation gives only `[caz, cel]`.
 - **The interactive 3-D view:** in the notebook and Jupyter, a figure with
   one 3-D axes is also sent as a scene (the 3-D mime type of Sage's
   `plot3d`, lib/sage_plot3d.py), and web/viewer3d.js shows it in WebGL
@@ -361,11 +362,22 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - surfaces are unlit quadrilaterals colored as in the SVG, under their
     edges (drawn with a polygon offset so they stay visible);
   - other figures are the SVG alone: several axes, a `sgtitle`, a legend,
-    patches or other objects in the 3-D axes, or a surface over 250,000
-    vertices.
-- **The figure's background** is its `Color` (white by default, as
-  MATLAB's), behind the axes and the text, in the SVG too. Text is
-  MATLAB's dark gray rather than the page's color.
+    patches or other objects in the 3-D axes, or a scene too big: over
+    250,000 vertices given, over a million drawn (counted as the viewer
+    counts them: lines 1.4 wide and wider are tubes of 36 vertices a
+    segment), or beyond the viewer's limits on text and ticks;
+  - the viewer checks every scene before building anything from it (a
+    saved document's scene is untrusted): its form, finite numbers,
+    indices in range, and limits on what it would draw after expansion
+    (web/viewer3d.js's `checkScene` and `LIMITS`). A scene it refuses
+    stays the static picture, with a line saying why.
+- **The figure's background** is its `Color`, behind the axes and the
+  text, in the SVG too. Unless set it is white: Sagebrush's choice (MATLAB
+  documents [0.94 0.94 0.94] as the default, and [0.9608 0.9608 0.9608]
+  in the light theme from R2025a). Text and axis lines are the documented
+  default axis color, [0.15 0.15 0.15], rather than the page's color: the
+  SVG's root sets `color`, which the shim's `currentColor` paints take, so
+  the text itself is never rewritten. Legends have a white box.
 - **Contours:** contour lines come from marching squares (saddle cells are
   split by the centre's value), oriented with the higher values on the left
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`

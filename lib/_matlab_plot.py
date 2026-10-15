@@ -2249,7 +2249,7 @@ _FUNCS["yline"] = _constline("y")
 @_fn("view")
 def view_(nargout, args):
     """view(az, el), view(v) ([az el], or [x y z] toward the camera), view(2),
-    view(3), view(ax, ...); [caz, cel] = view(...): the angles (one output: caz)"""
+    view(3), view(ax, ...); [caz, cel] = view(...): the angles"""
     args = list(args)
     ax = args.pop(0) if args and isinstance(args[0], Axes) else gca()
     if args:
@@ -2281,7 +2281,9 @@ def view_(nargout, args):
     if nargout >= 2:
         return [v[0], v[1]]
     if nargout == 1 or not args:
-        return v[0]
+        # (the documented outputs are [caz, cel]; one output is another
+        # contract, not implemented)
+        raise _m._err("view: one output is not supported; use [caz, cel] = view.")
 
 
 @_fn("set")
@@ -3483,26 +3485,52 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
 
 # ------------------------------------------------------------------ the figure as shown: SVG, and a 3-D scene
 
-# MATLAB's text and axis lines: dark gray on the figure's own color, whatever
-# the page's theme (the shim draws them in the page's color, currentColor)
+# the text and axis lines: dark gray, the documented default of the axes'
+# XColor, YColor and ZColor ([0.15 0.15 0.15]), on the figure's own color,
+# whatever the page's theme
 _INK = "#262626"
 
 
 def figure_svg(fig, mfig=None):
-    """fig's SVG as MATLAB shows it: the figure's Color behind it (white by
-    default), the text and axis lines in MATLAB's dark gray"""
+    """fig's SVG on the figure's Color (white unless set: Sagebrush's choice;
+    MATLAB documents another default), its text and axis lines in _INK.  The
+    shim paints them currentColor: the root's color says which, so the text
+    itself is left as it is; legends get a white box, not the page's"""
     svg = (mfig or render(fig))._svg()
     bg = _rgbof(fig.props.get("Color", _m.Char("w")))
     i = svg.find("<svg")
     j = svg.find(">", i) if i >= 0 else -1
-    if j > 0 and bg is not None:
-        svg = svg[:j + 1] + '<rect width="100%%" height="100%%" fill="%s"/>' % _hex(bg) + svg[j + 1:]
-    return svg.replace("currentColor", _INK)
+    if j < 0:
+        return svg
+    # (the root tag's attribute values are escaped: ' style="' is its own)
+    tag, style = svg[i:j], "color:%s;--sb-legend-bg:#ffffff" % _INK
+    tag = tag.replace(' style="', ' style="%s;' % style, 1) if ' style="' in tag else tag + ' style="%s"' % style
+    rect = '<rect width="100%%" height="100%%" fill="%s"/>' % _hex(bg) if bg is not None else ""
+    return svg[:i] + tag + ">" + rect + svg[j + 1:]
 
 
 # a scene of more vertices than this is shown as its SVG only (the interactive
-# view's data would be too big for a notebook's output)
+# view's data would be too big for a notebook's output); nor one that draws
+# more than _SCENE_MAX_DRAWN vertices, counted as the viewer counts them
+# (web/viewer3d.js's LIMITS, which are twice these: lines 1.4 wide and wider
+# are tubes, 36 vertices a segment), or has more than _SCENE_MAX_OBJECTS objects
 _SCENE_MAX_VERTICES = 250000
+_SCENE_MAX_DRAWN = 1000000
+_SCENE_MAX_OBJECTS = 10000
+
+
+def _scene_drawn(objs):
+    """the vertices the viewer draws for these version 1 objects"""
+    n = 0
+    for o in objs:
+        if o["type"] == "mesh":
+            n += len(o["idx"])
+        elif o["type"] == "lines":
+            segs = len(o["pos"]) // 6
+            n += 36 * segs if o.get("width", 1) >= 1.4 else 2 * segs
+        elif o["type"] == "points":
+            n += len(o["pos"]) // 3
+    return n
 
 
 def _r5(v):
@@ -3540,7 +3568,7 @@ def _scene_surface(c, cmap, clim, objs, budget):
     efix = None if emode in ("flat", "interp", "none") else _hex(_rgbof(ec))
 
     def ok(i, j):
-        return all(v == v for v in (GX[i][j], GY[i][j], z[i][j]))
+        return all(math.isfinite(v) for v in (GX[i][j], GY[i][j], z[i][j]))
 
     def rgb(v):
         k = _cindex(v, lo, hi, len(pal))
@@ -3601,13 +3629,13 @@ def _scene_line(c, objs):
     if _m._text(c.props["LineStyle"]) != "none":
         pos = []
         for a, b in zip(pts, pts[1:]):
-            if all(v == v for v in a + b):
+            if all(math.isfinite(v) for v in a + b):
                 pos.extend(_r5(v) for v in a + b)
         if pos:
             objs.append({"type": "lines", "pos": pos, "color": col, "width": float(_f(c.props["LineWidth"]))})
     mk = _m._text(c.props["Marker"])
     if mk not in ("none", ""):
-        pos = [_r5(v) for p in pts if all(t == t for t in p) for v in p]
+        pos = [_r5(v) for p in pts if all(math.isfinite(t) for t in p) for v in p]
         if pos:
             fill = c.props["MarkerFaceColor"]
             fc = _rgbof(fill)
@@ -3634,7 +3662,7 @@ def _scene_scatter(c, cmap, clim, objs):
     groups = {}
     for k in range(n):
         p = (xs[k], ys[k], zs[k])
-        if cols[k] is None or not all(t == t for t in p):
+        if cols[k] is None or not all(math.isfinite(t) for t in p):
             continue
         s_ = sz[k] if len(sz) == n else sz[0]
         groups.setdefault((cols[k], s_), []).extend(_r5(v) for v in p)
@@ -3646,7 +3674,7 @@ def _scene_stem(c, objs):
     col = _hex(_rgbof(c.props["Color"]) or COLOR_ORDER[0])
     pos, tips = [], []
     for x, y, z in zip(_vec(c.props["XData"]), _vec(c.props["YData"]), _vec(c.props["ZData"])):
-        if x == x and y == y and z == z:
+        if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
             pos.extend([x, y, 0.0, x, y, z])
             tips.extend([x, y, z])
     if pos:
@@ -3686,12 +3714,14 @@ def figure_scene(fig):
             _scene_scatter(c, cmap, clim, objs)
         elif isinstance(c, Text):
             p = _vec(c.props["Position"]) + [0.0, 0.0, 0.0]
+            if not all(math.isfinite(v) for v in p[:3]):
+                continue
             objs.append({"type": "text", "pos": p[:3], "text": _text_value(c.props["String"]),
                          "color": _hex(_rgbof(c.props["Color"]) or (0, 0, 0))})
         else:
             return None
     n_vert = sum(len(o["pos"]) // 3 for o in objs)
-    if n_vert > _SCENE_MAX_VERTICES:
+    if n_vert > _SCENE_MAX_VERTICES or _scene_drawn(objs) > _SCENE_MAX_DRAWN or len(objs) > _SCENE_MAX_OBJECTS:
         return None
     lo = [l[0] for l in proj.lim]
     hi = [l[1] for l in proj.lim]
@@ -3718,7 +3748,26 @@ def figure_scene(fig):
         for k, r in enumerate(M):
             cm.extend([k / max(1, len(M) - 1), float(r[0]), float(r[1]), float(r[2])])
         scene["colorbar"] = {"color_map": cm, "range": [clim[0], clim[1]]}
-    return scene
+    return scene if _scene_within(scene) else None
+
+
+def _scene_within(scene):
+    """whether the viewer would take the scene (web/viewer3d.js's checkScene:
+    its LIMITS on text and ticks, and positions near the box)"""
+    texts = [scene["title"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
+    if any(len(t) > 2000 for t in texts) or len(texts) - 4 > 2000:
+        return False
+    box = scene["box"]
+    if any(len(t) > 100 for t in box["ticks"]) or any(len(s) > 200 for t in box["ticklabels"] for s in t):
+        return False
+    if not all(math.isfinite(v) for v in scene["lo"] + scene["hi"] + scene["scale"] + [scene["azimuth"]]):
+        return False
+    mid = [(a + b) / 2 for a, b in zip(scene["lo"], scene["hi"])]
+    for o in scene["objects"]:
+        p = o["pos"]
+        if any(abs((p[i] - mid[i % 3]) * scene["scale"][i % 3]) > 1e6 for i in range(len(p))):
+            return False
+    return True
 
 
 class FigureView:

@@ -23,6 +23,11 @@
 // follows the view) and tick labels at the given values.  Version 1 meshes
 // may be lit: false (their colors as given) and offset: true (pushed back,
 // so that lines drawn on them, such as a surface's edges, stay visible).
+//
+// A scene is untrusted (a saved document's): mount checks it first
+// (checkScene: its form, finite numbers, indices in range, and LIMITS on
+// what would be drawn, counted after expansion) and otherwise keeps the
+// static picture, saying why.
 (function () {
   "use strict";
   if (typeof window === "undefined" || window.SagebrushViewer3d) return;
@@ -101,6 +106,8 @@
   }
   const f32 = (s) => new Float32Array(b64(s).buffer);
   const u32 = (s) => new Uint32Array(b64(s).buffer);
+  // an object's base64 array: as the check decoded it, else decoded now
+  const arr = (o, k, dec) => decoded.get(o)?.[k] ?? dec(o[k]);
 
   // a color map [t, r, g, b, ...] as a 256-entry table (RGB floats)
   function cmapTable(cm) {
@@ -119,13 +126,13 @@
   function vertexColors(o, n) {
     const col = new Float32Array(3 * n);
     if (o.attribute && o.color_map) {
-      const a = f32(o.attribute), tab = cmapTable(o.color_map), [lo, hi] = o.color_range, s = hi > lo ? 255 / (hi - lo) : 0;
+      const a = arr(o, "attribute", f32), tab = cmapTable(o.color_map), [lo, hi] = o.color_range, s = hi > lo ? 255 / (hi - lo) : 0;
       for (let i = 0; i < n; i++) {
         const k = Math.max(0, Math.min(255, Math.round((a[i] - lo) * s))) * 3;
         col[3 * i] = tab[k]; col[3 * i + 1] = tab[k + 1]; col[3 * i + 2] = tab[k + 2];
       }
     } else if (o.colors) {
-      const c = u32(o.colors);
+      const c = arr(o, "colors", u32);
       for (let i = 0; i < n; i++) {
         const v = c[Math.min(i, c.length - 1)];
         col[3 * i] = ((v >> 16) & 255) / 255; col[3 * i + 1] = ((v >> 8) & 255) / 255; col[3 * i + 2] = (v & 255) / 255;
@@ -183,7 +190,7 @@
       } else if (o.type === "text") texts.push({ at: D(o.pos, 0), text: o.text, color: o.color });
       // ---- version 2 (k3d): binary arrays
       else if (o.type === "mesh2") {
-        const pos = toDisplay(f32(o.positions)), idx = u32(o.indices), n = pos.length / 3;
+        const pos = toDisplay(arr(o, "positions", f32)), idx = arr(o, "indices", u32), n = pos.length / 3;
         const col = vertexColors(o, n);
         let nor = null;
         if (!o.flat_shading) {
@@ -198,10 +205,10 @@
         }
         meshes.push({ pos, idx, col, nor, alpha: o.opacity ?? 1, side: o.side || "front", flat: !!o.flat_shading, wire: !!o.wireframe });
       } else if (o.type === "points2") {
-        const pos = toDisplay(f32(o.positions)), n = pos.length / 3;
+        const pos = toDisplay(arr(o, "positions", f32)), n = pos.length / 3;
         points.push({ pos, col: vertexColors(o, n), worldSize: (o.size || 1) * sc[0], shader: o.shader, alpha: o.opacity ?? 1 });
       } else if (o.type === "line2") {
-        const pos = toDisplay(f32(o.positions)), seg = u32(o.segments), n = pos.length / 3;
+        const pos = toDisplay(arr(o, "positions", f32)), seg = arr(o, "segments", u32), n = pos.length / 3;
         const col = vertexColors(o, n);
         const r = (o.width || 0.01) * sc[0] / 2;
         if (o.shader !== "simple" && seg.length / 2 <= 40000 && r * 400 > 1) {
@@ -220,7 +227,7 @@
           lines.push({ pos: lp, col: lc });
         }
       } else if (o.type === "marching_cubes") {
-        const m = marchingCubes(f32(o.field), o.shape, o.bounds, o.level, o.spacings);
+        const m = marchingCubes(arr(o, "field", f32), o.shape, o.bounds, o.level, decoded.get(o)?.spacings ?? o.spacings, budgets.get(scene));
         const pos = toDisplay(m.pos), idx = m.idx, n = pos.length / 3;
         const col = vertexColors(o, n);
         let nor = null;
@@ -237,7 +244,7 @@
         meshes.push({ pos, idx, col, nor, alpha: o.opacity ?? 1, side: "double", flat: !!o.flat_shading, wire: !!o.wireframe });
       } else if (o.type === "volume") {
         const b = o.bounds;
-        volumes.push({ data: b64(o.data), shape: o.shape, bmin: D([b[0], b[2], b[4]], 0), bmax: D([b[1], b[3], b[5]], 0), o });
+        volumes.push({ data: arr(o, "data", b64), shape: o.shape, bmin: D([b[0], b[2], b[4]], 0), bmax: D([b[1], b[3], b[5]], 0), o });
       } else if (o.type === "text2") {
         if (o.mode === "2d") texts2d.push(o);
         else texts.push({ at: D(o.position, 0), text: o.text, color: o.color, size: 12 * (o.size || 1) });
@@ -255,12 +262,12 @@
   // the cubes around its grid edge.  An uneven grid (k3d's spacings_x, ...:
   // the distances between consecutive samples along an axis) places the
   // samples within the same bounds.
-  function marchingCubes(F, shape, bounds, level, spacings) {
+  function marchingCubes(F, shape, bounds, level, spacings, budget) {
     const [nz, ny, nx] = shape;
     const at = (i, j, k) => F[(k * ny + j) * nx + i];
     const axis = (n, lo, hi, sp) => {
       const g = new Float64Array(n);
-      const d = sp ? f32(sp) : null;
+      const d = sp ? (typeof sp === "string" ? f32(sp) : sp) : null;
       if (d && d.length === n - 1) {
         let total = 0;
         for (const v of d) total += v;
@@ -334,7 +341,10 @@
         const ids = loop.map((e) => vertex(i, j, k, e));
         for (let q = 1; q + 1 < ids.length; q++) idx.push(ids[0], ids[q], ids[q + 1]);
       }
+      // (the scene's budget, spent as the surface grows: refused past it)
+      if (budget && (pos.length / 3 > budget.verts || idx.length > budget.idx)) throw new Refused("has an isosurface of more vertices than its budget");
     }
+    if (budget) { budget.verts -= pos.length / 3; budget.idx -= idx.length; }
     return { pos: new Float32Array(pos), idx: new Uint32Array(idx) };
   }
 
@@ -388,12 +398,275 @@
   // a scene's color: #rrggbb only (a scene's strings are data, never CSS)
   const sceneColor = (c) => (typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : null);
 
+  // ---- a scene is untrusted data (a saved document's, from anywhere): it
+  // is checked before anything is built from it, and refused (the static
+  // picture stays, saying why) unless it is well formed and within bounds.
+  // The bounds count what the view would draw, after expansion (a thick
+  // line's tubes, a wireframe's edges, an isosurface's triangles), not
+  // only what the scene holds.
+  const LIMITS = {
+    objects: 20000, // scene objects
+    vertices: 4e6, // vertices drawn, all objects, after expansion
+    plainVertices: 2e6, // of those, built in plain arrays (version 1 objects, tubes)
+    indices: 32e6, // indices drawn (meshes of version 2, wireframes twice)
+    binaryBytes: 256 * 2 ** 20, // decoded base64, all objects
+    field: 2 ** 24, // an isosurface's field values
+    voxels: 2 ** 25, // a volume's voxels (8 bits each)
+    side: 2048, // a field's or a volume's samples along an axis
+    volumes: 16,
+    texts: 2000, // text objects (each a label placed on every frame)
+    text: 2000, // characters in a title, a label or a text
+    description: 100000,
+    ticks: 100, // MATLAB axes' ticks per axis
+    tickLabel: 200,
+    colorMap: 1024, // color map stops (t, r, g, b)
+    opacityFunction: 1024, // opacity function points (t, a)
+    samples: 4096, // a volume's samples per ray (the shader's loop)
+  };
+  const decoded = new WeakMap(); // object -> its base64 arrays, decoded by the check
+  const budgets = new WeakMap(); // scene -> what is left for its isosurfaces
+  class Refused extends Error {}
+
+  // null if the scene may be shown, else why not
+  function checkScene(scene) {
+    try {
+      check(scene);
+      return null;
+    } catch (e) {
+      return e instanceof Refused ? e.message : "is malformed";
+    }
+  }
+  function check(scene) {
+    const no = (why) => { throw new Refused(why); };
+    const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    const num = (v) => typeof v === "number" && Number.isFinite(v);
+    const given = (v) => v !== undefined && v !== null;
+    const nums = (a, what, n) => {
+      if (!Array.isArray(a) || (n !== undefined && a.length !== n)) no("has a malformed " + what);
+      for (const v of a) if (!num(v)) no("has a malformed " + what);
+      return a;
+    };
+    const str = (v, max, what) => { if (typeof v !== "string" || v.length > max) no("has a malformed or too long " + what); };
+    const optStr = (v, max, what) => { if (given(v)) str(v, max, what); };
+    const color = (v, what) => { if (!sceneColor(v)) no("has a color that is not #rrggbb (" + what + ")"); };
+    const optColor = (v, what) => { if (given(v)) color(v, what); };
+    const bool = (v, what) => { if (given(v) && typeof v !== "boolean") no("has a malformed " + what); };
+    const within = (v, lo, hi, what) => { if (given(v) && !(num(v) && v >= lo && v <= hi)) no("has a malformed " + what); };
+    const oneOf = (v, set, what) => { if (given(v) && !set.includes(v)) no("has a malformed " + what); };
+    const cmap = (a, what) => {
+      nums(a, what);
+      if (a.length % 4 || a.length < 8 || a.length > 4 * LIMITS.colorMap) no("has a malformed " + what);
+    };
+    if (!isObj(scene)) no("is not a scene");
+    if (scene.version !== 1 && scene.version !== 2) no("has an unknown version");
+    const lo = nums(scene.lo, "box"), hi = nums(scene.hi, "box"), sc = nums(scene.scale, "box");
+    if (lo.length !== 3 || hi.length !== 3 || sc.length !== 3) no("has a malformed box");
+    // (display coordinates: the box within [-2, 2]^3; a flat box is allowed)
+    for (let i = 0; i < 3; i++) if (!(hi[i] >= lo[i] && sc[i] > 0 && (hi[i] - lo[i]) * sc[i] <= 4)) no("has a malformed box");
+    const mid = [0, 1, 2].map((i) => (lo[i] + hi[i]) / 2);
+    // positions: finite, and not absurdly far outside the box
+    const positions = (p, what) => {
+      if (p.length % 3) no("has a malformed " + what);
+      for (let i = 0; i < p.length; i++) {
+        const v = p[i];
+        if (!(typeof v === "number" && Math.abs((v - mid[i % 3]) * sc[i % 3]) <= 1e6)) no("has a position that is not finite or far outside the box (" + what + ")");
+      }
+      return p.length / 3;
+    };
+    for (const k of ["frame", "axes", "fill", "fit"]) bool(scene[k], k);
+    optStr(scene.title, LIMITS.text, "title");
+    optStr(scene.description, LIMITS.description, "description");
+    if (given(scene.labels)) {
+      if (!Array.isArray(scene.labels) || scene.labels.length > 3) no("has malformed labels");
+      for (const s of scene.labels) optStr(s, LIMITS.text, "label");
+    }
+    within(scene.azimuth, -1e6, 1e6, "azimuth");
+    within(scene.elevation, -1e6, 1e6, "elevation");
+    within(scene.camera_fov, 0, 180, "camera_fov");
+    oneOf(scene.projection, ["orthographic", "perspective"], "projection");
+    optColor(scene.background, "background");
+    optColor(scene.ink, "ink");
+    if (given(scene.box)) {
+      const b = scene.box;
+      if (!isObj(b) || !Array.isArray(b.ticks) || b.ticks.length !== 3) no("has malformed axes");
+      for (const t of b.ticks) { nums(t, "ticks"); if (t.length > LIMITS.ticks) no("has too many ticks"); }
+      if (given(b.ticklabels)) {
+        if (!Array.isArray(b.ticklabels) || b.ticklabels.length !== 3) no("has malformed tick labels");
+        for (const t of b.ticklabels) {
+          if (!Array.isArray(t) || t.length > LIMITS.ticks) no("has malformed tick labels");
+          for (const s of t) str(s, LIMITS.tickLabel, "tick label");
+        }
+      }
+      if (b.grid !== false) optColor(b.grid, "grid");
+    }
+    if (given(scene.colorbar)) {
+      const cb = scene.colorbar;
+      if (!isObj(cb)) no("has a malformed colorbar");
+      if (given(cb.color_map)) { cmap(cb.color_map, "colorbar"); nums(cb.range, "colorbar", 2); }
+    }
+    if (!Array.isArray(scene.objects) || scene.objects.length > LIMITS.objects) no("has malformed or too many objects");
+
+    let bytes = 0, verts = 0, plain = 0, idxs = 0, texts = 0, vols = 0;
+    const spend = (n, inPlainArrays) => {
+      verts += n;
+      if (inPlainArrays) plain += n;
+      if (verts > LIMITS.vertices || plain > LIMITS.plainVertices) no("has more than " + (plain > LIMITS.plainVertices ? LIMITS.plainVertices : LIMITS.vertices) + " vertices to draw");
+    };
+    const spendIdx = (n) => { idxs += n; if (idxs > LIMITS.indices) no("has more than " + LIMITS.indices + " indices to draw"); };
+    // a base64 array, decoded once (and kept for build)
+    const bin = (o, k, Type) => {
+      const s = o[k];
+      if (typeof s !== "string" || s.length % 4) no("has a malformed " + k);
+      bytes += (s.length / 4) * 3;
+      if (bytes > LIMITS.binaryBytes) no("has more than " + LIMITS.binaryBytes / 2 ** 20 + " MB of data");
+      const u = b64(s);
+      if (u.length % Type.BYTES_PER_ELEMENT) no("has a malformed " + k);
+      const a = new Type(u.buffer, 0, u.length / Type.BYTES_PER_ELEMENT);
+      if (!decoded.has(o)) decoded.set(o, {});
+      decoded.get(o)[k] = a;
+      return a;
+    };
+    const finiteArray = (a, what) => { for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) no("has a value that is not finite (" + what + ")"); };
+    const indicesBelow = (a, n, what) => { for (let i = 0; i < a.length; i++) if (a[i] >= n) no("has an index out of range (" + what + ")"); };
+    const shape3 = (s, max, what) => {
+      if (!Array.isArray(s) || s.length !== 3 || !s.every((d) => Number.isInteger(d) && d >= 1 && d <= LIMITS.side)) no("has a malformed " + what + " shape");
+      const n = s[0] * s[1] * s[2];
+      if (n > max) no("has a " + what + " of more than " + max + " values");
+      return n;
+    };
+    // per-vertex colors of version 2: colors, or an attribute through a color map
+    const colors2 = (o, n) => {
+      if (given(o.attribute) && given(o.color_map)) {
+        const a = bin(o, "attribute", Float32Array);
+        if (a.length !== n) no("has a malformed attribute");
+        finiteArray(a, "attribute");
+        cmap(o.color_map, "color map");
+        nums(o.color_range, "color range", 2);
+      } else if (given(o.colors)) {
+        if (bin(o, "colors", Uint32Array).length < 1) no("has malformed colors");
+      }
+    };
+    const mcs = [];
+    for (const o of scene.objects) {
+      if (!isObj(o)) no("has a malformed object");
+      within(o.opacity, 0, 1, "opacity");
+      if (o.type === "mesh") {
+        nums(o.pos, "mesh");
+        const nv = positions(o.pos, "mesh");
+        if (!Array.isArray(o.idx) || o.idx.length % 3) no("has a malformed mesh");
+        for (const v of o.idx) if (!(Number.isInteger(v) && v >= 0 && v < nv)) no("has an index out of range (mesh)");
+        color(o.color, "mesh");
+        if (given(o.colors)) {
+          if (!Array.isArray(o.colors) || o.colors.length !== o.pos.length) no("has malformed mesh colors");
+          for (const v of o.colors) if (!(Number.isInteger(v) && v >= 0 && v <= 255)) no("has malformed mesh colors");
+        }
+        for (const k of ["flat", "lit", "offset"]) bool(o[k], k);
+        spend(o.idx.length, true);
+      } else if (o.type === "lines") {
+        nums(o.pos, "line");
+        positions(o.pos, "line");
+        if (o.pos.length % 6) no("has a malformed line");
+        color(o.color, "line");
+        within(o.width, 0, 1000, "line width");
+        const segs = o.pos.length / 6;
+        // (as build: 1.4 and wider are tubes, 36 vertices a segment)
+        spend((o.width ?? 1) >= 1.4 ? 36 * segs : 2 * segs, true);
+      } else if (o.type === "points") {
+        nums(o.pos, "points");
+        spend(positions(o.pos, "points"), true);
+        color(o.color, "points");
+        within(o.size, 0, 1e4, "point size");
+      } else if (o.type === "text") {
+        nums(o.pos, "text", 3);
+        positions(o.pos, "text");
+        str(o.text, LIMITS.text, "text");
+        optColor(o.color, "text");
+        if (++texts > LIMITS.texts) no("has more than " + LIMITS.texts + " texts");
+      } else if (o.type === "mesh2") {
+        const p = bin(o, "positions", Float32Array), n = positions(p, "mesh");
+        const idx = bin(o, "indices", Uint32Array);
+        if (idx.length % 3) no("has a malformed mesh");
+        indicesBelow(idx, n, "mesh");
+        color(o.color, "mesh");
+        oneOf(o.side, ["front", "back", "double"], "side");
+        bool(o.wireframe, "wireframe");
+        bool(o.flat_shading, "flat_shading");
+        colors2(o, n);
+        spend(n, false);
+        spendIdx(idx.length * (o.wireframe ? 3 : 1));
+      } else if (o.type === "points2") {
+        const n = positions(bin(o, "positions", Float32Array), "points");
+        color(o.color, "points");
+        within(o.size, 0, 1e6, "point size");
+        optStr(o.shader, 32, "shader");
+        colors2(o, n);
+        spend(n, false);
+      } else if (o.type === "line2") {
+        const n = positions(bin(o, "positions", Float32Array), "line");
+        const seg = bin(o, "segments", Uint32Array);
+        if (seg.length % 2) no("has a malformed line");
+        indicesBelow(seg, n, "line");
+        color(o.color, "line");
+        within(o.width, 0, 1e6, "line width");
+        optStr(o.shader, 32, "shader");
+        colors2(o, n);
+        // (as build: tubes, 36 vertices a segment, or plain segments)
+        const r = (o.width || 0.01) * sc[0] / 2, segs = seg.length / 2;
+        const tube = o.shader !== "simple" && segs <= 40000 && r * 400 > 1;
+        spend(tube ? 36 * segs : 2 * segs, tube);
+      } else if (o.type === "marching_cubes") {
+        const n = shape3(o.shape, LIMITS.field, "field");
+        const f = bin(o, "field", Float32Array);
+        if (f.length !== n) no("has a malformed field");
+        finiteArray(f, "field");
+        nums(o.bounds, "field bounds", 6);
+        if (!num(o.level)) no("has a malformed level");
+        if (given(o.spacings)) {
+          if (!Array.isArray(o.spacings) || o.spacings.length !== 3) no("has malformed spacings");
+          const sp = o.spacings.map((s, i) => {
+            if (!given(s)) return null;
+            const a = bin({ s }, "s", Float32Array);
+            for (const v of a) if (!(Number.isFinite(v) && v > 0)) no("has malformed spacings");
+            return a;
+          });
+          if (!decoded.has(o)) decoded.set(o, {});
+          decoded.get(o).spacings = sp;
+        }
+        color(o.color, "isosurface");
+        bool(o.wireframe, "wireframe");
+        bool(o.flat_shading, "flat_shading");
+        mcs.push(o);
+      } else if (o.type === "volume") {
+        if (++vols > LIMITS.volumes) no("has more than " + LIMITS.volumes + " volumes");
+        const n = shape3(o.shape, LIMITS.voxels, "volume");
+        if (bin(o, "data", Uint8Array).length !== n) no("has a malformed volume");
+        nums(o.bounds, "volume bounds", 6);
+        cmap(o.color_map, "color map");
+        const of = nums(o.opacity_function, "opacity function");
+        if (of.length % 2 || of.length < 2 || of.length > 2 * LIMITS.opacityFunction) no("has a malformed opacity function");
+        if (given(o.color_range)) nums(o.color_range, "color range", 2);
+        within(o.samples, 1, LIMITS.samples, "samples");
+        within(o.alpha_coef, 0, 1e6, "alpha_coef");
+        bool(o.interpolation, "interpolation");
+      } else if (o.type === "text2") {
+        str(o.text, LIMITS.text, "text");
+        oneOf(o.mode, ["2d", "3d"], "text mode");
+        nums(o.position, "text position");
+        if (o.position.length !== 3 && !(o.mode === "2d" && o.position.length === 2)) no("has a malformed text position");
+        if (o.mode !== "2d") positions(o.position, "text");
+        optColor(o.color, "text");
+        within(o.size, 0, 100, "text size");
+        if (++texts > LIMITS.texts) no("has more than " + LIMITS.texts + " texts");
+      } else no("has an object of an unknown type");
+    }
+    // isosurfaces: what is left of the budgets, spent as they are built
+    budgets.set(scene, { verts: LIMITS.vertices - verts, idx: LIMITS.indices - idxs });
+  }
+
   function mount(container, scene) {
     if (!container || !scene) return false;
     const fallback = container.querySelector("svg");
-    const canvas = document.createElement("canvas");
-    const opts = { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true };
-    // (no WebGL: the static picture stays, saying why, not silently)
+    // (no WebGL, or a scene refused: the static picture stays, saying why, not silently)
     const explain = (why) => {
       if (container.querySelector(".sb3d-why")) return false;
       const p = document.createElement("p");
@@ -403,6 +676,11 @@
       container.appendChild(p);
       return false;
     };
+    const refused = (why) => explain("This is a still picture: the interactive 3D view was not shown, because the scene " + why + ".");
+    const bad = checkScene(scene);
+    if (bad) return refused(bad);
+    const canvas = document.createElement("canvas");
+    const opts = { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true };
     let gl = canvas.getContext("webgl2", opts);
     const gl2 = !!gl;
     if (!gl) gl = canvas.getContext("webgl", opts);
@@ -411,7 +689,13 @@
     const deriv = gl2 || !!gl.getExtension("OES_standard_derivatives");
     const prog = program(gl, gl2, deriv);
     if (!prog) return explain("This is a still picture: the interactive 3D view could not start on this browser's graphics (its shaders did not compile).");
-    const geo = build(scene);
+    let geo;
+    try {
+      geo = build(scene);
+    } catch (e) {
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      return refused(e instanceof Refused ? e.message : "is malformed");
+    }
     const buf = (data, target = gl.ARRAY_BUFFER) => {
       const b = gl.createBuffer();
       gl.bindBuffer(target, b);
@@ -1196,5 +1480,5 @@
       samples: u("samples"), alphaCoef: u("alphaCoef"), vol: u("vol"), lut: u("lut") };
   }
 
-  window.SagebrushViewer3d = { mount, marchingCubes };
+  window.SagebrushViewer3d = { mount, marchingCubes, checkScene, LIMITS };
 })();
