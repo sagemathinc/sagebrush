@@ -417,10 +417,13 @@ fn pollard_brent(n: u64, budget: &mut u64) -> Option<u64> {
         let (mut x, mut ys) = (y, y);
         while g == 1 {
             x = y;
+            // the steps are debited before they are taken, and checked one
+            // by one: r doubles, up to about 2^20 (daybreak HARD-FE6-2)
+            *budget = budget.checked_sub(r)?;
             for _ in 0..r {
+                sagebrush_interrupt::check();
                 y = f(y);
             }
-            *budget = budget.checked_sub(r)?;
             let mut k = 0;
             while k < r && g == 1 {
                 sagebrush_interrupt::check();
@@ -442,8 +445,9 @@ fn pollard_brent(n: u64, budget: &mut u64) -> Option<u64> {
         if g == n {
             // backtrack from ys one step at a time
             loop {
-                ys = f(ys);
+                sagebrush_interrupt::check();
                 *budget = budget.checked_sub(1)?;
+                ys = f(ys);
                 g = gcd_u64(x.abs_diff(ys), n);
                 if g > 1 {
                     break;
