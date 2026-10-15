@@ -44,5 +44,21 @@ t('exact functions', lambda: [r.exact_rational() for r in [exp(RR(1000)), exp(RR
 t('exact n', lambda: [r.exact_rational() for r in [n(exp(1000)), n(pi^-700), (QQ(1)/3^700).n(), n(10^-400 * pi), n(2^-1074), n(10^400)]])
 t('exact arithmetic', lambda: [r.exact_rational() for r in [B * 3, B / 7, B + RR(10)^399, RR(1e300) * RR(1e300) / 3, (m / 3) * 5, S * 3 / 7, RR(1e-320) / 7]])
 t('limits', lambda: [RR(10)^(10^18), RR(2)^(2^62), RR(2)^(-2^62), RR('1e1000000000'), RR('-2.5e-1000000000'), RealField(100)('1.5e123456'), n(exp(10^9)), n(2^(10^9)), log(RR(10)^(10^15)), sin(RR(10)^1000), gamma(RR(10)^20), B^B, exp(-B)])
+# review of d53e591 (CORR-D53-1..6): a literal on the left, the 2^-1022
+# boundary, literal digits, huge real exponents, a decimal exponent whose
+# power of ten alone underflows, float methods, CC comparisons, and a power
+# whose rounding needs about 2p extra bits
+s0 = RR('1e-320')
+t('literal operands', lambda: [1e308*s0, s0*1e308, RR(1e308)*s0, 1e-20/s0, RR(1e-20)/s0, 1e-310*RR(2)^-1100, (1e308*s0).exact_rational() == (RR(1e308)*s0).exact_rational()])
+q0 = (2^53-1)/2^1075
+t('below the least normal', lambda: [RR(q0).exact_rational() == q0, RR(RealField(100)(q0)).exact_rational() == q0, RR(2)^-1022 * (1 - RR(2)^-53) == RR(q0), RR(-q0).exact_rational() == -q0])
+t('literal digits', lambda: [RealField(100)(1e400) == RealField(100)('1e400'), RealField(100)(1e-400) == RealField(100)('1e-400'), RealField(100)(1e-320) == RealField(100)('1e-320'), RealField(100)(-1e400) == RealField(100)('-1e400'), RealField(100)(RR('1e400')) == RealField(100)('1e400')])
+t('huge real exponents', lambda: [RR(2)^RR('1e308'), RealField(100)(2)^RealField(100)('1e308'), RealField(100)(2)^RealField(100)('-1e308'), RR(0.5)^RR('1e308')])
+E0 = 1388255822130839400
+t('decimal exponent boundary', lambda: [(RealField(p)('1' + '0'*200 + 'e-' + str(E0)) == RealField(p)('1e-' + str(E0 - 200)), RealField(p)('1e-' + str(E0 - 200))) for p in (53, 100)])
+T0, B0 = RR(2)^-1100, RR(2)^1100
+t('float methods and CC', lambda: [T0.conjugate(), T0.as_integer_ratio() == (1, 2^1100), T0 == CC(0), CC(0) == T0, B0 == CC(float('inf')), CC(float('inf')) == B0, T0 != CC(0), (-B0).log(), (-B0).log(2)])
+p0 = 8192; R0 = RealField(p0); u0 = R0(2)^(1-p0); x0 = R0(1) + 3*u0
+t('power midpoint', lambda: [x0^R0(0.5) == x0.sqrt(), int((x0^R0(0.5) - 1)/u0), RealField(100, rnd='RNDU')(4)^RealField(100)(0.5), RealField(100, rnd='RNDU')(2).log(8)])
 t('sum and product', lambda: [sum([RR(1e308)] * 4), prod([RR(1e100)] * 5), sum([S] * 3)])
 t('numpy-free floats', lambda: [float(RR(1e308) * 10) == float('inf'), float(RR(1e-320)) == 1e-320])

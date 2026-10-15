@@ -605,7 +605,7 @@ class Expression:
         re, im = float(re), float(im)
         if im == 0:
             from _sage_lang import RealNumber
-            if re == re and not _NORMAL_MIN <= abs(re) < _INF:
+            if re == re and not _NORMAL_MIN < abs(re) < _INF:
                 # an infinity, a zero or a subnormal double: RR's value may
                 # be past the doubles (n(exp(1000))), so the expression is
                 # evaluated in the 53-bit MP field, operation by operation as
@@ -2492,7 +2492,7 @@ def _rr_exact(r, fl):
     NaN, or an argument is a zero, an infinity or NaN (where the functions
     are exact).  Otherwise (an overflow, an underflow, a subnormal value)
     RR's value is past the doubles."""
-    return r != r or _NORMAL_MIN <= abs(r) < _INF or any(t == 0 or t != t or t in (_INF, -_INF) for t in fl)
+    return r != r or _NORMAL_MIN < abs(r) < _INF or any(t == 0 or t != t or t in (_INF, -_INF) for t in fl)
 
 
 _NORMAL_MIN, _INF = 2.2250738585072014e-308, float("inf")
@@ -2639,7 +2639,7 @@ def _special_function(name, nargs=(1,)):
                 v = _special_value(name, fl)
             except _Keep:
                 v = None
-            if rr and type(v) is float and not _NORMAL_MIN <= abs(v) < _INF and not _rr_special_exact(name, v, fl):
+            if rr and type(v) is float and not _NORMAL_MIN < abs(v) < _INF and not _rr_special_exact(name, v, fl):
                 return _rr_special(name, args)
             if v is _UnsignedInfinity:
                 return Expression("cu")

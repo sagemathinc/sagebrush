@@ -205,6 +205,18 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: the sine and cosine of a number of magnitude 2^3321929 (above 2^65536) are not available in sagebrush yet
+        sage: RR(2)^1100 // 3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: // and divmod with an RR element past the doubles are not available in sagebrush yet
+        sage: (-RR(2)^2200)^RR(0.5)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: -1.84497489401773e662^0.500000000000000: a negative real to a non-integer power is complex, and CC holds doubles; this one, past the double range, is not available in sagebrush yet
+        sage: CC(1, 1) * RR(2)^1100  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: CC arithmetic with 1.35829852904939e331, an element of RR past the double range, is not available in sagebrush yet (CC holds doubles)
     """
 
     __slots__ = ()
@@ -223,7 +235,7 @@ class RealNumber(float):
             # a literal keeps its decimal digits, for exact conversion into
             # higher precision: RealField(100)(0.1) = 0.1000...0
             f = float(x)
-            if not _NORMAL_MIN <= abs(f) < _INF:
+            if not _NORMAL_MIN < abs(f) < _INF:
                 b = _rr_literal_edge(x, f)
                 if b is not None:
                     return b
@@ -239,7 +251,7 @@ class RealNumber(float):
                 f = float(x)
             except OverflowError:
                 f = None
-            if f is None or (not _NORMAL_MIN <= abs(f) < _INF and x != 0):
+            if f is None or (not _NORMAL_MIN < abs(f) < _INF and x != 0):
                 return _RealField()(x)
             x = f
         return float.__new__(cls, x)
@@ -278,14 +290,29 @@ class RealNumber(float):
         # (closure constants and float.__new__: this is every operation)
         lo, inf, new = _NORMAL_MIN, _INF, float.__new__
         def g(self, *a):
+            # (an operand held in the MP field has a lossy backing double:
+            # 1e308 * RR('1e-320'), a literal on the left, reaches here)
+            if a and isinstance(a[0], _RealBig):
+                return _rr_slow(name, self, a)
             try:
                 r = f(float(self), *a)
             except OverflowError:
                 return _rr_edge(name, self, a, None)
             if type(r) is float or isinstance(r, float):
-                if lo <= r < inf or -inf < r <= -lo:
+                # (strictly above 2^-1022: a result rounded up to it from
+                # below may be a 53-bit RR number that the double lost)
+                if lo < r < inf or -inf < r < -lo:
                     return new(RealNumber, r)
                 return _rr_edge(name, self, a, r)
+            if type(r) is complex and r == r and not (-inf < r.real < inf and -inf < r.imag < inf) \
+                    and -inf < float(self) < inf and -inf < float(a[0]) < inf:
+                # (a negative base to a real power: CC holds doubles, so a
+                # complex value past them is refused, not an infinity)
+                raise NotImplementedError("%s ** %s: a complex number past the double range is not available in sagebrush yet" % (self, a[0]))
+            if type(r) is complex:
+                # (a negative base to a real power: an element of CC)
+                import _sage_matrix
+                return _sage_matrix.ComplexNumber(r)
             return r
         g.__name__ = name
         return g
@@ -678,6 +705,11 @@ class _RealBig(RealNumber):
     (Its examples are in RealNumber's docstring.)
     """
 
+    def __new__(cls, x=0.0):
+        # (type(B)(1): an element of RR made from x, never an _RealBig
+        # without its value; _rr_from_mp makes these with float.__new__)
+        return _RealField()(x)
+
     def __repr__(self):
         return repr(self._mp)
 
@@ -691,6 +723,50 @@ class _RealBig(RealNumber):
 
     # (Sage hashes RR elements by their float, as RealNumber does here)
     __hash__ = RealNumber.__hash__
+
+    # the digits of a decimal literal past the doubles (1e400), for exact
+    # conversion into a higher precision, as Sage's RealLiteral; None for a
+    # computed value
+    _lit = None
+
+    # float's methods that would act on the backing double (0.0, inf, a
+    # subnormal) instead of the value: the value's, or an explicit refusal.
+    # (float(), complex(), math and NumPy conversions round to a double,
+    # as intended.)
+    @property
+    def real(self):
+        return self
+
+    @property
+    def imag(self):
+        return RealNumber(0.0)
+
+    def conjugate(self):
+        return self
+
+    def as_integer_ratio(self):
+        q = self._mp.exact_rational()
+        return int(q.numerator()), int(q.denominator())
+
+    def hex(self):
+        raise NotImplementedError("hex() of an RR element past the doubles is not available in sagebrush yet")
+
+    def __floordiv__(self, o):
+        raise NotImplementedError("// and divmod with an RR element past the doubles are not available in sagebrush yet")
+
+    __rfloordiv__ = __divmod__ = __rdivmod__ = __floordiv__
+
+    def __reduce__(self):
+        return (_rr_from_mp, (self._mp,))
+
+    def __reduce_ex__(self, protocol):
+        return self.__reduce__()
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
 
     def __bool__(self):
         return True
@@ -715,6 +791,11 @@ class _RealBig(RealNumber):
         def g(self, o):
             m = _rr_operand(o)
             if m is None:
+                if isinstance(o, complex) and op in ("__eq__", "__ne__"):
+                    # (CC(0) == RR(2)^-1100 is False: by value, not by the
+                    # double)
+                    eq = o.imag == 0 and self._mp == _rr_mp()(o.real)
+                    return eq if op == "__eq__" else not eq
                 return NotImplemented
             return getattr(self._mp, op)(m)
         g.__name__ = op
@@ -732,6 +813,8 @@ class _RealBig(RealNumber):
         def g(self, o):
             m = _rr_operand(o)
             if m is None:
+                if isinstance(o, complex):
+                    raise NotImplementedError("%s with an RR element past the doubles and a complex number is not available in sagebrush yet (CC holds doubles)" % op)
                 return NotImplemented
             return _rr_from_mp(_rr_arith(m, self._mp, op) if rev else _rr_arith(self._mp, m, op))
         return g
@@ -748,11 +831,19 @@ class _RealBig(RealNumber):
         if isinstance(o, int) or type(o).__name__ == "Integer" or (isinstance(o, _Fraction) and o.denominator == 1):
             return _rr_from_mp(self._mp ** int(o))
         m = _rr_operand(o)
-        return NotImplemented if m is None else _rr_from_mp(self._mp ** m)
+        if m is None:
+            if isinstance(o, complex):
+                raise NotImplementedError("** with an RR element past the doubles and a complex number is not available in sagebrush yet (CC holds doubles)")
+            return NotImplemented
+        return _rr_real_pow(self._mp, m)
 
     def __rpow__(self, o):
         m = _rr_operand(o)
-        return NotImplemented if m is None else _rr_from_mp(m ** self._mp)
+        if m is None:
+            if isinstance(o, complex):
+                raise NotImplementedError("** with an RR element past the doubles and a complex number is not available in sagebrush yet (CC holds doubles)")
+            return NotImplemented
+        return _rr_real_pow(m, self._mp)
 
     def __mod__(self, o):
         raise NotImplementedError("% with an RR element past the doubles is not available in sagebrush yet")
@@ -760,7 +851,12 @@ class _RealBig(RealNumber):
     __rmod__ = __mod__
 
     def __neg__(self):
-        return _rr_from_mp(-self._mp)
+        r = _rr_from_mp(-self._mp)
+        if self._lit is not None:
+            # (-1e400 is still the literal, as in Sage)
+            lit = self._lit
+            r._lit = lit[1:] if lit.startswith("-") else "-" + lit.lstrip("+")
+        return r
 
     def __pos__(self):
         return self
@@ -783,7 +879,19 @@ class _RealBig(RealNumber):
 
     sqrt = _mpf("sqrt")
     exp = _mpf("exp")
-    log = _mpf("log")
+
+    def log(self, base=None):
+        if self._mp < 0:
+            # log|x| + pi I (over log(base)): log|x| is a double for every
+            # element of RR
+            import _sage_matrix
+            re = float(_rr_from_mp((-self._mp).log()))
+            if base is None:
+                return _sage_matrix.ComplexNumber(re, _m.pi)
+            lb = float(RealNumber(base).log()) if not isinstance(base, _RealBig) else float(base.log())
+            return _sage_matrix.ComplexNumber(re / lb, _m.pi / lb)
+        return _rr_from_mp(self._mp.log() if base is None else self._mp.log(_rr_operand(base) or base))
+
     log2 = _mpf("log2")
     log10 = _mpf("log10")
     gamma = _mpf("gamma")
@@ -932,7 +1040,7 @@ def _rr_slow(name, x, a):
         m = _rr_operand(o)
         if m is None:
             return NotImplemented
-        return _rr_from_mp(mx ** m if name == "__pow__" else m ** mx)
+        return _rr_real_pow(mx, m) if name == "__pow__" else _rr_real_pow(m, mx)
     if name in ("__mod__", "__rmod__"):
         raise NotImplementedError("% past the doubles is not available for RR in sagebrush yet")
     m = _rr_operand(o)
@@ -940,6 +1048,15 @@ def _rr_slow(name, x, a):
         return NotImplemented
     op, rev = _RR_OPS[name]
     return _rr_from_mp(_rr_arith(m, mx, op) if rev else _rr_arith(mx, m, op))
+
+
+def _rr_real_pow(mx, my):
+    """mx ** my (53-bit MP values) in RR; a negative base to a non-integer
+    power is complex, and CC holds doubles: refused when the base is past
+    them."""
+    if mx._m < 0 and not my.is_integer():
+        raise NotImplementedError("%s^%s: a negative real to a non-integer power is complex, and CC holds doubles; this one, past the double range, is not available in sagebrush yet" % (_rr_from_mp(mx), _rr_from_mp(my)))
+    return _rr_from_mp(mx ** my)
 
 
 def _rr_fn(x, fn, mpname, *a):
@@ -955,7 +1072,7 @@ def _rr_fn(x, fn, mpname, *a):
     if r is not None:
         if not isinstance(r, float):
             return r
-        if _NORMAL_MIN <= abs(r) < _INF or xf == 0 or xf != xf or xf in (_INF, -_INF):
+        if _NORMAL_MIN < abs(r) < _INF or xf == 0 or xf != xf or xf in (_INF, -_INF):
             return RealNumber(r)
     return _rr_from_mp(getattr(_rr_mp()(xf), mpname)(*a))
 
@@ -1019,7 +1136,9 @@ class _RealField:
         except OverflowError:
             f = None
         if f is not None:
-            if _NORMAL_MIN <= abs(f) < _INF:
+            # (strictly above 2^-1022: (2^53 - 1)/2^1075 is an RR number
+            # whose double rounds up to 2^-1022)
+            if _NORMAL_MIN < abs(f) < _INF:
                 return RealNumber(f)
             if f != f or (isinstance(x, float) and f in (_INF, -_INF)):
                 return RealNumber(f)
