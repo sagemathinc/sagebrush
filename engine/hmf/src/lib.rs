@@ -8,6 +8,10 @@
 //! (PROVENANCE.md); departures from it are noted in each module:
 //!
 //! * `field`: O_F = Z[w], ideals, primes, factorization;
+//! * `rqf`: any real quadratic field: ideals, primes, the fundamental
+//!   unit, class groups and narrow class groups with representatives,
+//!   principality and totally positive generators (for other fields;
+//!   written from the literature);
 //! * `residue`: O_F/P^e in one Hermite-normal-form representation;
 //! * `p1`: P^1(O_F/N) as a product of local projective lines;
 //! * `quat`: the icosian ring and its 120 units;
@@ -34,6 +38,7 @@ mod par;
 pub mod orbits;
 pub mod p1;
 pub mod quat;
+pub mod rqf;
 pub mod residue;
 pub mod split;
 pub mod theta;

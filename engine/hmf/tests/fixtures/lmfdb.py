@@ -49,6 +49,17 @@ first) and e a root of it, then for each prime P of norm <= EIGEN_PRIME_NORM
 (those dividing N included: a_P is then the eigenvalue of U_P), in the
 LMFDB's order, a_P = q0 + q1 e + ... + q_(d-1) e^(d-1) with rational q_i.
 
+lmfdb-rqf.txt (python3 lmfdb.py rqf), for every real quadratic field of
+discriminant <= RQF_DISC (all 2.2.D.1):
+
+    label | D | h | cyc | h+ | narrow cyc | regulator | grh | unit: x,y
+
+with the class group and narrow class group (invariant factors, comma
+separated, empty when trivial), the regulator as the LMFDB prints it,
+whether the LMFDB's class group assumed GRH (t/f), and its fundamental
+unit x + y a, where a is a root of the field's defining polynomial
+x^2 - x - (D - 1)/4 or x^2 - D/4 (the w of engine/hmf/src/rqf.rs).
+
 lmfdb-2.2.5.1-hecke.txt, for every level N of norm <= HECKE_LEVEL_NORM and
 every prime P of norm <= HECKE_PRIME_NORM not dividing N, and for P = N
 when N is prime (then T_P is U_P):
@@ -93,6 +104,12 @@ Q_EIGEN = (
 HECKE_LEVEL_NORM = 1000
 HECKE_PRIME_NORM = 30
 Q_PRIMES = f"select primes from hmf_fields where label = '{FIELD}'"
+RQF_DISC = 5000
+Q_RQF = (
+    "select f.label, f.coeffs, f.class_number, f.class_group, f.narrow_class_number, f.narrow_class_group, "
+    "f.regulator, f.used_grh, e.units from nf_fields f join nf_fields_extra e on e.label = f.label "
+    f"where f.degree = 2 and f.r2 = 0 and f.disc_abs <= {RQF_DISC}"
+)
 Q_HECKE = (
     "select f.level_ideal, h.hecke_polynomial, h.hecke_eigenvalues from hmf_forms f "
     "join hmf_hecke h on h.label = f.label "
@@ -295,6 +312,34 @@ def eigen_fixture():
     print(f"wrote {len(rows)} newform orbits to {path}")
 
 
+def rqf_fixture():
+    import json
+
+    rows = []
+    for label, coeffs, h, cyc, hp, ncyc, reg, grh, units in psql(Q_RQF):
+        c = [int(x) for x in coeffs.strip("{}").split(",")]
+        assert len(c) == 3 and c[2] == 1 and c[1] in (0, -1), coeffs
+        disc = c[1] * c[1] - 4 * c[0]
+        units = json.loads(units)
+        assert len(units) == 1, units
+        u = parse_poly(units[0].replace("\\(", "").replace("\\)", ""), "a")
+        u = u + [0] * (2 - len(u))
+        assert all(x.denominator == 1 for x in u), units
+        cyc = ",".join(x for x in cyc.strip("[]").replace(" ", "").split(",") if x)
+        ncyc = ",".join(x for x in ncyc.strip("{}").split(",") if x)
+        rows.append((disc, label, h, cyc, hp, ncyc, reg, grh, f"{u[0]},{u[1]}"))
+    rows.sort()
+    path = os.path.join(HERE, "lmfdb-rqf.txt")
+    with open(path, "w") as out:
+        out.write("# LMFDB (https://www.lmfdb.org), real quadratic fields; CC BY-SA, tests only\n")
+        out.write(f"# generated {datetime.date.today().isoformat()} by engine/hmf/tests/fixtures/lmfdb.py rqf\n")
+        out.write(f"# query: {Q_RQF}\n")
+        out.write("# label | D | h | cyc | h+ | narrow cyc | regulator | grh | unit: x,y (x + y a)\n")
+        for r in rows:
+            out.write(f"{r[1]} | {r[0]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} | {r[6]} | {r[7]} | unit: {r[8]}\n")
+    print(f"wrote {len(rows)} fields to {path}")
+
+
 def orbit_fixture():
     orbits = {}
     for level, d in psql(Q_ORBITS):
@@ -342,6 +387,10 @@ def contains(big, small):
 def main():
     import json
 
+    if sys.argv[1:] == ["rqf"]:
+        # only lmfdb-rqf.txt
+        rqf_fixture()
+        return
     if sys.argv[1:] == ["eigen"]:
         # only lmfdb-2.2.5.1-eigen.txt
         eigen_fixture()
