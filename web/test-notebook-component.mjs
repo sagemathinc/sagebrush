@@ -178,5 +178,5 @@ try {
   process.exitCode = 1;
 } finally {
   chrome.kill();
-  setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500);
+  setTimeout(() => rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }), 500);
 }
