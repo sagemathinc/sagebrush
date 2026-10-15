@@ -100,7 +100,7 @@ class IntegerModRing_:
             Vector space of dimension 3 over Finite Field of size 7
         """
         import _sage_ffmat
-        return _sage_ffmat.VectorSpace(self, int(n))
+        return _sage_ffmat.VectorSpace(self, n)
 
     def __repr__(self):
         if self._is_gf:
@@ -1346,7 +1346,7 @@ class FiniteField_ext:
             Vector space of dimension 3 over Finite Field of size 7
         """
         import _sage_ffmat
-        return _sage_ffmat.VectorSpace(self, int(n))
+        return _sage_ffmat.VectorSpace(self, n)
 
     def __repr__(self):
         return "Finite Field in %s of size %d^%d" % (self._name, self._p, self._n)
