@@ -59,7 +59,7 @@ function inspect(svg) {
 
 // ---- the example boards: every page; the same each time; nothing overflows --
 const HASHES = {
-  "sagebrush-0": "d52b0abf831946d0", "live-0": "ad4092bfdcbd68b2", "primes-0": "a50e6755a7c6348b", "primes-1": "bed8b854ba59fee4", "primes-2": "3df9c7d962b85d2a", "polynomials-0": "ec66434ad33df5a0", "museum-tour-0": "999888d248719e81",
+  "sagebrush-0": "d1246b3871005dea", "live-0": "1effa302c7b83f0f", "primes-0": "5ff20192569e199b", "primes-1": "895ebd4a38777287", "primes-2": "a04d0c3d71e878ba", "polynomials-0": "e94553d47bd3d0e3", "museum-tour-0": "999888d248719e81",
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
@@ -165,6 +165,17 @@ if (process.env.UPDATE) console.log(JSON.stringify(got));
   const t = [...r.svg.matchAll(/<text[^>]*>([^<]*(?:<tspan[^>]*>[^<]*<\/tspan>[^<]*)*)<\/text>/g)].map((m) => m[1].replace(/<[^>]*>/g, "")).filter((x) => x.startsWith("Workbench"));
   check(t.length === 1 && t[0].endsWith("…") && long.startsWith(t[0].slice(0, -1)), "a long group title, one line cut with …: " + JSON.stringify(t));
   check(r.svg.includes(`<g><title>${long}</title>`), "...its whole title kept, as the group's <title> (UI-0CC-2)");
+}
+// round 0's 13: an edge's label wider than its notes is inside the SVG, not
+// cut at its edge; and its plate is as wide as its text in the SVG's font
+// (wide letters: wider than the estimate of 6.8 a character)
+{
+  const label = "WWWW MMMM a label much longer than the notes are wide";
+  const r = boardSvg({ nodes: [{ id: "a", title: "A", w: 120 }, { id: "b", title: "B", w: 120 }], edges: [{ from: "a", to: "b", label }] });
+  const vb = /viewBox="([^"]*)"/.exec(r.svg)[1].split(" ").map(Number);
+  const m = new RegExp(`<rect x="([-\\d.]+)" y="[-\\d.]+" width="([\\d.]+)" height="18"[^>]*/><text[^>]*>${label}</text>`).exec(r.svg);
+  check(m && Number(m[1]) >= vb[0] && Number(m[1]) + Number(m[2]) <= vb[0] + vb[2], "a label wider than its notes: inside the SVG's view: " + JSON.stringify([m?.slice(1), vb]));
+  check(m && Number(m[2]) > label.length * 6.8 + 10, "...its plate as wide as its text in DejaVu Sans, not the estimate: " + m?.[2]);
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
