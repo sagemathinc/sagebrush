@@ -141,6 +141,10 @@ pub struct Newspaces {
     hecke: Mutex<HashMap<(Hnf, Hnf), Arc<HeckeMatrix>>>,
     /// The newform orbits, computed once.
     orbits: Mutex<Option<NewformOrbits>>,
+    /// Characteristic polynomials and Krylov sequences of operators on
+    /// M_2(N) modulo word-size primes, by (operator, prime): shared by the
+    /// orbits (eigen.rs).
+    pub(crate) charpoly_mod: Mutex<HashMap<(Vec<(Hnf, i64)>, u64), Arc<crate::eigen::ModData>>>,
 }
 
 /// The characteristic polynomial of an operator on S_2^new(N), and its
@@ -157,7 +161,7 @@ impl Newspaces {
         for (m, _) in &divisors {
             spaces.insert(m.hnf, Space::from_ideal(m.clone())?);
         }
-        Ok(Newspaces { level, spaces, divisors, hecke: Mutex::new(HashMap::new()), orbits: Mutex::new(None) })
+        Ok(Newspaces { level, spaces, divisors, hecke: Mutex::new(HashMap::new()), orbits: Mutex::new(None), charpoly_mod: Mutex::new(HashMap::new()) })
     }
     pub fn space(&self, m: &Ideal) -> &Space {
         &self.spaces[&m.hnf]
@@ -166,17 +170,19 @@ impl Newspaces {
         self.space(&self.level)
     }
 
+    /// The matrix of T_p (U_p if p divides M) on M_2(M), M | N, computed once.
+    pub fn hecke(&self, m: &Ideal, p: &Prime) -> Result<Arc<HeckeMatrix>, String> {
+        if let Some(t) = self.hecke.lock().unwrap().get(&(m.hnf, p.hnf)) {
+            return Ok(t.clone());
+        }
+        let t = Arc::new(self.space(m).hecke_matrix(p)?);
+        self.hecke.lock().unwrap().insert((m.hnf, p.hnf), t.clone());
+        Ok(t)
+    }
+
     /// The matrix of op on M_2(M), M | N, from cached Hecke matrices.
     pub fn op_matrix(&self, m: &Ideal, op: &HeckeOp) -> Result<Vec<Vec<i64>>, String> {
-        let space = self.space(m);
-        op_matrix_with(space, op, &|p| {
-            if let Some(t) = self.hecke.lock().unwrap().get(&(m.hnf, p.hnf)) {
-                return Ok(t.clone());
-            }
-            let t = Arc::new(space.hecke_matrix(p)?);
-            self.hecke.lock().unwrap().insert((m.hnf, p.hnf), t.clone());
-            Ok(t)
-        })
+        op_matrix_with(self.space(m), op, &|p| self.hecke(m, p))
     }
 
     /// The characteristic polynomials modulo md of op on S_2^new(M), for
