@@ -78,6 +78,10 @@ try {
   check(await ev("!!document.querySelector('.board-toolbar [data-tool=undo]')"), "Undo is in the toolbar on a touch screen");
   // every control a screen reader meets has a name in words, not a glyph (✎, ⤢, ⋯, ←, ↶, ▶, { })
   {
+    // (a code item in view, its ▶ drawn: items are in the page only while
+    // in view, and where the tour's last flight left the camera varies)
+    await ev("window.board.focus(['start'], true)");
+    check(await until("!!document.querySelector('[data-code=start] .board-code-run')", 10000), "the code item 'start', in view, has its ▶");
     await send("Accessibility.enable");
     const { nodes } = await send("Accessibility.getFullAXTree");
     const glyphs = nodes.filter((x) => !x.ignored && ["button", "combobox", "link", "menuitem", "slider", "checkbox"].includes(x.role?.value) && !/[A-Za-z]{2}/.test(x.name?.value ?? "")).map((x) => x.role.value + " " + JSON.stringify(x.name?.value ?? ""));
