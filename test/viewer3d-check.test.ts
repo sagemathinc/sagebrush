@@ -99,6 +99,10 @@ test("checkScene refuses hostile scenes: malformed, not finite, out of range, or
     ["a stacked pair", variant((s) => { s.title = [{ t: "x" }, { t: "1", s: 0.7, r: -0.245, j: [[1, 0]] }, { t: "2", s: 0.7, r: 0.385, j: [[1, 1]] }]; }), null as any],
     ["a pair's part that is not 0 or 1", variant((s) => { s.title = [{ t: "1", j: [[1, 2]] }]; }), /malformed title/],
     ["pairs nested too deep", variant((s) => { s.title = [{ t: "1", j: Array.from({ length: 9 }, (_, k) => [k + 1, 0]) }]; }), /malformed title/],
+    // (one id in disjoint groups: each group is a box and two cells, counted as appendRuns makes them)
+    ["alternating ids counted by group", variant((s) => {
+      s.objects = Array.from({ length: 80 }, () => ({ type: "text", pos: [0, 0, 0], text: Array.from({ length: 200 }, (_, k) => ({ t: "", j: [[1 + (k % 2), 0]] })) }));
+    }), /more than 20000 runs of styled text/],
     ["pairs counted as their spans", variant((s) => {
       s.objects = Array.from({ length: 100 }, () => ({ type: "text", pos: [0, 0, 0], text: Array.from({ length: 199 }, (_, k) => ({ t: "", j: [[k + 1, 0]] })) }));
     }), /more than 20000 runs of styled text/],

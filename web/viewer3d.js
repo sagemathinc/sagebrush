@@ -445,6 +445,26 @@
       el.appendChild(box);
     }
   }
+  // the elements appendRuns makes for runs (as its traversal: each
+  // consecutive group of one pair is a box and two cells, whatever its id)
+  function runElements(runs, level) {
+    let n = 0;
+    for (let k = 0; k < runs.length;) {
+      const g = Array.isArray(runs[k].j) ? runs[k].j[level] : null;
+      if (!g) {
+        n++;
+        k++;
+        continue;
+      }
+      const parts = [[], []];
+      while (k < runs.length && Array.isArray(runs[k].j) && runs[k].j[level]?.[0] === g[0]) {
+        parts[runs[k].j[level][1] === 1 ? 1 : 0].push(runs[k]);
+        k++;
+      }
+      n += 3 + runElements(parts[0], level + 1) + runElements(parts[1], level + 1);
+    }
+    return n;
+  }
   function runSpan(r) {
     const sp = document.createElement("span"), size = r.s ?? 1;
     sp.textContent = r.t;
@@ -517,19 +537,17 @@
     const rich = (v, max, what) => {
       if (typeof v === "string") return str(v, max, what);
       if (!Array.isArray(v) || v.length > LIMITS.runs) no("has a malformed " + what);
-      // (a span each, whatever its text, and three for each stacked pair (a
-      // box and its two cells, as appendRuns makes them): counted over the
-      // whole scene)
-      const pairs = new Set();
       for (const r of v) {
         if (!given(r?.j)) continue;
         if (!Array.isArray(r.j) || r.j.length > 8) no("has a malformed " + what);
-        r.j.forEach((g, level) => {
+        for (const g of r.j) {
           if (!Array.isArray(g) || g.length !== 2 || !Number.isInteger(g[0]) || g[0] < 1 || g[0] > 1e6 || (g[1] !== 0 && g[1] !== 1)) no("has a malformed " + what);
-          pairs.add(level + ":" + g[0]);
-        });
+        }
       }
-      spans += v.length + 3 * pairs.size;
+      // (the elements appendRuns makes, counted as it makes them: a span a
+      // run, and a box and two cells for each group of runs in a pair;
+      // over the whole scene)
+      spans += runElements(v, 0);
       if (spans > LIMITS.spans) no("has more than " + LIMITS.spans + " runs of styled text");
       let len = 0;
       for (const r of v) {

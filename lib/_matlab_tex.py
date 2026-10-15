@@ -257,41 +257,82 @@ def _num(v):
     return ("%.2f" % v).rstrip("0").rstrip(".") or "0"
 
 
-WIDTH = 0.55  # (a character's width, of its font size: Sagebrush's estimate, for stacked scripts)
+# a character's width, of its font size: Sagebrush's own rough classes, for
+# the advances of stacked scripts (their exact length is set, below)
+_NARROW, _SEMI, _WIDE = set("ijl!'.,:;|I`"), set('ftr()[]{}-/ "'), set("mwMW%@")
+
+
+def _char_em(c):
+    if c in _NARROW:
+        return 0.25
+    if c in _SEMI:
+        return 0.33
+    if c in _WIDE:
+        return 0.85
+    if c.isascii() and c.isupper():
+        return 0.68
+    if c.isdigit():
+        return 0.55
+    return 0.52 if c.isascii() else 0.6
 
 
 def svg(s, size):
-    """s as SVG tspans, in a <text> of font size size (px).  A stacked pair's
-    second script goes back by the first's width (estimated), and the text
-    after the pair goes on from the wider one"""
+    """s as SVG tspans, in a <text> of font size size (px).  A stacked
+    pair's two scripts start at the same place and the text after goes on
+    from the wider: SVG text cannot be measured where it is made, so each
+    run of a pair is given its length (textLength, with lengthAdjust
+    spacingAndGlyphs: an estimate from _char_em, its glyphs fitted to it),
+    which makes the advances exact; the second script goes back by the
+    first's length, and the text after forward by the difference"""
     items = []
     walk(s, lambda t, st: items.append((t, st)), size)
-    width = {}
-    for t, st in items:
-        for key in st["stack"]:
-            width[key] = width.get(key, 0.0) + len(t) * WIDTH * st["size"]
-    out = []
-    at = [0.0]
-    prev = [()]
+    paired = {sid for t, st in items for sid, part in st["stack"] if part == 1}
+    paths = [tuple((sid, part) for sid, part in st["stack"] if sid in paired) for t, st in items]
+    est = [sum(_char_em(c) for c in t) * st["size"] for t, st in items]
+    widths = {}  # pair id -> (its first script's length, its second's)
 
-    def emit(t, st):
-        a = []
-        was, now = dict(prev[0]), dict(st["stack"])
+    def width(idx, level):
+        # (a run of items: plain ones' lengths, a pair's the wider of its two)
+        w, k = 0.0, 0
+        while k < len(idx):
+            p = paths[idx[k]]
+            if len(p) <= level:
+                w += est[idx[k]]
+                k += 1
+                continue
+            sid, parts = p[level][0], ([], [])
+            while k < len(idx) and len(paths[idx[k]]) > level and paths[idx[k]][level][0] == sid:
+                parts[paths[idx[k]][level][1]].append(idx[k])
+                k += 1
+            widths[sid] = (width(parts[0], level + 1), width(parts[1], level + 1))
+            w += max(widths[sid])
+        return w
+    width(list(range(len(items))), 0)
+    out = []
+    at = 0.0
+    for i, (t, st) in enumerate(items):
+        prev, cur = paths[i - 1] if i else (), paths[i]
+        was, now = dict(prev), dict(cur)
         dx = 0.0
-        for sid, part in prev[0]:
-            if part == 1 and sid not in now:
-                dx += max(0.0, width[(sid, 0)] - width[(sid, 1)])
-        for sid, part in st["stack"]:
+        for sid, part in reversed(prev):
+            if sid not in now:
+                # (after a pair: on from its wider script)
+                w0, w1 = widths[sid]
+                dx += max(w0, w1) - w1
+        for sid, part in cur:
             if part == 1 and was.get(sid) != 1:
-                dx -= width[(sid, 0)]
-        prev[0] = st["stack"]
+                # (a pair's second script: back to where its first began)
+                dx -= widths[sid][0]
+        a = []
         if abs(dx) > 1e-6:
             a.append('dx="%s"' % _num(dx))
         if abs(st["size"] - size) > 1e-6:
             a.append('font-size="%s"' % _num(st["size"]))
-        if abs(st["rise"] - at[0]) > 1e-6:
-            a.append('dy="%s"' % _num(at[0] - st["rise"]))  # (SVG's y is down)
-            at[0] = st["rise"]
+        if abs(st["rise"] - at) > 1e-6:
+            a.append('dy="%s"' % _num(at - st["rise"]))  # (SVG's y is down)
+            at = st["rise"]
+        if cur:
+            a.append('textLength="%s" lengthAdjust="spacingAndGlyphs"' % _num(est[i]))
         if st["bold"] is not None:
             a.append('font-weight="%s"' % ("bold" if st["bold"] else "normal"))
         if st["italic"] is not None:
@@ -301,8 +342,6 @@ def svg(s, size):
         if st["font"]:
             a.append('font-family="%s"' % _esc(st["font"]))
         out.append("<tspan %s>%s</tspan>" % (" ".join(a), _esc(t)) if a else _esc(t))
-    for t, st in items:
-        emit(t, st)
     return "".join(out)
 
 

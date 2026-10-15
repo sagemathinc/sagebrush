@@ -3895,6 +3895,24 @@ def figure_scene(fig):
 _SCENE_TITLE_PX, _SCENE_LABEL_PX, _SCENE_TICK_PX, _SCENE_TEXT_PX = 15.0, 11.0, 10.0, 12.0
 
 
+def _run_elements(runs, level):
+    """the elements the viewer makes for styled runs (web/viewer3d.js's
+    runElements: a span a run, a box and two cells a group of a pair)"""
+    n, k = 0, 0
+    while k < len(runs):
+        j = runs[k].get("j", [])
+        if len(j) <= level:
+            n += 1
+            k += 1
+            continue
+        sid, parts = j[level][0], ([], [])
+        while k < len(runs) and len(runs[k].get("j", [])) > level and runs[k]["j"][level][0] == sid:
+            parts[runs[k]["j"][level][1]].append(runs[k])
+            k += 1
+        n += 3 + _run_elements(parts[0], level + 1) + _run_elements(parts[1], level + 1)
+    return n
+
+
 def _scene_within(scene):
     """whether the viewer would take the scene (web/viewer3d.js's checkScene:
     its LIMITS on text and ticks, and positions near the box)"""
@@ -3907,7 +3925,7 @@ def _scene_within(scene):
     # (the styled runs in all: the viewer's spans, LIMITS.spans; and each run's
     # size and rise within its LIMITS)
     rich = [t for t in texts + [s for t in scene["box"]["ticklabels"] for s in t] if not isinstance(t, str)]
-    if sum(len(t) + 3 * len({(k, g[0]) for r in t for k, g in enumerate(r.get("j", []))}) for t in rich) > 20000:
+    if sum(_run_elements(t, 0) for t in rich) > 20000:
         return False
     if any(not (0.01 <= r.get("s", 1) <= 10 and abs(r.get("r", 0)) <= 10 and len(r.get("j", [])) <= 8) for t in rich for r in t):
         return False
