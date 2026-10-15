@@ -1,0 +1,36 @@
+1
+
+>> y := (2 + ; x; x + 10;
+             ^
+User error: bad syntax
+2
+
+>>  * 3); x + 2;
+    ^
+User error: bad syntax
+4
+
+>> z := 3 $ 4;
+          ^
+User error: bad syntax
+5
+
+>> y := Foo(2);
+        ^
+User error: Identifier 'Foo' has not been declared or assigned
+
+>> print x, Baz;
+            ^
+User error: Identifier 'Baz' has not been declared or assigned
+6
+Runtime error: boom 1
+7
+
+>> assert x eq 2;
+   ^
+Runtime error in assert: Assertion failed
+8
+Runtime error: once more
+9
+
+User error: syntax error at end of input

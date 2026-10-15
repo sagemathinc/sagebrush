@@ -8,12 +8,15 @@
 //! {"ok": RESULT} or {"error": MESSAGE}.  Single-threaded.  The functions
 //! and their results mirror the Python bindings (py/src/lib.rs: modsym,
 //! ap, mf); newspace/newforms factor with sagebrush-poly (pure Rust) and
-//! "factor" exposes it.  Big integers are decimal strings.
+//! "factor" exposes it; "hmf_*" are Hilbert modular forms (hmf.rs).  Big
+//! integers are decimal strings.
 
 use sagebrush_bigint::BigInt;
 use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
+
+mod hmf;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -273,6 +276,30 @@ fn big(v: &[BigInt]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
 
+/// The number field of "t" (monic integer coefficients, constant first).
+fn nf_field(v: &Value) -> Result<sagebrush_poly::nf::Field, String> {
+    sagebrush_poly::nf::Field::new(&bigs(v.get("t"))?)
+}
+
+/// A polynomial over the field: {"num": [[coordinates], ...], "den": d}.
+fn kpoly(v: Option<&Value>, n: usize) -> Result<sagebrush_poly::nf::KPoly, String> {
+    let v = v.ok_or("missing polynomial")?;
+    let num = v.get("num").and_then(Value::as_array).ok_or("a polynomial needs \"num\"")?;
+    let num: Vec<Vec<BigInt>> = num.iter().map(|c| bigs(Some(c))).collect::<Result<_, _>>()?;
+    if num.iter().any(|c| c.len() > n) {
+        return Err(format!("each coefficient has at most {} coordinates", n));
+    }
+    let den = big1(v.get("den"))?;
+    if den.sign() == sagebrush_bigint::Sign::NoSign {
+        return Err("zero denominator".into());
+    }
+    Ok(sagebrush_poly::nf::KPoly::new(n, num, den))
+}
+
+fn kpoly_json(f: &sagebrush_poly::nf::KPoly) -> Value {
+    json!({ "num": f.num.iter().map(|c| big(c)).collect::<Vec<_>>(), "den": f.den.to_string() })
+}
+
 // ---------------------------------------------------------------- permutation groups
 
 fn perms(n: usize, v: Option<&Value>) -> Result<Vec<sagebrush_group::Perm>, String> {
@@ -407,6 +434,8 @@ fn perm_group_named(v: &Value) -> Result<Value, String> {
 fn dispatch(v: &Value) -> Result<Value, String> {
     let f = v.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match f {
+        // ---- Hilbert modular forms over Q(sqrt 5): engine/hmf (hmf.rs) ----
+        f if f.starts_with("hmf_") => hmf::dispatch(f, v),
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {
@@ -464,6 +493,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "dim": sp.dimension(), "ell": sp.p, "zeta": sp.zeta, "charpoly": sp.hecke_charpoly(q)? }))
         }
         // ---- sagebrush.modsym: weight 2, trivial character, sign +1 ----
+        "ec_modsym" => {
+            let n = level(v)?;
+            let pair = |x: &Value, what: &str| -> Result<(i64, i64), String> {
+                let a = x.as_array().filter(|a| a.len() == 2).ok_or_else(|| format!("each {} must be a pair", what))?;
+                let f = |y: &Value| y.as_i64().or_else(|| y.as_str().and_then(|s| s.parse().ok())).ok_or_else(|| format!("each {} must be a pair of integers", what));
+                Ok((f(&a[0])?, f(&a[1])?))
+            };
+            let list = |k: &str| -> Result<Vec<(i64, i64)>, String> {
+                v.get(k).and_then(Value::as_array).ok_or_else(|| format!("missing list '{}'", k))?.iter().map(|x| pair(x, k)).collect()
+            };
+            let aps: Vec<(u64, i64)> = list("aps")?.into_iter().map(|(q, a)| if q > 1 { Ok((q as u64, a)) } else { Err("each a_q needs a prime q".to_string()) }).collect::<Result<_, _>>()?;
+            let (zero, vals) = sagebrush_modsym::ec_modsym_values(n, &aps, &list("cusps")?)?;
+            Ok(json!({ "zero": zero.to_string(), "values": vals.iter().map(|x| x.to_string()).collect::<Vec<_>>() }))
+        }
         "hecke_charpoly" => {
             let (n, q) = (level(v)?, u(v, "q")?);
             let p = u(v, "p").unwrap_or(67108859);
@@ -544,6 +587,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes) }))
         }
+        "bnf_certify" => {
+            let opt = |k: &str| -> Result<Option<u64>, String> {
+                match v.get(k) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(x) => x.as_u64().map(Some).ok_or_else(|| format!("'{}' must be a nonnegative integer", k)),
+                }
+            };
+            let b = sagebrush_classgroup::api::bnf_certify(&bigs(v.get("f"))?, opt("norm_max")?, opt("index_max")?)?;
+            Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
+                       "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w,
+                       "norm_bound": b.norm_bound.to_string(), "norm_bound_kind": b.norm_bound_kind, "fb_bound": b.fb_bound,
+                       "primes_shown": b.primes_shown, "reg_lower": b.reg_lower, "index_bound": b.index_bound,
+                       "unit_primes": b.unit_primes, "class_primes": big(&b.class_primes) }))
+        }
         "bnf_relations" => {
             let bad = || "extra must be a list of primes".to_string();
             let extra: Vec<u64> = match v.get("extra") {
@@ -621,6 +678,20 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             let (c, fs) = sagebrush_poly::factor(&f);
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
+        }
+        // ---- polynomials over a number field Q[y]/(T), T monic (poly/src/nf.rs) ----
+        "nf_factor" => {
+            let k = nf_field(v)?;
+            let f = kpoly(v.get("f"), k.degree())?;
+            let ((u, d), fs) = k.factor(&f)?;
+            Ok(json!({ "unit": { "num": [big(&u)], "den": d.to_string() },
+                       "factors": fs.iter().map(|(g, e)| json!([kpoly_json(g), e])).collect::<Vec<_>>() }))
+        }
+        "nf_gcd" => {
+            let k = nf_field(v)?;
+            let (f, g) = (kpoly(v.get("f"), k.degree())?, kpoly(v.get("g"), k.degree())?);
+            let (h, _, _) = k.gcd(&f, &g)?;
+            Ok(json!({ "gcd": kpoly_json(&h) }))
         }
         // ---- sagebrush.linalg: exact matrices over Z (and Q, scaled) ----
         "mat_det" => {

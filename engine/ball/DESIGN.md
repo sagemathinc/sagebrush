@@ -34,7 +34,11 @@ input balls:
    `gamma` and Catalan's `G`, and certified comparisons (`Some(Ordering)`
    only when the balls decide it).
 2. **Special functions and complex balls**: `E_1`, `Li_2`, `Ti_2`, complex
-   balls (`exp`, `log`, `sqrt`), real and complex AGM, Carlson `R_F`.
+   balls (`exp`, `log`, `sqrt`), real and complex AGM, Carlson `R_F`;
+   `log Gamma` and the digamma function `psi` for real `x > 0` (the
+   Stirling series with DLMF 5.11(ii)'s remainder bound, after the
+   recurrence moves `x` to at least `prec/2`), for Zimmert's unconditional
+   bounds in the class-group certificate.
 3. **Class-group certificate** (`engine/classgroup/src/nf/grh.rs`,
    `certify.rs`): `ell`, the witness's `LDL^T` sign test, `log_hr_lower`
    and `regulator_bounds` computed with balls. `certified: true` then means

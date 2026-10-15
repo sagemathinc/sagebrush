@@ -715,3 +715,153 @@ test("eigs: a complex Afun refused; complex pairs through real solves; CholeskyP
     "eigs: FailureTreatment must be 'replacenan', 'keep' or 'drop'.",
   ]);
 });
+
+test("numgrid and delsq reproduce the published L-shaped grids, counts and nonzeros, and refuse the regions nothing pins", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "g = numgrid('L',10); disp(mat2str(g(2:9, 2:9)));",
+    "G = numgrid('L',32); disp(sum(G(:)>0));",
+    "A = delsq(numgrid('L',65)); disp(mat2str(size(A))); disp(nnz(A)); disp(issparse(A));",
+    "disp(size(delsq(numgrid('L',12)), 1)); disp(nnz(delsq(numgrid('S',200))));",
+    "disp(mat2str(full(delsq(numgrid('S',4)))));",
+    "try, numgrid('C', 10), catch e, disp(e.message), end",
+    "try, numgrid('Q', 10), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[1 5 9 13 17 25 33 41;2 6 10 14 18 26 34 42;3 7 11 15 19 27 35 43;4 8 12 16 20 28 36 44;0 0 0 0 21 29 37 45;0 0 0 0 22 30 38 46;0 0 0 0 23 31 39 47;0 0 0 0 24 32 40 48]",
+    "675", "[2945 2945]", "14473", "1", "75", "195228",
+    "[4 -1 -1 0;-1 4 0 -1;-1 0 4 -1;0 -1 -1 4]",
+    "numgrid: the region 'C' is not supported in Sagebrush (only 'S' and 'L').",
+    "numgrid: unknown region 'Q'.",
+  ]);
+});
+
+test("eig uses B, its options and the left eigenvectors as documented, and refuses what it cannot do", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (the page's examples: left eigenvectors, a generalized pair with complex eigenvalues)
+    "A = [1 7 3; 2 9 12; 5 22 7]; [V,D,W] = eig(A); disp(mat2str(round(sort(diag(D))' * 1e4) / 1e4)); disp(max(max(abs(W'*A - D*W'))) < 1e-12);",
+    "A = [1/sqrt(2) 0; 0 1]; B = [0 1; -1/sqrt(2) 0]; [V,D] = eig(A,B); disp(mat2str(round(imag(diag(D))'))); disp(max(max(abs(A*V - B*V*D))) < 1e-12);",
+    "T = [2 -1 0; -1 2 -1; 0 -1 2]; Bs = [4 1 0; 1 4 1; 0 1 4]; [V, D, W] = eig(T, Bs); disp(max(max(abs(V'*Bs*V - eye(3)))) < 1e-12); disp(isequal(V, W));",
+    "disp(mat2str(size(eig(T, 'matrix')))); [V, D] = eig(T, 'vector'); disp(mat2str(size(D)));",
+    "try, eig(eye(2), [3 6; 4 8]), catch e, disp(e.message), end",
+    "try, eig(eye(2), eye(2), 'qz'), catch e, disp(e.message), end",
+    "try, eig([1 1i; 2 3]), catch e, disp(e.message), end",
+    "try, eig(eye(2), 'bogus'), catch e, disp(e.message), end",
+    "try, eig(eye(2), 'chol'), catch e, disp(e.message), end",
+    "try, eig([1 NaN; 0 1]), catch e, disp(e.message), end",
+    "try, eig([1 2;3 4],[1 1;1 1+1e-12]), catch e, disp(e.message), end",
+    // (single inputs give single outputs; a symmetric but indefinite pencil's W is not V)
+    "disp(class(eig(single([1 2;3 4])))); disp(class(eig(single([1 0;0 2]), single(eye(2)))));",
+    "[V,D,W] = eig(single([1 2;3 4])); disp([class(V) ' ' class(D) ' ' class(W)]);",
+    "[V,D,W] = eig([0 1;1 0],[1 0;0 -1]); disp(isequal(V,W)); disp(max(max(abs(W'*[0 1;1 0] - D*W'*[1 0;0 -1]))) < 1e-12);",
+    // ("chol" is refused, not replaced by B \\ A, when A is not symmetric or B not positive definite)
+    "try, eig([1 2; 3 4], eye(2), 'chol'), catch e, disp(e.message), end",
+    "try, eig(eye(2), diag([1 -1]), 'chol'), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[-7.9759 -0.5789 25.5548]", "1", "[1 -1]", "1", "1", "1", "[3 3]", "[3 1]",
+    "eig: B is singular, so the pencil may have infinite eigenvalues, which need the QZ algorithm; it is not supported in Sagebrush.",
+    "eig: the QZ algorithm is not supported in Sagebrush.",
+    "eig: complex matrices are not supported in Sagebrush.",
+    "eig: invalid option 'bogus'.", "eig: invalid option 'chol'.",
+    "eig: the input must not contain Inf or NaN.",
+    "eig: B is badly conditioned (cond(B)*eps > 1e-8, Sagebrush's limit for solving through B \\ A), and the QZ algorithm it needs is not supported in Sagebrush.",
+    "single", "single", "single single single", "0", "1",
+    ...Array(2).fill("eig: the \"chol\" algorithm needs a symmetric A and a symmetric positive definite B; Sagebrush does not fall back to another algorithm when it is asked for."),
+  ]);
+});
+
+test("psi, beta, betaln, erfcx, erfinv, erfcinv and expint keep their documented domains and Sagebrush's choices", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (values where Octave's are less accurate: mpmath's are 26.2094699605161, 15.0655747025926, 6.60158062235514)
+    "fprintf('%.14g %.14g %.14g\\n', erfcinv(1e-300), erfcinv(1e-100), erfcinv(1e-20));",
+    "fprintf('%.16g %.16g\\n', -psi(1), psi(1, 2));",
+    // (the right-hand limits at 0, and psi(Inf), where Octave gives NaN and -0.5772)
+    "disp([psi(0) psi(1, 0) psi(2, 0) psi(Inf) psi(1, Inf)]);",
+    "try, psi(-1), catch e, disp(e.message), end",
+    "try, psi(1i), catch e, disp(e.message), end",
+    "try, psi(1.5, 2), catch e, disp(e.message), end",
+    "try, psi([1 2], 2), catch e, disp(e.message), end",
+    "try, psi(101, 2), catch e, disp(e.message), end",
+    "try, beta(-1, 2), catch e, disp(e.message), end",
+    "try, betaln(2, -0.5), catch e, disp(e.message), end",
+    "try, beta([1 2], [1 2 3]), catch e, disp(e.message), end",
+    "try, erfinv(0.5i), catch e, disp(e.message), end",
+    "try, erfcx(int8(3)), catch e, disp(e.message), end",
+    "disp(class(expint(single(2)))); disp(isreal(expint(2))); disp(isreal(expint(-2)));",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim().replace(/\s+/g, " ")), [
+    "26.209469960516 15.065574702593 6.6015806223551",
+    "0.5772156649015329 0.6449340668482264",
+    "-Inf Inf -Inf Inf 0",
+    "psi: X must be real and nonnegative.",
+    "psi: X must be real and nonnegative.",
+    "psi: k must be a nonnegative integer scalar.",
+    "psi: k must be a nonnegative integer scalar.",
+    "psi: Sagebrush covers k <= 100.",
+    "beta: Z must be real and nonnegative.",
+    "betaln: W must be real and nonnegative.",
+    "beta: Z and W must be the same size, or one of them a scalar.",
+    "erfinv: x must be real.",
+    "Undefined function 'erfcx' for input arguments of type 'int8'.",
+    "single", "1", "0",
+  ]);
+});
+
+test("ellipke, ellipj and legendre keep their documented domains", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a high order next to 1, where Octave's value is less accurate: mpmath's is 4.83973510425242e-18)
+    "Q = legendre(12, 0.999999); fprintf('%.14g\\n', Q(11));",
+    "[K, E] = ellipke(1); disp([K E]);",
+    "try, ellipke(-0.1), catch e, disp(e.message), end",
+    "try, ellipke(2), catch e, disp(e.message), end",
+    "try, ellipke(0.5, -1), catch e, disp(e.message), end",
+    "try, ellipj(1, 1.5), catch e, disp(e.message), end",
+    "try, ellipj(1i, 0.5), catch e, disp(e.message), end",
+    "try, ellipj([1 2], [0.1 0.2 0.3]), catch e, disp(e.message), end",
+    "try, legendre(2, 1.5), catch e, disp(e.message), end",
+    "try, legendre(-1, 0.5), catch e, disp(e.message), end",
+    "try, legendre(1.5, 0.5), catch e, disp(e.message), end",
+    "try, legendre(2, 0.5, 'bogus'), catch e, disp(e.message), end",
+    "try, ellipj(Inf, 0.5), catch e, disp(e.message), end",
+    "disp(class(legendre(2, single(0.3)))); [s, c, d] = ellipj(single(1), 0.5); disp(class(d));",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim().replace(/\s+/g, " ")), [
+    "4.8397351042524e-18",
+    "Inf 1",
+    "ellipke: M must be in the range 0 <= M <= 1.",
+    "ellipke: M must be in the range 0 <= M <= 1.",
+    "ellipke: tol must be a nonnegative real scalar.",
+    "ellipj: M must be in the range 0 <= M <= 1.",
+    "ellipj: U must be real.",
+    "ellipj: U and M must be the same size, or one of them a scalar.",
+    "legendre: X must be real and in the range -1 <= X <= 1.",
+    "legendre: n must be a nonnegative integer scalar.",
+    "legendre: n must be a nonnegative integer scalar.",
+    "legendre: normalization must be 'unnorm', 'sch' or 'norm'.",
+    "ellipj: U must be finite in Sagebrush.",
+    "single", "single",
+  ]);
+});
+
+test("a newline in a struct's text field or a string array's element is displayed as ↵, as MATLAB's published displays show it", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "err = struct('message', sprintf('Error using average>check_inputs (line 11)\\nInput must be a vector.'), 'identifier', 'AVG:NotAVector')",
+    "s = struct('n', \"x\" + newline)",
+    "t = [\"This is line one.\" + newline; \"Here is line two.\" + newline]",
+    // (a missing string in a struct: <missing>, as in a string array)
+    "m = [\"a\", \"b\"]; m(4) = \"x\"; v = struct('a', m(3))",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.split("\n").filter((s: string) => s.trim() !== "" && !/=|with fields|string array/.test(s)), [
+    "       message: 'Error using average>check_inputs (line 11)↵Input must be a vector.'",
+    "    identifier: 'AVG:NotAVector'",
+    "    n: \"x↵\"",
+    "    \"This is line one.↵\"",
+    "    \"Here is line two.↵\"",
+    "    a: <missing>",
+  ]);
+});

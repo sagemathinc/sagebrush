@@ -13,7 +13,9 @@ and runs on a runtime library with MATLAB's semantics:
   folder).
 - More built-ins, registered in the same table:
   - **lib/_matlab_numeric.py**: special matrices, matrix functions,
-    polynomials and interpolation;
+    polynomials and interpolation, numgrid and delsq (numgrid's 'S' and
+    'L' only: the other regions are described only in words, which do not
+    fix their shapes on the grid, so they are refused);
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics);
@@ -66,6 +68,13 @@ cases:
   when it runs: `(x if "x" in globals() else _m.fn("x"))`.
 - **A function named without arguments is called,** as MATLAB does
   (`rand`, `pi`). A handle is a value.
+- **A global variable** is one value shared by every workspace that
+  declares it (`_m.global_get`, `_m.global_set`). Each use reads it from
+  that registry at that point, since any call, even earlier in the same
+  expression, may have changed it; an anonymous function keeps the value
+  it had when the function was made. An indexed, field or cell assignment
+  evaluates its index and value first, then starts from the registry's
+  value at that point; each assignment writes it back.
 
 **Calls** pass `nargout`, as MATLAB does: the number of outputs the caller
 wants. It is 0 for a statement, 1 in an expression, and n in
@@ -306,8 +315,11 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
 - **What is kept from MATLAB:**
   - hold is off by default, so a plotting function replaces the axes'
     contents, title, labels, limits and color order (MATLAB's `newplot`);
-  - the color order is MATLAB's (`lines`), LineSpec strings (`'r--o'`) work,
-    and so do name-value properties;
+  - the color order (`lines`, `ColorOrder`) is the seven-color palette of
+    MATLAB releases before R2025a, from [0 0.4470 0.7410]. Current MATLAB's
+    default is the changed "gem" palette of R2025a (its colororder page
+    gives the new triplets); Sagebrush deliberately keeps the older one;
+  - LineSpec strings (`'r--o'`) work, and so do name-value properties;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,
@@ -376,6 +388,19 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - stacked bars sit on the series before them;
   - `XEndPoints`/`YEndPoints` give the bar tips;
   - a string array of names places the bars in that order.
+- **quiver** scales its arrows by Sagebrush's rule: the longest arrow as
+  long as the grid's spacing (the data's range over the square root of the
+  number of arrows), times the scale given to `quiver` (0.9 by default;
+  Sagebrush's quiver object has no `AutoScaleFactor` property). MATLAB
+  documents only that the arrows are scaled so as not to overlap, with
+  `AutoScaleFactor` 0.9 by default; its scaling and Octave's both differ
+  from Sagebrush's (`quiver([0 1], [0 1], [1 1], [1 -1])` leaves the x
+  limits at [0 1.6] here).
+- **spy** draws a blue `.` marker of size 6 at each nonzero by default:
+  Sagebrush's choice, since MATLAB's documentation does not state the
+  default marker (Octave's is `*` for fewer than 1000 nonzeros and `.`
+  otherwise). Its limits, 0 to n + 1 and 0 to m + 1 with the rows downward,
+  are Octave's, and its label `nz = nnz(S)` is documented.
 - **How arrays reach matplotlib:** they cross through `_m._mat`, in MATLAB
   orientation. This is the one place the reversed axes are turned back.
 - **Workarounds for the shim:**
@@ -570,9 +595,27 @@ The rest:
   doubles, so `intmax('int64')` shows 9223372036854775808 and
   `intmax('uint64')` 18446744073709551616;
 - `svds` and iterative solvers (`pcg`, `gmres`); `eigs` of complex
-  matrices, with complex shifts or start vectors (Sagebrush's numpy has
-  no complex eigenvalue or QR routines yet, which `eig` of a complex
-  matrix lacks too);
+  matrices, with complex shifts or start vectors, or with an Afun whose
+  results are complex (Sagebrush's numpy has no complex eigenvalue or QR
+  routines yet, which `eig` of a complex matrix lacks too);
+- `eig` of complex matrices (Sagebrush's numpy has no complex eigenvalue
+  routines yet), and `eig(A, B)` where it needs the QZ algorithm: "qz", a
+  singular B (the pencil may have infinite eigenvalues), or a badly
+  conditioned one (Sagebrush's rule: cond(B)*eps > 1e-8). A symmetric A
+  with a symmetric positive definite B is the page's "chol" algorithm;
+  another pair is solved as B \ A, with V's and W's columns of 2-norm 1
+  (Sagebrush's choice; the page leaves their norms open);
+- `psi`, `beta` and `betaln` of negative arguments (their pages ask for
+  real nonnegative ones; Octave answers), and `psi(k, X)` for k > 100. Where
+  the pages say nothing, `psi(k, 0)` is the limit from the right (-Inf for
+  even k, Inf for odd k) and `psi(Inf)` is Inf; Octave gives NaN and
+  -0.5772. These functions, `erfcx`, `erfinv`, `erfcinv`, `expint`,
+  `ellipke`, `ellipj` and `legendre` are thin wrappers
+  (lib/_matlab_special.py) over the shared numerics in lib/_special.py
+  (design/special.md). `ellipke` and `ellipj` refuse M outside [0, 1], as
+  their pages require (Octave answers), and accept `tol` but always
+  compute to full accuracy; `ellipj` also refuses an infinite U, where
+  Octave gives NaN;
 - the random sparse matrices' exact places and values: `sprand`'s and
   `sprandn`'s follow MATLAB's documented behaviour, and `sprandsym`'s
   construction is Sagebrush's own (exactly the requested number of

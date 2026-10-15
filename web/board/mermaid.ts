@@ -18,6 +18,7 @@
 
 import { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
 import { canvasLeftOut, fromCanvas, isCanvas } from "./canvas";
+import { boardFromHtml, isHtml } from "./fromhtml";
 import { pageCount, pageView, type BoardDoc, type DocEdge, type DocGroup, type DocNode, type DocNote, type NoteShape } from "./doc";
 
 /** Whether a text looks like a Mermaid flowchart. */
@@ -40,6 +41,8 @@ export function mermaidBlocks(md: string): { text: string; heading?: string }[] 
 export function boardFromText(text: string, name?: string, note?: (md: string) => void): BoardDoc {
   const t = text.trimStart();
   const titled = (d: BoardDoc) => { if (!d.title && name) d.title = name.replace(/\.[^.]*$/, ""); return d; };
+  // (a board downloaded as HTML: the JSON it holds, never the page itself, fromhtml.ts)
+  if (isHtml(t)) return boardFromHtml(t) as BoardDoc;
   // (a CoCalc whiteboard or slides file: JSON lines of its elements, cocalc.ts)
   if (isCocalcBoard(t)) {
     const c = fromCocalcBoard(t, { slides: /\.slides$/i.test(name ?? "") }), l = leftOut(c.left);

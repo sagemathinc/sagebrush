@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type Edge, type Item } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
@@ -45,6 +45,7 @@ import { Toolbar, defaultTools } from "./toolbar";
 import { PenRow } from "./pen";
 import { effect } from "@preact/signals-core";
 import { Editor, tidy } from "./edit";
+import { findIndex, findIn, textRanges, type FindEntry } from "./find";
 import { printSheets, type Sheet, type PrintOptions } from "./print";
 import { boardFromText, toMermaid, toMermaidMarkdown } from "./mermaid";
 import { canvasLeftOut, toCanvas } from "./canvas";
@@ -116,6 +117,10 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
+   * key is left to the browser, as on a page that is itself a saved board
+   * (an exported file), whose ⋯ menu still downloads it again */
+  saveKey?: boolean;
   /** whether exportHtml can carry the engine, and about how much more that is ("6 MB") */
   exportPython?(d: BoardDoc): string | null;
 }
@@ -134,9 +139,10 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More" aria-label="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More" aria-label="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
+<div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
@@ -162,24 +168,40 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 
 export type BoardApi = ReturnType<typeof mountBoard>;
 
+/** The largest file Open… or a drop reads: well past a board downloaded as
+ * HTML with every language's engine in it (about 10 MB) and its pictures
+ * (CoCalc shows boards of up to 16 MB). */
+export const FILE_MAX = 128 * 2 ** 20;
+
 /** Mount a board in `root` (which the host places and sizes), with what the host provides. */
-// The code notes of a document, by id (every page, in groups too).
+// The code notes of a document, by their cells' ids (codeOrder: every
+// page, in groups too; an id on several pages, each page's its own).
 function codeNotes(d: BoardDoc): Map<string, DocNote> {
-  const out = new Map<string, DocNote>();
-  const walk = (ns: DocNode[] | undefined) => {
-    for (const n of ns ?? []) {
-      if (n.kind === "group") walk(n.children);
-      else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) out.set(n.id, n);
-    }
-  };
-  walk(d.nodes);
-  for (const p of d.pages ?? []) walk(p.nodes);
+  const out = new Map<string, DocNote>(), cells = codeOrder(d);
+  for (let i = 0; i < pageCount(d); i++) {
+    const on = new Map<string, DocNote>();
+    const walk = (ns: DocNode[] | undefined) => {
+      for (const n of ns ?? []) {
+        if (n.kind === "group") walk(n.children);
+        else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) on.set(n.id, n);
+      }
+    };
+    walk(pageOf(d, i).nodes);
+    for (const c of cells) if (c.page === i && on.has(c.item)) out.set(c.id, on.get(c.item)!);
+  }
   return out;
 }
-// Code items in reading order with their previews (code.ts shows a preview, and doesn't run it, when it opens).
-function withPreviews(d: BoardDoc, order: { id: string; code: string }[]) {
+// Code items in reading order with their previews (code.ts shows a preview,
+// and doesn't run it, when it opens).  Only an item whose cell is its id's:
+// one whose id other pages' items have too is a cell by its page, and its
+// cell (and its seed) changes as those come and go, so a preview kept may be
+// another cell's: it has none, and runs (CORR-79B-3). Nor, once its own
+// again, does an item that was one since the board was loaded, until it has
+// run as its own (what it kept may be dropped only after a later sync takes
+// it, CORR-BB9-1): byPage, those items.
+function withPreviews(d: BoardDoc, order: CodeCell[], byPage: Set<string>) {
   const notes = codeNotes(d);
-  return order.map((it) => { const p = notes.get(it.id)?.preview; return p ? { ...it, preview: p } : it; });
+  return order.map(({ id, code, item }) => { const p = id === item && !byPage.has(item) ? notes.get(id)?.preview : undefined; return p ? { id, code, preview: p } : { id, code }; });
 }
 
 export function mountBoard(root: HTMLElement, host: BoardHost) {
@@ -204,6 +226,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   offs.push(track(root));
   const mine = () => active(root);
   let doc: BoardDoc | null = null;
+  // (a code item on the page shown: its cell's id, codeOrder's)
+  let cellOf = new Map<string, string>();
+  const cell = (id: string) => cellOf.get(id) ?? id;
+  // (items that were cells by their page since the board was loaded: withPreviews)
+  const byPage = new Set<string>();
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
@@ -320,8 +347,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // code items: their places in the reading order; the engine runs what changed
     const order = codeOrder(d);
     const nth = new Map(order.map((c, i) => [c.id, i + 1]));
-    for (const it of items) if (it.code !== undefined) it.order = nth.get(it.id);
-    if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
+    // (the board's items are the page's: their cells, by their ids on it)
+    cellOf = new Map(order.filter((c) => c.page === pageIx).map((c) => [c.item, c.id]));
+    for (const it of items) if (it.code !== undefined) it.order = nth.get(cellOf.get(it.id) ?? it.id);
+    if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
+    if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
@@ -450,10 +480,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
-        if (code === c && c.error) say(`**The code can't run here:** ${c.error}`);
+        if (code === c && c.error) say(plain("The code can't run here:", c.error));
         return;
       }
-      board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(id, copy), state: (id) => c.state(id), run: (id) => { c.run([id]); } });
+      board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
       relayout();
     });
     return c;
@@ -468,12 +498,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const got = await c.previews(ids);
     if (!got.size || code !== c || loads !== loaded) return;
     await editor.commit((d) => {
-      const notes = codeNotes(d);
+      const notes = codeNotes(d), own = new Set(codeOrder(d).filter((x) => x.id === x.item).map((x) => x.id));
       for (const [id, { preview: p, gen }] of got) {
         const n = notes.get(id);
         if (!n || c.generation(id) !== gen) continue;
-        if (p === null) delete n.preview;
+        // (a cell by its page keeps none: withPreviews; one that ran as its own, what it showed)
+        if (p === null || !own.has(id)) delete n.preview;
         else if (!sameOutputs(p, n.preview)) n.preview = p;
+        if (own.has(id)) byPage.delete(id);
       }
       const kept = new Map([...notes].filter(([, n]) => n.preview).map(([id, n]) => [id, n.preview!]));
       for (const id of overCap(kept)) delete notes.get(id)!.preview;
@@ -497,6 +529,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function load(d: BoardDoc, stored = false) {
     loads++;
     loadGen++;
+    byPage.clear();
     newOutputs(!stored);
     // (a document loaded from elsewhere was not written here; the one kept, as it says)
     writtenHere = stored ? host.store?.writtenHere?.() ?? false : host.store?.writtenHere?.(false) ?? false;
@@ -508,6 +541,26 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     at = -1;
     const n = Number(m?.[2] ?? m?.[3] ?? 0);
     step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
+    refitAfterRun().catch(fail);
+  }
+
+  // A board is fitted as it opens, before its code has run; its outputs then
+  // make it larger, and what they push down or out may start out of view.
+  // So once the code has first run, its outputs drawn, the view is fitted
+  // again, as the board now is, unless the reader has moved it meanwhile
+  // (William): told the camera to move at all, a flight not yet begun
+  // included (Find, a double-click; CORR-300-1)
+  async function refitAfterRun() {
+    const c = code, loaded = loads, moves = board.moves;
+    if (!c) return;
+    await c.idle();
+    // (code that can't run here has no first run: nothing to fit again)
+    if (!(await c.ready)) return;
+    // (its pictures decoded, so the layout has their sizes)
+    await Promise.all([...root.querySelectorAll<HTMLImageElement>(".board-world img")].map((i) => i.decode().catch(() => {})));
+    if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded || board.moves !== moves) return;
+    // (the camera only: the caption, and a notice in it, stay as they are)
+    look();
   }
 
   /** Show page i (0-based), from its start. */
@@ -535,11 +588,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const steps = () => (doc ? pageView(doc, pageIx).steps ?? [] : []);
   const hashFor = (i: number) => (pageIx ? `#p${pageIx + 1}${i >= 0 ? "-" + (i + 1) : ""}` : i >= 0 ? `#${i + 1}` : "");
 
-  function caption(md: string, where: string) {
+  function caption(md: string | HTMLElement, where: string) {
     const el = $("say");
     el.classList.remove("open");
-    el.innerHTML = markdown(md);
-    if (board.typeset && hasMath(md)) board.typeset(el);
+    if (typeof md === "string") {
+      el.innerHTML = markdown(md);
+      if (board.typeset && hasMath(md)) board.typeset(el);
+    } else el.replaceChildren(md);
     $("where").textContent = where;
     // the camera keeps clear of the title bar and the caption
     board.insets = { top: 44, right: 0, left: 0, bottom: $("tour").hidden ? 0 : $("tour").offsetHeight + 18 };
@@ -549,20 +604,26 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function step(i: number, now = false) {
     const ss = steps();
     at = Math.max(-1, Math.min(ss.length - 1, i));
+    if (at < 0) caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
+    else caption(ss[at].say ?? "", `${at + 1} / ${ss.length}`);
+    look(now);
+    host.address?.set(hashFor(at));
+    ($("prev") as HTMLButtonElement).disabled = at < 0;
+    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
+  }
+
+  // (the camera on the step shown: the whole board, or its slide's card, or the step's items)
+  function look(now = false) {
+    const ss = steps();
     if (at < 0) {
-      caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
       // (a slide: its card)
       const s = doc && lookOf(doc, pageIx).slide;
       if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
       else board.focus(undefined, now);
     } else {
       const s = ss[at];
-      caption(s.say ?? "", `${at + 1} / ${ss.length}`);
       board.focus(typeof s.focus === "string" ? [s.focus] : s.focus, now);
     }
-    host.address?.set(hashFor(at));
-    ($("prev") as HTMLButtonElement).disabled = at < 0;
-    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
   }
 
   // (on a phone the caption is one line: a tap shows it whole, or one line again)
@@ -594,7 +655,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function fail(e: unknown) {
     if (destroyed) return;
     $("tour").hidden = false;
-    caption("**This board could not be shown:** " + String((e as Error)?.message ?? e).replace(/[<>&]/g, ""), "");
+    // (as text, not Markdown: an error says what a file said, its format or
+    // an id, which is anyone's: as Markdown, a picture in it was fetched, SEC-36E-1)
+    caption(plain("This board could not be shown:", String((e as Error)?.message ?? e)), "");
+  }
+  // A caption of a bold head and text, as text.
+  function plain(head: string, text: string): HTMLElement {
+    const p = document.createElement("p"), b = document.createElement("strong");
+    b.textContent = head;
+    p.append(b, " " + text);
+    return p;
   }
 
   // the document: the host's (none: nothing is shown until load(), as for the benchmark's boards)
@@ -678,7 +748,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     input.onblur = () => finish(true);
   };
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
-  editor.onRun = (id) => { code?.run([id]); };
+  editor.onRun = (id) => { code?.run([cell(id)]); };
   editor.highlight = () => code?.highlight ?? null;
   editor.images = images;
   const editBtn = $("edit");
@@ -687,6 +757,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
     $("hint").hidden = !editor.editing.value;
     root.classList.toggle("sbb-editing", editor.editing.value);
+    // (Find's bar under the Edit toolbar, once it is shown or gone)
+    requestAnimationFrame(placeFind);
   }));
   // the toolbar, in Edit mode: adds at the middle of the view
   const center = () => { const v = board.view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2 }; };
@@ -978,17 +1050,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (a CoCalc board, converted: said in the caption, with what was left out,
   // until the next edit)
-  let converted = "", notice = "";
+  let converted = "", notice: string | HTMLElement = "";
   function sayConverted() {
     if (!converted) return;
     say(converted);
     converted = "";
   }
   /** A notice in the caption, until the next edit. */
-  function say(md: string) {
+  function say(md: string | HTMLElement) {
     notice = md;
     $("tour").hidden = false;
     caption(notice, "");
+  }
+  // A file opened or dropped, as text: refused by its size, before it is
+  // read, past FILE_MAX (HARD-36E-2)
+  async function readFile(f: File): Promise<string> {
+    if (f.size > FILE_MAX) throw new Error(`too large to open: ${Math.ceil(f.size / 2 ** 20)} MB (at most ${FILE_MAX / 2 ** 20} MB)`);
+    return f.text();
   }
   const picker = $("openfile") as HTMLInputElement;
   $("open").onclick = () => picker.click();
@@ -999,7 +1077,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const f = picker.files?.[0], g = loadGen;
     picker.value = "";
     if (!f) return;
-    const text = await f.text().catch(fail);
+    const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   };
   // (files dropped on this board)
@@ -1017,7 +1095,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     const f = files[0], g = loadGen;
     if (!f) return;
-    const text = await f.text().catch(fail);
+    const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   });
   // Import Mermaid…: a flowchart pasted in
@@ -1239,6 +1317,118 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   on(window, "keydown", (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc && mine()) { e.preventDefault(); $("print").click(); }
   });
+  // (⌘S downloads the board as one HTML file, as ⋯ Download as HTML does,
+  // not the page (William); what is being written in a note is kept first.
+  // Seen before a field's own keys; with a dialog open, nothing more)
+  on(window, "keydown", async (e: KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s" || !doc || !mine() || !host.exportHtml || host.saveKey === false) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (root.querySelector("dialog[open]")) return;
+    await editor.keepWriting();
+    $("html").click();
+  }, true);
+
+  // Find (Ctrl/Cmd+F, William): a small bar over the board, searching what
+  // its items say as written, in the document (find.ts); Enter and
+  // Shift+Enter go to the next and the previous item that says it, on its
+  // page, in view, outlined, the words marked; Esc closes it
+  const findBar = $("find"), findQ = $("findq") as HTMLInputElement;
+  let found: FindEntry[] = [], foundAt = -1, findGen = 0;
+  const indexes = new WeakMap<BoardDoc, FindEntry[]>();
+  const findDoc = () => viewing ?? doc;
+  const index = () => { const d = findDoc()!; let x = indexes.get(d); if (!x) indexes.set(d, (x = findIndex(d))); return x; };
+  // (under the top bar, or under the Edit toolbar when it shows)
+  function placeFind() {
+    if (findBar.hidden) return;
+    const tb = root.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect();
+    findBar.style.top = tb?.height ? `${Math.round(tb.bottom - root.getBoundingClientRect().top + 6)}px` : "";
+  }
+  function openFind() {
+    findBar.hidden = false;
+    placeFind();
+    findQ.focus();
+    findQ.select();
+  }
+  function closeFind() {
+    findBar.hidden = true;
+    found = [];
+    foundAt = -1;
+    findGen++;
+    unmark();
+  }
+  function unmark() {
+    board.setFound(null);
+    (CSS as any).highlights?.delete("sb-find");
+  }
+  // (as it is typed: the first item on the page shown or after it, else the first)
+  function findNow() {
+    if (!findDoc()) return;
+    found = findIn(index(), findQ.value);
+    foundAt = found.length ? Math.max(0, found.findIndex((e) => e.page >= pageIx)) : -1;
+    showFound().catch(fail);
+  }
+  // (the next or the previous, from the one shown; the document may have changed since)
+  function findStep(dir: 1 | -1) {
+    if (!findDoc()) return;
+    const id = found[foundAt]?.id;
+    found = findIn(index(), findQ.value);
+    const k = id ? found.findIndex((e) => e.id === id) : -1;
+    foundAt = !found.length ? -1 : k < 0 ? (dir > 0 ? 0 : found.length - 1) : (k + dir + found.length) % found.length;
+    showFound().catch(fail);
+  }
+  async function showFound() {
+    const g = ++findGen, e = found[foundAt];
+    $("findn").textContent = !findQ.value ? "" : found.length ? `${foundAt + 1} of ${found.length}` : "No matches";
+    findBar.classList.toggle("none", !!findQ.value && !found.length);
+    if (!e) return unmark();
+    if (e.page !== pageIx) await page(e.page);
+    if (g !== findGen || !board.item(e.id)) return;
+    board.setFound(e.id);
+    revealFound(e.id);
+    markFound(e.id, g);
+  }
+  // In view, below the bars, at the zoom it is (or close enough to read):
+  // the board moves only if the item is not wholly in view.
+  function revealFound(id: string) {
+    const b = board.bounds([id]);
+    if (!b) return;
+    const c = board.camera, i = board.insets, W = board.el.clientWidth, H = board.el.clientHeight;
+    const top = Math.max(i.top, findBar.getBoundingClientRect().bottom - board.el.getBoundingClientRect().top) + 8, bottom = H - i.bottom - 8;
+    const z = c.z >= 0.5 ? c.z : Math.min(1, board.cameraFor(b.x0, b.y0, b.x1, b.y1, 1).z);
+    const sx = (x: number) => (x - c.x) * c.z, sy = (y: number) => (y - c.y) * c.z;
+    if (z === c.z && sx(b.x0) >= i.left && sx(b.x1) <= W - i.right && sy(b.y0) >= top && sy(b.y1) <= bottom) return;
+    const y = (b.y1 - b.y0) * z <= bottom - top ? (b.y0 + b.y1) / 2 - (top + bottom) / 2 / z : b.y0 - top / z;
+    board.flyTo({ x: (b.x0 + b.x1) / 2 - (i.left + (W - i.left - i.right) / 2) / z, y, z });
+  }
+  // (its words marked, once it is mounted; not where a browser has no highlights)
+  function markFound(id: string, g: number, tries = 60) {
+    const reg = (CSS as any).highlights, H = (globalThis as any).Highlight;
+    if (!reg || !H || g !== findGen) return;
+    const el = board.element(id);
+    if (!el) { if (tries > 0) requestAnimationFrame(() => markFound(id, g, tries - 1)); return; }
+    reg.set("sb-find", new H(...textRanges(el, findQ.value)));
+  }
+  on(window, "keydown", (e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && doc && mine() && !presenting) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      openFind();
+    } else if (e.key === "Escape" && !findBar.hidden && mine() && (e.target === findQ || !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) && !board.editing && !root.querySelector("dialog[open]")) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeFind();
+    }
+  }, true);
+  findQ.addEventListener("input", findNow);
+  findQ.addEventListener("keydown", (e) => {
+    // (the board's keys are not for this field)
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+  });
+  $("findprev").onclick = () => findStep(-1);
+  $("findnext").onclick = () => findStep(1);
+  $("findx").onclick = closeFind;
 
   function outputs() {
     return doc ? codeOrder(doc).map(({ id, code: src }) => ({ id, code: src, state: code?.state(id) ?? "", output: code?.text(id) ?? "" })) : [];

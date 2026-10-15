@@ -7,15 +7,35 @@
 import { readFileSync, writeFileSync } from "fs";
 import { boardFromText } from "../web/board/mermaid";
 import { boardSvg } from "../web/board/svg";
-import { pageCount } from "../web/board/doc";
+import { badPictureNames, formatError, pageCount } from "../web/board/doc";
+import { oneLine } from "./terminal-text";
 
 const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
   a board as an SVG file (to OUT, else to standard output); --page N: its
   Nth page (from 1)
+       sagebrush board run FILE [--json] [--timeout S] [--store-previews]
+  run its code items as the board does, and report each one's output or
+  error (sagebrush board run --help)
 `;
+
+/** The command line as a reader of boards, in what it says of one it can't
+ * read: which sagebrush refused it, and what to do (formatError). */
+export const CLI_READER = { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" };
+
+/** What the command line says of a board's pictures whose names the board
+ * leaves out (doc.ts badPictureNames): the rule, and the names, so that
+ * whoever wrote the board can rename them; null if there are none. */
+export function pictureWarning(d: unknown): string | null {
+  const bad = badPictureNames(d);
+  if (!bad.length) return null;
+  const shown = bad.slice(0, 10).map((n) => JSON.stringify(n.length > 60 ? n.slice(0, 60) + "…" : n));
+  return oneLine(`pictures left out: a picture's name is letters, digits, _ and -, at most 100 characters (plot-1, not "plot 1" or "figure.png"), and ${bad.length === 1 ? "this one is" : "these are"} not: ${shown.join(", ")}${bad.length > 10 ? `, and ${bad.length - 10} more` : ""}`);
+}
 
 /** The `board` command; returns the exit code. */
 export async function boardCommand(argv: string[]): Promise<number> {
+  // (sagebrush board run: src/board-run.ts)
+  if (argv[0] === "run") return (await import("./board-run")).boardRun(argv.slice(1));
   if (argv[0] !== "render" || argv.includes("-h") || argv.includes("--help")) {
     (argv[0] === "render" || !argv.length ? process.stdout : process.stderr).write(USAGE);
     return argv[0] === "render" || !argv.length ? 0 : 2;
@@ -26,7 +46,7 @@ export async function boardCommand(argv: string[]): Promise<number> {
     if (a === "--svg") continue;
     if (a === "-o" || a === "--output") out = argv[++i] ?? null;
     else if (a === "--page") page = Number(argv[++i]);
-    else if (a.startsWith("-") && a !== "-") { process.stderr.write(`sagebrush board render: unknown option ${a}\n${USAGE}`); return 2; }
+    else if (a.startsWith("-") && a !== "-") { process.stderr.write(`sagebrush board render: unknown option ${oneLine(a)}\n${USAGE}`); return 2; }
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
   }
@@ -35,10 +55,18 @@ export async function boardCommand(argv: string[]): Promise<number> {
   try {
     const text = readFileSync(file === "-" ? 0 : file, "utf8");
     doc = boardFromText(text, file === "-" ? undefined : file.split(/[\\/]/).pop());
+    // (a document the board would not show, as the board says it: a later
+    // version of the format than this one reads, another format, an id
+    // twice on a page; no SVG of it)
+    const bad = formatError(doc, CLI_READER);
+    if (bad) throw new Error(bad);
   } catch (e: any) {
-    process.stderr.write(`sagebrush board render: ${file}: ${e?.message ?? e}\n`);
+    process.stderr.write(`sagebrush board render: ${oneLine(String(file))}: ${oneLine(String(e?.message ?? e))}\n`);
     return 1;
   }
+  // (pictures the board leaves out for their names: said, so they can be renamed)
+  const pics = pictureWarning(doc);
+  if (pics) process.stderr.write(`sagebrush board render: ${pics}\n`);
   const pages = pageCount(doc);
   if (!Number.isInteger(page) || page < 1 || page > pages) { process.stderr.write(`sagebrush board render: --page: from 1 to ${pages}\n`); return 2; }
   const { svg, left, overflow } = boardSvg(doc, { page: page - 1 });

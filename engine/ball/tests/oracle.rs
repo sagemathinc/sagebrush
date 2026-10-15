@@ -39,6 +39,8 @@ fn contains_arb() {
             "li2" => li2(&x, prec),
             "ti2" => ti2(&x, prec),
             "e1" => sagebrush_ball::e1(&x, prec),
+            "lgamma" => sagebrush_ball::lgamma(&x, prec),
+            "digamma" => sagebrush_ball::digamma(&x, prec),
             _ => panic!("{}", f),
         };
         let ours = ours.unwrap_or_else(|| panic!("{} returned None", line));
@@ -206,4 +208,55 @@ fn precision_cap_before_guard_bits() {
     let one = CBall::real(Ball::one());
     assert!(one.recip(u64::MAX).is_some());
     assert!(one.div(&one, u64::MAX).is_some());
+}
+
+#[test]
+fn gamma_identities() {
+    use sagebrush_ball::{digamma, lgamma, GAMMA_PREC_MAX};
+    let q = |m: i64, e: i64| Ball::exact(BigInt::from(m), e);
+    for prec in [53u64, 128, 400] {
+        let g = euler_gamma(prec + 20);
+        // log Gamma(1) = log Gamma(2) = 0, log Gamma(1/2) = log(pi)/2
+        assert!(lgamma(&q(1, 0), prec).unwrap().contains(&Ball::zero()));
+        assert!(lgamma(&q(2, 0), prec).unwrap().contains(&Ball::zero()));
+        let half_log_pi = pi(prec + 20).log(prec + 20).unwrap().mul_2exp(-1);
+        assert!(lgamma(&q(1, -1), prec).unwrap().overlaps(&half_log_pi));
+        // psi(1) = -gamma, psi(1/2) = -gamma - 2 log 2
+        assert!(digamma(&q(1, 0), prec).unwrap().overlaps(&g.neg()));
+        let want = g.neg().sub(&ln2(prec + 20).mul_2exp(1), prec + 20);
+        assert!(digamma(&q(1, -1), prec).unwrap().overlaps(&want));
+    }
+    // the recurrences log Gamma(x+1) = log Gamma(x) + log x and
+    // psi(x+1) = psi(x) + 1/x on random dyadics from 2^-40 to 2^40 (across
+    // the shift to the Stirling region and beyond it)
+    let mut seed: u64 = 777;
+    let mut rnd = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for prec in [53u64, 200] {
+        for _ in 0..60 {
+            let x = Ball::exact(BigInt::from(rnd() >> 12), (rnd() % 80) as i64 - 92);
+            let x1 = x.add(&Ball::one(), u64::MAX);
+            let d = lgamma(&x1, prec).unwrap().sub(&lgamma(&x, prec).unwrap(), prec);
+            assert!(d.overlaps(&x.log(prec).unwrap()), "log Gamma recurrence at {}", x);
+            let d = digamma(&x1, prec).unwrap().sub(&digamma(&x, prec).unwrap(), prec);
+            assert!(d.overlaps(&x.recip(prec).unwrap()), "psi recurrence at {}", x);
+        }
+    }
+    // a wide ball encloses the values at its ends and middle
+    let x = Ball::with_radius(BigInt::from(3), -2, Mag::pow2(-3)); // [0.625, 0.875]
+    let (lg, dg) = (lgamma(&x, 80).unwrap(), digamma(&x, 80).unwrap());
+    for p in [0.625, 0.75, 0.875] {
+        let pb = Ball::from_f64_exact(p).unwrap();
+        assert!(lg.contains(&lgamma(&pb, 80).unwrap()) && dg.contains(&digamma(&pb, 80).unwrap()), "at {}", p);
+    }
+    // the domain: only balls certainly positive, precision at most the cap
+    for bad in [Ball::zero(), q(-1, -1), Ball::with_radius(BigInt::from(1), -10, Mag::pow2(-9)), Ball::indeterminate()] {
+        assert!(lgamma(&bad, 64).is_none() && digamma(&bad, 64).is_none(), "{}", bad);
+    }
+    assert!(lgamma(&q(3, 0), GAMMA_PREC_MAX + 1).is_none() && digamma(&q(3, 0), u64::MAX).is_none());
+    assert!(lgamma(&q(3, 0), GAMMA_PREC_MAX).is_some());
 }

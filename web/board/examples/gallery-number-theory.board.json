@@ -1,0 +1,109 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "Number theory in Sage",
+ "mode": "sage",
+ "intro": "Sage's number theory, in the reader's browser: primes, factorizations, congruences, arithmetic functions, class numbers and an elliptic curve. Each code item is Sage code; its output shows under it.",
+ "layout": "graph",
+ "direction": "LR",
+ "nodes": [
+  {
+   "id": "about",
+   "title": "Number theory",
+   "text": "The integers, and what lies over them.",
+   "color": "#f3e3b5"
+  },
+  {
+   "id": "primes",
+   "title": "The first primes",
+   "code": "P = primes_first_n(15)\nP"
+  },
+  {
+   "id": "fermat",
+   "title": "Fermat's $F_5$ is not prime",
+   "text": "Fermat thought every $F_n = 2^{2^n} + 1$ prime; Euler found the factor $641$ of $F_5$ in 1732.",
+   "code": "F5 = 2^(2^5) + 1\nfactor(F5)"
+  },
+  {
+   "id": "crt",
+   "title": "The Chinese remainder theorem",
+   "text": "The $x$ with $x \\equiv 2 \\pmod 3$, $x \\equiv 3 \\pmod 5$ and $x \\equiv 2 \\pmod 7$.",
+   "code": "crt([2, 3, 2], [3, 5, 7])"
+  },
+  {
+   "id": "functions",
+   "title": "Arithmetic functions",
+   "text": "$\\varphi(n)$, $\\sigma(n)$ and $\\mu(n)$. $28$ is perfect: $\\sigma(28) = 2 \\cdot 28$.",
+   "code": "[(n, euler_phi(n), sigma(n), moebius(n)) for n in [12, 28, 30]]"
+  },
+  {
+   "id": "classes",
+   "title": "Class numbers",
+   "text": "Of $\\mathbb{Q}(\\sqrt{-d})$: for squarefree $d > 0$, the class number is $1$ for exactly nine $d$, the nine imaginary quadratic fields of class number $1$ (Heegner, Baker, Stark).",
+   "code": "[(d, QuadraticField(-d).class_number()) for d in [1, 2, 3, 5, 6, 7, 11, 19, 23, 43, 67, 163]]"
+  },
+  {
+   "id": "curve",
+   "title": "An elliptic curve",
+   "text": "$y^2 + y = x^3 - x$, of conductor $37$: the elliptic curve of least conductor with positive rank (rank $1$).",
+   "code": "E = EllipticCurve([0, 0, 1, -1, 0])\nE.conductor(), E.rank(), E.torsion_order()"
+  },
+  {
+   "id": "twin",
+   "title": "Twin primes among them",
+   "code": "[(p, p + 2) for p in P if is_prime(p + 2)]"
+  }
+ ],
+ "edges": [
+  {
+   "from": "about",
+   "to": "primes"
+  },
+  {
+   "from": "about",
+   "to": "crt"
+  },
+  {
+   "from": "about",
+   "to": "functions"
+  },
+  {
+   "from": "primes",
+   "to": "fermat"
+  },
+  {
+   "from": "primes",
+   "to": "twin",
+   "label": "reads P"
+  },
+  {
+   "from": "about",
+   "to": "classes"
+  },
+  {
+   "from": "classes",
+   "to": "curve",
+   "label": "further"
+  }
+ ],
+ "steps": [
+  {
+   "focus": [
+    "primes",
+    "twin"
+   ],
+   "say": "`P` is defined in one item and read in another: the board runs them in order, and reruns the reader when `P` changes."
+  },
+  {
+   "focus": "fermat",
+   "say": "Sage factors exactly, with arbitrary-size integers."
+  },
+  {
+   "focus": [
+    "classes",
+    "curve"
+   ],
+   "say": "Number fields and elliptic curves."
+  }
+ ]
+}

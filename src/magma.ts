@@ -20,7 +20,7 @@ export class MagmaSyntaxError extends Error {
 
 // ------------------------------------------------------------------ lexer
 
-type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "eof"; v: string; line: number; col: number };
+type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number };
 
 const KEYWORDS = new Set(
   ("and or not xor eq ne lt le gt ge in notin subset notsubset cat div mod join meet diff sdiff is cmpeq cmpne " +
@@ -30,7 +30,7 @@ const KEYWORDS = new Set(
 );
 
 // longest first
-const OPS = [":->", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
+const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
 export function lex(src: string): Tok[] {
@@ -102,7 +102,13 @@ export function lex(src: string): Tok[] {
     }
     if (src.startsWith("cat:=", i)) { out.push({ t: "op", v: "cat:=", line: L, col: C }); adv(5); continue; }
     const op = OPS.find((o) => src.startsWith(o, i));
-    if (!op) throw new MagmaSyntaxError(`unexpected character '${c}'`, L, C);
+    if (!op) {
+      // reported by the parser when it reaches it, so that the statements
+      // before it still run (Magma parses one statement at a time)
+      out.push({ t: "bad", v: c, line: L, col: C });
+      adv(1);
+      continue;
+    }
     out.push({ t: "op", v: op, line: L, col: C });
     adv(op.length);
   }
@@ -117,6 +123,8 @@ const PYKW = new Set(("False None True and as assert async await break class con
 
 /** A Magma identifier as a Python one. */
 export const pyName = (s: string) => (PYKW.has(s) || s.startsWith("_m") || /^__/.test(s) ? s + "_" : s);
+/** The Magma name of a Python name made by pyName. */
+const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
 interface Fn {
   name: string; // the Python function's name ($$)
@@ -131,8 +139,15 @@ class Parser {
   private tmp = 0;
   private fns: Fn[] = [];
   private hoisted: string[][] = []; // definitions to emit before the current statement
+  // a statement Magma rejects before running it ("User error: ..."): the
+  // first such error of the current top-level statement
+  private rejected: { line: number; col: number; msg: string } | null = null;
 
-  constructor(private toks: Tok[], private filename: string, private src = "") {}
+  reject(t: Tok, msg: string) {
+    if (!this.rejected) this.rejected = { line: t.line, col: t.col, msg };
+  }
+
+  constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {}
 
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
@@ -172,18 +187,45 @@ class Parser {
   program(): string {
     this.emit("from _magma import *");
     this.emit("import _magma as _m");
-    this.emit(`_m._source(${JSON.stringify(this.filename)}, ${JSON.stringify(this.toks.length ? this.src : "")})`);
+    // how errors behave at run time: stop (no recovery: notebook and kernel
+    // cells, as before), "file" or "session" (lib/_magma.py _source)
+    const mode = this.recover === null ? "" : `, ${JSON.stringify(this.recover)}`;
+    this.emit(`_m._source(${JSON.stringify(this.filename)}, ${JSON.stringify(this.toks.length ? this.src : "")}${mode})`);
     while (this.peek().t !== "eof") {
       const t = this.peek();
-      // each top-level statement on its own, as Magma runs them: an error
-      // is reported and the next statement runs
-      this.emit("try:");
-      this.block(() => {
-        this.emit(`_m._here(${t.line}, ${t.col})`);
-        this.statement(true);
-      });
-      this.emit("except Exception as _e:");
-      this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
+      const saved = { out: this.out, n: this.out.length, ind: this.ind, fns: this.fns.length };
+      try {
+        // each top-level statement on its own, as Magma runs them; what an
+        // error does is up to _m._report (a file stops, a session goes on)
+        this.rejected = null;
+        this.emit("try:");
+        this.block(() => {
+          this.emit(`_m._here(${t.line}, ${t.col})`);
+          this.statement(true);
+        });
+        this.emit("except Exception as _e:");
+        this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
+        if (this.rejected) {
+          // Magma rejects the whole statement and goes on with the next one
+          // (in a file too; a cell stops: lib/_magma.py _compile_error)
+          const r = this.rejected as { line: number; col: number; msg: string };
+          this.out.length = saved.n;
+          this.emit(`_m._compile_error(${r.line}, ${r.col}, ${JSON.stringify(r.msg)})`);
+        }
+      } catch (e) {
+        if (!(e instanceof MagmaSyntaxError) || this.recover === null) throw e;
+        // Magma's rule: the statements before a syntax error have run; the
+        // error is reported; a file stops there, and a session drops the
+        // statement and the rest of the line, and goes on with the next line
+        this.out = saved.out;
+        this.out.length = saved.n;
+        this.ind = saved.ind;
+        this.fns.length = saved.fns;
+        const atEnd = this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
+        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)})`);
+        if (this.recover === "file" || atEnd) break;
+        while (this.peek().t !== "eof" && this.peek().line <= e.line) this.i++;
+      }
     }
     return this.out.join("\n") + "\n";
   }
@@ -216,8 +258,99 @@ class Parser {
     }
   }
 
-  declareGlobal(_name: string) {
-    // top-level code is module code: nothing to declare
+  declareGlobal(name: string) {
+    // top-level code is module code: nothing to declare; but inside a map
+    // rule an assigned name is local to its function (see freeIn)
+    if (this.capturing) this.assigned.push(name);
+  }
+
+  // ---- free variables of map rules
+  // Magma's rule x :-> e takes the values e's free variables have when the
+  // map is made.  While a rule is parsed, every variable read is recorded
+  // in `uses` and emitted as a placeholder; each construct that binds names
+  // (a comprehension, a nested rule, func< >, a function's parameters and
+  // locals) marks the reads in its own scope as bound.  When the rule is
+  // done, its free names are taken in the order they occur, as Magma does
+  // (checked against Magma 2.18):
+  // - a name first read is imported: the snapshot is captured, and a read
+  //   is its value (_m._val: an error only if it was not assigned when the
+  //   map was made); a later `assigned name` in the same rule is rejected
+  //   ("Imported environment value 'a' cannot be used as a local");
+  // - a name first tested by `assigned` is a local of the rule, never
+  //   assigned: `assigned` is false, a later read is "Variable 'a' has not
+  //   been initialized", and a rule nested after it can't import it;
+  // - a nested rule's own reads don't count in the enclosing rule's order,
+  //   but its snapshot of a name imports it ("s").
+  private capturing = 0;
+  private uses: { name: string; bound: boolean; kind: "r" | "a" | "s"; tok?: Tok; done?: boolean; res?: string }[] = [];
+  private assigned: string[] = [];
+
+  /** A placeholder for a variable read inside a map rule ("r"), for the
+   * test `assigned name` ("a", at token tok), or for a nested rule's
+   * snapshot of it ("s"), resolved by resolveUses. */
+  useVar(name: string, kind: "r" | "a" | "s" = "r", tok?: Tok): string {
+    const k = this.uses.length;
+    this.uses.push({ name, bound: false, kind, tok });
+    return `\u0000${kind}${k}\u0000`;
+  }
+
+  /** Marks the reads uses[from, to) of the given names as bound. */
+  bindUses(from: number, to: number, names: Iterable<string>) {
+    const set = new Set(names);
+    for (let k = from; k < to; k++) if (set.has(this.uses[k].name)) this.uses[k].bound = true;
+  }
+
+  /** The free variables (the snapshots to take) of a rule parsed by
+   * `parse`, in the order of their first reads, besides the names in
+   * `bound`; and its code with every placeholder resolved. */
+  freeIn(parse: () => string, bound: string[]): { value: string; free: string[] } {
+    this.capturing++;
+    const u0 = this.uses.length, a0 = this.assigned.length;
+    let value: string;
+    try {
+      value = parse();
+    } finally {
+      this.capturing--;
+    }
+    const u1 = this.uses.length;
+    this.bindUses(u0, u1, [...bound, ...this.assigned.slice(a0)]);
+    const free: string[] = [];
+    const state = new Map<string, "imported" | "local">();
+    for (let k = u0; k < u1; k++) {
+      const u = this.uses[k];
+      if (u.done) continue; // a nested rule's, resolved there
+      u.done = true;
+      const n = u.name, q = JSON.stringify(n);
+      if (u.bound) {
+        u.res = u.kind === "a" ? `_m._assigned_name(lambda: ${n})` : n;
+        continue;
+      }
+      const local = state.get(n) === "local";
+      if (u.kind === "a") {
+        if (state.get(n) === "imported") this.reject(u.tok!, `Imported environment value '${magmaName(n)}' cannot be used as a local`);
+        else state.set(n, "local");
+        u.res = "False";
+      } else if (local) {
+        u.res = u.kind === "r" ? `_m._val(_m._UNSET, ${q})` : `_m._enclosing_unset(${q})`;
+      } else {
+        if (u.kind === "r") state.set(n, "imported");
+        if (!free.includes(n)) free.push(n);
+        u.res = u.kind === "r" ? `_m._val(${n}, ${q})` : n;
+      }
+    }
+    value = this.resolveUses(value, u0, u1);
+    this.assigned.length = a0;
+    if (!this.capturing) this.uses.length = 0;
+    return { value, free };
+  }
+
+  /** The placeholders of uses[u0, u1) in code, replaced by their
+   * resolutions (freeIn). */
+  resolveUses(code: string, u0: number, u1: number): string {
+    return code.replace(/\u0000([ras])(\d+)\u0000/g, (m, _kind: string, ks: string) => {
+      const k = Number(ks);
+      return k < u0 || k >= u1 ? m : this.uses[k].res!;
+    });
   }
 
   stmt() {
@@ -241,7 +374,21 @@ class Parser {
         case "function": case "procedure": return this.namedFunction();
         case "forward": this.next(); do this.ident(); while (this.eat(",")); this.expect(";"); return;
         case "local": this.next(); do this.ident(); while (this.eat(",")); this.expect(";"); return;
-        case "delete": { this.next(); const v = pyName(this.ident()); this.expect(";"); this.declareGlobal(v); this.emit(`del ${v}`); return; }
+        case "delete": {
+          this.next();
+          const target = this.tryLhs();
+          if (!target || target.kind === "gens") this.fail("expected a variable or a record field after 'delete'");
+          this.expect(";");
+          const last = target.path?.[target.path.length - 1];
+          if (last && last.kind === "idx") this.reject(last.tok, "Bad delete argument");
+          // delete r`f: the field becomes unassigned (lib/_magma.py _DELETE)
+          if (target.kind === "path") this.store(target, "_m._DELETE");
+          else {
+            this.emit(`_m._delete_check(${JSON.stringify(target.py)})`);
+            this.emit(`del ${target.py}`);
+          }
+          return;
+        }
         case "quit": case "exit": this.next(); this.eat(";"); this.emit("_m._quit()"); return;
         case "time": { this.next(); this.emit("_m._time_start()"); this.stmt(); this.emit("_m._time_end()"); return; }
       }
@@ -336,25 +483,32 @@ class Parser {
       return null;
     }
     let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name), name };
-    const path: string[] = [];
+    const path: PathEl[] = [];
     while (this.at("[") || this.at("`")) {
-      if (this.eat("`")) {
-        const a = this.ident();
-        path.push(`attr:${a}`);
+      if (this.at("`")) {
+        path.push(this.field());
         continue;
       }
-      this.next();
+      const lb = this.next();
       const idx = [this.expr()];
       while (this.eat(",")) idx.push(this.expr());
       this.expect("]");
-      path.push(idx.length === 1 ? idx[0] : `_m.MTuple([${idx.join(", ")}])`);
+      path.push({ kind: "idx", code: idx.length === 1 ? idx[0] : `_m.MTuple([${idx.join(", ")}])`, tok: lb });
     }
     if (path.length) target = { kind: "path", py: target.py, path, read: this.readPath(target.py, path) };
     return target;
   }
 
-  readPath(base: string, path: string[]) {
-    return path.reduce((acc, p) => (p.startsWith("attr:") ? `_m._getattr(${acc}, ${JSON.stringify(p.slice(5))})` : `_m._index(${acc}, ${p})`), base);
+  readPath(base: string, path: PathEl[]) {
+    return path.reduce((acc, p) => (p.kind === "attr" ? `_m._getattr(${acc}, ${p.code}, (${p.line}, ${p.col}))` : `_m._index(${acc}, ${p.code})`), base);
+  }
+
+  /** `name or ``expr (the field name as a string), at the backtick. */
+  field(): PathEl {
+    const t = this.expect("`");
+    // r``s: the field named by the string s
+    const code = this.eat("`") ? this.primary() : JSON.stringify(this.ident());
+    return { kind: "attr", code, line: t.line, col: t.col };
   }
 
   store(t: Target, val: string) {
@@ -366,7 +520,7 @@ class Parser {
       this.declareGlobal(t.py);
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
       const path = t.path!;
-      const enc = path.map((p) => (p.startsWith("attr:") ? `("attr", ${JSON.stringify(p.slice(5))})` : `("idx", ${p})`)).join(", ");
+      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code})`)).join(", ");
       this.emit(`${t.py} = _m._assign_path(${t.py}, [${enc}], ${val})`);
     }
   }
@@ -577,6 +731,7 @@ class Parser {
     this.expect(")");
     const fn: Fn = { name, refs: p.refs, procedure: kind === "procedure" };
     const lines: string[] = [];
+    const u0 = this.uses.length, a0 = this.assigned.length;
     const saveOut = this.out, saveInd = this.ind;
     this.out = lines;
     this.ind = "";
@@ -593,6 +748,9 @@ class Parser {
     this.expect(kind);
     this.out = saveOut;
     this.ind = saveInd;
+    // inside a map rule: the parameters and locals are bound in the body
+    this.bindUses(u0, this.uses.length, [...p.py, ...this.assigned.slice(a0)]);
+    this.assigned.length = a0;
     return lines;
   }
 
@@ -762,14 +920,18 @@ class Parser {
         this.next();
         e = `_m._gen(${e}, ${this.next().v})`;
       } else if (this.at("`")) {
-        this.next();
-        e = `_m._getattr(${e}, ${JSON.stringify(this.ident())})`;
+        const f = this.field() as { code: string; line: number; col: number };
+        e = `_m._getattr(${e}, ${f.code}, (${f.line}, ${f.col}))`;
       } else if (this.at("!")) {
         this.next();
         e = `_m._coerce(${e}, ${this.unary()})`;
       } else if (this.at("@")) {
         this.next();
         e = `_m._apply(${this.unary()}, ${e})`;
+      } else if (this.at("@@")) {
+        // y @@ f: the preimage
+        const op = this.next();
+        e = `_m._preimage(${this.unary()}, ${e}, (${op.line}, ${op.col}))`;
       } else return e;
     }
   }
@@ -779,7 +941,13 @@ class Parser {
     if (t.t === "num") { this.next(); return t.v; }
     if (t.t === "real") { this.next(); return `_m._real(${JSON.stringify(t.v)})`; }
     if (t.t === "str") { this.next(); return JSON.stringify(t.v); }
-    if (t.t === "id") { this.next(); return pyName(t.v); }
+    if (t.t === "id" && this.at("<", 1)) return this.ctorExpr();
+    if (t.t === "id") {
+      this.next();
+      const n = pyName(t.v);
+      return this.capturing ? this.useVar(n) : n;
+    }
+    if (this.at("assigned")) return this.assignedExpr(this.next());
     if (this.eat("true")) return "True";
     if (this.eat("false")) return "False";
     if (this.eat("$$")) {
@@ -823,21 +991,153 @@ class Parser {
       const p = this.params("|");
       this.expect("|");
       if (kind === "func") {
+        const b0 = this.uses.length;
         const body = this.expr();
+        this.bindUses(b0, this.uses.length, p.py);
         this.expect(">");
         return `(lambda ${[...p.py, ...(p.opts.length ? ["*", ...p.opts] : [])].join(", ")}: ${body})`;
       }
       this.fail("proc<...> is not supported yet");
     }
     if (this.at("function") || this.at("procedure")) {
+      const ft = this.peek();
       const kind = this.next().v as "function" | "procedure";
       const name = this.fresh("_mf");
       const lines = this.functionBody(kind, name);
+      if (this.capturing) {
+        // its definition would be hoisted out of the rule and read later
+        // globals: refuse rather than capture wrongly
+        return `_m._not_supported("a function expression inside a map rule", (${ft.line}, ${ft.col}))`;
+      }
       this.hoisted[this.hoisted.length - 1].push(...lines);
       return name;
     }
     if (this.at("-")) return this.unary();
     this.fail(t.t === "eof" ? "unexpected end of input" : `unexpected '${t.v}'`);
+  }
+
+  /**
+   * name< ... >: a constructor (Magma has no `<` operator, so an identifier
+   * followed by `<` always starts one).  Records are implemented; the
+   * others (sub, quo, ext, ideal, map, hom, Group, ...) are parsed and
+   * raise a runtime error until Sagebrush has them.
+   */
+  ctorExpr(): string {
+    const t = this.next();
+    const lt = this.expect("<");
+    const pos = `(${t.line}, ${t.col})`;
+    if (t.v === "recformat") {
+      // recformat< name, name : structure or category, ... > (also empty)
+      const fields: string[] = [];
+      const names = new Set<string>();
+      if (!this.at(">")) {
+        do {
+          const nt = this.peek();
+          const name = this.ident();
+          if (names.has(name)) this.reject(nt, `Field '${name}' is repeated`);
+          names.add(name);
+          fields.push(`(${JSON.stringify(name)}, ${this.eat(":") ? this.expr() : "None"})`);
+        } while (this.eat(","));
+      }
+      this.expect(">");
+      return `_m._recformat([${fields.join(", ")}], ${pos})`;
+    }
+    if (t.v === "rec") {
+      // rec< F | name := value, ... >
+      const fmt = this.expr();
+      this.expect("|");
+      const assigns: string[] = [];
+      if (!this.at(">")) {
+        do {
+          const name = this.ident();
+          this.expect(":=");
+          assigns.push(`(${JSON.stringify(name)}, ${this.expr()})`);
+        } while (this.eat(","));
+      }
+      this.expect(">");
+      return `_m._rec(${fmt}, [${assigns.join(", ")}], ${pos})`;
+    }
+    if (t.v === "map" || t.v === "pmap" || t.v === "hom") {
+      // Magma points at the '<' of a map constructor (at the name of rec< >)
+      const m = this.mapCtor(t.v, `(${lt.line}, ${lt.col})`);
+      if (m !== null) return m;
+    }
+    // not implemented yet: skip to the matching '>' (tuples and nested
+    // constructors are the only other uses of < and >)
+    let depth = 1;
+    while (depth > 0) {
+      const k = this.next();
+      if (k.t === "eof") this.fail("unexpected end of input", k);
+      if (k.t === "op" && k.v === "<") depth++;
+      else if (k.t === "op" && k.v === ">") depth--;
+    }
+    return `_m._unsupported(${JSON.stringify(t.v)}, ${pos})`;
+  }
+
+  /**
+   * map< A -> B | x :-> e(x) [, y :-> i(y)] >, map< A -> B | graph > (a
+   * set or sequence of pairs) and map< A -> B | x -> y, ... >; the same for
+   * pmap, and hom with a rule.  Null (with the position restored) for the
+   * forms not implemented yet, such as hom< ... > by images of generators.
+   */
+  mapCtor(kind: string, pos: string): string | null {
+    const start = this.i;
+    const dom = this.expr();
+    this.expect("->");
+    const cod = this.expr();
+    this.expect("|");
+    if (this.peek().t === "id" && this.at(":->", 1)) {
+      const rule = (): string => {
+        const v = pyName(this.ident());
+        this.expect(":->");
+        // Magma's rule takes the values its free variables have when the
+        // map is made (a later a := 10 doesn't change it): they are bound
+        // as default arguments, copied (value semantics)
+        const { value: body, free } = this.freeIn(() => this.expr(), [v]);
+        // the snapshot: the value, or _m._UNSET for a name not assigned;
+        // in an enclosing rule, the name read is that rule's own snapshot,
+        // passed through as it is (_m._UNSET too: the inner rule may test
+        // it with `assigned` and never read it)
+        const snap = (n: string) => `${n}=_m._snap(lambda: ${this.capturing ? this.useVar(n, "s") : n}, ${JSON.stringify(n)})`;
+        return `lambda ${[v, ...free.map(snap)].join(", ")}: ${body}`;
+      };
+      const r = rule();
+      const inv = this.eat(",") ? rule() : "None";
+      this.expect(">");
+      return `_m._map(${JSON.stringify(kind)}, ${dom}, ${cod}, rule=${r}, inv=${inv}, pos=${pos})`;
+    }
+    if (kind === "hom") {
+      this.i = start;
+      return null;
+    }
+    const first = this.expr();
+    if (this.eat("->")) {
+      const pairs = [`(${first}, ${this.expr()})`];
+      while (this.eat(",")) {
+        const a = this.expr();
+        this.expect("->");
+        pairs.push(`(${a}, ${this.expr()})`);
+      }
+      this.expect(">");
+      return `_m._map(${JSON.stringify(kind)}, ${dom}, ${cod}, pairs=[${pairs.join(", ")}], pos=${pos})`;
+    }
+    this.expect(">");
+    return `_m._map(${JSON.stringify(kind)}, ${dom}, ${cod}, graph=${first}, pos=${pos})`;
+  }
+
+  /** assigned x, assigned r`f, assigned s[i]. */
+  assignedExpr(kw: Tok): string {
+    const t = this.tryLhs();
+    if (!t || t.kind === "gens") this.fail("expected a variable after 'assigned'");
+    if (t.kind === "name") return this.capturing ? this.useVar(t.py, "a", kw) : `_m._assigned_name(lambda: ${t.read})`;
+    const path = t.path!;
+    const last = path[path.length - 1];
+    const base = this.readPath(this.capturing ? this.useVar(t.py) : t.py, path.slice(0, -1));
+    if (last.kind === "idx") {
+      this.reject(kw, "Argument to 'assigned' should be identifier, record field, or attribute");
+      return "None";
+    }
+    return `_m._assigned(${base}, ${last.code})`;
   }
 
   /** A tuple element: an expression up to , or > (no comparisons with > in Magma). */
@@ -850,12 +1150,14 @@ class Parser {
     this.expect(open);
     if (this.eat(close)) return `${ctor}([])`;
     let universe = "None";
+    let h0 = this.uses.length;
     let first = this.expr();
     // [ U | ... ]: a universe
     if (this.at("|") && !this.at(close, 1)) {
       this.next();
       universe = first;
       if (this.eat(close)) return `${ctor}([], universe=${universe})`;
+      h0 = this.uses.length;
       first = this.expr();
     } else if (this.at("|") && this.at(close, 1)) {
       this.next();
@@ -870,37 +1172,60 @@ class Parser {
     }
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]
+      const h1 = this.uses.length;
       const loops: [string, string][] = [];
+      const bound: string[] = [];
       do {
         const vars = [pyName(this.ident())];
         while (this.eat(",")) vars.push(pyName(this.ident()));
+        bound.push(...vars);
         this.expect("in");
         loops.push([vars.length === 1 ? vars[0] : `(${vars.join(", ")})`, this.expr()]);
       } while (this.eat(","));
+      const c0 = this.uses.length;
       const cond = this.eat("|") ? this.expr() : null;
+      // the loop variables are bound in the head and the condition, not in
+      // the sets they run over
+      this.bindUses(h0, h1, bound);
+      this.bindUses(c0, this.uses.length, bound);
       this.expect(close);
       // the first variable varies fastest: the last loop is the outermost
       const gen = `${first} ${loops.reverse().map(([v, s]) => `for ${v} in _m._iter(${s})`).join(" ")}${cond ? ` if _m._bool(${cond})` : ""}`;
       return `${ctor}([${gen}], universe=${universe})`;
     }
-    const elems = [first];
-    while (this.eat(",")) elems.push(this.expr());
+    // x -> y: an arrow pair, as in a map's graph [ 1 -> 30, 2 -> 20 ]
+    const arrow = (e: string) => (this.eat("->") ? `_m.MTuple([${e}, ${this.expr()}])` : e);
+    const elems = [arrow(first)];
+    while (this.eat(",")) elems.push(arrow(this.expr()));
     this.expect(close);
     return `${ctor}([${elems.join(", ")}], universe=${universe})`;
   }
 }
 
+/** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
+type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok };
+
 interface Target {
   kind: "name" | "path" | "gens";
   py: string;
   read: string;
-  path?: string[];
+  path?: PathEl[];
   gens?: string[];
   names?: string[];
   name?: string;
 }
 
+/**
+ * How a syntax error is handled.  Without one, magmaToPython throws
+ * MagmaSyntaxError and nothing runs.  With "file" (a program file) the
+ * statements before the error run, then the error is reported and the
+ * program stops; with "session" (input from stdin, like Magma's interactive
+ * session) the statement and the rest of its line are dropped and the input
+ * goes on, and a runtime error does not stop it either (lib/_magma.py).
+ */
+export type Recover = "file" | "session";
+
 /** Magma source -> Python source (for lib/_magma.py). */
-export function magmaToPython(src: string, filename = "<magma>"): string {
-  return new Parser(lex(src), filename, src).program();
+export function magmaToPython(src: string, filename = "<magma>", opts: { recover?: Recover } = {}): string {
+  return new Parser(lex(src), filename, src, opts.recover ?? null).program();
 }

@@ -836,3 +836,79 @@ def _cubic_conv2(x, y, V, xq, yq):
         for b in range(-1, 3):
             res = res + E[j + a + 1, i + b + 1] * (wy * _keys(tu - b))
     return res
+
+
+# ------------------------------------------------------------------ numgrid, delsq
+
+@_bs("numgrid")
+def numgrid_(region, n):
+    """numgrid(R, n): the points of an n-by-n grid over -1 <= x <= 1,
+    -1 <= y <= 1 that lie in the region R, numbered 1, 2, ... down the
+    columns, 0 elsewhere (the boundary is always 0), as MATLAB's
+    documentation describes it.  'S' is the whole square; 'L' the L-shaped
+    domain, the square without one quarter: with x_i = -1 + 2(i-1)/(n-1),
+    the points with x_row >= 0 and x_col <= 0 are left out, which gives the
+    published numgrid('L',10) and the published counts 675 (n = 32), 75
+    (n = 12) and 2945 (n = 65).  The other regions the documentation names
+    ('C', 'D', 'A', 'H', 'B', 'N') are only described in words, which do not
+    fix their shapes on the grid, so Sagebrush refuses them"""
+    if not _istext(region) or len(_text(region)) != 1:
+        raise _err("numgrid: the region must be one character.")
+    r = _text(region)
+    if r not in ("S", "L"):
+        if r in ("C", "D", "A", "H", "B", "N"):
+            raise _err("numgrid: the region '%s' is not supported in Sagebrush (only 'S' and 'L')." % r)
+        raise _err("numgrid: unknown region '%s'." % r)
+    if type(n) is Char or not _m._isnumlike(n) or _m._numel(n) != 1:
+        raise _err("numgrid: n must be a positive integer.")
+    nn = _scalar(n)
+    if nn != _math.floor(nn) or nn < 1:
+        raise _err("numgrid: n must be a positive integer.")
+    nn = int(nn)
+    x = np.array([-1.0 + 2.0 * i / (nn - 1) for i in range(nn)]) if nn > 1 else np.array([0.0])
+    inside = np.zeros((nn, nn), dtype=bool)
+    inside[1:nn - 1, 1:nn - 1] = True
+    if r == "L":
+        inside &= ~((x[:, None] >= 0) & (x[None, :] <= 0))
+    G = np.zeros((nn, nn))
+    k = 0
+    for j in range(nn):
+        for i in range(nn):
+            if inside[i, j]:
+                k += 1
+                G[i, j] = k
+    return _unmat(G)
+
+
+@_bi("delsq")
+def delsq_(nargout, g):
+    """delsq(G): the five-point finite difference Laplacian on the grid G
+    that numgrid makes, a sparse matrix as MATLAB's documentation describes
+    it: for each numbered point p, 4 at (p, p) and -1 at (p, q) for each of
+    its four neighbours (up, down, left, right) numbered q; the published
+    nnz(delsq(numgrid('S',200))) = 195228 is this stencil's"""
+    import _matlab_sparse as _sp
+    if type(g) is Char or not _m._isnumlike(g):
+        raise _err("delsq: the input must be a numbered grid, as numgrid makes.")
+    G = _mat(g)
+    if G.ndim != 2:
+        raise _err("delsq: the input must be a matrix.")
+    G = np.array(G, dtype=float)
+    N = int(np.max(G)) if G.size else 0
+    rows, cols, vals = [], [], []
+    m, n = G.shape
+    for i in range(m):
+        for j in range(n):
+            p = int(G[i, j])
+            if p <= 0:
+                continue
+            rows.append(p - 1)
+            cols.append(p - 1)
+            vals.append(4.0)
+            for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                a, b = i + di, j + dj
+                if 0 <= a < m and 0 <= b < n and G[a, b] > 0:
+                    rows.append(p - 1)
+                    cols.append(int(G[a, b]) - 1)
+                    vals.append(-1.0)
+    return _sp.make(N, N, rows, cols, vals)
