@@ -28,6 +28,29 @@ test("savefig's arguments act as matplotlib's: transparent and facecolor, axes p
   assert.equal(run([TEST + "png_savefig_args_cases.py"]), oracle["png_savefig_args_cases.py"]);
 });
 
+test("colors are checked as matplotlib checks them, savefig's facecolor too, and reach the SVG only as hex (CORR-788-1)", () => {
+  assert.equal(run([TEST + "png_color_cases.py"]), oracle["png_color_cases.py"]);
+});
+
+test("text a program gives reaches the SVG escaped: titles, labels, ticks, legends, texts, annotations (CORR-788-1)", () => {
+  const out = py(`
+import io, matplotlib.pyplot as plt
+for bad in ['red"/><script>void 0</script><rect fill="red', 'a" onload="void 0']:
+    fig, ax = plt.subplots()
+    ax.set_title(bad); ax.set_xlabel(bad); ax.set_ylabel(bad)
+    ax.plot([0, 1], [0, 1], label=bad); ax.axhline(0.5, label=bad); ax.legend()
+    ax.text(0, 0, bad); ax.annotate(bad, (0, 0), (1, 1), arrowprops={})
+    ax.set_xticks([0, 1], [bad, bad])
+    plt.suptitle(bad)
+    b = io.StringIO()
+    fig.savefig(b, format="svg")
+    for s in (fig._svg(), b.getvalue()):
+        print("<script" in s, 'onload="' in s, "&lt;script&gt;" in s or "onload=&quot;" in s)
+    plt.close("all")
+`);
+  assert.equal(out, "False False True\n".repeat(4));
+});
+
 // a PNG file from its IHDR fields and the IDAT data given
 function crc32(b: Uint8Array): number {
   let c = ~0;

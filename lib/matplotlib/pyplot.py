@@ -17,9 +17,19 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 import math
 import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
-                       show as _show, save_svg, TAB10, to_color, colormap, describe_svg)
+                       show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg)
+from matplotlib.colors import to_rgba as _to_rgba
 
 PT = 100 / 72  # pixels per point at 100 dpi
+
+
+def to_color(c, default=None):
+    """A color given to pyplot as CSS for the SVG, checked as matplotlib
+    checks colors: one it does not know is its ValueError (the SVG gets
+    only what to_color makes of a valid one, escaped)."""
+    if c is not None and not (isinstance(c, str) and c in ("none", "None", "currentColor")):
+        _to_rgba(c)
+    return _css(c, default)
 
 # rc settings (only those set: unset ones keep matplotlib's defaults below)
 rcParams = {}
@@ -248,7 +258,7 @@ class Axes:
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
         r = math.sqrt(36 if s is None or sizes is not None else float(s)) * PT / 2
         p = Points(xs, ys, marker=marker, size=r, sizes=sizes, color=col, colors=colors, alpha=alpha,
-                   label=label, edgecolor=edgecolors if edgecolors not in (None, "none", "face") else None)
+                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None)
         art = _Artist(self._add(p), "collections.PathCollection")
         if clim is not None:
             # (colored by values: a mappable, for colorbar)
@@ -271,7 +281,7 @@ class Axes:
             rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
         p = Rects(rects, color=self._color(None if colors else color), colors=colors, label=label,
-                  edgecolor=edgecolor, alpha=alpha)
+                  edgecolor=to_color(edgecolor), alpha=alpha)
         if tick_label is not None:
             self._opts["xticks"] = [float(v) for v in xs]
             self._opts["xticklabels"] = list(tick_label)
@@ -288,7 +298,7 @@ class Axes:
         ls_ = _list(left) if left is not None and not isinstance(left, (int, float)) else [left or 0] * len(ys)
         rects = [(l, float(yi) - height / 2, w, height) if w >= 0 else (l + w, float(yi) - height / 2, -w, height)
                  for yi, w, l in zip(ys, ws, ls_)]
-        p = Rects(rects, color=self._color(color), label=label, edgecolor=edgecolor, alpha=alpha)
+        p = Rects(rects, color=self._color(color), label=label, edgecolor=to_color(edgecolor), alpha=alpha)
         self._opts.setdefault("_barsh", True)
         return _Artist(self._add(p), "container.BarContainer")
 
@@ -329,7 +339,7 @@ class Axes:
             self._add(Line(xs, ys, color=col, thickness=1.5 * PT, label=label))
         else:
             rects = [(edges[i], 0, edges[i + 1] - edges[i], counts[i]) for i in builtin_range(nb)]
-            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=edgecolor))
+            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=to_color(edgecolor)))
         self._opts.setdefault("_bars", True)
         import sys
         np = sys.modules.get("numpy")
@@ -449,7 +459,7 @@ class Axes:
         if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
             lo, hi = self.get_xlim(), self.get_ylim()
             x, y = lo[0] + x * (lo[1] - lo[0]), hi[0] + y * (hi[1] - hi[0])
-        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=color,
+        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
                        vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True)), "text.Text")
 
@@ -461,7 +471,7 @@ class Axes:
         if xytext is None:
             xytext = xy
         if arrowprops is not None and tuple(xytext) != tuple(xy):
-            self._add(Arrow(xytext, xy, color=arrowprops.get("color", arrowprops.get("facecolor", "currentColor")),
+            self._add(Arrow(xytext, xy, color=to_color(arrowprops.get("color", arrowprops.get("facecolor", "currentColor"))),
                             thickness=1.2))
         # (matplotlib: the text's left end at xytext, unless told otherwise)
         ha = kw.get("horizontalalignment", ha) or ("center" if arrowprops else "left")
@@ -809,6 +819,8 @@ class Figure:
         # (the facecolor as it is when the figure is made, as matplotlib's;
         # given, it also colors the figure's SVG)
         self._facecolor_given = facecolor is not None
+        if facecolor is not None:
+            _css_color(facecolor)  # (an invalid one is matplotlib's ValueError here)
         self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
         self.axes = []
         self._suptitle = None
@@ -967,24 +979,26 @@ _SAVE_FORMATS = ("avif", "eps", "gif", "jpeg", "jpg", "pdf", "pgf", "png", "ps",
 
 
 def _css_color(color):
-    """savefig's facecolor as a CSS color, as matplotlib takes it ("none",
-    names, "#rrggbb[aa]", "C1", gray levels, RGB(A) tuples in [0, 1], whose
-    nan is 0); a tuple becomes #rrggbbaa, keeping its alpha exactly."""
-    if isinstance(color, str):
-        return "none" if color.lower() == "none" else to_color(color)
-    if isinstance(color, (tuple, list)) and len(color) in (3, 4):
-        vals = [float(v) for v in color]
-        if any(v < 0 or v > 1 for v in vals):
-            raise ValueError("RGBA values should be within 0-1 range")
-        vals = [0.0 if v != v else v for v in vals] + [1.0] * (4 - len(vals))
-        return "#" + "".join("%02x" % int(v * 255 + 0.5) for v in vals)
-    raise ValueError("Invalid RGBA argument: %r" % (color[0] if isinstance(color, (tuple, list)) and color else color,))
+    """savefig's facecolor as "none" or "#rrggbbaa", from matplotlib's
+    to_rgba (names, "#rrggbb[aa]", "C1", gray levels, RGB(A) tuples in [0, 1]
+    whose nan is 0; anything else its ValueError), the alpha kept exactly.
+    Only this canonical form reaches the SVG and the PNG module."""
+    if isinstance(color, str) and color.lower() == "none":
+        return "none"
+    rgba = _to_rgba(color)
+    return "#" + "".join("%02x" % int((0.0 if v != v else float(v)) * 255 + 0.5) for v in rgba)
 
 
 def _svg_background(svg, css, w, h):
-    """The figure's SVG on a rectangle of a color (an explicit facecolor)."""
+    """The figure's SVG on a rectangle of a color (an explicit facecolor,
+    as _css_color makes it: fill and fill-opacity, numbers only)."""
+    import re
+    if not re.fullmatch(r"#[0-9a-f]{8}", css):
+        raise ValueError("Invalid RGBA argument: %r" % (css,))
     i = svg.index(">", svg.index("<svg")) + 1
-    return svg[:i] + '<rect x="0" y="0" width="%s" height="%s" fill="%s"/>' % (w, h, css) + svg[i:]
+    rect = '<rect x="0" y="0" width="%s" height="%s" fill="%s"%s/>' % (
+        float(w), float(h), css[:7], ' fill-opacity="%s"' % round(int(css[7:], 16) / 255, 4) if css[7:] != "ff" else "")
+    return svg[:i] + rect + svg[i:]
 
 
 def _axes_patches(svg, axes):
