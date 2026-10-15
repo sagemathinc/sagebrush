@@ -915,6 +915,8 @@ def _gammainc_q_small(a, x):
         s += t
         if abs(t) <= 1e-17 * abs(s):
             break
+        if k > 1000:
+            raise NotCovered("gammainc: the small-x series did not converge at a = %r, x = %r" % (a, x))
     return u - _math.exp(e) * a * s
 
 
@@ -969,14 +971,21 @@ def _gammainc_temme(a, x):
         ak /= a
     r = _math.exp(-a * half_eta2) / _math.sqrt(2 * _PI * a) * s
     z = eta * _math.sqrt(a / 2)
-    return 0.5 * _math.erfc(-z) - r, 0.5 * _math.erfc(z) + r
+    p, q = 0.5 * _math.erfc(-z) - r, 0.5 * _math.erfc(z) + r
+    # (the smaller of P and Q divided by D = exp(-a eta^2/2) / (sqrt(2 pi a)
+    # Gamma*(a)) without forming either: erfc(|z|) = erfcx(|z|) exp(-z^2)
+    # and z^2 = a eta^2/2, so Q/D = Gamma*(a) (sqrt(2 pi a) erfcx(z)/2 + sum)
+    # for z >= 0 and P/D = Gamma*(a) (sqrt(2 pi a) erfcx(-z)/2 - sum) for z < 0)
+    g = _math.exp(_log_gamma_star(a)) * (_math.sqrt(2 * _PI * a) * 0.5 * _erfcx1(abs(z)) + (s if z >= 0 else -s))
+    return p, q, (g if z < 0 else None), (g if z >= 0 else None)
 
 
 def _gammainc_alpha(x):
     """Gautschi's boundary (ACM TOMS 5, 1979): the series for P
     above it, Q below"""
     if x < 0.25:
-        return _math.log(0.5) / _math.log(0.5 * x)
+        # (log x - log 2, not log(x/2), which underflows for the least subnormals)
+        return _math.log(0.5) / (_math.log(x) - _math.log(2.0))
     return x + 0.25
 
 
@@ -991,23 +1000,52 @@ def _gammainc_check(name, a, x):
         raise NotCovered("%s: Sagebrush covers finite a" % name)
 
 
+def _exp_or_inf(t):
+    try:
+        return _math.exp(t)
+    except OverflowError:
+        return _math.inf
+
+
+def _scaled_from(v, logd):
+    """v / D from log D, for a v that has not underflowed (the larger of P
+    and Q, at least about 0.4): inf where it overflows"""
+    if v <= 0:
+        return 0.0
+    return _exp_or_inf(_math.log(v) - logd)
+
+
 def _gammainc_pq(a, x):
-    """(P, Q, how, value): how is "series" (value = S, P = D S), "cf" or
-    "temme" or "small" (value None), for a > 0 and 0 < x < inf"""
+    """(P, Q, P/D, Q/D) for a > 0 and 0 < x < inf, D = x^a e^-x / Gamma(a+1).
+    The smaller of P and Q, which may underflow, has its scaled value
+    formed directly by its method (the series' S, the continued fraction's
+    a F, Temme's erfcx form), never as an underflowed value over D; the
+    larger, at least about 0.4, is divided through log D"""
     if a >= _TEMME_A:
         lam1 = (x - a) / a
         if abs(lam1) < 1 and 2 * -_log1pmx(lam1) <= _TEMME_ETA * _TEMME_ETA:
-            p, q = _gammainc_temme(a, x)
-            return p, q, "temme", None
+            p, q, ps, qs = _gammainc_temme(a, x)
+            logd = _gammainc_logd(a, x)
+            if ps is None:
+                ps = _scaled_from(p, logd)
+            if qs is None:
+                qs = _scaled_from(q, logd)
+            return p, q, ps, qs
+    logd = _gammainc_logd(a, x)
     if a > _gammainc_alpha(x):
         s = _gammainc_series(a, x)
-        p = _math.exp(_gammainc_logd(a, x)) * s
-        return p, 1 - p, "series", s
+        p = _math.exp(logd) * s
+        q = 1 - p
+        return p, q, s, _scaled_from(q, logd)
     if x <= 1.5:
         q = _gammainc_q_small(a, x)
-        return 1 - q, q, "small", None
-    q = a * _math.exp(_gammainc_logd(a, x)) * _gammainc_cf(a, x)
-    return 1 - q, q, "cf", None
+        p = 1 - q
+        # (here D = x^a e^-x / Gamma(a+1) is at least about 0.1: q/D does not lose q)
+        return p, q, _scaled_from(p, logd), q / _math.exp(logd)
+    qs = a * _gammainc_cf(a, x)
+    q = _math.exp(logd) * qs
+    p = 1 - q
+    return p, q, _scaled_from(p, logd), qs
 
 
 def _gammainc1(a, x, upper=False, scaled=False):
@@ -1017,10 +1055,10 @@ def _gammainc1(a, x, upper=False, scaled=False):
     _gammainc_check(name, a, x)
     if a == 0:
         # (P(0, x) = 1 for x >= 0: the limits DLMF 8.2.4 gives, and MATLAB's
-        # page's lim P(x, a) = 1 as x, a -> 0)
+        # page's lim P(x, a) = 1 as x, a -> 0; scaled, P Gamma(1) e^x / x^0 = e^x)
         if not scaled:
             return 0.0 if upper else 1.0
-        return 0.0 if upper else (_math.exp(x) if x < _math.inf else _math.inf)
+        return 0.0 if upper else _exp_or_inf(x)
     if x == 0:
         if not scaled:
             return 1.0 if upper else 0.0
@@ -1030,18 +1068,10 @@ def _gammainc1(a, x, upper=False, scaled=False):
         if not scaled:
             return 0.0 if upper else 1.0
         return 0.0 if upper else _math.inf
-    p, q, how, s = _gammainc_pq(a, x)
-    if not scaled:
-        return max(0.0, q) if upper else max(0.0, p)
-    if not upper and how == "series":
-        return s
-    v = q if upper else p
-    if v <= 0:
-        return 0.0
-    try:
-        return _math.exp(_math.log(v) - _gammainc_logd(a, x))
-    except OverflowError:
-        return _math.inf
+    p, q, ps, qs = _gammainc_pq(a, x)
+    if scaled:
+        return qs if upper else ps
+    return max(0.0, q) if upper else max(0.0, p)
 
 
 def gammainc(a, x):
@@ -1073,8 +1103,11 @@ def gammaincc(a, x):
 def gammainc_scaled(a, x, upper=False):
     """MATLAB's scaled forms: P(a, x) (or Q with upper) times
     Gamma(a + 1) e^x / x^a, which removes P's behaviour x^a/Gamma(a+1) near
-    x = 0 (for P from the series it is the series' sum itself).  inf where
-    the product overflows; at x = 0, 1 for P and inf for Q"""
+    x = 0.  The smaller of P and Q is scaled within its method, never formed
+    and divided (the series' sum for P, a times the continued fraction for
+    Q, Temme's expansion with erfcx), so it survives where P or Q itself
+    underflows (Q(1, 1000) scaled is 1/1000).  inf where the result
+    overflows; at x = 0, 1 for P and inf for Q; e^x for P at a = 0"""
     return _elementwise(lambda a, x: _gammainc1(a, x, upper=upper, scaled=True), a, x)
 
 

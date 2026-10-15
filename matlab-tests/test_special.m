@@ -25,6 +25,8 @@ p(gammainc([90 100 110], 100)); p(gammainc([90 100 110], 100, 'upper')); p(gamma
 p(gammainc([0.01 0.5 3], 1.5, 'scaledlower')); p(gammainc([0.5 3 30], 1.5, 'scaledupper'));
 p(gammainc([0 1 Inf], 2)); p(gammainc(0, [0 1])); p(gammainc([2; 7], [1.5; 6]));
 p(gammainc(700, 50, 'upper')); p(gammainc(1e-3, 30));
+p(gammainc([1000 2000], [1 2], 'scaledupper')); p(gammainc(1000, 0, 'scaledlower')); p(gammainc(1000, 0, 'scaledupper'));
+p(gammainc(5e-324, [0.5 1])); p(gammainc(5e-324, 1, 'scaledlower')); p(gammainc(5e-324, 1, 'upper'));
 fprintf('%s\n', class(gammainc(single(1), 2)));
 p(double(psi(single(0.3))));
 

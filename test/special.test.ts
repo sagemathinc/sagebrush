@@ -59,12 +59,12 @@ const TOL: Record<string, [number, number, number?]> = {
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
-  gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300],
+  gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300], gammainc_scaled: [6e-15, 1e-300],
 };
 // (P's and Q's relative error grows with the size of their exponent, the
 // rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda):
 // it is measured per unit max(1, |log value|))
-const LOG_SCALED = new Set(["gammainc", "gammaincc"]);
+const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled"]);
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
   const worst: Record<string, number> = {};
@@ -180,6 +180,9 @@ print(repr(S._ldexp(-0.0, 1027)), repr(S._ldexp(2.0 ** 60, -1100)), kind(lambda:
 print(repr(S.gammainc(0.0, 2.0)), repr(S.gammaincc(0.0, 2.0)), repr(S.gammainc(2.0, 0.0)), repr(S.gammaincc(2.0, float("inf"))),
       repr(S.gammainc_scaled(2.0, 0.0)), repr(S.gammainc_scaled(2.0, 0.0, True)), repr(S.gammainc(nan, 1.0)))
 print(" ".join(kind(f, *a) for f, a in [(S.gammainc, (-1.0, 2.0)), (S.gammaincc, (1.0, -2.0)), (S.gammainc, (complex(1, 1), 1.0)), (S.gammainc, (inf, 1.0))]))
+# (the scaled forms where the prefactor under- or overflows, and the least subnormal x: daybreak's HARD-05E-1, CORR-05E-2)
+print("%.12g %.12g" % (S.gammainc_scaled(1.0, 1000.0, True), S.gammainc_scaled(2.0, 1000.0, True)), repr(S.gammainc_scaled(0.0, 1000.0)),
+      repr(S.gammainc(1.0, 5e-324)), repr(S.gammainc_scaled(1.0, 5e-324)), repr(S.gammaincc(1.0, 5e-324)), repr(S.gammainc(1.0, 1e-320)))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -229,5 +232,6 @@ print(" ".join(kind(f, *a) for f, a in [(S.gammainc, (-1.0, 2.0)), (S.gammaincc,
     "1.0 0.0 0.0 0.0 1.0 inf nan",
     "NotCovered: gammainc: Sagebrush covers a >= 0 NotCovered: gammaincc: Sagebrush covers x >= 0 " +
       "NotCovered: gammainc: Sagebrush covers real arguments NotCovered: gammainc: Sagebrush covers finite a",
+    "0.001 0.002002 inf 5e-324 1.0 1.0 1e-320",
   ]);
 });

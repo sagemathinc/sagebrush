@@ -151,8 +151,18 @@ for a, kind in _gi:
         x = LU(1e-6, 1.5)
     _gi_pts.append((a, x))
 _gi_pts += [(a, x) for a in (0.5, 1.0, 1.5, 11.9, 12.0, 15.0, 100.0) for x in (0.2, 0.26, 1.5, 1.6, a + 0.25, a * 0.6, a * 1.6)]
+# (a = 1e10 about x = a: Temme's expansion where P or Q underflows; added
+# after the drawn points, deterministically)
+_gi_pts += [(1e10, 1e10 + z * 1e5) for z in (-20, -10, -5, -1, 0, 1, 5, 10, 20)] + [(1.0, 5e-324), (2.0, 1e-200)]
 points["gammainc"] = _gi_pts
 points["gammaincc"] = list(_gi_pts)
+# (the scaled forms, P or Q times Gamma(a+1) e^x / x^a: where the unscaled
+# value underflows (daybreak's HARD-05E-1: 0.001 at a = 1, x = 1000), in
+# each region, and at the least subnormal x)
+points["gammainc_scaled"] = [(a, x, float(up)) for a, x, up in [
+    (1.0, 1000.0, 1), (2.0, 1000.0, 1), (50.0, 2000.0, 1), (1e4, 1.2e4, 1), (1e4, 8e3, 0), (0.5, 1e-300, 0),
+    (1.0, 5e-324, 0), (3.0, 1e-200, 0), (1e10, 1e10 + 5e5, 1), (1e10, 1e10 - 5e5, 0), (1e10, 1e10 + 5e5, 0),
+    (20.0, 21.0, 0), (20.0, 21.0, 1), (0.3, 0.1, 1), (0.3, 0.1, 0), (5.0, 30.0, 0), (5.0, 30.0, 1), (0.01, 1.2, 1)]]
 
 
 def ferrers_column(n, x):
@@ -198,6 +208,11 @@ def ellipj_ref(u, m):
 
 def _gammainc_ref(a, x, upper):
     a, x = mp.mpf(a), mp.mpf(x)
+    if a >= 1e6:
+        # (mpmath's upper function is fast here; P = 1 - Q with digits enough for P's size)
+        with mp.workdps(400):
+            q = mp.gammainc(a, x, mp.inf, regularized=True)
+            return q if upper else 1 - q
     with mp.workdps(80):
         if x < a:
             # (P = x^a e^-x / Gamma(a+1) 1F1(1; a+1; x), DLMF 8.7.1 and 13.2.2)
@@ -210,6 +225,13 @@ def _gammainc_ref(a, x, upper):
             with mp.workdps(400):
                 q = 1 - mp.exp(a * mp.log(x) - x - mp.loggamma(a + 1)) * mp.hyp1f1(1, a + 1, x, maxterms=10 ** 7)
         return q if upper else 1 - q
+
+
+def _gammainc_scaled_ref(a, x, upper):
+    with mp.workdps(400):
+        v = _gammainc_ref(a, x, bool(upper))
+        A, X = mp.mpf(a), mp.mpf(x)
+        return v / mp.exp(A * mp.log(X) - X - mp.loggamma(A + 1))
 
 
 def faddeeva(z):
@@ -234,6 +256,7 @@ ref = {
     "ellipj": lambda u, m: ellipj_ref(u, m),
     "legendre_all": legendre_all,
     "gammainc": lambda a, x: _gammainc_ref(a, x, False), "gammaincc": lambda a, x: _gammainc_ref(a, x, True),
+    "gammainc_scaled": _gammainc_scaled_ref,
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}
