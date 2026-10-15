@@ -34,7 +34,7 @@ use crate::defnew::Op;
 use crate::defweight::{place_pairs, HeckeTerms, WPlace, WeightSpace, MAX_DIMENSION};
 use crate::fpoly::{bitlen, coefficient_bits, pairs_needed};
 use crate::gpoly::{self, GPlace, PairCrt, QPoly};
-use crate::quatalg::MaximalOrder;
+use crate::quatalg::{MaximalOrder, QuatAlg};
 use crate::rqf::{QElt, QIdeal, QPrime, QuadField};
 use crate::weight::Weight;
 use num_traits::{One, ToPrimitive};
@@ -53,6 +53,35 @@ use std::sync::{Arc, Mutex};
 /// which is refused) and about 1.4 times that in wasm, so up to a minute
 /// or two at the limit, with interrupt checks throughout.
 pub const MAX_TOTAL_WORK: u64 = 1 << 34;
+
+/// The modular work of one request, accumulated over its steps (the
+/// attempts of the separating-operator search): a step is admitted only if
+/// the work spent so far, the step, and the work it would go on to start
+/// fit the cap, and then its own work counts as spent.
+pub(crate) struct WorkBudget {
+    spent: u128,
+    cap: u128,
+}
+
+impl WorkBudget {
+    pub(crate) fn new(cap: u128) -> WorkBudget {
+        WorkBudget { spent: 0, cap }
+    }
+
+    /// Admits a step of work `now` that may be followed by `then` more.
+    pub(crate) fn admit(&mut self, now: u128, then: u128, weight: Weight) -> Result<(), String> {
+        let total = self.spent.saturating_add(now).saturating_add(then);
+        if total > self.cap {
+            return Err(format!("this computation in weight {:?} needs about {} operations modulo primes, above the limit of {} (unsupported)", weight.k, total, self.cap));
+        }
+        self.spent += now;
+        Ok(())
+    }
+
+    pub(crate) fn spent(&self) -> u128 {
+        self.spent
+    }
+}
 
 /// The newform orbits of a level: the separating operator and the
 /// characteristic polynomial over F of it on each orbit (irreducible over F,
@@ -176,6 +205,16 @@ impl WeightNewspaces {
     /// The modular work of op on the spaces `ms` at `places` places, checked
     /// against MAX_TOTAL_WORK (computing the place-independent data first).
     fn check_work(&self, ms: &[QIdeal], ops: &[&Op], places: usize) -> Result<u128, String> {
+        let w = self.work(ms, ops, places)?;
+        if w > MAX_TOTAL_WORK as u128 {
+            return Err(format!("this computation in weight {:?} needs about {} operations modulo primes, above the limit of {} (unsupported)", self.weight.k, w, MAX_TOTAL_WORK));
+        }
+        Ok(w)
+    }
+
+    /// The estimated modular work of ops on the spaces ms at `places`
+    /// places (computing the place-independent data first).
+    fn work(&self, ms: &[QIdeal], ops: &[&Op], places: usize) -> Result<u128, String> {
         let mut w: u128 = 0;
         for m in ms {
             let n = self.space(m)?.dimension() as u128;
@@ -186,10 +225,7 @@ impl WeightNewspaces {
                 }
             }
         }
-        if w * places as u128 > MAX_TOTAL_WORK as u128 {
-            return Err(format!("this computation in weight {:?} needs about {} operations modulo primes, above the limit of {} (unsupported)", self.weight.k, w * places as u128, MAX_TOTAL_WORK));
-        }
-        Ok(w * places as u128)
+        Ok(w.saturating_mul(places as u128))
     }
 
     /// The estimated modular work of hecke_charpoly(p), in multiply-adds
@@ -336,8 +372,19 @@ impl WeightNewspaces {
 
     /// A separating operator, by the search of weightnew.rs.
     pub fn separating_operator(&self) -> Result<(Op, QPoly), String> {
-        let primes: Vec<QPrime> = self.field.primes_of_bounded_norm(2000)?.into_iter().filter(|p| !self.divides(p).unwrap_or(true)).take(16).collect();
         let pl = self.pairs(1)?[0].0;
+        let op = self.search_separating(MAX_TOTAL_WORK as u128, |op| self.separates(op, &pl))?;
+        let cp = self.new_charpoly(&op)?;
+        Ok((op, cp))
+    }
+
+    /// The search for a separating operator, with `test` deciding each
+    /// candidate. One budget of `cap` covers the whole search (daybreak
+    /// HARD-A95-1): a candidate is tested only if the work of the failed
+    /// tests so far, its own test (one place) and the recovery of its
+    /// characteristic polynomial it would start (2 need places) all fit.
+    fn search_separating(&self, cap: u128, mut test: impl FnMut(&Op) -> Result<bool, String>) -> Result<Op, String> {
+        let primes: Vec<QPrime> = self.field.primes_of_bounded_norm(2000)?.into_iter().filter(|p| !self.divides(p).unwrap_or(true)).take(16).collect();
         let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
         let mut next = move || {
             seed ^= seed << 13;
@@ -346,6 +393,7 @@ impl WeightNewspaces {
             seed
         };
         let ms: Vec<QIdeal> = self.divisors.iter().map(|(m, _)| *m).collect();
+        let mut budget = WorkBudget::new(cap);
         for attempt in 0..48usize {
             let k = (1 + attempt).min(primes.len());
             let range = [9u64, 101, 1001, 20001][(attempt / 4).min(3)];
@@ -356,14 +404,11 @@ impl WeightNewspaces {
                 })
                 .filter(|&(_, c)| c != 0)
                 .collect();
-            // the recovery of its charpoly must fit the budgets, which are
-            // checked before the costly separation test
             let d = self.new_dimension()?;
             let need = pairs_needed(coefficient_bits(d, &self.op_bound(&op)?))?;
-            self.check_work(&ms, &[&op], 2 * need + 1)?;
-            if self.separates(&op, &pl)? {
-                let cp = self.new_charpoly(&op)?;
-                return Ok((op, cp));
+            budget.admit(self.work(&ms, &[&op], 1)?, self.work(&ms, &[&op], 2 * need)?, self.weight)?;
+            if test(&op)? {
+                return Ok(op);
             }
         }
         Err("no separating Hecke operator found".into())
@@ -406,25 +451,12 @@ impl WeightNewspaces {
         let tops = [self.level];
         let mut ops: Vec<Op> = primes.iter().map(|p| vec![(*p, 1)]).collect();
         ops.push(orbits.op.clone());
-        self.check_work(&tops, &ops.iter().collect::<Vec<_>>(), 2 * (need + 400))?;
-        type Res = Vec<Vec<(Vec<u64>, Vec<u64>)>>;
-        let mut kept: Vec<((WPlace, WPlace), Res, Res)> = vec![];
-        for (tries, pp) in place_pairs(self.order.alg())?.enumerate() {
-            if tries > need + 400 {
-                return Err("too many unusable places".into());
-            }
-            if pp.0.p() >> 61 == 0 {
-                return Err("internal error: a modulus below 2^61".into());
-            }
-            let (Some(a), Some(b)) = (self.orbit_charpolys_mod(orbits, primes, &pp.0)?, self.orbit_charpolys_mod(orbits, primes, &pp.1)?) else {
-                continue;
-            };
-            kept.push((pp, a, b));
-            if kept.len() >= need {
-                break;
-            }
-        }
-        let pairs: Vec<(WPlace, WPlace)> = kept.iter().map(|(pp, _, _)| *pp).collect();
+        self.check_work(&tops, &ops.iter().collect::<Vec<_>>(), 2 * (need + SPARE_PAIRS))?;
+        let kept = usable_pairs(self.order.alg(), need, |pp| {
+            let Some(a) = self.orbit_charpolys_mod(orbits, primes, &pp.0)? else { return Ok(None) };
+            Ok(self.orbit_charpolys_mod(orbits, primes, &pp.1)?.map(|b| (a, b)))
+        })?;
+        let pairs: Vec<(WPlace, WPlace)> = kept.iter().map(|(pp, _)| *pp).collect();
         let crt = Self::crt(&pairs);
         let mut cps = vec![];
         let mut hs = vec![];
@@ -433,9 +465,9 @@ impl WeightNewspaces {
             let mut row = vec![];
             let mut hrow = vec![];
             for t in 0..primes.len() {
-                row.push((0..=d).map(|i| crt.reconstruct(&kept.iter().map(|(_, a, b)| (a[k][t].0[i], b[k][t].0[i])).collect::<Vec<_>>())).collect());
+                row.push((0..=d).map(|i| crt.reconstruct(&kept.iter().map(|(_, (a, b))| (a[k][t].0[i], b[k][t].0[i])).collect::<Vec<_>>())).collect());
                 let at = |v: &Vec<u64>, i: usize| v.get(i).copied().unwrap_or(0);
-                hrow.push(gpoly::trim((0..d).map(|i| crt.reconstruct(&kept.iter().map(|(_, a, b)| (at(&a[k][t].1, i), at(&b[k][t].1, i))).collect::<Vec<_>>())).collect()));
+                hrow.push(gpoly::trim((0..d).map(|i| crt.reconstruct(&kept.iter().map(|(_, (a, b))| (at(&a[k][t].1, i), at(&b[k][t].1, i))).collect::<Vec<_>>())).collect()));
             }
             cps.push(row);
             hs.push(hrow);
@@ -526,10 +558,134 @@ impl WeightNewspaces {
     }
 }
 
+/// The pairs of places orbit_data may try beyond the `need` it uses, all
+/// budgeted.
+const SPARE_PAIRS: usize = 400;
+
+/// The first `need` pairs of conjugate places at which `at` succeeds, with
+/// its results, trying at most need + SPARE_PAIRS pairs (the number
+/// budgeted; daybreak LIM-A95-4), else an error.
+fn usable_pairs<T>(alg: &QuatAlg, need: usize, mut at: impl FnMut(&(WPlace, WPlace)) -> Result<Option<T>, String>) -> Result<Vec<((WPlace, WPlace), T)>, String> {
+    let mut kept = vec![];
+    for (tries, pp) in place_pairs(alg)?.enumerate() {
+        if kept.len() >= need {
+            break;
+        }
+        if tries >= need + SPARE_PAIRS {
+            return Err("too many unusable places".into());
+        }
+        if pp.0.p() >> 61 == 0 {
+            return Err("internal error: a modulus below 2^61".into());
+        }
+        if let Some(r) = at(&pp)? {
+            kept.push((pp, r));
+        }
+    }
+    if kept.len() < need {
+        return Err("internal error: not enough places above 2^61".into());
+    }
+    Ok(kept)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::quatalg::QuatAlg;
+
+    /// HARD-A95-1: the budget accumulates over failed attempts and counts
+    /// the recovery an attempt would start.
+    #[test]
+    fn work_budget_accumulates() {
+        let w = Weight::new(2, 4).unwrap();
+        let mut b = WorkBudget::new(100);
+        // three failed attempts of 30 with a recovery of 10 each fit
+        for _ in 0..3 {
+            b.admit(30, 10, w).unwrap();
+        }
+        assert_eq!(b.spent(), 90);
+        // a fourth would exceed the cap with its recovery
+        assert!(b.admit(5, 10, w).unwrap_err().contains("above the limit of 100"));
+        assert_eq!(b.spent(), 90);
+        // without it, it fits
+        b.admit(5, 5, w).unwrap();
+        // and saturation cannot wrap around
+        assert!(WorkBudget::new(100).admit(u128::MAX, 1, w).is_err());
+    }
+
+    /// HARD-A95-1 in the search: with every candidate failing, the tests
+    /// run and the last one's recovery fit the cap together, and the search
+    /// is refused at the first candidate that would not, although that
+    /// candidate alone (the check before the fix) fits.
+    #[test]
+    fn separating_search_one_budget() {
+        let f = QuadField::new(5).unwrap();
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let ns = WeightNewspaces::new(&o, &f.principal(&QElt::int(6)).unwrap(), Weight::new(2, 4).unwrap()).unwrap();
+        assert!(ns.new_dimension().unwrap() > 0);
+        let ms: Vec<QIdeal> = ns.divisors.iter().map(|(m, _)| *m).collect();
+        // without a cap: all 48 candidates are tested
+        let mut all: Vec<Op> = vec![];
+        let e = ns.search_separating(u128::MAX, |op| {
+            all.push(op.clone());
+            Ok(false)
+        });
+        assert_eq!(e.unwrap_err(), "no separating Hecke operator found");
+        assert_eq!(all.len(), 48);
+        let cost = |op: &Op| {
+            let need = pairs_needed(coefficient_bits(ns.new_dimension().unwrap(), &ns.op_bound(op).unwrap())).unwrap();
+            (ns.work(&ms, &[op], 1).unwrap(), ns.work(&ms, &[op], 2 * need).unwrap())
+        };
+        let costs: Vec<(u128, u128)> = all.iter().map(cost).collect();
+        assert!(costs.iter().all(|&(now, _)| now > 0));
+        // a cap that the first five tests and any one recovery fit
+        let cap = costs[..5].iter().map(|c| c.0).sum::<u128>() + costs[..5].iter().map(|c| c.1).max().unwrap();
+        let mut seen: Vec<Op> = vec![];
+        let e = ns.search_separating(cap, |op| {
+            seen.push(op.clone());
+            Ok(false)
+        });
+        assert!(e.unwrap_err().contains("above the limit"));
+        let c = seen.len();
+        assert!((5..48).contains(&c), "{} tests", c);
+        assert_eq!(seen[..], all[..c]);
+        let spent: u128 = costs[..c].iter().map(|x| x.0).sum();
+        assert!(spent + costs[c - 1].1 <= cap);
+        assert!(spent + costs[c].0 + costs[c].1 > cap);
+        assert!(costs[c].0 + costs[c].1 <= cap, "the refused candidate alone fits");
+    }
+
+    /// LIM-A95-4: with every place unusable, exactly need + SPARE_PAIRS
+    /// pairs are tried; otherwise the first `need` usable ones are kept.
+    #[test]
+    fn usable_pairs_tries_the_budgeted_number() {
+        let alg = QuatAlg::unramified(QuadField::new(13).unwrap()).unwrap();
+        let mut tries = 0;
+        let e = usable_pairs::<()>(&alg, 3, |_| {
+            tries += 1;
+            Ok(None)
+        });
+        assert_eq!(e.unwrap_err(), "too many unusable places");
+        assert_eq!(tries, 3 + SPARE_PAIRS);
+        // the last budgeted pair may still be the need-th usable one
+        let mut tries = 0;
+        let kept = usable_pairs(&alg, 3, |pp| {
+            tries += 1;
+            Ok((tries == 1 || tries == 2 || tries == 3 + SPARE_PAIRS).then_some(pp.0.p()))
+        })
+        .unwrap();
+        assert_eq!(tries, 3 + SPARE_PAIRS);
+        assert_eq!(kept.len(), 3);
+        assert!(kept.iter().all(|(pp, p)| pp.0.p() == *p));
+        // and nothing is tried once enough are kept
+        let mut tries = 0;
+        assert_eq!(usable_pairs(&alg, 2, |_| {
+            tries += 1;
+            Ok(Some(()))
+        })
+        .unwrap()
+        .len(), 2);
+        assert_eq!(tries, 2);
+        assert!(usable_pairs::<()>(&alg, 0, |_| unreachable!()).unwrap().is_empty());
+    }
 
     /// For tests/wasm-stop.mjs (the Stop button in wasm): a computation of
     /// several seconds, T at the prime of norm 3 on S_(6, 6)((9)) over

@@ -372,7 +372,8 @@ impl Group {
         let mut mult = vec![vec![0u8; elts.len()]; elts.len()];
         for (s, x) in elts.iter().enumerate() {
             for (t, y) in elts.iter().enumerate() {
-                sagebrush_interrupt::check();
+                // check_coarse: a product in big integers per step
+                sagebrush_interrupt::check_coarse();
                 let mut z = alg.mul(x, y);
                 let n = alg.nrd(&z).integral().ok_or("internal error: a unit of non-integral norm")?;
                 if cg.eps_norm == 1 && n == eps2 {
@@ -384,7 +385,7 @@ impl Group {
         let one = *index.get(&BElt::one()).ok_or("internal error: 1 is not among the units")?;
         let mut traces = vec![];
         for x in &elts {
-            sagebrush_interrupt::check();
+            sagebrush_interrupt::check_coarse();
             let t = alg.trd(x).integral().ok_or("internal error: a unit of non-integral trace")?;
             let n = alg.nrd(x).integral().ok_or("internal error: a unit of non-integral norm")?;
             traces.push(character(&f, w, &t, &n));
@@ -607,6 +608,7 @@ impl WeightSpace {
         for list in theta.iter() {
             let mut v = vec![];
             for (j, a) in list {
+                sagebrush_interrupt::check_coarse();
                 let u = alg.conj(a);
                 let nj = BigInt::from(sp.classes().classes()[*j].ideal().nrd().norm());
                 v.push((*j, us.len() as u32, sp.images(&u, &nj)?));
@@ -662,7 +664,7 @@ impl WeightSpace {
             // runs over the same group
             let mut p = vec![0u64; d * d];
             for &g in st {
-                sagebrush_interrupt::check();
+                sagebrush_interrupt::check_coarse();
                 let (g2, g1) = &conj_mats[*j][g as usize];
                 let m = rep(&self.weight, g2, g1, &md);
                 for (x, y) in p.iter_mut().zip(&m) {
@@ -701,13 +703,25 @@ impl WeightSpace {
             .groups
             .iter()
             .map(|g| g.elts.iter().map(|h| {
+                sagebrush_interrupt::check_coarse();
                 let c = alg.conj(h);
                 Ok((pl.split(&c)?, conj_pl.split(&c)?))
             }).collect::<Result<_, String>>())
             .collect::<Result<_, _>>()?;
-        let u_mats: Vec<([u64; 4], [u64; 4])> = terms.us.iter().map(|u| Ok((pl.split(u)?, conj_pl.split(u)?))).collect::<Result<_, String>>()?;
+        let u_mats: Vec<([u64; 4], [u64; 4])> = terms
+            .us
+            .iter()
+            .map(|u| {
+                sagebrush_interrupt::check_coarse();
+                Ok((pl.split(u)?, conj_pl.split(u)?))
+            })
+            .collect::<Result<_, String>>()?;
         let bases = self.invariant_bases(pl, &conj_mats)?;
         let d = self.weight.rep_dim();
+        // Stop is asked at every term and every target (check_coarse: a
+        // representation matrix or a product B_t S costs microseconds, so
+        // every 1024th call would leave tens of milliseconds between asks
+        // in wasm)
         let rows: Vec<Result<Vec<(usize, Vec<u64>)>, String>> = crate::par::map_range(terms.rows.len(), |r| {
             let (bi, list) = &terms.rows[r];
             let (basis_i, piv_i) = bases[*bi].as_ref().unwrap();
@@ -718,7 +732,7 @@ impl WeightSpace {
                 // S = sum of M(conj(h) u) over the terms into this orbit
                 let mut s = vec![0u64; d * d];
                 while k < list.len() && list[k].0 == target {
-                    sagebrush_interrupt::check();
+                    sagebrush_interrupt::check_coarse();
                     let (_, h, ui) = list[k];
                     let j = self.stabilizers[target].0;
                     let (h2, h1) = &conj_mats[j][h as usize];
@@ -731,6 +745,7 @@ impl WeightSpace {
                 }
                 let (basis_j, _) = bases[target].as_ref().unwrap();
                 for b in 0..self.dims[target] {
+                    sagebrush_interrupt::check_coarse();
                     // the row B_j[b] S, which must lie in the invariants of x_i
                     let mut row = vec![0u64; d];
                     for e in 0..d {
