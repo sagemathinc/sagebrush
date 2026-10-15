@@ -19,6 +19,7 @@
 mod par;
 pub mod estimate;
 pub mod cusps;
+pub mod cycles;
 pub mod dims;
 pub mod dirichlet;
 pub mod ec_map;
@@ -141,9 +142,11 @@ thread_local! {
 }
 
 /// The modular symbol map of the elliptic curve of conductor n with these
-/// a_q (ec_map.rs): X(0:1) and {0, a/b} for each cusp, in the map's
-/// primitive integral units.  The map is cached for the last few curves.
-pub fn ec_modsym_values(n: u64, aps: &[(u64, i64)], cusps: &[(i64, i64)]) -> Result<(sagebrush_bigint::BigInt, Vec<sagebrush_bigint::BigInt>), String> {
+/// a_q (ec_map.rs): X(0:1), the generator of X(H_1(X_0(N), Z)) and
+/// {0, a/b} for each cusp, in the map's primitive integral units.  The map
+/// is cached for the last few curves.
+#[allow(clippy::type_complexity)]
+pub fn ec_modsym_values(n: u64, aps: &[(u64, i64)], cusps: &[(i64, i64)]) -> Result<(sagebrush_bigint::BigInt, sagebrush_bigint::BigInt, Vec<sagebrush_bigint::BigInt>), String> {
     check_level(n)?;
     for &(a, b) in cusps {
         if b == 0 || a.unsigned_abs() >= 1 << 62 || b.unsigned_abs() >= 1 << 62 {
@@ -171,5 +174,5 @@ pub fn ec_modsym_values(n: u64, aps: &[(u64, i64)], cusps: &[(i64, i64)]) -> Res
         let g = p1::gcd(a.unsigned_abs(), b as u64) as i64;
         m.eval(a / g, b / g)
     }).collect();
-    Ok((m.at_zero_symbol(), vals))
+    Ok((m.at_zero_symbol(), m.cycles.clone(), vals))
 }
