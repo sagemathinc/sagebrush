@@ -184,10 +184,13 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
 // and doesn't run it, when it opens).  Only an item whose cell is its id's:
 // one whose id other pages' items have too is a cell by its page, and its
 // cell (and its seed) changes as those come and go, so a preview kept may be
-// another cell's: it has none, and runs (CORR-79B-3).
-function withPreviews(d: BoardDoc, order: CodeCell[]) {
+// another cell's: it has none, and runs (CORR-79B-3). Nor, once its own
+// again, does an item that was one since the board was loaded, until it has
+// run as its own (what it kept may be dropped only after a later sync takes
+// it, CORR-BB9-1): byPage, those items.
+function withPreviews(d: BoardDoc, order: CodeCell[], byPage: Set<string>) {
   const notes = codeNotes(d);
-  return order.map(({ id, code, item }) => { const p = id === item ? notes.get(id)?.preview : undefined; return p ? { id, code, preview: p } : { id, code }; });
+  return order.map(({ id, code, item }) => { const p = id === item && !byPage.has(item) ? notes.get(id)?.preview : undefined; return p ? { id, code, preview: p } : { id, code }; });
 }
 
 export function mountBoard(root: HTMLElement, host: BoardHost) {
@@ -215,6 +218,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (a code item on the page shown: its cell's id, codeOrder's)
   let cellOf = new Map<string, string>();
   const cell = (id: string) => cellOf.get(id) ?? id;
+  // (items that were cells by their page since the board was loaded: withPreviews)
+  const byPage = new Set<string>();
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
@@ -334,7 +339,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the board's items are the page's: their cells, by their ids on it)
     cellOf = new Map(order.filter((c) => c.page === pageIx).map((c) => [c.item, c.id]));
     for (const it of items) if (it.code !== undefined) it.order = nth.get(cellOf.get(it.id) ?? it.id);
-    if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
+    if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
+    if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
@@ -485,9 +491,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       for (const [id, { preview: p, gen }] of got) {
         const n = notes.get(id);
         if (!n || c.generation(id) !== gen) continue;
-        // (a cell by its page keeps none: withPreviews)
+        // (a cell by its page keeps none: withPreviews; one that ran as its own, what it showed)
         if (p === null || !own.has(id)) delete n.preview;
         else if (!sameOutputs(p, n.preview)) n.preview = p;
+        if (own.has(id)) byPage.delete(id);
       }
       const kept = new Map([...notes].filter(([, n]) => n.preview).map(([id, n]) => [id, n.preview!]));
       for (const id of overCap(kept)) delete notes.get(id)!.preview;
@@ -511,6 +518,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function load(d: BoardDoc, stored = false) {
     loads++;
     loadGen++;
+    byPage.clear();
     newOutputs(!stored);
     // (a document loaded from elsewhere was not written here; the one kept, as it says)
     writtenHere = stored ? host.store?.writtenHere?.() ?? false : host.store?.writtenHere?.(false) ?? false;

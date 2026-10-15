@@ -321,6 +321,23 @@ try {
     check(await until("window.sagebrush.board.snapshot().doc.pages.every((p) => !p.nodes[0].preview)", 5000), "...and the previews they had are not kept: " + JSON.stringify(await ev("window.sagebrush.board.snapshot().doc.pages.map((p) => !!p.nodes[0].preview)")));
   }
 
+  // ...nor taken, the item its own again, by a sync that came before the first's runs dropped it (CORR-BB9-1)
+  {
+    // (in a page of its own: nothing of the boards before it, their cells or their runs)
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    const stale = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "STALE\n" }] };
+    const page = (title) => ({ title, nodes: [{ id: "x", title, code: "import time\ntime.sleep(2)\nimport random\nprint(random.random())", preview: stale, x: 0, y: 0, w: 300 }] });
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Previews", pages: [page("One"), page("Two")] })}).then(() => 1)`);
+    // (at once: the first sync's runs not yet done, nor their previews dropped)
+    await ev("window.sagebrush.board.edit((d) => { d.pages = [d.pages[0]]; }).then(() => 1)");
+    const ran = await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].id === 'x' && os[0].state === '' && /^0\\.\\d+\\n$/.test(os[0].output))", 60000);
+    check(ran, "the item its own again before its preview was dropped: it runs, its old preview not shown: " + JSON.stringify(await outputs()));
+    await sleep(1500);
+    const kept = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.pages.map((p) => p.nodes[0].preview ?? null))");
+    check(!/STALE/.test(kept), "...nor kept: " + kept);
+  }
+
   // the language changed while an item runs by hand (one held by its preview, so nothing had run): the run first, then a new interpreter (CORR-79B-2)
   {
     // (in a page of its own: nothing of the boards before it, their cells or their runs)
