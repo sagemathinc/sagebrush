@@ -344,3 +344,47 @@ export function magicTransform(sage: boolean): (tree: any) => void {
   const parseCode = codeParser(sage);
   return (tree) => expandMagics(tree, parseCode);
 }
+
+// ------------------------------------------------------------------ autoreload's classes
+
+/** The names of a module's classes (at any depth) whose code may use the
+ *  __class__ cell, which %autoreload (lib/_pyjs_magic.py) cannot move onto an
+ *  older class: a bare name __class__, or any use of super other than an
+ *  explicit super(Name, obj) (super(), (super)(), an alias, in f-strings
+ *  too).  obj.__class__ is an attribute, not the cell.  null: the source does
+ *  not parse (every class is then refused). */
+export function classesUsingCell(src: string): string[] | null {
+  let tree: any;
+  try {
+    tree = pyparse(src, "exec");
+  } catch {
+    return null;
+  }
+  const out = new Set<string>();
+  const dotted = (n: any): boolean => n?._type === "Name" || (n?._type === "Attribute" && dotted(n.value));
+  // whether code (a class's body) uses the cell
+  const usesCell = (code: any): boolean => {
+    let found = false;
+    const walk = (n: any) => {
+      if (found || !n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const x of n) walk(x); return; }
+      if (n._type === "Name" && (n.id === "__class__" || n.id === "super")) { found = true; return; }
+      if (n._type === "Call" && n.func?._type === "Name" && n.func.id === "super" && n.args.length === 2 && !n.keywords.length && dotted(n.args[0]) && n.args[1]._type !== "Starred") {
+        // super(Name, obj): the explicit form, which the kept class satisfies
+        walk(n.args);
+        return;
+      }
+      for (const k of Object.keys(n)) if (k !== "_type") walk(n[k]);
+    };
+    walk(code);
+    return found;
+  };
+  const visit = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    if (n._type === "ClassDef" && usesCell(n.body)) out.add(n.name);
+    for (const k of Object.keys(n)) if (k !== "_type") visit(n[k]);
+  };
+  visit(tree);
+  return [...out];
+}

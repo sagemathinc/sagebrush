@@ -21,11 +21,11 @@ bound to it, follow the new code (as IPython's does).  Unlike IPython,
 Sagebrush cannot change a function's code in place; it rebinds the names in
 your notebook and in your other modules that referred to the old function,
 but an old function kept elsewhere (in a list, a closure, a default
-argument) keeps its old code, and a class whose code may use super()
-without arguments or __class__ (any use of super other than super(Name, ...),
-in its code or its f-strings) is not updated: autoreload says so."""
+argument) keeps its old code, and a class whose code may use the __class__
+cell (found in the parsed source: super() without arguments, any use of
+super other than super(Name, obj), or the name __class__) is not updated:
+autoreload says so."""
 import math
-import re
 import sys
 import time
 
@@ -244,135 +244,14 @@ def _timeit(line, body=None):
 
 # ---------------------------------------------------------------- autoreload
 
-# ---- which classes autoreload can update: their code (strings blanked) must
-# not use super() without arguments or __class__, in any spelling
-
-_PREFIX = re.compile(r"(?:[rRuUbBfFtT]|[bB][rR]|[rR][bB]|[fF][rR]|[rR][fF]|[tT][rR]|[rR][tT])$")
-
-
-def _prefix_at(src, i):
-    """the string prefix just before the quote at i (r, b, f, rb, ...), or ''"""
-    k = i
-    while k > 0 and src[k - 1].isalpha():
-        k -= 1
-    p = src[k:i]
-    if p and _PREFIX.match(p) and not (k > 0 and (src[k - 1].isalnum() or src[k - 1] == "_")):
-        return p.lower()
-    return ""
-
-
-def _string_end(src, i, prefix):
-    """the index after the string literal whose opening quote is at i (an
-    f-string's replacement fields followed, with their own strings)"""
-    n = len(src)
-    c = src[i]
-    q = c * 3 if src.startswith(c * 3, i) else c
-    f = "f" in prefix or "t" in prefix
-    j = i + len(q)
-    while j < n:
-        ch = src[j]
-        if ch == "\\":
-            j += 2
-            continue
-        if f and ch == "{":
-            if src.startswith("{{", j):
-                j += 2
-                continue
-            j = _code_end(src, j + 1, "}")
-            continue
-        if src.startswith(q, j):
-            return j + len(q)
-        if len(q) == 1 and ch == "\n":
-            return j
-        j += 1
-    return n
-
-
-def _code_end(src, j, close):
-    """the index after the bracket `close` that ends the code from j"""
-    n, depth = len(src), 0
-    while j < n:
-        ch = src[j]
-        if ch in "'\"":
-            j = _string_end(src, j, _prefix_at(src, j))
-            continue
-        if ch == "#":
-            e = src.find("\n", j)
-            j = n if e < 0 else e
-            continue
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            if depth == 0 and ch == close:
-                return j + 1
-            depth -= 1
-        j += 1
-    return n
-
-
-def _blank_strings(src, keep_f):
-    """src with the text of its string literals blanked (newlines kept), so
-    that what is left is code and comments; with keep_f, f- and t-strings are
-    kept whole (their fields are code)"""
-    out, i, n = [], 0, len(src)
-    while i < n:
-        ch = src[i]
-        if ch in "'\"":
-            p = _prefix_at(src, i)
-            e = _string_end(src, i, p)
-            t = src[i:e]
-            out.append(t if keep_f and ("f" in p or "t" in p) else "".join(c if c == "\n" else " " for c in t))
-            i = e
-            continue
-        if ch == "#":
-            e = src.find("\n", i)
-            e = n if e < 0 else e
-            out.append(src[i:e])
-            i = e
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-
-_SUPER = re.compile(r"\bsuper\b")
-# super(C, self), super(mod.C, obj): the explicit form, which works on the kept class
-_EXPLICIT_SUPER = re.compile(r"\s*\(\s*[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*\s*,")
-
-
-def _class_regions(src, name):
-    """the code of each `class name` block in a module (by indentation, on
-    the source with every string blanked), with f-strings kept"""
-    blank = _blank_strings(src, False).split("\n")
-    code = _blank_strings(src, True).split("\n")
-    head = re.compile(r"^(\s*)class\s+%s\b" % re.escape(name))
-    out = []
-    for i, l in enumerate(blank):
-        m = head.match(l)
-        if not m:
-            continue
-        ind = len(m.group(1))
-        j = i + 1
-        while j < len(blank) and (not blank[j].strip() or len(blank[j]) - len(blank[j].lstrip()) > ind):
-            j += 1
-        out.append("\n".join(code[i:j]))
-    return out
-
-
-def _class_uses_cell(src, name):
-    """whether a class's code may use super() without arguments or
-    __class__ (conservatively: any super that is not super(Name, ...), and
-    any class it cannot find)"""
-    regions = _class_regions(src, name)
-    if not regions:
-        return True
-    for code in regions:
-        if "__class__" in code:
-            return True
-        for m in _SUPER.finditer(code):
-            if not _EXPLICIT_SUPER.match(code, m.end()):
-                return True
-    return False
+def _classes_using_cell(src):
+    """the names of the module's classes whose code may use the __class__
+    cell (super() without arguments, or __class__), found in the parsed
+    source (src/magic-syntax.ts classesUsingCell); None if it does not
+    parse, and then no class is updated"""
+    import json
+    r = json.loads(__pyjs_class_cells__(src))
+    return None if r is None else set(r)
 
 
 class _Autoreload:
@@ -442,12 +321,13 @@ def _reload(mod, path):
     exec(compile(src, path, "exec"), mod.__dict__)
     notes = []
     functions = {}
+    cells = _classes_using_cell(src)
     for k, before in old.items():
         after = mod.__dict__.get(k, before)
         if after is before:
             continue
         if isinstance(before, type) and isinstance(after, type) and getattr(after, "__module__", None) == mod.__name__:
-            if _class_uses_cell(src, after.__name__):
+            if cells is None or after.__name__ in cells:
                 notes.append("class %s uses super() without arguments (or __class__), which Sagebrush cannot "
                              "move to the existing class: its existing instances keep the old methods, and "
                              "%s.%s is the new class" % (after.__name__, mod.__name__, k))

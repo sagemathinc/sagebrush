@@ -9,6 +9,7 @@ import { initParser, parse, PySyntaxError } from "./parse";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
+import { classesUsingCell } from "./magic-syntax";
 
 const builtinNames = new Set(Object.keys(R.builtins));
 
@@ -229,6 +230,11 @@ export function execModule(source: string, filename: string, name: string, isPac
   }
   return m;
 }
+
+// %autoreload's check of a module's classes (lib/_pyjs_magic.py): a JSON list
+// of the class names that may use the __class__ cell, or null if the source
+// does not parse
+R.builtins.__pyjs_class_cells__ = (src: any) => JSON.stringify(classesUsingCell(String(src)));
 
 // exec/eval/compile: compile `src` and run it with `ns` as its globals.
 let execCounter = 0;
