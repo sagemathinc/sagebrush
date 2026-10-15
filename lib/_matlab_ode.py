@@ -412,7 +412,9 @@ def _solve(solver, nargout, args):
             if stop_at is not None and (not chunk_t or chunk_t[-1] != t_end):
                 chunk_t.append(t_end)
                 chunk_y.append(y_end)
-        elif not sol_struct:
+        else:
+            # (the output points, also for a solution structure, which keeps
+            # none of them: its OutputFcn is called with them all the same)
             for j in range(1, refine):
                 s = j / refine
                 if s >= s_end:
@@ -449,7 +451,7 @@ def _solve(solver, nargout, args):
              "x": num(np.array(steps_x).reshape((1, -1))),
              "y": num(np.array(steps_y).T if steps_y else np.zeros((n, 0))),
              "stats": _m._struct1({"nsteps": float(nsteps), "nfailed": float(nfailed), "nfevals": float(nfev[0])}),
-             "idata": _m._struct1({"_steps": _StepData(solver, steps_data)})}
+             "idata": _m._struct1({"_steps": _StepData(solver, steps_data, steps_x[-1])})}
         if events is not None:
             d["xe"] = num(np.array(te).reshape((1, -1)))
             d["ye"] = num(np.array(ye).T if ye else np.zeros((n, 0)))
@@ -468,11 +470,13 @@ def _solve(solver, nargout, args):
 
 
 class _StepData:
-    """a solution's steps, for deval (an opaque value in sol.idata)"""
-    __slots__ = ("solver", "steps")
+    """a solution's steps, for deval (an opaque value in sol.idata), and
+    where the solution ends (sol.x(end): a terminal event's, inside its
+    step's interpolant)"""
+    __slots__ = ("solver", "steps", "end")
 
-    def __init__(self, solver, steps):
-        self.solver, self.steps = solver, steps
+    def __init__(self, solver, steps, end):
+        self.solver, self.steps, self.end = solver, steps, end
 
 
 def _event_time(g, a, b, ga, gb):
@@ -549,8 +553,10 @@ def deval_(nargout, *args):
     if not steps:
         raise _err("deval: the solution has no steps.")
     n = steps[0][2].size
-    lo = min(steps[0][0], steps[-1][0] + steps[-1][1])
-    hi = max(steps[0][0], steps[-1][0] + steps[-1][1])
+    # (the solution's own interval, [sol.x(1) sol.x(end)], as the page says:
+    # it ends where a terminal event ended it, inside its last step)
+    lo = min(steps[0][0], sd.end)
+    hi = max(steps[0][0], sd.end)
     Y = np.zeros((n, xs.size))
     YP = np.zeros((n, xs.size))
     ends = np.array([st[0] + st[1] for st in steps])

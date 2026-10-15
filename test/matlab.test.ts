@@ -1064,6 +1064,28 @@ test("ode45, ode23, odeset, odeget and deval: the pages' published examples, eve
   ]);
 });
 
+test("ode45 and ode23: OutputFcn in the solution-structure form too; deval only on the solution's own interval", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a stop request ends the integration whatever the outputs, with OutputSel too)
+    "for solver = {@ode45, @ode23}",
+    "  o = odeset('OutputFcn', @(t,y,flag) isempty(flag), 'MaxStep', .2);",
+    "  s = solver{1}(@(t,y) 1, [0 2], 0, o); [t, y] = solver{1}(@(t,y) 1, [0 2], 0, o);",
+    "  o2 = odeset(o, 'OutputSel', 2); s2 = solver{1}(@(t,y) [1; 2], [0 2], [0; 0], o2);",
+    "  fprintf('%.12g %.12g %.12g\\n', s.x(end), t(end), s2.x(end));",
+    "end",
+    // (a terminal event inside a step: deval at, just inside, and beyond the end; forward and backward)
+    "s = ode45(@(t,y) 1, [0 2], 0, odeset('Events', @(t,y) deal(t - .35, 1, 1), 'MaxStep', .2));",
+    "fprintf('%.12g %.12g %.12g\\n', s.x(end), deval(s, .35), deval(s, .3499)); try, deval(s, .36), catch e, disp(e.message), end",
+    "s = ode45(@(t,y) -1, [2 0], 2, odeset('Events', @(t,y) deal(t - 1.65, 1, 0), 'MaxStep', .2));",
+    "fprintf('%.12g %.12g %.12g\\n', s.x(end), deval(s, 1.65), deval(s, 1.6501)); try, deval(s, 1.64), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    "0.0001 0.0001 0.0001", "0.0001 0.0001 0.0001",
+    "0.35 0.35 0.3499", "deval: the points must lie in the interval of integration, [sol.x(1) sol.x(end)].",
+    "1.65 2.35 2.3499", "deval: the points must lie in the interval of integration, [sol.x(1) sol.x(end)].",
+  ]);
+});
+
 test("quad stops at GNU Octave's adaptive Simpson limit, 10001 evaluations exactly, with a warning", () => {
   const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
     "[q, n] = quad(@(x) sin(1000*x), 0, 1, 1e-14); disp(n);",
