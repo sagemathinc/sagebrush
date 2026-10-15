@@ -1,0 +1,31 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+
+// The search box's MATLAB examples (lib/_matlab_examples.py): each one,
+// run in Sagebrush, prints exactly the output its documentation shows
+// (their values are compared with GNU Octave's by
+// matlab-tests/test_doc_examples.m).
+
+const cli = (...args: string[]) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", ...args], { encoding: "utf8", maxBuffer: 64 * 2 ** 20 });
+
+test("every MATLAB search example prints exactly the output its documentation shows", () => {
+  const data: [string, string, string][] = JSON.parse(cli("-c", "import json, _matlab_examples as e\nprint(json.dumps([[n, c, e.OUTPUTS[c]] for n, c in e.CODES]))"));
+  assert.ok(data.length >= 100, "examples: " + data.length);
+  // (one session, each example after clear, its output delimited by a marker)
+  const program = data.map(([, code], k) => `clear\nfprintf('@@example ${k}@@\\n');\n${code}`).join("\n") + "\n";
+  const out = cli("--matlab", "-c", program);
+  const parts = out.split(/@@example (\d+)@@\n/);
+  assert.equal(parts[0], "");
+  const got = new Map<number, string>();
+  for (let i = 1; i < parts.length; i += 2) got.set(Number(parts[i]), parts[i + 1]);
+  for (const [k, [name, code, expected]] of data.entries()) assert.equal(got.get(k), expected, `${name}: ${code}`);
+});
+
+test("the MATLAB search index shows a function's examples, after the prompt >>, and counts them", () => {
+  const index = JSON.parse(cli("-m", "_matlab_docsearch", "--index"));
+  const max = index.find((e: any) => e.name === "max");
+  assert.equal(max.examples, 1);
+  assert.match(max.doc, /\n\nExamples:\n\n>> \[m, k\] = max\(\[3 9 4\]\)\n\nm =\n\n     9\n\n\nk =\n\n     2$/);
+  assert.ok(index.filter((e: any) => e.examples > 0).length >= 100);
+});
