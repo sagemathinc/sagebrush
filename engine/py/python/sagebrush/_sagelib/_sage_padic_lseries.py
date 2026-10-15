@@ -931,7 +931,11 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
             sage: EllipticCurve('27a1').padic_lseries(2003).frobenius(2)  # sagebrush only
             Traceback (most recent call last):
             ...
-            NotImplementedError: the Frobenius matrix at p = 2003 to precision 2 is beyond sagebrush's limit (p^2 (prec + 1)^2 <= 4194304)
+            NotImplementedError: the Frobenius matrix at p = 2003 to precision 2 is beyond sagebrush's limit (estimated work 100300225 > 1048576)
+            sage: EllipticCurve('14a1').padic_lseries(5).frobenius(408)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: the Frobenius matrix at p = 5 to precision 408 is beyond sagebrush's limit (estimated work 4223025 > 1048576)
         """
         sa = _sa()
         if algorithm not in ("mw", "approx"):
@@ -944,10 +948,8 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
             raise ValueError("prec (=%s) must be a positive integer" % prec)
         if p == 3:
             raise NotImplementedError("the Frobenius matrix at p = 3 is not available in sagebrush yet (Sage refuses it too)")
-        if p * p * (prec + 1) ** 2 > _KD_MAX_WORK:
-            # (the time grows about as p^2 prec^2: p = 197, prec = 8 takes
-            # half a minute in the browser)
-            raise NotImplementedError("the Frobenius matrix at p = %d to precision %d is beyond sagebrush's limit (p^2 (prec + 1)^2 <= %d)" % (p, prec, _KD_MAX_WORK))
+        if _kd_cost(p, prec + 1) > _KD_MAX_WORK:
+            raise NotImplementedError("the Frobenius matrix at p = %d to precision %d is beyond sagebrush's limit (estimated work %d > %d)" % (p, prec, _kd_cost(p, prec + 1), _KD_MAX_WORK))
         a1, a2, a3, a4, a6 = [_F(int(x)) if not isinstance(x, _F) else x for x in self._E.a_invariants()]
         Qc = [(a3 * a3 + 4 * a6) / 4, (2 * a4 + a1 * a3) / 2, (a1 * a1 + 4 * a2) / 4, _F(1)]
         N = prec + 1
@@ -976,7 +978,29 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
 # [H] = M. Harrison, arXiv:1006.4206, Lemmas 3.3-3.4 (the corrected forms of
 # [K]'s Lemmas 2 and 3, as in [K]'s 2003 errata).
 
-_KD_MAX_WORK = 1 << 22
+# The work allowed for frobenius(), in the units of _kd_cost.
+_KD_MAX_WORK = 1 << 20
+
+
+def _kd_cost(p, N):
+    """The estimated work of _kd_frobenius_matrix(Q, p, N) for a dense Q
+    (the worst case: zero coefficients are skipped), in units of about 25
+    microseconds in the CLI: U = p^2 (K + 2)^2 (1 + W log2(p) / 1024), K
+    and W from _kd_plan.  The series has about k p live terms at step k,
+    each combined with about p digits of E, so about p^2 K^2 products of
+    W log2(p)-bit numbers; K + 2 counts the check of the next two terms,
+    and the bit size the cost of one product.  Fitted on 27a1's dense model
+    y^2 + y = x^3 + 3 x^2 + 3 x - 6 at p = 5 ... 197 and prec 3 ... 200
+    (2.2 to 2.6 10^-5 s per unit); it also gives the 88 s of p = 197, prec
+    8 and the 147 s of 14a1 at p = 5, prec 408 measured in review.  With
+    the limit 2^20 a call takes about half a minute at most (and Stop
+    interrupts it).  p^2 (N + 2)^2 <= U (K >= N) is checked first, so an
+    enormous N is refused without planning it."""
+    lower = p * p * (N + 2) ** 2
+    if lower > _KD_MAX_WORK:
+        return lower
+    K, W = _kd_plan(p, N)
+    return p * p * (K + 2) ** 2 * (1024 + W * p.bit_length()) // 1024
 
 
 def _kd_ilog(n, p):
