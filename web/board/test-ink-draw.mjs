@@ -180,6 +180,48 @@ try {
   await key("Delete", 46);
   ss = await strokes();
   check(ss.length === 3 && !ss.some((s) => s.y < 200), `a rectangle selects the strokes it holds: ${ss.length} strokes left; selected ${inRect}; selecting ${await ev("window.board.el.classList.contains('selecting')")}`);
+
+  // nothing already shown moves when something is added (William's B1): a
+  // page laid out as a grid, with a group in it laid out as a row; a stroke
+  // drawn across it, then a note, a code item, a group and a sticker added
+  const GRID = { title: "Grid", layout: "grid", columns: 2, nodes: [
+    { id: "q1", title: "One", text: "The first" }, { id: "q2", title: "Two", text: "The second" },
+    { id: "q3", title: "Three", text: "The third" },
+    { id: "qg", kind: "group", title: "A group", layout: "row", children: [{ id: "q4", title: "Four" }, { id: "q5", title: "Five" }] },
+    { id: "q6", title: "Six", text: "The last" }] };
+  await ev(`${B}.load(${JSON.stringify(GRID)}).then(() => 1)`);
+  await until("!!window.board.item('q6')", 10000);
+  await ev(`${B}.editing(true), window.board.setCamera({ x: -150, y: -150, z: 0.8 }), window.board.render(), 1`);
+  await until("!document.querySelector('.board-toolbar').hidden", 3000);
+  const ids = ["q1", "q2", "q3", "qg", "q4", "q5", "q6"];
+  const shown = () => ev(`JSON.stringify(Object.fromEntries(${JSON.stringify(ids)}.map((id) => { const it = window.board.item(id); return [id, it ? [Math.round(it.x), Math.round(it.y), Math.round(it.w), Math.round(it.h)] : null]; })))`);
+  const was = await shown();
+  const unmoved = async (what) => { await sleep(300); const now = await shown(); check(now === was, `${what}: nothing already shown moves: ${was} then ${now}`); };
+  const pressed = (t) => ev(`document.querySelector('.board-toolbar [data-tool=${t}]').getAttribute('aria-pressed') === 'true'`);
+  if (!(await pressed("draw"))) await ev("document.querySelector('.board-toolbar [data-tool=draw]').click(), 1");
+  const n0 = (await strokes()).length, g0 = await toClient(-80, -60), g1 = await toClient(900, 500);
+  await drag(line(g0.x, g0.y, g1.x, g1.y, 30));
+  await sleep(300);
+  check((await strokes()).length === n0 + 1, "a stroke drawn across the grid is kept");
+  await unmoved("a stroke drawn across a grid page");
+  await ev("document.querySelector('.board-toolbar [data-tool=draw]').click(), 1");
+  for (const t of ["note", "code", "group"]) {
+    // (a new id: the one left empty before may still be going)
+    const known = JSON.stringify(await ev(`${B}.snapshot().doc.nodes.map((n) => n.id)`));
+    await ev(`document.querySelector('.board-toolbar [data-tool=${t}]').click(), 1`);
+    check(await until(`${B}.snapshot().doc.nodes.some((n) => !${known}.includes(n.id))`, 3000), `${t}: added`);
+    await unmoved(`a new ${t}`);
+    await key("Escape", 27);
+    await sleep(300);
+    if (await ev("!!window.board.editing")) { await key("Escape", 27); await sleep(200); }
+  }
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
+  await ev("document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]').click(), 1");
+  await until("!!document.querySelector('[data-sbb=stickers] .bs-emoji')", 3000);
+  const known1 = JSON.stringify(await ev(`${B}.snapshot().doc.nodes.map((n) => n.id)`));
+  await ev("document.querySelector('[data-sbb=stickers] .bs-emoji').click(), 1");
+  check(await until(`${B}.snapshot().doc.nodes.some((n) => n.kind === "sticker" && !${known1}.includes(n.id))`, 3000), "sticker: added");
+  await unmoved("a new sticker");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
