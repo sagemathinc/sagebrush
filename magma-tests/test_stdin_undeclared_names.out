@@ -1,0 +1,25 @@
+
+>> A;
+   ^
+User error: Identifier 'A' has not been declared or assigned
+
+>> L + 1;
+   ^
+User error: Identifier 'L' has not been declared or assigned
+
+>> x := HadamardTrasformation(3);
+        ^
+User error: Identifier 'HadamardTrasformation' has not been declared or assigned
+
+>> function F(n) return C(n); end function;
+                        ^
+User error: Identifier 'C' has not been declared or assigned
+
+>> F(2);
+   ^
+User error: Identifier 'F' has not been declared or assigned
+
+>> g := func< n | IsExtension(n) >;
+                  ^
+User error: Identifier 'IsExtension' has not been declared or assigned
+defined
