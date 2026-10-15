@@ -62,6 +62,18 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
 
+test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprime is refused at once (HARD-731-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const n = "463168356949264781694283940034751674351099985030800860588560112898177302183821";
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: `K := QuadraticField(${n});\nQuadraticField(12);\n`, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, "it must not run on");
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.match(flat, new RegExp(`QuadraticField: the squarefree part of ${n} was not found within the limit \\(its prime factors above 100000 are not known\\); this is not supported yet`));
+  assert.match(flat, /Quadratic Field with defining polynomial x\^2 - 3 over the Rational Field/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
