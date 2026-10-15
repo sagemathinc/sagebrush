@@ -86,7 +86,6 @@ method(object, "__delattr__", (self: any, name: string) => {
   genericDelattr(self, name, typeOf(self));
   return null;
 }).$genericDelattr = true;
-method(object, "__init_subclass__", (_cls: any) => null);
 
 const objectDir = method(object, "__dir__", (self: any) => defaultDir(self));
 
@@ -247,6 +246,18 @@ bindClass(PyClassMethod, classmethod);
   const h = pyfn((_c: any, ..._a: any[]) => NotImplemented, "__subclasshook__");
   h.$default = true;
   object.$dict.set("__subclasshook__", new PyClassMethod(h));
+  // object.__init_subclass__ is a class method taking nothing, so a class's
+  // own __init_subclass__ can end with super().__init_subclass__(**kw)
+  const named = (c: any) => `${c?.$qualname ?? c?.$name ?? "object"}.__init_subclass__()`;
+  const isub = pyfn((cls: any, ...a: any[]) => {
+    if (a.length) raise(T.TypeError, `${named(cls)} takes no arguments (${a.length} given)`);
+    return null;
+  }, "__init_subclass__");
+  isub.$kw = (pos: any[], names: string[], _values: any[]) => {
+    if (names.length) raise(T.TypeError, `${named(pos[0])} takes no keyword arguments`);
+    return isub(...pos);
+  };
+  object.$dict.set("__init_subclass__", new PyClassMethod(isub));
 }
 method(classmethod, "__get__", (s: PyClassMethod, o: any, t: any) => bindMethod(s.f, t === null || t === undefined ? typeOf(o) : t));
 getset(classmethod, "__func__", (s) => s.f);
@@ -254,16 +265,25 @@ getset(classmethod, "__func__", (s) => s.f);
 export class PySuper {
   constructor(public cls: PyType, public obj: any) {}
 }
-const superType = builtinType("super", [object], (cls: any, obj: any) => {
-  if (cls === undefined) raise(T.RuntimeError, "super(): no arguments");
-  if (!isType(cls)) raise(T.TypeError, `super() argument 1 must be a type, not ${typeName(cls)}`);
+// CPython's supercheck: obj must be an instance or a subtype of cls.
+function superChecked(cls: any, obj: any): PySuper {
   if (obj !== undefined && !(isType(obj) && obj.$mro.includes(cls)) && !isinstance(obj, cls)) {
     raise(T.TypeError, `super(type, obj): obj (${isType(obj) ? "type" : "instance of"} ${isType(obj) ? obj.$name : typeName(obj)}) is not an instance or subtype of type (${cls.$name}).`);
   }
   return new PySuper(cls, obj);
+}
+const superType = builtinType("super", [object], (...a: any[]) => {
+  if (a.length > 2) raise(T.TypeError, `super() expected at most 2 arguments, got ${a.length}`);
+  const [cls, obj] = a;
+  // A direct super() call compiles to superOf; this is super called some
+  // other way (s = super; s()), whose method CPython finds from its frame.
+  if (cls === undefined) raise(T.NotImplementedError, "super() without arguments works in Sagebrush only when called directly as super()");
+  if (!isType(cls)) raise(T.TypeError, `super() argument 1 must be a type, not ${typeName(cls)}`);
+  return superChecked(cls, obj);
 });
 bindClass(PySuper, superType);
-method(superType, "__repr__", (s: PySuper) => `<super: <class '${s.cls.$name}'>, ${s.obj === undefined ? "NULL" : isType(s.obj) ? `<class '${s.obj.$name}'>` : `<${typeName(s.obj)} object>`}>`);
+// (CPython shows the type the lookup starts from: obj, or obj's type)
+method(superType, "__repr__", (s: PySuper) => `<super: <class '${s.cls.$name}'>, ${s.obj === undefined ? "NULL" : `<${isType(s.obj) && s.obj.$mro.includes(s.cls) ? s.obj.$name : typeName(s.obj)} object>`}>`);
 method(superType, "__getattribute__", (s: PySuper, name: string) => {
   const start = isType(s.obj) && s.obj.$mro.includes(s.cls) ? s.obj : typeOf(s.obj);
   const mro = start.$mro;
@@ -280,11 +300,36 @@ method(superType, "__getattribute__", (s: PySuper, name: string) => {
 });
 superType.$customGet = true;
 
-// Zero-argument super() in a method compiles to superOf(__class__, firstArg).
-export function superOf(cls: any, obj: any): PySuper {
-  if (cls === undefined) raise(T.RuntimeError, "super(): __class__ cell not found");
-  if (obj === undefined) raise(T.RuntimeError, "super(): no arguments");
-  return new PySuper(cls, obj);
+// A cell, as CPython's: the class cell of a class whose methods use
+// __class__ or super() (the class body passes it to type.__new__ as
+// __classcell__), and types.CellType.
+export class PyCell {
+  constructor(public v: any = undefined) {}
+}
+const cellType = builtinType("cell", [object], (...a: any[]) => {
+  if (a.length > 1) raise(T.TypeError, `cell expected at most 1 argument, got ${a.length}`);
+  return new PyCell(a[0]);
+});
+bindClass(PyCell, cellType);
+getset(cellType, "cell_contents", (c: PyCell) => (c.v === undefined ? raise(T.ValueError, "Cell is empty") : c.v), (c: PyCell, v: any) => void (c.v = v));
+export const newCell = (v?: any) => new PyCell(v);
+// A function's free __class__, from its class's cell
+export function classCellGet(c: PyCell): any {
+  if (c.v === undefined) raise(T.NameError, "cannot access free variable '__class__' where it is not associated with a value in enclosing scope");
+  return c.v;
+}
+// Zero-argument super() compiles to superOf(cell, firstArg): the cell
+// holding the function's __class__ (null when it has none) and its first
+// argument, as CPython's super_init_without_args.  A function without a
+// positional argument compiles to superNoArgs() instead.
+export function superOf(cell: PyCell | null, obj: any): PySuper {
+  if (cell === null) raise(T.RuntimeError, "super(): __class__ cell not found");
+  if (cell.v === undefined) raise(T.RuntimeError, "super(): empty __class__ cell");
+  if (!isType(cell.v)) raise(T.RuntimeError, `super(): __class__ is not a type (${typeName(cell.v)})`);
+  return superChecked(cell.v, obj);
+}
+export function superNoArgs(): never {
+  raise(T.RuntimeError, "super(): no arguments");
 }
 
 // ------------------------------------------------------------------ simple types
@@ -430,7 +475,15 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
     const f = ns.get(k);
     if (typeof f === "function") ns.set(k, new PyClassMethod(f));
   }
+  // __classcell__: the class body's cell for its methods' __class__, set
+  // here, before __set_name__ and __init_subclass__, and not kept in the dict
+  const cell = ns.get("__classcell__");
+  if (cell !== undefined) {
+    if (!(cell instanceof PyCell)) raise(T.TypeError, `__classcell__ must be a nonlocal cell, not ${repr(typeOf(cell))}`);
+    ns.delete("__classcell__");
+  }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
+  if (cell !== undefined) cell.v = cls;
   if (meta !== T.type) (cls as any).$meta = meta;
   cls.$qualname = ns.get("__qualname__");
   ns.delete("__qualname__");

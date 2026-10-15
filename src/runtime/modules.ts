@@ -580,7 +580,8 @@ newBuiltinModule("types", (m) => {
   m.CodeType = T.code;
   m.MappingProxyType = T.dict;
   m.GetSetDescriptorType = T.getset_descriptor;
-  for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "CellType", "FrameType", "TracebackType", "AsyncGeneratorType", "GenericAlias", "CapsuleType"]) {
+  m.CellType = typeOf(Ty.newCell());
+  for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "GenericAlias", "CapsuleType"]) {
     m[n] = Ty.builtinTypeFor(n, class {}, "types", () => raise(T.TypeError, `cannot create '${n}' instances`));
   }
   // A generator function whose generators may be awaited.
