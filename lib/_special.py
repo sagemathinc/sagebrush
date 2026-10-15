@@ -215,8 +215,11 @@ def _loggamma_near_2(w):
         p *= -w
         t = _zeta_minus_1(k) * p / k
         s += t
-        if abs(t) <= 1e-18 * abs(s) or k > 80:
+        if abs(t) <= 1e-18 * abs(s):
             break
+        if k > 80:
+            # (for |w| <= 1 the terms are below 2^-k |w|^k: not reached)
+            raise NotCovered("loggamma: the series about 2 did not converge at w = %r" % (w,))
         k += 1
     return w * (1 - _EULER_GAMMA) + s
 
@@ -380,8 +383,10 @@ def _psi_near_2(w):
         p *= -w
         t = _zeta_minus_1(k) * p
         s += t
-        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3 or k > 90:
+        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3:
             break
+        if k > 90:
+            raise NotCovered("psi: the series about 2 did not converge at w = %r" % (w,))
         k += 1
     return (1 - _EULER_GAMMA) + s
 
@@ -397,8 +402,10 @@ def _psi_near_1(w):
         p *= -w
         t = (1 + _zeta_minus_1(k)) * p
         s += t
-        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3 or k > 90:
+        if abs(t) <= 1e-18 * max(abs(s), 1e-300) and k > 3:
             break
+        if k > 90:
+            raise NotCovered("psi: the series about 1 did not converge at w = %r" % (w,))
         k += 1
     return s - _EULER_GAMMA
 
@@ -456,6 +463,9 @@ def _polygamma1(n, z):
             S += t
             if j > jpeak and abs(t) <= 1e-17 * abs(S):
                 break
+            if j > jpeak + 10000 or not _cmath.isfinite(S):
+                # (|Im z| >= 1 here: beyond its peak each term is below e^-(2 pi) times the last)
+                raise NotCovered("polygamma: the q-series did not converge at n = %r, z = %r" % (n, z))
             j += 1
         D = -2j * (2j * _PI) ** n * S
         return sgn * _polygamma1(n, 1 - z) - _PI * D
@@ -1212,6 +1222,9 @@ def _erf_taylor(z):
         s += u
         if abs(u) <= 1e-17 * abs(s):
             break
+        if n > 200:
+            # (for |z| < 1/2 the terms fall by 1/(4n) each: not reached)
+            raise NotCovered("erf: the Taylor series did not converge at z = %r" % (z,))
     return 2 / _math.sqrt(_PI) * s
 
 
@@ -1429,8 +1442,11 @@ def _e1_series(z):
         t *= -z / n
         u = t / n
         s += u
-        if abs(u) <= 1e-17 * abs(s) or n > 4000:
+        if abs(u) <= 1e-17 * abs(s):
             break
+        if n > 4000:
+            # (|z| <= 700 here: the terms fall below eps by n = 2100)
+            raise NotCovered("E1: the series did not converge at z = %r" % (z,))
     return -_EULER_GAMMA - _cmath.log(z) - s
 
 
@@ -1572,6 +1588,9 @@ def _ei1(x):
             s += u
             if u <= 1e-17 * s:
                 break
+            if n > 1000:
+                # (x <= 40 here: the terms fall below eps by n = 150)
+                raise NotCovered("Ei: the series did not converge at x = %r" % (x,))
         return _EULER_GAMMA + _math.log(x) + s
     # (DLMF 6.12.2: Ei(x) ~ e^x/x sum k!/x^k, to its smallest term)
     s = 0.0
@@ -1788,8 +1807,12 @@ def _polylog_series(n, z):
         p *= z
         t = p / float(k) ** n
         s += t
-        if abs(t) <= 1e-17 * abs(s) or k > 100000:
+        if abs(t) <= 1e-17 * abs(s):
             break
+        if k > 2000:
+            # (|z| <= 1/2, or |z| <= 1 with n >= 8, here: about 57 and 130
+            # terms; on the unit circle |Li_n| >= 1 - sum_{k>=2} k^-8 > 0.99)
+            raise NotCovered("polylog: the series did not converge at n = %r, z = %r" % (n, z))
     return s
 
 
@@ -1816,7 +1839,8 @@ def _polylog_mu(n, z):
                 break
         k += 1
         if k > 250:
-            break
+            # (|mu| <= 4.3 < 2 pi here, the terms falling like (|mu|/(2 pi))^k: not reached)
+            raise NotCovered("polylog: the series in log z did not converge at n = %r, z = %r" % (n, z))
         t *= mu / k
     if n >= 1:
         H = _math.fsum(1.0 / j for j in range(1, n))
