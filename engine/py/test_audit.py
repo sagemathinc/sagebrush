@@ -658,3 +658,25 @@ assume(_xs > _r1); assert str(solve([_xs * _Y == 0], _xs, _Y)) == "[[x == 0, y =
 _n1 = SR.var("n1"); assume(_xs > _n1); assert "n1 for" not in str(solve(sin(_xs) == 0, _xs)); forget()
 assert "0 ==" in str(solve(sin(-(2**63) * _xs + 1) + sin(_xs) + 2 * cos(_xs) == 0, _xs))  # TRIG-F1: no i64 overflow
 print("solve casebook ok")
+
+# The special functions (lib/_special.py, shipped in _sagelib): the Sage
+# namespace imports without numpy, and the numerical values need it
+import sys as _sys
+from sagebrush.sage import gamma as _gamma, zeta as _zeta, psi as _psi, beta as _beta
+
+assert str(_zeta(2)) == "1/6*pi^2" and str(_psi(1)) == "-euler_gamma"
+try:
+    import numpy  # noqa: F401
+    have_numpy = True
+except ImportError:
+    have_numpy = False
+if have_numpy:
+    assert abs(float(_gamma(2.5)) - 1.329340388179137) < 1e-14
+    assert abs(float(_zeta(1e-17)) + 0.5) < 1e-15
+    assert abs(float(_zeta(3).n()) - 1.2020569031595942) < 1e-14
+    assert abs(complex(_beta(complex(1e-200, 1e-200), complex(1e-200, -1e-200))) / 1e200 - 1) < 1e-14
+    import os as _os
+    assert _os.sep + "_sagelib" + _os.sep in _sys.modules["_special"].__file__, _sys.modules["_special"].__file__
+else:
+    raises(NotImplementedError, _gamma, 2.5)
+print("special functions ok (numpy: %s)" % have_numpy)
