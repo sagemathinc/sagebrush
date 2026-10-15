@@ -408,8 +408,12 @@ try {
   await ev("(() => { const t = document.querySelector('.board-editing .be-code'); t.value = 'CODEA = 5\\nprint(CODEA * 2)'; t.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()");
   await ev("document.querySelector('.board-editing .board-code-run').click(), 1");
   check(await until("window.sagebrush.board.outputs().then((os) => os.find((x) => x.id === 'code1')?.output === '10\\n')", 30000) && (await editing()) === "code1", "▶ runs the code as it is written, still being written: " + JSON.stringify(await ev("window.sagebrush.board.outputs()")));
+  // ({ }: a toggle named "Show the code", pressed while the code shows; its tooltip the action it takes, A11Y-9E1-2)
+  const toggleState = () => ev("(() => { const t = document.querySelector('.board-editing .board-code-toggle'); return [t.getAttribute('aria-label'), t.getAttribute('aria-pressed'), t.title]; })()");
+  check(JSON.stringify(await toggleState()) === JSON.stringify(["Show the code", "true", "Hide the code (its output stays)"]), "{ } with the code shown: " + JSON.stringify(await toggleState()));
   await ev("document.querySelector('.board-editing .board-code-toggle').click(), 1");
   check(await until("document.querySelector('.board-editing .be-codepart').hidden && document.querySelector('.board-editing .board-code-toggle').classList.contains('off')", 2000) && (await editing()) === "code1", "{ } hides the code, still being written");
+  check(JSON.stringify(await toggleState()) === JSON.stringify(["Show the code", "false", "Show the code"]), "{ } with the code hidden: " + JSON.stringify(await toggleState()));
   await key("Escape");
   await sleep(300);
   if (await editing()) await outside();
