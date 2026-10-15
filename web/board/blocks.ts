@@ -101,6 +101,16 @@ function nextItem(src: string): string {
   return m[1] + (n ? `${+n[1] + 1}${n[2]}` : m[2]) + " ";
 }
 
+// A field as tall as its lines, exactly: scrollHeight is a whole number of
+// pixels, and what is below the field would move by its rounding as editing starts.
+export function fitHeight(ta: HTMLTextAreaElement) {
+  ta.style.height = "auto";
+  const cs = getComputedStyle(ta), lh = parseFloat(cs.lineHeight), h = ta.scrollHeight;
+  const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const border = cs.boxSizing === "border-box" ? parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth) : 0;
+  ta.style.height = (lh > 0 ? Math.max(1, Math.round((h - pad) / lh)) * lh + pad + border : h) + "px";
+}
+
 export interface BlockEditorOptions {
   /** Markdown to HTML: the host's safe renderer (this never renders markup itself) */
   render: (src: string) => string;
@@ -241,8 +251,7 @@ export class BlockEditor {
 
   private paint() {
     this.pre.innerHTML = (this.o.highlight ?? ((s: string) => highlightMarkdown(s, false)))(this.ta.value);
-    this.ta.style.height = "auto";
-    this.ta.style.height = this.ta.scrollHeight + "px";
+    fitHeight(this.ta);
     // (its kind as it is typed: "# " makes it a heading)
     const k = kindOf(this.ta.value), h = /^ {0,3}(#{1,6})/.exec(this.ta.value);
     this.box.className = `be-md mb-edit mb-${k}` + (k === "heading" ? ` mb-h${h![1].length}` : "");

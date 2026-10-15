@@ -44,13 +44,66 @@ const saveKey = "sagebrush-board:" + source;
 const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
+// (the frame other sites show a board in, /frame/board/ (export.ts
+// frameHtml, design/frame.md): an exported page whose document its parent
+// posts, its engine the one it was built with, from the site it is served
+// from, which exporting it again names too)
+const fromParent = embedded()?.dataset.sbFrom === "parent";
+if (fromParent && OWN_ENGINE && !document.getElementById("sb-engine-ref")) {
+  const r = document.createElement("script");
+  r.type = "application/json";
+  r.id = "sb-engine-ref";
+  r.textContent = JSON.stringify({ site: new URL("/", location.href).href, id: OWN_ENGINE.id });
+  document.head.append(r);
+}
 // (an exported file: the engine its code runs with, and the site it comes from)
 const ref = file ? engineRef() : null;
+
+// A frame's document: the first its parent posts, as
+// { sagebrush: "board", version: 1, text, name? } (a file's contents and
+// name: JSON, Mermaid, Markdown, a CoCalc whiteboard or a JSON Canvas, as
+// Open… takes).  Only the parent's messages count.  The frame says
+// { sagebrush: "ready", version: 1 } when it listens, and
+// { sagebrush: "error", version: 1, message } for a text that isn't a board.
+// A later board starts the frame afresh, a new page with a new interpreter
+// (nothing the first board's code did reaches it: ISO-A75-2), which says
+// ready again: its parent answers each ready with the board to show.
+// Opened on its own, it shows an empty board that says what it is for.
+let fromParentDoc: (d: { doc: BoardDoc; notice: string }) => void = () => {};
+const parentDoc = new Promise<{ doc: BoardDoc; notice: string }>((r) => (fromParentDoc = r));
+if (fromParent) {
+  // (nothing it says is secret: to any parent)
+  const say = (m: { sagebrush: string; message?: string }) => parent.postMessage({ ...m, version: 1 }, "*");
+  if (parent === window) fromParentDoc({ doc: { title: "Board", nodes: [] }, notice: "**This page shows a board another site's page gives it.** To open a board, go to [sagebrush.space/board](https://sagebrush.space/board/)." });
+  else {
+    let first = true;
+    addEventListener("message", (e) => {
+      const m = e.data;
+      if (e.source !== parent || !m || m.sagebrush !== "board" || m.version !== 1 || typeof m.text !== "string") return;
+      let notice = "", doc: BoardDoc;
+      try {
+        doc = boardFromText(m.text, typeof m.name === "string" ? m.name : undefined, (md) => { notice = md; });
+        if (!isBoard(doc)) throw new Error("not a board");
+      } catch (err: any) {
+        say({ sagebrush: "error", message: String(err?.message ?? err) });
+        return;
+      }
+      if (first) fromParentDoc({ doc, notice });
+      else location.reload();
+      first = false;
+    });
+    say({ sagebrush: "ready" });
+  }
+}
 
 const host: BoardHost = {
   store: {
     async load() {
       if (bench) return null;
+      if (fromParent) {
+        const { doc, notice } = await parentDoc;
+        return { doc, original: doc, notice };
+      }
       let notice = "";
       const url = new URL(source.startsWith("mermaid:") || source.startsWith("embedded:") ? "data:," : source, location.href);
       // (JSON, or a Mermaid flowchart, or Markdown with some, or a CoCalc whiteboard)
@@ -108,7 +161,8 @@ const host: BoardHost = {
   // (?runner=0 only on a loopback host, for tests: elsewhere a link could add
   // it to someone else's code; only in Chromium, as on the notebook page)
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
-    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
+    // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
+    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
@@ -140,6 +194,8 @@ const host: BoardHost = {
     },
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
+  saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language
   // runs, after the board's is changed too)
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),

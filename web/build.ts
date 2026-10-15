@@ -115,18 +115,23 @@ for (const r of [result, consoleResult, mathResult, notebookResult, historyResul
   writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + "<script>" + js + "</script>" + html.slice(m.index + m[0].length));
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
+copyFileSync(join(here, "board-format.md"), join(here, "dist", "board-format.md"));
 copyFileSync(join(here, "_headers"), join(here, "dist", "_headers"));
 // the engines (modular symbols, a_p ...), fetched by the worker on first use
 copyFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"), join(here, "dist", "sagebrush-engine.wasm"));
-// The documentation index for the page's search box (lib/_pyjs_docsearch.py,
-// run by the CLI bundle: build it first with npm run build:cli)
-{
-  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), "-m", "_pyjs_docsearch", "--index"]);
+// The documentation indexes for the page's search box, one per language that
+// has one: Sage's library (lib/_pyjs_docsearch.py), MATLAB's built-ins
+// (lib/_matlab_docsearch.py) and Magma's intrinsics (lib/_magma_docsearch.py),
+// and the capability map made from them (lib/_capability_map.py, for
+// llms.txt), run by the CLI bundle (build it first with npm run build:cli)
+for (const [mod, file, args] of [["_pyjs_docsearch", "docs-index.json", ["--index"]], ["_matlab_docsearch", "docs-index-matlab.json", ["--index"]],
+  ["_magma_docsearch", "docs-index-magma.json", ["--index"]], ["_capability_map", "capabilities.md", []]] as [string, string, string[]][]) {
+  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), "-m", mod, ...args]);
   if (r.exitCode !== 0) {
-    console.error("docs index: " + r.stderr.toString());
+    console.error(`${file}: ` + r.stderr.toString());
     process.exit(1);
   }
-  writeFileSync(join(here, "dist", "docs-index.json"), r.stdout);
+  writeFileSync(join(here, "dist", file), r.stdout);
 }
 // KaTeX's stylesheet and (woff2) fonts, for math in Markdown cells
 const katexDir = join(here, "..", "node_modules", "katex", "dist");
@@ -207,6 +212,15 @@ const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush
   const gen = Bun.spawnSync(["node", join(here, "..", "scripts", "board-examples.mjs"), join(here, "dist", "board", "examples")]);
   if (gen.exitCode !== 0) { console.error(gen.stderr.toString()); process.exit(1); }
 }
+// The frame other sites show a board in (/frame/board/, design/frame.md):
+// the exported board's page with every part inline but the document, which
+// its parent posts (export.ts frameHtml)
+{
+  const { frameHtml, katexFontsInline } = await import("./board/export.ts");
+  const css = katexFontsInline(readFileSync(join(here, "dist", "katex", "katex.min.css"), "utf8"), (f) => "data:font/woff2;base64," + readFileSync(join(here, "dist", "katex", f)).toString("base64"));
+  mkdirSync(join(here, "dist", "frame", "board"), { recursive: true });
+  writeFileSync(join(here, "dist", "frame", "board", "index.html"), frameHtml(readFileSync(join(here, "board", "index.html"), "utf8"), readFileSync(join(here, "dist", "board", "board.js"), "utf8"), readFileSync(join(here, "dist", "sagebrush-math.js"), "utf8"), css));
+}
 // The npm packages the bundles above contain (their metafiles' inputs) and
 // KaTeX (its stylesheet and fonts, copied): web/js-dependencies.json, from
 // which scripts/third-party-notices.mjs writes their notices; the page and
@@ -275,6 +289,8 @@ writeFileSync(join(here, "site", "src", "build-id.ts"), `// written by web/build
 // boards (/board/)
 rmSync(join(here, "site", "public", "board"), { recursive: true, force: true });
 cpSync(join(here, "dist", "board"), join(here, "site", "public", "board"), { recursive: true });
+rmSync(join(here, "site", "public", "frame"), { recursive: true, force: true });
+cpSync(join(here, "dist", "frame"), join(here, "site", "public", "frame"), { recursive: true });
 mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 // The app (PWA): manifest, icons, and the service worker with the files it
@@ -283,9 +299,9 @@ const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
-const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + precompiledHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
@@ -313,7 +329,7 @@ mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "docs-index.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "capabilities.md", "docs-index.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", ...ICONS, ...KATEX])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");

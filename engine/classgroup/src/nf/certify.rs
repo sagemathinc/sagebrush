@@ -131,6 +131,12 @@ pub fn log_hr_lower(split: &[(u64, Vec<(u32, u32)>)], x: u64, n: usize, r1: usiz
 /// error) or None (rank deficient, or too imprecise: Err(true), which more
 /// precision may cure).
 pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: u32) -> Result<(Ball, Ball, BigInt, f64), bool> {
+    regulator_bounds_t(lams, errs, basis, prec).map(|(lo, hi, d, rel, _)| (lo, hi, d, rel))
+}
+
+/// regulator_bounds, also returning T (r rows over the lambdas): the units
+/// whose logarithms are b = T lambda (for their compact representations).
+pub fn regulator_bounds_t(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: u32) -> Result<(Ball, Ball, BigInt, f64, Vec<Vec<BigInt>>), bool> {
     let r = basis.len();
     let m = lams.len();
     if r == 0 || m < r {
@@ -160,8 +166,36 @@ pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: 
         let vq: Vec<BigRational> = v.iter().map(|x| BigRational::from_integer(x.clone())).collect();
         vec_mat(&vq, qi).iter().map(|q| q.round().to_integer()).collect()
     }).collect();
-    let rows: ZMat = coords.iter().enumerate().map(|(k, c)| c.iter().cloned().chain((0..m).map(|j| BigInt::from((j == k) as i32))).collect()).collect();
-    let t: Vec<Vec<BigInt>> = hnf(&rows).into_iter().filter(|row| row[..r].iter().any(|x| !x.is_zero())).map(|row| row[r..].to_vec()).collect();
+    // only the lambdas whose coordinates change the HNF of those before
+    // them: they generate the same lattice, and the HNF of [C | I] below
+    // stays small (over all 1467 lambdas of a sextic field it took 37 s)
+    let mut chosen: Vec<usize> = vec![];
+    let mut h: ZMat = vec![];
+    for (k, cv) in coords.iter().enumerate() {
+        if cv.iter().all(|x| x.is_zero()) {
+            continue;
+        }
+        let mut trial = h.clone();
+        trial.push(cv.clone());
+        let ht = hnf(&trial);
+        if ht != h {
+            h = ht;
+            chosen.push(k);
+            if h.len() == r && (0..r).all(|i| h[i][i].is_one()) {
+                break; // all of Z^r: no other lambda can add anything
+            }
+        }
+    }
+    let mc = chosen.len();
+    let rows: ZMat = chosen.iter().enumerate().map(|(k, &i)| coords[i].iter().cloned().chain((0..mc).map(|j| BigInt::from((j == k) as i32))).collect()).collect();
+    // T over all the lambdas (zero outside `chosen`)
+    let t: Vec<Vec<BigInt>> = hnf(&rows).into_iter().filter(|row| row[..r].iter().any(|x| !x.is_zero())).map(|row| {
+        let mut full = vec![BigInt::zero(); m];
+        for (j, &i) in chosen.iter().enumerate() {
+            full[i] = row[r + j].clone();
+        }
+        full
+    }).collect();
     if t.len() != r {
         return Err(false);
     }
@@ -207,7 +241,7 @@ pub fn regulator_bounds(lams: &[Vec<BigInt>], errs: &[Mag], basis: &ZMat, prec: 
     let (lo, hi) = (lo.mul_2exp(scale), hi.mul_2exp(scale));
     // the relative error (for the digits shown only): pert / d
     let rel = hi.sub(&lo, 64).div(&lo.add(&hi, 64), 64).map_or(1.0, |q| q.to_f64_approx().abs()) + 2f64.powf(-(prec as f64) * 0.9);
-    Ok((lo, hi, d, rel))
+    Ok((lo, hi, d, rel, t))
 }
 
 /// The splitting of the primes below x in the quadratic field of

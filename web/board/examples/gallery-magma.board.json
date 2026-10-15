@@ -1,0 +1,57 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "Magma",
+ "mode": "magma",
+ "intro": "Magma code, in the reader's browser: integers, sequences, polynomials, a number field, an elliptic curve, matrices and a function. Sagebrush runs a subset of Magma; check what you use with `sagebrush --magma`.",
+ "layout": "grid",
+ "columns": 3,
+ "nodes": [
+  {
+   "id": "fermat",
+   "title": "Factor $2^{32} + 1$",
+   "code": "print Factorization(2^32 + 1);"
+  },
+  {
+   "id": "primes",
+   "title": "Primes below 60",
+   "code": "P := [p : p in [1..60] | IsPrime(p)];\nprint P;"
+  },
+  {
+   "id": "phi",
+   "title": "Euler's $\\varphi$",
+   "code": "print [EulerPhi(n) : n in [1..12]];"
+  },
+  {
+   "id": "crt",
+   "title": "Chinese remaindering",
+   "code": "print ChineseRemainderTheorem([2, 3, 2], [3, 5, 7]);"
+  },
+  {
+   "id": "poly",
+   "title": "Factor $x^6 - 1$ over $\\mathbb{Z}$",
+   "code": "R<x> := PolynomialRing(Integers());\nprint Factorization(x^6 - 1);"
+  },
+  {
+   "id": "field",
+   "title": "A class number",
+   "text": "Of $\\mathbb{Q}(\\sqrt{-5})$, where $6 = 2 \\cdot 3 = (1 + \\sqrt{-5})(1 - \\sqrt{-5})$.",
+   "code": "K<w> := QuadraticField(-5);\nprint ClassNumber(K);"
+  },
+  {
+   "id": "curve",
+   "title": "An elliptic curve's conductor",
+   "code": "E := EllipticCurve([0, 0, 1, -1, 0]);\nprint Conductor(E);"
+  },
+  {
+   "id": "matrix",
+   "title": "A matrix over $\\mathbb{Q}$",
+   "code": "M := Matrix(Rationals(), 2, 2, [1, 2, 3, 4]);\nprint Determinant(M);\nprint M^-1;"
+  },
+  {
+   "id": "fib",
+   "title": "A function",
+   "code": "function fib(n)\n  if n le 1 then return n; end if;\n  return fib(n - 1) + fib(n - 2);\nend function;\nprint [fib(n) : n in [0..15]];"
+  }
+ ]
+}

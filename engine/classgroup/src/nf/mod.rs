@@ -8,5 +8,7 @@ pub mod factor;
 pub mod grh;
 pub mod order;
 pub mod prime;
+pub mod proof;
 pub mod roots;
+pub mod zimmert;
 pub mod zlin;

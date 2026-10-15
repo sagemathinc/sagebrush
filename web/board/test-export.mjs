@@ -8,7 +8,7 @@
 // web/serve.py 8765), then
 //   node web/board/test-export.mjs [doc.json ...]
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +33,8 @@ const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiti
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return; await sleep(50); } throw new Error("timeout: " + expr); };
 const fails = [];
+// (each board's document as shown, and the file it was downloaded as)
+const shown = new Map(), files = new Map();
 const check = (ok, what) => { if (!ok) fails.push(what); };
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable"]) await send(m);
@@ -42,6 +44,7 @@ try {
     await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent(doc)}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     const html = await ev("window.sagebrush.board.exportHtml()");
+    shown.set(doc, await ev("JSON.stringify(window.sagebrush.board.snapshot().doc)"));
     const s0 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, math: JSON.stringify(s.doc).includes('$'), code: JSON.stringify(s.doc).includes('\"code\":') }; })()");
     check(!/offline/i.test(await ev("document.querySelector('[data-sbb=html]').textContent")), `${doc}: the menu says the file works offline`);
     // (its scripts: nothing in them ends them early, and no "<!--", after which
@@ -50,6 +53,7 @@ try {
     check(scripts.length >= 3 && scripts.every((t) => !/<!--|<\/script/i.test(t)), `${doc}: a script in the file has "<!--" or "</script" in it`);
     const file = join(dir, doc.split("/").pop().replace(/\.\w+$/, "") + ".html");
     writeFileSync(file, html);
+    files.set(doc, file);
     // the file, offline (after a blank page: no request of the site's page,
     // such as its code engine's, made late, is counted as the file's)
     await send("Page.navigate", { url: "about:blank" });
@@ -97,6 +101,149 @@ try {
     check(!errors.filter((e) => !(s0.code && engine.test(e))).length, `${doc}: errors in the file: ${errors.slice(0, 3).join(" | ")}`);
     console.log(`${doc}: ${(html.length / 1024).toFixed(0)} KB, ${s1.items} items, ${s1.pages} page(s), ${sheets} sheet(s)`);
   }
+
+  // Ctrl/Cmd+S: Download as HTML, not the page's own Save (William)
+  errors = [];
+  await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  const keyS = async (modifiers) => {
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "s", code: "KeyS", windowsVirtualKeyCode: 83, modifiers });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "s", code: "KeyS", windowsVirtualKeyCode: 83, modifiers });
+  };
+  const dialogOpen = () => ev("document.querySelector('[data-sbb=htmldlg]').open");
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  for (const [mod, name] of [[2, "Ctrl"], [4, "Cmd"]]) {
+    await keyS(mod);
+    await until("document.querySelector('[data-sbb=htmldlg]').open", 3000).catch(() => {});
+    check(await dialogOpen(), `${name}+S on a board with code does not open Download as HTML's dialog`);
+    await ev("document.querySelector('[data-sbb=htmldlg]').close(), 1");
+  }
+  // (a board without code: the file at once; the links clicked to download, counted)
+  const S = { title: "Saved", nodes: [{ id: "n", title: "Note", text: "Its text", x: 0, y: 0, w: 300 }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => 1)`);
+  await ev("window.__got = []; HTMLAnchorElement.prototype.click = function () { window.__got.push(this.download); }; 1");
+  await keyS(2);
+  await until("window.__got.length === 1", 5000).catch(() => {});
+  check((await ev("window.__got.join()")).endsWith(".html") && !(await dialogOpen()), "Ctrl+S on a board without code does not download its HTML at once: " + await ev("window.__got.join()"));
+  // (a note being written: what is written is kept first, and is in the file)
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev("(() => { const r = window.board.clientRect('n'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  await until("window.board.editing === 'n' && document.activeElement === document.querySelector('.board-editing .be-title')", 3000);
+  await ev("(() => { const t = document.querySelector('.board-editing .be-title'); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
+  await send("Input.insertText", { text: " kept" });
+  await keyS(2);
+  await until("window.__got.length === 2", 5000).catch(() => {});
+  check(await ev("window.__got.length === 2 && !window.board.editing && window.sagebrush.board.snapshot().doc.nodes[0].title === 'Note kept'"), "Ctrl+S while a note is written: not kept first, or not downloaded: " + JSON.stringify(await ev("({ got: window.__got, editing: window.board.editing, title: window.sagebrush.board.snapshot().doc.nodes[0].title })")));
+  // (an exported file is itself the saved board: there Ctrl/Cmd+S is the
+  // browser's, its ⋯ menu still downloading it again, CORR-2C4-1)
+  await send("Page.navigate", { url: "file://" + files.get("examples/primes.json") });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 30000);
+  await ev("window.__got = []; HTMLAnchorElement.prototype.click = function () { window.__got.push(this.download); }; window.__kept = []; document.addEventListener('keydown', (e) => window.__kept.push(e.defaultPrevented)); 1");
+  await keyS(2);
+  await sleep(500);
+  const exported = await ev("({ got: window.__got, kept: window.__kept, dialog: document.querySelector('[data-sbb=htmldlg]').open, menu: !document.querySelector('[data-sbb=html]').hidden })");
+  check(!exported.got.length && JSON.stringify(exported.kept) === "[false]" && !exported.dialog && exported.menu, "in an exported file, Ctrl+S is the browser's (nothing downloaded, nothing prevented), the menu's Download as HTML still there: " + JSON.stringify(exported));
+  check(!errors.length, "errors: " + errors.join(" | "));
+
+  // A board downloaded as HTML, opened again on the site (Open…, or
+  // dropped): the board it holds, as it was; never the file's page itself
+  // (fromhtml.ts).  Anything else in HTML is refused, and nothing of it runs.
+  errors = [];
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  const docJson = () => ev("JSON.stringify(window.sagebrush.board.snapshot().doc)");
+  const sayText = () => ev("document.querySelector('[data-sbb=say]').textContent");
+  // (through the Open… menu's file chooser, as a person picks a file)
+  const pick = async (file) => {
+    const { root } = await send("DOM.getDocument", { depth: 0 });
+    const { nodeId } = await send("DOM.querySelector", { nodeId: root.nodeId, selector: "[data-sbb=openfile]" });
+    await send("DOM.setFileInputFiles", { files: [file], nodeId });
+  };
+  for (const [doc, file] of files) {
+    await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => 1)`);
+    await pick(file);
+    await until(`window.sagebrush.board.snapshot().doc.title !== ${JSON.stringify(S.title)}`, 10000).catch(() => {});
+    check((await docJson()) === shown.get(doc), `${doc}, downloaded as HTML and opened again: not the same board: ${(await docJson()).slice(0, 120)}`);
+  }
+  // hostile files: none of their scripts or markup runs; only a Sagebrush export's board opens
+  const GEN = '<meta name="generator" content="Sagebrush boards (sagebrush.space/board), exported 2026-10-14">';
+  const bad = `<img src=x onerror="window.__pwn=1"><script>window.__pwn=1</script>`;
+  const docTag = (json) => `<script type="application/json" id="sb-doc">${json}</script>`;
+  const markup = { title: "Marked <img src=x onerror=window.__pwn=2>", nodes: [{ id: "x", title: "<script>window.__pwn=3</script>", text: "<img src=x onerror=window.__pwn=4> and [a link](javascript:window.__pwn=5)", x: 0, y: 0, w: 300 }] };
+  const HOSTILE = [
+    ["an ordinary page", `<!doctype html><html><head><title>Page</title></head><body>${bad}<p>Hello</p></body></html>`, false],
+    ["a page without the generator", `<!doctype html><html><head></head><body>${bad}${docTag(JSON.stringify(S))}</body></html>`, false],
+    ["an export whose JSON is broken", `<!doctype html><html><head>\n${GEN}</head><body>${bad}${docTag('{"title": "Broken", "nodes": [')}</body></html>`, false],
+    ["an export whose JSON is no board", `<!doctype html><html><head>\n${GEN}</head><body>${bad}${docTag('{"title": "No nodes"}')}</body></html>`, false],
+    ["an export whose board has markup in it", `<!doctype html><html><head>\n${GEN}${bad}</head><body>${bad}${docTag(JSON.stringify(markup).replace(/</g, "\\u003c"))}</body></html>`, true],
+  ];
+  for (const how of ["picked", "dropped"]) {
+    for (const [what, text, opens] of HOSTILE) {
+      await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => (window.__pwn = 0, 1))`);
+      const before = await docJson();
+      if (how === "picked") {
+        const f = join(dir, "hostile.html");
+        writeFileSync(f, text);
+        await pick(f);
+      } else {
+        await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(text)}], "hostile.html", { type: "text/html" })); document.querySelector(".board").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); return 1; })()`);
+      }
+      if (opens) {
+        await until("window.sagebrush.board.snapshot().doc.title.startsWith('Marked')", 10000).catch(() => {});
+        await ev("window.board.focus(undefined, true), 1");
+        await sleep(500);
+        check(await ev("window.sagebrush.board.snapshot().doc.nodes[0].title === '<script>window.__pwn=3</script>' && [...document.querySelectorAll('.board-note b')].some((b) => b.textContent === '<script>window.__pwn=3</script>') && !document.querySelector('.board-note img, .board-note script, .board-note a[href^=javascript]')"), `${what}, ${how}: its board opens, its markup shown as text: ` + await ev("document.querySelector('.board-note')?.innerHTML.slice(0, 200) ?? 'no note'"));
+      } else {
+        await until("/could not be shown/.test(document.querySelector('[data-sbb=say]').textContent)", 5000).catch(() => {});
+        check((await docJson()) === before && /could not be shown: not a board/.test(await sayText()), `${what}, ${how}: not refused, saying why: ` + (await sayText()).slice(0, 160));
+      }
+      check(!(await ev("window.__pwn")), `${what}, ${how}: something of the file ran: __pwn = ${await ev("window.__pwn")}`);
+    }
+  }
+
+  // a file refused for what it says (its format, its ids): what it said is
+  // shown as text, never as Markdown, so no picture of it is fetched and no
+  // link of it made (SEC-36E-1; JSON as well as a board as HTML)
+  const PROBE = "![probe](https://example.invalid/leak)";
+  const REFUSED = [
+    ["a JSON board whose format is Markdown", JSON.stringify({ format: PROBE, nodes: [] }), "its format is"],
+    ["a board as HTML whose format is Markdown", `<!doctype html><html><head>\n${GEN}</head><body>${docTag(JSON.stringify({ format: PROBE, nodes: [] }).replace(/</g, "\\u003c"))}</body></html>`, "its format is"],
+    ["a board whose ids are Markdown links", JSON.stringify({ nodes: [{ id: "[x](javascript:window.__pwn=7)" }, { id: "[x](javascript:window.__pwn=7)" }] }), "[x](javascript:window.__pwn=7)"],
+  ];
+  requests = [];
+  for (const how of ["picked", "dropped"]) {
+    for (const [what, text, says] of REFUSED) {
+      await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => (window.__pwn = 0, 1))`);
+      if (how === "picked") {
+        const f = join(dir, "refused.json");
+        writeFileSync(f, text);
+        await pick(f);
+      } else {
+        await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(text)}], "refused.json", { type: "application/json" })); document.querySelector(".board").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); return 1; })()`);
+      }
+      await until("/could not be shown/.test(document.querySelector('[data-sbb=say]').textContent)", 5000).catch(() => {});
+      await sleep(300);
+      const said = await ev("(() => { const e = document.querySelector('[data-sbb=say]'); return { text: e.textContent, markup: e.querySelectorAll('img, a, code, em').length, strong: e.querySelector('strong')?.textContent }; })()");
+      check(said.markup === 0 && said.strong === "This board could not be shown:" && said.text.includes(says) && (what.includes("format") ? said.text.includes(PROBE) : true), `${what}, ${how}: refused, what it said shown as text: ` + JSON.stringify(said));
+      check(!(await ev("window.__pwn")), `${what}, ${how}: something of the file ran`);
+    }
+  }
+  // a file past the largest the board reads (128 MB): refused by its size, before it is read (HARD-36E-2)
+  {
+    const big = join(dir, "big.json");
+    writeFileSync(big, "");
+    truncateSync(big, 128 * 2 ** 20 + 1);
+    for (const how of ["picked", "dropped"]) {
+      await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => 1)`);
+      const before = await docJson();
+      if (how === "picked") await pick(big);
+      else await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(128 * 2 ** 20 + 1)], "big.json", { type: "application/json" })); document.querySelector(".board").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); return 1; })()`);
+      await until("/too large/.test(document.querySelector('[data-sbb=say]').textContent)", 10000).catch(() => {});
+      check((await docJson()) === before && /could not be shown: too large to open: 129 MB \(at most 128 MB\)/.test(await sayText()), `a file past 128 MB, ${how}: refused by its size: ` + (await sayText()).slice(0, 160));
+    }
+  }
+  check(!requests.some((u) => u.includes("example.invalid")), "no picture a refused file names is fetched: " + requests.filter((u) => u.includes("example.invalid")).join(", "));
+  check(!errors.filter((e) => !/example\.invalid/.test(e)).length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
   if (errors.length) fails.push("page errors: " + errors.join(" | "));

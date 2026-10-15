@@ -1,0 +1,142 @@
+recformat<x: IntegerRing(), y: IntegerRing(), label, tags: SeqEnum, k: 
+RngIntElt>
+RecFrmt
+[ x, y, label, tags, k ]
+rec<Pt | >
+Rec
+rec<Pt | 
+    x := 0,
+    y := 0,
+    label := origin>
+origin
+false true
+3 RngIntElt
+rec<Pt | 
+    x := 3,
+    tags := [ 4, 50, 6 ]>
+[ x, y, label, tags, k ]
+0 9
+1
+0
+origin
+rec<Pt | 
+    x := 1,
+    y := 0,
+    label := moved>
+rec<Pt | 
+    x := 1,
+    y := 0>
+false
+<1, 0>
+[
+    rec<Pt | 
+        x := 3,
+        tags := [ 4, 50, 6 ]>,
+    rec<Pt | 
+        x := 1,
+        y := 0>
+]
+
+>> p`k := "seven";
+    ^
+Runtime error in :=: RHS value invalid for field 'k'
+
+>> p`x := 1/2;
+    ^
+Runtime error in :=: RHS value invalid for field 'x'
+
+>> z := p`nosuch;
+         ^
+Runtime error in `: Field 'nosuch' does not exist in this record
+
+
+>> z := q`tags;
+         ^
+Runtime error in `: Field 'tags' is not assigned
+
+
+>> rec< Pt | tags := { 1 } >;
+   ^
+Runtime error in rec< ... >: Value for field 'tags' should have category SeqEnum
+
+
+>> rec< Pt | x := "no" >;
+   ^
+Runtime error in rec< ... >: Value for field 'x' not in structure given by 
+format
+
+rec<F | 
+    a := 1>
+rec<G | 
+    a := 1>
+rec<recformat<a, b> | 
+    a := 1>
+rec<Outer | 
+    inner := rec<Inner | 
+        m := 2>,
+    items := [ 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 
+        256, 289, 324, 361, 400, 441, 484, 529, 576, 625, 676, 729, 784, 841, 
+        900 ]>
+rec<Inner | 
+    m := a long string value that does not fit on one line of eighty columns at 
+        all>
+rec<recformat<u, v> | 
+    v := { 1, 2, 3 }>
+rec<recformat<n> | 
+    n := 5>
+false
+true
+
+>> Twice := recformat< u, v, u >;
+                             ^
+User error: Field 'u' is repeated
+
+>> Twice;
+   ^
+User error: Identifier 'Twice' has not been declared or assigned
+
+>> rec< Ok | u := 1, v := 2, u := 3 >;
+   ^
+Runtime error in rec< ... >: Field 'u' given more than once
+
+
+>> rec< Ok | w := 1 >;
+   ^
+Runtime error in rec< ... >: Field 'w' is not in the format
+
+
+>> rec< Ok | u := 1, w := 2, u := 3 >;
+   ^
+Runtime error in rec< ... >: Field 'w' is not in the format
+
+
+>> recformat< u : 7 >;
+   ^
+Runtime error in elt< ... >: Expression for field u is not a category or 
+structure
+
+
+>> recformat< u : Integers(), v : true >;
+   ^
+Runtime error in elt< ... >: Expression for field v is not a category or 
+structure
+
+
+>> recformat< u : "text" >;
+   ^
+Runtime error in elt< ... >: Expression for field u is not a category or 
+structure
+
+recformat<>
+[]
+
+>> assigned seq[2];
+   ^
+User error: Argument to 'assigned' should be identifier, record field, or 
+attribute
+true
+
+>> delete seq[2];
+             ^
+User error: Bad delete argument
+[ 4, 5, 6 ]

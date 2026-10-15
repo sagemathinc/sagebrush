@@ -111,7 +111,8 @@ check(shaped("rect") === undefined && shaped("diamond") === 1, "a rectangle is n
 const examples = readdirSync(join(here, "examples")).filter((f) => /\.(json|md)$/.test(f) && f !== "index.json").map((f) => [f, boardFromText(readFileSync(join(here, "examples", f), "utf8"), f, () => {})]);
 const shape = (d) => {
   const out = [];
-  const w = (ns, parent) => { for (const n of ns) { out.push([n.id.replace(/^p\d+-/, ""), parent?.replace(/^p\d+-/, "") ?? "", n.kind ?? "note", n.title ?? "", n.code ?? ""]); if (n.kind === "group") w(n.children, n.id); } };
+  // (a canvas has no pen strokes, counted as left out, nor stickers: a sticker comes back as a card, a note)
+  const w = (ns, parent) => { for (const n of ns) { if (n.kind === "ink") continue; out.push([n.id.replace(/^p\d+-/, ""), parent?.replace(/^p\d+-/, "") ?? "", n.kind === "sticker" ? "note" : n.kind ?? "note", n.title ?? "", n.code ?? ""]); if (n.kind === "group") w(n.children, n.id); } };
   for (let i = 0; i < pageCount(d); i++) w(pageView(d, i).nodes ?? [], null);
   return out.sort((a, b) => a[0].localeCompare(b[0]));
 };
@@ -122,6 +123,8 @@ for (const [f, d] of examples) {
   check(ids.size === canvas.nodes.length && canvas.nodes.every((n) => ["text", "link", "group"].includes(n.type) && [n.x, n.y, n.width, n.height].every(Number.isInteger)) && canvas.edges.every((e) => ids.has(e.fromNode) && ids.has(e.toNode)), `${f}: not valid JSON Canvas`);
   const steps = Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).steps?.length ?? 0).reduce((a, b) => a + b, 0);
   check((l.step ?? 0) === steps, `${f}: the tour's ${steps} steps are not counted as left out: ${JSON.stringify(l)}`);
+  const inks = Array.from({ length: pageCount(d) }, (_, i) => (pageView(d, i).nodes ?? []).filter((n) => n.kind === "ink").length).reduce((a, b) => a + b, 0);
+  check((l.ink ?? 0) === inks, `${f}: its ${inks} pen strokes are not counted as left out: ${JSON.stringify(l)}`);
   const back = fromCanvas(JSON.stringify(canvas)).doc;
   const paged = pageCount(d) > 1;
   // (a board with pages comes back with a group a page around its notes)

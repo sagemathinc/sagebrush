@@ -6,7 +6,7 @@
 // web/serve.py 8765), then
 //   node web/board/test-code.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -274,6 +274,187 @@ try {
     await sleep(400);
     const b = await ev("(() => { const d = window.sagebrush.board.snapshot().doc, n = d.nodes.find((x) => x.id === 'mover'), o = d.nodes.find((x) => x.id === 'other'); return { title: d.title, x: n?.x, y: n?.y, ox: o?.x, oy: o?.y, drawn: window.board.item('mover')?.x }; })()");
     check(b.title === "B" && b.x === 1000 && b.y === 5300 && b.ox === 0 && b.oy === 5000 && b.drawn === 1000, "another document loaded during a drag: drawn, and nothing of the drag in it: " + JSON.stringify(b));
+  }
+  // an id on two pages (ids are a page's): two cells, each page's item showing its own output, once
+  {
+    await ev("window.sagebrush.board.editing(false), 1");
+    const page = (title, said) => ({ title, nodes: [{ id: "same", title, code: `print(${JSON.stringify(said)})`, x: 0, y: 0, w: 300 }] });
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Pages", pages: [page("One", "first"), page("Two", "second")] })}).then(() => 1)`);
+    const ran = await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === '' && o.output))", 30000);
+    const os = await ev("window.sagebrush.board.outputs().then((os) => os.map((o) => [o.id, o.output]))");
+    check(ran && JSON.stringify(os) === JSON.stringify([["same@p1", "first\n"], ["same@p2", "second\n"]]), "an id on two pages: two cells, each with its own output: " + JSON.stringify(os));
+    // (each page's item shows its own output, in one box, which stays one: no render loop)
+    const boxes = () => ev("[...document.querySelectorAll('.board-world .board-code-out')].map((e) => e.textContent)");
+    await sleep(1000);
+    const p1 = await boxes();
+    await sleep(1500);
+    check(JSON.stringify(p1) === JSON.stringify(["first\n"]) && JSON.stringify(await boxes()) === JSON.stringify(p1), "page 1 shows its item's output, once: " + JSON.stringify([p1, await boxes()]));
+    await ev("window.sagebrush.board.page(1)");
+    await sleep(1000);
+    const p2 = await boxes();
+    await sleep(1500);
+    check(JSON.stringify(p2) === JSON.stringify(["second\n"]) && JSON.stringify(await boxes()) === JSON.stringify(p2), "page 2 shows its item's output, once: " + JSON.stringify([p2, await boxes()]));
+  }
+
+  // an id on two pages, and a third page's item whose own id is the first's cell's: three cells, one each (CORR-79B-1)
+  {
+    const page = (title, id, said) => ({ title, nodes: [{ id, title, code: `print(${JSON.stringify(said)})`, x: 0, y: 0, w: 300 }] });
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Three", pages: [page("One", "x", "first"), page("Two", "x", "second"), page("Three", "x@p2", "real")] })}).then(() => 1)`);
+    const ran = await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === '' && o.output))", 30000);
+    const os = await ev("window.sagebrush.board.outputs().then((os) => os.map((o) => [o.id, o.output]))");
+    check(ran && JSON.stringify(os) === JSON.stringify([["x@p1", "first\n"], ["x@p2~2", "second\n"], ["x@p2", "real\n"]]), "an item whose id is another's cell's: three cells, each its own: " + JSON.stringify(os));
+    const shows = async (p) => { await ev(`window.sagebrush.board.page(${p})`); await sleep(800); return ev("[...document.querySelectorAll('.board-world .board-code-out')].map((e) => e.textContent).join()"); };
+    const on = [await shows(0), await shows(1), await shows(2)];
+    check(JSON.stringify(on) === JSON.stringify(["first\n", "second\n", "real\n"]), "each page shows its own item's output: " + JSON.stringify(on));
+  }
+
+  // previews of items whose id other pages' items have: neither shown nor kept (their cell, and seed, change as pages come and go: CORR-79B-3)
+  {
+    // (in a page of its own: nothing of the boards before it, their cells or their runs)
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    const stale = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "STALE\n" }] };
+    const page = (title) => ({ title, nodes: [{ id: "x", title, code: "import random\nprint(random.random())", preview: stale, x: 0, y: 0, w: 300 }] });
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Previews", pages: [page("One"), page("Two")] })}).then(() => 1)`);
+    const ran = await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === '' && /^0\\.\\d+\\n$/.test(o.output)))", 30000);
+    check(ran, "items whose id another page's item has: their previews not shown, they run: " + JSON.stringify(await outputs()));
+    check(await until("window.sagebrush.board.snapshot().doc.pages.every((p) => !p.nodes[0].preview)", 5000), "...and the previews they had are not kept: " + JSON.stringify(await ev("window.sagebrush.board.snapshot().doc.pages.map((p) => !!p.nodes[0].preview)")));
+  }
+
+  // ...nor taken, the item its own again, by a sync that came before the first's runs dropped it (CORR-BB9-1)
+  {
+    // (in a page of its own: nothing of the boards before it, their cells or their runs)
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    const stale = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "STALE\n" }] };
+    const page = (title) => ({ title, nodes: [{ id: "x", title, code: "import time\ntime.sleep(2)\nimport random\nprint(random.random())", preview: stale, x: 0, y: 0, w: 300 }] });
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Previews", pages: [page("One"), page("Two")] })}).then(() => 1)`);
+    // (at once: the first sync's runs not yet done, nor their previews dropped)
+    await ev("window.sagebrush.board.edit((d) => { d.pages = [d.pages[0]]; }).then(() => 1)");
+    const ran = await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].id === 'x' && os[0].state === '' && /^0\\.\\d+\\n$/.test(os[0].output))", 60000);
+    check(ran, "the item its own again before its preview was dropped: it runs, its old preview not shown: " + JSON.stringify(await outputs()));
+    await sleep(1500);
+    const kept = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.pages.map((p) => p.nodes[0].preview ?? null))");
+    check(!/STALE/.test(kept), "...nor kept: " + kept);
+  }
+
+  // the language changed while an item runs by hand (one held by its preview, so nothing had run): the run first, then a new interpreter (CORR-79B-2)
+  {
+    // (in a page of its own: nothing of the boards before it, their cells or their runs)
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    const held = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "held\n" }] };
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Race", mode: "sage", nodes: [{ id: "r", code: "import time\ntime.sleep(2)\nprint(pi)", preview: held, x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+    await sleep(1500);
+    await ev("window.sagebrush.board.run(['r']), 1");
+    const running = await until("!!document.querySelector('.board-code-engine .running')", 20000);
+    await ev(`window.sagebrush.board.edit((d) => { d.mode = "matlab"; d.nodes[0].code = "t = 2*pi"; }).then(() => 1)`);
+    check(running && await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /6\\.2832/.test(os[0].output))", 60000), "the language changed during a run: the MATLAB item's 2*pi is MATLAB's: " + JSON.stringify(await outputs()));
+  }
+
+  // the board fitted again once its code has first run, its outputs in place (William): unless the reader has moved the view meanwhile
+  {
+    const doc = { title: "Refit", layout: "column", nodes: [
+      { id: "top", title: "Top", text: "Above the code." },
+      { id: "long", title: "Long", code: "import time\ntime.sleep(1.5)\nfor i in range(60):\n    print(i)" },
+      { id: "bottom", title: "Bottom", text: "Pushed down by the output." },
+    ] };
+    // (all of the board's items in the view)
+    const inView = "(() => { const s = window.sagebrush.board.snapshot(), v = s.view; return s.items.every((it) => it.x >= v.x0 - 1 && it.y >= v.y0 - 1 && it.x + it.w <= v.x1 + 1 && it.y + it.h <= v.y1 + 1); })()";
+    const ran = "window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /59\\n$/.test(os[0].output))";
+    const camera = () => ev("JSON.stringify(window.sagebrush.board.snapshot().camera)");
+    for (const moved of [false, true]) {
+      // (in a page of its own: nothing of the boards before it)
+      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+      await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+      await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
+      // (the reader scrolls before the code has run)
+      if (moved) await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: 200 });
+      await sleep(200);
+      const before = await camera();
+      check(await until(ran, 60000), "the long item ran: " + JSON.stringify(await outputs()));
+      // (and the board laid out with its output: the item under it pushed down)
+      check(await until("window.sagebrush.board.snapshot().items.find((it) => it.id === 'bottom').y > 1000", 10000), "the output pushed the bottom item down");
+      if (!moved) check(await until(inView, 10000), "after the first run, the board fitted again, the pushed-down item in view: " + JSON.stringify(await ev("window.sagebrush.board.snapshot().view")));
+      else {
+        await sleep(2500);
+        check((await camera()) === before, "the reader moved the view: it stays where they put it: " + before + " then " + (await camera()));
+      }
+    }
+  }
+
+  // ...nor when the reader's move is a flight not yet begun (Find, a double-click), or a key pressed during the refit's own flight (CORR-300-1)
+  {
+    // (a real picture, which the board mounts as an <img>: the refit waits for it to decode)
+    const leaf = JSON.parse(readFileSync(new URL("examples/gallery-hello.board.json", import.meta.url), "utf8")).images.leaf;
+    const doc = { title: "Refit", layout: "column", images: { pic: leaf }, nodes: [
+      { id: "pic", title: "A picture", image: "pic" },
+      { id: "long", title: "Long", code: "import time\ntime.sleep(1.5)\nfor i in range(120):\n    print(i)" },
+      { id: "bottom", title: "Bottom", text: "Pushed down by the output." },
+    ] };
+    const camera = () => ev("JSON.stringify(window.sagebrush.board.snapshot().camera)");
+    // (animation frames held: a flight asked for has not begun until the test lets them go)
+    const holdFrames = `(() => {
+      const raf = window.requestAnimationFrame, caf = window.cancelAnimationFrame;
+      let held = [], n = 1e9;
+      window.requestAnimationFrame = (f) => { held.push([++n, f]); return n; };
+      window.cancelAnimationFrame = (i) => { held = held.filter(([j]) => j !== i); caf(i); };
+      window.__frames = () => { window.requestAnimationFrame = raf; window.cancelAnimationFrame = caf; for (const [, f] of held) raf(f); held = []; };
+    })();`;
+    // (the refit held where it waits for pictures, until the test lets it go)
+    const open = async () => {
+      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+      await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+      await ev("(() => { const held = new Promise((r) => (window.__letGo = r)); HTMLImageElement.prototype.decode = function () { return held; }; return 1; })()");
+      await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
+      return until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /119\\n$/.test(os[0].output)) && window.sagebrush.board.snapshot().items.find((it) => it.id === 'bottom').y > 1500", 60000);
+    };
+    // Find: its result off screen, its flight asked for, and the refit let go in the same task
+    check(await open(), "the long item ran, the bottom item pushed down");
+    await ev(`(() => { ${holdFrames} const q = document.querySelector('[data-sbb=findq]'); q.value = 'Pushed'; q.dispatchEvent(new Event('input')); return 1; })()`);
+    // (Find's flight asked for, the camera not yet moved; then the refit looks)
+    await sleep(300);
+    await ev("window.__letGo(), 1");
+    await sleep(1000);
+    await ev("window.__frames(), 1");
+    await sleep(2500);
+    const found = JSON.parse(await camera());
+    check(found.z >= 0.5 && await ev("(() => { const s = window.sagebrush.board.snapshot(), v = s.view, b = s.items.find((it) => it.id === 'bottom'); return b.y >= v.y0 && b.y + b.h <= v.y1; })()"), "Find's flight, asked for before the refit looked, wins: " + JSON.stringify(found));
+    // a double-click on the picture: its flight asked for, and the refit let go in the same task
+    check(await open(), "the long item ran again, in a new page");
+    await ev(`(() => {
+      const s = window.sagebrush.board.snapshot(), c = s.camera, it = s.items.find((x) => x.id === "pic");
+      const r = document.querySelector(".board-world").parentElement.getBoundingClientRect();
+      const cx = r.left + (it.x + it.w / 2 - c.x) * c.z, cy = r.top + (it.y + it.h / 2 - c.y) * c.z;
+      ${holdFrames}
+      document.elementFromPoint(cx, cy).dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: cx, clientY: cy }));
+      return 1;
+    })()`);
+    await sleep(300);
+    await ev("window.__letGo(), 1");
+    await sleep(1000);
+    await ev("window.__frames(), 1");
+    await sleep(2500);
+    const doubled = JSON.parse(await camera());
+    check(doubled.z >= 1, "the double-click's flight, asked for before the refit looked, wins: " + JSON.stringify(doubled));
+    // a key zooming during the refit's own flight: the zoom stays
+    check(await open(), "the long item ran again, in a new page");
+    const start = await camera();
+    await ev("window.__letGo(), 1");
+    check(await until(`JSON.stringify(window.sagebrush.board.snapshot().camera) !== ${JSON.stringify(start)}`, 10000), "the refit's flight began");
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "+", text: "+", code: "Equal" });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "+", code: "Equal" });
+    const zoomed = await camera();
+    await sleep(1500);
+    check((await camera()) === zoomed, "the key's zoom stays, the flight stopped: " + zoomed + " then " + (await camera()));
+  }
+
+  // a board in another language after one in Sage, in the same page: a new interpreter, nothing of Sage's left (Sage's pi in MATLAB's 2*pi)
+  {
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Sage", mode: "sage", nodes: [{ id: "s", code: "x = var('x')\ndiff(sin(x), x)", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+    check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].output === 'cos(x)\\n')", 60000), "a Sage board runs: " + JSON.stringify(await outputs()));
+    await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "MATLAB", mode: "matlab", nodes: [{ id: "m", code: "t = 2*pi", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+    check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /6\\.2832/.test(os[0].output))", 60000), "then a MATLAB board in the same page: 2*pi is MATLAB's: " + JSON.stringify(await outputs()));
   }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {

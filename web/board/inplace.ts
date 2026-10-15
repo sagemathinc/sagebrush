@@ -17,7 +17,7 @@ import type { BoardDoc, DocGroup, DocNote } from "./doc";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
 import { icon } from "./icons";
-import { BlockEditor } from "./blocks";
+import { BlockEditor, fitHeight } from "./blocks";
 import { COLORS } from "./colors";
 
 export interface InPlaceHost {
@@ -52,6 +52,7 @@ export class InPlace {
   private pic: { key: string; info: ImageInfo } | null = null;
   private picEl: HTMLElement | null = null;
   private hasCode = false;
+  private headHeight = 0; // (an untitled code item's head, as shown)
   private hideCode = false;
   private color: string | undefined;
   private stepped = false; // whether this visit has an undo step (what it keeps next joins it)
@@ -100,6 +101,8 @@ export class InPlace {
       first = this.text.field!;
     } else {
       first = (hit as HTMLTextAreaElement | HTMLInputElement | null) ?? (this.hasCode && !this.hideCode ? this.code! : this.title);
+      // (not a field it doesn't show: an untitled item's first that it does, its detail or link)
+      if (first.hidden) first = this.detail ?? this.ref ?? (this.title.hidden = false, this.title);
       const k = shown ? Math.min(shown.offset, first.value.length) : (hit && p && caretAt(first, p.x, p.y)) ?? first.value.length;
       first.focus({ preventScroll: true });
       first.setSelectionRange(k, k);
@@ -139,8 +142,20 @@ export class InPlace {
     this.title = area("be-title", n.title ?? "", "Title");
     this.title.rows = 1;
     if (head) {
+      if (!head.querySelector(":scope > b")) this.headHeight = parseFloat(getComputedStyle(head).height) || 0;
       head.querySelector(":scope > b")?.remove();
       head.insertBefore(this.title, head.querySelector(".board-code-toggle"));
+      // (▶ and { } stay where they are, so the title and the code do not
+      // move: here they run and hide the code as it is written)
+      const run = head.querySelector<HTMLElement>(".board-code-run"), toggle = head.querySelector<HTMLElement>(".board-code-toggle");
+      if (run) run.onclick = (e) => { e.stopPropagation(); this.run(); };
+      if (toggle) toggle.onclick = (e) => { e.stopPropagation(); this.toggleCode(); };
+      for (const b of [run, toggle]) b?.addEventListener("mousedown", (e) => e.preventDefault());
+    } else if (!n.title && !this.fresh && (n.text || n.detail || n.ref || this.pic)) {
+      // (an item with no title shows none: its field only once + Title asks
+      // for it, what it shows staying where it was: its text, picture,
+      // detail or link, CORR-9E1-1)
+      this.title.hidden = true;
     }
     const { board } = this.host;
     this.text = new BlockEditor(n.text ?? "", {
@@ -151,8 +166,10 @@ export class InPlace {
     });
     const text = this.text.el;
     text.classList.add("be-text");
-    // (a code item without text: none shown, until Enter in its title)
-    text.hidden = !n.text && n.code !== undefined;
+    // (no text: none shown where its field would push down what the item
+    // shows under it, its code, detail or link, until Enter in its title or
+    // + Text asks for it; a new item's shown, to write in, CORR-9E1-1)
+    text.hidden = !n.text && (n.code !== undefined || (!this.fresh && !!(n.detail || n.ref)));
     const parts: (HTMLElement | null)[] = [head ?? this.title, this.pic ? this.picture() : null, text];
     if (!this.group) {
       parts.push(this.codeField(n.code ?? ""), out);
@@ -241,6 +258,7 @@ export class InPlace {
     const sw = button("ip-color", "Color");
     sw.append(Object.assign(document.createElement("span"), { className: "ip-swatch" }));
     sw.onclick = () => this.palette();
+    b.append(tool("ip-title", "Add a title", "title", () => this.addPart("title"), true), tool("ip-text", "Add text", "text", () => this.addPart("text"), true));
     if (!this.group) {
       b.append(
         tool("ip-run", "Run (Shift+Enter), and what depends on it", "run", () => this.run()),
@@ -261,6 +279,16 @@ export class InPlace {
   // What the toolbar offers now.
   private refresh() {
     const q = (s: string) => this.bar.querySelector<HTMLElement>(s);
+    q(".ip-title")!.hidden = !this.title.hidden;
+    // (+ Text for a note whose text isn't shown; a code item's comes with Enter in its title, as before)
+    q(".ip-text")!.hidden = !this.text.el.hidden || this.hasCode;
+    // (the head's { }: its state, and its tooltip the action it now takes; its
+    // name stays "Show the code", pressed while the code shows, as a toggle's
+    // name should, WAI-ARIA APG, A11Y-9E1-2)
+    const toggle = this.el.querySelector<HTMLElement>(":scope > .board-code-head > .board-code-toggle");
+    toggle?.classList.toggle("off", this.hideCode);
+    toggle?.setAttribute("aria-pressed", String(!this.hideCode));
+    if (toggle) toggle.title = this.hideCode ? "Show the code" : "Hide the code (its output stays)";
     if (!this.group) {
       q(".ip-run")!.hidden = !this.hasCode;
       q(".ip-hide")!.hidden = !this.hasCode;
@@ -278,9 +306,20 @@ export class InPlace {
     else this.el.style.removeProperty("--c");
   }
 
-  private addPart(k: "code" | "detail" | "ref") {
+  private addPart(k: "title" | "text" | "code" | "detail" | "ref") {
     let f: HTMLTextAreaElement | HTMLInputElement;
-    if (k === "code") {
+    if (k === "text") {
+      this.text.el.hidden = false;
+      this.text.focus("end");
+      this.refresh();
+      this.fit();
+      this.place();
+      return;
+    }
+    if (k === "title") {
+      this.title.hidden = false;
+      f = this.title;
+    } else if (k === "code") {
       this.hasCode = true;
       // (a code item now: its state and output show in it once it runs, board.ts codeStates)
       this.el.dataset.code = this.id;
@@ -397,9 +436,10 @@ export class InPlace {
     for (const ta of this.el.querySelectorAll<HTMLTextAreaElement>("textarea")) {
       // (a hidden field has no height to measure: measured when it shows)
       if (!ta.offsetParent) continue;
-      ta.style.height = "auto";
-      ta.style.height = ta.scrollHeight + "px";
+      fitHeight(ta);
     }
+    // (an untitled code item's head as tall as it was while its title is empty: the code below stays where it was)
+    if (this.headHeight) this.title.style.maxHeight = this.title.value ? "" : this.headHeight + "px";
   }
 
   /** The toolbar above the item (below it if there is no room), or, on a
@@ -424,12 +464,14 @@ export class InPlace {
     b.style.left = Math.round(Math.max(8, Math.min(innerWidth - bw - 8, r.left))) + "px";
   }
 
-  // Room for the toolbar above the item, so that it covers nothing of it
-  // (on a phone it is under the Edit toolbar): the board moves down if need be.
+  // Room for the toolbar above the item or below it, so that it covers
+  // nothing of it (on a phone it is under the Edit toolbar): the board moves
+  // down only if there is room for it in neither place (William: the text
+  // being written stays where it was as editing starts, if it can).
   private room() {
     if (phone()) return;
-    const top = this.el.getBoundingClientRect().top, need = clearTop() + this.bar.offsetHeight + 8;
-    if (top < need) this.host.board.panBy(0, top - need);
+    const r = this.el.getBoundingClientRect(), bh = this.bar.offsetHeight, need = clearTop() + bh + 8;
+    if (r.top < need && r.bottom + 8 + bh > innerHeight) this.host.board.panBy(0, r.top - need);
     this.host.board.render();
   }
 

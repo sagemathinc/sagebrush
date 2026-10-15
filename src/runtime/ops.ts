@@ -281,29 +281,40 @@ function bitLength(x: bigint): number {
   return x === 0n ? 0 : absBig(x).toString(2).length;
 }
 
-// Correctly rounded int / int, like CPython's long_true_divide.
+// Correctly rounded int / int, subnormal results included, following the
+// scheme of CPython's long_true_divide (Objects/longobject.c; see
+// NOTICE.md): the quotient is formed with at least two bits beyond
+// the result's precision (53 bits, or fewer below 2^-1022, where the last
+// representable bit is 2^-1074) plus a sticky bit, rounded once to that
+// precision (ties to even), then scaled by an exact power of 2.
 export function intTrueDiv(a: bigint, b: bigint): number {
   if (absBig(a) <= MAXB && absBig(b) <= MAXB) return Number(a) / Number(b);
   const neg = a < 0n !== b < 0n;
   a = absBig(a);
   b = absBig(b);
-  // Scale so the quotient has 55 significant bits plus a sticky bit, then
-  // let Number() round to 53 bits (ties to even) exactly once.
-  const shift = bitLength(a) - bitLength(b) - 55;
+  if (a === 0n) return neg ? -0 : 0;
+  const diff = bitLength(a) - bitLength(b); // (a/b lies in [2^(diff-1), 2^(diff+1)))
+  if (diff > 1025) raise(T.OverflowError, "integer division result too large for a float");
+  if (diff < -1080) return neg ? -0 : 0; // (below half of 2^-1074)
+  const shift = Math.max(diff, -1021) - 55;
   let q: bigint, r: bigint;
   if (shift >= 0) {
-    q = a / (b << BigInt(shift));
-    r = a % (b << BigInt(shift));
+    const d = b << BigInt(shift);
+    q = a / d;
+    r = a % d;
   } else {
-    q = (a << BigInt(-shift)) / b;
-    r = (a << BigInt(-shift)) % b;
+    const n = a << BigInt(-shift);
+    q = n / b;
+    r = n % b;
   }
-  if (r !== 0n) q |= 1n;
-  let result = Number(q) * Math.pow(2, shift);
-  if (!Number.isFinite(result)) {
-    result = Number(q) * Math.pow(2, shift - 64) * Math.pow(2, 64);
-    if (!Number.isFinite(result)) raise(T.OverflowError, "integer division result too large for a float");
-  }
+  // (a/b = (q + r/b') 2^shift; drop the bits below the result's precision)
+  const extra = Math.max(bitLength(q) - 53, -1074 - shift);
+  const half = 1n << BigInt(extra - 1);
+  const low = q & ((1n << BigInt(extra)) - 1n);
+  q >>= BigInt(extra);
+  if (low > half || (low === half && (r !== 0n || (q & 1n) === 1n))) q += 1n;
+  const result = Number(q) * Math.pow(2, shift + extra);
+  if (!Number.isFinite(result)) raise(T.OverflowError, "integer division result too large for a float");
   return neg ? -result : result;
 }
 

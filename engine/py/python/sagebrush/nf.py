@@ -84,6 +84,28 @@ def bnf(f):
     return r
 
 
+def bnf_certify(f, norm_max=None, index_max=None):
+    """Class group and regulator of Q[x]/(f) proven without GRH (the
+    engine's unconditional certificate, engine/classgroup/src/nf/proof.rs):
+    dict with h, cyc, regulator, w, r1, r2, disc and what the proof used
+    (norm_bound and norm_bound_kind, Minkowski's or Zimmert's; fb_bound,
+    primes_shown, reg_lower, index_bound, unit_primes, class_primes).
+    Beyond the limits on norm_bound and index_bound (None: the engine's
+    defaults) it raises ValueError starting "beyond the limits of the
+    unconditional certificate", saying which bound and by how much."""
+    args = {"f": _ints(f)}
+    if norm_max is not None:
+        args["norm_max"] = int(norm_max)
+    if index_max is not None:
+        args["index_max"] = int(index_max)
+    r = call("bnf_certify", **args)
+    for k in ("h", "disc", "norm_bound"):
+        r[k] = int(r[k])
+    r["cyc"] = [int(c) for c in r["cyc"]]
+    r["class_primes"] = [int(c) for c in r["class_primes"]]
+    return r
+
+
 def quadratic_class_group(d):
     """(h, cyc, regulator) for the quadratic field of fundamental
     discriminant d (regulator a decimal string for d > 0, else None);
