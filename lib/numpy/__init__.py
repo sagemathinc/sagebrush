@@ -249,6 +249,19 @@ for _name, _cls in (("float64", float64), ("float32", float32), ("complex128", c
     _np.register_scalar(_name, _cls)
 _np.register_scalar("complex64", complex64)
 
+
+
+def _scalar_round(self, ndigits=None):
+    """round() of a NumPy scalar: a Python int without ndigits, else the
+    scalar rounded as np.round rounds it, of its own type"""
+    if ndigits is None:
+        return _builtins.round(_PLAIN[type(self)](self))
+    return around(self, ndigits)
+
+
+for _cls in [float64, float32] + [_g[_n] for _n in _INT_NAMES]:
+    _cls.__round__ = _scalar_round
+
 double = float_ = float64
 single = float32
 int_ = intp = long = int64
@@ -264,9 +277,12 @@ class finfo:
         dt = dtype(dt)
         self.dtype = dt
         if dt.name in ("float32", "complex64"):
-            self.eps, self.max, self.tiny, self.bits, self.precision, self.resolution = 1.1920929e-07, 3.4028235e+38, 1.1754944e-38, 32, 6, 1e-06
+            f, vals = float32, (1.1920929e-07, 3.4028235e+38, 1.1754944e-38, 32, 6, 1e-06)
         else:
-            self.eps, self.max, self.tiny, self.bits, self.precision, self.resolution = 2.220446049250313e-16, 1.7976931348623157e+308, 2.2250738585072014e-308, 64, 15, 1e-15
+            f, vals = float64, (2.220446049250313e-16, 1.7976931348623157e+308, 2.2250738585072014e-308, 64, 15, 1e-15)
+        # (the limits as scalars of the type, as NumPy's)
+        eps, mx, tiny, self.bits, self.precision, res = vals
+        self.eps, self.max, self.tiny, self.resolution = f(eps), f(mx), f(tiny), f(res)
         self.min = -self.max
         self.smallest_normal = self.tiny
 
@@ -639,6 +655,8 @@ def around(a, decimals=0, out=None):
     else:
         f = 10.0 ** decimals
         r = rint(a * f) / f
+        if a.dtype.kind in "iu":
+            r = r.astype(a.dtype)  # (an integer array stays one, as in NumPy)
     return r if a.ndim else r[()]
 
 
@@ -1786,7 +1804,7 @@ def vectorize(pyfunc, otypes=None, excluded=None, signature=None):
 
 def piecewise(x, condlist, funclist, *args, **kw):
     x = asarray(x)
-    res = zeros(x.shape, x.dtype if x.dtype.kind == "f" else float64)
+    res = zeros(x.shape, x.dtype)  # (x's dtype, as NumPy's: values are cast to it)
     condlist = [asarray(c, bool_) for c in (condlist if isinstance(condlist, list) else [condlist])]
     if len(funclist) == len(condlist) + 1:
         rest = ones(x.shape, bool_)
@@ -2578,7 +2596,7 @@ def roots(p):
     if N > 1:
         A = diag(ones(N - 2, float64), -1)
         A[0, :] = -p[1:] / p[0]
-        r = linalg.eigvals(A)
+        r = linalg._eigvals(A)
     else:
         r = array([])
     return concatenate([r, zeros(trailing, r.dtype)]) if trailing else r
@@ -2643,6 +2661,35 @@ def polyint(p, m=1, k=None):
     return p
 
 
+def _raise_power(astr, wrap=70):
+    """poly1d's text with each **n written as an exponent on the line above
+    (NumPy's, as poly1d.__str__)"""
+    import re
+    n = 0
+    line1 = ""
+    line2 = ""
+    output = " "
+    while True:
+        mat = re.compile(r"\*\*([0-9]*)").search(astr, n)
+        if mat is None:
+            break
+        span = mat.span()
+        power = mat.groups()[0]
+        partstr = astr[n:span[0]]
+        n = span[1]
+        toadd2 = partstr + " " * (len(power) - 1)
+        toadd1 = " " * (len(partstr) - 1) + power
+        if len(line2) + len(toadd2) > wrap or len(line1) + len(toadd1) > wrap:
+            output += line1 + "\n" + line2 + "\n "
+            line1 = toadd1
+            line2 = toadd2
+        else:
+            line2 += partstr + " " * (len(power) - 1)
+            line1 += " " * (len(partstr) - 1) + power
+    output += line1 + "\n" + line2
+    return output + astr[n:]
+
+
 class poly1d:
     """A one-dimensional polynomial, highest power first."""
 
@@ -2692,41 +2739,43 @@ class poly1d:
         return "poly1d(%s)" % vals
 
     def __str__(self):
+        # NumPy's poly1d.__str__ (numpy/lib/_polynomial_impl.py, BSD; see
+        # NOTICE.md): the terms on one line, their exponents on the line above
         thestr = "0"
         var = self.variable
-        coeffs = self.coeffs[flatnonzero(self.coeffs)[0]:] if len(flatnonzero(self.coeffs)) else self.coeffs
-        N = len(coeffs) - 1
+        vals = self.coeffs.tolist()
+        while vals and vals[0] == 0:
+            vals = vals[1:]
+        N = len(vals) - 1
 
         def fmt_float(q):
             s = "%.4g" % q
-            if s.endswith(".0000"):
-                s = s[:-5]
-            return s
+            return s[:-5] if s.endswith(".0000") else s
 
-        for k, coeff in enumerate(coeffs.tolist()):
-            if isinstance(coeff, complex):
-                coefstr = "(" + fmt_float(coeff.real) + (" + " if coeff.imag >= 0 else " - ") + fmt_float(abs(coeff.imag)) + "j)"
+        for k, coeff in enumerate(vals):
+            c = complex(coeff)
+            if c.imag == 0:
+                coefstr = fmt_float(c.real)
+            elif c.real == 0:
+                coefstr = "%sj" % fmt_float(c.imag)
             else:
-                coefstr = fmt_float(abs(coeff))
+                coefstr = "(%s + %sj)" % (fmt_float(c.real), fmt_float(c.imag))
             power = N - k
             if power == 0:
-                newstr = "" if coefstr == "0" else coefstr
+                newstr = coefstr if coefstr != "0" else ("0" if k == 0 else "")
             elif power == 1:
-                newstr = "" if coefstr == "0" else (var if coefstr == "b" else ("%s %s" % (coefstr, var) if coefstr != "1" else var))
+                newstr = "" if coefstr == "0" else "%s %s" % (coefstr, var)
             else:
-                newstr = "" if coefstr == "0" else ("%s %s**%d" % (coefstr, var, power) if coefstr != "1" else "%s**%d" % (var, power))
+                newstr = "" if coefstr == "0" else "%s %s**%d" % (coefstr, var, power)
             if k > 0:
                 if newstr != "":
                     if newstr.startswith("-"):
                         thestr = "%s - %s" % (thestr, newstr[1:])
-                    elif not isinstance(coeff, complex) and coeff < 0:
-                        thestr = "%s - %s" % (thestr, newstr)
                     else:
                         thestr = "%s + %s" % (thestr, newstr)
             else:
-                thestr = ("-" + newstr) if (not isinstance(coeff, complex) and coeff < 0) else newstr
-        # NumPy puts the exponents on a line above; ours keeps them inline with **
-        return thestr
+                thestr = newstr
+        return _raise_power(thestr)
 
     def _other(self, o):
         return o.coeffs if isinstance(o, poly1d) else asarray(o)

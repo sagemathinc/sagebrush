@@ -24,7 +24,8 @@ class Polynomial:
         return Polynomial(_np.polyint(self.coef[::-1], m)[::-1])
 
     def roots(self):
-        return _np.roots(self.coef[::-1])
+        # (sorted, as NumPy's polyroots returns them)
+        return _np.sort(_np.roots(self.coef[::-1]))
 
     @classmethod
     def fit(cls, x, y, deg):

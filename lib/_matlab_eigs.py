@@ -228,7 +228,7 @@ def _ritz(Hm, hermitian):
         T = (Hm + np.conj(Hm.T)) / 2
         theta, Y = np.linalg.eigh(T)
         return theta.astype(complex), Y
-    theta, Y = np.linalg.eig(Hm)
+    theta, Y = np.linalg._eig(Hm)
     Y = Y / np.linalg.norm(Y, axis=0)
     return theta.astype(complex), Y
 
@@ -662,7 +662,7 @@ def _dense_ritz(op, n, dt, hermitian, b_spd, A, B, sigma):
         theta, X = np.linalg.eigh((M + np.conj(M.T)) / 2)
         theta = theta.astype(complex)
     else:
-        theta, X = np.linalg.eig(M)
+        theta, X = np.linalg._eig(M)
         theta = theta.astype(complex)
         if hermitian:
             theta = theta.real.astype(complex)

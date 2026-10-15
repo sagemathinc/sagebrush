@@ -3,7 +3,7 @@
 import { writeSync, readSync } from "fs";
 import {
   T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple,
-  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity,
+  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity, unbox,
 } from "./object";
 import * as O from "./ops";
 import { INTR } from "./interrupt";
@@ -35,6 +35,9 @@ export class StdStream {
   }
 }
 export const stdout = new StdStream(1, "<stdout>");
+// the sys module (modules.ts), whose stdout print() writes to: Python code
+// may replace sys.stdout (with an io.StringIO, say), as in CPython
+export const sysRef: { m: any } = { m: null };
 export const stderr = new StdStream(2, "<stderr>");
 const streamType = builtinType("TextIOWrapper", [T.object], () => raise(T.TypeError, "cannot create 'TextIOWrapper' instances"), "_io");
 Ty.bindClass(StdStream, streamType);
@@ -102,7 +105,13 @@ function printImpl(args: any[], sep: any, end: any, file: any, flush: any) {
     s += typeof a === "string" ? a : str(a);
   }
   s += end;
-  if (file === null || file === stdout) {
+  if (file === null) {
+    // (sys.stdout as it is now; None: print writes nothing, as in CPython)
+    const cur = sysRef.m === null ? stdout : sysRef.m.stdout;
+    if (cur === null) return null;
+    file = cur === undefined ? stdout : cur;
+  }
+  if (file === stdout) {
     stdout.write(s);
     if (O.truth(flush)) stdout.flush();
   } else if (file instanceof StdStream) {
@@ -221,8 +230,65 @@ function sum(it: any, start: any = 0): any {
     if (v === DONE) return s;
     s = O.add(s, v);
   }
+  // CPython's float and complex paths (3.12, 3.14): while the total is an
+  // exact float (or complex) and the items are exact floats (or complex), or
+  // ints a C long holds, it is summed with Neumaier's compensation, so
+  // sum([0.1] * 10) is 1.0; anything else is added as it is.
+  if (exactFloat(s)) {
+    const f = new CompSum(O.fv(s)!);
+    for (v = next(); v !== DONE; v = next()) {
+      const x = exactFloat(v) ? O.fv(v)! : longValue(v);
+      if (x === undefined) break;
+      f.add(x);
+    }
+    s = O.mkfloat(f.total());
+    if (v === DONE) return s;
+    s = O.add(s, v);
+  }
+  if (typeOf(s) === T.complex) {
+    const re = new CompSum(s.re), im = new CompSum(s.im);
+    for (v = next(); v !== DONE; v = next()) {
+      if (typeOf(v) === T.complex) {
+        re.add(v.re);
+        im.add(v.im);
+        continue;
+      }
+      const x = exactFloat(v) ? O.fv(v)! : longValue(v);
+      if (x === undefined) break;
+      re.add(x);
+    }
+    s = T.complex(O.mkfloat(re.total()), O.mkfloat(im.total()));
+    if (v === DONE) return s;
+    s = O.add(s, v);
+  }
   for (v = next(); v !== DONE; v = next()) s = O.add(s, v);
   return s;
+}
+// an exact float (a JS number that is not an integer, or a boxed integral one)
+const exactFloat = (x: any) => (typeof x === "number" && !isInt(x)) || x instanceof FloatBox;
+// an int (or bool, or int subclass) as a double, if a C long holds it
+function longValue(x: any): number | undefined {
+  if (typeof x === "boolean") return +x;
+  if (typeof x === "number") return isInt(x) ? x : undefined;
+  const u = unbox(x);
+  if (typeof u === "number" && isInt(u) && u !== x) return u;
+  if (typeof u === "bigint" && u >= -(2n ** 63n) && u < 2n ** 63n) return Number(u);
+  return undefined;
+}
+// Neumaier's compensated sum, as CPython's sum keeps it
+class CompSum {
+  c = 0;
+  constructor(public f: number) {}
+  add(x: number) {
+    const t = this.f + x;
+    if (Math.abs(this.f) >= Math.abs(x)) this.c += this.f - t + x;
+    else this.c += x - t + this.f;
+    this.f = t;
+  }
+  // (the compensation only if finite: an infinite or overflowed sum stays one)
+  total() {
+    return this.c && Number.isFinite(this.c) ? this.f + this.c : this.f;
+  }
 }
 const HALF_SAFE = 2 ** 52;
 
@@ -458,6 +524,9 @@ define("max", (...a: any[]) => minmax("max", a, null, undefined, true));
 builtins.max.$kw = minmaxKw("max", true);
 define("sorted", sorted, [1, 1]);
 define("round", roundImpl, [1, 2]);
+// int.__round__ and float.__round__: how a subclass of int or float (numpy's
+// float64, say) rounds, to an exact int or float, as in CPython
+for (const t of [T.int, T.float]) Ty.method(t, "__round__", (x: any, nd: any = null) => roundImpl(unbox(x), nd));
 define("divmod", O.divmod, [2, 2]);
 define("pow", powImpl, [2, 3]);
 define("hash", hashImpl);

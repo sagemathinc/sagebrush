@@ -196,7 +196,7 @@ def _fun_of_matrix(x, f, name):
         w, V = np.linalg.eigh(A)
         F = (V * f(w.astype(np.complex128)).reshape((1, -1))) @ V.T
     else:
-        w, V = np.linalg.eig(A)
+        w, V = np.linalg._eig(A)
         w = np.asarray(w).astype(np.complex128)
         V = np.asarray(V).astype(np.complex128)
         F = _cdiv_right(V * f(w).reshape((1, -1)), V)
@@ -221,7 +221,7 @@ def _well_diagonalizable(A):
     """whether A's eigenvectors are a well-conditioned basis (else f(A) by them is inaccurate)"""
     if np.array_equal(A, np.conj(A.T)):
         return True
-    w, V = np.linalg.eig(A)
+    w, V = np.linalg._eig(A)
     V = np.asarray(V).astype(np.complex128)
     with np.errstate(all="ignore"):
         Vi = _inv(V)
