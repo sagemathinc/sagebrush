@@ -286,7 +286,11 @@ def _loggamma1(z):
     if isinstance(z, complex):
         return _loggamma_c(z)
     if z > 0:
-        return _math.lgamma(z)
+        try:
+            return _math.lgamma(z)
+        except OverflowError:
+            # (log Gamma(x) beyond the doubles, x near 2^1024 / 709: inf, as Gamma's is)
+            return _math.inf
     if z == _math.floor(z):
         raise PoleError("log Gamma has a pole at %r" % (z,))
     # (the value at x + 0i: log|Gamma(x)| - i pi k, where Gamma(x) has k
@@ -313,7 +317,16 @@ def _gamma1(z):
             raise ValueError("gamma has no limit at -inf")
         raise NotCovered("gamma: Sagebrush covers finite arguments (and +inf)")
     if isinstance(z, complex):
-        return _cmath.exp(_loggamma_c(z))
+        lg = _loggamma_c(z)
+        if lg.real < -746:
+            # (|Gamma(z)| below half the least subnormal, whatever its phase)
+            return 0j
+        if not (_math.isfinite(lg.real) and _math.isfinite(lg.imag)):
+            raise NotCovered("gamma: Sagebrush covers complex z whose log Gamma is within the doubles")
+        try:
+            return _cmath.exp(lg)
+        except OverflowError:
+            raise NotCovered("gamma: |Gamma(z)| is beyond the doubles here")
     if z <= 0 and z == _math.floor(z):
         raise PoleError("Gamma has a pole at %r" % (z,))
     try:
@@ -481,13 +494,15 @@ def _polygamma1(n, z):
     if m:
         k = np.arange(m, dtype=float)
         w = (z + k) if cplx else (x + k)
-        s = complex(np.sum(w ** (-(n + 1)))) if cplx else float(np.sum(w ** (-(n + 1.0))))
+        s = complex(np.sum((1 / w) ** (n + 1))) if cplx else float(np.sum((1 / w) ** (n + 1.0)))
     w = z + m
     # (DLMF 5.15.9: (-1)^(n+1) [ (n-1)!/w^n + n!/(2 w^(n+1))
-    #   + sum_k B_2k (2k+n-1)! / ((2k)! w^(2k+n)) ])
-    a = float(_math.factorial(n - 1)) / w ** n + fact_n / (2 * w ** (n + 1))
-    winv2 = 1 / (w * w)
-    wp = 1 / w ** n
+    #   + sum_k B_2k (2k+n-1)! / ((2k)! w^(2k+n)) ]; in powers of 1/w,
+    # which underflow for huge w where powers of w overflow)
+    winv = 1 / w
+    a = float(_math.factorial(n - 1)) * winv ** n + fact_n / 2 * winv ** (n + 1)
+    winv2 = winv * winv
+    wp = winv ** n
     for k in range(1, 20):
         wp *= winv2
         t = _B2K[k - 1] * float(_math.factorial(2 * k + n - 1) // _math.factorial(2 * k)) * wp
@@ -553,6 +568,11 @@ def _em_tail(s, a, N, m=12):
     else:
         # (real s and a give a real tail, and a real zeta)
         p = _math.exp(-s * _math.log(v))
+    if p == 0:
+        # (v = N + a >= 20: with (N+a)^-s below the doubles every term is,
+        # their logarithms -s log v + O(m log |s|); and (s)_(2j-1), which
+        # overflows for huge s, would make 0 * inf = nan)
+        return 0j if isinstance(p, complex) else 0.0
     t = p * v / (s - 1) + p / 2
     poch = s
     vinv2 = 1 / (v * v)
@@ -670,7 +690,14 @@ def _hurwitz1(s, a):
         head = complex(np.sum(np.exp(-s * np.log(k + a))))
     else:
         head = float(np.sum((k + a) ** (-s)))
-    return head + _em_tail(s, a, N)
+        if head == _math.inf:
+            # (every term is positive for real s: a sum beyond the doubles,
+            # a^-s for large s and a < 1, is inf, not the nan of inf - inf)
+            return _math.inf
+    v = head + _em_tail(s, a, N)
+    if _isnan(v):
+        raise NotCovered("hurwitz_zeta: the sum left the doubles at s = %r, a = %r" % (s, a))
+    return v
 
 
 def hurwitz_zeta(s, a):
@@ -732,6 +759,44 @@ def _is_nonpos_int(x):
     return x <= 0 and x == _math.floor(x)
 
 
+def _lgamma_diff(u, v):
+    """log Gamma(u) - log Gamma(v) for u, v >= 15, by Stirling's series
+    (DLMF 5.11.1) with its large terms combined: (u - 1/2) log(u/v) +
+    (u - v)(log v - 1) + mu(u) - mu(v), so that neither log Gamma, which
+    can overflow, is formed and their cancellation does not lose digits"""
+    return (u - 0.5) * _math.log1p((u - v) / v) + (u - v) * (_math.log(v) - 1) + _stirling_mu(u) - _stirling_mu(v)
+
+
+def _betaln_signed(a, b):
+    """(log |B(a, b)|, sign of B) for finite real a, b, not both positive.
+    PoleError where Gamma(a) or Gamma(b) has a pole that Gamma(a + b) does
+    not cancel; (-inf, 0) where only Gamma(a + b) has one"""
+    if _is_nonpos_int(a) or _is_nonpos_int(b):
+        if a > b:
+            a, b = b, a
+        if b == _math.floor(b) and b > 0 and a + b <= 0:
+            # (a = -m, b = n with n <= m: Gamma(a)/Gamma(a+b) = 1 / (a (a+1)
+            # ... (a+b-1)), so B(-m, n) = (-1)^n Gamma(n) Gamma(m-n+1) /
+            # Gamma(m+1) = (-1)^n B(n, m - n + 1), without a product over n
+            # factors)
+            return _betaln_pos(b, -a - b + 1), (-1.0 if int(b) % 2 else 1.0)
+        raise PoleError("beta has a pole at (%r, %r)" % (a, b))
+    if _is_nonpos_int(a + b):
+        return -_math.inf, 0.0
+    sign = 1.0
+    for v in (a, b, a + b):
+        if v < 0 and int(_math.floor(v)) % 2:
+            sign = -sign
+    # (a non-integer negative argument is below 2^52 in size, where every
+    # double is an integer, so its log |Gamma| is finite; the positive one
+    # may be huge, and is paired with a + b through _lgamma_diff)
+    if b < a:
+        a, b = b, a
+    if b >= _STIRLING_R and a + b >= _STIRLING_R:
+        return _math.lgamma(a) + _lgamma_diff(b, a + b), sign
+    return _math.lgamma(a) + _math.lgamma(b) - _math.lgamma(a + b), sign
+
+
 def _beta1(a, b):
     if isinstance(a, complex) or isinstance(b, complex):
         raise NotCovered("beta: Sagebrush covers real arguments")
@@ -747,29 +812,25 @@ def _beta1(a, b):
         if a + b < 20:
             # (the Gamma functions are accurate to a few ulp only for small
             # arguments; exp(betaln) is accurate while |betaln| is small)
-            g = _math.gamma(a) * _math.gamma(b)
+            try:
+                g = _math.gamma(a) * _math.gamma(b)
+            except OverflowError:
+                # (Gamma of a subnormal argument is beyond the doubles)
+                g = _math.inf
             if _math.isfinite(g):
                 return g / _math.gamma(a + b)
-        return _math.exp(_betaln_pos(a, b))
+        return _exp_or_inf(_betaln_pos(a, b))
     # (DLMF 5.12.1, B = Gamma(a) Gamma(b) / Gamma(a + b), continued to the
     # negative arguments)
-    if _is_nonpos_int(a) or _is_nonpos_int(b):
-        if a > b:
-            a, b = b, a
-        if b == _math.floor(b) and b > 0 and a + b <= 0:
-            # (a = -m, b = n with n <= m: Gamma(a)/Gamma(a+b) = 1 / (a (a+1) ... (a+b-1)))
-            p = 1.0
-            for j in range(int(b)):
-                p *= a + j
-            return _math.gamma(b) / p
-        raise PoleError("beta has a pole at (%r, %r)" % (a, b))
-    if _is_nonpos_int(a + b):
+    lo, hi = min(a, b), max(a, b)
+    if _is_nonpos_int(lo) and hi > 0 and hi == _math.floor(hi) and lo + hi <= 0:
+        # (B(-m, n) = (-1)^n B(n, m - n + 1), as _betaln_signed, through the
+        # positive path, exact for small arguments: B(-3, 2) = 1/6)
+        return (-1.0 if int(hi) % 2 else 1.0) * _beta1(hi, -lo - hi + 1)
+    lb, sign = _betaln_signed(a, b)
+    if sign == 0:
         return 0.0
-    sign = 1.0
-    for v in (a, b, a + b):
-        if v < 0 and int(_math.floor(v)) % 2:
-            sign = -sign
-    return sign * _math.exp(_math.lgamma(a) + _math.lgamma(b) - _math.lgamma(a + b))
+    return sign * _exp_or_inf(lb)
 
 
 def beta(a, b):
@@ -792,8 +853,10 @@ def _betaln1(a, b):
         if a == _math.inf or b == _math.inf:
             return -_math.inf
         return _betaln_pos(a, b)
-    v = _beta1(a, b)
-    return _math.log(abs(v)) if v != 0 else -_math.inf
+    if a == _math.inf or b == _math.inf or a == -_math.inf or b == -_math.inf:
+        v = _beta1(a, b)
+        return _math.log(abs(v)) if v != 0 else -_math.inf
+    return _betaln_signed(a, b)[0]
 
 
 def betaln(a, b):
@@ -1715,8 +1778,15 @@ def _lambertw_upper(z, k):
         L2 = _cmath.log(L1)
         w = L1 - L2 + L2 / L1
     # (Halley's iteration on w - z e^-w, which does not overflow)
+    lz = None
     for _ in range(100):
-        t = w - z * _cmath.exp(-w)
+        try:
+            t = w - z * _cmath.exp(-w)
+        except OverflowError:
+            # (tiny |z|: z e^-w = e^(log z - w), whose exponent is moderate)
+            if lz is None:
+                lz = _cmath.log(z)
+            t = w - _cmath.exp(lz - w)
         if t == 0:
             break
         w1 = w + 1
@@ -1837,6 +1907,10 @@ def _polylog_mu(n, z):
             # (zeta's trivial zeros make every other term 0 past k = n)
             if k > n + 1 and u != 0 and abs(u) <= 1e-17 * abs(s):
                 break
+        if t == 0:
+            # (mu^k/k! has underflowed: every later term is 0; for tiny
+            # mu the test above, needing a nonzero term, never passed)
+            break
         k += 1
         if k > 250:
             # (|mu| <= 4.3 < 2 pi here, the terms falling like (|mu|/(2 pi))^k: not reached)

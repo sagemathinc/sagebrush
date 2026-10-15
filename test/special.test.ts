@@ -198,6 +198,13 @@ print(kind(S.gammaincc, 1e307, 1e308))
 # _polylog_mu's cap is not probed here, as reaching it takes exact Bernoulli numbers to B_248, some 18 s)
 print(" | ".join(kind(f, *a).split(" at ")[0] for f, a in [(S._erf_taylor, (30.0,)), (S._loggamma_near_2, (1.9,)), (S._psi_near_1, (1.9,)), (S._psi_near_2, (1.95,)),
                                           (S._polylog_series, (2, 1 + 0j))]))
+# (arguments at the ends of the doubles, which raised OverflowError, ValueError or hung: each gives its value (checked
+# against mpmath), its limit beyond the doubles (inf, 0), or NotCovered)
+g = "%.12g"
+print(S.loggamma(1e308), S.gamma(complex(1, 1e308)), S.polygamma(1, 1e300), S.polygamma(5, complex(1, 1e308)), S.beta(0.5, 5e-324),
+      g % S.beta(-1.5, 1e308), S.beta(1e20, -1e308), g % S.beta(-2.5, 1e15), g % S.betaln(-1.5, 5e-324),
+      "%.12g%+.12gj" % (S.lambert_w(5e-324, -1).real, S.lambert_w(5e-324, -1).imag), S.hurwitz_zeta(1e300, 0.5), S.hurwitz_zeta(1e300, 1.0),
+      S.hurwitz_zeta(1e300, 2.0), g % S.dilog(complex(1, 1e-300)).real, g % S.beta(-3.0, 2.0))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -253,5 +260,8 @@ print(" | ".join(kind(f, *a).split(" at ")[0] for f, a in [(S._erf_taylor, (30.0
     "NotCovered: erf: the Taylor series did not converge | NotCovered: loggamma: the series about 2 did not converge | " +
       "NotCovered: psi: the series about 1 did not converge | NotCovered: psi: the series about 2 did not converge | " +
       "NotCovered: polylog: the series did not converge",
+    // (mpmath: B(-1.5, 1e308) = 2.36327180120735, B(-2.5, 1e15) = -2.98932864874555e37, log B(-1.5, 2^-1074) =
+    // 744.440071921381, W_-1(2^-1074) = -751.061568323038 - 3.14578107543527i, Li_2(1 + 1e-300 i) = pi^2/6 + ...)
+    "inf 0j 1e-300 0j inf 2.36327180121 0.0 -2.98932864875e+37 744.440071921 -751.061568323-3.14578107544j inf 1.0 0.0 1.64493406685 0.166666666667",
   ]);
 });
