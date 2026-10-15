@@ -116,6 +116,10 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
+   * key is left to the browser, as on a page that is itself a saved board
+   * (an exported file), whose ⋯ menu still downloads it again */
+  saveKey?: boolean;
   /** whether exportHtml can carry the engine, and about how much more that is ("6 MB") */
   exportPython?(d: BoardDoc): string | null;
 }
@@ -134,7 +138,7 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More" aria-label="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><span data-sbb="hint" hidden>Drag to move (into or out of groups) · double-click to write, add, or edit an edge · shift-drag to connect · Delete · ⌘Z</span><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="menubtn" title="More" aria-label="More">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><hr><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="print">Print or save as PDF…</button><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
@@ -161,6 +165,11 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="pr-go" class="be-done">Print…</button></div></form></dialog>`;
 
 export type BoardApi = ReturnType<typeof mountBoard>;
+
+/** The largest file Open… or a drop reads: well past a board downloaded as
+ * HTML with every language's engine in it (about 10 MB) and its pictures
+ * (CoCalc shows boards of up to 16 MB). */
+export const FILE_MAX = 128 * 2 ** 20;
 
 /** Mount a board in `root` (which the host places and sizes), with what the host provides. */
 // The code notes of a document, by id (every page, in groups too).
@@ -450,7 +459,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.ready.then((ok) => {
       // (it could not start: the caption says why, until the next edit)
       if (!ok) {
-        if (code === c && c.error) say(`**The code can't run here:** ${c.error}`);
+        if (code === c && c.error) say(plain("The code can't run here:", c.error));
         return;
       }
       board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(id, copy), state: (id) => c.state(id), run: (id) => { c.run([id]); } });
@@ -535,11 +544,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const steps = () => (doc ? pageView(doc, pageIx).steps ?? [] : []);
   const hashFor = (i: number) => (pageIx ? `#p${pageIx + 1}${i >= 0 ? "-" + (i + 1) : ""}` : i >= 0 ? `#${i + 1}` : "");
 
-  function caption(md: string, where: string) {
+  function caption(md: string | HTMLElement, where: string) {
     const el = $("say");
     el.classList.remove("open");
-    el.innerHTML = markdown(md);
-    if (board.typeset && hasMath(md)) board.typeset(el);
+    if (typeof md === "string") {
+      el.innerHTML = markdown(md);
+      if (board.typeset && hasMath(md)) board.typeset(el);
+    } else el.replaceChildren(md);
     $("where").textContent = where;
     // the camera keeps clear of the title bar and the caption
     board.insets = { top: 44, right: 0, left: 0, bottom: $("tour").hidden ? 0 : $("tour").offsetHeight + 18 };
@@ -594,7 +605,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function fail(e: unknown) {
     if (destroyed) return;
     $("tour").hidden = false;
-    caption("**This board could not be shown:** " + String((e as Error)?.message ?? e).replace(/[<>&]/g, ""), "");
+    // (as text, not Markdown: an error says what a file said, its format or
+    // an id, which is anyone's: as Markdown, a picture in it was fetched, SEC-36E-1)
+    caption(plain("This board could not be shown:", String((e as Error)?.message ?? e)), "");
+  }
+  // A caption of a bold head and text, as text.
+  function plain(head: string, text: string): HTMLElement {
+    const p = document.createElement("p"), b = document.createElement("strong");
+    b.textContent = head;
+    p.append(b, " " + text);
+    return p;
   }
 
   // the document: the host's (none: nothing is shown until load(), as for the benchmark's boards)
@@ -978,17 +998,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (a CoCalc board, converted: said in the caption, with what was left out,
   // until the next edit)
-  let converted = "", notice = "";
+  let converted = "", notice: string | HTMLElement = "";
   function sayConverted() {
     if (!converted) return;
     say(converted);
     converted = "";
   }
   /** A notice in the caption, until the next edit. */
-  function say(md: string) {
+  function say(md: string | HTMLElement) {
     notice = md;
     $("tour").hidden = false;
     caption(notice, "");
+  }
+  // A file opened or dropped, as text: refused by its size, before it is
+  // read, past FILE_MAX (HARD-36E-2)
+  async function readFile(f: File): Promise<string> {
+    if (f.size > FILE_MAX) throw new Error(`too large to open: ${Math.ceil(f.size / 2 ** 20)} MB (at most ${FILE_MAX / 2 ** 20} MB)`);
+    return f.text();
   }
   const picker = $("openfile") as HTMLInputElement;
   $("open").onclick = () => picker.click();
@@ -999,7 +1025,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const f = picker.files?.[0], g = loadGen;
     picker.value = "";
     if (!f) return;
-    const text = await f.text().catch(fail);
+    const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   };
   // (files dropped on this board)
@@ -1017,7 +1043,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     const f = files[0], g = loadGen;
     if (!f) return;
-    const text = await f.text().catch(fail);
+    const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   });
   // Import Mermaid…: a flowchart pasted in
@@ -1239,6 +1265,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   on(window, "keydown", (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "p" && doc && mine()) { e.preventDefault(); $("print").click(); }
   });
+  // (⌘S downloads the board as one HTML file, as ⋯ Download as HTML does,
+  // not the page (William); what is being written in a note is kept first.
+  // Seen before a field's own keys; with a dialog open, nothing more)
+  on(window, "keydown", async (e: KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s" || !doc || !mine() || !host.exportHtml || host.saveKey === false) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (root.querySelector("dialog[open]")) return;
+    await editor.keepWriting();
+    $("html").click();
+  }, true);
 
   function outputs() {
     return doc ? codeOrder(doc).map(({ id, code: src }) => ({ id, code: src, state: code?.state(id) ?? "", output: code?.text(id) ?? "" })) : [];
