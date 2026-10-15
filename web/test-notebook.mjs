@@ -302,6 +302,64 @@ try {
   await ready();
   await until("document.querySelector('#nbname').value === 'Shared notebook'");
   ok((await ev("document.querySelector('#mode').value")) === "matlab", "a MATLAB share link reopens in MATLAB mode");
+  // the whiteboard (William): File > New whiteboard just under New notebook, ⋯ Whiteboard beside Console
+  ok(await ev("(() => { const f = [...document.querySelectorAll('#filemenu [data-f]')].map((b) => b.dataset.f); return f.indexOf('whiteboard') === f.indexOf('new') + 1; })()"), "File: New whiteboard, just under New notebook");
+  ok(await ev("document.querySelector('#consolebtn').nextElementSibling?.id === 'boardbtn'"), "⋯: Whiteboard, beside Console");
+  // New whiteboard: a blank board in the notebook's language (MATLAB here), in Edit, at an address of its own
+  await ev("document.querySelector('[data-f=whiteboard]').click(), 1");
+  await until("location.pathname === '/board/' && /^\\?doc=local:[0-9a-f]{12}$/.test(location.search) && document.querySelector('[data-sbb=edit]')?.getAttribute('aria-pressed') === 'true'", 60000);
+  const wb = await ev("({ search: location.search, mode: window.sagebrush.board.snapshot().doc.mode, items: window.sagebrush.board.snapshot().items.length })");
+  ok(wb.mode === "matlab" && wb.items === 0, "New whiteboard: a blank MATLAB board, in Edit: " + JSON.stringify(wb));
+  // ⋯ Whiteboard, back in the notebook: that board again, the latest in its language
+  await send("Page.navigate", { url: mlink });
+  await ready();
+  await ev("document.querySelector('#boardbtn').click(), 1");
+  await until(`location.pathname === '/board/' && location.search === ${JSON.stringify(wb.search)}`, 60000);
+  ok(true, "⋯ Whiteboard: the latest board in the notebook's language");
+  // leaving for the whiteboard waits for the notebook's saves: an edit made
+  // just before, with a slow save, is kept; a save that fails keeps the
+  // notebook open, saying so (CORR-7F9-1, after astra's probe)
+  await send("Page.navigate", { url: url });
+  await ready();
+  await ev("document.querySelector('[data-f=new]').click(), 1");
+  await sleep(500);
+  await ev("(() => { const n = document.querySelector('#nbname'); n.value = 'WB save'; n.dispatchEvent(new Event('input')); window.sagebrush.notebook.flush(); return 1; })()");
+  await sleep(1000);
+  const docsIn = "import('/sagebrush-notebook.js').then(async (m) => { const db = await m.openDb(); return new Promise((res) => { const r = db.transaction('notebooks', 'readonly').objectStore('notebooks').getAll(); r.onsuccess = () => res(r.result.filter((d) => d.name === 'WB save').map((d) => d.cells.map((c) => c.code))); }); })";
+  // (its store's saves slowed to 2 s, or made to fail)
+  const slowStore = (fail) => ev(`import('/sagebrush-notebook.js').then(async (m) => { const db = await m.openDb(); const docs = await new Promise((r) => { const q = db.transaction('notebooks', 'readonly').objectStore('notebooks').getAll(); q.onsuccess = () => r(q.result); }); const d = docs.find((x) => x.name === 'WB save'); const store = new m.IdbStore(db, d.id), save = store.save.bind(store); store.save = async (doc) => { await new Promise((r) => setTimeout(r, 2000)); if (${fail}) throw new Error('disk full'); return save(doc); }; await window.sagebrush.notebook.attach(store); return 1; })`);
+  await slowStore(true);
+  await ev("(() => { const ta = window.sagebrush.notebook.cells()[0].ta; ta.value = 'not kept'; ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#boardbtn').click(); return 1; })()");
+  await until("/whiteboard was not opened/.test(document.querySelector('#saved').textContent)", 10000);
+  ok((await ev("location.pathname")) === "/", "a save that fails: the notebook stays open, and says the whiteboard wasn't opened: " + await ev("document.querySelector('#saved').textContent"));
+  await slowStore(false);
+  await ev("(() => { const ta = window.sagebrush.notebook.cells()[0].ta; ta.value = 'latest edit kept'; ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-f=whiteboard]').click(); return 1; })()");
+  await until("location.pathname === '/board/' && !!window.sagebrush?.board?.snapshot()?.doc", 60000);
+  const kept = await ev(docsIn);
+  ok(JSON.stringify(kept) === JSON.stringify([["latest edit kept"]]), "New whiteboard with a slow save: the edit made just before is saved before leaving: " + JSON.stringify(kept));
+  // (written elsewhere before each of its first n saves: a real conflict,
+  // merged and saved again, after astra's probe)
+  const conflictStore = (n) => ev(`import('/sagebrush-notebook.js').then(async (m) => { const db = await m.openDb(); const docs = await new Promise((r) => { const q = db.transaction('notebooks', 'readonly').objectStore('notebooks').getAll(); q.onsuccess = () => r(q.result); }); const d = docs.find((x) => x.name === 'WB save'); const store = new m.IdbStore(db, d.id), other = new m.IdbStore(db, d.id), save = store.save.bind(store); let k = 0; store.save = async (doc) => { if (k++ < ${n}) { const cur = await other.load(); await other.save({ ...cur, baseRev: cur.rev, other_writer: k }); } return save(doc); }; await window.sagebrush.notebook.attach(store); return 1; })`);
+  const editAndGo = (text, sel) => ev(`(() => { const ta = window.sagebrush.notebook.cells()[0].ta; ta.value = ${JSON.stringify(text)}; ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector(${JSON.stringify(sel)}).click(); return 1; })()`);
+  // written elsewhere each time, more often than it tries: the notebook
+  // stays open with the edit, from either entry (CORR-7F9-1)
+  for (const [sel, what] of [["#boardbtn", "⋯ Whiteboard"], ["[data-f=whiteboard]", "New whiteboard"]]) {
+    await send("Page.navigate", { url: url });
+    await ready();
+    await conflictStore(1e9);
+    await editAndGo(`conflicted (${what})`, sel);
+    await until("/whiteboard was not opened/.test(document.querySelector('#saved')?.textContent ?? '')", 20000).catch(() => {});
+    const at = await ev("({ path: location.pathname, code: window.sagebrush?.notebook?.cells()[0]?.ta.value ?? null, said: document.querySelector('#saved')?.textContent ?? null })");
+    ok(at.path === "/" && at.code === `conflicted (${what})`, `${what}, written elsewhere at every save: the notebook stays open with the edit, saying so: ${JSON.stringify(at)}`);
+  }
+  // written elsewhere twice: merged, the merge saved, then the whiteboard
+  await send("Page.navigate", { url: url });
+  await ready();
+  await conflictStore(2);
+  await editAndGo("kept after two conflicts", "#boardbtn");
+  await until("location.pathname === '/board/' && !!window.sagebrush?.board?.snapshot()?.doc", 60000);
+  const merged = await ev(docsIn);
+  ok(JSON.stringify(merged) === JSON.stringify([["kept after two conflicts"]]), "⋯ Whiteboard, written elsewhere twice: the merge is saved before leaving: " + JSON.stringify(merged));
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;

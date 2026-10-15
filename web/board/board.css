@@ -119,6 +119,9 @@
 .board-editor.be-sheet { left: 0 !important; right: 0; width: auto !important; border-radius: 0 0 10px 10px; overflow: auto; }
 .board-editor.be-sheet textarea { min-height: 72px; }
 @media (max-width: 600px) { [data-sbb=edit] .lbl { display: none; } [data-sbb=pgsel] { max-width: 34vw; } [data-sbb=top]:has([data-sbb=pages]:not([hidden])) [data-sbb=title] { display: none; } }
+/* (a phone's top bar, File and ⋯ both on it: the page by its menu alone, narrower, and File close-fitting) */
+[data-sbb=filebtn] { white-space: nowrap; }
+@media (max-width: 600px) { [data-sbb=pgprev], [data-sbb=pgnext] { display: none; } [data-sbb=pages] [data-sbb=pgsel] { max-width: 24vw; } [data-sbb=filebtn] .caret { display: none; } }
 .board-item.selected { outline: 2px solid #2a6f2f; outline-offset: 2px; }
 .board-editor { position: fixed; z-index: 3; box-sizing: border-box; background: #fff; border: 1px solid rgba(0, 0, 0, .18); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .board-editor input, .board-editor textarea { font: inherit; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; padding: 5px 8px; box-sizing: border-box; width: 100%; }

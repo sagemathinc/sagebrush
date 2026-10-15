@@ -1574,7 +1574,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
   // the document last known to be the store's (loaded, received, or saved
   // here): its revision and cells by id, the base of three-way merges with
   // changes from elsewhere (stores.js: revisions)
@@ -1632,12 +1632,28 @@ export function createNotebook(root, opts = {}) {
         }
         const r = t && typeof t === "object" ? t.rev : undefined;
         if (r === undefined || synced?.rev === undefined || r > synced.rev) setSynced(r, doc.cells);
+        lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
+        lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; });
     }
+  }
+  // Every change so far saved: resolves once the saves asked for (this one
+  // too, and a merge a conflict asked for) are done; rejects with why, if
+  // the last one failed, or if what is here is still not saved after a few
+  // rounds (written elsewhere each time, CORR-7F9-1).  For leaving the page
+  // (the notebook's Whiteboard)
+  async function saved() {
+    for (let i = 0; i < 5; i++) {
+      flush();
+      await saveChain;
+      if (lastSaveError) throw lastSaveError;
+      if (!timer && !savesPending) return;
+    }
+    throw new Error("changed elsewhere each time it was saved");
   }
   cellsEl.addEventListener("input", schedule);
   const observer = new MutationObserver(schedule);
@@ -2057,7 +2073,7 @@ export function createNotebook(root, opts = {}) {
     setMode, setType, setInput, renderMd, select, edit,
     /** Measure every editor again now (after the notebook was hidden). */
     resize() { cellsEl.querySelectorAll(".ed textarea").forEach(autosize); },
-    load, snapshot, applyRemote, replace, flush,
+    load, snapshot, applyRemote, replace, flush, saved,
     setMeta(patch) { meta = { ...meta, ...patch }; schedule(); },
     /** Count this document's pictures in `budget` (a board's: shared by its
      * pictures, notes and code, afresh for each document shown, image-size.ts). */
