@@ -157,6 +157,15 @@ if (process.env.UPDATE) console.log(JSON.stringify(got));
   check(/^<\?xml[^\n]*\n<svg[^>]*>(<title>[^<]*<\/title>)?<defs>.*?<\/defs><rect [^>]*fill="#123456"\/>/.test(plain.svg), "without a slide, the background's color behind the whole board");
 }
 
+// friction 10: a group's title one line, cut with "…" to its width (the
+// layout keeps one line's band for it), not wrapped over its members
+{
+  const long = "Workbench, browser and tools, and a great deal more besides (8)";
+  const r = boardSvg({ nodes: [{ id: "g", kind: "group", title: long, x: 0, y: 0, children: [{ id: "a", x: 0, y: 0, w: 200, title: "A" }] }] });
+  const t = [...r.svg.matchAll(/<text[^>]*>([^<]*(?:<tspan[^>]*>[^<]*<\/tspan>[^<]*)*)<\/text>/g)].map((m) => m[1].replace(/<[^>]*>/g, "")).filter((x) => x.startsWith("Workbench"));
+  check(t.length === 1 && t[0].endsWith("…") && long.startsWith(t[0].slice(0, -1)), "a long group title, one line cut with …: " + JSON.stringify(t));
+}
+
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f.slice(0, 600));
 process.exit(fails.length ? 1 : 0);

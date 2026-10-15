@@ -31,7 +31,8 @@
 .board-ref { display: block; margin-top: 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #2a6f2f; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .board-ref:hover { text-decoration: underline; }
 .board-group { background: none; border: 0; box-shadow: none; padding: 14px 24px; overflow: visible; z-index: 0; pointer-events: none; }
-.board-group > b { font-size: 17px; color: #24301f; }
+/* (one line, cut with "…": the layout keeps one line's band for it above its members, friction 10) */
+.board-group > b { font-size: 17px; color: #24301f; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .board-group .board-text { color: #4a5544; max-width: 70ch; }
 .board-group a { pointer-events: auto; }
 
