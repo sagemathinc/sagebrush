@@ -72,6 +72,9 @@ test("MATLAB figures draw text as TeX (Interpreter 'tex'), 'none' as typed; 'lat
     "plot(1:3); n = numel(get(gca, 'Children')); try, text([1 2], [1 2], {'fine', '\\bogus'}), catch e, disp(e.message), end; disp(numel(get(gca, 'Children')) - n)",
     "try, legend('\\color{orange}a'), catch e, disp(e.message), end",
     "surf(peaks(5)); title('z = x^2'); zlabel('\\it z'); text(3, 3, 5, '\\pi')",
+    // (the styled runs in all within the viewer's budget, 20000, or the SVG alone: 11 runs a text)
+    "surf(peaks(5)); text(linspace(1, 5, 2000), 3*ones(1, 2000), 0, repmat({'a^1b^1c^1d^1e^1f'}, 1, 2000));",
+    "surf(peaks(5)); text(linspace(1, 5, 1500), 3*ones(1, 1500), 0, repmat({'a^1b^1c^1d^1e^1f'}, 1, 1500));",
   ];
   for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
   const svg = (id: number) => msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
@@ -95,4 +98,7 @@ test("MATLAB figures draw text as TeX (Interpreter 'tex'), 'none' as typed; 'lat
   assert.deepEqual(scene.title, [{ t: "z = x" }, { t: "2", s: 0.7, r: 0.385 }]);
   assert.deepEqual(scene.labels[2], [{ t: " z", i: true }]);
   assert.equal(scene.objects.find((o: any) => o.type === "text").text, "π");
+  const sceneOf = (id: number) => msgs.find((m) => m.id === id && m.display)?.display["application/vnd.sagebrush.scene3d+json"];
+  assert.ok(svg(7) && !sceneOf(7), "22000 runs: the SVG alone");
+  assert.equal(JSON.parse(sceneOf(8)).objects.filter((o: any) => o.type === "text").length, 1500);
 });
