@@ -352,6 +352,37 @@ try {
     check(running && await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /6\\.2832/.test(os[0].output))", 60000), "the language changed during a run: the MATLAB item's 2*pi is MATLAB's: " + JSON.stringify(await outputs()));
   }
 
+  // the board fitted again once its code has first run, its outputs in place (William): unless the reader has moved the view meanwhile
+  {
+    const doc = { title: "Refit", layout: "column", nodes: [
+      { id: "top", title: "Top", text: "Above the code." },
+      { id: "long", title: "Long", code: "import time\ntime.sleep(1.5)\nfor i in range(60):\n    print(i)" },
+      { id: "bottom", title: "Bottom", text: "Pushed down by the output." },
+    ] };
+    // (all of the board's items in the view)
+    const inView = "(() => { const s = window.sagebrush.board.snapshot(), v = s.view; return s.items.every((it) => it.x >= v.x0 - 1 && it.y >= v.y0 - 1 && it.x + it.w <= v.x1 + 1 && it.y + it.h <= v.y1 + 1); })()";
+    const ran = "window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /59\\n$/.test(os[0].output))";
+    const camera = () => ev("JSON.stringify(window.sagebrush.board.snapshot().camera)");
+    for (const moved of [false, true]) {
+      // (in a page of its own: nothing of the boards before it)
+      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+      await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+      await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
+      // (the reader scrolls before the code has run)
+      if (moved) await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: 200 });
+      await sleep(200);
+      const before = await camera();
+      check(await until(ran, 60000), "the long item ran: " + JSON.stringify(await outputs()));
+      // (and the board laid out with its output: the item under it pushed down)
+      check(await until("window.sagebrush.board.snapshot().items.find((it) => it.id === 'bottom').y > 1000", 10000), "the output pushed the bottom item down");
+      if (!moved) check(await until(inView, 10000), "after the first run, the board fitted again, the pushed-down item in view: " + JSON.stringify(await ev("window.sagebrush.board.snapshot().view")));
+      else {
+        await sleep(2500);
+        check((await camera()) === before, "the reader moved the view: it stays where they put it: " + before + " then " + (await camera()));
+      }
+    }
+  }
+
   // a board in another language after one in Sage, in the same page: a new interpreter, nothing of Sage's left (Sage's pi in MATLAB's 2*pi)
   {
     await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Sage", mode: "sage", nodes: [{ id: "s", code: "x = var('x')\ndiff(sin(x), x)", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);

@@ -541,6 +541,24 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     at = -1;
     const n = Number(m?.[2] ?? m?.[3] ?? 0);
     step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
+    refitAfterRun().catch(fail);
+  }
+
+  // A board is fitted as it opens, before its code has run; its outputs then
+  // make it larger, and what they push down or out may start out of view.
+  // So once the code has first run, its outputs drawn, the view is fitted
+  // again, as the board now is, unless the reader has moved it meanwhile
+  // (William)
+  async function refitAfterRun() {
+    const c = code, loaded = loads, fitted = { ...board.camera };
+    if (!c) return;
+    await c.idle();
+    // (its pictures decoded, so the layout has their sizes)
+    await Promise.all([...root.querySelectorAll<HTMLImageElement>(".board-world img")].map((i) => i.decode().catch(() => {})));
+    if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded) return;
+    const k = board.camera;
+    if (k.x !== fitted.x || k.y !== fitted.y || k.z !== fitted.z) return;
+    step(at);
   }
 
   /** Show page i (0-based), from its start. */
