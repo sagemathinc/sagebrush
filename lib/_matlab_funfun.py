@@ -1507,7 +1507,9 @@ def _multi(nargout, solver, fun, lims, opts):
     atol, rtol = num("AbsTol", 1e-10), num("RelTol", 1e-6)
     if rtol > 0:
         rtol = max(rtol, 100 * _EPS)
-    method = _text(o["Method"]).lower() if "Method" in o and _istext(o["Method"]) else "auto"
+    if "Method" in o and not _istext(o["Method"]):
+        raise _err("%s: Method must be \"auto\", \"tiled\" or \"iterated\"." % solver)
+    method = _text(o["Method"]).lower() if "Method" in o else "auto"
     if method not in ("auto", "tiled", "iterated"):
         raise _err("%s: Method must be \"auto\", \"tiled\" or \"iterated\"." % solver)
     if method == "tiled":
@@ -1536,12 +1538,23 @@ def _multi(nargout, solver, fun, lims, opts):
     def warn(msg):
         failed.append(msg)
 
+    def real(y):
+        # (complex values, of the integrand or a limit function, are refused,
+        # before anything is stored as real numbers)
+        if np.iscomplexobj(y):
+            if np.any(np.imag(y) != 0):
+                raise _err("%s: complex integrands and limits are not supported in Sagebrush." % solver)
+            y = np.real(y)
+        return np.array(y, dtype=float)
+
     def call(fn, args):
         """fn at arrays of points: vectorized, or one point at a time"""
         n = args[0].size
         if vectorized:
             r = _m._call(fn, [_m._box(np.array(a, dtype=float).reshape((-1, 1))) for a in args])
-            y = np.array(_m._arr(r), dtype=float).reshape(-1) if _m._isnumlike(r) and type(r) is not _m.Char else None
+            y = np.array(_m._arr(r)).reshape(-1) if _m._isnumlike(r) and type(r) is not _m.Char else None
+            if y is not None:
+                y = real(y)
             if y is None or y.size != n:
                 raise _err("%s: the integrand and limit functions must return arrays the size of their inputs; use "
                            "array operators (.*, ./, .^) or set Vectorized to false." % solver)
@@ -1551,7 +1564,7 @@ def _multi(nargout, solver, fun, lims, opts):
             r = _m._call(fn, [float(a[i]) for a in args])
             if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != 1:
                 raise _err("%s: with Vectorized false, the integrand and limit functions must return scalars." % solver)
-            out[i] = float(_m._scalar(r))
+            out[i] = real(np.array(_m._arr(r)).reshape(-1))[0]
         return out
 
     def limit(v, args):
