@@ -15,7 +15,7 @@ import { initParser, compile, execModule, R, libDir, findModuleSource } from "./
 import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax } from "./interactive";
-import { getattr } from "./runtime/object";
+import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
@@ -60,7 +60,8 @@ function exitCode(c: any): number {
   } catch {}
   if (int) {
     try {
-      const v = BigInt(R.index(c));
+      // (its integer as stored, as CPython reads it: an int subclass's __index__ is not asked, CORR-0BE-1)
+      const v = BigInt(unbox(c));
       return v >= -(2n ** 63n) && v < 2n ** 63n ? Number(BigInt.asUintN(8, v)) : 255;
     } catch {}
   }
