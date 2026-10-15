@@ -457,7 +457,7 @@ def _exact_log(x, b):
     return None
 
 
-def _ziv_eval(R, fn, extra=40, limit=None):
+def _ziv_eval(R, fn, extra=40, limit=None, overflow=False):
     """fn(F), F = RealField(p + extra), rounded in R.  fn must return the
     value within 2^8 units in the last place of F (relative), and the value
     must not be a rounding boundary of R; both ends of that interval must
@@ -465,10 +465,11 @@ def _ziv_eval(R, fn, extra=40, limit=None):
     p = R._prec
     while True:
         v = fn(RealField(p + extra))
-        if v._special in ("+inf", "-inf"):
-            # the working field (nearest, more bits) overflowed, so the value
-            # is beyond this field's range too: rounded in its direction
-            # (the largest number toward zero), not +-infinity outright
+        if overflow and v._special in ("+inf", "-inf"):
+            # (overflow=True: fn's value is finite, so an infinity is the
+            # working field's overflow; its threshold is above this field's,
+            # so the value is beyond this range too, rounded in this field's
+            # direction.  Otherwise an infinity is a true one: log(2, 1).)
             return RealNumberMP(R, 1 if v._special == "+inf" else -1, _EMAX + 8)
         if v._special or not v._m:
             return R(v)
@@ -2277,18 +2278,21 @@ class RealNumberMP:
             if a & (a - 1) == 0:
                 t = a.bit_length() - 1
                 return _nudge(R, 1 if self._m > 0 else -1, -(self._e + t), -1)
-            return _ziv_eval(R, lambda F: 1 / F(self) - F.euler_constant())
+            return _ziv_eval(R, lambda F: 1 / F(self) - F.euler_constant(), overflow=True)
         v = _gamma(self._q(), R._prec)
         if not self._special and getattr(v, "_special", None) in ("+inf", "-inf"):
             # the working field overflowed: the value is beyond the range,
             # rounded in this field's direction (the largest number toward 0)
             return RealNumberMP(R, 1 if v._special == "+inf" else -1, _EMAX + 8)
-        if not self._special and self._m and isinstance(v, RealNumberMP) and not v._special and not v._m:
-            # it underflowed (Gamma has no zeros): below the range, rounded
-            # in this field's direction with Gamma's sign, (-1)^ceil(-x) for
-            # x < 0 (Sage: the smallest number in RNDD at -2^61 - 1/2)
-            sign = 1 if self._m > 0 or (-self._floor()) % 2 == 0 else -1
-            return RealNumberMP(R, sign, _EMIN - 8)
+        if (not self._special and self._m < 0 and isinstance(v, RealNumberMP)
+                and not v._special and (not v._m or v._mag() < _EMIN + 64)):
+            # the reflection Gamma(x) = pi / (sin(pi x) Gamma(1 - x)) with
+            # Gamma(1 - x) overflowed (a zero: Gamma has none) or nearly so:
+            # |Gamma(x)| is near or below 2^EMIN, where the working field's
+            # value is not reliable; it is taken from log |Gamma(x)|
+            if (1 - self)._cmpq(128) < 0:
+                raise NotImplementedError("Gamma(%s) at the bottom of the exponent range is not available in sagebrush yet" % self)
+            return _gamma_reflected(self)
         return R(v)
 
     def log_gamma(self):
@@ -2443,6 +2447,55 @@ def _format(q, D, no_sci=None, rnd="N"):
             return sign + s + _zeros(E + 1 - D) + "."
         return sign + s[:E + 1] + "." + s[E + 1:]
     return sign + "0." + _zeros(-E - 1) + s
+
+
+def _gamma_reflected(x):
+    """Gamma(x) for a negative non-integer x with 1 - x >= 2^7, correctly
+    rounded in x's field, where the reflection Gamma(x) = pi / (sin(pi x)
+    Gamma(1 - x)) cannot be formed: Gamma(1 - x) is beyond the exponent
+    range while Gamma(x) is near or below its bottom.  Instead
+    L = log |Gamma(x)| = log pi - log |sin(pi x)| - log Gamma(1 - x)
+    (Stirling), and Gamma(x) = s 2^k exp(r) with k = floor(L / log 2),
+    r = L - k log 2 and the sign s = (-1)^ceil(-x).  With |L| < 2^B, at W
+    bits L is within 2^(B - W + 8) (Stirling's sum to a few units of its
+    last place, the logarithms to a few of theirs) and k log 2 within
+    2^(B - W + 1), so exp(r) is within 2^-(W - B - 12) relative; the value
+    is accepted when both ends of that interval round alike in x's field
+    (below the range, decided on their exact values), else W grows."""
+    R = x._R
+    p = R._prec
+    fl = x._floor()
+    sign = 1 if (-fl) % 2 == 0 else -1
+    # |L| <= (1 - x) log(1 - x) + log(pi / |sin(pi x)|) < 2^B, 1 - x < 2^n
+    n = (-fl).bit_length() + 1
+    B = n + n.bit_length() + 1
+    # bits that hold x, 1 - x and the fractional part of x exactly
+    exact = abs(x._m).bit_length() + abs(fl).bit_length() + 64
+    G = 64
+    while G <= 1 << 14:
+        F = RealField(max(p + B + G, exact))
+        X = F(x)
+        lg = _log_gamma_stirling(1 - X)
+        if lg is None:
+            break
+        # |sin(pi x)| = sin(pi f), f = min(frac(x), 1 - frac(x)) (no
+        # cancellation near pi)
+        f = X - F(fl)
+        if (2 * f)._cmpq(1) > 0:
+            f = 1 - f
+        L = F.pi().log() - (F.pi() * f).sin().log() - lg
+        L2 = F(2).log()
+        k = int((L / L2).floor())
+        y = (L - F(k) * L2).exp()
+        m, e = y._m, y._e
+        g = F._prec - B - 12
+        t = abs(m) >> g if g > 0 else abs(m)
+        lo = _round_int(sign * (abs(m) - t - 1), e + k, p, R._rnd)
+        hi = _round_int(sign * (abs(m) + t + 1), e + k, p, R._rnd)
+        if lo == hi:
+            return RealNumberMP(R, lo[0], lo[1])
+        G *= 2
+    raise NotImplementedError("Gamma(%s) at the bottom of the exponent range is not available in sagebrush yet" % x)
 
 
 def _log_gamma_stirling(x):

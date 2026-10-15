@@ -230,3 +230,20 @@ for mode in ['RNDN', 'RNDU', 'RNDD', 'RNDZ', 'RNDA']:
     R = RealField(100, rnd=mode)
     for x in [R(-2^61) - R(1)/2, R(-2^61) - R(1)/4, R(-2^61) - R(3)/2, R(-2^61 + 1) - R(1)/2]:
         print(mode, x.gamma().is_zero(), x.gamma() > 0, x.gamma() < 0, abs(x.gamma()) == R(2)^(-2^62))
+# third review: a real pole stays infinite (log base 1) in every mode, and
+# gamma near the bottom of the exponent range, where Gamma(1 - x) overflows
+# but Gamma(x) is representable (or not: printed relative to the smallest
+# number u, zero tested separately)
+for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
+    R = RealField(100, rnd=mode)
+    print(mode, R(2).log(1), R(1/2).log(1), R(2).log(R(1)), R(3).log(QQ(1)))
+for prec in [80, 100, 200]:
+    for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
+        R = RealField(prec, rnd=mode)
+        u = R(2)^(-2^62)
+        x0 = R(-740481430788196297058565133986) / R(2)^43
+        out = []
+        for d in [R(i) / R(2)^20 for i in range(-12, 13, 3)] + [R(-2), R(-1), R(1), R(2), R(3)]:
+            g = (x0 + d).gamma()
+            out.append('0' if g.is_zero() else str(g / u))
+        print(prec, mode, out)
