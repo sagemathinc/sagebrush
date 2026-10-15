@@ -1,15 +1,28 @@
-"""The allocation and iteration sites of Sagebrush's matrix and vector code,
-for test/matrix-alloc.test.ts.
+"""The iteration and allocation sites of Sagebrush's matrix and vector code,
+for test/matrix-alloc.test.ts: a change detector.
 
-Every call of range() or list(), every list repetition ([x] * n), and every
-loop or comprehension over a function's own parameter, in
-lib/_sage_matrix.py, lib/_sage_ffmat.py and the matrix part of
-lib/_sage_padic.py is listed by its function and source text.  The test
-compares the list with test/matrix-alloc-sites.json, where each site was
-reviewed: its size is bounded by data that already passed _shape,
-_bounded_list or _bounded_rows (or a fixed constant).  A new or changed site
-fails the test until it is reviewed and recorded, so no constructor,
-product or concatenation can allocate from an unchecked size unnoticed.
+In lib/_sage_matrix.py, lib/_sage_ffmat.py and the matrix part of
+lib/_sage_padic.py it lists, by function, conservatively:
+
+  - every loop (for, async for, while) and every comprehension generator;
+  - every call of a function that materializes or iterates its argument
+    (list, tuple, set, dict, sorted, map, zip, enumerate, sum, join,
+    extend, ..., called bare or qualified, as builtins.list);
+  - every star expansion (*rows in a call, list, tuple or set);
+  - every literal sequence repetition ([0] * n, (0,) * n, "x" * n).
+
+In every other module of lib/ it lists each call of a raw matrix or vector
+constructor (Matrix, FFMatrix, PadicMatrix, Vector, FFVector,
+SeriesVector, also under an import alias), whose caller must check the
+shape of what it builds first.
+
+The test compares the list with test/matrix-alloc-sites.json, reviewed in
+the commit that last changed it.  It proves only that no site of these
+forms is added or changed without that review; it does not follow helper
+calls.  The bounds themselves come from the code: the constructors read
+their input with _read_rows/_bounded_list and check the shape before
+converting anything, and the factories call _shape before building a
+result.
 
     python3 test/matrix_alloc_sites.py            print the sites as JSON
 """
@@ -19,53 +32,106 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FILES = ["lib/_sage_matrix.py", "lib/_sage_ffmat.py", "lib/_sage_padic.py"]
+FULL = ["lib/_sage_matrix.py", "lib/_sage_ffmat.py", "lib/_sage_padic.py"]
 # lib/_sage_padic.py: only its matrix section
 PADIC_FROM = "# ------------------------------------------------------------------ matrices"
+MATERIALIZERS = {
+    "list", "tuple", "set", "frozenset", "dict", "sorted", "reversed", "bytearray", "bytes", "map", "filter",
+    "zip", "enumerate", "iter", "next", "sum", "min", "max", "any", "all", "join", "extend", "update", "fromkeys",
+    "range", "islice", "repeat", "product", "permutations", "combinations", "chain", "deepcopy", "copy",
+}
+CONSTRUCTORS = {"Matrix", "FFMatrix", "PadicMatrix", "Vector", "FFVector", "SeriesVector"}
 
 
-def sites(path):
+def _norm(src):
+    return " ".join(src.split())
+
+
+def _callee(func):
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _source(path):
     text = (ROOT / path).read_text()
-    offset = 0
-    if path.endswith("_sage_padic.py"):
-        i = text.index(PADIC_FROM)
-        offset = text[:i].count("\n")
-        text = text[i:]
+    if path.endswith("_sage_padic.py") and path in FULL:
+        text = text[text.index(PADIC_FROM):]
+    return text
+
+
+def _walk(text, record):
     tree = ast.parse(text)
-    out = []
 
-    def visit(node, scope, params):
+    def visit(node, scope):
         for child in ast.iter_child_nodes(node):
-            name, ps = scope, params
-            if isinstance(child, (ast.FunctionDef, ast.ClassDef)):
+            name = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 name = (scope + "." if scope else "") + child.name
-            if isinstance(child, ast.FunctionDef):
-                a = child.args
-                ps = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs} - {"self"}
-                ps |= {x.arg for x in (a.vararg, a.kwarg) if x is not None}
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id in ("range", "list"):
-                out.append((name, ast.get_source_segment(text, child)))
-            elif isinstance(child, ast.BinOp) and isinstance(child.op, ast.Mult) and (
-                    isinstance(child.left, ast.List) or isinstance(child.right, ast.List)):
-                out.append((name, ast.get_source_segment(text, child)))
-            elif isinstance(child, (ast.For, ast.comprehension)) and isinstance(child.iter, ast.Name) and child.iter.id in ps:
-                # iterating a parameter (user input, unless the caller
-                # passes data already read boundedly)
-                out.append((name, "for ... in " + child.iter.id))
-            visit(child, name, ps)
+            record(child, name, text)
+            visit(child, name)
 
-    visit(tree, "", set())
-    counts = {}
-    for name, src in out:
-        key = "%s: %s :: %s" % (path, name, " ".join(src.split()))
-        counts[key] = counts.get(key, 0) + 1
-    return counts
+    visit(tree, "")
+
+
+def full_sites(path):
+    out = {}
+
+    def add(name, kind, src):
+        key = "%s: %s :: %s :: %s" % (path, name or "<module>", kind, _norm(src))
+        out[key] = out.get(key, 0) + 1
+
+    def record(node, name, text):
+        seg = lambda n: ast.get_source_segment(text, n) or ""
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            add(name, "loop", seg(node.iter))
+        elif isinstance(node, ast.While):
+            add(name, "while", seg(node.test))
+        elif isinstance(node, ast.comprehension):
+            add(name, "comprehension", seg(node.iter))
+        elif isinstance(node, ast.Call) and _callee(node.func) in MATERIALIZERS:
+            add(name, "call", seg(node))
+        elif isinstance(node, ast.Starred):
+            add(name, "star", seg(node))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult) and any(
+                isinstance(o, (ast.List, ast.Tuple, ast.Set, ast.ListComp)) or (isinstance(o, ast.Constant) and isinstance(o.value, (str, bytes)))
+                for o in (node.left, node.right)):
+            add(name, "repeat", seg(node))
+
+    _walk(_source(path), record)
+    return out
+
+
+def caller_sites(path):
+    out = {}
+    text = (ROOT / path).read_text()
+    tree = ast.parse(text)
+    names = set(CONSTRUCTORS)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                if a.name in CONSTRUCTORS and a.asname:
+                    names.add(a.asname)
+
+    def record(node, name, text):
+        if isinstance(node, ast.Call) and _callee(node.func) in names:
+            key = "%s: %s :: constructor :: %s" % (path, name or "<module>", _norm(ast.get_source_segment(text, node) or ""))
+            out[key] = out.get(key, 0) + 1
+
+    _walk(text, record)
+    return out
 
 
 def all_sites():
     result = {}
-    for f in FILES:
-        result.update(sites(f))
+    for f in FULL:
+        result.update(full_sites(f))
+    for p in sorted((ROOT / "lib").glob("*.py")):
+        rel = "lib/" + p.name
+        if rel not in FULL:
+            result.update(caller_sites(rel))
     return dict(sorted(result.items()))
 
 

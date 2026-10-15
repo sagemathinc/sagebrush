@@ -936,6 +936,8 @@ def _elt(base, x):
 
 def _from_array(base, a):
     import _sage_ffmat
+    from _sage_matrix import _shape
+    _shape(a.shape[0] if len(a.shape) else 0, a.shape[1] if len(a.shape) > 1 else 0)
     rows = [[_elt(base, x) for x in r] for r in a.tolist()]
     b = base
     if not _is_complex_base(base) and any(_is_complex_base(x.parent()) for r in rows for x in r if hasattr(x, "parent")):
