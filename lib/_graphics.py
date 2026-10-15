@@ -880,7 +880,8 @@ def _pow10_label(v):
 class Panel:
     """One set of axes: primitives plus options.
 
-    Options: title, xlabel, ylabel, xmin, xmax, ymin, ymax, xscale/yscale
+    Options: title, title_weight, subtitle ((text, weight), after the title),
+    xlabel, ylabel, xmin, xmax, ymin, ymax, xscale/yscale
     ('linear' or 'log'), grid, legend (None: when labels exist; False: never),
     legend_loc, aspect_ratio (1 for equal scales), frame (a box with ticks,
     matplotlib style) or Sage's axes crossing at the origin, axes (False:
@@ -1069,9 +1070,11 @@ class Panel:
                 out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="%s" transform="rotate(%s %s %s)">%s</text>' % (
                     _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), _rich(ylabel)))
         if title:
-            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
+            sub = o.get("subtitle")
+            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s%s</text>' % (
                 _fmt(P.left + pw / 2), _fmt(P.top - max(8, tts * 0.6 + 4)), _fmt(tts),
-                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", _rich(title)))
+                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", _rich(title),
+                '<tspan font-weight="%s"> %s</tspan>' % (_esc(sub[1]), _rich(sub[0])) if sub else ""))
         out.append(self._legend_svg(P))
         out.append("</g>")
         return "".join(out), self.describe(xlo, xhi, ylo, yhi, xlog, ylog)
@@ -1161,7 +1164,7 @@ class Panel:
         o = self.options
         parts = []
         if o.get("title"):
-            parts.append('"%s"' % o["title"])
+            parts.append('"%s"' % (o["title"] + ("\n" + o["subtitle"][0] if o.get("subtitle") else "")))
         shown = [p.describe() for p in self.primitives[:8]]
         if len(self.primitives) > 8:
             shown.append("%d more" % (len(self.primitives) - 8))

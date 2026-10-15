@@ -305,6 +305,9 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     default is the changed "gem" palette of R2025a (its colororder page
     gives the new triplets); Sagebrush deliberately keeps the older one;
   - LineSpec strings (`'r--o'`) work, and so do name-value properties;
+  - titles are bold and subtitles normal, as the documented defaults of
+    TitleFontWeight and SubtitleFontWeight; a title's own `FontWeight`
+    is kept. The subtitle follows the title on its line;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,

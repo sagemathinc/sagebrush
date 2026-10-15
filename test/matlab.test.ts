@@ -842,3 +842,29 @@ test("a legend in 3-D axes is drawn: surfaces' swatches (colormapped at the midd
   assert.equal((four.match(/<circle /g) ?? []).length, 2);
   assert.equal(legend(5), null);
 });
+
+test("titles are bold by default (TitleFontWeight), subtitles not; a title's FontWeight is kept", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    "plot(1:3); title('Two'); disp(get(get(gca, 'Title'), 'FontWeight')); disp(get(get(gca, 'Subtitle'), 'FontWeight'))",
+    "surf(peaks(5)); title('Three')",
+    "plot(1:3); title('Main'); subtitle('Sub')",
+    "plot(1:3); title('Plain', 'FontWeight', 'normal')",
+    "plot(1:3); subtitle('Only')",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const title = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return svg.match(/<text [^>]*text-anchor="middle" font-size="[^"]*"[^>]*>(?:(?!<\/text>).)*<\/text>/g)?.find((t: string) => !/rotate/.test(t))
+      ?.replace(/^<text [^>]*?font-size="[^"]*"/, "<text");
+  };
+  assert.equal(msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join(""), "bold\nnormal\n");
+  assert.equal(title(1), '<text font-weight="bold">Two</text>');
+  assert.equal(title(2), '<text font-weight="bold">Three</text>');
+  assert.equal(title(3), '<text font-weight="bold">Main<tspan font-weight="normal"> Sub</tspan></text>');
+  assert.equal(title(4), "<text>Plain</text>");
+  assert.equal(title(5), "<text>Only</text>");
+});
