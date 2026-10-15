@@ -824,6 +824,9 @@ class EisensteinExtensionElement:
             sage: alpha.add_bigoh(3), L(5).add_bigoh(3)
             (alpha + O(alpha^3), 5 + O(alpha^3))
         """
+        if _is_plus_infinity(n):
+            # (a real +infinity changes nothing, as in Sage's extensions)
+            return self
         n = _prec_arg(n)
         if n is None:
             return self
@@ -1056,6 +1059,18 @@ class EisensteinExtensionElement:
     # (unhashable, as in Sage: equality up to precision is not transitive,
     # so no hash agrees with it and with the hash of the integers)
     __hash__ = None
+
+
+def _is_plus_infinity(n):
+    """Whether n is a real +infinity (a float or a real of any precision)."""
+    if isinstance(n, float):
+        return n == float("inf")
+    if hasattr(n, "exact_rational") and hasattr(n, "is_infinity"):
+        try:
+            return bool(n.is_infinity()) and n > 0
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _vbinom(n, k, p):
