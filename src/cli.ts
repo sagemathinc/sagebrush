@@ -36,9 +36,11 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)
   -V       print the version
   --licenses  the licenses of Sagebrush and of what it contains
-  --search QUERY [--json]
+  --search QUERY [--mode sage|python|magma|matlab] [--json]
            search the documentation of every function (name, signature,
-           docstring): what Sagebrush can do; obj? in a session shows one
+           docstring): what Sagebrush can do; obj? in a session shows one.
+           --mode: that language's functions (default: Sage's library,
+           which Python mode imports too)
   --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|matlab|all]
            register Sagebrush as a Jupyter kernel (no Python needed)
   --uninstall-jupyter-kernel [the same options]
