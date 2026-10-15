@@ -548,16 +548,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // make it larger, and what they push down or out may start out of view.
   // So once the code has first run, its outputs drawn, the view is fitted
   // again, as the board now is, unless the reader has moved it meanwhile
-  // (William)
+  // (William): told the camera to move at all, a flight not yet begun
+  // included (Find, a double-click; CORR-300-1)
   async function refitAfterRun() {
-    const c = code, loaded = loads, fitted = { ...board.camera };
+    const c = code, loaded = loads, moves = board.moves;
     if (!c) return;
     await c.idle();
     // (its pictures decoded, so the layout has their sizes)
     await Promise.all([...root.querySelectorAll<HTMLImageElement>(".board-world img")].map((i) => i.decode().catch(() => {})));
-    if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded) return;
-    const k = board.camera;
-    if (k.x !== fitted.x || k.y !== fitted.y || k.z !== fitted.z) return;
+    if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded || board.moves !== moves) return;
     step(at);
   }
 
