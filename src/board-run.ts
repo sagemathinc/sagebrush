@@ -37,6 +37,7 @@ import type { CellError } from "./notebook-graph";
 import { analyzeCell, ImportStarError } from "./dataflow";
 import { renameRedefinitions } from "./rename";
 import { oneLine, textLines } from "./terminal-text";
+import { CLI_READER } from "./board-cli";
 
 const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--store-previews [-o OUT] [--preview-ms MS]]
   run every code item of a board as the board runs it in a browser (its
@@ -119,7 +120,7 @@ export async function boardRun(argv: string[]): Promise<number> {
   try {
     const d = boardFromText(readFileSync(file === "-" ? 0 : file, "utf8"), file === "-" ? undefined : basename(file));
     // (as the board says it, in the command line's words: which sagebrush can't read it, and what to do)
-    const bad = formatError(d, { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" });
+    const bad = formatError(d, CLI_READER);
     if (bad) throw new Error(bad);
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     doc = cleanDoc(d);
