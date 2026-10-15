@@ -234,6 +234,24 @@ try {
     return r === false && still ? why : 'mounted';
   })()`);
   ok(/more than 2000000 vertices/.test(refused), "...a scene too big once drawn is refused: the SVG stays, saying why: " + JSON.stringify(refused.slice(0, 120)));
+  // (mounting decodes each of a scene's base64 arrays once)
+  const decodes = await ev(`(() => {
+    const real = window.atob, b = (a) => btoa(String.fromCharCode(...new Uint8Array(a.buffer)));
+    let n = 0;
+    window.atob = (t) => { n++; return real(t); };
+    const d = document.createElement('div');
+    d.innerHTML = '<svg></svg>';
+    document.body.appendChild(d);
+    try {
+      window.SagebrushViewer3d.mount(d, { version: 2, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2], objects: [{ type: 'mesh2', color: '#ff0000',
+        positions: b(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])), indices: b(new Uint32Array([0, 1, 2])) }] });
+    } finally {
+      window.atob = real;
+      d.remove();
+    }
+    return n;
+  })()`);
+  ok(decodes === 2, "...a scene's base64 arrays are decoded once each when it is mounted: " + decodes);
   if (await ev(`!!${m3d}.querySelector('canvas')`)) {
     const at = await ev(`(() => { const c = ${m3d}.querySelector('canvas'); c.scrollIntoView(); const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, az: c.sagebrush.view.az }; })()`);
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });

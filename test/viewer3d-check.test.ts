@@ -132,6 +132,16 @@ test("checkScene refuses hostile scenes: malformed, not finite, out of range, or
     try { f(); } finally { LIMITS[k] = old; }
   };
   const box = { lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2] };
+  // (each base64 array decoded once: by the check, then reused by build)
+  const realAtob = g.atob;
+  let decodes = 0;
+  g.atob = (t: string) => { decodes++; return realAtob(t); };
+  try {
+    geometry({ version: 2, ...box, objects: [{ ...k3dMesh([0, 1, 2]), colors: b64([0xff0000, 0x00ff00, 0x0000ff], Uint32Array) }] });
+  } finally {
+    g.atob = realAtob;
+  }
+  assert.equal(decodes, 3);
   lowered("plainVertices", 10, () => {
     assert.match(String(checkScene({ version: 1, ...box, objects: [{ type: "mesh", pos: new Array(60).fill(0), idx: [], color: "#000000" }] })), /more than 10 vertices/);
     assert.equal(checkScene({ version: 1, ...box, objects: [{ type: "mesh", pos: new Array(15).fill(0), idx: [], color: "#000000" }] }), null);
