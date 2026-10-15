@@ -369,6 +369,30 @@ const background = (b: any): PageBackground | undefined => {
   return color || image ? { ...(color ? { color } : {}), ...(image ? { image } : {}) } : undefined;
 };
 
+/**
+ * A board's picture names that cleanDoc leaves out, as its file has them
+ * (in `images`, a note's `image`, a background's): not letters, digits, `_`
+ * and `-`, at most 100 characters; each once, in the order met.  For a
+ * reader that can say so (the command line), where the board can't.
+ */
+export function badPictureNames(d: any): string[] {
+  const out = new Set<string>();
+  const see = (v: unknown) => { if (typeof v === "string" && !IMAGE_NAME.test(v)) out.add(v); };
+  const walk = (ns: unknown) => {
+    if (!Array.isArray(ns)) return;
+    for (const n of ns) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "group") walk(n.children);
+      else if (n.kind !== "ink" && n.kind !== "sticker") see(n.image);
+    }
+  };
+  if (d?.images && typeof d.images === "object" && !Array.isArray(d.images)) for (const k of Object.keys(d.images)) see(k);
+  see(d?.background?.image);
+  walk(d?.nodes);
+  for (const p of Array.isArray(d?.pages) ? d.pages : []) { see(p?.background?.image); walk(p?.nodes); }
+  return [...out];
+}
+
 export function cleanDoc(d: any): BoardDoc {
   const node = (n: any): DocNode | null => {
     if (!n || typeof n !== "object" || n.id == null) return null;
