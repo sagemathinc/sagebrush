@@ -78,8 +78,10 @@ impl QLocalRing {
     #[inline]
     pub fn reduce(&self, x: i128, y: i128) -> Res {
         let (a, c) = (self.a as i128, self.c as i128);
+        // y = k c + yr with 0 <= yr < c; div_euclid, not (y - yr) / c, which
+        // overflows at y = i128::MIN (HARD-D16-1)
         let yr = y.rem_euclid(c);
-        let k = (y - yr) / c;
+        let k = y.div_euclid(c);
         // |k mod A| < A and B < A < 2^31
         let xr = (x.rem_euclid(a) - (k % a) * self.b as i128).rem_euclid(a);
         Res(xr as u64, yr as u64)
@@ -91,7 +93,10 @@ impl QLocalRing {
         let y0 = x.b.mod_floor(&m).to_i128().unwrap();
         self.reduce(x0, y0)
     }
+    /// The canonical representative x + y w (0 <= x < A, 0 <= y < C) as an
+    /// element of O_F; a residue out of range is reduced first.
     pub fn lift(&self, x: Res) -> QElt {
+        let x = self.canon(x);
         QElt::new(x.0 as i64, x.1 as i64)
     }
     pub fn zero(&self) -> Res {
@@ -162,6 +167,7 @@ impl QLocalRing {
     /// of T^2 - s T + n, if there are two.
     pub fn distinct_roots(&self, s: Res, n: Res) -> Option<(Res, Res)> {
         assert_eq!(self.e, 1);
+        let (s, n) = (self.canon(s), self.canon(n));
         let f = |x: Res| self.add(self.sub(self.mul(x, x), self.mul(s, x)), n);
         if self.q <= 64 || self.prime.p == 2 {
             let roots: Vec<Res> = (0..self.card).map(|i| self.element(i)).filter(|&x| f(x) == self.zero()).collect();
@@ -183,6 +189,7 @@ impl QLocalRing {
     /// the cyclic group of order q - 1), if one exists.
     pub fn sqrt(&self, d: Res) -> Option<Res> {
         assert_eq!(self.e, 1);
+        let d = self.canon(d);
         let q = self.q;
         assert!(q % 2 == 1);
         if d == self.zero() {
@@ -297,5 +304,66 @@ mod tests {
         assert!(QLocalRing::new(&f, p, 1).is_err());
         let q = QuadField::new(5).unwrap().primes_above(11).unwrap()[0];
         assert!(QLocalRing::new(&f, q, 1).is_err());
+    }
+
+    #[test]
+    fn extreme_inputs() {
+        // HARD-D16-1 (daybreak): every entry point at i128::MIN, i128::MAX and
+        // u64::MAX agrees with the exact big-integer reduction, in ramified,
+        // inert and split rings (the test runs in debug builds too, where an
+        // overflow would panic)
+        let f = QuadField::new(13).unwrap();
+        let ram = QLocalRing::new(&f, f.primes_above(13).unwrap()[0], 3).unwrap();
+        // the reviewer's case: 13^3 ramified, reduce(0, i128::MIN)
+        assert_eq!(ram.reduce(0, i128::MIN), Res(156, 2));
+        let rings = [
+            ram,
+            QLocalRing::new(&f, f.primes_above(2).unwrap()[0], 3).unwrap(), // inert
+            QLocalRing::new(&f, f.primes_above(5).unwrap()[0], 2).unwrap(), // inert
+            QLocalRing::new(&f, f.primes_above(3).unwrap()[1], 4).unwrap(), // split
+        ];
+        let vals = [i128::MIN, i128::MIN + 1, -1, 0, 1, i128::MAX - 1, i128::MAX];
+        let exact = |r: &QLocalRing, x: i128, y: i128| r.from_qelt(&QElt { a: BigInt::from(x), b: BigInt::from(y) });
+        for r in &rings {
+            for &x in &vals {
+                for &y in &vals {
+                    let e = exact(r, x, y);
+                    assert!(e.0 < r.a && e.1 < r.c);
+                    assert_eq!(r.reduce(x, y), e, "reduce({}, {})", x, y);
+                }
+            }
+            // residues built by hand, out of range
+            let forged = [Res(u64::MAX, u64::MAX), Res(u64::MAX, 0), Res(0, u64::MAX), Res(r.a, r.c)];
+            for &u in &forged {
+                let cu = exact(r, u.0 as i128, u.1 as i128);
+                assert_eq!(r.lift(u), r.lift(cu));
+                assert_eq!(r.in_p(u), r.in_p(cu));
+                assert_eq!(r.is_unit(u), r.is_unit(cu));
+                assert_eq!(r.inv(u), r.inv(cu));
+                assert_eq!(r.neg(u), r.neg(cu));
+                for &v in &forged {
+                    let cv = exact(r, v.0 as i128, v.1 as i128);
+                    assert_eq!(r.add(u, v), r.add(cu, cv));
+                    assert_eq!(r.sub(u, v), r.sub(cu, cv));
+                    assert_eq!(r.mul(u, v), r.mul(cu, cv));
+                }
+                assert_eq!(r.pow(u, 5), r.pow(cu, 5));
+            }
+            assert_eq!(r.element(u64::MAX), r.element(u64::MAX % r.card));
+        }
+        // the residue field functions, on residues built by hand
+        let k = QLocalRing::new(&f, f.primes_above(5).unwrap()[0], 1).unwrap();
+        let zero_forged = Res(k.a, k.c);
+        assert_eq!(k.sqrt(zero_forged), Some(k.zero()));
+        for &u in &[Res(u64::MAX, u64::MAX), Res(u64::MAX, 0), zero_forged] {
+            let cu = k.from_qelt(&QElt { a: BigInt::from(u.0), b: BigInt::from(u.1) });
+            assert_eq!(k.sqrt(u), k.sqrt(cu));
+            assert_eq!(k.distinct_roots(u, zero_forged), k.distinct_roots(cu, k.zero()));
+        }
+        // from_qelt at the extremes of big integers
+        let r = &rings[0];
+        let huge = QElt { a: BigInt::from(i128::MIN) * BigInt::from(i128::MAX), b: BigInt::from(i128::MAX) * BigInt::from(3) };
+        let u = r.from_qelt(&huge);
+        assert!(u.0 < r.a && u.1 < r.c && f.in_ideal(&f.ideal_mul(&r.prime.ideal, &f.ideal_mul(&r.prime.ideal, &r.prime.ideal).unwrap()).unwrap(), &f.sub(&r.lift(u), &huge)));
     }
 }
