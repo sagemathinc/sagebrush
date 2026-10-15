@@ -113,3 +113,52 @@ S = PowerSeriesRing(Q, 'U')
 U = S.gen()
 g = S([Q(1, 2), Q(3)], 4)
 t('Qp g == g', lambda: (g == g, g == g + O(U^1), g == g + 9, g == g + 3, S([Q(0, 2)], 3) == 0))
+# Dp_valued_series: v with (1 - phi)^-2 L_p = v[0] omega + v[1] phi(omega).
+# Sage reports some coefficients to more digits than L_alpha's stated
+# precision supports (it reads inexact-zero coordinates as exact zeros), so
+# each coefficient is compared to the precision proven from L_alpha's: the
+# error lattice alpha^k O mapped by (1 - Phi)^-2 (G + a_p H, -p H), computed
+# here in the number field Q(alpha) (k_j by series()'s rule, c = 0)
+def proven_precisions(E, p, n, prec):
+    ap = E.ap(p)
+    x = polygen(QQ)
+    K = NumberField(x^2 - ap*x + p, 'a')
+    a = K.gen()
+    Phi = matrix(QQ, [[0, -1/p], [1, ap/p]])
+    M = (1 - Phi)^-2
+    cap = 2 * ceil((n + 2) / 2)
+    es = [None]
+    e = None
+    for j in range(1, prec):
+        b = binomial(p^(n - 1), j).valuation(p)
+        e = b if e is None else min(e, b)
+        if e == 0:
+            break
+        es.append(e)
+    out = []
+    for j in range(len(es)):
+        k = min(2*n - 4, cap - n - 1) if j == 0 else min(2*es[j] - n - 2, cap - n - 1)
+        imgs = []
+        for g in [a^k, a^(k + 1)]:
+            gg, hh = g.list()
+            w = M * vector(QQ, [gg + ap*hh, -p*hh])
+            imgs.append(w)
+        P1 = min(w[0].valuation(p) for w in imgs if w[0] != 0)
+        P2 = min(w[1].valuation(p) for w in imgs if w[1] != 0)
+        out.append((P1, P2))
+    return out
+for label, a_inv, p, ns in [('14a1', [1,0,1,4,-6], 5, [2, 3, 4]), ('11a1', [0,-1,1,-10,-20], 19, [2, 3]), ('17a1', [1,-1,1,-1,-14], 3, [2, 3, 4, 5]), ('37a1', [0,0,1,-1,0], 3, [2, 3, 4]), ('19a1', [0,1,1,-9,-15], 23, [2, 3]), ('15a1', [1,1,1,-10,-10], 7, [2, 3])]:
+    E = EllipticCurve(a_inv)
+    if E.ap(p) % p:
+        continue
+    L = E.padic_lseries(p)
+    for n in ns:
+        v = L.Dp_valued_series(n, prec=5)
+        Ps = proven_precisions(E, p, n, 5)
+        rows = [(v[0][j].add_bigoh(P1), v[1][j].add_bigoh(P2)) for j, (P1, P2) in enumerate(Ps)]
+        print(label, p, 'n', n, rows, flush=True)
+L = EllipticCurve('14a1').padic_lseries(5)
+t('Dp parent', lambda: L.Dp_valued_series(3).parent())
+t('Dp prec=1', lambda: L.Dp_valued_series(3, prec=1))
+t('Dp prec=2', lambda: L.Dp_valued_series(3, prec=2)[0])
+t('Dp n=1', lambda: L.Dp_valued_series(1))
