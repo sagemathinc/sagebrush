@@ -269,7 +269,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const on = (t: EventTarget, type: string, f: (e: any) => void, capture = false) => { t.addEventListener(type, f, capture); offs.push(() => t.removeEventListener(type, f, capture)); };
   // (the page's keys are this board's only when it is the active one: focus.ts)
   offs.push(track(root));
-  const mine = () => active(root);
+  // (and none of its dialogs open, Help, Print…: that one has the keys, the
+  // board's shortcuts waiting until it closes, and Esc is the browser's,
+  // closing it; astra's UI-D74-1)
+  const mine = () => active(root) && !root.querySelector("dialog[open]");
   let doc: BoardDoc | null = null;
   // (a code item on the page shown: its cell's id, codeOrder's)
   let cellOf = new Map<string, string>();
