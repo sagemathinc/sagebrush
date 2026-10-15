@@ -38,3 +38,18 @@ test("proof=True: refusals and failures of the certificate are NotImplementedErr
   // the GRH answers stay available
   assert.equal(sage("K = NumberField(x^2 - 7, 'a'); K._bnf_proof = 'the certificate failed'\nprint(K.class_number(), K.class_number(proof=False))\n"), "1 1\n");
 });
+
+test("the quadratic algorithms failing: the general algorithm, and forms for proof=True", () => {
+  // (realq.rs used to fail for many D, e.g. "no convergence" at 1004 and a
+  // panic at 2077; any failure must fall back, not surface)
+  const fail = "import _sage_nf; _sage_nf.NumberField_absolute._quadratic_bnfdata = lambda self: (_ for _ in ()).throw(ValueError('no convergence'))\n";
+  assert.equal(sage(fail + "K = NumberField(x^2 - 1066, 'a'); print(K.class_number(), K.class_group().invariants())\n"), "4 (2, 2)\n");
+  assert.equal(sage(fail + "K = NumberField(x^2 - 1066, 'a'); print(K.class_number(proof=True), K._bnf_proof_check)\n"), "4 ('real forms',)\n");
+  assert.equal(sage(fail + "K = NumberField(x^2 + 1067, 'a'); print(K.class_number(proof=True), K._bnf_proof_check)\n"), "12 ('reduced forms',)\n");
+});
+
+test("real quadratic fields that used to fail (no convergence; a panic at 2077)", () => {
+  // (class groups from Sage)
+  assert.equal(sage("for D in [1004, 1013, 1021, 2077, 5945]:\n    K = QuadraticField(D); print(D, K.class_number(), K.class_group().invariants(), K.class_number(proof=True))\n"),
+    "1004 1 () 1\n1013 1 () 1\n1021 1 () 1\n2077 1 () 1\n5945 4 (2, 2) 4\n");
+});

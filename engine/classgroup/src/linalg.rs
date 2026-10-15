@@ -458,6 +458,11 @@ fn kernel_crt_impl(a: &[Vec<i64>], vs: &[Vec<i64>], early: bool) -> (BigInt, Vec
 /// complete the rank).
 pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Result<Vec<usize>, Vec<usize>> {
     const P: u64 = 2147483647; // 2^31 - 1: products fit in u64
+    if n == 0 {
+        // no columns: the empty selection is a basis (it used to be reported
+        // as "not of full rank" with no free column, forever)
+        return Ok(vec![]);
+    }
     let mut basis: Vec<Option<Vec<u64>>> = vec![None; n]; // by pivot column, pivot = 1
     let mut chosen = vec![];
     let mut v = vec![0u64; n];
