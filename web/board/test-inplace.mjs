@@ -488,8 +488,9 @@ try {
   check(kids.includes("q") && kids.includes("r"), "B3: two notes dropped into the group are its items: " + JSON.stringify(kids));
   check(!overlap(iq, ir), "B3: ...the second, dropped where the first is, lands clear of it: " + JSON.stringify([iq, ir]));
   // resized by its corner, both ways
+  // (selected by a click in its bottom-left corner: its items stay where they were dropped, in its middle)
   const gr = await rect(gid);
-  await click(gr.left + gr.width - 25, gr.top + gr.height - 25);
+  await click(gr.left + 25, gr.top + gr.height - 25);
   await sleep(200);
   check(await ev(`window.board.handle === ${JSON.stringify(gid)} && window.board.grip === ${JSON.stringify(gid)}`), "B3: a group selected has a resize handle (and a grip)");
   // (from its size as shown: its items may need more than it was made)
@@ -508,6 +509,55 @@ try {
   const after3 = await box(gid), kids3 = ((await node(gid))?.children ?? []).map((c) => c.id);
   check(!kids3.includes("r") && kids3.includes("q"), "B3: an item dragged out of the group leaves it: " + JSON.stringify(kids3));
   check(Math.abs(after3.w - before3.w) <= 1 && Math.abs(after3.h - before3.h) <= 1 && Math.abs(after3.x - before3.x) <= 1 && Math.abs(after3.y - before3.y) <= 1, "B3: ...and the group keeps its size and place: " + JSON.stringify([before3, after3]));
+  // its top-left item taken out of a group a person sized: the other items
+  // stay where they are (astra's, on bdc8eef); and one dragged above and
+  // left of its origin: the group moves out to hold it, the others staying
+  const SZ = { title: "Sized", nodes: [{ id: "sg", kind: "group", x: 100, y: 100, w: 700, h: 400, children: [{ id: "sa", title: "A", x: 0, y: 0, w: 160 }, { id: "sb", title: "B", x: 300, y: 160, w: 160 }] }] };
+  await ev(`window.sagebrush.board.load(${JSON.stringify(SZ)}).then(() => 1)`);
+  await until("!!window.board.item('sb')", 10000);
+  await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: 0, y: 0, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  const sg0 = await box("sg"), sb0 = await box("sb"), sa = await rect("sa"), sgr = await rect("sg");
+  await dragFrom(sa.left + 20, sa.top + 12, sgr.left + sgr.width + 120 - (sa.left + 20), 0);
+  const sg1 = await box("sg"), sb1 = await box("sb"), skids = ((await node("sg"))?.children ?? []).map((c) => c.id);
+  check(!skids.includes("sa") && Math.abs(sg1.x - sg0.x) <= 1 && Math.abs(sg1.y - sg0.y) <= 1 && Math.abs(sg1.w - sg0.w) <= 1 && Math.abs(sg1.h - sg0.h) <= 1, "B3: a sized group's top-left item taken out: the group stays: " + JSON.stringify([skids, sg0, sg1]));
+  check(Math.abs(sb1.x - sb0.x) <= 1 && Math.abs(sb1.y - sb0.y) <= 1, "B3: ...and its other item stays where it is: " + JSON.stringify([sb0, sb1]));
+  await ev(`window.sagebrush.board.load(${JSON.stringify(SZ)}).then(() => 1)`);
+  await until("!!window.board.item('sb')", 10000);
+  await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: 0, y: 0, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  // (by less than the group's margin: let go inside the group, so still its item)
+  const sb2 = await box("sb"), sa2 = await rect("sa"), sa2w = await box("sa"), sg2 = await box("sg");
+  await dragFrom(sa2.left + 4, sa2.top + 4, -12, -10);
+  const sg3 = await box("sg"), sb3 = await box("sb"), sa3 = await box("sa"), skids3 = ((await node("sg"))?.children ?? []).map((c) => c.id);
+  check(skids3.includes("sa") && sg3.x < sg2.x - 5 && sg3.y < sg2.y - 5, "B3: an item dragged above and left of a sized group's origin: the group moves out to hold it: " + JSON.stringify([skids3, sg2, sg3]));
+  check(Math.abs(sb3.x - sb2.x) <= 1 && Math.abs(sb3.y - sb2.y) <= 1, "B3: ...its other item stays where it is: " + JSON.stringify([sb2, sb3]));
+  check(Math.abs(sa3.x - (sa2w.x - 12)) <= 2 && Math.abs(sa3.y - (sa2w.y - 10)) <= 2, "B3: ...and it is where it was dropped: " + JSON.stringify([sa2w, sa3]));
+  // the selected item's grip over another note's link: the grip's, by mouse
+  // and by touch, the link not followed (astra's UI-BDC-2)
+  const LK = { title: "Link under", nodes: [{ id: "under", text: "[Under WWWWWWWWWWWWWWWWWWWWWWWWWWW](#noop)", x: 0, y: 0, w: 260 }, { id: "over", title: "Selected", x: 250, y: 20, w: 260 }] };
+  for (const how of ["mouse", "touch"]) {
+    await ev(`window.sagebrush.board.load(${JSON.stringify(LK)}).then(() => 1)`);
+    await until("!!window.board.item('over')", 10000);
+    await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: -100, y: -100, z: 1 }), window.board.render(), 1");
+    await sleep(300);
+    const ro = await rect("over");
+    await click(ro.left + 150, ro.top + 30);
+    await sleep(250);
+    const hash0 = await ev("location.hash"), o0 = await box("over"), gp2 = await gripOf("over");
+    const onLink = await ev(`!!document.elementFromPoint(${gp2.x}, ${gp2.y})?.closest('a')`);
+    if (how === "mouse") await dragFrom(gp2.x, gp2.y, 80, 100);
+    else {
+      const t = (type, x, y) => send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      await t("touchStart", gp2.x, gp2.y);
+      for (let i = 1; i <= 8; i++) { await t("touchMove", gp2.x + 10 * i, gp2.y + 12.5 * i); await sleep(16); }
+      await t("touchEnd");
+      await sleep(350);
+    }
+    const o1 = await box("over");
+    check(onLink && Math.abs(o1.x - (o0.x + 80)) <= 12 && Math.abs(o1.y - (o0.y + 100)) <= 12, `B2: the selected item's grip over another note's link drags it (${how}): ` + JSON.stringify([onLink, o0, o1]));
+    check((await ev("location.hash")) === hash0, `B2: ...and the link is not followed (${how}): ` + (await ev("location.hash")));
+  }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

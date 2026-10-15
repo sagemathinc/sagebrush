@@ -1238,10 +1238,16 @@ export class Board {
       const [p, q] = [...down.values()];
       return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y) };
     };
+    // (a press on the selected item's grip, over another item's link: the
+    // grip's, and the link not followed when it is let go, UI-BDC-2)
+    let gripPress = false;
+    this.el.addEventListener("click", (e) => { if (gripPress && (e.target as Element).closest?.("a")) { e.preventDefault(); e.stopPropagation(); } }, true);
     this.el.addEventListener("pointerdown", (e) => {
+      gripPress = this.gripAt(e.clientX, e.clientY, e.pointerType === "touch") !== null;
       // (links, buttons, controls, 3D views, and the fields of the item being
-      // edited, stay theirs; its frame drags it, as any item's does)
-      if ((e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
+      // edited, stay theirs, but for the selected item's grip over them; its
+      // frame drags it, as any item's does)
+      if (!gripPress && (e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
       cancelAnimationFrame(this.flight);
       const touch = e.pointerType === "touch";
       if (e.pointerType === "pen") this.penSeen = true;
