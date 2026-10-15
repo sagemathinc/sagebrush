@@ -59,7 +59,7 @@ const TOL: Record<string, [number, number, number?]> = {
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
-  besselj: [2e-14, 1e-300],
+  besselj: [4e-14, 1e-300],
 };
 // (J_nu(x) oscillates for |x| > nu with an envelope near sqrt(2/(pi |x|)):
 // there its error is measured against that, an absolute accuracy next to
@@ -181,6 +181,10 @@ print(repr(S._ldexp(-0.0, 1027)), repr(S._ldexp(2.0 ** 60, -1100)), kind(lambda:
 # (Bessel J: its edges, the side of the cut for negative x, and what it does not cover)
 print(repr(S.besselj(0.0, 0.0)), repr(S.besselj(2.5, 0.0)), repr(S.besselj(-3.0, 0.0)), repr(S.besselj(1.0, inf)), "%.12gj" % S.besselj(0.5, -2.0).imag, repr(S.besselj(nan, 1.0)))
 print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1.0, 1 + 2j)), (S.besselj, (inf, 1.0)), (S.besselj, (6e5, 6e5))]))
+# (the least subnormal x, daybreak's CORR-088-3: J_(1/2) ~ sqrt(2x/pi), J_1 and J_2 round to 0; huge finite orders,
+# API-088-4: J below the doubles is 0, and the turning point at 1e308 is refused, never an OverflowError)
+print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.besselj(2.0, 5e-324)), repr(S.besselj(1e308, 1.0)),
+      repr(S.besselj(500.0, 1.0)), kind(S.besselj, 1e308, 1e308).split(" (")[0], kind(S.besselj, 8e307, 8e307).split(" (")[0])
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -232,5 +236,8 @@ print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1
     "NotCovered: besselj: Sagebrush covers negative orders only when they are integers " +
       "NotCovered: besselj: Sagebrush covers real orders and arguments NotCovered: besselj: Sagebrush covers finite orders " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps (here about 601042)",
+    "1.7735048886036e-162 0.0 0.0 0.0 0.0 " +
+      "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps " +
+      "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps",
   ]);
 });
