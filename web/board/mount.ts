@@ -35,8 +35,9 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type Edge, type Item, plainTitle } from "./board";
-import { boardLink, layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { boardLink, layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
+import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 import { PixelBudget } from "../image-size";
@@ -96,7 +97,8 @@ export interface BoardHost {
   /** a CoCalc icon by its name (a converted board's stickers), as the host draws it; none: an emoji close to it (stickers.ts) */
   icon?(name: string): Element | null;
   /** the engine of code items, made the first time a board has code (the document then) */
-  code?: (d: BoardDoc) => BoardCode;
+  /** an interpreter for a language (a board's items may be in several: codes.ts) */
+  code?: (d: BoardDoc, mode: BoardMode) => BoardCode;
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
@@ -244,9 +246,11 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
 // again, does an item that was one since the board was loaded, until it has
 // run as its own (what it kept may be dropped only after a later sync takes
 // it, CORR-BB9-1): byPage, those items.
+// (code shown as text, its language's highlighter not loaded yet)
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 function withPreviews(d: BoardDoc, order: CodeCell[], byPage: Set<string>) {
   const notes = codeNotes(d);
-  return order.map(({ id, code, item }) => { const p = id === item && !byPage.has(item) ? notes.get(id)?.preview : undefined; return p ? { id, code, preview: p } : { id, code }; });
+  return order.map(({ id, code, item, mode }) => { const p = id === item && !byPage.has(item) ? notes.get(id)?.preview : undefined; return p ? { id, code, mode, preview: p } : { id, code, mode }; });
 }
 
 export function mountBoard(root: HTMLElement, host: BoardHost) {
@@ -520,10 +524,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
 
   // The engine of code items: the host's (none: the code shows, as text, as in an exported file)
-  let code: BoardCode | null = null;
-  function engine(): BoardCode | null {
+  // (one interpreter for each language its items are in: codes.ts, item 16)
+  let code: BoardCodes | null = null;
+  function engine(): BoardCodes | null {
     if (code || !host.code) return code;
-    const c = (code = host.code(doc!));
+    const c = (code = new BoardCodes((mode) => host.code!(doc!, mode)));
     c.onChange = () => { board.codeStates(); relayout(); };
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
     c.cache = host.outputs ?? null;
@@ -535,7 +540,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         if (code === c && c.error) say(plain("The code can't run here:", c.error));
         return;
       }
-      board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
+      board.setCode({ highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
       relayout();
     });
     return c;
@@ -545,7 +550,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // written only when what it shows changed, and not as a step to undo
   // (each of one run: dropped if its item ran again, or another board was
   // loaded, while its picture was drawn, SEC-14C-1)
-  async function keepPreviews(c: BoardCode, ids: string[]) {
+  async function keepPreviews(c: BoardCodes, ids: string[]) {
     const loaded = loads;
     const got = await c.previews(ids);
     if (!got.size || code !== c || loads !== loaded) return;
@@ -891,7 +896,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
   editor.onRun = (id) => { code?.run([cell(id)]); };
-  editor.highlight = () => code?.highlight ?? null;
+  editor.highlight = (id) => { const c = code; return c && c.highlight("", cell(id)) !== null ? (src: string) => c.highlight(src, cell(id))! : null; };
   editor.images = images;
   const editBtn = $("edit");
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };

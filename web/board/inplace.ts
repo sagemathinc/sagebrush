@@ -31,7 +31,7 @@ export interface InPlaceHost {
   /** run a code item (as its code is in the document) */
   run(id: string): void;
   /** the board's code highlighter (its language), once the notebook is loaded */
-  highlight(): ((src: string) => string) | null;
+  highlight(id: string): ((src: string) => string) | null;
   images: ImageStore | null;
 }
 
@@ -208,7 +208,7 @@ export class InPlace {
     ta.spellcheck = false;
     ta.setAttribute("autocapitalize", "off");
     ta.setAttribute("autocomplete", "off");
-    const paint = () => { pre.innerHTML = (this.host.highlight() ?? ((s: string) => highlightPython(s, false)))(ta.value); };
+    const paint = () => { pre.innerHTML = (this.host.highlight(this.id) ?? ((s: string) => highlightPython(s, false)))(ta.value); };
     ta.addEventListener("input", paint);
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {

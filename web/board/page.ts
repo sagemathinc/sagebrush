@@ -276,7 +276,8 @@ const host: BoardHost = {
   // it to someone else's code; only in Chromium, as on the notebook page)
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
-    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
+    // (one for each language the board's items are in: Sage's with its library, item 16)
+    : ref ? (d, mode) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
