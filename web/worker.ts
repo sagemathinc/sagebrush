@@ -26,6 +26,13 @@ const FILES: Record<string, string> | undefined = (globalThis as any).__SB_FILES
 (globalThis as any).__SAGEBRUSH_ENGINE_URL__ = FILES?.["sagebrush-engine.wasm"] ?? new URL("sagebrush-engine.wasm?h=" + __SB_ENGINE_HASH__.slice(0, 16), BASE).href;
 // (and its SHA-256, checked before it runs: src/runtime/engine.ts)
 (globalThis as any).__SAGEBRUSH_ENGINE_SHA256__ = __SB_ENGINE_HASH__;
+// the PNG module likewise, the first time a PNG is written or read
+// (src/runtime/raster.ts); it is not one of the files a downloaded file's
+// runner carries (files mode), where writing or reading a PNG is then an
+// error saying so
+declare const __SB_RASTER_HASH__: string;
+(globalThis as any).__SAGEBRUSH_RASTER_URL__ = FILES ? FILES["sagebrush-raster.wasm"] : new URL("sagebrush-raster.wasm?h=" + __SB_RASTER_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_RASTER_SHA256__ = __SB_RASTER_HASH__;
 import "../build/cli/lib.gen.js";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
