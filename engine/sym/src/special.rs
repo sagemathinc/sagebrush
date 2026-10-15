@@ -68,7 +68,7 @@ fn small_int(e: &Expr) -> Option<i64> {
     if !r.is_integer() {
         return None;
     }
-    r.to_integer().to_i64().filter(|n| n.abs() <= EXACT_MAX)
+    r.to_integer().to_i64().filter(|n| (-EXACT_MAX..=EXACT_MAX).contains(n))
 }
 
 /// m with e = m + 1/2, for a rational e with denominator 2.
@@ -77,7 +77,7 @@ fn half_int(e: &Expr) -> Option<i64> {
     if *r.denom() != BigInt::from(2) {
         return None;
     }
-    r.floor().to_integer().to_i64().filter(|n| n.abs() <= EXACT_MAX)
+    r.floor().to_integer().to_i64().filter(|n| (-EXACT_MAX..=EXACT_MAX).contains(n))
 }
 
 fn is_minus_one_over_e(e: &Expr) -> bool {
@@ -134,9 +134,12 @@ fn binomial(n: i64, k: i64) -> BigInt {
 fn bernoulli(n: i64) -> Vec<Q> {
     let mut b: Vec<Q> = vec![Q::one()];
     for m in 1..=n {
+        // binomial(m + 1, k) for k = 0, 1, ... built along the row
         let mut s = Q::zero();
+        let mut c = BigInt::one();
         for (k, bk) in b.iter().enumerate() {
-            s += Q::from_integer(binomial(m + 1, k as i64)) * bk;
+            s += Q::from_integer(c.clone()) * bk;
+            c = c * BigInt::from(m + 1 - k as i64) / BigInt::from(k as i64 + 1);
         }
         b.push(-s / qi(m + 1));
     }
@@ -292,9 +295,11 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
         }
         Fun::Beta => {
             let (p, q) = (&a[0], &a[1]);
+            // a nonpositive integer (of any size) is a pole of gamma(p) or
+            // gamma(q)
             for t in [p, q] {
-                if let Some(n) = small_int(t) {
-                    if n <= 0 {
+                if let Some(r) = t.as_rat() {
+                    if r.is_integer() && !r.is_positive() {
                         value_error("beta_eval(): simple pole");
                     }
                 }
@@ -554,6 +559,30 @@ mod tests {
         ] {
             assert_eq!(s(a), b, "{}", a);
         }
+    }
+
+    /// Arguments beyond EXACT_MAX stay unevaluated, at once, including at
+    /// i64::MIN (whose abs() overflows) and the half-integer just above it.
+    #[test]
+    fn large_arguments_stay_calls() {
+        for (a, b) in [
+            ("zeta(-9223372036854775808)", "zeta(-9223372036854775808)"),
+            ("zeta(-9223372036854775807)", "zeta(-9223372036854775807)"),
+            ("zeta(-602)", "zeta(-602)"),
+            ("hurwitz_zeta(-9223372036854775808, 1/3)", "hurwitz_zeta(-9223372036854775808, 1/3)"),
+            ("psi(-18446744073709551615/2)", "psi(-18446744073709551615/2)"),
+            ("psi(-9223372036854775808)", "psi(-9223372036854775808)"),
+            ("psi(1, -18446744073709551615/2)", "psi(1, -18446744073709551615/2)"),
+            ("log_gamma(-9223372036854775808)", "log_gamma(-9223372036854775808)"),
+        ] {
+            let t = std::time::Instant::now();
+            assert_eq!(s(a), b, "{}", a);
+            assert!(t.elapsed().as_millis() < 500, "{}", a);
+        }
+        assert_eq!(s("zeta(-600)"), "0");
+        // a pole of any size is a pole
+        let pole = std::panic::catch_unwind(|| s("beta(-9223372036854775808, 2)"));
+        assert!(pole.is_err());
     }
 
     #[test]
