@@ -545,3 +545,59 @@ try:
     print('T/(T + 5*T^2)', '=>', r.parent(), '|', r)
 except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
     print('T/(T + 5*T^2)', '=>', type(ex).__name__, ex)
+
+# Over Zp too (review D46): a Laurent series divided coefficient by
+# coefficient when the quotient stays in Zp, else ValueError; an exact zero
+# over a valid divisor stays exact
+Md.<Ud> = LaurentSeriesRing(A)
+Sd.<Td> = PowerSeriesRing(A)
+try:
+    r = (A(5)*Ud) / Md(A(5))
+    print('(A(5)*Ud) / Md(A(5))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(A(5)*Ud) / Md(A(5))', '=>', type(ex).__name__, ex)
+try:
+    r = (A(5)*Ud) / (A(5)*Ud)
+    print('(A(5)*Ud) / (A(5)*Ud)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(A(5)*Ud) / (A(5)*Ud)', '=>', type(ex).__name__, ex)
+try:
+    r = Ud / Md(A(5))
+    print('Ud / Md(A(5))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('Ud / Md(A(5))', '=>', type(ex).__name__, ex)
+try:
+    r = (A(25)*Ud)/(A(5)*Ud)
+    print('(A(25)*Ud)/(A(5)*Ud)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(A(25)*Ud)/(A(5)*Ud)', '=>', type(ex).__name__, ex)
+try:
+    r = (A(5)*Ud + A(1)*Ud^2)/Md(A(5))
+    print('(A(5)*Ud + A(1)*Ud^2)/Md(A(5))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('(A(5)*Ud + A(1)*Ud^2)/Md(A(5))', '=>', type(ex).__name__, ex)
+try:
+    r = Sd(0)/(1+Td)
+    print('Sd(0)/(1+Td)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('Sd(0)/(1+Td)', '=>', type(ex).__name__, ex)
+try:
+    r = Sd(0)/(1 + Td + O(Td^3))
+    print('Sd(0)/(1 + Td + O(Td^3))', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('Sd(0)/(1 + Td + O(Td^3))', '=>', type(ex).__name__, ex)
+try:
+    r = Sd(0)/(5 + Td)
+    print('Sd(0)/(5 + Td)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('Sd(0)/(5 + Td)', '=>', type(ex).__name__, ex)
+try:
+    r = Sd(0)/(5*Td)
+    print('Sd(0)/(5*Td)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('Sd(0)/(5*Td)', '=>', type(ex).__name__, ex)
+try:
+    r = Md(0)/(A(5)*Ud)
+    print('Md(0)/(A(5)*Ud)', '=>', r.parent(), '|', r)
+except (ValueError, ArithmeticError, ZeroDivisionError) as ex:
+    print('Md(0)/(A(5)*Ud)', '=>', type(ex).__name__, ex)
