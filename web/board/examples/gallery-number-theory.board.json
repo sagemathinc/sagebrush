@@ -45,7 +45,7 @@
   {
    "id": "curve",
    "title": "An elliptic curve",
-   "text": "$y^2 + y = x^3 - x$, of conductor $37$: the first curve of rank $1$.",
+   "text": "$y^2 + y = x^3 - x$, of conductor $37$: the elliptic curve of least conductor with positive rank (rank $1$).",
    "code": "E = EllipticCurve([0, 0, 1, -1, 0])\nE.conductor(), E.rank(), E.torsion_order()"
   },
   {
