@@ -47,7 +47,9 @@ def _texts(v, name, what="str"):
 
 
 def _as(strings, dims, isstr):
-    """Python strings, column-major, as a string array or a cell array of character vectors"""
+    """Python strings, column-major, as a string array or a cell array of
+    character vectors, without trailing singleton dimensions (as Cell's are)"""
+    dims = _m._canon_dims(dims)
     if isstr:
         return _m._strarr(list(strings), dims) if _m._prod(dims) != 1 else Str(strings[0])
     return Cell([Char(s) for s in strings], dims)

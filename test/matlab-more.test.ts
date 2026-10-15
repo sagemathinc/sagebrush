@@ -94,6 +94,17 @@ test("join: its page's examples, an array of delimiters rebuilding split's text,
     "c = join({'a', 'b'; 'c', 'd'}); disp(class(c)); disp(size(c)); disp(join({'a', 'b', 'c'}, {'+', '='}));",
     'disp(join(["a" "b"], "-", 2)); disp(join("abc"));',
   ].join("\n") + "\n");
+  // (no trailing singleton dimensions in the result: N-D input, by default and along dim 3, and dim beyond the rank)
+  const nd = matlab([
+    "S = reshape(string(1:24), [2, 3, 4]); y = join(S, 3); disp(size(y)); disp(ndims(y)); disp(y(2, 3));",
+    "y = join(S); disp(size(y)); disp(y(2, 3));",
+    "C = reshape(cellstr(string(1:24)), [2, 3, 4]); z = join(C, 3); disp(size(z));",
+    'w = join(["a", "b"; "c", "d"], 5); disp(size(w)); disp(ndims(w));',
+    'v = split(["a b" "c d"]); disp(size(join(v, 3)));',
+  ].join("\n") + "\n");
+  assert.deepEqual(nd.split("\n").map((l: string) => l.trim()).filter(Boolean), [
+    "2     3", "2", "6 12 18 24", "2     3", "6 12 18 24", "2     3", "2     2", "2", "1     2",
+  ]);
   assert.deepEqual(out.split("\n").map((l: string) => l.trim()).filter(Boolean), [
     '"Carlos Sada"', '"Ella Olsen"', '"Diana Lee"', '"x-y-z"', '"a-b-c"', '"x + y = z"', '"a - b = c"',
     '"Carlos Ella Diana"    "Sada Olsen Lee"', "bacon, lettuce, and tomato", "cell", "2     1", "{'a+b=c'}", "a-b", "abc",
