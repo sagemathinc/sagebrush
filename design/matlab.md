@@ -307,7 +307,12 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - LineSpec strings (`'r--o'`) work, and so do name-value properties;
   - titles are bold and subtitles normal, as the documented defaults of
     TitleFontWeight and SubtitleFontWeight; a title's own `FontWeight`
-    is kept. The subtitle follows the title on its line;
+    is kept. The subtitle is a line under the title, as documented, in
+    the title's size (Sagebrush's choice), and the axes gives up that
+    line's height (the interactive 3-D view shows it the same way);
+    `title(titletext, subtitletext)` sets both. A new plot with hold off
+    resets the title and labels to their defaults, as NextPlot 'replace'
+    resets the axes;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,

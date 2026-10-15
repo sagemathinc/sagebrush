@@ -880,7 +880,7 @@ def _pow10_label(v):
 class Panel:
     """One set of axes: primitives plus options.
 
-    Options: title, title_weight, subtitle ((text, weight), after the title),
+    Options: title, title_weight, subtitle ((text, weight), a line under the title),
     xlabel, ylabel, xmin, xmax, ymin, ymax, xscale/yscale
     ('linear' or 'log'), grid, legend (None: when labels exist; False: never),
     legend_loc, aspect_ratio (1 for equal scales), frame (a box with ticks,
@@ -997,7 +997,9 @@ class Panel:
         ts, ls, tts = float(o.get("tick_size", 10.5)), float(o.get("label_size", 12)), float(o.get("title_size", 14))
         right_y = o.get("yaxis_side") == "right"
         # margins around the plot area, for tick labels, axis labels and title
-        top = 10 + (tts + 8 if title else 0)
+        sub = o.get("subtitle") if title else None
+        sub_h = tts + 4 if sub else 0  # (the subtitle's line, under the title)
+        top = 10 + (tts + 8 if title else 0) + sub_h
         bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
         right = 14
         guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
@@ -1008,6 +1010,7 @@ class Panel:
             # (matplotlib's axes: the box is the plot area; labels and the
             # title go outside it)
             left = top = right = bottom = 0
+            top = sub_h  # (except a subtitle's line: the title stays where it was)
         pw, ph = max(20, w - left - right), max(20, h - top - bottom)
         ar = o.get("aspect_ratio")
         if o.get("fit_aspect") and ar not in (None, "automatic", "auto") and None not in (
@@ -1070,11 +1073,13 @@ class Panel:
                 out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="%s" transform="rotate(%s %s %s)">%s</text>' % (
                     _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), _rich(ylabel)))
         if title:
-            sub = o.get("subtitle")
-            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s%s</text>' % (
-                _fmt(P.left + pw / 2), _fmt(P.top - max(8, tts * 0.6 + 4)), _fmt(tts),
-                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", _rich(title),
-                '<tspan font-weight="%s"> %s</tspan>' % (_esc(sub[1]), _rich(sub[0])) if sub else ""))
+            ty = P.top - max(8, tts * 0.6 + 4)
+            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
+                _fmt(P.left + pw / 2), _fmt(ty - sub_h), _fmt(tts),
+                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", _rich(title)))
+            if sub:
+                out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
+                    _fmt(P.left + pw / 2), _fmt(ty), _fmt(tts), ' font-weight="bold"' if sub[1] == "bold" else "", _rich(sub[0])))
         out.append(self._legend_svg(P))
         out.append("</g>")
         return "".join(out), self.describe(xlo, xhi, ylo, yhi, xlog, ylog)
