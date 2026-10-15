@@ -1,6 +1,7 @@
 """matplotlib.colors: the colormap classes (enough to build one from colors),
 Normalize, and color conversions."""
-from _graphics import to_color, colormap as _colormap
+import re as _re
+from _graphics import to_color, colormap as _colormap, TAB10 as _TAB10
 
 
 class Colormap:
@@ -109,55 +110,82 @@ CSS4_COLORS = {
     "whitesmoke": "#f5f5f5", "yellow": "#ffff00", "yellowgreen": "#9acd32"}
 
 
+# matplotlib's Tableau colors (its color cycle), each also with "grey"
+TABLEAU_COLORS = {"tab:" + n: h for n, h in zip(
+    ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray", "olive", "cyan"], _TAB10)}
+TABLEAU_COLORS["tab:grey"] = TABLEAU_COLORS["tab:gray"]
+
 # matplotlib's one-letter colors
 BASE_COLORS = {"b": (0, 0, 1), "g": (0, 0.5, 0), "r": (1, 0, 0), "c": (0, 0.75, 0.75), "m": (0.75, 0, 0.75),
                "y": (0.75, 0.75, 0), "k": (0, 0, 0), "w": (1, 1, 1)}
 
 
 def _hex_rgba(h, c):
+    """"#rgb", "#rgba", "#rrggbb" or "#rrggbbaa" (ASCII hex digits only:
+    no sign, space or other digit), as matplotlib reads them"""
+    if not _re.fullmatch(r"#[0-9a-fA-F]+", h):
+        raise ValueError("Invalid RGBA argument: %r" % (c,))
+    if len(h) in (4, 5):
+        h = "#" + "".join(d + d for d in h[1:])
     if len(h) not in (7, 9):
         raise ValueError("Invalid hex color specifier: %r" % (c,))
-    try:
-        v = tuple(int(h[i:i + 2], 16) / 255 for i in range(1, len(h), 2))
-    except ValueError:
-        raise ValueError("Invalid hex color specifier: %r" % (c,)) from None
+    v = tuple(int(h[i:i + 2], 16) / 255 for i in range(1, len(h), 2))
     return v if len(v) == 4 else v + (1.0,)
 
 
 def to_rgba(c, alpha=None):
     """c as (r, g, b, a) in 0..1, as matplotlib's: a name, hex string, 'C<n>',
-    a gray level or a tuple (its values kept, its alpha unless alpha is given)"""
+    a gray level, a sequence or array of 3 or 4 values (kept as they are), or
+    a (color, alpha) pair; alpha, if given, replaces the color's"""
+    if isinstance(c, tuple) and len(c) == 2:  # (a color and its alpha)
+        if alpha is None:
+            c, alpha = c
+        else:
+            c = c[0]
+    orig = c
+    if alpha is not None and not 0 <= alpha <= 1:
+        raise ValueError("'alpha' must be between 0 and 1, inclusive")
     if isinstance(c, str):
-        if c.lower() == "none":
+        lc = c.lower()
+        if lc == "none":
             return (0.0, 0.0, 0.0, 0.0)
         if c in BASE_COLORS:
             rgba = tuple(float(v) for v in BASE_COLORS[c]) + (1,)
-        elif len(c) == 2 and c[0] == "C" and c[1].isdigit():
-            rgba = _hex_rgba(to_color(c), c)[:3] + (1,)
+        elif _re.fullmatch(r"C[0-9]+", c):  # (the color cycle's, round and round)
+            rgba = _hex_rgba(_TAB10[int(c[1:]) % 10], c)[:3] + (1,)
+        elif lc.startswith("xkcd:"):
+            raise NotImplementedError("the xkcd colors (%r) are not supported by sagebrush's matplotlib" % (c,))
+        elif lc in TABLEAU_COLORS or lc in CSS4_COLORS:  # (names in any case)
+            rgba = _hex_rgba(TABLEAU_COLORS.get(lc) or CSS4_COLORS[lc], c)
         elif c.startswith("#"):
             rgba = _hex_rgba(c, c)
         else:
-            h = to_color(c)
-            h = CSS4_COLORS.get(h.lower(), h) if isinstance(h, str) else h
-            try:
+            try:  # (a gray level)
                 g = float(c)
             except ValueError:
-                g = None
-            if g is not None and 0 <= g <= 1:
-                rgba = (g, g, g, 1.0)
-            elif isinstance(h, str) and h.startswith("#"):
-                rgba = _hex_rgba(h, c)
-            else:
-                raise ValueError("Invalid RGBA argument: %r" % (c,))
-    elif isinstance(c, (tuple, list)) and len(c) in (3, 4):
-        rgba = tuple(float(v) for v in c)
-        if len(rgba) == 3:
-            rgba += (1,)
-        if any(v < 0 or v > 1 for v in rgba):  # (nan passes, as in matplotlib)
-            raise ValueError("RGBA values should be within 0-1 range")
-    else:
-        raise ValueError("Invalid RGBA argument: %r" % (c,))
-    return rgba if alpha is None else rgba[:3] + (alpha,)
+                raise ValueError("Invalid RGBA argument: %r" % (c,)) from None
+            if not 0 <= g <= 1:
+                raise ValueError("Invalid string grayscale value %r. Value must be within 0-1 range" % (c,))
+            rgba = (g, g, g, 1.0)
+        return rgba if alpha is None else rgba[:3] + (alpha,)
+    if hasattr(c, "tolist") and getattr(c, "ndim", 1) == 2 and c.shape[0] == 1:
+        c = c.reshape(-1)  # (an array of one color)
+    if hasattr(c, "tolist"):
+        c = c.tolist()
+    if not isinstance(c, (tuple, list)):
+        raise ValueError("Invalid RGBA argument: %r" % (orig,))
+    if len(c) not in (3, 4):
+        raise ValueError("RGBA sequence should have length 3 or 4")
+    if not all(isinstance(v, (int, float)) for v in c):
+        raise ValueError("Invalid RGBA argument: %r" % (orig,))
+    rgba = tuple(float(v) for v in c)
+    if len(rgba) == 3 and alpha is None:
+        alpha = 1
+    if alpha is not None:
+        rgba = rgba[:3] + (alpha,)
+    if any(v < 0 or v > 1 for v in rgba):  # (nan passes, as in matplotlib)
+        raise ValueError("RGBA values should be within 0-1 range")
+    return rgba
 
 
 def to_rgb(c):

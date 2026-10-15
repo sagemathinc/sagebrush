@@ -18,7 +18,7 @@ import math
 import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg)
-from matplotlib.colors import to_rgba as _to_rgba
+from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS
 
 PT = 100 / 72  # pixels per point at 100 dpi
 
@@ -27,9 +27,14 @@ def to_color(c, default=None):
     """A color given to pyplot as CSS for the SVG, checked as matplotlib
     checks colors: one it does not know is its ValueError (the SVG gets
     only what to_color makes of a valid one, escaped)."""
-    if c is not None and not (isinstance(c, str) and c in ("none", "None", "currentColor")):
-        _to_rgba(c)
-    return _css(c, default)
+    if c is None or isinstance(c, str) and c in ("none", "None", "currentColor"):
+        return _css(c, default)
+    rgba = _to_rgba(c)
+    css = _css(c, default)
+    if isinstance(css, str) and (css.startswith("#") or css.lower() in _CSS4_COLORS):
+        return css
+    # (a matplotlib color CSS does not know, "C12" or "TAB:BLUE": as hex)
+    return "#%02x%02x%02x" % tuple(int(v * 255 + 0.5) for v in rgba[:3])
 
 # rc settings (only those set: unset ones keep matplotlib's defaults below)
 rcParams = {}

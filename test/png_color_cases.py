@@ -51,3 +51,36 @@ for c in ["notacolor", "#12345", (1, 2, 3), BAD]:
         to_rgba(c)
     except ValueError as e:
         print(type(e).__name__, e)
+# hex strictly (ASCII hex digits, 3, 4, 6 or 8 of them), gray levels,
+# names in any case, the color cycle's C<n> (CORR-788-1, CORR-EE6-1)
+for c in ['#abc', '#ABCD', '#abcdef', '#ABCDEF80', '#ff00-1', '#ff00+1', '#ff00 1', '#ff\n0000', '#ff0000\n', ' #ff0000', '#ab',
+          '#abcde', '#abcdefa', '#abcdef801', '#gg0000', '#', 'ff0000', '#١٢٣', '#-ab', '#+abc', '#0x12',
+          '0.5', ' 0.5', '0.5 ', '1.5', '-0.1', 'nan', 'inf', '1e-1', '0x1', '.5', '1', '0', '+0.5', '0_5',
+          'red', 'Red', 'RED', ' red', 'red ', 'darkgrey', 'DarkGrey', 'grey', 'r', 'R', 'B', 'k', 'w', 'C0', 'C9', 'C10', 'C255', 'C00',
+          'c0', 'C-1', 'C', 'C 1', 'C٣', 'tab:blue', 'TAB:BLUE', 'tab:Blue', 'tab:grey', 'Tab:gray', 'None', 'NONE', '']:
+    try:
+        print(repr(c), to_rgba(c))
+    except ValueError as e:
+        print(repr(c), "ValueError", e)
+for c in ['#ff00-1', '#ff00 1', '#abc', '#abcd']:
+    for where in ("plot", "savefig"):
+        fig, ax = plt.subplots()
+        try:
+            if where == "plot":
+                ax.plot([0, 1], [0, 1], color=c)
+            b = io.StringIO()
+            fig.savefig(b, format="svg", **({"facecolor": c} if where == "savefig" else {}))
+            print(repr(c), where, "saved")
+        except ValueError as e:  # (plot's message is Line2D's, which differs: its type)
+            print(repr(c), where, "ValueError", e if where == "savefig" else "")
+        plt.close("all")
+# alpha given, (color, alpha) pairs, arrays, sequences of other lengths
+import numpy as np
+for args in [("r", 2), ("r", -0.1), ("r", 0.5), ("r", float("nan")), (("r", 0.3),), (("r", 0.3), 0.6), ((1, 0, 0, 0.5),),
+             ((1, 0, 0, 0.5), None), (np.array([1, 0, 0]),), (np.array([1, 0, 0, 0.2]),), (np.array([[1, 0, 0]]),), (np.array([0.5]),),
+             ([1, 0, 0],), (("#abc", 2),), (("#abcd", 0.5),), ("none", 0.5), ((1, 0, 0), 1), ("r", True), ((1, 0),), ([1, 0],),
+             ((1, 0, 0, 0, 0),), (("r", "g", "b"),), ((1, 0, 0, 2),), ((1, 0, 0), 0.5), ("C12", 0.25), ("0.5", 1)]:
+    try:
+        print(repr(args), to_rgba(*args))
+    except ValueError as e:
+        print(repr(args), "ValueError", e)
