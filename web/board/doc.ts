@@ -72,7 +72,7 @@ export interface DocNote {
   x?: number;
   /** as `x` */
   y?: number;
-  /** its width (default 260, or 440 for a code item) */
+  /** its width (default 260; 440 for a code item; for a note with only a picture, the picture's width, up to 480, its height then from the picture's shape) */
   w?: number;
   /** its height (default: as tall as what it shows) */
   h?: number;

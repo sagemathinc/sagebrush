@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { layout } from "../web/board/doc";
 
 // The board format's field reference (web/board-format.md's Fields) is
 // written from web/board/doc.ts's doc comments by
@@ -66,4 +67,16 @@ test("a kind of item added to DocNode without a section is refused (HARD-EC7-1)"
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a note's width as the reference says it: 260, 440 for code, a picture-only note its picture's width up to 480 (DOC-EC7-2)", () => {
+  const r = run(["--stdout"]);
+  assert.match(r.stdout, /\| `w` \| number \| its width \(default 260; 440 for a code item; for a note with only a picture, the picture's width, up to 480, its height then from the picture's shape\) \|/);
+  const src = "data:image/png;base64,iVBORw0KGgo=";
+  const { items } = layout({ nodes: [{ id: "big", image: "big" }, { id: "small", image: "small" }, { id: "text", text: "hi" }, { id: "code", code: "1" }], images: { big: { w: 800, h: 600, src }, small: { w: 200, h: 100, src } } } as any);
+  const size = (id: string) => { const it = items.find((x: any) => x.id === id)!; return [it.w, it.h]; };
+  assert.deepEqual(size("big"), [480, 360]);
+  assert.deepEqual(size("small"), [200, 100]);
+  assert.equal(size("text")[0], 260);
+  assert.equal(size("code")[0], 440);
 });
