@@ -282,8 +282,12 @@ def _fzero_search(F, x0, show, outs):
     published iterative displays show, step k tries a = x0 - dx*sqrt(2)^k
     and then b = x0 + dx*sqrt(2)^k, with dx = x0/50, and stops at the first
     value whose sign differs from the other end's.  For x0 = 0, where that
-    rule gives no step, dx = 1/50 is Sagebrush's own choice, as is ending
-    the search (exitflag -6) when the next a or b would overflow.  Returns
+    rule gives no step, the search is on the scale of 0.1: dx = 0.1/50.
+    That scale is GNU Octave's (observed: Octave's fzero tries the same
+    multiples of x0 from any start, 0.99 x0, 1.025 x0, 0.95 x0, ..., and
+    from x0 = 0 exactly those multiples of 0.1: 0.099, 0.1025, 0.095, ...).
+    Ending the search (exitflag -6) when the next a or b would overflow is
+    Sagebrush's own choice.  Returns
     (a, fa, b, fb, k, flag, x, fx) where flag is None when it found a sign
     change"""
     fx0 = F(x0)
@@ -306,7 +310,7 @@ def _fzero_search(F, x0, show, outs):
     fa = fb = fx0
     if fx0 == 0:
         return a, fa, b, fb, 0, None, x0, fx0
-    dx = x0 / 50 if x0 != 0 else 1 / 50
+    dx = (x0 if x0 != 0 else 0.1) / 50
     k = 0
     while True:
         k += 1
@@ -889,9 +893,13 @@ def lsqnonneg_(nargout, *args):
     (default 10*eps*norm(C,1)*length(C), as the page gives it).  The
     options are Display ('notify', 'final', 'off' or 'none') and TolX.
 
-    Sagebrush's own choices, where the page fixes nothing: TolX is the
-    threshold for entering (lambda above it), for a positive entry and for
-    reaching 0; the limit behind exitflag 0 is MaxIter if set and
+    TolX is the threshold for entering (lambda above it); a passive
+    solution's entries are tested for positivity exactly, and the variable
+    that limits the step back reaches 0 exactly, as in Lawson and Hanson's
+    steps 6 to 11, so that a solution of any scale is kept (TolX, which
+    scales with C, is a dual tolerance, not a size for x).
+
+    Sagebrush's own choices, where the page fixes nothing: the limit behind exitflag 0 is MaxIter if set and
     otherwise Lawson and Hanson's 3 times the number of variables;
     iterations counts the least-squares solves; a sparse C is used as a
     full matrix; and the message for exitflag 0 is Sagebrush's own"""
@@ -939,15 +947,22 @@ def lsqnonneg_(nargout, *args):
         passive[t] = True
         z = solve(passive)
         it += 1
-        while np.any(z[passive] <= tol):
+        # (Lawson and Hanson's steps 6 to 11: the passive solution's entries
+        # are tested for positivity exactly, whatever the scale of C; the
+        # step back stops where the first of them reaches 0, which leaves
+        # with every other passive variable at 0 or below)
+        while np.any(z[passive] <= 0):
             if it >= maxit:
                 flag = 0
                 break
-            neg = passive & (z.reshape(-1) <= tol)
+            neg = passive & (z.reshape(-1) <= 0)
             xs, zs = x.reshape(-1)[neg], z.reshape(-1)[neg]
-            alpha = float(np.min(xs / (xs - zs)))
-            x = x + alpha * (z - x)
-            passive &= ~(np.abs(x.reshape(-1)) <= tol)
+            gap = xs - zs
+            ratios = np.where(gap > 0, xs / np.where(gap > 0, gap, 1.0), 0.0)
+            k = int(np.argmin(ratios))
+            x = x + float(ratios[k]) * (z - x)
+            x[np.flatnonzero(neg)[k]] = 0.0
+            passive &= ~(x.reshape(-1) <= 0)
             x[~passive] = 0.0
             z = solve(passive)
             it += 1
@@ -971,6 +986,12 @@ def lsqnonneg_(nargout, *args):
 
 # ------------------------------------------------------------------ quad
 
+# quad's evaluation limit: GNU Octave's for its adaptive Simpson quadrature,
+# quadv, observed with Octave 11.1 (it stops at exactly 10001 evaluations,
+# whatever the integrand, warning "maximum iteration count reached")
+_QUAD_MAX_EVALS = 10001
+
+
 @_bi("quad")
 def quad_(nargout, fun, *args):
     """quad as its documentation page describes it: quad(fun, a, b),
@@ -990,10 +1011,15 @@ def quad_(nargout, fun, *args):
     otherwise its halves are integrated in turn.  There is no limit on the
     recursion depth, as the paper argues.
 
+    At most 10001 evaluations, the limit of GNU Octave's adaptive Simpson
+    quadrature (quadv: observed, it stops at exactly 10001 whatever the
+    integrand): a subinterval whose step or halves would go beyond it is
+    accepted with the value it has, with a warning that the tolerance may
+    not be met; the count never goes beyond it.
+
     Sagebrush's own choices, where the page fixes nothing: a subinterval
     with an Inf or NaN value is not subdivided further, and the warning
-    says the integrand is not finite; at most 10000 evaluations, after
-    which the remaining subintervals are accepted with a warning; the
+    says the integrand is not finite; the
     trace's number format; and single precision: a single a, b or value
     gives a single result, computed in double"""
     if len(args) < 2:
@@ -1059,14 +1085,24 @@ def quad_(nargout, fun, *args):
         flo, fmid, fhi = fr["f"]
         m = (lo + hi) / 2
         h = (hi - lo) / 4
-        fml, fmr = values([lo + h, hi - h])
-        i1 = h / 1.5 * (flo + 4 * fmid + fhi)
-        i2 = h / 3 * (flo + 4 * (fml + fmr) + 2 * fmid + fhi)
-        i1 = (16 * i2 - i1) / 15
-        finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi, fml, fmr))
-        met = abs(i1 - i2) <= tol
-        tiny = m <= min(lo, hi) or max(lo, hi) <= m
-        if not (met or tiny or not finite or count[0] >= 10000):
+        if count[0] + 2 > _QUAD_MAX_EVALS:
+            # (no evaluations left for this interval's step: its Simpson
+            # value from the three it has)
+            i1 = h / 1.5 * (flo + 4 * fmid + fhi)
+            finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi))
+            met = tiny = False
+            full = True
+        else:
+            fml, fmr = values([lo + h, hi - h])
+            i1 = h / 1.5 * (flo + 4 * fmid + fhi)
+            i2 = h / 3 * (flo + 4 * (fml + fmr) + 2 * fmid + fhi)
+            i1 = (16 * i2 - i1) / 15
+            finite = all(_math.isfinite(abs(v)) for v in (flo, fmid, fhi, fml, fmr))
+            met = abs(i1 - i2) <= tol
+            tiny = m <= min(lo, hi) or max(lo, hi) <= m
+            # (no evaluations left for its halves' steps: this value)
+            full = count[0] + 2 > _QUAD_MAX_EVALS
+        if not (met or tiny or not finite or full):
             fr["state"] = "left"
             fr["mid"] = (fml, fmr)
             stack.append({"lo": lo, "hi": m, "f": (flo, fml, fmid), "state": "new"})
@@ -1076,7 +1112,7 @@ def quad_(nargout, fun, *args):
         elif tiny and not met:
             warn("tiny", "quad: a subinterval holds no more machine numbers; the tolerance may not be met.")
         elif not met:
-            warn("count", "quad: the limit of 10000 function evaluations was reached; the tolerance may not be met.")
+            warn("count", "quad: the limit of %d function evaluations was reached; the tolerance may not be met." % _QUAD_MAX_EVALS)
         if trace:
             _m._write("%10d %21.14g %21.14g %21.14g\n" % (count[0], lo, hi - lo, i1.real))
         q = i1
