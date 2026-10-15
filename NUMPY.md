@@ -8,14 +8,30 @@ Status (2026-10-05): built, following the recommendation below. The core is
 
 `numpy-tests/` holds programs that print results: creation, arithmetic and
 promotion, ufuncs, reductions, indexing, shapes, printing, random, linalg,
-fft, polynomials. `python3 numpy-tests/run.py` runs each one under CPython
-with the real NumPy (2.5.1) and under sagebrush, and requires the output to
-be **byte-identical**. All 13 pass, and CI runs them.
+fft, polynomials, printing options and float formatting. `python3
+numpy-tests/run.py` runs each one under CPython with the real NumPy (2.5.1)
+and under sagebrush, and requires the output to be **byte-identical**. All 17
+pass, and CI runs them.
 
 - **Printing:** `repr`/`str` port NumPy's `arrayprint` rules (dragon4
   shortest digits, padding, line wrapping, summarization, `shape=`/`dtype=`
   suffixes, float32 shortest forms), so printed arrays look exactly like
   NumPy's.
+  - Every option of `set_printoptions` works, as do `printoptions`,
+    `array2string`, `array_repr` and `array_str` with their arguments: `sign`,
+    `floatmode`, `nanstr`/`infstr`, `formatter` and `override_repr`, but not
+    `legacy` (an error).
+  - `format_float_positional` and `format_float_scientific` follow NumPy's
+    Dragon4 (`numpy/_core/src/multiarray/dragon4.c`): its digit rules (exact
+    digits rounded half to even, `min_digits`, carries) and its formatting
+    (`trim`, padding), including its argument checks and its 16,384-character
+    buffer: a positional result that would not fit is a RuntimeError, and a
+    scientific one is cut where NumPy cuts it.
+  - `numpy-tests/test_dragon4.py` compares about 1,500 random cases of each;
+    `test_printoptions_limits.py` compares the limits and argument checks.
+  - `nextafter` picks NumPy 2's loop with Python scalars weak, e.g. float32
+    for `np.float32(1)` and `2.0`. NumPy computes bool, int8 and uint8
+    inputs in float16, which Sagebrush refuses (see float16 below).
 - **Arithmetic:** NumPy 2 promotion, with Python scalars "weak" (NEP 50),
   and OverflowError for out-of-range Python ints. Float sums use NumPy's
   pairwise summation, so they agree to the last bit. `mean`, `var` and `std`

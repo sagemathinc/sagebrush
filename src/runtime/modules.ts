@@ -387,7 +387,38 @@ newBuiltinModule("math", (m) => {
     while (Math.abs(v) < 0.5) { v *= 2; e--; }
     return tuple([O.mkfloat(v), e]);
   });
-  fn(m, "ldexp", (x: any, i: any) => O.mkfloat(F(x) * Math.pow(2, Number(i))));
+  // x * 2**i rounded once, as CPython's (C's ldexp): a subnormal result is
+  // rounded half to even, an overflow is OverflowError
+  fn(m, "ldexp", (x: any, i: any) => {
+    const v = F(x);
+    if (!O.isPyInt(i) && typeof i !== "boolean") raise(T.TypeError, "Expected an int as second argument to ldexp.");
+    if (v === 0 || !Number.isFinite(v)) return O.mkfloat(v);
+    const big = BigInt(typeof i === "boolean" ? +i : i);
+    // |v| = m * 2**ev with 0.5 <= m < 1
+    let ev = Math.floor(Math.log2(Math.abs(v))) + 1;
+    let mant = v / Math.pow(2, ev);
+    if (!(Math.abs(mant) >= 0.5 && Math.abs(mant) < 1)) {
+      // (log2's rounding, and subnormal inputs: exact halving and doubling)
+      mant = v; ev = 0;
+      while (Math.abs(mant) >= 1) { mant /= 2; ev++; }
+      while (Math.abs(mant) < 0.5) { mant *= 2; ev--; }
+    }
+    const total = big + BigInt(ev);
+    if (total > 1024n) raise(T.OverflowError, "math range error");
+    let r: number;
+    if (total >= -1021n) {
+      const t = Number(total);
+      // (2**1024 is not a double: m * 2 first)
+      r = t === 1024 ? mant * 2 * Math.pow(2, 1023) : mant * Math.pow(2, t);
+    } else if (total < -1074n - 54n) {
+      r = mant < 0 ? -0 : 0;
+    } else {
+      // exactly into the normal range, then one rounding to the subnormal
+      r = mant * Math.pow(2, Number(total) + 1074) * Math.pow(2, -1074);
+    }
+    if (!Number.isFinite(r)) raise(T.OverflowError, "math range error");
+    return O.mkfloat(r);
+  });
   const bigOf = (x: any): bigint => {
     // as CPython: anything with __index__ (int subclasses included)
     if (!O.isPyInt(x)) x = O.index(x);
