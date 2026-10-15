@@ -200,7 +200,9 @@ class RealNumber(float):
         ...
         NotImplementedError: % with an RR element past the doubles is not available in sagebrush yet
         sage: zeta(RR(-261.5))  # sagebrush only
-        zeta(-261.500000000000)
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: zeta(-261.500000000000): the value in RR, past the double range, is not available in sagebrush yet
         sage: sin(RR(10)^(10^6))  # sagebrush only
         Traceback (most recent call last):
         ...
