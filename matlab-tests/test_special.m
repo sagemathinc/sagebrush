@@ -1,4 +1,4 @@
-% psi, beta, betaln, erfcx, erfinv, erfcinv, expint and gammainc: the examples on
+% psi, beta, betaln, erfcx, erfinv, erfcinv, expint, gammainc and besselj: the examples on
 % their documentation pages and values across their ranges, to 10
 % significant digits (the last digits of special functions differ between
 % implementations; test/matlab.test.ts checks the precision, and the
@@ -28,6 +28,12 @@ p(gammainc(700, 50, 'upper')); p(gammainc(1e-3, 30));
 p(gammainc([1000 2000], [1 2], 'scaledupper')); p(gammainc(1000, 0, 'scaledlower')); p(gammainc(1000, 0, 'scaledupper'));
 p(gammainc(5e-324, [0.5 1])); p(gammainc(5e-324, 1, 'scaledlower')); p(gammainc(5e-324, 1, 'upper'));
 fprintf('%s\n', class(gammainc(single(1), 2)));
+% besselj: the page's examples, real orders across the regions, negative integer orders, scale
+p(besselj(3, 0:5)); p(besselj(3, 0:5, 1)); p(besselj(0:4, 2.5)); p(besselj(0:4, 17.5));
+p(besselj(0.3, [0.01 1 7 40 1000])); p(besselj(2.5, [0.5 5 50])); p(besselj(-3, [1 4 9]));
+p(besselj(50, [10 45 50 55 100])); p(besselj(100, [1 90 110 1e4])); p(besselj(0, [1e5 1e6]));
+p(besselj([0 1 2], 0)); p(besselj(0.5, 0));
+fprintf('%s\n', class(besselj(single(1), 2)));
 p(double(psi(single(0.3))));
 
 function p(x)

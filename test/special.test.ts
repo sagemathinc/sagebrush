@@ -60,6 +60,14 @@ const TOL: Record<string, [number, number, number?]> = {
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
   gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300], gammainc_scaled: [6e-15, 1e-300],
+  besselj: [6e-15, 1e-300],
+};
+// (J_nu(x) oscillates for |x| > nu with an envelope near sqrt(2/(pi |x|)):
+// there its error is measured against that, an absolute accuracy next to
+// its zeros, and relative to |J| below the oscillations)
+const besselFloor = (args: any[]): number => {
+  const nu = Math.abs(num(args[0])), x = Math.abs(num(args[1]));
+  return x > nu ? Math.sqrt(2 / (Math.PI * Math.max(1, x))) : 1e-300;
 };
 // (P's and Q's relative error grows with the size of their exponent, the
 // rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda):
@@ -96,7 +104,7 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
       return;
     }
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
-    let e = Math.hypot(gr - wr, gi - wi) / Math.max(TOL[name][1], Math.hypot(wr, wi));
+    let e = Math.hypot(gr - wr, gi - wi) / Math.max(name === "besselj" ? besselFloor(args) : TOL[name][1], Math.hypot(wr, wi));
     if (LOG_SCALED.has(name) && wr > 0) e /= Math.max(1, Math.abs(Math.log(wr)));
     if (TOL[name][2] !== undefined && Array.isArray(args[0])) {
       const key = name + " (complex s, per unit |Im s|)";
@@ -194,6 +202,13 @@ print(S.gammainc(m, m), S.gammaincc(m, m), abs(S.gammainc_scaled(m, m) / r - 1) 
       S.gammainc_scaled(m, 0.9 * m, True), abs(S.gammainc_scaled(1.7e308, 1.79e308, True) * 0.09 / 1.7 - 1) < 4e-15,
       S.gammainc_scaled(1.7e308, 1.79e308), abs(S.gammainc_scaled(m, 0.3 * m) - 1 / 0.7) < 4e-15)
 print(kind(S.gammaincc, 1e307, 1e308))
+# (Bessel J: its edges, the side of the cut for negative x, and what it does not cover)
+print(repr(S.besselj(0.0, 0.0)), repr(S.besselj(2.5, 0.0)), repr(S.besselj(-3.0, 0.0)), repr(S.besselj(1.0, inf)), "%.12gj" % S.besselj(0.5, -2.0).imag, repr(S.besselj(nan, 1.0)))
+print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1.0, 1 + 2j)), (S.besselj, (inf, 1.0)), (S.besselj, (6e5, 6e5))]))
+# (the least subnormal x, daybreak's CORR-088-3: J_(1/2) ~ sqrt(2x/pi), J_1 and J_2 round to 0; huge finite orders,
+# API-088-4: J below the doubles is 0, and the turning point at 1e308 is refused, never an OverflowError)
+print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.besselj(2.0, 5e-324)), repr(S.besselj(1e308, 1.0)),
+      repr(S.besselj(500.0, 1.0)), kind(S.besselj, 1e308, 1e308).split(" (")[0], kind(S.besselj, 8e307, 8e307).split(" (")[0])
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -246,5 +261,13 @@ print(kind(S.gammaincc, 1e307, 1e308))
     "0.001 0.002002 inf 5e-324 1.0 1.0 1e-320",
     "0.5 0.5 True True True inf True inf True",
     "NotCovered: gammainc: the continued fraction overflowed at a = 1e+307, x = 1e+308",
+    // (J_(1/2)(-2) = e^(i pi/2) J_(1/2)(2) = i sqrt(2/(2 pi)) sin 2 = 0.5130161365618278i)
+    "1.0 0.0 -0.0 0.0 0.513016136562j nan",
+    "NotCovered: besselj: Sagebrush covers negative orders only when they are integers " +
+      "NotCovered: besselj: Sagebrush covers real orders and arguments NotCovered: besselj: Sagebrush covers finite orders " +
+      "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps (here about 601042)",
+    "1.7735048886036e-162 0.0 0.0 0.0 0.0 " +
+      "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps " +
+      "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps",
   ]);
 });
