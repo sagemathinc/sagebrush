@@ -50,3 +50,20 @@ test("a field without a doc comment, or required without saying so, is refused; 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a kind of item added to DocNode without a section is refused (HARD-EC7-1)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-fields-"));
+  try {
+    mkdirSync(join(dir, "web", "board"), { recursive: true });
+    for (const f of ["web/board/doc.ts", "web/board/images.ts", "web/board-format.md"]) cpSync(join(repo, f), join(dir, f));
+    const doc = readFileSync(join(dir, "web/board/doc.ts"), "utf8");
+    const union = "export type DocNode = DocNote | DocGroup | DocInk | DocSticker;";
+    assert.ok(doc.includes(union));
+    writeFileSync(join(dir, "web/board/doc.ts"), doc.replace(union, "/** A widget. */\nexport interface DocWidget {\n  /** required: unique on its page */\n  id: string;\n}\nexport type DocNode = DocNote | DocGroup | DocInk | DocSticker | DocWidget;"));
+    const r = run(["--check"], dir);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /DocNode's DocWidget: a kind of item with no section/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
