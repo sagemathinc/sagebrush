@@ -667,3 +667,22 @@ for f in [x^2 + QQ(3)/2, x^2 - QQ(6)/5*x + QQ(3)/7]:
     t('L(Qp(3,6)(3^71))', lambda: L(Qp(3, 6)(3^71)))
     t('L(3^50) + 1', lambda: L(3^50) + 1)
     t('L(3^20)*(1+a)', lambda: L(3^20)*(1 + a))
+# precision arguments and exponents are validated by their exact value:
+# high-precision reals near integers, large integral reals, symbolic numbers
+H = RealField(100)
+K = Qp(3, 6)
+L = K.extension(polygen(K)^2 + 3, names='a')
+a = L.gen()
+vals = [('H(1)+2^-80', H(1) + H(2)^-80), ('H(2)-2^-90', H(2) - H(2)^-90), ('H(-9007199254740993)', H(-9007199254740993)), ('H(9007199254740993)', H(9007199254740993)), ('H(2)', H(2)), ('H(10)^400', H(10)^400), ('RR(2)', RR(2)), ('RR(1/3)', RR(1/3)), ('RR(2^60+1)', RR(2^60 + 1)), ('SR(2)', SR(2)), ('SR(3)/2', SR(3)/2), ('RR(oo)', RR(oo)), ('float(oo)', float('inf'))]
+for B, x in [(K, K(1)), (Zp(3, 6), Zp(3, 6)(1)), (L, a)]:
+    t('base', lambda: B)
+    for name, v in vals:
+        if B is L and 'oo' in name:
+            continue
+        t('absprec ' + name, lambda: B(1, absprec=v))
+        t('relprec ' + name, lambda: B(1, relprec=v))
+        t('add_bigoh ' + name, lambda: x.add_bigoh(v))
+t('add_bigoh H(-9007199254740993) precision', lambda: K(1).add_bigoh(H(-9007199254740993)).precision_absolute())
+R.<s> = K[]
+for name, v in [('H(2)', H(2)), ('H(1)+2^-80', H(1) + H(2)^-80), ('H(2)-2^-90', H(2) - H(2)^-90), ('SR(2)', SR(2)), ('SR(3)/2', SR(3)/2), ('RR(2)', RR(2))]:
+    t('s^' + name, lambda: (s + 1)^v)
