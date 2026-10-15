@@ -216,6 +216,25 @@ try {
   ok(out.trim() === "Unrecognized function or variable 'nothere'.", "a MATLAB error is MATLAB's message: " + JSON.stringify(out.trim()));
   await runCode("plot(1:3, [2 4 3])");
   ok(await ev("!![...document.querySelectorAll('.cell')].at(-1).querySelector('.out svg, .out img')"), "a MATLAB figure is shown");
+  // stacked scripts in the SVG, as rendered: a pair's two scripts start where its base ends, the text after
+  // starts where the wider ends (narrow/wide both ways, nested)
+  await runCode("plot(1:3)\nxlabel('a_{iiii}^W b')\ntitle('x^{a_1^2}_b c')\ntext(1.5, 2, 'a^{WWWW}_{iiii} b')");
+  const stacked = await ev(`(() => {
+    const svg = [...document.querySelectorAll('.cell')].at(-1).querySelector('.out svg');
+    const find = (s) => [...svg.querySelectorAll('text')].find((t) => t.textContent === s);
+    const at = (t, i) => [t.getStartPositionOfChar(i).x, t.getEndPositionOfChar(i).x];
+    const near = (a, b) => Math.abs(a - b) < 0.05;
+    const out = [];
+    let t = find('a iiiiW b');
+    if (!t) t = find('aiiiiW b');
+    out.push(!!t && near(at(t, 1)[0], at(t, 0)[1]) && near(at(t, 5)[0], at(t, 1)[0]) && near(at(t, 6)[0], Math.max(at(t, 4)[1], at(t, 5)[1])));
+    t = find('xa12b c');
+    out.push(!!t && near(at(t, 1)[0], at(t, 0)[1]) && near(at(t, 3)[0], at(t, 2)[0]) && near(at(t, 4)[0], at(t, 1)[0]) && near(at(t, 5)[0], Math.max(at(t, 3)[1], at(t, 4)[1])));
+    t = find('aWWWWiiii b');
+    out.push(!!t && near(at(t, 5)[0], at(t, 1)[0]) && near(at(t, 9)[0], Math.max(at(t, 4)[1], at(t, 8)[1])));
+    return out.join(' ');
+  })()`);
+  ok(stacked === "true true true", "MATLAB TeX: a stacked pair's scripts share their place, and the text after follows the wider (as rendered): " + stacked);
   // a MATLAB 3-D figure: the 3D view over its SVG, which a drag rotates
   await runCode("[X,Y] = meshgrid(-3:3);\nsurf(X,Y,peaks(X,Y))\ntitle(\"Original Sampling\")");
   const m3d = "[...document.querySelectorAll('.cell')].at(-1).querySelector('figure.plot3d')";

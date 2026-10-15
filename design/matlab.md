@@ -418,9 +418,12 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   - scripts are 0.7 of their base's size, raised 0.385 or lowered 0.245 of
     it (Sagebrush's choice); a subscript and a superscript on one base,
     one right after the other (`x_1^2`, `x^2_1`), are stacked at the same
-    place, as Octave draws them (in the SVG the second goes back by the
-    first's estimated width, 0.55 of its size a character, Sagebrush's
-    estimate; the 3-D view stacks them exactly);
+    place, as Octave draws them, and the text after follows the wider. The
+    3-D view stacks them in one grid cell. An SVG cannot measure its text
+    where it is made, so each run of a pair is given its length
+    (textLength, lengthAdjust spacingAndGlyphs), which makes the advances
+    exact: the length is Sagebrush's estimate from rough character
+    classes, and the glyphs are fitted to it;
   - the 3-D view gets the same runs of styled text, their sizes relative to
     the viewer's own text sizes, so that a `\fontsize` is the same size
     in points there as in the SVG.
