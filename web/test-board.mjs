@@ -509,6 +509,22 @@ try {
       dg = await docOf();
       check(dg.nodes.some((n) => n.id === "c") && !dg.nodes.find((n) => n.id === "s")?.children.some((c) => c.id === "c"), "dragging a note out of its group did not take it out");
       check(dg.nodes.find((n) => n.id === "s")?.children.length === 2, "the group lost its other members");
+      // Help, where the hint strip was (William's B5): a ? in the top bar, ⋯'s
+      // Help, or the ? key, open a dialog of the keys and gestures with links to
+      // read more; Esc closes it
+      check(await ev("!/Drag to move/.test(document.querySelector('[data-sbb=top]').textContent)"), "B5: no hint strip in the top bar");
+      const helpOpen = () => ev("document.querySelector('[data-sbb=helpdlg]').open");
+      check(await ev("(() => { const b = document.querySelector('[data-sbb=help]'); return !!b.offsetParent && b.getAttribute('aria-label') === 'Help'; })()"), "B5: a Help button in the top bar");
+      await ev("document.querySelector('[data-sbb=help]').click(), 1");
+      check(await helpOpen(), "B5: Help opens its dialog");
+      check(await ev("(() => { const d = document.querySelector('[data-sbb=helpdlg]'), t = d.textContent; return /Shift-drag from one note to another/.test(t) && /Double-click an item to write in it/.test(t) && [...d.querySelectorAll('a')].map((a) => a.href).join() === 'https://sagebrush.space/board-format.md,https://sagebrush.space/articles/notebook/01-how-cells-run,https://sagebrush.space/articles/' && [...d.querySelectorAll('a')].every((a) => a.target === '_blank' && /noopener/.test(a.rel)); })()"), "B5: ...what the hint said, more, and links to read more (in a new tab)");
+      await ev("document.querySelector('[data-sbb=helpdlg]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), document.querySelector('[data-sbb=helpdlg]').close(), 1");
+      await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })), 1");
+      check(await helpOpen(), "B5: the ? key opens it");
+      await ev("document.querySelector('[data-sbb=helpdlg]').close(), 1");
+      await ev("document.querySelector('[data-sbb=menubtn]').click(), document.querySelector('[data-sbb=helpitem]').click(), 1");
+      check((await helpOpen()) && await ev("document.querySelector('[data-sbb=menu]').hidden"), "B5: ⋯'s Help opens it, the menu closed");
+      await ev("document.querySelector('[data-sbb=helpdlg]').close(), 1");
       // the toolbar (Edit mode only): the default tools; connecting by taps;
       // a note added, then cancelled; choosing this board's tools
       check(await ev("!document.querySelector('.board-toolbar').hidden"), "the toolbar shows in Edit");
