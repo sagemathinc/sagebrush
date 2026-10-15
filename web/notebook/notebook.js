@@ -1643,14 +1643,17 @@ export function createNotebook(root, opts = {}) {
   }
   // Every change so far saved: resolves once the saves asked for (this one
   // too, and a merge a conflict asked for) are done; rejects with why, if
-  // the last one failed.  For leaving the page (the notebook's Whiteboard)
+  // the last one failed, or if what is here is still not saved after a few
+  // rounds (written elsewhere each time, CORR-7F9-1).  For leaving the page
+  // (the notebook's Whiteboard)
   async function saved() {
     for (let i = 0; i < 5; i++) {
       flush();
       await saveChain;
-      if (!timer && !savesPending) break;
+      if (lastSaveError) throw lastSaveError;
+      if (!timer && !savesPending) return;
     }
-    if (lastSaveError) throw lastSaveError;
+    throw new Error("changed elsewhere each time it was saved");
   }
   cellsEl.addEventListener("input", schedule);
   const observer = new MutationObserver(schedule);
