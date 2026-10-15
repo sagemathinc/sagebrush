@@ -111,12 +111,13 @@ impl BElt {
     }
 }
 
-/// The quaternion algebra (a, b)_F.
+/// The quaternion algebra (a, b)_F, made by `new` or `unramified` (the
+/// fields are private to the crate, so a and b are totally negative).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuatAlg {
-    pub f: QuadField,
-    pub a: QElt,
-    pub b: QElt,
+    pub(crate) f: QuadField,
+    pub(crate) a: QElt,
+    pub(crate) b: QElt,
 }
 
 impl QuatAlg {
@@ -128,6 +129,15 @@ impl QuatAlg {
             return Err("a and b must be totally negative (only totally definite algebras are supported)".into());
         }
         Ok(QuatAlg { f, a, b })
+    }
+    pub fn field(&self) -> &QuadField {
+        &self.f
+    }
+    pub fn a(&self) -> &QElt {
+        &self.a
+    }
+    pub fn b(&self) -> &QElt {
+        &self.b
     }
 
     /// A totally definite quaternion algebra over F unramified at every
@@ -270,14 +280,21 @@ fn ext_gcd(u: &BigInt, v: &BigInt) -> (BigInt, BigInt, BigInt) {
 /// A Z-lattice (1/den) (row span of h) in B, in the coordinates of [`BElt`],
 /// containing Lambda = Z^8; h is in Hermite normal form (upper triangular,
 /// positive diagonal, entries above the diagonal reduced modulo it) and den
-/// is least.
+/// is least. Made only by `from_gens` (the fields are private to the crate).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Lattice {
-    pub den: BigInt,
-    pub h: [[BigInt; 8]; 8],
+    pub(crate) den: BigInt,
+    pub(crate) h: [[BigInt; 8]; 8],
 }
 
 impl Lattice {
+    pub fn den(&self) -> &BigInt {
+        &self.den
+    }
+    /// The rows of the Hermite normal form.
+    pub fn hnf(&self) -> &[[BigInt; 8]; 8] {
+        &self.h
+    }
     /// Lambda + Z gens.
     pub fn from_gens(gens: &[BElt]) -> Lattice {
         let den = gens.iter().fold(BigInt::one(), |d, g| d.lcm(&g.den));
@@ -399,16 +416,27 @@ fn ring_closure(alg: &QuatAlg, o: &Lattice, extra: &[BElt]) -> Option<Lattice> {
 }
 
 /// A maximal order of a totally definite quaternion algebra over F that is
-/// unramified at every finite place, with its certificate.
+/// unramified at every finite place, with its certificate. Made only by
+/// `new`, which certifies it (the fields are private to the crate).
 #[derive(Clone, Debug)]
 pub struct MaximalOrder {
-    pub alg: QuatAlg,
-    pub lattice: Lattice,
+    pub(crate) alg: QuatAlg,
+    pub(crate) lattice: Lattice,
     /// A Z-basis (the rows of the lattice); basis[0] need not be 1.
-    pub basis: Vec<BElt>,
+    pub(crate) basis: Vec<BElt>,
 }
 
 impl MaximalOrder {
+    pub fn alg(&self) -> &QuatAlg {
+        &self.alg
+    }
+    pub fn lattice(&self) -> &Lattice {
+        &self.lattice
+    }
+    /// A Z-basis (the rows of the lattice); basis()[0] need not be 1.
+    pub fn basis(&self) -> &[BElt] {
+        &self.basis
+    }
     /// A maximal order of alg, which must be unramified at every finite
     /// place (an error otherwise). Implemented for a, b in Z, squarefree,
     /// with no odd prime factor in common or dividing disc F (as for
@@ -416,7 +444,8 @@ impl MaximalOrder {
     pub fn new(alg: &QuatAlg) -> Result<MaximalOrder, String> {
         let f = &alg.f;
         let (a, b) = match (alg.a.b.is_zero(), alg.b.b.is_zero(), alg.a.a.to_i64(), alg.b.a.to_i64()) {
-            (true, true, Some(a), Some(b)) if a.abs() < 1 << 31 && b.abs() < 1 << 31 => (a, b),
+            // unsigned_abs: abs() of i64::MIN overflows (HARD-022-1)
+            (true, true, Some(a), Some(b)) if a.unsigned_abs() < 1 << 31 && b.unsigned_abs() < 1 << 31 => (a, b),
             _ => return Err("maximal orders are implemented only for a, b in Z (|a|, |b| < 2^31)".into()),
         };
         let fa = factor_u64(a.unsigned_abs());
@@ -540,7 +569,7 @@ impl MaximalOrder {
         for (s, x) in self.basis.iter().enumerate() {
             for (t, y) in self.basis.iter().enumerate() {
                 let v = self.alg.tr_trd(&self.alg.mul(x, &self.alg.conj(y))).expect("an order is integral");
-                g[s][t] = v.to_i128().filter(|v| v.abs() < 1 << 60).ok_or("the norm form is too large")?;
+                g[s][t] = v.to_i128().filter(|v| v.unsigned_abs() < 1 << 60).ok_or("the norm form is too large")?;
             }
         }
         Ok(g)
@@ -598,12 +627,19 @@ pub fn mat_mul(r: &QLocalRing, x: &Mat, y: &Mat) -> Mat {
 /// then it is an isomorphism, as O / P O is simple of the same order.
 #[derive(Clone, Debug)]
 pub struct OrderSplitting {
-    pub ring: QLocalRing,
+    pub(crate) ring: QLocalRing,
     /// The images of the basis elements of the order.
-    pub images: Vec<Mat>,
+    pub(crate) images: Vec<Mat>,
 }
 
 impl OrderSplitting {
+    pub fn ring(&self) -> &QLocalRing {
+        &self.ring
+    }
+    /// The images of the basis elements of the order.
+    pub fn images(&self) -> &[Mat] {
+        &self.images
+    }
     /// The image of the element with the given coordinates in the basis.
     pub fn image(&self, coords: &[BigInt; 8]) -> Mat {
         let r = &self.ring;
@@ -644,11 +680,9 @@ impl MaximalOrder {
     /// The splitting O / P^e O = M_2(O_F / P^e) at the prime P.
     pub fn local_splitting(&self, prime: QPrime, e: u32) -> Result<OrderSplitting, String> {
         let f = &self.alg.f;
-        if f.primes_above(prime.p).iter().all(|q| q.ideal != prime.ideal) {
-            return Err("not a prime of this field".into());
-        }
+        // QLocalRing::new refuses anything but a prime of f
         let ring = QLocalRing::new(f, prime, e)?;
-        let k = QLocalRing::new(f, prime, 1)?;
+        let k = QLocalRing::new(f, ring.prime(), 1)?;
         let alg = &self.alg;
         let m = ring.card;
         let red = |x: &BElt| self.reduce_mod(x, m);
@@ -736,7 +770,7 @@ mod tests {
             let f = QuadField::new(d).unwrap();
             let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
             for p in [2i64, 3, 5, 7, 11, 13, 53] {
-                for pr in f.primes_above(p) {
+                for pr in f.primes_above(p).unwrap() {
                     for e in 1..=3u32 {
                         if (pr.norm as u128).pow(e) > 1 << 16 {
                             continue;
@@ -790,6 +824,17 @@ mod tests {
         let alg = QuatAlg::new(QuadField::new(13).unwrap(), QElt::int(-1), QElt::int(-3)).unwrap();
         assert!(MaximalOrder::new(&alg).is_err());
         assert!(QuatAlg::new(QuadField::new(13).unwrap(), QElt::int(1), QElt::int(-3)).is_err());
+        // HARD-022-1 (daybreak): i64::MIN is outside |a|, |b| < 2^31, in a and
+        // in b (abs() wrapped to i64::MIN < 2^31 in release builds)
+        let f = QuadField::new(5).unwrap();
+        for (a, b) in [(i64::MIN, -1), (-1, i64::MIN), (i64::MIN, i64::MIN), (-(1 << 31), -1), (-1, -(1 << 31))] {
+            let alg = QuatAlg::new(f, QElt::int(a), QElt::int(b)).unwrap();
+            assert_eq!(MaximalOrder::new(&alg).unwrap_err(), "maximal orders are implemented only for a, b in Z (|a|, |b| < 2^31)");
+        }
+        // a prime of another field
+        let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
+        let q = QuadField::new(13).unwrap().primes_above(3).unwrap()[0];
+        assert!(o.local_splitting(q, 1).is_err());
     }
 
     #[test]
