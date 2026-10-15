@@ -258,6 +258,33 @@ class NumberField_absolute:
     def __contains__(self, x):
         return isinstance(x, NumberFieldElement) and x._K is self
 
+    def _latex_(self):
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: latex(NumberField(x^2 - 5, 'a')), latex(QuadraticField(2)), latex(CyclotomicField(5))
+            (\\Bold{Q}[a]/(a^{2} - 5), \\Bold{Q}(\\sqrt{2}), \\Bold{Q}(\\zeta_{5}))
+        """
+        v = _latex_name(self)
+        if v.startswith("\\sqrt") or v.startswith("\\zeta"):
+            return "\\Bold{Q}(%s)" % v
+        terms = []
+        f = self._f
+        for i in range(len(f) - 1, -1, -1):
+            c = f[i]
+            if c == 0:
+                continue
+            mono = "" if i == 0 else v if i == 1 else "%s^{%d}" % (v, i)
+            a = abs(c)
+            t = str(a) if not mono else (mono if a == 1 else "%d %s" % (a, mono))
+            terms.append(("-" if c < 0 else "+", t))
+        s = ("-" if terms[0][0] == "-" else "") + terms[0][1]
+        for sign, t in terms[1:]:
+            s += " %s %s" % (sign, t)
+        return "\\Bold{Q}[%s]/(%s)" % (v, s)
+
     # ---- invariants
     def degree(self):
         """The degree over QQ.
@@ -759,6 +786,21 @@ def _poly_divmod(a, b):
     return q, a
 
 
+def _latex_name(K):
+    """The generator's name in LaTeX, as Sage writes it."""
+    import re
+    f = K._f
+    if getattr(K, "_emb", None) and len(f) == 3 and f[1] == 0 and f[2] == 1:
+        return "\\sqrt{%d}" % (-f[0])  # QuadraticField(D)
+    n = getattr(K, "_cyclotomic_order", None)
+    if n is not None and K._name == "zeta%d" % n:
+        return "\\zeta_{%d}" % n
+    m = re.match(r"^([A-Za-z]+)(\d+)$", K._name)
+    if m:
+        return "%s_{%s}" % (m.group(1), m.group(2))
+    return K._name
+
+
 class NumberFieldElement:
     """An element of a number field.
 
@@ -805,7 +847,36 @@ class NumberFieldElement:
         return _repr_poly(self._c, self._K._name)
 
     def _latex_(self):
-        return repr(self).replace("*", "")
+        """LaTeX, as Sage writes it: the generator as Sage names it
+        (QuadraticField's sqrt, zeta_n, a subscript for trailing digits).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = QuadraticField(2); L.<b> = NumberField(x^3 - 2)
+            sage: latex(2*a + 1), latex(b^2/2 - 3*b)
+            (2 \\sqrt{2} + 1, \\frac{1}{2} b^{2} - 3 b)
+            sage: latex(CyclotomicField(5).gen()^2 + 1)
+            \\zeta_{5}^{2} + 1
+        """
+        v = _latex_name(self._K)
+        out = []
+        for i in range(len(self._c) - 1, -1, -1):
+            q = _F(self._c[i])
+            if q == 0:
+                continue
+            neg = q < 0
+            q = -q if neg else q
+            num = str(q.numerator) if q.denominator == 1 else "\\frac{%d}{%d}" % (q.numerator, q.denominator)
+            mono = "" if i == 0 else v if i == 1 else "%s^{%d}" % (v, i)
+            t = num if not mono else (mono if q == 1 else num + " " + mono)
+            out.append(("-" if neg else "+", t))
+        if not out:
+            return "0"
+        s = ("-" if out[0][0] == "-" else "") + out[0][1]
+        for sign, t in out[1:]:
+            s += " %s %s" % (sign, t)
+        return s
 
     def __hash__(self):
         if all(x == 0 for x in self._c[1:]):
