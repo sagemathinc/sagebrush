@@ -183,6 +183,17 @@ print(" ".join(kind(f, *a) for f, a in [(S.gammainc, (-1.0, 2.0)), (S.gammaincc,
 # (the scaled forms where the prefactor under- or overflows, and the least subnormal x: daybreak's HARD-05E-1, CORR-05E-2)
 print("%.12g %.12g" % (S.gammainc_scaled(1.0, 1000.0, True), S.gammainc_scaled(2.0, 1000.0, True)), repr(S.gammainc_scaled(0.0, 1000.0)),
       repr(S.gammainc(1.0, 5e-324)), repr(S.gammainc_scaled(1.0, 5e-324)), repr(S.gammaincc(1.0, 5e-324)), repr(S.gammainc(1.0, 1e-320)))
+# (near the largest doubles, daybreak's CORR-9BD-1: at x = a both scaled forms are sqrt(pi a / 2) + 1/3, Temme's
+# leading terms; at lambda = 0.9 the series' sum is 1/(1 - lambda) and for x - a >> sqrt(a) a F is a/(x - a), each to
+# about 1e-300; the larger forms overflow; the continued fraction's coefficients n (n - a) overflow, refused)
+import math
+m = 1e308
+r = math.sqrt(math.pi / 2) * math.sqrt(m)
+print(S.gammainc(m, m), S.gammaincc(m, m), abs(S.gammainc_scaled(m, m) / r - 1) < 4e-16,
+      abs(S.gammainc_scaled(m, m, True) / r - 1) < 4e-16, abs(S.gammainc_scaled(m, 0.9 * m) - 10) < 4e-15,
+      S.gammainc_scaled(m, 0.9 * m, True), abs(S.gammainc_scaled(1.7e308, 1.79e308, True) * 0.09 / 1.7 - 1) < 4e-15,
+      S.gammainc_scaled(1.7e308, 1.79e308), abs(S.gammainc_scaled(m, 0.3 * m) - 1 / 0.7) < 4e-15)
+print(kind(S.gammaincc, 1e307, 1e308))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -233,5 +244,7 @@ print("%.12g %.12g" % (S.gammainc_scaled(1.0, 1000.0, True), S.gammainc_scaled(2
     "NotCovered: gammainc: Sagebrush covers a >= 0 NotCovered: gammaincc: Sagebrush covers x >= 0 " +
       "NotCovered: gammainc: Sagebrush covers real arguments NotCovered: gammainc: Sagebrush covers finite a",
     "0.001 0.002002 inf 5e-324 1.0 1.0 1e-320",
+    "0.5 0.5 True True True inf True inf True",
+    "NotCovered: gammainc: the continued fraction overflowed at a = 1e+307, x = 1e+308",
   ]);
 });
