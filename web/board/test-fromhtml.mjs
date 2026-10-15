@@ -16,7 +16,7 @@ const GEN = '<meta name="generator" content="Sagebrush boards (sagebrush.space/b
 const page = (json, head = GEN) => `<!doctype html><html><head>\n${head}</head><body><script type="application/json" id="sb-doc">${json}</script><script>window.after = 1</script></body></html>`;
 const doc = { title: "T", nodes: [{ id: "a", text: "</script><img src=x onerror=alert(1)>" }] };
 
-// as exportHtml writes it: each "<" as <, so no "</script>" in it
+// as exportHtml writes it: each "<" as "\u003c", so no "</script>" in it
 const written = JSON.stringify(doc).replaceAll("<", LT);
 check(!written.includes("</script>") && written.includes(LT + "/script>"), "as written, the JSON has no </script>: " + written);
 check(JSON.stringify(embeddedJson(page(written), "sb-doc", "Sagebrush boards")) === JSON.stringify(doc), "read back, the same document (its </script> text and all)");
