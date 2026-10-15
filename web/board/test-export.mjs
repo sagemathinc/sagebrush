@@ -18,9 +18,17 @@ const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dir = mkdtempSync(join(tmpdir(), "sb-export-")), profile = mkdtempSync(join(tmpdir(), "sb-export-prof-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+// (Chrome goes with the test however it ends: at its end, on an error before
+// the try below, or at its deadline)
+process.on("exit", () => { try { chrome.kill("SIGKILL"); } catch {} });
+// Every wait has a deadline, and so has the whole test (alone it takes about
+// 20 s): it fails saying where it was, rather than holding a CI slot.
+let at = "starting Chrome";
+const DEADLINE = Number(process.env.SB_TEST_DEADLINE) || 300_000;
+setTimeout(() => { console.log(`FAIL\n  the test did not end within ${DEADLINE / 1000} s; it was at: ${at}`); process.exit(1); }, DEADLINE).unref();
 if (!port) port = await devtoolsPort(profile);
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); let errors = [], requests = [];
@@ -31,9 +39,17 @@ ws.onmessage = (ev) => {
   if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "")) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
   if (m.method === "Network.requestWillBeSent" && !/^(data|blob|file):/.test(m.params.request.url)) requests.push(m.params.request.url);
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
-const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return; await sleep(50); } throw new Error("timeout: " + expr); };
+// (a command Chrome does not answer within `ms` fails, as does an
+// expression whose promise does not settle within it)
+const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => {
+  const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s, at: ${at}`)); }, ms);
+  waiting.set(id, (r) => { clearTimeout(timer); resolve(r); });
+  ws.send(JSON.stringify({ id, method, params }));
+});
+const ev = async (expression, ms = 60000) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
+// (each evaluation given only what is left of the wait: one that never
+// settles, such as outputs() while the code never runs, ends with it)
+const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr, Math.max(1000, ms - (Date.now() - t))).catch(() => false)) return; await sleep(50); } throw new Error("timeout: " + expr); };
 const fails = [];
 // (each board's document as shown, and the file it was downloaded as)
 const shown = new Map(), files = new Map();
@@ -41,6 +57,7 @@ const check = (ok, what) => { if (!ok) fails.push(what); };
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable"]) await send(m);
   for (const doc of docs) {
+    at = doc;
     errors = [];
     await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent(doc)}` });
@@ -90,7 +107,8 @@ try {
     }
     // printing
     const sheets = await ev("window.sagebrush.board.print({ dialog: false })");
-    const pdf = await send("Page.printToPDF", { preferCSSPageSize: true, printBackground: true });
+    at = `${doc}: printing`;
+    const pdf = await send("Page.printToPDF", { preferCSSPageSize: true, printBackground: true }, 120000);
     const pages = (Buffer.from(pdf.data ?? "", "base64").toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
     check(sheets === s0.pages && pages === sheets, `${doc}: the file printed ${sheets} sheets, ${pages} PDF pages, for ${s0.pages} pages`);
     await ev("document.getElementById('board-print')?.remove()");
@@ -105,6 +123,7 @@ try {
   }
 
   // Ctrl/Cmd+S: Download as HTML, not the page's own Save (William)
+  at = "Ctrl/Cmd+S";
   errors = [];
   await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   const keyS = async (modifiers) => {
@@ -116,7 +135,11 @@ try {
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   // (its code run first: the dialog shows what the file would carry, so it
   // opens only when what was asked for has run, which under load is slow)
-  check(await until("window.sagebrush.board.outputs().then((os) => os.length > 0)", 90000).then(() => true, () => false), "examples/live.json's code did not run");
+  if (!(await until("window.sagebrush.board.outputs().then((os) => os.length > 0)", 90000).then(() => true, () => false))) {
+    // (what the board said, and the page's errors: why its engine never answered, should it happen again)
+    const said = await ev("document.querySelector('[data-sbb=say]')?.textContent ?? ''", 10000).catch((e) => String(e));
+    check(false, `examples/live.json's code did not run in 90 s; the board says: ${said.slice(0, 200)}; page errors: ${errors.slice(0, 5).join(" | ") || "none"}`);
+  }
   for (const [mod, name] of [[2, "Ctrl"], [4, "Cmd"]]) {
     await keyS(mod);
     await until("document.querySelector('[data-sbb=htmldlg]').open", 10000).catch(() => {});
@@ -153,6 +176,7 @@ try {
   // A board downloaded as HTML, opened again on the site (Open…, or
   // dropped): the board it holds, as it was; never the file's page itself
   // (fromhtml.ts).  Anything else in HTML is refused, and nothing of it runs.
+  at = "opened again";
   errors = [];
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
@@ -184,6 +208,7 @@ try {
   ];
   for (const how of ["picked", "dropped"]) {
     for (const [what, text, opens] of HOSTILE) {
+      at = `${what}, ${how}`;
       await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => (window.__pwn = 0, 1))`);
       const before = await docJson();
       if (how === "picked") {
@@ -218,6 +243,7 @@ try {
   requests = [];
   for (const how of ["picked", "dropped"]) {
     for (const [what, text, says] of REFUSED) {
+      at = `${what}, ${how}`;
       await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => (window.__pwn = 0, 1))`);
       if (how === "picked") {
         const f = join(dir, "refused.json");
@@ -238,6 +264,7 @@ try {
     const big = join(dir, "big.json");
     writeFileSync(big, "");
     truncateSync(big, 128 * 2 ** 20 + 1);
+    at = "a file past 128 MB";
     for (const how of ["picked", "dropped"]) {
       await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => 1)`);
       const before = await docJson();
