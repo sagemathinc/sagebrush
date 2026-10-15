@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { boardFromText } from "../web/board/mermaid";
 import { boardSvg } from "../web/board/svg";
 import { formatError, pageCount } from "../web/board/doc";
+import { oneLine } from "./terminal-text";
 
 const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
   a board as an SVG file (to OUT, else to standard output); --page N: its
@@ -17,9 +18,6 @@ const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
 /** The command line as a reader of boards, in what it says of one it can't
  * read: which sagebrush refused it, and what to do (formatError). */
 export const CLI_READER = { reader: `this sagebrush (${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"})`, remedy: "update sagebrush (npx sagebrush@latest)" };
-
-// (text for a terminal: a file's name and what a board says are anyone's; no control characters but newlines and tabs)
-const safe = (s: string) => s.replace(/[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 
 /** The `board` command; returns the exit code. */
 export async function boardCommand(argv: string[]): Promise<number> {
@@ -33,7 +31,7 @@ export async function boardCommand(argv: string[]): Promise<number> {
     if (a === "--svg") continue;
     if (a === "-o" || a === "--output") out = argv[++i] ?? null;
     else if (a === "--page") page = Number(argv[++i]);
-    else if (a.startsWith("-") && a !== "-") { process.stderr.write(`sagebrush board render: unknown option ${a}\n${USAGE}`); return 2; }
+    else if (a.startsWith("-") && a !== "-") { process.stderr.write(`sagebrush board render: unknown option ${oneLine(a)}\n${USAGE}`); return 2; }
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
   }
@@ -48,7 +46,7 @@ export async function boardCommand(argv: string[]): Promise<number> {
     const bad = formatError(doc, CLI_READER);
     if (bad) throw new Error(bad);
   } catch (e: any) {
-    process.stderr.write(`sagebrush board render: ${safe(String(file))}: ${safe(String(e?.message ?? e))}\n`);
+    process.stderr.write(`sagebrush board render: ${oneLine(String(file))}: ${oneLine(String(e?.message ?? e))}\n`);
     return 1;
   }
   const pages = pageCount(doc);
