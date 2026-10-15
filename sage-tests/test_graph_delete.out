@@ -1,0 +1,12 @@
+pairs -> (6, 3, [('Edinburgh', 'Madrid', None), (1, 9, None), (2, 9, None)])
+triples -> (None, 3)
+missing edge -> (None, 5)
+missing vertex -> (None, 5)
+missing both -> (None, 5)
+delete_edges missing -> (None, 4)
+delete_vertices -> (None, 4, 1)
+delete_vertex missing !! ValueError vertex (42) not in the graph
+delete_vertices missing !! ValueError vertex (42) not in the graph
+edges iter -> (None, 4)
+digraph -> [(2, 1, None)]
+edge with label arg -> (None, 4)
