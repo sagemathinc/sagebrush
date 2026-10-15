@@ -317,6 +317,11 @@ def _exact_quo(x, c, B):
     return x / c
 
 
+def _inexact(c):
+    """Whether c is a p-adic coefficient of finite precision (O(p^k) too)."""
+    return hasattr(c, "_x") and type(c).__name__ in ("pAdicCappedRelativeElement", "EisensteinExtensionElement") and not c._x.is_exact_zero()
+
+
 def _is_zero(c):
     # (a p-adic coefficient O(p^n) is kept, as Sage prints it: O(5)*T)
     if hasattr(c, "_x") and type(c).__name__ in ("pAdicCappedRelativeElement", "EisensteinExtensionElement"):
@@ -338,6 +343,21 @@ class Series:
         1 + w + 9*w^2 + 26/3*w^3 + 265/6*w^4 + 413/10*w^5 + O(w^6)
         sage: ps.prec(), ps.valuation(), ps.list()
         (6, 1, [0, 1, 17/2, 0, 15/4])
+
+    Series compare at their common precision, so only exact ones hash:
+    a series of finite precision, or with a coefficient of finite
+    precision (O(p^k) included), is unhashable (Sage hashes the latter by
+    value, though R([B(1, 2)]) == R([B(10, 3)]))::
+
+        sage: B = Qp(3, 5); R = PowerSeriesRing(B, 'T'); a, b = R([B(1, 2)]), R([B(10, 3)])
+        sage: a == b, b == a
+        (True, True)
+        sage: hash(a)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: unhashable: a power series with inexact coefficients [1 + O(3^2)]
+        sage: R([B(0, 2)]) == 9, hash(R([B(0)])) == hash(0), hash(w^2 + 1) == hash(w^2 + 1)
+        (True, True, True)
     """
 
     __slots__ = ("_R", "_v", "_c", "_prec")
@@ -951,6 +971,10 @@ class Series:
         # the polynomial it equals
         if self._prec is not None:
             raise TypeError("unhashable: a power series of finite precision (%s)" % (self,))
+        # likewise with a coefficient of finite precision, O(p^k) included:
+        # R([Qp(3)(1, 2)]) equals R([Qp(3)(10, 3)]) (Sage hashes them apart)
+        if any(_inexact(c) for c in self._c):
+            raise TypeError("unhashable: a power series with inexact coefficients %s" % (list(self._c),))
         from _sage_poly import poly_hash
         n = self._R._name
         return poly_hash({((n, self._v + i),) if self._v + i else (): c for i, c in enumerate(self._c)})
