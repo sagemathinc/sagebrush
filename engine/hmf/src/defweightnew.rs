@@ -205,7 +205,10 @@ impl WeightNewspaces {
     /// The modular work of op on the spaces `ms` at `places` places, checked
     /// against MAX_TOTAL_WORK (computing the place-independent data first).
     fn check_work(&self, ms: &[QIdeal], ops: &[&Op], places: usize) -> Result<u128, String> {
-        let w = self.work(ms, ops, places)?;
+        self.within_cap(self.work(ms, ops, places)?)
+    }
+
+    fn within_cap(&self, w: u128) -> Result<u128, String> {
         if w > MAX_TOTAL_WORK as u128 {
             return Err(format!("this computation in weight {:?} needs about {} operations modulo primes, above the limit of {} (unsupported)", self.weight.k, w, MAX_TOTAL_WORK));
         }
@@ -312,10 +315,8 @@ impl WeightNewspaces {
     pub fn new_charpolys(&self, op: &Op) -> Result<HashMap<QIdeal, QPoly>, String> {
         self.check_op(op)?;
         let nd = self.new_dimensions()?;
-        let d = nd.values().copied().max().unwrap_or(0);
-        let k = pairs_needed(coefficient_bits(d, &self.op_bound(op)?))?;
-        let ms: Vec<QIdeal> = self.divisors.iter().map(|(m, _)| *m).collect();
-        self.check_work(&ms, &[op], 2 * k)?;
+        let (k, work) = self.recovery(op)?;
+        self.within_cap(work)?;
         let pairs = self.pairs(k)?;
         let res: Vec<Result<(HashMap<QIdeal, Vec<u64>>, HashMap<QIdeal, Vec<u64>>), String>> =
             crate::par::map_range(pairs.len(), |t| Ok((self.new_charpolys_mod(op, &pairs[t].0)?.0, self.new_charpolys_mod(op, &pairs[t].1)?.0)));
@@ -329,6 +330,17 @@ impl WeightNewspaces {
             out.insert(*m, f);
         }
         Ok(out)
+    }
+
+    /// The pairs of places new_charpolys(op) uses and its modular work:
+    /// the coefficient bound of the largest new dimension over the divisors
+    /// of N (a divisor's can exceed N's), on every divisor space. The
+    /// separating search reserves exactly this (daybreak HARD-F86-1).
+    fn recovery(&self, op: &Op) -> Result<(usize, u128), String> {
+        let d = self.new_dimensions()?.values().copied().max().unwrap_or(0);
+        let k = pairs_needed(coefficient_bits(d, &self.op_bound(op)?))?;
+        let ms: Vec<QIdeal> = self.divisors.iter().map(|(m, _)| *m).collect();
+        Ok((k, self.work(&ms, &[op], 2 * k)?))
     }
 
     pub fn new_charpoly(&self, op: &Op) -> Result<QPoly, String> {
@@ -382,7 +394,8 @@ impl WeightNewspaces {
     /// candidate. One budget of `cap` covers the whole search (daybreak
     /// HARD-A95-1): a candidate is tested only if the work of the failed
     /// tests so far, its own test (one place) and the recovery of its
-    /// characteristic polynomial it would start (2 need places) all fit.
+    /// characteristic polynomial it would start (recovery(), the same
+    /// estimate new_charpolys checks) all fit.
     fn search_separating(&self, cap: u128, mut test: impl FnMut(&Op) -> Result<bool, String>) -> Result<Op, String> {
         let primes: Vec<QPrime> = self.field.primes_of_bounded_norm(2000)?.into_iter().filter(|p| !self.divides(p).unwrap_or(true)).take(16).collect();
         let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
@@ -404,9 +417,7 @@ impl WeightNewspaces {
                 })
                 .filter(|&(_, c)| c != 0)
                 .collect();
-            let d = self.new_dimension()?;
-            let need = pairs_needed(coefficient_bits(d, &self.op_bound(&op)?))?;
-            budget.admit(self.work(&ms, &[&op], 1)?, self.work(&ms, &[&op], 2 * need)?, self.weight)?;
+            budget.admit(self.work(&ms, &[&op], 1)?, self.recovery(&op)?.1, self.weight)?;
             if test(&op)? {
                 return Ok(op);
             }
@@ -611,18 +622,18 @@ mod tests {
         assert!(WorkBudget::new(100).admit(u128::MAX, 1, w).is_err());
     }
 
-    /// HARD-A95-1 in the search: with every candidate failing, the tests
-    /// run and the last one's recovery fit the cap together, and the search
-    /// is refused at the first candidate that would not, although that
-    /// candidate alone (the check before the fix) fits.
-    #[test]
-    fn separating_search_one_budget() {
-        let f = QuadField::new(5).unwrap();
+    fn weight_newspaces(d: i64, n: i64, k: (u32, u32)) -> WeightNewspaces {
+        let f = QuadField::new(d).unwrap();
         let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
-        let ns = WeightNewspaces::new(&o, &f.principal(&QElt::int(6)).unwrap(), Weight::new(2, 4).unwrap()).unwrap();
-        assert!(ns.new_dimension().unwrap() > 0);
-        let ms: Vec<QIdeal> = ns.divisors.iter().map(|(m, _)| *m).collect();
-        // without a cap: all 48 candidates are tested
+        WeightNewspaces::new(&o, &f.principal(&QElt::int(n)).unwrap(), Weight::new(k.0, k.1).unwrap()).unwrap()
+    }
+
+    /// The 48 candidates of the search with every test failing, and per
+    /// candidate the work of its test (one place) and of the recovery
+    /// new_charpolys would run for it, computed here from the definition:
+    /// the coefficient bound for the largest new dimension over the
+    /// divisors, on every divisor space.
+    fn candidates(ns: &WeightNewspaces) -> Vec<(Op, u128, u128, usize)> {
         let mut all: Vec<Op> = vec![];
         let e = ns.search_separating(u128::MAX, |op| {
             all.push(op.clone());
@@ -630,27 +641,75 @@ mod tests {
         });
         assert_eq!(e.unwrap_err(), "no separating Hecke operator found");
         assert_eq!(all.len(), 48);
-        let cost = |op: &Op| {
-            let need = pairs_needed(coefficient_bits(ns.new_dimension().unwrap(), &ns.op_bound(op).unwrap())).unwrap();
-            (ns.work(&ms, &[op], 1).unwrap(), ns.work(&ms, &[op], 2 * need).unwrap())
-        };
-        let costs: Vec<(u128, u128)> = all.iter().map(cost).collect();
-        assert!(costs.iter().all(|&(now, _)| now > 0));
-        // a cap that the first five tests and any one recovery fit
-        let cap = costs[..5].iter().map(|c| c.0).sum::<u128>() + costs[..5].iter().map(|c| c.1).max().unwrap();
+        let ms: Vec<QIdeal> = ns.divisors.iter().map(|(m, _)| *m).collect();
+        let d = *ns.new_dimensions().unwrap().values().max().unwrap();
+        all.into_iter()
+            .map(|op| {
+                let k = pairs_needed(coefficient_bits(d, &ns.op_bound(&op).unwrap())).unwrap();
+                assert_eq!(ns.recovery(&op).unwrap().0, k);
+                let (now, then) = (ns.work(&ms, &[&op], 1).unwrap(), ns.work(&ms, &[&op], 2 * k).unwrap());
+                assert!(now > 0);
+                (op, now, then, k)
+            })
+            .collect()
+    }
+
+    /// The search under `cap` with every test failing: it must test exactly
+    /// the candidates whose spent work, test and recovery fit (in order),
+    /// and refuse the next one; returns how many it tested.
+    fn tested_under(ns: &WeightNewspaces, all: &[(Op, u128, u128, usize)], cap: u128) -> usize {
         let mut seen: Vec<Op> = vec![];
         let e = ns.search_separating(cap, |op| {
             seen.push(op.clone());
             Ok(false)
         });
         assert!(e.unwrap_err().contains("above the limit"));
-        let c = seen.len();
+        let mut spent = 0;
+        let mut want = 0;
+        while want < all.len() && spent + all[want].1 + all[want].2 <= cap {
+            spent += all[want].1;
+            want += 1;
+        }
+        assert_eq!(seen.len(), want);
+        assert!(seen.iter().zip(all).all(|(a, b)| *a == b.0));
+        want
+    }
+
+    /// HARD-A95-1 in the search: with every candidate failing, the tests
+    /// run and the last one's recovery fit the cap together, and the search
+    /// is refused at the first candidate that would not, although that
+    /// candidate alone (the check before the fix) fits.
+    #[test]
+    fn separating_search_one_budget() {
+        let ns = weight_newspaces(5, 6, (2, 4));
+        let all = candidates(&ns);
+        // a cap that the first five tests and any one recovery fit
+        let cap = all[..5].iter().map(|c| c.1).sum::<u128>() + all[..5].iter().map(|c| c.2).max().unwrap();
+        let c = tested_under(&ns, &all, cap);
         assert!((5..48).contains(&c), "{} tests", c);
-        assert_eq!(seen[..], all[..c]);
-        let spent: u128 = costs[..c].iter().map(|x| x.0).sum();
-        assert!(spent + costs[c - 1].1 <= cap);
-        assert!(spent + costs[c].0 + costs[c].1 > cap);
-        assert!(costs[c].0 + costs[c].1 <= cap, "the refused candidate alone fits");
+        assert!(all[c].1 + all[c].2 <= cap, "the refused candidate alone fits");
+    }
+
+    /// HARD-F86-1: the recovery reserved is that of new_charpolys, for the
+    /// largest new dimension over the divisors, not the top one. Over
+    /// Q(sqrt 6) at level (6) in weight (2, 4) the top new dimension is 3
+    /// and a divisor's is 4; the fifth candidate needs 2 pairs, 1 for the
+    /// top dimension. Under a cap one short of the first five tests and
+    /// that recovery, the search stops after four tests (reserving 1 pair
+    /// it would have run the fifth).
+    #[test]
+    fn separating_search_reserves_divisor_recovery() {
+        let ns = weight_newspaces(6, 6, (2, 4));
+        let nd = ns.new_dimensions().unwrap();
+        assert_eq!(ns.new_dimension().unwrap(), 3);
+        assert_eq!(*nd.values().max().unwrap(), 4);
+        let all = candidates(&ns);
+        let top = |op: &Op| pairs_needed(coefficient_bits(3, &ns.op_bound(op).unwrap())).unwrap();
+        assert_eq!((all[4].3, top(&all[4].0)), (2, 1));
+        let ms: Vec<QIdeal> = ns.divisors.iter().map(|(m, _)| *m).collect();
+        let cap = all[..5].iter().map(|c| c.1).sum::<u128>() + all[4].2 - 1;
+        assert!(all[..5].iter().map(|c| c.1).sum::<u128>() + ns.work(&ms, &[&all[4].0], 2).unwrap() <= cap);
+        assert_eq!(tested_under(&ns, &all, cap), 4);
     }
 
     /// LIM-A95-4: with every place unusable, exactly need + SPARE_PAIRS
