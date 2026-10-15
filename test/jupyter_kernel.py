@@ -130,6 +130,13 @@ r, m = run(kc, "factor(2026)")
 check("works after interrupts", of(m, "execute_result")[0]["data"]["text/plain"] == "2 * 1013", m)
 r, m = run(kc, "K.<a> = NumberField(x^3 - 11)\nK.class_number()")
 check("number field (engine)", of(m, "execute_result")[0]["data"]["text/plain"] == "2", m)
+# IPython's magics: %time runs Sage's code in the cell, its value the result; a
+# function's locals; shell commands are refused
+r, m = run(kc, "def g():\n    z = 11\n    %time print(z)\ng()\n%time 2^10")
+out = "".join(c["text"] for c in of(m, "stream"))
+check("%time (Sage)", of(m, "execute_result")[0]["data"]["text/plain"] == "1024" and out.startswith("11\nWall time: ") and out.count("Wall time") == 2, m)
+r, m = run(kc, "!ls")
+check("!ls is refused", r["status"] == "error" and "shell commands are not available" in r["evalue"], r)
 km.shutdown_kernel(now=False)
 check("shutdown", not km.is_alive())
 

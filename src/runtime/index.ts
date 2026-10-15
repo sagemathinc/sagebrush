@@ -341,6 +341,11 @@ B.builtins.__pyjs_source_lines__ = Obj.builtin((filename: any) => {
   return found === null ? null : tuple(found);
 }, "__pyjs_source_lines__");
 B.builtins.__pyjs_help__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_help"), "inspect_object"), a), "__pyjs_help__");
+// IPython's magics (src/magic-syntax.ts writes %name args as these calls)
+B.builtins.__pyjs_magic__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_magic"), "run_line_magic"), a), "__pyjs_magic__");
+B.builtins.__pyjs_cell_magic__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_magic"), "run_cell_magic"), a), "__pyjs_cell_magic__");
+// and the code %time and %timeit run, expanded in the cell, calls these: timer, time_value, keep, kept, timeit_run
+B.builtins.__pyjs_magic_api__ = Obj.builtin((name: any) => Obj.getattr(Obj.getattr(M.importModule("_pyjs_magic"), "API"), String(name)), "__pyjs_magic_api__");
 B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   if (v !== null) {
     B.builtins._ = v;

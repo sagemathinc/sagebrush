@@ -21,12 +21,13 @@ import { homedir } from "os";
 import { Worker, parentPort } from "worker_threads";
 import { ZSocket } from "./zmtp";
 import { initParser, R, libDir } from "./compile";
-import { needsMore, complete, helpSyntax } from "./interactive";
+import { needsMore, complete, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 
 export type Mode = "sage" | "python" | "magma" | "matlab";
 
@@ -497,10 +498,11 @@ export function kernelWorker(mode: Mode) {
       }
       return null;
     };
+    run(GET_IPYTHON, host, "exec", "<init>");
     if (mode === "sage") run("from sage_all import *\n", main, "exec", "<sage>");
     return { main, host };
   })();
-  const FLUSH = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n";
+  const FLUSH = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n" + MAGIC_POST;
   const moduleNames = () => [...R.builtinModuleNames(), ...Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k: string) => k.split("/")[0].replace(/\.py$/, ""))];
   port.on("message", async (m: any) => {
     const { main, host } = await ready;
@@ -554,7 +556,10 @@ export function kernelWorker(mode: Mode) {
           port.postMessage({ id: m.id, error: errorReported });
         }
       }
-    } else run(helpSyntax(m.code) + "\n", main, "cell", "<cell>", { sage: mode === "sage" });
+    } else {
+      run(MAGIC_PRE, host, "exec", "<autoreload>");
+      run(ipythonSyntax(m.code) + "\n", main, "cell", "<cell>", { sage: mode === "sage", transform: magicTransform(mode === "sage") });
+    }
     run(FLUSH, host, "exec", "<figures>");
     flush();
     port.postMessage({ id: m.id, done: true, error: errorReported });
