@@ -321,7 +321,9 @@ def _loggamma1(z):
 
 def gamma(z):
     """Gamma(z): for real x the math library's gamma, for complex z
-    exp(loggamma(z)).  PoleError at 0, -1, -2, ...  Largest relative error
+    exp(loggamma(z)), scaled (_cexp_mul) so that both parts are doubles
+    wherever they are; NotCovered where they are not.  PoleError at 0, -1,
+    -2, ...  Largest relative error
     found against mpmath: real x 6e-16 for |x| <= 171; complex z 3.6e-14
     for |z| <= 42, growing in proportion to |log Gamma(z)| (the exponential
     turns loggamma's absolute error into a relative one)"""
@@ -344,10 +346,10 @@ def _gamma1(z):
             return 0j
         if not (_math.isfinite(lg.real) and _math.isfinite(lg.imag)):
             raise NotCovered("gamma: Sagebrush covers complex z whose log Gamma is within the doubles")
-        try:
-            return _cmath.exp(lg)
-        except OverflowError:
+        v = _cexp(lg)
+        if _bad(v):
             raise NotCovered("gamma: |Gamma(z)| is beyond the doubles here")
+        return v
     if z <= 0 and z == _math.floor(z):
         raise PoleError("Gamma has a pole at %r" % (z,))
     try:
@@ -818,11 +820,17 @@ def _zeta1(s):
             sp = _sinpi(sr / 2)
             lg = _math.lgamma(1 - sr)
             sign = 1.0 if _gamma1(1 - sr) > 0 else -1.0
-            return _math.exp(sr * _math.log(2) + (sr - 1) * _math.log(_PI) + lg) * sign * sp * z1
+            # (scaled: e^t alone overflows below s = -260 where the product
+            # with sin(pi s / 2) and zeta(1 - s) can still be a double, and
+            # math.exp raised OverflowError there; +-inf beyond)
+            return _exp_mul(sr * _math.log(2) + (sr - 1) * _math.log(_PI) + lg, sign * sp * z1)
         lg = _loggamma_c(1 - s)
         h = complex(s) / 2
         ls = _logsinpi_upper(h) if h.imag >= 0 else _logsinpi_upper(h.conjugate()).conjugate()
-        return _cmath.exp(s * _math.log(2) + (s - 1) * _math.log(_PI) + lg + ls) * z1
+        v = _cexp_mul(s * _math.log(2) + (s - 1) * _math.log(_PI) + lg + ls, z1)
+        if _bad(v):
+            raise NotCovered("zeta: |zeta(s)| is beyond the doubles at s = %r" % (s,))
+        return v
     if not cplx and sr > 60:
         return 1.0 + 2.0 ** -sr
     t = abs(s.imag) if cplx else 0.0
@@ -842,9 +850,12 @@ def zeta(s):
     summation (DLMF 25.2.9) with N = 20 + |Im s| terms and twelve
     Bernoulli corrections for Re s >= 1/2, and the functional equation
     (DLMF 25.4.2) below; zeta(0) = -1/2 (DLMF 25.6.1).  PoleError at
-    s = 1; NotCovered for |Im s| > 1e5; zeta(+inf) = 1.  Largest error
-    found against mpmath: 2.2e-14 relative for real s in [-40, 60] (the
-    size of Gamma(1 - s) for s < 0); for complex s an absolute error of
+    s = 1; NotCovered for |Im s| > 1e5; zeta(+inf) = 1.  The functional
+    equation's exponential is scaled (_exp_mul), so that zeta(s) is a double
+    down to where it leaves them, near s = -260, and +-inf beyond for real s
+    (NotCovered for complex s).  Largest error found against mpmath:
+    2.2e-14 relative for real s in [-40, 60], growing with the size of
+    Gamma(1 - s) for s < 0 to 4e-13 near s = -260; for complex s an absolute error of
     about 8 |Im s| eps of max(1, |zeta(s)|), measured for |Im s| <= 1e4
     (from the rounding of the phases Im s log k: 1.5e-12 at |Im s| = 1e3,
     1.8e-11 at 1e4), so the relative error is larger where |zeta| is small,
@@ -1488,26 +1499,64 @@ def gammainc_scaled(a, x, upper=False):
 
 # ------------------------------------------------------------------ error functions
 
+# (log 2 in two parts, Cody and Waite's: k LOG2_HI is exact for |k| < 2^21,
+# so t - k log 2 is exact to about 1e-26)
+_LOG2_HI = 6.93147180369123816490e-01
+_LOG2_LO = 1.90821492927058770002e-10
+
+
+def _ldexp_inf(v, k):
+    """v 2^k, rounded once, +-inf where it is beyond the doubles"""
+    try:
+        return _ldexp(v, k)
+    except OverflowError:
+        return _math.copysign(_math.inf, v)
+
+
+def _exp_mul(t, w):
+    """e^t w for real t and w, without e^t's own overflow or underflow where
+    the product is a double: e^t = 2^k e^r, r = t - k log 2 in [-0.35, 0.35],
+    and 2^k applied to e^r w once (_ldexp); +-inf or a signed 0 beyond"""
+    if not _math.isfinite(t) or w == 0 or not _math.isfinite(w):
+        return _math.exp(t) * w if t < 709 else _math.inf * w
+    if -700 <= t <= 700:
+        return _math.exp(t) * w
+    if t > 1500:
+        return _math.copysign(_math.inf, w)
+    if t < -1500:
+        return _math.copysign(0.0, w)
+    k = int(round(t / _LOG2_HI))
+    r = (t - k * _LOG2_HI) - k * _LOG2_LO
+    return _ldexp_inf(_math.exp(r) * w, k)
+
+
+def _cexp_mul(u, w):
+    """e^u w for complex u and w, scaled as _exp_mul, each part of
+    e^(u - k log 2) w taken by 2^k: the product's parts are doubles even where
+    e^u's modulus is not (Sagebrush's cmath.exp forms e^Re u first, so
+    e^(710 + 0.785i) was infinite in both parts), and e^(y^2 - x^2) w(iz)
+    no longer overflows before the small w(iz) brings it back"""
+    t, y = u.real, u.imag
+    if -700 <= t <= 700:
+        return _cmath.exp(u) * w
+    if t < -1500 or (t > 1500 and w == 0):
+        return 0j
+    c, s_ = _math.cos(y), _math.sin(y)
+    if t > 1500:
+        v = complex(c, s_) * w
+        return complex(_math.copysign(_math.inf, v.real) if v.real else 0.0,
+                       _math.copysign(_math.inf, v.imag) if v.imag else 0.0)
+    k = int(round(t / _LOG2_HI))
+    r = (t - k * _LOG2_HI) - k * _LOG2_LO
+    v = _cmath.exp(complex(r, y)) * w
+    return complex(_ldexp_inf(v.real, k), _ldexp_inf(v.imag, k))
+
+
 def _cexp(u):
     """e^u for complex u, 0 when it underflows and infinite parts (of the
-    right signs) when it overflows, rather than an OverflowError"""
-    re, im = u.real, u.imag
-    if re < -745:
-        return 0j
-    if re > 709:
-        # (e^re itself is a double up to 709.78: E1(-716 + i) and
-        # E1(-1400 + 1e300 i), whose exponents with log |z| folded in are
-        # about 709.4, were refused as overflowing)
-        try:
-            v = _cmath.exp(u)
-            if _math.isfinite(v.real) and _math.isfinite(v.imag):
-                return v
-        except OverflowError:
-            pass
-        m = _math.inf
-        c, s = _math.cos(im), _math.sin(im)
-        return complex(m * c if c else 0.0, m * s if s else 0.0)
-    return _cmath.exp(u)
+    right signs) when it overflows, rather than an OverflowError; each part
+    is a double where it is one (_cexp_mul)"""
+    return _cexp_mul(u, 1.0)
 
 
 def _minus_square(z):
@@ -1527,12 +1576,13 @@ def _phase_lost(z):
     return u.real >= -745 and not _math.isfinite(u.imag)
 
 
-def _exp_minus_square(z, name):
-    """e^(-z^2) with its phase -2xy and its exponent y^2 - x^2 taken
+def _exp_minus_square(z, name, w=1.0):
+    """e^(-z^2) w with the phase -2xy and the exponent y^2 - x^2 taken
     exactly, each as rounded products plus their rounding errors (Dekker's
     product): the rounded phase alone is off by up to half a unit, a radian
-    at 2^52, and erf(3e7 + 3e7i) was off by 3e-9.  NotCovered where the
-    phase is lost (_phase_lost)"""
+    at 2^52, and erf(3e7 + 3e7i) was off by 3e-9; the product scaled
+    (_cexp_mul), so that a huge e^(-z^2) times a small w is a double where
+    it is one.  NotCovered where the phase is lost (_phase_lost)"""
     u = _minus_square(z)
     if u.real < -745:
         return 0j
@@ -1556,10 +1606,9 @@ def _exp_minus_square(z, name):
         xx, xx_err = _two_prod(z.real, z.real)
         re, d = _two_sum(yy, -xx)
         re_err = d + (yy_err - xx_err)
-    e = _cexp(complex(re, -2 * p))
-    if err == 0 and re_err == 0:
-        return e
-    return e * _cmath.exp(complex(re_err, -2 * err))
+    if err or re_err:
+        w = w * _cmath.exp(complex(re_err, -2 * err))
+    return _cexp_mul(complex(re, -2 * p), w)
 
 
 def _erfc_negligible(z):
@@ -1627,8 +1676,8 @@ def _faddeeva(z):
         raise NotCovered("faddeeva: Sagebrush covers finite arguments (and real +-inf)")
     if z.imag < 0:
         # (DLMF 7.4.3: w(-z) = 2 e^(-z^2) - w(z))
-        v = 2 * _exp_minus_square(z, "faddeeva") - _faddeeva_upper(-z)
-        if _isnan(v):
+        v = _exp_minus_square(z, "faddeeva", 2.0) - _faddeeva_upper(-z)
+        if _bad(v):
             # (e^(-z^2) infinite: its parts' products are inf * 0 or inf - inf)
             raise NotCovered("faddeeva: |w(z)| is beyond the doubles at z = %r" % (z,))
         return v
@@ -1670,10 +1719,13 @@ def _erf_taylor(z):
 def _erfc_c(z):
     if z.real >= 0:
         # (DLMF 7.2.3 with z -> iz: erfc z = e^(-z^2) w(iz))
-        v = _exp_minus_square(z, "erfc") * _faddeeva_upper(1j * z)
-        if _isnan(v):
-            # (e^(-z^2) infinite: the product's parts are inf - inf)
-            raise NotCovered("erf, erfc, erfi: |e^(-z^2)| is beyond the doubles at z = %r" % (z,))
+        v = _exp_minus_square(z, "erfc", _faddeeva_upper(1j * z))
+        if _bad(v):
+            # (|erfc z| beyond the doubles: refused, not an infinity, whose
+            # parts' signs and kind (inf, nan) were not to be trusted;
+            # CPython's erfc(0.1 + 26.646i) was inf - inf i where it is
+            # 3.87e306 - 2.72e306i, astra's note on 826f1de)
+            raise NotCovered("erf, erfc, erfi: |erfc z| is beyond the doubles at z = %r" % (z,))
         return v
     v = _erfc_right(-z, "erfc")
     # (the zero parts' signs set here, as 2 - 0j's differ between runtimes)
@@ -1740,9 +1792,12 @@ def erf(z):
     real x; for complex z the Taylor series DLMF 7.6.1 when |z| < 1/2, and
     1 - erfc(z) otherwise (with erf(-z) = -erf(z)).  Largest relative
     error found against mpmath for complex |z| up to 1e9: 1e-15 (of
-    max(1e-300, |erf|)), larger near erf's complex zeros.  NotCovered
-    where e^(-z^2)'s phase -2xy is beyond the doubles, unless erfc z is
-    negligible beside 1 there (erf(1e308 + 1e308i) is 1)"""
+    max(1e-300, |erf|)), larger near erf's complex zeros.  e^(-z^2) w(iz)
+    is formed scaled (_cexp_mul), so that erf, erfc and erfi are doubles
+    wherever they are (CPython's erfc(0.1 + 26.646i) was inf - inf i, not
+    3.87e306 - 2.72e306i), and NotCovered where they are not; NotCovered
+    also where e^(-z^2)'s phase -2xy is beyond the doubles, unless erfc z
+    is negligible beside 1 there (erf(1e308 + 1e308i) is 1)"""
     return _elementwise(_erf1, z)
 
 
@@ -1966,7 +2021,7 @@ def _e1_asym(z):
     big, small = max(x, y), min(x, y)
     lzr = _math.log(big) + 0.5 * _math.log1p((small / big) ** 2)
     lzi = _math.atan2(z.imag, z.real)
-    v = _cexp(complex(-z.real - lzr, -z.imag)) * _cmath.exp(complex(0.0, -lzi)) * s
+    v = _cexp_mul(complex(-z.real - lzr, -z.imag), _cmath.exp(complex(0.0, -lzi)) * s)
     if _bad(v):
         # (e^-z / z, the leading term, beyond the doubles: an infinite part,
         # or its phase's parts times it, inf * 0)

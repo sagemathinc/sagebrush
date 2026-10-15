@@ -276,6 +276,20 @@ print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1
 # API-088-4: J below the doubles is 0, and the turning point at 1e308 is refused, never an OverflowError)
 print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.besselj(2.0, 5e-324)), repr(S.besselj(1e308, 1.0)),
       repr(S.besselj(500.0, 1.0)), kind(S.besselj, 1e308, 1e308).split(" (")[0], kind(S.besselj, 8e307, 8e307).split(" (")[0])
+# (astra's notes on 826f1de: exponentials beyond the doubles times small factors, which are doubles; each part of
+# e^(710 + 0.785i) a double though its modulus is not; real zeta below s = -260, where math.exp raised OverflowError;
+# against mpmath at 400 digits)
+big = [(S.erfc(complex(0.1, 26.646012834943992)), complex(3.871464092850159e306, -2.7234841033085135e306), 1e-15),
+       (S.erf(complex(-0.4555275171297095, 26.66212742352627)), complex(6.941103718233293e306, 5.98557067321044e306), 1e-15),
+       (S._cexp(complex(710, 0.7853981633974483)), complex(1.5796728482882015e308, 1.5796728482882013e308), 1e-15),
+       (S.exp_integral_e1(complex(-716.5, 1)), complex(-1.1245214950119198e308, 1.7459663900313909e308), 1e-13),
+       (S.gamma(complex(171.6, 1)), complex(6.589928500099849e307, -1.4374077427156274e308), 3e-13),
+       (S.zeta(-259.7), 5.384417346157599e307, 3e-13), (S.zeta(-258.5), 9.643336244800007e305, 3e-13)]
+# (compared part by part: abs() of these moduli is beyond the doubles)
+part = lambda v: (complex(v).real, complex(v).imag)
+print([max(abs(a - b) for a, b in zip(part(v), part(r))) <= tol * max(map(abs, part(r))) for v, r, tol in big],
+      repr(S.zeta(-261.5)), repr(S.zeta(-300.5)),
+      kind(S.zeta, complex(-280, 3)).split(" at ")[0], kind(S.erfc, complex(0.1, 26.8)).split(" at ")[0])
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -340,7 +354,7 @@ print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.bes
     "18.564802414575553j 0.8427007929497149j (1-18.564802414575553j) (-0+18.564802414575553j) (0.9661051464753108-0j) " +
       "(0.9402829338335074+0j) (0.4795001221869535-0j)",
     "(5e-309-5e-309j) -inf -inf (1-0j) (2-0j) NotCovered: erfc: the phase of e^(-z^2) is beyond the doubles " +
-      "NotCovered: erf, erfc, erfi: |e^(-z^2)| is beyond the doubles",
+      "NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles",
     "[True, True]",
     "NotCovered: polygamma: |psi^(n)(z)| is beyond the doubles here | NotCovered: polygamma: |psi^(n)(z)| is beyond the doubles here | " +
       "NotCovered: polygamma: Sagebrush covers Re z >= -1e6 when |Im z| < 1 | " +
@@ -357,5 +371,7 @@ print("%.14g" % S.besselj(0.5, 5e-324), repr(S.besselj(1.0, 5e-324)), repr(S.bes
     "1.7735048886036e-162 0.0 0.0 0.0 0.0 " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps " +
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps",
+    "[True, True, True, True, True, True, True] -inf -inf NotCovered: zeta: |zeta(s)| is beyond the doubles " +
+      "NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles",
   ]);
 });
