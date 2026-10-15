@@ -75,3 +75,26 @@ test("board render: a board of a later version of the format, or another format,
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("board render: what it says of a board it refuses is one line: a newline or a tab in the format, or in the file's name, escaped (HARD-EC2-1)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
+  try {
+    const evil = JSON.stringify({ format: "evil\nINJECTED: ok\tX", nodes: [] });
+    let r = cli(["-"], evil);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, 'sagebrush board render: -: not a Sagebrush board: its format is "evil\\x0aINJECTED: ok\\x09X"\n');
+    const file = join(dir, "a\nINJECTED: ok\tb.json");
+    writeFileSync(file, evil);
+    r = cli([file]);
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.split("\n").length, 2, r.stderr);
+    assert.ok(r.stderr.includes("a\\x0aINJECTED: ok\\x09b.json: not a Sagebrush board"), r.stderr);
+    // (an option it does not know, likewise)
+    r = cli(["--x\ny", "-"], evil);
+    assert.equal(r.status, 2);
+    assert.ok(r.stderr.startsWith("sagebrush board render: unknown option --x\\x0ay\nusage:"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
