@@ -134,6 +134,18 @@ points["ellipj"] = points["ellipj"] + [(random.choice((1, -1)) * LU(1e-300, 1e-2
                                        for _ in range(30)] + [
     (random.choice((1, -1)) * LU(1e3, 1.7e308), random.choice((U(0, 1), 1 - LU(1e-16, 0.1)))) for _ in range(30)] + [
     (314159265358979328.0, 0.9999999990686774)]
+# (Bessel J of real order and argument: each region of lib/_special.py's
+# (power series, Hankel's expansion, Miller's recurrence) and the
+# transition x near nu, integer and negative integer orders, large x, and
+# negative x (complex for non-integer orders); drawn last, so that the
+# cases above stay as they were)
+points["besselj"] = (
+    [(U(0, 200), U(1e-3, 300)) for _ in range(60)] + [(U(0, 3), LU(1e-4, 1e6)) for _ in range(40)]
+    + [(float(random.randint(0, 40)), U(0, 60)) for _ in range(40)] + [(float(-random.randint(1, 30)), U(0.1, 50)) for _ in range(20)]
+    + [(n, n * U(0.8, 1.2)) for n in (LU(5, 1000) for _ in range(30))]
+    + [(random.choice((float(random.randint(0, 10)), U(0, 10))), -U(0.01, 40)) for _ in range(30)]
+    + [(0.0, 2.404825557695773), (1.0, 3.8317059702075125), (0.5, 1e-300), (100.0, 1.0), (0.0, 1e300)]
+)
 
 
 def ferrers_column(n, x):
@@ -198,6 +210,7 @@ ref = {
     "ellipk": mp.ellipk, "ellipe": mp.ellipe,
     "ellipj": lambda u, m: ellipj_ref(u, m),
     "legendre_all": legendre_all,
+    "besselj": lambda nu, x: mp.besselj(nu, x),
 }
 # (the real functions' values are real; loggamma and E1 of a negative real are complex)
 complex_valued = {"faddeeva"}

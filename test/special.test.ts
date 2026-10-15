@@ -59,6 +59,14 @@ const TOL: Record<string, [number, number, number?]> = {
   exp_integral_e1: [6e-14, 1e-300], exp_integral_ei: [1.2e-13, 1e-300], lambert_w: [1.5e-15, 1e-300],
   polylog: [2.5e-14, 1e-300], dilog: [4e-15, 1e-300],
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
+  besselj: [2e-14, 1e-300],
+};
+// (J_nu(x) oscillates for |x| > nu with an envelope near sqrt(2/(pi |x|)):
+// there its error is measured against that, an absolute accuracy next to
+// its zeros, and relative to |J| below the oscillations)
+const besselFloor = (args: any[]): number => {
+  const nu = Math.abs(num(args[0])), x = Math.abs(num(args[1]));
+  return x > nu ? Math.sqrt(2 / (Math.PI * Math.max(1, x))) : 1e-300;
 };
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
@@ -91,7 +99,7 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
       return;
     }
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
-    const e = Math.hypot(gr - wr, gi - wi) / Math.max(TOL[name][1], Math.hypot(wr, wi));
+    const e = Math.hypot(gr - wr, gi - wi) / Math.max(name === "besselj" ? besselFloor(args) : TOL[name][1], Math.hypot(wr, wi));
     if (TOL[name][2] !== undefined && Array.isArray(args[0])) {
       const key = name + " (complex s, per unit |Im s|)";
       worst[key] = Math.max(worst[key] ?? 0, e / Math.max(1, Math.abs(num(args[0][1]))));
@@ -170,6 +178,9 @@ col = S.legendre_all(200, 0.0)
 print(all(t == t for t in col), col[151], col[150] != 0)
 # (_ldexp rounds once, as CPython's math.ldexp: Sagebrush's math.ldexp gives nan, 0.0 and inf for these)
 print(repr(S._ldexp(-0.0, 1027)), repr(S._ldexp(2.0 ** 60, -1100)), kind(lambda: S._ldexp(1.0, 1024)), repr(S._ldexp(3.0, -1075)))
+# (Bessel J: its edges, the side of the cut for negative x, and what it does not cover)
+print(repr(S.besselj(0.0, 0.0)), repr(S.besselj(2.5, 0.0)), repr(S.besselj(-3.0, 0.0)), repr(S.besselj(1.0, inf)), "%.12gj" % S.besselj(0.5, -2.0).imag, repr(S.besselj(nan, 1.0)))
+print(" ".join(kind(f, *a) for f, a in [(S.besselj, (-0.5, 1.0)), (S.besselj, (1.0, 1 + 2j)), (S.besselj, (inf, 1.0)), (S.besselj, (6e5, 6e5))]))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -216,5 +227,10 @@ print(repr(S._ldexp(-0.0, 1027)), repr(S._ldexp(2.0 ** 60, -1100)), kind(lambda:
     "0.999994083212 -0.003439991520 0.003440126883",
     "True -0.0 True",
     "-0.0 8.487983164e-314 OverflowError: math range error 1e-323",
+    // (J_(1/2)(-2) = e^(i pi/2) J_(1/2)(2) = i sqrt(2/(2 pi)) sin 2 = 0.5130161365618278i)
+    "1.0 0.0 -0.0 0.0 0.513016136562j nan",
+    "NotCovered: besselj: Sagebrush covers negative orders only when they are integers " +
+      "NotCovered: besselj: Sagebrush covers real orders and arguments NotCovered: besselj: Sagebrush covers finite orders " +
+      "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps (here about 601042)",
   ]);
 });

@@ -1,4 +1,4 @@
-"""MATLAB's special functions psi, beta, betaln, erfcx, erfinv, erfcinv,
+"""MATLAB's special functions psi, beta, betaln, erfcx, erfinv, erfcinv, besselj,
 expint, ellipke, ellipj and legendre, for lib/_matlab.py: thin wrappers that give the numerics in
 lib/_special.py (shared with Sagebrush's scipy.special and Sage) MATLAB's
 argument rules, classes and values at the poles, as the functions'
@@ -161,6 +161,49 @@ def _expint_value(v):
 
 
 _unary("expint", _expint_value, allow_complex=True)
+
+
+# ------------------------------------------------------------------ besselj
+
+@_bi("besselj")
+def besselj_(nargout, *args):
+    """J = besselj(nu, Z), besselj(nu, Z, scale): the Bessel function of the
+    first kind J_nu(Z), as the documentation page describes it, nu real, nu
+    and Z the same size or one of them a scalar; scale 1 multiplies by
+    exp(-abs(imag(Z))), which is 1 for the real Z Sagebrush covers.
+    lib/_special.py's besselj (DLMF chapter 10: the power series, Hankel's
+    expansion, Miller's backward recurrence).  Negative Z gives the value
+    above the cut, e^(i nu pi) J_nu(-Z), complex for non-integer nu.
+    besselj(nu, Inf) is NaN, as Octave gives it (the page says nothing).
+    Sagebrush does not compute complex Z or negative non-integer orders
+    (they need Y_nu, bessely)"""
+    if not 2 <= len(args) <= 3:
+        raise _err("Too many input arguments." if len(args) > 3 else "Not enough input arguments.")
+    if len(args) == 3:
+        sv = _m._farr(args[2], "besselj") if _m._isnumlike(args[2]) else None
+        if sv is None or sv.size != 1 or float(sv.reshape(-1)[0].real) not in (0.0, 1.0) or sv.dtype.kind == "c":
+            raise _err("besselj: scale must be 0 or 1.")
+    (N, cn), (Z, cz) = _values("besselj", args[0]), _values("besselj", args[1])
+    _real("besselj", N, "nu")
+    if Z.dtype.kind == "c":
+        raise _err("besselj: Sagebrush does not compute besselj of complex Z yet.")
+    if N.size != 1 and Z.size != 1 and N.shape != Z.shape:
+        raise _err("besselj: nu and Z must be the same size, or one of them a scalar.")
+    Nb, Zb = np.broadcast_arrays(N, Z)
+    out = []
+    for nu, z in zip(Nb.reshape(-1), Zb.reshape(-1)):
+        nu, z = float(nu), float(z)
+        if _math.isinf(z):
+            out.append(_math.nan)
+            continue
+        try:
+            out.append(_sf._besselj1(nu, z))
+        except ValueError as e:
+            msg = str(e).split(": ", 1)[-1]
+            raise _err("besselj: %s." % msg)
+    cplx = any(isinstance(v, complex) for v in out)
+    r = np.array(out if out else [], dtype=complex if cplx else float).reshape(Nb.shape)
+    return _m._finish(r, "single" if "single" in (cn, cz) else "double")
 
 
 # ------------------------------------------------------------------ ellipke, ellipj

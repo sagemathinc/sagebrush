@@ -34,6 +34,7 @@ precision, with no MATLAB types:
 | `polylog(s, z)`, `dilog(z)` | integer orders -20 <= s <= 100: the series 25.12.10, the expansion in log z (25.12.12, and its limit at integers, where two poles cancel into H_(n-1) - log(-log z)), the inversion 25.12.13 (with 25.11.14's Bernoulli polynomials at integers), and for s <= 0 the Eulerian polynomials (26.14.4, 26.14.6) |
 | `ellipk(m)`, `ellipe(m)` | m <= 1: K by the AGM (19.8.5); E by the series 19.5.2 (m <= 1/2) and 19.12.2 (in 1 - m), and 19.7.2's imaginary-modulus transformation for m < 0, since 19.8.6's AGM sum cancels |
 | `ellipj(u, m)` | finite real u, 0 <= m <= 1: the AGM with phases (22.20), after reducing u by the periods to [0, K/2] (Table 22.4.3's translations by K and 2K, so that cn keeps its relative accuracy next to its zeros; beyond 8K in exact integer fixed point, with K to some 130 bits more than log2(\|u\|/K)); the Maclaurin series 22.10.1-22.10.3 below 1e-3; the ascending Landen transformation (22.7) for m > 0.9 |
+| `besselj(nu, x)` | real order and argument: the power series 10.2.2 for x^2 <= max(1, 2(nu+1)), Hankel's expansion 10.17.3 for x >= max(25, nu^2), the recurrence 10.6.1 upward from Hankel's J_mu and J_(mu+1) for x >= 25 and nu <= 0.95 x (stable below the turning point), and otherwise Miller's backward recurrence (3.6(iii)) normalized by Neumann's expansion of (x/2)^mu (10.23(ii)); negative integer orders by 10.4.1, negative x by 10.11.1 (above the cut) |
 | `legendre_p(n, x)`, `assoc_legendre_p(n, m, x)`, `legendre_all(n, x, normalization)` | integer degree and order, real x in [-1, 1]: the degree recurrence 14.10.3 with exact coefficients from the diagonal (14.7.8), and next to +-1 (n^2 (1 - |x|)/2 <= 1) the terminating hypergeometric series 14.3.1 with 14.9.3 and 14.7.17; the scale kept as an exact power of 2 and the factorial ratios as exact integers |
 
 The phase conventions of the Legendre functions:
@@ -54,7 +55,11 @@ functions are within a few units in the last place. The larger errors
 follow the functions' own condition numbers or the method's: for complex s,
 zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 8 |Im s| eps of max(1, |zeta|), from the rounding of the phases Im s log k),
-the error functions' with |z|^2, and E1's and Ei's with |x|.
+the error functions' with |z|^2, and E1's and Ei's with |x|. J_nu(x) is
+measured against its envelope sqrt(2/(pi x)) where it oscillates (|x| > nu,
+an absolute accuracy next to its zeros) and relatively below: within
+5e-15 there, and 1.3e-14 for the series beyond nu = 170, where
+Gamma(nu + 1) leaves the doubles and the prefactor goes through logarithms.
 matlab-tests/test_special.m checks the MATLAB functions against GNU Octave,
 to 10 digits, on the examples from their documentation pages and more.
 
@@ -66,7 +71,10 @@ to 10 digits, on the examples from their documentation pages and more.
 - Incomplete elliptic integrals, Carlson's integrals, complex arguments
   of the elliptic functions, and Legendre functions of non-integer degree
   or order or of the second kind.
-- Bessel and Airy functions, after Amos's papers (ACM TOMS 644).
+- Bessel functions other than J (Y, I, K, the Hankel functions) and Airy
+  functions; J of complex argument, of negative non-integer order (it needs
+  Y), and orders and arguments that would need a backward recurrence longer
+  than 500000 steps (NotCovered).
 - polylog of non-integer order, and of orders below -20 or above 100.
 - Complex beta, complex erfinv, hurwitz_zeta for complex a (the summation
   cancels catastrophically, and DLMF 25.11.5 is stated for real a) or
