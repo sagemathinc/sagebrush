@@ -24,6 +24,8 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 
 pub type ZPoly = Vec<BigInt>;
 
+pub mod nf;
+
 // ------------------------------------------------------------------ Z[x]
 
 fn trim(mut v: ZPoly) -> ZPoly {
