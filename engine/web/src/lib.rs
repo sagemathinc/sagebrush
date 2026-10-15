@@ -8,7 +8,7 @@
 //! {"ok": RESULT} or {"error": MESSAGE}.  Single-threaded.  The functions
 //! and their results mirror the Python bindings (py/src/lib.rs: modsym,
 //! ap, mf); newspace/newforms factor with sagebrush-poly (pure Rust) and
-//! "factor" exposes it; "hmf_*" are Hilbert modular forms (hmf.rs).  Big
+//! "factor" exposes it; "hmf_*" are Hilbert modular forms over Q(sqrt 5) (hmf.rs), "hmfq_*" over any real quadratic field (hmfq.rs).  Big
 //! integers are decimal strings.
 
 use sagebrush_bigint::BigInt;
@@ -17,6 +17,7 @@ use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
 
 mod hmf;
+mod hmfq;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -436,6 +437,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
     match f {
         // ---- Hilbert modular forms over Q(sqrt 5): engine/hmf (hmf.rs) ----
         f if f.starts_with("hmf_") => hmf::dispatch(f, v),
+        f if f.starts_with("hmfq_") => hmfq::dispatch(f, v),
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {

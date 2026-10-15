@@ -216,19 +216,19 @@ pub struct ClassSet {
     primes: Vec<QPrime>,
 }
 
-fn central(x: &QElt) -> BElt {
+pub(crate) fn central(x: &QElt) -> BElt {
     BElt::from_coords([x.clone(), QElt::int(0), QElt::int(0), QElt::int(0)])
 }
 
 /// The Z-basis a, b + c w of an ideal.
-fn ideal_basis(i: &QIdeal) -> [QElt; 2] {
+pub(crate) fn ideal_basis(i: &QIdeal) -> [QElt; 2] {
     let (a, b, c) = i.hnf();
     [QElt { a: BigInt::from(a), b: BigInt::zero() }, QElt { a: BigInt::from(b), b: BigInt::from(c) }]
 }
 
 /// The Z-span of the products x y (x in xs, y in ys), given that it
 /// contains m Lambda.
-fn product(alg: &QuatAlg, xs: &[BElt], ys: &[BElt], m: &BigInt) -> Lattice {
+pub(crate) fn product(alg: &QuatAlg, xs: &[BElt], ys: &[BElt], m: &BigInt) -> Lattice {
     let mut gens = vec![];
     for x in xs {
         for y in ys {

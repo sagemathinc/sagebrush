@@ -57,6 +57,27 @@ pub struct Mat {
     pub d: Vec<u64>,
 }
 
+/// Asks for Stop (sagebrush_interrupt::check_coarse, which asks the wasm
+/// host at every call) about every 2^16 multiply-adds, a few milliseconds
+/// in wasm, where the 128-bit products are emulated: the natural
+/// checkpoints of the dense algorithms here (a row, a column, a block) can
+/// each cost tens of millions of them for large matrices.
+struct Poll(u64);
+
+impl Poll {
+    fn new() -> Poll {
+        Poll(0)
+    }
+    #[inline]
+    fn add(&mut self, work: usize) {
+        self.0 += work as u64;
+        if self.0 >= 1 << 16 {
+            self.0 = 0;
+            sagebrush_interrupt::check_coarse();
+        }
+    }
+}
+
 /// How many products of reduced residues fit in a u128 sum.
 fn batch_len(m: &Modulus) -> usize {
     let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
@@ -259,8 +280,10 @@ impl Mat {
         let mut block_start = 0; // first pivot row of the pending block
         let mut col = 0;
         let mut acc = vec![0u128; cols];
+        let mut poll = Poll::new();
         while col < cols && r < rows {
             let blk = &pivots[block_start..];
+            poll.add((rows - r) * (blk.len() + 1));
             // column col of the rows below, up to date with the block
             if !blk.is_empty() {
                 for i in r..rows {
@@ -312,14 +335,13 @@ impl Mat {
             r += 1;
             col += 1;
             if pivots.len() - block_start == BLOCK {
-                self.flush(block_start, &pivots[block_start..], r, col, batch, &mut acc, keep);
+                self.flush(block_start, &pivots[block_start..], r, col, batch, &mut acc, keep, &mut poll);
                 block_start = pivots.len();
-                sagebrush_interrupt::check();
             }
         }
         if pivots.len() > block_start {
             let blk = pivots[block_start..].to_vec();
-            self.flush(block_start, &blk, r, col, batch, &mut acc, keep);
+            self.flush(block_start, &blk, r, col, batch, &mut acc, keep, &mut poll);
         }
         // rows r.. are zero (every column was processed or no rows remain)
         if !keep {
@@ -336,11 +358,13 @@ impl Mat {
     /// The rows below the block (from row `below`) up to date with the
     /// block's pivots in the columns from `from`, and zero in the block's
     /// pivot columns.
-    fn flush(&mut self, start: usize, blk: &[usize], below: usize, from: usize, batch: usize, acc: &mut [u128], keep: bool) {
+    #[allow(clippy::too_many_arguments)]
+    fn flush(&mut self, start: usize, blk: &[usize], below: usize, from: usize, batch: usize, acc: &mut [u128], keep: bool, poll: &mut Poll) {
         let cols = self.cols;
         let m = self.m;
         let (head, tail) = self.d.split_at_mut(below * cols);
         for row in tail.chunks_exact_mut(cols) {
+            poll.add(cols * blk.len());
             if blk.iter().all(|&ct| row[ct] == 0) {
                 continue;
             }
@@ -359,6 +383,7 @@ impl Mat {
         let cols = self.cols;
         let m = self.m;
         let k = piv.len();
+        let mut poll = Poll::new();
         for i in (0..k).rev() {
             let later = &piv[i + 1..];
             if later.is_empty() || later.iter().all(|&ct| self.d[i * cols + ct] == 0) {
@@ -370,9 +395,7 @@ impl Mat {
             for &ct in later {
                 row[ct] = 0;
             }
-            if i % 16 == 0 {
-                sagebrush_interrupt::check();
-            }
+            poll.add(cols * later.len());
         }
     }
 
@@ -446,6 +469,7 @@ impl Mat {
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
+        let mut poll = Poll::new();
         for i in 0..self.rows {
             let a = self.row(i);
             for j in 0..o.cols {
@@ -460,9 +484,7 @@ impl Mat {
                 }
                 c.d[i * o.cols + j] = r;
             }
-            if i % 16 == 15 {
-                sagebrush_interrupt::check();
-            }
+            poll.add(o.cols * self.cols);
         }
         c
     }
@@ -471,8 +493,10 @@ impl Mat {
     pub fn mul_vec(&self, v: &[u64]) -> Vec<u64> {
         let m = self.m;
         let batch = batch_len(&m);
+        let mut poll = Poll::new();
         (0..self.rows)
             .map(|i| {
+                poll.add(self.cols);
                 let mut r = 0u64;
                 for (ca, cb) in self.row(i).chunks(batch).zip(v.chunks(batch)) {
                     let mut acc = 0u128;
@@ -516,6 +540,7 @@ impl Mat {
             .collect();
         // S has columns v, Av, ..., A^n v
         let mut s = Mat::zero(n, n + 1, m);
+        let mut poll = Poll::new();
         for i in 0..=n {
             for j in 0..n {
                 s.d[j * (n + 1) + i] = v[j];
@@ -523,9 +548,7 @@ impl Mat {
             if i < n {
                 v = self.mul_vec(&v);
             }
-            if i % 32 == 31 {
-                sagebrush_interrupt::check();
-            }
+            poll.add(n * n);
         }
         let piv = s.rref();
         if piv.len() != n || piv[n - 1] != n - 1 {
@@ -543,8 +566,11 @@ impl Mat {
         let m = self.m;
         let n = self.rows;
         let mut h = self.clone();
+        let mut poll = Poll::new();
         // Hessenberg form by similarity transformations
         for k in 1..n.saturating_sub(1) {
+            // the pivot search
+            poll.add(n);
             let Some(i) = (k..n).find(|&i| h.get(i, k - 1) != 0) else { continue };
             if i != k {
                 h.swap_rows(i, k);
@@ -559,11 +585,13 @@ impl Mat {
             let us: Vec<u64> = (k + 1..n).map(|i| m.mul(h.get(i, k - 1), tinv)).collect();
             for (t, &u) in us.iter().enumerate() {
                 if u != 0 {
+                    poll.add(n - k + 1);
                     let (dst, src) = h.rows2(k + 1 + t, k);
                     axpy(&mut dst[k - 1..], &src[k - 1..], m.neg(u), &m);
                 }
             }
             if us.iter().any(|&u| u != 0) {
+                poll.add(n * (n - k));
                 let batch = batch_len(&m);
                 for r in 0..n {
                     let row = &h.d[r * n + k + 1..(r + 1) * n];
@@ -578,13 +606,13 @@ impl Mat {
                     h.d[r * n + k] = m.add(h.d[r * n + k], add);
                 }
             }
-            if k % 16 == 15 {
-                sagebrush_interrupt::check();
-            }
         }
-        // p_{k+1} = (x - h_kk) p_k - sum_i (prod_j h_{j,j-1}) h_{k-i,k} p_{k-i}
+        // p_{k+1} = (x - h_kk) p_k - sum_i (prod_j h_{j,j-1}) h_{k-i,k} p_{k-i},
+        // up to n^3 / 6 multiply-adds: polled by work too (daybreak
+        // HARD-FE6-1: Stop went unobserved here for seconds)
         let mut p: Vec<Vec<u64>> = vec![vec![1 % m.n]];
         for k in 0..n {
+            poll.add(k + 2);
             let mut next = vec![0u64; k + 2];
             for (j, &c) in p[k].iter().enumerate() {
                 next[j + 1] = m.add(next[j + 1], c);
@@ -592,12 +620,14 @@ impl Mat {
             }
             let mut t = 1 % m.n;
             for i in 1..=k {
+                poll.add(1);
                 t = m.mul(t, h.get(k - i + 1, k - i));
                 if t == 0 {
                     break;
                 }
                 let f = m.mul(t, h.get(k - i, k));
                 if f != 0 {
+                    poll.add(p[k - i].len());
                     for (j, &c) in p[k - i].iter().enumerate() {
                         next[j] = m.sub(next[j], m.mul(f, c));
                     }
@@ -612,6 +642,21 @@ impl Mat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// For engine/hmf/tests/wasm-stop.mjs (the Stop button in wasm,
+    /// daybreak HARD-FE6-1): the characteristic polynomial of a 1252 x 1252
+    /// upper Hessenberg matrix of ones modulo 65537 (no reduction, then
+    /// seconds of recurrence), which must notice a Stop pressed during the
+    /// recurrence and trap.
+    #[test]
+    #[ignore]
+    fn stop_hessenberg_recurrence() {
+        let md = Modulus::new(65537);
+        let n = 1252;
+        let rows: Vec<Vec<u64>> = (0..n).map(|i| (0..n).map(|j| if j + 1 >= i { 1 } else { 0 }).collect()).collect();
+        let c = Mat::from_rows(&rows, md).charpoly_hessenberg();
+        println!("not interrupted: {}", c.len());
+    }
 
     fn rng(seed: &mut u64) -> u64 {
         *seed ^= *seed << 13;

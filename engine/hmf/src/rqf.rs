@@ -74,19 +74,11 @@ fn isqrt(n: i128) -> i128 {
     x
 }
 
-fn is_squarefree(n: i64) -> bool {
-    let mut m = n;
-    let mut p = 2i64;
-    while p * p <= m {
-        if m % (p * p) == 0 {
-            return false;
-        }
-        if m % p == 0 {
-            m /= p;
-        }
-        p += 1;
-    }
-    true
+/// Whether n > 0 is squarefree, from its bounded factorization (field.rs;
+/// daybreak HARD-3AE-1: the trial division here had no bound and its p * p
+/// overflowed near i64::MAX).
+fn is_squarefree(n: i64) -> Result<bool, String> {
+    Ok(crate::field::factor_u64(n as u64)?.iter().all(|&(_, e)| e == 1))
 }
 
 /// A real quadratic field.
@@ -205,13 +197,55 @@ pub enum Splitting {
     Ramified,
 }
 
-/// A prime ideal of O_F.
+/// A prime ideal of O_F. The fields are private to the crate: a QPrime is
+/// made only by QuadField::primes_above (and the functions built on it), so
+/// p, norm and kind always agree with the ideal (daybreak API-3AE-6: a
+/// caller altering norm reached unchecked arithmetic).
+///
+/// ```
+/// let f = sagebrush_hmf::rqf::QuadField::new(5).unwrap();
+/// let p = f.primes_above(11).unwrap()[0];
+/// assert_eq!((p.p(), p.norm()), (11, 11));
+/// ```
+///
+/// A prime cannot be altered outside the crate:
+///
+/// ```compile_fail
+/// let f = sagebrush_hmf::rqf::QuadField::new(5).unwrap();
+/// let mut p = f.primes_above(11).unwrap()[0];
+/// p.norm = i128::MAX;
+/// ```
+///
+/// nor made from parts:
+///
+/// ```compile_fail
+/// let f = sagebrush_hmf::rqf::QuadField::new(5).unwrap();
+/// let p = f.primes_above(11).unwrap()[0];
+/// let q = sagebrush_hmf::rqf::QPrime { p: 11, norm: i128::MAX, kind: p.kind(), ideal: p.ideal() };
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct QPrime {
-    pub p: i64,
-    pub norm: i128,
-    pub kind: Splitting,
-    pub ideal: QIdeal,
+    pub(crate) p: i64,
+    pub(crate) norm: i128,
+    pub(crate) kind: Splitting,
+    pub(crate) ideal: QIdeal,
+}
+
+impl QPrime {
+    /// The rational prime below.
+    pub fn p(&self) -> i64 {
+        self.p
+    }
+    /// The absolute norm, p or p^2.
+    pub fn norm(&self) -> i128 {
+        self.norm
+    }
+    pub fn kind(&self) -> Splitting {
+        self.kind
+    }
+    pub fn ideal(&self) -> QIdeal {
+        self.ideal
+    }
 }
 
 /// The 2-dimensional Hermite normal form of the Z-span of vectors (u, v)
@@ -323,11 +357,12 @@ impl SignCmp for BigInt {
 impl QuadField {
     /// Q(sqrt d) for squarefree d > 1.
     pub fn new(d: i64) -> Result<QuadField, String> {
-        if d <= 1 || !is_squarefree(d) {
-            return Err(format!("{} is not a squarefree integer > 1", d));
-        }
+        // the range first, before any arithmetic on d (HARD-3AE-1)
         if d > 1 << 40 {
             return Err("d must be below 2^40".into());
+        }
+        if d <= 1 || !is_squarefree(d)? {
+            return Err(format!("{} is not a squarefree integer > 1", d));
         }
         Ok(if d % 4 == 1 { QuadField { d, disc: d, t: 1, n: (d - 1) / 4 } } else { QuadField { d, disc: 4 * d, t: 0, n: d } })
     }
@@ -563,7 +598,7 @@ impl QuadField {
         self.check(i)?;
         let mut out = vec![];
         let mut rest = *i;
-        for (p, _) in crate::field::factor_u64(i.norm() as u64) {
+        for (p, _) in crate::field::factor_u64(i.norm() as u64)? {
             // the primes above p dividing I have norm dividing N(I) < 2^60;
             // an inert p divides N(I) only as p^2, so (p) is in range too
             let primes = self.primes_above(p as i64).expect("the primes above a divisor of N(I) are in range");
@@ -980,7 +1015,9 @@ fn abelian_invariants(table: &[Vec<usize>], e: usize) -> Vec<i64> {
         r
     };
     let mut factors: Vec<Vec<u64>> = vec![]; // per prime: the cyclic p-power factors
-    for (p, _) in crate::field::factor_u64(n as u64) {
+    // n is the order of a class group whose table is in memory: below 2^20,
+    // so trial division alone factors it and this cannot fail
+    for (p, _) in crate::field::factor_u64(n as u64).unwrap_or_default() {
         // n_j = log_p #{x : x^(p^j) = 1}
         let mut counts = vec![0u32];
         let mut pj = 1u64;

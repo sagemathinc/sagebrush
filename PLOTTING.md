@@ -152,9 +152,11 @@ Supported:
 - `plot` with format strings (`'r--o'`, `'C2'`), `scatter` (with colormaps),
   `bar`/`barh` (categorical labels), `hist` (`density`, `cumulative`,
   `histtype='step'`), `fill_between`, `errorbar`, `step`, `stem`, `pie`,
-  `imshow` (viridis/gray), `axhline`/`axvline`, `text` and `annotate`.
+  `imshow` (viridis/gray), `axhline`/`axvline` (`xmin`/`xmax`, a label in
+  the legend), `text` and `annotate`.
 - Titles, labels, limits, `xscale`/`yscale('log')`, ticks and tick labels,
-  `grid`, `legend` (`loc`), `axis('equal'|'off')` and `suptitle`.
+  `grid`, `legend` (`loc`; labels, handles, or the labelled artists as
+  matplotlib lists them), `axis('equal'|'off')` and `suptitle`.
 - `savefig`: PNG (matplotlib's default, also for a name without an
   extension or a file object) and SVG, with `dpi`, `facecolor`,
   `transparent` and `metadata`; other formats and `bbox_inches='tight'` are
@@ -169,6 +171,10 @@ Supported:
   returns them: float32 in [0, 1], `(h, w)`, `(h, w, 3)` or `(h, w, 4)`.
   Other formats are errors, and a file over 16384 pixels on a side or
   2**24 in all is refused before it is decoded.
+- As in matplotlib: the ticks are its AutoLocator's (as many as the axes'
+  size allows, in its default subplot layout), autoscaled limits have 5%
+  margins, and lines (`plot`, `hist`, `errorbar`) and patches (`bar`,
+  `scatter`, `fill_between`, `pie`) take colors from separate cycles.
 
 Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 
