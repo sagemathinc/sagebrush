@@ -21,7 +21,7 @@ __all__ = [
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
-    "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
+    "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Zp", "Qp", "ZpCR", "QpCR", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
@@ -110,6 +110,7 @@ from _sage_mpoly import ideal, Ideal, TermOrder
 from _sage_real import RealField, ComplexField, RealIntervalField, RIF
 from _sage_rdf import RDF, CDF
 from _sage_series import PowerSeriesRing, LaurentSeriesRing, O
+from _sage_padic import Zp, Qp, ZpCR, QpCR
 from _sage_graph import Graph, DiGraph, graphs, digraphs
 true, false = True, False
 from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles, firing_graph, parallel_firing_graph
