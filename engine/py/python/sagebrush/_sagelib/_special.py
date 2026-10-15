@@ -506,11 +506,13 @@ def _polygamma1(n, z):
         # powers of q: d^n/dz^n cot(pi z) = -2i (2 pi i)^n sum j^n q^j)
         r, y = _reduce(x), z.imag
         S = 0j
+        Sabs = 0.0
         j = 1
         jpeak = n / (2 * _PI * y)
         while True:
             t = j ** n * _math.exp(-2 * _PI * j * y) * _cmath.exp(2j * _PI * _reduce(j * r))
             S += t
+            Sabs += abs(t)
             if j > jpeak and abs(t) <= 1e-17 * abs(S):
                 break
             if j > jpeak + 10000 or not _cmath.isfinite(S):
@@ -520,7 +522,16 @@ def _polygamma1(n, z):
                 raise NotCovered("polygamma: the q-series did not converge at n = %r, z = %r" % (n, z))
             j += 1
         D = -2j * (2j * _PI) ** n * S
-        return sgn * _polygamma1(n, 1 - z) - _PI * D
+        q = _polygamma1(n, 1 - z)
+        v = sgn * q - _PI * D
+        # (the two parts cancel next to the value's zeros: their roundings,
+        # bounded by (n + 2) eps times the moduli, against 1e-11 of the
+        # result, as the reflection and the recurrence do; psi^(100)(-0.5 +
+        # 1.0000000000000002i) was 7.9e-11 off)
+        bound = (n + 2) * 2.2e-16 * (abs(q) + 2 * _PI * (2 * _PI) ** n * Sabs)
+        if _bad(v) or not _math.isfinite(bound) or bound > 1e-11 * abs(v):
+            raise NotCovered("polygamma: the reflection cancels beyond the doubles' accuracy at n = %r, z = %r" % (n, z))
+        return v
     # (DLMF 5.15.5: psi^(n)(z+1) = psi^(n)(z) + (-1)^n n! / z^(n+1),
     # upward to Re z >= R, then DLMF 5.15.9's asymptotic series)
     R = _STIRLING_R + 2 * n
@@ -528,6 +539,7 @@ def _polygamma1(n, z):
     fact_n = float(_math.factorial(n))
     sign = -1.0 if n % 2 else 1.0
     rec = 0j if cplx else 0.0
+    rec_abs = 0.0
     if m > 10 ** 6:
         raise NotCovered("polygamma: Sagebrush covers Re z >= -1e6 when |Im z| < %g" % _POLYGAMMA_Y)
     if m:
@@ -548,8 +560,11 @@ def _polygamma1(n, z):
             e1 = -ex // 2
             ws = (w * 2.0 ** e1) * 2.0 ** (-ex - e1)
             r = fact_n * complex(np.sum((1.0 / ws) ** (n + 1)))
+            # (and the sum of the terms' moduli, for the rounding bound below)
+            ra = fact_n * float(np.sum(np.abs(1.0 / ws) ** (n + 1)))
             try:
                 rec = complex(_ldexp(r.real, -ex * (n + 1)), _ldexp(r.imag, -ex * (n + 1)))
+                rec_abs = _ldexp(ra, -ex * (n + 1))
             except OverflowError:
                 raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
         else:
@@ -571,7 +586,21 @@ def _polygamma1(n, z):
         if abs(t) < 1e-18 * abs(a):
             break
     asym = -sign * a
-    return asym - sign * rec
+    v = asym - sign * rec
+    if cplx:
+        if _bad(v):
+            # (|psi^(n)(z)| beyond the doubles, from the sum or the series: an
+            # infinite or nan part is refused, as the scaled recurrence's
+            # overflow is)
+            raise NotCovered("polygamma: |psi^(n)(z)| is beyond the doubles here")
+        # (the terms' roundings, each about (n + 2) eps of the term with the
+        # powers, bounded by the sum of their moduli: where that exceeds
+        # 1e-11 of the result the terms cancel beyond the doubles' accuracy,
+        # next to the zeros of the dominant terms (psi^(100)(-0.5 + 0.0468i)
+        # was off by 54 times its value), and the value is refused, not given)
+        if (n + 2) * 2.2e-16 * (rec_abs + abs(a)) > 1e-11 * abs(v):
+            raise NotCovered("polygamma: the recurrence cancels beyond the doubles' accuracy at n = %r, z = %r" % (n, z))
+    return v
 
 
 # (complex z with Re z < 1/2 and |Im z| at least this use the reflection,
@@ -626,7 +655,9 @@ def _polygamma_reflect(n, z):
     q = _polygamma1(n, 1 - z)
     r = (-1.0 if n % 2 else 1.0) * q - complex(p * v.real, p * v.imag)
     bound = 4 * n * 2.2e-16 * (p * a + abs(q))
-    if not bound <= 1e-13 * abs(r):
+    # (finite first: where P_n's terms or the result overflow, inf <= inf
+    # would accept an infinite or nan value, astra's CORR-7E4-1)
+    if _bad(r) or not _math.isfinite(bound) or not bound <= 1e-13 * abs(r):
         return None
     return r
 
@@ -653,15 +684,19 @@ def polygamma(n, z):
     polynomial in cot for |Im z| < 1, or else the recurrence where that
     polynomial would lose more than three digits, and as a q-series for
     |Im z| >= 1, Re z < 1/2; the recurrence takes -Re z terms, so
-    NotCovered below Re z = -1e6 there).  NotCovered for n > 100 and where
-    |psi^(n)(z)| or |z| is beyond the doubles.  PoleError at 0, -1, -2, ...
+    NotCovered below Re z = -1e6 there).  NotCovered for n > 100, where
+    |psi^(n)(z)| or |z| is beyond the doubles, and for complex z where the
+    method's terms cancel so that the bound on their rounding, (n + 2) eps
+    times the sum of their moduli, exceeds 1e-11 of the value: next to the
+    zeros of the dominant terms, where each of the recurrence and the
+    reflection lost up to the whole value (psi^(100)(-0.5 + 0.0468i)).
+    PoleError at 0, -1, -2, ...
     Largest relative error found against mpmath for n = 1..20: 4.6e-15
     for real x in [-40, 50], 4.3e-15 for complex |z| <= 420, 1e-14 next to
     the negative real axis; for n up to 100 and |z| up to 1e12, 4e-14
-    (largest for negative Re z); larger near the zeros and where the
-    function's condition is large (8e-13 at psi^(100)(-0.5 - 0.0311i),
-    where 101 arg(0.5 + 0.0311i) is near 2 pi and the value's leading
-    part nearly vanishes)"""
+    (largest for negative Re z), and below 1e-12 wherever the bound
+    accepts (8e-13 at psi^(100)(-0.5 - 0.0311i), where 101 arg(0.5 +
+    0.0311i) is near 2 pi and the value's leading part nearly vanishes)"""
     def one(n, z):
         if isinstance(n, complex) or n != _math.floor(n) or n < 0:
             raise ValueError("polygamma: n must be an integer >= 0")
@@ -1914,10 +1949,17 @@ def _e1_asym(z):
             break
     # (e^-z / z with the phases -Im z and -arg z apart: their sum rounded
     # -arg z away at Im z = 1e308, E1(1e308 i) off by a factor i)
-    lz = _cmath.log(z)
-    v = _cexp(complex(-z.real - lz.real, -z.imag)) * _cmath.exp(complex(0.0, -lz.imag)) * s
-    if _isnan(v):
-        # (e^-z infinite, its phase's parts times it inf * 0)
+    # (log |z| from the larger part, as Sagebrush's cmath.log forms |z| first
+    # and is inf beyond 1.8e308: e^(1.7e308 - inf) made E1(-1.7e308 + 1.7e308i)
+    # 0, astra's CORR-7E4-2)
+    x, y = abs(z.real), abs(z.imag)
+    big, small = max(x, y), min(x, y)
+    lzr = _math.log(big) + 0.5 * _math.log1p((small / big) ** 2)
+    lzi = _math.atan2(z.imag, z.real)
+    v = _cexp(complex(-z.real - lzr, -z.imag)) * _cmath.exp(complex(0.0, -lzi)) * s
+    if _bad(v):
+        # (e^-z beyond the doubles: an infinite part, or its phase's parts
+        # times it, inf * 0)
         raise NotCovered("exp_integral_e1: |E1(z)| is beyond the doubles at z = %r" % (z,))
     if z.real < 0 and z.imag == 0:
         v = complex(v.real, -_math.copysign(_PI, z.imag))
