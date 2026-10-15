@@ -488,25 +488,53 @@ class pAdicFieldCappedRelative(pAdicGeneric_):
     _field = True
 
 
+def _exact_number(n):
+    """The exact rational value of an integer, rational, real (of any
+    precision: its exact binary value, never rounded through a double) or
+    numeric symbolic constant; TypeError for anything else, an infinity or
+    NaN."""
+    if isinstance(n, (int, _F)):
+        return _F(n)
+    if isinstance(n, float):
+        if n in (float("inf"), float("-inf")) and type(n) is float:
+            # (Sage's error for a Python infinity; TypeError for a real one)
+            raise OverflowError("cannot convert float infinity to integer")
+        if n != n or n in (float("inf"), float("-inf")):
+            raise TypeError("unable to convert %r to an integer" % (n,))
+        return _F(n)
+    if hasattr(n, "exact_rational"):
+        for t in ("is_infinity", "is_NaN"):
+            if hasattr(n, t) and getattr(n, t)():
+                raise TypeError("unable to convert %r to an integer" % (n,))
+        try:
+            return _F(n.exact_rational())
+        except (TypeError, ValueError, OverflowError, ArithmeticError):
+            raise TypeError("unable to convert %r to an integer" % (n,))
+    if type(n).__name__ == "Expression":
+        try:
+            v = n.pyobject()
+        except (TypeError, ValueError, AttributeError):
+            raise TypeError("unable to convert %r to an integer" % (n,))
+        if isinstance(v, (int, _F)):
+            return _F(v)
+    raise TypeError("unable to convert %r to an integer" % (n,))
+
+
 def _prec_arg(n):
     """A precision argument as an int, None for None or +Infinity: an
     integral rational or real is accepted, a fractional one refused (as
-    Sage), never truncated."""
+    Sage), never truncated or rounded.  The exact value is checked (a
+    100-bit 1 + 2^-80 is fractional)."""
     if n is None or isinstance(n, int):
         return n
-    if isinstance(n, _F):
-        if n.denominator != 1:
-            raise TypeError("no conversion of this rational to integer")
-        return n.numerator
-    try:
-        f = float(n)
-    except (TypeError, ValueError, AttributeError, OverflowError):
-        raise TypeError("unable to convert %r to an integer" % (n,))
-    if f == float("inf"):
+    if type(n).__name__ == "Expression" and str(n) == "+Infinity":
         return None
-    if f != f or f == float("-inf") or f != int(f):
+    q = _exact_number(n)
+    if q.denominator != 1:
+        if isinstance(n, _F):
+            raise TypeError("no conversion of this rational to integer")
         raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
-    return int(f)
+    return q.numerator
 
 
 def _int_exponent(n):
@@ -826,6 +854,13 @@ class pAdicCappedRelativeElement:
 
             sage: Zp(5, 6)(23).add_bigoh(2)
             3 + 4*5 + O(5^2)
+
+        The precision is checked by its exact value, not rounded::
+
+            sage: Zp(5, 6)(23).add_bigoh(RealField(100)(2) + 2^-80)
+            Traceback (most recent call last):
+            ...
+            TypeError: Attempt to coerce non-integral RealNumber to Integer
         """
         n = _prec_arg(absprec)
         if n is None:

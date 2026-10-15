@@ -17,7 +17,7 @@ a black-box oracle.
 
 from fractions import Fraction as _F
 
-from _sage_padic import _prec_arg, _int_exponent
+from _sage_padic import _prec_arg, _int_exponent, _exact_number
 
 
 def _sa():
@@ -1500,12 +1500,12 @@ class Polynomial_padic:
         if type(n).__name__ == "pAdicCappedRelativeElement":
             raise NotImplementedError("p-adic exponents are not available in sagebrush yet")
         try:
-            q = n if isinstance(n, int) else _F(n)
-        except (TypeError, ValueError, AttributeError, OverflowError):
+            q = _exact_number(n)
+        except TypeError:
             raise TypeError("non-integral exponents not supported")
-        if not isinstance(q, int) and q.denominator != 1:
+        if q.denominator != 1:
             raise TypeError("non-integral exponents not supported")
-        n = int(q)
+        n = q.numerator
         if n < 0:
             raise NotImplementedError("negative powers of polynomials")
         r = self._R.one()
