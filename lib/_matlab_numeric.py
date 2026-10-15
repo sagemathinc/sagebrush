@@ -12,7 +12,7 @@ from _matlab import _bs, _bi, _err, _mat, _unmat, _box, _arr, _scalar, _istext, 
 
 
 def _n_arg(n, what="n"):
-    v = _scalar(n)
+    v = _m._real_scalar(n, what)
     if v != _math.floor(v):
         raise _err("Input must be a nonnegative integer.")
     return max(0, int(v))
@@ -71,7 +71,7 @@ def pascal_(n, k=0.0, *args):
         k = 0.0
     _, cls = _class_arg(args)
     n = _n_arg(n)
-    k = int(_scalar(k))
+    k = _m._int_arg(k)
     if k not in (0, 1, 2):
         raise _err("K must be 0, 1, or 2.")
     L = np.zeros((n, n))
@@ -688,7 +688,7 @@ def ppval_(pp, xx):
 @_bs("mkpp")
 def mkpp_(breaks, coefs, d=1.0):
     br = _arr(breaks).reshape(-1).astype(np.float64)
-    dim = int(_scalar(d))
+    dim = _m._int_arg(d, "dimension")
     C = _mat(coefs)
     pieces = br.size - 1
     if C.size % (pieces * dim):
@@ -724,7 +724,7 @@ def interp2_(*args):
                    "interp2: the '%s' method is not supported in Sagebrush." % method)
     if len(args) in (1, 2):
         V = _mat(args[0])
-        k = int(_scalar(args[1])) if len(args) == 2 else 1
+        k = _m._int_arg(args[1]) if len(args) == 2 else 1
         m, n = V.shape
         x = np.arange(1.0, n + 1)
         y = np.arange(1.0, m + 1)

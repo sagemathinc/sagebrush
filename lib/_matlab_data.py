@@ -35,8 +35,10 @@ def _first_dim(shape):
 
 
 def _dim_value(d):
+    if _m._numel(d) != 1 or not _m._isnumlike(d) or _m._arr(d).dtype.kind == "c" and _m._arr(d).reshape(-1)[0].imag != 0:
+        raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
     v = _scalar(d)
-    if v != _math.floor(v) or v < 1:
+    if not _math.isfinite(v) or v != _math.floor(v) or v < 1:
         raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
     return int(v) - 1
 
@@ -367,7 +369,7 @@ def _cov_args(x, args, fname):
         else:
             y = a
             if len(args) > 1:
-                w = int(_scalar(args[1]))
+                w = _m._int_arg(args[1], "weight")
     if w not in (0, 1):
         raise _err("W must be 0 or 1.")
     return y, w
@@ -500,7 +502,7 @@ def _mov_args(args, fname, takes_w):
     w, axis, omit, ends = 0, None, False, "shrink"
     if takes_w and args and not _istext(args[0]):
         if _m._numel(args[0]):
-            w = int(_scalar(args[0]))
+            w = _m._int_arg(args[0], "weight")
             if w not in (0, 1):
                 raise _err("W must be 0 or 1.")
         args.pop(0)

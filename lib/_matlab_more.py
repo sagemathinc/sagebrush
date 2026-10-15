@@ -281,7 +281,7 @@ def _base_text(name, args, radix):
         raise _err("%s: D must be a numeric, logical or char array, not %s." % (name, cls))
     mind = 0
     if len(args) == 2:
-        x = _m._scalar(args[1], "minDigits")
+        x = _m._real_scalar(args[1], "minDigits")
         if not (x >= 0 and x == _math.floor(x) and _math.isfinite(x)):
             raise _err("%s: minDigits must be a nonnegative integer." % name)
         mind = int(x)

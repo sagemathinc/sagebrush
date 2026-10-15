@@ -3497,8 +3497,30 @@ def _fmod(A, B):
 import re as _re
 
 
+def _real_scalar(v, what="argument"):
+    """a real numeric scalar as a Python float: refused, not truncated or
+    taken from its first element, when v has another number of elements,
+    an imaginary part, or is NaN or infinite (sizes, dimensions, counts)"""
+    if not _isnumlike(v) and type(v) is not int:
+        raise _err("Expected a numeric %s, not %s." % (what, class_(v)))
+    if _numel(v) != 1:
+        raise _err("Size inputs must be scalars." if what == "size" else "Expected a scalar %s, not an array of %d elements." % (what, _numel(v)))
+    a = _arr(v) if type(v) is not int else np.array([[float(v)]])
+    x = a.reshape(-1)[0]
+    if a.dtype.kind == "c":
+        if x.imag != 0:
+            raise _err("Size inputs must be real." if what == "size" else "Expected a real %s, not a complex number." % what)
+        x = x.real
+    x = float(x)
+    if not _math.isfinite(x):
+        raise _err("Size inputs must be finite." if what == "size" else "Expected a finite %s." % what)
+    return x
+
+
 def _int_arg(v, what="argument"):
-    x = _scalar(v, what)
+    """an integer argument (a size, dimension, count): a real, finite,
+    integer-valued scalar, else an error"""
+    x = _real_scalar(v, what)
     if x != _math.floor(x):
         raise _err("Size inputs must be integers." if what == "size" else "Expected an integer %s." % what)
     return int(x)
