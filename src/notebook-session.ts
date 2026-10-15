@@ -35,7 +35,8 @@
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir } from "./compile";
-import { needsMore, complete, helpSyntax } from "./interactive";
+import { needsMore, complete, ipythonSyntax } from "./interactive";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
@@ -171,6 +172,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // display(), a builtin in a notebook, as IPython makes it (display(widget)
     // without an import is common): IPython.display's, imported when first used
     R.loader.exec("import builtins as _b\ndef display(*objs, **kw):\n    from IPython.display import display as _d\n    return _d(*objs, **kw)\n_b.display = display\ndel _b, display\n", host, "exec", "<init>");
+    // get_ipython(), also a builtin in a notebook (Jupyter's exports call
+    // get_ipython().run_line_magic): lib/_pyjs_magic.py's shell
+    R.loader.exec(GET_IPYTHON, host, "exec", "<init>");
     return { main, host };
   })();
 
@@ -211,7 +215,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
 
   // Figures a cell made with matplotlib.pyplot and did not show: show them now, as Jupyter does.
   // And files the cell wrote without closing them: write them now.
-  const FLUSH_FIGURES = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n";
+  // (and %autoreload's record of the modules the cell imported)
+  const FLUSH_FIGURES = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n" + MAGIC_POST;
 
   async function handle(m: any) {
     const { id } = m;
@@ -331,7 +336,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
           }
         };
         const transform = (t: any) => { if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
-        ok = run(helpSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length || inits.length ? { transform } : {}) });
+        run(MAGIC_PRE, host, "exec", "<autoreload>");
+        ok = run(ipythonSyntax(code, { sage: !!m.sage }) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, ...(mangle || scopedNames.length || inits.length ? { transform } : {}) });
       }
       run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

@@ -14,7 +14,8 @@ import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
 import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
-import { needsMore, complete, helpSyntax } from "./interactive";
+import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
+import { MAGIC_PRE, MAGIC_POST } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
@@ -221,6 +222,9 @@ function repl(main: any, quiet: boolean): Promise<number> {
   const ps1 = () => (typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");
   const ps2 = () => (typeof sys.ps2 === "string" ? sys.ps2 : sage ? "....: " : "... ");
   let buf: string[] = [];
+  // (the session's own Python around each input: %autoreload's hooks)
+  const host = R.newModule("__sagebrush_host__");
+  host.__builtins__ = R.builtins;
   rl.setPrompt(ps1());
   rl.prompt();
   return new Promise((resolveExit) => {
@@ -249,7 +253,9 @@ function repl(main: any, quiet: boolean): Promise<number> {
             // read-only home: no history
           }
         }
-        const code = guarded(() => R.loader.exec(helpSyntax(src) + "\n", main, "single", "<stdin>", opts()));
+        guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
+        const code = guarded(() => R.loader.exec(ipythonSyntax(src, opts()) + "\n", main, "single", "<stdin>", opts()));
+        guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
         flushFiles();
         R.stdout.flush();
         R.stderr.flush();

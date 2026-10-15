@@ -4,8 +4,8 @@ import { R } from "./compile";
 import { parse, PySyntaxError } from "./parse";
 
 // IPython's help syntax (obj?): src/help-syntax.ts
-import { helpSyntax } from "./help-syntax";
-export { helpSyntax };
+import { helpSyntax, ipythonSyntax } from "./help-syntax";
+export { helpSyntax, ipythonSyntax };
 
 // Is `src` an incomplete statement (more lines needed)?  The codeop rule:
 // a syntax error that goes away or moves when more text could follow.
@@ -16,7 +16,7 @@ export function needsMore(src: string, opts: { sage?: boolean } = {}): boolean {
   if (/:\s*(#.*)?$/.test(lines[0]) || /^\s*@/.test(lines[0])) return last.trim() !== "";
   if (/\\$/.test(last)) return true;
   try {
-    parse(helpSyntax(src) + "\n", "<stdin>", "exec", opts);
+    parse(ipythonSyntax(src, opts) + "\n", "<stdin>", "exec", opts);
     return false;
   } catch (e: any) {
     return e instanceof PySyntaxError && /was never closed|unexpected EOF|unterminated triple-quoted|expected an indented block|incomplete input/.test(e.msg);
