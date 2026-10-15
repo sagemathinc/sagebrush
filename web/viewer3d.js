@@ -16,7 +16,8 @@
 // container's fallback SVG is hidden once WebGL works.
 //
 // Optional scene fields (MATLAB's figures, lib/_matlab_plot.py, use them):
-// projection "orthographic"; background and ink (#rrggbb: the view's
+// projection "orthographic"; subtitle (a line under the title) and
+// title_weight ("normal": not bold); background and ink (#rrggbb: the view's
 // background, and its text and axis lines, instead of the page's); box
 // {ticks: [xs, ys, zs], ticklabels: [...], grid: "#rrggbb"}: axes drawn as
 // MATLAB draws them, a grid on the three planes at the back (which ones
@@ -490,6 +491,8 @@
     };
     for (const k of ["frame", "axes", "fill", "fit"]) bool(scene[k], k);
     optStr(scene.title, LIMITS.text, "title");
+    optStr(scene.subtitle, LIMITS.text, "subtitle");
+    oneOf(scene.title_weight, ["bold", "normal"], "title_weight");
     optStr(scene.description, LIMITS.description, "description");
     if (given(scene.labels)) {
       if (!Array.isArray(scene.labels) || scene.labels.length > 3) no("has malformed labels");
@@ -850,10 +853,12 @@
     wrap.appendChild(layer);
     const bgColor = sceneColor(scene.background), inkColor = sceneColor(scene.ink);
     if (inkColor) layer.style.color = inkColor;
-    if (scene.title) {
+    // the title, and a subtitle on a line under it
+    for (const [text, weight, pad] of [[scene.title, scene.title_weight === "normal" ? "400" : "600", "4px 0"], [scene.subtitle, "400", "0 0 4px"]]) {
+      if (!text) continue;
       const t = document.createElement("div");
-      t.textContent = scene.title;
-      t.style.cssText = "text-align:center;font-weight:600;font-size:15px;margin:0;padding:4px 0";
+      t.textContent = text;
+      t.style.cssText = `text-align:center;font-weight:${weight};font-size:15px;margin:0;padding:${pad}`;
       if (bgColor) t.style.background = bgColor;
       if (inkColor) t.style.color = inkColor;
       container.appendChild(t);

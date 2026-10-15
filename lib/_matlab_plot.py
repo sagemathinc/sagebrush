@@ -367,8 +367,10 @@ class Axes(GObj):
                 c.delete()
             self.children = []
             self.color_index = 0
+            # (the title and labels too: their defaults, the title bold)
             for t in (self.title, self.xlabel, self.ylabel, self.zlabel, self.subtitle):
-                t.props["String"] = _m.Char("")
+                t.props.update(t.defaults())
+            self.title.props["FontWeight"] = _m.Char("bold")
             self.legend = None
             for k in ("XLimMode", "YLimMode", "ZLimMode", "CLimMode", "XTickMode", "YTickMode", "XTickLabelMode", "YTickLabelMode"):
                 self.props[k] = _m.Char("auto")
@@ -2042,11 +2044,20 @@ def _label(prop):
     def g(nargout, args):
         ax, args = _axes_arg(args)
         target = ax.get_prop(prop)
+        sub = None
+        if prop == "Title" and len(args) >= 2 and len(args) % 2 == 0:
+            # (title(titletext, subtitletext, Name, Value, ...): the even count
+            # leaves the subtitle second)
+            sub, args = args[1], [args[0]] + list(args[2:])
         pos, props = _split_props(args, 1)
+        if len(pos) > 1:
+            raise _m._err("Too many input arguments.")
         target.props["String"] = _m.cp(pos[0]) if pos else _m.Char("")
         _apply(target, props)
+        if sub is not None:
+            ax.subtitle.props["String"] = _m.cp(sub)
         ax.touch()
-        return target
+        return [target, ax.subtitle] if prop == "Title" and nargout >= 2 else target
     return g
 
 
@@ -3791,7 +3802,8 @@ def figure_scene(fig):
     bg = _rgbof(fig.props.get("Color", _m.Char("w")))
     scene = {"version": 1, "lo": lo, "hi": hi, "scale": scale, "objects": objs, "frame": False, "axes": False,
              "labels": [_text_value(l.props["String"]) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
-             "title": (t + (" - " + st if st else "")) or None,
+             "title": t or None, "subtitle": st or None,
+             "title_weight": "bold" if _m._text(ax.title.props["FontWeight"]).lower() == "bold" else "normal",
              # (MATLAB's azimuth is from the negative y axis, the viewer's from the x axis)
              "azimuth": v[0] - 90.0, "elevation": max(-89.0, min(89.0, v[1])),
              "projection": "orthographic", "background": _hex(bg) if bg else "#ffffff", "ink": _INK,
@@ -3808,8 +3820,8 @@ def figure_scene(fig):
 def _scene_within(scene):
     """whether the viewer would take the scene (web/viewer3d.js's checkScene:
     its LIMITS on text and ticks, and positions near the box)"""
-    texts = [scene["title"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
-    if any(len(t) > 2000 for t in texts) or len(texts) - 4 > 2000:
+    texts = [scene["title"] or "", scene["subtitle"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
+    if any(len(t) > 2000 for t in texts) or len(texts) - 5 > 2000:
         return False
     box = scene["box"]
     if any(len(t) > 100 for t in box["ticks"]) or any(len(s) > 200 for t in box["ticklabels"] for s in t):

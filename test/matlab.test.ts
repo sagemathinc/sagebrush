@@ -843,17 +843,22 @@ test("a legend in 3-D axes is drawn: surfaces' swatches (colormapped at the midd
   assert.equal(legend(5), null);
 });
 
-test("titles are bold by default (TitleFontWeight), subtitles not; a title's FontWeight is kept", async () => {
+test("titles are bold by default (TitleFontWeight), subtitles not, on a line under the title; title(t, s)", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const msgs: any[] = [];
   const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
   await s.ready;
   const cells = [
-    "plot(1:3); title('Two'); disp(get(get(gca, 'Title'), 'FontWeight')); disp(get(get(gca, 'Subtitle'), 'FontWeight'))",
+    // (close all: the session's figures are those earlier tests left)
+    "close all; plot(1:3); title('Two'); disp(get(get(gca, 'Title'), 'FontWeight')); disp(get(get(gca, 'Subtitle'), 'FontWeight'))",
     "surf(peaks(5)); title('Three')",
     "plot(1:3); title('Main'); subtitle('Sub')",
     "plot(1:3); title('Plain', 'FontWeight', 'normal')",
     "plot(1:3); subtitle('Only')",
+    "plot(1:3); [t, s] = title('Top', 'Below', 'Color', 'r'); disp(t.String), disp(s.String), disp(t.Color), disp(s.Color)",
+    "plot(1:3); title('Top')",
+    "xlabel('a', 'b')",
+    "surf(peaks(5)); title('Top', 'Below')",
   ];
   for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
   const title = (id: number) => {
@@ -864,7 +869,24 @@ test("titles are bold by default (TitleFontWeight), subtitles not; a title's Fon
   assert.equal(msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join(""), "bold\nnormal\n");
   assert.equal(title(1), '<text font-weight="bold">Two</text>');
   assert.equal(title(2), '<text font-weight="bold">Three</text>');
-  assert.equal(title(3), '<text font-weight="bold">Main<tspan font-weight="normal"> Sub</tspan></text>');
+  // (the subtitle: a second line, under the title, which stays where it was; the axes one line shorter)
+  const texts = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle"[^>]*>([A-Za-z]+)<\/text>/g)].map((m) => [m[3], +m[2]]);
+  };
+  const [[t3, y3], [s3, ys3]] = texts(3);
+  assert.deepEqual([t3, s3, ys3 > y3], ["Main", "Sub", true]);
+  assert.equal(texts(7)[0][1], y3);
+  assert.equal(title(3), '<text font-weight="bold">Main</text>');
+  assert.match(msgs.find((m) => m.id === 3 && m.display).display["image/svg+xml"], /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="[\d.]+">Sub<\/text>/);
+  // (title(titletext, subtitletext, Name, Value): the properties are the title's)
+  assert.equal(msgs.filter((m) => m.id === 6 && m.stream === "stdout").map((m) => m.text).join(""), "Top\nBelow\n     1     0     0\n     0     0     0\n");
+  assert.deepEqual(texts(6).map((t) => t[0]), ["Top", "Below"]);
+  assert.match(msgs.filter((m) => m.id === 8 && m.stream === "stderr").map((m) => m.text).join(""), /Too many input arguments/);
+  // (the interactive 3-D view: the subtitle a line of its own too; a new plot's title is bold
+  // again, the axes reset as NextPlot 'replace' says)
+  const scene = JSON.parse(msgs.find((m) => m.id === 9 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
+  assert.deepEqual([scene.title, scene.subtitle, scene.title_weight], ["Top", "Below", "bold"]);
   assert.equal(title(4), "<text>Plain</text>");
   assert.equal(title(5), "<text>Only</text>");
 });
