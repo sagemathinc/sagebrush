@@ -222,6 +222,37 @@ try {
   await ev("document.querySelector('[data-sbb=stickers] .bs-emoji').click(), 1");
   check(await until(`${B}.snapshot().doc.nodes.some((n) => n.kind === "sticker" && !${known1}.includes(n.id))`, 3000), "sticker: added");
   await unmoved("a new sticker");
+
+  // a stroke in a group moved left (or up) past the group's corner: the
+  // group's other items stay where they are, the stroke moves as far as it
+  // was moved (astra's UI-FD2-1), in a group, and in a group in a group
+  const nudgeCases = [
+    ["a group", { layout: "row", nodes: [
+      { id: "g", kind: "group", x: 100, y: 100, children: [{ id: "a", title: "A", x: 0, y: 0 }, { id: "b", title: "B", x: 300, y: 0 }, { id: "s", kind: "ink", x: 10, y: 120, points: [0, 0, 0.5, 60, 0, 0.5], size: 3 }] },
+      { id: "c", title: "Outside", x: 900, y: 100 }] }, ["a", "b", "c"], [["ArrowLeft", 37, -10, 0]]],
+    ["a group in a group", { layout: "row", nodes: [
+      { id: "o", kind: "group", x: 100, y: 100, children: [
+        { id: "i", kind: "group", x: 0, y: 0, children: [{ id: "a", title: "A", x: 20, y: 20 }, { id: "s", kind: "ink", x: 2, y: 2, points: [0, 0, 0.5, 60, 0, 0.5], size: 3 }] },
+        { id: "b", title: "B", x: 400, y: 0 }] },
+      { id: "c", title: "Outside", x: 1100, y: 100 }] }, ["a", "b", "c"], [["ArrowLeft", 37, -10, 0], ["ArrowUp", 38, 0, -10]]],
+  ];
+  for (const [what, nd, still, moves] of nudgeCases) {
+    await ev(`${B}.load(${JSON.stringify({ title: "Nudge", ...nd })}).then(() => 1)`);
+    await until("!!window.board.item('s') && !!window.board.item('c')", 10000);
+    await ev(`${B}.editing(true), window.board.setCamera({ x: 0, y: 0, z: 1 }), window.board.render(), 1`);
+    await sleep(300);
+    const at = (id) => ev(`(() => { const i = window.board.item(${JSON.stringify(id)}); return [Math.round(i.x * 10) / 10, Math.round(i.y * 10) / 10]; })()`);
+    const before = await Promise.all(still.map(at)), s0 = await at("s");
+    const sc = await ev("(() => { const i = window.board.item('s'); return { x: i.x + i.w / 2, y: i.y + i.h / 2 }; })()"), p = await toClient(sc.x, sc.y);
+    await mouse("mousePressed", p.x, p.y);
+    await mouse("mouseReleased", p.x, p.y);
+    await sleep(200);
+    let dx = 0, dy = 0;
+    for (const [k, code, mx, my] of moves) { await key(k, code, 8); dx += mx; dy += my; await sleep(300); }
+    const after = await Promise.all(still.map(at)), s1 = await at("s");
+    check(JSON.stringify(after) === JSON.stringify(before), `${what}: its stroke moved past the group's corner, its other items stay: ${JSON.stringify(before)} then ${JSON.stringify(after)}`);
+    check(Math.abs(s1[0] - s0[0] - dx) < 0.6 && Math.abs(s1[1] - s0[1] - dy) < 0.6, `${what}: ...and the stroke moves (${dx}, ${dy}): ${JSON.stringify([s0, s1])}`);
+  }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

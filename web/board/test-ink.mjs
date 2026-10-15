@@ -141,10 +141,12 @@ check(li.kind === "ink" && ob.x0 >= 0 && ob.y0 >= 0 && ob.x1 <= li.w && ob.y1 <=
       check(ink && ink.x === s.x && ink.y === s.y, `${name}: ...and it is where it was drawn: ` + JSON.stringify([ink?.x, ink?.y, s.x, s.y]));
     }
   }
-  // (in a group: its members stay where they are, wherever in it a stroke is)
+  // (in a group: its members stay where they are, a stroke among them or
+  // beyond them; one above or left of them moves the group's corner, as any
+  // member there does, which the editor makes up for: Editor.contain, UI-FD2-1)
   const g = { layout: "graph", nodes: [{ id: "g", kind: "group", title: "G", layout: "row", children: [note("g1", { x: 0, y: 0 }), note("g2", { x: 300, y: 0 })] }] };
   const gb = at(layout(g));
-  for (const [sx, sy] of [[-200, -150], [100, 40]]) {
+  for (const [sx, sy] of [[100, 40], [700, 300]]) {
     const s = inkNode("s", [sx, sy, 0.5, sx + 100, sy + 60, 0.5]);
     const ga = at(layout({ ...g, nodes: [{ ...g.nodes[0], children: [...g.nodes[0].children, s] }] }));
     check(["g", "g1", "g2"].every((k) => ga[k][0] === gb[k][0] && ga[k][1] === gb[k][1]), `a stroke in a group at (${sx}, ${sy}) moves neither the group nor its members: ` + JSON.stringify([gb, ga]));

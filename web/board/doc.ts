@@ -701,10 +701,9 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
         return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
       }));
-    // (a group's members start at its origin: its members other than pen
-    // strokes, which never move them, B1)
-    const solid = kids.filter((k) => k.c.kind !== "ink").map((k) => pos.get(k.c.id)!), from = solid.length ? solid : [...pos.values()];
-    const minX = Math.min(...from.map((p) => p.x)), minY = Math.min(...from.map((p) => p.y));
+    // (a group's members start at its origin: all of them, strokes too, as
+    // the editor keeps a group around its members, Editor.contain, UI-FD2-1)
+    const minX = Math.min(...[...pos.values()].map((p) => p.x)), minY = Math.min(...[...pos.values()].map((p) => p.y));
     if (kids.length) for (const [id, p] of pos) pos.set(id, { x: p.x - minX, y: p.y - minY });
     let w = 0, h = 0;
     for (const k of kids) {
