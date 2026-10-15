@@ -108,7 +108,7 @@ test("constructors name< ... > parse; those not implemented yet raise at run tim
     assert.match(out, /_m\._unsupported\("[A-Za-z]+", \(1, \d+\)\)/, src);
   }
   assert.match(py("r := rec< F | a := 1, b := <2, 3> >;"), /_m\._rec\(F, \[\("a", 1\), \("b", _m\.MTuple\(\[2, 3\]\)\)\], \(1, 6\)\)/);
-  assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", Integers\(\)\), \("b", None\)\], \(1, 6\)\)/);
+  assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", _m\._first\(Integers\(\)\)\), \("b", None\)\], \(1, 6\)\)/);
   // statements Magma rejects before running them: only the rejection is emitted
   assert.match(py("F := recformat< a, a >;"), /^_m\._compile_error\(1, 20, "Field 'a' is repeated"\)$/m);
   assert.doesNotMatch(py("F := recformat< a, a >;"), /_recformat/);
