@@ -15,10 +15,47 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 """
 
 import math
+import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
-                       show as _show, save_svg, TAB10, to_color, colormap, describe_svg)
+                       show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg)
+from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS
 
 PT = 100 / 72  # pixels per point at 100 dpi
+
+
+def to_color(c, default=None):
+    """A color given to pyplot as CSS for the SVG, checked as matplotlib
+    checks colors: one it does not know is its ValueError.  What reaches the
+    SVG is a CSS name or hex the program gave, or hex made from to_rgba's
+    numbers ("rgba(r, g, b, a)" when its alpha is below 1, the alpha
+    exactly); "none" in any case is no color."""
+    if c is None or isinstance(c, str) and c == "currentColor":
+        return _css(c, default)
+    if isinstance(c, str) and c.lower() == "none":
+        return "none"
+    rgba = _to_rgba(c)
+    if isinstance(c, str):
+        css = _css(c, default)
+        if isinstance(css, str) and (css.startswith("#") or css.lower() in _CSS4_COLORS):
+            return css
+    # (a matplotlib color CSS does not know, "C12" or "TAB:BLUE", a tuple,
+    # a (color, alpha) pair, an array: from its numbers)
+    v = [0 if x != x else int(float(x) * 255 + 0.5) for x in rgba[:3]]
+    a = float(rgba[3])
+    if a == a and a < 1:
+        return "rgba(%d, %d, %d, %s)" % (v[0], v[1], v[2], ("%.6f" % a).rstrip("0").rstrip(".") or "0")
+    return "#%02x%02x%02x" % tuple(v)
+
+
+def _opaque(css):
+    """A color without its alpha: alpha= replaces a color's, as in matplotlib"""
+    if isinstance(css, str):
+        if css.startswith("rgba("):
+            r, g, b = [int(t) for t in css[5:-1].split(",")[:3]]
+            return "#%02x%02x%02x" % (r, g, b)
+        if css.startswith("#") and len(css) in (5, 9):
+            return css[:len(css) - (1 if len(css) == 5 else 2)]
+    return css
 
 # rc settings (only those set: unset ones keep matplotlib's defaults below)
 rcParams = {}
@@ -98,7 +135,9 @@ class Line2D:
         return self._prim.options.get("label")
 
     def set_color(self, c):
-        self._prim.options["color"] = to_color(c)
+        o = self._prim.options
+        o["color_given"] = to_color(c)
+        o["color"] = _opaque(o["color_given"]) if o.get("alpha") is not None else o["color_given"]
 
     def get_xdata(self):
         return list(self._prim.xs)
@@ -121,7 +160,12 @@ class Line2D:
         self._prim.options["hidden"] = not b
 
     def set_alpha(self, a):
-        self._prim.options["alpha"] = a
+        # (the alpha replaces the color's while it is set, as matplotlib's;
+        # the color as given is kept for set_alpha(None))
+        o = self._prim.options
+        given = o.setdefault("color_given", o.get("color"))
+        o["alpha"] = a
+        o["color"] = _opaque(given) if a is not None else given
 
     def set_linewidth(self, w):
         self._prim.options["thickness"] = w * PT
@@ -209,19 +253,22 @@ class Axes:
                 continue
             xs = _list(x) if x is not None else list(range(len(ys)))
             fc, fm, fl = _parse_fmt(fmt)
-            color = self._color(kw.get("color", kw.get("c", fc)))
+            color = given = self._color(kw.get("color", kw.get("c", fc)))
+            if kw.get("alpha") is not None:
+                color = _opaque(color)
             ls = kw.get("linestyle", kw.get("ls", fl or "-"))
             marker = kw.get("marker", fm)
             lw = kw.get("linewidth", kw.get("lw", 1.5))
             ms = kw.get("markersize", kw.get("ms", 6))
             label = kw.get("label")
-            o = {"color": color, "thickness": lw * PT, "linestyle": ls if ls not in ("None", "none", " ", "") else "-",
+            o = {"color": color, "color_given": given, "thickness": lw * PT, "linestyle": ls if ls not in ("None", "none", " ", "") else "-",
                  "alpha": kw.get("alpha"), "label": None if label is None or str(label).startswith("_") else str(label)}
             if marker and marker not in ("None", "none", ""):
                 o["marker"] = marker
                 o["markersize"] = ms * PT / 2
             if ls in ("None", "none", " ", ""):
-                p = Points(xs, ys, marker=marker or "o", size=ms * PT / 2, color=color, alpha=kw.get("alpha"), label=o["label"])
+                p = Points(xs, ys, marker=marker or "o", size=ms * PT / 2, color=color, color_given=given, alpha=kw.get("alpha"),
+                           label=o["label"])
             else:
                 p = Line(xs, ys, **o)
             out.append(Line2D(self._add(p)))
@@ -242,12 +289,14 @@ class Axes:
             else:
                 colors = [to_color(v) for v in cl]
         col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None))
+        if alpha is not None:
+            col, colors = _opaque(col), colors and [_opaque(v) for v in colors]
         sizes = None
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
         r = math.sqrt(36 if s is None or sizes is not None else float(s)) * PT / 2
         p = Points(xs, ys, marker=marker, size=r, sizes=sizes, color=col, colors=colors, alpha=alpha,
-                   label=label, edgecolor=edgecolors if edgecolors not in (None, "none", "face") else None)
+                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None)
         art = _Artist(self._add(p), "collections.PathCollection")
         if clim is not None:
             # (colored by values: a mappable, for colorbar)
@@ -269,8 +318,11 @@ class Axes:
             x0 = float(xi) - width / 2 if align == "center" else float(xi)
             rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
-        p = Rects(rects, color=self._color(None if colors else color), colors=colors, label=label,
-                  edgecolor=edgecolor, alpha=alpha)
+        col = self._color(None if colors else color)
+        if alpha is not None:
+            col, colors = _opaque(col), colors and [_opaque(v) for v in colors]
+        p = Rects(rects, color=col, colors=colors, label=label,
+                  edgecolor=to_color(edgecolor), alpha=alpha)
         if tick_label is not None:
             self._opts["xticks"] = [float(v) for v in xs]
             self._opts["xticklabels"] = list(tick_label)
@@ -287,7 +339,8 @@ class Axes:
         ls_ = _list(left) if left is not None and not isinstance(left, (int, float)) else [left or 0] * len(ys)
         rects = [(l, float(yi) - height / 2, w, height) if w >= 0 else (l + w, float(yi) - height / 2, -w, height)
                  for yi, w, l in zip(ys, ws, ls_)]
-        p = Rects(rects, color=self._color(color), label=label, edgecolor=edgecolor, alpha=alpha)
+        p = Rects(rects, color=self._color(color) if alpha is None else _opaque(self._color(color)), label=label,
+                  edgecolor=to_color(edgecolor), alpha=alpha)
         self._opts.setdefault("_barsh", True)
         return _Artist(self._add(p), "container.BarContainer")
 
@@ -317,7 +370,7 @@ class Axes:
         if density:
             total = sum(counts)
             counts = [c / (total * (edges[i + 1] - edges[i])) if total else 0 for i, c in enumerate(counts)]
-        col = self._color(color)
+        col = self._color(color) if alpha is None else _opaque(self._color(color))
         if histtype == "step":
             xs, ys = [edges[0]], [0.0]
             for i in builtin_range(nb):
@@ -328,7 +381,7 @@ class Axes:
             self._add(Line(xs, ys, color=col, thickness=1.5 * PT, label=label))
         else:
             rects = [(edges[i], 0, edges[i + 1] - edges[i], counts[i]) for i in builtin_range(nb)]
-            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=edgecolor))
+            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=to_color(edgecolor)))
         self._opts.setdefault("_bars", True)
         import sys
         np = sys.modules.get("numpy")
@@ -340,8 +393,10 @@ class Axes:
         xs, a = _list(x), _list(y1)
         b = _list(y2) if not isinstance(y2, (int, float)) else [float(y2)] * len(xs)
         pts = list(zip(xs, a)) + list(zip(xs, b))[::-1]
-        p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=self._color(color or kw.get("facecolor")),
-                    alpha=0.5 if alpha is None else alpha, label=label)
+        # (opaque unless alpha is given, as matplotlib's)
+        col = self._color(color if color is not None else kw.get("facecolor"))
+        p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=col if alpha is None else _opaque(col),
+                    alpha=alpha, label=label)
         return _Artist(self._add(p), "collections.PolyCollection")
 
     def errorbar(self, x, y, yerr=None, xerr=None, fmt="", ecolor=None, elinewidth=None, capsize=None, color=None,
@@ -448,7 +503,7 @@ class Axes:
         if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
             lo, hi = self.get_xlim(), self.get_ylim()
             x, y = lo[0] + x * (lo[1] - lo[0]), hi[0] + y * (hi[1] - hi[0])
-        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=color,
+        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
                        vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True)), "text.Text")
 
@@ -460,7 +515,7 @@ class Axes:
         if xytext is None:
             xytext = xy
         if arrowprops is not None and tuple(xytext) != tuple(xy):
-            self._add(Arrow(xytext, xy, color=arrowprops.get("color", arrowprops.get("facecolor", "currentColor")),
+            self._add(Arrow(xytext, xy, color=to_color(arrowprops.get("color", arrowprops.get("facecolor", "currentColor"))),
                             thickness=1.2))
         # (matplotlib: the text's left end at xytext, unless told otherwise)
         ha = kw.get("horizontalalignment", ha) or ("center" if arrowprops else "left")
@@ -799,9 +854,18 @@ class _AxesArray:
 
 
 class Figure:
-    def __init__(self, figsize=None, dpi=None, **kw):
+    def __init__(self, figsize=None, dpi=None, facecolor=None, **kw):
         fs = figsize or (6.4, 4.8)
         self._size = (float(fs[0]), float(fs[1]))
+        # (the figure's dpi is what savefig uses by default; on screen the
+        # SVG has 100 units per inch)
+        self.dpi = float(dpi) if dpi is not None else float(rcParams.get("figure.dpi", 100.0))
+        # (the facecolor as it is when the figure is made, as matplotlib's;
+        # given, it also colors the figure's SVG)
+        self._facecolor_given = facecolor is not None
+        if facecolor is not None:
+            _css_color(facecolor)  # (an invalid one is matplotlib's ValueError here)
+        self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
         self.axes = []
         self._suptitle = None
         self._grid = (1, 1)
@@ -875,8 +939,70 @@ class Figure:
     def description(self):
         return describe_svg(self._svg())
 
-    def savefig(self, fname, format=None, dpi=None, bbox_inches=None, **kw):
-        save_svg(self._svg(), fname)
+    def savefig(self, fname, *, transparent=None, dpi=None, format=None, metadata=None, bbox_inches=None,
+                pad_inches=None, facecolor=None, edgecolor=None, **kw):
+        """The figure as a PNG (the default, as in matplotlib: rcParams
+        "savefig.format") or SVG file, by `format` or the file name's
+        extension; a name without one gets ".png"."""
+        if kw:
+            raise NotImplementedError("savefig: %s %s not implemented in Sagebrush"
+                                      % (", ".join(sorted(kw)), "is" if len(kw) == 1 else "are"))
+        if bbox_inches is None:
+            bbox_inches = rcParams.get("savefig.bbox")
+        if bbox_inches is not None:
+            raise NotImplementedError("savefig: bbox_inches=%r is not implemented in Sagebrush" % (bbox_inches,))
+        if format is None:
+            if hasattr(type(fname), "__fspath__"):
+                fname = os.fspath(fname)
+            if isinstance(fname, str):
+                format = os.path.splitext(fname)[1][1:]
+            if format is None or format == "":
+                format = rcParams.get("savefig.format", "png")
+                if isinstance(fname, str):
+                    fname = fname.rstrip(".") + "." + format
+        format = format.lower()
+        if format not in _SAVE_FORMATS:
+            raise ValueError("Format %r is not supported (supported formats: %s)" % (format, ", ".join(sorted(_SAVE_FORMATS))))
+        if format not in ("png", "svg"):
+            raise NotImplementedError("savefig: Sagebrush saves PNG and SVG files, not %s" % format)
+        # the background, as matplotlib's: transparent=True makes the figure's
+        # default facecolor "none" (an explicit one still applies) and leaves
+        # the axes without their (white) patches
+        if transparent is None:
+            transparent = rcParams.get("savefig.transparent", False)
+        given = facecolor is not None
+        if facecolor is None:
+            facecolor = "none" if transparent else rcParams.get("savefig.facecolor", "auto")
+        if facecolor == "auto":
+            facecolor = self._facecolor
+            given = given or self._facecolor_given
+        background = _css_color(facecolor)
+        if format == "svg":
+            if metadata is not None:
+                raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
+            # (Sagebrush's SVG has no background on screen: one asked for is added)
+            svg = self._svg()
+            if given and background != "none":
+                svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
+            _write(fname, svg, text=True)
+            return
+        if dpi is None:
+            dpi = rcParams.get("savefig.dpi", "figure")
+        if dpi == "figure":
+            dpi = self.dpi
+        dpi = float(dpi)
+        svg = self._svg()
+        if not transparent:
+            svg = _axes_patches(svg, self.axes)
+        text = {"Software": "Sagebrush"}
+        for k, v in (metadata or {}).items():
+            if v is None:
+                text.pop(k, None)
+            else:
+                text[k] = v
+        import _png
+        png = _png.figure_png(svg, self._size[0], self._size[1], dpi, None if background == "none" else background, list(text.items()))
+        _write(fname, png)
 
     def show(self):
         _show(self, "figure")
@@ -889,6 +1015,67 @@ class Figure:
 
 
 builtin_range = range
+
+# savefig's formats: matplotlib's (the ones other than PNG and SVG raise
+# NotImplementedError)
+_SAVE_FORMATS = ("avif", "eps", "gif", "jpeg", "jpg", "pdf", "pgf", "png", "ps", "raw", "rgba", "svg", "svgz", "tif",
+                 "tiff", "webp")
+
+
+def _css_color(color):
+    """savefig's facecolor as "none" or "#rrggbbaa", from matplotlib's
+    to_rgba (names, "#rrggbb[aa]", "C1", gray levels, RGB(A) tuples in [0, 1]
+    whose nan is 0; anything else its ValueError), the alpha kept exactly.
+    Only this canonical form reaches the SVG and the PNG module."""
+    if isinstance(color, str) and color.lower() == "none":
+        return "none"
+    rgba = _to_rgba(color)
+    return "#" + "".join("%02x" % int((0.0 if v != v else float(v)) * 255 + 0.5) for v in rgba)
+
+
+def _svg_background(svg, css, w, h):
+    """The figure's SVG on a rectangle of a color (an explicit facecolor,
+    as _css_color makes it: fill and fill-opacity, numbers only)."""
+    import re
+    if not re.fullmatch(r"#[0-9a-f]{8}", css):
+        raise ValueError("Invalid RGBA argument: %r" % (css,))
+    i = svg.index(">", svg.index("<svg")) + 1
+    rect = '<rect x="0" y="0" width="%s" height="%s" fill="%s"%s/>' % (
+        float(w), float(h), css[:7], ' fill-opacity="%s"' % round(int(css[7:], 16) / 255, 4) if css[7:] != "ff" else "")
+    return svg[:i] + rect + svg[i:]
+
+
+def _axes_patches(svg, axes):
+    """The figure's SVG with matplotlib's white axes patches, under each
+    axes' content (its panel's box; none for axis('off'))."""
+    import re
+    out, pos, k = [], 0, 0
+    for m in re.finditer(r'<g class="sb-panel"[^>]*data-box="([^"]*)"[^>]*>', svg):
+        ax = axes[k] if k < len(axes) else None
+        k += 1
+        out.append(svg[pos:m.end()])
+        pos = m.end()
+        if ax is not None and ax._opts.get("axes", True):
+            x, y, w, h = m.group(1).split()
+            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="#ffffff" stroke="none"/>' % (x, y, w, h))
+    out.append(svg[pos:])
+    return "".join(out)
+
+
+def _write(fname, data, text=False):
+    """data (str for an SVG) written to a file name or file object; text
+    goes to a binary file object as UTF-8, as matplotlib's SVG does."""
+    if hasattr(fname, "write"):
+        if text:
+            try:
+                fname.write(data)
+            except TypeError:
+                fname.write(data.encode("utf-8"))
+        else:
+            fname.write(data)
+        return
+    with open(fname, "w" if text else "wb") as f:
+        f.write(data)
 
 
 def _bisect(edges, v):
@@ -908,8 +1095,8 @@ _figs = []
 _cur = [None]
 
 
-def figure(num=None, figsize=None, dpi=None, **kw):
-    f = Figure(figsize, dpi)
+def figure(num=None, figsize=None, dpi=None, facecolor=None, **kw):
+    f = Figure(figsize, dpi, facecolor)
     _figs.append(f)
     _cur[0] = f
     return f
@@ -925,8 +1112,8 @@ def gca():
     return gcf().gca()
 
 
-def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze=True, **kw):
-    fig = figure(figsize=figsize)
+def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze=True, dpi=None, facecolor=None, **kw):
+    fig = figure(figsize=figsize, dpi=dpi, facecolor=facecolor)
     rows = [[fig.add_subplot(nrows, ncols, r * ncols + c + 1) for c in builtin_range(ncols)] for r in builtin_range(nrows)]
     if squeeze and nrows == 1 and ncols == 1:
         return fig, rows[0][0]
@@ -972,6 +1159,12 @@ def show(*args, **kw):
 
 def savefig(fname, **kw):
     gcf().savefig(fname, **kw)
+
+
+def imread(fname, format=None):
+    """matplotlib's imread, for PNG files (lib/_png.py)."""
+    import _png
+    return _png.read(fname, format)
 
 
 def _flush_figures():
