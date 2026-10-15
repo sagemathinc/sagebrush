@@ -169,7 +169,7 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
 <h4>Looking</h4><ul>
-<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>0</kbd> or <kbd>Esc</kbd>: the whole board</li>
+<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>Esc</kbd>: the board as it opens; <kbd>0</kbd>: all of it, however small</li>
 <li>Drag the background to move about; <kbd>+</kbd> <kbd>−</kbd>, Ctrl and the wheel, or two fingers to zoom</li>
 <li><kbd>PageDown</kbd> <kbd>PageUp</kbd>: the next and previous page</li>
 <li><kbd>Ctrl</kbd>+<kbd>F</kbd> (<kbd>⌘</kbd><kbd>F</kbd>): find words in the board</li>
