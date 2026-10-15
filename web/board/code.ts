@@ -166,11 +166,18 @@ export class BoardCode {
    */
   sync(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode = "python", seed?: string): Promise<string[]> {
     // (one after another: a sync sees what the one before it did)
-    const p = this.last.then(() => this.syncNow(items, mode, seed ?? BOARD_SEED));
+    return this.queued(() => this.syncNow(items, mode, seed ?? BOARD_SEED));
+  }
+  // (syncs and runs one after another: a sync, its language's interpreter
+  // among what it changes, never during a run, CORR-79B-2)
+  private last: Promise<unknown> = Promise.resolve();
+  private queued<T>(f: () => Promise<T>): Promise<T> {
+    const p = this.last.then(f);
     this.last = p.catch(() => {});
     return p;
   }
-  private last: Promise<unknown> = Promise.resolve();
+  /** whether the interpreter has been given anything to run (since it started) */
+  private started = false;
   /** the board's language (BoardDoc.mode) */
   mode: BoardMode = "python";
   /** the board's seed (BoardDoc.seed) */
@@ -183,11 +190,13 @@ export class BoardCode {
     // (another language or seed: every item runs again, in it)
     const relang = mode !== this.mode || seed !== this.seed;
     // (another language: a new interpreter, nothing of the last one's left
-    // in it, such as Sage's pi in a MATLAB board's code; once it has run anything)
-    if (mode !== this.mode && this.runs) {
+    // in it, such as Sage's pi in a MATLAB board's code; once it has been
+    // given anything to run, finished or not)
+    if (mode !== this.mode && this.started) {
       const k = this.kernel, ready = new Promise<void>((resolve) => { const off = k.on("ready", () => { off(); resolve(); }); });
       k.restart();
       await ready;
+      this.started = false;
       if (this.closed) return [];
     }
     this.mode = mode;
@@ -264,8 +273,12 @@ export class BoardCode {
       }
       // (then the others run, but not what reads a held one, which would run it)
       const blocked: Set<string> = nb.reactive.graph.closure([...held.map((it) => it.id), ...hits.keys()]);
+      this.started = true;
       report = await nb.runCells(changed.filter((id) => !blocked.has(id))).finally(() => this.changed());
-    } else report = await nb.runCells(changed).finally(() => this.changed());
+    } else {
+      this.started = true;
+      report = await nb.runCells(changed).finally(() => this.changed());
+    }
     this.ran(report);
     return changed;
   }
@@ -453,19 +466,25 @@ export class BoardCode {
   }
 
   /** Run these code items, then what depends on them (resolves to the reactive notebook's report). */
-  async run(ids: string[]): Promise<any> {
-    if (!(await this.ready)) return null;
-    this.release(ids);
-    const report = await this.nb.runCells(ids).finally(() => this.changed());
-    this.ran(report);
-    return report;
+  run(ids: string[]): Promise<any> {
+    return this.queued(async () => {
+      if (!(await this.ready)) return null;
+      this.release(ids);
+      this.started = true;
+      const report = await this.nb.runCells(ids).finally(() => this.changed());
+      this.ran(report);
+      return report;
+    });
   }
-  async runAll(): Promise<any> {
-    if (!(await this.ready)) return null;
-    this.release(null);
-    const report = await this.nb.runAll().finally(() => this.changed());
-    this.ran(report);
-    return report;
+  runAll(): Promise<any> {
+    return this.queued(async () => {
+      if (!(await this.ready)) return null;
+      this.release(null);
+      this.started = true;
+      const report = await this.nb.runAll().finally(() => this.changed());
+      this.ran(report);
+      return report;
+    });
   }
   /** Resolves when what was asked for has run (syncs, and what they started). */
   async idle(): Promise<void> {
