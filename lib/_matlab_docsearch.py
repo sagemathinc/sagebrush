@@ -29,22 +29,36 @@ def build_index():
             __import__(modname)
         except Exception:
             pass
+    from _matlab_examples import examples
+    ex = examples()
     out = []
     for name in sorted(_matlab._B):
         if name.startswith("_"):
             continue
         clean = _clean(getattr(_matlab._B[name].f, "__doc__", None))
+        doc = clean + _examples_text(ex.get(name, []))
         out.append({
             "name": name,
             "module": "matlab",
             "kind": "function",
             "signature": "",
             "summary": clean.split("\n\n")[0].replace("\n", " "),
-            "doc": clean,
-            "examples": 0,
+            "doc": doc,
+            "examples": len(ex.get(name, [])),
             "open_problem": False,
         })
     return out
+
+
+def _examples_text(exs):
+    """a function's examples as its documentation shows them: each line of
+    code after MATLAB's prompt >>, then what it prints (lib/_matlab_examples.py)"""
+    if not exs:
+        return ""
+    parts = []
+    for code, output in exs:
+        parts.append("\n".join(">> " + line for line in code.split("\n")) + "\n" + output.rstrip("\n"))
+    return "\n\nExamples:\n\n" + "\n\n".join(parts)
 
 
 def main(argv):

@@ -145,8 +145,10 @@
 .board-editing .be-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
 .board-group.board-editing .be-title { font-size: 17px; }
 .board-code-head .be-title { flex: 1; min-width: 0; margin: 0; }
-.board-editing .board-code-run, .board-editing .board-code-toggle { display: none; }
 .board-editing .be-md { margin: 0 0 6px; border-radius: 3px; }
+/* (the detail where it shows: its rule, its space above) */
+.board-editing .be-md.board-detail { margin: 6px 0 0; border-radius: 0; }
+.board-editing .be-md.board-detail > pre { padding-top: 5px; }
 .board-editing .be-md > pre { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; font: inherit; scrollbar-gutter: auto; }
 .board-editing .be-md > textarea { scrollbar-gutter: auto; color: transparent; caret-color: #1d2330; }
 .board-editing .board-detail { opacity: 1; }
@@ -154,6 +156,14 @@
    whole; here, a paragraph keeps its space below unless it ends the text */
 .mb > .mb-block:not(:last-child) > p:last-child { margin-bottom: 6px; }
 .mb > .mb-edit:not(:last-child) { margin-bottom: 6px; }
+/* (the block being written, last: no space under it, as a last paragraph; what is below stays where it was) */
+.board-editing .mb > .mb-edit:last-child { margin-bottom: 0; }
+/* (a heading, a list item, a quote being written: its first line where it
+   shows, its Markdown starting where its text did; a heading's spacing, a list's indent, a quote's) */
+.board-editing .mb > .mb-edit.mb-h1 { margin: .67em 0; } .board-editing .mb > .mb-edit.mb-h2 { margin: .83em 0; } .board-editing .mb > .mb-edit.mb-h3 { margin: 1em 0; }
+.board-editing .mb > .mb-edit.mb-h4 { margin: 1.33em 0; } .board-editing .mb > .mb-edit.mb-h5 { margin: 1.67em 0; } .board-editing .mb > .mb-edit.mb-h6 { margin: 2.33em 0; }
+.board-editing .mb > .mb-edit.mb-item > :is(pre, textarea) { padding-left: 18px; }
+.board-editing .mb > .mb-edit.mb-quote { margin: 1em 40px; }
 .board-editing .mb-block { border-radius: 3px; }
 .board-editing .mb-block:hover { background: rgba(0, 0, 0, .03); }
 .board-editing .be-ref { margin-top: 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #2a6f2f; }

@@ -136,6 +136,20 @@ export interface BoardHost {
 
 // (its stylesheet, once a page, first: the page's own rules win; it goes
 // with the last board unmounted)
+// Find's marked words: one highlight for the page ("sb-find", board.css),
+// made of every mounted board's own ranges, so that two boards don't take
+// each other's, and a board destroyed takes only its own (CORR-8CE-2)
+const findRanges = new Map<object, Range[]>();
+function setFindRanges(owner: object, ranges: Range[] | null) {
+  const reg = (CSS as any).highlights, H = (globalThis as any).Highlight;
+  if (ranges?.length) findRanges.set(owner, ranges);
+  else findRanges.delete(owner);
+  if (!reg || !H) return;
+  const all = [...findRanges.values()].flat();
+  if (all.length) reg.set("sb-find", new H(...all));
+  else reg.delete("sb-find");
+}
+
 let mounted = 0;
 function addStyle() {
   mounted++;
@@ -540,6 +554,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function load(d: BoardDoc, stored = false) {
     loads++;
     loadGen++;
+    // (Find's matches were the old document's: gone, before its items are
+    // drawn again, CORR-F33-1; its query asked of the new one once shown)
+    forgetFound();
     byPage.clear();
     newOutputs(!stored);
     // (a document loaded from elsewhere was not written here; the one kept, as it says)
@@ -556,6 +573,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // is write in it, so in Edit, William; a document loaded into the page
     // later, an agent's or Open…'s, leaves Edit as it is)
     if (loads === 1 && host.editBlank !== false && !editor.on && !editBtn.hidden && Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).nodes ?? []).every((ns) => !ns.length)) editBtn.click();
+    if (!findBar.hidden && findQ.value) findNow();
     refitAfterRun().catch(fail);
   }
 
@@ -585,6 +603,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     editor.clear();
     pageIx = Math.max(0, Math.min(pageCount(viewing ?? doc) - 1, i));
     if (!(await redraw())) return;
+    // (Find's item outlined and marked only on its own page: another item
+    // there may have its id, CORR-8CE-1)
+    if (found[foundAt] && found[foundAt].page !== pageIx) unmark();
     step(-1, true);
   }
 
@@ -1379,6 +1400,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // page, in view, outlined, the words marked; Esc closes it
   const findBar = $("find"), findQ = $("findq") as HTMLInputElement;
   let found: FindEntry[] = [], foundAt = -1, findGen = 0;
+  // (this board's own part of the page's highlight: gone with it)
+  const findOwner = {};
+  offs.push(() => setFindRanges(findOwner, null));
   const indexes = new WeakMap<BoardDoc, FindEntry[]>();
   const findDoc = () => viewing ?? doc;
   const index = () => { const d = findDoc()!; let x = indexes.get(d); if (!x) indexes.set(d, (x = findIndex(d))); return x; };
@@ -1396,6 +1420,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   function closeFind() {
     findBar.hidden = true;
+    forgetFound();
+  }
+  // (no match: none counted, outlined or marked, and a mark still coming dropped)
+  function forgetFound() {
     found = [];
     foundAt = -1;
     findGen++;
@@ -1403,7 +1431,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   function unmark() {
     board.setFound(null);
-    (CSS as any).highlights?.delete("sb-find");
+    setFindRanges(findOwner, null);
   }
   // (as it is typed: the first item on the page shown or after it, else the first)
   function findNow() {
@@ -1412,12 +1440,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     foundAt = found.length ? Math.max(0, found.findIndex((e) => e.page >= pageIx)) : -1;
     showFound().catch(fail);
   }
-  // (the next or the previous, from the one shown; the document may have changed since)
+  // (the next or the previous, from the one shown, by its page and id, ids
+  // being unique only on a page; the document may have changed since, CORR-8CE-1)
   function findStep(dir: 1 | -1) {
     if (!findDoc()) return;
-    const id = found[foundAt]?.id;
+    const was = found[foundAt];
     found = findIn(index(), findQ.value);
-    const k = id ? found.findIndex((e) => e.id === id) : -1;
+    const k = was ? found.findIndex((e) => e.id === was.id && e.page === was.page) : -1;
     foundAt = !found.length ? -1 : k < 0 ? (dir > 0 ? 0 : found.length - 1) : (k + dir + found.length) % found.length;
     showFound().catch(fail);
   }
@@ -1451,7 +1480,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!reg || !H || g !== findGen) return;
     const el = board.element(id);
     if (!el) { if (tries > 0) requestAnimationFrame(() => markFound(id, g, tries - 1)); return; }
-    reg.set("sb-find", new H(...textRanges(el, findQ.value)));
+    setFindRanges(findOwner, textRanges(el, findQ.value));
   }
   on(window, "keydown", (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && doc && mine() && !presenting) {
@@ -1641,8 +1670,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
      * the last board on the page). */
     async destroy() {
       // (first, at once: whatever is waiting draws nothing more, CORR-C08-1;
-      // what is being written is still kept, saved though not drawn)
+      // what is being written is still kept, saved though not drawn; Find's
+      // mark still coming dropped, F33)
       destroyed = true;
+      findGen++;
       presenting = null;
       presentGen++;
       routingGen++;

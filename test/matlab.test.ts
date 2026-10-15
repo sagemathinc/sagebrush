@@ -174,6 +174,60 @@ test("notebook session: MATLAB cells share variables and functions; an error fai
   assert.match(out(9, "stderr"), /Unrecognized function or variable 'z'/);
 });
 
+test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view) with the SVG; other figures the SVG alone", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    "[X,Y] = meshgrid(-3:3);\nsurf(X,Y,peaks(X,Y))\ntitle(\"Original Sampling\")",
+    "mesh(peaks(5))",
+    "t = 0:0.5:5; plot3(sin(t), cos(t), t, 'r-o'); xlabel('x'); view(30, 20)",
+    "subplot(1,2,1); surf(peaks(5)); subplot(1,2,2); plot(1:3)",
+    "surf(peaks(5)); legend('p')",
+    "surf(peaks(300))",
+    "plot(1:3); set(gcf, 'Color', [0.94 0.94 0.94])",
+    "plot(1:2); title(\"currentColor label\")",
+    // (250,000 vertices given, 4.5 million drawn as the viewer's tubes)
+    "t = linspace(0, 1, 125001); plot3(t, t, t, 'LineWidth', 2)",
+    "plot3([0 1], [0 1], [0 1]); view([1 1 1]); [caz, cel] = view; fprintf('%.4f %.4f\\n', caz, cel); [caz, cel] = view([-5 -2 5]); fprintf('%.4f %.4f\\n', caz, cel); view(gca, 2); [caz, cel] = view(gca); fprintf('%g %g\\n', caz, cel); try, v = view; catch e, disp(e.message), end; try, view, catch e, disp(e.message), end",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const shown = (id: number) => msgs.find((m) => m.id === id && m.display)?.display;
+  const scene = (id: number) => {
+    const t = shown(id)?.["application/vnd.sagebrush.scene3d+json"];
+    return t ? JSON.parse(t) : null;
+  };
+  const a = scene(1);
+  assert.ok(a && shown(1)["image/svg+xml"], "surf: a scene and its SVG");
+  assert.deepEqual([a.lo, a.hi, a.azimuth, a.elevation, a.projection, a.background, a.title], [[-3, -3, -5], [3, 3, 10], -127.5, 30, "orthographic", "#ffffff", "Original Sampling"]);
+  assert.deepEqual(a.box.ticks[2], [-5, 0, 5, 10]);
+  const mesh = a.objects.find((o: any) => o.type === "mesh");
+  // (36 faces, flat colors: 4 vertices each, unlit, under black edges)
+  assert.deepEqual([mesh.pos.length / 3, mesh.lit, mesh.offset], [144, false, true]);
+  assert.deepEqual(a.objects.filter((o: any) => o.type === "lines").map((o: any) => [o.color, o.pos.length / 6]), [["#000000", 84]]);
+  // (mesh: white faces under edges colored by the colormap)
+  const b = scene(2);
+  assert.equal(new Set(b.objects.find((o: any) => o.type === "mesh").colors).size, 1);
+  assert.ok(b.objects.filter((o: any) => o.type === "lines").length > 1);
+  const c = scene(3);
+  assert.deepEqual([c.azimuth, c.elevation, c.labels[0]], [-60, 20, "x"]);
+  assert.deepEqual(c.objects.map((o: any) => [o.type, o.color, o.pos.length / 3]), [["lines", "#ff0000", 20], ["points", "#ff0000", 11]]);
+  // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2);
+  // one output, not the documented [caz, cel], refused)
+  assert.equal(msgs.filter((m) => m.id === 10 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n" + "view: one output is not supported; use [caz, cel] = view.\n".repeat(2));
+  for (const id of [4, 5, 6, 7, 8, 9, 10]) {
+    assert.ok(shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": the SVG only");
+  }
+  // (the figure's Color behind the SVG; MATLAB's dark gray, not the page's color)
+  assert.match(shown(1)["image/svg+xml"], /^<svg[^>]*><rect width="100%" height="100%" fill="#ffffff"\/>/);
+  assert.match(shown(7)["image/svg+xml"], /<rect width="100%" height="100%" fill="#f0f0f0"\/>/);
+  // (the ink: the root's color, for the shim's currentColor; the text itself untouched)
+  for (const id of [1, 7]) assert.match(shown(id)["image/svg+xml"], /^<svg [^>]*style="color:#262626;--sb-legend-bg:#ffffff"/);
+  assert.match(shown(8)["image/svg+xml"], />currentColor label</);
+  assert.match(shown(8)["image/svg+xml"], /aria-label="[^"]*currentColor label/);
+});
+
 test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); no renaming", () => {
   const { analyzeCell } = require("../src/dataflow");
   const { renameInCell, forwardRefers } = require("../src/rename");
@@ -622,6 +676,534 @@ test("repelem takes a string scalar and string arrays, and only numeric scalar o
     "Replication factors must be scalars or vectors.", "Replication factors must be numeric.", "Replication factors must be numeric."]);
 });
 
+test("optimset and optimget as documented: their pages' examples, solver defaults, partial names, merging and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "o = optimset('fzero'); disp(o.TolX == eps); disp(o.Display);",
+    "disp(strjoin(fieldnames(optimset())', ','));",
+    // (the page's merging examples, with MaxIter in place of PlotFcns, which Sagebrush refuses)
+    "oldopts = optimset(TolFun=1e-6); options = optimset(oldopts, MaxIter=40, TolX=1e-6); disp(mat2str([options.TolFun options.TolX options.MaxIter]));",
+    "oldopts = optimset(Display='iter', TolX=1e-6); newopts = optimset(MaxIter=40, Display='off'); options = optimset(oldopts, newopts); disp(options.Display); disp(options.TolX);",
+    "o = optimset(@fminbnd); disp(mat2str([o.MaxFunEvals o.MaxIter o.TolX])); o = optimset('fminsearch'); disp(isempty(o.MaxIter)); disp(o.TolFun);",
+    "disp(optimget(optimset('tolx', 3), 'TolX')); disp(optimget(optimset(), 'MaxIter', 7)); disp(optimget(optimset('Display', 'iter'), 'disp'));",
+    "try, optimset('Bogus', 1), catch e, disp(e.message), end",
+    "try, optimset('Max', 1), catch e, disp(e.message), end",
+    "try, optimset('Display', 'loud'), catch e, disp(e.message), end",
+    // (each value checked as the listing says, also from a structure; the words stored in lower case)
+    "o = optimset('Display', 'ITER', 'FunValCheck', 'ON'); disp([o.Display ' ' o.FunValCheck]);",
+    "try, optimset('MaxIter', 1.5), catch e, disp(e.message), end",
+    "try, optimset('MaxIter', 1+2i), catch e, disp(e.message), end",
+    "try, optimset('TolX', 1+2i), catch e, disp(e.message), end",
+    "try, optimset('OutputFcn', 17), catch e, disp(e.message), end",
+    "try, optimset('PlotFcns', 'optimplotfval'), catch e, disp(e.message), end",
+    "s.MaxIter = 1.5; try, optimset(optimset(), s), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "1", "notify", "Display,FunValCheck,MaxFunEvals,MaxIter,OutputFcn,PlotFcns,TolFun,TolX",
+    "[1e-06 1e-06 40]", "off", "1.0000e-06", "[500 500 0.0001]", "1", "1.0000e-04",
+    "3", "7", "iter",
+    "optimset: unrecognized parameter name 'Bogus'.", "optimset: ambiguous parameter name 'Max' (MaxFunEvals, MaxIter).",
+    "optimset: Display must be 'notify', 'final', 'off', 'none' or 'iter'.",
+    "iter on", "optimset: MaxIter must be a positive integer.", "optimset: MaxIter must be a positive integer.",
+    "optimset: TolX must be a nonnegative real scalar.",
+    "optimset: OutputFcn must be a function handle or a cell array of function handles.",
+    "optimset: the PlotFcns option is not supported in Sagebrush.", "optimset: MaxIter must be a positive integer.",
+  ]);
+});
+
+test("fzero reproduces its published examples: results, output structures and iterative displays", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  // (the doc page's single, interval and double examples: counts and messages)
+  const counts = run([
+    "f = @(x)cosh(x)-2*sinh(x);",
+    "[x,fval,exitflag,output] = fzero(f,single(1)); disp(class(x)); disp(class(exitflag)); fprintf('%.4f %d %d\\n', x, exitflag, output.intervaliterations); disp(output.message);",
+    "[x2,fval2,exitflag2,output2] = fzero(f,single([-1,1])); fprintf('%.4f %d %d %d\\n', x2, output2.intervaliterations, output2.iterations, output2.funcCount); disp(output2.message);",
+    "[x3,fval3,exitflag3,output3] = fzero(f,[-1,1]); fprintf('%.4f %.4e %d %d %d\\n', x3, fval3, output3.intervaliterations, output3.iterations, output3.funcCount); disp(output3.algorithm);",
+    "fun = @(x) exp(-exp(-x)) - x; [x fval exitflag output] = fzero(fun,[0 1]); fprintf('%.4f %g %d %d %d\\n', x, fval, exitflag, output.iterations, output.funcCount);",
+  ].join("\n"));
+  assert.deepEqual(counts, ["single", "single", "0.5493 1 9", "Zero found in the interval [0.547452, 1.32]",
+    "0.5493 0 5 7", "Zero found in the interval [-1, 1]",
+    "0.5493 -2.2204e-16 0 7 9", "bisection, interpolation", "0.5671 0 1 5 7"]);
+  // (the published displays of humps from an interval and from a point, to the digit)
+  const humps = "h = @(x) 1./((x-0.3).^2+0.01) + 1./((x-0.9).^2+0.04) - 6; options = optimset('Display','iter');";
+  assert.deepEqual(run(humps + " a = fzero(h,[-1 1],options);"), [
+    " Func-count    x          f(x)             Procedure",
+    "    2              -1      -5.13779        initial",
+    "    3       -0.513876      -4.02235        interpolation",
+    "    4       -0.513876      -4.02235        bisection",
+    "    5       -0.473635      -3.83767        interpolation",
+    "    6       -0.115287      0.414441        bisection",
+    "    7       -0.115287      0.414441        interpolation",
+    "    8       -0.132562    -0.0226907        interpolation",
+    "    9       -0.131666    -0.0011492        interpolation",
+    "   10       -0.131618   1.88371e-07        interpolation",
+    "   11       -0.131618   -2.7935e-11        interpolation",
+    "   12       -0.131618   8.88178e-16        interpolation",
+    "   13       -0.131618   8.88178e-16        interpolation",
+    "Zero found in the interval [-1, 1]"]);
+  assert.deepEqual(run(humps + " a = fzero(h,-0.2,options);"), [
+    "Search for an interval around -0.2 containing a sign change:",
+    " Func-count    a          f(a)             b          f(b)                    Procedure",
+    "    1            -0.2      -1.35385          -0.2      -1.35385               initial interval",
+    "    3       -0.194343      -1.26077     -0.205657      -1.44411               search",
+    "    5          -0.192      -1.22137        -0.208       -1.4807               search",
+    "    7       -0.188686      -1.16477     -0.211314      -1.53167               search",
+    "    9          -0.184      -1.08293        -0.216      -1.60224               search",
+    "   11       -0.177373     -0.963455     -0.222627      -1.69911               search",
+    "   13          -0.168     -0.786636        -0.232      -1.83055               search",
+    "   15       -0.154745      -0.51962     -0.245255      -2.00602               search",
+    "   17          -0.136     -0.104165        -0.264      -2.23521               search",
+    "   18        -0.10949      0.572246        -0.264      -2.23521               search",
+    "Search for a zero in the interval [-0.10949, -0.264]:",
+    " Func-count    x          f(x)             Procedure",
+    "   18        -0.10949      0.572246        initial",
+    "   19       -0.140984     -0.219277        interpolation",
+    "   20       -0.132259    -0.0154224        interpolation",
+    "   21       -0.131617   3.40729e-05        interpolation",
+    "   22       -0.131618  -6.79505e-08        interpolation",
+    "   23       -0.131618  -2.98428e-13        interpolation",
+    "   24       -0.131618   8.88178e-16        interpolation",
+    "   25       -0.131618   8.88178e-16        interpolation",
+    "Zero found in the interval [-0.10949, -0.264]"]);
+  // (the problem structure, the Display levels and an output function)
+  assert.deepEqual(run([
+    "problem.objective = @(x)sin(cosh(x)); problem.x0 = 1; problem.solver = 'fzero'; problem.options = optimset(@fzero);",
+    "fprintf('%.4f\\n', fzero(problem));",
+    "x = fzero(@(x) x - 2, [0 4], optimset('Display', 'final')); x = fzero(@(x) x - 2, [0 4]); x = fzero(@(x) x - 2, [0 4], optimset('Display', 'off'));",
+    "[x,f,e,o] = fzero(@cos, [1 2], optimset('OutputFcn', @(x, v, s) v.iteration >= 2, 'Display', 'off')); fprintf('%d %d\\n', e, o.iterations);",
+  ].join("\n")), ["1.8115", "Zero found in the interval [0, 4]", "-1 2"]);
+  // (from x0 = 0: Octave's scale for a zero start, 0.1, in the published step, dx = 0.1/50 times sqrt(2)^k)
+  const zero = run("x = fzero(@(x) x - 1, 0, optimset('Display', 'iter'));");
+  assert.ok(zero.includes("    3     -0.00282843      -1.00283    0.00282843     -0.997172               search"), zero.slice(0, 5).join("\n"));
+  assert.ok(zero.includes("    5          -0.004        -1.004         0.004        -0.996               search"));
+});
+
+test("fzero's other exits: no sign change, overflow, a sign change at a pole (never -5), and its refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "o = optimset('Display', 'off');",
+    "[x,f,e] = fzero(@(x) sqrt(x) - 10, 1, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@(x) 1./x + 1, 0, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@(x) x.^2 + 1, 1, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@(x) 1 + 0*x, 1, o); disp(mat2str([x f e]));",
+    "[x,f,e] = fzero(@tan, [1 2], o); disp(mat2str([abs(x - pi/2) < 1e-15 abs(f) > 1e14 e]));",
+    "[x,f,e,out] = fzero(@(x) x.^2, 0, o); disp(mat2str([x f e out.funcCount]));",
+    "try, fzero(@(x) x + 2, [0 4]), catch err, disp(err.message), end",
+    "try, fzero(@(x) x + 2, [0 Inf]), catch err, disp(err.message), end",
+    "try, fzero(@(x) x + 2, [0 1 2]), catch err, disp(err.message), end",
+    "try, fzero(@(x) x + 2, 1i), catch err, disp(err.message), end",
+    "p = optimset(); p.PlotFcns = @optimplotx; try, fzero(@(x) x + 2, 1, p), catch err, disp(err.message), end",
+    "try, fzero(@(x) sqrt(x) - 10, 1, optimset('FunValCheck', 'on')), catch err, disp(err.message), end",
+    "q = optimset(); q.FunValCheck = 'ON'; try, fzero(@(x) sqrt(x) - 10, 1, q), catch err, disp(err.message), end",
+    "try, fzero(@(x) [x x], 1), catch err, disp(err.message), end",
+    "try, p.objective = @sin; p.x0 = 3; fzero(p), catch err, disp(err.message), end",
+    "try, fzero(@(x) x - 0.5 + 0 ./ (abs(x - 0.5) >= 0.1), [0 1]), catch err, disp(err.message), end",
+    "x = fzero(@(x) x.^2 + 1, 1);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[NaN NaN -4]", "[NaN NaN -3]", "[NaN NaN -3]", "[NaN NaN -6]", "[1 1 1]", "[0 0 1 1]",
+    "fzero: the function values at the interval endpoints must differ in sign.",
+    "fzero: the interval x0 must be finite.",
+    "fzero: x0 must be a real scalar or a two-element real vector.",
+    "fzero: x0 must be real.",
+    "fzero: the PlotFcns option is not supported in Sagebrush.",
+    "fzero: the function returned a complex value at x = -0.28 (FunValCheck is on).",
+    "fzero: the function returned a complex value at x = -0.28 (FunValCheck is on).",
+    "fzero: the function must return a numeric scalar.",
+    "fzero: the problem structure needs the field 'solver'.",
+    "fzero: the function returned NaN at x = 0.5, inside the interval; fzero cannot continue.",
+    "fzero stopped searching for an interval containing a sign change: the function value at x = -1.7162e+154 is Inf.",
+  ]);
+});
+
+test("fminbnd reproduces its published examples, and its exits and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const done = ["Optimization terminated:", " the current x satisfies the termination criteria using OPTIONS.TolX of 1.000000e-04"];
+  assert.deepEqual(run("options = optimset(Display=\"iter\"); x = fminbnd(@sin,0,2*pi,options);"), [
+    " Func-count     x          f(x)         Procedure",
+    "    1        2.39996      0.67549        initial",
+    "    2        3.88322     -0.67549        golden",
+    "    3        4.79993    -0.996171        golden",
+    "    4        5.08984    -0.929607        parabolic",
+    "    5        4.70582    -0.999978        parabolic",
+    "    6         4.7118           -1        parabolic",
+    "    7        4.71239           -1        parabolic",
+    "    8        4.71236           -1        parabolic",
+    "    9        4.71242           -1        parabolic", ...done]);
+  assert.deepEqual(run("h = @(x) 1./((x-0.3).^2+0.01) + 1./((x-0.9).^2+0.04) - 6; x = fminbnd(h,0.3,1,optimset('Display','iter'));"), [
+    " Func-count     x          f(x)         Procedure",
+    "    1       0.567376      12.9098        initial",
+    "    2       0.732624      13.7746        golden",
+    "    3       0.465248      25.1714        golden",
+    "    4       0.644416      11.2693        parabolic",
+    "    5         0.6413      11.2583        parabolic",
+    "    6       0.637618      11.2529        parabolic",
+    "    7       0.636985      11.2528        parabolic",
+    "    8       0.637019      11.2528        parabolic",
+    "    9       0.637052      11.2528        parabolic", ...done]);
+  assert.deepEqual(run([
+    "[x,fval,exitflag,output] = fminbnd(@sin,0,2*pi); fprintf('%.4f %.4f %d %d %d\\n', x, fval, exitflag, output.iterations, output.funcCount); disp(output.algorithm); disp(output.message); disp(double(output.message(end)));",
+    "fprintf('%.4f\\n', fminbnd(@(x)sin(x-9/7),1,2*pi)); [x fval] = fminbnd(@(x)-tan(cos(x)),3,8); fprintf('%.4f %.4f\\n', x, fval);",
+    "o = optimset('Display', 'off');",
+    "[x,f,e,o2] = fminbnd(@sin, 2, 1, o); disp(mat2str([x f e o2.funcCount]));",
+    "[x,f,e,o2] = fminbnd(@sin, 0, 2*pi, optimset(o, 'MaxFunEvals', 4)); disp(mat2str([e o2.funcCount o2.iterations]));",
+    "[x,f,e,o2] = fminbnd(@sin, 0, 2*pi, optimset(o, 'MaxIter', 4)); disp(mat2str([e o2.funcCount o2.iterations]));",
+    "[x,f,e,o2] = fminbnd(@sin, 0, 2*pi, optimset(o, 'OutputFcn', @(x,v,s) v.iteration >= 3)); disp(mat2str([e o2.iterations]));",
+    "p.objective = @sin; p.x1 = 0; p.x2 = 2*pi; p.solver = 'fminbnd'; fprintf('%.4f\\n', fminbnd(p));",
+    "x = fminbnd(@sin, 0, 2*pi, optimset('MaxIter', 2));",
+    "try, fminbnd(@(x) sqrt(x - 2), 0, 1), catch err, disp(err.message), end",
+    "try, fminbnd(@(x) x, 0, Inf), catch err, disp(err.message), end",
+    "try, fminbnd(@(x) x, single(0), 1), catch err, disp(err.message), end",
+    "try, fminbnd(@(x) NaN, 0, 1, optimset('FunValCheck', 'on')), catch err, disp(err.message), end",
+    "p = optimset(); p.PlotFcns = @optimplotfval; try, fminbnd(@sin, 0, 1, p), catch err, disp(err.message), end",
+  ].join("\n")), [
+    "4.7124 -1.0000 1 8 9", "golden section search, parabolic interpolation", ...done, "    32",
+    "5.9981", "6.2832 -1.5574",
+    "[NaN NaN -2 0]", "[0 4 3]", "[0 5 4]", "[-1 3]", "4.7124",
+    "fminbnd stopped: it reached the MaxIter limit of 2 before meeting TolX.",
+    "fminbnd: the objective function returned a complex value; only real values can be minimized.",
+    "fminbnd: the bounds x1 and x2 must be finite.",
+    "fminbnd: the bounds x1 and x2 must be double scalars.",
+    "fminbnd: the objective function returned NaN (FunValCheck is on).",
+    "fminbnd: the PlotFcns option is not supported in Sagebrush.",
+  ]);
+});
+
+test("fminsearch reproduces its published examples: the iterative display, results, and an output function's history", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const objectivefcn1 = "\nfunction f = objectivefcn1(x)\nf = 0;\nfor k = -10:10\n    f = f + exp(-(x(1)-x(2))^2 - 2*x(1)^2)*cos(x(2))*sin(2*x(2));\nend\nend";
+  const rows = [
+    [0, 1, "-6.70447", ""], [1, 3, "-6.89837", "initial simplex"], [2, 5, "-7.34101", "expand"], [3, 7, "-7.91894", "expand"],
+    [4, 9, "-9.07939", "expand"], [5, 11, "-10.5047", "expand"], [6, 13, "-12.4957", "expand"], [7, 15, "-12.6957", "reflect"],
+    [8, 17, "-12.8052", "contract outside"], [9, 19, "-12.8052", "contract inside"], [10, 21, "-13.0189", "expand"],
+    [11, 23, "-13.0189", "contract inside"], [12, 25, "-13.0374", "reflect"], [13, 27, "-13.122", "reflect"],
+    [14, 28, "-13.122", "reflect"], [15, 29, "-13.122", "reflect"], [16, 31, "-13.122", "contract outside"],
+    [17, 33, "-13.1279", "contract inside"], [18, 35, "-13.1279", "contract inside"], [19, 37, "-13.1296", "contract inside"],
+    [20, 39, "-13.1301", "contract inside"], [21, 41, "-13.1305", "reflect"], [22, 43, "-13.1306", "contract inside"],
+    [23, 45, "-13.1309", "contract inside"], [24, 47, "-13.1309", "contract inside"], [25, 49, "-13.131", "reflect"],
+    [26, 51, "-13.131", "contract inside"], [27, 53, "-13.131", "contract inside"], [28, 55, "-13.131", "contract inside"],
+    [29, 57, "-13.131", "contract outside"], [30, 59, "-13.131", "contract inside"], [31, 61, "-13.131", "contract inside"],
+    [32, 63, "-13.131", "contract inside"], [33, 65, "-13.131", "contract outside"], [34, 67, "-13.131", "contract inside"],
+    [35, 69, "-13.131", "contract inside"],
+  ].map(([i, n, f, p]) => (String(i).padStart(6) + String(n).padStart(13) + String(f).padStart(17) + "         " + p).trimEnd());
+  assert.deepEqual(run("options = optimset(Display=\"iter\"); [x,fval,exitflag,output] = fminsearch(@objectivefcn1,[0.25,-0.25],options);"
+    + " fprintf('%.4f %.4f %.4f %d %d %d\\n', x, fval, exitflag, output.iterations, output.funcCount); disp(output.algorithm);" + objectivefcn1), [
+    " Iteration   Func-count         f(x)         Procedure", ...rows,
+    "Optimization terminated:",
+    " the current x satisfies the termination criteria using OPTIONS.TolX of 1.000000e-04",
+    " and F(X) satisfies the convergence criteria using OPTIONS.TolFun of 1.000000e-04",
+    "-0.1696 -0.5086 -13.1310 1 35 69", "Nelder-Mead simplex direct search"]);
+  assert.deepEqual(run([
+    "fun = @(x)100*(x(2) - x(1)^2)^2 + (1 - x(1))^2; fprintf('%.4f %.4f\\n', fminsearch(fun,[-1.2,1]));",
+    "f = @(x,a)100*(x(2) - x(1)^2)^2 + (a-x(1))^2; a = 3; fprintf('%.4f %.4f\\n', fminsearch(@(x)f(x,a),[-1,1.9]));",
+    "x0 = [1,2,3]; fun = @(x)-norm(x+x0)^2*exp(-norm(x-x0)^2 + sum(x)); [x,fval] = fminsearch(fun,x0); fprintf('%.4f %.4f %.4f %.4e\\n', x, fval);",
+    "a = fminsearch(@(v) v(1).^2 + 2.5*sin(v(2)) - v(3)^2*v(1)^2*v(2)^2, [-0.6,-1.2,0.135]); fprintf('%.4f %.4f %.4f\\n', abs(a(1)), a(2:3));",
+    // (the nested output function's recorded history: its first four points and the solution)
+    "o = optimset('OutputFcn', @(x,v,s) isequal(s, 'iter') && isempty(fprintf('%.4f %.4f\\n', x)));",
+    "objfun = @(x) exp(x(1))*(4*x(1)^2+2*x(2)^2+x(1)*x(2)+2*x(2)); [x fval] = fminsearch(objfun, [-1 1], o); fprintf('= %.4f %.4f %.4f\\n', x, fval);",
+  ].join("\n")).filter((s: string, i: number, all: string[]) => i < 8 || s.startsWith("=") || all[i + 1]?.startsWith("=")), [
+    "1.0000 1.0000", "3.0000 9.0000", "1.5359 2.5645 3.5932 -5.9565e+04", "0.0000 -1.5708 0.1803",
+    "-1.0000 1.0000", "-1.0000 1.0000", "-1.0750 0.9000", "-1.0125 0.8500", "0.1290 -0.5323", "= 0.1290 -0.5323 -0.5689"]);
+});
+
+test("fminsearch's limits, x0's shape, the problem structure and its refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "r = @(x)100*(x(2) - x(1)^2)^2 + (1 - x(1))^2; o = optimset('Display', 'off');",
+    "[x,f,e,s] = fminsearch(r, [-1.2 1], optimset(o, 'MaxIter', 10)); disp(mat2str([e s.iterations s.funcCount]));",
+    "[x,f,e,s] = fminsearch(r, [-1.2 1], optimset(o, 'MaxFunEvals', 10)); disp(mat2str([e s.iterations s.funcCount]));",
+    "[x,f,e,s] = fminsearch(r, [-1.2 1], optimset(o, 'OutputFcn', @(x,v,s) v.iteration >= 5)); disp(mat2str([e s.iterations]));",
+    "x = fminsearch(@(x) sum((x - [1 2; 3 4]).^2, 'all'), zeros(2)); disp(mat2str(round(x * 1e3) / 1e3));",
+    "x = fminsearch(@(x) abs(x(1)) + abs(x(2) - 1), [1; 3]); disp(mat2str(size(x)));",
+    // (the initial simplex takes x0's components in linear-index order)
+    "x = fminsearch(@(x) numel(fprintf('%s\\n', mat2str(x))), [1 2; 3 4], optimset(o, 'MaxFunEvals', 3));",
+    "p.objective = @(x) (x-1)^2; p.x0 = 5; p.solver = 'fminsearch'; disp(round(fminsearch(p) * 1e3) / 1e3);",
+    "x = fminsearch(r, [-1.2 1], optimset('MaxIter', 3));",
+    "try, fminsearch(@(x) sqrt(x), -1), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) x, []), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) x, int8(1)), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) [x x], 1), catch err, disp(err.message), end",
+    "try, fminsearch(@(x) NaN, 1, optimset('FunValCheck', 'on')), catch err, disp(err.message), end",
+    "p = optimset(); p.PlotFcns = @optimplotfval; try, fminsearch(@(x) x, 1, p), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[0 10 21]", "[0 5 11]", "[-1 5]", "[1 2;3 4]", "[2 1]", "[1 2;3 4]", "[1.05 2;3 4]", "[1 2;3.15 4]", "[1 2.1;3 4]", "[1 2;3 4.2]", "1",
+    "fminsearch stopped: it reached the MaxIter limit of 3 before meeting TolX and TolFun.",
+    "fminsearch: the objective function returned a complex value; only real values can be minimized.",
+    "fminsearch: x0 must be a nonempty double array.", "fminsearch: x0 must be a nonempty double array.",
+    "fminsearch: the objective function must return a numeric scalar.",
+    "fminsearch: the objective function returned NaN (FunValCheck is on).",
+    "fminsearch: the PlotFcns option is not supported in Sagebrush.",
+  ]);
+});
+
+test("lsqnonneg reproduces its published examples, and its limit, problem structure and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "C = [0.0372 0.2869; 0.6861 0.7071; 0.6233 0.6245; 0.6344 0.6170]; d = [0.8587; 0.1781; 0.0747; 0.8405];",
+    "[x,resnorm,residual,exitflag,output,lambda] = lsqnonneg(C,d);",
+    "fprintf('%.4f ', x, resnorm, residual, exitflag, output.iterations, lambda); fprintf('\\n'); disp(output.algorithm); disp(output.message);",
+    "fprintf('%.4f %.4f\\n', norm(C*x - d), norm(residual)^2);",
+    "x = lsqnonneg(C,d,optimset(Display='final'));",
+    "x = lsqnonneg(C,d);",
+    "[x,rn,res,e,out] = lsqnonneg(magic(5), [1; -1; 2; -2; 3], optimset('MaxIter', 1, 'Display', 'off')); disp(mat2str([e out.iterations all(x >= 0)]));",
+    "x = lsqnonneg(magic(5), [1; -1; 2; -2; 3], optimset('MaxIter', 1));",
+    "x = lsqnonneg(sparse([1 0; 0 1]), [1; 2]); disp(mat2str([issparse(x) x']));",
+    "p.C = [1 0; 0 1]; p.d = [3; -1]; p.solver = 'lsqnonneg'; disp(mat2str(lsqnonneg(p)'));",
+    "try, lsqnonneg([1 2; 3 4], [1; 2; 3]), catch err, disp(err.message), end",
+    "try, lsqnonneg([1 2; 3 4], [1 2; 3 4]), catch err, disp(err.message), end",
+    "try, lsqnonneg([1i 2; 3 4], [1; 2]), catch err, disp(err.message), end",
+    "try, lsqnonneg(single([1 2; 3 4]), [1; 2]), catch err, disp(err.message), end",
+    "try, lsqnonneg([1 2; 3 4], [1; 2], optimset('Display', 'iter')), catch err, disp(err.message), end",
+    "try, lsqnonneg([1 NaN; 3 4], [1; 2]), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "0.0000 0.6929 0.8315 0.6599 -0.3119 -0.3580 0.4130 1.0000 1.0000 -0.1506 -0.0000",
+    "active-set", "Optimization terminated.", "0.9118 0.8315",
+    "Optimization terminated.",
+    "[0 1 1]", "lsqnonneg stopped: it reached the iteration limit of 1 before finishing.",
+    "[0 1 2]", "[3 0]",
+    "lsqnonneg: the length of d must equal the number of rows of C.",
+    "lsqnonneg: d must be a vector.",
+    "lsqnonneg: C must be real.",
+    "lsqnonneg: C must be a real double matrix.",
+    "lsqnonneg: Display 'iter' is not supported; use 'notify', 'final', 'off' or 'none'.",
+    "lsqnonneg: C and d must be finite.",
+  ]);
+});
+
+test("quad: its published example, the evaluation count, trace, warnings and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "myfun = @(x) 1./(x.^3-2*x-5); fprintf('%.4f\\n', quad(myfun,0,2));",
+    // (Simpson's rule is exact for a cubic: the first step is accepted, after 5 values)
+    "[q, n] = quad(@(x) x.^3 - x, 0, 2); disp(mat2str([q n]));",
+    "q = quad(@(x) x.^2, 0, 1, [], 1);",
+    "[q, n] = quad(@(x) exp(x), 0, 1); disp(abs(q - (exp(1) - 1)) < 1e-6 && n > 5);",
+    "disp(quad(@(x) x, 2, 2)); fprintf('%.4f\\n', quad(@(x) x, 1, 0)); disp(class(quad(@(x) x, single(0), 1)));",
+    "q = quad(@(x) exp(1i*x), 0, pi); fprintf('%.6f %.6f\\n', real(q), imag(q));",
+    "lastwarn(''); q = quad(@(x) 1./sqrt(x), 0, 1); [msg, id] = lastwarn; disp(msg); disp(isnan(q));",
+    "try, quad(@(x) 1, 0, 1), catch e, disp(e.message), end",
+    "try, quad(@(x) x, 0, Inf), catch e, disp(e.message), end",
+    "try, quad(@(x) x, 0, 1, -1), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "-0.4605", "[2 5]",
+    "5                     0                     1      0.33333333333333",
+    "1", "0", "-0.5000", "single", "0.000000 2.000000",
+    "quad: the integrand is Inf or NaN in the interval, so the result is not finite.", "1",
+    "quad: the integrand must return a vector of the same length as its input (use array operators such as .* and ./).",
+    "quad: the limits a and b must be finite.",
+    "quad: tol must be a nonnegative scalar.",
+  ]);
+});
+
+test("integral and quadgk reproduce their published examples", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "fprintf('%.15f\\n', integral(@(x) log(x),0,1));",
+    "fprintf('%.15f\\n', integral(@(x) log(x),0,1,AbsoluteTolerance=1e-12,RelativeTolerance=0));",
+    // (published: -14.999999999998360; Sagebrush's last digits differ)
+    "q = integral(@(x) x.^5.*exp(-x).*sin(x),0,Inf,AbsoluteTolerance=1e-13,RelativeTolerance=1e-8); fprintf('%.12f\\n', q);",
+    "fprintf('%.4f\\n', integral(@(x) exp(-x.^2).*log(x).^2,0,Inf));",
+    "fun = @(x,c) 1./(x.^3-2*x-c); fprintf('%.4f\\n', integral(@(x) fun(x,5),0,2));",
+    "q = integral(@(z) 1./(2*z-1),0,0,Waypoints=[1+1i,1-1i]); fprintf('%.4f %.4f\\n', abs(real(q)), imag(q));",
+    "fprintf('%.4f ', integral(@(x) sin((1:5)*x),0,1,ArrayValued=true)); fprintf('\\n');",
+    "fprintf('%.4f\\n', integral(@(x) 2*x-x^2,0,1,Vectorized=false));",
+    "fprintf('%.4f\\n', quadgk(@(x) exp(x).*log(x),0,1));",
+    "q = quadgk(@(z) 1./(2.*z-1),1,1,'Waypoints',[1+1i 0+1i 0-1i 1-1i]); fprintf('%.4f %.4f\\n', abs(real(q)), imag(q));",
+    "[Q,errbnd] = quadgk(@(x) sin(2e4*pi*x),0,pi); fprintf('%.4f %.4f\\n', Q, errbnd);",
+    // (published: errbnd 2.6323e-12; Sagebrush's estimate is 2.5e-11, below the tolerance too)
+    "[Q,errbnd] = quadgk(@(x) sin(2e4*pi*x),0,pi,'MaxIntervalCount',1e5); fprintf('%.4e %d\\n', Q, errbnd < 1e-10);",
+  ].join("\n")], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  assert.deepEqual(out.trim().split("\n"), [
+    "-1.000000010959678", "-1.000000000000010", "-14.999999999998", "1.9475", "-0.4605", "0.0000 -3.1416",
+    "0.4597 0.7081 0.6633 0.4134 0.1433 ", "0.6667", "-1.3179", "0.0000 3.1416", "-0.0082 0.5723", "1.6656e-06 1"]);
+});
+
+test("integral: an array-valued integrand's components each meet their own tolerance; a large one does not hide a small one's error", () => {
+  const out = require("node:child_process").execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "exact = (1 - cos(1000))/1000; q1 = integral(@(x) sin(1000*x), 0, 1);",
+    "q = integral(@(x) [1e12; sin(1000*x)], 0, 1, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1)/1e12 - 1) < 1e-14, abs(q(2) - exact) < 1e-14);",
+    "q = integral(@(x) [sin(1000*x); 1e12], 0, 1, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1) - exact) < 1e-14, abs(q(1) - q1) < 1e-14);",
+    "q = integral(@(x) [1e-8*sin(x); x.^2], 0, pi, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1) - 2e-8) < 1e-20, abs(q(2) - pi^3/3) < 1e-12);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1 1", "1 1", "1 1"]);
+});
+
+test("integral and quadgk: infinite and reversed limits, waypoints, warnings and refusals", () => {
+  const { execFileSync } = require("node:child_process");
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "disp(abs(integral(@(x) exp(-x.^2), -Inf, Inf) - sqrt(pi)) < 1e-8);",
+    "disp(abs(integral(@(x) exp(x), -Inf, 2, 'Waypoints', [-5 0]) - exp(2)) < 1e-9);",
+    "disp(abs(integral(@(x) exp(x), 1, 0) + (exp(1) - 1)) < 1e-12);",
+    "disp(integral(@(x) x, 2, 2)); disp(class(quadgk(@(x) x, single(0), 1)));",
+    "lastwarn(''); [q, e] = quadgk(@(x) sin(2e4*pi*x), 0, pi); disp(lastwarn);",
+    "lastwarn(''); q = integral(@(x) sin(2e4*pi*x), 0, pi); disp(lastwarn);",
+    "try, integral(@(x) 1, 0, 1), catch err, disp(err.message), end",
+    "try, integral(@(x) x, 0, 1, 'MaxIntervalCount', 10), catch err, disp(err.message), end",
+    "try, quadgk(@(x) x, 0, 1, 'ArrayValued', true), catch err, disp(err.message), end",
+    "try, integral(@(x) x, 0, 1, 'AbsTol', -1), catch err, disp(err.message), end",
+    "try, integral(@(x) x, 0, 1, 'Waypoints', 2), catch err, disp(err.message), end",
+    "try, integral(@(x) NaN*x, 0, 1), catch err, disp(err.message), end",
+    "lastwarn(''); q = integral(@(x) 1./x, 0, 1); disp(lastwarn);",
+    "try, integral(@(x) x, 0, Inf, 'Waypoints', 1i), catch err, disp(err.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), [
+    "1", "1", "1", "0", "single",
+    "Reached the limit on the maximum number of intervals in use. Approximate bound on error is 5.7e-01.",
+    "integral: Reached the limit on the maximum number of intervals in use. Approximate bound on error is 5.7e-01. The tolerances were not met.",
+    "integral: the integrand must return an array the size of its input; use array operators (.*, ./, .^) or set ArrayValued.",
+    "integral: unknown option 'MaxIntervalCount'.",
+    "quadgk: unknown option 'ArrayValued'.",
+    "integral: AbsTol must be a nonnegative real scalar.",
+    "Waypoints must lie strictly between the limits of integration.",
+    "integral: the integrand is Inf or NaN at the first points tried; no approximation of the integral is possible.",
+    "integral: the integrand is Inf or NaN at some points; the last approximation is returned. Approximate bound on error is 2.4e+00.",
+    "Contour integration requires all limits and waypoints to be finite.",
+  ]);
+});
+
+test("ode45, ode23, odeset, odeget and deval: the pages' published examples, events, output functions and refusals", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (deval's published example: ode23's cubic interpolant is exact for t^3/3)
+    "sol = ode23(@(t,y) t^2, [0 3], 0); x = linspace(0,3,7); [y,yp] = deval(sol,x); disp(mat2str(round(y * 1e4) / 1e4)); disp(mat2str(round(yp * 1e4) / 1e4));",
+    // (the solution structure's fields, as the ode45 page's example shows them)
+    "vdp1 = @(t,y) [y(2); (1-y(1)^2)*y(2)-y(1)]; sol = ode45(vdp1,[0 20],[2 0]); disp(strjoin(fieldnames(sol)', ' ')); disp(mat2str(size(sol.y, 1)));",
+    "y = deval(sol, [5 10], 1); disp(mat2str(size(y)));",
+    // (odeset's published structure: its 23 fields in order, \"on\" stored as 'on')
+    "o = odeset(RelTol=1e-8,AbsTol=1e-10); o = odeset(o,AbsTol=1e-9); f = fieldnames(o); disp(numel(f)); disp([f{1} ' ' f{end}]); disp(o.AbsTol); disp(o.RelTol);",
+    "o = odeset(RelTol=1e-8,AbsTol=1e-9,Stats=\"on\"); disp(class(o.Stats)); disp(odeget(o, 'Stats')); disp(odeget(o, 'MaxStep', 0.5));",
+    // (Refine: 4 by default for ode45, 1 for ode23, the points between each step's ends)
+    "[t,y] = ode45(@(t,y) -y, [0 1], 1); [t1,y1] = ode45(@(t,y) -y, [0 1], 1, odeset('Refine', 1)); disp(numel(t) - 1 == 4 * (numel(t1) - 1));",
+    "[t,y] = ode45(@(t,y) -y, [0 0.5 1], 1); disp(mat2str(t')); disp(max(abs(y - exp(-t))) < 1e-5);",
+    // (a terminal event with a direction: a falling ball reaching the ground)
+    "ev = @(t,y) deal(y(1), 1, -1); o = odeset('Events', ev, 'RelTol', 1e-8, 'AbsTol', 1e-10);",
+    "[t,y,te,ye,ie] = ode45(@(t,y) [y(2); -9.8], [0 10], [10; 0], o); disp(abs(te - sqrt(20/9.8)) < 1e-8); disp(ie); disp(t(end) == te);",
+    "opts = odeset('Stats','on'); [t,y] = ode23(@(t,y) -y, [0 1], 1, opts);",
+    // (a pole at t = 1: the steps shrink to the smallest the precision allows,
+    // and the integration ends there with a warning instead of stepping across)
+    "lastwarn(''); [t,y] = ode45(@(t,y) 1/(1-t), [0 2], 0); disp(t(end) < 1 && t(end) > 1 - 1e-10); disp(~isempty(lastwarn));",
+    "lastwarn(''); [t,y] = ode23(@(t,y) 1/(1-t), [0 2], 0); disp(t(end) < 1 && t(end) > 1 - 1e-10); disp(~isempty(lastwarn));",
+    "try, ode45(@(t,y) -y, [0 1], 1, odeset('Mass', 1)), catch e, disp(e.message), end",
+    "try, ode45(@(t,y) [y; y], [0 1], 1), catch e, disp(e.message), end",
+    "try, ode45(@(t,y) -y, [0 1 0.5], 1), catch e, disp(e.message), end",
+    "try, odeset('Bogus', 1), catch e, disp(e.message), end",
+    "try, odeset('RelTol', -1), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  const lines = r.stdout.trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines.slice(0, 13), [
+    "[0 0.0417 0.3333 1.125 2.6667 5.2083 9]", "[0 0.25 1 2.25 4 6.25 9]",
+    "solver extdata x y stats idata", "2", "[1 2]",
+    "23", "AbsTol InitialSlope", "1.0000e-09", "1.0000e-08", "char", "on", "0.5000", "1",
+  ]);
+  assert.deepEqual(lines.slice(13, 18), ["[0 0.5 1]", "1", "1", "1", "1"]);
+  assert.match(lines[18], /^\d+ successful steps$/);
+  assert.match(lines[19], /^\d+ failed attempts$/);
+  assert.match(lines[20], /^\d+ function evaluations$/);
+  assert.deepEqual(lines.slice(21, 25), ["1", "1", "1", "1"]);
+  assert.match(r.stderr, /ode45: at t = 1 the step size fell below its minimum/);
+  assert.deepEqual(lines.slice(25), [
+    "ode45: the Mass option is not supported in Sagebrush.",
+    "ode45: the ODE function must return a vector of length 1 (as y0).",
+    "ode45: the entries of tspan must be strictly increasing or strictly decreasing.",
+    "odeset: unrecognized property name 'Bogus'.",
+    "odeset: RelTol must be a positive scalar.",
+  ]);
+});
+
+test("integral2 and integral3 reproduce their published examples by the iterated method, and refuse the tiled one", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "fun = @(x,y) 1./(sqrt(x+y).*(1+x+y).^2); fprintf('%.4f\\n', integral2(fun,0,1,0,@(x) 1 - x));",
+    "polarfun = @(theta,r) fun(r.*cos(theta),r.*sin(theta)).*r; fprintf('%.4f\\n', integral2(polarfun,0,pi/2,0,@(theta) 1./(sin(theta)+cos(theta))));",
+    "a = 3; b = 5; fprintf('%.15e\\n', integral2(@(x,y) a*x.^2+b*y.^2,0,5,-5,0,Method=\"iterated\",AbsoluteTolerance=0,RelativeTolerance=1e-10));",
+    "fprintf('%.4f\\n', integral2(@(x,y) log(x^2+y^2),0,2,0,2,Vectorized=false));",
+    "fprintf('%.4f\\n', integral3(@(x,y,z) y.*sin(x)+z.*cos(x),0,pi,0,1,-1,1));",
+    "fprintf('%.4f\\n', integral3(@(x,y,z) x.*cos(y)+x.^2.*cos(z),-1,1,@(x)-sqrt(1-x.^2),@(x) sqrt(1-x.^2),@(x,y)-sqrt(1-x.^2-y.^2),@(x,y) sqrt(1-x.^2-y.^2)));",
+    "try, integral2(@(x,y) x.*y,0,1,0,1,Method=\"tiled\"), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) x.*y,0,1,0,1,Waypoints={0.5, 0.5}), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) 1,0,1,0,1), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) x,0,1,0,1,0,1,'Bogus',1), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "0.2854", "0.2854", "1.666666666666667e+03", "2.6010", "2.0000", "0.7796",
+    "integral2: the \"tiled\" method is not supported in Sagebrush; use \"iterated\" (which \"auto\" uses).",
+    "integral2: Waypoints are not supported in Sagebrush.",
+    "integral2: the integrand and limit functions must return arrays the size of their inputs; use array operators (.*, ./, .^) or set Vectorized to false.",
+    "integral3: unknown option 'Bogus'.",
+  ]);
+});
+
+test("integral2 and integral3 refuse complex integrands and limits, and a Method that is not text, before integrating", () => {
+  const out = require("node:child_process").execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, integral2(@(x,y) (1+2i)*ones(size(x)), 0, 1, 0, 1), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) (1+2i)*ones(size(x)), 0, 1, 0, 1, 0, 1), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) (1+2i), 0, 1, 0, 1, 'Vectorized', false), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) (1+2i), 0, 1, 0, 1, 0, 1, 'Vectorized', false), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) x.*y, 0, 1, @(x) 1i*x, 1), catch e, disp(e.message), end",
+    "try, integral2(@(x,y) x.*y, 0, 1, 0, 1, 'Method', 17), catch e, disp(e.message), end",
+    "try, integral3(@(x,y,z) x, 0, 1, 0, 1, 0, 1, 'Method', 17), catch e, disp(e.message), end",
+    "fprintf('%.15g %.15g\\n', integral2(@(x,y) x.*y, 0, 1, 0, @(x) x), integral3(@(x,y,z) x + y + z, 0, 1, 0, 1, 0, 1, 'Method', 'iterated'));",
+  ].join("\n")], { encoding: "utf8" });
+  const no = (s: string) => s + ": complex integrands and limits are not supported in Sagebrush.";
+  assert.deepEqual(out.trim().split("\n"), [no("integral2"), no("integral3"), no("integral2"), no("integral3"), no("integral2"),
+    'integral2: Method must be "auto", "tiled" or "iterated".', 'integral3: Method must be "auto", "tiled" or "iterated".', "0.125 1.5"]);
+});
+
+test("ode45 and ode23: OutputFcn in the solution-structure form too; deval only on the solution's own interval", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a stop request ends the integration whatever the outputs, with OutputSel too)
+    "for solver = {@ode45, @ode23}",
+    "  o = odeset('OutputFcn', @(t,y,flag) isempty(flag), 'MaxStep', .2);",
+    "  s = solver{1}(@(t,y) 1, [0 2], 0, o); [t, y] = solver{1}(@(t,y) 1, [0 2], 0, o);",
+    "  o2 = odeset(o, 'OutputSel', 2); s2 = solver{1}(@(t,y) [1; 2], [0 2], [0; 0], o2);",
+    "  fprintf('%.12g %.12g %.12g\\n', s.x(end), t(end), s2.x(end));",
+    "end",
+    // (a terminal event inside a step: deval at, just inside, and beyond the end; forward and backward)
+    "s = ode45(@(t,y) 1, [0 2], 0, odeset('Events', @(t,y) deal(t - .35, 1, 1), 'MaxStep', .2));",
+    "fprintf('%.12g %.12g %.12g\\n', s.x(end), deval(s, .35), deval(s, .3499)); try, deval(s, .36), catch e, disp(e.message), end",
+    "s = ode45(@(t,y) -1, [2 0], 2, odeset('Events', @(t,y) deal(t - 1.65, 1, 0), 'MaxStep', .2));",
+    "fprintf('%.12g %.12g %.12g\\n', s.x(end), deval(s, 1.65), deval(s, 1.6501)); try, deval(s, 1.64), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    "0.0001 0.0001 0.0001", "0.0001 0.0001 0.0001",
+    "0.35 0.35 0.3499", "deval: the points must lie in the interval of integration, [sol.x(1) sol.x(end)].",
+    "1.65 2.35 2.3499", "deval: the points must lie in the interval of integration, [sol.x(1) sol.x(end)].",
+  ]);
+});
+
+test("quad stops at GNU Octave's adaptive Simpson limit, 10001 evaluations exactly, with a warning", () => {
+  const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "[q, n] = quad(@(x) sin(1000*x), 0, 1, 1e-14); disp(n);",
+    "[q, n] = quad(@(x) 1./(x + 1e-12), 0, 1, 1e-14); disp(n);",
+    "[q, n] = quad(@(x) exp(x), 0, 1); disp(n < 10001);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(r.stdout.trim().split("\n").map((s: string) => s.trim()), ["10001", "10001", "1"]);
+  assert.equal((r.stderr.match(/Warning: quad: the limit of 10001 function evaluations was reached; the tolerance may not be met\./g) || []).length, 2);
+});
+
+test("lsqnonneg keeps a solution of any scale: positivity tested exactly, as Lawson and Hanson's steps 6 to 11", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a scaled identity: TolX grows with C, but x = 1e-8 is a solution, not a zero)
+    "[x,r,res,e,o,l] = lsqnonneg(1e8*eye(2), ones(2,1)); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    // (mixed active and passive variables, at two scales: the same x, the duals scaled, optimality held)
+    "[x,r,res,e,o,l] = lsqnonneg(eye(2), [1;-2]); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    "[x,r,res,e,o,l] = lsqnonneg(1e8*eye(2), 1e8*[1;-2]); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    "C = [0.0372 0.2869; 0.6861 0.7071; 0.6233 0.6245; 0.6344 0.6170]; d = [0.8587; 0.1781; 0.0747; 0.8405];",
+    "[x1,r1] = lsqnonneg(C, d); [x2,r2,~,e2,~,l2] = lsqnonneg(1e-6*C, d);",
+    "fprintf('%d %d %d\\n', abs(x2(2)*1e-6 - x1(2)) < 1e-12, abs(r2 - r1) < 1e-12, e2); disp(all(x2 >= 0) && all(l2 <= 1e-10) && abs(l2(2)) < 1e-10);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1e-08 1e-08 0 1 0 0", "1 0 4 1 0 -2", "1 0 4e+16 1 0 -2e+16", "1 1 1", "   1"]);
+});
+
 test("eigs: the page's output orders, k beyond n, failure treatment and flag, option structures, a Cholesky B, and the refusals", () => {
   const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
     "n = 100; e = ones(n,1); T = spdiags([-e 2*e -e], -1:1, n, n);",
@@ -845,6 +1427,96 @@ test("ellipke, ellipj and legendre keep their documented domains", () => {
     "ellipj: U must be finite in Sagebrush.",
     "single", "single",
   ]);
+});
+
+test("a legend in 3-D axes is drawn: surfaces' swatches (colormapped at the middle of CLim), lines, markers, stems", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    // (the colormap's middle color: row floor(m / 2) + 1 of m)
+    // (close all: the session's figures are those earlier tests left)
+    "close all; surf(peaks(20)); legend('peaks'); cm = colormap; fprintf('#%02x%02x%02x %d\\n', round(cm(floor(size(cm, 1) / 2) + 1, :) * 255), size(cm, 1))",
+    "mesh(peaks(20)); legend('m')",
+    "surf(peaks(5)); shading interp; legend('i')",
+    "surf(peaks(5), 'FaceColor', 'r'); hold on; t = 0:0.1:5; plot3(t, t, t, 'k--'); scatter3([1 2], [1 2], [1 2], 'filled');\n" +
+      "stem3([1 2], [2 1], [3 4]); legend('surface', 'line', 'points', 'stems', 'Location', 'northwest'); hold off",
+    "plot3(1:3, 1:3, 1:3); legend('a'); legend('off')",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const legend = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return svg.match(/<g class="sb-legend">.*?<\/g>/)?.[0] ?? null;
+  };
+  const swatch = (id: number) => legend(id)?.match(/<rect x="[^"]*" y="[^"]*" width="22" height="10"([^/]*)\/>/)?.[1].trim();
+  const [mid, rows] = msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join("").trim().split(" ");
+  assert.match(mid, /^#[0-9a-f]{6}$/);
+  assert.equal(rows, "256");
+  assert.equal(swatch(1), `fill="${mid}" stroke="#000000" stroke-width="1"`);
+  assert.match(legend(1)!, />peaks<\/text>/);
+  assert.equal(swatch(2), `fill="#ffffff" stroke="${mid}" stroke-width="1"`);
+  assert.equal(swatch(3), `fill="${mid}"`);
+  const four = legend(4)!;
+  assert.deepEqual([...four.matchAll(/>([a-z]+)<\/text>/g)].map((m) => m[1]), ["surface", "line", "points", "stems"]);
+  assert.match(four, /<rect x="27" y="28" width="22" height="10" fill="#ff0000" stroke="#000000"/);
+  assert.match(four, /stroke="#000000" stroke-width="[\d.]+" stroke-dasharray/);
+  assert.equal((four.match(/<circle /g) ?? []).length, 2);
+  assert.equal(legend(5), null);
+});
+
+test("titles are bold by default (TitleFontWeight), subtitles not, on a line under the title; title(t, s)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = [
+    // (close all: the session's figures are those earlier tests left)
+    "close all; plot(1:3); title('Two'); disp(get(get(gca, 'Title'), 'FontWeight')); disp(get(get(gca, 'Subtitle'), 'FontWeight'))",
+    "surf(peaks(5)); title('Three')",
+    "plot(1:3); title('Main'); subtitle('Sub')",
+    "plot(1:3); title('Plain', 'FontWeight', 'normal')",
+    "plot(1:3); subtitle('Only')",
+    "plot(1:3); [t, s] = title('Top', 'Below', 'Color', 'r'); disp(t.String), disp(s.String), disp(t.Color), disp(s.Color)",
+    "plot(1:3); title('Top')",
+    "xlabel('a', 'b')",
+    "surf(peaks(5)); title('Top', 'Below')",
+    "surf(peaks(5)); [t, s] = title('Top', 'Below'); s.FontWeight = 'bold';",
+    // (plain cla keeps the title's formatting; cla reset and a new plot reset it)
+    "plot(1:3); t = title('Old', 'Color', 'r'); cla; disp(t.Color); cla reset; disp(t.Color); try, cla('again'), catch e, disp(e.message), end",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
+  const title = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return svg.match(/<text [^>]*text-anchor="middle" font-size="[^"]*"[^>]*>(?:(?!<\/text>).)*<\/text>/g)?.find((t: string) => !/rotate/.test(t))
+      ?.replace(/^<text [^>]*?font-size="[^"]*"/, "<text");
+  };
+  assert.equal(msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join(""), "bold\nnormal\n");
+  assert.equal(title(1), '<text font-weight="bold">Two</text>');
+  assert.equal(title(2), '<text font-weight="bold">Three</text>');
+  // (the subtitle: a second line, under the title, which stays where it was; the axes one line shorter)
+  const texts = (id: number) => {
+    const svg = msgs.find((m) => m.id === id && m.display)?.display["image/svg+xml"] ?? "";
+    return [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle"[^>]*>([A-Za-z]+)<\/text>/g)].map((m) => [m[3], +m[2]]);
+  };
+  const [[t3, y3], [s3, ys3]] = texts(3);
+  assert.deepEqual([t3, s3, ys3 > y3], ["Main", "Sub", true]);
+  assert.equal(texts(7)[0][1], y3);
+  assert.equal(title(3), '<text font-weight="bold">Main</text>');
+  assert.match(msgs.find((m) => m.id === 3 && m.display).display["image/svg+xml"], /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="[\d.]+">Sub<\/text>/);
+  // (title(titletext, subtitletext, Name, Value): the properties are both lines', as the documented example's Color)
+  assert.equal(msgs.filter((m) => m.id === 6 && m.stream === "stdout").map((m) => m.text).join(""), "Top\nBelow\n     1     0     0\n     1     0     0\n");
+  assert.deepEqual(texts(6).map((t) => t[0]), ["Top", "Below"]);
+  assert.match(msgs.filter((m) => m.id === 8 && m.stream === "stderr").map((m) => m.text).join(""), /Too many input arguments/);
+  // (the interactive 3-D view: the subtitle a line of its own too; a new plot's title is bold
+  // again, the axes reset as NextPlot 'replace' says)
+  const scene = JSON.parse(msgs.find((m) => m.id === 9 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
+  assert.deepEqual([scene.title, scene.subtitle, scene.title_weight, scene.subtitle_weight], ["Top", "Below", "bold", "normal"]);
+  const bolder = JSON.parse(msgs.find((m) => m.id === 10 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
+  assert.equal(bolder.subtitle_weight, "bold");
+  assert.equal(msgs.filter((m) => m.id === 11 && m.stream).map((m) => m.text).join(""), "     1     0     0\n     0     0     0\ncla: the only option is 'reset'.\n");
+  assert.equal(title(4), "<text>Plain</text>");
+  assert.equal(title(5), "<text>Only</text>");
 });
 
 test("a newline in a struct's text field or a string array's element is displayed as ↵, as MATLAB's published displays show it", () => {
