@@ -40,17 +40,14 @@ its eigenvalues a_P at the primes P of norm <= RATIONAL_PRIME_NORM (at P | N
 the LMFDB's value, related to the Atkin-Lehner eigenvalue).
 
 lmfdb-2.2.5.1-eigen.txt, for every newform orbit of level norm <= EIGEN_LEVEL_NORM
-(rational or not), the characteristic polynomials over Q of its Hecke
-eigenvalues:
+(rational or not), its Hecke eigenvalues exactly as the LMFDB stores them:
 
-    label | a b c | d | pa pb pc:f0,f1,... ... | z: f0,f1,...
+    label | a b c | d | field: f0,f1,...,fd | pa pb pc:q0,q1,... ...
 
-with d the dimension, then for each prime P of norm <= EIGEN_PRIME_NORM
-(those dividing N included: a_P is then the eigenvalue of U_P) the
-characteristic polynomial of a_P, constant term first, and last that of
-z = sum_k (k + 1) a_(P_k) over the primes P_k among those that do not divide
-N, in order (a check of the whole system of eigenvalues up to Galois
-conjugation, whenever z generates the coefficient field).
+with d the dimension, f the LMFDB's Hecke polynomial (monic, constant term
+first) and e a root of it, then for each prime P of norm <= EIGEN_PRIME_NORM
+(those dividing N included: a_P is then the eigenvalue of U_P), in the
+LMFDB's order, a_P = q0 + q1 e + ... + q_(d-1) e^(d-1) with rational q_i.
 
 lmfdb-2.2.5.1-hecke.txt, for every level N of norm <= HECKE_LEVEL_NORM and
 every prime P of norm <= HECKE_PRIME_NORM not dividing N, and for P = N
@@ -278,27 +275,23 @@ def eigen_fixture():
     for label, level, dim, poly, eigs in psql(Q_EIGEN):
         n, h = ideal_hnf(level)
         f = parse_poly(poly, "x")
-        assert f[-1] == 1 and len(f) - 1 == int(dim)
+        d = int(dim)
+        assert f[-1] == 1 and len(f) - 1 == d
         eigs = json.loads(eigs)
         parts = []
-        z = [Fraction(0)]
-        k = 0
         for i, ph in pl:
             a = parse_poly(eigs[i], "e")
-            parts.append(f"{ph[0]} {ph[1]} {ph[2]}:" + ",".join(map(str, charpoly_of_element(a, f))))
-            if not contains(ph, h):
-                k += 1
-                m = max(len(z), len(a))
-                z = [(z[t] if t < len(z) else 0) + (k + 1) * (a[t] if t < len(a) else 0) for t in range(m)]
-        zc = ",".join(map(str, charpoly_of_element(z, f)))
-        rows.append((n, label, h, int(dim), " ".join(parts), zc))
+            assert len(a) <= d
+            a = a + [Fraction(0)] * (d - len(a))
+            parts.append(f"{ph[0]} {ph[1]} {ph[2]}:" + ",".join(map(str, a)))
+        rows.append((n, label, h, d, ",".join(map(str, f)), " ".join(parts)))
     rows.sort()
     path = os.path.join(HERE, f"lmfdb-{FIELD}-eigen.txt")
     with open(path, "w") as out:
         header(out, Q_PRIMES, Q_EIGEN)
-        out.write("# label | level HNF | dimension | prime HNF:charpoly of a_P ... | z: charpoly of sum (k+1) a_(P_k) over the good primes\n")
-        for _, label, h, d, parts, zc in rows:
-            out.write(f"{label} | {h[0]} {h[1]} {h[2]} | {d} | {parts} | z: {zc}\n")
+        out.write("# label | level HNF | dimension | field: Hecke polynomial of e | prime HNF:a_P in the basis 1, e, e^2, ... ...\n")
+        for _, label, h, d, f, parts in rows:
+            out.write(f"{label} | {h[0]} {h[1]} {h[2]} | {d} | field: {f} | {parts}\n")
     print(f"wrote {len(rows)} newform orbits to {path}")
 
 
@@ -349,6 +342,10 @@ def contains(big, small):
 def main():
     import json
 
+    if sys.argv[1:] == ["eigen"]:
+        # only lmfdb-2.2.5.1-eigen.txt
+        eigen_fixture()
+        return
     hecke_fixture()
     eigen_fixture()
     orbit_fixture()
