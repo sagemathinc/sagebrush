@@ -157,11 +157,24 @@ Supported:
 - Titles, labels, limits, `xscale`/`yscale('log')`, ticks and tick labels,
   `grid`, `legend` (`loc`; labels, handles, or the labelled artists as
   matplotlib lists them), `axis('equal'|'off')` and `suptitle`.
+- `savefig`: PNG (matplotlib's default, also for a name without an
+  extension or a file object) and SVG, with `dpi`, `facecolor`,
+  `transparent` and `metadata`; other formats and `bbox_inches='tight'` are
+  errors.  A PNG is the figure's SVG drawn by a small WebAssembly module of
+  its own (`engine/raster`: tiny-skia, DejaVu Sans as outlines), fetched the
+  first time a PNG is written or read (about 310 kB gzipped).  Its size
+  (`int(figsize * dpi)`), color type, dpi chunk and what `imread` reads back
+  are matplotlib's; the drawing is not Agg's pixel for pixel.  Text in it
+  may use Latin-1, Greek and the common math symbols (a character outside
+  them is an error that names it; SVG has them all).
+- `imread` (and `matplotlib.image.imread`) for PNG files, as matplotlib
+  returns them: float32 in [0, 1], `(h, w)`, `(h, w, 3)` or `(h, w, 4)`.
+  Other formats are errors, and a file over 16384 pixels on a side or
+  2**24 in all is refused before it is decoded.
 - As in matplotlib: the ticks are its AutoLocator's (as many as the axes'
   size allows, in its default subplot layout), autoscaled limits have 5%
   margins, and lines (`plot`, `hist`, `errorbar`) and patches (`bar`,
   `scatter`, `fill_between`, `pie`) take colors from separate cycles.
-- `savefig('f.svg')`, and SVG only for now.
 
 Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 
@@ -305,5 +318,4 @@ built by `web/demo/jfm/build.sh`.
 
 - Zooming by resampling.
 - LaTeX labels (KaTeX).
-- PNG files from the command line (resvg).
 - Colorbars, contour labels (`labels=True`), streamlines.

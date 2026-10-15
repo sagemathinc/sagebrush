@@ -20,7 +20,10 @@
 
 import { FILES_RUNNER } from "./files-runner.js";
 
-const OWN = /\/sagebrush-(engine\.wasm|precompiled\.json)$/;
+// the files the runner may have the page fetch for its worker: the engine,
+// the PNG module (fetched when Python first writes or reads a PNG) and the
+// precompiled library, each checked by its SHA-256 in the worker
+const OWN = /\/sagebrush-(engine\.wasm|raster\.wasm|precompiled\.json)$/;
 
 // Files mode: the runner for a page that has the engine's files itself (a
 // board downloaded as one HTML file).  A file:// page is never cross-origin
