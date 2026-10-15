@@ -17,6 +17,37 @@ class UnsupportedOperation(OSError, ValueError):
 _CLOSED = "I/O operation on closed file."
 
 
+def _bytes_like(b):
+    """b's bytes, for a write: a bytes-like object (bytes, bytearray,
+    memoryview, an array's buffer), or CPython's TypeError"""
+    if isinstance(b, (bytes, bytearray, memoryview)):
+        return bytes(b)
+    if not isinstance(b, (str, int, float, complex, list, tuple, dict, set)) and b is not None and hasattr(b, "tobytes"):
+        return b.tobytes()
+    raise TypeError("a bytes-like object is required, not '%s'" % type(b).__name__)
+
+
+def _readlines(f, hint, stop_at_hint, msg):
+    """f's lines, as CPython's readlines(hint): all of them for a hint that is
+    None, 0 or negative; else up to the line after which their total length
+    exceeds the hint (or, stop_at_hint, reaches it, as BytesIO's)"""
+    if hint is not None:
+        try:
+            hint = hint.__index__() if not isinstance(hint, int) else int(hint)
+        except AttributeError:
+            raise TypeError(msg % type(hint).__name__) from None
+    out = []
+    total = 0
+    while True:
+        line = f.readline()
+        if not line:
+            return out
+        out.append(line)
+        total += len(line)
+        if hint is not None and hint > 0 and (total >= hint if stop_at_hint else total > hint):
+            return out
+
+
 class IOBase:
     closed = False
 
@@ -84,7 +115,7 @@ class IOBase:
 
     def readlines(self, hint=None):
         self._checkClosed()
-        return list(self)
+        return _readlines(self, hint, False, "argument should be integer or None, not '%s'")
 
     def writelines(self, lines):
         self._checkClosed()
@@ -188,11 +219,13 @@ class BytesIO(BufferedIOBase):
         self._pos += len(b)
         return b
 
+    def readlines(self, size=None):
+        self._checkClosed()
+        return _readlines(self, size, True, "integer argument expected, got '%s'")
+
     def write(self, b):
+        b = _bytes_like(b)  # (the argument first, then closed, as CPython's)
         self._check()
-        if isinstance(b, str):
-            raise TypeError("a bytes-like object is required, not 'str'")
-        b = bytes(b)
         n = len(b)
         if self._pos > len(self._buf):
             self._buf += bytes(self._pos - len(self._buf))
@@ -256,9 +289,10 @@ class StringIO(TextIOBase):
         return self._parts[0] if self._parts else ""
 
     def write(self, s):
-        self._check()
+        # (the argument first, then closed, as CPython's, CORR-606-4)
         if not isinstance(s, str):
             raise TypeError(f"string argument expected, got '{type(s).__name__}'")
+        self._check()
         v = self._value()
         if self._pos == len(v):
             self._parts.append(s)
@@ -297,12 +331,7 @@ class StringIO(TextIOBase):
 
     def readlines(self, hint=None):
         self._checkClosed()
-        out = []
-        while True:
-            line = self.readline()
-            if not line:
-                return out
-            out.append(line)
+        return _readlines(self, hint, False, "argument should be integer or None, not '%s'")
 
     def __iter__(self):
         self._checkClosed()

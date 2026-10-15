@@ -92,12 +92,7 @@ class _Mixin:
 
     def readlines(self, hint=None):
         self._closed_check()
-        out = []
-        while True:
-            line = self.readline()
-            if not line:
-                return out
-            out.append(line)
+        return io._readlines(self, hint, False, "argument should be integer or None, not '%s'")
 
     def writelines(self, lines):
         self._closed_check()
@@ -139,6 +134,9 @@ class TextFile(_Mixin, io.StringIO):
         return line
 
     def write(self, s):
+        # (the argument first, as CPython's TextIOWrapper)
+        if not isinstance(s, str):
+            raise TypeError("write() argument must be str, not %s" % ("None" if s is None else type(s).__name__))
         self._closed_check()
         if not self._w():
             raise io.UnsupportedOperation("not writable")
@@ -204,6 +202,7 @@ class BinaryFile(_Mixin, io.BytesIO):
     def write(self, b):
         if not self._w():
             raise io.UnsupportedOperation("write")
+        b = io._bytes_like(b)  # (then closed, as CPython's BufferedWriter)
         self._closed_check("write to closed file")
         return self._write(b)
 

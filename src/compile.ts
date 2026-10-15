@@ -6,6 +6,8 @@ import { runInThisContext, Script } from "vm";
 import { createHash } from "crypto";
 import { homedir } from "os";
 import { initParser, parse, PySyntaxError } from "./parse";
+import { TokState, decodeBytes } from "../pyparse/src/lexer";
+import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
@@ -236,33 +238,43 @@ R.builtins.__pyjs_class_cells__ = (src: any) => JSON.stringify(classCellReport(S
 // statement; else the SyntaxError where the first one ends (the REPL, the
 // console and doctests, which run "single" too, take several)
 const COMPOUND = new Set(["If", "While", "For", "FunctionDef", "ClassDef", "Try", "With", "Match"]);
+const CLAUSES = new Set(["else", "elif", "except", "finally"]);
 function checkSingle(src: string, filename: string, opts: CompileOptions): void {
   const body: any[] = parse(src, filename, "exec", opts).body;
   if (body.length < 2) return;
-  const first = body[0];
-  const compound = COMPOUND.has(first.k);
-  const second = compound ? body[1] : body.find((s) => s.line !== first.line);
-  if (second === undefined) return;
+  // (the tokenizer's view: where the first statement's logical line, or its
+  // block, ends, and the next token; continued lines, strings and comments
+  // as CPython's tokenizer has them, CORR-606-1)
+  const tok = new TokState(src.endsWith("\n") ? src : src + "\n", { sage: opts.sage });
+  const toks: any[] = [];
+  for (;;) {
+    const raw: any = { type: 0, start: -1, end: -1, level: 0, lineno: 0, col_offset: -1, end_lineno: 0, end_col_offset: -1, metadata: null };
+    const t = tok.get(raw);
+    toks.push({ t, ...raw, text: raw.start >= 0 ? decodeBytes(tok.buf, raw.start, raw.end) : "" });
+    if (t === TK.ENDMARKER || t < 0 || toks.length > src.length + 16) break;
+  }
+  let depth = 0, end = -1;
+  for (let i = 0; i < toks.length && end < 0; i++) {
+    const t = toks[i].t;
+    if (t === TK.INDENT) depth++;
+    else if (t === TK.DEDENT) {
+      // (back at the top level, unless a clause of the same statement follows)
+      if (--depth === 0 && !CLAUSES.has(toks.slice(i + 1).find((x) => x.t !== TK.DEDENT && x.t !== TK.NL)?.text)) end = i;
+    } else if (t === TK.NEWLINE && depth === 0 && toks[i + 1]?.t !== TK.INDENT) end = i;
+  }
+  if (end < 0) return;
+  const second = toks.slice(end + 1).find((x) => x.t !== TK.NL && x.t !== TK.DEDENT && x.t !== TK.NEWLINE);
+  if (second === undefined || second.t === TK.ENDMARKER || second.t < 0) return;
   const lines = src.split("\n");
   const withNewline = (n: number) => lines[n - 1] + (n < lines.length ? "\n" : "");
-  if (compound) {
-    // (after a compound statement: "invalid syntax" at the next one's first
-    // token, a decorator's line being where a decorated definition starts)
-    let n = second.line;
-    while (n - 1 > first.line && lines[n - 2].trim().startsWith("@")) n--;
-    const t = lines[n - 1];
-    const off = t.length - t.trimStart().length + 1;
-    const tok = /^[A-Za-z_]\w*|^\S/.exec(t.trimStart())?.[0].length ?? 1;
-    throw new PySyntaxError("invalid syntax", filename, n, withNewline(n), off, n, off + tok);
+  if (COMPOUND.has(body[0].k)) {
+    // (after a compound statement: "invalid syntax" at the next one's first token)
+    throw new PySyntaxError("invalid syntax", filename, second.lineno, withNewline(second.lineno), second.col_offset + 1, second.lineno, second.end_col_offset + 1);
   }
-  // (a simple statement: at the end of its last line, past blank and
-  // comment lines; at its comment if it has one)
-  let n = second.line - 1;
-  while (n > first.line && (lines[n - 1].trim() === "" || lines[n - 1].trim().startsWith("#"))) n--;
-  const t = lines[n - 1];
-  const hash = t.indexOf("#");
-  const [off, end] = [hash >= 0 ? hash + 1 : t.length + 1, t.length + 2];
-  throw new PySyntaxError("multiple statements found while compiling a single statement", filename, n, withNewline(n), off, n, end);
+  // (a simple statement: at the NEWLINE that ends its logical line, which
+  // begins at a trailing comment)
+  const nl = toks[end];
+  throw new PySyntaxError("multiple statements found while compiling a single statement", filename, nl.lineno, withNewline(nl.lineno), nl.col_offset + 1, nl.lineno, nl.end_col_offset + 1);
 }
 
 // exec/eval/compile: compile `src` and run it with `ns` as its globals.
