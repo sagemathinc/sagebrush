@@ -35,6 +35,7 @@ precision, with no MATLAB types:
 | `ellipk(m)`, `ellipe(m)` | m <= 1: K by the AGM (19.8.5); E by the series 19.5.2 (m <= 1/2) and 19.12.2 (in 1 - m), and 19.7.2's imaginary-modulus transformation for m < 0, since 19.8.6's AGM sum cancels |
 | `ellipj(u, m)` | finite real u, 0 <= m <= 1: the AGM with phases (22.20), after reducing u by the periods to [0, K/2] (Table 22.4.3's translations by K and 2K, so that cn keeps its relative accuracy next to its zeros; beyond 8K in exact integer fixed point, with K to some 130 bits more than log2(\|u\|/K)); the Maclaurin series 22.10.1-22.10.3 below 1e-3; the ascending Landen transformation (22.7) for m > 0.9 |
 | `gammainc(a, x)`, `gammaincc(a, x)`, `gammainc_scaled(a, x, upper)` | the regularized P and Q, real a, x >= 0, in Gautschi's regions (ACM TOMS 5, 1979): the series 8.7.1 for P above a = x + 1/4, below it Q by Legendre's continued fraction 8.9.2 (modified Lentz) for x > 1.5 and by 8.7.1's series for gamma, with 1 - x^a/Gamma(a+1) by expm1, for x <= 1.5; for a >= 12 near x (\|eta\| <= 0.6) Temme's uniform expansion 8.12.3-8.12.4, its coefficients' Taylor series in eta computed exactly by scripts/gen-gammainc-temme.py (c_k = (c_(k-1)' + gamma_k eta/(lambda - 1))/eta, gamma_k from 1/Gamma*); the prefactor x^a e^-x/Gamma(a+1) in Temme's form, through lambda - 1 - log lambda, for a >= 1; the scaled forms (MATLAB's 'scaledlower', 'scaledupper') of the smaller of P and Q within each method (the series' sum, a times the continued fraction, Temme's expansion with erfcx), so that they survive where P or Q underflows |
+| `besselj(nu, x)` | real order and argument: the power series 10.2.2 for x^2 <= max(1, 2(nu+1)) and nu <= 170 (beyond it Miller's recurrence, or 0 where a Stirling bound puts J below the doubles), Hankel's expansion 10.17.3 for x >= max(25, nu^2), the recurrence 10.6.1 upward from Hankel's J_mu and J_(mu+1) for x >= 25 and nu <= 0.95 x (stable below the turning point), and otherwise Miller's backward recurrence (3.6(iii)) normalized by Neumann's expansion of (x/2)^mu (10.23(ii)); negative integer orders by 10.4.1, negative x by 10.11.1 (above the cut) |
 | `legendre_p(n, x)`, `assoc_legendre_p(n, m, x)`, `legendre_all(n, x, normalization)` | integer degree and order, real x in [-1, 1]: the degree recurrence 14.10.3 with exact coefficients from the diagonal (14.7.8), and next to +-1 (n^2 (1 - |x|)/2 <= 1) the terminating hypergeometric series 14.3.1 with 14.9.3 and 14.7.17; the scale kept as an exact power of 2 and the factorial ratios as exact integers |
 
 The phase conventions of the Legendre functions:
@@ -58,6 +59,14 @@ zeta's and hurwitz_zeta's absolute error grows with |Im s| (about
 the error functions' with |z|^2, E1's and Ei's with |x|, and the
 incomplete gamma functions' with the size of their exponent (about
 4e-15 max(1, |log value|), the rounding of log x^a e^-x / Gamma(a+1)).
+J_nu(x) is measured against its envelope sqrt(2/(pi x)) where it oscillates
+(|x| > nu, an absolute accuracy next to its zeros) and relatively below: within
+5e-15 for nu up to 3000. Miller's recurrence and the upward one run in
+double-double arithmetic: in doubles their roundings accumulated over the
+oscillating steps below the turning point, to 4.4e-14 at nu = 1213
+(scipy.special.jv's errors there reach 4.5e-13). The series stops at nu = 170, where
+Gamma(nu + 1) leaves the doubles and its prefactor would go through
+logarithms (2.8e-13 at the old boundary).
 matlab-tests/test_special.m checks the MATLAB functions against GNU Octave,
 to 10 digits, on the examples from their documentation pages and more.
 
@@ -69,7 +78,10 @@ to 10 digits, on the examples from their documentation pages and more.
 - Incomplete elliptic integrals, Carlson's integrals, complex arguments
   of the elliptic functions, and Legendre functions of non-integer degree
   or order or of the second kind.
-- Bessel and Airy functions, after Amos's papers (ACM TOMS 644).
+- Bessel functions other than J (Y, I, K, the Hankel functions) and Airy
+  functions; J of complex argument, of negative non-integer order (it needs
+  Y), and orders and arguments that would need a backward recurrence longer
+  than 500000 steps (NotCovered).
 - polylog of non-integer order, and of orders below -20 or above 100.
 - Complex beta, complex erfinv, hurwitz_zeta for complex a (the summation
   cancels catastrophically, and DLMF 25.11.5 is stated for real a) or
