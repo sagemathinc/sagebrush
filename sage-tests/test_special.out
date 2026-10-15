@@ -231,3 +231,29 @@ elliptic_kc(1.0) -> +infinity
 erfinv(1.0) -> +infinity
 psi(1, 2.5) -> psi(1, 2.50000000000000)
 erfinv(1.5) -> erfinv(1.50000000000000)
+zeta(1e-14) -> -0.5
+zeta(-1e-14) -> -0.5
+zeta(1e-16) -> -0.5
+zeta(1e-17) -> -0.5
+zeta(-1e-17) -> -0.5
+zeta(1.2e-16) -> -0.5
+zeta(1e-8) -> -0.500000009189
+zeta(1e-10*I).n() -> -0.5 -9.18938533205e-11i
+zeta(0.999) -> -999.422857156
+beta(CC(1,1), CC(-1,-1)) -> 0
+beta(CC(0.5,0.5), CC(-1.5,-0.5)) -> 0
+beta(CC(1e-200,1e-200), CC(1e-200,-1e-200)) -> 1e+200
+beta(1+I,-1-I).n() -> 0
+gen_legendre_P(0,-1,0.5) -> 0.57735026919
+gen_legendre_P(2,-3,0.5) -> 0.0212496974077
+gen_legendre_P(1,-2,0.3) -> 0.20641025641
+gen_legendre_P(1,-3,-0.4) -> 0.386124433556
+gen_legendre_P(0,-2,0.9) -> 0.0263157894737
+gen_legendre_P(3,-5,0.25) -> 0.00100401473967
+gamma(CC(-1)) -> Infinity
+gamma(CC(0)) -> Infinity
+hurwitz_zeta(1.0, 1.5) -> +infinity
+hurwitz_zeta(1.0, 1.0) -> +infinity
+hurwitz_zeta(1, x).subs(x=1.5).n() -> +infinity
+psi(gamma(x)).subs(x=2.5) -> -0.136417407831
+gamma(psi(x)).subs(x=2.5) -> 1.29308412137
