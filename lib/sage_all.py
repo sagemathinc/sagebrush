@@ -1158,6 +1158,11 @@ def digits(n, base=10):
 
 # ------------------------------------------------------------------ arithmetic
 
+def _poly_like(a):
+    # polynomials over ZZ/QQ, finite fields and number fields, and multivariate ones
+    return isinstance(a, _Polynomial) or type(a).__name__ in ("MPolynomial", "Polynomial_ff", "Polynomial_nf")
+
+
 def gcd(*args):
     """The greatest common divisor.
 
@@ -1168,7 +1173,7 @@ def gcd(*args):
     """
     if len(args) == 1:
         args = tuple(args[0])
-    if any(isinstance(a, _Polynomial) or type(a).__name__ == "MPolynomial" for a in args):
+    if any(_poly_like(a) for a in args):
         r = args[0]
         for a in args[1:]:
             r = r.gcd(a) if hasattr(r, "gcd") and not isinstance(r, int) else a.gcd(r)
@@ -1192,7 +1197,7 @@ def lcm(*args):
     """
     if len(args) == 1:
         args = tuple(args[0])
-    if any(isinstance(a, _Polynomial) or type(a).__name__ == "MPolynomial" for a in args):
+    if any(_poly_like(a) for a in args):
         r = args[0]
         for a in args[1:]:
             r = r.lcm(a) if hasattr(r, "lcm") and not isinstance(r, int) else a.lcm(r)
@@ -1208,6 +1213,8 @@ def xgcd(a, b):
         sage: xgcd(240, 46)
         (2, -9, 47)
     """
+    if _poly_like(a) or _poly_like(b):
+        return a.xgcd(b) if _poly_like(a) else b.parent()(a).xgcd(b)
     x0, x1, y0, y1 = 1, 0, 0, 1
     while b:
         q, a, b = a // b, b, a % b
