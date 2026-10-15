@@ -36,6 +36,17 @@
 //! and every totally positive generator is totally positive. The narrow
 //! class group refines
 //! the classes by the sign of the norm of a generator when N(eps) = 1.
+//!
+//! Arithmetic bounds. Elements have big-integer coordinates. Ideals are
+//! stored in i128, and every ideal has norm below [`MAX_NORM`] = 2^60:
+//! Hermite normal forms are computed exactly with big integers, and an
+//! ideal whose norm would reach 2^60 is an error (`ideal`, `ideal_mul`,
+//! `primes_above`). The fields of [`QIdeal`] are private to the crate, so
+//! no ideal escapes the bound. The reduction keeps its coordinates below
+//! 2^62 (see `step`), so the products formed there stay below 2^125; they
+//! are checked anyway. Class orders use the group law on the reduced
+//! representatives (products of norm < D), never powers of the ideal
+//! itself.
 
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -47,8 +58,9 @@ fn big(x: i128) -> BigInt {
     BigInt::from(x)
 }
 
-/// floor(sqrt(n)) for n >= 0.
-pub fn isqrt(n: i128) -> i128 {
+/// floor(sqrt(n)) for 0 <= n < 2^100 (here n = D < 2^42).
+fn isqrt(n: i128) -> i128 {
+    debug_assert!((0..1 << 100).contains(&n));
     if n < 2 {
         return n;
     }
@@ -157,21 +169,31 @@ impl QFrac {
     }
 }
 
+/// Every ideal has norm below 2^60 (see the module documentation).
+pub const MAX_NORM: i128 = 1 << 60;
+
 /// A nonzero ideal Z a + Z (b + c w) in Hermite normal form: a, c > 0,
-/// c | a, c | b, 0 <= b < a.
+/// c | a, c | b, 0 <= b < a, and a c < 2^60. It records the discriminant of
+/// its field: an ideal passed to another field is an error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct QIdeal {
-    pub a: i128,
-    pub b: i128,
-    pub c: i128,
+    pub(crate) a: i128,
+    pub(crate) b: i128,
+    pub(crate) c: i128,
+    pub(crate) disc: i64,
 }
 
 impl QIdeal {
+    /// The norm a c (< 2^60).
     pub fn norm(&self) -> i128 {
         self.a * self.c
     }
     pub fn is_one(&self) -> bool {
         self.a == 1 && self.c == 1
+    }
+    /// The Hermite normal form (a, b, c): the ideal is Z a + Z (b + c w).
+    pub fn hnf(&self) -> (i128, i128, i128) {
+        (self.a, self.b, self.c)
     }
 }
 
@@ -194,72 +216,74 @@ pub struct QPrime {
 
 /// The 2-dimensional Hermite normal form of the Z-span of vectors (u, v)
 /// (coordinates in 1, w): (a, b, c) with span = Z (a, 0) + Z (b, c), or None
-/// if the span has rank < 2.
-fn hnf2(vs: &[(i128, i128)]) -> Option<(i128, i128, i128)> {
+/// if the span has rank < 2. Exact (big integers).
+fn hnf2(vs: &[(BigInt, BigInt)]) -> Option<(BigInt, BigInt, BigInt)> {
     // gcd on the second coordinate
-    let mut c = 0i128;
-    let mut row = (0i128, 0i128); // a vector (b, c) with that c
-    let mut rest: Vec<i128> = vec![]; // first coordinates of vectors with v = 0
-    for &(u, v) in vs {
-        if v == 0 {
-            rest.push(u);
+    let mut c = BigInt::zero();
+    let mut row = BigInt::zero(); // the first coordinate of a vector with second coordinate c
+    let mut a = BigInt::zero(); // the gcd of the first coordinates of vectors with v = 0
+    for (u, v) in vs {
+        if v.is_zero() {
+            a = a.gcd(u);
             continue;
         }
-        if c == 0 {
-            row = (u, v);
-            c = v;
+        if c.is_zero() {
+            row = u.clone();
+            c = v.clone();
             continue;
         }
-        // combine (row.0, c) and (u, v): x c + y v = g
-        let (g, x, y) = xgcd(c, v);
-        let new = (x * row.0 + y * u, g);
-        // the vector v/g row - c/g (u, v) has second coordinate 0
-        let z = (v / g) * row.0 - (c / g) * u;
-        rest.push(z);
-        row = new;
+        // combine (row, c) and (u, v): x c + y v = g
+        let (g, x, y) = xgcd_big(&c, v);
+        // the vector v/g (row, c) - c/g (u, v) has second coordinate 0
+        let z = (v / &g) * &row - (&c / &g) * u;
+        a = a.gcd(&z);
+        row = x * &row + y * u;
         c = g;
     }
-    if c == 0 {
+    if c.is_zero() || a.is_zero() {
         return None;
     }
-    let a = rest.iter().fold(0i128, |g, &x| gcd(g, x));
-    if a == 0 {
-        return None;
-    }
-    let (mut b, mut c) = row;
-    if c < 0 {
-        b = -b;
+    if c.is_negative() {
+        row = -row;
         c = -c;
     }
-    Some((a, b.rem_euclid(a), c))
-}
-
-pub fn gcd(a: i128, b: i128) -> i128 {
-    let (mut a, mut b) = (a.abs(), b.abs());
-    while b != 0 {
-        let r = a % b;
-        a = b;
-        b = r;
-    }
-    a
+    let b = row.mod_floor(&a);
+    Some((a, b, c))
 }
 
 /// (g, x, y) with x a + y b = g = gcd(a, b) >= 0.
-pub fn xgcd(a: i128, b: i128) -> (i128, i128, i128) {
-    let (mut r0, mut r1) = (a, b);
-    let (mut s0, mut s1) = (1i128, 0i128);
-    let (mut t0, mut t1) = (0i128, 1i128);
-    while r1 != 0 {
-        let q = r0.div_euclid(r1);
-        (r0, r1) = (r1, r0 - q * r1);
-        (s0, s1) = (s1, s0 - q * s1);
-        (t0, t1) = (t1, t0 - q * t1);
+fn xgcd_big(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
+    let (mut r0, mut r1) = (a.clone(), b.clone());
+    let (mut s0, mut s1) = (BigInt::one(), BigInt::zero());
+    let (mut t0, mut t1) = (BigInt::zero(), BigInt::one());
+    while !r1.is_zero() {
+        let q = r0.div_floor(&r1);
+        let r2 = &r0 - &q * &r1;
+        let s2 = &s0 - &q * &s1;
+        let t2 = &t0 - &q * &t1;
+        (r0, r1, s0, s1, t0, t1) = (r1, r2, s1, s2, t1, t2);
     }
-    if r0 < 0 {
+    if r0.is_negative() {
         (-r0, -s0, -t0)
     } else {
         (r0, s0, t0)
     }
+}
+
+/// The ideal with the exact Hermite normal form (a, b, c), if its norm is
+/// below 2^60.
+fn to_ideal(disc: i64, (a, b, c): (BigInt, BigInt, BigInt)) -> Result<QIdeal, String> {
+    let n = &a * &c;
+    if n >= BigInt::from(MAX_NORM) {
+        return Err(format!("ideal of norm {} out of range (norms must be below 2^60)", n));
+    }
+    // a, c <= a c < 2^60 and 0 <= b < a
+    Ok(QIdeal { a: a.to_i128().unwrap(), b: b.to_i128().unwrap(), c: c.to_i128().unwrap(), disc })
+}
+
+/// A checked intermediate of the reduction (bounded; see `step`).
+fn ck(x: Option<i128>) -> i128 {
+    x.expect("reduction intermediate out of range: the bounds of step() are violated")
 }
 
 /// The sign of u + v sqrt D.
@@ -378,46 +402,69 @@ impl QuadField {
 
     // ---- ideals
 
-    /// The ideal generated by the given elements (not all zero).
+    /// The ideal generated by the given elements (not all zero); an error if
+    /// its norm is not below 2^60.
     pub fn ideal(&self, gens: &[QElt]) -> Result<QIdeal, String> {
         let mut vs = vec![];
         let w = QElt::new(0, 1);
         for g in gens {
             for h in [g.clone(), self.mul(g, &w)] {
-                let u = h.a.to_i128().ok_or("ideal generator too large")?;
-                let v = h.b.to_i128().ok_or("ideal generator too large")?;
-                vs.push((u, v));
+                vs.push((h.a, h.b));
             }
         }
-        let (a, b, c) = hnf2(&vs).ok_or("the zero ideal")?;
-        Ok(QIdeal { a, b, c })
+        to_ideal(self.disc, hnf2(&vs).ok_or("the zero ideal")?)
     }
     pub fn principal(&self, g: &QElt) -> Result<QIdeal, String> {
         self.ideal(std::slice::from_ref(g))
     }
     pub fn unit_ideal(&self) -> QIdeal {
-        QIdeal { a: 1, b: 0, c: 1 }
+        QIdeal { a: 1, b: 0, c: 1, disc: self.disc }
+    }
+    /// An error unless i is an ideal of this field.
+    pub fn check(&self, i: &QIdeal) -> Result<(), String> {
+        if i.disc != self.disc {
+            return Err(format!("an ideal of the field of discriminant {} passed to the field of discriminant {}", i.disc, self.disc));
+        }
+        Ok(())
     }
     /// The Z-basis a, b + c w.
     fn basis(&self, i: &QIdeal) -> [QElt; 2] {
         [QElt { a: big(i.a), b: BigInt::zero() }, QElt { a: big(i.b), b: big(i.c) }]
     }
-    pub fn ideal_mul(&self, i: &QIdeal, j: &QIdeal) -> QIdeal {
+    /// The exact Hermite normal form of I J.
+    fn mul_hnf(&self, i: &QIdeal, j: &QIdeal) -> (BigInt, BigInt, BigInt) {
         let mut vs = vec![];
         for x in self.basis(i) {
             for y in self.basis(j) {
                 let p = self.mul(&x, &y);
-                vs.push((p.a.to_i128().expect("ideal product overflow"), p.b.to_i128().expect("ideal product overflow")));
+                vs.push((p.a, p.b));
             }
         }
-        let (a, b, c) = hnf2(&vs).expect("nonzero");
-        QIdeal { a, b, c }
+        hnf2(&vs).expect("a product of nonzero ideals is nonzero")
     }
-    pub fn ideal_conj(&self, i: &QIdeal) -> QIdeal {
+    /// I J; an error if its norm is not below 2^60.
+    pub fn ideal_mul(&self, i: &QIdeal, j: &QIdeal) -> Result<QIdeal, String> {
+        self.check(i)?;
+        self.check(j)?;
+        to_ideal(self.disc, self.mul_hnf(i, j))
+    }
+    pub fn ideal_conj(&self, i: &QIdeal) -> Result<QIdeal, String> {
+        self.check(i)?;
+        Ok(self.conj_unchecked(i))
+    }
+    fn conj_unchecked(&self, i: &QIdeal) -> QIdeal {
         let [x, y] = self.basis(i);
-        self.ideal(&[x, self.conj(&y)]).expect("nonzero")
+        // the conjugate has the same norm, so it is in range
+        self.ideal(&[x, self.conj(&y)]).expect("the conjugate ideal has the same norm")
     }
-    pub fn contains(&self, i: &QIdeal, x: &QElt) -> bool {
+    /// Whether x lies in I.
+    pub fn contains(&self, i: &QIdeal, x: &QElt) -> Result<bool, String> {
+        self.check(i)?;
+        Ok(self.in_ideal(i, x))
+    }
+    /// contains, for an ideal known to be of this field.
+    pub(crate) fn in_ideal(&self, i: &QIdeal, x: &QElt) -> bool {
+        debug_assert_eq!(i.disc, self.disc);
         let (u, v) = (&x.a, &x.b);
         if !(v % big(i.c)).is_zero() {
             return false;
@@ -425,68 +472,104 @@ impl QuadField {
         let k = v / big(i.c);
         ((u - k * big(i.b)) % big(i.a)).is_zero()
     }
-    /// I / k for an integer k dividing I.
-    fn ideal_div_int(&self, i: &QIdeal, k: i128) -> Option<QIdeal> {
-        if i.a % k != 0 || i.b % k != 0 || i.c % k != 0 {
+    /// I J^-1 if it is integral (its norm N(I)/N(J) is then in range).
+    pub fn ideal_div(&self, i: &QIdeal, j: &QIdeal) -> Result<Option<QIdeal>, String> {
+        self.check(i)?;
+        self.check(j)?;
+        Ok(self.div_unchecked(i, j))
+    }
+    fn div_unchecked(&self, i: &QIdeal, j: &QIdeal) -> Option<QIdeal> {
+        // J^-1 = conj(J) / N(J), and I conj(J) / k is an ideal iff k divides
+        // every coordinate of its Hermite normal form
+        let (a, b, c) = self.mul_hnf(i, &self.conj_unchecked(j));
+        let k = big(j.norm());
+        if !(&a % &k).is_zero() || !(&b % &k).is_zero() || !(&c % &k).is_zero() {
             return None;
         }
-        Some(QIdeal { a: i.a / k, b: (i.b / k).rem_euclid(i.a / k), c: i.c / k })
-    }
-    /// I J^-1 if it is integral.
-    pub fn ideal_div(&self, i: &QIdeal, j: &QIdeal) -> Option<QIdeal> {
-        // J^-1 = conj(J) / N(J)
-        let p = self.ideal_mul(i, &self.ideal_conj(j));
-        self.ideal_div_int(&p, j.norm())
+        let (a, c) = (a / &k, c / &k);
+        let b = (b / &k).mod_floor(&a);
+        Some(to_ideal(self.disc, (a, b, c)).expect("an integral quotient has norm at most N(I)"))
     }
 
     // ---- primes
 
-    /// The primes above the rational prime p, sorted by norm.
-    pub fn primes_above(&self, p: i64) -> Vec<QPrime> {
-        assert!(crate::field::is_prime(p as u64), "{} is not prime", p);
-        // roots of x^2 - t x - n mod p
-        let roots: Vec<i64> = (0..p).filter(|&r| (r as i128 * r as i128 - self.t as i128 * r as i128 - self.n as i128).rem_euclid(p as i128) == 0).take(2).collect();
-        let mk = |kind, r: Option<i64>| -> QPrime {
+    /// The roots of x^2 - t x - n modulo the prime p (each once, sorted).
+    fn roots_mod(&self, p: i64) -> Vec<i64> {
+        let pm = p as i128;
+        let f = |r: i128| (r * r - self.t as i128 * r - self.n as i128).rem_euclid(pm) == 0;
+        if p == 2 {
+            return (0..2).filter(|&r| f(r as i128)).collect();
+        }
+        // x = (t +- sqrt D)/2 modulo p
+        let Some(s) = crate::field::sqrt_mod_p((self.disc as i128).rem_euclid(pm) as u64, p as u64) else { return vec![] };
+        let half = (pm + 1) / 2;
+        let mut v: Vec<i64> = [s as i128, pm - s as i128].iter().map(|&r| ((self.t as i128 + r) % pm * half % pm) as i64).collect();
+        v.sort_unstable();
+        v.dedup();
+        debug_assert!(v.iter().all(|&r| f(r as i128)));
+        v
+    }
+
+    /// The primes above the rational prime p, sorted by HNF; an error if p
+    /// is not prime or a prime above it has norm 2^60 or more.
+    pub fn primes_above(&self, p: i64) -> Result<Vec<QPrime>, String> {
+        if p < 2 || !crate::field::is_prime(p as u64) {
+            return Err(format!("{} is not prime", p));
+        }
+        let roots = self.roots_mod(p);
+        let mk = |kind, r: Option<i64>| -> Result<QPrime, String> {
             let ideal = match r {
-                Some(r) => self.ideal(&[QElt::int(p), QElt::new(-r, 1)]).unwrap(),
-                None => self.ideal(&[QElt::int(p)]).unwrap(),
+                Some(r) => self.ideal(&[QElt::int(p), QElt::new(-r, 1)])?,
+                None => self.ideal(&[QElt::int(p)])?,
             };
-            QPrime { p, norm: ideal.norm(), kind, ideal }
+            Ok(QPrime { p, norm: ideal.norm(), kind, ideal })
         };
-        if self.disc % p == 0 {
-            vec![mk(Splitting::Ramified, Some(roots[0]))]
+        Ok(if self.disc % p == 0 {
+            vec![mk(Splitting::Ramified, Some(roots[0]))?]
         } else if roots.is_empty() {
-            vec![mk(Splitting::Inert, None)]
+            vec![mk(Splitting::Inert, None)?]
         } else {
-            let mut v = vec![mk(Splitting::Split, Some(roots[0])), mk(Splitting::Split, Some(roots[1]))];
+            let mut v = vec![mk(Splitting::Split, Some(roots[0]))?, mk(Splitting::Split, Some(roots[1]))?];
             v.sort_by_key(|q| q.ideal);
             v
-        }
+        })
     }
-    /// The primes of norm at most b, sorted by norm (then HNF).
-    pub fn primes_of_bounded_norm(&self, bound: i64) -> Vec<QPrime> {
+    /// The primes of norm at most bound (at most 2^40), sorted by norm (then
+    /// HNF).
+    pub fn primes_of_bounded_norm(&self, bound: i64) -> Result<Vec<QPrime>, String> {
+        if bound > 1 << 40 {
+            return Err("the norm bound must be at most 2^40".into());
+        }
         let mut out = vec![];
         for p in 2..=bound {
             if !crate::field::is_prime(p as u64) {
                 continue;
             }
-            for q in self.primes_above(p) {
+            // an inert prime has norm p^2: skip it before forming it
+            if (p as i128) * (p as i128) > bound as i128 && self.disc % p != 0 && self.roots_mod(p).is_empty() {
+                continue;
+            }
+            for q in self.primes_above(p)? {
                 if q.norm <= bound as i128 {
                     out.push(q);
                 }
             }
         }
         out.sort_by_key(|q| (q.norm, q.ideal));
-        out
+        Ok(out)
     }
     /// The factorization of a nonzero ideal into primes.
-    pub fn factor(&self, i: &QIdeal) -> Vec<(QPrime, u32)> {
+    pub fn factor(&self, i: &QIdeal) -> Result<Vec<(QPrime, u32)>, String> {
+        self.check(i)?;
         let mut out = vec![];
         let mut rest = *i;
         for (p, _) in crate::field::factor_u64(i.norm() as u64) {
-            for q in self.primes_above(p as i64) {
+            // the primes above p dividing I have norm dividing N(I) < 2^60;
+            // an inert p divides N(I) only as p^2, so (p) is in range too
+            let primes = self.primes_above(p as i64).expect("the primes above a divisor of N(I) are in range");
+            for q in primes {
                 let mut e = 0;
-                while let Some(r) = self.ideal_div(&rest, &q.ideal) {
+                while let Some(r) = self.div_unchecked(&rest, &q.ideal) {
                     rest = r;
                     e += 1;
                 }
@@ -496,7 +579,7 @@ impl QuadField {
             }
         }
         assert!(rest.is_one(), "factorization incomplete");
-        out
+        Ok(out)
     }
 
     // ---- reduction
@@ -509,7 +592,7 @@ impl QuadField {
     /// (sqrt D - b1)/(2 a1).
     fn gamma(&self, b1: i128, a1: i128) -> QFrac {
         let s = self.sqrt_disc();
-        QFrac::new(&s.a - big(b1), s.b, big(2 * a1))
+        QFrac::new(&s.a - big(b1), s.b, big(a1) * BigInt::from(2))
     }
 
     /// The primitive part of I: I = k J with J = Z a + Z (b + sqrt D)/2,
@@ -523,14 +606,25 @@ impl QuadField {
 
     /// One continued fraction step from (a, b) (a != 0): (a1, b1, gamma)
     /// with J = gamma J_1 as lattices.
+    ///
+    /// Bounds: with s = floor(sqrt D), b1 lies in (s - 2|a|, s], so |b1| <=
+    /// 2|a| + s, and |a1| = |D - b1^2|/(4|a|) <= max(D/(4|a|), |a|) (if
+    /// 2|a| >= s then |b1| <= 2|a|, otherwise 0 < b1 <= s). By induction a
+    /// reduction from (a_0, b_0) with |b_0| <= 2|a_0| + 1 keeps |a| <=
+    /// max(|a_0|, D/4) < 2^60 and |b| < 2^62 for ideals of norm < 2^60
+    /// (D < 2^42), so every product below is below 2^126. They are checked
+    /// all the same: an overflow would be a bug, never a wrapped value.
     fn step(&self, a: i128, b: i128) -> (i128, i128, QFrac) {
         let s = isqrt(self.disc as i128);
+        let a2 = ck(a.checked_mul(2));
+        let bs = ck(b.checked_add(s));
         // q = floor((b + sqrt D)/(2a))
-        let q = if a > 0 { (b + s).div_euclid(2 * a) } else { -((b + s).div_euclid(-2 * a)) - 1 };
-        let b1 = 2 * a * q - b;
-        let num = self.disc as i128 - b1 * b1;
-        debug_assert_eq!(num % (4 * a), 0);
-        let a1 = num / (4 * a);
+        let q = if a > 0 { bs.div_euclid(a2) } else { -(bs.div_euclid(-a2)) - 1 };
+        let b1 = ck(ck(a2.checked_mul(q)).checked_sub(b));
+        let num = ck((self.disc as i128).checked_sub(ck(b1.checked_mul(b1))));
+        let a4 = ck(a.checked_mul(4));
+        debug_assert_eq!(num % a4, 0);
+        let a1 = num / a4;
         let g = self.gamma(b1, a1);
         (a1, b1, g)
     }
@@ -538,14 +632,13 @@ impl QuadField {
     fn is_reduced(&self, a: i128, b: i128) -> bool {
         // |sqrt D - 2a| < b < sqrt D with a > 0
         let dd = self.disc as i128;
-        if a <= 0 || b <= 0 || b * b >= dd {
+        if a <= 0 || b <= 0 || ck(b.checked_mul(b)) >= dd {
             return false;
         }
-        // |sqrt D - 2a| < b  <=>  (2a - b)^2 < D and 2a + b > sqrt D... use
-        // sqrt D - 2a < b and 2a - sqrt D < b
-        let lo = 2 * a - b; // need sqrt D > 2a - b and sqrt D < 2a + b
-        let hi = 2 * a + b;
-        (lo <= 0 || lo * lo < dd) && hi * hi > dd
+        // sqrt D > 2a - b and sqrt D < 2a + b
+        let lo = ck(ck(a.checked_mul(2)).checked_sub(b));
+        let hi = ck(ck(a.checked_mul(2)).checked_add(b));
+        (lo <= 0 || ck(lo.checked_mul(lo)) < dd) && ck(hi.checked_mul(hi)) > dd
     }
 
     /// Reduce the primitive ideal (a, b): the reduced (a, b) of its class
@@ -654,6 +747,10 @@ pub struct ClassGroup {
     pub reps: Vec<QIdeal>,
     /// reduced (a, b) -> (class, delta) with R_c = delta J_(a, b).
     place: HashMap<(i128, i128), (usize, QFrac)>,
+    /// The group law on the representatives: R_c R_d = alpha R_(table[c][d])
+    /// with sign[c][d] the sign of N(alpha) (+1 when N(eps) = -1).
+    table: Vec<Vec<usize>>,
+    sign: Vec<Vec<i8>>,
     /// The structure: invariant factors (wide and narrow).
     pub cyc: Vec<i64>,
     pub narrow_cyc: Vec<i64>,
@@ -706,9 +803,23 @@ impl ClassGroup {
             for (id, de) in ids.into_iter().zip(deltas) {
                 place.insert(id, (c, de));
             }
-            reps.push(QIdeal { a: st.0, b: (st.1 - f.t as i128) / 2 % st.0, c: 1 }.normalized());
+            reps.push(QIdeal { a: st.0, b: (st.1 - f.t as i128) / 2 % st.0, c: 1, disc: f.disc }.normalized());
         }
-        let mut g = ClassGroup { field: f, eps, eps_norm, reps, place, cyc: vec![], narrow_cyc: vec![] };
+        let mut g = ClassGroup { field: f, eps, eps_norm, reps, place, table: vec![], sign: vec![], cyc: vec![], narrow_cyc: vec![] };
+        // representatives are reduced, of norm a < sqrt D, so their products
+        // have norm < D < 2^42
+        let h = g.reps.len();
+        for c in 0..h {
+            let (mut row, mut srow) = (vec![], vec![]);
+            for d in 0..h {
+                let prod = f.ideal_mul(&g.reps[c], &g.reps[d]).expect("norm below D");
+                let nc = g.narrow_class(&prod).expect("an ideal of this field");
+                row.push(nc.class);
+                srow.push(nc.sign);
+            }
+            g.table.push(row);
+            g.sign.push(srow);
+        }
         g.cyc = g.structure(false);
         g.narrow_cyc = g.structure(true);
         g
@@ -728,63 +839,88 @@ impl ClassGroup {
     }
 
     /// The wide class c of I and alpha with I = alpha R_c.
-    pub fn locate(&self, i: &QIdeal) -> (usize, QFrac) {
+    pub fn locate(&self, i: &QIdeal) -> Result<(usize, QFrac), String> {
         let f = &self.field;
+        f.check(i)?;
         let (k, a, b) = f.primitive(i);
         let (ra, rb, g) = f.reduce(a, b);
         let (c, delta) = self.place.get(&(ra, rb)).cloned().expect("every reduced ideal is in a cycle");
         // I = k g J_r and R_c = delta J_r, so I = (k g / delta) R_c
         let alpha = f.fmul(&f.fmul(&QFrac::new(big(k), BigInt::zero(), BigInt::one()), &g), &f.finv(&delta));
-        (c, alpha)
+        Ok((c, alpha))
     }
 
     /// The narrow class of I.
-    pub fn narrow_class(&self, i: &QIdeal) -> NarrowClass {
-        let (c, alpha) = self.locate(i);
+    pub fn narrow_class(&self, i: &QIdeal) -> Result<NarrowClass, String> {
+        let (c, alpha) = self.locate(i)?;
         let n = self.field.norm(&QElt { a: alpha.a.clone(), b: alpha.b.clone() });
         let sign = if self.eps_norm == -1 || n.is_positive() { 1 } else { -1 };
-        NarrowClass { class: c, sign }
+        Ok(NarrowClass { class: c, sign })
     }
 
-    /// The order of the class of I in the class group (narrow if `narrow`).
-    pub fn class_order(&self, i: &QIdeal, narrow: bool) -> usize {
-        let f = &self.field;
-        let trivial = |j: &QIdeal| if narrow { self.narrow_class(j) == NarrowClass { class: 0, sign: 1 } } else { self.locate(j).0 == 0 };
-        let mut j = *i;
-        let mut k = 1;
-        while !trivial(&j) {
-            j = f.ideal_mul(&j, i);
+    /// The index of the class of I among the elements of the class group
+    /// (narrow if `narrow`): c, or c + h for the narrow class (c, -1).
+    fn element(&self, i: &QIdeal, narrow: bool) -> Result<usize, String> {
+        Ok(if narrow {
+            let nc = self.narrow_class(i)?;
+            nc.class + if nc.sign < 0 { self.h() } else { 0 }
+        } else {
+            self.locate(i)?.0
+        })
+    }
+
+    /// The product of two elements (indices as in `element`), by the group
+    /// law on the representatives: (c, s)(d, t) = (table[c][d], s t sign[c][d]).
+    fn mul_elements(&self, x: usize, y: usize, narrow: bool) -> usize {
+        let h = self.h();
+        let (c, s) = (x % h, if x >= h { -1 } else { 1 });
+        let (d, t) = (y % h, if y >= h { -1 } else { 1 });
+        let e = self.table[c][d];
+        if narrow && s * t * self.sign[c][d] < 0 {
+            e + h
+        } else {
+            e
+        }
+    }
+
+    /// The order of the class of I in the class group (narrow if `narrow`),
+    /// by the group law on the representatives (no powers of I are formed).
+    pub fn class_order(&self, i: &QIdeal, narrow: bool) -> Result<usize, String> {
+        let x = self.element(i, narrow)?;
+        let (mut y, mut k) = (x, 1);
+        while y != 0 {
+            y = self.mul_elements(y, x, narrow);
             k += 1;
             assert!(k <= self.narrow_h(), "a class order exceeds the class number");
         }
-        k
+        Ok(k)
     }
 
     /// A generator of I if it is principal.
-    pub fn generator(&self, i: &QIdeal) -> Option<QElt> {
-        let (c, alpha) = self.locate(i);
+    pub fn generator(&self, i: &QIdeal) -> Result<Option<QElt>, String> {
+        let (c, alpha) = self.locate(i)?;
         if c != 0 {
-            return None;
+            return Ok(None);
         }
         // R_0 = O_F: I = alpha O_F
         let g = alpha.integral().expect("a generator of an integral ideal is integral");
         // checked: g generates I
         assert_eq!(self.field.principal(&g).unwrap(), *i, "a generator from the cycle does not generate the ideal");
-        Some(g)
+        Ok(Some(g))
     }
 
     /// A totally positive generator of I, balanced (of least trace among
     /// its totally positive associates), if I is narrowly principal.
-    pub fn totally_positive_generator(&self, i: &QIdeal) -> Option<QElt> {
+    pub fn totally_positive_generator(&self, i: &QIdeal) -> Result<Option<QElt>, String> {
         let f = &self.field;
-        let mut g = self.generator(i)?;
+        let Some(mut g) = self.generator(i)? else { return Ok(None) };
         let neg = |x: &QElt| QElt { a: -&x.a, b: -&x.b };
         match f.signs(&g) {
             (Ordering::Greater, Ordering::Greater) => {}
             (Ordering::Less, Ordering::Less) => g = neg(&g),
             _ => {
                 if self.eps_norm == 1 {
-                    return None;
+                    return Ok(None);
                 }
                 g = f.mul(&g, &self.eps);
                 if !f.is_totally_positive(&g) {
@@ -807,49 +943,28 @@ impl ClassGroup {
                 }
             }
         }
-        Some(g)
+        Ok(Some(g))
     }
 
     /// The invariant factors of the class group (wide or narrow), from the
-    /// group law on classes (h small).
+    /// group law on the representatives.
     fn structure(&self, narrow: bool) -> Vec<i64> {
-        let f = &self.field;
-        // the elements: representatives, and for the narrow group, also
-        // sqrt(D) times them (norm of the generator sqrt D is -D < 0)
-        let mut elems: Vec<QIdeal> = self.reps.clone();
-        if narrow && self.eps_norm == 1 {
-            let sd = f.principal(&f.sqrt_disc()).unwrap();
-            elems.extend(self.reps.iter().map(|r| f.ideal_mul(r, &sd)));
-        }
-        let key = |i: &QIdeal| -> (usize, i8) {
-            if narrow {
-                let c = self.narrow_class(i);
-                (c.class, c.sign)
-            } else {
-                (self.locate(i).0, 1)
-            }
-        };
-        let keys: Vec<(usize, i8)> = elems.iter().map(key).collect();
-        let index: HashMap<(usize, i8), usize> = keys.iter().enumerate().map(|(i, k)| (*k, i)).collect();
-        let n = elems.len();
-        assert_eq!(index.len(), n, "class representatives are not distinct");
-        // multiplication table
-        let table: Vec<Vec<usize>> = (0..n).map(|i| (0..n).map(|j| index[&key(&f.ideal_mul(&elems[i], &elems[j]))]).collect()).collect();
-        let e = index[&key(&f.unit_ideal())];
-        abelian_invariants(&table, e)
+        let n = if narrow { self.narrow_h() } else { self.h() };
+        let table: Vec<Vec<usize>> = (0..n).map(|x| (0..n).map(|y| self.mul_elements(x, y, narrow)).collect()).collect();
+        abelian_invariants(&table, 0)
     }
 }
 
 impl QIdeal {
     fn normalized(self) -> QIdeal {
-        QIdeal { a: self.a, b: self.b.rem_euclid(self.a), c: self.c }
+        QIdeal { a: self.a, b: self.b.rem_euclid(self.a), c: self.c, disc: self.disc }
     }
 }
 
 /// The invariant factors d_1 | d_2 | ... (each > 1) of a finite abelian
 /// group given by its multiplication table and identity: from the numbers
 /// of elements killed by p^j for each prime p.
-pub fn abelian_invariants(table: &[Vec<usize>], e: usize) -> Vec<i64> {
+fn abelian_invariants(table: &[Vec<usize>], e: usize) -> Vec<i64> {
     let n = table.len();
     let pow = |x: usize, k: u64| -> usize {
         let mut r = e;
@@ -929,12 +1044,12 @@ mod tests {
         // generators generating the same ideals
         let f = QuadField::new(5).unwrap();
         let g = f.class_group();
-        let mine = f.primes_of_bounded_norm(500);
+        let mine = f.primes_of_bounded_norm(500).unwrap();
         let theirs = crate::field::primes_of_bounded_norm(500);
         assert_eq!(mine.len(), theirs.len());
         for (p, q) in mine.iter().zip(&theirs) {
             assert_eq!((p.ideal.a, p.ideal.b, p.ideal.c), (q.hnf.a as i128, q.hnf.b as i128, q.hnf.c as i128));
-            let t = g.totally_positive_generator(&p.ideal).unwrap();
+            let t = g.totally_positive_generator(&p.ideal).unwrap().unwrap();
             assert!(f.is_totally_positive(&t));
             assert_eq!(f.principal(&t).unwrap(), p.ideal);
             assert_eq!(f.trace(&t), BigInt::from(q.gen.trace()), "least trace at {:?}", q.gen);
@@ -952,29 +1067,87 @@ mod tests {
                     let i = f.principal(&e).unwrap();
                     // factorization multiplies back
                     let mut prod = f.unit_ideal();
-                    for (p, k) in f.factor(&i) {
+                    for (p, k) in f.factor(&i).unwrap() {
                         for _ in 0..k {
-                            prod = f.ideal_mul(&prod, &p.ideal);
+                            prod = f.ideal_mul(&prod, &p.ideal).unwrap();
                         }
                     }
                     assert_eq!(prod, i);
                     // principal, with a generator generating it
-                    let gen = g.generator(&i).expect("principal");
+                    let gen = g.generator(&i).unwrap().expect("principal");
                     assert_eq!(f.principal(&gen).unwrap(), i);
                     // narrowly principal iff some generator is totally positive
-                    let tp = g.totally_positive_generator(&i);
+                    let tp = g.totally_positive_generator(&i).unwrap();
                     let expect = g.eps_norm == -1 || f.norm(&e).is_positive();
                     assert_eq!(tp.is_some(), expect, "d = {}, {}", d, e);
                 }
             }
             // the class of a product is the product of classes: the ideal
             // P Q R with [P][Q][R] = 1 is principal
-            for p in f.primes_of_bounded_norm(60) {
-                let (c, _) = g.locate(&p.ideal);
-                let pc = f.ideal_conj(&p.ideal);
+            for p in f.primes_of_bounded_norm(60).unwrap() {
+                let (c, _) = g.locate(&p.ideal).unwrap();
+                let pc = f.ideal_conj(&p.ideal).unwrap();
                 // P conj(P) = (N P) is principal
-                assert!(g.generator(&f.ideal_mul(&p.ideal, &pc)).is_some());
+                assert!(g.generator(&f.ideal_mul(&p.ideal, &pc).unwrap()).unwrap().is_some());
                 let _ = c;
+            }
+        }
+    }
+
+    #[test]
+    fn out_of_range_is_an_error() {
+        // CORR-73A-1 (astra): the ideal (2^64 + w) has norm about 2^128; it
+        // was returned with wrapped Hermite normal form and norm 0
+        let f = QuadField::new(5).unwrap();
+        let g = QElt { a: BigInt::from(1i128 << 64), b: BigInt::from(1) };
+        assert!(f.principal(&g).is_err());
+        assert!(f.principal(&QElt { a: BigInt::from(1i128 << 64), b: BigInt::zero() }).is_err());
+        // just below and at the bound 2^60
+        assert_eq!(f.principal(&QElt::new(1 << 30, 0)).unwrap_err(), "ideal of norm 1152921504606846976 out of range (norms must be below 2^60)");
+        let i = f.principal(&QElt::new((1 << 30) - 1, 0)).unwrap();
+        assert_eq!(i.norm(), ((1i128 << 30) - 1).pow(2));
+        assert!(f.ideal_mul(&i, &i).is_err());
+        // an inert prime above 2^30 has norm above 2^60
+        let p = (1i64 << 31) - 1; // prime
+        assert!(crate::field::is_prime(p as u64));
+        let kinds = f.primes_above(p);
+        assert!(kinds.is_err() || kinds.unwrap().iter().all(|q| q.kind != Splitting::Inert));
+        assert!(f.primes_above(91).is_err());
+        assert!(f.primes_of_bounded_norm(1 << 41).is_err());
+        // a quotient computed exactly: (q^2) / (q) for a split prime q of
+        // norm about 10^6 (1000039 = 4 mod 5)
+        let q = f.primes_above(1_000_039).unwrap()[0];
+        assert_eq!(q.kind, Splitting::Split);
+        let q2 = f.ideal_mul(&q.ideal, &q.ideal).unwrap();
+        assert_eq!(f.ideal_div(&q2, &q.ideal).unwrap(), Some(q.ideal));
+        // the inert 1000003 has norm about 10^12, its square is out of range
+        let r = f.primes_above(1_000_003).unwrap()[0];
+        assert_eq!(r.kind, Splitting::Inert);
+        assert!(f.ideal_mul(&r.ideal, &r.ideal).is_err());
+        // ideals of another field are refused
+        let g = QuadField::new(13).unwrap();
+        let j = g.principal(&QElt::new(3, 1)).unwrap();
+        assert!(f.ideal_mul(&q.ideal, &j).is_err() && f.contains(&j, &QElt::int(0)).is_err() && f.factor(&j).is_err());
+        assert!(f.class_group().locate(&j).is_err() && f.class_group().class_order(&j, true).is_err());
+    }
+
+    #[test]
+    fn class_orders_in_larger_fields() {
+        // CORR-73A-2 (astra): in Q(sqrt 10001), Cl = Cl+ = Z/16 and
+        // P = (29, w + 2) has order 16 (Magma, ClassGroup with Proof :=
+        // "Full"); it was 14
+        let f = QuadField::new(10001).unwrap();
+        let g = f.class_group();
+        assert_eq!((g.cyc.clone(), g.narrow_cyc.clone()), (vec![16], vec![16]));
+        let p = f.ideal(&[QElt::int(29), QElt::new(2, 1)]).unwrap();
+        assert_eq!((g.class_order(&p, false).unwrap(), g.class_order(&p, true).unwrap()), (16, 16));
+        // every class order divides the group order
+        for d in [10001i64, 65537, 32767, 10005] {
+            let f = QuadField::new(d).unwrap();
+            let g = f.class_group();
+            for pr in f.primes_of_bounded_norm(200).unwrap() {
+                assert_eq!(g.h() % g.class_order(&pr.ideal, false).unwrap(), 0);
+                assert_eq!(g.narrow_h() % g.class_order(&pr.ideal, true).unwrap(), 0);
             }
         }
     }
