@@ -17,6 +17,8 @@ a black-box oracle.
 
 from fractions import Fraction as _F
 
+from _sage_padic import _prec_arg, _int_exponent
+
 
 def _sa():
     import sage_all
@@ -101,11 +103,11 @@ class _Ext:
         while k:
             if k & 1:
                 ra, rb = self.mul(ra, rb, ea, eb)
-                ra, rb = ra % p ** M, rb % p ** M
+                ra, rb = _mod(ra, p, M), _mod(rb, p, M)
             k >>= 1
             if k:
                 ea, eb = self.mul(ea, eb, ea, eb)
-                ea, eb = ea % p ** M, eb % p ** M
+                ea, eb = _mod(ea, p, M), _mod(eb, p, M)
         a, b = self.mul(_mod(a, p, M), _mod(b, p, M), ra, rb)
         a, b = self.shift(a, b, -rest)
         return v, a, b
@@ -193,13 +195,16 @@ class EisensteinExtensionGeneric:
         (alpha^2 + O(alpha^12), 18*alpha^2 + alpha^4 + O(alpha^12), 1 + 18*alpha + alpha^2 + alpha^4 + 18*alpha^5 + alpha^6 + alpha^8 + 18*alpha^9 + O(alpha^10))
     """
 
-    def __init__(self, base, c1, c0, name, varname):
+    def __init__(self, base, c1, c0, name, varname, k=None):
         self._base, self._p = base, base.prime()
         self._c1, self._c0 = c1, c0
         self._name, self._varname = name, varname
         self._E = _Ext(self._p, c1, c0)
         self._field = base.is_field()
-        self._prec = 2 * base.precision_cap()
+        # k: the absolute precision of the defining coefficients (None:
+        # exact); they determine alpha^2 only modulo p^k = alpha^(2k)
+        self._k = k
+        self._prec = 2 * (base.precision_cap() if k is None else min(base.precision_cap(), k))
 
     def __repr__(self):
         return "%d-adic Eisenstein Extension %s in %s defined by %s" % (
@@ -210,7 +215,7 @@ class EisensteinExtensionGeneric:
         s = "%s^2" % x
         if self._c1:
             s += " %s %s*%s" % ("+" if self._c1 > 0 else "-", abs(self._c1), x) if abs(self._c1) != 1 else " %s %s" % ("+" if self._c1 > 0 else "-", x)
-        s += " %s %d" % ("+" if self._c0 > 0 else "-", abs(self._c0))
+        s += " %s %s" % ("+" if self._c0 > 0 else "-", abs(self._c0))
         return s
 
     def _latex_(self):
@@ -218,7 +223,7 @@ class EisensteinExtensionGeneric:
         return "%s[%s]" % (self._base._latex_(), _latex_variable_name(self._name))
 
     def __hash__(self):
-        return hash((self._p, self._c1, self._c0, self._name, self._field, self._prec))
+        return hash((self._p, self._c1, self._c0, self._name, self._field, self._prec, self._k))
 
     def __eq__(self, o):
         return self is o
@@ -335,14 +340,15 @@ class EisensteinExtensionGeneric:
             x^2 + 19
         """
         if exact:
-            x = _sa().PolynomialRing(_sa().ZZ, self._varname).gen()
-            return x ** 2 + self._c1 * x + self._c0
+            Z = _sa().ZZ if _F(self._c1).denominator == _F(self._c0).denominator == 1 else _sa().QQ
+            x = _sa().PolynomialRing(Z, self._varname).gen()
+            return x ** 2 + Z(self._c1) * x + Z(self._c0)
         # (the coefficients below the leading one to absolute precision
         # cap + 1, as Sage gives them: x^2 + O(19^6)*x + 19 + O(19^6))
         B = self._base
-        ap = B.precision_cap() + 1
+        ap = self._prec // 2 + 1
         R = PolynomialRing_padic(B, self._varname)
-        return R([B(self._c0, absprec=ap), B(self._c1, absprec=ap), B(1)])
+        return R([B(self._c0, absprec=ap), B(self._c1, absprec=ap), B(1) if self._k is None else B(1, absprec=ap)])
 
     modulus = defining_polynomial
 
@@ -420,7 +426,7 @@ class EisensteinExtensionGeneric:
         """
         if self._field:
             return self
-        return _extension(self._base.fraction_field(), self._c1, self._c0, self._name, self._varname)
+        return _extension(self._base.fraction_field(), self._c1, self._c0, self._name, self._varname, self._k)
 
     def integer_ring(self):
         """The extension of the base's ring of integers.
@@ -433,7 +439,7 @@ class EisensteinExtensionGeneric:
         """
         if not self._field:
             return self
-        return _extension(self._base.integer_ring(), self._c1, self._c0, self._name, self._varname)
+        return _extension(self._base.integer_ring(), self._c1, self._c0, self._name, self._varname, self._k)
 
     def residue_field(self):
         """The residue field, F_p.
@@ -464,6 +470,7 @@ class EisensteinExtensionGeneric:
             (5 + O(alpha^10), 18*alpha^-2 + 1 + O(alpha^8), 2 + O(alpha^6), 0)
         """
         E, cap = self._E, self._prec
+        absprec, relprec = _prec_arg(absprec), _prec_arg(relprec)
         if isinstance(x, EisensteinExtensionElement):
             if (x._parent._p, x._parent._c1, x._parent._c0) != (self._p, self._c1, self._c0):
                 raise TypeError("no conversion between %r and %r" % (x._parent, self))
@@ -490,7 +497,8 @@ class EisensteinExtensionGeneric:
                 raise ValueError("element has negative valuation")
             y = _make(E, q, 0, None, cap)
         if relprec is not None and y.r:
-            y = _recap(E, y, int(relprec))
+            # (relative precision <= 0: the inexact zero O(alpha^v), as Sage)
+            y = _recap(E, y, relprec) if relprec > 0 else _Val(y.v, 0, 0, 0)
         el = self._element(y)
         if absprec is not None:
             el = el.add_bigoh(absprec)
@@ -512,11 +520,11 @@ class EisensteinExtensionRingCappedRelative(EisensteinExtensionGeneric):
     pass
 
 
-def _extension(base, c1, c0, name, varname):
-    key = (base, c1, c0, name, varname)
+def _extension(base, c1, c0, name, varname, k=None):
+    key = (base, c1, c0, name, varname, k)
     if key not in _EXTS:
         cls = EisensteinExtensionFieldCappedRelative if base.is_field() else EisensteinExtensionRingCappedRelative
-        _EXTS[key] = cls(base, c1, c0, name, varname)
+        _EXTS[key] = cls(base, c1, c0, name, varname, k)
     return _EXTS[key]
 
 
@@ -531,6 +539,24 @@ def extension(base, modulus, names=None, prec=None, print_mode=None, implementat
         3-adic Eisenstein Extension Field in b defined by x^2 - 3*x + 3
         sage: M(-1)
         2 + b^2 + b^3 + b^4 + b^5 + b^6 + b^7 + b^8 + b^9 + b^10 + b^11 + O(b^12)
+
+    p-integral rational coefficients are kept exactly; the precision cap is
+    limited by that of p-adic coefficients (as in Sage).  A polynomial over
+    another prime, or one whose coefficients do not determine that it is
+    Eisenstein, is refused (Sage aborts on these)::
+
+        sage: Qp(3, 6).extension(polygen(QQ)^2 + 3/2, names='a')
+        3-adic Eisenstein Extension Field in a defined by x^2 + 3/2
+        sage: Qp(3, 6).extension(Qp(3, 4)['y'].gen()^2 + 3, names='a').precision_cap()
+        8
+        sage: Qp(3, 6).extension(Qp(5, 6)['y'].gen()^2 + 3, names='a')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: the modulus (1 + O(5^6))*y^2 + 3 + O(5^6) is not over the 3-adics
+        sage: Qp(3, 6).extension(x^2 + Qp(3, 6)(0, 0)*x + 3, names='a')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        _padic.PrecisionError: not enough precision on the coefficients of (1 + O(3^6))*x^2 + O(3^0)*x + 3 + O(3^7) to define an Eisenstein extension
     """
     if names is None:
         raise TypeError("You must specify the name of the generator.")
@@ -538,15 +564,28 @@ def extension(base, modulus, names=None, prec=None, print_mode=None, implementat
     name = str(name)
     if prec is not None or print_mode is not None or implementation is not None or kwds:
         raise NotImplementedError("extension options (prec, print_mode, implementation, ...) are not available in sagebrush yet")
-    coeffs, varname = _poly_coefficients(modulus, base.prime())
     p = base.prime()
+    coeffs, varname, k = _poly_coefficients(modulus, p)
     if len(coeffs) - 1 != 2 or coeffs[-1] != 1:
         if len(coeffs) - 1 >= 2 and coeffs[-1] == 1 and _eisenstein(coeffs, p):
             raise NotImplementedError("Eisenstein extensions of degree %d are not available in sagebrush yet (degree 2 only)" % (len(coeffs) - 1))
         raise NotImplementedError("p-adic extensions by %s are not available in sagebrush yet (monic Eisenstein polynomials of degree 2 only)" % (modulus,))
+    if k is not None:
+        # (p | c1 and p || c0 must be determined: c0 known modulo p^2)
+        from _padic import PrecisionError
+        if k < 1 or modulus._c[0] is None or modulus._c[0].precision_absolute() < 2:
+            raise PrecisionError("not enough precision on the coefficients of %s to define an Eisenstein extension" % (modulus,))
     if not _eisenstein(coeffs, p):
         raise NotImplementedError("Extensions by general polynomials not yet supported.  Please use an unramified or Eisenstein polynomial.  (In sagebrush: monic Eisenstein polynomials of degree 2 only.)")
-    return _extension(base, int(coeffs[1]), int(coeffs[0]), name, varname)
+    # (p-integral rational coefficients are kept exactly, as Sage does; the
+    # precision is limited by that of p-adic coefficients, as Sage's)
+    return _extension(base, _exact(coeffs[1]), _exact(coeffs[0]), name, varname, k)
+
+
+def _exact(c):
+    """The rational c, as an int when it is one."""
+    c = _F(c)
+    return c.numerator if c.denominator == 1 else c
 
 
 def _eisenstein(coeffs, p):
@@ -555,23 +594,31 @@ def _eisenstein(coeffs, p):
 
 
 def _poly_coefficients(f, p):
-    """(integer coefficients from the constant term, variable name) of a
-    polynomial over ZZ, QQ or a p-adic ring (the p-adic coefficients
-    lifted)."""
+    """(rational coefficients from the constant term, variable name,
+    smallest absolute precision of a p-adic coefficient or None) of a
+    polynomial over ZZ, QQ or a p-adic ring of the prime p (the p-adic
+    coefficients lifted)."""
     if isinstance(f, Polynomial_padic):
-        cs = []
+        if f._R._base.prime() != p:
+            raise TypeError("the modulus %r is not over the %d-adics" % (f, p))
+        cs, k = [], None
         for c in f._c:
-            if c is None or c.is_zero():
+            if c is None or c._x.is_exact_zero():
+                cs.append(0)
+                continue
+            n = int(c.precision_absolute())
+            k = n if k is None else min(k, n)
+            if c.is_zero():
                 cs.append(0)
             else:
                 # the centered lift (-3, not 3^7 - 3, for 16 + 18*19 + ...)
-                m = _F(p) ** int(c.precision_absolute())
+                m = _F(p) ** n
                 q = _F(c.lift())
                 cs.append(q - m if q > m / 2 else q)
-        return cs, f._R._name
+        return cs, f._R._name, k
     if hasattr(f, "list") and hasattr(f, "parent"):
         cs = [_F(c) for c in f.list()]
-        return cs, str(f.parent().variable_name())
+        return cs, str(f.parent().variable_name()), None
     raise TypeError("the modulus must be a polynomial, not %r" % (f,))
 
 
@@ -777,26 +824,39 @@ class EisensteinExtensionElement:
             sage: alpha.add_bigoh(3), L(5).add_bigoh(3)
             (alpha + O(alpha^3), 5 + O(alpha^3))
         """
-        return self._parent._element(_add_bigoh(self._x, int(n)))
+        n = _prec_arg(n)
+        if n is None:
+            return self
+        return self._parent._element(_add_bigoh(self._x, n))
 
     def norm(self):
         """The norm to the base: N(alpha)^v N(u), known to relative precision
         ceil(r/2) (a perturbation of u by alpha^r changes N(u) by a trace of
         an element of alpha^r O, which lies in p^ceil(r/2) Zp, plus a
-        norm of valuation r).
+        norm of valuation r).  The norm of O(alpha^n) is O(p^n): v_p(N(y))
+        = v_alpha(y), and alpha^n has norm of valuation n.
 
         EXAMPLES::
 
             sage: R.<x> = Qp(19, 5)[]; L.<alpha> = Qp(19, 5).extension(x^2 + 19)
             sage: alpha.norm(), (1 + alpha).norm()
             (19 + O(19^6), 1 + 19 + O(19^5))
+
+        The norm of an inexact zero (Sage raises AttributeError) contains
+        the norms of the ball's elements of least valuation::
+
+            sage: R.<x> = Qp(3, 6)[]; L.<a> = Qp(3, 6).extension(x^2 + 3)
+            sage: [L(0).add_bigoh(n).norm() for n in (-3, -2, 3)]  # sagebrush only
+            [O(3^-3), O(3^-2), O(3^3)]
+            sage: (a^-3).norm().valuation(), ((1 + a)*a^-2).norm().valuation(), (2*a^3).norm().valuation()
+            (-3, -2, 3)
         """
         P, x = self._parent, self._x
         B = P._base
         if x.is_exact_zero():
             return B(0)
         if x.is_zero():
-            return B(0, absprec=(x.v + 1) // 2 if x.v >= 0 else x.v // 2)
+            return B(0, absprec=x.v)
         val = _F(P._c0) ** x.v * P._E.norm(x.a, x.b)
         return B(val, relprec=(x.r + 1) // 2)
 
@@ -841,7 +901,7 @@ class EisensteinExtensionElement:
             if B.is_field() and not P._field:
                 R = P.fraction_field()
             if B.precision_cap() * 2 > R._prec:
-                R = _extension(_pushout_base(R._base, B), P._c1, P._c0, P._name, P._varname)
+                R = _extension(_pushout_base(R._base, B), P._c1, P._c0, P._name, P._varname, P._k)
             return R, self._x, _from_base(R._E, o, R._prec)
         if isinstance(o, (int, _F)):
             q = _F(o)
@@ -950,7 +1010,9 @@ class EisensteinExtensionElement:
         """
         if isinstance(n, _F) and not isinstance(n, int):
             raise NotImplementedError("p-adic extension elements to rational powers are not available")
-        n = int(n)
+        if type(n).__name__ == "pAdicCappedRelativeElement":
+            raise NotImplementedError("p-adic exponents are not available in sagebrush yet")
+        n = _int_exponent(n)
         if n < 0:
             return self._inverse() ** (-n)
         P, x = self._parent, self._x
@@ -991,9 +1053,9 @@ class EisensteinExtensionElement:
         r = self.__eq__(o)
         return r if r is NotImplemented else not r
 
-    def __hash__(self):
-        # (elements that compare equal may differ in precision)
-        return hash(self._parent)
+    # (unhashable, as in Sage: equality up to precision is not transitive,
+    # so no hash agrees with it and with the hash of the integers)
+    __hash__ = None
 
 
 def _vbinom(n, k, p):
@@ -1077,10 +1139,24 @@ def _ext_pushout(P, Q):
     if P is Q:
         return P
     B = _pushout_base(P._base, Q._base)
-    return _extension(B, P._c1, P._c0, P._name, P._varname)
+    ks = [k for k in (P._k, Q._k) if k is not None]
+    return _extension(B, P._c1, P._c0, P._name, P._varname, min(ks) if ks else None)
 
 
 # ------------------------------------------------------------------ polynomials over Qp and Zp
+
+def _scalar_base(B, o):
+    """The base of a polynomial over B combined with the scalar o: the
+    pushout with o's p-adic parent, the fraction field for a rational that
+    is not an integer (as Sage, even for 1/2 over Zp(3)), else B."""
+    if type(o).__name__ == "pAdicCappedRelativeElement":
+        if o.parent().prime() != B.prime():
+            raise TypeError("no common parent for %r and %r" % (B, o.parent()))
+        return _pushout_base(B, o.parent())
+    if not B.is_field() and isinstance(o, (int, _F)) and _F(o).denominator != 1:
+        return B.fraction_field()
+    return B
+
 
 _PRINGS = {}
 
@@ -1208,7 +1284,7 @@ class Polynomial_padic:
         terms = []
         for i in range(len(self._c) - 1, -1, -1):
             c = self._c[i]
-            if c is None or c._x.is_exact_zero():
+            if c is None or (c._x.is_exact_zero() and i < len(self._c) - 1):
                 continue
             s = c._latex_() if latex else repr(c)
             if i == 0:
@@ -1224,25 +1300,104 @@ class Polynomial_padic:
         return self._repr_(latex=True)
 
     def list(self):
+        """The coefficients from the constant term, zeros included ([0] for
+        the zero polynomial, as Sage).
+
+        EXAMPLES::
+
+            sage: R.<x> = Qp(3, 6)[]
+            sage: (x^2 + 3).list(), (x - x).list(), R(0).list()
+            ([3 + O(3^7), 0, 1 + O(3^6)], [0, O(3^6)], [0])
+        """
         z = self._R._base(0)
-        return [z if c is None else c for c in self._c]
+        return [z if c is None else c for c in self._c] or [z]
 
     def coefficients(self, sparse=True):
-        return [c for c in self._c if c is not None and not c._x.is_exact_zero()]
+        """The coefficients that are not zero (exact or to their
+        precision); with sparse=False, all of them (list()).
+
+        EXAMPLES::
+
+            sage: R.<x> = Qp(3, 6)[]
+            sage: (x^2 + 3).coefficients(), (x^2 + 3).coefficients(sparse=False)
+            ([3 + O(3^7), 1 + O(3^6)], [3 + O(3^7), 0, 1 + O(3^6)])
+        """
+        if not sparse:
+            return self.list()
+        return [c for c in self._c if c is not None and not c.is_zero()]
 
     def __getitem__(self, i):
         c = self._coeff(int(i))
         return self._R._base(0) if c is None else c
 
-    def degree(self):
-        return _sa().Integer(len(self._c) - 1) if self._c else _sa().Integer(-1)
+    def _top(self):
+        """The largest i with a coefficient not zero to its precision (-1)."""
+        i = len(self._c) - 1
+        while i >= 0 and (self._c[i] is None or self._c[i].is_zero()):
+            i -= 1
+        return i
+
+    def degree(self, secure=False):
+        """The largest n whose coefficient is not zero to its precision (-1
+        for none); secure=True raises PrecisionError when a stored higher
+        coefficient is zero, so the degree is not determined.
+
+        EXAMPLES::
+
+            sage: R.<x> = Qp(3, 6)[]; K = Qp(3, 6)
+            sage: (x - x).degree(), R([K(1), K(0, 2)]).degree(), R(0).degree()
+            (-1, 0, -1)
+        """
+        d = self._top()
+        if secure and d < len(self._c) - 1:
+            from _padic import PrecisionError
+            raise PrecisionError("the leading coefficient is indistinguishable from 0")
+        return _sa().Integer(d)
 
     def leading_coefficient(self):
-        return self[len(self._c) - 1] if self._c else self._R._base(0)
+        """The coefficient of x^degree() (0 for degree -1)."""
+        return self[self._top()] if self._top() >= 0 else self._R._base(0)
 
     def is_eisenstein(self, secure=False):
-        cs, _ = _poly_coefficients(self, self._R._base.prime())
-        return len(cs) >= 2 and _vp(cs[-1], self._R._base.prime()) == 0 and _eisenstein(cs, self._R._base.prime())
+        """Whether the polynomial is Eisenstein: the leading coefficient
+        (of degree() >= 1) a unit, the others divisible by p and the
+        constant one exactly.  A constant term known only modulo p (or
+        less) raises PrecisionError; with secure=True, so do an
+        undetermined degree and other coefficients known only modulo 1.
+
+        EXAMPLES::
+
+            sage: R.<x> = Qp(3, 6)[]; K = Qp(3, 6)
+            sage: (x^2 + 3*x + 3).is_eisenstein(), (x - x).is_eisenstein(), R([K(3), K(0, 2), K(1)]).is_eisenstein()
+            (True, False, True)
+        """
+        from _padic import PrecisionError
+        B = self._R._base
+        d = self._top()
+        if secure and d < len(self._c) - 1:
+            raise PrecisionError("The degree of the polynomial is not determined")
+        if d < 1 or self._c[d].valuation() != 0:
+            return False
+        c0 = self._c[0]
+        if c0 is None or c0._x.is_exact_zero():
+            return False
+        if c0.is_zero():
+            if c0.precision_absolute() >= 2:
+                return False
+            raise PrecisionError("Not enough precision on the constant coefficient")
+        if c0.valuation() != 1:
+            return False
+        for i in range(1, d):
+            c = self._c[i]
+            if c is None or c._x.is_exact_zero():
+                continue
+            if c.is_zero():
+                if c.precision_absolute() < 1 and secure:
+                    name = self._R._name if i == 1 else "%s^%d" % (self._R._name, i)
+                    raise PrecisionError("Not enough precision on the coefficient of %s" % name)
+            elif c.valuation() < 1:
+                return False
+        return True
 
     def __call__(self, x):
         """The value at x (Horner)."""
@@ -1255,26 +1410,35 @@ class Polynomial_padic:
                 r = r + c
         return r
 
-    def _other(self, o):
+    def _common(self, o):
+        """(self, o) in the polynomial ring over the pushout of the bases
+        (as Sage: Zp(3)[x] with 1/3 or with Qp(3) gives Qp(3)[x]), or None."""
+        R = self._R
         if isinstance(o, Polynomial_padic):
-            if o._R is not self._R:
-                raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, o._R))
-            return o
+            S = o._R
+            if S is R:
+                return self, o
+            if S._name != R._name or S._base.prime() != R._base.prime():
+                raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (R, S))
+            T = PolynomialRing_padic(_pushout_base(R._base, S._base), R._name)
+            return T(self), T(o)
         try:
-            return self._R(o)
+            T = PolynomialRing_padic(_scalar_base(R._base, o), R._name)
+            return T(self), T(o)
         except (TypeError, ValueError):
             return None
 
     def __add__(self, o):
-        o = self._other(o)
-        if o is None:
+        t = self._common(o)
+        if t is None:
             return NotImplemented
-        n = max(len(self._c), len(o._c))
+        f, g = t
+        n = max(len(f._c), len(g._c))
         out = []
         for i in range(n):
-            a, b = self._coeff(i), o._coeff(i)
+            a, b = f._coeff(i), g._coeff(i)
             out.append(a if b is None else b if a is None else a + b)
-        return Polynomial_padic(self._R, out)
+        return Polynomial_padic(f._R, out)
 
     __radd__ = __add__
 
@@ -1282,21 +1446,22 @@ class Polynomial_padic:
         return Polynomial_padic(self._R, [None if c is None else -c for c in self._c])
 
     def __sub__(self, o):
-        o = self._other(o)
-        if o is None:
+        t = self._common(o)
+        if t is None:
             return NotImplemented
-        return self + (-o)
+        return t[0] + (-t[1])
 
     def __rsub__(self, o):
-        o = self._other(o)
-        if o is None:
+        t = self._common(o)
+        if t is None:
             return NotImplemented
-        return o + (-self)
+        return t[1] + (-t[0])
 
     def __mul__(self, o):
-        o = self._other(o)
-        if o is None:
+        t = self._common(o)
+        if t is None:
             return NotImplemented
+        self, o = t
         if not self._c or not o._c:
             return self._R.zero()
         out = [None] * (len(self._c) + len(o._c) - 1)
@@ -1313,13 +1478,34 @@ class Polynomial_padic:
     __rmul__ = __mul__
 
     def __truediv__(self, o):
+        """Division by a scalar, over the fraction field of the bases'
+        pushout (as Sage, even for a unit).
+
+        EXAMPLES::
+
+            sage: R.<u> = Zp(3, 6)[]
+            sage: u/3, (u/3).parent()
+            ((3^-1 + O(3^5))*u, Univariate Polynomial Ring in u over 3-adic Field with capped relative precision 6)
+        """
         if isinstance(o, Polynomial_padic):
             raise NotImplementedError("division of polynomials over p-adic rings is not available in sagebrush yet")
-        c = self._R._base(o)
-        return Polynomial_padic(self._R, [None if a is None else a / c for a in self._c])
+        B = _scalar_base(self._R._base, o).fraction_field()
+        c = B(o)
+        T = PolynomialRing_padic(B, self._R._name)
+        return Polynomial_padic(T, [None if a is None else B(a) / c for a in self._c])
 
     def __pow__(self, n):
-        n = int(n)
+        """f^n for an integral n (2.0 or 4/2 too, as Sage); other
+        exponents raise TypeError, negative ones NotImplementedError."""
+        if type(n).__name__ == "pAdicCappedRelativeElement":
+            raise NotImplementedError("p-adic exponents are not available in sagebrush yet")
+        try:
+            q = n if isinstance(n, int) else _F(n)
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            raise TypeError("non-integral exponents not supported")
+        if not isinstance(q, int) and q.denominator != 1:
+            raise TypeError("non-integral exponents not supported")
+        n = int(q)
         if n < 0:
             raise NotImplementedError("negative powers of polynomials")
         r = self._R.one()
@@ -1333,17 +1519,28 @@ class Polynomial_padic:
         return r
 
     def __eq__(self, o):
-        o = self._other(o)
-        if o is None:
+        try:
+            t = self._common(o)
+        except TypeError:
             return False
-        d = self - o
+        if t is None:
+            return False
+        d = t[0] - t[1]
         return all(c is None or c.is_zero() for c in d._c)
 
     def __ne__(self, o):
         return not self.__eq__(o)
 
     def __hash__(self):
-        return hash((self._R, len(self._c)))
+        # (that of the constant for degree <= 0, so R.zero(), x - x and 0
+        # agree, as do R(1), Qp(3)(1) and 1; otherwise the coefficients'
+        # up to the degree.  Equality up to precision is not transitive, so
+        # values differing in low digits can be equal with different hashes,
+        # as for the p-adics themselves.)
+        d = self._top()
+        if d <= 0:
+            return hash(self[0])
+        return hash(tuple(hash(self[i]) for i in range(d + 1)))
 
     def _unsupported(self, *a, **k):
         raise NotImplementedError("this operation on polynomials over p-adic rings is not available in sagebrush yet")
