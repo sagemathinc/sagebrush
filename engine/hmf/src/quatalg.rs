@@ -98,6 +98,10 @@ impl BElt {
     fn num(&self, m: usize) -> QElt {
         QElt { a: self.c[2 * m].clone(), b: self.c[2 * m + 1].clone() }
     }
+    /// k x for an integer k.
+    pub fn scale_int(&self, k: &BigInt) -> BElt {
+        BElt::new(std::array::from_fn(|i| &self.c[i] * k), self.den.clone())
+    }
     /// x / k for a nonzero integer k.
     pub fn div_int(&self, k: &BigInt) -> BElt {
         BElt::new(self.c.clone(), &self.den * k)
@@ -303,8 +307,10 @@ impl Lattice {
     }
     /// m Lambda + Z gens, for an integer m > 0: the Z-span of gens when it
     /// contains m Lambda (the Hermite normal form is computed from the rows
-    /// m den e_i, which keeps it exact without a determinant).
-    pub fn from_gens_containing(gens: &[BElt], m: &BigInt) -> Lattice {
+    /// m den e_i, which keeps it exact without a determinant). Private to the
+    /// crate: every caller passes a positive multiple justified in a comment
+    /// (API-06F-2).
+    pub(crate) fn from_gens_containing(gens: &[BElt], m: &BigInt) -> Lattice {
         assert!(m.is_positive(), "m must be positive");
         let den = gens.iter().fold(BigInt::one(), |d, g| d.lcm(&g.den));
         let md = m * &den;
@@ -365,6 +371,37 @@ impl Lattice {
     pub fn covolume(&self) -> (BigInt, BigInt) {
         let d = (0..8).fold(BigInt::one(), |d, i| d * &self.h[i][i]);
         (d, self.den.pow(8))
+    }
+    /// The least integer m > 0 with m Lambda inside L: the least common
+    /// denominator of the coordinates of e_1, ..., e_8 in the basis of L
+    /// (solved exactly on the triangular Hermite normal form).
+    pub fn lambda_multiple(&self) -> BigInt {
+        let mut m = BigInt::one();
+        for s in 0..8 {
+            // x H = den e_s, solved column by column: x_i = (t_i - sum_{r < i}
+            // x_r H[r][i]) / H[i][i], with x_r = num_r / dd (common denominator)
+            let mut nums: Vec<BigInt> = vec![];
+            let mut dd = BigInt::one();
+            for i in 0..8 {
+                // t_i dd - sum num_r H[r][i], over dd H[i][i]
+                let t = if i == s { &self.den * &dd } else { BigInt::zero() };
+                let acc = (0..i).fold(t, |a, r| a - &nums[r] * &self.h[r][i]);
+                let den_i = &dd * &self.h[i][i];
+                let g = acc.gcd(&den_i);
+                let (num_i, den_i) = (&acc / &g, &den_i / &g);
+                // bring everything to the common denominator lcm(dd, den_i)
+                let l = dd.lcm(&den_i);
+                let scale = &l / &dd;
+                for x in nums.iter_mut() {
+                    *x = &*x * &scale;
+                }
+                nums.push(num_i * (&l / &den_i));
+                dd = l;
+            }
+            let g = nums.iter().fold(dd.clone(), |g, x| g.gcd(x));
+            m = m.lcm(&(&dd / &g));
+        }
+        m
     }
     /// The index [L : Lambda] = den^8 / prod h_ii, for L containing Lambda.
     pub fn index(&self) -> BigInt {
@@ -441,6 +478,9 @@ pub struct MaximalOrder {
     pub(crate) lattice: Lattice,
     /// A Z-basis (the rows of the lattice); basis[0] need not be 1.
     pub(crate) basis: Vec<BElt>,
+    /// The least m > 0 with m Lambda inside the order (1 for the orders of
+    /// `new`, which contain Lambda; a left order of an ideal need not).
+    pub(crate) lambda_m: BigInt,
 }
 
 impl MaximalOrder {
@@ -453,6 +493,11 @@ impl MaximalOrder {
     /// A Z-basis (the rows of the lattice); basis()[0] need not be 1.
     pub fn basis(&self) -> &[BElt] {
         &self.basis
+    }
+    /// The least m > 0 with m Lambda inside the order, Lambda = O_F<1, i, j,
+    /// k>.
+    pub fn lambda_multiple(&self) -> &BigInt {
+        &self.lambda_m
     }
     /// A maximal order of alg, which must be unramified at every finite
     /// place (an error otherwise). Implemented for a, b in Z, squarefree,
@@ -510,7 +555,7 @@ impl MaximalOrder {
             }
             break;
         }
-        let order = MaximalOrder { alg: alg.clone(), basis: o.basis(), lattice: o };
+        let order = MaximalOrder { alg: alg.clone(), basis: o.basis(), lambda_m: o.lambda_multiple(), lattice: o };
         order.certify()?;
         Ok(order)
     }
@@ -524,7 +569,7 @@ impl MaximalOrder {
     /// lattice is not an O_F-order of reduced discriminant O_F), e.g. the left
     /// order of an ideal.
     pub fn from_lattice(alg: &QuatAlg, lattice: Lattice) -> Result<MaximalOrder, String> {
-        let o = MaximalOrder { alg: alg.clone(), basis: lattice.basis(), lattice };
+        let o = MaximalOrder { alg: alg.clone(), basis: lattice.basis(), lambda_m: lattice.lambda_multiple(), lattice };
         o.certify()?;
         Ok(o)
     }
