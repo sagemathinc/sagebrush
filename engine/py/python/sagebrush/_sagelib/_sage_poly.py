@@ -350,6 +350,10 @@ class PolynomialRing_:
             sage: R.<x> = QQ[]
             sage: R([1, 2, 3]), R(5), R(x^2 + 1)
             (3*x^2 + 2*x + 1, 5, x^2 + 1)
+            sage: ZZ['x'](PolynomialRing(ZZ, 2, 'x,y')({(2000000, 0): 1}))  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: a polynomial of degree 2000000 exceeds sagebrush's limit of 1048576 coefficients for this conversion
         """
         if isinstance(x, Polynomial):
             # (Sage converts between univariate rings by coefficients, so
@@ -365,6 +369,11 @@ class PolynomialRing_:
                 if any(v for i, v in enumerate(e) if i != k):
                     raise TypeError("cannot convert nonconstant polynomial")
                 cs[e[k] if k is not None else 0] = x._ring._dom._out(c)
+            # the coefficient list is dense: refused past the limit before
+            # it is made (one term of degree 2000000 made 2000001
+            # coefficients, the review's HARD-0FE-1)
+            if cs and max(cs) >= _MAX_DENSE_COEFFS:
+                raise NotImplementedError("a polynomial of degree %d exceeds sagebrush's limit of %d coefficients for this conversion" % (max(cs), _MAX_DENSE_COEFFS))
             return Polynomial(self, [cs.get(i, 0) for i in range(max(cs) + 1)] if cs else [])
         if isinstance(x, (list, tuple)):
             return Polynomial(self, list(x))
@@ -395,6 +404,9 @@ class PolynomialRing_:
 
 
 _RINGS = {}
+
+# The most coefficients a conversion from a sparse polynomial writes densely.
+_MAX_DENSE_COEFFS = 1 << 20
 
 
 def PolynomialRing(base, *args, **kwds):

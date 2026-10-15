@@ -656,15 +656,33 @@ class Rational(_Fraction):
         b = Integer(self._denominator).nth_root(n)
         return Rational._from_coprime_ints(int(a), int(b))
 
-    def sqrt(self, *args, **kwds):
-        """The square root, exact or symbolic (as sqrt(q)).
+    def sqrt(self, prec=None, extend=True, all=False):
+        """The square root: a Rational for a square (also 4/1 and 0: it
+        escaped to ZZ), else symbolic, or numerical with prec bits; all, the
+        list of roots; extend=False, a ValueError when no root is rational.
 
         EXAMPLES::
 
-            sage: (9/4).sqrt(), (3/4).sqrt(), (-4/1).sqrt()
-            (3/2, 1/2*sqrt(3), 2*I)
+            sage: (9/4).sqrt(), (4/1).sqrt(), (3/4).sqrt(), (-4/1).sqrt()
+            (3/2, 2, 1/2*sqrt(3), 2*I)
+            sage: parent((4/1).sqrt()), (4/1).sqrt().quo_rem(3)
+            (Rational Field, (2/3, 0))
+            sage: (2/1).sqrt(prec=30), (4/1).sqrt(all=True), (2/1).sqrt(all=True, extend=False)
+            (1.4142136, [2, -2], [])
         """
-        return sqrt(self, *args, **kwds)
+        n, d = self._numerator, self._denominator
+        if prec is not None:
+            r = RealField(prec)(self).sqrt()
+            return ([r, -r] if n else [r]) if all else r
+        if n >= 0 and _math.isqrt(n) ** 2 == n and _math.isqrt(d) ** 2 == d:
+            r = Rational._from_coprime_ints(_math.isqrt(n), _math.isqrt(d))
+        elif not extend:
+            if all:
+                return []
+            raise ValueError("square root of negative number not rational" if n < 0 else "square root of %s not a rational number" % self)
+        else:
+            r = _expr(self) ** _Fraction(1, 2)
+        return ([r, -r] if n else [r]) if all else r
 
     def squarefree_part(self):
         """The squarefree part of numerator times denominator (the same
@@ -728,38 +746,55 @@ class Rational(_Fraction):
         return (_intdiv(int(g), L), _intdiv(int(s) * b, L), _intdiv(int(t) * d, L))
 
     def quo_rem(self, other):
-        """(self/other, 0): QQ is a field.
+        """(self/other, 0): QQ is a field (the remainder a Python 0, as in
+        Sage).
 
         EXAMPLES::
 
             sage: (10/2).quo_rem(3)
             (5/3, 0)
         """
-        return (self / QQ(other), Rational._from_coprime_ints(0, 1))
+        return (self / QQ(other), 0)
 
     def mod(self, n):
-        """0: QQ is a field, and n generates the whole of it.
+        """self modulo the ideal (n): self for n = 0, else 0 (n generates the
+        whole field; a Python 0, as in Sage).
 
         EXAMPLES::
 
-            sage: (3/4).mod(7)
-            0
+            sage: (3/4).mod(7), (3/4).mod(0)
+            (0, 3/4)
+            sage: (3/4).mod('a')
+            Traceback (most recent call last):
+            ...
+            TypeError: unable to convert 'a' to a rational
         """
-        return Rational._from_coprime_ints(0, 1)
+        try:
+            n = QQ(n)
+        except (TypeError, ValueError):
+            raise TypeError("unable to convert %r to a rational" % (n,))
+        return self if n == 0 else 0
 
-    def round(self, mode="away"):
-        """The nearest integer, halves away from zero (Sage's default).
+    def round(self, mode="even"):
+        """The nearest integer; a half goes by mode: 'even' (the default),
+        'odd', 'toward' or 'away' from zero, 'up' or 'down'.
 
         EXAMPLES::
 
-            sage: (5/2).round(), (-5/2).round(), (9/4).round()
-            (3, -3, 2)
+            sage: [q.round() for q in [1/2, 5/2, -1/2, -5/2, 9/4]]
+            [0, 2, 0, -2, 2]
+            sage: [(5/2).round(m) for m in ['toward', 'away', 'up', 'down', 'even', 'odd']]
+            [2, 3, 3, 2, 2, 3]
         """
-        if mode != "away":
-            raise NotImplementedError("rounding mode %r is not available for rationals in sagebrush yet" % (mode,))
+        if mode not in ("toward", "away", "up", "down", "even", "odd"):
+            raise ValueError("rounding mode must be one of 'toward', 'away', 'up', 'down', 'even', or 'odd'")
         n, d = self._numerator, self._denominator
-        q = (2 * abs(n) + d) // (2 * d)
-        return Integer(q if n >= 0 else -q)
+        f, r = divmod(n, d)
+        if 2 * r != d:
+            return Integer(f + 1 if 2 * r > d else f)
+        up = {"up": True, "down": False, "toward": n < 0, "away": n > 0,
+              "even": f % 2 == 1, "odd": f % 2 == 0}[mode]
+        return Integer(f + 1 if up else f)
 
     def inverse_mod(self, m):
         """Refused, as in Sage (a TypeError).
@@ -1762,6 +1797,8 @@ def sqrt(x):
         r = _math.isqrt(x)
         if r * r == x:
             return r
+    if isinstance(x, Rational):
+        return x.sqrt()
     if hasattr(x, "sqrt") and not isinstance(x, (int, _Fraction, _Expr)):
         return x.sqrt()
     r = _expr(x) ** _Fraction(1, 2)

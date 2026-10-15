@@ -79,3 +79,37 @@ def setb():
     B[0] = B[1]
 t('basis', setb)
 t('basis copy', lambda: list(B))
+
+# review of the above (CORR-0FE-1..6)
+# conversion by position is explicit only, never arithmetic's coercion
+P = ZZ['x', 'y']; px, py = P.gens()
+Rz = QQ['z', 'x']; rz, rx = Rz.gens()
+Tz = QQ['z', 't']; tz, tt = Tz.gens()
+for a, b, lab in [(px, rz, 'x, z'), (rz, px, 'z, x'), (px, tz, 'x, t.z'), (tz, px, 't.z, x')]:
+    t('mixed %s' % lab, lambda: [a + b, a - b, a * b, a == b])
+t('mixed /', lambda: [rz / px, rz / QQ['x', 'z'].gen(0)])
+t('mixed conversion', lambda: [Rz(px), Tz(px), Rz.ideal(px), px in Rz.ideal(rz)])
+t('monomial of another parent', lambda: (rz + 2*rx).monomial_coefficient(px))
+# Rational mod, round, sqrt
+q = 3/4
+t('mod', lambda: [q.mod(0), q.mod(7), q.mod(1/3), (2/1).mod(0)])
+t('mod refused', lambda: q.mod('not rational'))
+qs = [1/2, 5/2, 9/2, -1/2, -5/2, 3/2, -3/2, 7/3, -7/3, 0/1]
+for m in [None, 'toward', 'away', 'up', 'down', 'even', 'odd']:
+    t('round %s' % m, lambda: [r.round() if m is None else r.round(m) for r in qs])
+t('round refused', lambda: q.round('bogus'))
+t('sqrt', lambda: [(k/1).sqrt() for k in [0, 4, 9/4, 1, 10^40, 2, -4, -9/4, 3/4]])
+t('sqrt parents', lambda: [parent((k/1).sqrt()) for k in [0, 4, 9/4, 1, 2]] + [parent(sqrt(4/1))])
+t('sqrt quo_rem', lambda: (4/1).sqrt().quo_rem(3))
+t('sqrt options', lambda: [(2/1).sqrt(prec=30), (4/1).sqrt(all=True), (0/1).sqrt(all=True), (2/1).sqrt(all=True, extend=False), (-4/1).sqrt(prec=30)])
+t('sqrt not rational', lambda: (2/1).sqrt(extend=False))
+t('sqrt negative', lambda: (-4/1).sqrt(extend=False))
+# latex of LaTeX, and the _latex_ protocol of a str subclass
+class TexString(str):
+    def _latex_(self):
+        return r'\mathcal{CUSTOM}'
+t('latex', lambda: [latex(latex(1/2)), latex(TexString('a_b')), latex([latex(x^2), 'a_b'])])
+# coercion into polynomial rings
+K = QuadraticField(2, 'a'); RK = K['x', 'y']
+t('coercion maps', lambda: [QQ['x', 'y'].has_coerce_map_from(int), RK.has_coerce_map_from(QQ), RK.has_coerce_map_from(QQ['x', 'y']), RK.has_coerce_map_from(ZZ['y']), Zmod(4)['x', 'y'].has_coerce_map_from(Zmod(12)['x', 'y']), Zmod(12)['x', 'y'].has_coerce_map_from(Zmod(4)), GF(9, 'b')['x', 'y'].has_coerce_map_from(GF(3)), GF(9, 'b')['x', 'y'].has_coerce_map_from(Zmod(12)['x']), GF(5)['x', 'y'].has_coerce_map_from(QQ), QQ['x', 'y'].has_coerce_map_from(float), QQ['x', 'y'].has_coerce_map_from(K), GF(3)['x', 'y'].has_coerce_map_from(GF(9, 'b'))])
+t('coerce', lambda: [RK.coerce(1/2), RK.coerce(QQ['x', 'y'].gen(1))])
