@@ -2241,9 +2241,11 @@ def _ff_base_of(entries, _left=None):
     import _sage_ff
     # (read boundedly: a list subclass may iterate without end; the nested
     # lists share one budget of entries, so [row] * 2^22 with a shared row
-    # of 2^22 entries is refused rather than scanned 2^44 times)
+    # of 2^22 entries is refused rather than scanned 2^44 times; the
+    # outer list's own scalars count against it too, as in _bounded_rows)
     if _left is None:
-        xs, _left = _bounded_list(entries, what="rows"), [_MAX_ENTRIES]
+        xs = _bounded_list(entries, what="rows")
+        _left = [_MAX_ENTRIES - sum(1 for x in xs if not isinstance(x, (list, tuple)))]
     else:
         xs = _bounded_list(entries, _left[0], total=_MAX_ENTRIES)
         _left[0] -= len(xs)
@@ -2332,9 +2334,11 @@ def _padic_base_of(rows):
     p-adic ones are refused."""
     import _sage_padic
     # (read boundedly: a list subclass may iterate without end; the rows
-    # share one budget of entries, as in _read_rows)
-    flat, left = [], _MAX_ENTRIES
-    for r in _bounded_list(rows, what="rows"):
+    # and the outer list's scalars share one budget of entries, as in
+    # _bounded_rows)
+    rows = _bounded_list(rows, what="rows")
+    flat, left = [], _MAX_ENTRIES - sum(1 for r in rows if not isinstance(r, (list, tuple)))
+    for r in rows:
         if isinstance(r, (list, tuple)):
             r = _bounded_list(r, left, total=_MAX_ENTRIES)
             left -= len(r)

@@ -28,7 +28,8 @@ test("matrix and vector allocation sites are all reviewed", () => {
 // base detectors that matrix() runs first gave every row the full entry
 // budget, so [row] * 2^22 with one shared row of 2^22 entries was 2^44
 // reads.  The rows share one budget: at a limit of 5, five shared rows of
-// five are refused after the limit plus one reads.  (CORR-6E4-2) A ragged
+// five are refused after the limit plus one reads; and (HARD-8B7-1) the
+// outer list's scalars share it, so four of them leave one entry for a row.  (CORR-6E4-2) A ragged
 // Matrix is refused before any entry is converted (Probe counts the reads
 // of a conversion: four for a good row of two).
 test("matrix() reads shared rows within one budget; ragged rows are refused before conversion", () => {
@@ -54,6 +55,13 @@ try:
     sm._ff_base_of([[row] * 5])
 except ValueError as e:
     print(e, CountingRow.calls)
+# (8b7b533, HARD-8B7-1) the outer list's scalars count too
+for scan in [matrix, sm._ff_base_of, sm._padic_base_of]:
+    CountingRow.calls = 0
+    try:
+        scan([0, 0, 0, 0, row])
+    except ValueError as e:
+        print(e, CountingRow.calls)
 sm._MAX_ENTRIES = 1 << 22
 class Probe:
     reads = 0
@@ -80,6 +88,9 @@ for f in [lambda: sm.Matrix(object(), [[x, x], [x]]), lambda: sm.Matrix(object()
       "(1, 5) 15",
       "more than 5 entries 6",
       "more than 5 entries 1",
+      "more than 5 entries 2",
+      "more than 5 entries 2",
+      "more than 5 entries 2",
       "1 4",
       "the rows of a matrix must have the same length 0",
       "the rows of a matrix must have the same length 0",
