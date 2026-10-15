@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanPreview } from "../web/board/preview";
+import { codeOrder } from "../web/board/doc";
 
 // `sagebrush board run`: every code item of a board run as the board runs it
 // in a browser (src/board-run.ts), each item's output or error reported.
@@ -211,4 +212,41 @@ test("board run: what it says of a board it refuses is one line, a newline or a 
   r = run(["-"], board([{ id: "p", code: "print('one\\ttwo\\nthree')" }]));
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes("one\ttwo\n       three\n"), r.stdout);
+});
+
+test("board run: its cells are the board's (doc.ts codeOrder), each with its cell's seed, as in the browser", () => {
+  // (x on two pages, and a third page's item whose id is the first x's cell's: x@p1~2, x@p2, x@p1)
+  const page = (title: string, id: string) => ({ title, nodes: [{ id, title, code: "import random\nprint(random.random())", x: 0, y: 0, w: 300 }] });
+  const doc = { format: "sagebrush-board", version: 1, title: "Seeds", pages: [page("One", "x"), page("Two", "x"), page("Three", "x@p1")] };
+  const cells = codeOrder(doc as any).map((c) => c.id);
+  assert.deepEqual(cells, ["x@p1~2", "x@p2", "x@p1"]);
+  const { status, report } = json(["-"], JSON.stringify(doc));
+  assert.equal(status, 0);
+  // (each prints what an item alone, whose id is that cell's, prints: its seed is its cell's)
+  const alone = cells.map((id) => json(["-"], board([{ id, code: "import random\nprint(random.random())" }])).report.items[0].stdout);
+  assert.deepEqual(report.items.map((i: any) => i.stdout), alone);
+  assert.equal(new Set(alone).size, 3);
+});
+
+test("board run: a board of a later version is refused in the same words as board render's (CLI_READER)", () => {
+  const later = JSON.stringify({ format: "sagebrush-board", version: 99, nodes: [{ id: "a", code: "print('ran')" }] });
+  const render = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "render", "-"], { encoding: "utf8", input: later });
+  const r = run(["-"], later);
+  assert.equal(r.status, 1);
+  assert.equal(render.status, 1);
+  assert.equal(r.stderr.replace(/^sagebrush board run: /, ""), render.stderr.replace(/^sagebrush board render: /, ""));
+});
+
+test("board run: a Magma item that fails fails its cell; what reads it is not run, the others are, and the exit is 1", () => {
+  const { status, report } = json(["-"], board([
+    { id: "a", code: "x := 5;\nprint x;" },
+    { id: "b", code: "y := x div 0;" },
+    { id: "c", code: "print y + 1;" },
+    { id: "d", code: "print 7;" },
+  ], { mode: "magma" }));
+  assert.equal(status, 1);
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.items.map((i: any) => [i.id, i.status]), [["a", "ok"], ["b", "failed"], ["c", "not run"], ["d", "ok"]]);
+  assert.match(report.items[1].stdout, /Runtime error/);
+  assert.equal(report.items[3].stdout, "7\n");
 });
