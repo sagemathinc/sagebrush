@@ -320,6 +320,17 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     default is the changed "gem" palette of R2025a (its colororder page
     gives the new triplets); Sagebrush deliberately keeps the older one;
   - LineSpec strings (`'r--o'`) work, and so do name-value properties;
+  - titles are bold and subtitles normal, as the documented defaults of
+    TitleFontWeight and SubtitleFontWeight; a title's own `FontWeight`
+    is kept. The subtitle is a line under the title, as documented, in
+    the title's size (Sagebrush's choice), and the axes gives up that
+    line's height (the interactive 3-D view shows it the same way);
+    `title(titletext, subtitletext)` sets both. A new plot with hold off
+    resets the title, labels and grid to their defaults, as NextPlot
+    'replace' resets the axes, and so does `cla reset`; plain `cla` deletes
+    only the plotted objects (those with visible handles), as documented.
+    `title(titletext, subtitletext, Name, Value)` gives both lines the
+    properties, as the documented example's Color;
   - `plot(Y)` draws a line per column, and `imagesc(C)` shows C's first row
     at the top, with `YDir` reversed;
   - colormaps: `jet`, `hot`, `gray`, `bone`, `pink`, `copper`, `hsv`,
@@ -352,10 +363,85 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
     corner's CData, `'interp'` averages the four);
   - `mesh` has white faces and height-colored edges;
   - `shading` sets both colors.
+  - A legend lists lines, markers and stems as in 2-D, and a surface as a
+    swatch of its FaceColor edged in its EdgeColor; a colormapped one
+    (`'flat'`, `'interp'`) takes the colormap's color at the middle of
+    CLim. MATLAB does not document its legend's surface icon; this is
+    Octave's choice.
   - Seen from above (`view(2)`, `pcolor`), a surface is the same faces in
     data coordinates.
   - Hold off resets the view to 2-D (`newplot`); `surf` and `plot3` then
     turn it to 3-D.
+  - `view` takes (az, el), [az el], [x y z] (the direction toward the
+    camera, converted to the angles of a unit vector along it, as the
+    documented example's), 2, 3 and an axes first; `[caz, cel] = view(...)`
+    sets and returns the angles. One output (or `view` alone) is refused:
+    the documentation gives only `[caz, cel]`.
+- **The interactive 3-D view:** in the notebook and Jupyter, a figure with
+  one 3-D axes is also sent as a scene (the 3-D mime type of Sage's
+  `plot3d`, lib/sage_plot3d.py), and web/viewer3d.js shows it in WebGL
+  over the SVG, so it can be dragged to rotate it, as a MATLAB figure can:
+  - `figure_scene` gives the scene the axes' limits, box proportions, ticks
+    and tick labels, (az, el) (the viewer's azimuth is measured from +x,
+    MATLAB's from −y, so it is az − 90), the title and labels, and a
+    colorbar if one is shown;
+  - the scene asks for options that Sage's scenes do not use: an
+    orthographic projection, the figure's background and text colors, and
+    MATLAB's box (the back planes with their grid lines, and the axis edges
+    nearest the viewer, chosen again as it turns), with the SVG's grid
+    color;
+  - surfaces are unlit quadrilaterals colored as in the SVG, under their
+    edges (drawn with a polygon offset so they stay visible);
+  - other figures are the SVG alone: several axes, a `sgtitle`, a legend,
+    patches or other objects in the 3-D axes, or a scene too big: over
+    250,000 vertices given, over a million drawn (counted as the viewer
+    counts them: lines 1.4 wide and wider are tubes of 36 vertices a
+    segment), or beyond the viewer's limits on text and ticks;
+  - the viewer checks every scene before building anything from it (a
+    saved document's scene is untrusted): its form, finite numbers,
+    indices in range, and limits on what it would draw after expansion
+    (web/viewer3d.js's `checkScene` and `LIMITS`). A scene it refuses
+    stays the static picture, with a line saying why.
+- **The figure's background** is its `Color`, behind the axes and the
+  text, in the SVG too. Unless set it is white: Sagebrush's choice (MATLAB
+  documents [0.94 0.94 0.94] as the default, and [0.9608 0.9608 0.9608]
+  in the light theme from R2025a). Text and axis lines are the documented
+  default axis color, [0.15 0.15 0.15], rather than the page's color: the
+  SVG's root sets `color`, which the shim's `currentColor` paints take, so
+  the text itself is never rewritten. Legends have a white box.
+- **Text: TeX markup** (lib/_matlab_tex.py). Titles, subtitles, axis
+  labels, legends, `text` and tick labels are drawn as their interpreter
+  says (`Interpreter`, the axes' `TickLabelInterpreter`; 'tex' by
+  default), in the SVG and in the interactive 3-D view:
+  - 'tex' is the markup of the documentation's "TeX Markup" table: `^`
+    and `_` (the next character, or the characters in braces), `\bf`,
+    `\it`, `\sl`, `\rm`, `\fontname{}`, `\fontsize{}` (points),
+    `\color{}` and `\color[rgb]{}`, the table's 102 special characters,
+    and a backslash before `\ { } _ ^` for the character itself.
+    Modifiers last to the end of the text or of the braces they are in
+    (braces group as in TeX and in Octave; Octave keeps a space after a
+    command, and so does Sagebrush);
+  - anything else is an error when the text is set (`title`, `xlabel`,
+    `text`, `legend`) or drawn, never drawn as typed: another command after
+    a backslash (`C:\Users` too: write `\\`), a script with nothing to
+    raise, unbalanced braces, and the `\color` names whose colors the
+    documentation does not give (gray, darkGreen, orange, lightBlue: use
+    `\color[rgb]`). A refused call changes nothing;
+  - 'none' draws the text as typed; 'latex' is refused;
+  - `$` is a dollar sign (the shim's matplotlib `$...$` math is not used
+    for MATLAB's figures: the shim's `markup` option);
+  - scripts are 0.7 of their base's size, raised 0.385 or lowered 0.245 of
+    it (Sagebrush's choice); a subscript and a superscript on one base,
+    one right after the other (`x_1^2`, `x^2_1`), are stacked at the same
+    place, as Octave draws them, and the text after follows the wider. The
+    3-D view stacks them in one grid cell. An SVG cannot measure its text
+    where it is made, so each run of a pair is given its length
+    (textLength, lengthAdjust spacingAndGlyphs), which makes the advances
+    exact: the length is Sagebrush's estimate from rough character
+    classes, and the glyphs are fitted to it;
+  - the 3-D view gets the same runs of styled text, their sizes relative to
+    the viewer's own text sizes, so that a `\fontsize` is the same size
+    in points there as in the SVG.
 - **Contours:** contour lines come from marching squares (saddle cells are
   split by the centre's value), oriented with the higher values on the left
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`
@@ -419,7 +505,9 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
 - **Not yet:**
   - lighting (`camlight`, `lighting` and `material` do nothing);
   - polar axes, `annotation`, `uifigure` and apps, `animatedline`;
-  - raster output: `print`, `saveas` and `exportgraphics` write SVG.
+  - raster output: `print`, `saveas` and `exportgraphics` write SVG;
+  - an interactive view of the figures that show the SVG alone (see the
+    interactive 3-D view above).
 
 Tests:
 - **test_plot** compares objects' properties after plotting (limits, data,
@@ -548,6 +636,8 @@ since it compares against the committed outputs.
   narrower.
 - **Random numbers:** Octave's `randn` is not MATLAB's ziggurat; Sagebrush's
   `rand`, `randn` and `randi` give MATLAB's numbers.
+- **`[caz, cel] = view(v)`** sets the view and returns its angles in
+  MATLAB. Octave refuses to set and get it in one call.
 - **Sparse matrices:**
   - `max(S, F)`, `dot`, `unique`, and `lu`'s permutation are sparse in
     MATLAB and full in Octave;
