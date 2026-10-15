@@ -11,7 +11,7 @@ lib/_sage_padic.py it lists, by function, conservatively:
   - every star expansion (*rows in a call, list, tuple or set);
   - every literal sequence repetition ([0] * n, (0,) * n, "x" * n).
 
-In every other module of lib/ it lists each call of a raw matrix or vector
+In every other module under lib/ (recursively) it lists each call of a raw matrix or vector
 constructor (Matrix, FFMatrix, PadicMatrix, Vector, FFVector,
 SeriesVector, also under an import alias), whose caller must check the
 shape of what it builds first.
@@ -128,8 +128,8 @@ def all_sites():
     result = {}
     for f in FULL:
         result.update(full_sites(f))
-    for p in sorted((ROOT / "lib").glob("*.py")):
-        rel = "lib/" + p.name
+    for p in sorted((ROOT / "lib").rglob("*.py")):
+        rel = p.relative_to(ROOT).as_posix()
         if rel not in FULL:
             result.update(caller_sites(rel))
     return dict(sorted(result.items()))
