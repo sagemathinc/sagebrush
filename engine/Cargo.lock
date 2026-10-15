@@ -520,6 +520,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-hmf"
+version = "0.1.0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "rayon",
+ "sagebrush-arith",
+ "sagebrush-bigint",
+ "sagebrush-poly",
+]
+
+[[package]]
 name = "sagebrush-interrupt"
 version = "0.1.0"
 dependencies = [
@@ -635,6 +647,7 @@ dependencies = [
  "sagebrush-classgroup",
  "sagebrush-galois",
  "sagebrush-group",
+ "sagebrush-hmf",
  "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-mpoly",

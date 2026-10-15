@@ -1,9 +1,13 @@
 # Contributing to Sagebrush
 
 Sagebrush is MIT OR Apache-2.0 (see [NOTICE.md](NOTICE.md)). Keeping it that
-way is the point of the project, so contributions follow two rules.
+way is the point of the project.
 
-## 1. Clean room
+The most useful contributions are often not code: a notebook or program you
+want to run that doesn't work yet, or a precise description (a prompt) of
+what you would like Sagebrush to do. Open an issue with it.
+
+## Clean room
 
 Do not read, translate or copy the source code of GPL (or other copyleft or
 closed) systems such as PARI, Sage, FLINT, NTL or Magma when writing code for
@@ -16,16 +20,7 @@ owner's written permission (record it, as in
 [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md)). Say in a comment where
 an algorithm comes from.
 
-## 2. Developer Certificate of Origin
-
-Every commit must be signed off, certifying the
-[Developer Certificate of Origin 1.1](https://developercertificate.org/): that
-you wrote the change or otherwise have the right to submit it under the
-project's license. Add the line with `git commit -s`:
-
-```
-Signed-off-by: Your Name <you@example.com>
-```
+## License of contributions
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in Sagebrush, as defined in the Apache-2.0 license,

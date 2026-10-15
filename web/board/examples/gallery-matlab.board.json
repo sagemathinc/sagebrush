@@ -1,0 +1,80 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "MATLAB",
+ "mode": "matlab",
+ "intro": "MATLAB code, in the reader's browser: matrices, a linear system, eigenvalues, a fit, a loop, a function and a plot. Variables carry from item to item, in reading order.",
+ "nodes": [
+  {
+   "id": "matrices",
+   "kind": "group",
+   "title": "Matrices",
+   "layout": "column",
+   "x": 0,
+   "y": 0,
+   "children": [
+    {
+     "id": "matrix",
+     "title": "A matrix",
+     "code": "format compact\nA = [4 -2; 1 1];\ndet(A)",
+     "w": 380
+    },
+    {
+     "id": "eig",
+     "title": "Its eigenvalues",
+     "code": "[V, D] = eig(A)",
+     "w": 380
+    },
+    {
+     "id": "solve",
+     "title": "A linear system",
+     "code": "x = A \\ [2; 3]",
+     "w": 380
+    }
+   ]
+  },
+  {
+   "id": "code",
+   "kind": "group",
+   "title": "A fit, a loop, a function",
+   "layout": "column",
+   "x": 488,
+   "y": 0,
+   "children": [
+    {
+     "id": "fit",
+     "title": "A quadratic fit",
+     "code": "t = linspace(0, 1, 5);\ny = 3 * t.^2 + 1;\np = polyfit(t, y, 2);\nfprintf('%.4f ', p); fprintf('\\n');",
+     "w": 380
+    },
+    {
+     "id": "loop",
+     "title": "A loop",
+     "text": "The partial sum $\\sum_{k=1}^{100} 1/k^2$.",
+     "code": "s = 0;\nfor k = 1:100\n  s = s + 1/k^2;\nend\nfprintf('%.6f\\n', s)",
+     "w": 380
+    },
+    {
+     "id": "function",
+     "title": "A function",
+     "code": "function r = hyp(a, b)\n  r = sqrt(a^2 + b^2);\nend",
+     "w": 380
+    },
+    {
+     "id": "use",
+     "title": "Using it",
+     "code": "hyp(3, 4)",
+     "w": 380
+    }
+   ]
+  },
+  {
+   "id": "plot",
+   "title": "A plot",
+   "code": "u = linspace(0, 2*pi, 100);\nplot(u, sin(u))\ntitle('sin')",
+   "x": 976,
+   "y": 0,
+   "w": 420
+  }
+ ]
+}

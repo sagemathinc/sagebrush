@@ -203,6 +203,11 @@ export class Editor {
     this.gone();
     return stepped;
   }
+  /** What is being written where it is, kept in the document (writing it
+   * ends): before the board is downloaded. */
+  async keepWriting() {
+    await this.inplace?.end();
+  }
   // (the item being written is no longer there: undone, or removed by an agent)
   private gone() {
     if (this.inplace && !this.board.item(this.inplace.id)) this.inplace.abandon();

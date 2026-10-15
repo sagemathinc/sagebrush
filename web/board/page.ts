@@ -194,6 +194,8 @@ const host: BoardHost = {
     },
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
+  saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language
   // runs, after the board's is changed too)
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),

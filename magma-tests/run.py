@@ -7,7 +7,9 @@
 
 Each test_*.m runs under `sagebrush --magma`; its stdout must equal test_*.out,
 the output of the same program under Magma (committed, so that the check
-needs no Magma).
+needs no Magma).  A test_stdin_*.m is given on stdin instead, on both sides,
+which Magma reads as a session: errors are reported and the input goes on.
+A test whose name contains "error" may exit with a nonzero status.
 """
 import difflib, os, subprocess, sys, concurrent.futures as cf
 
@@ -19,14 +21,17 @@ files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswi
 MAGMA = os.environ.get("MAGMA", os.path.expanduser("~/bin/magma"))
 
 
-def run(cmd):
-    p = subprocess.run(cmd, cwd=HERE, capture_output=True, timeout=600)
+def run(cmd, f):
+    stdin = open(os.path.join(HERE, f), "rb") if f.startswith("test_stdin_") else None
+    if stdin:
+        cmd = cmd[:-1]
+    p = subprocess.run(cmd, cwd=HERE, stdin=stdin, capture_output=True, timeout=600)
     return p.returncode, p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace")
 
 
 if "--regen" in sys.argv:
     for f in files:
-        code, out, err = run([MAGMA, "-b", f])
+        code, out, err = run([MAGMA, "-b", f], f)
         if code:
             sys.exit("magma failed on %s:\n%s" % (f, err[-2000:]))
         open(os.path.join(HERE, f[:-2] + ".out"), "w").write(out)
@@ -35,13 +40,13 @@ if "--regen" in sys.argv:
 
 
 def one(f):
-    return f, open(os.path.join(HERE, f[:-2] + ".out")).read(), run(["node", CLI, "--magma", f])
+    return f, open(os.path.join(HERE, f[:-2] + ".out")).read(), run(["node", CLI, "--magma", f], f)
 
 
 bad = 0
 with cf.ThreadPoolExecutor(4) as ex:
     for f, ref, got in ex.map(one, files):
-        ok = got[0] == 0 and ref == got[1]
+        ok = (got[0] == 0 or "error" in f) and ref == got[1]
         print("%-24s %s  (%d lines)" % (f, "ok" if ok else "DIFF", ref.count("\n")))
         if not ok:
             bad += 1

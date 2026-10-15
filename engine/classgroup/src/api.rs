@@ -294,6 +294,49 @@ pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
     Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified, assumed_primes: b.assumed_primes })
 }
 
+/// The unconditional class group and regulator (nf/proof.rs: no GRH).
+pub struct BnfProofData {
+    pub degree: usize,
+    pub r1: usize,
+    pub r2: usize,
+    pub disc: BigInt,
+    pub h: BigInt,
+    pub cyc: Vec<BigInt>,
+    /// the regulator to its proven significant digits ("1" for unit rank 0)
+    pub regulator: String,
+    pub w: u32,
+    /// what the proof used: the norm bound M and its source (Minkowski or
+    /// Zimmert), the factor base's bound, the prime ideals shown to lie in
+    /// its subgroup, Zimmert's regulator lower bound, the unit index bound
+    /// B, the primes l <= B checked, and the primes l | h checked
+    pub norm_bound: BigInt,
+    pub norm_bound_kind: &'static str,
+    pub fb_bound: u64,
+    pub primes_shown: usize,
+    pub reg_lower: f64,
+    pub index_bound: u64,
+    pub unit_primes: usize,
+    pub class_primes: Vec<BigInt>,
+}
+
+/// The unconditional certificate for Q[x]/(f), within the limits (None:
+/// the defaults); an error starting with nf::proof::REFUSED is a refusal
+/// (a bound beyond the limits, said by how much), not a failure.
+pub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) -> Result<BnfProofData, String> {
+    monic(f)?;
+    if f.len() == 2 {
+        return Ok(BnfProofData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2,
+            norm_bound: BigInt::one(), norm_bound_kind: "Minkowski", fb_bound: 1, primes_shown: 0, reg_lower: 1.0, index_bound: 1, unit_primes: 0, class_primes: vec![] });
+    }
+    let d = crate::nf::proof::Limits::default();
+    let limits = crate::nf::proof::Limits { norm_max: norm_max.unwrap_or(d.norm_max), index_max: index_max.unwrap_or(d.index_max) };
+    let p = crate::nf::proof::certify(f, &limits)?;
+    let regulator = if p.prec == 0 { "1".to_string() } else { fixed_to_decimal(&p.reg_fixed, p.prec, p.reg_digits) };
+    Ok(BnfProofData { degree: p.n, r1: p.r1, r2: p.r2, disc: p.disc, h: p.h, cyc: p.cyc, regulator, w: p.w,
+        norm_bound: p.norm_bound, norm_bound_kind: p.norm_bound_kind.name(), fb_bound: p.fb_bound, primes_shown: p.primes_shown,
+        reg_lower: p.reg_lower, index_bound: p.index_bound, unit_primes: p.unit_primes, class_primes: p.class_primes })
+}
+
 /// The factor-base relations of a certified class group computation, with
 /// all prime ideals above the rational primes `extra` in the factor base:
 /// (bnf data, factor base (p, e, f), relations (column, exponent), and the

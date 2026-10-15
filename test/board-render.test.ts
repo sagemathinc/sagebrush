@@ -52,3 +52,67 @@ test("board render: a page that is not there, a file that is not there, no file"
   assert.match(n.stderr, /ENOENT/);
   assert.equal(cli([]).status, 2);
 });
+
+test("board render: a board of a later version of the format, or another format, is refused as the board refuses it, and nothing drawn", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
+  try {
+    const out = join(dir, "later.svg");
+    const later = JSON.stringify({ format: "sagebrush-board", version: 99, nodes: [{ id: "a", title: "A" }] });
+    let r = cli(["-"], later);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    // (the command line's own words: which sagebrush refused it, and what to do)
+    assert.match(r.stderr, /^sagebrush board render: -: this board is in version 99 of the format, from a later Sagebrush; this sagebrush \((dev|\d+\.\d+\.\d+\S*)\) reads version 1: update sagebrush \(npx sagebrush@latest\)\n$/);
+    r = cli(["-", "-o", out], later);
+    assert.equal(r.status, 1);
+    assert.throws(() => readFileSync(out), "no file written");
+    // (another format, its name quoted, no control character reaching the terminal)
+    r = cli(["-"], JSON.stringify({ format: "evil\u001b[31m", nodes: [] }));
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    assert.ok(r.stderr.includes("not a Sagebrush board: its format is") && !r.stderr.includes("\u001b"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("board render: what it says of a board it refuses is one line: a newline or a tab in the format, or in the file's name, escaped (HARD-EC2-1)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
+  try {
+    const evil = JSON.stringify({ format: "evil\nINJECTED: ok\tX", nodes: [] });
+    let r = cli(["-"], evil);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, 'sagebrush board render: -: not a Sagebrush board: its format is "evil\\x0aINJECTED: ok\\x09X"\n');
+    const file = join(dir, "a\nINJECTED: ok\tb.json");
+    writeFileSync(file, evil);
+    r = cli([file]);
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.split("\n").length, 2, r.stderr);
+    assert.ok(r.stderr.includes("a\\x0aINJECTED: ok\\x09b.json: not a Sagebrush board"), r.stderr);
+    // (an option it does not know, likewise)
+    r = cli(["--x\ny", "-"], evil);
+    assert.equal(r.status, 2);
+    assert.ok(r.stderr.startsWith("sagebrush board render: unknown option --x\\x0ay\nusage:"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("board render: pictures the board leaves out for their names are named on stderr, with the rule; good names say nothing", () => {
+  const src = "data:image/png;base64,iVBORw0KGgo=", pic = { w: 10, h: 10, src };
+  const doc = { format: "sagebrush-board", version: 1, background: { image: "back ground" }, images: { "plot 1": pic, "fig-1": pic, "figure.png": pic }, nodes: [{ id: "a", image: "plot 1" }, { id: "b", image: "fig-1" }, { id: "c", image: "figure.png" }, { id: "g", kind: "group", children: [{ id: "d", image: "in\ngroup" }] }] };
+  let r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("<svg "), "drawn all the same");
+  // (its first line: what else the render says, of pictures it shows as boxes, follows)
+  assert.equal(r.stderr.split("\n")[0] + "\n", 'sagebrush board render: pictures left out: a picture\'s name is letters, digits, _ and -, at most 100 characters (plot-1, not "plot 1" or "figure.png"), and these are not: "plot 1", "figure.png", "back ground", "in\\ngroup"\n');
+  // (good names: nothing said)
+  r = cli(["-"], JSON.stringify({ ...doc, background: undefined, images: { "fig-1": pic }, nodes: [{ id: "b", image: "fig-1" }] }));
+  assert.equal(r.status, 0);
+  assert.ok(!r.stderr.includes("left out"), r.stderr);
+  // (many: the first ten, and how many more)
+  const many = Array.from({ length: 12 }, (_, i) => `p ${i}`);
+  r = cli(["-"], JSON.stringify({ format: "sagebrush-board", version: 1, images: Object.fromEntries(many.map((n) => [n, pic])), nodes: [{ id: "a", text: "x" }] }));
+  assert.match(r.stderr, /^sagebrush board render: pictures left out: .*and these are not: "p 0", [^\n]*"p 9", and 2 more\n/);
+});

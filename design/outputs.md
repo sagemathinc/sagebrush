@@ -173,3 +173,12 @@ cached, or a preview.
    the cache will be decided once boards have used it for a while.
    `.ipynb` stays as in section 4.
 6. **CoCalc:** the sidecar file, with the board-in-CoCalc integration.
+7. **Previews written by `sagebrush board run --store-previews` (follow-up):**
+   the command line has no canvas to draw a picture smaller, so it keeps a
+   PNG, JPEG or WebP picture as it is when it fits a preview, and leaves
+   out an SVG one (matplotlib's plots here), with the "<Figure ...>" text
+   beside it: such an item has no preview and runs when the board opens.
+   A later step: previews that hold an SVG, shown only as an image (a
+   data: URL in an `<img>`, so no script in it runs). That changes the
+   format (cleanPreview accepts no SVG today) and needs its own security
+   review first.

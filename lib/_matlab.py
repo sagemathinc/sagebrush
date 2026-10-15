@@ -3130,6 +3130,14 @@ def _g5(x):
     return "%.5g" % x
 
 
+def _newlines_shown(s):
+    """text as a struct's field or a string array's element shows it: each
+    newline as the sign ↵, as MATLAB's published displays show them (the
+    message of lasterror's structure; extract's 2-by-1 string array of
+    lines)"""
+    return s.replace("\n", "\u21b5")
+
+
 def _brief(v, in_cell):
     """a value as one item of a struct's or a cell's display"""
     t = type(v)
@@ -3137,12 +3145,15 @@ def _brief(v, in_cell):
     cls = class_(v)
     if t is Char:
         if len(d) == 2 and d[0] == 1:
-            return "'%s'" % v.text()
+            return "'%s'" % (v.text() if in_cell else _newlines_shown(v.text()))
         if d == (0, 0):
             return "0×0 char" if in_cell else "''"
         return "%s char" % _dimstr(d) if in_cell else "[%s char]" % _dimstr(d)
     if t is Str:
-        return '["%s"]' % v.s if in_cell else '"%s"' % v.s
+        if v.s is None:
+            # (a missing string: <missing>, unquoted, as a string array shows it)
+            return "[<missing>]" if in_cell else "<missing>"
+        return '["%s"]' % v.s if in_cell else '"%s"' % _newlines_shown(v.s)
     if t is Cell:
         if not in_cell and len(v.a) == 1 and _isnumlike(v.a[0]) and _numel(v.a[0]) == 1:
             # (a struct's field holding a 1-by-1 cell of a scalar: its element, b: {[1]})
@@ -3287,7 +3298,8 @@ def _blocks(v):
             return [], ["  %s empty string array" % _dimstr(d)], True
         rows = d[0]
         cols = _prod(d[1:])
-        texts = [['"%s"' % v.a[j * rows + i] if v.a[j * rows + i] is not None else "<missing>" for i in range(rows)] for j in range(cols)]
+        texts = [['"%s"' % _newlines_shown(v.a[j * rows + i]) if v.a[j * rows + i] is not None else "<missing>"
+                  for i in range(rows)] for j in range(cols)]
         w = [max(len(t) for t in c) for c in texts]
         lines = ["".join("    " + texts[j][i].ljust(w[j]) for j in range(cols)) for i in range(rows)]
         return ["  %s string array" % _dimstr(d)], ["\n".join(lines)], True
@@ -5617,20 +5629,135 @@ def cond_(x, p=None):
 
 @_bi("eig")
 def eig_(nargout, x, *args):
-    M = _mat(x)
-    _square(M)
-    sym = M.dtype.kind != "c" and np.array_equal(M, M.T)
-    herm = M.dtype.kind == "c" and np.array_equal(M, np.conj(M.T))
-    if sym or herm:
-        w, V = np.linalg.eigh(M)
+    """eig as its documentation page describes it: e = eig(A), [V, D] and
+    [V, D, W] (W's columns the left eigenvectors, W'*A = D*W'), eig(A, B)
+    for A*V = B*V*D (and W'*A = D*W'*B), the balanceOption, the algorithm
+    "chol" and the outputForm "vector" or "matrix".  Real matrices: the
+    symmetric eigenproblem (tred2 and tql2) or the general one (orthes and
+    hqr2), from JAMA, in Sagebrush's numpy; neither balances, so
+    "balance" and "nobalance" give the same result.  eig(A, B) with a
+    symmetric A and a symmetric positive definite B is the page's "chol"
+    algorithm: the symmetric problem of L^-1 A L^-T, B = L L', V B-normalized
+    as the page says.  Otherwise, for lack of QZ, it is the eigenproblem of
+    B \\ A.  W comes from the transposed problem, each vector matched to its
+    eigenvalue; W = V for the real symmetric standard problem and on the
+    Cholesky path.  Single inputs give single outputs, computed in double.
+
+    Sagebrush's own choices: W for the standard nonsymmetric problem, and V
+    and W from B \\ A, have columns of 2-norm 1 (the page leaves the
+    generalized ones' norms open), while the Cholesky path has W = V with
+    V'*B*V = I; "chol" is refused unless A and B are symmetric and B is
+    positive definite (chol(B) succeeds), rather than falling back to
+    B \\ A when it was asked for; "qz" is refused; a singular B is
+    refused, since its pencil may have infinite eigenvalues, which need QZ;
+    a nonsingular but badly
+    conditioned B is refused too, for accuracy, by Sagebrush's rule
+    cond(B)*eps > 1e-8; complex matrices are refused, Sagebrush's numpy
+    having no complex eigenvalue routines yet"""
+    A = _mat(x)
+    _square(A)
+    B, form, algo = None, None, None
+    for a in args:
+        if _istext(a):
+            t = _text(a).lower()
+            if t in ("vector", "matrix") and form is None:
+                form = t
+            elif t in ("balance", "nobalance") and B is None and algo is None:
+                algo = t
+            elif t in ("chol", "qz") and B is not None and algo is None:
+                algo = t
+            else:
+                raise _err("eig: invalid option '%s'." % _text(a))
+        elif _isnumlike(a) and B is None and algo is None and form is None:
+            B = _mat(a)
+            if B.shape != A.shape:
+                raise _err("eig: A and B must be square matrices of the same size.")
+        else:
+            raise _err("eig: invalid input.")
+    if nargout > 3:
+        raise _err("Too many output arguments.")
+    if A.dtype.kind == "c" or (B is not None and B.dtype.kind == "c"):
+        raise _err("eig: complex matrices are not supported in Sagebrush.")
+    if A.size and not np.all(np.isfinite(A)) or (B is not None and B.size and not np.all(np.isfinite(B))):
+        raise _err("eig: the input must not contain Inf or NaN.")
+    single = class_(x) == "single" or any(_isnumlike(a) and not _istext(a) and class_(a) == "single" for a in args)
+    A = A.astype(float)
+    n = A.shape[0]
+    W = None
+    if B is None:
+        if np.array_equal(A, A.T):
+            w, V = np.linalg.eigh(A)
+            W = V
+        else:
+            w, V = np.linalg.eig(A)
     else:
-        w, V = np.linalg.eig(M)
-        if np.iscomplexobj(w) and not np.any(np.imag(w)):
-            w = np.real(w)
-            V = np.real(V)
+        B = B.astype(float)
+        if algo == "qz":
+            raise _err("eig: the QZ algorithm is not supported in Sagebrush.")
+        L = None
+        if np.array_equal(A, A.T) and np.array_equal(B, B.T):
+            try:
+                L = np.linalg.cholesky(B)
+            except Exception:
+                L = None
+        if algo == "chol" and L is None:
+            raise _err("eig: the \"chol\" algorithm needs a symmetric A and a symmetric positive definite B; "
+                       "Sagebrush does not fall back to another algorithm when it is asked for.")
+        if L is not None:
+            Li = np.linalg.inv(L)
+            C = Li @ A @ Li.T
+            w, Y = np.linalg.eigh((C + C.T) / 2)
+            V = Li.T @ Y
+            W = V
+        else:
+            c = np.linalg.cond(B) if n else 1.0
+            if n and not _math.isfinite(c):
+                raise _err("eig: B is singular, so the pencil may have infinite eigenvalues, which need the QZ "
+                           "algorithm; it is not supported in Sagebrush.")
+            if n and c * _EPS_D > 1e-8:
+                raise _err("eig: B is badly conditioned (cond(B)*eps > 1e-8, Sagebrush's limit for solving through "
+                           "B \\ A), and the QZ algorithm it needs is not supported in Sagebrush.")
+            w, V = np.linalg.eig(np.linalg.solve(B, A) if n else A)
+    if np.iscomplexobj(w) and not np.any(np.imag(w)):
+        w = np.real(w)
+        V = np.real(V)
+    if nargout == 3 and W is None:
+        W = _left_vectors(A, B, w)
+    def out1(a):
+        r = _unmat(np.asarray(a))
+        return _B["single"].f(1, r) if single else r
     if nargout <= 1:
-        return _unmat(np.asarray(w).reshape((-1, 1)))
-    return [_unmat(V), _unmat(np.diag(w))]
+        e = np.asarray(w).reshape((-1, 1))
+        return out1(np.diag(np.asarray(w)) if form == "matrix" else e)
+    D = np.asarray(w).reshape((-1, 1)) if form == "vector" else np.diag(np.asarray(w))
+    out = [out1(V), out1(D)]
+    if nargout == 3:
+        out.append(out1(W))
+    return out
+
+
+_EPS_D = 2.220446049250313e-16
+
+
+def _left_vectors(A, B, w):
+    """left eigenvectors: for each eigenvalue w(k), a vector u with
+    u' A = w(k) u' B (B the identity when None), from the eigenvectors of
+    the transposed problem A.' z = mu B.' z (u = conj(z)), each matched to
+    the nearest unused mu, of 2-norm 1"""
+    At = A.T if B is None else np.linalg.solve(B.T, A.T)
+    mu, Z = np.linalg.eig(At)
+    mu, Z = np.asarray(mu), np.asarray(Z)
+    used = [False] * len(mu)
+    cols = []
+    for lam in np.asarray(w):
+        j = min((i for i in range(len(mu)) if not used[i]), key=lambda i: abs(mu[i] - lam))
+        used[j] = True
+        z = np.conj(Z[:, j])
+        cols.append(z / np.linalg.norm(z) if np.linalg.norm(z) else z)
+    U = np.array(cols).T
+    if np.iscomplexobj(U) and not np.any(np.imag(U)):
+        U = np.real(U)
+    return U
 
 
 @_bi("svd")
@@ -9444,3 +9571,4 @@ import _matlab_sparse as _sp  # noqa: E402  (it registers its built-ins)
 import _matlab_numeric  # noqa: E402,F401  (more numerical built-ins)
 import _matlab_data  # noqa: E402,F401  (data analysis and signal functions)
 import _matlab_eigs  # noqa: E402,F401  (eigs)
+import _matlab_special  # noqa: E402,F401  (special functions)

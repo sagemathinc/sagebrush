@@ -1,0 +1,21 @@
+
+In file "test_compile_error_file.m", line 3, column 23:
+>> F := recformat< a, b, a >; 1;
+                         ^
+User error: Field 'a' is repeated
+1
+2
+
+In file "test_compile_error_file.m", line 5, column 14:
+>> s := [7, 8]; assigned s[1]; 3;
+                ^
+User error: Argument to 'assigned' should be identifier, record field, or 
+attribute
+3
+
+In file "test_compile_error_file.m", line 6, column 9:
+>> delete s[1];
+           ^
+User error: Bad delete argument
+4
+[ 7, 8 ]

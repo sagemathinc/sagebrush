@@ -6,6 +6,7 @@ arguments) and its printing, checked against Magma by magma-tests/.
 """
 
 import math as _math
+import re as _re
 import sys as _sys
 from fractions import Fraction as _Fraction
 
@@ -19,7 +20,21 @@ WIDTH = 80
 
 
 class MagmaError(Exception):
-    pass
+    """A Magma runtime error; `where` names what failed, as in Magma's
+    "Runtime error in assert: ...".  Magma follows most runtime errors with
+    an empty line, but not those of assert, coercion (!) or a call with the
+    wrong number of arguments (`blank`)."""
+
+    def __init__(self, msg="", where=None, blank=True, pos=None):
+        # (pyjs: exceptions take positional arguments only)
+        super().__init__(msg)
+        self.where = where
+        self.blank = blank
+        self.pos = pos  # (line, col) of the failing operation, if known
+
+
+class _UserError(MagmaError):
+    """Raised by Magma's `error` statement: reported without the source line."""
 
 
 _pos = [0, 0]
@@ -29,21 +44,89 @@ def _here(line, col):
     _pos[0], _pos[1] = line, col
 
 
-_src = ["<magma>", []]
+_src = ["<magma>", [], None]  # name, lines, mode
 
 
-def _source(name, text):
-    _src[0], _src[1] = name, text.split("\n")
+def _source(name, text, mode=None):
+    """How errors behave (src/magma.ts Recover), checked against Magma 2.18:
+    "session" (input from stdin, as Magma's interactive session reads it):
+    every error is reported and the input goes on; "file": a runtime or
+    syntax error stops it, an undeclared identifier does not; None (no
+    recovery: notebook and kernel cells): every error stops it."""
+    if mode not in (None, "file", "session"):
+        raise ValueError("unknown mode %r" % (mode,))
+    _src[0], _src[1], _src[2] = name, text.split("\n"), mode
+
+
+def _where(line, col):
+    """The source line with a caret under column `col`, after Magma's
+    'In file' header (which a session leaves out)."""
+    text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
+    head = "" if _src[2] == "session" else 'In file "%s", line %d, column %d:\n' % (_src[0], line, col)
+    return "\n%s>> %s\n%s^\n" % (head, text, " " * (col + 2))
+
+
+def _undeclared(name, line, col):
+    """Where `name` is first used at or after (line, col), as Magma points at
+    an undeclared identifier."""
+    rx = _re.compile(r"(?<![A-Za-z0-9_'])%s(?![A-Za-z0-9_])" % _re.escape(name))
+    for k in range(line - 1, len(_src[1])):
+        start = col - 1 if k == line - 1 else 0
+        m = rx.search(_src[1][k], start)
+        if m:
+            return k + 1, m.start() + 1
+    return line, col
 
 
 def _report(e, line, col):
-    """A runtime error, reported as Magma does; then the program stops."""
+    """A runtime error, reported as Magma does; then a file stops and a
+    session goes on."""
     if isinstance(e, SystemExit):
         raise e
-    msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
-    text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
-    _sys.stdout.write('\nIn file "%s", line %d, column %d:\n>> %s\n%s^\nRuntime error: %s\n\n' % (_src[0], line, col, text, " " * (col + 2), msg))
-    raise SystemExit(1)
+    m = _re.match(r"name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", str(e)) if isinstance(e, NameError) else None
+    if m:
+        # Magma rejects a statement that uses an undeclared identifier
+        # (before running it) and goes on, in a file too
+        name = m.group(1)
+        name = name[:-1] if name.endswith("_") else name
+        line, col = _undeclared(name, line, col)
+        _sys.stdout.write("%sUser error: Identifier '%s' has not been declared or assigned\n" % (_where(line, col), name))
+        if _src[2] is None:
+            raise SystemExit(1)  # no recovery: a cell stops, as before
+        return
+    if isinstance(e, _UserError):
+        _sys.stdout.write("Runtime error: %s\n" % e)
+    else:
+        msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
+        where = getattr(e, "where", None)
+        blank = "\n" if getattr(e, "blank", True) else ""
+        line, col = getattr(e, "pos", None) or (line, col)
+        # Magma wraps the message at 80 columns, as it prints values
+        text = "Runtime error%s: %s" % (" in " + where if where else "", msg)
+        _sys.stdout.write("%s%s\n%s" % (_where(line, col), _wrap(text, 0, 0), blank))
+    if _src[2] != "session":
+        raise SystemExit(1)
+
+
+def _compile_error(line, col, msg):
+    """A statement Magma rejects before running it ("User error: ..."):
+    reported, and the next statement runs (in a file too); a cell (no
+    recovery) stops."""
+    _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: " + msg, 0, 0)))
+    if _src[2] is None:
+        raise SystemExit(1)
+
+
+def _syntax_error(line, col, detail):
+    """A syntax error at (line, col) (line 0: at the end of the input), in
+    Magma's words on stdout; the parser's reason goes to stderr."""
+    if line:
+        _sys.stdout.write("%sUser error: bad syntax\n" % _where(line, col))
+    else:
+        _sys.stdout.write("\nUser error: syntax error at end of input\n")
+    _sys.stderr.write("sagebrush: bad syntax: %s (%s, line %d)\n" % (detail, _src[0], line or len(_src[1])))
+    if _src[2] != "session" or not line:
+        raise SystemExit(1)
 
 
 def _quit():
@@ -51,12 +134,12 @@ def _quit():
 
 
 def _error(args):
-    raise MagmaError(" ".join(_str(a) for a in args))
+    raise _UserError(" ".join(_str(a) for a in args))
 
 
 def _assert(c):
     if not _bool(c):
-        raise MagmaError("Assertion failed")
+        raise MagmaError("Assertion failed", "assert", False)
 
 
 # ------------------------------------------------------------------ return values
@@ -303,6 +386,8 @@ def _own(v, name=None):
         return s
     if isinstance(v, MTuple):
         return MTuple(_own(x) for x in v)
+    if isinstance(v, MRec):
+        return v._copy()
     return v
 
 
@@ -356,14 +441,22 @@ def _index(s, i):
 
 
 _UNDEF = object()
+_DELETE = object()  # assigned along a path by `delete r`a`
 
 
 def _assign_path(obj, path, val):
     """x[i][j] := v (sequences: also one past the end, filling undefined)."""
     if not path:
-        return _own(val)
-    kind, i = path[0]
+        return val if val is _DELETE else _own(val)
+    kind, i = path[0][:2]
+    pos = path[0][2] if len(path[0]) > 2 else None
     if kind == "attr":
+        if isinstance(obj, MRec):
+            if len(path) == 1:
+                obj._set(i, val, pos)
+            else:
+                obj._set(i, _assign_path(obj._get(i, pos), path[1:], val), pos)
+            return obj
         setattr(obj, i, _assign_path(getattr(obj, i, None), path[1:], val))
         return obj
     if isinstance(obj, MRange):
@@ -385,8 +478,422 @@ def _assign_path(obj, path, val):
     raise MagmaError("cannot assign into %s" % _str(obj))
 
 
-def _getattr(x, name):
+def _getattr(x, name, pos=None):
+    """x`name (and x``s, with s a string)."""
+    if isinstance(x, MRec):
+        return x._get(name, pos)
+    if not isinstance(name, str):
+        raise MagmaError("Bad argument types", "`", True, pos)
     return getattr(x, name)
+
+
+def _assigned(x, name):
+    """assigned x`name."""
+    if isinstance(x, MRec):
+        x._field(name, None)
+        return name in x.vals
+    return hasattr(x, name)
+
+
+def _assigned_name(read):
+    """assigned x, for a variable x."""
+    try:
+        read()
+        return True
+    except NameError:
+        return False
+
+
+# ------------------------------------------------------------------ records
+
+def _magma_str(x):
+    """A structure or category as Magma prints it where it must be read
+    back (the fields of a record format): IntegerRing(), RationalField()."""
+    if x is _ZZ:
+        return "IntegerRing()"
+    if x is _QQ:
+        return "RationalField()"
+    return _inline(x)
+
+
+class MRecFormat:
+    """recformat< n : Integers(), misc, seq : SeqEnum >: field names, each
+    with an optional structure (values are coerced into it) or category
+    (values must have it).  Behaviour from Magma's documentation (Records)
+    and checked against Magma."""
+
+    def __init__(self, fields):
+        self.fields = [(n, c) for n, c in fields]
+        self.names = [n for n, _ in fields]
+
+    def __repr__(self):
+        return "recformat<%s>" % ", ".join(n if c is None else "%s: %s" % (n, _magma_str(c)) for n, c in self.fields)
+
+    def _constraint(self, name):
+        for n, c in self.fields:
+            if n == name:
+                return c
+        raise KeyError(name)
+
+
+def _recformat(fields, pos=None):
+    """recformat< ... >: each restriction must be a structure or a category
+    (Magma's "Expression for field a is not a category or structure")."""
+    for name, c in fields:
+        if c is None or isinstance(c, _Cat) or c is _ZZ or c is _QQ:
+            continue
+        if isinstance(c, (MSeq, MSet, MRange)) or hasattr(c, "_magma_coerce") or hasattr(c, "_magma_contains"):
+            # a structure, but its use (and printing) as a restriction isn't done
+            raise MagmaError("this structure as the restriction of field %s is not supported yet" % name,
+                             "recformat< ... >", True, pos)
+        raise MagmaError("Expression for field %s is not a category or structure" % name, "elt< ... >", True, pos)
+    return MRecFormat(fields)
+
+
+def _global_name(obj):
+    """The first (oldest) global variable that holds obj now, or None.
+    Magma names structures this way where it prints them inside others
+    (checked against Magma: after `B := X; A := X; delete X;` a record of
+    format X prints rec<B | ...>)."""
+    main = _sys.modules.get("__main__")
+    for k, v in (vars(main).items() if main is not None else ()):
+        if v is obj and not k.startswith("_"):
+            return k[:-1] if k.endswith("_") and k[:-1] in _PYKW else k
+    return None
+
+
+def _format_name(fmt):
+    """How a record prints its format."""
+    return _global_name(fmt) or repr(fmt)
+
+
+# Python keywords: a Magma name that is one gets a trailing _ (src/magma.ts pyName)
+_PYKW = set(("False None True and as assert async await break class continue def del elif else except finally for from global "
+             "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split())
+
+
+class MRec:
+    """A record: values for some of its format's fields."""
+
+    def __init__(self, fmt, vals=None):
+        self.fmt = fmt
+        self.vals = dict(vals or {})
+
+    def _field(self, name, pos):
+        if not isinstance(name, str):
+            raise MagmaError("Bad argument types", "`", True, pos)
+        if name not in self.fmt.names:
+            raise MagmaError("Field '%s' does not exist in this record" % name, "`", True, pos)
+        return name
+
+    def _get(self, name, pos=None):
+        self._field(name, pos)
+        if name not in self.vals:
+            raise MagmaError("Field '%s' is not assigned" % name, "`", True, pos)
+        return self.vals[name]
+
+    def _check(self, name, v):
+        """v as stored in field `name`, or None if it doesn't fit."""
+        c = self.fmt._constraint(name)
+        if c is None:
+            return v
+        if isinstance(c, _Cat):
+            return v if Type(v) == c else None
+        try:
+            return _coerce(c, v)
+        except Exception:
+            return None
+
+    def _set(self, name, v, pos=None):
+        self._field(name, pos)
+        if v is _DELETE:
+            self.vals.pop(name, None)
+            return
+        w = self._check(name, v)
+        if w is None:
+            raise MagmaError("RHS value invalid for field '%s'" % name, ":=", False, pos)
+        self.vals[name] = w
+
+    def _copy(self):
+        return MRec(self.fmt, {k: _own(v) for k, v in self.vals.items()})
+
+    def _str(self, indent):
+        head = "rec<%s | " % _format_name(self.fmt)
+        names = [n for n in self.fmt.names if n in self.vals]
+        if not names:
+            return head + ">"
+        pad = " " * (indent + 4)
+        lines = []
+        for n in names:
+            start = "%s := " % n
+            v = self.vals[n]
+            # a record or a list of structures nests 4 deeper; a value that
+            # wraps (a long sequence or string) continues 8 deeper
+            deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet)) and not all(_atomic(x) for x in v))
+            lines.append(pad + start + _str(v, indent + (4 if deep else 8), indent + 4 + len(start)))
+        return head + "\n" + ",\n".join(lines) + ">"
+
+
+def _rec(fmt, assigns, pos=None):
+    """rec< F | name := value, ... >."""
+    try:
+        return _make_rec(fmt, assigns)
+    except MagmaError as e:
+        e.pos = e.pos or pos
+        raise
+
+
+def _make_rec(fmt, assigns):
+    if not isinstance(fmt, MRecFormat):
+        raise MagmaError("Bad argument types", "rec< ... >")
+    r = MRec(fmt)
+    seen = set()
+    for name, v in assigns:
+        # in order, as Magma checks them: unknown, given twice, then the value
+        if name not in fmt.names:
+            raise MagmaError("Field '%s' is not in the format" % name, "rec< ... >")
+        if name in seen:
+            raise MagmaError("Field '%s' given more than once" % name, "rec< ... >")
+        seen.add(name)
+        w = r._check(name, v)
+        if w is None:
+            c = fmt._constraint(name)
+            raise MagmaError("Value for field '%s' should have category %s" % (name, c) if isinstance(c, _Cat)
+                             else "Value for field '%s' not in structure given by format" % name, "rec< ... >")
+        r.vals[name] = _own(w)
+    return r
+
+
+def Names(x):
+    """The field names of a record format or of a record."""
+    if isinstance(x, MRec):
+        x = x.fmt
+    if isinstance(x, MRecFormat):
+        return MSeq(list(x.names))
+    raise MagmaError("Bad argument types", "'Names'")
+
+
+def Format(r):
+    """The format of a record."""
+    if isinstance(r, MRec):
+        return r.fmt
+    raise MagmaError("Bad argument types", "'Format'")
+
+
+# ------------------------------------------------------------------ maps
+
+def _struct_name(S):
+    """A map's domain or codomain as Magma prints it in the map: "RngInt: x"
+    when a global variable x holds it, else the structure itself."""
+    n = _global_name(S)
+    return "%s: %s" % (Type(S), n) if n is not None else _inline(S)
+
+
+class MMap:
+    """A map made by map< A -> B | ... >, pmap< ... > or hom< ... > (rule
+    forms), from Magma's documentation (Mappings) and checked against
+    Magma: given by a rule x :-> e(x) (optionally with an inverse rule) or
+    by its graph (pairs <x, y> or x -> y); also inverses and compositions."""
+
+    def __init__(self, dom, cod, rule=None, inv=None, graph=None, partial=False, parts=None, inverse_of=None):
+        self.dom, self.cod = dom, cod
+        self.rule, self.inv, self.graph, self.partial = rule, inv, graph, partial
+        self.parts = parts            # (f, g): the composition, f first
+        self.inverse_of = inverse_of  # the map this is the inverse of
+
+    def __repr__(self):
+        head = "Mapping from: %s to %s" % (_struct_name(self.dom), _struct_name(self.cod))
+        if self.parts is not None:
+            f, g = self.parts
+            return head + "\n" + _wrap("Composition of %r and" % f, 0, 0) + "\n" + repr(g)
+        if self.graph is not None:
+            return head + "".join("\n    " + _inline(MTuple([x, y])) for x, y in self.graph)
+        if self.rule is not None:
+            return head + " given by a rule" + ("" if self.inv is not None else " [no inverse]")
+        return head
+
+    def __call__(self, x):
+        if isinstance(x, MSet) and not _in(x, self.dom):
+            # the image of a set of elements
+            return _set([self(y) for y in x.ordered()])
+        if self.parts is not None:
+            return self.parts[1](self.parts[0](x))
+        if self.inverse_of is not None:
+            return self.inverse_of._preimage(x, "map application")
+        if self.graph is not None:
+            for a, b in self.graph:
+                if _eq(a, x):
+                    return b
+            raise MagmaError("Application of map failed", "map application")
+        if not _in(x, self.dom):
+            raise MagmaError("Element is not in the domain of the map", "map application")
+        y = self.rule(x)
+        if not _in(y, self.cod):
+            raise MagmaError("Element is not in the codomain of the map", "map application")
+        return _coerce(self.cod, y) if hasattr(self.cod, "_magma_coerce") else y
+
+    def _preimage(self, y, where):
+        """The preimage of y, as Magma computes it: through the inverses of
+        the parts of a composition (the last part first); by the inverse
+        rule, checking that y is in the codomain and the result in the
+        domain (Magma's message is the same for both), and coercing it."""
+        if self.parts is not None:
+            f, g = self.parts
+            return f._preimage(g._preimage(y, where), where)
+        if self.inverse_of is not None:
+            return self.inverse_of(y)
+        if self.graph is not None:
+            raise MagmaError("Map has no inverse", where)
+        if self.inv is None:
+            raise MagmaError("There is no rule for calculating the preimage", where)
+        if not _in(y, self.cod):
+            raise MagmaError("Element is not in the codomain of the map", where)
+        x = self.inv(y)
+        if not _in(x, self.dom):
+            raise MagmaError("Element is not in the codomain of the map", where)
+        return _coerce(self.dom, x) if hasattr(self.dom, "_magma_coerce") else x
+
+    def __mul__(self, g):
+        if not isinstance(g, MMap):
+            return NotImplemented
+        if not (g.dom is self.cod or _eq(g.dom, self.cod)):
+            raise MagmaError("The codomain of the first map is not the domain of the second", "'*'")
+        return MMap(self.dom, g.cod, parts=(self, g))
+
+    def _inverse(self, where):
+        if self.parts is not None:
+            f, g = self.parts
+            return MMap(self.cod, self.dom, parts=(g._inverse(where), f._inverse(where)))
+        if self.inverse_of is not None:
+            return self.inverse_of
+        if self.graph is not None:
+            raise MagmaError("Map has no inverse", where)
+        return MMap(self.cod, self.dom, inverse_of=self)
+
+
+def _map(kind, dom, cod, rule=None, inv=None, graph=None, pairs=None, pos=None):
+    """map< A -> B | ... > (kind "map", "pmap" or "hom").  A graph gives at
+    most one image for each element, and a map's (not a pmap's) gives one
+    for every element of its domain, which must then be finite (Magma's
+    errors, checked against Magma)."""
+    where = "%s< ... >" % kind
+    try:
+        if pairs is not None:
+            graph = [tuple(p) for p in pairs]
+        elif graph is not None:
+            items = graph.ordered() if isinstance(graph, MSet) else list(graph)
+            if not all(isinstance(t, MTuple) and len(t) == 2 for t in items):
+                raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
+            graph = [tuple(t) for t in items]
+        if graph is not None:
+            for k, (a, b) in enumerate(graph):
+                if any(_eq(a, a2) for a2, _ in graph[:k]):
+                    raise MagmaError("More than one image is given for a single element of the domain", where)
+            for a, b in graph:
+                if not _in(a, dom) or not _in(b, cod):
+                    raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
+            if kind != "pmap":
+                if dom is _ZZ or dom is _QQ:
+                    raise MagmaError("Domain of map has no cardinality algorithm", where)
+                if not isinstance(dom, (MSet, MSeq, MRange)):
+                    raise MagmaError("a map given by a graph on this domain is not supported yet", where)
+                if not all(any(_eq(a, x) for a, _ in graph) for x in _iter(dom)):
+                    raise MagmaError("Not enough images given to constructor", where)
+        return MMap(dom, cod, rule, inv, graph, kind == "pmap")
+    except MagmaError as e:
+        e.pos = e.pos or pos
+        raise
+
+
+def _preimage(f, y, pos=None):
+    """y @@ f; an error points at the @@ (pos)."""
+    try:
+        if isinstance(f, MMap):
+            return f._preimage(y, "'@@'")
+        raise MagmaError("Bad argument types", "'@@'")
+    except MagmaError as e:
+        e.pos = e.pos or pos
+        raise
+
+
+def Domain(f):
+    """The domain of a map."""
+    return f.dom
+
+
+def Codomain(f):
+    """The codomain of a map."""
+    return f.cod
+
+
+def Inverse(f):
+    """The inverse of a map (applying it needs an inverse rule)."""
+    if isinstance(f, MMap):
+        return f._inverse("'Inverse'")
+    raise MagmaError("Bad argument types", "'Inverse'")
+
+
+def Image(f):
+    """The image of a map given by its graph."""
+    if isinstance(f, MMap) and f.graph is not None:
+        return _set([b for _, b in f.graph])
+    raise MagmaError("Image of this map is not supported yet", "'Image'")
+
+
+class _Unset:
+    def __repr__(self):
+        return "<unassigned>"
+
+
+_UNSET = _Unset()  # a map rule's snapshot of a name not assigned then
+
+
+_CAPTURED = set()  # the names map rules have captured
+
+
+def _snap(read, name):
+    """A map rule's snapshot of a free variable when the map is made: its
+    value (copied, value semantics), or _UNSET if it is not assigned."""
+    _CAPTURED.add(name)
+    try:
+        return _own(read())
+    except NameError:
+        return _UNSET
+
+
+def _delete_check(name):
+    """delete x: in Magma a map rule that captured x sees it unassigned
+    afterwards (though a later assignment doesn't reach the rule); that
+    isn't modelled, so deleting a captured variable is refused."""
+    if name in _CAPTURED:
+        raise MagmaError("deleting a variable that a map rule has captured is not supported yet")
+
+
+def _val(v, name):
+    """A captured variable read in a map rule: an error (as Magma's) only
+    if it was not assigned when the map was made."""
+    if v is _UNSET:
+        raise MagmaError("Variable '%s' has not been initialized" % (name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name))
+    return v
+
+
+def _enclosing_unset(name):
+    """A map rule made inside another rule reads a name that is a local of
+    the enclosing rule (tested there by `assigned` first), never assigned:
+    Magma's error when the inner map is made."""
+    raise MagmaError("Variable '%s' in enclosing environment has not been assigned to"
+                     % (name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name))
+
+
+def _not_supported(what, pos=None):
+    """Something the translator parses but Sagebrush doesn't do yet."""
+    raise MagmaError("%s is not supported yet" % what, None, True, pos)
+
+
+def _unsupported(name, pos=None):
+    """A constructor name< ... > the translator parses but Sagebrush doesn't
+    implement yet: an error, never a guess."""
+    raise MagmaError("%s< ... > is not supported yet" % name, None, True, pos)
 
 
 # ------------------------------------------------------------------ operators
@@ -440,6 +947,9 @@ def _pow(a, b):
 
 
 def _eq(a, b):
+    if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
+        # Magma has no equality of record formats
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (Type(a), Type(b)), "'eq'")
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) == MReal.of(b)
     if isinstance(a, (MSeq, MRange)) and isinstance(b, (MSeq, MRange)):
@@ -759,7 +1269,7 @@ def _inline(v, in_tuple=False):
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, str):
-        return '"' + v + '"' if in_tuple else v
+        return '"' + v + '"' if in_tuple and not isinstance(v, _Cat) else v
     if isinstance(v, MTuple):
         return "<" + ", ".join(_inline(x, True) for x in v) + ">"
     if isinstance(v, MRange):
@@ -822,11 +1332,13 @@ def _str(v, indent=0, col=None):
             return o.strip() + c.strip()
         if all(_atomic(x) or x is _UNDEF for x in raw):
             items = _items(v)
-            # wrapped at WIDTH: an item fits when the line, it and ", " do
+            # wrapped at WIDTH: an item fits when the line (from the column
+            # it starts at), it and ", " do
             lines, line = [], o
             for k, it in enumerate(items):
                 piece = it + (", " if k < len(items) - 1 else c)
-                if line.strip() and len(line) + len(it) + 2 > WIDTH:
+                start = col if not lines else indent
+                if line.strip() and start + len(line) + len(it) + 2 > WIDTH:
                     lines.append(line)
                     line = ""
                 line += piece
@@ -835,6 +1347,8 @@ def _str(v, indent=0, col=None):
         pad = " " * (indent + 4)
         inner = [pad + _str(x, indent + 4) for x in raw]
         return o.strip() + "\n" + ",\n".join(inner) + "\n" + " " * indent + c.strip()
+    if isinstance(v, MRec):
+        return v._str(indent)
     if getattr(v, "_magma_nowrap", False):
         return _inline(v)
     return _wrap(_inline(v), col, indent + _extra(v), indent)
@@ -1028,7 +1542,42 @@ def Parent(x):
     raise MagmaError("Parent: unknown structure")
 
 
+class _Cat(str):
+    """A category (the type of an object, as Type returns it): prints as its
+    name, without quotes."""
+
+
+# Categories bound as names (RngIntElt, SeqEnum, ...), for Type(x) eq
+# RngIntElt and record formats such as recformat< n : RngIntElt >.
+_CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
+               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map").split()
+for _c in _CATEGORIES:
+    globals()[_c] = _Cat(_c)
+
+
+def _type_name(x):
+    if isinstance(x, _Cat):
+        return "Cat"
+    if isinstance(x, MRec):
+        return "Rec"
+    if isinstance(x, MRecFormat):
+        return "RecFrmt"
+    if isinstance(x, MMap):
+        return "Map"
+    if x is _ZZ:
+        return "RngInt"
+    if x is _QQ:
+        return "FldRat"
+    if type(x).__name__ == "MList":
+        return "List"
+    return None
+
+
 def Type(x):
+    return _Cat(_type_name(x) or _type(x))
+
+
+def _type(x):
     if isinstance(x, bool):
         return "BoolElt"
     if isinstance(x, int):
@@ -2289,3 +2838,4 @@ def Rank(x):
 
 __all__ = [n for n, v in list(globals().items())
            if not n.startswith("_") and (callable(v) or isinstance(v, type)) and getattr(v, "__module__", None) == __name__]
+__all__ += _CATEGORIES

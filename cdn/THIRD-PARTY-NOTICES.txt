@@ -12,6 +12,25 @@ Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
 gave explicit permission for this port to be licensed however Sagebrush
 chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
+### PSAGE (used with the author's permission)
+
+Parts of PSAGE (https://github.com/williamstein/psage, distributed under the
+GNU GPL, version 3 or later) may be ported to Sagebrush with the copyright
+holder's permission. William Stein is the sole author and copyright holder
+of the files below; on 2026-10-14 he gave permission for them to be ported to
+Sagebrush and licensed under MIT OR Apache-2.0:
+
+- every file in `psage/modform/hilbert/sqrt5` (Hilbert modular forms over
+  $\mathbb{Q}(\sqrt{5})$; see [engine/hmf/PROVENANCE.md](engine/hmf/PROVENANCE.md));
+- in `psage/modform/rational` ($p$-adic $L$-series of elliptic curves and
+  modular symbols): `modular_symbol_map.pyx`/`.pxd`, `newforms.py`,
+  `padic_elliptic_lseries_fast.pyx`, `special.py`, `special_fast.pyx`,
+  `unfiled.py`.
+
+`psage/modform/rational/padic_lseries.py` credits Jennifer Balakrishnan with
+its first version, so it is not covered: it is not ported unless she also
+gives permission. Nothing else in PSAGE is covered.
+
 ### CPython (PSF License Agreement)
 
 Copyright (c) 2001 Python Software Foundation. See
@@ -24,10 +43,14 @@ Copyright (c) 2001 Python Software Foundation. See
   (vendored in `pyparse/vendor/cpython`), with TypeScript ports of parts of
   CPython's `Parser/` directory, and a Unicode character-name table generated
   from Python's `unicodedata`.
+- `src/runtime/ops.ts`, `intTrueDiv`: int / int follows the scheme of
+  CPython's `long_true_divide` (`Objects/longobject.c`): the shift, the two
+  extra bits and the sticky bit, a single round to even at the result's
+  precision (subnormals included), then exact scaling.
 
 == Rust crates compiled into the engines (28) ==
 
-Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-ball, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-interrupt, sagebrush-modsym, sagebrush-mpoly, sagebrush-poly, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
+Sagebrush's own crates: sagebrush-ap, sagebrush-arith, sagebrush-ball, sagebrush-bigint, sagebrush-classgroup, sagebrush-galois, sagebrush-group, sagebrush-hmf, sagebrush-interrupt, sagebrush-modsym, sagebrush-mpoly, sagebrush-poly, sagebrush-sym, sagebrush-web. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
 
 cfg-if 1.0.5: MIT OR Apache-2.0
 crossbeam-deque 0.8.8: MIT OR Apache-2.0
