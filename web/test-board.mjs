@@ -518,7 +518,28 @@ try {
       await ev("document.querySelector('[data-sbb=help]').click(), 1");
       check(await helpOpen(), "B5: Help opens its dialog");
       check(await ev("(() => { const d = document.querySelector('[data-sbb=helpdlg]'), t = d.textContent; return /Shift-drag from one note to another/.test(t) && /Double-click an item to write in it/.test(t) && [...d.querySelectorAll('a')].map((a) => a.href).join() === 'https://sagebrush.space/board-format.md,https://sagebrush.space/articles/notebook/01-how-cells-run,https://sagebrush.space/articles/' && [...d.querySelectorAll('a')].every((a) => a.target === '_blank' && /noopener/.test(a.rel)); })()"), "B5: ...what the hint said, more, and links to read more (in a new tab)");
-      await ev("document.querySelector('[data-sbb=helpdlg]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), document.querySelector('[data-sbb=helpdlg]').close(), 1");
+      // (real keys, astra's UI-D74-1: while Help is open the board's
+      // shortcuts wait, its tour, Delete, undo and redo, and the arrows that
+      // move a selection; Esc closes it, as the browser closes a dialog)
+      {
+        await ev("document.querySelector('[data-sbb=helpdlg]').close(), 1");
+        const rk = async (key, code, vk, modifiers = 0) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk, modifiers }); await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk, modifiers }); await sleep(200); };
+        const cn = await center("c");
+        await mouse("mousePressed", cn.x, cn.y); await mouse("mouseReleased", cn.x, cn.y, { buttons: 0 });
+        await sleep(300);
+        const selected = await ev("window.board.selection.has('c')"), before = JSON.stringify(await docOf()), step0 = await ev("window.sagebrush.board.snapshot().step");
+        await ev("document.querySelector('[data-sbb=help]').click(), 1");
+        check((await helpOpen()) && await ev("document.querySelector('[data-sbb=helpdlg]').contains(document.activeElement)"), "B5: Help opens with the focus in it");
+        for (const k of [["ArrowRight", "ArrowRight", 39], ["ArrowDown", "ArrowDown", 40], ["Delete", "Delete", 46], ["Backspace", "Backspace", 8], [" ", "Space", 32], ["0", "Digit0", 48], ["?", "Slash", 191, 8], ["z", "KeyZ", 90, 2], ["z", "KeyZ", 90, 10], ["y", "KeyY", 89, 2]]) await rk(...k);
+        check(selected && JSON.stringify(await docOf()) === before, "B5: with Help open, real keys (arrows, Delete, Backspace, undo, redo) leave the board as it was: " + selected);
+        check((await ev("window.sagebrush.board.snapshot().step")) === step0 && (await helpOpen()), "B5: ...and its tour, Help still open");
+        await rk("Escape", "Escape", 27);
+        check(!(await helpOpen()), "B5: Esc closes Help (the browser's, not the board's)");
+        await rk("Delete", "Delete", 46);
+        check(!(await docOf()).nodes.some((n) => n.id === "c" || n.children?.some((m) => m.id === "c")), "B5: ...after which the board's keys are its own again (Delete deletes the selected note)");
+        await rk("z", "KeyZ", 90, 2);
+        check(JSON.stringify(await docOf()) === before, "B5: ...and undo brings it back");
+      }
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })), 1");
       check(await helpOpen(), "B5: the ? key opens it");
       await ev("document.querySelector('[data-sbb=helpdlg]').close(), 1");
