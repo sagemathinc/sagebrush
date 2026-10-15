@@ -591,6 +591,40 @@ def _em_tail(s, a, N, m=12):
 _ZETA_MAX_T = 1e5
 
 
+def _expm1_c(z):
+    """e^z - 1 without cancellation, real or complex: for z = x + iy,
+    expm1(x) cos y - 2 sin^2(y/2) + i e^x sin y"""
+    if not isinstance(z, complex):
+        return _math.expm1(z)
+    x, y = z.real, z.imag
+    h = _math.sin(0.5 * y)
+    return complex(_math.expm1(x) * _math.cos(y) - 2 * h * h, _math.exp(x) * _math.sin(y))
+
+
+def _zeta_near0(s):
+    """zeta(s) for 0 < |s| < 0.05, real or complex, by Euler-Maclaurin
+    summation (DLMF 25.2.9) at s itself, with N = 10 and 12 Bernoulli
+    corrections: the functional equation's 1 - s rounds to 1 for tiny s,
+    losing about eps/|s| (zeta(1e-16) came out -0.4504, and 1e-17 raised
+    PoleError; 1e-13 at |s| = 1e-3); this is the better of the two below
+    |s| = 0.05 (2.3e-15 at most, against mpmath).  With k^-s = 1 + expm1(-s log k), the integer parts of the
+    sum, of N^(1-s)/(s - 1) and of N^-s/2 add up to exactly -1/2, and every
+    other term is O(s), so nothing cancels; the first neglected correction,
+    about 2 |s| 24!/((2 pi)^26 N^25), is below 1e-22.  (@sagebrush-sage's
+    method, from Sage mode's lib/_sage_expr.py.)"""
+    N = 10
+    e = [0.0] + [_expm1_c(-s * _math.log(k)) for k in range(1, N + 1)]
+    # (sum_(k<N) k^-s + N^(1-s)/(s-1) + N^-s/2 + 1/2)
+    t = sum(e[1:N]) - N * s / (1 - s) - N * e[N] / (1 - s) + e[N] / 2
+    # (+ sum_j B_2j/(2j)! s (s+1) ... (s+2j-2) N^(-s-2j+1))
+    poch, fact = s, 2.0
+    for j in range(1, 13):
+        t += _B2K[j - 1] / fact * poch * (1 + e[N]) / N ** (2 * j - 1)
+        poch *= (s + 2 * j - 1) * (s + 2 * j)
+        fact *= (2 * j + 1) * (2 * j + 2)
+    return t - 0.5
+
+
 def _zeta1(s):
     cplx = isinstance(s, complex)
     if _bad(s):
@@ -606,6 +640,8 @@ def _zeta1(s):
     if s == 0:
         # (DLMF 25.6.1; the trivial zeros, DLMF 25.6.4, start at -2)
         return complex(-0.5, 0.0) if cplx else -0.5
+    if abs(s) < 0.05:
+        return _zeta_near0(s)
     sr = s.real
     if sr < 0.5:
         # (DLMF 25.4.2, the functional equation, in logarithms:
