@@ -18,7 +18,8 @@ export function isHtml(text: string): boolean {
  * id="${id}">`, parsed; null if `text` is no such export: its generator
  * (`<meta name="generator">`, near its start, as assemble() writes it)
  * starts with `generator`, and the script is there, whole, its JSON
- * well-formed (its "<"s are written <, so no "</script>" is in it).
+ * well-formed. (exportHtml writes each "<" in it as \u003c, so no
+ * "</script>" is in it: the first "</script>" after it is its end.)
  */
 export function embeddedJson(text: string, id: string, generator: string): unknown {
   const meta = /<meta name="generator" content="([^"<>]*)">/.exec(text.slice(0, 8192));
