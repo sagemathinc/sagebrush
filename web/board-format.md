@@ -82,7 +82,7 @@ A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`).
 | `tools` | [string] | the toolbar's tools in Edit mode, in order (written by Sagebrush) |
 | `images` | {name: picture} | pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL). A name is letters, digits, `_` and `-`, at most 100 characters (`plot-1`, not `plot 1` or `figure.png`): a picture by another name is left out, and so is a note's or a background's use of it |
 | `pages` | [page] | several pages; a document with pages has no `nodes`, `edges` or `steps` of its own |
-| `intro` | string | Markdown shown before the tour starts |
+| `intro` | string | Markdown shown before the tour starts (with pages: on the first page, if it has no `intro` of its own) |
 | `refBase` | string | the base URL for `ref` links that are paths (e.g. a repository's blob URL) |
 | `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how the top-level items are laid out (default `graph`) |
 | `columns` | number | as for a group |
@@ -101,7 +101,7 @@ A page of a board: its own items, edges and tour.
 |---|---|---|
 | `id` | string | needed by templates; unique among the pages |
 | `title` | string | the page's title (plain text) |
-| `intro` | string | Markdown shown before the page's tour |
+| `intro` | string | Markdown shown before the page's tour (without it, the page's title is shown; on the first page, the document's `intro`) |
 | `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how the page's items are laid out (default `graph`) |
 | `columns` | number | as for a group |
 | `direction` | `"TB"` \| `"LR"` | as for a group |

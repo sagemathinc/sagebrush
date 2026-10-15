@@ -91,6 +91,7 @@ jobs:
           CHROME=google-chrome node web/board/test-ink-draw.mjs
           CHROME=google-chrome node web/board/test-backdrop.mjs
           CHROME=google-chrome node web/board/test-present.mjs
+          CHROME=google-chrome node web/board/test-tour.mjs
           CHROME=google-chrome node web/board/test-templates.mjs
           CHROME=google-chrome node web/board/test-stickers.mjs
           CHROME=google-chrome node web/board/test-cached.mjs
