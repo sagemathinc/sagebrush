@@ -52,6 +52,22 @@ impl Fun {
             Fun::ImagPart => "imag_part",
             Fun::Arg => "arg",
             Fun::Heaviside => "heaviside",
+            Fun::Psi => "psi",
+            Fun::LogGamma => "log_gamma",
+            Fun::Zeta => "zeta",
+            Fun::ZetaDeriv => "zetaderiv",
+            Fun::HurwitzZeta => "hurwitz_zeta",
+            Fun::Beta => "beta",
+            Fun::Erfc => "erfc",
+            Fun::Erfi => "erfi",
+            Fun::Erfinv => "erfinv",
+            Fun::ExpIntegralE1 => "exp_integral_e1",
+            Fun::Ei => "Ei",
+            Fun::Dilog => "dilog",
+            Fun::Polylog => "polylog",
+            Fun::LambertW => "lambert_w",
+            Fun::EllipticKc => "elliptic_kc",
+            Fun::EllipticEc => "elliptic_ec",
             Fun::User(n) => return n.to_string(),
             Fun::Deriv(n, _) => return n.to_string(),
             Fun::Integral => "integrate",
@@ -102,14 +118,30 @@ impl Fun {
             "imag_part" | "imag" => Fun::ImagPart,
             "arg" => Fun::Arg,
             "heaviside" | "unit_step" => Fun::Heaviside,
+            "psi" => Fun::Psi,
+            "log_gamma" => Fun::LogGamma,
+            "zeta" => Fun::Zeta,
+            "zetaderiv" => Fun::ZetaDeriv,
+            "hurwitz_zeta" => Fun::HurwitzZeta,
+            "beta" => Fun::Beta,
+            "erfc" => Fun::Erfc,
+            "erfi" => Fun::Erfi,
+            "erfinv" => Fun::Erfinv,
+            "exp_integral_e1" => Fun::ExpIntegralE1,
+            "Ei" | "exp_integral_ei" => Fun::Ei,
+            "dilog" => Fun::Dilog,
+            "polylog" => Fun::Polylog,
+            "lambert_w" => Fun::LambertW,
+            "elliptic_kc" => Fun::EllipticKc,
+            "elliptic_ec" => Fun::EllipticEc,
             _ => return None,
         })
     }
 
     pub fn arity(&self) -> Option<usize> {
         match self {
-            Fun::Atan2 | Fun::Binomial => Some(2),
-            Fun::User(_) | Fun::Deriv(..) | Fun::Integral | Fun::Limit => None,
+            Fun::Atan2 | Fun::Binomial | Fun::ZetaDeriv | Fun::HurwitzZeta | Fun::Beta | Fun::Polylog => Some(2),
+            Fun::User(_) | Fun::Deriv(..) | Fun::Integral | Fun::Limit | Fun::Psi | Fun::LambertW => None,
             _ => Some(1),
         }
     }
@@ -123,9 +155,13 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
             value_error(format!("{}() takes exactly {} argument{} ({} given)", f.name(), n, if n == 1 { "" } else { "s" }, args.len()));
         }
     }
-    // floats in, a float out
+    if crate::special::is_special(&f) {
+        return crate::special::eval(f, args);
+    }
+    // floats in, a float out (gamma's and erf's from the front end, as
+    // the other special functions')
     let numeric = args.iter().all(|a| a.is_num());
-    if numeric && args.iter().any(|a| a.is_float()) {
+    if numeric && args.iter().any(|a| a.is_float()) && !matches!(f, Fun::Gamma | Fun::Erf) {
         let v: Vec<(f64, f64)> = args.iter().map(|a| a.as_num().unwrap().to_c64()).collect();
         if let Some((re, im)) = float_eval(&f, &v) {
             return num(if im == 0.0 { Num::float(re) } else { Num::Float(re, im) });
@@ -326,6 +362,8 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             Some(if v.is_const(Const::UnsignedInfinity) { v } else { mul2(&c, &v) })
         }
         Fun::Sinh | Fun::Tanh | Fun::Asinh | Fun::Atanh | Fun::Erf if x.is_zero() => Some(zero()),
+        Fun::Erf if x.is_const(Const::Infinity) => Some(one()),
+        Fun::Erf if x.is_const(Const::MinusInfinity) => Some(int(-1)),
         Fun::Cosh | Fun::Sech if x.is_zero() => Some(one()),
         Fun::Acosh if x.is_one() => Some(zero()),
         Fun::Log => {

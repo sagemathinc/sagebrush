@@ -626,10 +626,16 @@ fn fun_at(f: &Fun, l: &Expr) -> R<Expr> {
         Fun::Cosh if pinf || minf => infinity(),
         Fun::Erf if pinf => one(),
         Fun::Erf if minf => int(-1),
+        Fun::Erfc if pinf => zero(),
+        Fun::Erfc if minf => int(2),
+        Fun::Erfi if pinf || minf => l.clone(),
+        Fun::ExpIntegralE1 if pinf => zero(),
+        Fun::LogGamma | Fun::Gamma | Fun::Psi | Fun::Ei if pinf => infinity(),
+        Fun::Zeta if pinf => one(),
         Fun::Sin | Fun::Cos if pinf || minf => return fail("limit does not exist (the function oscillates)"),
         // a function at an infinity no rule above covers (sin of complex
         // infinity, ...): not a value to compute with (0 sin(oo) became 0)
-        _ if has_infinity(l) => return fail(format!("limit of {:?} at {} not found", f, crate::to_string(l))),
+        _ if has_infinity(l) => return fail(format!("limit of {} at {} not found", f.name(), crate::to_string(l))),
         _ => fun1(f.clone(), l),
     })
 }
