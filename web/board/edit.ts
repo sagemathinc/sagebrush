@@ -459,7 +459,7 @@ export class Editor {
             const g = find(this.pg(d), id);
             if (!g) continue;
             this.freezeUp(d, g);
-            this.contain(g.parent, g.siblings);
+            this.contain(g.parent, g.siblings, d);
           }
         });
         return;
@@ -475,7 +475,7 @@ export class Editor {
         // (its group's members, and every enclosing group's, keep their
         // places: a group growing moves nothing else)
         this.freezeUp(d, g);
-        if (target === from) { this.contain(g.parent, g.siblings); return; }
+        if (target === from) { this.contain(g.parent, g.siblings, d); return; }
         // into another group, or out to the top level: where it was let go,
         // and that group's members, and every group around it, stay put
         const into = target ? find(this.pg(d), target) : null;
@@ -489,7 +489,7 @@ export class Editor {
         g.node.y = Math.round((now.y - o.y) * 10) / 10;
         const list = into ? (into.node as DocGroup).children : (this.pg(d).nodes ??= []);
         list.push(g.node);
-        this.contain(into ? (into.node as DocGroup) : null, list);
+        this.contain(into ? (into.node as DocGroup) : null, list, d);
       });
     };
     addEventListener("pointermove", move);
@@ -541,13 +541,13 @@ export class Editor {
         const g = find(this.pg(d), it.id);
         if (!g || g.node.kind === "group" || g.node.kind === "ink") return;
         this.freezeUp(d, g);
-        if (g.node.kind === "sticker") { g.node.w = w; this.contain(g.parent, g.siblings); return; }
+        if (g.node.kind === "sticker") { g.node.w = w; this.contain(g.parent, g.siblings, d); return; }
         const n = g.node as DocNote;
         n.w = w;
         // (its height follows: its text's, or its picture's shape; and it no longer fits its text)
         delete n.h;
         delete n.fit;
-        this.contain(g.parent, g.siblings);
+        this.contain(g.parent, g.siblings, d);
       });
     };
     addEventListener("pointermove", move);
@@ -718,7 +718,7 @@ export class Editor {
         const g = find(this.pg(d), id);
         if (!g) continue;
         this.freezeUp(d, g);
-        this.contain(g.parent, g.siblings);
+        this.contain(g.parent, g.siblings, d);
       }
     });
   }
@@ -733,14 +733,18 @@ export class Editor {
     }
   }
   // A member moved above or left of its group's origin: the group moves out
-  // that far, its members back by as much, so it still holds them.
-  private contain(parent: DocGroup | null, siblings: DocNode[]) {
+  // that far, its members back by as much, so it still holds them; and the
+  // group, moved out of the group around it, that one too, and so on up
+  // (a group in a group, UI-FD2-1).
+  private contain(parent: DocGroup | null, siblings: DocNode[], d: BoardDoc) {
     if (!parent) return;
     const minX = Math.min(0, ...siblings.map((s) => s.x ?? 0)), minY = Math.min(0, ...siblings.map((s) => s.y ?? 0));
     if (minX < 0 || minY < 0) {
       parent.x = (parent.x ?? 0) + minX;
       parent.y = (parent.y ?? 0) + minY;
       for (const s of siblings) { s.x = (s.x ?? 0) - minX; s.y = (s.y ?? 0) - minY; }
+      const up = find(this.pg(d), parent.id);
+      if (up) this.contain(up.parent, up.siblings, d);
     }
   }
   // A member taken out: the group closes up around the rest (its corner moves
