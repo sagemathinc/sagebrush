@@ -267,8 +267,11 @@ export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: strin
   const clips: string[] = [];
   // groups' titles and text, outer first
   for (const g of items.filter((it) => it.kind === "group").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0))) {
-    const ls = [...(g.title ? lines(g.title.replace(/\n/g, " "), Math.max(40, g.w - 48), 17, "#24301f", { b: true }) : []), ...(g.text ? lines(g.text, Math.min(g.w - 48, 600)) : [])];
-    if (ls.length) out.push(textBlock(ls, g.x + 24, g.y + 14, g.w - 48, false));
+    // (its title one line, cut with "…", as on the board: the layout keeps one line's band for it, friction 10)
+    const title: Line[] = g.title ? [{ runs: [{ t: ellipsis({ t: g.title.replace(/\n/g, " "), b: true }, 17, Math.max(40, g.w - 48)), b: true }], size: 17, lh: 17 * LH, indent: 0, gap: 0, color: "#24301f" }] : [];
+    const ls = [...title, ...(g.text ? lines(g.text, Math.min(g.w - 48, 600)) : [])];
+    // (its whole title kept, as the group's <title>, when the line shows it cut: UI-0CC-2)
+    if (ls.length) out.push(g.title ? `<g><title>${xmlEscape(g.title.replace(/\n/g, " "))}</title>${textBlock(ls, g.x + 24, g.y + 14, g.w - 48, false)}</g>` : textBlock(ls, g.x + 24, g.y + 14, g.w - 48, false));
   }
   // notes, inner last; each clipped to its box, as on the board
   const notes = items.filter((it) => it.kind === "note" || it.kind === "shape").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));

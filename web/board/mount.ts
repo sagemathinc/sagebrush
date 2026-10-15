@@ -713,6 +713,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("prev").onclick = () => go(back);
   $("next").onclick = () => go(onward);
   $("fit").onclick = () => board.focus();
+  // (reading, a click on a group's title band shows its whole title, or hides it; a click elsewhere, none: UI-0CC-2)
+  board.onTitleClick = (id) => { if (!editor.on) board.reveal(id && id !== board.revealedId ? id : null); else if (board.revealedId) board.reveal(null); };
   on(window, "keydown", (e: KeyboardEvent) => {
     if (!mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
     // (items selected in Edit: the arrow keys move them; in Edit, Space held pans)

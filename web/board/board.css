@@ -31,7 +31,11 @@
 .board-ref { display: block; margin-top: 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #2a6f2f; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .board-ref:hover { text-decoration: underline; }
 .board-group { background: none; border: 0; box-shadow: none; padding: 14px 24px; overflow: visible; z-index: 0; pointer-events: none; }
-.board-group > b { font-size: 17px; color: #24301f; }
+/* (one line, cut with "…": the layout keeps one line's band for it above its members, friction 10) */
+.board-group > b { font-size: 17px; color: #24301f; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* (its whole title, over its members: a click on its band, or Find's; UI-0CC-2) */
+.board-group.reveal, .board-group.found { z-index: 3; contain: layout; }
+.board-group.reveal > b, .board-group.found > b { white-space: normal; overflow: visible; width: max-content; max-width: 60ch; position: relative; background: rgba(250, 250, 247, .96); border-radius: 4px; box-shadow: 0 1px 4px rgba(0, 0, 0, .12); padding: 2px 4px; margin: -2px -4px; }
 .board-group .board-text { color: #4a5544; max-width: 70ch; }
 .board-group a { pointer-events: auto; }
 
