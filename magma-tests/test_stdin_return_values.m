@@ -1,0 +1,36 @@
+// a call's several return values: the first in an expression, all of them
+// where the call is the whole statement, print item, return or func< > body
+function Pair(x) return x, x + 1; end function;
+Pair(2);
+Pair(2), 7;
+print Pair(2), 7;
+(Pair(2));
+[ Pair(2) ];
+{ Pair(2) };
+< Pair(2), 5 >;
+Pair(2) + 1;
+-Pair(2);
+Pair(3)^2;
+#[ Pair(2) ];
+Pair(2) eq 2;
+"v" cat IntegerToString(Pair(5));
+Abs(Pair(-2));
+[ Pair(i) : i in [1 .. 3] ];
+t := [10, 20, 30]; t[Pair(1)];
+for i in [Pair(1) .. 3] do i; end for;
+case Pair(2): when 2: "two"; end case;
+if Pair(2) eq 2 then "yes"; end if;
+g := func< y | Pair(y) >;
+g(3);
+function Outer(y) return Pair(y); end function;
+Outer(4);
+function Both() return Pair(2), 9; end function;
+Both();
+x := Pair(2); x;
+a, b := Outer(4); a, b;
+procedure Bump(~z) z := Pair(z); end procedure;
+w := 6; Bump(~w); w;
+r := rec< recformat< u > | u := Pair(4) >; r`u;
+q, m := Quotrem(17, 5); q, m;
+Quotrem(17, 5) + 1;
+[ Quotrem(17, 5) ];
