@@ -35,18 +35,29 @@ EXAMPLES::
 """
 
 from sagebrush._engine import call as _call
+from _sage_lang import _CallableInt
 
 
 def _strict_int(x, what):
-    """x as an int: a Python or Sage integer (Sagebrush's are ints), checked
-    by type before any conversion (daybreak CORR-FB2-1). bool, floats,
-    rationals, strings and NumPy scalars (an int subclass in Sagebrush) are
-    refused with a TypeError, even when their value is integral."""
+    """x as an int: a Python or Sage integer, recognized by its exact type
+    before any conversion (daybreak CORR-FB2-1 and CORR-434-1). In
+    Sagebrush, 3 and ZZ(3) have type int exactly, and the numerator of a
+    rational as an attribute ((3/4).numerator) has type _CallableInt, an int
+    subclass of _sage_lang that adds only __call__. Everything else is
+    refused with a TypeError, even when its value is integral: bool, floats,
+    rationals, strings, NumPy scalars, and any other int subclass, whose
+    __int__ or __index__ could stand for another value. No user-overridable
+    hook is called."""
     t = type(x)
-    if not isinstance(x, int) or isinstance(x, bool) or any(c.__module__ == "numpy" for c in t.__mro__):
-        name = next(c.__name__ for c in t.__mro__ if not c.__name__.startswith("_"))
-        raise TypeError("%s must be an integer, not %r of type %s" % (what, x, name))
-    return int(x)
+    if t is int:
+        return x
+    if t is _CallableInt:
+        # an exact _sage_lang class: int() runs int's own conversion
+        v = int(x)
+        if type(v) is int and v == x:
+            return v
+    name = next(c.__name__ for c in t.__mro__ if not c.__name__.startswith("_"))
+    raise TypeError("%s must be an integer, not %r of type %s" % (what, x, name))
 
 _FIELD = []
 
@@ -181,6 +192,26 @@ class SqrtFiveIdeal:
 
         sage: HilbertModularForms(3).level(), HilbertModularForms(ZZ(3)).level()  # sagebrush only
         (Fractional ideal (3), Fractional ideal (3))
+        sage: HilbertModularForms((6/1).numerator()).level(), HilbertModularForms((6/1).numerator).level()  # sagebrush only
+        (Fractional ideal (6), Fractional ideal (6))
+
+    Other int subclasses are refused too: their __int__ or __index__ could
+    stand for another value::
+
+        sage: Plain = type("Plain", (int,), {})  # sagebrush only
+        sage: HilbertModularForms(Plain(3))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not 3 of type Plain
+        sage: Warp = type("Warp", (int,), {"__int__": lambda self: 9, "__index__": lambda self: 9})  # sagebrush only
+        sage: HilbertModularForms(Warp(3))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not 3 of type Warp
+        sage: HilbertModularForms((Warp(3), 0))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a coordinate must be an integer, not 3 of type Warp
         sage: HilbertModularForms(3.0)  # sagebrush only
         Traceback (most recent call last):
         ...
