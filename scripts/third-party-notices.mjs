@@ -42,6 +42,7 @@ const artistic = readFileSync(join(root, "LICENSE-Artistic-2.0.txt"), "utf8");
 const PARTS = {
   cpython: () => section("CPython"),
   numpy: () => section("NumPy"),
+  scipy: () => section("SciPy"),
   arm: () => section("Arm Optimized Routines"),
   fdlibm: () => section("fdlibm"),
   marimo: () => section("marimo"),
@@ -59,7 +60,7 @@ const PACKAGES = [
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
   { file: "app/THIRD-PARTY-NOTICES-native.txt", what: "the desktop app's native code (app/src-tauri)", manifest: "app/src-tauri", crates: ["sagebrush-app"], parts: [], mpl: true, native: true },
-  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo"], artistic: "packages/sagebrush", web: true },
+  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web"], parts: ["cpython", "numpy", "scipy", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo"], artistic: "packages/sagebrush", web: true },
 ];
 
 const metas = new Map();
