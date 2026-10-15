@@ -14,45 +14,74 @@ use sagebrush_bigint::BigInt;
 
 pub const MAX_LOCAL: u64 = 1 << 31;
 
+/// The fields are private to the crate: a ring is made only by `new`, from
+/// a prime of its field.
 #[derive(Clone, Debug)]
 pub struct QLocalRing {
-    pub f: QuadField,
-    pub prime: QPrime,
-    pub e: u32,
+    pub(crate) f: QuadField,
+    pub(crate) prime: QPrime,
+    pub(crate) e: u32,
     /// The HNF (A, B, C) of P^e.
-    pub a: u64,
-    pub b: u64,
-    pub c: u64,
+    pub(crate) a: u64,
+    pub(crate) b: u64,
+    pub(crate) c: u64,
     /// #O_F/P^e = A C.
-    pub card: u64,
+    pub(crate) card: u64,
     /// The residue field size N(P).
-    pub q: u64,
+    pub(crate) q: u64,
 }
 
 impl QLocalRing {
+    /// O_F/P^e for a prime P of f (an error for anything else: the prime is
+    /// looked up among f.primes_above(P.p), so a QPrime whose public fields
+    /// were altered is refused) with N(P)^e < 2^31.
     pub fn new(f: &QuadField, prime: QPrime, e: u32) -> Result<QLocalRing, String> {
         if e == 0 {
             return Err("the exponent must be positive".into());
         }
+        f.check(&prime.ideal)?;
+        let prime = f.primes_above(prime.p)?.into_iter().find(|q| *q == prime).ok_or("not a prime of this field")?;
         let card = (prime.norm as u128).checked_pow(e).filter(|&c| c < MAX_LOCAL as u128);
         if card.is_none() {
             return Err(format!("O_F/P^e with N(P) = {}, e = {} has more than 2^31 elements", prime.norm, e));
         }
         let mut h = prime.ideal;
         for _ in 1..e {
-            h = f.ideal_mul(&h, &prime.ideal);
+            h = f.ideal_mul(&h, &prime.ideal)?;
         }
-        debug_assert_eq!(h.norm() as u128, card.unwrap());
-        Ok(QLocalRing { f: *f, prime, e, a: h.a as u64, b: h.b as u64, c: h.c as u64, card: (h.a * h.c) as u64, q: prime.norm as u64 })
+        let (a, b, c) = h.hnf();
+        debug_assert_eq!((a * c) as u128, card.unwrap());
+        Ok(QLocalRing { f: *f, prime, e, a: a as u64, b: b as u64, c: c as u64, card: (a * c) as u64, q: prime.norm as u64 })
+    }
+    pub fn prime(&self) -> QPrime {
+        self.prime
+    }
+    pub fn exponent(&self) -> u32 {
+        self.e
+    }
+    /// #O_F/P^e.
+    pub fn card(&self) -> u64 {
+        self.card
+    }
+    /// The canonical representative of u (u from another ring, or built by
+    /// hand, is reduced first, so the products below cannot overflow).
+    #[inline]
+    fn canon(&self, u: Res) -> Res {
+        if u.0 < self.a && u.1 < self.c {
+            u
+        } else {
+            self.reduce(u.0 as i128, u.1 as i128)
+        }
     }
 
-    /// The reduction of x + y w.
+    /// The reduction of x + y w (any x, y: x is reduced modulo A first).
     #[inline]
     pub fn reduce(&self, x: i128, y: i128) -> Res {
-        let c = self.c as i128;
+        let (a, c) = (self.a as i128, self.c as i128);
         let yr = y.rem_euclid(c);
         let k = (y - yr) / c;
-        let xr = (x - (k % self.a as i128) * self.b as i128).rem_euclid(self.a as i128);
+        // |k mod A| < A and B < A < 2^31
+        let xr = (x.rem_euclid(a) - (k % a) * self.b as i128).rem_euclid(a);
         Res(xr as u64, yr as u64)
     }
     pub fn from_qelt(&self, x: &QElt) -> Res {
@@ -83,6 +112,7 @@ impl QLocalRing {
     /// (x + y w)(s + r w) = x s + n y r + (x r + y s + t y r) w; the
     /// coordinates are below 2^31 and |n| < 2^40, so this fits in i128.
     pub fn mul(&self, u: Res, v: Res) -> Res {
+        let (u, v) = (self.canon(u), self.canon(v));
         let (x, y, s, r) = (u.0 as i128, u.1 as i128, v.0 as i128, v.1 as i128);
         let yr = y * r;
         self.reduce(x * s + self.f.n as i128 * yr, x * r + y * s + self.f.t as i128 * yr)
@@ -100,7 +130,7 @@ impl QLocalRing {
     }
     /// Whether u lies in the maximal ideal P.
     pub fn in_p(&self, u: Res) -> bool {
-        self.f.contains(&self.prime.ideal, &self.lift(u))
+        self.f.in_ideal(&self.prime.ideal, &self.lift(u))
     }
     pub fn is_unit(&self, u: Res) -> bool {
         !self.in_p(u)
@@ -109,6 +139,7 @@ impl QLocalRing {
     /// for split P the representative u is an integer, and otherwise P is
     /// the only prime above p.
     pub fn inv(&self, u: Res) -> Option<Res> {
+        let u = self.canon(u);
         if self.in_p(u) {
             return None;
         }
@@ -121,8 +152,9 @@ impl QLocalRing {
         debug_assert_eq!(self.mul(u, v), self.one());
         Some(v)
     }
-    /// Elements are indexed by x + A y.
+    /// Elements are indexed by x + A y, 0 <= i < A C (i is taken modulo A C).
     pub fn element(&self, i: u64) -> Res {
+        let i = i % self.card;
         Res(i % self.a, i / self.a)
     }
 
@@ -200,7 +232,7 @@ mod tests {
         for d in [2i64, 3, 13, 17, 106, 401] {
             let f = QuadField::new(d).unwrap();
             for p in [2i64, 3, 5, 7, 11, 13, 53] {
-                for pr in f.primes_above(p) {
+                for pr in f.primes_above(p).unwrap() {
                     for e in 1..=3u32 {
                         if (pr.norm as u128).pow(e) > 20000 {
                             continue;
@@ -208,17 +240,17 @@ mod tests {
                         let r = QLocalRing::new(&f, pr, e).unwrap();
                         let mut ideal = pr.ideal;
                         for _ in 1..e {
-                            ideal = f.ideal_mul(&ideal, &pr.ideal);
+                            ideal = f.ideal_mul(&ideal, &pr.ideal).unwrap();
                         }
                         let xs: Vec<QElt> = (0..r.card).step_by(((r.card / 30) as usize).max(1)).map(|i| r.lift(r.element(i))).chain([QElt::new(-7, 12345), QElt::new(99991, -3)]).collect();
                         for x in &xs {
                             for y in &xs {
                                 let (u, v) = (r.from_qelt(x), r.from_qelt(y));
-                                assert!(f.contains(&ideal, &f.sub(&r.lift(r.mul(u, v)), &f.mul(x, y))));
-                                assert!(f.contains(&ideal, &f.sub(&r.lift(r.add(u, v)), &f.add(x, y))));
+                                assert!(f.in_ideal(&ideal, &f.sub(&r.lift(r.mul(u, v)), &f.mul(x, y))));
+                                assert!(f.in_ideal(&ideal, &f.sub(&r.lift(r.add(u, v)), &f.add(x, y))));
                             }
                             let u = r.from_qelt(x);
-                            assert_eq!(r.in_p(u), f.contains(&pr.ideal, x));
+                            assert_eq!(r.in_p(u), f.in_ideal(&pr.ideal, x));
                             match r.inv(u) {
                                 Some(v) => assert_eq!(r.mul(u, v), r.one()),
                                 None => assert!(r.in_p(u)),
@@ -234,7 +266,7 @@ mod tests {
     fn square_roots() {
         let f = QuadField::new(13).unwrap();
         for p in [3i64, 5, 7, 11, 101, 1009] {
-            for pr in f.primes_above(p) {
+            for pr in f.primes_above(p).unwrap() {
                 let k = QLocalRing::new(&f, pr, 1).unwrap();
                 for i in 0..k.card.min(300) {
                     let x = k.element(i);
@@ -244,5 +276,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn forged_inputs() {
+        let f = QuadField::new(13).unwrap();
+        let mut p = f.primes_above(3).unwrap()[0];
+        let r = QLocalRing::new(&f, p, 2).unwrap();
+        // residues out of range are reduced, never overflowing
+        let big = crate::residue::Res(u64::MAX, u64::MAX);
+        let x = r.mul(big, big);
+        assert_eq!(x, r.mul(r.reduce(u64::MAX as i128, u64::MAX as i128), r.reduce(u64::MAX as i128, u64::MAX as i128)));
+        // reduce(i128::MIN, i128::MIN) is congruent to MIN + MIN w modulo P^2
+        let m = r.reduce(i128::MIN, i128::MIN);
+        let exact = QElt { a: BigInt::from(i128::MIN), b: BigInt::from(i128::MIN) };
+        let p2 = f.ideal_mul(&p.ideal, &p.ideal).unwrap();
+        assert!(m.0 < r.a && m.1 < r.c && f.in_ideal(&p2, &f.sub(&r.lift(m), &exact)));
+        // an altered prime, and a prime of another field, are refused
+        p.norm = 2;
+        assert!(QLocalRing::new(&f, p, 1).is_err());
+        let q = QuadField::new(5).unwrap().primes_above(11).unwrap()[0];
+        assert!(QLocalRing::new(&f, q, 1).is_err());
     }
 }

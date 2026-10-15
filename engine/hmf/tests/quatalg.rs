@@ -18,8 +18,8 @@ use sagebrush_hmf::rqf::QuadField;
 fn order_line(d: i64) -> (MaximalOrder, String) {
     let f = QuadField::new(d).unwrap();
     let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap();
-    let h: Vec<String> = o.lattice.h.iter().flatten().map(|x| x.to_string()).collect();
-    let line = format!("{} | {} {} | {} | {}", d, o.alg.a.a, o.alg.b.a, o.lattice.den, h.join(" "));
+    let h: Vec<String> = o.lattice().hnf().iter().flatten().map(|x| x.to_string()).collect();
+    let line = format!("{} | {} {} | {} | {}", d, o.alg().a().a, o.alg().b().a, o.lattice().den(), h.join(" "));
     (o, line)
 }
 
@@ -69,7 +69,7 @@ fn certificate_up_to_5000() {
         // MaximalOrder::new certifies d_Z(O) = d_F^4
         let o = MaximalOrder::new(&QuatAlg::unramified(f).unwrap()).unwrap_or_else(|e| panic!("d = {}: {}", d, e));
         assert_eq!(o.z_discriminant(), BigInt::from(f.disc).pow(4));
-        for pr in f.primes_of_bounded_norm(30) {
+        for pr in f.primes_of_bounded_norm(30).unwrap() {
             o.local_splitting(pr, 1).unwrap_or_else(|e| panic!("d = {}: {}", d, e));
         }
         n += 1;
