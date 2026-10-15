@@ -874,12 +874,22 @@ def _mpl_nonsingular(vmin, vmax, expander, tiny=1e-15):
 
 
 def _mpl_autoscale(lo, hi, margin):
-    """matplotlib's autoscaled view of the data range lo..hi (None: no data)"""
+    """matplotlib's autoscaled view of the data range lo..hi (None: no data):
+    the locator's nonsingular, the margins, then its view_limits'"""
     if lo is None:
         return 0.0, 1.0
     lo, hi = _mpl_nonsingular(lo, hi, 0.05)
     d = (hi - lo) * margin
-    return lo - d, hi + d
+    if not math.isfinite(d):
+        d = 0.0
+    return _mpl_nonsingular(lo - d, hi + d, 1e-12, 1e-13)
+
+
+def _mpl_set_lim(lo, hi):
+    """matplotlib's Axis._set_lim: a degenerate range widened by 5%, the
+    order (an inverted axis) kept"""
+    a, b = _mpl_nonsingular(lo, hi, 0.05)
+    return (b, a) if lo > hi else (a, b)
 
 
 # matplotlib's AutoLocator: MaxNLocator's steps 1, 2, 2.5, 5, 10, as its
@@ -894,6 +904,8 @@ def mpl_ticks(vmin, vmax, nbins):
     the ticks just outside the range, as its get_xticks() lists them."""
     vmin, vmax = _mpl_nonsingular(min(vmin, vmax), max(vmin, vmax), 1e-13, 1e-14)
     dv = vmax - vmin
+    if not math.isfinite(dv):  # (a span past the doubles: matplotlib's numpy.arange fails)
+        raise ValueError("arange: cannot compute length")
     meanv = (vmax + vmin) / 2
     offset = 0 if abs(meanv) / dv < 100 else math.copysign(10 ** (math.log10(abs(meanv)) // 1), meanv)
     scale = 10 ** (math.log10(dv / nbins) // 1)
@@ -1033,8 +1045,12 @@ class Panel:
             else:
                 d = (yhi - ylo) * m
                 ylo, yhi = ylo - d, yhi + d
-        xlo, xhi = _range(xlo, xhi, xlog)
-        ylo, yhi = _range(ylo, yhi, ylog)
+        # (matplotlib's linear axes keep its limits: not the guard below,
+        # which widens tiny spans)
+        if not mx:
+            xlo, xhi = _range(xlo, xhi, xlog)
+        if not my:
+            ylo, yhi = _range(ylo, yhi, ylog)
         for k, v in (("xmin", "xlo"), ("xmax", "xhi"), ("ymin", "ylo"), ("ymax", "yhi")):
             if o.get(k) is not None:
                 val = float(o[k])
@@ -1046,8 +1062,8 @@ class Panel:
                     ylo = val
                 else:
                     yhi = val
-        xlo, xhi = _range(xlo, xhi, xlog)
-        ylo, yhi = _range(ylo, yhi, ylog)
+        xlo, xhi = _mpl_set_lim(xlo, xhi) if mx else _range(xlo, xhi, xlog)
+        ylo, yhi = _mpl_set_lim(ylo, yhi) if my else _range(ylo, yhi, ylog)
         ar = o.get("aspect_ratio")
         # (fit_aspect with all four limits set: the box takes the shape, the limits stay, as matplotlib's adjustable='box')
         boxed = o.get("fit_aspect") and None not in (o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax"))
@@ -1247,9 +1263,9 @@ class Panel:
             return ""
         if o.get("legend_entries") is not None:
             # (the entries matplotlib's legend() chose when it was called, of
-            # the primitives still shown)
-            shown = set(id(p) for p in self.primitives)
-            items = [(p, s) for p, s in o["legend_entries"] if id(p) in shown]
+            # whichever axes and whether drawn or not: a hidden artist keeps
+            # its text, without a swatch)
+            items = list(o["legend_entries"])
         else:
             items = [(p, p.legend()) for p in self.primitives if p.legend()]
         if not items:
@@ -1267,7 +1283,9 @@ class Panel:
         for i, (p, s) in enumerate(items):
             cy = ly + 13 + i * 18
             c = _esc(to_color(p.options.get("color"), "#1f77b4"))
-            if p.kind in ("line", "axline"):
+            if p.options.get("hidden"):
+                pass  # (an artist not drawn: its text, no swatch)
+            elif p.kind in ("line", "axline"):
                 dash = DASHES.get(p.options.get("linestyle", "-"))
                 out.append('<path d="M%s %sh22" stroke="%s" stroke-width="%s"%s%s/>' % (
                     _fmt(lx + 7), _fmt(cy), c, _fmt(p.options.get("thickness", 1.5)), ' stroke-dasharray="%s"' % dash if dash else "",

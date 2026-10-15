@@ -19,11 +19,10 @@ def entries(ax):
     """[(label, swatch, color)] of ax's legend"""
     if hasattr(ax, "_panel"):  # (Sagebrush: its legend's entries)
         out = []
-        shown = set(id(p) for p in ax._panel().primitives)
         for p, s in ax._opts.get("legend_entries", []):
-            if id(p) not in shown:
-                continue
-            if p.kind in ("line", "axline"):
+            if p.options.get("hidden"):
+                kind = "none"
+            elif p.kind in ("line", "axline"):
                 kind = "line+marker" if p.options.get("marker") else "line"
             elif p.kind == "points":
                 kind = "marker"
@@ -36,9 +35,10 @@ def entries(ax):
     out = []
     for h, t in zip(leg.legend_handles, leg.get_texts()):
         if isinstance(h, Line2D):
-            line = h.get_linestyle() not in ("None", "") and h.get_visible()
+            line = h.get_linestyle() not in ("None", "")
             marker = h.get_marker() not in ("None", "", None)
-            kind = "line+marker" if line and marker else "line" if line else "marker"
+            kind = ("none" if not h.get_visible() or not (line or marker) else
+                    "line+marker" if line and marker else "line" if line else "marker")
             out.append((t.get_text(), kind, _hex(h.get_color())))
         elif hasattr(h, "get_segments"):  # (an errorbar's: a line with its bar)
             out.append((t.get_text(), "line", _hex(h.get_colors()[0])))
@@ -93,14 +93,36 @@ legend_case("pie", lambda ax: (ax.pie([1, 2], labels=["a", "b"], autopct="%1.0f%
 legend_case("bad-kw", lambda ax: ax.axhline(1, foo=2))
 legend_case("bad-ls", lambda ax: ax.axhline(1, linestyle="wavy"))
 legend_case("artist-label", lambda ax: ax.legend([ax.plot([1, 2])[0]]))
+# explicit handles: from other axes, hidden, without a line, labelled with _
+# (the legend keeps them all, as matplotlib's; CORR-17C-1)
+fig, axs = plt.subplots(1, 2)
+h = axs[0].plot([0, 1], [0, 1], label="From left")[0]
+axs[1].legend(handles=[h])
+show("other axes", axs[1])
+plt.close(fig)
+legend_case("hidden", lambda ax: (ax.plot([0, 1]), ax.axhline(0.5, label="Hidden entry", visible=False),
+                                  ax.axhline(0.2, label="No stroke", linestyle="none"), ax.legend()))
+legend_case("underscore", lambda ax: (lambda h: ax.legend(handles=[h]))(ax.axhline(0.5, label="_explicit")))
+legend_case("underscore plot", lambda ax: (lambda h: ax.legend(handles=[h]))(ax.plot([0, 1], label="_line")[0]))
+legend_case("underscore auto", lambda ax: (ax.plot([0, 1], label="_line"), ax.plot([1, 0], label="shown"), ax.legend()))
+# the patch cycle: used only by an artist colored from it (CORR-17C-3)
+for name, first in [("scatter colors", lambda ax: ax.scatter([0, 1], [0, 1], c=["red", "blue"])),
+                    ("scatter mapped", lambda ax: ax.scatter([0, 1], [0, 1], c=[0.2, 0.8])),
+                    ("bar colors", lambda ax: ax.bar([0, 1], [1, 2], color=["red", "blue"])),
+                    ("scatter red", lambda ax: ax.scatter([0], [0], color="red")),
+                    ("bar red", lambda ax: ax.bar([0], [1], color="red"))]:
+    legend_case("cycle after " + name, lambda ax: (first(ax), ax.scatter([0.5], [0.5], label="s"), ax.bar([2], [1], label="b"),
+                                                   ax.plot([0, 1], label="p"), ax.legend()))
 
 r = plt.axhline(3, xmin=0.2, xmax=0.6)
 print("axhline data", [float(v) for v in r.get_xdata()], [float(v) for v in r.get_ydata()])
 plt.close("all")
 
 
+# (15 significant digits: tiny spans in full, but not the last bits that
+# matplotlib's transforms add to an axvline's position)
 def limits(ax):
-    return tuple(round(float(v), 12) for v in ax.get_xlim() + ax.get_ylim())
+    return tuple(float("%.15g" % v) for v in ax.get_xlim() + ax.get_ylim())
 
 
 def ticks(ax):
@@ -108,7 +130,7 @@ def ticks(ax):
     for t, (lo, hi) in ((ax.get_xticks(), ax.get_xlim()), (ax.get_yticks(), ax.get_ylim())):
         lo, hi = min(lo, hi), max(lo, hi)
         tol = (hi - lo) * 1e-10
-        out.append([round(float(v), 12) for v in t if lo - tol <= v <= hi + tol])
+        out.append([float("%.15g" % v) for v in t if lo - tol <= v <= hi + tol])
     return out
 
 
@@ -117,20 +139,34 @@ def tick_case(label, data, figsize=None, grid=(1, 1), tweak=None):
     ax = axs if grid == (1, 1) else axs[0] if 1 in grid else axs[0][0]
     (x0, x1), (y0, y1) = data
     ax.plot([x0, x1], [y0, y1])
-    if tweak:
-        tweak(ax)
-    print(label, limits(ax), *ticks(ax))
+    try:
+        if tweak:
+            tweak(ax)
+        print(label, limits(ax), *ticks(ax))
+    except ValueError as e:
+        print(label, "ValueError", e)
     plt.close(fig)
 
 
 for data in [((0, 200), (0, 1)), ((-3.7, 12.2), (1e-5, 3e-5)), ((1000, 1000.5), (-1e6, 5e6)), ((0, 7), (2.5, 2.5)),
-             ((0, 1e-7), (-1, 1)), ((123456, 123789), (0.1, 0.9)), ((-2.5, -2.4), (0, 0)), ((0, 2 * np.pi), (-1, 1))]:
+             ((0, 1e-7), (-1, 1)), ((123456, 123789), (0.1, 0.9)), ((-2.5, -2.4), (0, 0)), ((0, 2 * np.pi), (-1, 1)),
+             # tiny, negative tiny, constant tiny, offset (CORR-17C-2)
+             ((1e-14, 2e-14), (1e-14, 2e-14)), ((-2e-14, -1e-14), (-3e-15, -3e-15)), ((1e-14, 1e-14), (0, 0)),
+             ((1e12, 1e12 + 1e-3), (-1e-300, 1e-300)), ((1e-320, 2e-320), (1e300, 1.7e308)), ((1 - 1e-15, 1 + 1e-15), (5, 5))]:
     tick_case("data %s" % (data,), data)
 for size in [(3, 2), (10, 3), (4, 8), (12, 9), (2, 2)]:
     tick_case("figsize %s" % (size,), ((0, 200), (0, 100)), figsize=size)
 for grid in [(1, 2), (2, 2), (3, 1), (2, 3), (1, 4)]:
     tick_case("grid %s" % (grid,), ((0, 200), (-5, 37)), grid=grid)
 tick_case("set_xlim", ((0, 200), (0, 1)), tweak=lambda ax: ax.set_xlim(0, 37))
+for lim in [(1e12, 1e12 + 0.1), (2, 1), (1e-14, 2e-14), (-1e-14, -2e-14)]:
+    tick_case("set_xlim %r" % (lim,), ((0, 200), (0, 1)), tweak=lambda ax: ax.set_xlim(*lim))
+import warnings
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    tick_case("set_xlim (5, 5)", ((0, 200), (0, 1)), tweak=lambda ax: ax.set_xlim(5, 5))
+    tick_case("set_ylim (0, 0)", ((0, 200), (0, 1)), tweak=lambda ax: ax.set_ylim(0, 0))
+    print([str(x.message) for x in w])
 tick_case("labelsize", ((0, 200), (0, 1)), tweak=lambda ax: ax.tick_params(labelsize=16))
 tick_case("axhline", ((0, 1), (0, 1)), tweak=lambda ax: ax.axhline(5))
 tick_case("axvline", ((0, 1), (0, 1)), tweak=lambda ax: ax.axvline(-3, ymin=0.5))

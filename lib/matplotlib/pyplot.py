@@ -92,10 +92,13 @@ class Line2D:
         self._prim = prim
 
     def set_label(self, s):
-        self._prim.options["label"] = s
+        o = self._prim.options
+        o["label_given"] = None if s is None else str(s)
+        o["label"] = None if s is None or str(s).startswith("_") else str(s)
 
     def get_label(self):
-        return self._prim.options.get("label")
+        o = self._prim.options
+        return o.get("label_given", o.get("label"))
 
     def set_color(self, c):
         self._prim.options["color"] = to_color(c)
@@ -182,10 +185,21 @@ def _line_props(kw):
     if ls in ("None", "none", " ", ""):
         o["visible"] = False  # (no line: nothing is drawn)
     o["linewidth"] = float(o["linewidth"])
+    # (label_given is the label as given, which a legend of explicit handles
+    # shows; one starting with _ is left out of automatic legends only)
+    o["label_given"] = None if o["label"] is None else str(o["label"])
     if o["label"] is not None:
         o["label"] = None if str(o["label"]).startswith("_") else str(o["label"])
     o["visible"] = bool(o["visible"])
     return o
+
+
+def _same_limits(lo, hi, axis):
+    """matplotlib's warning for equal limits (it widens them, as _graphics does)"""
+    if lo is not None and hi is not None and lo == hi:
+        import warnings
+        warnings.warn("Attempting to set identical low and high %slims makes transformation singular; automatically expanding."
+                      % axis, UserWarning, stacklevel=3)
 
 
 def _handle_prim(h):
@@ -289,12 +303,14 @@ class Axes:
             ms = kw.get("markersize", kw.get("ms", 6))
             label = kw.get("label")
             o = {"color": color, "thickness": lw * PT, "linestyle": ls if ls not in ("None", "none", " ", "") else "-",
-                 "alpha": kw.get("alpha"), "label": None if label is None or str(label).startswith("_") else str(label)}
+                 "alpha": kw.get("alpha"), "label": None if label is None or str(label).startswith("_") else str(label),
+                 "label_given": None if label is None else str(label)}
             if marker and marker not in ("None", "none", ""):
                 o["marker"] = marker
                 o["markersize"] = ms * PT / 2
             if ls in ("None", "none", " ", ""):
-                p = Points(xs, ys, marker=marker or "o", size=ms * PT / 2, color=color, alpha=kw.get("alpha"), label=o["label"])
+                p = Points(xs, ys, marker=marker or "o", size=ms * PT / 2, color=color, alpha=kw.get("alpha"), label=o["label"],
+                           label_given=o["label_given"])
             else:
                 p = Line(xs, ys, **o)
             out.append(Line2D(self._add(p)))
@@ -314,7 +330,12 @@ class Axes:
                 clim = (float(lo), float(hi))
             else:
                 colors = [to_color(v) for v in cl]
-        col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None), True)
+        # (a cycle color only when it is the points' color: not with colors
+        # given or mapped, as matplotlib's)
+        if colors is not None and color is None:
+            col = colors[0] if colors else TAB10[0]
+        else:
+            col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None), True)
         sizes = None
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
@@ -342,7 +363,7 @@ class Axes:
             x0 = float(xi) - width / 2 if align == "center" else float(xi)
             rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
-        p = Rects(rects, color=self._color(None if colors else color, True), colors=colors, label=label,
+        p = Rects(rects, color=colors[0] if colors else self._color(color, True), colors=colors, label=label,
                   edgecolor=edgecolor, alpha=alpha, legend_role="container")
         if tick_label is not None:
             self._opts["xticks"] = [float(v) for v in xs]
@@ -531,6 +552,7 @@ class Axes:
         # color cycle)
         p = AxLine(float(v), vertical, (float(lo), float(hi)), color=o["color"] or "#1f77b4",
                    linestyle=o["linestyle"], thickness=o["linewidth"] * PT, alpha=o["alpha"], label=o["label"],
+                   label_given=o["label_given"],
                    hidden=not o["visible"])
         return _AxLine2D(self._add(p))
 
@@ -735,6 +757,7 @@ class Axes:
     def set_xlim(self, left=None, right=None, **kw):
         if isinstance(left, (tuple, list)):
             left, right = left
+        _same_limits(left, right, "x")
         if left is not None:
             self._opts["xmin"] = left
         if right is not None:
@@ -743,6 +766,7 @@ class Axes:
     def set_ylim(self, bottom=None, top=None, **kw):
         if isinstance(bottom, (tuple, list)):
             bottom, top = bottom
+        _same_limits(bottom, top, "y")
         if bottom is not None:
             self._opts["ymin"] = bottom
         if top is not None:
@@ -814,7 +838,7 @@ class Axes:
         if handles is not None:
             prims = [_handle_prim(h) for h in handles]
             if labels is None:
-                labels = [p.options.get("label") for p in prims]
+                labels = [p.options.get("label_given", p.options.get("label")) for p in prims]
             entries = [(p, str(s)) for p, s in zip(prims, labels) if s is not None]
         elif labels is not None:
             labels = list(labels)  # (a string: its characters, as matplotlib's)
