@@ -245,6 +245,8 @@ CODES = [
     ("expint", "expint(1)"),
     ("gammainc", "gammainc(1, 2)"),
     ("gammainc", "gammainc([1 3], 2, 'upper')"),
+    ("besselj", "besselj(0, 1)"),
+    ("besselj", "besselj(1:3, 2.5)"),
     # more arrays, indexing and reductions
     ("meshgrid", "[X, Y] = meshgrid(1:3, 1:2)"),
     ("ndgrid", "[A, B] = ndgrid(1:2, 1:3)"),
@@ -477,6 +479,8 @@ OUTPUTS = {
 "expint(1)": "\nans =\n\n    0.2194\n\n",
 "gammainc(1, 2)": "\nans =\n\n    0.2642\n\n",
 "gammainc([1 3], 2, 'upper')": "\nans =\n\n    0.7358    0.1991\n\n",
+"besselj(0, 1)": "\nans =\n\n    0.7652\n\n",
+"besselj(1:3, 2.5)": "\nans =\n\n    0.4971    0.4461    0.2166\n\n",
 "[X, Y] = meshgrid(1:3, 1:2)": "\nX =\n\n     1     2     3\n     1     2     3\n\n\nY =\n\n     1     1     1\n     2     2     2\n\n",
 "[A, B] = ndgrid(1:2, 1:3)": "\nA =\n\n     1     1     1\n     2     2     2\n\n\nB =\n\n     1     2     3\n     1     2     3\n\n",
 "nnz([1 0 2 0 3])": "\nans =\n\n     3\n\n",
