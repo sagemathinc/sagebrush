@@ -3,7 +3,7 @@
 // types, so their V8 feedback stays clean when inlined into compiled code.
 
 import {
-  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple,
+  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -81,10 +81,152 @@ function special(o: any, name: string): any {
   if (v !== undefined) return v === MISSING ? undefined : v;
   let f = lookupType(t, name);
   if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
+  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
   c[name] = f === undefined ? MISSING : f;
   return f;
 }
 const MISSING = {};
+
+// The special method name of type t, normalized as special() does (for the
+// lookups made on a type rather than on an object).
+function typeDunder(t: any, name: string): any {
+  let f = lookupType(t, name);
+  if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
+  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
+  return f;
+}
+
+// A special method that is a class attribute but not a function, called as
+// CPython calls it: through its __get__ when its type has one, else without
+// self (C().__add__ = callable_instance gets only the other operand).  None
+// (__iadd__ = None, __add__ = None) raises CPython's TypeError, not a JS
+// error; for __contains__ and __iter__, None means the operation is not
+// available, with no fallback to iteration or __getitem__.
+//
+// One wrapper per attribute object and name (WRAPPED), so that a class and
+// its subclass inheriting the same attribute see the same wrapper.  The
+// descriptor protocol is looked up when the wrapper is called, not when it
+// is made: replacing, deleting or adding the type's __get__ takes effect
+// (CPython's slot does the same).  The getter is called as Python calls
+// any object, so a callable instance works and None raises TypeError.
+const WRAPPED = new WeakMap<object, Record<string, any>>();
+const NONE_WRAPPED: Record<string, any> = Object.create(null);
+function nonFunctionDunder(g: any, name: string): any {
+  if (g === null) {
+    let w = NONE_WRAPPED[name];
+    if (w === undefined) {
+      if (name === "__contains__") w = (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not a container`);
+      else if (name === "__iter__") w = (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not iterable`);
+      else if (name === "__bool__") w = (self: any) => raise(T.TypeError, `'${typeName(self)}' cannot be interpreted as a boolean`);
+      else w = () => callObj(null, []);
+      NONE_WRAPPED[name] = w;
+    }
+    return w;
+  }
+  const isObj = typeof g === "object" || typeof g === "function";
+  let byName = isObj ? WRAPPED.get(g) : undefined;
+  if (byName !== undefined && byName[name] !== undefined) return byName[name];
+  const w = (self: any, ...args: any[]) => {
+    const get = lookupType(typeOf(g), "__get__");
+    if (get !== undefined) return callObj(callObj(get, [g, self, typeOf(self)]), args);
+    return callObj(g, args);
+  };
+  if (isObj) {
+    const m: Record<string, any> = byName ?? Object.create(null);
+    if (byName === undefined) WRAPPED.set(g, m);
+    m[name] = w;
+  }
+  return w;
+}
+
+// Whether the right operand's type overrides the reflected method name of
+// the left operand's (CPython's method_is_overloaded): the optional class
+// attribute lookup getattr(type, name), through the metaclass's own
+// __getattribute__ (and __getattr__) when it has one, where only an
+// AttributeError means absent.  The right type is looked up first: absent
+// there means not overridden (the left is not looked up); present there and
+// absent on the left means overridden; otherwise the two are compared with
+// !=.  For plain classes holding functions (or nothing) the lookup has no
+// user code and is just the raw one, compared by identity.  The metaclass's
+// hooks are bound as CPython binds them, through their type's __get__ (a
+// staticmethod gets the name alone, a classmethod the metaclass).
+const ABSENT = {};
+function metaHook(meta: any, name: string): any {
+  const f = lookupType(meta, name);
+  return f === undefined || typeof f === "function" ? f : nonFunctionDunder(f, name);
+}
+function classAttrOpt(cls: any, name: string): any {
+  const meta = cls.$meta ?? T.type;
+  try {
+    if (meta !== T.type) {
+      const raw = lookupType(meta, "__getattribute__");
+      const own = raw !== undefined && raw !== lookupType(T.type, "__getattribute__");
+      const gf = metaHook(meta, "__getattr__");
+      if (own || gf !== undefined) {
+        try {
+          return own ? callObj(metaHook(meta, "__getattribute__"), [cls, name]) : getattr(cls, name);
+        } catch (e) {
+          if (gf === undefined || !isinstance(e, T.AttributeError)) throw e;
+          return callObj(gf, [cls, name]);
+        }
+      }
+    }
+    return getattr(cls, name);
+  } catch (e) {
+    if (isinstance(e, T.AttributeError)) return ABSENT;
+    throw e;
+  }
+}
+// The class attribute name of t as getattr(t, name) gives it when that
+// runs no user code (a plain metaclass, an attribute whose type has no
+// __get__: functions, None, callable instances), else NEEDS_GET.  Cached
+// per version of t, as special()'s lookups, and, for an attribute that is
+// an object, per identity and version of the attribute's own type: that
+// type can gain or lose __get__, or the object change its type, without t
+// changing.
+const NEEDS_GET = {};
+type RawAttr = { raw: any; at: any; atVer: number; plain: boolean };
+function plainClassAttr(t: any, name: string): any {
+  let c = t.$rc;
+  if (c === undefined || t.$rcVer !== t.$ver) {
+    c = t.$rc = Object.create(null);
+    t.$rcVer = t.$ver;
+  }
+  let e: RawAttr | undefined = c[name];
+  if (e === undefined) {
+    const raw = lookupType(t, name);
+    const at = raw === undefined || raw === null || typeof raw === "function" ? null : typeOf(raw);
+    e = c[name] = { raw: raw === undefined ? MISSING : raw, at, atVer: -1, plain: at === null };
+  }
+  if (e.at !== null) {
+    // (the attribute's type itself can change: a.__class__ = Descriptor)
+    const at = typeOf(e.raw);
+    if (at !== e.at || e.atVer !== at.$ver) {
+      e.plain = lookupType(at, "__get__") === undefined;
+      e.at = at;
+      e.atVer = at.$ver;
+    }
+  }
+  return e.plain ? e.raw : NEEDS_GET;
+}
+function overloaded(ta: any, tb: any, name: string): boolean {
+  if ((ta.$meta ?? T.type) === T.type && (tb.$meta ?? T.type) === T.type) {
+    const rb = plainClassAttr(tb, name);
+    if (rb === MISSING) return false;
+    if (rb !== NEEDS_GET) {
+      const ra = plainClassAttr(ta, name);
+      if (ra === MISSING) return true;
+      // (two functions compare by identity, without user code)
+      if (ra !== NEEDS_GET) return ra !== rb && ((typeof ra === "function" && typeof rb === "function") || truth(richCompare(ra, rb, "__ne__")));
+    }
+  }
+  const b = classAttrOpt(tb, name);
+  if (b === ABSENT) return false;
+  const a = classAttrOpt(ta, name);
+  if (a === ABSENT) return true;
+  if (a === b) return false;
+  return truth(richCompare(a, b, "__ne__"));
+}
 
 const OPS: Record<string, [string, string, string]> = table({
   add: ["__add__", "__radd__", "+"],
@@ -131,24 +273,33 @@ export const truedivT = (a: any, b: any, w: number): any => reuse("truediv", a, 
 export function binaryDunder(a: any, b: any, op: string): any {
   const [name, rname, sym] = OPS[op];
   const ta = typeOf(a), tb = typeOf(b);
-  const fa = special(a, name);
-  const fb = ta === tb ? undefined : special(b, rname);
-  if (fb !== undefined && tb.$mro.includes(ta) && fb !== special(a, rname)) {
+  // As CPython's slot: the override test first (it may run user code that
+  // replaces a method), then each method fetched when it is called.
+  if (ta !== tb && tb.$mro.includes(ta) && (lookupType(tb, rname) !== undefined || lookupType(tb, name) !== undefined)
+      && overloaded(ta, tb, rname)) {
     // A subclass's reflected method gets priority.
-    const r = settle(fb, fb(b, a));
-    if (r !== NotImplemented) return r;
+    const fb = special(b, rname);
+    if (fb !== undefined) {
+      const r = settle(fb, fb(b, a));
+      if (r !== NotImplemented) return r;
+    }
+    const fa = special(a, name);
     if (fa !== undefined) {
       const r2 = settle(fa, fa(a, b));
       if (r2 !== NotImplemented) return r2;
     }
   } else {
+    const fa = special(a, name);
     if (fa !== undefined) {
       const r = settle(fa, fa(a, b));
       if (r !== NotImplemented) return r;
     }
-    if (fb !== undefined) {
-      const r = settle(fb, fb(b, a));
-      if (r !== NotImplemented) return r;
+    if (ta !== tb) {
+      const fb = special(b, rname);
+      if (fb !== undefined) {
+        const r = settle(fb, fb(b, a));
+        if (r !== NotImplemented) return r;
+      }
     }
   }
   raise(T.TypeError, `unsupported operand type(s) for ${sym}: '${ta.$name}' and '${tb.$name}'`);
@@ -625,7 +776,8 @@ export function invert(a: any): any {
 function unaryDunder(a: any, name: string, sym: string): any {
   const f = special(a, name);
   if (f !== undefined) return settle(f, f(a));
-  raise(T.TypeError, `bad operand type for unary ${sym}: '${typeName(a)}'`);
+  // (abs() is a function, not an operator, in CPython 3.14's message)
+  raise(T.TypeError, sym === "abs()" ? `bad operand type for abs(): '${typeName(a)}'` : `bad operand type for unary ${sym}: '${typeName(a)}'`);
 }
 
 export function abs(a: any): any {
@@ -725,11 +877,11 @@ export function richCompare(a: any, b: any, op: string): any {
   const rop = REFLECT[op];
   const reflectedFirst = ta !== tb && tb.$mro.includes(ta) && lookupType(tb, rop) !== lookupType(ta, rop);
   const left = () => {
-    const f = lookupType(ta, op);
+    const f = typeDunder(ta, op);
     return f === undefined ? NotImplemented : f(a, b);
   };
   const right = () => {
-    const f = lookupType(tb, rop);
+    const f = typeDunder(tb, rop);
     return f === undefined ? NotImplemented : f(b, a);
   };
   let r = reflectedFirst ? right() : left();
@@ -1040,7 +1192,7 @@ export const objectEq = markPy(function __eq__(self: any, other: any) {
   return self === other ? true : NotImplemented;
 }, "__eq__");
 export const objectNe = markPy(function __ne__(self: any, other: any) {
-  const eq = lookupType(typeOf(self), "__eq__");
+  const eq = typeDunder(typeOf(self), "__eq__");
   const r = eq === undefined ? NotImplemented : eq(self, other);
   return r === NotImplemented ? r : !truth(r);
 }, "__ne__");
@@ -1551,7 +1703,7 @@ function getitemSlow(o: any, k: any): any {
 function dictMissing(d: PyDict, k: any): any {
   const t = typeOf(d);
   if (t !== T.dict) {
-    const m = lookupType(t, "__missing__");
+    const m = typeDunder(t, "__missing__");
     if (m !== undefined) return m(d, k);
   }
   throw T.KeyError(k);
