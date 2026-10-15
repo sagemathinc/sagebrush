@@ -2734,6 +2734,20 @@ def _CallableReal(x):
     return _R(x)
 
 
+_RR_BIG = None
+
+
+def _cc(o):
+    """complex(o) for CC's arithmetic: an element of RR past the doubles is
+    refused (CC holds doubles; its float would be inf or 0)."""
+    global _RR_BIG
+    if _RR_BIG is None:
+        from _sage_lang import _RealBig as _RR_BIG
+    if isinstance(o, _RR_BIG):
+        raise NotImplementedError("CC arithmetic with %s, an element of RR past the double range, is not available in sagebrush yet (CC holds doubles)" % (o,))
+    return complex(o)
+
+
 class ComplexNumber(complex):
     """A 53-bit complex number, printed as Sage prints elements of CC.
 
@@ -2818,29 +2832,52 @@ class ComplexNumber(complex):
         return _sa().RealNumber(abs(complex(self)))
 
     def __add__(self, o):
-        return ComplexNumber(complex(self) + complex(o))
+        return ComplexNumber(complex(self) + _cc(o))
 
     __radd__ = __add__
 
     def __sub__(self, o):
-        return ComplexNumber(complex(self) - complex(o))
+        return ComplexNumber(complex(self) - _cc(o))
 
     def __rsub__(self, o):
-        return ComplexNumber(complex(o) - complex(self))
+        return ComplexNumber(_cc(o) - complex(self))
 
     def __mul__(self, o):
-        return ComplexNumber(complex(self) * complex(o))
+        return ComplexNumber(complex(self) * _cc(o))
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
-        return ComplexNumber(complex(self) / complex(o))
+        return ComplexNumber(complex(self) / _cc(o))
+
+    def __rtruediv__(self, o):
+        return ComplexNumber(_cc(o) / complex(self))
 
     def __neg__(self):
         return ComplexNumber(-complex(self))
 
     def __pow__(self, e):
+        _cc(e)
         return ComplexNumber(complex(self) ** e)
+
+    def __rpow__(self, b):
+        return ComplexNumber(_cc(b) ** complex(self))
+
+    def __eq__(self, o):
+        # (an element of RR past the doubles compares by its value: its
+        # own __eq__)
+        global _RR_BIG
+        if _RR_BIG is None:
+            _cc(0)
+        if isinstance(o, _RR_BIG):
+            return NotImplemented
+        return complex.__eq__(self, o)
+
+    def __ne__(self, o):
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
+
+    __hash__ = complex.__hash__
 
 
 class ComplexField_:
