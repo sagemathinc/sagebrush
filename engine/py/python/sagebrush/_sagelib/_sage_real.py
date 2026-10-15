@@ -465,6 +465,11 @@ def _ziv_eval(R, fn, extra=40, limit=None):
     p = R._prec
     while True:
         v = fn(RealField(p + extra))
+        if v._special in ("+inf", "-inf"):
+            # the working field (nearest, more bits) overflowed, so the value
+            # is beyond this field's range too: rounded in its direction
+            # (the largest number toward zero), not +-infinity outright
+            return RealNumberMP(R, 1 if v._special == "+inf" else -1, _EMAX + 8)
         if v._special or not v._m:
             return R(v)
         m, e = v._m, v._e
@@ -1445,18 +1450,23 @@ class RealNumberMP:
         E = e + a.bit_length()
         if E > 1025:
             return float("-inf") if neg else float("inf")
-        # nearest double: 53 bits for normal numbers, a multiple of 2^-1074
-        # below 2^-1022 (rounded once, ties to even)
-        bits = 53 if E > -1021 else max(0, E + 1074)
-        if E < -1076:
-            return -0.0 if neg else 0.0
-        q, k = _round_q(a, 1, max(bits, 1), "RNDN", e) if bits else (0, 0)
-        if bits and E <= -1021:
-            # (at most 53 bits, below 2^-1022: a multiple of 2^-1074)
-            sh = k + 1074
-            v = (q << sh) if sh >= 0 else _round_q(q, 1 << -sh, max(1, q.bit_length() + sh), "RNDN")[0]
-            r = math.ldexp(v, -1074)
+        if E <= -1022:
+            # below 2^-1022: the nearest multiple of 2^-1074 (half to even),
+            # rounded once from the exact value (3 2^-1076 is 2^-1074)
+            if E < -1076:
+                return -0.0 if neg else 0.0
+            sh = e + 1074
+            if sh >= 0:
+                q = a << sh
+            else:
+                q, r = divmod(a, 1 << -sh)
+                c = 2 * r - (1 << -sh)
+                if c > 0 or (c == 0 and q & 1):
+                    q += 1
+            r = math.ldexp(q, -1074)
         else:
+            # 53 bits, rounded once; overflow to inf
+            q, k = _round_q(a, 1, 53, "RNDN", e)
             if k + q.bit_length() > 1024:
                 return float("-inf") if neg else float("inf")
             r = math.ldexp(q, k)
@@ -2273,6 +2283,12 @@ class RealNumberMP:
             # the working field overflowed: the value is beyond the range,
             # rounded in this field's direction (the largest number toward 0)
             return RealNumberMP(R, 1 if v._special == "+inf" else -1, _EMAX + 8)
+        if not self._special and self._m and isinstance(v, RealNumberMP) and not v._special and not v._m:
+            # it underflowed (Gamma has no zeros): below the range, rounded
+            # in this field's direction with Gamma's sign, (-1)^ceil(-x) for
+            # x < 0 (Sage: the smallest number in RNDD at -2^61 - 1/2)
+            sign = 1 if self._m > 0 or (-self._floor()) % 2 == 0 else -1
+            return RealNumberMP(R, sign, _EMIN - 8)
         return R(v)
 
     def log_gamma(self):
