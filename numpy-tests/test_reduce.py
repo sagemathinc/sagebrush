@@ -47,3 +47,11 @@ for f in (lambda: np.zeros([2.0, 3]), lambda: np.zeros((2, 3.5)), lambda: np.ara
         print(repr(f()))
     except TypeError:
         print("TypeError")
+
+# cumsum and cumprod of complex arrays (and real ones accumulated as complex)
+zc = np.array([2 + 3j, 4 + 5j, 1 - 1j])
+print(np.cumsum(zc), np.cumprod(zc), np.add.accumulate(zc), zc.cumsum())
+print(np.cumsum(zc.astype(np.complex64)), np.cumprod(zc.astype(np.complex64)))
+zm = np.array([[1 + 1j, 2, 3j], [3, 4j, -1]])
+print(np.cumsum(zm, axis=0), np.cumsum(zm, axis=1), np.cumsum(zm), np.cumprod(zm, axis=1))
+print(np.cumsum(np.array([1, 2, 3]), dtype=complex), np.cumsum(zm[:, ::2], axis=0))

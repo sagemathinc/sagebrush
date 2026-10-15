@@ -79,8 +79,19 @@ its explicit Runge-Kutta solvers (`_ivp/ivp.py`, `rk.py`, `common.py`,
 `base.py`: the step-size control, initial step, error norms, dense output
 and event handling), DOP853's coefficients (`_ivp/dop853_coefficients.py`,
 Hairer's), and the argument handling of `quad`, `nquad`, `odeint`,
-`trapezoid`, `cumulative_trapezoid` and `simpson`. (`quad`'s QUADPACK
-routines are public domain.)
+`trapezoid`, `cumulative_trapezoid` and `simpson`.
+
+`quad` in `lib/scipy/integrate.py` is a code translation, not only an
+implementation of the published algorithm: `_qags`, `_qk21`, `_qk15i`,
+`_qpsrt` and `_qelg` translate QUADPACK's Fortran routines dqagse/dqagie,
+dqk21, dqk15i, dqpsrt and dqelg (R. Piessens, E. de Doncker-Kapenga,
+C. Ueberhuber and D. Kahaner, 1983), keeping their routine structure,
+1-based work arrays, control flow, constants and error counters, so that
+values, error estimates and evaluation counts are SciPy's. QUADPACK is in
+the public domain. SciPy 1.18's `scipy/integrate/__quadpack.c` is a C
+translation of the same Fortran code, under SciPy's BSD license below;
+Sagebrush's translation was checked against it, and its argument handling
+and messages follow SciPy's `_quadpack_py.py`.
 
 ```
 Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.

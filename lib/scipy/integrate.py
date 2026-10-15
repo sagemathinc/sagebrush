@@ -18,9 +18,12 @@ Where things come from:
   SciPy's within the tolerances, not bit for bit, and it has no stiff method,
   so a stiff problem stops with an error after mxstep steps instead of
   switching to BDF.
-- quad is QUADPACK's QAGS and QAGI (Piessens, de Doncker-Kapenga, Uberhuber and
-  Kahaner, 1983; public domain): 21- and 15-point Gauss-Kronrod rules, the
-  epsilon algorithm, and QUADPACK's error estimates, as in SciPy.
+- quad is a translation of QUADPACK's Fortran routines dqagse, dqagie, dqk21,
+  dqk15i, dqpsrt and dqelg (Piessens, de Doncker-Kapenga, Uberhuber and
+  Kahaner, 1983; public domain), keeping their structure, 1-based work
+  arrays, control flow and constants, as SciPy's C translation of the same
+  code does: 21- and 15-point Gauss-Kronrod rules, the epsilon algorithm,
+  and QUADPACK's error estimates (see NOTICE.md).
 - simpson and the trapezoid rules follow SciPy's formulas.
 
 Options that are not implemented raise NotImplementedError; none is ignored.
@@ -1007,7 +1010,8 @@ def odeint(func, y0, t, args=(), Dfun=None, col_deriv=0, full_output=0, ml=None,
     Sagebrush's odeint is the Dormand-Prince 5(4) method (an explicit
     Runge-Kutta method), not LSODA: results agree with SciPy within the
     tolerances.  It has no stiff method, so Dfun, ml, mu, mxordn and mxords are
-    not implemented, and a stiff problem stops with an error at mxstep.
+    not implemented, nor are ixpr and mxhnil (LSODA's messages), and a stiff
+    problem stops with an error at mxstep.
 
     >>> t = np.linspace(0, 1, 3)
     >>> odeint(lambda y, t: -y, 1.0, t)[:, 0]
@@ -1017,6 +1021,12 @@ def odeint(func, y0, t, args=(), Dfun=None, col_deriv=0, full_output=0, ml=None,
                      "Sagebrush's odeint has no stiff method; drop Dfun")
     if ml is not None or mu is not None:
         _unsupported("odeint", "ml and mu (a banded Jacobian for the stiff method)")
+    if ixpr:
+        _unsupported("odeint", "ixpr (printing LSODA's switches between its methods)",
+                     "Sagebrush's odeint has one method and never switches")
+    if mxhnil:
+        _unsupported("odeint", "mxhnil (the number of LSODA's step-size warnings)",
+                     "Sagebrush's odeint raises an error instead of warning")
     if mxordn != 12 or mxords != 5:
         _unsupported("odeint", "mxordn and mxords (the orders of LSODA's methods)",
                      "Sagebrush's odeint is the Dormand-Prince 5(4) method, of fixed order")
@@ -1869,13 +1879,18 @@ def simpson(y, x=None, *, dx=1.0, axis=-1):
     """The integral of samples y along axis by Simpson's rule, at the points
     x (or spacing dx).  With an even number of samples, the last interval
     uses Cartwright's correction, as in SciPy 1.11 and later."""
-    y = np.asarray(y, dtype=float)
+    # (complex samples and points stay complex, as in SciPy)
+    y = np.asarray(y)
+    if y.dtype.kind in "biu":
+        y = y.astype(float)
     sl, axis = _along(y, axis)
     nd = y.ndim
     N = y.shape[axis]
     last_dx = dx
     if x is not None:
-        x = np.asarray(x, dtype=float)
+        x = np.asarray(x)
+        if x.dtype.kind in "biu":
+            x = x.astype(float)
         if x.ndim == 1:
             shapex = [1] * nd
             shapex[axis] = x.shape[0]
