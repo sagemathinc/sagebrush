@@ -1240,8 +1240,15 @@ export class Board {
     };
     // (a press on the selected item's grip, over another item's link: the
     // grip's, and the link not followed when it is let go, UI-BDC-2)
+    // (only that press's own click: a pointer's (a keyboard's click is
+    // the link's), and only until just after its release, when that click has
+    // come, or its cancelling; astra's UI-36C-1)
     let gripPress = false;
-    this.el.addEventListener("click", (e) => { if (gripPress && (e.target as Element).closest?.("a")) { e.preventDefault(); e.stopPropagation(); } }, true);
+    const gripDone = () => { gripPress = false; };
+    this.el.addEventListener("click", (e) => { if (gripPress && e.detail > 0 && (e.target as Element).closest?.("a")) { e.preventDefault(); e.stopPropagation(); } gripPress = false; }, true);
+    this.el.addEventListener("pointerup", () => { if (gripPress) setTimeout(gripDone, 0); }, true);
+    this.el.addEventListener("pointercancel", gripDone, true);
+    this.el.addEventListener("lostpointercapture", () => { if (gripPress) setTimeout(gripDone, 0); }, true);
     this.el.addEventListener("pointerdown", (e) => {
       gripPress = this.gripAt(e.clientX, e.clientY, e.pointerType === "touch") !== null;
       // (links, buttons, controls, 3D views, and the fields of the item being

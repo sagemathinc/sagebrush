@@ -558,6 +558,15 @@ try {
     check(onLink && Math.abs(o1.x - (o0.x + 80)) <= 12 && Math.abs(o1.y - (o0.y + 100)) <= 12, `B2: the selected item's grip over another note's link drags it (${how}): ` + JSON.stringify([onLink, o0, o1]));
     check((await ev("location.hash")) === hash0, `B2: ...and the link is not followed (${how}): ` + (await ev("location.hash")));
   }
+  // ...and once that drag is done, out of Edit with no other press, the
+  // link opened from the keyboard is the link's (astra's UI-36C-1: the
+  // guard was left on until the next press on the board)
+  await ev("window.sagebrush.board.editing(false), 1");
+  await sleep(300);
+  const focused = await ev(`(() => { const a = [...document.querySelectorAll('.board-item a')].find((x) => /Under/.test(x.textContent)); if (!a) return false; window.__cl = null; document.addEventListener('click', (e) => { window.__cl = e.defaultPrevented; e.preventDefault(); }, { once: true }); a.focus(); return document.activeElement === a; })()`);
+  await key("Enter");
+  await sleep(200);
+  check(focused && (await ev("window.__cl")) === false, "B2: after a grip drag, a link opened by Enter out of Edit is not held back: " + JSON.stringify([focused, await ev("window.__cl")]));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
