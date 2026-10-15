@@ -923,3 +923,18 @@ test("lsqnonneg reproduces its published examples, and its limit, problem struct
     "lsqnonneg: C and d must be finite.",
   ]);
 });
+
+test("lsqnonneg keeps a solution of any scale: positivity tested exactly, as Lawson and Hanson's steps 6 to 11", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    // (a scaled identity: TolX grows with C, but x = 1e-8 is a solution, not a zero)
+    "[x,r,res,e,o,l] = lsqnonneg(1e8*eye(2), ones(2,1)); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    // (mixed active and passive variables, at two scales: the same x, the duals scaled, optimality held)
+    "[x,r,res,e,o,l] = lsqnonneg(eye(2), [1;-2]); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    "[x,r,res,e,o,l] = lsqnonneg(1e8*eye(2), 1e8*[1;-2]); fprintf('%.15g %.15g %.15g %d %.15g %.15g\\n', x, r, e, l);",
+    "C = [0.0372 0.2869; 0.6861 0.7071; 0.6233 0.6245; 0.6344 0.6170]; d = [0.8587; 0.1781; 0.0747; 0.8405];",
+    "[x1,r1] = lsqnonneg(C, d); [x2,r2,~,e2,~,l2] = lsqnonneg(1e-6*C, d);",
+    "fprintf('%d %d %d\\n', abs(x2(2)*1e-6 - x1(2)) < 1e-12, abs(r2 - r1) < 1e-12, e2); disp(all(x2 >= 0) && all(l2 <= 1e-10) && abs(l2(2)) < 1e-10);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1e-08 1e-08 0 1 0 0", "1 0 4 1 0 -2", "1 0 4e+16 1 0 -2e+16", "1 1 1", "   1"]);
+});

@@ -597,8 +597,11 @@ The rest:
   best in each component, every value within TolFun of the best), as are
   a complex value being an error and the messages other than the
   converged one. PlotFcns is refused;
-- lsqnonneg's likewise: how TolX enters the tests (for entering, for a
-  positive entry and for reaching 0), the iteration limit when MaxIter is
+- lsqnonneg's likewise: TolX as the threshold for entering (a dual
+  tolerance; a passive solution's positivity is tested exactly and the
+  variable limiting the step back reaches 0 exactly, as in Lawson and
+  Hanson's steps 6 to 11, so that a solution of any scale is kept), the
+  iteration limit when MaxIter is
   unset (Lawson and Hanson's 3 times the number of variables), what
   counts as an iteration (a least-squares solve), and the message for
   exitflag 0. Display 'iter', which its page does not list, is refused;
