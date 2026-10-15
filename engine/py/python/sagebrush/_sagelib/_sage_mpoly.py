@@ -682,6 +682,36 @@ class MPolynomialRing_:
         return _FractionField(self)
 
     # ---- conversion
+    def has_coerce_map_from(self, S):
+        """Whether S coerces into this ring: the ring itself, what coerces
+        into the base ring, and polynomial rings whose variables are among
+        this ring's, over a base that coerces.
+
+        EXAMPLES::
+
+            sage: R1.<x,y> = ZZ[]
+            sage: ZZ['y', 'x'].has_coerce_map_from(R1), ZZ['z', 'x'].has_coerce_map_from(R1)
+            (True, False)
+            sage: R1.has_coerce_map_from(ZZ), R1.has_coerce_map_from(QQ), R1.has_coerce_map_from(ZZ['x'])
+            (True, False, True)
+        """
+        return _coerces_into(S, self)
+
+    def coerce(self, x):
+        """x in this ring by its canonical coercion; TypeError when there is
+        none (ZZ['z', 'x'].coerce(y) for y in ZZ['x', 'y']).
+
+        EXAMPLES::
+
+            sage: R1.<x,y> = ZZ[]
+            sage: ZZ['y', 'x'].coerce(y), R1.coerce(3)
+            (y, 3)
+        """
+        P = _sa().parent(x)
+        if not _coerces_into(P, self):
+            raise TypeError("no canonical coercion from %s to %s" % (P, self))
+        return self(x)
+
     def __call__(self, x=0, *args):
         """Convert a number, polynomial, string or dict {exponents: coeff}.
 
@@ -695,7 +725,7 @@ class MPolynomialRing_:
         if isinstance(x, MPolynomial):
             if x._ring is self:
                 return x
-            return _map_vars(x, self)
+            return _map_vars(x, self, convert=True)
         if isinstance(x, dict):
             # exponents nonnegative integers, coefficients in the base (an
             # exponent -1 printed as x, 3/2 became 1, 1/2 entered ZZ[x, y]:
@@ -760,6 +790,32 @@ class MPolynomialRing_:
         return MPolynomial(self, {(0,) * self._n: c})
 
 
+def _base_coerces(S, B):
+    """Whether the ring S coerces into the base ring B (ZZ into every ring,
+    QQ into QQ and the real and complex fields, a ring into itself)."""
+    sa = _sa()
+    if S is B or S == B:
+        return True
+    if S is sa.ZZ:
+        return True
+    if S is sa.QQ:
+        return B is sa.QQ or repr(B).startswith(("Real Field", "Complex Field", "Real Double", "Complex Double"))
+    return False
+
+
+def _coerces_into(S, R):
+    """Whether S coerces into the polynomial ring R (multivariate or not)."""
+    if S is R or S == R:
+        return True
+    B = R.base_ring()
+    names = list(R._names) if hasattr(R, "_names") else [R._name]
+    if hasattr(S, "_names") and hasattr(S, "_dom"):
+        return all(n in names for n in S._names) and _base_coerces(S.base_ring(), B)
+    if hasattr(S, "_name") and callable(getattr(S, "base_ring", None)) and callable(getattr(S, "gen", None)):
+        return S._name in names and _base_coerces(S.base_ring(), B)
+    return _base_coerces(S, B)
+
+
 def _integral(R, d):
     """d, refused if R is over ZZ and a coefficient is not an integer (every
     conversion path checks: Z(Q.gen()/2) had parent ZZ[x, y] and coefficient
@@ -769,9 +825,18 @@ def _integral(R, d):
     return d
 
 
-def _map_vars(f, R):
-    """f in the ring R, matching variables by name."""
+def _map_vars(f, R, convert=False):
+    """f in the ring R, matching variables by name.  convert (R(f), a
+    conversion, not a coercion): by position instead when not all of f's
+    ring's names are R's and it has no more generators (ZZ['z', 'x'](x) is
+    z, as in Sage; arithmetic and == still match names)."""
     S = f._ring
+    if convert and not all(n in R._names for n in S._names) and S._n <= R._n:
+        d = {}
+        for e, c in f._d.items():
+            t = tuple(e) + (0,) * (R._n - S._n)
+            d[t] = R._dom._add(d.get(t, R._dom.zero), R._dom._conv(S._dom._out(c)))
+        return MPolynomial(R, _integral(R, d))
     idx = []
     for name in S._names:
         if name not in R._names:

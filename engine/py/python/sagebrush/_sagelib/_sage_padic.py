@@ -1428,8 +1428,8 @@ class PadicMatrix:
         return "\n".join("[" + " ".join(c.rjust(w) for c in r) + "]" for r in cells)
 
     def _latex_(self):
-        return "\\left(\\begin{array}{%s}%s\\end{array}\\right)" % (
-            "r" * self._ncols, " \\\\\n".join(" & ".join(x._latex_() for x in r) for r in self._rows))
+        import _sage_expr
+        return _sage_expr._latex_matrix(self._rows, self._ncols)
 
     def _index(self, ij):
         if not (isinstance(ij, tuple) and len(ij) == 2 and all(isinstance(k, int) or type(k).__name__ == "Integer" for k in ij)):

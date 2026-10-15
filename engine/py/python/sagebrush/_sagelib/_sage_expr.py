@@ -23,6 +23,13 @@ _ERRORS = {"ZeroDivisionError": ZeroDivisionError, "ValueError": ValueError,
            "NotImplementedError": NotImplementedError}
 
 
+
+def _is_symbolic_function(v):
+    """Whether v is a callable expression f(x) = ... (_sage_lang's
+    SymbolicFunction, whose type shows as Sage's Expression)."""
+    import _sage_lang
+    return isinstance(v, _sage_lang.SymbolicFunction)
+
 def _call(op, *args):
     r = _raw(_SEP.join((op,) + args)).split(_SEP)
     if r[0] == "ok":
@@ -90,7 +97,7 @@ def _expr(v):
         return v
     if isinstance(v, str):
         return Expression(_call("parse", v)[0])
-    if type(v).__name__ == "SymbolicFunction" and not v._vec:
+    if _is_symbolic_function(v) and not v._vec:
         return v._expr
     s = _to_s(v)
     if s is None:
@@ -201,7 +208,12 @@ class Expression:
         o = _to_s(other)
         if o is None:
             return NotImplemented
-        return _one(op, o, self._s) if rev else _one(op, self._s, o)
+        r = _one(op, o, self._s) if rev else _one(op, self._s, o)
+        if r._s == "c?" and op in _SIGN_ERRORS and ("c+" in (o, self._s) or "c-" in (o, self._s)):
+            # oo*0, oo - oo: Sage's infinity raises (SignError), where the
+            # engine's arithmetic gives NaN
+            raise SignError(_SIGN_ERRORS[op])
+        return r
 
     def __add__(self, o): return self._bin("add", o)
     def __radd__(self, o): return self._bin("add", o, True)
@@ -3438,7 +3450,7 @@ def diff(f, *args):
 
 def _callable(f):
     """Whether f is a callable symbolic expression (f(x) = ...)."""
-    return type(f).__name__ == "SymbolicFunction"
+    return _is_symbolic_function(f)
 
 
 derivative = diff
@@ -4991,22 +5003,164 @@ def _real(v):
     return RealNumber(v)
 
 
-def latex(v):
-    """The LaTeX form of v (a LatexExpr string).
+# Sage's escapes in latex(a string): {\char`\X} for TeX's special characters
+_TEXT_ESC = {c: "{\\char`\\%s}" % c for c in "^_$%{}\\~#&"}
+_TEXT_ESC[" "] = "{ }"
+
+
+def _latex_text(s):
+    """latex() of a string, as Sage writes it: \\text{\\texttt{...}}, one
+    line per row of an array when it has several."""
+    if not s:
+        return ""
+    if "\n" in s:
+        return "\\begin{array}{l}\n" + "\\\\\n".join(_latex_text(l) for l in s.split("\n")) + "\n\\end{array}"
+    return "\\text{\\texttt{%s}}" % "".join(_TEXT_ESC.get(c, c) for c in s)
+
+
+def _delim(d, side):
+    return "\\" + side + d
+
+
+def _latex_matrix(rows, ncols):
+    """A matrix's LaTeX, as Sage writes it (one row per line, the entries'
+    LaTeX, the delimiters of latex.matrix_delimiters())."""
+    if not rows or not ncols:
+        return "()"
+    l, r = latex._matrix_delims
+    body = " \\\\\n".join(" & ".join(latex(x) for x in row) for row in rows)
+    return "%s\\begin{array}{%s}\n%s\n\\end{array}%s" % (_delim(l, "left"), "r" * ncols, body, _delim(r, "right"))
+
+
+def _latex_vector(entries):
+    """A vector's LaTeX, as Sage writes it: \\left(1,\\,2\\right)."""
+    l, r = latex._vector_delims
+    return "%s%s%s" % (_delim(l, "left"), ",\\,".join(latex(x) for x in entries), _delim(r, "right"))
+
+
+class _Latex:
+    """latex(x): the LaTeX form of x (a LatexExpr string), and the settings
+    of Sage's latex object (delimiters, macros, preamble, engine).  The
+    settings change what latex() writes (delimiters) or are recorded for a
+    LaTeX document (macros, preamble): sagebrush typesets with MathJax or
+    KaTeX, not a TeX installation.
 
     EXAMPLES::
 
         sage: latex(x^2/2), latex(sqrt(x)), latex(1/2)
         (\\frac{1}{2} \\, x^{2}, \\sqrt{x}, \\frac{1}{2})
+        sage: latex(QQ), latex('a string')
+        (\\Bold{Q}, \\text{\\texttt{a{ }string}})
+        sage: latex.matrix_delimiters(left='[', right=']'); latex(matrix(ZZ, 2, 2, range(4)))
+        \\left[\\begin{array}{rr}
+        0 & 1 \\\\
+        2 & 3
+        \\end{array}\\right]
+        sage: latex.matrix_delimiters('(', ')'); latex.matrix_delimiters()
+        ['(', ')']
     """
-    if hasattr(v, "_latex_"):
-        return _LatexExpr(v._latex_())
-    if isinstance(v, _Fraction):
-        return _LatexExpr(_expr(v)._latex_())
-    if isinstance(v, (list, tuple)):
-        inner = ", ".join(latex(t) for t in v)
-        return _LatexExpr(("\\left[%s\\right]" if isinstance(v, list) else "\\left(%s\\right)") % inner)
-    return _LatexExpr(str(v))
+
+    def __init__(self):
+        self._matrix_delims = ["(", ")"]
+        self._vector_delims = ["(", ")"]
+        self._bb = False
+        self._macros = ""
+        self._preamble = ""
+        self._engine = "latex"
+
+    def __call__(self, v):
+        if isinstance(v, str):
+            return _LatexExpr(_latex_text(v))
+        if hasattr(v, "_latex_"):
+            return _LatexExpr(v._latex_())
+        if isinstance(v, _Fraction):
+            return _LatexExpr(_expr(v)._latex_())
+        if isinstance(v, (list, tuple)):
+            inner = ", ".join(self(t) for t in v)
+            return _LatexExpr(("\\left[%s\\right]" if isinstance(v, list) else "\\left(%s\\right)") % inner)
+        return _LatexExpr(str(v))
+
+    def __repr__(self):
+        return "LaTeX definitions"
+
+    def matrix_delimiters(self, left=None, right=None):
+        """The delimiters of matrices: set them, or (no arguments) get them."""
+        if left is None and right is None:
+            return list(self._matrix_delims)
+        if left is not None:
+            self._matrix_delims[0] = left
+        if right is not None:
+            self._matrix_delims[1] = right
+
+    def vector_delimiters(self, left=None, right=None):
+        """The delimiters of vectors: set them, or (no arguments) get them."""
+        if left is None and right is None:
+            return list(self._vector_delims)
+        if left is not None:
+            self._vector_delims[0] = left
+        if right is not None:
+            self._vector_delims[1] = right
+
+    def blackboard_bold(self, t=None):
+        """Whether \\Bold is blackboard bold (\\mathbb) when typeset; latex()
+        itself writes \\Bold{Q} either way, as Sage's does."""
+        if t is None:
+            return self._bb
+        self._bb = bool(t)
+
+    def add_macro(self, macro):
+        """Add a macro definition (\\newcommand...) to extra_macros()."""
+        if macro not in self._macros:
+            self._macros += macro
+
+    def extra_macros(self, macros=None):
+        """The extra macros (a string): set them, or (no argument) get them."""
+        if macros is None:
+            return self._macros
+        self._macros = macros
+
+    def add_to_preamble(self, s):
+        """Add s to the extra LaTeX preamble."""
+        self._preamble += s
+
+    def extra_preamble(self, s=None):
+        """The extra preamble (a string): set it, or (no argument) get it."""
+        if s is None:
+            return self._preamble
+        self._preamble = s
+
+    def add_package_to_preamble_if_available(self, package):
+        """Adds nothing here: there is no TeX installation to find the
+        package in (Sage, without the package, also adds nothing)."""
+        return None
+
+    def engine(self, e=None):
+        """The TeX engine's name: set it, or (no argument) get it."""
+        if e is None:
+            return self._engine
+        if e not in ("latex", "pdflatex", "xelatex", "lualatex"):
+            raise ValueError("%r is not a supported LaTeX engine. Use latex, pdflatex, xelatex, or lualatex" % (e,))
+        self._engine = e
+
+
+latex = _Latex()
+
+
+class SignError(ArithmeticError):
+    """oo*0, oo - oo: arithmetic of infinity without a value (as Sage's
+    sage.rings.infinity.SignError).
+
+    EXAMPLES::
+
+        sage: oo * 0  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        _sage_expr.SignError: cannot multiply infinity by zero
+    """
+
+
+_SIGN_ERRORS = {"mul": "cannot multiply infinity by zero", "div": "cannot multiply infinity by zero",
+                "add": "cannot add infinity to minus infinity", "sub": "cannot add infinity to minus infinity"}
 
 
 class _LatexExpr(str):
