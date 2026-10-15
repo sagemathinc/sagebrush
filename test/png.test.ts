@@ -32,6 +32,18 @@ test("colors are checked as matplotlib checks them, savefig's facecolor too, and
   assert.equal(run([TEST + "png_color_cases.py"]), oracle["png_color_cases.py"]);
 });
 
+test("a color's alpha, and none in any case, in the pixels of a PNG as in matplotlib's (CORR-3D8-1)", () => {
+  // (each channel within 1 of matplotlib's: Agg truncates where tiny-skia rounds when it blends)
+  const parse = (s: string) => s.trim().split("\n").map((l) => {
+    const i = l.lastIndexOf("[");
+    return { label: l.slice(0, i), px: JSON.parse(l.slice(i)) as number[] };
+  });
+  const got = parse(run([TEST + "png_alpha_cases.py"])), want = parse(oracle["png_alpha_cases.py"]);
+  assert.deepEqual(got.map((g) => g.label), want.map((w) => w.label));
+  for (let i = 0; i < want.length; i++)
+    assert.ok(got[i].px.every((v, k) => Math.abs(v - want[i].px[k]) <= 1), `${want[i].label}: ${got[i].px} against ${want[i].px}`);
+});
+
 test("text a program gives reaches the SVG escaped: titles, labels, ticks, legends, texts, annotations (CORR-788-1)", () => {
   const out = py(`
 import io, matplotlib.pyplot as plt

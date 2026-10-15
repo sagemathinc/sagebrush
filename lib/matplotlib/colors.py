@@ -1,6 +1,7 @@
 """matplotlib.colors: the colormap classes (enough to build one from colors),
 Normalize, and color conversions."""
 import re as _re
+from numbers import Real as _Real
 from _graphics import to_color, colormap as _colormap, TAB10 as _TAB10
 
 
@@ -137,7 +138,7 @@ def to_rgba(c, alpha=None):
     """c as (r, g, b, a) in 0..1, as matplotlib's: a name, hex string, 'C<n>',
     a gray level, a sequence or array of 3 or 4 values (kept as they are), or
     a (color, alpha) pair; alpha, if given, replaces the color's"""
-    if isinstance(c, tuple) and len(c) == 2:  # (a color and its alpha)
+    if isinstance(c, tuple) and len(c) == 2 and isinstance(c[1], _Real):  # (a color and its alpha)
         if alpha is None:
             c, alpha = c
         else:
@@ -176,7 +177,7 @@ def to_rgba(c, alpha=None):
         raise ValueError("Invalid RGBA argument: %r" % (orig,))
     if len(c) not in (3, 4):
         raise ValueError("RGBA sequence should have length 3 or 4")
-    if not all(isinstance(v, (int, float)) for v in c):
+    if not all(isinstance(v, _Real) for v in c):  # (Fraction, numpy scalars...)
         raise ValueError("Invalid RGBA argument: %r" % (orig,))
     rgba = tuple(float(v) for v in c)
     if len(rgba) == 3 and alpha is None:

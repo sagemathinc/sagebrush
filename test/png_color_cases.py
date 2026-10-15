@@ -84,3 +84,11 @@ for args in [("r", 2), ("r", -0.1), ("r", 0.5), ("r", float("nan")), (("r", 0.3)
         print(repr(args), to_rgba(*args))
     except ValueError as e:
         print(repr(args), "ValueError", e)
+# any real numbers, as matplotlib takes them (CORR-3D8-2)
+from fractions import Fraction
+for c in [(Fraction(1, 2), 0, 0), (np.float64(0.5), np.int64(0), 0), (np.float32(0.5), 0, 0, Fraction(1, 4)), (True, False, 0),
+          ("1", 0, 0), (1j, 0, 0), (Fraction(3, 2), 0, 0)]:
+    try:
+        print(repr(c), to_rgba(c))
+    except ValueError as e:
+        print(repr(c), "ValueError", e)
