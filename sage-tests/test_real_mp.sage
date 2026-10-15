@@ -261,3 +261,17 @@ for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
 for mode in ['RNDN', 'RNDZ', 'RNDD']:
     R = RealField(100, rnd=mode)
     print(mode, [(x.gamma(), x.log_gamma() if x != R(-oo) else None) for x in [R(oo), R(-oo), R('NaN')]])
+# fifth review: log_gamma just below the top of the exponent range, where
+# (x - 1/2) log x overflowed although log Gamma(x) is representable (Sage
+# is slow at some neighbouring points, and for log(2^(2^61), 1/2): those are
+# checked against MPFR directly); and
+# exact logarithms to the bases 1/2 and 1/4
+for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
+    for prec, ds in [(24, [-2, 0, 2]), (80, [0]), (100, [0]), (200, [0])]:
+        R = RealField(prec, rnd=mode)
+        x = R(914416617264592223894114751223) * R(2)^4611686018427387742
+        print(mode, prec, [(x + d * x.ulp()).log_gamma() for d in ds])
+R = RealField(100)
+# (to nearest only: Sage divides two rounded logarithms, one unit off in the
+# directed modes, RNDA's log(2^-100, 1/2) = 100.00...01)
+print([(R(2)^k).log(1/2) for k in [-100, 100, -1000, 999]], (R(4)^-10).log(R(1/4)), R(8).log(1/2), R(1/9).log(1/3))
