@@ -366,5 +366,18 @@ for n, z in _pg:
 with mp.workdps(60):
     _a, _s = mp.mpf(4e205), mp.mpf(-0.5)
     add("hurwitz_zeta", (-0.5, 4e205), _a ** (1 - _s) / (_s - 1) + _a ** (-_s) / 2 + _s * _a ** (-_s - 1) / 12)
+# (Hankel's expansion at huge x, found by the edge sweep: the prefactor
+# sqrt(2/(pi x)) overflowed or went subnormal, J_0(1e308) was 0, and the
+# phase pi (nu/2 + 1/4) lost its 1/4 for nu >= 2^52; at 400 digits, for x's
+# phase; appended after everything above, which stays as it was)
+for nu, x in [(0.0, 1e308), (0.5, 1.7976931348623157e308), (3.0, -1e308), (170.5, 1e308), (0.0, 3e305), (1e20, 1e200),
+              (1e20, 1e300), (2.0 ** 53, 1e40), (1e5, 1e12),
+              # (and the series' Gamma(nu + 1) at the rounded nu + 1: 2.9e-14 off)
+              (63.589762425754834, 6.476702183150906), (63.985572465086086, 8.957063545130058),
+              # (astra's CORR-7AA-1: Hankel's coefficients, whose k 8 x and 4 nu^2 overflowed, near nu = sqrt(x))
+              (1e153, 1e308), (5.477225575051661e153, 3e307), (4.1079191812887456e153, 3e307),
+              (6.703903964971298e153, 1.7976931348623157e308)]:
+    with mp.workdps(400):
+        add("besselj", (nu, x), mp.besselj(nu, x))
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")
