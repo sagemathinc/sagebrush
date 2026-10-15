@@ -469,7 +469,10 @@ def _ziv_eval(R, fn, extra=40, limit=None, overflow=False):
             # (overflow=True: fn's value is finite, so an infinity is the
             # working field's overflow; its threshold is above this field's,
             # so the value is beyond this range too, rounded in this field's
-            # direction.  Otherwise an infinity is a true one: log(2, 1).)
+            # direction.  Otherwise an infinity is a true one: log(2, 1).
+            # Callers: tiny gamma and log_gamma (finite for finite x > 0)
+            # opt in; log(x, b) (|log x / log b| < 2^(62 + p) for b != 1)
+            # and arctan (|value| < pi/2) cannot overflow and stay out.)
             return RealNumberMP(R, 1 if v._special == "+inf" else -1, _EMAX + 8)
         if v._special or not v._m:
             return R(v)
@@ -2266,6 +2269,9 @@ class RealNumberMP:
             8.2639316883312400623766461032e5565702
         """
         R = self._R
+        if self._special:
+            # Gamma(+infinity) = +infinity; -infinity and NaN give NaN
+            return self if self._special == "+inf" else self._nan()
         if not self._special and self._m and self._mag() < -(R._prec + 40):
             # Gamma(x) = 1/x - euler_gamma + O(x), the O(x) term below 2^-2(p+40)
             # relative.  When 1/x is a power of 2 it is a rounding boundary
@@ -2304,15 +2310,26 @@ class RealNumberMP:
             12.801827480081469611207717875
             sage: RealField(100)(10^6).log_gamma()
             1.2815504569147611659976971785e7
+            sage: R = RealField(100, rnd='RNDZ'); x = R(2)^(2^62 - 2); x.log_gamma() / x
+            1.9999999999999999999999999999
+            sage: R(oo).log_gamma(), R(oo).gamma(), R(-oo).gamma()
+            (+infinity, +infinity, NaN)
         """
         R = self._R
+        if self._special == "+inf" or self._special == "nan":
+            return self
+        if self._special == "-inf":
+            raise NotImplementedError("log_gamma(-infinity) is not available in sagebrush yet (Sage raises an error too)")
         if not self._special and self._m > 0:
             E = self._mag()
+            # (log Gamma is finite for every finite x > 0, so an infinity
+            # from the working field is overflow: log_gamma(2^(2^62 - 2))
+            # is the largest number in RNDZ and RNDD, as in Sage)
             if E > 7 and _log_gamma_stirling(RealField(R._prec + 40)(self)) is not None:
-                return _ziv_eval(R, lambda F: _log_gamma_stirling(F(self)) or F(self).gamma().log())
+                return _ziv_eval(R, lambda F: _log_gamma_stirling(F(self)) or F(self).gamma().log(), overflow=True)
             if E < -(R._prec + 40):
                 # -log x - euler_gamma x + ...: the linear term is far below
-                return _ziv_eval(R, lambda F: -F(self).log())
+                return _ziv_eval(R, lambda F: -F(self).log(), overflow=True)
         return self.gamma().log()
 
     def __round__(self, n=None):
