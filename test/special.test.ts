@@ -205,6 +205,12 @@ print(S.loggamma(1e308), S.gamma(complex(1, 1e308)), S.polygamma(1, 1e300), S.po
       g % S.beta(-1.5, 1e308), S.beta(1e20, -1e308), g % S.beta(-2.5, 1e15), g % S.betaln(-1.5, 5e-324),
       "%.12g%+.12gj" % (S.lambert_w(5e-324, -1).real, S.lambert_w(5e-324, -1).imag), S.hurwitz_zeta(1e300, 0.5), S.hurwitz_zeta(1e300, 1.0),
       S.hurwitz_zeta(1e300, 2.0), g % S.dilog(complex(1, 1e-300)).real, g % S.beta(-3.0, 2.0))
+# (zeta near 0, @sagebrush-sage's report: the functional equation lost about eps/|s|, zeta(1e-16) was -0.4504 and
+# zeta(-1e-17) raised PoleError; now Euler-Maclaurin at s for |s| < 0.05.  mpmath's values at 30 digits)
+zref = [(1e-16, -0.50000000000000009189), (-1e-17, -0.49999999999999999081), (complex(1e-5, 1e-5), complex(-0.50000918938533004512, -9.1895859696938894166e-6)),
+        (0.03, -0.52849887255537702034), (-0.049, -0.45726839624509547995), (complex(-0.02, 0.03), complex(-0.48116447625400678751, -0.026374490214081654222)),
+        (5e-324, -0.5)]
+print([abs(S.zeta(z) - r) <= 3e-15 * abs(r) for z, r in zref], repr(S.zeta(1e-16)), repr(S.zeta(5e-324)))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -263,5 +269,6 @@ print(S.loggamma(1e308), S.gamma(complex(1, 1e308)), S.polygamma(1, 1e300), S.po
     // (mpmath: B(-1.5, 1e308) = 2.36327180120735, B(-2.5, 1e15) = -2.98932864874555e37, log B(-1.5, 2^-1074) =
     // 744.440071921381, W_-1(2^-1074) = -751.061568323038 - 3.14578107543527i, Li_2(1 + 1e-300 i) = pi^2/6 + ...)
     "inf 0j 1e-300 0j inf 2.36327180121 0.0 -2.98932864875e+37 744.440071921 -751.061568323-3.14578107544j inf 1.0 0.0 1.64493406685 0.166666666667",
+    "[True, True, True, True, True, True, True] -0.5000000000000001 -0.5",
   ]);
 });
