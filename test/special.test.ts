@@ -256,6 +256,11 @@ print(" | ".join(kind(S.polygamma, n, z).split(" at ")[0] for n, z in [(2, compl
       (100, complex(-1e20, 0.01)), (100, complex(-0.5, 0.046793214736766446)), (100, complex(-0.5, 1.0000000000000002))]))
 print(" | ".join(kind(S.exp_integral_e1, z).split(" at ")[0] for z in [complex(-1.7e308, 1.7e308), complex(-1.7e308, -1.7e308)]),
       repr(S.exp_integral_e1(complex(1.7e308, 1.7e308))))
+# (astra's review of 31f1ea2: E1 where e^-z overflows but e^-z/z does not, against mpmath at 400 digits; each was
+# refused as overflowing)
+e1ref = [(complex(-716, 1), complex(-6.8253476368320043e307, 1.0597220277097455e308)),
+         (complex(-1400, 1e300), complex(8.4132785550751173e307, 5.9188051048798075e307))]
+print([abs(S.exp_integral_e1(z) - r) <= 1e-13 * abs(r) for z, r in e1ref])
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -326,6 +331,8 @@ print(" | ".join(kind(S.exp_integral_e1, z).split(" at ")[0] for z in [complex(-
       "NotCovered: polygamma: Sagebrush covers Re z >= -1e6 when |Im z| < 1 | " +
       "NotCovered: polygamma: the recurrence cancels beyond the doubles' accuracy | " +
       "NotCovered: polygamma: the reflection cancels beyond the doubles' accuracy",
-    "NotCovered: exp_integral_e1: |E1(z)| is beyond the doubles | NotCovered: exp_integral_e1: |E1(z)| is beyond the doubles 0j",
+    "NotCovered: exp_integral_e1: e^-z/z, E1's leading term, is beyond the doubles | " +
+      "NotCovered: exp_integral_e1: e^-z/z, E1's leading term, is beyond the doubles 0j",
+    "[True, True]",
   ]);
 });
