@@ -230,3 +230,105 @@ n = NoneOps()
 for f in (lambda: iadd(Nones([1]), [2]), lambda: imul(Nones([1]), 2), lambda: n + 1, lambda: isub(NoneOps(), 1),
           lambda: -n, lambda: n == 1, lambda: n < 1, lambda: len(n), lambda: 1 in n, lambda: list(n)):
     print(attempt(f))
+
+# (review) reflected priority sees an inherited None or shared callable as
+# not overridden; descriptors are looked up at each call; getters and
+# __call__ are called as Python calls objects
+class Hook:
+    def __call__(self, other):
+        return "right"
+
+
+class LeftNone:
+    def __add__(self, other):
+        return 42
+
+    def __mul__(self, other):
+        return 43
+
+    __radd__ = None
+    __rmul__ = None
+
+
+class RightNone(LeftNone):
+    pass
+
+
+class LeftHook:
+    def __add__(self, other):
+        return "left"
+
+    __radd__ = Hook()
+
+
+class RightHook(LeftHook):
+    pass
+
+
+class RightOwn(LeftHook):
+    __radd__ = Hook()
+
+
+print(LeftNone() + RightNone(), LeftNone() * RightNone(), LeftHook() + RightHook(), LeftHook() + RightOwn())
+
+
+class Desc:
+    def __get__(self, obj, cls):
+        return lambda other: "old"
+
+
+class UsesDesc:
+    __add__ = Desc()
+
+
+u = UsesDesc()
+seen = [u + 1]
+Desc.__get__ = lambda self, obj, cls: lambda other: "new"
+seen.append(u + 1)
+del Desc.__get__
+seen.append(attempt(lambda: u + 1))
+Desc.__get__ = lambda self, obj, cls: lambda other: "added"
+seen.append(u + 1)
+print(seen)
+
+
+class Getter:
+    def __call__(self, desc, obj, cls):
+        return lambda other: 99
+
+
+class G1:
+    __get__ = Getter()
+
+
+class G2:
+    __get__ = staticmethod(lambda desc, obj, cls: lambda other: 98)
+
+
+class G3:
+    __get__ = None
+
+
+class UsesG:
+    __add__ = G1()
+    __sub__ = G2()
+    __mul__ = G3()
+
+
+g = UsesG()
+print(g + 1, g - 1, attempt(lambda: g * 1))
+
+
+class CallNone:
+    __call__ = None
+
+
+class UsesCallNone:
+    __neg__ = CallNone()
+
+
+class BoolNone:
+    __bool__ = None
+
+
+print(attempt(lambda: -UsesCallNone()), attempt(lambda: bool(BoolNone())), attempt(lambda: abs(object())), attempt(lambda: -object()))

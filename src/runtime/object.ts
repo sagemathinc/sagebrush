@@ -342,7 +342,9 @@ export function bindMethod(f: any, self: any): any {
 export function callObj(f: any, args: any[]): any {
   if (typeof f === "function") return f(...args);
   const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return c(f, ...args);
+  // (a __call__ that is None, or an object that is not a function, is
+  // called as CPython calls it: None raises TypeError)
+  if (c !== undefined) return typeof c === "function" ? c(f, ...args) : c === null ? callObj(c, []) : callObj(c, args);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
@@ -354,7 +356,7 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
     raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
   }
   const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return callKw(c, [f, ...pos], names, values);
+  if (c !== undefined) return typeof c === "function" ? callKw(c, [f, ...pos], names, values) : c === null ? callObj(c, []) : callKw(c, pos, names, values);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
