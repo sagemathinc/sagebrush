@@ -39,6 +39,8 @@ fn requests() -> Vec<Value> {
         json!({"fn": "galois_group", "f": [2, 0, 0, 1], "proof": true}),
         json!({"fn": "transitive_group", "n": 4, "k": 2}),
         json!({"fn": "factor", "f": [-1, 0, 1]}),
+        json!({"fn": "nf_factor", "t": [-5, 0, 1], "f": {"num": [[-5, 0], [0, 0], [1, 0]], "den": 1}}),
+        json!({"fn": "nf_gcd", "t": [-5, 0, 1], "f": {"num": [[0, -1], [1, 0]], "den": 1}, "g": {"num": [[-5, 0], [0, 0], [1, 0]], "den": 2}}),
         json!({"fn": "mat_det", "m": [[1, 2], [3, 4]]}),
         json!({"fn": "mat_rank", "m": [[1, 2], [3, 4]]}),
         json!({"fn": "mat_rref", "m": [[1, 2], [3, 4]]}),

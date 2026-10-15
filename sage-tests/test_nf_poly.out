@@ -1,0 +1,499 @@
+Number Field in a with defining polynomial x^2 - 5 | \Bold{Q}[a]/(a^{2} - 5) | \Bold{Q}[a]/(a^{2} - 5)[y] | -2 a + \frac{8}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (a - 5)*y^2 + (5*a + 5)*y - 5*a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y + 1/2*a - 1/2) * (y + 1/2*a + 1/2) * (y - 2)^3 | roots [(-1/2*a + 1/2, 1), (-1/2*a - 1/2, 1), (2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y + \frac{1}{2} a - \frac{1}{2}) \cdot (y + \frac{1}{2} a + \frac{1}{2}) \cdot (y - 2)^{3}
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - 5
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - 5 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-2*a - 4)*y^2 + 9*a*y + 5*a - 25
+    factor (y - 5) * (y - a) * (y - a + 1) | roots [(5, 1), (a, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a - 4)*y^2 + 9*a*y + 5*a - 25 | latex (y - 5) \cdot (y - a) \cdot (y - a + 1)
+   y^5 - 17/3*a*y^4 + 36*y^3 + 37/3*a*y^2 - 19/4*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 9 | (5*a - 13)*y - 9*a + 22 | xgcd (1, -1/4*a - 1/4, (1/4*a + 1/4)*y - 1/4*a - 1/4)
+Number Field in a with defining polynomial x^2 - x - 1 | \Bold{Q}[a]/(a^{2} - a - 1) | \Bold{Q}[a]/(a^{2} - a - 1)[y] | -\frac{5}{3} a + \frac{4}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 - y^2 + (3*a + 2)*y - 2*a - 1
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a - 1
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a - 1 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 - 3*a*y^2 + (3*a + 2)*y - a - 1
+    factor (y - a - 1) * (y - a) * (y - a + 1) | roots [(a + 1, 1), (a, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 - 3*a*y^2 + (3*a + 2)*y - a - 1 | latex (y - a - 1) \cdot (y - a) \cdot (y - a + 1)
+   y^5 - 17/3*a*y^4 + (7*a + 8)*y^3 + (10/3*a + 3)*y^2 + (-a - 3/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 7*a - 13 | 7*y - 6*a - 1 | xgcd (1, -a, a*y - a)
+Number Field in a with defining polynomial x^2 + 1 | \Bold{Q}[a]/(a^{2} + 1) | \Bold{Q}[a]/(a^{2} + 1)[y] | -2 a + \frac{2}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (a + 1)*y^2 + (-a - 1)*y + a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y - a) * (y + a) * (y + 1) | roots [(1, 1), (a, 1), (-a, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y - a) \cdot (y + a) \cdot (y + 1)
+   y^6 + 1
+    factor (y - a) * (y + a) * (y^2 - a*y - 1) * (y^2 + a*y - 1) | roots [(a, 1), (-a, 1)] | sqfree True
+    gcd 1 | sqd y^6 + 1 | latex (y - a) \cdot (y + a) \cdot (y^{2} - a y - 1) \cdot (y^{2} + a y - 1)
+   y^3 + (-2*a + 2)*y^2 - 3*a*y - a - 1
+    factor (y - a) * (y - a + 1) * (y + 1) | roots [(a, 1), (a - 1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a + 2)*y^2 - 3*a*y - a - 1 | latex (y - a) \cdot (y - a + 1) \cdot (y + 1)
+   y^5 - 17/3*a*y^4 - 6*y^3 - 17/3*a*y^2 + 5/4*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 15 | (5*a + 17)*y - 15*a - 14 | xgcd (1, 1/2*a + 1/2, (-1/2*a - 1/2)*y + 1/2*a + 1/2)
+Number Field in a with defining polynomial x^2 + x + 1 | \Bold{Q}[a]/(a^{2} + a + 1) | \Bold{Q}[a]/(a^{2} + a + 1)[y] | -\frac{7}{3} a + \frac{2}{3}
+   y^2 - a
+    factor (y - a - 1) * (y + a + 1) | roots [(a + 1, 1), (-a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y - a - 1) \cdot (y + a + 1)
+   y^4 + (-a - 1)*y^3 + (2*a + 1)*y^2 - a*y - 1
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y - a) * (y + a + 1) * (y^3 - 2) | roots [(a, 1), (-a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y - a) \cdot (y + a + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 + a + 1
+    factor (y^3 + a) * (y^3 - a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 + a + 1 | latex (y^{3} + a) \cdot (y^{3} - a)
+   y^3 + (-a + 2)*y^2 + (-a + 2)*y - a + 1
+    factor (y - a) * (y + a + 1) * (y - a + 1) | roots [(a, 1), (-a - 1, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a + 2)*y^2 + (-a + 2)*y - a + 1 | latex (y - a) \cdot (y + a + 1) \cdot (y - a + 1)
+   y^5 - 17/3*a*y^4 + (-7*a - 6)*y^3 + (-8/3*a + 3)*y^2 + (a + 5/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 5*a - 15 | (10*a + 17)*y - 20*a - 13 | xgcd (1, 1/3*a + 2/3, (-1/3*a - 2/3)*y + 1/3*a + 2/3)
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? | \Bold{Q}(\sqrt{2}) | \Bold{Q}(\sqrt{2})[y] | -2 \sqrt{2} + \frac{5}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - \sqrt{2})
+   y^4 + (-a - 1)*y^3 + (a - 2)*y^2 + (2*a + 2)*y - 2*a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + \sqrt{2}) \cdot (y - \sqrt{2})^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + \sqrt{2} y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 \sqrt{2} + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - 2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - 2 | latex (y^{3} - \sqrt{2}) \cdot (y^{3} + \sqrt{2})
+   y^3 + (-2*a - 1)*y^2 + 3*a*y + 2*a - 4
+    factor (y - 2) * (y - a) * (y - a + 1) | roots [(2, 1), (a, 1), (a - 1, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a - 1)*y^2 + 3*a*y + 2*a - 4 | latex (y - 2) \cdot (y - \sqrt{2}) \cdot (y - \sqrt{2} + 1)
+   y^5 - 17/3*a*y^4 + 15*y^3 + 10/3*a*y^2 - 7/4*y + 1/12*a
+    factor (y + 1/3*a) * (y - 3/2*a - 2)^2 * (y - 3/2*a + 2)^2 | roots [(-1/3*a, 1), (3/2*a + 2, 2), (3/2*a - 2, 2)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} \sqrt{2}) \cdot (y - \frac{3}{2} \sqrt{2} - 2)^{2} \cdot (y - \frac{3}{2} \sqrt{2} + 2)^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 12 | (5*a + 2)*y - 12*a + 4 | xgcd (1, -a - 1, (a + 1)*y - a - 1)
+Number Field in a with defining polynomial x^2 + 5 with a = 2.236067977499790?*I | \Bold{Q}(\sqrt{-5}) | \Bold{Q}(\sqrt{-5})[y] | -2 \sqrt{-5} - \frac{2}{3}
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - \sqrt{-5})
+   y^4 + (-a - 1)*y^3 + (a + 5)*y^2 + (-5*a - 5)*y + 5*a
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + \sqrt{-5}) \cdot (y - \sqrt{-5})^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + \left(\sqrt{-5}\right) y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 \sqrt{-5} + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 + 5
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 + 5 | latex (y^{3} - \sqrt{-5}) \cdot (y^{3} + \sqrt{-5})
+   y^3 + (-2*a + 6)*y^2 - 11*a*y - 5*a - 25
+    factor (y - a) * (y - a + 1) * (y + 5) | roots [(a, 1), (a - 1, 1), (-5, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-2*a + 6)*y^2 - 11*a*y - 5*a - 25 | latex (y - \sqrt{-5}) \cdot (y - \sqrt{-5} + 1) \cdot (y + 5)
+   y^5 - 17/3*a*y^4 - 34*y^3 - 53/3*a*y^2 + 21/4*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} \sqrt{-5}) \cdot (y^{2} + \left(-3 \sqrt{-5}\right) y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + 6*a - 19 | (5*a + 37)*y - 19*a - 38 | xgcd (1, 1/6*a + 1/6, (-1/6*a - 1/6)*y + 1/6*a + 1/6)
+Number Field in a with defining polynomial x^3 - 2 | \Bold{Q}[a]/(a^{3} - 2) | \Bold{Q}[a]/(a^{3} - 2)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^2 + 2)*y - 2
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y - a) * (y^2 + y + 1) * (y^2 + a*y + a^2) | roots [(a, 1)] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y - a) \cdot (y^{2} + y + 1) \cdot (y^{2} + a y + a^{2})
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (-a + 4)*y - 2*a + 2
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (-a + 4)*y - 2*a + 2 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (-8/3*a + 6)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + 6*a^2 - 14*a - 6 | xgcd (1, -a^2 - a - 1, (a^2 + a + 1)*y - a^2 - a - 1)
+Number Field in a with defining polynomial x^3 - x - 1 | \Bold{Q}[a]/(a^{3} - a - 1) | \Bold{Q}[a]/(a^{3} - a - 1)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^2 + a + 1)*y - a - 1
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (a + 2)*y - a^2 + 1
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (a + 2)*y - a^2 + 1 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (1/3*a + 3)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + 6*a^2 - 13*a - 7 | xgcd (1, -a^2 - a, (a^2 + a)*y - a^2 - a)
+Number Field in a with defining polynomial x^4 + 1 | \Bold{Q}[a]/(a^{4} + 1) | \Bold{Q}[a]/(a^{4} + 1)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^3 + a^2)*y - a^3
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y - a^2) * (y + a^2) | roots [(1, 1), (-1, 1), (a^2, 1), (-a^2, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y - a^{2}) \cdot (y + a^{2})
+   y^6 - a^2
+    factor (y - a^3) * (y + a^3) * (y^2 - a^3*y - a^2) * (y^2 + a^3*y - a^2) | roots [(a^3, 1), (-a^3, 1)] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y - a^{3}) \cdot (y + a^{3}) \cdot (y^{2} - a^{3} y - a^{2}) \cdot (y^{2} + a^{3} y - a^{2})
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 + 1
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 + 1 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (3*a^3 - 8/3*a)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + a^3 + 6*a^2 - 14*a - 8 | xgcd (1, 1/2*a^3 + 1/2*a^2 + 1/2*a + 1/2, (-1/2*a^3 - 1/2*a^2 - 1/2*a - 1/2)*y + 1/2*a^3 + 1/2*a^2 + 1/2*a + 1/2)
+Number Field in a with defining polynomial x^4 - 2 | \Bold{Q}[a]/(a^{4} - 2) | \Bold{Q}[a]/(a^{4} - 2)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor y^2 - a | roots [] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y^{2} - a)
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^3 + a^2)*y - a^3
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y^3 - a) * (y^3 + a) | roots [] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y^{3} - a) \cdot (y^{3} + a)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 - 2
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + a^3 - 2 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (3*a^3 - 8/3*a)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + a^3 + 6*a^2 - 14*a - 8 | xgcd (1, -a^3 - a^2 - a - 1, (a^3 + a^2 + a + 1)*y - a^3 - a^2 - a - 1)
+Cyclotomic Field of order 5 and degree 4 | \Bold{Q}[a]/(a^{4} + a^{3} + a^{2} + a + 1) | \Bold{Q}[a]/(a^{4} + a^{3} + a^{2} + a + 1)[y] | \frac{1}{3} a^{2} - 2 a + 1
+   y^2 - a
+    factor (y - a^3) * (y + a^3) | roots [(a^3, 1), (-a^3, 1)] | sqfree True
+    gcd 1 | sqd y^2 - a | latex (y - a^{3}) \cdot (y + a^{3})
+   y^4 + (-a - 1)*y^3 + (-a^2 + a)*y^2 + (a^3 + a^2)*y - a^3
+    factor (y - 1) * (y + a) * (y - a)^2 | roots [(1, 1), (-a, 1), (a, 2)] | sqfree False
+    gcd y - a | sqd (y^2 + (a - 1)*y - a) * (y - a)^2 | latex (y - 1) \cdot (y + a) \cdot (y - a)^{2}
+   y^5 + (a - 6)*y^4 + (-6*a + 13)*y^3 + (12*a - 14)*y^2 + (-8*a + 12)*y - 8
+    factor (y - 2)^3 * (y^2 + a*y + 1) | roots [(2, 3)] | sqfree False
+    gcd y^2 - 4*y + 4 | sqd (y^2 + a*y + 1) * (y - 2)^3 | latex (y - 2)^{3} \cdot (y^{2} + a y + 1)
+   y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2
+    factor (y^2 + y + 1) * (y^3 - 2) | roots [] | sqfree True
+    gcd 1 | sqd y^5 + y^4 + y^3 - 2*y^2 - 2*y - 2 | latex (y^{2} + y + 1) \cdot (y^{3} - 2)
+   (2*a + 1)*y^4 - 2*a - 1
+    factor (2*a + 1) * (y - 1) * (y + 1) * (y^2 + 1) | roots [(1, 1), (-1, 1)] | sqfree True
+    gcd 1 | sqd (2*a + 1)*y^4 - 2*a - 1 | latex \left(2 a + 1\right) \cdot (y - 1) \cdot (y + 1) \cdot (y^{2} + 1)
+   y^6 - a^2
+    factor (y - a^2) * (y + a^2) * (y^2 - a^2*y - a^3 - a^2 - a - 1) * (y^2 + a^2*y - a^3 - a^2 - a - 1) | roots [(a^2, 1), (-a^2, 1)] | sqfree True
+    gcd 1 | sqd y^6 - a^2 | latex (y - a^{2}) \cdot (y + a^{2}) \cdot (y^{2} - a^{2} y - a^{3} - a^{2} - a - 1) \cdot (y^{2} + a^{2} y - a^{3} - a^{2} - a - 1)
+   y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + 2*a^3 + a^2 + a + 1
+    factor (y - a) * (y - a + 1) * (y - a^2) | roots [(a, 1), (a - 1, 1), (a^2, 1)] | sqfree True
+    gcd 1 | sqd y^3 + (-a^2 - 2*a + 1)*y^2 + (2*a^3 - a)*y + 2*a^3 + a^2 + a + 1 | latex (y - a) \cdot (y - a + 1) \cdot (y - a^{2})
+   y^5 - 17/3*a*y^4 + (7*a^2 + 1)*y^3 + (3*a^3 - 8/3*a)*y^2 + (-a^2 + 1/4)*y + 1/12*a
+    factor (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | roots [(-1/3*a, 1)] | sqfree False
+    gcd y^2 - 3*a*y + 1/2 | sqd (y + 1/3*a) * (y^2 - 3*a*y + 1/2)^2 | latex (y + \frac{1}{3} a) \cdot (y^{2} - 3 a y + \frac{1}{2})^{2}
+  quo_rem y^3 + (a - 6)*y^2 + (-5*a + 13)*y + a^2 + 6*a - 14 | (-5*a^2 + 5*a + 12)*y + a^3 + 6*a^2 - 14*a - 8 | xgcd (1, 1/5*a^3 + 2/5*a^2 + 3/5*a + 4/5, (-1/5*a^3 - 2/5*a^2 - 3/5*a - 4/5)*y + 1/5*a^3 + 2/5*a^2 + 3/5*a + 4/5)
+74 False
+(z - 10*w + 18)^2 * (z + 18*w - 6)^2 * (z + 22*w + 22)^2 * (z + 20*w + 30)^2 * (z - 16*w - 24)^3 * (z + 12*w - 48)^3 * z^3 * (z - 4*w + 60)^3 * (z - 30*w - 12)^4 * (z - 34*w + 26)^4 * (z + 20*w - 47)^4 * (z + 36*w - 34)^4 * (z + 20*w + 8)^4 * (z + 48*w - 16)^4 * (z - 40*w + 28)^6 * (z - 22)^6 * (z - 24*w + 30)^6 * (z + 12*w + 18)^6 * (z^3 + (-2*w - 58)*z^2 + (184*w - 758)*z - 18660*w + 51540)^2
+[(10*w - 18, 2), (-18*w + 6, 2), (-22*w - 22, 2), (-20*w - 30, 2), (16*w + 24, 3), (-12*w + 48, 3), (0, 3), (4*w - 60, 3), (30*w + 12, 4), (34*w - 26, 4), (-20*w + 47, 4), (-36*w + 34, 4), (-20*w - 8, 4), (-48*w + 16, 4), (40*w - 28, 6), (22, 6), (24*w - 30, 6), (-12*w - 18, 6)]
+\Bold{Q}[a_{12}]/(a_{12}^{3} - a_{12} - 1) | \frac{1}{2} a_{12}^{2} - \frac{3}{7} a_{12} + \frac{5}{11} | \Bold{Q}[a_{12}]/(a_{12}^{3} - a_{12} - 1)[y_{2}] | \left(a_{12} + 1\right) y_{2}^{2} - \frac{1}{2} a_{12} y_{2} + \frac{3}{7}
+\Bold{Q}[\theta_{1}]/(\theta_{1}^{3} - \theta_{1} - 1) | \frac{1}{2} \theta_{1}^{2} - \frac{3}{7} \theta_{1} + \frac{5}{11} | \Bold{Q}[\theta_{1}]/(\theta_{1}^{3} - \theta_{1} - 1)[y_{2}] | \left(\theta_{1} + 1\right) y_{2}^{2} - \frac{1}{2} \theta_{1} y_{2} + \frac{3}{7}
+\Bold{Q}[\alpha]/(\alpha^{3} - \alpha - 1) | \frac{1}{2} \alpha^{2} - \frac{3}{7} \alpha + \frac{5}{11} | \Bold{Q}[\alpha]/(\alpha^{3} - \alpha - 1)[y_{2}] | \left(\alpha + 1\right) y_{2}^{2} - \frac{1}{2} \alpha y_{2} + \frac{3}{7}
+\Bold{Q}[\zeta_{5}]/(\zeta_{5}^{3} - \zeta_{5} - 1) | \frac{1}{2} \zeta_{5}^{2} - \frac{3}{7} \zeta_{5} + \frac{5}{11} | \Bold{Q}[\zeta_{5}]/(\zeta_{5}^{3} - \zeta_{5} - 1)[y_{2}] | \left(\zeta_{5} + 1\right) y_{2}^{2} - \frac{1}{2} \zeta_{5} y_{2} + \frac{3}{7}
+\Bold{Q}[x_{12}]/(x_{12}^{3} - x_{12} - 1) | \frac{1}{2} x_{12}^{2} - \frac{3}{7} x_{12} + \frac{5}{11} | \Bold{Q}[x_{12}]/(x_{12}^{3} - x_{12} - 1)[y_{2}] | \left(x_{12} + 1\right) y_{2}^{2} - \frac{1}{2} x_{12} y_{2} + \frac{3}{7}
+\Bold{Q}[\Omega_{84}]/(\Omega_{84}^{3} - \Omega_{84} - 1) | \frac{1}{2} \Omega_{84}^{2} - \frac{3}{7} \Omega_{84} + \frac{5}{11} | \Bold{Q}[\Omega_{84}]/(\Omega_{84}^{3} - \Omega_{84} - 1)[y_{2}] | \left(\Omega_{84} + 1\right) y_{2}^{2} - \frac{1}{2} \Omega_{84} y_{2} + \frac{3}{7}
+\Bold{Q}[\mathit{abc}]/(\mathit{abc}^{3} - \mathit{abc} - 1) | \frac{1}{2} \mathit{abc}^{2} - \frac{3}{7} \mathit{abc} + \frac{5}{11} | \Bold{Q}[\mathit{abc}]/(\mathit{abc}^{3} - \mathit{abc} - 1)[y_{2}] | \left(\mathit{abc} + 1\right) y_{2}^{2} - \frac{1}{2} \mathit{abc} y_{2} + \frac{3}{7}
+\Bold{Q}[\sigma_{\alpha}]/(\sigma_{\alpha}^{3} - \sigma_{\alpha} - 1) | \frac{1}{2} \sigma_{\alpha}^{2} - \frac{3}{7} \sigma_{\alpha} + \frac{5}{11} | \Bold{Q}[\sigma_{\alpha}]/(\sigma_{\alpha}^{3} - \sigma_{\alpha} - 1)[y_{2}] | \left(\sigma_{\alpha} + 1\right) y_{2}^{2} - \frac{1}{2} \sigma_{\alpha} y_{2} + \frac{3}{7}
+\Bold{Q}[\mathit{Alpha}]/(\mathit{Alpha}^{3} - \mathit{Alpha} - 1) | \frac{1}{2} \mathit{Alpha}^{2} - \frac{3}{7} \mathit{Alpha} + \frac{5}{11} | \Bold{Q}[\mathit{Alpha}]/(\mathit{Alpha}^{3} - \mathit{Alpha} - 1)[y_{2}] | \left(\mathit{Alpha} + 1\right) y_{2}^{2} - \frac{1}{2} \mathit{Alpha} y_{2} + \frac{3}{7}
+\Bold{Q}[b_{c_{1}}]/(b_{c_{1}}^{3} - b_{c_{1}} - 1) | \frac{1}{2} b_{c_{1}}^{2} - \frac{3}{7} b_{c_{1}} + \frac{5}{11} | \Bold{Q}[b_{c_{1}}]/(b_{c_{1}}^{3} - b_{c_{1}} - 1)[y_{2}] | \left(b_{c_{1}} + 1\right) y_{2}^{2} - \frac{1}{2} b_{c_{1}} y_{2} + \frac{3}{7}
+\Bold{Q}(\zeta_{5}) | \zeta_{5}^{2} + \frac{1}{3} \zeta_{5} | \Bold{Q}(\zeta_{5})[\Omega_{84}]
+\Bold{Q}[\alpha]/(\alpha^{4} + \alpha^{3} + \alpha^{2} + \alpha + 1) | \alpha^{2} + \frac{1}{3} \alpha | \Bold{Q}[\alpha]/(\alpha^{4} + \alpha^{3} + \alpha^{2} + \alpha + 1)[\Omega_{84}]
+\Bold{Q}[\zeta_{5}]/(\zeta_{5}^{4} + \zeta_{5}^{3} + \zeta_{5}^{2} + \zeta_{5} + 1) | \zeta_{5}^{2} + \frac{1}{3} \zeta_{5} | \Bold{Q}[\zeta_{5}]/(\zeta_{5}^{4} + \zeta_{5}^{3} + \zeta_{5}^{2} + \zeta_{5} + 1)[\Omega_{84}]
+\Bold{Q}(\sqrt{5}) | \frac{1}{3} \sqrt{5} + 5 | \Bold{Q}(\sqrt{5})[\Omega_{84}]
+\Bold{Q}(\sqrt{-3}) | \frac{1}{3} \sqrt{-3} - 3 | \Bold{Q}(\sqrt{-3})[\Omega_{84}]
+\Bold{Q}[\mathit{sqrt}_{5}]/(\mathit{sqrt}_{5}^{2} - 5) | \frac{1}{3} \mathit{sqrt}_{5} + 5 | \Bold{Q}[\mathit{sqrt}_{5}]/(\mathit{sqrt}_{5}^{2} - 5)[\Omega_{84}]
+a \Bold{Q}[a] 3a^{2} - a 3 a^{2} - \frac{1}{2} a
+abc \Bold{Q}[\mathit{abc}] 3\mathit{abc}^{2} - \mathit{abc} 3 \mathit{abc}^{2} - \frac{1}{2} \mathit{abc}
+sigma \Bold{Q}[\sigma] 3\sigma^{2} - \sigma 3 \sigma^{2} - \frac{1}{2} \sigma
+sigma_k \Bold{Q}[\sigma_{k}] 3\sigma_{k}^{2} - \sigma_{k} 3 \sigma_{k}^{2} - \frac{1}{2} \sigma_{k}
+sigma389 \Bold{Q}[\sigma_{389}] 3\sigma_{389}^{2} - \sigma_{389} 3 \sigma_{389}^{2} - \frac{1}{2} \sigma_{389}
+beta_00 \Bold{Q}[\beta_{00}] 3\beta_{00}^{2} - \beta_{00} 3 \beta_{00}^{2} - \frac{1}{2} \beta_{00}
+Omega84 \Bold{Q}[\Omega_{84}] 3\Omega_{84}^{2} - \Omega_{84} 3 \Omega_{84}^{2} - \frac{1}{2} \Omega_{84}
+sigma_alpha \Bold{Q}[\sigma_{\alpha}] 3\sigma_{\alpha}^{2} - \sigma_{\alpha} 3 \sigma_{\alpha}^{2} - \frac{1}{2} \sigma_{\alpha}
+nothing1 \Bold{Q}[\mathit{nothing}_{1}] 3\mathit{nothing}_{1}^{2} - \mathit{nothing}_{1} 3 \mathit{nothing}_{1}^{2} - \frac{1}{2} \mathit{nothing}_{1}
+nothing_abc \Bold{Q}[\mathit{nothing}_{\mathit{abc}}] 3\mathit{nothing}_{\mathit{abc}}^{2} - \mathit{nothing}_{\mathit{abc}} 3 \mathit{nothing}_{\mathit{abc}}^{2} - \frac{1}{2} \mathit{nothing}_{\mathit{abc}}
+alpha_beta_gamma12 \Bold{Q}[\alpha_{\beta_{\gamma_{12}}}] 3\alpha_{\beta_{\gamma_{12}}}^{2} - \alpha_{\beta_{\gamma_{12}}} 3 \alpha_{\beta_{\gamma_{12}}}^{2} - \frac{1}{2} \alpha_{\beta_{\gamma_{12}}}
+x_ast \Bold{Q}[x_{\ast}] 3x_{\ast}^{2} - x_{\ast} 3 x_{\ast}^{2} - \frac{1}{2} x_{\ast}
+alpha \Bold{Q}[\alpha] 3\alpha^{2} - \alpha 3 \alpha^{2} - \frac{1}{2} \alpha
+theta_1 \Bold{Q}[\theta_{1}] 3\theta_{1}^{2} - \theta_{1} 3 \theta_{1}^{2} - \frac{1}{2} \theta_{1}
+y_2 \Bold{Q}[y_{2}] 3y_{2}^{2} - y_{2} 3 y_{2}^{2} - \frac{1}{2} y_{2}
+a12 \Bold{Q}[a_{12}] 3a_{12}^{2} - a_{12} 3 a_{12}^{2} - \frac{1}{2} a_{12}
+zeta5 \Bold{Q}[\zeta_{5}] 3\zeta_{5}^{2} - \zeta_{5} 3 \zeta_{5}^{2} - \frac{1}{2} \zeta_{5}
+x_12 \Bold{Q}[x_{12}] 3x_{12}^{2} - x_{12} 3 x_{12}^{2} - \frac{1}{2} x_{12}
+Alpha \Bold{Q}[\mathit{Alpha}] 3\mathit{Alpha}^{2} - \mathit{Alpha} 3 \mathit{Alpha}^{2} - \frac{1}{2} \mathit{Alpha}
+Beta \Bold{Q}[\mathit{Beta}] 3\mathit{Beta}^{2} - \mathit{Beta} 3 \mathit{Beta}^{2} - \frac{1}{2} \mathit{Beta}
+Gamma \Bold{Q}[\Gamma] 3\Gamma^{2} - \Gamma 3 \Gamma^{2} - \frac{1}{2} \Gamma
+Delta \Bold{Q}[\Delta] 3\Delta^{2} - \Delta 3 \Delta^{2} - \frac{1}{2} \Delta
+Epsilon \Bold{Q}[\mathit{Epsilon}] 3\mathit{Epsilon}^{2} - \mathit{Epsilon} 3 \mathit{Epsilon}^{2} - \frac{1}{2} \mathit{Epsilon}
+Theta \Bold{Q}[\Theta] 3\Theta^{2} - \Theta 3 \Theta^{2} - \frac{1}{2} \Theta
+Lambda \Bold{Q}[\Lambda] 3\Lambda^{2} - \Lambda 3 \Lambda^{2} - \frac{1}{2} \Lambda
+Xi \Bold{Q}[\Xi] 3\Xi^{2} - \Xi 3 \Xi^{2} - \frac{1}{2} \Xi
+Pi \Bold{Q}[\Pi] 3\Pi^{2} - \Pi 3 \Pi^{2} - \frac{1}{2} \Pi
+Sigma \Bold{Q}[\Sigma] 3\Sigma^{2} - \Sigma 3 \Sigma^{2} - \frac{1}{2} \Sigma
+Upsilon \Bold{Q}[\mathit{Upsilon}] 3\mathit{Upsilon}^{2} - \mathit{Upsilon} 3 \mathit{Upsilon}^{2} - \frac{1}{2} \mathit{Upsilon}
+Phi \Bold{Q}[\Phi] 3\Phi^{2} - \Phi 3 \Phi^{2} - \frac{1}{2} \Phi
+Psi \Bold{Q}[\Psi] 3\Psi^{2} - \Psi 3 \Psi^{2} - \frac{1}{2} \Psi
+Omega \Bold{Q}[\Omega] 3\Omega^{2} - \Omega 3 \Omega^{2} - \frac{1}{2} \Omega
+Zeta \Bold{Q}[\mathit{Zeta}] 3\mathit{Zeta}^{2} - \mathit{Zeta} 3 \mathit{Zeta}^{2} - \frac{1}{2} \mathit{Zeta}
+Eta \Bold{Q}[\mathit{Eta}] 3\mathit{Eta}^{2} - \mathit{Eta} 3 \mathit{Eta}^{2} - \frac{1}{2} \mathit{Eta}
+Iota \Bold{Q}[\mathit{Iota}] 3\mathit{Iota}^{2} - \mathit{Iota} 3 \mathit{Iota}^{2} - \frac{1}{2} \mathit{Iota}
+Kappa \Bold{Q}[\mathit{Kappa}] 3\mathit{Kappa}^{2} - \mathit{Kappa} 3 \mathit{Kappa}^{2} - \frac{1}{2} \mathit{Kappa}
+Mu \Bold{Q}[\mathit{Mu}] 3\mathit{Mu}^{2} - \mathit{Mu} 3 \mathit{Mu}^{2} - \frac{1}{2} \mathit{Mu}
+Nu \Bold{Q}[\mathit{Nu}] 3\mathit{Nu}^{2} - \mathit{Nu} 3 \mathit{Nu}^{2} - \frac{1}{2} \mathit{Nu}
+Rho \Bold{Q}[\mathit{Rho}] 3\mathit{Rho}^{2} - \mathit{Rho} 3 \mathit{Rho}^{2} - \frac{1}{2} \mathit{Rho}
+Tau \Bold{Q}[\mathit{Tau}] 3\mathit{Tau}^{2} - \mathit{Tau} 3 \mathit{Tau}^{2} - \frac{1}{2} \mathit{Tau}
+Chi \Bold{Q}[\mathit{Chi}] 3\mathit{Chi}^{2} - \mathit{Chi} 3 \mathit{Chi}^{2} - \frac{1}{2} \mathit{Chi}
+Omicron \Bold{Q}[\mathit{Omicron}] 3\mathit{Omicron}^{2} - \mathit{Omicron} 3 \mathit{Omicron}^{2} - \frac{1}{2} \mathit{Omicron}
+omicron \Bold{Q}[\mathit{omicron}] 3\mathit{omicron}^{2} - \mathit{omicron} 3 \mathit{omicron}^{2} - \frac{1}{2} \mathit{omicron}
+varepsilon \Bold{Q}[\mathit{varepsilon}] 3\mathit{varepsilon}^{2} - \mathit{varepsilon} 3 \mathit{varepsilon}^{2} - \frac{1}{2} \mathit{varepsilon}
+vartheta \Bold{Q}[\mathit{vartheta}] 3\mathit{vartheta}^{2} - \mathit{vartheta} 3 \mathit{vartheta}^{2} - \frac{1}{2} \mathit{vartheta}
+varpi \Bold{Q}[\mathit{varpi}] 3\mathit{varpi}^{2} - \mathit{varpi} 3 \mathit{varpi}^{2} - \frac{1}{2} \mathit{varpi}
+varrho \Bold{Q}[\mathit{varrho}] 3\mathit{varrho}^{2} - \mathit{varrho} 3 \mathit{varrho}^{2} - \frac{1}{2} \mathit{varrho}
+varsigma \Bold{Q}[\mathit{varsigma}] 3\mathit{varsigma}^{2} - \mathit{varsigma} 3 \mathit{varsigma}^{2} - \frac{1}{2} \mathit{varsigma}
+varphi \Bold{Q}[\varphi] 3\varphi^{2} - \varphi 3 \varphi^{2} - \frac{1}{2} \varphi
+lambda_ \Bold{Q}[\lambda] 3\lambda^{2} - \lambda 3 \lambda^{2} - \frac{1}{2} \lambda
+ell \Bold{Q}[\mathit{ell}] 3\mathit{ell}^{2} - \mathit{ell} 3 \mathit{ell}^{2} - \frac{1}{2} \mathit{ell}
+hbar \Bold{Q}[\mathit{hbar}] 3\mathit{hbar}^{2} - \mathit{hbar} 3 \mathit{hbar}^{2} - \frac{1}{2} \mathit{hbar}
+aleph \Bold{Q}[\mathit{aleph}] 3\mathit{aleph}^{2} - \mathit{aleph} 3 \mathit{aleph}^{2} - \frac{1}{2} \mathit{aleph}
+ast \Bold{Q}[\ast] 3\ast^{2} - \ast 3 \ast^{2} - \frac{1}{2} \ast
+star \Bold{Q}[\star] 3\star^{2} - \star 3 \star^{2} - \frac{1}{2} \star
+x_star \Bold{Q}[x_{\star}] 3x_{\star}^{2} - x_{\star} 3 x_{\star}^{2} - \frac{1}{2} x_{\star}
+infty \Bold{Q}[\mathit{infty}] 3\mathit{infty}^{2} - \mathit{infty} 3 \mathit{infty}^{2} - \frac{1}{2} \mathit{infty}
+x1_2 \Bold{Q}[\mathit{x1}_{2}] 3\mathit{x1}_{2}^{2} - \mathit{x1}_{2} 3 \mathit{x1}_{2}^{2} - \frac{1}{2} \mathit{x1}_{2}
+a12b \Bold{Q}[\mathit{a12b}] 3\mathit{a12b}^{2} - \mathit{a12b} 3 \mathit{a12b}^{2} - \frac{1}{2} \mathit{a12b}
+ab1c2 \Bold{Q}[\mathit{ab1c}_{2}] 3\mathit{ab1c}_{2}^{2} - \mathit{ab1c}_{2} 3 \mathit{ab1c}_{2}^{2} - \frac{1}{2} \mathit{ab1c}_{2}
+a_1_2 \Bold{Q}[a_{1_{2}}] 3a_{1_{2}}^{2} - a_{1_{2}} 3 a_{1_{2}}^{2} - \frac{1}{2} a_{1_{2}}
+w_ \Bold{Q}[w] 3w^{2} - w 3 w^{2} - \frac{1}{2} w
+a__b \Bold{Q}[a_{_{b}}] 3a_{_{b}}^{2} - a_{_{b}} 3 a_{_{b}}^{2} - \frac{1}{2} a_{_{b}}
+x_y_z \Bold{Q}[x_{y_{z}}] 3x_{y_{z}}^{2} - x_{y_{z}} 3 x_{y_{z}}^{2} - \frac{1}{2} x_{y_{z}}
+xy_1 \Bold{Q}[\mathit{xy}_{1}] 3\mathit{xy}_{1}^{2} - \mathit{xy}_{1} 3 \mathit{xy}_{1}^{2} - \frac{1}{2} \mathit{xy}_{1}
+X \Bold{Q}[X] 3X^{2} - X 3 X^{2} - \frac{1}{2} X
+XY \Bold{Q}[\mathit{XY}] 3\mathit{XY}^{2} - \mathit{XY} 3 \mathit{XY}^{2} - \frac{1}{2} \mathit{XY}
+Xy12 \Bold{Q}[\mathit{Xy}_{12}] 3\mathit{Xy}_{12}^{2} - \mathit{Xy}_{12} 3 \mathit{Xy}_{12}^{2} - \frac{1}{2} \mathit{Xy}_{12}
+b0 \Bold{Q}[b_{0}] 3b_{0}^{2} - b_{0} 3 b_{0}^{2} - \frac{1}{2} b_{0}
+b00 \Bold{Q}[b_{00}] 3b_{00}^{2} - b_{00} 3 b_{00}^{2} - \frac{1}{2} b_{00}
+b01 \Bold{Q}[b_{01}] 3b_{01}^{2} - b_{01} 3 b_{01}^{2} - \frac{1}{2} b_{01}
+pi2 \Bold{Q}[\pi_{2}] 3\pi_{2}^{2} - \pi_{2} 3 \pi_{2}^{2} - \frac{1}{2} \pi_{2}
+pi_2 \Bold{Q}[\pi_{2}] 3\pi_{2}^{2} - \pi_{2} 3 \pi_{2}^{2} - \frac{1}{2} \pi_{2}
+epsilon \Bold{Q}[\epsilon] 3\epsilon^{2} - \epsilon 3 \epsilon^{2} - \frac{1}{2} \epsilon
+eta \Bold{Q}[\eta] 3\eta^{2} - \eta 3 \eta^{2} - \frac{1}{2} \eta
+iota \Bold{Q}[\iota] 3\iota^{2} - \iota 3 \iota^{2} - \frac{1}{2} \iota
+kappa \Bold{Q}[\kappa] 3\kappa^{2} - \kappa 3 \kappa^{2} - \frac{1}{2} \kappa
+lambda \Bold{Q}[\lambda] 3\lambda^{2} - \lambda 3 \lambda^{2} - \frac{1}{2} \lambda
+mu \Bold{Q}[\mu] 3\mu^{2} - \mu 3 \mu^{2} - \frac{1}{2} \mu
+nu \Bold{Q}[\nu] 3\nu^{2} - \nu 3 \nu^{2} - \frac{1}{2} \nu
+xi \Bold{Q}[\xi] 3\xi^{2} - \xi 3 \xi^{2} - \frac{1}{2} \xi
+pi \Bold{Q}[\pi] 3\pi^{2} - \pi 3 \pi^{2} - \frac{1}{2} \pi
+rho \Bold{Q}[\rho] 3\rho^{2} - \rho 3 \rho^{2} - \frac{1}{2} \rho
+tau \Bold{Q}[\tau] 3\tau^{2} - \tau 3 \tau^{2} - \frac{1}{2} \tau
+upsilon \Bold{Q}[\upsilon] 3\upsilon^{2} - \upsilon 3 \upsilon^{2} - \frac{1}{2} \upsilon
+phi \Bold{Q}[\phi] 3\phi^{2} - \phi 3 \phi^{2} - \frac{1}{2} \phi
+chi \Bold{Q}[\chi] 3\chi^{2} - \chi 3 \chi^{2} - \frac{1}{2} \chi
+psi \Bold{Q}[\psi] 3\psi^{2} - \psi 3 \psi^{2} - \frac{1}{2} \psi
+omega \Bold{Q}[\omega] 3\omega^{2} - \omega 3 \omega^{2} - \frac{1}{2} \omega
+gamma \Bold{Q}[\gamma] 3\gamma^{2} - \gamma 3 \gamma^{2} - \frac{1}{2} \gamma
+delta \Bold{Q}[\delta] 3\delta^{2} - \delta 3 \delta^{2} - \frac{1}{2} \delta
+zeta \Bold{Q}[\zeta] 3\zeta^{2} - \zeta 3 \zeta^{2} - \frac{1}{2} \zeta
+theta \Bold{Q}[\theta] 3\theta^{2} - \theta 3 \theta^{2} - \frac{1}{2} \theta
+beta \Bold{Q}[\beta] 3\beta^{2} - \beta 3 \beta^{2} - \frac{1}{2} \beta
+alpha1 \Bold{Q}[\alpha_{1}] 3\alpha_{1}^{2} - \alpha_{1} 3 \alpha_{1}^{2} - \frac{1}{2} \alpha_{1}
+alpha_1 \Bold{Q}[\alpha_{1}] 3\alpha_{1}^{2} - \alpha_{1} 3 \alpha_{1}^{2} - \frac{1}{2} \alpha_{1}
+alpha_beta \Bold{Q}[\alpha_{\beta}] 3\alpha_{\beta}^{2} - \alpha_{\beta} 3 \alpha_{\beta}^{2} - \frac{1}{2} \alpha_{\beta}
+a_alpha \Bold{Q}[a_{\alpha}] 3a_{\alpha}^{2} - a_{\alpha} 3 a_{\alpha}^{2} - \frac{1}{2} a_{\alpha}
+a_bc \Bold{Q}[a_{\mathit{bc}}] 3a_{\mathit{bc}}^{2} - a_{\mathit{bc}} 3 a_{\mathit{bc}}^{2} - \frac{1}{2} a_{\mathit{bc}}
+ab_c \Bold{Q}[\mathit{ab}_{c}] 3\mathit{ab}_{c}^{2} - \mathit{ab}_{c} 3 \mathit{ab}_{c}^{2} - \frac{1}{2} \mathit{ab}_{c}
+x_10 \Bold{Q}[x_{10}] 3x_{10}^{2} - x_{10} 3 x_{10}^{2} - \frac{1}{2} x_{10}
+x10 \Bold{Q}[x_{10}] 3x_{10}^{2} - x_{10} 3 x_{10}^{2} - \frac{1}{2} x_{10}
+x_a1 \Bold{Q}[x_{a_{1}}] 3x_{a_{1}}^{2} - x_{a_{1}} 3 x_{a_{1}}^{2} - \frac{1}{2} x_{a_{1}}
+theta_1_2 \Bold{Q}[\theta_{1_{2}}] 3\theta_{1_{2}}^{2} - \theta_{1_{2}} 3 \theta_{1_{2}}^{2} - \frac{1}{2} \theta_{1_{2}}
+th \Bold{Q}[\mathit{th}] 3\mathit{th}^{2} - \mathit{th} 3 \mathit{th}^{2} - \frac{1}{2} \mathit{th}
+thet \Bold{Q}[\mathit{thet}] 3\mathit{thet}^{2} - \mathit{thet} 3 \mathit{thet}^{2} - \frac{1}{2} \mathit{thet}
+alphas \Bold{Q}[\mathit{alphas}] 3\mathit{alphas}^{2} - \mathit{alphas} 3 \mathit{alphas}^{2} - \frac{1}{2} \mathit{alphas}
+Alphas \Bold{Q}[\mathit{Alphas}] 3\mathit{Alphas}^{2} - \mathit{Alphas} 3 \mathit{Alphas}^{2} - \frac{1}{2} \mathit{Alphas}
+nabla \Bold{Q}[\mathit{nabla}] 3\mathit{nabla}^{2} - \mathit{nabla} 3 \mathit{nabla}^{2} - \frac{1}{2} \mathit{nabla}
+partial \Bold{Q}[\mathit{partial}] 3\mathit{partial}^{2} - \mathit{partial} 3 \mathit{partial}^{2} - \frac{1}{2} \mathit{partial}
+x_prime \Bold{Q}[x_{\mathit{prime}}] 3x_{\mathit{prime}}^{2} - x_{\mathit{prime}} 3 x_{\mathit{prime}}^{2} - \frac{1}{2} x_{\mathit{prime}}
+x_p \Bold{Q}[x_{p}] 3x_{p}^{2} - x_{p} 3 x_{p}^{2} - \frac{1}{2} x_{p}
+x_i_j \Bold{Q}[x_{i_{j}}] 3x_{i_{j}}^{2} - x_{i_{j}} 3 x_{i_{j}}^{2} - \frac{1}{2} x_{i_{j}}
+zeta_5 \Bold{Q}[\zeta_{5}] 3\zeta_{5}^{2} - \zeta_{5} 3 \zeta_{5}^{2} - \frac{1}{2} \zeta_{5}
+gen \Bold{Q}[\mathit{gen}] 3\mathit{gen}^{2} - \mathit{gen} 3 \mathit{gen}^{2} - \frac{1}{2} \mathit{gen}
+w2x \Bold{Q}[\mathit{w2x}] 3\mathit{w2x}^{2} - \mathit{w2x} 3 \mathit{w2x}^{2} - \frac{1}{2} \mathit{w2x}
+q_00_1 \Bold{Q}[q_{\mathit{00}_{1}}] 3q_{\mathit{00}_{1}}^{2} - q_{\mathit{00}_{1}} 3 q_{\mathit{00}_{1}}^{2} - \frac{1}{2} q_{\mathit{00}_{1}}
+uz \Bold{Q}[\mathit{uz}] 3\mathit{uz}^{2} - \mathit{uz} 3 \mathit{uz}^{2} - \frac{1}{2} \mathit{uz}
+P \Bold{Q}[P] 3P^{2} - P 3 P^{2} - \frac{1}{2} P
+e5gx8d3 \Bold{Q}[\mathit{e5gx8d}_{3}] 3\mathit{e5gx8d}_{3}^{2} - \mathit{e5gx8d}_{3} 3 \mathit{e5gx8d}_{3}^{2} - \frac{1}{2} \mathit{e5gx8d}_{3}
+n \Bold{Q}[n] 3n^{2} - n 3 n^{2} - \frac{1}{2} n
+f_ep \Bold{Q}[f_{\mathit{ep}}] 3f_{\mathit{ep}}^{2} - f_{\mathit{ep}} 3 f_{\mathit{ep}}^{2} - \frac{1}{2} f_{\mathit{ep}}
+f_d7h \Bold{Q}[f_{\mathit{d7h}}] 3f_{\mathit{d7h}}^{2} - f_{\mathit{d7h}} 3 f_{\mathit{d7h}}^{2} - \frac{1}{2} f_{\mathit{d7h}}
+o8d78z \Bold{Q}[\mathit{o8d78z}] 3\mathit{o8d78z}^{2} - \mathit{o8d78z} 3 \mathit{o8d78z}^{2} - \frac{1}{2} \mathit{o8d78z}
+dc \Bold{Q}[\mathit{dc}] 3\mathit{dc}^{2} - \mathit{dc} 3 \mathit{dc}^{2} - \frac{1}{2} \mathit{dc}
+Jis_j5h \Bold{Q}[\mathit{Jis}_{\mathit{j5h}}] 3\mathit{Jis}_{\mathit{j5h}}^{2} - \mathit{Jis}_{\mathit{j5h}} 3 \mathit{Jis}_{\mathit{j5h}}^{2} - \frac{1}{2} \mathit{Jis}_{\mathit{j5h}}
+K6l \Bold{Q}[\mathit{K6l}] 3\mathit{K6l}^{2} - \mathit{K6l} 3 \mathit{K6l}^{2} - \frac{1}{2} \mathit{K6l}
+g7mxg \Bold{Q}[\mathit{g7mxg}] 3\mathit{g7mxg}^{2} - \mathit{g7mxg} 3 \mathit{g7mxg}^{2} - \frac{1}{2} \mathit{g7mxg}
+Je7dn2 \Bold{Q}[\mathit{Je7dn}_{2}] 3\mathit{Je7dn}_{2}^{2} - \mathit{Je7dn}_{2} 3 \mathit{Je7dn}_{2}^{2} - \frac{1}{2} \mathit{Je7dn}_{2}
+R_u08 \Bold{Q}[R_{u_{08}}] 3R_{u_{08}}^{2} - R_{u_{08}} 3 R_{u_{08}}^{2} - \frac{1}{2} R_{u_{08}}
+Dtp \Bold{Q}[\mathit{Dtp}] 3\mathit{Dtp}^{2} - \mathit{Dtp} 3 \mathit{Dtp}^{2} - \frac{1}{2} \mathit{Dtp}
+Yp \Bold{Q}[\mathit{Yp}] 3\mathit{Yp}^{2} - \mathit{Yp} 3 \mathit{Yp}^{2} - \frac{1}{2} \mathit{Yp}
+ft42v \Bold{Q}[\mathit{ft42v}] 3\mathit{ft42v}^{2} - \mathit{ft42v} 3 \mathit{ft42v}^{2} - \frac{1}{2} \mathit{ft42v}
+Us9e \Bold{Q}[\mathit{Us9e}] 3\mathit{Us9e}^{2} - \mathit{Us9e} 3 \mathit{Us9e}^{2} - \frac{1}{2} \mathit{Us9e}
+h_kvj \Bold{Q}[h_{\mathit{kvj}}] 3h_{\mathit{kvj}}^{2} - h_{\mathit{kvj}} 3 h_{\mathit{kvj}}^{2} - \frac{1}{2} h_{\mathit{kvj}}
+Fce6 \Bold{Q}[\mathit{Fce}_{6}] 3\mathit{Fce}_{6}^{2} - \mathit{Fce}_{6} 3 \mathit{Fce}_{6}^{2} - \frac{1}{2} \mathit{Fce}_{6}
+Kuvw928 \Bold{Q}[\mathit{Kuvw}_{928}] 3\mathit{Kuvw}_{928}^{2} - \mathit{Kuvw}_{928} 3 \mathit{Kuvw}_{928}^{2} - \frac{1}{2} \mathit{Kuvw}_{928}
+Zefr \Bold{Q}[\mathit{Zefr}] 3\mathit{Zefr}^{2} - \mathit{Zefr} 3 \mathit{Zefr}^{2} - \frac{1}{2} \mathit{Zefr}
+Eedt7_ \Bold{Q}[\mathit{Eedt7}] 3\mathit{Eedt7}^{2} - \mathit{Eedt7} 3 \mathit{Eedt7}^{2} - \frac{1}{2} \mathit{Eedt7}
+sywb0w \Bold{Q}[\mathit{sywb0w}] 3\mathit{sywb0w}^{2} - \mathit{sywb0w} 3 \mathit{sywb0w}^{2} - \frac{1}{2} \mathit{sywb0w}
+kh2dn \Bold{Q}[\mathit{kh2dn}] 3\mathit{kh2dn}^{2} - \mathit{kh2dn} 3 \mathit{kh2dn}^{2} - \frac{1}{2} \mathit{kh2dn}
+Xip \Bold{Q}[\mathit{Xip}] 3\mathit{Xip}^{2} - \mathit{Xip} 3 \mathit{Xip}^{2} - \frac{1}{2} \mathit{Xip}
+z2fk \Bold{Q}[\mathit{z2fk}] 3\mathit{z2fk}^{2} - \mathit{z2fk} 3 \mathit{z2fk}^{2} - \frac{1}{2} \mathit{z2fk}
+C6ri \Bold{Q}[\mathit{C6ri}] 3\mathit{C6ri}^{2} - \mathit{C6ri} 3 \mathit{C6ri}^{2} - \frac{1}{2} \mathit{C6ri}
+B6r_wyo \Bold{Q}[\mathit{B6r}_{\mathit{wyo}}] 3\mathit{B6r}_{\mathit{wyo}}^{2} - \mathit{B6r}_{\mathit{wyo}} 3 \mathit{B6r}_{\mathit{wyo}}^{2} - \frac{1}{2} \mathit{B6r}_{\mathit{wyo}}
+j \Bold{Q}[j] 3j^{2} - j 3 j^{2} - \frac{1}{2} j
+lo \Bold{Q}[\mathit{lo}] 3\mathit{lo}^{2} - \mathit{lo} 3 \mathit{lo}^{2} - \frac{1}{2} \mathit{lo}
+Qa \Bold{Q}[\mathit{Qa}] 3\mathit{Qa}^{2} - \mathit{Qa} 3 \mathit{Qa}^{2} - \frac{1}{2} \mathit{Qa}
+F8lqsaj \Bold{Q}[\mathit{F8lqsaj}] 3\mathit{F8lqsaj}^{2} - \mathit{F8lqsaj} 3 \mathit{F8lqsaj}^{2} - \frac{1}{2} \mathit{F8lqsaj}
+Ax7ui \Bold{Q}[\mathit{Ax7ui}] 3\mathit{Ax7ui}^{2} - \mathit{Ax7ui} 3 \mathit{Ax7ui}^{2} - \frac{1}{2} \mathit{Ax7ui}
+S3d06zz \Bold{Q}[\mathit{S3d06zz}] 3\mathit{S3d06zz}^{2} - \mathit{S3d06zz} 3 \mathit{S3d06zz}^{2} - \frac{1}{2} \mathit{S3d06zz}
+zg1z \Bold{Q}[\mathit{zg1z}] 3\mathit{zg1z}^{2} - \mathit{zg1z} 3 \mathit{zg1z}^{2} - \frac{1}{2} \mathit{zg1z}
+de \Bold{Q}[\mathit{de}] 3\mathit{de}^{2} - \mathit{de} 3 \mathit{de}^{2} - \frac{1}{2} \mathit{de}
+nkhv \Bold{Q}[\mathit{nkhv}] 3\mathit{nkhv}^{2} - \mathit{nkhv} 3 \mathit{nkhv}^{2} - \frac{1}{2} \mathit{nkhv}
+M \Bold{Q}[M] 3M^{2} - M 3 M^{2} - \frac{1}{2} M
+g \Bold{Q}[g] 3g^{2} - g 3 g^{2} - \frac{1}{2} g
+K5 \Bold{Q}[K_{5}] 3K_{5}^{2} - K_{5} 3 K_{5}^{2} - \frac{1}{2} K_{5}
+gbe \Bold{Q}[\mathit{gbe}] 3\mathit{gbe}^{2} - \mathit{gbe} 3 \mathit{gbe}^{2} - \frac{1}{2} \mathit{gbe}
+nyjqw \Bold{Q}[\mathit{nyjqw}] 3\mathit{nyjqw}^{2} - \mathit{nyjqw} 3 \mathit{nyjqw}^{2} - \frac{1}{2} \mathit{nyjqw}
+M1h \Bold{Q}[\mathit{M1h}] 3\mathit{M1h}^{2} - \mathit{M1h} 3 \mathit{M1h}^{2} - \frac{1}{2} \mathit{M1h}
+h2011tf \Bold{Q}[\mathit{h2011tf}] 3\mathit{h2011tf}^{2} - \mathit{h2011tf} 3 \mathit{h2011tf}^{2} - \frac{1}{2} \mathit{h2011tf}
+Vq1 \Bold{Q}[\mathit{Vq}_{1}] 3\mathit{Vq}_{1}^{2} - \mathit{Vq}_{1} 3 \mathit{Vq}_{1}^{2} - \frac{1}{2} \mathit{Vq}_{1}
+S4 \Bold{Q}[S_{4}] 3S_{4}^{2} - S_{4} 3 S_{4}^{2} - \frac{1}{2} S_{4}
+b4 \Bold{Q}[b_{4}] 3b_{4}^{2} - b_{4} 3 b_{4}^{2} - \frac{1}{2} b_{4}
+x5 \Bold{Q}[x_{5}] 3x_{5}^{2} - x_{5} 3 x_{5}^{2} - \frac{1}{2} x_{5}
+b4tfq4x \Bold{Q}[\mathit{b4tfq4x}] 3\mathit{b4tfq4x}^{2} - \mathit{b4tfq4x} 3 \mathit{b4tfq4x}^{2} - \frac{1}{2} \mathit{b4tfq4x}
+ko5 \Bold{Q}[\mathit{ko}_{5}] 3\mathit{ko}_{5}^{2} - \mathit{ko}_{5} 3 \mathit{ko}_{5}^{2} - \frac{1}{2} \mathit{ko}_{5}
+I3vompz \Bold{Q}[\mathit{I3vompz}] 3\mathit{I3vompz}^{2} - \mathit{I3vompz} 3 \mathit{I3vompz}^{2} - \frac{1}{2} \mathit{I3vompz}
+Vom42wb \Bold{Q}[\mathit{Vom42wb}] 3\mathit{Vom42wb}^{2} - \mathit{Vom42wb} 3 \mathit{Vom42wb}^{2} - \frac{1}{2} \mathit{Vom42wb}
+br1qm9w \Bold{Q}[\mathit{br1qm9w}] 3\mathit{br1qm9w}^{2} - \mathit{br1qm9w} 3 \mathit{br1qm9w}^{2} - \frac{1}{2} \mathit{br1qm9w}
+Cwxfogo \Bold{Q}[\mathit{Cwxfogo}] 3\mathit{Cwxfogo}^{2} - \mathit{Cwxfogo} 3 \mathit{Cwxfogo}^{2} - \frac{1}{2} \mathit{Cwxfogo}
+Ev \Bold{Q}[\mathit{Ev}] 3\mathit{Ev}^{2} - \mathit{Ev} 3 \mathit{Ev}^{2} - \frac{1}{2} \mathit{Ev}
+na1w \Bold{Q}[\mathit{na1w}] 3\mathit{na1w}^{2} - \mathit{na1w} 3 \mathit{na1w}^{2} - \frac{1}{2} \mathit{na1w}
+Zfhym1 \Bold{Q}[\mathit{Zfhym}_{1}] 3\mathit{Zfhym}_{1}^{2} - \mathit{Zfhym}_{1} 3 \mathit{Zfhym}_{1}^{2} - \frac{1}{2} \mathit{Zfhym}_{1}
+lvfz \Bold{Q}[\mathit{lvfz}] 3\mathit{lvfz}^{2} - \mathit{lvfz} 3 \mathit{lvfz}^{2} - \frac{1}{2} \mathit{lvfz}
+Dfkk \Bold{Q}[\mathit{Dfkk}] 3\mathit{Dfkk}^{2} - \mathit{Dfkk} 3 \mathit{Dfkk}^{2} - \frac{1}{2} \mathit{Dfkk}
+i \Bold{Q}[i] 3i^{2} - i 3 i^{2} - \frac{1}{2} i
+j0j91 \Bold{Q}[\mathit{j0j}_{91}] 3\mathit{j0j}_{91}^{2} - \mathit{j0j}_{91} 3 \mathit{j0j}_{91}^{2} - \frac{1}{2} \mathit{j0j}_{91}
+Qj6 \Bold{Q}[\mathit{Qj}_{6}] 3\mathit{Qj}_{6}^{2} - \mathit{Qj}_{6} 3 \mathit{Qj}_{6}^{2} - \frac{1}{2} \mathit{Qj}_{6}
+Jb \Bold{Q}[\mathit{Jb}] 3\mathit{Jb}^{2} - \mathit{Jb} 3 \mathit{Jb}^{2} - \frac{1}{2} \mathit{Jb}
+ag4i_mn \Bold{Q}[\mathit{ag4i}_{\mathit{mn}}] 3\mathit{ag4i}_{\mathit{mn}}^{2} - \mathit{ag4i}_{\mathit{mn}} 3 \mathit{ag4i}_{\mathit{mn}}^{2} - \frac{1}{2} \mathit{ag4i}_{\mathit{mn}}
+bns \Bold{Q}[\mathit{bns}] 3\mathit{bns}^{2} - \mathit{bns} 3 \mathit{bns}^{2} - \frac{1}{2} \mathit{bns}
+G8 \Bold{Q}[G_{8}] 3G_{8}^{2} - G_{8} 3 G_{8}^{2} - \frac{1}{2} G_{8}
+u5_ \Bold{Q}[\mathit{u5}] 3\mathit{u5}^{2} - \mathit{u5} 3 \mathit{u5}^{2} - \frac{1}{2} \mathit{u5}
+V08 \Bold{Q}[V_{08}] 3V_{08}^{2} - V_{08} 3 V_{08}^{2} - \frac{1}{2} V_{08}
+H3i5 \Bold{Q}[\mathit{H3i}_{5}] 3\mathit{H3i}_{5}^{2} - \mathit{H3i}_{5} 3 \mathit{H3i}_{5}^{2} - \frac{1}{2} \mathit{H3i}_{5}
+j3b_l \Bold{Q}[\mathit{j3b}_{l}] 3\mathit{j3b}_{l}^{2} - \mathit{j3b}_{l} 3 \mathit{j3b}_{l}^{2} - \frac{1}{2} \mathit{j3b}_{l}
+Xjlj1h6 \Bold{Q}[\mathit{Xjlj1h}_{6}] 3\mathit{Xjlj1h}_{6}^{2} - \mathit{Xjlj1h}_{6} 3 \mathit{Xjlj1h}_{6}^{2} - \frac{1}{2} \mathit{Xjlj1h}_{6}
+d44 \Bold{Q}[d_{44}] 3d_{44}^{2} - d_{44} 3 d_{44}^{2} - \frac{1}{2} d_{44}
+Jg6d \Bold{Q}[\mathit{Jg6d}] 3\mathit{Jg6d}^{2} - \mathit{Jg6d} 3 \mathit{Jg6d}^{2} - \frac{1}{2} \mathit{Jg6d}
+pr \Bold{Q}[\mathit{pr}] 3\mathit{pr}^{2} - \mathit{pr} 3 \mathit{pr}^{2} - \frac{1}{2} \mathit{pr}
+cg3_6be \Bold{Q}[\mathit{cg3}_{\mathit{6be}}] 3\mathit{cg3}_{\mathit{6be}}^{2} - \mathit{cg3}_{\mathit{6be}} 3 \mathit{cg3}_{\mathit{6be}}^{2} - \frac{1}{2} \mathit{cg3}_{\mathit{6be}}
+C39 \Bold{Q}[C_{39}] 3C_{39}^{2} - C_{39} 3 C_{39}^{2} - \frac{1}{2} C_{39}
+Gr \Bold{Q}[\mathit{Gr}] 3\mathit{Gr}^{2} - \mathit{Gr} 3 \mathit{Gr}^{2} - \frac{1}{2} \mathit{Gr}
