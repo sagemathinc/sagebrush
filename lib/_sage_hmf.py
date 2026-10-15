@@ -35,7 +35,29 @@ EXAMPLES::
 """
 
 from sagebrush._engine import call as _call
-from _sage_nf import _exact_int
+from _sage_lang import _CallableInt
+
+
+def _strict_int(x, what):
+    """x as an int: a Python or Sage integer, recognized by its exact type
+    before any conversion (daybreak CORR-FB2-1 and CORR-434-1). In
+    Sagebrush, 3 and ZZ(3) have type int exactly, and the numerator of a
+    rational as an attribute ((3/4).numerator) has type _CallableInt, an int
+    subclass of _sage_lang that adds only __call__. Everything else is
+    refused with a TypeError, even when its value is integral: bool, floats,
+    rationals, strings, NumPy scalars, and any other int subclass, whose
+    __int__ or __index__ could stand for another value. No user-overridable
+    hook is called."""
+    t = type(x)
+    if t is int:
+        return x
+    if t is _CallableInt:
+        # an exact _sage_lang class: int() runs int's own conversion
+        v = int(x)
+        if type(v) is int and v == x:
+            return v
+    name = next(c.__name__ for c in t.__mro__ if not c.__name__.startswith("_"))
+    raise TypeError("%s must be an integer, not %r of type %s" % (what, x, name))
 
 _FIELD = []
 
@@ -54,7 +76,7 @@ def _elt_pair(x):
     """An element of O_F as a pair (c0, c1) meaning c0 + c1*a; coordinates
     must be integers (3/2 or 3.9 is an error, never truncated)."""
     if isinstance(x, (tuple, list)) and len(x) == 2:
-        return [_exact_int(x[0], "a coordinate"), _exact_int(x[1], "a coordinate")]
+        return [_strict_int(x[0], "a coordinate"), _strict_int(x[1], "a coordinate")]
     if hasattr(x, "list") and hasattr(x, "parent"):
         from fractions import Fraction
         K = x.parent()
@@ -71,7 +93,7 @@ def _elt_pair(x):
         if any(getattr(t, "denominator", 1) != 1 for t in (c0, c1)):
             raise ValueError("%s is not an algebraic integer" % (x,))
         return [int(c0), int(c1)]
-    return [_exact_int(x, "a level or prime"), 0]
+    return [_strict_int(x, "a level or prime"), 0]
 
 
 def _gens(X):
@@ -87,7 +109,7 @@ def _gens(X):
         # a factorization [(P, e), ...] of an integral ideal
         I = SqrtFiveIdeal([[1, 0]])
         for P, e in X:
-            e = _exact_int(e, "an exponent")
+            e = _strict_int(e, "an exponent")
             if e < 0:
                 raise ValueError("levels are integral ideals: the exponent %d is negative" % e)
             for _ in range(e):
@@ -142,15 +164,15 @@ class SqrtFiveIdeal:
         sage: HilbertModularForms(3/2)  # sagebrush only
         Traceback (most recent call last):
         ...
-        TypeError: a level or prime must be an integer, not 3/2
+        TypeError: a level or prime must be an integer, not 3/2 of type Rational
         sage: HilbertModularForms(3.9)  # sagebrush only
         Traceback (most recent call last):
         ...
-        TypeError: a level or prime must be an integer, not 3.90000000000000
+        TypeError: a level or prime must be an integer, not 3.90000000000000 of type RealNumber
         sage: HilbertModularForms((3/2, 0))  # sagebrush only
         Traceback (most recent call last):
         ...
-        TypeError: a coordinate must be an integer, not 3/2
+        TypeError: a coordinate must be an integer, not 3/2 of type Rational
         sage: x = polygen(QQ, 'x'); K = NumberField(x^2 - x - 1, 'a')  # sagebrush only
         sage: HilbertModularForms(K.ideal(1).factor()).level()  # sagebrush only
         Fractional ideal (1)
@@ -162,7 +184,76 @@ class SqrtFiveIdeal:
         sage: HilbertModularForms([(P, 3/2)])  # sagebrush only
         Traceback (most recent call last):
         ...
-        TypeError: an exponent must be an integer, not 3/2
+        TypeError: an exponent must be an integer, not 3/2 of type Rational
+
+    Integers are recognized by their type, not their value: Python and Sage
+    integers are accepted, and bool, floats, rationals, strings and NumPy
+    scalars are refused even when they are integral::
+
+        sage: HilbertModularForms(3).level(), HilbertModularForms(ZZ(3)).level()  # sagebrush only
+        (Fractional ideal (3), Fractional ideal (3))
+        sage: HilbertModularForms((6/1).numerator()).level(), HilbertModularForms((6/1).numerator).level()  # sagebrush only
+        (Fractional ideal (6), Fractional ideal (6))
+
+    Other int subclasses are refused too: their __int__ or __index__ could
+    stand for another value::
+
+        sage: Plain = type("Plain", (int,), {})  # sagebrush only
+        sage: HilbertModularForms(Plain(3))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not 3 of type Plain
+        sage: Warp = type("Warp", (int,), {"__int__": lambda self: 9, "__index__": lambda self: 9})  # sagebrush only
+        sage: HilbertModularForms(Warp(3))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not 3 of type Warp
+        sage: HilbertModularForms((Warp(3), 0))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a coordinate must be an integer, not 3 of type Warp
+        sage: HilbertModularForms(3.0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not 3.00000000000000 of type RealNumber
+        sage: HilbertModularForms(QQ(3))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not 3 of type Rational
+        sage: HilbertModularForms("3")  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not '3' of type str
+        sage: HilbertModularForms(True)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not True of type bool
+        sage: import numpy  # sagebrush only
+        sage: HilbertModularForms(numpy.int64(3))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a level or prime must be an integer, not np.int64(3) of type int64
+        sage: HilbertModularForms((3.0, 0))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: a coordinate must be an integer, not 3.00000000000000 of type RealNumber
+        sage: HilbertModularForms([(P, 2.0)])  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: an exponent must be an integer, not 2.00000000000000 of type RealNumber
+        sage: HilbertModularForms([(P, True)])  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: an exponent must be an integer, not True of type bool
+        sage: from _sage_hmf import primes_of_bounded_norm  # sagebrush only
+        sage: primes_of_bounded_norm(12.0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: the bound must be an integer, not 12.0000000000000 of type RealNumber
+        sage: HilbertModularForms(SqrtFiveIdeal([[-2, 5]])).hecke_operator_on_basis_element(2, True)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: the basis index must be an integer, not True of type bool
     """
 
     def __init__(self, gens):
@@ -286,9 +377,9 @@ def primes_of_bounded_norm(B):
         sage: primes_of_bounded_norm(12.5)  # sagebrush only
         Traceback (most recent call last):
         ...
-        TypeError: the bound must be an integer, not 12.5000000000000
+        TypeError: the bound must be an integer, not 12.5000000000000 of type RealNumber
     """
-    B = _exact_int(B, "the bound")
+    B = _strict_int(B, "the bound")
     if B <= 2:
         return []
     return [SqrtFiveIdeal([P["gen"]]) for P in _call("hmf_primes", bound=B - 1)]
@@ -453,18 +544,18 @@ class HilbertModularForms:
             sage: H.hecke_operator_on_basis_element(2, 3/2)  # sagebrush only
             Traceback (most recent call last):
             ...
-            TypeError: the basis index must be an integer, not 3/2
+            TypeError: the basis index must be an integer, not 3/2 of type Rational
             sage: H.hecke_operator_on_basis_element(2, 0.9)  # sagebrush only
             Traceback (most recent call last):
             ...
-            TypeError: the basis index must be an integer, not 0.900000000000000
+            TypeError: the basis index must be an integer, not 0.900000000000000 of type RealNumber
             sage: H.hecke_operator_on_basis_element(2, 2)  # sagebrush only
             Traceback (most recent call last):
             ...
             IndexError: basis index 2 out of range (dimension 2)
         """
         P = _prime(P)
-        i = _exact_int(i, "the basis index")
+        i = _strict_int(i, "the basis index")
         if not 0 <= i < self._dimension:
             raise IndexError("basis index %d out of range (dimension %d)" % (i, self._dimension))
         (r,) = _call("hmf_hecke_rows", level=[self._level._gen], p=[P._gen], rows=[i])
@@ -620,7 +711,7 @@ class HilbertModularForms:
     def _rational_newforms(self, B):
         """For each rational newform, [(P, a_P)] for the primes of
         norm <= B, computed once for all the forms."""
-        B = _exact_int(B, "the bound")
+        B = _strict_int(B, "the bound")
         if B not in self._rational:
             d = _call("hmf_rational_newforms", level=[self._level._gen], bound=B)
             self._rational[B] = [[(SqrtFiveIdeal([P["gen"]]), a) for P, a in f["aplist"]] for f in d["forms"]]
@@ -717,7 +808,7 @@ class NewformOrbit:
 
     def _eigenvalues(self, B):
         """[(P, a_P)] for the primes of norm <= B, computed once per bound."""
-        B = _exact_int(B, "the bound")
+        B = _strict_int(B, "the bound")
         if B not in self._eigen:
             from fractions import Fraction
             K = self.coefficient_field()
@@ -759,7 +850,7 @@ class NewformOrbit:
             sage: f.aplist(12)  # sagebrush only
             [e, -2*e - 7, 3*e + 6, -3, -e - 5]
         """
-        B = _exact_int(B, "the bound")
+        B = _strict_int(B, "the bound")
         if B <= 2:
             return []
         return [a for _, a in self._eigenvalues(B - 1)]
@@ -851,9 +942,9 @@ class EllipticCurveFactor:
             sage: E.aplist(101/2)  # sagebrush only
             Traceback (most recent call last):
             ...
-            TypeError: the bound must be an integer, not 101/2
+            TypeError: the bound must be an integer, not 101/2 of type Rational
         """
-        B = _exact_int(B, "the bound")
+        B = _strict_int(B, "the bound")
         if B <= 2:
             return []
         return [a for _, a in self._data(B - 1)]
