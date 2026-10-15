@@ -195,8 +195,10 @@ def _eigvals(a):
 def eig(a):
     """Eigenvalues and right eigenvectors, complex (as NumPy 2.5 returns
     them, also when they are real)."""
+    # (complex64 for float32, as NumPy's)
+    t = _np.complex64 if _np.asarray(a).dtype == _np.float32 else _np.complex128
     w, v = _eig(a)
-    return EigResult(_np.asarray(w).astype(_np.complex128), _np.asarray(v).astype(_np.complex128))
+    return EigResult(_np.asarray(w).astype(t), _np.asarray(v).astype(t))
 
 
 def eigvals(a):

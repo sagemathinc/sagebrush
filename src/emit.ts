@@ -397,16 +397,14 @@ export class Emitter {
   consumingCall(e: Extract<A.Expr, { k: "Call" }>): string | null {
     const f = e.func;
     if (f.k !== "Name" || e.args.length !== 1 || e.keywords.length !== 0 || e.args[0].k !== "Comp" || e.args[0].kind !== "gen") return null;
-    // (sum collects the list and calls the builtin, which sums floats with
-    // CPython's compensation)
-    const kinds: Record<string, string> = { tuple: "tuple", list: "list", set: "set", frozenset: "frozenset", sum: "list", any: "any", all: "all", sorted: "list", min: "list", max: "list" };
+    const kinds: Record<string, string> = { tuple: "tuple", list: "list", set: "set", frozenset: "frozenset", sum: "sum", any: "any", all: "all", sorted: "list", min: "list", max: "list" };
     const kind = kinds[f.id];
     if (kind === undefined || resolve(this.fn.scope, f.id).kind !== "global" || this.moduleBinds(f.id)) return null;
     const comp = e.args[0];
     const fn = this.temp();
     const fast = this.comprehension(comp, kind);
     const slow = this.comprehension(comp);
-    const wrap: Record<string, string> = { tuple: `tuple(${fast})`, list: fast, set: fast, frozenset: `R.newSet(${fast}, true)`, sum: `${fn}(${fast})`, any: fast, all: fast, sorted: `${fn}(${fast})`, min: `${fn}(${fast})`, max: `${fn}(${fast})` };
+    const wrap: Record<string, string> = { tuple: `tuple(${fast})`, list: fast, set: fast, frozenset: `R.newSet(${fast}, true)`, sum: fast, any: fast, all: fast, sorted: `${fn}(${fast})`, min: `${fn}(${fast})`, max: `${fn}(${fast})` };
     return `((${fn} = ${this.load(f.id)}) === $B${prop(f.id)} ? ${wrap[f.id]} : callObj(${fn}, [${slow}]))`;
   }
 
@@ -471,7 +469,7 @@ export class Emitter {
     // variables count as assigned.
     if (eager === "tuple" || eager === "list" || eager === "frozenset") body = `${r}.push(${this.ex(e.elt)});`;
     else if (eager === "set") body = `setAdd(${r}, ${this.ex(e.elt)});`;
-    else if (eager === "sum") body = `${r} = add(${r}, ${this.ex(e.elt)});`;
+    else if (eager === "sum") body = `${r}.push(${this.ex(e.elt)});`; // (R.sumAcc: the builtin's own total, item by item)
     else if (eager === "any") body = `if (${this.bool(e.elt)}) return true;`;
     else if (eager === "all") body = `if (!${this.bool(e.elt)}) return false;`;
     else if (e.kind === "gen") body = `yield ${this.ex(e.elt)};`;
@@ -481,8 +479,8 @@ export class Emitter {
     const locals = [...scope.bound].filter((n) => resolve(scope, n).kind === "local").map(js);
     const decls = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
     if (eager !== null) {
-      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "0", any: "", all: "" };
-      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r};`, any: "return false;", all: "return true;" };
+      const init: Record<string, string> = { tuple: "[]", list: "[]", set: "newSet()", frozenset: "[]", sum: "R.sumAcc(0)", any: "", all: "" };
+      const fin: Record<string, string> = { tuple: `return ${r};`, list: `return ${r};`, set: `return ${r};`, frozenset: `return ${r};`, sum: `return ${r}.total();`, any: "return false;", all: "return true;" };
       const start = init[eager] ? `let ${r} = ${init[eager]}; ` : "";
       const decls2 = [...locals, ...this.fn.temps].filter((x) => x !== "$it0");
       const inner2 = `${decls2.length ? `let ${decls2.join(", ")}; ` : ""}${start}${loops.join(" ")} ${body} ${closes.reverse().join(" ")} ${fin[eager]}`;

@@ -110,9 +110,18 @@ def index_for(mode=None):
         return index()
     if mode not in _OTHER:
         try:
+            # (the CPython package ships Python mode's index, made by the CLI:
+            # scripts/sync-python-package.sh)
+            import json, os
+            with open(os.path.join(os.path.dirname(__file__), "docs-index-%s.json" % mode)) as f:
+                _OTHER[mode] = json.load(f)
+            return _OTHER[mode]
+        except Exception:  # (as index(): no file here, or none readable)
+            pass
+        try:
             module = __import__(MODES[mode])
         except ImportError:
-            # (the CPython package has the Sage library only)
+            # (the CPython package has no Magma or MATLAB index)
             raise ValueError("this installation has no %s index" % mode)
         _OTHER[mode] = module.build_index()
     return _OTHER[mode]
