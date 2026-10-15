@@ -347,22 +347,23 @@ export function magicTransform(sage: boolean): (tree: any) => void {
 
 // ------------------------------------------------------------------ autoreload's classes
 
-/** The names of a module's classes (at any depth) whose code may use the
- *  __class__ cell, which %autoreload (lib/_pyjs_magic.py) cannot move onto an
- *  older class: a bare name __class__, or any use of super other than an
- *  explicit super(Name, obj) (super(), (super)(), an alias, in f-strings
- *  too).  obj.__class__ is an attribute, not the cell.  null: the source does
- *  not parse (every class is then refused). */
-export function classesUsingCell(src: string): string[] | null {
+/** A module's classes at its top level (in if, try, with and loops too, not
+ *  in functions or classes), by name: whether %autoreload
+ *  (lib/_pyjs_magic.py) may move a new version's methods onto the old class,
+ *  that is, whether the class's code never uses the __class__ cell: no bare
+ *  name __class__, and no use of super other than an explicit super(Name,
+ *  obj) (super(), (super)(), an alias, in f-strings and nested code too).
+ *  obj.__class__ is an attribute, not the cell.  A name defined by two class
+ *  statements is not safe.  null: the source does not parse (no class is
+ *  then updated). */
+export function classCellReport(src: string): Record<string, boolean> | null {
   let tree: any;
   try {
     tree = pyparse(src, "exec");
   } catch {
     return null;
   }
-  const out = new Set<string>();
   const dotted = (n: any): boolean => n?._type === "Name" || (n?._type === "Attribute" && dotted(n.value));
-  // whether code (a class's body) uses the cell
   const usesCell = (code: any): boolean => {
     let found = false;
     const walk = (n: any) => {
@@ -379,12 +380,21 @@ export function classesUsingCell(src: string): string[] | null {
     walk(code);
     return found;
   };
-  const visit = (n: any) => {
-    if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
-    if (n._type === "ClassDef" && usesCell(n.body)) out.add(n.name);
-    for (const k of Object.keys(n)) if (k !== "_type") visit(n[k]);
+  const out: Record<string, boolean> = Object.create(null);
+  const seen = new Set<string>();
+  const visit = (stmts: any[]) => {
+    for (const st of stmts ?? []) {
+      if (st._type === "ClassDef") {
+        out[st.name] = !seen.has(st.name) && !usesCell(st.body);
+        seen.add(st.name);
+        continue;
+      }
+      if (st._type === "FunctionDef" || st._type === "AsyncFunctionDef") continue;
+      for (const k of ["body", "orelse", "finalbody"]) if (Array.isArray(st[k])) visit(st[k]);
+      for (const h of st.handlers ?? []) visit(h.body);
+      for (const c of st.cases ?? []) visit(c.body);
+    }
   };
-  visit(tree);
-  return [...out];
+  visit(tree.body);
+  return out;
 }

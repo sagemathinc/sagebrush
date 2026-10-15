@@ -244,14 +244,29 @@ def _timeit(line, body=None):
 
 # ---------------------------------------------------------------- autoreload
 
-def _classes_using_cell(src):
-    """the names of the module's classes whose code may use the __class__
-    cell (super() without arguments, or __class__), found in the parsed
-    source (src/magic-syntax.ts classesUsingCell); None if it does not
-    parse, and then no class is updated"""
+def _class_report(src):
+    """{name: whether autoreload may update it} for the module's top-level
+    classes, from its parsed source (src/magic-syntax.ts classCellReport): a
+    class whose code may use the __class__ cell (super() without arguments,
+    __class__) may not.  None if the source does not parse."""
     import json
-    r = json.loads(__pyjs_class_cells__(src))
-    return None if r is None else set(r)
+    return json.loads(__pyjs_class_cells__(src))
+
+
+def _refusal(mod, k, after, report):
+    """None if the new class `after` (bound to k in mod) may replace the old
+    one's methods: it is the one top-level class statement named k, which
+    does not use the __class__ cell.  Else why not."""
+    if report is None:
+        return "its source does not parse here"
+    if not (after.__name__ == k and getattr(after, "__qualname__", None) == k
+            and getattr(after, "__module__", None) == mod.__name__ and k in report):
+        return ("class %s cannot be tied to a class statement of %s (its name, qualified name or module differ), "
+                "so Sagebrush does not move its methods" % (k, mod.__name__))
+    if not report[k]:
+        return ("class %s uses super() without arguments (or __class__), which Sagebrush cannot move to the "
+                "existing class" % k)
+    return None
 
 
 class _Autoreload:
@@ -321,16 +336,16 @@ def _reload(mod, path):
     exec(compile(src, path, "exec"), mod.__dict__)
     notes = []
     functions = {}
-    cells = _classes_using_cell(src)
+    report = _class_report(src)
     for k, before in old.items():
         after = mod.__dict__.get(k, before)
         if after is before:
             continue
         if isinstance(before, type) and isinstance(after, type) and getattr(after, "__module__", None) == mod.__name__:
-            if cells is None or after.__name__ in cells:
-                notes.append("class %s uses super() without arguments (or __class__), which Sagebrush cannot "
-                             "move to the existing class: its existing instances keep the old methods, and "
-                             "%s.%s is the new class" % (after.__name__, mod.__name__, k))
+            why = _refusal(mod, k, after, report)
+            if why:
+                notes.append("%s: its existing instances keep the old methods, and %s.%s is the new class"
+                             % (why, mod.__name__, k))
                 functions[id(before)] = (before, after)
                 continue
             _update_class(before, after)
