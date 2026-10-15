@@ -26,6 +26,13 @@ Differences from PSAGE:
   implement it), and ap(P) is the eigenvalue of U_P on the newform: +-1 if P
   exactly divides the level (-1 times the Atkin-Lehner eigenvalue), 0 if P^2
   divides it. PSAGE returned '?' in the first case.
+* HilbertModularForms(F, N) over any other real quadratic field F (a
+  NumberField or QuadraticField of degree 2) gives a
+  QuadraticHilbertModularForms: weight (2, 2), any level, by the definite
+  method of Dembélé and Voight (2013, sections 4 and 8), with Hecke
+  matrices, new dimensions and newform orbits with their eigenvalues.
+  Over Q(sqrt(5)) given by x^2 - x - 1 or x^2 - 5, HilbertModularForms(F,
+  N) is HilbertModularForms(N).
 * HilbertModularForms(level, weight=(k1, k2)) gives the cusp forms of
   weight (k1, k2) != (2, 2) (PSAGE had weight (2, 2) only; Dembélé 2005,
   section 3), with k1 at the real place a -> (1 - sqrt(5))/2 and k2 at
@@ -408,6 +415,33 @@ _NO_SUBSPACES = ("Sagebrush does not construct subspaces of spaces of Hilbert mo
                  "new_decomposition() give newform orbits (operator, characteristic polynomial, dimension)")
 
 
+def _hmf_args(args, kwds):
+    """(F, level, weight) from HilbertModularForms(level, weight=None) or
+    HilbertModularForms(F, level, weight=None), F a number field."""
+    args = list(args)
+    weight = kwds.pop("weight", None)
+    if kwds:
+        raise TypeError("unexpected arguments %s" % ", ".join(sorted(kwds)))
+    F = None
+    if args and _is_field(args[0]):
+        F = args.pop(0)
+    if not args or len(args) > 2:
+        raise TypeError("HilbertModularForms(level, weight=None) or HilbertModularForms(F, level, weight=None)")
+    if len(args) == 2:
+        if weight is not None:
+            raise TypeError("the weight is given twice")
+        weight = args[1]
+    return F, args[0], weight
+
+
+def _is_sqrt5(F):
+    """Whether F is Q(sqrt(5)) given by x^2 - x - 1 or x^2 - 5 (the fields
+    the icosian implementation accepts)."""
+    from fractions import Fraction
+    f = [Fraction(int(c.numerator), int(c.denominator)) if hasattr(c, "denominator") else Fraction(c) for c in F.polynomial().list()]
+    return f in ([-1, -1, 1], [-5, 0, 1])
+
+
 class HilbertModularForms:
     """The space M_2(N) of Hilbert modular forms of weight (2, 2) and level N
     over Q(sqrt(5)), Eisenstein series included, with the basis of orbits of
@@ -422,12 +456,18 @@ class HilbertModularForms:
         Hilbert modular forms of dimension 1, level 3 (of norm 9=3^2) over QQ(sqrt(5))
     """
 
-    def __new__(cls, level, weight=None):
+    def __new__(cls, *args, **kwds):
+        F, level, weight = _hmf_args(args, kwds)
+        if F is not None and not _is_sqrt5(F):
+            if weight is not None and _weight(weight) != (2, 2):
+                raise NotImplementedError("Hilbert modular forms of weight other than (2, 2) are implemented over Q(sqrt(5)) only")
+            return QuadraticHilbertModularForms(F, level)
         if weight is not None and _weight(weight) != (2, 2):
             return HilbertCuspFormsWeight(level, _weight(weight))
         return object.__new__(cls)
 
-    def __init__(self, level, weight=None):
+    def __init__(self, *args, **kwds):
+        _, level, _ = _hmf_args(args, kwds)
         self._level = _ideal(level)
         d = _call("hmf_dimension", level=[self._level._gen])
         self._dimension = d["dim"]
@@ -1382,3 +1422,581 @@ class EllipticCurveFactor:
         if B <= 2:
             return []
         return [a for _, a in self._data(B - 1)]
+
+
+# ---- other real quadratic fields: HilbertModularForms(F, N) (engine/hmf:
+# definite.rs, defnew.rs; the JSON functions hmfq_* of engine/web/src/hmfq.rs)
+
+def _squarefree_part(n):
+    """(d, m) with n = m^2 d, d squarefree (n > 0)."""
+    d, m, p = 1, 1, 2
+    while p * p <= n:
+        while n % (p * p) == 0:
+            n //= p * p
+            m *= p
+        if n % p == 0:
+            n //= p
+            d *= p
+        p += 1
+    return d * n, m
+
+
+class _QuadraticField:
+    """The isomorphism between a real quadratic number field K of Sagebrush
+    (defining polynomial x^2 + b x + c, generator alpha) and the engine's
+    Q(sqrt d) with O_F = Z[w], w = (1 + sqrt d)/2 if d = 1 mod 4 and sqrt d
+    otherwise: alpha = (-b + m sqrt d)/2 with b^2 - 4c = m^2 d, m > 0 (one of
+    the two isomorphisms; the other is its conjugate, and only weight 2 is
+    computed, where the real places play symmetric roles)."""
+
+    def __init__(self, K):
+        from fractions import Fraction
+        if not (hasattr(K, "polynomial") and hasattr(K, "degree") and hasattr(K, "ideal")):
+            raise TypeError("the field must be a number field, not %r" % (K,))
+        if K.degree() != 2:
+            raise ValueError("Hilbert modular forms are implemented over real quadratic fields only, not %r" % (K,))
+        f = [Fraction(int(c.numerator), int(c.denominator)) if hasattr(c, "denominator") else Fraction(c) for c in K.polynomial().list()]
+        c, b = f[0], f[1]
+        disc = b * b - 4 * c
+        if disc.denominator != 1 or disc <= 0:
+            raise ValueError("%r is not a real quadratic field" % (K,))
+        d, m = _squarefree_part(int(disc))
+        info = _call("hmfq_field", d=d)
+        self.K, self.d, self.t, self.n = K, d, info["t"], info["n"]
+        self.disc = info["disc"]
+        self.h, self.narrow_h = info["h"], info["narrow_h"]
+        # sqrt d = s0 + s1 w
+        s0, s1 = (-1, 2) if self.t == 1 else (0, 1)
+        self.a0 = (-b + m * s0) / 2
+        self.a1 = Fraction(m * s1, 2)
+        self._primes = {}
+
+    def elt(self, x):
+        """An element of O_F (in K, or an integer) as [u, v], u + v w.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: Q.d, Q.elt(b), Q.elt(3)  # sagebrush only
+            (2, [1, 1], [3, 0])
+            sage: Q.elt(b/2)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            ValueError: 1/2*b is not an algebraic integer
+        """
+        from fractions import Fraction
+        if type(x) is int or type(x) is _CallableInt:
+            return [_strict_int(x, "an element"), 0]
+        if not (hasattr(x, "list") and hasattr(x, "parent")) or x.parent() is not self.K:
+            raise TypeError("%r is not an element of %r" % (x, self.K))
+        cs = [Fraction(int(t.numerator), int(t.denominator)) if hasattr(t, "denominator") else Fraction(t) for t in x.list()] + [Fraction(0)] * 2
+        u = cs[0] + cs[1] * self.a0
+        v = cs[1] * self.a1
+        if u.denominator != 1 or v.denominator != 1:
+            raise ValueError("%s is not an algebraic integer" % (x,))
+        return [int(u), int(v)]
+
+    def to_K(self, u, v):
+        """u + v w as an element of K.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: Q.to_K(1, 1), Q.elt(Q.to_K(5, -3))  # sagebrush only
+            (b, [5, -3])
+        """
+        from fractions import Fraction
+        u, v = Fraction(int(u)), Fraction(int(v))
+        return self.K([u - v * self.a0 / self.a1, v / self.a1])
+
+    def mul(self, x, y):
+        """(a + b w)(c + e w), w^2 = t w + n.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: Q.mul([0, 1], [0, 1])  # sagebrush only
+            [2, 0]
+        """
+        a, b = x
+        c, e = y
+        return [a * c + self.n * b * e, a * e + b * c + self.t * b * e]
+
+    def ideal(self, gens):
+        """The engine's data for the ideal with the given generators.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: Q.ideal([[2, 0], [0, 1]])["norm"]  # sagebrush only
+            '2'
+        """
+        return _call("hmfq_ideal", d=self.d, gens=gens)
+
+    def gens(self, X):
+        """Generators [[u, v], ...] of X: an integer or an element of K
+        (principal), an ideal of K (from K.ideal(n) or K.primes_above(p)), a
+        factorization [(P, e), ...] of such ideals, or a list or tuple of
+        elements of K (the ideal they generate).
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: Q.gens(7), Q.gens(K.primes_above(7)[0]), Q.gens([b, 3])  # sagebrush only
+            ([[7, 0]], [[7, 0], [3, 1]], [[1, 1], [3, 0]])
+        """
+        if type(X) is int or type(X) is _CallableInt or (hasattr(X, "parent") and hasattr(X, "list")):
+            return [self.elt(X)]
+        if hasattr(X, "gens") and hasattr(X, "number_field"):
+            if X.number_field() is not self.K:
+                raise ValueError("%r is not an ideal of %r" % (X, self.K))
+            return [self.elt(g) for g in X.gens()]
+        if isinstance(X, list) and all(isinstance(t, tuple) and len(t) == 2 and hasattr(t[0], "gens") for t in X):
+            # a factorization (an IdealFactorization is a list of (P, e))
+            g = [[1, 0]]
+            for P, e in X:
+                e = _strict_int(e, "an exponent")
+                if e < 0:
+                    raise ValueError("levels are integral ideals: the exponent %d is negative" % e)
+                for _ in range(e):
+                    prod = [self.mul(x, y) for x in g for y in self.gens(P)]
+                    g = [[int(s) for s in t] for t in self.ideal(prod)["gens"]]
+            return g
+        if isinstance(X, (list, tuple)) and X:
+            return [self.elt(x) for x in X]
+        raise TypeError("cannot make an ideal of %r from %r" % (self.K, X))
+
+    def prime(self, pj):
+        """The prime ideal of K for the engine's prime (a dict with p, hnf),
+        from K.primes_above(p), matched by the Hermite normal form.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: from _sage_hmf import _call  # sagebrush only
+            sage: [Q.prime(P) for P in _call("hmfq_primes", d=2, bound=7)]  # sagebrush only
+            [Fractional ideal (2, b + 1), Fractional ideal (7, b + 2), Fractional ideal (7, b + 3)]
+        """
+        key = tuple(pj["hnf"])
+        if key not in self._primes:
+            p = int(pj["p"])
+            for P in self.K.primes_above(p):
+                h = tuple(self.ideal([self.elt(g) for g in P.gens()])["hnf"])
+                self._primes[h] = P
+        return self._primes[key]
+
+    def factorization(self, ij):
+        """The engine's ideal as a factorization into prime ideals of K.
+
+        EXAMPLES::
+
+            sage: from _sage_hmf import _QuadraticField  # sagebrush only
+            sage: x = polygen(QQ, 'x')
+            sage: K.<b> = NumberField(x^2 - 2*x - 1)
+            sage: Q = _QuadraticField(K)  # sagebrush only
+            sage: Q.factorization(Q.ideal(Q.gens(14)))  # sagebrush only
+            (Fractional ideal (2, b + 1))^2 * (Fractional ideal (7, b + 2)) * (Fractional ideal (7, b + 3))
+        """
+        from _sage_nf import IdealFactorization
+        return IdealFactorization([(self.prime(p), int(e)) for p, e in ij["factors"]])
+
+
+def _is_field(x):
+    return hasattr(x, "polynomial") and hasattr(x, "degree") and hasattr(x, "primes_above") and not hasattr(x, "number_field")
+
+
+class QuadraticHilbertModularForms:
+    """The space M_2(N) of Hilbert modular forms of parallel weight 2 and
+    level N over a real quadratic field F other than Q(sqrt(5)), Eisenstein
+    series included, by the definite method (Dembélé-Voight, "Explicit
+    methods for Hilbert modular forms", 2013, sections 4 and 8): functions
+    on the right ideal classes of a maximal order of the totally definite
+    quaternion algebra over F unramified at every finite place, with level
+    structure. Made by HilbertModularForms(F, N).
+
+    Differences from Sage-style interfaces:
+
+    * level() is the factorization of N into prime ideals of F, since
+      Sagebrush's number fields have no general ideals yet; N may be given
+      as an integer, an element of F, an ideal of F (K.ideal(n),
+      K.primes_above(p)), a factorization, or a list of generators.
+    * The Eisenstein part has dimension h+, the narrow class number of F, so
+      cuspidal_dimension() is dimension() - h+.
+    * new_decomposition() returns newform orbits (operator, characteristic
+      polynomial, dimension and eigenvalues), as over Q(sqrt(5)).
+    * For P dividing N, hecke_matrix(P) is U_P; where P is not narrowly
+      principal, its eigenvalues on newforms need not be +-1.
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: F = NumberField(x^2 - 10, 'a')
+        sage: P = F.primes_above(5)[0]; P
+        Fractional ideal (5, a)
+        sage: H = HilbertModularForms(F, P); H  # sagebrush only
+        Hilbert modular forms of dimension 10, level Fractional ideal (5, a) of norm 5 over Number Field in a with defining polynomial x^2 - 10
+        sage: H.cuspidal_dimension(), H.new_dimension()  # sagebrush only
+        (8, 4)
+
+    Dembélé and Voight's Example 8.6: over Q(sqrt(106)), of class number and
+    narrow class number 2, S_2(1) has dimension 50, with Galois orbits of
+    newforms of dimensions 1, 1, 1, 1, 2 (six), 4, 4 and 26, and the four
+    rational ones are their forms f1, ..., f4::
+
+        sage: F.<w> = QuadraticField(106)
+        sage: H = HilbertModularForms(F, 1)  # long time, sagebrush only
+        sage: H.cuspidal_dimension()  # long time, sagebrush only
+        50
+        sage: D = H.new_decomposition(); [f.dimension() for f in D]  # long time, sagebrush only
+        [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 4, 4, 26]
+        sage: for f in D[:4]: print(f.aplist(8))  # long time, sagebrush only
+        [-1, -2, 3, 3, -2, 4, -1]
+        [1, -3, 2, 2, -3, -1, 4]
+        [-1, 3, -2, -2, 3, -1, 4]
+        [1, 2, -3, -3, 2, 4, -1]
+
+    Refusals: other weights over fields other than Q(sqrt(5)), fields that
+    are not real quadratic, ideals of another field, and Hecke operators at
+    non-primes::
+
+        sage: HilbertModularForms(F, 1, weight=(2, 4))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: Hilbert modular forms of weight other than (2, 2) are implemented over Q(sqrt(5)) only
+        sage: HilbertModularForms(NumberField(x^2 + 1, 'i'), 1)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: Number Field in i with defining polynomial x^2 + 1 is not a real quadratic field
+        sage: HilbertModularForms(NumberField(x^3 - 2, 'b'), 1)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: Hilbert modular forms are implemented over real quadratic fields only, not Number Field in b with defining polynomial x^3 - 2
+        sage: K = NumberField(x^2 - 3, 'c')
+        sage: HilbertModularForms(K, F.primes_above(5)[0])  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: Fractional ideal (5, w + 1) is not an ideal of Number Field in c with defining polynomial x^2 - 3
+        sage: HilbertModularForms(K, 2).hecke_matrix(6)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: not a prime ideal
+    """
+
+    def __init__(self, F, level):
+        self._F = _QuadraticField(F)
+        g = self._F.gens(level)
+        self._ideal = self._F.ideal(g)
+        self._gens = [[int(s) for s in t] for t in self._ideal["gens"]]
+        d = _call("hmfq_dimension", d=self._F.d, level=self._gens)
+        self._dimension = d["dim"]
+        self._cusp = d["cusp_dim"]
+        self._hecke = {}
+
+    def _args(self, **kw):
+        kw.update(d=self._F.d, level=self._gens)
+        return kw
+
+    def __repr__(self):
+        return "Hilbert modular forms of dimension %s, level %r of norm %s over %r" % (
+            self._dimension, self.level(), self._ideal["norm"], self._F.K)
+
+    def base_field(self):
+        """The field F.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: HilbertModularForms(F, 2).base_field()  # sagebrush only
+            Number Field in a with defining polynomial x^2 - 3
+        """
+        return self._F.K
+
+    def level(self):
+        """The level N, as a factorization into prime ideals of F.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: HilbertModularForms(F, 6).level()  # sagebrush only
+            (Fractional ideal (2, a + 1))^2 * (Fractional ideal (3, a))^2
+            sage: HilbertModularForms(F, 1).level()  # sagebrush only
+            1
+        """
+        return self._F.factorization(self._ideal)
+
+    def weight(self):
+        """The weight (2, 2).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: HilbertModularForms(NumberField(x^2 - 3, 'a'), 2).weight()  # sagebrush only
+            (2, 2)
+        """
+        return (2, 2)
+
+    def dimension(self):
+        """The dimension of M_2(N), the Eisenstein series included: the
+        number of orbits over all the ideal classes.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: HilbertModularForms(NumberField(x^2 - 3, 'a'), 2).dimension()  # sagebrush only
+            2
+        """
+        return self._dimension
+
+    def cuspidal_dimension(self):
+        """The dimension of S_2(N): dimension() minus the narrow class
+        number h+ of F (the Eisenstein part).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: H = HilbertModularForms(F, F.primes_above(13)[0]); H.dimension(), H.cuspidal_dimension()  # sagebrush only
+            (4, 2)
+        """
+        return self._cusp
+
+    def new_dimension(self):
+        """The dimension of the new subspace of S_2(N).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: HilbertModularForms(F, F.primes_above(13)[0]).new_dimension()  # sagebrush only
+            2
+        """
+        return _call("hmfq_new_dimension", **self._args())
+
+    def hecke_matrix(self, P):
+        """The matrix of T_P (U_P if P divides the level), acting on the
+        right on the basis of orbits: row i is the image of the i-th basis
+        element. Rows sum to N(P) + 1 (N(P) for U_P).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: H = HilbertModularForms(F, F.primes_above(13)[0])  # sagebrush only
+            sage: H.hecke_matrix(F.primes_above(2)[0]).charpoly().factor()  # sagebrush only
+            (x - 3) * (x + 3) * (x^2 - 2)
+        """
+        Pg = self._F.gens(P)
+        key = tuple(map(tuple, Pg))
+        if self._dimension > _MAX_DENSE:
+            raise ValueError("the space has dimension %d: Sagebrush's matrices are dense, and hecke_matrix() "
+                             "is limited to dimension %d" % (self._dimension, _MAX_DENSE))
+        if key not in self._hecke:
+            from _sage_matrix import matrix
+            from _sage_poly import QQ
+            rows = _call("hmfq_hecke_matrix", **self._args(p=Pg))
+            dense = [[0] * self._dimension for _ in range(self._dimension)]
+            for i, r in enumerate(rows):
+                for j, c in r:
+                    dense[i][j] = c
+            self._hecke[key] = matrix(QQ, dense)
+        return self._hecke[key]
+
+    T = hecke_matrix
+
+    def new_decomposition(self, verbose=False):
+        """The Galois orbits of newforms of level N, sorted by dimension, as
+        QuadraticNewformOrbit objects.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 10, 'a')
+            sage: H = HilbertModularForms(F, F.primes_above(5)[0])  # sagebrush only
+            sage: D = H.new_decomposition(); D  # sagebrush only
+            [Newform orbit of dimension 4 at level Fractional ideal (5, a) of norm 5 over Number Field in a with defining polynomial x^2 - 10]
+        """
+        d = _call("hmfq_newform_orbits", **self._args())
+        op = [(self._F.prime(P), c) for P, c in d["op"]]
+        return [QuadraticNewformOrbit(self, op, [int(c) for c in g], k) for k, g in enumerate(d["orbits"])]
+
+    def elliptic_curve_factors(self):
+        """The newform orbits of dimension one (rational Hecke eigenvalues):
+        conjecturally the isogeny classes of elliptic curves over F of
+        conductor N.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: HilbertModularForms(F, F.primes_above(13)[0]).elliptic_curve_factors()  # sagebrush only
+            []
+        """
+        return [f for f in self.new_decomposition() if f.dimension() == 1]
+
+
+class QuadraticNewformOrbit:
+    """A Galois orbit of newforms over a real quadratic field: the
+    characteristic polynomial (irreducible over Q) of a separating Hecke
+    operator T = sum c_P T_P on the orbit, and the Hecke eigenvalues in the
+    coefficient field K = Q(e), e a root of it (each proven by an identity
+    in integers).
+
+    EXAMPLES::
+
+        sage: x = polygen(QQ, 'x')
+        sage: F = NumberField(x^2 - 3, 'a')
+        sage: f = HilbertModularForms(F, F.primes_above(13)[0]).new_decomposition()[0]  # sagebrush only
+        sage: f.dimension(), f.coefficient_field()  # sagebrush only
+        (2, Number Field in e with defining polynomial x^2 - 2)
+    """
+
+    def __init__(self, space, op, charpoly, number):
+        self._space = space
+        self._op = op
+        self._charpoly = charpoly
+        self._number = number
+        self._field = None
+        self._eigen = {}
+
+    def __repr__(self):
+        S = self._space
+        return "Newform orbit of dimension %d at level %r of norm %s over %r" % (
+            self.dimension(), S.level(), S._ideal["norm"], S._F.K)
+
+    def dimension(self):
+        """The number of newforms in the orbit.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 10, 'a')
+            sage: HilbertModularForms(F, F.primes_above(5)[0]).new_decomposition()[0].dimension()  # sagebrush only
+            4
+        """
+        return len(self._charpoly) - 1
+
+    def level(self):
+        """The level, as a factorization into prime ideals.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 10, 'a')
+            sage: HilbertModularForms(F, F.primes_above(5)[0]).new_decomposition()[0].level()  # sagebrush only
+            Fractional ideal (5, a)
+        """
+        return self._space.level()
+
+    def operator(self):
+        """The separating Hecke operator T = sum c_P T_P, as a list of
+        (P, c_P).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: HilbertModularForms(F, F.primes_above(13)[0]).new_decomposition()[0].operator()  # sagebrush only
+            [(Fractional ideal (2, a + 1), 1)]
+        """
+        return list(self._op)
+
+    def charpoly(self, var="x"):
+        """The characteristic polynomial of the operator on the orbit.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: HilbertModularForms(F, F.primes_above(13)[0]).new_decomposition()[0].charpoly()  # sagebrush only
+            x^2 - 2
+        """
+        from _sage_poly import QQ, PolynomialRing
+        return PolynomialRing(QQ, var)(self._charpoly)
+
+    def coefficient_field(self):
+        """The field Q(e) of the Hecke eigenvalues, e a root of charpoly().
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 10, 'a')
+            sage: HilbertModularForms(F, F.primes_above(5)[0]).new_decomposition()[0].coefficient_field()  # sagebrush only
+            Number Field in e with defining polynomial x^4 + 8*x^2 + 4
+        """
+        if self._field is None:
+            from _sage_nf import NumberField
+            self._field = NumberField(self.charpoly(), "e")
+        return self._field
+
+    def _eigenvalues(self, B):
+        """[(P, a_P)] for the primes of norm <= B, computed once per bound."""
+        B = _strict_int(B, "the bound")
+        if B not in self._eigen:
+            from fractions import Fraction
+            K = self.coefficient_field()
+            S = self._space
+            d = _call("hmfq_newform_eigenvalues", **S._args(orbit=self._number, bound=B))
+            self._eigen[B] = [(S._F.prime(P), K([Fraction(int(c), int(den)) for c in num])) for P, num, den in d["aplist"]]
+        return self._eigen[B]
+
+    def hecke_eigenvalue(self, P):
+        """The eigenvalue a_P of T_P (U_P if P divides the level) on the
+        newform with T-eigenvalue e, in the coefficient field.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 10, 'a')
+            sage: P = F.primes_above(5)[0]
+            sage: f = HilbertModularForms(F, P).new_decomposition()[0]  # sagebrush only
+            sage: f.hecke_eigenvalue(P).charpoly()  # sagebrush only
+            x^4 + 2*x^2 + 1
+        """
+        S = self._space
+        h = S._F.ideal(S._F.gens(P))
+        if len(h["factors"]) != 1 or h["factors"][0][1] != 1:
+            raise ValueError("%r is not a prime ideal" % (P,))
+        key = tuple(h["hnf"])
+        for Q, a in self._eigenvalues(int(h["norm"])):
+            if tuple(S._F.ideal(S._F.gens(Q))["hnf"]) == key:
+                return a
+        raise ValueError("%r is not a prime ideal" % (P,))
+
+    def aplist(self, B):
+        """The eigenvalues a_P for the primes P of norm less than B, by norm,
+        in the coefficient field (as Magma's HeckeOperator gives: the
+        characteristic polynomials x^2 - 2, x^2 - 2, x^2 - 32 and x^2 - 18
+        here).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: F = NumberField(x^2 - 3, 'a')
+            sage: f = HilbertModularForms(F, F.primes_above(13)[0]).new_decomposition()[0]  # sagebrush only
+            sage: f.aplist(12)  # sagebrush only
+            [e, -e, 4*e, -3*e]
+        """
+        B = _strict_int(B, "the bound")
+        if B <= 2:
+            return []
+        return [a for _, a in self._eigenvalues(B - 1)]
