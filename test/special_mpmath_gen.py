@@ -146,6 +146,21 @@ points["besselj"] = (
     + [(random.choice((float(random.randint(0, 10)), U(0, 10))), -U(0.01, 40)) for _ in range(30)]
     + [(0.0, 2.404825557695773), (1.0, 3.8317059702075125), (0.5, 1e-300), (100.0, 1.0), (0.0, 1e300)]
 )
+# (daybreak's review of 088bc11, deterministic, after everything drawn: the
+# series/Miller boundary x = sqrt(2 (nu + 1)) at large orders, with its
+# neighbouring doubles; large orders below the turning point; the least
+# subnormal x)
+_bj = []
+for _k in range(0, 345, 12):
+    _nu = 155 + 0.25 * _k
+    _xb = math.sqrt(2.0) * math.sqrt(_nu + 1)
+    _bj += [(_nu, _xb), (_nu, math.nextafter(_xb, 0)), (_nu, math.nextafter(_xb, 100))]
+_bj += [(240.5, 21.977260975835907), (240.5, 21.977260975835915), (235.0, 21.725560982400427), (200.5, 20.07485989988473)]
+_bj += [(494.64835926046334, 284.56332208950073), (1134.5070496950125, 631.7690438100962), (311.12552474955464, 174.76213244286976),
+        (300.0, 50.0), (1000.0, 500.0), (1500.0, 1400.0)]
+_bj += [(0.5, 5e-324), (1.0, 5e-324), (0.5, 1e-310)]
+points["besselj"] = points["besselj"] + _bj
+
 
 
 def ferrers_column(n, x):

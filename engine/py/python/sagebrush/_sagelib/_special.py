@@ -1919,9 +1919,9 @@ _BESSEL_MAX_N = 500000   # (the longest backward recurrence Sagebrush runs)
 
 def _besselj_series(nu, x):
     """J_nu(x) by its power series, DLMF 10.2.2: (x/2)^nu sum_k (-x^2/4)^k /
-    (k! Gamma(nu + k + 1)), the prefactor (x/2)^nu / Gamma(nu + 1) in
-    logarithms; for x^2 <= max(1, 2 (nu + 1)), where the terms fall from the
-    first and do not cancel"""
+    (k! Gamma(nu + k + 1)), for x^2 <= max(1, 2 (nu + 1)) and nu <= 170,
+    where the terms fall from the first and do not cancel, and
+    (x/2)^nu / Gamma(nu + 1) is formed from the two doubles"""
     q = -0.25 * x * x
     s = t = 1.0
     k = 0
@@ -1931,16 +1931,24 @@ def _besselj_series(nu, x):
         s += t
         if abs(t) <= 1e-17 * abs(s):
             break
+        if k > 1000 or not _math.isfinite(s):
+            raise NotCovered("besselj: the power series did not converge at nu = %r, x = %r" % (nu, x))
     if nu == 0:
         return s
-    if nu < 170:
-        # ((x/2)^nu and Gamma(nu + 1) each to an ulp or so, where they are
-        # doubles; exp of their logarithms' difference would round the
-        # exponent, losing |that exponent| ulps)
-        pw = (0.5 * x) ** nu
-        if 1e-290 < pw < 1e290:
-            return pw / _math.gamma(nu + 1) * s
-    return _math.exp(nu * _math.log(0.5 * x) - _math.lgamma(nu + 1)) * s
+    # ((x/2)^nu and Gamma(nu + 1) each to an ulp or so, where they are
+    # doubles (nu <= 170 here); exp of their logarithms' difference would
+    # round the exponent, losing |that exponent| ulps, so it is used only
+    # where (x/2)^nu leaves the doubles, with log x - log 2, as 0.5 x
+    # underflows for the least subnormal x)
+    if x < 1e-300:
+        # (x^nu 2^-nu: 0.5 x would underflow first for the least subnormals,
+        # and these results round once into the subnormals, to 0 where they
+        # are below half the least)
+        return x ** nu * 0.5 ** nu / _math.gamma(nu + 1) * s
+    pw = (0.5 * x) ** nu
+    if 1e-290 < pw < 1e290:
+        return pw / _math.gamma(nu + 1) * s
+    return _math.exp(nu * (_math.log(x) - _math.log(2.0)) - _math.lgamma(nu + 1)) * s
 
 
 def _besselj_hankel(nu, x):
@@ -1994,6 +2002,7 @@ def _besselj_miller(nu, x):
         top += 1
     f_next, f = 0.0, 1e-300
     want = None
+    shift = 0             # (want's value is want * 2^-shift)
     total = comp = 0.0    # (the Neumann sum, compensated: Kahan's summation)
     h = 1.0     # ((mu+1)...(mu+k-1)/k!, for the order mu + 2k)
     # (the Neumann coefficients for the even offsets 2k <= top, built upward)
@@ -2017,13 +2026,16 @@ def _besselj_miller(nu, x):
         f_prev = (2 * (mu + m) / x) * f - f_next
         f_next, f = f, f_prev
         if abs(f) > 1e250:
-            f *= 1e-250
-            f_next *= 1e-250
-            total *= 1e-250
-            comp *= 1e-250
+            # (by 2^-830, exactly; the wanted value's scale is counted, not
+            # applied, so that a small J does not underflow on the way)
+            f = _math.ldexp(f, -830)
+            f_next = _math.ldexp(f_next, -830)
+            total = _math.ldexp(total, -830)
+            comp = _math.ldexp(comp, -830)
             if want is not None:
-                want *= 1e-250
-    return want * (0.5 * x) ** mu / (_math.gamma(mu + 1) * total)
+                shift += 830
+    r = want * (0.5 * x) ** mu / (_math.gamma(mu + 1) * total)
+    return _ldexp(r, -shift) if shift else r
 
 
 def _besselj_forward(nu, x):
@@ -2047,10 +2059,21 @@ def _besselj_forward(nu, x):
 
 
 def _besselj_pos(nu, x):
-    """J_nu(x) for nu >= 0 and x > 0"""
-    if x * x <= max(1.0, 2 * (nu + 1)):
-        return _besselj_series(nu, x)
-    if x >= 25 and x >= nu * nu:
+    """J_nu(x) for nu >= 0 and x > 0.  The comparisons do not overflow:
+    sqrt(2) sqrt(nu + 1), not 2 (nu + 1), and nu <= sqrt(x), not x >= nu^2"""
+    if x <= max(1.0, _math.sqrt(2.0) * _math.sqrt(nu + 1)):
+        if nu <= 170:
+            return _besselj_series(nu, x)
+        # (beyond nu = 170 the series' prefactor would go through logarithms,
+        # losing |its exponent| ulps (daybreak's CORR-088-1), so Miller's
+        # recurrence takes these, unless J is far below the doubles: by
+        # Stirling (DLMF 5.11.1, its correction positive), log J_nu(x) <=
+        # nu log(x/2) - (nu + 1/2) log(nu + 1) + nu + 1 - log(2 pi)/2 here,
+        # as the series' sum is below 1 where its terms fall from the first)
+        if nu * (_math.log(x) - _math.log(2.0)) - (nu + 0.5) * _math.log(nu + 1) + nu + 1 < -800:
+            return 0.0
+        return _besselj_miller(nu, x)
+    if x >= 25 and nu <= _math.sqrt(x):
         v = _besselj_hankel(nu, x)
         if v is not None:
             return v
@@ -2093,7 +2116,9 @@ def _besselj1(nu, x):
 def besselj(nu, x):
     """the Bessel function of the first kind J_nu(x) (DLMF 10.2.2), real
     order nu and real x: the power series 10.2.2 for x^2 <= max(1,
-    2 (nu + 1)), Hankel's expansion 10.17.3 for x >= max(25, nu^2), the
+    2 (nu + 1)) and nu <= 170 (beyond, Miller's recurrence, or 0 where a
+    Stirling bound puts J below the doubles), Hankel's expansion 10.17.3
+    for x >= max(25, nu^2), the
     recurrence 10.6.1 upward from Hankel's J_mu and J_(mu+1) for x >= 25
     and nu <= 0.95 x, and otherwise Miller's backward recurrence (3.6(iii),
     10.6.1) normalized by Neumann's expansion (10.23(ii)).  Negative integer orders by 10.4.1,
@@ -2101,10 +2126,11 @@ def besselj(nu, x):
     nu).  J_nu(0) = 1 for nu = 0, else 0; J_nu(+-inf) = 0.  NotCovered for
     complex arguments, negative non-integer orders, infinite orders, and
     orders and arguments that would need a recurrence longer than 500000
-    steps.  Largest error found against mpmath (nu up to 1000, x up to
+    steps.  Largest error found against mpmath (nu up to 1500, x up to
     1e6), as a fraction of the envelope sqrt(2/(pi x)) where J oscillates
-    (|x| > nu) and of |J| below: 5e-15, and 1.3e-14 for the series beyond
-    nu = 170 (its prefactor through logarithms there)."""
+    (|x| > nu) and of |J| below: 5e-15, except up to 3e-14 below the
+    turning point for orders beyond about 170, where Miller's normalization
+    runs over nu steps (scipy.special.jv's errors there are up to 4.5e-13)."""
     return _elementwise(_besselj1, nu, x)
 
 
