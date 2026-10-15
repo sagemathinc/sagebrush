@@ -25,16 +25,37 @@ PT = 100 / 72  # pixels per point at 100 dpi
 
 def to_color(c, default=None):
     """A color given to pyplot as CSS for the SVG, checked as matplotlib
-    checks colors: one it does not know is its ValueError (the SVG gets
-    only what to_color makes of a valid one, escaped)."""
-    if c is None or isinstance(c, str) and c in ("none", "None", "currentColor"):
+    checks colors: one it does not know is its ValueError.  What reaches the
+    SVG is a CSS name or hex the program gave, or hex made from to_rgba's
+    numbers ("rgba(r, g, b, a)" when its alpha is below 1, the alpha
+    exactly); "none" in any case is no color."""
+    if c is None or isinstance(c, str) and c == "currentColor":
         return _css(c, default)
+    if isinstance(c, str) and c.lower() == "none":
+        return "none"
     rgba = _to_rgba(c)
-    css = _css(c, default)
-    if isinstance(css, str) and (css.startswith("#") or css.lower() in _CSS4_COLORS):
-        return css
-    # (a matplotlib color CSS does not know, "C12" or "TAB:BLUE": as hex)
-    return "#%02x%02x%02x" % tuple(int(v * 255 + 0.5) for v in rgba[:3])
+    if isinstance(c, str):
+        css = _css(c, default)
+        if isinstance(css, str) and (css.startswith("#") or css.lower() in _CSS4_COLORS):
+            return css
+    # (a matplotlib color CSS does not know, "C12" or "TAB:BLUE", a tuple,
+    # a (color, alpha) pair, an array: from its numbers)
+    v = [0 if x != x else int(float(x) * 255 + 0.5) for x in rgba[:3]]
+    a = float(rgba[3])
+    if a == a and a < 1:
+        return "rgba(%d, %d, %d, %s)" % (v[0], v[1], v[2], ("%.6f" % a).rstrip("0").rstrip(".") or "0")
+    return "#%02x%02x%02x" % tuple(v)
+
+
+def _opaque(css):
+    """A color without its alpha: alpha= replaces a color's, as in matplotlib"""
+    if isinstance(css, str):
+        if css.startswith("rgba("):
+            r, g, b = [int(t) for t in css[5:-1].split(",")[:3]]
+            return "#%02x%02x%02x" % (r, g, b)
+        if css.startswith("#") and len(css) in (5, 9):
+            return css[:len(css) - (1 if len(css) == 5 else 2)]
+    return css
 
 # rc settings (only those set: unset ones keep matplotlib's defaults below)
 rcParams = {}
@@ -138,6 +159,8 @@ class Line2D:
 
     def set_alpha(self, a):
         self._prim.options["alpha"] = a
+        if a is not None:  # (it replaces the color's, as matplotlib's)
+            self._prim.options["color"] = _opaque(self._prim.options.get("color"))
 
     def set_linewidth(self, w):
         self._prim.options["thickness"] = w * PT
@@ -226,6 +249,8 @@ class Axes:
             xs = _list(x) if x is not None else list(range(len(ys)))
             fc, fm, fl = _parse_fmt(fmt)
             color = self._color(kw.get("color", kw.get("c", fc)))
+            if kw.get("alpha") is not None:
+                color = _opaque(color)
             ls = kw.get("linestyle", kw.get("ls", fl or "-"))
             marker = kw.get("marker", fm)
             lw = kw.get("linewidth", kw.get("lw", 1.5))
@@ -258,6 +283,8 @@ class Axes:
             else:
                 colors = [to_color(v) for v in cl]
         col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None))
+        if alpha is not None:
+            col, colors = _opaque(col), colors and [_opaque(v) for v in colors]
         sizes = None
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
@@ -285,7 +312,10 @@ class Axes:
             x0 = float(xi) - width / 2 if align == "center" else float(xi)
             rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
-        p = Rects(rects, color=self._color(None if colors else color), colors=colors, label=label,
+        col = self._color(None if colors else color)
+        if alpha is not None:
+            col, colors = _opaque(col), colors and [_opaque(v) for v in colors]
+        p = Rects(rects, color=col, colors=colors, label=label,
                   edgecolor=to_color(edgecolor), alpha=alpha)
         if tick_label is not None:
             self._opts["xticks"] = [float(v) for v in xs]
@@ -303,7 +333,8 @@ class Axes:
         ls_ = _list(left) if left is not None and not isinstance(left, (int, float)) else [left or 0] * len(ys)
         rects = [(l, float(yi) - height / 2, w, height) if w >= 0 else (l + w, float(yi) - height / 2, -w, height)
                  for yi, w, l in zip(ys, ws, ls_)]
-        p = Rects(rects, color=self._color(color), label=label, edgecolor=to_color(edgecolor), alpha=alpha)
+        p = Rects(rects, color=self._color(color) if alpha is None else _opaque(self._color(color)), label=label,
+                  edgecolor=to_color(edgecolor), alpha=alpha)
         self._opts.setdefault("_barsh", True)
         return _Artist(self._add(p), "container.BarContainer")
 
@@ -333,7 +364,7 @@ class Axes:
         if density:
             total = sum(counts)
             counts = [c / (total * (edges[i + 1] - edges[i])) if total else 0 for i, c in enumerate(counts)]
-        col = self._color(color)
+        col = self._color(color) if alpha is None else _opaque(self._color(color))
         if histtype == "step":
             xs, ys = [edges[0]], [0.0]
             for i in builtin_range(nb):
@@ -356,8 +387,10 @@ class Axes:
         xs, a = _list(x), _list(y1)
         b = _list(y2) if not isinstance(y2, (int, float)) else [float(y2)] * len(xs)
         pts = list(zip(xs, a)) + list(zip(xs, b))[::-1]
-        p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=self._color(color or kw.get("facecolor")),
-                    alpha=0.5 if alpha is None else alpha, label=label)
+        # (opaque unless alpha is given, as matplotlib's)
+        col = self._color(color if color is not None else kw.get("facecolor"))
+        p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=col if alpha is None else _opaque(col),
+                    alpha=alpha, label=label)
         return _Artist(self._add(p), "collections.PolyCollection")
 
     def errorbar(self, x, y, yerr=None, xerr=None, fmt="", ecolor=None, elinewidth=None, capsize=None, color=None,
