@@ -54,7 +54,8 @@ authoritative.
   `title`, which are plain text). In JSON, write a backslash as `\\`.
 - **Pictures** live in the top-level `images` object:
   `"images": {"fig1": {"w": 800, "h": 600, "src": "data:image/png;base64,..."}}`,
-  and a note shows one with `"image": "fig1"`. `src` may be a raster `data:` URL
+  and a note shows one with `"image": "fig1"`. A name is letters, digits, `_`
+  and `-` (no spaces or dots), up to 100 characters. `src` may be a raster `data:` URL
   or an `https:` address; a board you hand to someone else should use `data:`
   URLs, so it is complete in one file. Keep a board under 16 MiB.
 - **Pages and slides.** For several pages, put `nodes`, `edges` and `steps` in
@@ -79,7 +80,7 @@ A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`).
 | `engine` | `"latest"` | `"latest"`, in a downloaded file: run with the newest engine when online (written by Sagebrush) |
 | `seed` | string | 64 hex digits: the seed of its code's random numbers; without it a fixed default is used, so a board's random numbers are always repeatable |
 | `tools` | [string] | the toolbar's tools in Edit mode, in order (written by Sagebrush) |
-| `images` | {name: picture} | pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL) |
+| `images` | {name: picture} | pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL). A name is letters, digits, `_` and `-`, at most 100 characters (`plot-1`, not `plot 1` or `figure.png`): a picture by another name is left out, and so is a note's or a background's use of it |
 | `pages` | [page] | several pages; a document with pages has no `nodes`, `edges` or `steps` of its own |
 | `intro` | string | Markdown shown before the tour starts |
 | `refBase` | string | the base URL for `ref` links that are paths (e.g. a repository's blob URL) |
@@ -121,7 +122,7 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `id` | string | required: unique on its page (an edge names it) |
 | `kind` | `"note"` | `"note"`, or left out |
 | `title` | string | a heading (plain text, math allowed) |
-| `image` | string | a picture: its name in the document's `images` |
+| `image` | string | a picture: its name in the document's `images` (letters, digits, `_` and `-`, at most 100 characters) |
 | `text` | string | Markdown with math (`$...$`), shown at every zoom |
 | `code` | string | code in the board's language (`mode`), run in the reader's browser, its output under it; it makes the note a code item |
 | `hideCode` | boolean | `true`: show only the code's output, not the code |
@@ -224,7 +225,7 @@ A page's background.
 | field | type | meaning |
 |---|---|---|
 | `color` | string | a color: on a slide's card, or behind the whole board |
-| `image` | string | a picture's name in `images`, on a slide's card |
+| `image` | string | a picture's name in `images` (letters, digits, `_` and `-`, at most 100 characters), on a slide's card |
 
 ### A picture (in `images`)
 
@@ -234,7 +235,7 @@ A picture a note shows, by its name in the document's `images`.
 |---|---|---|
 | `w` | number | required: its width in pixels |
 | `h` | number | required: its height in pixels |
-| `src` | string | its bytes: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address |
+| `src` | string | its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address |
 
 <!-- /fields -->
 

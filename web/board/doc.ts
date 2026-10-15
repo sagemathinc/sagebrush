@@ -43,7 +43,7 @@ export interface DocNote {
   kind?: "note";
   /** a heading (plain text, math allowed) */
   title?: string;
-  /** a picture: its name in the document's `images` */
+  /** a picture: its name in the document's `images` (letters, digits, `_` and `-`, at most 100 characters) */
   image?: string;
   /** Markdown with math (`$...$`), shown at every zoom */
   text?: string;
@@ -171,7 +171,7 @@ export interface SlideRect {
 export interface PageBackground {
   /** a color: on a slide's card, or behind the whole board */
   color?: string;
-  /** a picture's name in `images`, on a slide's card */
+  /** a picture's name in `images` (letters, digits, `_` and `-`, at most 100 characters), on a slide's card */
   image?: string;
 }
 
@@ -260,7 +260,7 @@ export interface BoardDoc {
   /** the toolbar's tools in Edit mode, in order (written by Sagebrush) */
   // (toolbar.ts; else the person's default)
   tools?: string[];
-  /** pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL) */
+  /** pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL). A name is letters, digits, `_` and `-`, at most 100 characters (`plot-1`, not `plot 1` or `figure.png`): a picture by another name is left out, and so is a note's or a background's use of it */
   // (their bytes as data: URLs in a board that left the browser: images.ts)
   images?: Record<string, ImageInfo>;
   /** several pages; a document with pages has no `nodes`, `edges` or `steps` of its own */
