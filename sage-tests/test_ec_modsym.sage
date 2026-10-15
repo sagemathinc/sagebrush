@@ -2,11 +2,11 @@
 # least positive real period), and quadratic twists, on curves of conductor
 # below 1000 given by their a-invariants.  The expected output comes from
 # a Sage with eclib (Sage's default implementation; the full oracle Sage,
-# /scratch/sage-oracle/sage/sage): Sage's implementation='sage' cannot
-# normalize 784i1 and warns so.
+# /scratch/sage-oracle/sage/sage).  784i1 and 121b1 (N a square, root
+# number -1: no twist by D > 0 normalizes them exactly) are refused by
+# sagebrush, so they are doctests, not cases here.
 cusps = [0, 1/2, 1/3, 2/5, 1/7, -3/7, 3/11, 5/13, 1/25, 11/60, 13/97]
-for label, a in [('784i1', [0, 1, 0, -2, -1]),
-                 ('630f1', [1,-1,0,-369,1053]),
+for label, a in [('630f1', [1,-1,0,-369,1053]),
                  ('358b1', [1,0,0,-18,28]),
                  ('730a1', [1,-1,0,-865,-9219]),
                  ('158d1', [1,0,1,-82,-92]),
@@ -39,3 +39,24 @@ print(E.modular_symbol())
 for D in [5, -3, 8, -4, 12, 1]:
     print(D, E.quadratic_twist(D))
 print(EllipticCurve([1, -1, 0, -369, 1053]).quadratic_twist(-3).a_invariants())
+# L(E,1) = 0 (rank 1 and 2): normalized by the first twist with L(E_D,1) != 0
+for label in ['37a1', '43a1', '53a1', '57a1', '58a1', '61a1', '65a1', '77a1', '79a1', '83a1', '88a1', '89a1',
+              '91a1', '91b1', '92b1', '99a1', '101a1', '112a1', '117a1', '128a1', '135a1', '136a1',
+              '389a1', '433a1', '446d1', '563a1', '571b1', '643a1', '655a1', '664a1', '681c1', '707a1',
+              '709a1', '718b1', '794a1', '817a1', '916c1', '944e1', '997b1', '997c1']:
+    E = EllipticCurve(label)
+    f = E.modular_symbol()
+    print(label, E.rank(), [f(r) for r in cusps])
+# Sage's arguments: the accepted spellings, and the invalid ones
+E = EllipticCurve('11a1')
+print(E.modular_symbol(normalize='L_ratio', implementation='eclib', nap=50)(1/7))
+print(E.modular_symbol(normalize=None, nap=0)(1/7), E.modular_symbol(sign=1, nap=True)(1/7))
+for kw in [dict(normalize=False), dict(normalize='foo'), dict(normalize='L_RATIO'), dict(implementation='foo'),
+           dict(implementation=None), dict(implementation='ECLIB'), dict(nap='bogus'), dict(nap=None),
+           dict(sign=0), dict(sign=2), dict(sign='a'), dict(sign=0, implementation='foo'),
+           dict(implementation='foo', normalize='foo'), dict(normalize='foo', nap='x'), dict(implementation='foo', nap='x')]:
+    try:
+        E.modular_symbol(**kw)
+        print(kw, 'accepted')
+    except (ValueError, TypeError) as e:
+        print(kw, type(e).__name__, e)

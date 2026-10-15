@@ -1,4 +1,3 @@
-784i1 [0, 0, 0, 0, 0, -1/2, 1, -1, 1, 0, 0]
 630f1 [2, -4, -1, 0, 0, -2, -1, 0, 0, 2, 3]
 358b1 [1/3, 0, -2/3, -1/6, 1/3, -1/6, -1/6, -1/6, 1/3, 0, 1/3]
 730a1 [2, -4, -2, -5, -4, -4, 3, -1, 2, 3, 3]
@@ -32,3 +31,60 @@ Modular symbol with sign 1 over Rational Field attached to Elliptic Curve define
 12 Elliptic Curve defined by y^2 = x^3 - 1488*x - 40016 over Rational Field
 1 Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
 (1, 0, 0, -41, -39)
+37a1 1 [0, 0, 0, -1, 1, -1, 0, -1, 0, 2, 1]
+43a1 1 [0, 0, 0, -1/2, 0, -1/2, 1/2, -1/2, -1/2, 0, 1/2]
+53a1 1 [0, 0, 0, -1/2, 1/2, 0, -1/2, 0, 0, 1/2, 1]
+57a1 1 [0, 0, 0, -1/2, 0, -1/2, 0, -1/2, -1/2, 0, 0]
+58a1 1 [0, 0, 0, -1/2, 1/2, -1/2, 0, -1/2, -1/2, 0, 1/2]
+61a1 1 [0, 0, 0, 0, 1/2, -1/2, 0, -1/2, 0, 0, 1/2]
+65a1 1 [0, 0, 0, -1/2, 1, -1, 0, -1/2, -1/2, 1/2, 1]
+77a1 1 [0, 0, 0, -1/2, 1/2, 0, -1/2, 0, 0, 1, 1]
+79a1 1 [0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 0]
+83a1 1 [0, 0, 0, -1/2, 0, -1/2, 0, -1/2, -1/2, 1/2, 0]
+88a1 1 [0, 0, 0, -1/2, 1/2, 0, 0, -1/2, -1/2, 0, 1]
+89a1 1 [0, 0, 0, 0, 1/2, -1/2, 0, 0, 0, 1/2, 0]
+91a1 1 [0, 0, 0, 0, 0, -1/2, 1, -1/2, 1, 0, 1/2]
+91b1 1 [0, 0, 0, 0, 1/3, -1/6, 0, -1/6, 0, 0, 1/2]
+92b1 1 [0, 0, 0, -1/2, 0, 0, -1/2, 0, -1/2, 0, 1/2]
+99a1 1 [0, 0, 0, 0, 0, -1, 0, -1, 0, 0, 2]
+101a1 1 [0, 0, 0, 0, 1, 0, -1, 0, 0, 1, 1]
+112a1 1 [0, 0, 0, -1/2, 1/2, -1/2, 0, -1, -1/2, 0, 0]
+117a1 1 [0, 0, 0, -1/2, 1, -1, -1/2, 0, 0, -1/2, 1/2]
+128a1 1 [0, 0, 0, -1/2, 1/2, -1/2, -1/2, 0, 1/2, 0, 0]
+135a1 1 [0, 0, 0, -1/2, 1/2, -1/2, 1, -1/2, 1/2, 1/2, 1/2]
+136a1 1 [0, 0, 0, 0, 1, 0, -1, -1, 1, 1, 0]
+389a1 2 [0, 0, 0, -2, 1, -2, 1, -2, -1, 0, 0]
+433a1 2 [0, 0, 0, 0, 1, -1/2, 1/2, 0, 1/2, 0, 1/2]
+446d1 2 [0, 0, 0, -2, 0, 0, 0, -1, -1, 1, 1]
+563a1 2 [0, 0, 0, 0, 1/2, -1, 0, 0, 1/2, -1/2, 1/2]
+571b1 2 [0, 0, 0, -1, 1/2, -1, 0, -1, 0, 0, 1]
+643a1 2 [0, 0, 0, 0, 1, -1/2, 0, 0, 0, 0, 1/2]
+655a1 2 [0, 0, 0, -1, 1/2, -1, 0, -1, 0, 1/2, 0]
+664a1 2 [0, 0, 0, -1, 1, -1/2, 1/2, -1, -1, -1/2, 0]
+681c1 2 [0, 0, 0, -1, -1/2, -1/2, 0, -1/2, -1/2, 1/2, -1/2]
+707a1 2 [0, 0, 0, 0, 1, -2, 0, -1, 0, 2, -1]
+709a1 2 [0, 0, 0, -2, -1, -1, 2, 0, -2, -1, 1]
+718b1 2 [0, 0, 0, 0, 1, -2, -1, -2, 0, 2, 2]
+794a1 2 [0, 0, 0, -1, 1/2, -1, 1/2, -1, -1/2, -1/2, 0]
+817a1 2 [0, 0, 0, 0, 1/2, 1/2, -1, -1/2, 1, 1/2, 0]
+916c1 2 [0, 0, 0, -2, 2, -1, 0, 0, -1, 0, 0]
+944e1 2 [0, 0, 0, -1, 1, -1/2, 0, -1/2, -1/2, 1, 1]
+997b1 2 [0, 0, 0, 0, 1, -2, 1, 0, 0, 0, 0]
+997c1 2 [0, 0, 0, 0, 1, -2, 1, 0, 0, 0, 0]
+7/10
+7/10 7/10
+{'normalize': False} ValueError normalize should be one of 'L_ratio', 'period' or 'none'
+{'normalize': 'foo'} ValueError normalize should be one of 'L_ratio', 'period' or 'none'
+{'normalize': 'L_RATIO'} ValueError normalize should be one of 'L_ratio', 'period' or 'none'
+{'implementation': 'foo'} ValueError Implementation should be one of 'sage', 'num' or 'eclib'
+{'implementation': None} ValueError Implementation should be one of 'sage', 'num' or 'eclib'
+{'implementation': 'ECLIB'} ValueError Implementation should be one of 'sage', 'num' or 'eclib'
+{'nap': 'bogus'} TypeError an integer is required
+{'nap': None} TypeError an integer is required
+{'sign': 0} ValueError The sign of a modular symbol must be 1 or -1
+{'sign': 2} ValueError The sign of a modular symbol must be 1 or -1
+{'sign': 'a'} ValueError The sign of a modular symbol must be 1 or -1
+{'sign': 0, 'implementation': 'foo'} ValueError The sign of a modular symbol must be 1 or -1
+{'implementation': 'foo', 'normalize': 'foo'} ValueError normalize should be one of 'L_ratio', 'period' or 'none'
+{'normalize': 'foo', 'nap': 'x'} ValueError normalize should be one of 'L_ratio', 'period' or 'none'
+{'implementation': 'foo', 'nap': 'x'} ValueError Implementation should be one of 'sage', 'num' or 'eclib'
