@@ -1,0 +1,9 @@
+1
+1
+2
+3
+
+In file "test_error_syntax.m", line 7, column 11:
+>> y := (2 + ;
+             ^
+User error: bad syntax

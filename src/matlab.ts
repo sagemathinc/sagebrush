@@ -1214,8 +1214,9 @@ class Emitter {
   exprStmt(e: Expr, print: boolean, scope: Scope) {
     // a variable alone: displayed by its name
     if (e.k === "id" && this.isVar(e.name, scope)) {
-      if (print) this.emit(`_m.display(${JSON.stringify(e.name)}, ${pyName(e.name)})`);
-      else this.emit(pyName(e.name));
+      const v = this.varRead(e.name, scope);
+      if (print) this.emit(`_m.display(${JSON.stringify(e.name)}, ${v})`);
+      else this.emit(v);
       return;
     }
     if (e.k === "id" && WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) {
@@ -1279,13 +1280,24 @@ class Emitter {
       this.afterAssign(lv.name, scope);
       return;
     }
-    const base = scope.fn || scope.globals.has(lv.name) || scope.persistents.has(lv.name) ? name : `(${name} if ${JSON.stringify(name)} in globals() else None)`;
+    const base = scope.globals.has(lv.name) ? this.varRead(lv.name, scope)
+      : scope.fn || scope.persistents.has(lv.name) ? name : `(${name} if ${JSON.stringify(name)} in globals() else None)`;
     // x(i) = v and x(i, j) = v: the common cases, without the path
     const p0 = lv.path[0];
     if (lv.path.length === 1 && p0.k === "index" && !p0.brace && (p0.args.length === 1 || p0.args.length === 2) &&
         p0.args.every((a) => a.k !== "colon" && !(a.k === "index" && a.brace) && a.k !== "field" && a.k !== "dynfield")) {
       p0.frame.code = base;
       const subs = p0.args.map((a) => this.expr(a, scope));
+      if (scope.globals.has(lv.name)) {
+        // (a global: the index and the value first, which may call functions
+        // that change it, then the registry's value at that point as the base)
+        const t = this.fresh();
+        this.emit(`${t} = [${subs.join(", ")}, ${value}]`);
+        this.emit(`${name} = _m.set${subs.length}(${base}, *${t})`);
+        scope.vars.add(lv.name);
+        this.afterAssign(lv.name, scope);
+        return;
+      }
       this.emit(`${name} = _m.set${subs.length}(${base}, ${subs.join(", ")}, ${value})`);
       scope.vars.add(lv.name);
       this.afterAssign(lv.name, scope);
@@ -1301,13 +1313,28 @@ class Emitter {
         parts.push(`(${p.brace ? '"b"' : '"p"'}, ${this.argList(p.args, scope)})`);
       }
     }
-    this.emit(`${name} = _m.assign(${base}, [${parts.join(", ")}], ${value})`);
+    if (scope.globals.has(lv.name)) {
+      // (a global: the path and the value first, then the registry's value)
+      const tp = this.fresh(), tv = this.fresh();
+      this.emit(`${tp} = [${parts.join(", ")}]`);
+      this.emit(`${tv} = ${value}`);
+      this.emit(`${name} = _m.assign(${base}, ${tp}, ${tv})`);
+    } else {
+      this.emit(`${name} = _m.assign(${base}, [${parts.join(", ")}], ${value})`);
+    }
     scope.vars.add(lv.name);
     this.afterAssign(lv.name, scope);
   }
 
   isVar(name: string, scope: Scope) {
     return scope.vars.has(name);
+  }
+
+  /** a variable's value where it is read: a global's from the shared
+   * registry at that point, since any call (even earlier in the same
+   * expression) may have changed it, as MATLAB's global page says */
+  varRead(name: string, scope: Scope): string {
+    return scope.globals.has(name) ? `_m.global_get(${JSON.stringify(name)})` : pyName(name);
   }
 
   /** a name that is not a known variable: the value it names when the code runs */
@@ -1325,7 +1352,7 @@ class Emitter {
       case "str": return e.dq ? `_m.Str(${JSON.stringify(e.v)})` : `_m.Char(${JSON.stringify(e.v)})`;
       case "id": {
         if (scope.caps?.has(e.name)) return `_m.val(_m.capf(${pyName(e.name)}, ${JSON.stringify(e.name)}))`;
-        if (this.isVar(e.name, scope)) return pyName(e.name);
+        if (this.isVar(e.name, scope)) return this.varRead(e.name, scope);
         if (e.name === "nargin" && scope.fn) return "_m.nargs(_a)";
         if (e.name === "nargout" && scope.fn) return "_m.nargs(_nargout)";
         if (WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
@@ -1430,7 +1457,9 @@ class Emitter {
     for (const n of free) {
       if (inner.vars.has(n)) continue;
       if (this.isVar(n, scope)) {
-        captured.push(`${pyName(n)}=_m.cp(${pyName(n)})`);
+        // (a global's value now, from the registry: the anonymous function
+        // keeps a snapshot, its own scope having no globals)
+        captured.push(`${pyName(n)}=_m.cp(${this.varRead(n, scope)})`);
         inner.vars.add(n);
       } else if (!scope.fn && !this.fnNames.has(n)) {
         // (at the top level: a workspace variable now, else a function)

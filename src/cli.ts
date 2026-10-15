@@ -12,10 +12,10 @@ import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
-import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax } from "./interactive";
-import { getattr } from "./runtime/object";
+import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
@@ -36,9 +36,11 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)
   -V       print the version
   --licenses  the licenses of Sagebrush and of what it contains
-  --search QUERY [--json]
+  --search QUERY [--mode sage|python|magma|matlab] [--json]
            search the documentation of every function (name, signature,
-           docstring): what Sagebrush can do; obj? in a session shows one
+           docstring): what Sagebrush can do; obj? in a session shows one.
+           --mode: that language's functions (default: Sage's library,
+           which Python mode imports too)
   --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|matlab|all]
            register Sagebrush as a Jupyter kernel (no Python needed)
   --uninstall-jupyter-kernel [the same options]
@@ -47,6 +49,35 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
            notebooks are the .ipynb files in DIR
 `;
 
+// A SystemExit's status as the process's exit code, by CPython's rule
+// (Python/pythonrun.c), from its Python type, not how this runtime holds it:
+// None is 0; an integer (bool and int subclasses too) is its value, its low
+// byte as the system keeps it, or -1 (255) if it does not fit a long long;
+// anything else is written to stderr, and is 1.
+function exitCode(c: any): number {
+  if (c === null || c === undefined) return 0;
+  let int = false;
+  try {
+    int = R.typeOf(c).$mro.includes(R.T.int);
+  } catch {}
+  if (int) {
+    try {
+      // (its integer as stored, as CPython reads it: an int subclass's __index__ is not asked, CORR-0BE-1)
+      const v = BigInt(unbox(c));
+      return v >= -(2n ** 63n) && v < 2n ** 63n ? Number(BigInt.asUintN(8, v)) : 255;
+    } catch {}
+  }
+  R.stdout.flush();
+  let text: string;
+  try {
+    text = String(R.str(c));
+  } catch {
+    text = "(an exit status that could not be written as text)";
+  }
+  R.stderr.write(text + "\n");
+  return 1;
+}
+
 // Run fn, reporting an uncaught exception as CPython does; returns the exit code.
 function guarded(fn: () => void): number | null {
   try {
@@ -54,14 +85,7 @@ function guarded(fn: () => void): number | null {
     return null;
   } catch (e: any) {
     const exc = R.toPyExc(e);
-    if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
-      const c = exc.code;
-      if (c === null || c === undefined) return 0;
-      if (typeof c === "number") return c;
-      R.stdout.flush();
-      R.stderr.write(R.str(c) + "\n");
-      return 1;
-    }
+    if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return exitCode(exc.code);
     R.stdout.flush();
     R.stderr.write(R.formatException(exc));
     return 1;
@@ -118,10 +142,14 @@ function matlabSource(src: string, file: string): string | null {
   }
 }
 
-/** Magma source as Python, or null after reporting a syntax error. */
-function magmaSource(src: string, file: string): string | null {
+/**
+ * Magma source as Python, or null after reporting a syntax error.  A file
+ * runs up to its first syntax error; input from stdin is a session, which
+ * reports errors and goes on (src/magma.ts, Recover).
+ */
+function magmaSource(src: string, file: string, recover: Recover = "file"): string | null {
   try {
-    return magmaToPython(src, file);
+    return magmaToPython(src, file, { recover });
   } catch (e) {
     if (!(e instanceof MagmaSyntaxError)) throw e;
     const line = src.split("\n")[e.line - 1] ?? "";
@@ -248,7 +276,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
 async function main() {
   const argv = process.argv.slice(2);
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2)
-  if (argv[0] === "board" && argv[1] === "render") {
+  if (argv[0] === "board" && (argv[1] === "render" || argv[1] === "run")) {
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;
@@ -379,6 +407,11 @@ async function main() {
     code = guarded(() => {
       main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"));
     });
+  } else if (!interactive && isMagma(null)) {
+    // Magma on stdin: a session, as `magma < file` is
+    main = mainModule("<stdin>");
+    const py = magmaSource(readFileSync(0, "utf8"), "<stdin>", "session");
+    if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive) {
     // program on stdin
     const source = readFileSync(0, "utf8");
@@ -420,3 +453,5 @@ function execModuleAsMain(name: string): any {
 if (isMainThread) main();
 else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
 else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);
+// (`board run`'s interpreter, src/board-run.ts)
+else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boardRunWorker(workerData.sagebrushBoardRun));

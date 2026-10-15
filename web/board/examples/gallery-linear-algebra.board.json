@@ -1,0 +1,54 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "Linear algebra with NumPy",
+ "intro": "A linear system, eigenvalues, a least-squares fit and the singular values, in Python with NumPy, in the reader's browser.",
+ "layout": "graph",
+ "nodes": [
+  {
+   "id": "matrix",
+   "title": "A symmetric matrix",
+   "text": "$A = \\begin{pmatrix} 2 & 1 \\\\ 1 & 3 \\end{pmatrix}$, $b = (1, 2)$",
+   "code": "import numpy as np\nA = np.array([[2.0, 1.0], [1.0, 3.0]])\nb = np.array([1.0, 2.0])"
+  },
+  {
+   "id": "solve",
+   "title": "Solve $Ax = b$",
+   "code": "x = np.linalg.solve(A, b)\nprint(x)\nprint(np.allclose(A @ x, b))"
+  },
+  {
+   "id": "eigen",
+   "title": "Its eigenvalues",
+   "text": "$\\frac{5 \\pm \\sqrt 5}{2}$: real, as $A$ is symmetric.",
+   "code": "w, V = np.linalg.eigh(A)\nprint(np.round(w, 6))\nprint(np.allclose(A @ V, V * w))"
+  },
+  {
+   "id": "fit",
+   "title": "A least-squares line",
+   "text": "Through $(1, 2.1)$, $(2, 3.9)$, $(3, 6.2)$, $(4, 7.8)$.",
+   "code": "M = np.column_stack([np.ones(4), np.arange(1, 5)])\nys = np.array([2.1, 3.9, 6.2, 7.8])\ncoef, *_ = np.linalg.lstsq(M, ys, rcond=None)\nprint(\"intercept %.3f, slope %.3f\" % tuple(coef))"
+  },
+  {
+   "id": "svd",
+   "title": "Singular values",
+   "code": "print(np.round(np.linalg.svd(M, compute_uv=False), 4))\nprint(\"rank\", np.linalg.matrix_rank(M))"
+  }
+ ],
+ "edges": [
+  {
+   "from": "matrix",
+   "to": "solve",
+   "label": "A, b"
+  },
+  {
+   "from": "matrix",
+   "to": "eigen",
+   "label": "A"
+  },
+  {
+   "from": "fit",
+   "to": "svd",
+   "label": "M"
+  }
+ ]
+}

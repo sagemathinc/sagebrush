@@ -86,6 +86,9 @@ class SeriesRing_:
             if self._base is _sa().ZZ and q.denominator != 1:
                 raise ArithmeticError("%s/%s is not in Integer Ring (use a series ring over QQ)" % (a, b))
             return _norm(q)
+        if _is_padic(self._base) and not self._base._field:
+            # stay in Zp: b is a unit there (inverse() checks)
+            return a * self._base(b).inverse_of_unit()
         return a / b
 
     def __repr__(self):
@@ -277,7 +280,47 @@ class SeriesRing_:
             return False
 
 
+def _is_padic(B):
+    return type(B).__name__ in ("pAdicRingCappedRelative", "pAdicFieldCappedRelative")
+
+
+def _frac(B):
+    """The fraction field of the base B (QQ for ZZ, Qp for Zp); B itself
+    for a field."""
+    sa = _sa()
+    if B is sa.ZZ:
+        return sa.QQ
+    if _is_padic(B) and not B._field:
+        return B.fraction_field()
+    return B
+
+
+def _is_unit(c, B):
+    """Whether the coefficient c is a unit of the base B."""
+    if B is _sa().ZZ:
+        return c == 1 or c == -1
+    if _is_padic(B):
+        return not c.is_zero() and (B._field or c.valuation() == 0)
+    return not _is_zero(c)
+
+
+def _exact_quo(x, c, B):
+    """x / c in the base B when it lies there (over ZZ when c divides x,
+    over Zp when v(x) >= v(c)), else None."""
+    if B is _sa().ZZ:
+        q, r = divmod(int(x), int(c))
+        return _sa().Integer(q) if r == 0 else None
+    if _is_padic(B):
+        if x.valuation() < c.valuation():
+            return None
+        return B(x / c)
+    return x / c
+
+
 def _is_zero(c):
+    # (a p-adic coefficient O(p^n) is kept, as Sage prints it: O(5)*T)
+    if hasattr(c, "_x") and type(c).__name__ == "pAdicCappedRelativeElement":
+        return c._x.is_exact_zero()
     try:
         return not c
     except Exception:
@@ -485,7 +528,7 @@ class Series:
             if _is_zero(c):
                 continue
             e = self._v + i
-            parts.append(_term(c, e, name))
+            parts.append(_term(c, e, name, self._R._laurent))
         if self._prec is not None:
             parts.append((False, "O(%s)" % (_mono(name, self._prec) if self._prec != 0 else "1")))
         if not parts:
@@ -504,8 +547,11 @@ class Series:
     # ---- arithmetic
     def _coerce(self, o):
         if isinstance(o, Series):
-            if o._R == self._R:
+            if o._R is self._R:
                 return o
+            if o._R == self._R:
+                # the same ring but another default precision: self's (Sage)
+                return Series(self._R, o._v, o._c, o._prec)
             if o._R._laurent and not self._R._laurent and o._R._base == self._R._base:
                 return o
             return self._R(o)
@@ -514,15 +560,86 @@ class Series:
         except (TypeError, ValueError, ArithmeticError):
             return None
 
+    def _lift_base(self, o):
+        """self, moved to the common parent Sage uses with o when that
+        differs, else self: the series ring over _target_base(o), and a
+        Laurent series ring if either operand is one (QQ[[z]] meets a
+        Laurent series over ZZ in QQ((z)), whichever comes first; the
+        review's CORR-078-1)."""
+        R = self._R
+        base = self._target_base(o)
+        laurent = R._laurent or (isinstance(o, Series) and o._R._laurent)
+        if base is R._base and laurent == R._laurent:
+            return self
+        # the default precision as Sage: the other operand's parent when it
+        # is the common one, the larger of the two when the common parent is
+        # new (QQ[[z]], default 5, meets ZZ((z)), default 20, in QQ((z))
+        # with 20), self's with a scalar (the review's CORR-6F0-1)
+        dp = R._dp
+        if isinstance(o, Series):
+            S = o._R
+            dp = S._dp if (base is S._base and laurent == S._laurent) else max(R._dp, S._dp)
+        return self._over(base, laurent=laurent, dp=dp)
+
+    def _target_base(self, o):
+        """The coefficient ring of self's parent with o.  p-adic bases: an
+        element of Y joins a series over X in X if Y coerces into X, else
+        over the p-adics with the larger cap, a field if either is
+        (Zp(5, 4)[[T]] times an element of Zp(5) lands in Zp(5, 20)[[T]];
+        Zp(5, 20)[[T]] plus one of Qp(5, 4) in Qp(5, 20)[[T]]); two series
+        meet in the base that the other coerces into, else in the same
+        pushout.  ZZ: the fraction field when o needs it (ZZ[[z]] meets 1/2
+        or a series over QQ in QQ[[z]]).  Otherwise the base."""
+        B = self._R._base
+        if _is_padic(B):
+            if isinstance(o, Series):
+                P = o._R._base
+            elif type(o).__name__ == "pAdicCappedRelativeElement":
+                P = o.parent()
+            else:
+                return B
+            if P is B or not _is_padic(P) or P.prime() != B.prime():
+                return B
+            from _sage_padic import _series_pushout, _coerces
+            if isinstance(o, Series) and not _coerces(P, B) and _coerces(B, P):
+                return P
+            return _series_pushout(B, P)
+        F = _frac(B)
+        if F is B:
+            return B
+        if isinstance(o, Series):
+            return F if o._R._base is F else B
+        try:
+            B(o)
+            return B
+        except (TypeError, ValueError, ArithmeticError):
+            pass
+        try:
+            F(o)
+        except (TypeError, ValueError, ArithmeticError):
+            return B
+        return F
+
+    def _over(self, base, laurent=None, dp=None):
+        """self in the series ring over base (a Laurent series ring if asked;
+        default precision dp, else self's)."""
+        R = self._R
+        lau = R._laurent if laurent is None else laurent
+        return (LaurentSeriesRing if lau else PowerSeriesRing)(base, R._name, R._dp if dp is None else dp)(self)
+
     def _ring_for(self, o, v):
         R = self._R
-        if isinstance(o, Series) and o._R._laurent:
+        if isinstance(o, Series) and o._R._laurent and not R._laurent:
             R = o._R
         if v < 0 and not R._laurent:
             R = R.laurent_series_ring()
         return R
 
     def __add__(self, o):
+        self._check_var(o, "+")
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__add__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
@@ -542,24 +659,36 @@ class Series:
                 c[k] = c[k] + x
         return Series(self._ring_for(o, v), v, c, p)
 
-    __radd__ = __add__
+    def __radd__(self, o):
+        return self.__add__(o)
 
     def __neg__(self):
         return Series(self._R, self._v, [-c for c in self._c], self._prec)
 
     def __sub__(self, o):
+        self._check_var(o, "-")
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__sub__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
         return self + (-o)
 
     def __rsub__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__rsub__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
         return o + (-self)
 
     def __mul__(self, o):
+        self._check_var(o, "*")
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__mul__(o)
         o = self._coerce(o)
         if o is None:
             return NotImplemented
@@ -581,21 +710,110 @@ class Series:
                 c[i + j] = c[i + j] + x * y
         return Series(self._ring_for(o, v), v, c, p)
 
-    __rmul__ = __mul__
+    def __rmul__(self, o):
+        return self.__mul__(o)
+
+    def _check_var(self, o, op):
+        """Series in different variables do not meet (Sage refuses)."""
+        if isinstance(o, Series) and o._R._name != self._R._name:
+            raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self._R, o._R))
 
     def __truediv__(self, o):
+        self._check_var(o, "/")
+        B = self._R._base
+        if _is_padic(B) and not isinstance(o, Series):
+            # by a scalar: over the fraction field (Sage: T/2 and T/Zp(5)(2)
+            # are over Qp; the review's CORR-D9E-2), joined with the
+            # scalar's own fraction field
+            F = B if B._field else B.fraction_field()
+            if type(o).__name__ == "pAdicCappedRelativeElement" and o.parent().prime() == B.prime():
+                from _sage_padic import _series_pushout
+                F = _series_pushout(F, o.parent().fraction_field())
+            s = self if F is B else self._over(F)
+            c = F(o)
+            if c.is_zero():
+                raise ZeroDivisionError("division by zero")
+            return Series(s._R, s._v, [x / c for x in s._c], s._prec)
+        F = _frac(B)
+        if F is not B and not isinstance(o, Series):
+            # by a scalar: over the fraction field (Sage: z/2 and z/1 are in
+            # QQ[[z]])
+            s = self._over(F)
+            c = F(o)
+            if _is_zero(c):
+                raise ZeroDivisionError("division by zero")
+            return Series(s._R, s._v, [s._R._div(x, c) for x in s._c], s._prec)
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__truediv__(o)
         o2 = self._coerce(o)
         if o2 is None:
             return NotImplemented
         if not o2._c:
             raise ZeroDivisionError("division by zero series")
-        if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None:
+        if o2._R._laurent and not self._R._laurent:
+            # by a Laurent series: the quotient is one too (Sage: z/L(1) in L)
+            return self._over(self._R._base, laurent=True).__truediv__(o2)
+        if F is not B:
+            # over ZZ or Zp: Sage's rule for a base that is not a field
+            return self._ring_div(o2)
+        if not self._c and self._prec is None:
+            # an exact zero stays exact (Sage: 0/(1 + t) is 0)
+            return Series(self._R, 0, [], None)
+        if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None and not _is_padic(B):
             # exact division by a constant stays exact
             return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
         return self * o2.inverse()
 
+    def _ring_div(self, g):
+        """self / g over a base that is not a field (ZZ, Zp), as Sage (whose
+        output served as the oracle).  By an exact monomial c z^v: if c is a
+        unit, the quotient stays over the base when it is a power series or
+        self is a Laurent series; a Laurent series is divided coefficient by
+        coefficient when c divides each of them (2 w/2 = w; else Sage's
+        refusal); otherwise the quotient is a Laurent series over the
+        fraction field (z/(2 z) = 1/2, 1/z).  By anything else the constant
+        term of g / z^v must be a unit (else ValueError), and the quotient
+        stays over the base unless it needs negative powers in a power
+        series ring (then: Laurent over the fraction field).  An exact zero
+        stays exact.  (A Laurent divisor made self a Laurent series first.)"""
+        R = self._R
+        B = R._base
+        vg = g._v
+        vf = self._v if self._c else (self._prec if self._prec is not None else vg)
+        prec = None if self._prec is None else self._prec - vg
+        if g._prec is None and len(g._c) == 1:
+            c = g._c[0]
+            if _is_unit(c, B) and (vf >= vg or R._laurent):
+                ci = R._div(1, c)
+                return Series(R, self._v - vg, [x * ci for x in self._c], prec)
+            if R._laurent:
+                q = [_exact_quo(x, c, B) for x in self._c]
+                if all(t is not None for t in q):
+                    return Series(R, self._v - vg, q, prec)
+                # (Sage's refusals: over ZZ, and over Zp)
+                if _is_padic(B):
+                    raise ValueError("negative valuation")
+                raise ArithmeticError("division not defined")
+        else:
+            c0 = g._c[0]
+            if not _is_unit(c0, B):
+                raise ValueError("constant term %r is not a unit" % (c0,))
+            if vf >= vg or R._laurent:
+                if not self._c and self._prec is None:
+                    return Series(R, 0, [], None)
+                u = Series(g._R, 0, g._c, None if g._prec is None else g._prec - vg)
+                return Series(R, self._v - vg, self._c, prec) * u.inverse()
+        F = _frac(B)
+        return self._over(F, laurent=True) / g._over(F, laurent=True)
+
     def __rtruediv__(self, o):
+        lifted = self._lift_base(o)
+        if lifted is not self:
+            return lifted.__rtruediv__(o)
         o = self._coerce(o)
+        if o is None:
+            return NotImplemented
         return o / self
 
     def inverse(self):
@@ -605,10 +823,38 @@ class Series:
 
             sage: R.<q> = QQ[[]]; (1 + q + O(q^3)).inverse(), (q^2 + q^3 + O(q^5))^-1
             (1 - q + q^2 + O(q^3), q^-2 - q^-1 + 1 + O(q))
+
+        Over ZZ the constant term must be a unit; an exact monomial is
+        inverted in the fraction field::
+
+            sage: Z.<z> = ZZ[[]]; (1 - z + O(z^4))^-1, z^-1, ~Z(2)
+            (1 + z + z^2 + z^3 + O(z^4), z^-1, 1/2)
+            sage: (2 + z)^-1
+            Traceback (most recent call last):
+            ...
+            ValueError: constant term 2 is not a unit
+            sage: z/2, (2*z)/z, z/(2*z), (1/z).parent()
+            (1/2*z, 2, 1/2, Laurent Series Ring in z over Rational Field)
         """
         if not self._c:
             raise ZeroDivisionError("division by zero series")
         R = self._R
+        B = R._base
+        if self._prec is None and len(self._c) == 1:
+            # an exact monomial has an exact inverse (Sage: 1/z is z^-1;
+            # 1/2 in ZZ[[z]] is the Laurent series 1/2 over QQ)
+            v = -self._v
+            c = self._c[0]
+            if not _is_unit(c, B):
+                if v != 0:
+                    raise ValueError("constant term %r is not a unit" % (c,))
+                return Series(LaurentSeriesRing(_frac(B), R._name, R._dp), 0, [_frac(B)(1) / _frac(B)(c)], None)
+            if v < 0 and not R._laurent:
+                R = R.laurent_series_ring()
+            return Series(R, v, [R._div(1, c)], None)
+        if not _is_unit(self._c[0], B):
+            # over ZZ (or Zp) the constant term must be a unit, as Sage
+            raise ValueError("constant term %r is not a unit" % (self._c[0],))
         rel = (self._prec - self._v) if self._prec is not None else R._dp
         c0inv = R._div(1, self._c[0])
         a = self._c + [R._zero()] * rel
@@ -904,16 +1150,20 @@ def _mono(name, e):
     return name if e == 1 else "%s^%d" % (name, e)
 
 
-def _term(c, e, name):
+def _term(c, e, name, laurent=False):
     """(negative, text) of the term c*x^e."""
-    s = repr(_out(c))
-    neg = s.startswith("-")
-    if neg:
-        s = s[1:]
-    if " + " in s or " - " in s:
-        s = "(" + s + ")"
-    if e == 0:
+    full = repr(_out(c))
+    neg = full.startswith("-")
+    s = full[1:] if neg else full
+    compound = " + " in s or " - " in s
+    if e == 0 and not (laurent and compound):
+        # (Sage parenthesizes no constant term of a power series, 5 + O(5^4)
+        # + O(5)*T, but a compound one of a Laurent series: t^-1 + (a + 1))
         return neg, s
+    if compound:
+        # the whole coefficient, sign included: (-a - 1)*s, not -(a - 1)*s
+        s, neg = "(" + full + ")", False
+        return neg, s if e == 0 else s + "*" + _mono(name, e)
     m = _mono(name, e)
     if s == "1":
         return neg, m
@@ -936,7 +1186,8 @@ def O(x):
         R = x.parent()
         S = PowerSeriesRing(R.base_ring(), R.variable_name())
         return Series(S, 0, [], int(x.degree()))
-    if type(x).__name__ in ("Integer", "int") or isinstance(x, int):
-        from sage_all import Integer
-        raise NotImplementedError("p-adic big-oh O(p^n) is not available in sagebrush yet")
+    if isinstance(x, (int, _F)) and not isinstance(x, bool):
+        # O(p^n): an inexact zero of Zp(p) (Qp(p) for n < 0)
+        from _sage_padic import _bigoh
+        return _bigoh(x)
     raise NotImplementedError("O(%r)" % (x,))

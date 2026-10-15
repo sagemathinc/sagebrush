@@ -71,9 +71,14 @@ async function katexCss(base: URL): Promise<string> {
     if (!r.ok) throw new Error(`katex/${m[1]}: ${r.status}`);
     fonts.set(m[1], "data:font/woff2;base64," + base64(await r.arrayBuffer()));
   }
+  return katexFontsInline(css, (f) => fonts.get(f)!);
+}
+
+/** KaTeX's stylesheet with each font's woff2 as `font(its path)` gives it, a data: URL (web/build.ts too). */
+export function katexFontsInline(css: string, font: (path: string) => string): string {
   return css.replace(/src:([^;}]*)/g, (_, list: string) => {
     const w = /url\((fonts\/[^)]+\.woff2)\)\s*format\("woff2"\)/.exec(list);
-    return w ? `src:url(${fonts.get(w[1])}) format("woff2")` : "src:" + list;
+    return w ? `src:url(${font(w[1])}) format("woff2")` : "src:" + list;
   });
 }
 
@@ -103,27 +108,41 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?:
     // (every part, the Sage library too: a file's board may change its language, William)
     for (const name of engineFiles(true)) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
   }
-  // (the template rides along for exporting again, its scripts' ends escaped
-  // as everything inline is, and unescaped when used)
-  const json = JSON.stringify(doc).replace(/</g, "\\u003c");
   // (the slow items' outputs, keyed by what produced them: outcache.ts, carriedOutputs())
   const outputs = o.outputs?.length ? JSON.stringify(o.outputs.map(({ where: _w, ...e }) => e)).replace(/</g, "\\u003c") : null;
+  return assemble(template, { doc: JSON.stringify(doc).replace(/</g, "\\u003c"), outputs, mathJs, mathCss, engine, board, title: doc.title ?? "Board", generator: `exported ${new Date().toISOString().slice(0, 10)}` });
+}
+
+/** The board page's template with its parts inline in place of its script:
+ * an exported file (exportHtml), or the frame other sites show a board in
+ * (frameHtml).  `doc` is the document's JSON, its "<"s escaped. */
+export function assemble(template: string, p: { doc: string; from?: "parent"; outputs?: string | null; mathJs?: string | null; mathCss?: string | null; engine?: string[]; board: string; title: string; generator: string }): string {
+  // (the template rides along for exporting again, its scripts' ends escaped
+  // as everything inline is, and unescaped when used)
   const parts = [
-    `<script type="application/json" id="sb-doc">${json}</script>`,
-    outputs ? `<script type="application/json" id="sb-outputs">${outputs}</script>` : "",
+    `<script type="application/json" id="sb-doc"${p.from ? ` data-sb-from="${p.from}"` : ""}>${p.doc}</script>`,
+    p.outputs ? `<script type="application/json" id="sb-outputs">${p.outputs}</script>` : "",
     `<script type="text/plain" id="sb-template">${inline(template)}</script>`,
-    mathJs ? `<script type="text/plain" id="sb-math">${inlineJs(mathJs)}</script>` : "",
-    mathCss ? `<style id="sb-katex">${inline(mathCss)}</style>` : "",
-    ...engine,
-    `<script type="module" id="sb-board">${inlineJs(board)}</script>`,
+    p.mathJs ? `<script type="text/plain" id="sb-math">${inlineJs(p.mathJs)}</script>` : "",
+    p.mathCss ? `<style id="sb-katex">${inline(p.mathCss)}</style>` : "",
+    ...(p.engine ?? []),
+    `<script type="module" id="sb-board">${inlineJs(p.board)}</script>`,
   ].join("\n");
-  const title = (doc.title ?? "Board").replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"));
+  const title = p.title.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"));
   return template
     .replace(/<title>[^<]*<\/title>/, () => `<title>${title}</title>`)
     .replace(/<link rel="canonical"[^>]*>\n?/, "")
     .replace(/<meta name="generator"[^>]*>\n?/, "")
-    .replace(/<head>/, () => `<head>\n<meta name="generator" content="Sagebrush boards (sagebrush.space/board), exported ${new Date().toISOString().slice(0, 10)}">`)
+    .replace(/<head>/, () => `<head>\n<meta name="generator" content="Sagebrush boards (sagebrush.space/board), ${p.generator}">`)
     .replace(/<script type="module" src="[^"]*board\.js"><\/script>/, () => parts);
+}
+
+/** The frame another site shows a board in (/frame/board/; design/frame.md):
+ * the exported page with every part but the document, which its parent posts
+ * (page.ts).  Its engine is the one it was built with, from the site it is
+ * served from.  Made by web/build.ts. */
+export function frameHtml(template: string, board: string, mathJs: string, mathCss: string): string {
+  return assemble(template, { doc: "null", from: "parent", mathJs, mathCss, board, title: "Board — Sagebrush", generator: "a frame for other sites' pages" });
 }
 
 /** The text of an embedded part an exported page carries (#sb-template has its scripts' ends escaped). */

@@ -26,6 +26,7 @@ import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
 import { typeName } from "./runtime/object";
+import { exitStatus } from "./notebook-session";
 
 export type Mode = "sage" | "python" | "magma" | "matlab";
 
@@ -238,7 +239,8 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
           else if (m.clear && !current.silent) send(iopub, "clear_output", { wait: false }, current.msg);
           else if (m.error) {
             current.error = true;
-            send(iopub, "error", m.error, current.msg);
+            // (the run's done message carries its error again, for the reply: sent once)
+            if (!m.done) send(iopub, "error", m.error, current.msg);
           }
         }
         const f = pending.get(m.id);
@@ -394,8 +396,22 @@ export function kernelWorker(mode: Mode) {
   // stdout and stderr to the main thread, at least every 100 ms during a run
   // (timed from the start of the cell)
   let last = 0;
+  // (the line being printed, its start, however it comes in pieces, and the
+  // last Magma error line's start: Jupyter's error reply says it, CORR-396-1)
+  const LINE_MAX = 1000;
+  let line = "", lineLength = 0, magmaError: string | null = null;
+  const printed = (s: string) => {
+    const parts = s.split("\n");
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) { line = ""; lineLength = 0; }
+      lineLength += parts[i].length;
+      if (line.length < LINE_MAX) line = (line + parts[i]).slice(0, LINE_MAX);
+      if (/^(User|Runtime) error\b/.test(line)) magmaError = lineLength > LINE_MAX ? line + "…" : line;
+    }
+  };
   for (const [stream, name] of [[R.stdout, "stdout"], [R.stderr, "stderr"]] as [any, string][]) {
     stream.write = function (s: string) {
+      if (name === "stdout") printed(s);
       this.buf.push(s);
       this.size += s.length;
       const now = Date.now();
@@ -442,6 +458,16 @@ export function kernelWorker(mode: Mode) {
       if (!R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
         const tb = R.formatException(exc).replace(/\n$/, "");
         errorReported = { ename: typeName(exc), evalue: R.str(exc), traceback: tb.split("\n") };
+        if (current !== null) port.postMessage({ id: current, error: errorReported });
+      } else {
+        // exit() just ends the cell; an exit with a failure's status is an
+        // error: Magma's in a cell (lib/_magma.py raises SystemExit(1) once
+        // it has printed it: its line is the error's value, and no traceback,
+        // the text being on stdout already), or sys.exit(1)
+        const s = exitStatus(exc.code);
+        if (s.ok) return;
+        const said = mode === "magma" ? magmaError : null, t = said === null ? s.text ?? R.str(exc.code) : "";
+        errorReported = said !== null ? { ename: "MagmaError", evalue: said, traceback: [] } : { ename: "SystemExit", evalue: t, traceback: [`SystemExit: ${t}`] };
         if (current !== null) port.postMessage({ id: current, error: errorReported });
       }
     }
@@ -490,6 +516,9 @@ export function kernelWorker(mode: Mode) {
     current = m.id;
     last = Date.now();
     errorReported = null;
+    line = "";
+    lineLength = 0;
+    magmaError = null;
     R.INTR[0] = 0;
     if (mode === "magma") {
       let py: string | null = null;

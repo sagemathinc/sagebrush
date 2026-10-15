@@ -16,10 +16,12 @@ __all__ = [
     # modular forms and elliptic curves (Sagebrush's engines)
     "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
     "Newforms", "newform_orbits",
+    # Hilbert modular forms over Q(sqrt(5)) (engine/hmf; PSAGE's names)
+    "HilbertModularForms",
     # number fields, integer matrices (engine/classgroup)
     "NumberField", "QuadraticField", "CyclotomicField",
     # finite fields and Z/nZ
-    "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
+    "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Zp", "Qp", "ZpCR", "QpCR", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
     "conway_polynomial", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
@@ -98,6 +100,7 @@ def show(obj, **options):
     return _show2d(obj, **options)
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
+from _sage_hmf import HilbertModularForms
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
@@ -107,6 +110,7 @@ from _sage_mpoly import ideal, Ideal, TermOrder
 from _sage_real import RealField, ComplexField, RealIntervalField, RIF
 from _sage_rdf import RDF, CDF
 from _sage_series import PowerSeriesRing, LaurentSeriesRing, O
+from _sage_padic import Zp, Qp, ZpCR, QpCR
 from _sage_graph import Graph, DiGraph, graphs, digraphs
 true, false = True, False
 from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles, firing_graph, parallel_firing_graph
@@ -1155,6 +1159,11 @@ def digits(n, base=10):
 
 # ------------------------------------------------------------------ arithmetic
 
+def _poly_like(a):
+    # polynomials over ZZ/QQ, finite fields and number fields, and multivariate ones
+    return isinstance(a, _Polynomial) or type(a).__name__ in ("MPolynomial", "Polynomial_ff", "Polynomial_nf")
+
+
 def gcd(*args):
     """The greatest common divisor.
 
@@ -1165,7 +1174,7 @@ def gcd(*args):
     """
     if len(args) == 1:
         args = tuple(args[0])
-    if any(isinstance(a, _Polynomial) or type(a).__name__ == "MPolynomial" for a in args):
+    if any(_poly_like(a) for a in args):
         r = args[0]
         for a in args[1:]:
             r = r.gcd(a) if hasattr(r, "gcd") and not isinstance(r, int) else a.gcd(r)
@@ -1189,7 +1198,7 @@ def lcm(*args):
     """
     if len(args) == 1:
         args = tuple(args[0])
-    if any(isinstance(a, _Polynomial) or type(a).__name__ == "MPolynomial" for a in args):
+    if any(_poly_like(a) for a in args):
         r = args[0]
         for a in args[1:]:
             r = r.lcm(a) if hasattr(r, "lcm") and not isinstance(r, int) else a.lcm(r)
@@ -1205,6 +1214,8 @@ def xgcd(a, b):
         sage: xgcd(240, 46)
         (2, -9, 47)
     """
+    if _poly_like(a) or _poly_like(b):
+        return a.xgcd(b) if _poly_like(a) else b.parent()(a).xgcd(b)
     x0, x1, y0, y1 = 1, 0, 0, 1
     while b:
         q, a, b = a // b, b, a % b

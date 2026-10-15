@@ -15,6 +15,9 @@ const cdpPort = Number(process.env.CDP_PORT ?? 9337);
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
+// (a script copying this harness must close ws at its end, as the finally
+// below does: an open WebSocket keeps node running, and piped output is
+// then held back until exit, which looks like a hang)
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
@@ -105,7 +108,8 @@ try {
   ok(out.includes("['x,y', '3,4']"), "an uploaded file is visible to Python: " + out.trim());
   ok((await ev("document.querySelector('#filelist').textContent")).includes("data.txt"), "the files panel lists Python's files");
   // Sage mode: polynomial factoring and newforms on the Rust engine (WebAssembly)
-  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
+  // (changing the language of a notebook with code asks first: yes)
+  await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R.<x> = ZZ[]\nprint((x^4 - 1).factor(), Newforms(37, names='a'))");
   ok(out.includes("(x - 1) * (x + 1) * (x^2 + 1) [q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), q + q^3 - 2*q^4 + O(q^6)]"), "Sage mode factors polynomials and finds newforms: " + out.trim());
   // number fields, class groups and LLL (engine/classgroup in WebAssembly)
@@ -185,12 +189,12 @@ try {
   out = await runCode("print(globals()['keep'], factor(2^64 + 1))");
   ok(out.includes("41 274177 * 67280421310721"), "...the engine works after it, variables kept: " + out.trim());
   // Magma mode: translated to Python in the page
-  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
+  await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");
   ok(out.includes("[\n    <x - 1, 1>,\n    <x + 1, 1>,\n    <x^2 + 1, 1>\n]\n[ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ]"), "Magma mode runs Magma: " + JSON.stringify(out.trim().slice(0, 80)));
   out = await runCode("x := ;");
   ok(/bad syntax/.test(out), "a Magma syntax error is reported: " + JSON.stringify(out.trim().slice(0, 60)));
-  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'python'; m.dispatchEvent(new Event('change')); })()");
+  await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'python'; m.dispatchEvent(new Event('change')); })()");
   // share link round trip
   await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
   await until("location.hash.includes('z=')");
@@ -202,7 +206,7 @@ try {
   ok((await ev("[...document.querySelectorAll('textarea')].some(t => t.value.includes(\"open('up.csv')\"))")), `share link (${link.length} chars) opens the cells`);
   // MATLAB mode: values printed as MATLAB prints them, a function for later cells, an
   // error, a figure; MATLAB's highlighting; a share link that reopens in MATLAB
-  await ev("(() => { const m = document.querySelector('#mode'); m.value = 'matlab'; m.dispatchEvent(new Event('change')); })()");
+  await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'matlab'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("A = magic(3);\nb = A(2, :)");
   ok(out.includes("b =") && /3\s+5\s+7/.test(out), "MATLAB mode prints as MATLAB: " + JSON.stringify(out.trim()));
   await runCode("function y = twice(x)\n  y = 2 * x; % doubled\nend");
