@@ -682,7 +682,7 @@ class Text(Primitive):
             _fmt(p[0]), _fmt(p[1]), _fmt(o.get("fontsize", 11)), anchor, base,
             ' fill="%s"' % _esc(color) if color else "",
             ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "",
-            _rich(self.string))
+            P.markup.svg(self.string, float(o.get("fontsize", 11))) if getattr(P, "markup", None) else _rich(self.string))
 
     def describe(self):
         return 'text "%s"' % self.string
@@ -881,6 +881,8 @@ class Panel:
     """One set of axes: primitives plus options.
 
     Options: title, title_weight, subtitle ((text, weight), a line under the title),
+    markup (an object whose svg(text, size) and plain(text) render the text
+    given (titles, labels, legends, tick labels, texts) instead of $...$ math),
     xlabel, ylabel, xmin, xmax, ymin, ymax, xscale/yscale
     ('linear' or 'log'), grid, legend (None: when labels exist; False: never),
     legend_loc, aspect_ratio (1 for equal scales), frame (a box with ticks,
@@ -971,7 +973,9 @@ class Panel:
         if positions is not None:
             pos = [float(v) for v in positions]
             if labels is not None:
-                labs = [_rich(s) for s in labels]
+                mk = self.options.get("markup")
+                size = float(self.options.get("tick_size", 10.5))
+                labs = [mk.svg(s, size) if mk else _rich(s) for s in labels]
             elif mpl:
                 labs = _mpl_labels(pos)
             else:
@@ -993,6 +997,8 @@ class Panel:
         frame = o.get("frame", False)
         show_axes = o.get("axes", True)
         title, xlabel, ylabel = o.get("title"), o.get("xlabel"), o.get("ylabel")
+        mk = o.get("markup")
+        rich = (lambda t, size: mk.svg(t, size)) if mk else (lambda t, size: _rich(t))
         # font sizes (pixels): tick labels, axis labels, title
         ts, ls, tts = float(o.get("tick_size", 10.5)), float(o.get("label_size", 12)), float(o.get("title_size", 14))
         right_y = o.get("yaxis_side") == "right"
@@ -1024,6 +1030,7 @@ class Panel:
                 pw, ph = xr * k, yr * k
         xlo, xhi, ylo, yhi, xlog, ylog = self.ranges(pw, ph)
         P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        P.markup = o.get("markup")
         # Sage's axes carry more ticks than matplotlib's frame
         dx, dy = (85, 55) if frame else (60, 45)
         xt = self.ticks(xlo, xhi, xlog, o.get("xticks"), o.get("xticklabels"), max(3, int(pw / dx)))
@@ -1060,7 +1067,7 @@ class Panel:
             if xlabel:
                 has_xt = bool(xt)
                 out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s">%s</text>' % (
-                    _fmt(P.left + pw / 2), _fmt(P.top + ph + (ts * 1.75 if has_xt else 4) + ls * 1.0), _fmt(ls), _rich(xlabel)))
+                    _fmt(P.left + pw / 2), _fmt(P.top + ph + (ts * 1.75 if has_xt else 4) + ls * 1.0), _fmt(ls), rich(xlabel, ls)))
             if ylabel:
                 lwr = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
                 pad = float(o.get("ylabel_pad", 0))
@@ -1071,15 +1078,15 @@ class Panel:
                     cx, rot = P.left - lwr - ls * 0.55 - pad, -90
                 cy = P.top + ph / 2
                 out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="%s" transform="rotate(%s %s %s)">%s</text>' % (
-                    _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), _rich(ylabel)))
+                    _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), rich(ylabel, ls)))
         if title:
             ty = P.top - max(8, tts * 0.6 + 4)
             out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
                 _fmt(P.left + pw / 2), _fmt(ty - sub_h), _fmt(tts),
-                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", _rich(title)))
+                ' font-weight="%s"' % o.get("title_weight", "600") if o.get("title_weight", "600") != "normal" else "", rich(title, tts)))
             if sub:
                 out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
-                    _fmt(P.left + pw / 2), _fmt(ty), _fmt(tts), ' font-weight="bold"' if sub[1] == "bold" else "", _rich(sub[0])))
+                    _fmt(P.left + pw / 2), _fmt(ty), _fmt(tts), ' font-weight="bold"' if sub[1] == "bold" else "", rich(sub[0], tts)))
         out.append(self._legend_svg(P))
         out.append("</g>")
         return "".join(out), self.describe(xlo, xhi, ylo, yhi, xlog, ylog)
@@ -1138,7 +1145,8 @@ class Panel:
         items = [(p, p.legend()) for p in self.primitives if p.legend()]
         if not items:
             return ""
-        w = max(len(str(s)) for _, s in items) * 6.6 + 40
+        mk = o.get("markup")
+        w = max(len(mk.plain(s) if mk else str(s)) for _, s in items) * 6.6 + 40
         h = len(items) * 18 + 8
         loc = o.get("legend_loc") or "upper right"
         if isinstance(loc, int):
@@ -1161,21 +1169,25 @@ class Panel:
                 out.append('<rect x="%s" y="%s" width="22" height="10" fill="%s"%s%s/>' % (
                     _fmt(lx + 7), _fmt(cy - 5), c, ' fill-opacity="%s"' % _fmt(p.options["alpha"]) if p.options.get("alpha") is not None else "",
                     ' stroke="%s" stroke-width="1"' % _esc(ec) if ec else ""))
-            out.append('<text x="%s" y="%s" dominant-baseline="middle" font-size="11">%s</text>' % (_fmt(lx + 35), _fmt(cy), _rich(s)))
+            out.append('<text x="%s" y="%s" dominant-baseline="middle" font-size="11">%s</text>' % (_fmt(lx + 35), _fmt(cy), mk.svg(s, 11) if mk else _rich(s)))
         out.append("</g>")
         return "".join(out)
 
     def describe(self, xlo, xhi, ylo, yhi, xlog, ylog):
         o = self.options
         parts = []
+        plain = o["markup"].plain if o.get("markup") else (lambda s: s)
         if o.get("title"):
-            parts.append('"%s"' % (o["title"] + ("\n" + o["subtitle"][0] if o.get("subtitle") else "")))
-        shown = [p.describe() for p in self.primitives[:8]]
+            parts.append('"%s"' % (plain(o["title"]) + ("\n" + plain(o["subtitle"][0]) if o.get("subtitle") else "")))
+        shown = []
+        for p in self.primitives[:8]:
+            d, lab = p.describe(), p.kind == "text" and getattr(p, "string", None) or p.legend()
+            shown.append(d.replace('"%s"' % lab, '"%s"' % plain(lab), 1) if lab and o.get("markup") else d)
         if len(self.primitives) > 8:
             shown.append("%d more" % (len(self.primitives) - 8))
         parts.append(", ".join(shown) if shown else "empty")
-        xl = (" (%s)" % o["xlabel"]) if o.get("xlabel") else ""
-        yl = (" (%s)" % o["ylabel"]) if o.get("ylabel") else ""
+        xl = (" (%s)" % plain(o["xlabel"])) if o.get("xlabel") else ""
+        yl = (" (%s)" % plain(o["ylabel"])) if o.get("ylabel") else ""
         parts.append("x%s from %s to %s%s, y%s from %s to %s%s" % (
             xl, _short(xlo), _short(xhi), " log scale" if xlog else "", yl, _short(ylo), _short(yhi), " log scale" if ylog else ""))
         return "; ".join(parts)
@@ -1206,7 +1218,7 @@ def _strip_tags(s):
     return "".join(out)
 
 
-def render_frame(panels, width=640, height=480, title=None):
+def render_frame(panels, width=640, height=480, title=None, markup=None):
     """The SVG body (without the <svg> element) and description of panels laid
     out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
     width, height = float(width), float(height)
@@ -1220,9 +1232,10 @@ def render_frame(panels, width=640, height=480, title=None):
         body.append(s)
         descs.append(d)
     if title:
-        body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (_fmt(width / 2), _rich(title)))
+        body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (
+            _fmt(width / 2), markup.svg(title, 15) if markup else _rich(title)))
     kind = "Plot" if len(panels) == 1 else "Figure with %d plots" % len(panels)
-    desc = kind + (' "%s"' % title if title else "") + ": " + " | ".join(descs)
+    desc = kind + (' "%s"' % (markup.plain(title) if markup else title) if title else "") + ": " + " | ".join(descs)
     return "".join(body), desc
 
 
@@ -1232,9 +1245,9 @@ def _svg_open(width, height, desc, cls="sb-plot", extra=""):
             '<title>%s</title>') % (_fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
 
 
-def render_svg(panels, width=640, height=480, title=None):
+def render_svg(panels, width=640, height=480, title=None, markup=None):
     """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
-    body, desc = render_frame(panels, width, height, title)
+    body, desc = render_frame(panels, width, height, title, markup)
     return _svg_open(float(width), float(height), desc) + body + "</svg>"
 
 

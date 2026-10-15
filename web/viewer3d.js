@@ -16,7 +16,8 @@
 // container's fallback SVG is hidden once WebGL works.
 //
 // Optional scene fields (MATLAB's figures, lib/_matlab_plot.py, use them):
-// projection "orthographic"; subtitle (a line under the title), title_weight
+// projection "orthographic"; title, subtitle, labels, tick labels and texts as
+// a string or runs of styled text (setRich); subtitle (a line under the title), title_weight
 // ("normal": not bold) and subtitle_weight ("bold"); background and ink (#rrggbb: the view's
 // background, and its text and axis lines, instead of the page's); box
 // {ticks: [xs, ys, zs], ticklabels: [...], grid: "#rrggbb"}: axes drawn as
@@ -404,6 +405,30 @@
   // a scene's color: #rrggbb only (a scene's strings are data, never CSS)
   const sceneColor = (c) => (typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : null);
 
+  // a scene's text: a string, or runs (MATLAB's TeX markup, lib/_matlab_tex.py):
+  // {t: text, s: size and r: rise (of the text's own size), b: bold, i: italic,
+  // c: #rrggbb, f: font}, as spans (textContent, and style properties only)
+  function setRich(el, v) {
+    if (el.sbRich === v) return;
+    el.sbRich = v;
+    if (!Array.isArray(v)) {
+      el.textContent = v == null ? "" : String(v);
+      return;
+    }
+    el.textContent = "";
+    for (const r of v) {
+      const sp = document.createElement("span"), size = r.s ?? 1;
+      sp.textContent = r.t;
+      if (r.s !== undefined) sp.style.fontSize = size + "em";
+      if (r.r) { sp.style.position = "relative"; sp.style.top = -r.r / size + "em"; }
+      if (r.b !== undefined) sp.style.fontWeight = r.b ? "bold" : "normal";
+      if (r.i !== undefined) sp.style.fontStyle = r.i ? "italic" : "normal";
+      if (sceneColor(r.c)) sp.style.color = r.c;
+      if (r.f) sp.style.fontFamily = r.f;
+      el.appendChild(sp);
+    }
+  }
+
   // ---- a scene is untrusted data (a saved document's, from anywhere): it
   // is checked before anything is built from it, and refused (the static
   // picture stays, saying why) unless it is well formed and within bounds.
@@ -425,6 +450,7 @@
     volumes: 16,
     texts: 2000, // text objects (each a label placed on every frame)
     text: 2000, // characters in a title, a label or a text
+    runs: 200, // runs of styled text in one (setRich's)
     description: 100000,
     ticks: 100, // MATLAB axes' ticks per axis
     tickLabel: 200,
@@ -457,6 +483,24 @@
     };
     const str = (v, max, what) => { if (typeof v !== "string" || v.length > max) no("has a malformed or too long " + what); };
     const optStr = (v, max, what) => { if (given(v)) str(v, max, what); };
+    // a text: a string, or runs (setRich's), of at most max characters in all
+    const rich = (v, max, what) => {
+      if (typeof v === "string") return str(v, max, what);
+      if (!Array.isArray(v) || v.length > LIMITS.runs) no("has a malformed " + what);
+      let len = 0;
+      for (const r of v) {
+        if (!isObj(r) || typeof r.t !== "string") no("has a malformed " + what);
+        len += r.t.length;
+        within(r.s, 0.01, 10, what + " size");
+        within(r.r, -10, 10, what + " rise");
+        bool(r.b, what + " weight");
+        bool(r.i, what + " angle");
+        optColor(r.c, what);
+        if (given(r.f) && !(typeof r.f === "string" && /^[A-Za-z0-9 _-]{1,64}$/.test(r.f))) no("has a malformed " + what + " font");
+      }
+      if (len > max) no("has a malformed or too long " + what);
+    };
+    const optRich = (v, max, what) => { if (given(v)) rich(v, max, what); };
     const color = (v, what) => { if (!sceneColor(v)) no("has a color that is not #rrggbb (" + what + ")"); };
     const optColor = (v, what) => { if (given(v)) color(v, what); };
     const bool = (v, what) => { if (given(v) && typeof v !== "boolean") no("has a malformed " + what); };
@@ -490,14 +534,14 @@
       for (let i = 0; i < 6; i += 2) if (open ? !(b[i + 1] > b[i]) : !(b[i + 1] >= b[i])) no("has malformed " + what + " bounds");
     };
     for (const k of ["frame", "axes", "fill", "fit"]) bool(scene[k], k);
-    optStr(scene.title, LIMITS.text, "title");
-    optStr(scene.subtitle, LIMITS.text, "subtitle");
+    optRich(scene.title, LIMITS.text, "title");
+    optRich(scene.subtitle, LIMITS.text, "subtitle");
     oneOf(scene.title_weight, ["bold", "normal"], "title_weight");
     oneOf(scene.subtitle_weight, ["bold", "normal"], "subtitle_weight");
     optStr(scene.description, LIMITS.description, "description");
     if (given(scene.labels)) {
       if (!Array.isArray(scene.labels) || scene.labels.length > 3) no("has malformed labels");
-      for (const s of scene.labels) optStr(s, LIMITS.text, "label");
+      for (const s of scene.labels) optRich(s, LIMITS.text, "label");
     }
     within(scene.azimuth, -1e6, 1e6, "azimuth");
     within(scene.elevation, -1e6, 1e6, "elevation");
@@ -513,7 +557,7 @@
         if (!Array.isArray(b.ticklabels) || b.ticklabels.length !== 3) no("has malformed tick labels");
         for (const t of b.ticklabels) {
           if (!Array.isArray(t) || t.length > LIMITS.ticks) no("has malformed tick labels");
-          for (const s of t) str(s, LIMITS.tickLabel, "tick label");
+          for (const s of t) rich(s, LIMITS.tickLabel, "tick label");
         }
       }
       if (b.grid !== false) optColor(b.grid, "grid");
@@ -599,7 +643,7 @@
       } else if (o.type === "text") {
         nums(o.pos, "text", 3);
         positions(o.pos, "text");
-        str(o.text, LIMITS.text, "text");
+        rich(o.text, LIMITS.text, "text");
         optColor(o.color, "text");
         if (++texts > LIMITS.texts) no("has more than " + LIMITS.texts + " texts");
       } else if (o.type === "mesh2") {
@@ -859,7 +903,7 @@
       [scene.subtitle, scene.subtitle_weight === "bold" ? "600" : "400", "0 0 4px"]]) {
       if (!text) continue;
       const t = document.createElement("div");
-      t.textContent = text;
+      setRich(t, text);
       t.style.cssText = `text-align:center;font-weight:${weight};font-size:15px;margin:0;padding:${pad}`;
       if (bgColor) t.style.background = bgColor;
       if (inkColor) t.style.color = inkColor;
@@ -1118,7 +1162,7 @@
         if (!(z > -1 && z < 1)) return; // behind the eye (flying)
         const s = label(n++);
         s.style.left = x + "px"; s.style.top = y + "px"; s.style.display = "";
-        s.textContent = text;
+        setRich(s, text);
         s.style.fontStyle = style?.italic ? "italic" : "";
         s.style.fontSize = style?.size ? style.size + "px" : "";
         s.style.color = style?.color || "";
@@ -1137,11 +1181,11 @@
             if (typeof v !== "number" || v < lo - 1e-9 * (hi - lo) || v > hi + 1e-9 * (hi - lo)) return;
             const f = hi > lo ? (v - lo) / (hi - lo) : 0.5;
             const given = mbox && Array.isArray(mbox.ticklabels) && Array.isArray(mbox.ticklabels[axis]) ? mbox.ticklabels[axis][k] : undefined;
-            const text = mbox ? String(given ?? tickLabel(v, Math.abs(hi - lo) / 10 || 1)) : tickLabel(v, nt.step);
+            const text = mbox ? given ?? tickLabel(v, Math.abs(hi - lo) / 10 || 1) : tickLabel(v, nt.step);
             put(a[0] + (b[0] - a[0]) * f + 14 * ox, a[1] + (b[1] - a[1]) * f + 12 * oy, text, null, Math.max(a[2], b[2]));
           });
           const name = (scene.labels || [])[axis];
-          if (name) put(mx + 34 * ox, my + 30 * oy, mbox ? String(name) : axisLabel(name), mbox ? { size: 11 } : { italic: true, size: 12 }, Math.max(a[2], b[2]));
+          if (name) put(mx + 34 * ox, my + 30 * oy, mbox ? name : axisLabel(name), mbox ? { size: 11 } : { italic: true, size: 12 }, Math.max(a[2], b[2]));
         }
       }
       for (let i = n; i < labels.length; i++) labels[i].style.display = "none";

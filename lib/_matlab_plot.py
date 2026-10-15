@@ -22,6 +22,7 @@ and saveas write SVG).
 """
 
 import math
+import _matlab_tex as _mtex
 
 import numpy as np
 
@@ -248,6 +249,27 @@ def _text_value(v):
     return _m._text(_m.num2str_(v))
 
 
+def _tex(h, s, prop="Interpreter"):
+    """s as the TeX markup the figure's text is drawn from (lib/_matlab_tex.py),
+    as h's interpreter says: 'tex' (the default) as it is, 'none' its
+    markup characters escaped; 'latex' is not supported"""
+    it = _m._text(h.props.get(prop, _m.Char("tex"))).lower() if h is not None else "tex"
+    if it == "tex":
+        return s
+    if it == "none":
+        return _mtex.literal(s)
+    if it == "latex":
+        raise _m._err("The 'latex' interpreter is not supported in Sagebrush: use 'tex' (MATLAB's TeX markup) or 'none'.")
+    raise _m._err("%s must be 'tex', 'latex' or 'none'." % prop)
+
+
+def _tex_checked(h, s, prop="Interpreter"):
+    """_tex, and the markup checked now (an error at the call, not when drawn)"""
+    t = _tex(h, s, prop)
+    _mtex.check(t)
+    return t
+
+
 class Axes(GObj):
     _mclass = "matlab.graphics.axis.Axes"
     TYPE = "axes"
@@ -274,6 +296,7 @@ class Axes(GObj):
                 "ZTickLabel": _m.Cell([], (0, 1)), "ZTickLabelMode": _m.Char("auto"),
                 "PlotBoxAspectRatio": np.array([[1.0], [1.0], [1.0]]), "PlotBoxAspectRatioMode": _m.Char("auto"),
                 "XGrid": _m.Char("off"), "YGrid": _m.Char("off"), "ZGrid": _m.Char("off"), "Box": _m.Char("on"),
+                "TickLabelInterpreter": _m.Char("tex"),
                 "FontSize": 10.0, "XTick": np.zeros((0, 0)), "YTick": np.zeros((0, 0)), "XTickMode": _m.Char("auto"),
                 "YTickMode": _m.Char("auto"), "XTickLabel": _m.Cell([], (0, 1)), "YTickLabel": _m.Cell([], (0, 1)),
                 "XTickLabelMode": _m.Char("auto"), "YTickLabelMode": _m.Char("auto"),
@@ -660,7 +683,7 @@ class Legend(GObj):
 
     def defaults(self):
         return {"String": _m.Cell([], (1, 0)), "Location": _m.Char("northeast"), "Visible": _m.Char("on"), "FontSize": 9.0,
-                "Box": _m.Char("on"), "Orientation": _m.Char("vertical"), "Title": None}
+                "Box": _m.Char("on"), "Orientation": _m.Char("vertical"), "Title": None, "Interpreter": _m.Char("tex")}
 
 
 class Colorbar(GObj):
@@ -2066,12 +2089,22 @@ def _label(prop):
         pos, props = _split_props(args, 1)
         if len(pos) > 1:
             raise _m._err("Too many input arguments.")
-        target.props["String"] = _m.cp(pos[0]) if pos else _m.Char("")
-        _apply(target, props)
-        if sub is not None:
-            # (title(titletext, subtitletext, Name, Value): the properties are both lines')
-            ax.subtitle.props["String"] = _m.cp(sub)
-            _apply(ax.subtitle, props)
+        # (refused markup or interpreter: the title and subtitle as they were)
+        saved = [(h, dict(h.props)) for h in (target, ax.subtitle)]
+        try:
+            target.props["String"] = _m.cp(pos[0]) if pos else _m.Char("")
+            _apply(target, props)
+            if sub is not None:
+                # (title(titletext, subtitletext, Name, Value): the properties are both lines')
+                ax.subtitle.props["String"] = _m.cp(sub)
+                _apply(ax.subtitle, props)
+                _tex_checked(ax.subtitle, _text_value(ax.subtitle.props["String"]))
+            _tex_checked(target, _text_value(target.props["String"]))
+        except BaseException:
+            for h, p in saved:
+                h.props.clear()
+                h.props.update(p)
+            raise
         ax.touch()
         return [target, ax.subtitle] if prop == "Title" and nargout >= 2 else target
     return g
@@ -2126,6 +2159,8 @@ def legend_(nargout, args):
     lg.parent = ax
     lg.items = shown
     _apply(lg, props)
+    for c in shown:
+        _tex_checked(lg, _m._text(c.props["DisplayName"]))
     ax.legend = lg
     ax.touch()
     return lg
@@ -2248,6 +2283,13 @@ def text_(nargout, args):
     for k in range(len(xs)):
         t = Text(ax, String=_m.cp(each[k] if each else s), Position=np.array([[xs[k]], [ys[k]], [z]]))
         _apply(t, props)
+        try:
+            _tex_checked(t, _text_value(t.props["String"]))
+        except BaseException:
+            # (a refused text is not left in the axes, nor those made before it)
+            for u in out + [t]:
+                u.delete()
+            raise
         out.append(t)
     return _harr(out)
 
@@ -2751,11 +2793,14 @@ def render(fig):
             max_ = mfig.add_axes(list(ax.manual_pos))
         else:
             max_ = mfig.add_subplot(1, 1, 1)
+        # (MATLAB's text: TeX markup, not the shim's $...$ math)
+        max_._opts["markup"] = _mtex.MARKUP
         if ax.is3d():
             _draw_axes3d(ax, max_, mfig, _MCmap(ax.get_prop("Colormap")), _vec(ax.get_prop("CLim")))
         else:
             _draw_axes(ax, max_, mfig)
     if getattr(fig, "suptitle", None):
+        mfig._markup = _mtex.MARKUP
         mfig.suptitle(fig.suptitle)
     return mfig
 
@@ -2766,12 +2811,12 @@ def _set_title(ax, mx):
     st = _text_value(ax.subtitle.props["String"])
     weight = lambda h: "bold" if _m._text(h.props["FontWeight"]).lower() == "bold" else "normal"
     if t:
-        mx.set_title(t)
+        mx.set_title(_tex(ax.title, t))
         mx._opts["title_weight"] = weight(ax.title)
         if st:
-            mx._opts["subtitle"] = (st, weight(ax.subtitle))
+            mx._opts["subtitle"] = (_tex(ax.subtitle, st), weight(ax.subtitle))
     elif st:
-        mx.set_title(st)
+        mx.set_title(_tex(ax.subtitle, st))
         mx._opts["title_weight"] = weight(ax.subtitle)
 
 
@@ -2787,7 +2832,7 @@ def _draw_axes(ax, mx, mfig):
     for c in ax.children:
         if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
             continue
-        label = _m._text(c.props.get("DisplayName", _m.Char(""))) if id(c) in labels else None
+        label = _tex(ax.legend, _m._text(c.props.get("DisplayName", _m.Char("")))) if id(c) in labels else None
         if isinstance(c, Histogram):
             e = _vec(c.props["BinEdges"])
             v = _vec(c.props["Values"])
@@ -2842,7 +2887,7 @@ def _draw_axes(ax, mx, mfig):
                 _draw_contour_lines(c, mx, cmap, clim)
         elif isinstance(c, Text):
             p = _vec(c.props["Position"])
-            mx.text(p[0], _fy(p[1]), _text_value(c.props["String"]), fontsize=_f(c.props["FontSize"]),
+            mx.text(p[0], _fy(p[1]), _tex(c, _text_value(c.props["String"])), fontsize=_f(c.props["FontSize"]),
                     color=_hex(_rgbof(c.props["Color"])), ha=_m._text(c.props["HorizontalAlignment"]),
                     va=_VA.get(_m._text(c.props["VerticalAlignment"]).lower(), "center"), rotation=_f(c.props["Rotation"]))
         elif isinstance(c, ConstantLine):
@@ -2854,9 +2899,9 @@ def _draw_axes(ax, mx, mfig):
                 mx.axhline(_f(c.props["Value"]), color=col, linestyle=ls)
     _set_title(ax, mx)
     if _text_value(ax.xlabel.props["String"]):
-        mx.set_xlabel(_text_value(ax.xlabel.props["String"]))
+        mx.set_xlabel(_tex(ax.xlabel, _text_value(ax.xlabel.props["String"])))
     if _text_value(ax.ylabel.props["String"]):
-        mx.set_ylabel(_text_value(ax.ylabel.props["String"]))
+        mx.set_ylabel(_tex(ax.ylabel, _text_value(ax.ylabel.props["String"])))
     if _m._text(ax.props["XScale"]) == "log":
         mx.set_xscale("log")
     if _m._text(ax.props["YScale"]) == "log":
@@ -2889,13 +2934,13 @@ def _draw_axes(ax, mx, mfig):
         labs = None
         if _m._text(ax.props["XTickLabelMode"]) == "manual":
             labs = _ticklabels(ax.props["XTickLabel"])
-        mx.set_xticks(ticks, labs)
+        mx.set_xticks(ticks, [_tex(ax, l, "TickLabelInterpreter") for l in labs] if labs is not None else None)
     elif _m._text(ax.props["XTickLabelMode"]) == "manual":
-        mx.set_xticklabels(_ticklabels(ax.props["XTickLabel"]))
+        mx.set_xticklabels([_tex(ax, l, "TickLabelInterpreter") for l in _ticklabels(ax.props["XTickLabel"])])
     if _m._text(ax.props["YTickMode"]) == "manual":
         yt = _vec(ax.props["YTick"])
         labs = _ticklabels(ax.props["YTickLabel"]) if _m._text(ax.props["YTickLabelMode"]) == "manual" else ([_m._text(_m.num2str_(t)) for t in yt] if _FLIP else None)
-        mx.set_yticks([_fy(t) for t in yt], labs)
+        mx.set_yticks([_fy(t) for t in yt], [_tex(ax, l, "TickLabelInterpreter") for l in labs] if labs is not None else None)
     if _m._text(ax.props["XGrid"]) == "on" or _m._text(ax.props["YGrid"]) == "on":
         mx.grid(True)
     if _m._text(ax.props["DataAspectRatioMode"]) == "manual":
@@ -3471,7 +3516,7 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     for c in ax.children:
         if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
             continue
-        label = _m._text(c.props.get("DisplayName", _m.Char(""))) if id(c) in shown else None
+        label = _tex(ax.legend, _m._text(c.props.get("DisplayName", _m.Char("")))) if id(c) in shown else None
         if isinstance(c, Surface):
             if label:
                 mx._add(_LegendSwatch(label, *_surface_swatch(c, cmap, clim)))
@@ -3503,7 +3548,7 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
         elif isinstance(c, Text):
             p = _vec(c.props["Position"]) + [0.0, 0.0]
             q = proj(p[0], p[1], p[2])
-            mx.text(q[0], q[1], _text_value(c.props["String"]), fontsize=_f(c.props["FontSize"]),
+            mx.text(q[0], q[1], _tex(c, _text_value(c.props["String"])), fontsize=_f(c.props["FontSize"]),
                     color=_hex(_rgbof(c.props["Color"])), ha=_m._text(c.props["HorizontalAlignment"]),
                     va=_VA.get(_m._text(c.props["VerticalAlignment"]).lower(), "center"))
     # tick labels: x on the front edge (y = front) at the bottom (z = z0), y likewise,
@@ -3537,14 +3582,14 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
             q = proj(*p)
             k = all_ticks.index(t) if t in all_ticks else -1
             lab = ticklabels[i][k] if 0 <= k < len(ticklabels[i]) else _m._text(_m.num2str_(float(t)))
-            mx.text(q[0] + 0.04 * dx, q[1] + 0.04 * dy, lab, fontsize=9, color="#262626", ha=ha, va=va)
+            mx.text(q[0] + 0.04 * dx, q[1] + 0.04 * dy, _tex(ax, lab, "TickLabelInterpreter"), fontsize=9, color="#262626", ha=ha, va=va)
         lab = _text_value(labels[i].props["String"])
         if lab:
             p = list(base)
             p[i] = mid[i]
             q = proj(*p)
             off = 0.24 if i < 2 else 0.22
-            mx.text(q[0] + off * dx, q[1] + off * dy, lab, fontsize=10, color="#262626", ha="center", va="center",
+            mx.text(q[0] + off * dx, q[1] + off * dy, _tex(labels[i], lab), fontsize=10, color="#262626", ha="center", va="center",
                     rotation=90 if i == 2 else 0)
     corners = [proj(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
     sx = [c[0] for c in corners]
@@ -3797,7 +3842,7 @@ def figure_scene(fig):
             p = _vec(c.props["Position"]) + [0.0, 0.0, 0.0]
             if not all(math.isfinite(v) for v in p[:3]):
                 continue
-            objs.append({"type": "text", "pos": p[:3], "text": _text_value(c.props["String"]),
+            objs.append({"type": "text", "pos": p[:3], "text": _mtex.runs(_tex(c, _text_value(c.props["String"]))),
                          "color": _hex(_rgbof(c.props["Color"]) or (0, 0, 0))})
         else:
             return None
@@ -3811,14 +3856,16 @@ def figure_scene(fig):
     ticklabels = []
     for i, k in enumerate("XYZ"):
         labs = _ticklabels(ax.get_prop(k + "TickLabel"))
-        ticklabels.append([labs[j] if j < len(labs) else _m._text(_m.num2str_(float(t))) for j, t in enumerate(ticks[i])])
+        ticklabels.append([_mtex.runs(_tex(ax, labs[j], "TickLabelInterpreter")) if j < len(labs) else _m._text(_m.num2str_(float(t)))
+                           for j, t in enumerate(ticks[i])])
     v = _vec(ax.props["View"])
     t = _text_value(ax.title.props["String"])
     st = _text_value(ax.subtitle.props["String"])
     bg = _rgbof(fig.props.get("Color", _m.Char("w")))
     scene = {"version": 1, "lo": lo, "hi": hi, "scale": scale, "objects": objs, "frame": False, "axes": False,
-             "labels": [_text_value(l.props["String"]) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
-             "title": t or None, "subtitle": st or None,
+             "labels": [_mtex.runs(_tex(l, _text_value(l.props["String"]))) for l in (ax.xlabel, ax.ylabel, ax.zlabel)],
+             # (text as MATLAB's TeX markup draws it: a string, or runs of styled text)
+             "title": _mtex.runs(_tex(ax.title, t)) if t else None, "subtitle": _mtex.runs(_tex(ax.subtitle, st)) if st else None,
              "title_weight": "bold" if _m._text(ax.title.props["FontWeight"]).lower() == "bold" else "normal",
              "subtitle_weight": "bold" if _m._text(ax.subtitle.props["FontWeight"]).lower() == "bold" else "normal",
              # (MATLAB's azimuth is from the negative y axis, the viewer's from the x axis)
@@ -3837,11 +3884,14 @@ def figure_scene(fig):
 def _scene_within(scene):
     """whether the viewer would take the scene (web/viewer3d.js's checkScene:
     its LIMITS on text and ticks, and positions near the box)"""
+    def size(v):
+        # (a text's characters, and its runs: the viewer's limits)
+        return (len(v), 1) if isinstance(v, str) else (sum(len(r["t"]) for r in v), len(v))
     texts = [scene["title"] or "", scene["subtitle"] or ""] + scene["labels"] + [o["text"] for o in scene["objects"] if o["type"] == "text"]
-    if any(len(t) > 2000 for t in texts) or len(texts) - 5 > 2000:
+    if any(n > 2000 or k > 200 for n, k in map(size, texts)) or len(texts) - 5 > 2000:
         return False
     box = scene["box"]
-    if any(len(t) > 100 for t in box["ticks"]) or any(len(s) > 200 for t in box["ticklabels"] for s in t):
+    if any(len(t) > 100 for t in box["ticks"]) or any(n > 200 or k > 200 for t in box["ticklabels"] for n, k in map(size, t)):
         return False
     if not all(math.isfinite(v) for v in scene["lo"] + scene["hi"] + scene["scale"] + [scene["azimuth"]]):
         return False

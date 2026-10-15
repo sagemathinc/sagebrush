@@ -394,6 +394,29 @@ Sagebrush's matplotlib (lib/matplotlib, SVG):
   default axis color, [0.15 0.15 0.15], rather than the page's color: the
   SVG's root sets `color`, which the shim's `currentColor` paints take, so
   the text itself is never rewritten. Legends have a white box.
+- **Text: TeX markup** (lib/_matlab_tex.py). Titles, subtitles, axis
+  labels, legends, `text` and tick labels are drawn as their interpreter
+  says (`Interpreter`, the axes' `TickLabelInterpreter`; 'tex' by
+  default), in the SVG and in the interactive 3-D view:
+  - 'tex' is the markup of the documentation's "TeX Markup" table: `^`
+    and `_` (the next character, or the characters in braces), `\bf`,
+    `\it`, `\sl`, `\rm`, `\fontname{}`, `\fontsize{}` (points),
+    `\color{}` and `\color[rgb]{}`, the table's 102 special characters,
+    and a backslash before `\ { } _ ^` for the character itself.
+    Modifiers last to the end of the text or of the braces they are in
+    (braces group as in TeX and in Octave; Octave keeps a space after a
+    command, and so does Sagebrush);
+  - anything else is an error when the text is set (`title`, `xlabel`,
+    `text`, `legend`) or drawn, never drawn as typed: another command after
+    a backslash (`C:\Users` too: write `\\`), a script with nothing to
+    raise, unbalanced braces, and the `\color` names whose colors the
+    documentation does not give (gray, darkGreen, orange, lightBlue: use
+    `\color[rgb]`). A refused call changes nothing;
+  - 'none' draws the text as typed; 'latex' is refused;
+  - `$` is a dollar sign (the shim's matplotlib `$...$` math is not used
+    for MATLAB's figures: the shim's `markup` option);
+  - scripts are 0.7 of their base's size, raised 0.385 or lowered 0.245 of
+    it (Sagebrush's choice); the 3-D view gets the same runs of styled text.
 - **Contours:** contour lines come from marching squares (saddle cells are
   split by the centre's value), oriented with the higher values on the left
   as Octave's are, and they give `contourc` and `[C,h] = contour(...)`
