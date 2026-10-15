@@ -31,9 +31,9 @@ Differences from PSAGE:
   section 3), with k1 at the real place a -> (1 - sqrt(5))/2 and k2 at
   a -> (1 + sqrt(5))/2, as in Magma. Their Hecke operators are defined
   over Q(sqrt(5)), and newform orbits are Galois orbits over Q(sqrt(5)).
-  Polynomials over Q(sqrt(5)) are given as lists of coefficients in
-  Q(sqrt(5)), constant term first (hecke_charpoly_coefficients() and
-  similar), since Sagebrush has no polynomial rings over number fields yet.
+  Their characteristic polynomials are polynomials over Q(sqrt(5))
+  (hecke_charpoly() and similar); the *_coefficients() methods give the
+  same coefficients as a list, constant term first.
 
 EXAMPLES::
 
@@ -746,8 +746,11 @@ def _felt(c):
     return _field()([int(c[0]), int(c[1])])
 
 
-_NO_FPOLY = ("Sagebrush has no polynomial rings over number fields yet: %s gives the coefficients in "
-             "Q(sqrt(5)), constant term first")
+def _fpoly(coeffs, var):
+    """The polynomial over F in the variable var with the engine's
+    coefficient pairs, constant term first."""
+    from _sage_poly import PolynomialRing
+    return PolynomialRing(_field(), var)(_fcoeffs(coeffs))
 
 
 def _fcoeffs(coeffs):
@@ -868,18 +871,26 @@ class HilbertCuspFormsWeight:
         return _fcoeffs(self._charpolys[P])
 
     def hecke_charpoly(self, P, var="x"):
-        """Not implemented until Sagebrush has polynomial rings over number
-        fields: hecke_charpoly_coefficients() gives the coefficients.
+        """The characteristic polynomial over Q(sqrt(5)) of T_P (U_P if P
+        divides the level) on S_k(N).
 
-        EXAMPLES::
+        EXAMPLES:
 
-            sage: from _sage_hmf import HilbertModularForms  # sagebrush only
-            sage: HilbertModularForms(6, weight=(2, 4)).hecke_charpoly(3)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: Sagebrush has no polynomial rings over number fields yet: hecke_charpoly_coefficients() gives the coefficients in Q(sqrt(5)), constant term first
+        Dembélé's Example 3.6 (level (2*a + 7), of norm 59): the three
+        eigenvalues of T_2 of his Table 2 are its roots::
+
+            sage: from _sage_hmf import HilbertModularForms, SqrtFiveIdeal  # sagebrush only
+            sage: H = HilbertModularForms(SqrtFiveIdeal([[7, 2]]), weight=(2, 4))  # sagebrush only
+            sage: f = H.hecke_charpoly(2); f  # sagebrush only
+            x^3 + 8*x^2 + (8*a - 100)*x + 112*a - 224
+            sage: f.factor()  # sagebrush only
+            (x - 4*a) * (x + 4*a - 6) * (x + 14)
+            sage: H.hecke_charpoly(2, var="T").parent()  # sagebrush only
+            Univariate Polynomial Ring in T over Number Field in a with defining polynomial x^2 - x - 1
         """
-        raise NotImplementedError(_NO_FPOLY % "hecke_charpoly_coefficients()")
+        P = _prime(P)
+        self.hecke_charpoly_coefficients(P)
+        return _fpoly(self._charpolys[P], var)
 
     def hecke_matrix(self, P):
         """Not implemented: in weight other than (2, 2) the Hecke matrices
@@ -1034,18 +1045,16 @@ class NewformOrbitWeight:
         return list(self._op)
 
     def charpoly(self, var="x"):
-        """Not implemented until Sagebrush has polynomial rings over number
-        fields: charpoly_coefficients() gives the coefficients.
+        """The characteristic polynomial over Q(sqrt(5)) of the operator on
+        the orbit, irreducible over Q(sqrt(5)).
 
         EXAMPLES::
 
-            sage: from _sage_hmf import HilbertModularForms  # sagebrush only
-            sage: HilbertModularForms(6, weight=(2, 4)).new_decomposition()[0].charpoly()  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: Sagebrush has no polynomial rings over number fields yet: charpoly_coefficients() gives the coefficients in Q(sqrt(5)), constant term first
+            sage: from _sage_hmf import HilbertModularForms, SqrtFiveIdeal  # sagebrush only
+            sage: HilbertModularForms(SqrtFiveIdeal([[3, 1]]), weight=(2, 4)).new_decomposition()[0].charpoly()  # sagebrush only
+            x - 4*a + 12
         """
-        raise NotImplementedError(_NO_FPOLY % "charpoly_coefficients()")
+        return _fpoly(self._g, var)
 
     def charpoly_coefficients(self):
         """The coefficients in Q(sqrt(5)), constant term first, of the
@@ -1077,19 +1086,21 @@ class NewformOrbitWeight:
         raise ValueError("%s is not a prime" % (P,))
 
     def hecke_eigenvalue_charpoly(self, P, var="x"):
-        """Not implemented until Sagebrush has polynomial rings over number
-        fields: hecke_eigenvalue_charpoly_coefficients() gives the
-        coefficients.
+        """The characteristic polynomial over Q(sqrt(5)) of the eigenvalue
+        a_P of T_P (U_P if P divides the level) on the orbit: the product of
+        x - a_P(f) over its newforms f.
 
         EXAMPLES::
 
-            sage: from _sage_hmf import HilbertModularForms  # sagebrush only
-            sage: HilbertModularForms(6, weight=(2, 4)).new_decomposition()[0].hecke_eigenvalue_charpoly(5)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: Sagebrush has no polynomial rings over number fields yet: hecke_eigenvalue_charpoly_coefficients() gives the coefficients in Q(sqrt(5)), constant term first
+            sage: from _sage_hmf import HilbertModularForms, SqrtFiveIdeal  # sagebrush only
+            sage: f = HilbertModularForms(SqrtFiveIdeal([[3, 1]]), weight=(2, 4)).new_decomposition()[0]  # sagebrush only
+            sage: f.hecke_eigenvalue_charpoly(3)  # sagebrush only
+            x - 12*a + 6
+            sage: g = HilbertModularForms(SqrtFiveIdeal([[7, 3]]), weight=(2, 4)).new_decomposition()[0]  # sagebrush only
+            sage: c = g.hecke_eigenvalue_charpoly(2); c, c.factor()  # irreducible: one orbit of three newforms  # sagebrush only
+            (x^3 - 12*x^2 + (16*a - 24)*x + 64*a + 128, x^3 - 12*x^2 + (16*a - 24)*x + 64*a + 128)
         """
-        raise NotImplementedError(_NO_FPOLY % "hecke_eigenvalue_charpoly_coefficients()")
+        return _fpoly(self._find(P)[0], var)
 
     def hecke_eigenvalue_charpoly_coefficients(self, P):
         """The coefficients in Q(sqrt(5)), constant term first, of the
@@ -1114,7 +1125,7 @@ class NewformOrbitWeight:
         Q(sqrt(5)), for an orbit of dimension one. For larger orbits the
         coefficient field is a relative extension of Q(sqrt(5)), which
         Sagebrush's number fields do not provide yet; their eigenvalues are
-        described by hecke_eigenvalue_charpoly_coefficients().
+        described by hecke_eigenvalue_charpoly().
 
         EXAMPLES:
 
@@ -1128,7 +1139,7 @@ class NewformOrbitWeight:
         """
         if self.dimension() != 1:
             raise NotImplementedError("the coefficient field of this orbit has degree %d over Q(sqrt(5)), and Sagebrush's "
-                                      "number fields are absolute: hecke_eigenvalue_charpoly_coefficients(P) gives the "
+                                      "number fields are absolute: hecke_eigenvalue_charpoly(P) gives the "
                                       "characteristic polynomial of a_P over Q(sqrt(5))" % self.dimension())
         h = self._find(P)[1]
         return _felt(h[0]) if h else _field()(0)
