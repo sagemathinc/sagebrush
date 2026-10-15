@@ -21,12 +21,15 @@ for pair in $pairs; do
 done
 # the documentation index (lib/_pyjs_docsearch.py), for search_doc and the MCP
 # server's search_docs, made by the CLI bundle (npm run build:cli)
+# (a private temporary file: several worktrees and agents run this at once)
 if [ -f build/cli/pyjs.cjs ]; then
-  node build/cli/pyjs.cjs -m _pyjs_docsearch --index > /tmp/sb-docs-index.json
+  index=$(mktemp)
+  trap 'rm -f "$index"' EXIT
+  node build/cli/pyjs.cjs -m _pyjs_docsearch --index > "$index"
   if [ "$1" = "--check" ]; then
-    cmp -s /tmp/sb-docs-index.json $DEST/_sagelib/docs-index.json || { echo "out of date: $DEST/_sagelib/docs-index.json (run scripts/sync-python-package.sh)"; bad=1; }
+    cmp -s "$index" $DEST/_sagelib/docs-index.json || { echo "out of date: $DEST/_sagelib/docs-index.json (run scripts/sync-python-package.sh)"; bad=1; }
   else
-    cp /tmp/sb-docs-index.json $DEST/_sagelib/docs-index.json
+    cp "$index" $DEST/_sagelib/docs-index.json
   fi
 fi
 exit $bad
