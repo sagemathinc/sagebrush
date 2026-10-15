@@ -1472,10 +1472,12 @@ function moveAxisToEnd(a: NDArray, ax: number): NDArray {
 function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray {
   if (axis === null || axis === undefined) a = ravel(a);
   if (a.ndim === 1 && a.isC() && (dtype === null || dtype === undefined) && a.dt.kind === "f") {
+    // (the first element is copied, as NumPy does: 0 + -0.0 would be +0.0)
     const out = empty(a.shape, a.dt), d = a.data, od = out.data, n = a.size;
-    let acc = isProd ? 1 : 0;
-    if (a.dt === D.float32) for (let i = 0; i < n; i++) od[i] = acc = Math.fround(isProd ? acc * d[a.offset + i] : acc + d[a.offset + i]);
-    else for (let i = 0; i < n; i++) od[i] = acc = isProd ? acc * d[a.offset + i] : acc + d[a.offset + i];
+    let acc = d[a.offset];
+    if (n) od[0] = acc;
+    if (a.dt === D.float32) for (let i = 1; i < n; i++) od[i] = acc = Math.fround(isProd ? acc * d[a.offset + i] : acc + d[a.offset + i]);
+    else for (let i = 1; i < n; i++) od[i] = acc = isProd ? acc * d[a.offset + i] : acc + d[a.offset + i];
     return out;
   }
   const ax = axis === null || axis === undefined ? 0 : normAxis(intNum(axis), a.ndim);
@@ -1484,13 +1486,15 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   const t = moveAxisToEnd(a, ax), o = moveAxisToEnd(out, ax);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1], ost = o.strides[o.ndim - 1];
   if (rt.cplx) {
-    // complex: (re, im) pairs, at data[2p] and data[2p + 1]
+    // complex: (re, im) pairs, at data[2p] and data[2p + 1]; the first is
+    // copied, as NumPy does ((1 + 0j) * (inf + 1j) would be inf + nanj)
     const cin = a.dt.cplx, f32 = rt === D.complex64;
     loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
-      let re = isProd ? 1 : 0, im = 0;
+      let re = 0, im = 0;
       for (let i = 0; i < n; i++) {
         const s = p + i * st, xr = cin ? t.data[2 * s] : t.data[s], xi = cin ? t.data[2 * s + 1] : 0;
-        if (isProd) [re, im] = [re * xr - im * xi, re * xi + im * xr];
+        if (i === 0) [re, im] = [xr, xi];
+        else if (isProd) [re, im] = [re * xr - im * xi, re * xi + im * xr];
         else [re, im] = [re + xr, im + xi];
         if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
         const d = q + i * ost;
@@ -1505,7 +1509,7 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
     let acc = isProd ? 1 : 0;
     for (let i = 0; i < n; i++) {
-      acc = isProd ? acc * t.data[p + i * st] : acc + t.data[p + i * st];
+      acc = i === 0 ? t.data[p] : isProd ? acc * t.data[p + i * st] : acc + t.data[p + i * st];
       acc = castNum(rt, acc);
       o.data[q + i * ost] = acc;
     }
