@@ -69,6 +69,10 @@ const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled", "beta"])
 // (betaln of negative arguments, through _betaln_signed's reflections: a
 // bound of its own, the positive arguments' staying as small as it is)
 const NEG_TOL: Record<string, number> = { betaln: 2.5e-15 };
+// (polygamma of orders above 20: a bound of its own, as Horner's rule over
+// P_n's n/2 terms and the recurrence's n-fold powers round in proportion to
+// n; 9574afa's values at these cases reach 2e-14 too)
+const HIGH_ORDER_TOL = 2.5e-14;
 
 test("lib/_special.py agrees with mpmath within each function's stated error", () => {
   const worst: Record<string, number> = {};
@@ -102,6 +106,11 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
     const [gr, gi] = pair(g), [wr, wi] = pair(want);
     let e = Math.hypot(gr - wr, gi - wi) / Math.max(TOL[name][1], Math.hypot(wr, wi));
     if (LOG_SCALED.has(name) && wr !== 0) e /= Math.max(1, Math.abs(Math.log(Math.abs(wr))));
+    if (name === "polygamma" && num(args[0]) > 20) {
+      const key = "polygamma (n > 20)";
+      worst[key] = Math.max(worst[key] ?? 0, e);
+      return;
+    }
     if (name in NEG_TOL && args.some((a) => !Array.isArray(a) && num(a) < 0)) {
       const key = name + " (negative arguments)";
       worst[key] = Math.max(worst[key] ?? 0, e);
@@ -114,6 +123,8 @@ test("lib/_special.py agrees with mpmath within each function's stated error", (
     }
     worst[name] = Math.max(worst[name] ?? 0, e);
   });
+  assert.ok("polygamma (n > 20)" in worst, "polygamma (n > 20) has no cases");
+  assert.ok(worst["polygamma (n > 20)"] <= HIGH_ORDER_TOL, `polygamma (n > 20): ${worst["polygamma (n > 20)"]} > ${HIGH_ORDER_TOL}`);
   for (const [name, tol] of Object.entries(NEG_TOL)) {
     const key = name + " (negative arguments)";
     assert.ok(key in worst, key + " has no cases");
