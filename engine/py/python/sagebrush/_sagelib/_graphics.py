@@ -767,32 +767,42 @@ class Image(Primitive):
 
 
 class AxLine(Primitive):
-    """A horizontal or vertical line across the whole panel (axhline, axvline)."""
+    """A horizontal or vertical line across the panel (axhline, axvline), or
+    across the part `span` of it (fractions of the panel's width or height,
+    from its left or bottom: matplotlib's xmin and xmax, or ymin and ymax)."""
     kind = "axline"
 
-    def __init__(self, value, vertical, **options):
+    def __init__(self, value, vertical, span=(0.0, 1.0), **options):
         super().__init__(**options)
         self.value, self.vertical = float(value), vertical
+        self.span = (float(span[0]), float(span[1]))
 
     def bbox(self):
-        return None
+        # (its value is in the data limits along its own axis only, as
+        # matplotlib's: the other axis is the panel's)
+        v = self.value
+        if not math.isfinite(v):
+            return None
+        return (v, v, None, None) if self.vertical else (None, None, v, v)
 
     def svg(self, P):
         o = self.options
+        a, b = self.span
         if self.vertical:
             p = P.map(self.value, P.ylo, clamp=False)
             if p is None:
                 return ""
-            d = "M%s %sV%s" % (_fmt(p[0]), _fmt(P.top), _fmt(P.top + P.h))
+            d = "M%s %sV%s" % (_fmt(p[0]), _fmt(P.top + P.h * (1 - a)), _fmt(P.top + P.h * (1 - b)))
         else:
             p = P.map(P.xlo, self.value, clamp=False)
             if p is None:
                 return ""
-            d = "M%s %sH%s" % (_fmt(P.left), _fmt(p[1]), _fmt(P.left + P.w))
+            d = "M%s %sH%s" % (_fmt(P.left + P.w * a), _fmt(p[1]), _fmt(P.left + P.w * b))
         dash = DASHES.get(o.get("linestyle", "-"))
-        return '<path d="%s" stroke="%s" stroke-width="%s"%s/>' % (
+        return '<path d="%s" stroke="%s" stroke-width="%s"%s%s/>' % (
             d, _esc(to_color(o.get("color"), "currentColor")), _fmt(o.get("thickness", 1)),
-            ' stroke-dasharray="%s"' % dash if dash else "")
+            ' stroke-dasharray="%s"' % dash if dash else "",
+            ' stroke-opacity="%s"' % _fmt(o["alpha"]) if o.get("alpha") is not None else "")
 
     def describe(self):
         return "%s line at %s = %s" % ("vertical" if self.vertical else "horizontal", "x" if self.vertical else "y", _num(self.value))
@@ -845,6 +855,78 @@ def _range(lo, hi, log):
     return lo, hi
 
 
+def _mpl_nonsingular(vmin, vmax, expander, tiny=1e-15):
+    """matplotlib.transforms.nonsingular: a range widened when it is (nearly)
+    a point; not finite: -expander to expander (ported from matplotlib,
+    NOTICE.md)"""
+    if not (math.isfinite(vmin) and math.isfinite(vmax)):
+        return -expander, expander
+    if vmax < vmin:
+        vmin, vmax = vmax, vmin
+    maxabs = max(abs(vmin), abs(vmax))
+    if maxabs < (1e6 / tiny) * 2.2250738585072014e-308:
+        return -expander, expander
+    if vmax - vmin <= maxabs * tiny:
+        if vmax == 0 and vmin == 0:
+            return -expander, expander
+        return vmin - expander * abs(vmin), vmax + expander * abs(vmax)
+    return vmin, vmax
+
+
+def _mpl_autoscale(lo, hi, margin):
+    """matplotlib's autoscaled view of the data range lo..hi (None: no data)"""
+    if lo is None:
+        return 0.0, 1.0
+    lo, hi = _mpl_nonsingular(lo, hi, 0.05)
+    d = (hi - lo) * margin
+    return lo - d, hi + d
+
+
+# matplotlib's AutoLocator: MaxNLocator's steps 1, 2, 2.5, 5, 10, as its
+# "staircase" one decade either side
+_MPL_STEPS = (0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20)
+
+
+def mpl_ticks(vmin, vmax, nbins):
+    """The ticks matplotlib's AutoLocator puts on an axis from vmin to vmax
+    with room for `nbins` intervals (MaxNLocator.tick_values with at least
+    two ticks in range; ported from matplotlib.ticker, NOTICE.md), including
+    the ticks just outside the range, as its get_xticks() lists them."""
+    vmin, vmax = _mpl_nonsingular(min(vmin, vmax), max(vmin, vmax), 1e-13, 1e-14)
+    dv = vmax - vmin
+    meanv = (vmax + vmin) / 2
+    offset = 0 if abs(meanv) / dv < 100 else math.copysign(10 ** (math.log10(abs(meanv)) // 1), meanv)
+    scale = 10 ** (math.log10(dv / nbins) // 1)
+    _vmin, _vmax = vmin - offset, vmax - offset
+    steps = [s * scale for s in _MPL_STEPS]
+    raw = (_vmax - _vmin) / nbins
+    large = [i for i, s in enumerate(steps) if s >= raw]
+    istep = large[0] if large else len(steps) - 1
+    if offset:  # (more slop when the offset is large for the step)
+        tol = lambda step: min(0.4999, max(1e-10, 10 ** (math.log10(abs(offset) / step) - 12)))
+    else:
+        tol = lambda step: 1e-10
+    for step in steps[istep::-1]:
+        best_vmin = (_vmin // step) * step
+        d, m = divmod(_vmin - best_vmin, step)
+        low = d + 1 if abs(m / step - 1) < tol(step) else d
+        d, m = divmod(_vmax - best_vmin, step)
+        high = d if abs(m / step) < tol(step) else d + 1
+        ticks = [k * step + best_vmin for k in _frange(low, high + 1)]
+        if sum(1 for t in ticks if _vmin <= t <= _vmax) >= 2:
+            break
+    return [t + offset for t in ticks]
+
+
+def _frange(a, b):
+    # (numpy.arange(a, b) of floats with step 1)
+    out, k = [], 0
+    while a + k < b:
+        out.append(a + k)
+        k += 1
+    return out
+
+
 def _mpl_labels(vals):
     """Tick labels as matplotlib's ScalarFormatter writes them: as many
     decimals as the ticks need, the same for all, and a true minus sign."""
@@ -895,10 +977,16 @@ class Panel:
         self.options = options
 
     def data_bbox(self):
+        """(xmin, xmax, ymin, ymax) of the primitives' data, None where none
+        has any (an axhline has a y only), or None"""
         boxes = [b for b in (p.bbox() for p in self.primitives) if b is not None]
         if not boxes:
             return None
-        return (min(b[0] for b in boxes), max(b[1] for b in boxes), min(b[2] for b in boxes), max(b[3] for b in boxes))
+
+        def side(i, f):
+            vals = [b[i] for b in boxes if b[i] is not None]
+            return f(vals) if vals else None
+        return (side(0, min), side(1, max), side(2, min), side(3, max))
 
     def ranges(self, w, h):
         o = self.options
@@ -923,13 +1011,22 @@ class Panel:
                 bb = (min(xs), max(xs), min(ys), max(ys))
         xlo, xhi, ylo, yhi = bb if bb else (None, None, None, None)
         m = o.get("margins", 0.0)
-        if bb and m:
+        # (matplotlib's autoscaling of a linear axis: a degenerate range
+        # widened by 5%, then the margins; an axis without data is 0 to 1)
+        mpl = o.get("autoscale") == "matplotlib"
+        mx, my = mpl and not xlog, mpl and not ylog
+        if mx:
+            xlo, xhi = _mpl_autoscale(xlo, xhi, m)
+        if my:
+            ylo, yhi = _mpl_autoscale(ylo, yhi, m)
+        if m and xlo is not None and not mx:
             if xlog:
                 f = (xhi / xlo) ** m
                 xlo, xhi = xlo / f, xhi * f
             else:
                 d = (xhi - xlo) * m
                 xlo, xhi = xlo - d, xhi + d
+        if m and ylo is not None and not my:
             if ylog:
                 f = (yhi / ylo) ** m
                 ylo, yhi = ylo / f, yhi * f
@@ -967,8 +1064,9 @@ class Panel:
                 ylo, yhi = c - gy * half, c + gy * half
         return xlo, xhi, ylo, yhi, xlog, ylog
 
-    def ticks(self, lo, hi, log, positions, labels, target):
+    def ticks(self, lo, hi, log, positions, labels, target, axis="x"):
         mpl = self.options.get("tick_format") == "matplotlib"
+        bins = (self.options.get("tick_bins") or {}).get(axis)
         lo, hi = min(lo, hi), max(lo, hi)  # (an inverted axis has the same ticks)
         if positions is not None:
             pos = [float(v) for v in positions]
@@ -986,6 +1084,11 @@ class Panel:
             t = _log_ticks(lo, hi)
             if len(t) >= 2:
                 return [(v, _pow10_label(v)) for v in t]
+        if bins and not log:
+            # (matplotlib's AutoLocator, the ticks in the view, as its axis draws them)
+            tol = (hi - lo) * 1e-10
+            ticks = [t for t in mpl_ticks(lo, hi, bins) if lo - tol <= t <= hi + tol]
+            return list(zip(ticks, _mpl_labels(ticks))) if mpl else [(v, _num(v)) for v in ticks]
         ticks, step = nice_ticks(lo, hi, target)
         if mpl:
             return list(zip(ticks, _mpl_labels(ticks)))
@@ -1009,7 +1112,7 @@ class Panel:
         bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
         right = 14
         guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
-        yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)))
+        yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)), "y")
         lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
         left = (lw + (ls + 6 if ylabel else 0)) if show_axes else 8
         if o.get("exact"):
@@ -1034,7 +1137,7 @@ class Panel:
         # Sage's axes carry more ticks than matplotlib's frame
         dx, dy = (85, 55) if frame else (60, 45)
         xt = self.ticks(xlo, xhi, xlog, o.get("xticks"), o.get("xticklabels"), max(3, int(pw / dx)))
-        yt = self.ticks(ylo, yhi, ylog, o.get("yticks"), o.get("yticklabels"), max(3, int(ph / dy)))
+        yt = self.ticks(ylo, yhi, ylog, o.get("yticks"), o.get("yticklabels"), max(3, int(ph / dy)), "y")
 
         out = ['<g class="sb-panel" data-xr="%r %r" data-yr="%r %r" data-box="%s %s %s %s"%s%s>' % (
             xlo, xhi, ylo, yhi, _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph),
@@ -1142,7 +1245,13 @@ class Panel:
         o = self.options
         if o.get("legend") is False:
             return ""
-        items = [(p, p.legend()) for p in self.primitives if p.legend()]
+        if o.get("legend_entries") is not None:
+            # (the entries matplotlib's legend() chose when it was called, of
+            # the primitives still shown)
+            shown = set(id(p) for p in self.primitives)
+            items = [(p, s) for p, s in o["legend_entries"] if id(p) in shown]
+        else:
+            items = [(p, p.legend()) for p in self.primitives if p.legend()]
         if not items:
             return ""
         mk = o.get("markup")
@@ -1158,10 +1267,13 @@ class Panel:
         for i, (p, s) in enumerate(items):
             cy = ly + 13 + i * 18
             c = _esc(to_color(p.options.get("color"), "#1f77b4"))
-            if p.kind == "line":
+            if p.kind in ("line", "axline"):
                 dash = DASHES.get(p.options.get("linestyle", "-"))
-                out.append('<path d="M%s %sh22" stroke="%s" stroke-width="%s"%s/>' % (
-                    _fmt(lx + 7), _fmt(cy), c, _fmt(p.options.get("thickness", 1.5)), ' stroke-dasharray="%s"' % dash if dash else ""))
+                out.append('<path d="M%s %sh22" stroke="%s" stroke-width="%s"%s%s/>' % (
+                    _fmt(lx + 7), _fmt(cy), c, _fmt(p.options.get("thickness", 1.5)), ' stroke-dasharray="%s"' % dash if dash else "",
+                    ' stroke-opacity="%s"' % _fmt(p.options["alpha"]) if p.options.get("alpha") is not None else ""))
+                if p.kind == "line" and p.options.get("marker"):  # (a line with markers: one, in the middle, as matplotlib's)
+                    out.append(_marker(p.options["marker"], lx + 18, cy, p.options.get("markersize", 3.5), to_color(p.options.get("color"), "#1f77b4")))
             elif p.kind == "points":
                 out.append(_marker(p.options.get("marker", "o"), lx + 18, cy, 3.5, to_color(p.options.get("color"), "#1f77b4")))
             else:
