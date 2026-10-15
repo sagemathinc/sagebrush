@@ -219,6 +219,7 @@ export class Board {
   selectedEdge: string | null = null;
   dropTarget: string | null = null;
   private selection = new Set<string>();
+  private foundId: string | null = null; // (the item Find shows, outlined)
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -473,6 +474,7 @@ export class Board {
         this.cache.set(it.id, el);
       }
       el.classList.toggle("selected", this.selection.has(it.id));
+      el.classList.toggle("found", it.id === this.foundId);
       if (el.dataset.untypeset) { delete el.dataset.untypeset; this.typesetSoon(el); }
       frag.append(el);
       this.mounted.set(it.id, el);
@@ -1057,6 +1059,17 @@ export class Board {
     this.selection = new Set(ids === null ? [] : typeof ids === "string" ? [ids] : ids);
     for (const id of this.selection) this.cache.get(id)?.classList.add("selected");
     this.request();
+  }
+
+  /** Outline the item Find shows (or none). */
+  setFound(id: string | null) {
+    if (this.foundId) this.cache.get(this.foundId)?.classList.remove("found");
+    this.foundId = id;
+    if (id) this.cache.get(id)?.classList.add("found");
+  }
+  /** An item's element, if it is mounted. */
+  element(id: string): HTMLElement | null {
+    return this.mounted.get(id) ?? null;
   }
 
   /** The notes and groups wholly inside a world rectangle. */
