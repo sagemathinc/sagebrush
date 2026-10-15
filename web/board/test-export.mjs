@@ -134,6 +134,15 @@ try {
   await keyS(2);
   await until("window.__got.length === 2", 5000).catch(() => {});
   check(await ev("window.__got.length === 2 && !window.board.editing && window.sagebrush.board.snapshot().doc.nodes[0].title === 'Note kept'"), "Ctrl+S while a note is written: not kept first, or not downloaded: " + JSON.stringify(await ev("({ got: window.__got, editing: window.board.editing, title: window.sagebrush.board.snapshot().doc.nodes[0].title })")));
+  // (an exported file is itself the saved board: there Ctrl/Cmd+S is the
+  // browser's, its ⋯ menu still downloading it again, CORR-2C4-1)
+  await send("Page.navigate", { url: "file://" + files.get("examples/primes.json") });
+  await until("window.sagebrush?.board?.snapshot().items.length > 0", 30000);
+  await ev("window.__got = []; HTMLAnchorElement.prototype.click = function () { window.__got.push(this.download); }; window.__kept = []; document.addEventListener('keydown', (e) => window.__kept.push(e.defaultPrevented)); 1");
+  await keyS(2);
+  await sleep(500);
+  const exported = await ev("({ got: window.__got, kept: window.__kept, dialog: document.querySelector('[data-sbb=htmldlg]').open, menu: !document.querySelector('[data-sbb=html]').hidden })");
+  check(!exported.got.length && JSON.stringify(exported.kept) === "[false]" && !exported.dialog && exported.menu, "in an exported file, Ctrl+S is the browser's (nothing downloaded, nothing prevented), the menu's Download as HTML still there: " + JSON.stringify(exported));
   check(!errors.length, "errors: " + errors.join(" | "));
 
   // A board downloaded as HTML, opened again on the site (Open…, or

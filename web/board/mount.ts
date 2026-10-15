@@ -116,6 +116,10 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
+   * key is left to the browser, as on a page that is itself a saved board
+   * (an exported file), whose ⋯ menu still downloads it again */
+  saveKey?: boolean;
   /** whether exportHtml can carry the engine, and about how much more that is ("6 MB") */
   exportPython?(d: BoardDoc): string | null;
 }
@@ -1254,7 +1258,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // not the page (William); what is being written in a note is kept first.
   // Seen before a field's own keys; with a dialog open, nothing more)
   on(window, "keydown", async (e: KeyboardEvent) => {
-    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s" || !doc || !mine() || !host.exportHtml) return;
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s" || !doc || !mine() || !host.exportHtml || host.saveKey === false) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (root.querySelector("dialog[open]")) return;
