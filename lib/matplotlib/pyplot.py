@@ -135,7 +135,9 @@ class Line2D:
         return self._prim.options.get("label")
 
     def set_color(self, c):
-        self._prim.options["color"] = to_color(c)
+        o = self._prim.options
+        o["color_given"] = to_color(c)
+        o["color"] = _opaque(o["color_given"]) if o.get("alpha") is not None else o["color_given"]
 
     def get_xdata(self):
         return list(self._prim.xs)
@@ -158,9 +160,12 @@ class Line2D:
         self._prim.options["hidden"] = not b
 
     def set_alpha(self, a):
-        self._prim.options["alpha"] = a
-        if a is not None:  # (it replaces the color's, as matplotlib's)
-            self._prim.options["color"] = _opaque(self._prim.options.get("color"))
+        # (the alpha replaces the color's while it is set, as matplotlib's;
+        # the color as given is kept for set_alpha(None))
+        o = self._prim.options
+        given = o.setdefault("color_given", o.get("color"))
+        o["alpha"] = a
+        o["color"] = _opaque(given) if a is not None else given
 
     def set_linewidth(self, w):
         self._prim.options["thickness"] = w * PT
@@ -248,7 +253,7 @@ class Axes:
                 continue
             xs = _list(x) if x is not None else list(range(len(ys)))
             fc, fm, fl = _parse_fmt(fmt)
-            color = self._color(kw.get("color", kw.get("c", fc)))
+            color = given = self._color(kw.get("color", kw.get("c", fc)))
             if kw.get("alpha") is not None:
                 color = _opaque(color)
             ls = kw.get("linestyle", kw.get("ls", fl or "-"))
@@ -256,13 +261,14 @@ class Axes:
             lw = kw.get("linewidth", kw.get("lw", 1.5))
             ms = kw.get("markersize", kw.get("ms", 6))
             label = kw.get("label")
-            o = {"color": color, "thickness": lw * PT, "linestyle": ls if ls not in ("None", "none", " ", "") else "-",
+            o = {"color": color, "color_given": given, "thickness": lw * PT, "linestyle": ls if ls not in ("None", "none", " ", "") else "-",
                  "alpha": kw.get("alpha"), "label": None if label is None or str(label).startswith("_") else str(label)}
             if marker and marker not in ("None", "none", ""):
                 o["marker"] = marker
                 o["markersize"] = ms * PT / 2
             if ls in ("None", "none", " ", ""):
-                p = Points(xs, ys, marker=marker or "o", size=ms * PT / 2, color=color, alpha=kw.get("alpha"), label=o["label"])
+                p = Points(xs, ys, marker=marker or "o", size=ms * PT / 2, color=color, color_given=given, alpha=kw.get("alpha"),
+                           label=o["label"])
             else:
                 p = Line(xs, ys, **o)
             out.append(Line2D(self._add(p)))
