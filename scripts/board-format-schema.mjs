@@ -1,6 +1,7 @@
 // The board format as a JSON Schema (draft 2020-12): web/board-format.schema.json,
 // served at /board-format.schema.json, so a program writing boards can check
-// them before anyone opens them (`sagebrush board check` does).  Written
+// them before anyone opens them; and the same as a module,
+// web/board/format-schema.ts, for `sagebrush board check` (src/board-check.ts).  Written
 // from web/board/doc.ts's interfaces, as the field reference is
 // (scripts/board-format-fields.mjs), with the rules the board's loader
 // (doc.ts cleanDoc) applies to values that the types don't say: colors,
@@ -20,6 +21,7 @@ import { split, typeReader } from "./board-doc-types.mjs";
 // (BOARD_FORMAT_ROOT: another tree than this one, for its test)
 const root = process.env.BOARD_FORMAT_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(root, "web", "board-format.schema.json");
+const MODULE = join(root, "web", "board", "format-schema.ts");
 const DOC = "web/board/doc.ts";
 const parse = typeReader(root);
 const problems = [];
@@ -195,6 +197,7 @@ const schema = {
   $defs: Object.fromEntries(Object.entries(defs).filter(([n]) => n !== "BoardDoc")),
 };
 const text = JSON.stringify(schema, null, 1) + "\n";
+const module = "// The board format's JSON Schema (web/board-format.schema.json), as a module\n// for the command line: written by scripts/board-format-schema.mjs; edit\n// web/board/doc.ts, not this.\nexport const BOARD_SCHEMA = " + JSON.stringify(schema, null, 1) + ";\n";
 
 if (problems.length) {
   process.stderr.write(`board-format-schema: ${problems.length} problem(s):\n  ${problems.join("\n  ")}\n`);
@@ -204,15 +207,15 @@ if (process.argv.includes("--stdout")) {
   process.stdout.write(text);
   process.exit(0);
 }
-let old = null;
-try { old = readFileSync(OUT, "utf8"); } catch {}
+const read = (f) => { try { return readFileSync(f, "utf8"); } catch { return null; } };
+const stale = [[OUT, text], [MODULE, module]].filter(([f, t]) => read(f) !== t);
 if (process.argv.includes("--check")) {
-  if (old !== text) {
-    process.stderr.write("board-format-schema: web/board-format.schema.json is not as web/board/doc.ts says: run node scripts/board-format-schema.mjs\n");
+  if (stale.length) {
+    process.stderr.write(`board-format-schema: ${stale.map(([f]) => f.slice(root.length + 1)).join(" and ")} ${stale.length > 1 ? "are" : "is"} not as web/board/doc.ts says: run node scripts/board-format-schema.mjs\n`);
     process.exit(1);
   }
   console.log("web/board-format.schema.json is as web/board/doc.ts says");
-} else if (old !== text) {
-  writeFileSync(OUT, text);
-  console.log("wrote web/board-format.schema.json");
+} else if (stale.length) {
+  for (const [f, t] of stale) writeFileSync(f, t);
+  console.log(`wrote ${stale.map(([f]) => f.slice(root.length + 1)).join(" and ")}`);
 } else console.log("web/board-format.schema.json was already as web/board/doc.ts says");

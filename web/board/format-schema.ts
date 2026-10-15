@@ -1,0 +1,786 @@
+// The board format's JSON Schema (web/board-format.schema.json), as a module
+// for the command line: written by scripts/board-format-schema.mjs; edit
+// web/board/doc.ts, not this.
+export const BOARD_SCHEMA = {
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://sagebrush.space/board-format.schema.json",
+ "title": "Sagebrush board",
+ "type": "object",
+ "description": "A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`). Written from web/board/doc.ts by scripts/board-format-schema.mjs; the format is described at https://sagebrush.space/board-format.md.",
+ "properties": {
+  "format": {
+   "const": "sagebrush-board",
+   "description": "`\"sagebrush-board\"`: write it first"
+  },
+  "version": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1,
+   "description": "`1`: write it second"
+  },
+  "title": {
+   "type": "string",
+   "description": "the board's title (plain text)"
+  },
+  "mode": {
+   "enum": [
+    "python",
+    "sage",
+    "magma",
+    "matlab"
+   ],
+   "description": "the language of its code items, one per board (default `python`)"
+  },
+  "engine": {
+   "const": "latest",
+   "description": "`\"latest\"`, in a downloaded file: run with the newest engine when online (written by Sagebrush)"
+  },
+  "seed": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{64}$",
+   "description": "64 hex digits: the seed of its code's random numbers; without it a fixed default is used, so a board's random numbers are always repeatable"
+  },
+  "tools": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "description": "the toolbar's tools in Edit mode, in order (written by Sagebrush)"
+  },
+  "images": {
+   "type": "object",
+   "additionalProperties": {
+    "$ref": "#/$defs/ImageInfo"
+   },
+   "description": "pictures by name: `{w, h, src}` (pixels; `src` a `data:` or `https:` URL). A name is letters, digits, `_` and `-`, at most 100 characters (`plot-1`, not `plot 1` or `figure.png`): a picture by another name is left out, and so is a note's or a background's use of it",
+   "propertyNames": {
+    "pattern": "^[\\w-]{1,100}$"
+   }
+  },
+  "pages": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/BoardPage"
+   },
+   "description": "several pages; a document with pages has no `nodes`, `edges` or `steps` of its own"
+  },
+  "intro": {
+   "type": "string",
+   "description": "Markdown shown before the tour starts (with pages: on the first page, if it has no `intro` of its own)"
+  },
+  "refBase": {
+   "type": "string",
+   "description": "the base URL for `ref` links that are paths (e.g. a repository's blob URL)"
+  },
+  "layout": {
+   "enum": [
+    "row",
+    "column",
+    "grid",
+    "graph"
+   ],
+   "description": "how the top-level items are laid out (default `graph`)"
+  },
+  "columns": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1.7976931348623157e+308,
+   "description": "as for a group"
+  },
+  "direction": {
+   "enum": [
+    "TB",
+    "LR"
+   ],
+   "description": "as for a group"
+  },
+  "slide": {
+   "$ref": "#/$defs/SlideRect",
+   "description": "as for a page"
+  },
+  "background": {
+   "$ref": "#/$defs/PageBackground",
+   "description": "as for a page"
+  },
+  "nodes": {
+   "type": "array",
+   "items": {
+    "anyOf": [
+     {
+      "$ref": "#/$defs/DocNote"
+     },
+     {
+      "$ref": "#/$defs/DocGroup"
+     },
+     {
+      "$ref": "#/$defs/DocInk"
+     },
+     {
+      "$ref": "#/$defs/DocSticker"
+     }
+    ]
+   },
+   "description": "the items of a one-page board"
+  },
+  "edges": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/DocEdge"
+   },
+   "description": "the edges among them"
+  },
+  "steps": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/DocStep"
+   },
+   "description": "its tour"
+  }
+ },
+ "additionalProperties": false,
+ "anyOf": [
+  {
+   "required": [
+    "nodes"
+   ],
+   "not": {
+    "required": [
+     "pages"
+    ]
+   },
+   "description": "one page: its `nodes` (and `edges`, `steps`), and no `pages`"
+  },
+  {
+   "required": [
+    "pages"
+   ],
+   "not": {
+    "anyOf": [
+     {
+      "required": [
+       "nodes"
+      ]
+     },
+     {
+      "required": [
+       "edges"
+      ]
+     },
+     {
+      "required": [
+       "steps"
+      ]
+     }
+    ]
+   },
+   "description": "several: `pages`, each with its own `nodes`, and no `nodes`, `edges` or `steps` of the document's own"
+  }
+ ],
+ "$defs": {
+  "BoardPage": {
+   "type": "object",
+   "description": "A page of a board: its own items, edges and tour.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "needed by templates; unique among the pages"
+    },
+    "title": {
+     "type": "string",
+     "description": "the page's title (plain text)"
+    },
+    "intro": {
+     "type": "string",
+     "description": "Markdown shown before the page's tour (without it, the page's title is shown; on the first page, the document's `intro`)"
+    },
+    "layout": {
+     "enum": [
+      "row",
+      "column",
+      "grid",
+      "graph"
+     ],
+     "description": "how the page's items are laid out (default `graph`)"
+    },
+    "columns": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 1.7976931348623157e+308,
+     "description": "as for a group"
+    },
+    "direction": {
+     "enum": [
+      "TB",
+      "LR"
+     ],
+     "description": "as for a group"
+    },
+    "slide": {
+     "$ref": "#/$defs/SlideRect",
+     "description": "the card the page is arranged on, a slide, which Present shows"
+    },
+    "background": {
+     "$ref": "#/$defs/PageBackground",
+     "description": "the page's background"
+    },
+    "template": {
+     "type": "boolean",
+     "description": "`true`: other pages can be made from it (it needs an `id`)"
+    },
+    "uses": {
+     "type": "string",
+     "description": "a template page's id: its card, background and items appear under this page's own"
+    },
+    "nodes": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/DocNote"
+       },
+       {
+        "$ref": "#/$defs/DocGroup"
+       },
+       {
+        "$ref": "#/$defs/DocInk"
+       },
+       {
+        "$ref": "#/$defs/DocSticker"
+       }
+      ]
+     },
+     "description": "required: the page's items"
+    },
+    "edges": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/DocEdge"
+     },
+     "description": "the edges among them"
+    },
+    "steps": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/DocStep"
+     },
+     "description": "its tour"
+    }
+   },
+   "required": [
+    "nodes"
+   ],
+   "additionalProperties": false
+  },
+  "DocNote": {
+   "type": "object",
+   "description": "A note: the default item. Every part is optional; a note with `code` is a code item.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "required: unique on its page (an edge names it)"
+    },
+    "kind": {
+     "const": "note",
+     "description": "`\"note\"`, or left out"
+    },
+    "title": {
+     "type": "string",
+     "description": "a heading (plain text, math allowed)"
+    },
+    "image": {
+     "type": "string",
+     "pattern": "^[\\w-]{1,100}$",
+     "description": "a picture: its name in the document's `images` (letters, digits, `_` and `-`, at most 100 characters)"
+    },
+    "text": {
+     "type": "string",
+     "description": "Markdown with math (`$...$`), shown at every zoom"
+    },
+    "code": {
+     "type": "string",
+     "description": "code in the board's language (`mode`), run in the reader's browser, its output under it; it makes the note a code item"
+    },
+    "hideCode": {
+     "type": "boolean",
+     "description": "`true`: show only the code's output, not the code"
+    },
+    "preview": {
+     "type": "object",
+     "description": "a slow code item's output, kept to show before it runs (written by Sagebrush)"
+    },
+    "detail": {
+     "type": "string",
+     "description": "Markdown shown only when zoomed in"
+    },
+    "ref": {
+     "type": "string",
+     "description": "a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`"
+    },
+    "color": {
+     "type": "string",
+     "pattern": "^\\s*(?:(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|([rR][gG][bB][aA]?|[hH][sS][lL][aA]?)\\(\\s*[-\\d.]+%?([dD][eE][gG])?\\s*(,\\s*[-\\d.]+%?\\s*){2,3}\\)))\\s*$",
+     "description": "a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`)"
+    },
+    "shape": {
+     "enum": [
+      "rect",
+      "round",
+      "stadium",
+      "circle",
+      "diamond",
+      "hexagon",
+      "cylinder",
+      "subroutine",
+      "lean-right",
+      "lean-left",
+      "trapezoid",
+      "inv-trapezoid",
+      "flag"
+     ],
+     "description": "its outline (a flowchart's); its text is then centered"
+    },
+    "fit": {
+     "type": "boolean",
+     "description": "`true`: as wide as its text needs, up to `w`"
+    },
+    "x": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its position, kept once a person moves it: leave it out, and the board places it"
+    },
+    "y": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "as `x`"
+    },
+    "w": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its width (default 260; 440 for a code item; for a note with only a picture, the picture's width, up to 480, its height then from the picture's shape)"
+    },
+    "h": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its height (default: as tall as what it shows)"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "dependentRequired": {
+    "hideCode": [
+     "code"
+    ],
+    "preview": [
+     "code"
+    ]
+   }
+  },
+  "DocGroup": {
+   "type": "object",
+   "description": "A group: items laid out together, under a title. Groups nest; an edge may join any two items on a page, in any groups.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "required: unique on its page"
+    },
+    "kind": {
+     "const": "group",
+     "description": "required: `\"group\"`"
+    },
+    "title": {
+     "type": "string",
+     "description": "a heading (plain text, math allowed)"
+    },
+    "text": {
+     "type": "string",
+     "description": "Markdown with math, under the title"
+    },
+    "layout": {
+     "enum": [
+      "row",
+      "column",
+      "grid",
+      "graph"
+     ],
+     "description": "how its items are laid out (default `graph`: in layers along the edges among them)"
+    },
+    "columns": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 1.7976931348623157e+308,
+     "description": "`grid` layout: how many columns (default: as square as can be)"
+    },
+    "direction": {
+     "enum": [
+      "TB",
+      "LR"
+     ],
+     "description": "`graph` layout: layers top to bottom (`TB`, the default) or left to right (`LR`)"
+    },
+    "children": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/DocNote"
+       },
+       {
+        "$ref": "#/$defs/DocGroup"
+       },
+       {
+        "$ref": "#/$defs/DocInk"
+       },
+       {
+        "$ref": "#/$defs/DocSticker"
+       }
+      ]
+     },
+     "description": "required: its items (notes, groups, stickers)"
+    },
+    "color": {
+     "type": "string",
+     "pattern": "^\\s*(?:(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|([rR][gG][bB][aA]?|[hH][sS][lL][aA]?)\\(\\s*[-\\d.]+%?([dD][eE][gG])?\\s*(,\\s*[-\\d.]+%?\\s*){2,3}\\)))\\s*$",
+     "description": "a color"
+    },
+    "x": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its position, kept once a person moves it: leave it out"
+    },
+    "y": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "as `x`"
+    },
+    "w": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its width at least, as a person made it by its corner (it is as wide as this, or as its items need, whichever is more)"
+    },
+    "h": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its height at least, as `w`"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "children"
+   ],
+   "additionalProperties": false
+  },
+  "DocInk": {
+   "type": "object",
+   "description": "A pen stroke, drawn by a person. Don't write these.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "required: unique on its page"
+    },
+    "kind": {
+     "const": "ink",
+     "description": "required: `\"ink\"`"
+    },
+    "points": {
+     "type": "array",
+     "items": {
+      "type": "number",
+      "minimum": -1.7976931348623157e+308,
+      "maximum": 1.7976931348623157e+308
+     },
+     "minItems": 3,
+     "description": "required: x, y and pressure (0 to 1) of each point, from the corner (`x`, `y`)"
+    },
+    "size": {
+     "type": "number",
+     "maximum": 200,
+     "exclusiveMinimum": 0,
+     "description": "the pen's width"
+    },
+    "color": {
+     "type": "string",
+     "pattern": "^\\s*(?:(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|([rR][gG][bB][aA]?|[hH][sS][lL][aA]?)\\(\\s*[-\\d.]+%?([dD][eE][gG])?\\s*(,\\s*[-\\d.]+%?\\s*){2,3}\\)))\\s*$",
+     "description": "its color"
+    },
+    "opacity": {
+     "type": "number",
+     "exclusiveMinimum": 0,
+     "exclusiveMaximum": 1,
+     "description": "below 1: a highlighter's, which what is under it shows through"
+    },
+    "x": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "required: the corner of its box"
+    },
+    "y": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "required: as `x`"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "points",
+    "x",
+    "y"
+   ],
+   "additionalProperties": false
+  },
+  "DocSticker": {
+   "type": "object",
+   "description": "A sticker: one emoji, or one of CoCalc's icons, shown without a frame. It needs `emoji` or `icon`.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "required: unique on its page"
+    },
+    "kind": {
+     "const": "sticker",
+     "description": "required: `\"sticker\"`"
+    },
+    "emoji": {
+     "type": "string",
+     "pattern": "^[^A-Za-z\\p{Cc}]*[^A-Za-z\\p{Cc}\\s][^A-Za-z\\p{Cc}]*$",
+     "description": "one emoji"
+    },
+    "icon": {
+     "type": "string",
+     "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+     "description": "one of CoCalc's icons, by name (a converted CoCalc board), with `color`"
+    },
+    "color": {
+     "type": "string",
+     "pattern": "^\\s*(?:(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|([rR][gG][bB][aA]?|[hH][sS][lL][aA]?)\\(\\s*[-\\d.]+%?([dD][eE][gG])?\\s*(,\\s*[-\\d.]+%?\\s*){2,3}\\)))\\s*$",
+     "description": "an icon's color"
+    },
+    "x": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its position: leave it out, and the board places it"
+    },
+    "y": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "as `x`"
+    },
+    "w": {
+     "type": "number",
+     "minimum": 8,
+     "maximum": 4000,
+     "description": "its width (default 64)"
+    }
+   },
+   "required": [
+    "id",
+    "kind"
+   ],
+   "additionalProperties": false,
+   "anyOf": [
+    {
+     "required": [
+      "emoji"
+     ]
+    },
+    {
+     "required": [
+      "icon"
+     ]
+    }
+   ]
+  },
+  "DocEdge": {
+   "type": "object",
+   "description": "An edge between two items on a page, drawn as an arrow from `from` to `to`.",
+   "properties": {
+    "from": {
+     "type": "string",
+     "description": "required: an item's id"
+    },
+    "to": {
+     "type": "string",
+     "description": "required: an item's id"
+    },
+    "label": {
+     "type": "string",
+     "description": "a label on it (plain text)"
+    },
+    "hidden": {
+     "type": "boolean",
+     "description": "`true`: not drawn, only used to lay out (to place one box below another)"
+    },
+    "arrow": {
+     "enum": [
+      "none",
+      "both"
+     ],
+     "description": "arrowheads: at the end (when left out), `none`, or `both` ends"
+    },
+    "line": {
+     "enum": [
+      "dotted",
+      "thick"
+     ],
+     "description": "`dotted` or `thick` (default: a thin line)"
+    }
+   },
+   "required": [
+    "from",
+    "to"
+   ],
+   "additionalProperties": false
+  },
+  "DocStep": {
+   "type": "object",
+   "description": "A step of a tour: the camera shows these items while the caption explains them.",
+   "properties": {
+    "focus": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     ],
+     "description": "required: an item's id, or several"
+    },
+    "say": {
+     "type": "string",
+     "description": "the caption (Markdown with math)"
+    }
+   },
+   "required": [
+    "focus"
+   ],
+   "additionalProperties": false
+  },
+  "SlideRect": {
+   "type": "object",
+   "description": "A slide's card on its page, in board coordinates.",
+   "properties": {
+    "x": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "required: its left edge"
+    },
+    "y": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "required: its top edge"
+    },
+    "w": {
+     "type": "number",
+     "maximum": 1.7976931348623157e+308,
+     "exclusiveMinimum": 0,
+     "description": "required: its width"
+    },
+    "h": {
+     "type": "number",
+     "maximum": 1.7976931348623157e+308,
+     "exclusiveMinimum": 0,
+     "description": "required: its height (16:9 with `w`, say)"
+    }
+   },
+   "required": [
+    "x",
+    "y",
+    "w",
+    "h"
+   ],
+   "additionalProperties": false
+  },
+  "PageBackground": {
+   "type": "object",
+   "description": "A page's background.",
+   "properties": {
+    "color": {
+     "type": "string",
+     "pattern": "^\\s*(?:(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|([rR][gG][bB][aA]?|[hH][sS][lL][aA]?)\\(\\s*[-\\d.]+%?([dD][eE][gG])?\\s*(,\\s*[-\\d.]+%?\\s*){2,3}\\)))\\s*$",
+     "description": "a color: on a slide's card, or behind the whole board"
+    },
+    "image": {
+     "type": "string",
+     "pattern": "^[\\w-]{1,100}$",
+     "description": "a picture's name in `images` (letters, digits, `_` and `-`, at most 100 characters), on a slide's card"
+    }
+   },
+   "additionalProperties": false
+  },
+  "ImageInfo": {
+   "type": "object",
+   "description": "A picture a note shows, by its name in the document's `images`.",
+   "properties": {
+    "w": {
+     "type": "number",
+     "maximum": 1.7976931348623157e+308,
+     "exclusiveMinimum": 0,
+     "description": "required: its width in pixels"
+    },
+    "h": {
+     "type": "number",
+     "maximum": 1.7976931348623157e+308,
+     "exclusiveMinimum": 0,
+     "description": "required: its height in pixels"
+    },
+    "src": {
+     "type": "string",
+     "anyOf": [
+      {
+       "pattern": "^https:\\/\\/[^\\s\"'<>\\\\]+$",
+       "description": "an https: address"
+      },
+      {
+       "pattern": "^[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]\\/([pP][nN][gG]|[jJ][pP][eE]?[gG]|[wW][eE][bB][pP]|[gG][iI][fF]);[bB][aA][sS][eE]64,([A-Za-z0-9+/=\\s]*)$",
+       "description": "a data: URL of a PNG, JPEG, GIF or WebP picture (base64)"
+      }
+     ],
+     "description": "its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address"
+    }
+   },
+   "required": [
+    "w",
+    "h"
+   ],
+   "additionalProperties": false
+  },
+  "DocNode": {
+   "description": "An item: a note, a group, ink or a sticker, as its `kind` says (a note's `kind` is `\"note\"`, or left out).",
+   "anyOf": [
+    {
+     "$ref": "#/$defs/DocNote"
+    },
+    {
+     "$ref": "#/$defs/DocGroup"
+    },
+    {
+     "$ref": "#/$defs/DocInk"
+    },
+    {
+     "$ref": "#/$defs/DocSticker"
+    }
+   ]
+  }
+ }
+};

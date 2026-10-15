@@ -230,7 +230,7 @@ test("a rule of the loader changed in doc.ts without the schema is refused", () 
   const dir = mkdtempSync(join(tmpdir(), "sb-schema-"));
   try {
     mkdirSync(join(dir, "web", "board"), { recursive: true });
-    for (const f of ["web/board/doc.ts", "web/board/images.ts", "web/image-size.ts", "web/board-format.schema.json"]) cpSync(join(repo, f), join(dir, f));
+    for (const f of ["web/board/doc.ts", "web/board/images.ts", "web/image-size.ts", "web/board-format.schema.json", "web/board/format-schema.ts"]) cpSync(join(repo, f), join(dir, f));
     const doc = readFileSync(join(dir, "web/board/doc.ts"), "utf8");
     writeFileSync(join(dir, "web/board/doc.ts"), doc.replace("w !== undefined && w >= 8 && w <= 4000", "w !== undefined && w >= 8 && w <= 8000"));
     let r = run(["--check"], dir);
@@ -240,7 +240,7 @@ test("a rule of the loader changed in doc.ts without the schema is refused", () 
     writeFileSync(join(dir, "web/board/doc.ts"), doc.replace("const IMAGE_NAME = /^[\\w-]{1,100}$/;", "const IMAGE_NAME = /^[\\w-]{1,80}$/;"));
     r = run(["--check"], dir);
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /is not as web\/board\/doc\.ts says/);
+    assert.match(r.stderr, /(is|are) not as web\/board\/doc\.ts says/);
     assert.equal(run([], dir).status, 0);
     assert.match(readFileSync(join(dir, "web/board-format.schema.json"), "utf8"), /\{1,80\}/);
     // (a new field: in the schema, with its doc comment)
