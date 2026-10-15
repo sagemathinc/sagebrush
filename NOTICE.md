@@ -88,6 +88,14 @@ step (`select_initial_step`, after Hairer, Norsett and Wanner) and the
 step size factors (0.9, at least 0.2, at most 10, no growth after a
 rejected step).
 
+`lib/scipy/integrate.py` follows SciPy's `scipy/integrate`: `solve_ivp` and
+its explicit Runge-Kutta solvers (`_ivp/ivp.py`, `rk.py`, `common.py`,
+`base.py`: the step-size control, initial step, error norms, dense output
+and event handling), DOP853's coefficients (`_ivp/dop853_coefficients.py`,
+Hairer's), and the argument handling of `quad`, `nquad`, `odeint`,
+`trapezoid`, `cumulative_trapezoid` and `simpson`. (`quad`'s QUADPACK
+routines are public domain.)
+
 ```
 Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
 All rights reserved.
