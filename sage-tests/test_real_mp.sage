@@ -212,3 +212,21 @@ t('float tiny', lambda: (float(R(2)^-1074), float(R(2)^-1075), float(R(2)^-1075 
 # through a double (a 100-bit 1/3 with '.30f'; 2^2000 with '.3e')
 for x in [R(2)^2000, R(1)/3, R(2)^-2000, -R(2.5e-7), R(0), R(12345.6789), R(2)^(2^40), R(oo), R(-oo), R('NaN')]:
     t('format', lambda: [format(x, s) for s in ['.3e', '.30f', 'g', '>14.5G', '+.2%', '#.0f', '012.3e', ',.2f', '', '10']])
+# second review: gamma's tiny non-power-of-two path overflows in the field's
+# rounding mode; float() just above half the smallest subnormal
+for mode in ['RNDN', 'RNDZ', 'RNDU', 'RNDD', 'RNDA']:
+    R = RealField(100, rnd=mode)
+    u = R(2)^(-2^62)
+    print(mode, [((c*u).gamma(), (-c*u).gamma()) for c in [R(3)/2, R(5)/4, R(7)/4, R(1)]])
+R = RealField(100)
+for k in range(1070, 1080):
+    for c in [1, 3, 5, 7, 9, 11, 2]:
+        x = R(c) * R(2)^(-k)
+        print(k, c, float(x), float(-x), float(x * (1 + R(2)^-90)), float(x * (1 - R(2)^-90)))
+print([float(R(2)^-1022 * (1 - R(2)^-k)) for k in [1, 52, 53, 54, 60]])
+print([float(R(2)^1024 * (1 - R(2)^-k)) for k in [53, 54, 60]])
+# gamma underflowing at large negative arguments, by rounding mode and sign
+for mode in ['RNDN', 'RNDU', 'RNDD', 'RNDZ', 'RNDA']:
+    R = RealField(100, rnd=mode)
+    for x in [R(-2^61) - R(1)/2, R(-2^61) - R(1)/4, R(-2^61) - R(3)/2, R(-2^61 + 1) - R(1)/2]:
+        print(mode, x.gamma().is_zero(), x.gamma() > 0, x.gamma() < 0, abs(x.gamma()) == R(2)^(-2^62))
