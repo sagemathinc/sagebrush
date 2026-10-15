@@ -849,7 +849,7 @@ def _gammainc_logd(a, x):
         main = a * _math.log(lam) - (x - a)
     else:
         main = a * (_math.log(x) - _math.log(a)) - (x - a)
-    return main - 0.5 * _math.log(2 * _PI * a) - _log_gamma_star(a)
+    return main - 0.5 * (_math.log(2 * _PI) + _math.log(a)) - _log_gamma_star(a)
 
 
 def _gammainc_series(a, x):
@@ -892,6 +892,9 @@ def _gammainc_cf(a, x):
         d = 1 / d
         delta = d * c
         h *= delta
+        if not _math.isfinite(h):
+            # (n (n - a) overflows for a near the largest doubles: refused at once)
+            raise NotCovered("gammainc: the continued fraction overflowed at a = %r, x = %r" % (a, x))
         if abs(delta - 1) <= 1e-16:
             return h
         if n > 100000:
@@ -969,15 +972,22 @@ def _gammainc_temme(a, x):
         if abs(term) <= 1e-17 * abs(s) and ak < 1:
             break
         ak /= a
-    r = _math.exp(-a * half_eta2) / _math.sqrt(2 * _PI * a) * s
+    # (sqrt(2 pi) sqrt(a), not sqrt(2 pi a): 2 pi a overflows for a near the largest doubles)
+    sq = _math.sqrt(2 * _PI) * _math.sqrt(a)
+    r = _math.exp(-a * half_eta2) / sq * s
     z = eta * _math.sqrt(a / 2)
     p, q = 0.5 * _math.erfc(-z) - r, 0.5 * _math.erfc(z) + r
-    # (the smaller of P and Q divided by D = exp(-a eta^2/2) / (sqrt(2 pi a)
-    # Gamma*(a)) without forming either: erfc(|z|) = erfcx(|z|) exp(-z^2)
-    # and z^2 = a eta^2/2, so Q/D = Gamma*(a) (sqrt(2 pi a) erfcx(z)/2 + sum)
-    # for z >= 0 and P/D = Gamma*(a) (sqrt(2 pi a) erfcx(-z)/2 - sum) for z < 0)
-    g = _math.exp(_log_gamma_star(a)) * (_math.sqrt(2 * _PI * a) * 0.5 * _erfcx1(abs(z)) + (s if z >= 0 else -s))
-    return p, q, (g if z < 0 else None), (g if z >= 0 else None)
+    # (P and Q divided by D = exp(-a eta^2/2) / (sqrt(2 pi a) Gamma*(a))
+    # without forming either: erfc(z) = erfcx(z) exp(-z^2) and z^2 = a eta^2/2,
+    # so Q/D = Gamma*(a) (sqrt(2 pi a) erfcx(z)/2 + sum) and P/D = Gamma*(a)
+    # (sqrt(2 pi a) erfcx(-z)/2 - sum); erfcx of a negative argument is
+    # 2 e^(z^2) - erfcx(|z|) (DLMF 7.4.3), inf where that overflows, whose
+    # rounding grows only with z^2, where the route through log D would
+    # round all of log(v/D) = z^2 + log(2 pi a)/2 + ...)
+    gs = _math.exp(_log_gamma_star(a))
+    ps = gs * (sq * 0.5 * _erfcx1(-z) - s)
+    qs = gs * (sq * 0.5 * _erfcx1(z) + s)
+    return p, q, ps, qs
 
 
 def _gammainc_alpha(x):
@@ -1024,13 +1034,7 @@ def _gammainc_pq(a, x):
     if a >= _TEMME_A:
         lam1 = (x - a) / a
         if abs(lam1) < 1 and 2 * -_log1pmx(lam1) <= _TEMME_ETA * _TEMME_ETA:
-            p, q, ps, qs = _gammainc_temme(a, x)
-            logd = _gammainc_logd(a, x)
-            if ps is None:
-                ps = _scaled_from(p, logd)
-            if qs is None:
-                qs = _scaled_from(q, logd)
-            return p, q, ps, qs
+            return _gammainc_temme(a, x)
     logd = _gammainc_logd(a, x)
     if a > _gammainc_alpha(x):
         s = _gammainc_series(a, x)
