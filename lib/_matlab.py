@@ -6987,13 +6987,6 @@ def strjoin_(c, delim=None):
     return Char(d.join(_text(e) for e in c.a))
 
 
-@_bs("join")
-def join_(c, delim=None):
-    d = _text(delim) if delim is not None else " "
-    vals = [_text(e) if type(e) is not str else e for e in c.a]
-    return Str(d.join(vals))
-
-
 def _text_pred(name, f):
     def g(nargout, s, p, *opts):
         ic = len(opts) >= 2 and _text(opts[0]).lower() == "ignorecase" and cond(opts[1])

@@ -85,6 +85,28 @@ test("replace: its page's examples, several substrings, and the type of str kept
   ]);
 });
 
+test("join: its page's examples, an array of delimiters rebuilding split's text, cells, dim, and its refusals", () => {
+  const out = matlab([
+    'str = ["Carlos","Sada"; "Ella","Olsen"; "Diana","Lee"];',
+    'str2 = ["x","y","z"; "a","b","c"];',
+    'disp(join(str)); disp(join(str2, "-")); disp(join(str2, [" + "," = "; " - "," = "])); disp(join(str, 1));',
+    '[newStr, match] = split("bacon, lettuce, and tomato", ["and" "," " "]); disp(join(newStr, match));',
+    "c = join({'a', 'b'; 'c', 'd'}); disp(class(c)); disp(size(c)); disp(join({'a', 'b', 'c'}, {'+', '='}));",
+    'disp(join(["a" "b"], "-", 2)); disp(join("abc"));',
+  ].join("\n") + "\n");
+  assert.deepEqual(out.split("\n").map((l: string) => l.trim()).filter(Boolean), [
+    '"Carlos Sada"', '"Ella Olsen"', '"Diana Lee"', '"x-y-z"', '"a-b-c"', '"x + y = z"', '"a - b = c"',
+    '"Carlos Ella Diana"    "Sada Olsen Lee"', "bacon, lettuce, and tomato", "cell", "2     1", "{'a+b=c'}", "a-b", "abc",
+  ]);
+  assert.deepEqual(values(["join('abc')", 'join(["a" "b" "c"], ["-" "+" "*"])', 'join(["a" "b"], "-", 0)', 'join(["a" "b"; "c" "d"], ["-"; "+"; "*"])', "join({1, 2})"]), [
+    "ERROR join: str must be a string array or a cell array of character vectors, not char.",
+    "ERROR join: delimiter must have 2 elements along dimension 2 (one fewer than str), and along each other dimension str's size or 1.",
+    "ERROR join: dim must be a positive integer.",
+    "ERROR join: delimiter must have 1 element along dimension 2 (one fewer than str), and along each other dimension str's size or 1.",
+    "ERROR join: str must be text: a cell array's elements must be character vectors.",
+  ]);
+});
+
 test("dec2bin and dec2hex: fractions, two's complement, and their refusals", () => {
   assert.deepEqual(values([
     "dec2bin(-1.5)", "dec2bin(-2^63)", "dec2bin('a')", "dec2hex(2^64 - 2^12)",
