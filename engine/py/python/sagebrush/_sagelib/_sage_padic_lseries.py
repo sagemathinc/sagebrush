@@ -56,13 +56,44 @@ def _vp(x, p):
     return v
 
 
+def _integer(v):
+    """v as an int when it is an integer (an int, an integral float or
+    rational, as Sage converts them); TypeError otherwise, never a
+    truncation (int(1.9) would be 1)."""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return int(v)
+    if isinstance(v, float):
+        if v.is_integer():
+            return int(v)
+        raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
+    try:
+        q = _F(v)
+    except (TypeError, ValueError):
+        raise TypeError("unable to convert %r to an integer" % (v,))
+    if q.denominator != 1:
+        raise TypeError("no conversion of this rational to integer")
+    return int(q.numerator)
+
+
 def _binomial(n, k):
     from math import comb
     return comb(n, k)
 
 
-def padic_lseries(E, p, normalize="L_ratio", implementation="eclib", precision=None):
+def padic_lseries(E, p, normalize=None, implementation="eclib", precision=None):
     """The p-adic L-series of E (see E.padic_lseries).
+
+    The options are Sage's.  implementation 'eclib' (the default: the
+    modular symbols are eclib's, see E.modular_symbol()); 'sage', 'num' and
+    'pollackstevens' raise NotImplementedError ('pollackstevens' without a
+    precision ValueError first, as in Sage).  normalize None or 'L_ratio'
+    (the same normalization); 'period' and 'none' raise
+    NotImplementedError.  precision is only used by 'pollackstevens', so
+    it is ignored otherwise, as in Sage.  p must be a prime: an integral
+    float or rational is taken as that integer, anything else is not a
+    prime.
 
     EXAMPLES::
 
@@ -76,11 +107,30 @@ def padic_lseries(E, p, normalize="L_ratio", implementation="eclib", precision=N
         Traceback (most recent call last):
         ...
         NotImplementedError: p (=5) must be a prime of semi-stable reduction
+        sage: EllipticCurve('11a1').padic_lseries(3.9)
+        Traceback (most recent call last):
+        ...
+        ArithmeticError: p must be prime
+        sage: EllipticCurve('11a1').padic_lseries(3, normalize='bogus')
+        Traceback (most recent call last):
+        ...
+        ValueError: normalize should be one of 'L_ratio', 'period' or 'none'
     """
-    sa = _sa()
+    if not isinstance(implementation, str) or implementation not in ("sage", "eclib", "num", "pollackstevens"):
+        raise ValueError("Implementation should be one of  'sage', 'eclib', 'num' or 'pollackstevens'")
+    if implementation == "pollackstevens" and precision is None:
+        raise ValueError("Must specify precision when using 'pollackstevens'")
+    if implementation != "eclib":
+        raise NotImplementedError("implementation=%r is not available in sagebrush yet (the modular symbols are eclib's: implementation='eclib')" % (implementation,))
+    if normalize is not None and (not isinstance(normalize, str) or normalize not in ("L_ratio", "period", "none")):
+        raise ValueError("normalize should be one of 'L_ratio', 'period' or 'none'")
+    if normalize in ("period", "none"):
+        raise NotImplementedError("normalize=%r is not available in sagebrush yet (only 'L_ratio')" % (normalize,))
+    if isinstance(p, str):
+        raise TypeError("p must be an integer, not a string")
     try:
-        p = int(p)
-    except (TypeError, ValueError):
+        p = _integer(p)
+    except TypeError:
         raise ArithmeticError("p must be prime")
     if not _is_prime(p):
         raise ArithmeticError("p must be prime")
@@ -172,7 +222,12 @@ class pAdicLseriesOrdinary:
             [0, 1, 2057, 1068, 3124]
         """
         from _padic import Padic
-        return [_sa().Integer(Padic.teichmuller(self._p, a, int(prec))) for a in range(self._p)]
+        prec = _integer(prec)
+        if prec < 0:
+            raise ValueError("prec_cap must be nonnegative")
+        if prec == 0:
+            raise ValueError("not enough precision to determine Teichmuller representative")
+        return [_sa().Integer(Padic.teichmuller(self._p, a, prec)) for a in range(self._p)]
 
     def _alpha_int(self, prec):
         """alpha modulo p^prec, an int: the unit root of x^2 - a_p x + p
@@ -199,7 +254,11 @@ class pAdicLseriesOrdinary:
             sage: EllipticCurve('11a1').padic_lseries(5).alpha(10)
             1 + 4*5 + 3*5^2 + 2*5^3 + 4*5^4 + 4*5^5 + 4*5^6 + 3*5^7 + 2*5^8 + 3*5^9 + O(5^10)
         """
-        prec = int(prec)
+        prec = _integer(prec)
+        if prec < 0:
+            raise ValueError("prec_cap must be nonnegative")
+        if prec == 0:
+            return _sa().Zp(self._p, 1)(0, 0)
         return _sa().Zp(self._p, prec)(self._alpha_int(prec), prec)
 
     def modular_symbol(self, r, sign=+1, quadratic_twist=+1):
@@ -242,7 +301,9 @@ class pAdicLseriesOrdinary:
         return self._cbound
 
     def measure(self, a, n, prec, quadratic_twist=+1, sign=+1):
-        """mu(a + p^n Z_p), in Qp(p, prec) (alpha to precision prec).
+        """mu(a + p^n Z_p), in Qp(p, prec) (alpha to precision prec), for
+        integers a, n >= 1 and prec >= 1 (a non-integral a raises TypeError:
+        Sage reads a rational a as the cusp a/p^n, which is not a measure).
 
         EXAMPLES::
 
@@ -252,10 +313,14 @@ class pAdicLseriesOrdinary:
         if sign != 1 or quadratic_twist != 1:
             raise NotImplementedError("twisted or sign -1 measures are not available in sagebrush yet")
         sa = _sa()
-        p, n, prec = self._p, int(n), int(prec)
+        p, n, prec = self._p, _integer(n), _integer(prec)
+        if n < 1:
+            raise ValueError("n (=%s) must be a positive integer" % n)
+        if prec < 1:
+            raise ValueError("prec (=%s) must be a positive integer" % prec)
         K = sa.Qp(p, prec)
         al = K(self.alpha(prec))
-        a = int(a)
+        a = _integer(a)
         if self._good:
             A, B = self._plus([(a, p ** n), (a, p ** (n - 1))])
             # (paper's [r]^+ times the number of components: Sage's measure)
@@ -266,11 +331,19 @@ class pAdicLseriesOrdinary:
 
     def _riemann(self, n, nterms):
         """The coefficients of P_n(T) up to T^(nterms-1), as (S_j ints mod
-        p^K, ord_p of the common scale): the true coefficient is
-        scale * S_j."""
+        p^K, K, the common rational scale): the true coefficient is
+        scale * T_j with T_j = alpha^-n U_j - alpha^-(n+1) V_j, U_j and V_j
+        integers (sums of the map's integer values) and alpha a p-adic unit,
+        so T_j is a p-adic integer and S_j = T_j mod p^K.  Hence
+        scale * S_j = the coefficient + O(p^(K + v)), v = ord_p(scale), and
+        series() reports precisions at most n + 2 - c: K is chosen with
+        K + v >= n + 2 - c (and K >= n + 6), so the reduction never limits
+        them (a bound read off the actual scale, not assumed)."""
         from _padic import Padic
         p = self._p
-        K = n + 6
+        scale, zero = self._ms._normalization()
+        v = _vp(scale, p) if scale else 0
+        K = max(n + 6, n + 2 - self._c() - v)
         m = p ** K
         pn, pn1 = p ** n, p ** (n - 1)
         teich = [Padic.teichmuller(p, a, n) for a in range(p)]
@@ -284,7 +357,6 @@ class pAdicLseriesOrdinary:
         cusps = [(x, pn) for x in xs]
         if self._good:
             cusps += [(x % pn1, pn1) for x in xs]
-        scale, zero = self._ms._normalization()
         _, vals = self._ms._raw(cusps)
         ainv = pow(self._alpha_int(K), -1, m)
         an, an1 = pow(ainv, n, m), pow(ainv, n + 1, m)
@@ -344,9 +416,13 @@ class pAdicLseriesOrdinary:
         if quadratic_twist != 1 or eta != 0:
             raise NotImplementedError("twisted p-adic L-series (quadratic_twist, eta) are not available in sagebrush yet")
         sa = _sa()
-        p, n, prec = self._p, int(n), int(prec)
+        if isinstance(prec, float):
+            raise TypeError("%r cannot be interpreted as an integer" % (prec,))
+        p, n, prec = self._p, _integer(n), _integer(prec)
         if n < 1:
             raise ValueError("n (=%s) must be a positive integer" % n)
+        if prec < 1:
+            raise ValueError("Insufficient precision (%s)" % prec)
         c = self._c()
         # e_(n-1,j) and where the series stops (the first j with e = 0)
         pn1 = p ** (n - 1)
@@ -360,7 +436,9 @@ class pAdicLseriesOrdinary:
             es.append(e)
         nterms = len(es)
         S, K, scale = self._riemann(n, nterms)
-        vs = _vp(scale, p) if scale else 0
+        # (_riemann's K is enough: K + ord_p(scale) >= n + 2 - c, the
+        # largest absolute precision below)
+        assert scale == 0 or K + _vp(scale, p) >= n + 2 - c
         R = sa.Qp(p, n + 4 - c)
         # trailing coefficients that are exact zeros are dropped (Sage does
         # not show them as O(p^k)*T^j); the others carry their precision
