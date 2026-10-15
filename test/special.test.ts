@@ -271,9 +271,10 @@ print(repr(S.erf(2j)), repr(S.erfi(1j)), repr(S.erfc(2j)), repr(S.erf(complex(-0
     "NotCovered: erf: the Taylor series did not converge | NotCovered: loggamma: the series about 2 did not converge | " +
       "NotCovered: psi: the series about 1 did not converge | NotCovered: psi: the series about 2 did not converge | " +
       "NotCovered: polylog: the series did not converge",
-    // (mpmath: B(-1.5, 1e308) = 2.36327180120735, B(-2.5, 1e15) = -2.98932864874555e37, log B(-1.5, 2^-1074) =
+    // (mpmath at 400 digits: B(-1.5, 1e308) = 2.36327180120735e462, beyond the doubles (30 digits round 1e308 - 1.5 to
+    // 1e308 and give 2.36); B(-2.5, 1e15) = -2.98932864874555e37, log B(-1.5, 2^-1074) =
     // 744.440071921381, W_-1(2^-1074) = -751.061568323038 - 3.14578107543527i, Li_2(1 + 1e-300 i) = pi^2/6 + ...)
-    "inf 0j 1e-300 0j inf 2.36327180121 0.0 -2.98932864875e+37 744.440071921 -751.061568323-3.14578107544j inf 1.0 0.0 1.64493406685 0.166666666667",
+    "inf 0j 1e-300 0j inf inf 0.0 -2.98932864875e+37 744.440071921 -751.061568323-3.14578107544j inf 1.0 0.0 1.64493406685 0.166666666667",
     "[True, True, True, True, True, True, True] -0.5000000000000001 -0.5",
     // (mpmath: erfi(2) = 18.5648024145755526, erf(1) = 0.842700792949714869)
     "18.564802414575553j 0.8427007929497149j (1-18.564802414575553j) (-0+18.564802414575553j) (0.9661051464753108-0j) " +

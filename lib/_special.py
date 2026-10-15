@@ -795,12 +795,15 @@ def _is_nonpos_int(x):
     return x <= 0 and x == _math.floor(x)
 
 
-def _lgamma_diff(u, v):
-    """log Gamma(u) - log Gamma(v) for u, v >= 15, by Stirling's series
-    (DLMF 5.11.1) with its large terms combined: (u - 1/2) log(u/v) +
-    (u - v)(log v - 1) + mu(u) - mu(v), so that neither log Gamma, which
-    can overflow, is formed and their cancellation does not lose digits"""
-    return (u - 0.5) * _math.log1p((u - v) / v) + (u - v) * (_math.log(v) - 1) + _stirling_mu(u) - _stirling_mu(v)
+def _lgamma_diff(b, d):
+    """log Gamma(b) - log Gamma(b + d) for b, b + d >= 15, by Stirling's
+    series (DLMF 5.11.1) with its large terms combined, as in _betaln_pos:
+    -(b - 1/2) log(1 + d/b) - d log(b + d) + d + mu(b) - mu(b + d).  The
+    offset d enters exactly (not as the difference of b and a rounded b + d),
+    neither log Gamma, which can overflow, is formed, and their cancellation
+    does not lose digits"""
+    v = b + d
+    return -(b - 0.5) * _math.log1p(d / b) - d * _math.log(v) + d + _stirling_mu(b) - _stirling_mu(v)
 
 
 def _betaln_signed(a, b):
@@ -829,7 +832,7 @@ def _betaln_signed(a, b):
     if b < a:
         a, b = b, a
     if b >= _STIRLING_R and a + b >= _STIRLING_R:
-        return _math.lgamma(a) + _lgamma_diff(b, a + b), sign
+        return _math.lgamma(a) + _lgamma_diff(b, a), sign
     return _math.lgamma(a) + _math.lgamma(b) - _math.lgamma(a + b), sign
 
 
