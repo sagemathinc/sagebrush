@@ -59,8 +59,7 @@ function inspect(svg) {
 
 // ---- the example boards: every page; the same each time; nothing overflows --
 const HASHES = {
-
-  "sagebrush-0": "119690ce7f019263", "live-0": "1effa302c7b83f0f", "primes-0": "5ff20192569e199b", "primes-1": "895ebd4a38777287", "primes-2": "a04d0c3d71e878ba", "polynomials-0": "e94553d47bd3d0e3", "museum-tour-0": "999888d248719e81",
+  "sagebrush-0": "119690ce7f019263", "live-0": "1effa302c7b83f0f", "primes-0": "5ff20192569e199b", "primes-1": "895ebd4a38777287", "primes-2": "f41e30fae80e71f2", "polynomials-0": "e94553d47bd3d0e3", "museum-tour-0": "999888d248719e81",
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {

@@ -383,16 +383,22 @@ export function* routeSteps(reqs: RouteRequest[], boxes: Rect[]): Generator<void
     if (!p) continue;
     fixed.set(r.id, { sa: sideOf(r.a, p[0], p[1]), ta: 0.5, sb: sideOf(r.b, p[p.length - 2], p[p.length - 1]), tb: 0.5 });
   }
+  // (an edge straight across from one box to the next, as neighbours in a
+  // grid's row are, keeps the side's middle at both its ends: the others
+  // sharing the side spread around it, before or after it by where they go,
+  // and it stays straight, not jogged by them; friction 14)
+  const straight = (id: string) => { const p = first.get(id)!; return p.length === 4 && (p[0] === p[2] || p[1] === p[3]); };
   let spread = false;
   for (const list of ends.values()) {
     if (list.length < 2) continue;
     spread = true;
     list.sort((p, q) => p.key - q.key);
-    list.forEach((e, i) => {
-      const f = fixed.get(e.id)!;
-      const t = (i + 1) / (list.length + 1);
-      if (e.end === "a") f.ta = t; else f.tb = t;
-    });
+    const set = (e: (typeof list)[number], t: number) => { const f = fixed.get(e.id)!; if (e.end === "a") f.ta = t; else f.tb = t; };
+    const mid = list.find((e) => straight(e.id));
+    if (!mid) { list.forEach((e, i) => set(e, (i + 1) / (list.length + 1))); continue; }
+    const k = list.indexOf(mid), before = list.slice(0, k), after = list.slice(k + 1);
+    before.forEach((e, i) => set(e, ((i + 1) / (before.length + 1)) * 0.5));
+    after.forEach((e, i) => set(e, 0.5 + ((i + 1) / (after.length + 1)) * 0.5));
   }
   // second pass, with the spread ends (when any end moved)
   const used2 = new Used();
