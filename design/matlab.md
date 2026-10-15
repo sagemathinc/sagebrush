@@ -66,7 +66,7 @@ and runs on a runtime library with MATLAB's semantics:
     double, the order for a numeric sigma (nearest first), which the page
     leaves open, IsSymmetricDefinite required for a sparse B of more than
     2000 rows, and the messages;
-  - **lib/_matlab_more.py**: split and replace, dec2bin, dec2hex, bin2dec
+  - **lib/_matlab_more.py**: split, join and replace, dec2bin, dec2hex, bin2dec
     and hex2dec, sub2ind and ind2sub, and mat2cell, from their
     documentation pages. Negative numbers in dec2bin and dec2hex are two's
     complement in the narrowest of 8, 16, 32 and 64 bits holding every
@@ -739,8 +739,8 @@ something plausible. Examples:
   - `sub2ind` with fewer subscripts than sz has elements;
   - `sub2ind` and `ind2sub` results above 2^53 that are not exactly
     doubles (their arithmetic is exact; the result would be rounded);
-  - `split`'s and `replace`'s pattern objects, which Sagebrush lacks, and
-    `join` with an array of delimiters.
+  - `split`'s and `replace`'s pattern objects, which Sagebrush lacks;
+  - `join` of an array with no elements along the joined dimension.
 
 The rest:
 - polar axes, lighting and apps (see Graphics);
