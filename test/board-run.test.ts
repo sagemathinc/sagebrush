@@ -236,3 +236,17 @@ test("board run: a board of a later version is refused in the same words as boar
   assert.equal(render.status, 1);
   assert.equal(r.stderr.replace(/^sagebrush board run: /, ""), render.stderr.replace(/^sagebrush board render: /, ""));
 });
+
+test("board run: a Magma item that fails fails its cell; what reads it is not run, the others are, and the exit is 1", () => {
+  const { status, report } = json(["-"], board([
+    { id: "a", code: "x := 5;\nprint x;" },
+    { id: "b", code: "y := x div 0;" },
+    { id: "c", code: "print y + 1;" },
+    { id: "d", code: "print 7;" },
+  ], { mode: "magma" }));
+  assert.equal(status, 1);
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.items.map((i: any) => [i.id, i.status]), [["a", "ok"], ["b", "failed"], ["c", "not run"], ["d", "ok"]]);
+  assert.match(report.items[1].stdout, /Runtime error/);
+  assert.equal(report.items[3].stdout, "7\n");
+});
