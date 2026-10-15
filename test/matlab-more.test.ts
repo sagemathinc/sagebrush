@@ -144,6 +144,30 @@ test("sub2ind and ind2sub: scalar subscripts expanding, and their refusals", () 
   ]);
 });
 
+test("sub2ind and ind2sub: exact arithmetic beyond 2^52, and no scalar sz for ind2sub (R2024b)", () => {
+  const out = matlab([
+    "[r, c] = ind2sub([3, 1], 9007199254740994); fprintf('%.0f %.0f\\n', r, c);",
+    "[r, c] = ind2sub([2^40 2^20], 2^60); fprintf('%.0f %.0f\\n', r, c);",
+    "fprintf('%.0f\\n', sub2ind([2^40 2^20], 2^40, 2^20));",
+    "[r, c] = ind2sub([6 1], [2 3 4]); disp([r; c]);",
+    "fprintf('%.0f\\n', sub2ind(6, 4));",
+    "try, [r, c] = ind2sub(6, [2 3 4]); catch e, disp(e.message), end",
+    "try, sub2ind([2^40 2^20], 2, 2^20), catch e, disp(e.message), end",
+    "try, [r, c] = ind2sub([3 2^60], 2^62 + 2^12); catch e, disp(e.message), end",
+  ].join("\n") + "\n");
+  assert.deepEqual(out.split("\n").map((l: string) => l.trim()).filter(Boolean), [
+    "1 3002399751580332",
+    "1099511627776 1048576",
+    "1152921504606846976",
+    "2     3     4",
+    "1     1     1",
+    "4",
+    "ind2sub: sz must be a vector of positive integers with two or more elements; for a column of n elements, give [n 1].",
+    "sub2ind: the result 1152920405095219202 is not exactly a double (above 2^53); Sagebrush does not round it.",
+    "ind2sub: the result 1537228672809130667 is not exactly a double (above 2^53); Sagebrush does not round it.",
+  ]);
+});
+
 test("mat2cell: string and struct arrays, and its refusals", () => {
   assert.deepEqual(values([
     'mat2cell(["a" "b" "c"], 1, [2 1])', "mat2cell(struct('a', {1, 2}), 1, [1 1])",

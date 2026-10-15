@@ -737,6 +737,8 @@ something plausible. Examples:
     integer class;
   - `bin2dec` and `hex2dec` of empty text, or of spaces between digits;
   - `sub2ind` with fewer subscripts than sz has elements;
+  - `sub2ind` and `ind2sub` results above 2^53 that are not exactly
+    doubles (their arithmetic is exact; the result would be rounded);
   - `split`'s and `replace`'s pattern objects, which Sagebrush lacks, and
     `join` with an array of delimiters.
 
