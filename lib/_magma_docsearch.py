@@ -7,9 +7,10 @@ Sagebrush, as JSON entries in the form of lib/_pyjs_docsearch.py's index.
     sagebrush --search "class group" --mode magma
 
 No text here comes from Magma's documentation: the names are the
-intrinsics' names, and the summaries and areas are Sagebrush's own.  Every
-name lib/_magma.py binds is either in TABLE or in INTERNAL (test/docsearch
-checks it), so a new intrinsic needs a summary to be found.
+intrinsics' names, and the summaries, areas and examples are Sagebrush's
+own.  Every name lib/_magma.py binds is either in TABLE, with an example in
+EXAMPLES, or in INTERNAL (test/docsearch checks it), so a new intrinsic
+needs a summary and an example to be found.
 """
 
 import json as _json
@@ -111,7 +112,6 @@ TABLE = {
     "SequenceToSet": (["sequences and sets"], "The same as Seqset."),
     "Set": (["sequences and sets"], "The set of the elements of a sequence or other collection."),
     "Eltseq": (["sequences and sets", "polynomials"], "The sequence of an object's coefficients or elements."),
-    "Sum": (["sequences and sets"], "The sum of the elements of a sequence."),
     "Universe": (["sequences and sets"], "The structure containing the elements of a set or sequence."),
     "Random": (["sequences and sets"], "A random element of a set, sequence or structure."),
     # records
@@ -141,7 +141,6 @@ TABLE = {
     "NewformDecomposition": (["modular forms"], "A space of modular symbols split into Galois orbits of newforms."),
     "DimensionCuspFormsGamma0": (["modular forms"], "The dimension of the cusp forms of level N and weight k."),
     "DimensionNewCuspFormsGamma0": (["modular forms"], "The dimension of the new cusp forms of level N and weight k."),
-    "DimensionModularFormsGamma0": (["modular forms"], "The dimension of the modular forms of level N and weight k."),
     "CuspForms": (["modular forms"], "The space of cusp forms of level N and weight k."),
     "ModularForms": (["modular forms"], "The space of modular forms of level N and weight k."),
     "Newforms": (["modular forms"], "The newforms of a space of cusp forms, by Galois orbit."),
@@ -189,6 +188,565 @@ TABLE = {
     "Image": (["maps"], "The set of images of a map given by its graph."),
     "Inverse": (["maps"], "The inverse of a map given by a rule; applying it needs an inverse rule."),
 }
+
+# name -> an example, written for Sagebrush: Magma input after the prompt
+# "> ", each statement followed by the output Sagebrush prints for it.
+# test/magma-examples.test.ts runs every one in a fresh Magma session and
+# requires exactly this output; it also compares Magma 2.18's (recorded in
+# test/magma-examples.json, made by scripts/magma-examples-table.py) and
+# lists where the two differ.
+EXAMPLES = {
+    "Integers": """\
+> Z := Integers();
+> Z ! 17;
+17""",
+    "IntegerRing": """\
+> IntegerRing() eq Integers();
+true""",
+    "Rationals": """\
+> Q := Rationals();
+> Q ! (6/8);
+3/4""",
+    "RationalField": """\
+> RationalField() eq Rationals();
+true""",
+    "RealField": """\
+> R := RealField(10);
+> R ! (2/7);
+0.2857142857""",
+    "Parent": """\
+> Parent(5/3);
+Rational Field""",
+    "Type": """\
+> Type([1, 2]);
+SeqEnum""",
+    "AssignNames": """\
+> P := PolynomialRing(Integers());
+> AssignNames(~P, ["u"]);
+> P.1^2 + 1;
+u^2 + 1""",
+    "IsPrime": """\
+> IsPrime(101);
+true
+> IsPrime(91);
+false""",
+    "IsProbablePrime": """\
+> IsProbablePrime(1009);
+true""",
+    "NextPrime": """\
+> NextPrime(100);
+101""",
+    "PreviousPrime": """\
+> PreviousPrime(100);
+97""",
+    "PrimesUpTo": """\
+> PrimesUpTo(30);
+[ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ]""",
+    "PrimesInInterval": """\
+> PrimesInInterval(40, 60);
+[ 41, 43, 47, 53, 59 ]""",
+    "NthPrime": """\
+> NthPrime(25);
+97""",
+    "PrimeDivisors": """\
+> PrimeDivisors(360);
+[ 2, 3, 5 ]""",
+    "Divisors": """\
+> Divisors(28);
+[ 1, 2, 4, 7, 14, 28 ]""",
+    "NumberOfDivisors": """\
+> NumberOfDivisors(360);
+24""",
+    "SumOfDivisors": """\
+> SumOfDivisors(28);
+56""",
+    "DivisorSigma": """\
+> DivisorSigma(2, 6);
+50""",
+    "EulerPhi": """\
+> EulerPhi(36);
+12""",
+    "MoebiusMu": """\
+> MoebiusMu(30), MoebiusMu(12);
+-1 0""",
+    "IsPrimePower": """\
+> IsPrimePower(243);
+true 3 5""",
+    "Factorization": """\
+> Factorization(720);
+[ <2, 4>, <3, 2>, <5, 1> ]""",
+    "Factorisation": """\
+> Factorisation(1001);
+[ <7, 1>, <11, 1>, <13, 1> ]""",
+    "Gcd": """\
+> Gcd(84, 120);
+12""",
+    "GCD": """\
+> GCD(35, 21);
+7""",
+    "GreatestCommonDivisor": """\
+> GreatestCommonDivisor(48, 180);
+12""",
+    "Lcm": """\
+> Lcm(12, 18);
+36""",
+    "LCM": """\
+> LCM(4, 10);
+20""",
+    "LeastCommonMultiple": """\
+> LeastCommonMultiple(6, 15);
+30""",
+    "Xgcd": """\
+> g, x, y := Xgcd(30, 42);
+> g, 30*x + 42*y;
+6 6""",
+    "XGCD": """\
+> g, x, y := XGCD(14, 9);
+> g eq 14*x + 9*y;
+true""",
+    "ExtendedGreatestCommonDivisor": """\
+> g := ExtendedGreatestCommonDivisor(20, 12);
+> g;
+4""",
+    "Quotrem": """\
+> Quotrem(47, 6);
+7 5""",
+    "Modexp": """\
+> Modexp(3, 100, 7);
+4""",
+    "Modinv": """\
+> Modinv(5, 17);
+7""",
+    "InverseMod": """\
+> InverseMod(3, 11);
+4""",
+    "Binomial": """\
+> Binomial(10, 3);
+120""",
+    "Factorial": """\
+> Factorial(12);
+479001600""",
+    "Fibonacci": """\
+> Fibonacci(30);
+832040""",
+    "IsSquare": """\
+> IsSquare(144);
+true 12
+> IsSquare(50);
+false""",
+    "Isqrt": """\
+> Isqrt(150);
+12""",
+    "IsEven": """\
+> IsEven(10);
+true""",
+    "IsOdd": """\
+> IsOdd(10);
+false""",
+    "Valuation": """\
+> Valuation(96, 2);
+5""",
+    "Intseq": """\
+> Intseq(1234);
+[ 4, 3, 2, 1 ]
+> Intseq(10, 2);
+[ 0, 1, 0, 1 ]""",
+    "Seqint": """\
+> Seqint([4, 3, 2, 1]);
+1234""",
+    "ChineseRemainderTheorem": """\
+> ChineseRemainderTheorem([2, 3], [5, 7]);
+17""",
+    "CRT": """\
+> CRT([1, 4], [3, 5]);
+4""",
+    "IsZero": """\
+> IsZero(0), IsZero(3/4);
+true false""",
+    "IsOne": """\
+> IsOne(1), IsOne(-1);
+true false""",
+    "IsUnit": """\
+> IsUnit(-1), IsUnit(2);
+true false""",
+    "Abs": """\
+> Abs(-7/3);
+7/3""",
+    "Sign": """\
+> Sign(-12), Sign(0);
+-1 0""",
+    "Floor": """\
+> Floor(17/5);
+3""",
+    "Ceiling": """\
+> Ceiling(17/5);
+4""",
+    "Round": """\
+> Round(7/2), Round(-13/4);
+4 -3""",
+    "Truncate": """\
+> Truncate(-17/5);
+-3""",
+    "Numerator": """\
+> Numerator(12/18);
+2""",
+    "Denominator": """\
+> Denominator(12/18);
+3""",
+    "Sqrt": """\
+> Sqrt(RealField(15) ! 3);
+1.73205080756888""",
+    "Exp": """\
+> Exp(RealField(15) ! 2);
+7.38905609893065""",
+    "Log": """\
+> Log(RealField(15) ! 10);
+2.30258509299405""",
+    "Pi": """\
+> Pi(RealField(20));
+3.1415926535897932385""",
+    "Max": """\
+> Max(3, 11);
+11
+> Max([4, 9, 2]);
+9 2""",
+    "Min": """\
+> Min(3, 11);
+3
+> Min([4, 9, 2]);
+2 3""",
+    "Maximum": """\
+> Maximum([4, 9, 2]);
+9 2""",
+    "Minimum": """\
+> Minimum([4, 9, 2]);
+2 3""",
+    "IntegerToString": """\
+> IntegerToString(255);
+255
+> IntegerToString(255, 16);
+FF""",
+    "StringToInteger": """\
+> StringToInteger("4096") + 1;
+4097""",
+    "Sprint": """\
+> s := Sprint([1, 2]);
+> #s;
+8""",
+    "Sprintf": """\
+> Sprintf("%o squared is %o", 7, 49);
+7 squared is 49""",
+    "Append": """\
+> Append([1, 2], 3);
+[ 1, 2, 3 ]""",
+    "Include": """\
+> Include({1, 2}, 5);
+{ 1, 2, 5 }""",
+    "Exclude": """\
+> Exclude({1, 2, 5}, 2);
+{ 1, 5 }""",
+    "Remove": """\
+> Remove([10, 20, 30], 2);
+[ 10, 30 ]""",
+    "Insert": """\
+> Insert([10, 30], 2, 20);
+[ 10, 20, 30 ]""",
+    "Reverse": """\
+> Reverse([1, 2, 3]);
+[ 3, 2, 1 ]""",
+    "Sort": """\
+> Sort([5, 1, 4]);
+[ 1, 4, 5 ]""",
+    "Index": """\
+> Index([7, 8, 9], 8);
+2""",
+    "Position": """\
+> Position([7, 8, 9], 10);
+0""",
+    "IsEmpty": """\
+> IsEmpty([]), IsEmpty({1});
+true false""",
+    "Seqset": """\
+> Seqset([3, 1, 3, 2]);
+{ 1, 2, 3 }""",
+    "SetToSequence": """\
+> Sort(SetToSequence({4, 2, 9}));
+[ 2, 4, 9 ]""",
+    "Setseq": """\
+> #Setseq({1, 2, 3});
+3""",
+    "SequenceToSet": """\
+> SequenceToSet([2, 2, 5]);
+{ 2, 5 }""",
+    "Set": """\
+> Set([1, 1, 2]);
+{ 1, 2 }""",
+    "Eltseq": """\
+> P<x> := PolynomialRing(Integers());
+> Eltseq(3*x^2 + 1);
+[ 1, 0, 3 ]""",
+    "Universe": """\
+> Universe([1/2, 3]);
+Rational Field""",
+    "Random": """\
+> Random([7]);
+7""",
+    "Names": """\
+> F := recformat< a, b >;
+> Names(F);
+[ a, b ]""",
+    "Format": """\
+> F := recformat< a, b >;
+> r := rec< F | a := 1 >;
+> Names(Format(r));
+[ a, b ]""",
+    "PolynomialRing": """\
+> P<t> := PolynomialRing(Rationals());
+> (t + 1)^3;
+t^3 + 3*t^2 + 3*t + 1""",
+    "Degree": """\
+> P<x> := PolynomialRing(Integers());
+> Degree(x^5 - x);
+5""",
+    "Coefficients": """\
+> P<x> := PolynomialRing(Integers());
+> Coefficients(2*x^3 - x + 7);
+[ 7, -1, 0, 2 ]""",
+    "Coefficient": """\
+> P<x> := PolynomialRing(Integers());
+> Coefficient(2*x^3 - x + 7, 1);
+-1""",
+    "LeadingCoefficient": """\
+> P<x> := PolynomialRing(Integers());
+> LeadingCoefficient(5*x^2 + x);
+5""",
+    "Evaluate": """\
+> P<x> := PolynomialRing(Integers());
+> Evaluate(x^2 + 1, 3);
+10""",
+    "Derivative": """\
+> P<x> := PolynomialRing(Integers());
+> Derivative(x^4 + 3*x);
+4*x^3 + 3""",
+    "Discriminant": """\
+> P<x> := PolynomialRing(Integers());
+> Discriminant(x^2 + x + 1);
+-3""",
+    "Resultant": """\
+> P<x> := PolynomialRing(Integers());
+> Resultant(x^2 - 2, x - 3);
+7""",
+    "IsIrreducible": """\
+> P<x> := PolynomialRing(Rationals());
+> IsIrreducible(x^4 + 1), IsIrreducible(x^2 - 4);
+true false""",
+    "Roots": """\
+> P<x> := PolynomialRing(Rationals());
+> Roots((x - 2)^2 * (x + 5));
+[ <-5, 1>, <2, 2> ]""",
+    "Gamma0": """\
+> Gamma0(11);
+Gamma_0(11)""",
+    "ModularSymbols": """\
+> M := ModularSymbols(23, 2, 1);
+> Dimension(M);
+3""",
+    "Dimension": """\
+> Dimension(CuspidalSubspace(ModularSymbols(37, 2, 1)));
+2""",
+    "CuspidalSubspace": """\
+> S := CuspidalSubspace(ModularSymbols(11, 2, 1));
+> Dimension(S);
+1""",
+    "NewSubspace": """\
+> Dimension(NewSubspace(CuspidalSubspace(ModularSymbols(22, 2, 1))));
+0""",
+    "HeckePolynomial": """\
+> S := CuspidalSubspace(ModularSymbols(23, 2, 1));
+> HeckePolynomial(S, 2);
+x^2 + x - 1""",
+    "HeckeOperator": """\
+> S := CuspidalSubspace(ModularSymbols(11, 2, 1));
+> T := HeckeOperator(S, 5);
+> Coefficients(CharacteristicPolynomial(T));
+[ -1, 1 ]""",
+    "CharacteristicPolynomial": """\
+> S := CuspidalSubspace(ModularSymbols(11, 2, 1));
+> Coefficients(CharacteristicPolynomial(HeckeOperator(S, 2)));
+[ 2, 1 ]""",
+    "NewformDecomposition": """\
+> S := CuspidalSubspace(ModularSymbols(33, 2, 1));
+> #NewformDecomposition(NewSubspace(S));
+1""",
+    "DimensionCuspFormsGamma0": """\
+> DimensionCuspFormsGamma0(37, 2);
+2""",
+    "DimensionNewCuspFormsGamma0": """\
+> DimensionNewCuspFormsGamma0(22, 2);
+0""",
+    "CuspForms": """\
+> Dimension(CuspForms(23, 2));
+2""",
+    "ModularForms": """\
+> Dimension(ModularForms(1, 12));
+2""",
+    "Newforms": """\
+> #Newforms(CuspForms(11, 2));
+1""",
+    "qExpansion": """\
+> f := Newforms(CuspForms(11, 2))[1][1];
+> qExpansion(f, 6);
+q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)""",
+    "EllipticCurve": """\
+> E := EllipticCurve([0, 0, 1, -1, 0]);
+> Conductor(E);
+37""",
+    "TraceOfFrobenius": """\
+> E := EllipticCurve([0, -1, 1, 0, 0]);
+> TraceOfFrobenius(E, 7);
+-2""",
+    "Conductor": """\
+> Conductor(EllipticCurve([1, 0, 0, 0, 1]));
+433""",
+    "aInvariants": """\
+> aInvariants(EllipticCurve([3, 5]));
+[ 0, 0, 0, 3, 5 ]""",
+    "jInvariant": """\
+> jInvariant(EllipticCurve([0, 0, 1, -1, 0]));
+110592/37""",
+    "CremonaReference": """\
+> CremonaReference(EllipticCurve([0, -1, 1, -10, -20]));
+11a1""",
+    "TorsionSubgroup": """\
+> #TorsionSubgroup(EllipticCurve([0, -1, 1, -10, -20]));
+5""",
+    "Rank": """\
+> Rank(EllipticCurve([0, 0, 1, -1, 0]));
+1
+> Rank(Matrix(Integers(), 2, 2, [1, 2, 2, 4]));
+1""",
+    "NumberField": """\
+> P<x> := PolynomialRing(Integers());
+> K<a> := NumberField(x^3 - 2);
+> a^4;
+2*a""",
+    "QuadraticField": """\
+> K<w> := QuadraticField(-5);
+> w^2;
+-5""",
+    "MaximalOrder": """\
+> K := QuadraticField(5);
+> Discriminant(MaximalOrder(K));
+5""",
+    "RingOfIntegers": """\
+> K := QuadraticField(-3);
+> Discriminant(RingOfIntegers(K));
+-3""",
+    "Signature": """\
+> P<x> := PolynomialRing(Integers());
+> Signature(NumberField(x^3 - 2));
+1 1""",
+    "IntegralBasis": """\
+> K<w> := QuadraticField(13);
+> IntegralBasis(K)[2];
+1/2*(w + 1)""",
+    "ClassNumber": """\
+> ClassNumber(QuadraticField(-23));
+3""",
+    "ClassGroup": """\
+> G := ClassGroup(QuadraticField(-14));
+> #G;
+4""",
+    "UnitGroup": """\
+> U := UnitGroup(QuadraticField(-1));
+> #U;
+4""",
+    "Regulator": """\
+> Round(1000 * Regulator(QuadraticField(5)));
+481""",
+    "UnitRank": """\
+> P<x> := PolynomialRing(Integers());
+> UnitRank(NumberField(x^3 - 2));
+1""",
+    "Decomposition": """\
+> O := MaximalOrder(QuadraticField(-1));
+> #Decomposition(O, 5);
+2""",
+    "Norm": """\
+> K<w> := QuadraticField(7);
+> Norm(3 + w);
+2""",
+    "Trace": """\
+> K<w> := QuadraticField(7);
+> Trace(3 + w);
+6""",
+    "MinimalPolynomial": """\
+> K<w> := QuadraticField(7);
+> MinimalPolynomial(1 + w);
+$.1^2 - 2*$.1 - 6""",
+    "Matrix": """\
+> Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]);
+[1 2 3]
+[4 5 6]""",
+    "HermiteForm": """\
+> HermiteForm(Matrix(Integers(), 2, 2, [2, 4, 3, 1]));
+[ 1  7]
+[ 0 10]""",
+    "EchelonForm": """\
+> EchelonForm(Matrix(Rationals(), 2, 3, [1, 2, 3, 2, 4, 7]));
+[1 2 0]
+[0 0 1]""",
+    "SmithForm": """\
+> D := SmithForm(Matrix(Integers(), 2, 2, [2, 4, 6, 8]));
+> D;
+[2 0]
+[0 4]""",
+    "ElementaryDivisors": """\
+> ElementaryDivisors(Matrix(Integers(), 2, 2, [2, 4, 6, 8]));
+[ 2, 4 ]""",
+    "LLL": """\
+> LLL(Matrix(Integers(), 2, 2, [1, 0, 99, 1]));
+[1 0]
+[0 1]""",
+    "Determinant": """\
+> Determinant(Matrix(Integers(), 3, 3, [2, 0, 1, 1, 3, 0, 0, 1, 4]));
+25""",
+    "Transpose": """\
+> Transpose(Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]));
+[1 4]
+[2 5]
+[3 6]""",
+    "NumberOfRows": """\
+> NumberOfRows(Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]));
+2""",
+    "NumberOfColumns": """\
+> NumberOfColumns(Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]));
+3""",
+    "Nrows": """\
+> Nrows(Matrix(Integers(), 4, 1, [1, 2, 3, 4]));
+4""",
+    "Ncols": """\
+> Ncols(Matrix(Integers(), 4, 1, [1, 2, 3, 4]));
+1""",
+    "Domain": """\
+> f := map< Integers() -> Rationals() | n :-> n / 2 >;
+> Domain(f);
+Integer Ring""",
+    "Codomain": """\
+> f := map< Integers() -> Rationals() | n :-> n / 2 >;
+> Codomain(f);
+Rational Field""",
+    "Image": """\
+> f := map< {1, 2, 3} -> Integers() | [<1, 5>, <2, 5>, <3, 7>] >;
+> Image(f);
+{ 5, 7 }""",
+    "Inverse": """\
+> f := map< Integers() -> Integers() | n :-> n + 4, m :-> m - 4 >;
+> g := Inverse(f);
+> g(10);
+6""",
+}
+
 
 # names lib/_magma.py exports that are not Magma intrinsics (its classes
 # and internal aliases)
@@ -260,14 +818,18 @@ def build_index():
         if name not in TABLE:
             continue  # (test/docsearch fails for these)
         areas, summary = TABLE[name]
+        example = EXAMPLES.get(name, "")
+        doc = summary
+        if example:
+            doc += "\n\nExample:\n\n" + "\n".join("    " + line for line in example.split("\n"))
         out.append({
             "name": name,
             "module": "magma",
             "kind": "function",
             "signature": _magma_signature(name, getattr(_magma, name))[len(name):],
             "summary": summary,
-            "doc": summary,
-            "examples": 0,
+            "doc": doc,
+            "examples": sum(1 for line in example.split("\n") if line.startswith("> ")),
             "open_problem": False,
             "language": "magma",
             "areas": areas,
@@ -276,10 +838,11 @@ def build_index():
 
 
 def check():
-    """Names bound but not in TABLE (they need a summary), and names in
-    TABLE that are not bound."""
+    """Names bound but not in TABLE (they need a summary), names in TABLE
+    that are not bound, and names of TABLE without an example (or examples
+    of names not in TABLE)."""
     bound = set(bound_names())
-    return sorted(bound - set(TABLE)), sorted(set(TABLE) - bound)
+    return sorted(bound - set(TABLE)), sorted(set(TABLE) - bound), sorted(set(TABLE) ^ set(EXAMPLES))
 
 
 def main(argv):
@@ -287,10 +850,13 @@ def main(argv):
         print(_json.dumps(build_index(), separators=(",", ":")))
         return 0
     if "--check" in argv:
-        missing, extra = check()
-        print(_json.dumps({"missing": missing, "extra": extra}))
-        return 1 if missing or extra else 0
-    print("usage: sagebrush -m _magma_docsearch --index | --check")
+        missing, extra, no_example = check()
+        print(_json.dumps({"missing": missing, "extra": extra, "no_example": no_example}))
+        return 1 if missing or extra or no_example else 0
+    if "--examples" in argv:
+        print(_json.dumps(EXAMPLES))
+        return 0
+    print("usage: sagebrush -m _magma_docsearch --index | --check | --examples")
     return 2
 
 

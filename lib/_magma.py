@@ -2502,10 +2502,12 @@ def PolynomialRing(R, n=1):
 
 
 def AssignNames(R, names):
+    # a procedure (AssignNames(~R, names)): returns R, the new value of ~R
     if isinstance(R, _sp.PolynomialRing_) and names:
         R._name = names[0]
     elif hasattr(R, "_magma_names"):
         R._magma_names(names)
+    return R
 
 
 def _poly_parts(f):
@@ -3231,10 +3233,6 @@ def Eltseq(x):
     return MSeq(x)
 
 
-def Sum(s):
-    return _reduce("+", s)
-
-
 def Universe(s):
     u = getattr(s, "universe", None)
     if u is not None:
@@ -3379,8 +3377,14 @@ def HeckePolynomial(M, p):
 
 
 class _HeckeOp:
+    """T_p on a space, for its characteristic polynomial; its matrix isn't
+    computed."""
+
     def __init__(self, M, p):
         self.M, self.p = M, p
+
+    def __repr__(self):
+        raise MagmaError("the matrix of a Hecke operator is not supported yet (CharacteristicPolynomial works)")
 
 
 def HeckeOperator(M, p):
@@ -3409,11 +3413,6 @@ def DimensionCuspFormsGamma0(N, k):
 
 def DimensionNewCuspFormsGamma0(N, k):
     return _mf.dims(N, k)["new"]
-
-
-def DimensionModularFormsGamma0(N, k):
-    d = _mf.dims(N, k)
-    return d["cusp"] + d["eisenstein"]
 
 
 class MModForms:
@@ -3732,7 +3731,11 @@ def UnitGroup(K):
 
 
 def Regulator(K):
-    return MReal(_sa.RR(_field(K)._bnfdata()["regulator"]), 30)
+    # the regulator as a decimal string; printed to the digits it has, less
+    # two kept back for its rounding
+    s = str(_field(K)._bnfdata()["regulator"])
+    digits = len(_re.sub(r"[^0-9]", "", s).lstrip("0"))
+    return MReal.of(_Fraction(s), max(digits - 2, 10))
 
 
 def UnitRank(K):
@@ -3830,7 +3833,9 @@ def HermiteForm(M):
     return _multi([_mmat(M.hermite_form())], show=1)
 
 
-EchelonForm = HermiteForm
+def EchelonForm(M):
+    # over Z the Hermite form, over Q the reduced row echelon form
+    return _multi([_mmat(M.echelon_form())], show=1)
 
 
 def SmithForm(M):
