@@ -351,7 +351,7 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
     if (names.length === 0) return f(...pos);
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
     if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
-    raise(T.TypeError, `${f.__name__ ?? f.name}() takes no keyword arguments`);
+    raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
   }
   const c = lookupType(typeOf(f), "__call__");
   if (c !== undefined) return callKw(c, [f, ...pos], names, values);
