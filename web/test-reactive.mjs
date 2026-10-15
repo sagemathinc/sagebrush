@@ -470,7 +470,8 @@ try {
   await run(1);
   await run(0);
   const r2 = [await out(0), await out(1)];
-  ok(r1[0] === r2[0] && r1[1] === r2[1] && /^0\.\d+ 0\.\d+$/.test(r1[0]), `a cell's random numbers are the same on every run (${r1.join(" | ")})`);
+  // (any float in [0, 1): a draw below 1e-4 prints as 5.98e-05)
+  ok(r1[0] === r2[0] && r1[1] === r2[1] && r1[0].split(" ").length === 2 && r1[0].split(" ").every((s) => { const v = Number(s); return s !== "" && v >= 0 && v < 1; }), `a cell's random numbers are the same on every run (${r1.join(" | ")})`);
   const vs = await ev("sagebrush.notebook.verify().then((r) => r.changed.length)");
   ok(vs === 0, `...and in a fresh interpreter: verify finds no difference (${vs})`);
   ok(/^[0-9a-f]{64}$/.test(await ev("sagebrush.notebook.meta.seed")), "the notebook's seed is in its document");
