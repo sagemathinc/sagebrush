@@ -554,10 +554,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const c = code, loaded = loads, moves = board.moves;
     if (!c) return;
     await c.idle();
+    // (code that can't run here has no first run: nothing to fit again)
+    if (!(await c.ready)) return;
     // (its pictures decoded, so the layout has their sizes)
     await Promise.all([...root.querySelectorAll<HTMLImageElement>(".board-world img")].map((i) => i.decode().catch(() => {})));
     if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded || board.moves !== moves) return;
-    step(at);
+    // (the camera only: the caption, and a notice in it, stay as they are)
+    look();
   }
 
   /** Show page i (0-based), from its start. */
@@ -601,20 +604,26 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function step(i: number, now = false) {
     const ss = steps();
     at = Math.max(-1, Math.min(ss.length - 1, i));
+    if (at < 0) caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
+    else caption(ss[at].say ?? "", `${at + 1} / ${ss.length}`);
+    look(now);
+    host.address?.set(hashFor(at));
+    ($("prev") as HTMLButtonElement).disabled = at < 0;
+    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
+  }
+
+  // (the camera on the step shown: the whole board, or its slide's card, or the step's items)
+  function look(now = false) {
+    const ss = steps();
     if (at < 0) {
-      caption((doc && pageView(doc, pageIx).intro) ?? "", ss.length ? `${ss.length} steps` : "");
       // (a slide: its card)
       const s = doc && lookOf(doc, pageIx).slide;
       if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
       else board.focus(undefined, now);
     } else {
       const s = ss[at];
-      caption(s.say ?? "", `${at + 1} / ${ss.length}`);
       board.focus(typeof s.focus === "string" ? [s.focus] : s.focus, now);
     }
-    host.address?.set(hashFor(at));
-    ($("prev") as HTMLButtonElement).disabled = at < 0;
-    ($("next") as HTMLButtonElement).disabled = at >= ss.length - 1;
   }
 
   // (on a phone the caption is one line: a tap shows it whole, or one line again)
