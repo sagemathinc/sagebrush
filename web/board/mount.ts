@@ -670,9 +670,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const l = doc && boardLink(doc, pageIx, a.getAttribute("href") ?? "");
     if (!l) return;
     go(async () => {
-      if (l.page !== pageIx) await page(l.page);
+      const g = loadGen, other = l.page !== pageIx;
+      if (other) {
+        const p = page(l.page), mine = pageGen;
+        await p;
+        // (the link is retired with its document, or when another page was
+        // asked for meanwhile: nothing of it is done to what is shown now, UI-07E-2)
+        if (destroyed || g !== loadGen || mine !== pageGen || pageIx !== l.page) return;
+      }
       if (l.item) board.focus([l.item]);
-      else if (l.step >= 0) step(l.step);
+      // (a page's start on the page shown too: its intro, the tour from the
+      // top, as from another page, UI-07E-1; page() has shown it otherwise)
+      else if (l.step >= 0 || !other) step(l.step);
     });
   }, true);
 
