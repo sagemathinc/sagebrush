@@ -9,15 +9,17 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort } from "./test-port.mjs";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 // (the run journal and its replay: the notebook as it was before the reactive
 // model, still there with ?reactive=0; the reactive notebook resumes a version
 // by computing it again: web/test-reactive.mjs)
 const start = new URL("?reactive=0", base).href;
-const port = Number(process.env.CDP_PORT ?? 9343); // (CDP_PORT: several agents' runs do not collide)
+let port = Number(process.env.CDP_PORT) || 0; // (else Chrome's choice: several runs do not collide, test-port.mjs)
 const profile = mkdtempSync(join(tmpdir(), "sb-replay-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
@@ -122,9 +124,11 @@ try {
   // ---- the portable bundle, opened in another browser (a fresh profile: no notebooks, no files)
   const bundle64 = await a.ev("sagebrush.bundle().then((u) => { let s = ''; for (const x of u) s += String.fromCharCode(x); return btoa(s); })");
   ok(bundle64.length > 100, `File > Download with history: a ${Math.round((bundle64.length * 3) / 4)}-byte .sbreplay`);
-  const port2 = port + 1, profile2 = mkdtempSync(join(tmpdir(), "sb-replay2-"));
-  const chrome2 = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port2}`, "--window-size=1000,700", `--user-data-dir=${profile2}`, "about:blank"], { stdio: "ignore" });
+  // (the second browser: always Chrome's choice of port, not one beside the first's)
+  const profile2 = mkdtempSync(join(tmpdir(), "sb-replay2-"));
+  const chrome2 = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--window-size=1000,700", `--user-data-dir=${profile2}`, "about:blank"], { stdio: "ignore" });
   try {
+    const port2 = await devtoolsPort(profile2);
     let tg2;
     for (let i = 0; i < 100; i++) { try { tg2 = await (await fetch(`http://127.0.0.1:${port2}/json`)).json(); break; } catch { await sleep(100); } }
     const d = await tab(tg2.find((t) => t.type === "page").webSocketDebuggerUrl);

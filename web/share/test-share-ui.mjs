@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
+import { devtoolsPort } from "../test-port.mjs";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const REMOTE = process.env.SHARE_URL;
@@ -19,9 +20,11 @@ const dev = REMOTE
 const TOKEN = REMOTE ? process.env.DEV_AUTH_TOKEN : "dev-token";
 const profile = mkdtempSync(join(tmpdir(), "sb-share-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9341", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let cdpPort = Number(process.env.CDP_PORT) || 0;
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!cdpPort) cdpPort = await devtoolsPort(profile);
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9341/json")).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0;
