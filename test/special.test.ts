@@ -249,6 +249,13 @@ print(repr(S.polygamma(1, complex(1e308, 1e308))), repr(S.gamma(-5e-324)), repr(
 sub = [(S.exp_integral_e1(1e308j), complex(-4.5339649050164911158e-309, 8.9130893768703339812e-309)),
        (S.erfcx(complex(1e308, 1e308)), complex(2.8209479177387814038e-309, -2.8209479177387814038e-309))]
 print([abs(v - r) < 1e-321 for v, r in sub])
+# (astra's CORR-7E4-1 and 7E4-2, in the CLI: the reflection's overflowing terms (inf <= inf accepted nan + inf i), E1 of
+# a growing argument beyond the doubles (0j, as Sagebrush's cmath.log is inf there), and next to a zero of the dominant
+# terms, where the recurrence was off by 54 times the value: each refused)
+print(" | ".join(kind(S.polygamma, n, z).split(" at ")[0] for n, z in [(2, complex(-1, 1e-150)), (100, complex(-1, 0.01)),
+      (100, complex(-1e20, 0.01)), (100, complex(-0.5, 0.046793214736766446)), (100, complex(-0.5, 1.0000000000000002))]))
+print(" | ".join(kind(S.exp_integral_e1, z).split(" at ")[0] for z in [complex(-1.7e308, 1.7e308), complex(-1.7e308, -1.7e308)]),
+      repr(S.exp_integral_e1(complex(1.7e308, 1.7e308))))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -315,5 +322,10 @@ print([abs(v - r) < 1e-321 for v, r in sub])
     "(5e-309-5e-309j) -inf -inf (1-0j) (2-0j) NotCovered: erfc: the phase of e^(-z^2) is beyond the doubles " +
       "NotCovered: erf, erfc, erfi: |e^(-z^2)| is beyond the doubles",
     "[True, True]",
+    "NotCovered: polygamma: |psi^(n)(z)| is beyond the doubles here | NotCovered: polygamma: |psi^(n)(z)| is beyond the doubles here | " +
+      "NotCovered: polygamma: Sagebrush covers Re z >= -1e6 when |Im z| < 1 | " +
+      "NotCovered: polygamma: the recurrence cancels beyond the doubles' accuracy | " +
+      "NotCovered: polygamma: the reflection cancels beyond the doubles' accuracy",
+    "NotCovered: exp_integral_e1: |E1(z)| is beyond the doubles | NotCovered: exp_integral_e1: |E1(z)| is beyond the doubles 0j",
   ]);
 });
