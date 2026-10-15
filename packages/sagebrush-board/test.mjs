@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { devtoolsPort } from "../../web/test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,7 +30,6 @@ writeFileSync(join(site, "index.html"), `<!doctype html><html><head><meta charse
 <div style="position:absolute;left:0;top:580px"><div id="top">The host's top</div><span id="title">The host's title</span><div id="menu">The host's menu</div><div class="menu">The host's .menu</div><button id="hostbtn">The host's button</button></div>
 <script type="module">
 import { mountBoard } from "./index.js";
-import { devtoolsPort } from "../../web/test-port.mjs";
 const images = { url: () => undefined, put: async () => "", ensure: async () => {}, absorb: async () => {}, inline: async (d) => d };
 const host = (doc) => {
   const kept = { saves: 0, doc: null };
