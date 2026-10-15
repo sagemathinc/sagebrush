@@ -1757,6 +1757,21 @@ class _UnsignedInfinity:
     """Sage's unsigned infinity (gamma at a pole given as a complex number)."""
 
 
+class _AmbiguousPole(NotImplementedError):
+    """A pole whose value in Sage depends on whether the argument is a real or
+    a complex number, reached through a symbolic expression, where the
+    engine keeps -1.0 + 0.0*I as the real -1.0: refused rather than guessed
+    (Sage: gamma(-1.0 + 0.0*I) is Infinity, gamma(SR(-1.0)) NaN)."""
+
+
+# the functions whose value at a pole, reached through a symbolic
+# expression, Sage gives differently for real and complex arguments
+# (gamma(SR(-1.0)) NaN, gamma(-1.0 + 0.0*I) Infinity; beta NaN or NaN + NaN*I);
+# zeta's (Infinity), log_gamma's (NaN + NaN*I) and hurwitz_zeta's (+infinity)
+# are the same both ways there
+_KIND_POLES = ("gamma", "beta")
+
+
 def _is_pole(name, a):
     """Whether the arguments a are a pole of name: _special's PoleError there
     is the function's own, not one met inside a transformation (zeta's
@@ -1777,19 +1792,29 @@ def _is_pole(name, a):
 
 def _pole_value(name, a, cx):
     """What Sage gives at a pole of name (arguments a, cx: whether each was
-    given as a complex number), or _Keep."""
+    given as a complex number, None when that is unknown: through the
+    engine), or _Keep."""
     if not _is_pole(name, a):
         raise _sf.NotCovered("%s%r: _special met a pole of an intermediate step; this point is not available in sagebrush yet" % (name, tuple(a)))
     x = a[-1]
     inf, nan = float("inf"), float("nan")
+    if cx is None:
+        if name in _KIND_POLES:
+            raise _AmbiguousPole("%s(%s) is a pole where Sage's value depends on whether the argument is real or complex, which this expression no longer tells; evaluate %s at a RealNumber or ComplexNumber" % (name, ", ".join(map(repr, a)), name))
+        # through an expression Sage gives these as for complex arguments
+        cx = [name in ("zeta", "log_gamma")] * len(a)
     if name == "gamma":
         if cx[-1]:
             return _UnsignedInfinity
         return _m.copysign(inf, x) if x == 0 else nan
-    if name == "psi" and len(a) == 1 or name == "beta":
+    if name == "zeta" and cx[0]:
+        return _UnsignedInfinity
+    if name == "beta":
+        return complex(nan, nan) if any(cx) else nan
+    if name == "psi" and len(a) == 1:
         return nan
     if name == "log_gamma":
-        return inf if x == 0 else complex(nan, nan)
+        return inf if x == 0 and not cx[-1] else complex(nan, nan)
     if name in ("zeta", "hurwitz_zeta", "exp_integral_e1", "elliptic_kc"):
         return inf
     if name == "Ei":
@@ -1799,12 +1824,14 @@ def _pole_value(name, a, cx):
     raise _Keep
 
 
-def _special_value(name, a):
+def _special_value(name, a, kinds=True):
     """name(*a) at Python floats or complexes as Sage evaluates it: a float
     or complex (Sage's NaN or infinity at a pole); _Keep where Sage keeps
     the call; NotImplementedError (_special.NotCovered) where Sage has a
-    value that Sagebrush does not compute."""
-    cx = [isinstance(t, complex) for t in a]
+    value that Sagebrush does not compute.  kinds=False: the arguments come
+    from the engine, which does not tell -1.0 + 0.0*I from -1.0, so a pole
+    whose value depends on that raises _AmbiguousPole."""
+    cx = [isinstance(t, complex) for t in a] if kinds else None
     a = [t.real if isinstance(t, complex) and t.imag == 0 else t for t in a]
     try:
         return _special_raw(name, a)
@@ -1859,7 +1886,9 @@ def _complete_special(s):
             op = _call("operator", c)
             name, args = op[0][4:], op[1:]
             try:
-                v = _special_value(name, [_py_val(*_num_pair(t)) for t in args])
+                v = _special_value(name, [_py_val(*_num_pair(t)) for t in args], kinds=False)
+            except _AmbiguousPole:
+                raise
             except (_Keep, NotImplementedError):
                 continue
             rules += [c, _encode_value(v)]
@@ -1880,7 +1909,7 @@ def _lower_special(s):
         name, args = op[0][4:], op[1:]
         vals = [_py_val(*_num_pair(_lower_special(t))) for t in args]
         try:
-            v = _special_value(name, vals)
+            v = _special_value(name, vals, kinds=False)
         except _Keep:
             raise ValueError("cannot evaluate %s numerically" % _call("str", c)[0])
         rules += [c, _encode_value(v)]
@@ -2717,7 +2746,13 @@ _FUNCTION_DOCS = {
         sage: gamma(2.5), gamma(-1.0)
         (1.32934038817914, NaN)
         sage: gamma(x).diff(x)
-        gamma(x)*psi(x)""",
+        gamma(x)*psi(x)
+        sage: gamma(CC(-1)), gamma(RR(-1))
+        (Infinity, NaN)
+        sage: gamma(-1.0 + 0.0*I)  # the engine keeps -1.0 + 0.0*I as -1.0  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        _sage_expr._AmbiguousPole: gamma(-1.0) is a pole where Sage's value depends on whether the argument is real or complex, which this expression no longer tells; evaluate gamma at a RealNumber or ComplexNumber""",
     'erf': """The error function (numerical values from lib/_special.py, real
     or complex).
 
@@ -3059,11 +3094,28 @@ def _legendre_neg_order(k, mu, x):
     if isinstance(x, (float, complex)):
         if isinstance(x, complex) or not -1 < x <= 1:
             raise NotImplementedError("gen_legendre_P(%d, %d, x) at a number x outside (-1, 1] is not available in sagebrush yet" % (k, -mu))
-        t = (1 - x) / 2
-        f = sum(math.prod(range(k + 1, k + 1 + i)) * math.prod(range(-k, -k + i)) / (math.prod(range(mu + 1, mu + 1 + i)) * math.factorial(i)) * t ** i
-                for i in range(k + 1))
+        if k > 2000:
+            raise NotImplementedError("gen_legendre_P of degree above 2000 at a number is not available in sagebrush yet")
+        # The series alternates and cancels (gen_legendre_P(30, -31, -0.99)
+        # is 2.6e-16 from terms near 1), so it is summed exactly, at the
+        # exact rational the float x is; w^floor(mu/2) F / mu! is rounded
+        # once, and an odd mu adds one factor sqrt(w) (both correctly
+        # rounded): the result is within a few units in the last place.
+        X = Fraction(x)
+        t = (1 - X) / 2
+        f, term = Fraction(0), Fraction(1)
+        for i in range(k + 1):
+            f += term
+            term = term * (k + 1 + i) * (-k + i) / ((mu + 1 + i) * (i + 1)) * t
+        w = (1 - X) / (1 + X)
+        q = w ** (mu // 2) * f / math.factorial(mu)
+        v = float(q)
+        if mu % 2:
+            v *= math.sqrt(float(w))
+        if q != 0 and (v == 0 or not math.isfinite(v)):
+            raise NotImplementedError("gen_legendre_P(%d, %d, %r) is outside the double range" % (k, -mu, x))
         from _sage_lang import RealNumber
-        return RealNumber(((1 - x) / (1 + x)) ** (mu / 2) / math.factorial(mu) * f)
+        return RealNumber(v)
     X = _expr(x)
     t = (1 - X) / 2
     f = _expr(0)
