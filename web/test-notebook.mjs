@@ -240,6 +240,27 @@ try {
   await ev("document.querySelector('#boardbtn').click(), 1");
   await until(`location.pathname === '/board/' && location.search === ${JSON.stringify(wb.search)}`, 60000);
   ok(true, "⋯ Whiteboard: the latest board in the notebook's language");
+  // leaving for the whiteboard waits for the notebook's saves: an edit made
+  // just before, with a slow save, is kept; a save that fails keeps the
+  // notebook open, saying so (CORR-7F9-1, after astra's probe)
+  await send("Page.navigate", { url: url });
+  await ready();
+  await ev("document.querySelector('[data-f=new]').click(), 1");
+  await sleep(500);
+  await ev("(() => { const n = document.querySelector('#nbname'); n.value = 'WB save'; n.dispatchEvent(new Event('input')); window.sagebrush.notebook.flush(); return 1; })()");
+  await sleep(1000);
+  const docsIn = "import('/sagebrush-notebook.js').then(async (m) => { const db = await m.openDb(); return new Promise((res) => { const r = db.transaction('notebooks', 'readonly').objectStore('notebooks').getAll(); r.onsuccess = () => res(r.result.filter((d) => d.name === 'WB save').map((d) => d.cells.map((c) => c.code))); }); })";
+  // (its store's saves slowed to 2 s, or made to fail)
+  const slowStore = (fail) => ev(`import('/sagebrush-notebook.js').then(async (m) => { const db = await m.openDb(); const docs = await new Promise((r) => { const q = db.transaction('notebooks', 'readonly').objectStore('notebooks').getAll(); q.onsuccess = () => r(q.result); }); const d = docs.find((x) => x.name === 'WB save'); const store = new m.IdbStore(db, d.id), save = store.save.bind(store); store.save = async (doc) => { await new Promise((r) => setTimeout(r, 2000)); if (${fail}) throw new Error('disk full'); return save(doc); }; await window.sagebrush.notebook.attach(store); return 1; })`);
+  await slowStore(true);
+  await ev("(() => { const ta = window.sagebrush.notebook.cells()[0].ta; ta.value = 'not kept'; ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#boardbtn').click(); return 1; })()");
+  await until("/whiteboard was not opened/.test(document.querySelector('#saved').textContent)", 10000);
+  ok((await ev("location.pathname")) === "/", "a save that fails: the notebook stays open, and says the whiteboard wasn't opened: " + await ev("document.querySelector('#saved').textContent"));
+  await slowStore(false);
+  await ev("(() => { const ta = window.sagebrush.notebook.cells()[0].ta; ta.value = 'latest edit kept'; ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-f=whiteboard]').click(); return 1; })()");
+  await until("location.pathname === '/board/' && !!window.sagebrush?.board?.snapshot()?.doc", 60000);
+  const kept = await ev(docsIn);
+  ok(JSON.stringify(kept) === JSON.stringify([["latest edit kept"]]), "New whiteboard with a slow save: the edit made just before is saved before leaving: " + JSON.stringify(kept));
 } catch (e) {
   console.log("ERROR", e.message);
   process.exitCode = 1;
