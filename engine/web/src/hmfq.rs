@@ -5,9 +5,15 @@
 //! otherwise) are pairs [a, b] of integers meaning a + b w, and ideals are
 //! given by generators [[a, b], ...]. The newspaces of the last few (field,
 //! level) pairs are kept, so that a session's calls at one level build the
-//! class set and the spaces once.
+//! class set and the spaces once. The hmfq_weight_* calls take a weight
+//! [k1, k2] != [2, 2] ("weight": k1 at sqrt d -> -sqrt d, k2 at sqrt d ->
+//! +sqrt d; engine/hmf: defweight.rs, defweightnew.rs) and give polynomials
+//! over O_F as lists of coefficients [a, b] (strings), constant term first.
 
 use sagebrush_hmf::defnew::Newspaces;
+use sagebrush_hmf::defweightnew::{WeightNewspaces, WeightOrbits};
+use sagebrush_hmf::gpoly::QPoly;
+use sagebrush_hmf::weight::Weight;
 use sagebrush_hmf::quatalg::{MaximalOrder, QuatAlg};
 use sagebrush_hmf::rqf::{QElt, QIdeal, QPrime, QuadField};
 use serde_json::{json, Value};
@@ -24,6 +30,7 @@ type Key = (i64, (i128, i128, i128));
 
 thread_local! {
     static NEWSPACES: RefCell<Vec<(Key, Rc<Newspaces>)>> = RefCell::new(vec![]);
+    static WEIGHT_NEWSPACES: RefCell<Vec<((Key, Weight), Rc<WeightNewspaces>)>> = RefCell::new(vec![]);
 }
 
 fn field(v: &Value) -> Result<QuadField, String> {
@@ -103,6 +110,38 @@ fn newspaces(f: &QuadField, n: &QIdeal) -> Result<Rc<Newspaces>, String> {
         c.push((key, x.clone()));
     });
     Ok(x)
+}
+
+/// The weight [k1, k2] in "weight", other than [2, 2] (as hmf.rs).
+fn weight(v: &Value) -> Result<Weight, String> {
+    let k = v.get("weight").and_then(Value::as_array).ok_or("missing argument 'weight': [k1, k2]")?;
+    let k: Vec<u32> = k.iter().map(|x| x.as_u64().filter(|&x| x <= 1000).map(|x| x as u32).ok_or("weights are integers")).collect::<Result<_, _>>()?;
+    match k.as_slice() {
+        [2, 2] => Err("weight [2, 2] is the hmfq_* space without a weight".into()),
+        &[a, b] => Weight::new(a, b),
+        _ => Err("a weight is [k1, k2]".into()),
+    }
+}
+
+fn weight_newspaces(f: &QuadField, n: &QIdeal, w: Weight) -> Result<Rc<WeightNewspaces>, String> {
+    let key = ((f.d, n.hnf()), w);
+    if let Some(x) = WEIGHT_NEWSPACES.with(|c| c.borrow().iter().find(|(h, _)| *h == key).map(|(_, x)| x.clone())) {
+        return Ok(x);
+    }
+    let o = MaximalOrder::new(&QuatAlg::unramified(*f)?)?;
+    let x = Rc::new(WeightNewspaces::new(&o, n, w)?);
+    WEIGHT_NEWSPACES.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= CACHE {
+            c.remove(0);
+        }
+        c.push((key, x.clone()));
+    });
+    Ok(x)
+}
+
+fn qpoly_json(f: &QPoly) -> Value {
+    json!(f.iter().map(|c| json!([c.a.to_string(), c.b.to_string()])).collect::<Vec<_>>())
 }
 
 fn bound(v: &Value, max: u64) -> Result<i64, String> {
@@ -189,6 +228,41 @@ pub fn dispatch(name: &str, v: &Value) -> Result<Value, String> {
             }
             Ok(json!({ "g": e.g.iter().map(|c| c.to_string()).collect::<Vec<_>>(), "aplist": aps }))
         }
+        // weight [k1, k2] != [2, 2]: S_k(N) and its new subspace
+        "hmfq_weight_dimension" => {
+            let ns = weight_newspaces(&f, &ideal(&f, v, "level")?, weight(v)?)?;
+            Ok(json!({ "dim": ns.top().dimension(), "new_dim": ns.new_dimension()? }))
+        }
+        // the characteristic polynomial over O_F of T_P (U_P if P | N) on S_k(N)
+        "hmfq_weight_hecke_charpoly" => {
+            let ns = weight_newspaces(&f, &ideal(&f, v, "level")?, weight(v)?)?;
+            Ok(qpoly_json(&ns.hecke_charpoly(&prime(&f, v, "p")?)?))
+        }
+        // the Galois orbits over F of the newforms: the separating operator
+        // and its characteristic polynomial over O_F on each orbit
+        "hmfq_weight_newform_orbits" => {
+            let ns = weight_newspaces(&f, &ideal(&f, v, "level")?, weight(v)?)?;
+            let o = ns.newform_orbits()?;
+            Ok(json!({ "op": o.op.iter().map(|(p, c)| json!([prime_json(p), c])).collect::<Vec<_>>(),
+                       "orbits": o.orbits.iter().map(qpoly_json).collect::<Vec<_>>() }))
+        }
+        // for the k-th orbit and the primes of norm <= bound: the
+        // characteristic polynomial over O_F of a_P on the orbit, and h with
+        // a_P = h(theta)/g'(theta)
+        "hmfq_weight_newform_eigenvalues" => {
+            let ns = weight_newspaces(&f, &ideal(&f, v, "level")?, weight(v)?)?;
+            let k = index(v, "orbit")?;
+            let b = bound(v, 10_000)?;
+            let o = ns.newform_orbits()?;
+            if k >= o.orbits.len() {
+                return Err(format!("orbit {} out of range: there are {}", k, o.orbits.len()));
+            }
+            let one = WeightOrbits { op: o.op.clone(), orbits: vec![o.orbits[k].clone()] };
+            let primes = f.primes_of_bounded_norm(b)?;
+            let (cps, hs) = ns.orbit_data(&one, &primes)?;
+            Ok(json!({ "g": qpoly_json(&o.orbits[k]),
+                       "aplist": primes.iter().zip(cps[0].iter().zip(&hs[0])).map(|(p, (c, h))| json!([prime_json(p), qpoly_json(c), qpoly_json(h)])).collect::<Vec<_>>() }))
+        }
         _ => Err(format!("unknown function {}", name)),
     }
 }
@@ -243,5 +317,22 @@ mod tests {
         assert!(t.elapsed().as_secs_f64() < 2.0, "{:?}", t.elapsed());
         // API-3AE-5: an orbit number is not truncated
         assert!(call(r#"{"fn":"hmfq_newform_eigenvalues","d":10,"level":[[5,0],[0,1]],"orbit":4294967296,"bound":5}"#).is_err());
+    }
+
+    #[test]
+    fn hmfq_weight_calls() {
+        // Q(sqrt 3), level 2 (norm 4), weight (3, 3): dimension 1, T at (7) is -94
+        let r = call(r#"{"fn":"hmfq_weight_dimension","d":3,"level":[[2,0]],"weight":[3,3]}"#).unwrap();
+        assert_eq!((r["dim"].as_u64(), r["new_dim"].as_u64()), (Some(1), Some(1)));
+        let r = call(r#"{"fn":"hmfq_weight_hecke_charpoly","d":3,"level":[[2,0]],"weight":[3,3],"p":[[7,0]]}"#).unwrap();
+        assert_eq!(r, serde_json::json!([["94", "0"], ["1", "0"]]));
+        let r = call(r#"{"fn":"hmfq_weight_newform_eigenvalues","d":3,"level":[[2,0]],"weight":[3,3],"orbit":0,"bound":7}"#).unwrap();
+        assert_eq!(r["g"].as_array().unwrap().len(), 2);
+        // refusals
+        assert!(call(r#"{"fn":"hmfq_weight_dimension","d":3,"level":[[2,0]],"weight":[2,2]}"#).is_err());
+        assert!(call(r#"{"fn":"hmfq_weight_dimension","d":3,"level":[[2,0]],"weight":[2,3]}"#).is_err());
+        assert!(call(r#"{"fn":"hmfq_weight_dimension","d":3,"level":[[2,0]],"weight":[2,300]}"#).is_err());
+        assert!(call(r#"{"fn":"hmfq_weight_dimension","d":3,"level":[[2,0]]}"#).is_err());
+        assert!(call(r#"{"fn":"hmfq_weight_newform_eigenvalues","d":3,"level":[[2,0]],"weight":[3,3],"orbit":1,"bound":7}"#).is_err());
     }
 }

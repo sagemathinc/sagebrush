@@ -27,6 +27,12 @@
 //!   new characteristic polynomials;
 //! * `defnew`: over any real quadratic field, the new subspaces, the
 //!   Galois orbits of newforms and their Hecke eigenvalues;
+//! * `defweight`, `defweightnew`: over any real quadratic field, weights
+//!   (k1, k2) other than (2, 2): the spaces with coefficients, Hecke
+//!   operators modulo degree-one primes, newspaces, newform orbits over F
+//!   and their eigenvalues;
+//! * `gpoly`: polynomials over O_F for any real quadratic field, recovered
+//!   from pairs of conjugate degree-one primes, and factored over F;
 //! * `split`: local splittings R/P^e R = M_2(O_F/P^e), from idempotents;
 //! * `orbits`: the orbits of the units on P^1(O_F/N);
 //! * `theta`: the Hecke elements Theta(p), by lattice enumeration;
@@ -44,10 +50,13 @@
 pub mod classes;
 pub mod definite;
 pub mod defnew;
+pub mod defweight;
+pub mod defweightnew;
 pub mod degeneracy;
 pub mod eigen;
 pub mod field;
 pub mod fpoly;
+pub mod gpoly;
 pub mod newspace;
 mod par;
 pub mod orbits;
