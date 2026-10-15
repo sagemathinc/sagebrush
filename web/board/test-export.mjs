@@ -8,7 +8,7 @@
 // web/serve.py 8765), then
 //   node web/board/test-export.mjs [doc.json ...]
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -226,6 +226,20 @@ try {
       const said = await ev("(() => { const e = document.querySelector('[data-sbb=say]'); return { text: e.textContent, markup: e.querySelectorAll('img, a, code, em').length, strong: e.querySelector('strong')?.textContent }; })()");
       check(said.markup === 0 && said.strong === "This board could not be shown:" && said.text.includes(says) && (what.includes("format") ? said.text.includes(PROBE) : true), `${what}, ${how}: refused, what it said shown as text: ` + JSON.stringify(said));
       check(!(await ev("window.__pwn")), `${what}, ${how}: something of the file ran`);
+    }
+  }
+  // a file past the largest the board reads (128 MB): refused by its size, before it is read (HARD-36E-2)
+  {
+    const big = join(dir, "big.json");
+    writeFileSync(big, "");
+    truncateSync(big, 128 * 2 ** 20 + 1);
+    for (const how of ["picked", "dropped"]) {
+      await ev(`window.sagebrush.board.load(${JSON.stringify(S)}).then(() => 1)`);
+      const before = await docJson();
+      if (how === "picked") await pick(big);
+      else await ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(128 * 2 ** 20 + 1)], "big.json", { type: "application/json" })); document.querySelector(".board").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); return 1; })()`);
+      await until("/too large/.test(document.querySelector('[data-sbb=say]').textContent)", 10000).catch(() => {});
+      check((await docJson()) === before && /could not be shown: too large to open: 129 MB \(at most 128 MB\)/.test(await sayText()), `a file past 128 MB, ${how}: refused by its size: ` + (await sayText()).slice(0, 160));
     }
   }
   check(!requests.some((u) => u.includes("example.invalid")), "no picture a refused file names is fetched: " + requests.filter((u) => u.includes("example.invalid")).join(", "));
