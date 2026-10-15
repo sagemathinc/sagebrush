@@ -436,8 +436,6 @@ class Rational(_Fraction):
     __rmul__ = _lift("__rmul__")
     __truediv__ = _lift("__truediv__")
     __rtruediv__ = _lift("__rtruediv__")
-    __mod__ = _lift("__mod__")
-    __rmod__ = _lift("__rmod__")
     _pow = _lift("__pow__")
     _rpow = _lift("__rpow__")
 
@@ -688,6 +686,180 @@ class Rational(_Fraction):
         """
         return self._numerator == 1 and self._denominator == 1
 
+    def __mod__(self, n):
+        """self % n for an integral n: the residue of numerator *
+        denominator^-1 modulo n, an integer with the sign of n (as Python's %
+        on integers), as in Sage; a ZeroDivisionError when the denominator
+        is not invertible modulo n.
+
+        EXAMPLES::
+
+            sage: (1/5) % 7, (-1/5) % 7, (1/5) % -7, (4/6) % 5, (7/2) % 1
+            (3, 4, -4, 4, 0)
+            sage: (3/5) % 10
+            Traceback (most recent call last):
+            ...
+            ZeroDivisionError: inverse of Mod(5, 10) does not exist
+            sage: (1/2) % (1/3)
+            Traceback (most recent call last):
+            ...
+            TypeError: no conversion of this rational to integer
+        """
+        m = _integral_modulus(n)
+        if m is NotImplemented:
+            return NotImplemented
+        if m == 0:
+            raise ZeroDivisionError("Rational modulo by zero")
+        a, d = self._numerator, self._denominator
+        if d == 1:
+            return a % m
+        am = abs(m)
+        if _math.gcd(d, am) != 1:
+            raise ZeroDivisionError("inverse of Mod(%d, %d) does not exist" % (d % am, am))
+        return (a * pow(d, -1, am)) % am % m
+
+    def __rmod__(self, a):
+        """a % self: a is converted to QQ first, then self must be an
+        integer, as in Sage.
+
+        EXAMPLES::
+
+            sage: True % (2/1), float(-3) % (2/1), 5 % (4/2)
+            (1, 1, 1)
+            sage: float(2) % (7/2)
+            Traceback (most recent call last):
+            ...
+            TypeError: no conversion of this rational to integer
+            sage: RR(2) % (7/2), RR(7) % (2/1)
+            (-1.50000000000000, -1.00000000000000)
+        """
+        kind = _real_kind(a)
+        if kind == "rr":
+            return _rr_remainder(a, self)
+        if kind == "rdf":
+            P = str(a.parent())
+            raise TypeError("unsupported operand parent(s) for %%: '%s' and '%s'" % (P, P))
+        if isinstance(a, (int, _Fraction)) or kind == "float":
+            A = _real_qq(a) if kind == "float" else QQ(a)
+            if self._denominator != 1:
+                raise TypeError("no conversion of this rational to integer")
+            if self._numerator == 0:
+                raise ZeroDivisionError("Rational modulo by zero")
+            return A % self._numerator
+        return NotImplemented
+
+    def __floordiv__(self, other):
+        """self // other: in QQ, a field, the exact quotient, as in Sage;
+        with a Python float, the float floor quotient; with RDF, RDF's
+        quotient; RR has no floor division.
+
+        EXAMPLES::
+
+            sage: (7/2) // 1, (6/3) // 4, (7/2) // -2, 7 // (2/3), (7/2) // True
+            (7/2, 1/2, -7/4, 21/2, 7/2)
+            sage: (7/2) // float(2), float(2) // (7/2), (7/2) // RDF(2)
+            (1.0, 0.0, 1.75)
+            sage: divmod(7/2, 1), divmod(7, 1/2), divmod(7/2, 1/3), divmod(7/2, 1.5)
+            ((7/2, 0), (14, 0), (21/2, 0), (7/3, 0))
+            sage: (7/2) // RR(2)
+            Traceback (most recent call last):
+            ...
+            TypeError: unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of precision'
+        """
+        if isinstance(other, (int, _Fraction)):
+            return self / (int(other) if isinstance(other, bool) else other)
+        kind = _real_kind(other)
+        if kind == "float":
+            return float(self) // other
+        if kind == "rdf":
+            return other.parent()(self) / other
+        if kind == "rr":
+            P = str(other.parent())
+            raise TypeError("unsupported operand parent(s) for //: '%s' and '%s'" % (P, P))
+        return NotImplemented
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, int):
+            return Rational._from_coprime_ints(int(other), 1) / self
+        if isinstance(other, _Fraction):
+            raise TypeError("unsupported operand type(s) for //: 'Fraction' and 'Rational'")
+        kind = _real_kind(other)
+        if kind == "float":
+            return other // float(self)
+        if kind == "rdf":
+            return other / other.parent()(self)
+        if kind == "rr":
+            P = str(other.parent())
+            raise TypeError("unsupported operand parent(s) for //: '%s' and '%s'" % (P, P))
+        return NotImplemented
+
+    def __divmod__(self, other):
+        # (self / other, 0) with other converted exactly to QQ, as Sage (the
+        # remainder is a Python int there)
+        x = _to_qq(other)
+        if x is NotImplemented:
+            return NotImplemented
+        return self / x, 0
+
+    def __rdivmod__(self, other):
+        kind = _real_kind(other)
+        if kind == "rdf":
+            return other / other.parent()(self), 0
+        if kind == "rr":
+            P = other.parent()
+            if self._numerator == 0:
+                raise ZeroDivisionError()
+            return other / P(self), P(0)
+        if isinstance(other, _Fraction) and not isinstance(other, Rational):
+            raise TypeError("unsupported operand type(s) for //: 'Fraction' and 'Rational'")
+        if isinstance(other, int) and not isinstance(other, bool):
+            # an Integer is coerced into QQ: (other / self, 0), as Sage
+            return Rational._from_coprime_ints(int(other), 1) / self, 0
+        if isinstance(other, bool) or kind == "float":
+            # (other // self, other % self), in that order, as Sage
+            return self.__rfloordiv__(other), self.__rmod__(other)
+        return NotImplemented
+
+    def ord(self, p):
+        """The valuation at p (as valuation).
+
+        EXAMPLES::
+
+            sage: (12/1).ord(2), (3/8).ord(2)
+            (2, -3)
+        """
+        return self.valuation(p)
+
+    def is_perfect_power(self):
+        """Whether self is r^k for a rational r and an integer k >= 2 (0, 1
+        and -1 are).
+
+        EXAMPLES::
+
+            sage: [q.is_perfect_power() for q in [4/9, -8/27, 1/4, 1/1, -1/1, 0/1]]
+            [True, True, True, True, True, True]
+            sage: [q.is_perfect_power() for q in [2/1, 8/3, -4/9]]
+            [False, False, False]
+        """
+        a, b = abs(self._numerator), self._denominator
+        if a == 0 or (a == 1 and b == 1):
+            return True
+        bits = max(a, b).bit_length()
+        if bits > 4096:
+            raise NotImplementedError("is_perfect_power of a rational of more than 4096 bits is not available in sagebrush yet")
+        # r^k for a composite k is also a power with each prime factor of k
+        for k in range(2, bits + 1):
+            if any(k % q == 0 for q in range(2, int(k ** 0.5) + 1)):
+                continue
+            if self._numerator < 0 and k == 2:
+                continue
+            ra = _iroot(a, k)
+            if ra ** k == a:
+                rb = _iroot(b, k)
+                if rb ** k == b:
+                    return True
+        return False
+
     def is_unit(self):
         """Whether it is a unit of QQ: nonzero.
 
@@ -919,6 +1091,184 @@ class Rational(_Fraction):
 _SQRT_MAX_PREC = 1 << 16
 
 
+def _iroot(n, k):
+    """The integer k-th root of n >= 0, rounded down (Newton's method)."""
+    if n < 2:
+        return n
+    x = 1 << -(-n.bit_length() // k)
+    while True:
+        y = ((k - 1) * x + n // x ** (k - 1)) // k
+        if y >= x:
+            return x
+        x = y
+
+
+def _real_kind(x):
+    """'rr' for an element of RR or RealField(p), 'rdf' for RDF, 'float' for
+    a Python float, None otherwise (the classes are float subclasses, so
+    the order of the tests matters)."""
+    name = type(x).__name__
+    if name in ("RealNumber", "_RealLiteral", "RealNumberMP"):
+        return "rr"
+    if name == "RealDoubleElement":
+        return "rdf"
+    if isinstance(x, float):
+        return "float"
+    return None
+
+
+def _real_qq(x):
+    """The exact rational value of a real number x, as Sage converts it."""
+    import math
+    if isinstance(x, float) and not math.isfinite(x):
+        raise ValueError("cannot convert NaN or infinity to rational number")
+    try:
+        return QQ(x)
+    except (OverflowError, ValueError):
+        raise ValueError("cannot convert NaN or infinity to rational number") from None
+
+
+def _integral_modulus(n):
+    """n as an integer modulus for Rational % n, as Sage converts it: an
+    integer, or an integral rational or real number; TypeError for a
+    non-integral one; NotImplemented for other types."""
+    if isinstance(n, bool):
+        return int(n)
+    if isinstance(n, int):
+        return n
+    if isinstance(n, _Fraction):
+        if not isinstance(n, Rational):
+            raise TypeError("unable to coerce <class 'fractions.Fraction'> to an integer")
+        if n.denominator != 1:
+            raise TypeError("no conversion of this rational to integer")
+        return int(n.numerator)
+    kind = _real_kind(n)
+    if kind is None:
+        names = [c.__name__ for c in type(n).__mro__]
+        if "IntegerMod" in names:
+            # an integer mod m by its lift, as Sage: (7/2) % GF(5)(2) is mod 2
+            return int(n.lift())
+        if "Expression" in names:
+            try:
+                r = QQ(n)
+            except (TypeError, ValueError):
+                return NotImplemented
+            if r.denominator == 1:
+                return int(r.numerator)
+        return NotImplemented
+    if kind == "rr":
+        r = QQ(n)
+        if r.denominator != 1:
+            raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
+        return int(r.numerator)
+    f = float(n)
+    # (int() of an infinity or a NaN raises Python's own error, as in Sage)
+    if f != int(f):
+        raise TypeError("cannot convert non-integral float to integer")
+    return int(f)
+
+
+def _simplest_in(lo, hi, lo_closed, hi_closed):
+    """The simplest rational (smallest denominator, then numerator) in the
+    interval from lo to hi, 0 < lo <= hi (hi None for infinity), each end
+    included or not: by continued fractions, iteratively (at most about
+    1.5 terms per bit of the ends)."""
+    terms = []
+    while True:
+        f = lo.numerator // lo.denominator
+        if f == lo and lo_closed:
+            terms.append(f)
+            break
+        if hi is None or f + 1 < hi or (f + 1 == hi and hi_closed):
+            terms.append(f + 1)
+            break
+        # lo and hi lie in [f, f + 1]: x = f + 1/y with y between
+        # 1/(hi - f) and 1/(lo - f) (infinity when lo = f), ends exchanged
+        terms.append(f)
+        lo, hi, lo_closed, hi_closed = 1 / (hi - f), (None if lo == f else 1 / (lo - f)), hi_closed, lo_closed
+    r = QQ(terms[-1])
+    for t in reversed(terms[:-1]):
+        r = t + 1 / r
+    return r
+
+
+_SIMPLEST_MAX_PREC = 1 << 14
+
+
+def _simplest_rational(x):
+    """The simplest rational that rounds to x in x's field (RR,
+    RealField(p), RDF, or a float's 53 bits), as Sage converts such a
+    number to QQ for divmod:
+    QQ(RR(0.1)) is 1/10. The rounding interval is half an ulp each side
+    (a quarter below a power of 2), its ends included when the
+    significand is even (ties to even)."""
+    X = _real_qq(x)
+    if X.denominator == 1:
+        # an integral value is itself, as in Sage (1e300 is that integer)
+        return X
+    if X < 0:
+        return -_simplest_rational(-x)
+    p = int(x.parent().prec()) if _real_kind(x) == "rr" else 53
+    if p > _SIMPLEST_MAX_PREC:
+        raise NotImplementedError("divmod with a real number of more than %d bits of precision is not implemented" % _SIMPLEST_MAX_PREC)
+    # X = m * 2^e with 2^(p-1) <= m < 2^p
+    e = X.numerator.bit_length() - X.denominator.bit_length() - p
+    while True:
+        m = X / QQ(2) ** e
+        if m < 2 ** (p - 1):
+            e -= 1
+        elif m >= 2 ** p:
+            e += 1
+        else:
+            break
+    m = int(m)
+    half = QQ(2) ** e / 2
+    lo = X - (half / 2 if m == 2 ** (p - 1) else half)
+    closed = m % 2 == 0
+    return _simplest_in(lo, X + half, closed, closed)
+
+
+def _to_qq(x):
+    """x as a rational for divmod(q, x), as Sage converts it: an integer or
+    a rational exactly, a real number as the simplest rational rounding to
+    it, an integer mod n by its lift, or a symbolic constant;
+    NotImplemented for other types."""
+    if isinstance(x, (bool, int)):
+        return Rational._from_coprime_ints(int(x), 1)
+    if isinstance(x, _Fraction):
+        return QQ(x)
+    if _real_kind(x) is not None:
+        return _simplest_rational(x)
+    names = [c.__name__ for c in type(x).__mro__]
+    if "IntegerMod" in names:
+        return Rational._from_coprime_ints(int(x.lift()), 1)
+    if "Expression" in names:
+        return QQ(x)
+    if "ComplexNumber" in names:
+        raise TypeError("unable to convert %s to a rational" % x)
+    return NotImplemented
+
+
+def _rr_remainder(x, q):
+    """x % q for x in RR or RealField(p) and a rational q, as Sage: q is
+    rounded to x's field, then x - n*q exactly for the nearest integer n
+    (ties to even), rounded to the field; NaN when q is 0 or x is not
+    finite."""
+    P = x.parent()
+    Q = QQ(P(q))
+    try:
+        X = QQ(x)
+    except (OverflowError, ValueError):
+        X = None
+    if X is None or Q == 0:
+        return P(float("nan"))
+    t = X / Q
+    n, r = divmod(t.numerator, t.denominator)
+    if 2 * r > t.denominator or (2 * r == t.denominator and n % 2):
+        n += 1
+    return P(X - n * Q)
+
+
 def _intdiv(a, b):
     # The runtime's `/` on two ints in Sage mode: a Rational, also when it
     # is integral (parent(4/2) is the Rational Field, as in Sage).
@@ -1125,6 +1475,12 @@ def is_prime(n, proof=None):
         ...
         NotImplementedError: a primality proof above 3.3e24 is not implemented: n passes BPSW, which is not a proof (call is_prime with proof=False)
     """
+    if isinstance(n, _Fraction):
+        # a rational (6/3 too) is never prime in QQ, a field; Sage says so
+        # (int() truncated: is_prime(7/2) tested 3)
+        import warnings
+        warnings.warn("Testing primality in Rational Field, which is a field, hence the result will always be False. To test whether n is a prime integer, use is_prime(ZZ(n)) or ZZ(n).is_prime(). Using n.is_prime() instead will silence this warning.", UserWarning)
+        return False
     n = int(n)
     if n < 2:
         return False
