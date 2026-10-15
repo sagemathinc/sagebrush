@@ -859,6 +859,9 @@ test("titles are bold by default (TitleFontWeight), subtitles not, on a line und
     "plot(1:3); title('Top')",
     "xlabel('a', 'b')",
     "surf(peaks(5)); title('Top', 'Below')",
+    "surf(peaks(5)); [t, s] = title('Top', 'Below'); s.FontWeight = 'bold';",
+    // (plain cla keeps the title's formatting; cla reset and a new plot reset it)
+    "plot(1:3); t = title('Old', 'Color', 'r'); cla; disp(t.Color); cla reset; disp(t.Color); try, cla('again'), catch e, disp(e.message), end",
   ];
   for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
   const title = (id: number) => {
@@ -879,14 +882,17 @@ test("titles are bold by default (TitleFontWeight), subtitles not, on a line und
   assert.equal(texts(7)[0][1], y3);
   assert.equal(title(3), '<text font-weight="bold">Main</text>');
   assert.match(msgs.find((m) => m.id === 3 && m.display).display["image/svg+xml"], /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" font-size="[\d.]+">Sub<\/text>/);
-  // (title(titletext, subtitletext, Name, Value): the properties are the title's)
-  assert.equal(msgs.filter((m) => m.id === 6 && m.stream === "stdout").map((m) => m.text).join(""), "Top\nBelow\n     1     0     0\n     0     0     0\n");
+  // (title(titletext, subtitletext, Name, Value): the properties are both lines', as the documented example's Color)
+  assert.equal(msgs.filter((m) => m.id === 6 && m.stream === "stdout").map((m) => m.text).join(""), "Top\nBelow\n     1     0     0\n     1     0     0\n");
   assert.deepEqual(texts(6).map((t) => t[0]), ["Top", "Below"]);
   assert.match(msgs.filter((m) => m.id === 8 && m.stream === "stderr").map((m) => m.text).join(""), /Too many input arguments/);
   // (the interactive 3-D view: the subtitle a line of its own too; a new plot's title is bold
   // again, the axes reset as NextPlot 'replace' says)
   const scene = JSON.parse(msgs.find((m) => m.id === 9 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
-  assert.deepEqual([scene.title, scene.subtitle, scene.title_weight], ["Top", "Below", "bold"]);
+  assert.deepEqual([scene.title, scene.subtitle, scene.title_weight, scene.subtitle_weight], ["Top", "Below", "bold", "normal"]);
+  const bolder = JSON.parse(msgs.find((m) => m.id === 10 && m.display).display["application/vnd.sagebrush.scene3d+json"]);
+  assert.equal(bolder.subtitle_weight, "bold");
+  assert.equal(msgs.filter((m) => m.id === 11 && m.stream).map((m) => m.text).join(""), "     1     0     0\n     0     0     0\ncla: the only option is 'reset'.\n");
   assert.equal(title(4), "<text>Plain</text>");
   assert.equal(title(5), "<text>Only</text>");
 });
