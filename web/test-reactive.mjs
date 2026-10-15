@@ -604,5 +604,5 @@ try {
   ok(false, String(e?.stack ?? e));
 } finally {
   chrome.kill();
-  try { rmSync(profile, { recursive: true, force: true }); } catch {}
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
