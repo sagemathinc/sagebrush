@@ -466,9 +466,13 @@ class NumberField_absolute:
             self._bnf = None
             if self._n == 2 and abs(self.discriminant()) >= 1000:
                 # the quadratic algorithms are much faster (their
-                # certificate status kept: the systematic review's ASR-F2)
-                self._bnf = self._quadratic_bnfdata()
-            else:
+                # certificate status kept: the systematic review's ASR-F2);
+                # should they fail, the general algorithm
+                try:
+                    self._bnf = self._quadratic_bnfdata()
+                except (ValueError, RuntimeError):
+                    self._bnf = None
+            if self._bnf is None:
                 self._bnf = _nf().bnf(self._f)
         return self._bnf
 
@@ -501,7 +505,8 @@ class NumberField_absolute:
         of the one certified, never against a cached general result:
           * |d| >= 1000: the class number and invariants against the
             quadratic algorithms (sagebrush.nf.quadratic_class_group_data);
-          * 0 < d < 1000: the class number against the classes of reduced
+          * 0 < d < 1000 (or up to 10^5 when the quadratic algorithms
+            fail): the class number against the classes of reduced
             indefinite forms (_count_real_classes);
           * -10^5 <= d < 0: the class number against the number of reduced
             forms.
@@ -526,13 +531,20 @@ class NumberField_absolute:
             done = []
             if self._n == 2:
                 D = self.discriminant()
+                g = None
                 if abs(D) >= 1000:
-                    g = self._quadratic_bnfdata()
+                    try:
+                        g = self._quadratic_bnfdata()
+                    except (ValueError, RuntimeError):
+                        # (the quadratic algorithms failed: the proof stands
+                        # on the certificate; forms check it where cheap)
+                        g = None
+                if g is not None:
                     cyc = [int(c) for c in g["cyc"]]
                     if int(g["h"]) != p["h"] or cyc != p["cyc"]:
                         raise RuntimeError("the proven class group %s disagrees with the quadratic algorithms' %s" % (p["cyc"], cyc))
                     done.append("quadratic")
-                elif D > 0:
+                elif 0 < D <= 10**5:
                     if _count_real_classes(D) != p["h"]:
                         raise RuntimeError("the proven class number %d is not the number of classes of reduced forms" % p["h"])
                     done.append("real forms")
