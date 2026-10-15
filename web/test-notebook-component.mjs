@@ -9,12 +9,15 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort } from "./test-port.mjs";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-component-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9339", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let cdpPort = Number(process.env.CDP_PORT) || 0;
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!cdpPort) cdpPort = await devtoolsPort(profile);
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9339/json")).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
 
 // a connection to one tab
@@ -152,7 +155,7 @@ try {
   await a.ev("document.querySelector('[data-f=new]').click()");
   await a.until("document.querySelector('#nbname').value === 'Untitled'");
   await sleep(700);
-  const t2 = await (await fetch("http://127.0.0.1:9339/json/new?" + encodeURIComponent(base), { method: "PUT" })).json();
+  const t2 = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?` + encodeURIComponent(base), { method: "PUT" })).json();
   const b = await tab(t2.webSocketDebuggerUrl);
   await b.until("window.sagebrush && document.querySelector('#nbname').value === 'Untitled' && document.querySelectorAll('.cell').length === 1");
   await a.ev("(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], 'x = 6 * 7'); nb.addCell('print(x)'); })()");

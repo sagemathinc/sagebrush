@@ -9,14 +9,16 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort } from "../test-port.mjs";
 
 const items = Number(process.argv[2] ?? 2000), strokes = Number(process.argv[3] ?? 20000);
 const runs = Math.max(1, Math.floor(Number(process.env.BOARD_RUNS ?? 5)) || 1);
 const url = `${process.env.SB_URL ?? "http://127.0.0.1:8765/"}board/?items=${items}&strokes=${strokes}`;
-const port = Number(process.env.CDP_PORT ?? 9450);
+let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-board-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);

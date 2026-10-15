@@ -7,20 +7,23 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort, freePort } from "./test-port.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; };
-const port = 9800 + Math.floor(Math.random() * 100);
+const port = await freePort();
 const here = new URL(".", import.meta.url).pathname;
 let server = spawn("python3", [join(here, "serve.py"), String(port)], { stdio: "ignore" });
 await sleep(800);
 const profile = mkdtempSync(join(tmpdir(), "sb-pwa-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=9342", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let cdpPort = Number(process.env.CDP_PORT) || 0;
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!cdpPort) cdpPort = await devtoolsPort(profile);
 const cleanup = () => { chrome.kill(); server.kill(); };
 process.on("uncaughtException", (e) => { console.log("FAIL " + (e?.stack ?? e)); cleanup(); process.exit(1); });
 let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch("http://127.0.0.1:9342/json")).json(); break; } catch { await sleep(100); } }
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
@@ -105,7 +108,7 @@ const pageDropped = () => ev(`(async () => { const name = (await caches.keys()).
 async function openTab(path) {
   // (opened blank, its HTTP cache off, then sent to the page: so nothing but
   // the service worker can answer; sagebrush-daybreak's suggestion)
-  const t = await (await fetch("http://127.0.0.1:9342/json/new?about:blank", { method: "PUT" })).json();
+  const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?about:blank`, { method: "PUT" })).json();
   const tws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => (tws.onopen = r));
   let k = 0; const w = new Map();

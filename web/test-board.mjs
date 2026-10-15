@@ -8,15 +8,17 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { devtoolsPort } from "./test-port.mjs";
 
 const doc = process.argv[2] ?? "examples/sagebrush.json";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const url = `${base}board/?doc=${encodeURIComponent(doc)}`;
-const port = +(process.env.CDP_PORT ?? 9451);
+let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-board-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const [W, H] = (process.env.SIZE ?? "1280x800").split("x").map(Number);
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--window-size=${W},${H}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
