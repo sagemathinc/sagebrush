@@ -8,9 +8,9 @@ import { tmpdir } from "node:os";
 const cli = join(__dirname, "..", "src", "cli.js");
 const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
 
-test("every intrinsic Magma mode binds has a summary in the Magma index (lib/_magma_docsearch.py)", () => {
+test("every intrinsic Magma mode binds has a summary and an example in the Magma index (lib/_magma_docsearch.py)", () => {
   const r = run("-m", "_magma_docsearch", "--check");
-  assert.equal(r.stdout.trim(), '{"missing": [], "extra": []}', r.stdout + r.stderr);
+  assert.equal(r.stdout.trim(), '{"missing": [], "extra": [], "no_example": []}', r.stdout + r.stderr);
   assert.equal(r.status, 0);
 });
 

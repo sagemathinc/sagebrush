@@ -52,3 +52,13 @@ M[2][3];
 (b^2+b)/2;
 a^-1;
 Signature(NumberField(x^4 - 10*x^2 + 1));
+// the regulator to the digits it has (not a garbled exponent)
+Round(10^15 * Regulator(QuadraticField(5)));
+Regulator(QuadraticField(3)) gt 13/10;
+// EchelonForm: over Q the reduced row echelon form, over Z the Hermite form
+EchelonForm(Matrix(Rationals(), 2, 2, [2, 4, 3, 1]));
+EchelonForm(Matrix(Integers(), 2, 2, [2, 4, 3, 1]));
+// AssignNames(~R, ...) renames the generator and keeps R
+Pa := PolynomialRing(Integers());
+AssignNames(~Pa, ["u"]);
+Pa.1^3 - 1;
