@@ -40,6 +40,7 @@ import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
+import { unbox } from "./runtime/object";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -54,6 +55,34 @@ export interface Session {
 export interface RunHooks {
   begin(m: any): void;
   end(): Record<string, unknown>;
+}
+
+/** A SystemExit's status as text (a cell exiting with a message): at most
+ * STATUS_MAX characters, the rest said not written (HARD-8E4-1); a fixed
+ * text if it can't be made text, its __str__ raising (CORR-8E4-2).  Also
+ * the Jupyter kernel's (src/kernel.ts). */
+export const STATUS_MAX = 4096;
+export function exitText(code: unknown): string {
+  let t: string;
+  try {
+    t = String(R.str(code));
+  } catch {
+    return "(an exit status that could not be written as text)";
+  }
+  return t.length > STATUS_MAX ? `${t.slice(0, STATUS_MAX)}… (${t.length - STATUS_MAX} more characters)` : t;
+}
+
+/** How a SystemExit's status ends a cell, by Python's rule (its type, not
+ * how this runtime holds it, CORR-588-1): None, or an integer (bool and int
+ * subclasses too, their integer as stored) that is 0, ends it well; another integer fails it, saying
+ * nothing; anything else fails it, its text written (exitText). */
+export function exitStatus(code: unknown): { ok: boolean; text: string | null } {
+  if (code === null || code === undefined) return { ok: true, text: null };
+  try {
+    // (its integer as stored, as CPython reads it: an int subclass's __bool__ is not asked, CORR-AD9-1)
+    if (R.typeOf(code).$mro.includes(R.T.int)) return { ok: BigInt(unbox(code)) === 0n, text: null };
+  } catch {}
+  return { ok: false, text: exitText(code) };
 }
 
 // post: sends a message to the page.  captureStreams: replace sys.stdout and
@@ -160,8 +189,16 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       const exc = R.toPyExc(e);
       flush();
       target = null;
-      // exit() can't leave a notebook: it just ends the cell.
-      if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return true;
+      // exit() can't leave a notebook: it just ends the cell.  An exit with
+      // a failure's status is the cell failing: sys.exit(1), and Magma's
+      // errors in a cell (lib/_magma.py raises SystemExit(1) once it has
+      // said them); a message for a status is written, as Python does.
+      if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
+        const s = exitStatus(exc.code);
+        if (s.ok) return true;
+        if (s.text !== null) R.stderr.write(s.text + "\n");
+        return false;
+      }
       // (a cell's renamed `_` names are shown as written)
       // (and page-order scoping's names, as written: the run's `scoped`)
       let text = R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "");

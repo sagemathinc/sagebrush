@@ -111,3 +111,71 @@ test("maps: rules, graphs, arrow pairs and preimages", () => {
   // a function expression would be hoisted out of the rule: refused
   assert.match(py("f := map< A -> B | x :-> (function(y) return y; end function)(x) >;"), /_m\._not_supported\("a function expression inside a map rule"/);
 });
+
+test("notebook session: a Magma cell's error fails its cell, said as Magma says it; quit, and Python's sys.exit() or sys.exit(0), only end theirs", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells: [string, object][] = [
+    ["x := 6 * 7;\nprint x;", { magma: true }],
+    ["print NotAnIntrinsic(7);", { magma: true }],
+    ['error "no";', { magma: true }],
+    ["y := 1 div 0;", { magma: true }],
+    ["print x +;", { magma: true }],
+    ["print x + 1;\nquit;\nprint 0;", { magma: true }],
+    ["import sys\nprint('before')\nsys.exit()", {}],
+    ["import sys\nsys.exit(0)", {}],
+    ["import sys\nsys.exit(1)", {}],
+    ["import sys\nsys.exit('a message')", {}],
+    ["print x;", { magma: true }],
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i][0], ...cells[i][1] });
+  const out = (id: number, stream: string) => msgs.filter((m) => m.id === id && m.stream === stream).map((m) => m.text).join("");
+  const failed = (id: number) => !!msgs.find((m) => m.id === id && m.done)?.error;
+  assert.deepEqual(cells.map((_, i) => failed(i + 1)), [false, true, true, true, true, false, false, false, true, true, false]);
+  assert.equal(out(1, "stdout"), "42\n");
+  assert.match(out(2, "stdout"), /User error: Identifier 'NotAnIntrinsic' has not been declared or assigned/);
+  assert.match(out(3, "stdout"), /Runtime error: no/);
+  assert.match(out(4, "stdout"), /Runtime error/);
+  assert.match(out(5, "stderr"), /User error: bad syntax/);
+  assert.equal(out(6, "stdout"), "43\n");
+  assert.equal(out(7, "stdout"), "before\n");
+  assert.equal(out(10, "stderr"), "a message\n");
+  // (the session goes on, x as it was)
+  assert.equal(out(11, "stdout"), "42\n");
+});
+
+test("notebook session: an exit status as text is at most 4096 characters, and one that can't be text still ends its cell, failed (HARD-8E4-1, CORR-8E4-2)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  await s.handle({ id: 1, code: "import sys\nsys.exit('x' * 1000000)" });
+  await s.handle({ id: 2, code: "import sys\nclass Bad:\n    def __str__(self):\n        raise RuntimeError('string failed')\nsys.exit(Bad())" });
+  await s.handle({ id: 3, code: "print('after')" });
+  const out = (id: number, stream: string) => msgs.filter((m) => m.id === id && m.stream === stream).map((m) => m.text).join("");
+  const done = (id: number) => msgs.find((m) => m.id === id && m.done);
+  assert.equal(out(1, "stderr"), "x".repeat(4096) + "… (995904 more characters)\n");
+  assert.ok(done(1)?.error);
+  assert.equal(out(2, "stderr"), "(an exit status that could not be written as text)\n");
+  assert.ok(done(2)?.error, "it ends, failed");
+  assert.equal(out(3, "stdout"), "after\n");
+});
+
+test("notebook session: an exit status is an integer or not by its Python type (CORR-588-1)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  const cells = ["import sys\nsys.exit(-2.5)", "import sys\nsys.exit(2**100)", "import sys\nsys.exit(0.0)", "import sys\nsys.exit(True)", "import sys\nsys.exit(False)",
+    "import sys\nclass Code(int): pass\nsys.exit(Code(3))", "import sys\nclass Code(int): pass\nsys.exit(Code(0))",
+    // (an int subclass's __bool__ is not asked: its integer as stored is the status, CORR-AD9-1)
+    "import sys\nclass Lie(int):\n    def __bool__(self): return not int(self)\nsys.exit(Lie(3))", "import sys\nclass Lie(int):\n    def __bool__(self): return not int(self)\nsys.exit(Lie(0))",
+    "import sys\nclass Bad(int):\n    def __bool__(self): raise RuntimeError('no')\nsys.exit(Bad(0))"];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i] });
+  const err = (id: number) => msgs.filter((m) => m.id === id && m.stream === "stderr").map((m) => m.text).join("");
+  const failed = (id: number) => !!msgs.find((m) => m.id === id && m.done)?.error;
+  // (as CPython: a float is no integer status, written; an integer, however large, is not written; True is 1, False 0)
+  assert.deepEqual(cells.map((_, i) => [failed(i + 1), err(i + 1)]), [[true, "-2.5\n"], [true, ""], [true, "0.0\n"], [true, ""], [false, ""], [true, ""], [false, ""], [true, ""], [false, ""], [false, ""]]);
+});
