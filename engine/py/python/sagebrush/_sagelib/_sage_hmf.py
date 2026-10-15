@@ -1502,9 +1502,17 @@ class _QuadraticField:
     """The isomorphism between a real quadratic number field K of Sagebrush
     (defining polynomial x^2 + b x + c, generator alpha) and the engine's
     Q(sqrt d) with O_F = Z[w], w = (1 + sqrt d)/2 if d = 1 mod 4 and sqrt d
-    otherwise: alpha = (-b + m sqrt d)/2 with b^2 - 4c = m^2 d, m > 0 (one of
-    the two isomorphisms; the other is its conjugate, and only weight 2 is
-    computed, where the real places play symmetric roles)."""
+    otherwise: alpha = (-b + m sqrt d)/2 with b^2 - 4c = m^2 d, m > 0. This
+    is one of the two isomorphisms; the other is its conjugate.
+
+    The choice matters in weights other than (2, 2), where the two real
+    places play different roles. Under it, the engine's place sqrt d ->
+    -sqrt d, where it puts k1, is the one where alpha takes its smaller
+    value: K's first real embedding in Sage's order. Its place sqrt d ->
+    +sqrt d, where it puts k2 and reads eigenvalues in F, is the second
+    one: Sage's embedding of QuadraticField(d). So weight (k1, k2) here is
+    Sage's, as QuadraticHilbertCuspFormsWeight documents. In weight 2 the
+    real places play symmetric roles."""
 
     def __init__(self, K):
         from fractions import Fraction
