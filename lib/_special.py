@@ -1575,9 +1575,26 @@ def _cexp_mul(u, w, lo=0.0):
     c, s_ = er * _math.cos(y), er * _math.sin(y)
     mr, jr = _math.frexp(w.real)
     mi, ji = _math.frexp(w.imag)
-    re = _ldexp_inf(c * mr, k + jr) - _ldexp_inf(s_ * mi, k + ji)
-    im = _ldexp_inf(s_ * mr, k + jr) + _ldexp_inf(c * mi, k + ji)
-    return complex(re, im)
+    # (each output part's two terms are added at their larger exponent and
+    # 2^E is applied to the sum once: scaled apart, each term could overflow
+    # where their sum does not, e^(1 + 0.14i) (6.7e307 + 9.5e306i) had an
+    # infinite real part for 1.78e308, astra's CORR-816-1; the real and
+    # imaginary parts keep their own E)
+    return complex(_sum2_ldexp(c * mr, k + jr, -(s_ * mi), k + ji),
+                   _sum2_ldexp(s_ * mr, k + jr, c * mi, k + ji))
+
+
+def _sum2_ldexp(a, ea, b, eb):
+    """a 2^ea + b 2^eb for doubles a, b of modulus below 2, as one double:
+    both scaled to the larger exponent E (exactly, or the smaller one
+    rounding below a unit of the larger), summed, and 2^E applied once;
+    +-inf where the sum is beyond the doubles"""
+    if a == 0:
+        return _ldexp_inf(b, eb) if b else a + b
+    if b == 0:
+        return _ldexp_inf(a, ea)
+    e = max(ea, eb)
+    return _ldexp_inf(_ldexp(a, ea - e) + _ldexp(b, eb - e), e)
 
 
 def _cexp(u):

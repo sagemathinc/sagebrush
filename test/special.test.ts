@@ -303,6 +303,13 @@ print(abs(S._exp_mul(-1000.0, 1.7e308) / 8.62913012583407619e-127 - 1) < 1e-14, 
 v = S._cexp_mul(complex(-1000.0, 0.5), complex(1e-300, 1.7e308))
 r = complex(-4.137025358263756e-127, 7.572774122714864e-127)   # (mpmath at 400 digits)
 print(repr(S._cexp_mul(0j, complex(1e308, 1e-100))), abs(v - r) <= 1e-15 * abs(r))
+# (astra's CORR-816-1: each output part's two terms summed before 2^E, so neither overflows alone: e^(1 + 0.14i)
+# (6.7e307 + 9.5e306i) is 1.7797e308 + 5.11e307i, and E1(-716.529 +- i), both parts doubles, against mpmath at 400 digits)
+big = [(S._cexp_mul(complex(1, 0.1398015493183669), complex(6.745286136385928e307, 9.491933528128834e306)), complex(1.7797162035136925e+308, 5.110004002505212e+307), 1e-15),
+       (S.exp_integral_e1(complex(-716.529, 1)), complex(-1.157563064776513e+308, 1.797267963212778e+308), 2e-14),
+       (S.exp_integral_e1(complex(-716.529, -1)), complex(-1.157563064776513e+308, -1.797267963212778e+308), 2e-14)]
+part = lambda v: (complex(v).real, complex(v).imag)
+print([all(abs(a - b) <= tol * abs(b) for a, b in zip(part(v), part(r))) for v, r, tol in big])
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -391,5 +398,6 @@ print(repr(S._cexp_mul(0j, complex(1e308, 1e-100))), abs(v - r) <= 1e-15 * abs(r
       "NotCovered: faddeeva: |w(z)| is beyond the doubles",
     "True True 0.0 0j",
     "(1e+308+1e-100j) True",
+    "[True, True, True]",
   ]);
 });
