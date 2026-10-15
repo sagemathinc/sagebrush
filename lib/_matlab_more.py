@@ -1,4 +1,4 @@
-"""More of MATLAB's built-ins, for lib/_matlab.py: split and replace, the
+"""More of MATLAB's built-ins, for lib/_matlab.py: split, join and replace, the
 conversions between numbers and binary or hexadecimal text (dec2bin,
 dec2hex, bin2dec, hex2dec), sub2ind and ind2sub, and mat2cell, as their
 documentation pages describe them.  Where a page leaves a case open,
@@ -47,7 +47,9 @@ def _texts(v, name, what="str"):
 
 
 def _as(strings, dims, isstr):
-    """Python strings, column-major, as a string array or a cell array of character vectors"""
+    """Python strings, column-major, as a string array or a cell array of
+    character vectors, without trailing singleton dimensions (as Cell's are)"""
+    dims = _m._canon_dims(dims)
     if isstr:
         return _m._strarr(list(strings), dims) if _m._prod(dims) != 1 else Str(strings[0])
     return Cell([Char(s) for s in strings], dims)
@@ -198,6 +200,75 @@ def replace_(nargout, *args):
     return _as(res, dims, type(v) is StrArr)
 
 
+@_bi("join")
+def join_(nargout, *args):
+    """newStr = join(str), join(str, delimiter), join(str, dim),
+    join(str, delimiter, dim): the text of a string array or cell array of
+    character vectors joined along dim (by default the last dimension whose
+    size is not 1), with a space or the delimiter between the elements; the
+    result has str's type and size 1 along dim.  An array of delimiters has
+    one fewer element than str along dim, and along each other dimension
+    either str's size or 1.  Delimiters are literal text."""
+    if not 1 <= len(args) <= 3:
+        raise _err("Not enough input arguments." if not args else "Too many input arguments.")
+    v = args[0]
+    if type(v) not in (Str, StrArr, Cell):
+        raise _err("join: str must be a string array or a cell array of character vectors, not %s." % _m.class_(v))
+    texts, dims, isstr = _texts(v, "join")
+    rest = list(args[1:])
+    dim = None
+    if rest and _m._isnumlike(rest[-1]) and type(rest[-1]) is not Char:
+        dim = _m._int_arg(rest.pop(), "dimension")
+        if dim < 1:
+            raise _err("join: dim must be a positive integer.")
+        dim -= 1
+    if len(rest) > 1:
+        raise _err("join: the arguments are str, then a delimiter, then dim.")
+    S = list(dims)
+    if dim is None:
+        nonsingle = [k for k, d in enumerate(S) if d != 1]
+        dim = nonsingle[-1] if nonsingle else 0
+    while len(S) <= dim:
+        S.append(1)
+    n = S[dim]
+    if n == 0:
+        raise _err("join: str has no elements along dimension %d; Sagebrush does not join nothing (the page leaves the result open)." % (dim + 1))
+    if rest:
+        delims, ddims, _ = _texts(rest[0], "join", "delimiter")
+        D = list(ddims)
+    else:
+        delims, D = [" "], [1, 1]
+    while len(D) < len(S):
+        D.append(1)
+    if len(D) > len(S) and any(d != 1 for d in D[len(S):]):
+        raise _err("join: delimiter has more dimensions than str.")
+    D = D[:len(S)]
+    single = len(delims) == 1
+    if not single:
+        bad = D[dim] != n - 1 or any(D[k] not in (1, S[k]) for k in range(len(S)) if k != dim)
+        if bad:
+            raise _err("join: delimiter must have %d element%s along dimension %d (one fewer than str), and along each other dimension str's size or 1." % (n - 1, "" if n == 2 else "s", dim + 1))
+    O = list(S)
+    O[dim] = 1
+    out = []
+    for k in range(_m._prod(O)):
+        sub = _subs(k, O)
+        parts = []
+        for j in range(n):
+            if j:
+                if single:
+                    parts.append(delims[0])
+                else:
+                    ds = [0 if D[q] == 1 else sub[q] for q in range(len(S))]
+                    ds[dim] = j - 1
+                    parts.append(delims[_linear(ds, D)])
+            sub[dim] = j
+            parts.append(texts[_linear(sub, S)])
+            sub[dim] = 0
+        out.append("".join(parts))
+    return _as(out, O, isstr)
+
+
 # ------------------------------------------------------------------ numbers as binary and hexadecimal text
 
 
@@ -210,7 +281,7 @@ def _base_text(name, args, radix):
         raise _err("%s: D must be a numeric, logical or char array, not %s." % (name, cls))
     mind = 0
     if len(args) == 2:
-        x = _m._scalar(args[1], "minDigits")
+        x = _m._real_scalar(args[1], "minDigits")
         if not (x >= 0 and x == _math.floor(x) and _math.isfinite(x)):
             raise _err("%s: minDigits must be a nonnegative integer." % name)
         mind = int(x)

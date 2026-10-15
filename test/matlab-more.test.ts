@@ -85,6 +85,57 @@ test("replace: its page's examples, several substrings, and the type of str kept
   ]);
 });
 
+test("join: its page's examples, an array of delimiters rebuilding split's text, cells, dim, and its refusals", () => {
+  const out = matlab([
+    'str = ["Carlos","Sada"; "Ella","Olsen"; "Diana","Lee"];',
+    'str2 = ["x","y","z"; "a","b","c"];',
+    'disp(join(str)); disp(join(str2, "-")); disp(join(str2, [" + "," = "; " - "," = "])); disp(join(str, 1));',
+    '[newStr, match] = split("bacon, lettuce, and tomato", ["and" "," " "]); disp(join(newStr, match));',
+    "c = join({'a', 'b'; 'c', 'd'}); disp(class(c)); disp(size(c)); disp(join({'a', 'b', 'c'}, {'+', '='}));",
+    'disp(join(["a" "b"], "-", 2)); disp(join("abc"));',
+  ].join("\n") + "\n");
+  // (no trailing singleton dimensions in the result: N-D input, by default and along dim 3, and dim beyond the rank)
+  const nd = matlab([
+    "S = reshape(string(1:24), [2, 3, 4]); y = join(S, 3); disp(size(y)); disp(ndims(y)); disp(y(2, 3));",
+    "y = join(S); disp(size(y)); disp(y(2, 3));",
+    "C = reshape(cellstr(string(1:24)), [2, 3, 4]); z = join(C, 3); disp(size(z));",
+    'w = join(["a", "b"; "c", "d"], 5); disp(size(w)); disp(ndims(w));',
+    'v = split(["a b" "c d"]); disp(size(join(v, 3)));',
+  ].join("\n") + "\n");
+  assert.deepEqual(nd.split("\n").map((l: string) => l.trim()).filter(Boolean), [
+    "2     3", "2", "6 12 18 24", "2     3", "6 12 18 24", "2     3", "2     2", "2", "1     2",
+  ]);
+  assert.deepEqual(out.split("\n").map((l: string) => l.trim()).filter(Boolean), [
+    '"Carlos Sada"', '"Ella Olsen"', '"Diana Lee"', '"x-y-z"', '"a-b-c"', '"x + y = z"', '"a - b = c"',
+    '"Carlos Ella Diana"    "Sada Olsen Lee"', "bacon, lettuce, and tomato", "cell", "2     1", "{'a+b=c'}", "a-b", "abc",
+  ]);
+  assert.deepEqual(values(["join('abc')", 'join(["a" "b" "c"], ["-" "+" "*"])', 'join(["a" "b"], "-", 0)', 'join(["a" "b"; "c" "d"], ["-"; "+"; "*"])', "join({1, 2})"]), [
+    "ERROR join: str must be a string array or a cell array of character vectors, not char.",
+    "ERROR join: delimiter must have 2 elements along dimension 2 (one fewer than str), and along each other dimension str's size or 1.",
+    "ERROR join: dim must be a positive integer.",
+    "ERROR join: delimiter must have 1 element along dimension 2 (one fewer than str), and along each other dimension str's size or 1.",
+    "ERROR join: str must be text: a cell array's elements must be character vectors.",
+  ]);
+});
+
+test("dimension, size and count arguments must be real, finite, integer scalars: refused, not truncated to a first element (CORR-E0C-2)", () => {
+  assert.deepEqual(values([
+    'join(["a","b";"c","d"], "-", [2, 1])', 'join(["a","b";"c","d"], "-", 2+3i)', 'join(["a","b";"c","d"], [2, 1])', 'join(["a","b";"c","d"], 2+3i)',
+    'split("a b", " ", [1 2])', "zeros(2, [3 4])", "zeros(2+1i)", "zeros(Inf)", "flip(1:3, [2 1])", "nchoosek(5, [2 3])", "dec2bin(5, [8 9])",
+    "cumsum([1 2], Inf)", "sum([1 2; 3 4], 2+3i)", "triu(magic(3), [1 2])",
+    // (what stays valid: vector dims where MATLAB documents them, and a complex value with no imaginary part)
+    "sum([1 2; 3 4], [2 1])", "circshift(1:4, [1 2])", "mean([1 2; 3 4], 2+0i)", "zeros([1 2])",
+  ]), [
+    "ERROR Expected a scalar dimension, not an array of 2 elements.", "ERROR Expected a real dimension, not a complex number.",
+    "ERROR Expected a scalar dimension, not an array of 2 elements.", "ERROR Expected a real dimension, not a complex number.",
+    "ERROR Expected a scalar dimension, not an array of 2 elements.", "ERROR Size inputs must be scalars.", "ERROR Size inputs must be real.",
+    "ERROR Size inputs must be finite.", "ERROR Expected a scalar argument, not an array of 2 elements.", "ERROR Expected a scalar argument, not an array of 2 elements.",
+    "ERROR Expected a scalar minDigits, not an array of 2 elements.", "ERROR Expected a finite dimension.", "ERROR Expected a real dimension, not a complex number.",
+    "ERROR Expected a scalar argument, not an array of 2 elements.",
+    "10", "3     4     1     2", "1.5000|3.5000", "0     0",
+  ]);
+});
+
 test("dec2bin and dec2hex: fractions, two's complement, and their refusals", () => {
   assert.deepEqual(values([
     "dec2bin(-1.5)", "dec2bin(-2^63)", "dec2bin('a')", "dec2hex(2^64 - 2^12)",
