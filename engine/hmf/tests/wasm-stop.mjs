@@ -9,6 +9,7 @@
 //     node engine/hmf/tests/wasm-stop.mjs <the .wasm> stop_class_set 300
 //     node engine/hmf/tests/wasm-stop.mjs <the .wasm> field::tests::stop_factor 300
 //     node engine/hmf/tests/wasm-stop.mjs <the .wasm> defnew::tests::stop_newspaces 300
+//     node engine/hmf/tests/wasm-stop.mjs <the .wasm> defweightnew::tests::stop_weight_charpoly 300
 //
 // and for sagebrush-arith (cargo test -p sagebrush-arith ... with the same
 // options):

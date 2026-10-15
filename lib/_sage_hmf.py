@@ -41,6 +41,17 @@ Differences from PSAGE:
   Their characteristic polynomials are polynomials over Q(sqrt(5))
   (hecke_charpoly() and similar); the *_coefficients() methods give the
   same coefficients as a list, constant term first.
+* HilbertModularForms(F, N, weight=(k1, k2)) over any other real quadratic
+  field gives a QuadraticHilbertCuspFormsWeight, with the same methods, by
+  the definite method with coefficients over the ideal classes. k1 sits at
+  the first real embedding of F in Sage's order (where the generator of F
+  takes its smaller value) and k2 at the second, and eigenvalues in F are
+  read at the second (Sage's embedding of QuadraticField(d)): there they
+  are the eigenvalues of the forms. Magma puts k_i at its i-th infinite
+  place, so where its first infinite place is the larger one (over
+  Q(sqrt(2)), for instance) its weight [k1, k2] is (k2, k1) here. Odd
+  weights give nonzero spaces when the fundamental unit has norm +1 (as
+  over Q(sqrt(3))).
 
 EXAMPLES::
 
@@ -498,7 +509,7 @@ class HilbertModularForms:
         F, level, weight = _hmf_args(args, kwds)
         if F is not None and not _is_sqrt5(F):
             if weight is not None and _weight(weight) != (2, 2):
-                raise NotImplementedError("Hilbert modular forms of weight other than (2, 2) are implemented over Q(sqrt(5)) only")
+                return QuadraticHilbertCuspFormsWeight(F, level, _weight(weight))
             return QuadraticHilbertModularForms(F, level)
         if weight is not None and _weight(weight) != (2, 2):
             return HilbertCuspFormsWeight(level, _weight(weight))
@@ -813,7 +824,7 @@ def _weight(k):
     """(k1, k2) from a pair or a parallel weight k."""
     if isinstance(k, (tuple, list)):
         if len(k) != 2:
-            raise ValueError("a weight over Q(sqrt(5)) is a pair (k1, k2)")
+            raise ValueError("a weight is a pair (k1, k2)")
         return (_strict_int(k[0], "a weight"), _strict_int(k[1], "a weight"))
     k = _strict_int(k, "a weight")
     return (k, k)
@@ -1719,14 +1730,13 @@ class QuadraticHilbertModularForms:
         [-1, 3, -2, -2, 3, -1, 4]
         [1, 2, -3, -3, 2, 4, -1]
 
-    Refusals: other weights over fields other than Q(sqrt(5)), fields that
-    are not real quadratic, ideals of another field, and Hecke operators at
-    non-primes::
+    Refusals: weights of mixed parity, fields that are not real quadratic,
+    ideals of another field, and Hecke operators at non-primes::
 
-        sage: HilbertModularForms(F, 1, weight=(2, 4))  # sagebrush only
+        sage: HilbertModularForms(F, 1, weight=(2, 3))  # sagebrush only
         Traceback (most recent call last):
         ...
-        NotImplementedError: Hilbert modular forms of weight other than (2, 2) are implemented over Q(sqrt(5)) only
+        ValueError: the weights must have the same parity
         sage: HilbertModularForms(NumberField(x^2 + 1, 'i'), 1)  # sagebrush only
         Traceback (most recent call last):
         ...
@@ -2056,3 +2066,449 @@ class QuadraticNewformOrbit:
         if B <= 2:
             return []
         return [a for _, a in self._eigenvalues(B - 1)]
+
+
+class QuadraticHilbertCuspFormsWeight:
+    """The space S_k(N) of Hilbert cusp forms of weight k = (k1, k2) other
+    than (2, 2) and level N over a real quadratic field F other than
+    Q(sqrt(5)), by the definite method with coefficients (Dembélé 2005,
+    sections 2 and 3, over the ideal classes of Dembélé-Voight 2013, section
+    4). Made by HilbertModularForms(F, N, weight=k).
+
+    k1 sits at the first real embedding of F in Sage's order, where the
+    generator of F takes its smaller value, and k2 at the second. The Hecke
+    operators are defined over F, and newform orbits are Galois orbits over
+    F. Eigenvalues in F, read at the second real embedding (Sage's
+    embedding of QuadraticField(d)), are the eigenvalues of the forms; at
+    the first they are those of the weight (k2, k1). Polynomials over F are
+    given as lists of coefficients in F, constant term first, as over
+    Q(sqrt(5)).
+
+    EXAMPLES:
+
+    Over Q(sqrt(3)), whose fundamental unit has norm +1, there are forms of
+    odd weight: Magma's HilbertCuspForms(F, 2*O, [3, 3]) has dimension 1 and
+    T_7 = -94 there::
+
+        sage: F.<a> = QuadraticField(3)
+        sage: H = HilbertModularForms(F, 2, weight=3); H  # sagebrush only
+        Hilbert cusp forms of weight (3, 3) and dimension 1, level (Fractional ideal (2, a + 1))^2 of norm 4 over Number Field in a with defining polynomial x^2 - 3 with a = 1.732050807568878?
+        sage: H.hecke_charpoly_coefficients(F.primes_above(7)[0])  # sagebrush only
+        [94, 1]
+
+    Over Q(sqrt(2)), whose fundamental unit has norm -1, they vanish. In
+    weight (6, 2) at the level (a) of norm 2 there is one newform, with
+    eigenvalues in F. It is Magma's newform of weight [2, 6] (Magma's first
+    infinite place sends a to +sqrt(2)); Magma gives these eigenvalues in F
+    as their conjugates::
+
+        sage: F.<a> = QuadraticField(2)
+        sage: HilbertModularForms(F, 6, weight=(3, 3)).dimension()  # sagebrush only
+        0
+        sage: f = HilbertModularForms(F, a, weight=(6, 2)).new_decomposition()[0]  # sagebrush only
+        sage: [f.hecke_eigenvalue(P) for P in F.primes_above(7)]  # sagebrush only
+        [-48*a - 88, 48*a - 88]
+
+    Refusals: weights of mixed parity, and polynomial rings over F::
+
+        sage: HilbertModularForms(F, 1, weight=(2, 5))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: the weights must have the same parity
+        sage: HilbertModularForms(F, 3, weight=(2, 4)).hecke_charpoly(7)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: Sagebrush has no polynomial rings over number fields yet: hecke_charpoly_coefficients() gives the coefficients in F, constant term first
+    """
+
+    def __init__(self, F, level, weight):
+        self._F = _QuadraticField(F)
+        self._ideal = self._F.ideal(self._F.gens(level))
+        self._gens = [[int(s) for s in t] for t in self._ideal["gens"]]
+        self._k = _weight(weight)
+        d = _call("hmfq_weight_dimension", **self._args())
+        self._dimension = d["dim"]
+        self._new_dimension = d["new_dim"]
+        self._charpolys = {}
+
+    def _args(self, **kw):
+        kw.update(d=self._F.d, level=self._gens, weight=list(self._k))
+        return kw
+
+    def _coeffs(self, cs):
+        return [self._F.to_K(int(u), int(v)) for u, v in cs]
+
+    def _prime(self, P):
+        """The engine's generators of the prime P, refusing non-primes."""
+        g = self._F.gens(P)
+        h = self._F.ideal(g)
+        if len(h["factors"]) != 1 or h["factors"][0][1] != 1:
+            raise ValueError("%r is not a prime ideal" % (P,))
+        return g, h
+
+    def __repr__(self):
+        return "Hilbert cusp forms of weight %s and dimension %s, level %r of norm %s over %r" % (
+            self._k, self._dimension, self.level(), self._ideal["norm"], self._F.K)
+
+    def base_field(self):
+        """The field F.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=4).base_field()  # sagebrush only
+            Number Field in a with defining polynomial x^2 - 3 with a = 1.732050807568878?
+        """
+        return self._F.K
+
+    def level(self):
+        """The level N, as a factorization into prime ideals of F.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 6, weight=4).level()  # sagebrush only
+            (Fractional ideal (2, a + 1))^2 * (Fractional ideal (3, a))^2
+        """
+        return self._F.factorization(self._ideal)
+
+    def weight(self):
+        """The weight (k1, k2).
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=(2, 4)).weight()  # sagebrush only
+            (2, 4)
+        """
+        return self._k
+
+    def dimension(self):
+        """The dimension of S_k(N) (there is no Eisenstein part in weight
+        other than (2, 2)).
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(10)
+            sage: HilbertModularForms(F, 1, weight=4).dimension()  # sagebrush only
+            12
+        """
+        return self._dimension
+
+    cuspidal_dimension = dimension
+
+    def new_dimension(self):
+        """The dimension of the new subspace of S_k(N).
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: H = HilbertModularForms(F, 3, weight=4); H.dimension(), H.new_dimension()  # sagebrush only
+            (10, 4)
+        """
+        return self._new_dimension
+
+    def hecke_charpoly_coefficients(self, P):
+        """The coefficients in F, constant term first, of the characteristic
+        polynomial of T_P (U_P if P divides the level) on S_k(N).
+
+        EXAMPLES:
+
+        Over Q(sqrt(10)), of class number 2, at level one (Magma's
+        characteristic polynomial)::
+
+            sage: F.<a> = QuadraticField(10)
+            sage: HilbertModularForms(F, 1, weight=(2, 4)).hecke_charpoly_coefficients(7)  # sagebrush only
+            [9604, -196, 1]
+        """
+        g, h = self._prime(P)
+        key = tuple(h["hnf"])
+        if key not in self._charpolys:
+            self._charpolys[key] = _call("hmfq_weight_hecke_charpoly", **self._args(p=g))
+        return self._coeffs(self._charpolys[key])
+
+    def hecke_charpoly(self, P, var="x"):
+        """Not implemented until Sagebrush has polynomial rings over number
+        fields: hecke_charpoly_coefficients() gives the coefficients.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=4).hecke_charpoly(7)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Sagebrush has no polynomial rings over number fields yet: hecke_charpoly_coefficients() gives the coefficients in F, constant term first
+        """
+        raise NotImplementedError(_NO_QPOLY % "hecke_charpoly_coefficients()")
+
+    def hecke_matrix(self, P):
+        """Not implemented: in weight other than (2, 2) the Hecke matrices
+        are defined over F, and Sagebrush computes their characteristic
+        polynomials (hecke_charpoly_coefficients()).
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=4).hecke_matrix(7)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: in weight other than (2, 2) Sagebrush computes the characteristic polynomials of Hecke operators over F: use hecke_charpoly_coefficients()
+        """
+        raise NotImplementedError("in weight other than (2, 2) Sagebrush computes the characteristic polynomials "
+                                  "of Hecke operators over F: use hecke_charpoly_coefficients()")
+
+    T = hecke_matrix
+
+    def new_subspace(self, p=None):
+        """Not implemented: see the module documentation.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=4).new_subspace()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Sagebrush does not construct subspaces of spaces of Hilbert modular forms: new_dimension() gives the dimension of the new subspace, and decomposition() and new_decomposition() give newform orbits (operator, characteristic polynomial, dimension)
+        """
+        raise NotImplementedError(_NO_SUBSPACES)
+
+    def new_decomposition(self, verbose=False):
+        """The Galois orbits over F of the newforms of level N, as
+        QuadraticNewformOrbitWeight objects, sorted by dimension.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(10)
+            sage: D = HilbertModularForms(F, 1, weight=(2, 4)).new_decomposition(); D  # sagebrush only
+            [Newform orbit of weight (2, 4) and dimension 2 at level 1 of norm 1 over Number Field in a with defining polynomial x^2 - 10 with a = 3.162277660168380?]
+        """
+        d = _call("hmfq_weight_newform_orbits", **self._args())
+        op = [(self._F.prime(P), c) for P, c in d["op"]]
+        return [QuadraticNewformOrbitWeight(self, op, g, k) for k, g in enumerate(d["orbits"])]
+
+    def decomposition(self, B=None, verbose=False):
+        """The Galois orbits over F of newforms of every level M dividing N,
+        as pairs (orbit, multiplicity): the orbit occurs d(N/M) times in
+        S_k(N), d counting the divisors of N/M. B is accepted for PSAGE's
+        signature and ignored.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: H = HilbertModularForms(F, 3, weight=4)  # sagebrush only
+            sage: sum(f.dimension() * m for f, m in H.decomposition()) == H.dimension()  # sagebrush only
+            True
+        """
+        out = []
+        facs = [(self._F.prime(P), int(e)) for P, e in self._ideal["factors"]]
+        divs = [[]]
+        for P, e in facs:
+            divs = [d + [(P, k)] for d in divs for k in range(e + 1)]
+        for d in divs:
+            mult = 1
+            for (P, k), (_, e) in zip(d, facs):
+                mult *= e - k + 1
+            M = [(P, k) for P, k in d if k > 0] or 1
+            H = QuadraticHilbertCuspFormsWeight(self._F.K, M, self._k)
+            if H.new_dimension() == 0:
+                continue
+            for f in H.new_decomposition():
+                out.append((f, mult))
+        return out
+
+
+_NO_QPOLY = ("Sagebrush has no polynomial rings over number fields yet: %s gives the coefficients in F, "
+             "constant term first")
+
+
+class QuadraticNewformOrbitWeight:
+    """A Galois orbit over F of newforms of weight k != (2, 2) over a real
+    quadratic field F: the characteristic polynomial g over F of a Hecke
+    operator T (which separates the newforms of its level) on the orbit,
+    irreducible over F; its degree is the number of newforms. Their
+    eigenvalues are a_P = h(e)/g'(e), e a root of g, with h computed exactly
+    (proven bounds), as over Q(sqrt(5)).
+
+    EXAMPLES::
+
+        sage: F.<a> = QuadraticField(3)
+        sage: f = HilbertModularForms(F, 2, weight=3).new_decomposition()[0]; f  # sagebrush only
+        Newform orbit of weight (3, 3) and dimension 1 at level (Fractional ideal (2, a + 1))^2 of norm 4 over Number Field in a with defining polynomial x^2 - 3 with a = 1.732050807568878?
+    """
+
+    def __init__(self, space, op, g, number):
+        self._space = space
+        self._op = op
+        self._g = g
+        self._number = number
+        self._data = {}
+
+    def __repr__(self):
+        S = self._space
+        return "Newform orbit of weight %s and dimension %d at level %r of norm %s over %r" % (
+            S.weight(), self.dimension(), S.level(), S._ideal["norm"], S._F.K)
+
+    def dimension(self):
+        """The number of newforms in the orbit (its degree over F).
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(10)
+            sage: HilbertModularForms(F, 1, weight=(2, 4)).new_decomposition()[0].dimension()  # sagebrush only
+            2
+        """
+        return len(self._g) - 1
+
+    def level(self):
+        """The level, as a factorization into prime ideals.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=3).new_decomposition()[0].level()  # sagebrush only
+            (Fractional ideal (2, a + 1))^2
+        """
+        return self._space.level()
+
+    def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=3).new_decomposition()[0].weight()  # sagebrush only
+            (3, 3)
+        """
+        return self._space.weight()
+
+    def operator(self):
+        """The Hecke operator T = sum c_P T_P, as a list of (P, c_P).
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=3).new_decomposition()[0].operator()  # sagebrush only
+            [(Fractional ideal (3, a), 1)]
+        """
+        return list(self._op)
+
+    def charpoly(self, var="x"):
+        """Not implemented until Sagebrush has polynomial rings over number
+        fields: charpoly_coefficients() gives the coefficients.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=3).new_decomposition()[0].charpoly()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Sagebrush has no polynomial rings over number fields yet: charpoly_coefficients() gives the coefficients in F, constant term first
+        """
+        raise NotImplementedError(_NO_QPOLY % "charpoly_coefficients()")
+
+    def charpoly_coefficients(self):
+        """The coefficients in F, constant term first, of the characteristic
+        polynomial of the operator on the orbit.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(10)
+            sage: HilbertModularForms(F, 1, weight=(2, 4)).new_decomposition()[0].charpoly_coefficients()  # sagebrush only
+            [20, 0, 1]
+        """
+        return self._space._coeffs(self._g)
+
+    def _eigen(self, B):
+        """[(hnf, charpoly, h)] for the primes of norm <= B, computed once
+        per bound."""
+        B = _strict_int(B, "the bound")
+        if B not in self._data:
+            S = self._space
+            d = _call("hmfq_weight_newform_eigenvalues", **S._args(orbit=self._number, bound=B))
+            self._data[B] = [(tuple(P["hnf"]), P, c, h) for P, c, h in d["aplist"]]
+        return self._data[B]
+
+    def _find(self, P):
+        g, h = self._space._prime(P)
+        key = tuple(h["hnf"])
+        for k, _, c, hh in self._eigen(int(h["norm"])):
+            if k == key:
+                return c, hh
+        raise ValueError("%r is not a prime ideal" % (P,))
+
+    def hecke_eigenvalue_charpoly(self, P, var="x"):
+        """Not implemented until Sagebrush has polynomial rings over number
+        fields: hecke_eigenvalue_charpoly_coefficients() gives the
+        coefficients.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: HilbertModularForms(F, 2, weight=3).new_decomposition()[0].hecke_eigenvalue_charpoly(7)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Sagebrush has no polynomial rings over number fields yet: hecke_eigenvalue_charpoly_coefficients() gives the coefficients in F, constant term first
+        """
+        raise NotImplementedError(_NO_QPOLY % "hecke_eigenvalue_charpoly_coefficients()")
+
+    def hecke_eigenvalue_charpoly_coefficients(self, P):
+        """The coefficients in F, constant term first, of the characteristic
+        polynomial of the eigenvalue a_P of T_P (U_P if P divides the level)
+        on the orbit: the product of x - a_P(f) over its newforms f.
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(10)
+            sage: f = HilbertModularForms(F, 1, weight=(2, 4)).new_decomposition()[0]  # sagebrush only
+            sage: f.hecke_eigenvalue_charpoly_coefficients(7)  # sagebrush only
+            [9604, -196, 1]
+        """
+        return self._space._coeffs(self._find(P)[0])
+
+    def hecke_eigenvalue(self, P):
+        """The eigenvalue a_P of T_P (U_P if P divides the level), in F, for
+        an orbit of dimension one. For larger orbits the coefficient field
+        is a relative extension of F, which Sagebrush's number fields do not
+        provide yet; their eigenvalues are described by
+        hecke_eigenvalue_charpoly_coefficients().
+
+        EXAMPLES::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: f = HilbertModularForms(F, 2, weight=3).new_decomposition()[0]  # sagebrush only
+            sage: f.hecke_eigenvalue(7), f.hecke_eigenvalue(F.primes_above(2)[0])  # sagebrush only
+            (-94, 0)
+            sage: F.<a> = QuadraticField(10)
+            sage: HilbertModularForms(F, 1, weight=(2, 4)).new_decomposition()[0].hecke_eigenvalue(7)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: the coefficient field of this orbit has degree 2 over F, and Sagebrush's number fields are absolute: hecke_eigenvalue_charpoly_coefficients(P) gives the characteristic polynomial of a_P over F
+        """
+        if self.dimension() != 1:
+            raise NotImplementedError("the coefficient field of this orbit has degree %d over F, and Sagebrush's "
+                                      "number fields are absolute: hecke_eigenvalue_charpoly_coefficients(P) gives the "
+                                      "characteristic polynomial of a_P over F" % self.dimension())
+        h = self._find(P)[1]
+        return self._space._F.to_K(int(h[0][0]), int(h[0][1])) if h else self._space._F.K(0)
+
+    def aplist(self, B):
+        """The eigenvalues a_P for the primes P of norm less than B, by norm,
+        for an orbit of dimension one.
+
+        EXAMPLES:
+
+        Weight (3, 3) over Q(sqrt(3)) at level 4: the primes of norm 2, 3, 11,
+        11, 13 and 13 (Magma's HeckeOperator gives the same)::
+
+            sage: F.<a> = QuadraticField(3)
+            sage: f = HilbertModularForms(F, 2, weight=3).new_decomposition()[0]  # sagebrush only
+            sage: f.aplist(14)  # sagebrush only
+            [0, 0, 0, 0, -22, -22]
+        """
+        B = _strict_int(B, "the bound")
+        if self.dimension() != 1:
+            return [self.hecke_eigenvalue(None)]  # raises NotImplementedError
+        if B <= 2:
+            return []
+        F = self._space._F
+        return [F.to_K(int(h[0][0]), int(h[0][1])) if h else F.K(0) for _, _, _, h in self._eigen(B - 1)]

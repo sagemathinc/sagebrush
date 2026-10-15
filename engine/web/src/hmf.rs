@@ -25,6 +25,10 @@ thread_local! {
 /// The weight [k1, k2] in "weight", other than [2, 2].
 fn weight(v: &Value) -> Result<Weight, String> {
     let k = v.get("weight").and_then(Value::as_array).ok_or("missing argument 'weight': [k1, k2]")?;
+    // the shape first (daybreak HARD-A95-2)
+    if k.len() != 2 {
+        return Err("a weight is [k1, k2]".into());
+    }
     let k: Vec<u32> = k.iter().map(|x| x.as_u64().filter(|&x| x <= 1000).map(|x| x as u32).ok_or("weights are integers")).collect::<Result<_, _>>()?;
     match k.as_slice() {
         [2, 2] => Err("weight [2, 2] is the hmf_* space without a weight".into()),
@@ -152,19 +156,24 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
             let s = space(&ideal(v, "level")?)?;
             Ok(json!({ "dim": s.dimension(), "cusp_dim": s.cusp_dimension() }))
         }
+        // every argument is parsed before a space is built or cached
+        // (daybreak HARD-A95-3)
         "hmf_hecke_matrix" => {
-            let s = space(&ideal(v, "level")?)?;
-            Ok(rows_json(&s.hecke_matrix(&prime(v, "p")?)?.rows))
+            let (n, p) = (ideal(v, "level")?, prime(v, "p")?);
+            let s = space(&n)?;
+            Ok(rows_json(&s.hecke_matrix(&p)?.rows))
         }
         "hmf_hecke_rows" => {
-            let s = space(&ideal(v, "level")?)?;
+            let (n, p) = (ideal(v, "level")?, prime(v, "p")?);
             // checked: x as usize would truncate on 32-bit targets (API-3AE-5)
             let rows: Vec<usize> = v.get("rows").and_then(Value::as_array).ok_or("missing argument 'rows'")?.iter().map(|x| x.as_u64().and_then(|x| usize::try_from(x).ok()).ok_or("rows are indices")).collect::<Result<_, _>>()?;
-            Ok(rows_json(&s.hecke_rows(&prime(v, "p")?, &rows)?))
+            let s = space(&n)?;
+            Ok(rows_json(&s.hecke_rows(&p, &rows)?))
         }
         "hmf_degeneracy" => {
-            let s = space(&ideal(v, "level")?)?;
-            let d = s.degeneracy(&prime(v, "p")?)?;
+            let (n, p) = (ideal(v, "level")?, prime(v, "p")?);
+            let s = space(&n)?;
+            let d = s.degeneracy(&p)?;
             Ok(json!({ "lower": ideal_json(&d.lower.level), "lower_dim": d.lower.dimension(), "map": d.map }))
         }
         "hmf_new_dimension" => Ok(json!(newspaces(&ideal(v, "level")?)?.new_dimension())),
@@ -178,12 +187,13 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
         // hmf_newform_orbits) at the primes of norm <= bound: polynomials in
         // a root theta of the orbit's polynomial g, num / den
         "hmf_newform_eigenvalues" => {
-            let ns = newspaces(&ideal(v, "level")?)?;
+            let n = ideal(v, "level")?;
             let k = orbit(v)?;
             let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
             if bound > 100_000 {
                 return Err("bound must be at most 10^5".into());
             }
+            let ns = newspaces(&n)?;
             let o = ns.newform_orbits()?;
             if k >= o.orbits.len() {
                 return Err(format!("orbit {} out of range: there are {}", k, o.orbits.len()));
@@ -197,11 +207,12 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
             Ok(json!({ "g": e.g.iter().map(|c| c.to_string()).collect::<Vec<_>>(), "aplist": aps }))
         }
         "hmf_rational_newforms" => {
-            let ns = newspaces(&ideal(v, "level")?)?;
+            let n = ideal(v, "level")?;
             let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
             if bound > 1_000_000 {
                 return Err("bound must be at most 10^6".into());
             }
+            let ns = newspaces(&n)?;
             let o = ns.newform_orbits()?;
             let forms = ns.rational_newforms_of(&o)?;
             let lists = aplists(ns.top(), &forms, bound)?;
@@ -213,18 +224,21 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
         // weight [k1, k2] != [2, 2] (engine/hmf/src/weight.rs): S_k(N) and
         // its new subspace
         "hmf_weight_dimension" => {
-            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            let (n, k) = (ideal(v, "level")?, weight(v)?);
+            let ns = weight_newspaces(&n, k)?;
             Ok(json!({ "dim": ns.top().dimension(), "new_dim": ns.new_dimension()? }))
         }
         // the characteristic polynomial over O_F of T_p (U_p if p | N) on S_k(N)
         "hmf_weight_hecke_charpoly" => {
-            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
-            Ok(fpoly_json(&ns.hecke_charpoly(&prime(v, "p")?)?))
+            let (n, k, p) = (ideal(v, "level")?, weight(v)?, prime(v, "p")?);
+            let ns = weight_newspaces(&n, k)?;
+            Ok(fpoly_json(&ns.hecke_charpoly(&p)?))
         }
         // the Galois orbits over F of the newforms: the separating operator
         // and its characteristic polynomial over O_F on each orbit
         "hmf_weight_newform_orbits" => {
-            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            let (n, k) = (ideal(v, "level")?, weight(v)?);
+            let ns = weight_newspaces(&n, k)?;
             let o = ns.newform_orbits()?;
             Ok(json!({ "op": op_json(&o.op), "orbits": o.orbits.iter().map(fpoly_json).collect::<Vec<_>>() }))
         }
@@ -232,12 +246,13 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
         // characteristic polynomial over O_F of a_p on the orbit, and h with
         // a_p = h(theta)/g'(theta)
         "hmf_weight_newform_eigenvalues" => {
-            let ns = weight_newspaces(&ideal(v, "level")?, weight(v)?)?;
+            let (n, w) = (ideal(v, "level")?, weight(v)?);
             let k = orbit(v)?;
             let bound = v.get("bound").and_then(Value::as_u64).unwrap_or(100);
             if bound > 10_000 {
                 return Err("bound must be at most 10^4".into());
             }
+            let ns = weight_newspaces(&n, w)?;
             let o = ns.newform_orbits()?;
             if k >= o.orbits.len() {
                 return Err(format!("orbit {} out of range: there are {}", k, o.orbits.len()));
@@ -254,7 +269,34 @@ pub fn dispatch(f: &str, v: &Value) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::call;
+
+    /// HARD-A95-2 and HARD-A95-3 (as in hmfq.rs): malformed arguments are
+    /// refused before any space is built or cached.
+    #[test]
+    fn hmf_arguments_before_spaces() {
+        let cached = || SPACES.with(|c| c.borrow().len()) + NEWSPACES.with(|c| c.borrow().len()) + WEIGHT_NEWSPACES.with(|c| c.borrow().len());
+        let before = cached();
+        let long: Value = serde_json::json!({ "level": [[7, 0]], "weight": vec![3u32; 1_000_000] });
+        let t = std::time::Instant::now();
+        assert_eq!(dispatch("hmf_weight_dimension", &long).unwrap_err(), "a weight is [k1, k2]");
+        for (name, req) in [
+            ("hmf_hecke_matrix", r#"{"level":[[7,0]]}"#),
+            ("hmf_hecke_rows", r#"{"level":[[7,0]],"p":[[2,0]]}"#),
+            ("hmf_degeneracy", r#"{"level":[[7,0]],"p":[[6,0]]}"#),
+            ("hmf_newform_eigenvalues", r#"{"level":[[7,0]],"orbit":0,"bound":1000000}"#),
+            ("hmf_rational_newforms", r#"{"level":[[7,0]],"bound":10000000}"#),
+            ("hmf_weight_hecke_charpoly", r#"{"level":[[7,0]],"weight":[4,4]}"#),
+            ("hmf_weight_newform_eigenvalues", r#"{"level":[[7,0]],"weight":[4,4],"bound":5}"#),
+            ("hmf_weight_newform_eigenvalues", r#"{"level":[[7,0]],"weight":[4,4],"orbit":0,"bound":100000}"#),
+        ] {
+            let v: Value = serde_json::from_str(req).unwrap();
+            assert!(dispatch(name, &v).is_err(), "{} {}", name, req);
+        }
+        assert!(t.elapsed().as_secs_f64() < 0.1, "{:?}", t.elapsed());
+        assert_eq!(cached(), before);
+    }
 
     #[test]
     fn hmf_calls() {

@@ -82,6 +82,10 @@ fn requests() -> Vec<Value> {
         json!({"fn": "hmfq_new_dimension", "d": 10, "level": [[5, 0], [0, 1]]}),
         json!({"fn": "hmfq_newform_orbits", "d": 10, "level": [[5, 0], [0, 1]]}),
         json!({"fn": "hmfq_newform_eigenvalues", "d": 10, "level": [[5, 0], [0, 1]], "orbit": 0, "bound": 10}),
+        json!({"fn": "hmfq_weight_dimension", "d": 3, "level": [[2, 0]], "weight": [3, 3]}),
+        json!({"fn": "hmfq_weight_hecke_charpoly", "d": 3, "level": [[2, 0]], "weight": [3, 3], "p": [[7, 0]]}),
+        json!({"fn": "hmfq_weight_newform_orbits", "d": 3, "level": [[2, 0]], "weight": [3, 3]}),
+        json!({"fn": "hmfq_weight_newform_eigenvalues", "d": 3, "level": [[2, 0]], "weight": [3, 3], "orbit": 0, "bound": 10}),
     ]
 }
 
