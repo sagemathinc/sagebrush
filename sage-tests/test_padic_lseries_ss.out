@@ -174,3 +174,126 @@ Dp parent -> Ambient free module of rank 2 over the principal ideal domain Power
 Dp prec=1 -> (1 + 4*5 + 4*5^3 + 4*5^5 + 4*5^7 + 4*5^9 + 4*5^11 + 4*5^13 + 4*5^15 + 4*5^17 + 4*5^19 + O(5^20) + O(T), O(T^1))
 Dp prec=2 -> 1 + 4*5 + O(5^2) + (4 + O(5))*T + O(T^2)
 Dp n=1 !! ValueError
+v -> ((1 + O(5^6))*T, 1 + O(5^6))
+parent v[1] -> Power Series Ring in T over 5-adic Field with capped relative precision 6
+v+v parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6
+2*v -> (((2 + O(5^6))*T, 2 + O(5^6)), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6)
+-v, v-v -> (((4 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + 4*5^5 + O(5^6))*T, 4 + 4*5 + 4*5^2 + 4*5^3 + 4*5^4 + 4*5^5 + O(5^6)), (0, 0), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6)
+v*T -> (((1 + O(5^6))*T^2, (1 + O(5^6))*T), Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 6)
+nonsense !! TypeError
+ZZ 1/2 !! TypeError
+ZZ parent -> Ambient free module of rank 2 over the integral domain Power Series Ring in s over Integer Ring
+QQ parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in u over Rational Field
+rank -> (2, Power Series Ring in T over 5-adic Field with capped relative precision 6, 2, 2)
+M([1,2]) -> ((1 + O(5^6), 2 + O(5^6)), True)
+M.zero -> (0, 0)
+v.dot -> 1 + O(5^6) + (1 + O(5^6))*T^2
+v == v -> (True, True)
+v list -> ([(1 + O(5^6))*T, 1 + O(5^6)], 2, (1 + O(5^6))*T)
+valuation -2 !! ValueError
+int valuation -2 !! ValueError
+valuation 2.50000000000000 !! TypeError
+int valuation 2.50000000000000 !! TypeError
+valuation 0 !! ValueError
+int valuation 0 !! ValueError
+valuation 1 !! ValueError
+int valuation 1 !! ValueError
+valuation -1 !! ValueError
+int valuation -1 !! ValueError
+valuation 4 -> (1, +Infinity)
+int valuation 4 -> (2, +Infinity)
+valuation 2.00000000000000 -> (2, +Infinity)
+int valuation 2.00000000000000 -> (4, +Infinity)
+valuation 1/2 !! TypeError
+int valuation 1/2 !! TypeError
+valuation 6 -> (1, +Infinity)
+int valuation 6 -> (1, +Infinity)
+QQ(0).valuation(0) !! ValueError
+QQ(32/3).valuation(4) -> (2, -2, 2)
+valuation(1/2, 1) !! ValueError
+valuation fn -> 4
+2v parent -> Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 3
+-v -> 4 + O(5^2) + (1 + O(5))*T + (4 + O(5))*T^2 + (1 + O(5))*T^3 + (3 + O(5))*T^4 + O(T^5)
+v-v -> (Ambient free module of rank 2 over the principal ideal domain Power Series Ring in T over 5-adic Field with capped relative precision 3, True)
+rank -> (2, (1 + O(5^3), 2 + O(5^3)))
+v[0] parent -> Power Series Ring in T over 5-adic Field with capped relative precision 3
+matrix (2, 2) 0 -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 2) 1 -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) 2 -> ([3 2]
+[3 6], [3 2]
+[3 6], [-1  2]
+[ 3  2], [ 1 -2]
+[-3 -2])
+matrix (2, 2) 1/2 -> ([3/2   2]
+[  3 9/2], [3/2   2]
+[  3 9/2], [1/2   2]
+[  3 7/2], [-1/2   -2]
+[  -3 -7/2])
+matrix (2, 2) True -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) False -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 2) 0 -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 2) 1 -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) 2 -> ([3 2]
+[3 6], [3 2]
+[3 6], [-1  2]
+[ 3  2], [ 1 -2]
+[-3 -2])
+matrix (2, 2) 1/2 -> ([3/2   2]
+[  3 9/2], [3/2   2]
+[  3 9/2], [1/2   2]
+[  3 7/2], [-1/2   -2]
+[  -3 -7/2])
+matrix (2, 2) True -> ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+matrix (2, 2) False -> ([1 2]
+[3 4], [1 2]
+[3 4], [1 2]
+[3 4], [-1 -2]
+[-3 -4])
+matrix (2, 3) 0 -> ([0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [ 0 -1 -2]
+[-3 -4 -5])
+matrix (2, 3) 1 !! TypeError
+matrix (2, 3) 2 !! TypeError
+matrix (2, 3) 1/2 !! TypeError
+matrix (2, 3) True !! TypeError
+matrix (2, 3) False -> ([0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [0 1 2]
+[3 4 5], [ 0 -1 -2]
+[-3 -4 -5])
+matrix (0, 3) 0 -> ([], [], [], [])
+matrix (0, 3) 1 !! TypeError
+matrix (0, 3) 2 !! TypeError
+matrix (0, 3) 1/2 !! TypeError
+matrix (0, 3) True !! TypeError
+matrix (0, 3) False -> ([], [], [], [])
