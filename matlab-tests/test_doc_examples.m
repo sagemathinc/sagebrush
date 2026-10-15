@@ -486,3 +486,344 @@ show(v);
 clear
 v = isfield(struct('a', 1), {'a', 'b'});
 show(v);
+% plus
+clear
+v = [1 2 3] + 10;
+show(v);
+% minus
+clear
+v = [5 7] - [1 2];
+show(v);
+% uminus
+clear
+v = -[2 -3];
+show(v);
+% times
+clear
+v = [1 2 3] .* [4 5 6];
+show(v);
+% mtimes
+clear
+v = [1 2; 3 4] * [1; 1];
+show(v);
+% rdivide
+clear
+v = [6 8 9] ./ [3 2 4];
+show(v);
+% ldivide
+clear
+v = [2 4] .\ [6 8];
+show(v);
+% mrdivide
+clear
+v = [2 4] / 2;
+show(v);
+% power
+clear
+v = [1 2 3] .^ 2;
+show(v);
+% mpower
+clear
+v = [1 1; 0 1] ^ 3;
+show(v);
+% eq
+clear
+v = [1 2 3] == 2;
+show(v);
+% ne
+clear
+v = [1 2 3] ~= 2;
+show(v);
+% lt
+clear
+v = [1 5 3] < 3;
+show(v);
+% gt
+clear
+v = [1 5 3] > 3;
+show(v);
+% le
+clear
+v = [1 5 3] <= 3;
+show(v);
+% ge
+clear
+v = [1 5 3] >= 3;
+show(v);
+% and
+clear
+v = [1 0 1] & [1 1 0];
+show(v);
+% or
+clear
+v = [1 0 0] | [0 0 1];
+show(v);
+% not
+clear
+v = ~[1 0 2];
+show(v);
+% xor
+clear
+v = xor([1 0 1], [1 1 0]);
+show(v);
+% ctranspose
+clear
+v = [1+2i 3]';
+show(v);
+% lu
+clear
+[L, U, P] = lu([1 2; 3 4]);
+show(L);
+show(U);
+show(P);
+% chol
+clear
+v = chol([4 2; 2 3]);
+show(v);
+% qr
+clear
+v = abs(qr([3 1; 4 2]));
+show(v);
+% svd
+clear
+v = svd([3 0; 0 4]);
+show(v);
+% pinv
+clear
+v = pinv([1 2; 2 4]);
+show(v);
+% expm
+clear
+v = expm([0 1; 0 0]);
+show(v);
+% cond
+clear
+v = cond([2 0; 0 0.5]);
+show(v);
+% linsolve
+clear
+v = linsolve([2 1; 1 3], [3; 5]);
+show(round(v * 1e12) / 1e12);
+% issymmetric
+clear
+v = issymmetric([1 2; 2 1]);
+show(v);
+% regexp
+clear
+v = regexp('a1b22c333', '\d+', 'match');
+show(v);
+% strfind
+clear
+v = strfind('abcabc', 'bc');
+show(v);
+% startsWith
+clear
+v = startsWith("report.txt", "rep");
+show(v);
+% endsWith
+clear
+v = endsWith({'a.m', 'b.txt'}, '.m');
+show(v);
+% strncmp
+clear
+v = strncmp('hello', 'help', 3);
+show(v);
+% strcmpi
+clear
+v = strcmpi('ABC', 'abc');
+show(v);
+% int2str
+clear
+v = int2str(2.7);
+show(v);
+% str2num
+clear
+v = str2num('[1 2 3]');
+show(v);
+% char
+clear
+v = char([72 105]);
+show(v);
+% blanks
+clear
+v = ['[' blanks(3) ']'];
+show(v);
+% deblank
+clear
+v = ['[' deblank('hi   ') ']'];
+show(v);
+% isspace
+clear
+v = isspace('a b');
+show(v);
+% isstrprop
+clear
+v = isstrprop('a1B', 'digit');
+show(v);
+% fliplr
+clear
+v = fliplr('abc');
+show(v);
+% regexprep
+clear
+v = regexprep('2024-01-05', '(\d+)-(\d+)-(\d+)', '$3/$2/$1');
+show(v);
+% isnumeric
+clear
+v = isnumeric([1 2]);
+show(v);
+% ischar
+clear
+v = ischar('abc');
+show(v);
+% iscell
+clear
+v = iscell({1, 'a'});
+show(v);
+% isstruct
+clear
+v = isstruct(struct('a', 1));
+show(v);
+% islogical
+clear
+v = islogical(true);
+show(v);
+% isreal
+clear
+v = isreal([1 2i]);
+show(v);
+% isscalar
+clear
+v = isscalar(5);
+show(v);
+% isvector
+clear
+v = isvector([1 2 3]);
+show(v);
+% isrow
+clear
+v = isrow([1 2 3]);
+show(v);
+% iscolumn
+clear
+v = iscolumn([1; 2]);
+show(v);
+% isa
+clear
+v = isa(int8(5), 'integer');
+show(v);
+% int8
+clear
+v = int8([100 200 -200]);
+show(v);
+% single
+clear
+v = single(1) / 3;
+show(v);
+% cast
+clear
+v = cast(3.7, 'int16');
+show(v);
+% intmax
+clear
+v = intmax('uint8');
+show(v);
+% intmin
+clear
+v = intmin('int16');
+show(v);
+% realmax
+clear
+v = realmax;
+show(v);
+% eps
+clear
+v = eps(1);
+show(v);
+% flintmax
+clear
+v = flintmax;
+show(v);
+% idivide
+clear
+v = idivide(int32(7), int32(2));
+show(v);
+% bitand
+clear
+v = bitand(12, 10);
+show(v);
+% bitor
+clear
+v = bitor(12, 10);
+show(v);
+% bitxor
+clear
+v = bitxor(12, 10);
+show(v);
+% bitshift
+clear
+v = bitshift(1, 4);
+show(v);
+% gamma
+clear
+v = gamma([1 5 0.5]);
+show(round(v * 1e12) / 1e12);
+% beta
+clear
+v = beta(2, 3);
+show(v);
+% erf
+clear
+v = erf([0 1]);
+show(v);
+% erfc
+clear
+v = erfc(1);
+show(v);
+% legendre
+clear
+v = legendre(2, 0.5);
+show(v);
+% expint
+clear
+v = expint(1);
+show(v);
+% meshgrid
+clear
+[X, Y] = meshgrid(1:3, 1:2);
+show(X);
+show(Y);
+% ndgrid
+clear
+[A, B] = ndgrid(1:2, 1:3);
+show(A);
+show(B);
+% nnz
+clear
+v = nnz([1 0 2 0 3]);
+show(v);
+% isfinite
+clear
+v = isfinite([1 Inf NaN]);
+show(v);
+% sortrows
+clear
+v = sortrows([3 1; 1 2; 2 0]);
+show(v);
+% accumarray
+clear
+v = accumarray([1; 2; 1], [10; 20; 30]);
+show(v);
+% deal
+clear
+[a, b] = deal(7);
+show(a);
+show(b);
+% cumsum
+clear
+v = cumsum([1 2; 3 4], 2);
+show(v);
+% abs
+clear
+v = abs(3 + 4i);
+show(v);
