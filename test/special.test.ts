@@ -290,6 +290,14 @@ part = lambda v: (complex(v).real, complex(v).imag)
 print([max(abs(a - b) for a, b in zip(part(v), part(r))) <= tol * max(map(abs, part(r))) for v, r, tol in big],
       repr(S.zeta(-261.5)), repr(S.zeta(-300.5)),
       kind(S.zeta, complex(-280, 3)).split(" at ")[0], kind(S.erfc, complex(0.1, 26.8)).split(" at ")[0])
+# (astra's CORR-BDA-1: next to the diagonal at 1.1e10, y^2 - x^2 rounds to 49152 with a correction of -7220.9; the
+# correction exponentiated alone underflowed and the five functions gave 0, 1 or tiny values, all beyond the doubles,
+# refused; and the helpers' contract: e^-1000 1.7e308 = 8.629130125834076e-127, e^710 0 = 0)
+z = complex(10991984838.86061, 10991984838.860611)
+print(" | ".join(kind(f, a).split(" at ")[0] for f, a in [(S.erfc, z), (S.erf, z), (S.erfi, 1j * z), (S.faddeeva, z.conjugate()),
+                                                          (S.erfcx, -1j * z.conjugate())]))
+print(abs(S._exp_mul(-1000.0, 1.7e308) / 8.62913012583407619e-127 - 1) < 1e-14, abs(S._cexp_mul(complex(-1000.0, 0), 1.7e308).real / 8.62913012583407619e-127 - 1) < 1e-14,
+      repr(S._exp_mul(710.0, 0.0)), repr(S._cexp_mul(complex(710.0, 1), 0.0)))
 `], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
     "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError", "PoleError",
@@ -373,5 +381,9 @@ print([max(abs(a - b) for a, b in zip(part(v), part(r))) <= tol * max(map(abs, p
       "NotCovered: besselj: Sagebrush covers orders and arguments for which the recurrence needs at most 500000 steps",
     "[True, True, True, True, True, True, True] -inf -inf NotCovered: zeta: |zeta(s)| is beyond the doubles " +
       "NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles",
+    "NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles | NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles | " +
+      "NotCovered: erf, erfc, erfi: |erfc z| is beyond the doubles | NotCovered: faddeeva: |w(z)| is beyond the doubles | " +
+      "NotCovered: faddeeva: |w(z)| is beyond the doubles",
+    "True True 0.0 0j",
   ]);
 });

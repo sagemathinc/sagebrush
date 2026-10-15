@@ -1513,43 +1513,63 @@ def _ldexp_inf(v, k):
         return _math.copysign(_math.inf, v)
 
 
-def _exp_mul(t, w):
-    """e^t w for real t and w, without e^t's own overflow or underflow where
-    the product is a double: e^t = 2^k e^r, r = t - k log 2 in [-0.35, 0.35],
-    and 2^k applied to e^r w once (_ldexp); +-inf or a signed 0 beyond"""
-    if not _math.isfinite(t) or w == 0 or not _math.isfinite(w):
-        return _math.exp(t) * w if t < 709 else _math.inf * w
-    if -700 <= t <= 700:
-        return _math.exp(t) * w
-    if t > 1500:
+def _reduce_exp(t, lo):
+    """(k, r) with e^(t + lo) = 2^k e^r, r in about [-0.35, 0.35]: t - k LOG2_HI
+    exactly as a sum (TwoSum, k LOG2_HI being exact for |k| < 2^21), lo added
+    to it before anything is exponentiated, so that neither t nor lo, which
+    can be large and of opposite signs, is exponentiated alone"""
+    k = int(round((t + lo) / _LOG2_HI))
+    s_, e_ = _two_sum(t, -k * _LOG2_HI)
+    return k, (s_ + lo) + (e_ - k * _LOG2_LO)
+
+
+def _exp_mul(t, w, lo=0.0):
+    """e^(t + lo) w for real t, lo and w, without e^t's own overflow or
+    underflow where the product is a double: 2^(k + j) (e^r m) with t + lo
+    reduced by _reduce_exp and w = m 2^j (frexp), applied once (_ldexp); +-inf
+    or a signed 0 where the product is beyond the doubles; 0 for w = 0"""
+    if w == 0 and _math.isfinite(t) and _math.isfinite(lo):
+        return w
+    if not (_math.isfinite(t) and _math.isfinite(lo) and _math.isfinite(w)):
+        return _math.exp(t + lo) * w if t + lo < 709 else _math.inf * w
+    m, j = _math.frexp(w)
+    rough = (t + lo) / _LOG2_HI + j
+    if rough > 1100:
         return _math.copysign(_math.inf, w)
-    if t < -1500:
+    if rough < -1200:
         return _math.copysign(0.0, w)
-    k = int(round(t / _LOG2_HI))
-    r = (t - k * _LOG2_HI) - k * _LOG2_LO
-    return _ldexp_inf(_math.exp(r) * w, k)
+    k, r = _reduce_exp(t, lo)
+    return _ldexp_inf(_math.exp(r) * m, k + j)
 
 
-def _cexp_mul(u, w):
-    """e^u w for complex u and w, scaled as _exp_mul, each part of
-    e^(u - k log 2) w taken by 2^k: the product's parts are doubles even where
-    e^u's modulus is not (Sagebrush's cmath.exp forms e^Re u first, so
-    e^(710 + 0.785i) was infinite in both parts), and e^(y^2 - x^2) w(iz)
-    no longer overflows before the small w(iz) brings it back"""
+def _cexp_mul(u, w, lo=0.0):
+    """e^(u + lo) w for complex u and w (lo real, a correction to Re u that
+    stays with it through the reduction: an exponentiated correction alone
+    underflowed, astra's CORR-BDA-1), scaled as _exp_mul, each part of
+    e^(r + i Im u) (w 2^-j) taken by 2^(k + j): the product's parts are
+    doubles even where e^u's modulus is not (Sagebrush's cmath.exp forms
+    e^Re u first, so e^(710 + 0.785i) was infinite in both parts), and
+    e^(y^2 - x^2) w(iz) no longer overflows before the small w(iz) brings it
+    back.  Infinite parts (of the right signs) beyond the doubles; 0 for w = 0"""
     t, y = u.real, u.imag
-    if -700 <= t <= 700:
-        return _cmath.exp(u) * w
-    if t < -1500 or (t > 1500 and w == 0):
+    w = complex(w)
+    if w == 0 and _math.isfinite(t) and _math.isfinite(lo):
         return 0j
-    c, s_ = _math.cos(y), _math.sin(y)
-    if t > 1500:
-        v = complex(c, s_) * w
+    big = max(abs(w.real), abs(w.imag))
+    if not (_math.isfinite(t) and _math.isfinite(lo) and _math.isfinite(big) and _math.isfinite(y)):
+        return complex(_math.nan, _math.nan)
+    _, j = _math.frexp(big)
+    mw = complex(_ldexp(w.real, -j), _ldexp(w.imag, -j))
+    rough = (t + lo) / _LOG2_HI + j
+    if rough < -1200:
+        return 0j
+    if rough > 1100:
+        v = complex(_math.cos(y), _math.sin(y)) * mw
         return complex(_math.copysign(_math.inf, v.real) if v.real else 0.0,
                        _math.copysign(_math.inf, v.imag) if v.imag else 0.0)
-    k = int(round(t / _LOG2_HI))
-    r = (t - k * _LOG2_HI) - k * _LOG2_LO
-    v = _cmath.exp(complex(r, y)) * w
-    return complex(_ldexp_inf(v.real, k), _ldexp_inf(v.imag, k))
+    k, r = _reduce_exp(t, lo)
+    v = _cmath.exp(complex(r, y)) * mw
+    return complex(_ldexp_inf(v.real, k + j), _ldexp_inf(v.imag, k + j))
 
 
 def _cexp(u):
@@ -1606,9 +1626,13 @@ def _exp_minus_square(z, name, w=1.0):
         xx, xx_err = _two_prod(z.real, z.real)
         re, d = _two_sum(yy, -xx)
         re_err = d + (yy_err - xx_err)
-    if err or re_err:
-        w = w * _cmath.exp(complex(re_err, -2 * err))
-    return _cexp_mul(complex(re, -2 * p), w)
+    # (the exponent's correction re_err stays with re through the reduction,
+    # as lo: exponentiated alone it can underflow where re + re_err is huge,
+    # erfc(1.0992e10 (1 + i)) was 0, astra's CORR-BDA-1; the phase's, of
+    # modulus 1, multiplies w)
+    if err:
+        w = w * _cmath.exp(complex(0.0, -2 * err))
+    return _cexp_mul(complex(re, -2 * p), w, re_err)
 
 
 def _erfc_negligible(z):
