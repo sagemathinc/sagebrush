@@ -973,6 +973,16 @@ test("integral and quadgk reproduce their published examples", () => {
     "0.4597 0.7081 0.6633 0.4134 0.1433 ", "0.6667", "-1.3179", "0.0000 3.1416", "-0.0082 0.5723", "1.6656e-06 1"]);
 });
 
+test("integral: an array-valued integrand's components each meet their own tolerance; a large one does not hide a small one's error", () => {
+  const out = require("node:child_process").execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "exact = (1 - cos(1000))/1000; q1 = integral(@(x) sin(1000*x), 0, 1);",
+    "q = integral(@(x) [1e12; sin(1000*x)], 0, 1, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1)/1e12 - 1) < 1e-14, abs(q(2) - exact) < 1e-14);",
+    "q = integral(@(x) [sin(1000*x); 1e12], 0, 1, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1) - exact) < 1e-14, abs(q(1) - q1) < 1e-14);",
+    "q = integral(@(x) [1e-8*sin(x); x.^2], 0, pi, 'ArrayValued', true); fprintf('%d %d\\n', abs(q(1) - 2e-8) < 1e-20, abs(q(2) - pi^3/3) < 1e-12);",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n"), ["1 1", "1 1", "1 1"]);
+});
+
 test("integral and quadgk: infinite and reversed limits, waypoints, warnings and refusals", () => {
   const { execFileSync } = require("node:child_process");
   const r = require("node:child_process").spawnSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
