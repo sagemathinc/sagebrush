@@ -3,7 +3,7 @@
 // types, so their V8 feedback stays clean when inlined into compiled code.
 
 import {
-  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple,
+  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -80,10 +80,37 @@ function special(o: any, name: string): any {
   if (v !== undefined) return v === MISSING ? undefined : v;
   let f = lookupType(t, name);
   if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
+  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
   c[name] = f === undefined ? MISSING : f;
   return f;
 }
 const MISSING = {};
+
+// The special method name of type t, normalized as special() does (for the
+// lookups made on a type rather than on an object).
+function typeDunder(t: any, name: string): any {
+  let f = lookupType(t, name);
+  if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
+  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
+  return f;
+}
+
+// A special method that is a class attribute but not a function, called as
+// CPython calls it: through its __get__ when its type has one, else without
+// self (C().__add__ = callable_instance gets only the other operand).  None
+// (__iadd__ = None, __add__ = None) raises CPython's TypeError, not a JS
+// error; for __contains__ and __iter__, None means the operation is not
+// available, with no fallback to iteration or __getitem__.
+function nonFunctionDunder(g: any, name: string): any {
+  if (g === null) {
+    if (name === "__contains__") return (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not a container`);
+    if (name === "__iter__") return (self: any) => raise(T.TypeError, `'${typeName(self)}' object is not iterable`);
+    return () => callObj(g, []);
+  }
+  const get = lookupType(typeOf(g), "__get__");
+  if (get !== undefined) return (self: any, ...args: any[]) => callObj(get(g, self, typeOf(self)), args);
+  return (_self: any, ...args: any[]) => callObj(g, args);
+}
 
 const OPS: Record<string, [string, string, string]> = table({
   add: ["__add__", "__radd__", "+"],
@@ -724,11 +751,11 @@ export function richCompare(a: any, b: any, op: string): any {
   const rop = REFLECT[op];
   const reflectedFirst = ta !== tb && tb.$mro.includes(ta) && lookupType(tb, rop) !== lookupType(ta, rop);
   const left = () => {
-    const f = lookupType(ta, op);
+    const f = typeDunder(ta, op);
     return f === undefined ? NotImplemented : f(a, b);
   };
   const right = () => {
-    const f = lookupType(tb, rop);
+    const f = typeDunder(tb, rop);
     return f === undefined ? NotImplemented : f(b, a);
   };
   let r = reflectedFirst ? right() : left();
@@ -1039,7 +1066,7 @@ export const objectEq = markPy(function __eq__(self: any, other: any) {
   return self === other ? true : NotImplemented;
 }, "__eq__");
 export const objectNe = markPy(function __ne__(self: any, other: any) {
-  const eq = lookupType(typeOf(self), "__eq__");
+  const eq = typeDunder(typeOf(self), "__eq__");
   const r = eq === undefined ? NotImplemented : eq(self, other);
   return r === NotImplemented ? r : !truth(r);
 }, "__ne__");
@@ -1531,7 +1558,7 @@ function getitemSlow(o: any, k: any): any {
 function dictMissing(d: PyDict, k: any): any {
   const t = typeOf(d);
   if (t !== T.dict) {
-    const m = lookupType(t, "__missing__");
+    const m = typeDunder(t, "__missing__");
     if (m !== undefined) return m(d, k);
   }
   throw T.KeyError(k);
