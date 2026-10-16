@@ -10,8 +10,9 @@
 // on its page, edges and tour steps naming items of their page, a page made
 // from a template naming one, pictures named in `images` and within the
 // pixels the board shows, a sticker's one emoji, previews the board would
-// drop); and then every code item, run as `board run` runs it (the board's
-// language, its reactive order, its seeds), unless --no-run.
+// drop, a question's options, bounds and answer); and then every code
+// item, run as `board run` runs it (the board's language, its reactive
+// order, its seeds), unless --no-run.
 //
 // Loaded only for `board check` (src/board-cli.ts).
 
@@ -19,6 +20,7 @@ import { closeSync, openSync, readSync } from "fs";
 import { basename } from "path";
 import { cleanDoc, formatError, isBoard, oneEmoji, VERSION } from "../web/board/doc";
 import { cleanPreview } from "../web/board/preview";
+import { askProblems } from "../web/board/ask";
 import { BOARD_SCHEMA } from "../web/board/format-schema";
 import { dataUrl, imageSize, PixelBudget } from "../web/image-size";
 import { SchemaValidator, didYouMean, step } from "./json-schema";
@@ -30,8 +32,8 @@ const USAGE = `usage: sagebrush board check FILE [--json] [--no-run] [--timeout 
   every problem at once: its JSON, its header and version, every field
   against the format (web/board-format.schema.json; an unknown field with
   the one meant), ids once on each page, edges and tour steps naming items
-  of their page, templates, pictures, stickers and previews; then run its
-  code items as \`sagebrush board run\` does
+  of their page, templates, pictures, stickers, questions and previews;
+  then run its code items as \`sagebrush board run\` does
   --json      the report as JSON
   --no-run    don't run the code items
   --timeout S the seconds a code item may run (default 60)
@@ -135,6 +137,11 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
           else ids.set(id, p);
         }
         if (n.kind === "group") walk(n.children, step(p, "children"));
+        else if (n.kind === "ask") {
+          // (a question the board keeps as one: its options, bounds and answer, past the schema)
+          const q = cleanDoc({ nodes: [n] }).nodes?.[0];
+          if (q?.kind === "ask") for (const x of askProblems(q)) (x.level === "error" ? err : warn)(x.field ? step(p, x.field) : p, x.message);
+        }
         else if (n.kind === "sticker") { if (typeof n.emoji === "string" && !oneEmoji(n.emoji)) err(step(p, "emoji"), `${show(n.emoji)} is not one emoji: a sticker shows one (a single character such as 🌵), else it is left out`); }
         else if (n.kind !== "ink") {
           if (typeof n.image === "string" && !used.has(n.image)) used.set(n.image, step(p, "image"));

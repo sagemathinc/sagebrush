@@ -9,7 +9,7 @@
 
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
-import { inkNode, STICKER_SIZE, GROUP_PAD, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { inkNode, isNote, STICKER_SIZE, GROUP_PAD, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
@@ -697,7 +697,7 @@ export class Editor {
     const at = Object.fromEntries(nodes.map((n) => [n.id, this.board.item(n.id)]).filter(([, it]) => it).map(([id, it]) => [id, { x: (it as Item).x, y: (it as Item).y }]));
     // (and the sizes of their pictures, kept in this browser)
     const pics = new Set<string>();
-    const walk = (ns: DocNode[]) => { for (const n of ns) { if (n.kind === "group") walk(n.children); else if (n.kind !== "ink" && n.kind !== "sticker" && n.image) pics.add(n.image); } };
+    const walk = (ns: DocNode[]) => { for (const n of ns) { if (n.kind === "group") walk(n.children); else if (isNote(n) && n.image) pics.add(n.image); } };
     walk(nodes);
     const images = Object.fromEntries([...pics].filter((k) => d.images?.[k]).map((k) => [k, d.images![k]]));
     return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });
@@ -978,6 +978,9 @@ export class Editor {
   open(id: string, fresh = false, at?: { x: number; y: number }) {
     // (a sticker: its picker)
     if (this.board.item(id)?.kind === "sticker") return this.pickSticker({ id });
+    // (a question: shown as a note saying it, not written in place as one)
+    const d = this.doc();
+    if (d && find(this.pg(d), id)?.node.kind === "ask") return;
     // (already being written: a touch's tap on it selected and its double tap both say so)
     if (this.inplace?.id === id && this.inplace.active) return;
     this.close();

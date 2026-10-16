@@ -162,7 +162,69 @@ export interface DocSticker {
   w?: number;
 }
 
-export type DocNode = DocNote | DocGroup | DocInk | DocSticker;
+// A question for the board's reader (web/board-host-protocol.md): its
+// answer is kept on it.  A reader that doesn't know the kind shows its
+// title and text as a note's, so the question is in them.
+/** A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`. (For now the board shows a question, its options and its answer read-only; a host's submission, or `sagebrush board answers --apply`, writes the answer.) */
+export interface DocAsk {
+  /** required: unique on its page (an answer names it) */
+  id: string;
+  /** required: `"ask"` */
+  kind: "ask";
+  /** a heading (plain text, math allowed) */
+  title?: string;
+  /** the question: Markdown with math (`$...$`) */
+  text?: string;
+  /** required: how it is answered: `check` (any of `options`, or without them one yes/no box), `radio` (one of `options`), `choice` (one of `options`, from a list: for many), `text`, `number` or `scale` (a whole number from `min` to `max`) */
+  input: AskInput;
+  /** `check`, `radio` and `choice`: what may be chosen; each a text, or `{ "value": ..., "label": ... }` to keep its answers when its words change */
+  options?: AskOption[];
+  /** `true`: it must be answered before the answers are sent */
+  required?: boolean;
+  /** `number`: the least it takes; `scale`: its first value (default 1) */
+  min?: number;
+  /** `number`: the most it takes; `scale`: its last value (default 5) */
+  max?: number;
+  /** `number`: the step between the values it takes */
+  step?: number;
+  /** `scale`: the words at its low end ("disagree") */
+  low?: string;
+  /** `scale`: the words at its high end ("agree") */
+  high?: string;
+  /** `text`: how many lines its field shows (default 1) */
+  lines?: number;
+  /** the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered */
+  note?: string;
+  /** the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number */
+  answer?: AskAnswer;
+  /** Markdown shown only when zoomed in */
+  detail?: string;
+  /** a color */
+  color?: string;
+  /** its position: leave it out, and the board places it */
+  x?: number;
+  /** as `x` */
+  y?: number;
+  /** its width (default 320) */
+  w?: number;
+  /** its height (default: as tall as what it shows) */
+  h?: number;
+}
+
+export type AskInput = "check" | "radio" | "choice" | "text" | "number" | "scale";
+/** One of a question's options, whose `value` its answer names: its `label` (default: the value) is what the reader sees. */
+export interface AskChoice {
+  /** required: what an answer says when this is chosen */
+  value: string;
+  /** what the reader sees (Markdown with math; default: `value`) */
+  label?: string;
+}
+export type AskOption = string | AskChoice;
+export type AskAnswer = string | number | boolean | string[];
+
+export type DocNode = DocNote | DocGroup | DocInk | DocSticker | DocAsk;
+/** Whether an item is a note (a code item too). */
+export const isNote = (n: DocNode): n is DocNote => n.kind === undefined || n.kind === "note";
 
 /** A slide's card on its page, in board coordinates. */
 export interface SlideRect {
@@ -381,6 +443,13 @@ const str = (v: unknown) => (typeof v === "string" ? v : v == null ? undefined :
 const one = <T extends string>(v: unknown, of: readonly T[]): T | undefined => (of.includes(v as T) ? (v as T) : undefined);
 const strip = <T extends object>(o: T): T => { for (const k of Object.keys(o)) if ((o as any)[k] === undefined) delete (o as any)[k]; return o; };
 const LAYOUTS = ["row", "column", "grid", "graph"] as const, DIRS = ["TB", "LR"] as const;
+export const ASK_INPUTS = ["check", "radio", "choice", "text", "number", "scale"] as const;
+// (an option: a string, or an object with a string value and, if any, a string label)
+const askOption = (o: any): AskOption | undefined =>
+  typeof o === "string" ? o : o && typeof o === "object" && !Array.isArray(o) && typeof o.value === "string" ? strip({ value: o.value, label: typeof o.label === "string" ? o.label : undefined }) : undefined;
+// (an answer: a string, a finite number, true or false, or a list of strings)
+const askAnswer = (a: unknown): AskAnswer | undefined =>
+  typeof a === "string" || typeof a === "boolean" ? a : num(a) ?? (Array.isArray(a) && a.every((x) => typeof x === "string") ? [...a] : undefined);
 // (a picture's name, and where its bytes may be: a raster image's data: URL, or an https: address)
 const IMAGE_NAME = /^[\w-]{1,100}$/;
 // (data: URLs as image-size.ts reads them, any case of the type and jpg too: one grammar, CORR-68B-1)
@@ -455,6 +524,14 @@ export function cleanDoc(d: any): BoardDoc {
       if (!emoji && !icon) return null;
       return strip({ id: String(n.id), kind: "sticker" as const, emoji, icon, color: safeColor(n.color), x: num(n.x), y: num(n.y), w: w !== undefined && w >= 8 && w <= 4000 ? w : undefined });
     }
+    // (a question: its input one of those; else, as a reader that doesn't
+    // know the kind shows it, a note with its title and text)
+    if (n.kind === "ask" && one(n.input, ASK_INPUTS)) {
+      const options = Array.isArray(n.options) ? n.options.map(askOption).filter((o: AskOption | undefined): o is AskOption => o !== undefined) : undefined;
+      return strip({ id: String(n.id), kind: "ask" as const, title: str(n.title), text: str(n.text), input: n.input as AskInput, options, required: n.required === true ? true : undefined,
+        min: num(n.min), max: num(n.max), step: num(n.step), low: str(n.low), high: str(n.high), lines: num(n.lines), answer: askAnswer(n.answer), note: typeof n.note === "string" ? n.note : undefined, detail: str(n.detail),
+        color: safeColor(n.color), x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
+    }
     // (kind "code": the code items of documents before every note could have code)
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
     return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, mode: code !== undefined ? one(n.mode, ITEM_MODES) : undefined, detail: str(n.detail), ref: str(n.ref),
@@ -474,7 +551,7 @@ export function cleanDoc(d: any): BoardDoc {
   if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
   // (previews: at most DOC_MAX in all, every page's, SEC-14C-2)
   const notes: DocNote[] = [];
-  const walk = (ns: DocNode[] | undefined) => { for (const n of ns ?? []) n.kind === "group" ? walk(n.children) : n.kind !== "ink" && n.kind !== "sticker" && n.preview && notes.push(n); };
+  const walk = (ns: DocNode[] | undefined) => { for (const n of ns ?? []) n.kind === "group" ? walk(n.children) : isNote(n) && n.preview && notes.push(n); };
   walk(out.nodes);
   for (const p of out.pages ?? []) walk(p.nodes);
   capPreviews(notes);
@@ -626,7 +703,7 @@ function noteSize(n: DocNote, measure?: Measure, img?: ImageInfo): Box {
 export const onlyImage = (n: { image?: string | object; title?: string; text?: string; code?: string; detail?: string; ref?: string }) =>
   !!n.image && !n.title && !n.text && n.code === undefined && !n.detail && !n.ref;
 
-const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined));
+const hasCode = (ns: DocNode[]): boolean => ns.some((n) => (n.kind === "group" ? hasCode(n.children) : isNote(n) && n.code !== undefined));
 /** Whether a board has code items, on any page. */
 export const anyCode = (d: BoardDoc) => Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i)).some((v) => hasCode(v.nodes ?? []));
 
@@ -687,6 +764,53 @@ function rows(xs: Item[]): Item[] {
   return out;
 }
 
+/** A question's options, each its value and what the reader sees. */
+export const askOptions = (a: DocAsk): { value: string; label: string }[] => (a.options ?? []).map((o) => (typeof o === "string" ? { value: o, label: o } : { value: o.value, label: o.label ?? o.value }));
+
+/**
+ * A question as Markdown: its text, then its options, each marked chosen
+ * or not, or the answer given; what a reader without controls shows (the
+ * board until it has them, `sagebrush board render`).
+ */
+export function askMarkdown(a: DocAsk): string {
+  const out: string[] = a.text ? [a.text, ""] : [];
+  // (answered in words only: answered, nothing said to be missing)
+  const words = a.note?.trim() ? a.note : undefined, ans = a.answer, none = words ? "" : "_(not answered yet)_";
+  const code = (s: string) => "`" + s.replace(/`/g, "'").replace(/\s+/g, " ") + "`";
+  if (a.input === "check" || a.input === "radio" || a.input === "choice") {
+    const opts = askOptions(a);
+    if (a.input === "check" && !opts.length) out.push(ans === true ? "☑ yes" : ans === false ? "☐ no" : `☐ ${none}`.trimEnd());
+    else {
+      const chosen = new Set(Array.isArray(ans) ? ans : typeof ans === "string" ? [ans] : []);
+      const [on, off] = a.input === "check" ? ["☑", "☐"] : ["◉", "○"];
+      for (const o of opts) out.push(`- ${chosen.has(o.value) ? on : off} ${o.label}`);
+      // (an answer that names no option: said as it is)
+      for (const v of chosen) if (!opts.some((o) => o.value === v)) out.push(`- ${on} ${code(v)} (not one of the options)`);
+      // (answered, none chosen; or not answered yet: not the same)
+      out.push("", Array.isArray(ans) && !ans.length ? "_(answered: none chosen)_" : ans === undefined ? none : "");
+      while (out.at(-1) === "") out.pop();
+    }
+  } else if (a.input === "text") {
+    const said = typeof ans !== "string" ? none : ans.trim() ? ans.split("\n").map((l) => "> " + l).join("\n") : "_(answered: left empty)_";
+    if (said) out.push(said);
+  } else {
+    const lo = a.min ?? (a.input === "scale" ? 1 : undefined), hi = a.max ?? (a.input === "scale" ? 5 : undefined);
+    const range = lo !== undefined && hi !== undefined ? `from ${a.low ? `${lo} (${a.low})` : lo} to ${a.high ? `${hi} (${a.high})` : hi}` : lo !== undefined ? `at least ${lo}` : hi !== undefined ? `at most ${hi}` : "";
+    out.push([typeof ans === "number" ? `**${ans}**` : none, range].filter((x) => x).join(" · "));
+  }
+  if (words) {
+    while (out.at(-1) === "") out.pop();
+    out.push(...(out.length ? [""] : []), "_In the reader's words:_", "", words.split("\n").map((l) => "> " + l).join("\n"));
+  }
+  if (a.required) out.push("", "_required_");
+  return out.join("\n");
+}
+
+/** A question as the note a reader without controls shows. */
+export function askNote(a: DocAsk): DocNote {
+  return strip({ id: a.id, title: a.title, text: askMarkdown(a), detail: a.detail, color: a.color, x: a.x, y: a.y, w: a.w ?? 320, h: a.h });
+}
+
 /**
  * Place a board's nodes: returns the renderer's items (groups, notes) and
  * edges, in world coordinates.
@@ -720,6 +844,8 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const rel = new Map<string, { x: number; y: number }>();
   const innerTop = new Map<string, number>(); // a group's members' origin, below its title
   const sizeOf = (n: DocNode): Box => {
+    // (a question: as a note saying it, its options and its answer)
+    if (n.kind === "ask") n = askNote(n);
     if (n.kind === "ink") {
       const b = inkSize(n);
       size.set(n.id, b);
@@ -780,6 +906,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   // absolute positions, and the items
   const place = (n: DocNode, x: number, y: number, depth: number, parent?: string) => {
     const b = size.get(n.id)!;
+    if (n.kind === "ask") n = askNote(n);
     if (n.kind === "group") {
       items.push({ id: n.id, kind: "group", x, y, w: b.w, h: b.h, title: n.title, text: n.text, color: n.color, depth, parent, inner: { x: x + PAD, y: y + innerTop.get(n.id)! }, ...(n.children.length ? {} : { empty: true }) });
       for (const c of n.children) {
