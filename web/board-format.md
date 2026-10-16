@@ -157,6 +157,13 @@ kept in the item, as `answer`: for `check` a list of values (or `true` or
 `false`), for `radio` and `choice` one value, for `text` a string, for
 `number` and `scale` a number.
 
+**Every question can also be answered in words.** Beside the controls, the
+reader can always write an answer of their own, in English or any
+language. It is kept as the question's `note`. A question with a note and
+no `answer` counts as answered, and `required` is met. So ask with the
+controls that fit, and expect the reader to say something else when the
+options don't fit. Read the note as the answer whenever it is there.
+
 ```json
 {
   "format": "sagebrush-board",
@@ -168,13 +175,15 @@ kept in the item, as `answer`: for `check` a list of values (or `true` or
       "options": [{ "value": "a", "label": "Plan A: fix it now" }, { "value": "b", "label": "Plan B: document it" }] },
     { "id": "areas", "kind": "ask", "text": "Which modes should it cover?", "input": "check", "options": ["Python", "Sage", "MATLAB"] },
     { "id": "sure", "kind": "ask", "text": "How sure are you?", "input": "scale", "low": "not at all", "high": "very" },
-    { "id": "why", "kind": "ask", "text": "Anything else?", "input": "text", "lines": 3 }
+    { "id": "why", "kind": "ask", "text": "Anything else?", "input": "text", "lines": 3 },
+    { "id": "when", "kind": "ask", "text": "When should it ship?", "input": "radio", "options": ["Tonight", "Next week"],
+      "note": "Not before the docs are reviewed." }
   ]
 }
 ```
 
 `sagebrush board answers FILE` lists the questions and the answers kept in
-the board; with `--json`, for a program. A host that shows the board
+the board, with each one's note; with `--json`, for a program. A host that shows the board
 passes the reader's answers back as a submission
 (https://sagebrush.space/board-host-protocol.md), and
 `sagebrush board answers FILE --apply SUBMISSION.json` writes them into
@@ -348,6 +357,7 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `low` | string | `scale`: the words at its low end ("disagree") |
 | `high` | string | `scale`: the words at its high end ("agree") |
 | `lines` | number | `text`: how many lines its field shows (default 1) |
+| `note` | string | the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered |
 | `answer` | string \| number \| boolean \| [string] | the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number |
 | `detail` | string | Markdown shown only when zoomed in |
 | `color` | string | a color |
@@ -409,7 +419,8 @@ A picture a note shows, by its name in the document's `images`.
 ## What's new
 
 - **2026-10-16:** questions for the reader (`"kind": "ask"`), their answers
-  kept in the board, and `sagebrush board answers`.
+  (and the reader's own words, `note`) kept in the board, and
+  `sagebrush board answers`.
 - **2026-10-14:**
   - `"mode": "magma"` and `"mode": "matlab"`;
   - template pages (`template`, `uses`) and stickers;

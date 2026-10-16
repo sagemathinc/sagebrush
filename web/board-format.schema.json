@@ -701,6 +701,10 @@
      "maximum": 1.7976931348623157e+308,
      "description": "`text`: how many lines its field shows (default 1)"
     },
+    "note": {
+     "type": "string",
+     "description": "the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered"
+    },
     "answer": {
      "anyOf": [
       {

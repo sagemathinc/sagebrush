@@ -23,7 +23,7 @@
 A board is a JSON file (`*.board.json`) of notes with Markdown and math, live code, groups laid out for you, labeled edges, pages or slides and a guided tour. You give the structure, and the board does the layout. Open a board at https://sagebrush.space/board/ (its menu's Open…, or drop the file on the page); a page that embeds a board uses https://sagebrush.space/frame/board/.
 
 - [The board format](https://sagebrush.space/board-format.md): the header `{"format": "sagebrush-board", "version": 1}`, a complete small example, the fields with their defaults, pages, slides and templates, `mode`, pictures, how to check a board, and a dated "What's new" list. Read it before writing a board; the format grows.
-- To ask your user things (decisions, preferences), give the board a page of questions: items of `"kind": "ask"` with checkboxes, radio buttons, a list, a text, a number or a scale (see "Asking the reader" in the board format). The answers are kept in the board; `sagebrush board answers FILE --json` (from the next release) reads them.
+- To ask your user things (decisions, preferences), give the board a page of questions: items of `"kind": "ask"` with checkboxes, radio buttons, a list, a text, a number or a scale (see "Asking the reader" in the board format). Every question can also be answered in the user's own words (`note`), which counts as an answer: read it whenever it is there. The answers are kept in the board; `sagebrush board answers FILE --json` (from the next release) reads them.
 - Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout.
 
 ## Languages

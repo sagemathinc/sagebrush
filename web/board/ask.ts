@@ -5,7 +5,7 @@
 // (src/board-answers.ts), the board's controls, and a host checking a
 // submission (web/board-host-protocol.md).
 
-import { askOptions, pageCount, pageOf, type AskAnswer, type BoardDoc, type DocAsk, type DocNode } from "./doc";
+import { askOptions, cleanDoc, formatError, isBoard, pageCount, pageOf, type AskAnswer, type BoardDoc, type DocAsk, type DocNode } from "./doc";
 
 /** The bounds of answers and submissions (web/board-host-protocol.md). */
 export const ASK_LIMITS = { text: 10_000, comment: 10_000, options: 100, asks: 200, bytes: 65_536 } as const;
@@ -77,8 +77,10 @@ export function answerProblem(a: DocAsk, ans: unknown): string | null {
   }
 }
 
-/** Whether a question has an answer (a check question's empty list is one: none chosen). */
-export const answered = (a: DocAsk) => a.answer !== undefined;
+/** Whether a question has an answer (a check question's empty list is one:
+ * none chosen), or a note in the reader's own words that is not only spaces
+ * (William's rule: any question can be answered in words). */
+export const answered = (a: { answer?: unknown; note?: string }) => a.answer !== undefined || !!a.note?.trim();
 
 export interface AskProblem {
   level: "error" | "warning";
@@ -124,6 +126,7 @@ export function askProblems(a: DocAsk): AskProblem[] {
     else if (!Number.isInteger(a.lines) || a.lines < 1 || a.lines > 50) err("lines", "a text field's lines are a whole number from 1 to 50");
   }
   if (a.answer !== undefined) { const why = answerProblem(a, a.answer); if (why) err("answer", why); }
+  if (a.note !== undefined && a.note.length > ASK_LIMITS.text) err("note", `its note is longer than ${ASK_LIMITS.text} characters`);
   return out;
 }
 
@@ -161,4 +164,119 @@ export function answerText(a: DocAsk, ans: AskAnswer | undefined = a.answer): st
   if (typeof ans === "boolean") return ans ? "yes" : "no";
   if (typeof ans === "number") return String(ans);
   return a.input === "radio" || a.input === "choice" ? label(ans) : JSON.stringify(ans);
+}
+
+const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** Why a submission can't be applied to a board (as cleanDoc leaves it),
+ * or null.  `m` is JSON data (parsed from text). */
+export function submissionProblem(d: BoardDoc, m: any): string | null {
+  if (!isObj(m) || m.sagebrush !== "answers" || m.version !== 1) return 'not a submission: a host\'s "answers" message, {"sagebrush": "answers", "version": 1, "page": {"number": N}, "answers": {...}, ...}';
+  const n = m.page?.number;
+  if (!Number.isInteger(n) || n < 1 || n > pageCount(d)) return `its page.number is not a page of the board (from 1 to ${pageCount(d)})`;
+  if (!isObj(m.answers)) return "its answers are not an object (a question's id to its answer)";
+  // (notes: a question's id to the reader's own words, which answer it too)
+  const notes = m.notes ?? {};
+  if (!isObj(notes)) return "its notes are not an object (a question's id to the reader's own words)";
+  if (m.comment !== undefined && (typeof m.comment !== "string" || m.comment.length > ASK_LIMITS.comment)) return `its comment is not a string of at most ${ASK_LIMITS.comment} characters`;
+  const keys = Object.keys(m.answers);
+  if (keys.length > ASK_LIMITS.asks) return `more than ${ASK_LIMITS.asks} answers`;
+  const said = Object.keys(notes);
+  if (said.length > ASK_LIMITS.asks) return `more than ${ASK_LIMITS.asks} notes`;
+  // (each question of the page once, and as the board can ask it: else
+  // which question an answer is to, and what it may be, is not clear;
+  // cleanDoc's caller has refused ids twice on a page, CORR-02C-1)
+  const asks = new Map<string, DocAsk>();
+  for (const { ask: a } of asksOf(d).filter((q) => q.page === n)) {
+    if (asks.has(a.id)) return `two questions on page ${n} have the id ${JSON.stringify(a.id.slice(0, 60))}`;
+    asks.set(a.id, a);
+    const bad = askProblems(a).find((x) => x.level === "error" && x.field !== "answer");
+    if (bad) return `the question ${JSON.stringify(a.id.slice(0, 60))} can't be answered as written (${bad.field || "it"}: ${bad.message}): sagebrush board check says what to fix`;
+  }
+  for (const k of keys) {
+    const a = asks.get(k);
+    if (!a) return `an answer to ${JSON.stringify(k.slice(0, 60))}, which is no question on page ${n}`;
+    const why = answerProblem(a, m.answers[k]);
+    if (why) return `the answer to ${JSON.stringify(k.slice(0, 60))}: ${why}`;
+  }
+  for (const k of said) {
+    if (!asks.has(k)) return `a note to ${JSON.stringify(k.slice(0, 60))}, which is no question on page ${n}`;
+    if (typeof notes[k] !== "string" || notes[k].length > ASK_LIMITS.text) return `the note to ${JSON.stringify(k.slice(0, 60))} is not a string of at most ${ASK_LIMITS.text} characters`;
+  }
+  // (a required question: answered, or said in words)
+  for (const a of asks.values()) if (a.required && !answered({ answer: Object.prototype.hasOwnProperty.call(m.answers, a.id) ? m.answers[a.id] : undefined, note: notes[a.id] })) return `the required question ${JSON.stringify(a.id.slice(0, 60))} is not answered`;
+  return null;
+}
+
+/** What a host posted on a channel: the board's text, and its name and revision (web/board-host-protocol.md). */
+export interface Posted { text: string; name?: string | null; revision?: string | null }
+export type Checked = { ok: true; submission: Submission } | { ok: false; id?: string; message: string };
+/** A submission as checkSubmission returns it: only these fields. */
+export interface Submission {
+  id: string;
+  name: string | null;
+  revision: string | null;
+  page: { number: number; id?: string; title?: string };
+  answers: Record<string, AskAnswer>;
+  notes: Record<string, string>;
+  comment: string;
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// (a board's questions, read once for each text posted)
+const boards = new WeakMap<Posted, BoardDoc | string>();
+function boardOf(posted: Posted): BoardDoc | string {
+  let d = boards.get(posted);
+  if (d !== undefined) return d;
+  try {
+    const raw = JSON.parse(posted.text);
+    const bad = raw && typeof raw === "object" && !Array.isArray(raw) ? formatError(raw) : "not a board";
+    d = bad ? `the board posted can't take answers: ${bad}` : isBoard(raw) ? cleanDoc(raw) : "the board posted can't take answers: it is not a board";
+  } catch {
+    d = "the board posted has no questions (it is not a board's JSON)";
+  }
+  boards.set(posted, d);
+  return d;
+}
+
+/**
+ * A host's check of a submission, against the board it posted on that
+ * channel (web/board-host-protocol.md, "Checking a submission"): plain
+ * JSON data, at most 64 KiB as UTF-8, every field as the protocol says,
+ * and every answer and note one its question takes.  Ok: the submission
+ * with only its known fields (quote only this).  Not: why, in Sagebrush's
+ * words, and its id if it had a valid one (to say `refused`).
+ */
+export function checkSubmission(posted: Posted, m: unknown): Checked {
+  const id = isObj(m) && typeof m.id === "string" && UUID.test(m.id) ? m.id : undefined;
+  const no = (message: string): Checked => ({ ok: false, ...(id ? { id } : {}), message });
+  // (plain JSON, walked without recursion before anything reads it: structured clone carries cycles and other types)
+  const stack: [unknown, number][] = [[m, 1]];
+  for (let seen = 0; stack.length; ) {
+    const [v, depth] = stack.pop()!;
+    if (++seen > 10_000) return no("a submission has more than 10000 values");
+    if (v === null || typeof v === "string" || typeof v === "boolean") continue;
+    if (typeof v === "number") { if (!Number.isFinite(v)) return no("a submission's numbers are finite"); continue; }
+    if (depth > 4) return no("a submission nests at most 4 deep");
+    if (Array.isArray(v)) { if (Object.getPrototypeOf(v) !== Array.prototype) return no("a submission is plain JSON data"); for (const x of v) stack.push([x, depth + 1]); continue; }
+    if (typeof v !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(v))) return no("a submission is plain JSON data");
+    for (const k of Object.keys(v as object)) stack.push([(v as any)[k], depth + 1]);
+  }
+  let bytes: number;
+  try { bytes = new TextEncoder().encode(JSON.stringify(m)).length; } catch { return no("a submission is plain JSON data"); }
+  if (bytes > ASK_LIMITS.bytes) return no(`a submission is at most ${ASK_LIMITS.bytes / 1024} KiB`);
+  if (!isObj(m) || m.sagebrush !== "answers" || m.version !== 1) return no("not a submission");
+  if (!id) return no("a submission's id is a UUID");
+  if ((m.name ?? null) !== (posted.name ?? null) || (m.revision ?? null) !== (posted.revision ?? null)) return no("a submission's name and revision are those of the board posted on its channel");
+  if (!isObj(m.page)) return no("a submission's page is an object");
+  if (m.notes !== undefined && !isObj(m.notes)) return no("a submission's notes are an object");
+  const d = boardOf(posted);
+  if (typeof d === "string") return no(d);
+  const why = submissionProblem(d, m);
+  if (why) return no(why);
+  const n = m.page.number as number, p = pageOf(d, n - 1), many = !!d.pages?.length;
+  if (m.page.id !== undefined && m.page.id !== (many ? p.id : undefined)) return no("a submission's page id is not its page's");
+  if (m.page.title !== undefined && m.page.title !== (many ? p.title : undefined)) return no("a submission's page title is not its page's");
+  const own = (o: any) => Object.fromEntries(Object.keys(o ?? {}).map((k) => [k, o[k]]));
+  return { ok: true, submission: { id, name: m.name ?? null, revision: m.revision ?? null, page: { number: n, ...(typeof m.page.id === "string" ? { id: m.page.id } : {}), ...(typeof m.page.title === "string" ? { title: m.page.title } : {}) },
+    answers: own(m.answers), notes: own(m.notes), comment: typeof m.comment === "string" ? m.comment : "" } };
 }

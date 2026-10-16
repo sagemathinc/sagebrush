@@ -153,6 +153,23 @@ try {
   rmSync(profile, { recursive: true, force: true });
   rmSync(site, { recursive: true, force: true });
 }
+// /submission alone: a host's check of a board's answers, without the board
+try {
+  const { checkSubmission } = await import(join(here, "dist", "submission.js"));
+  const text = JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "q", kind: "ask", text: "Which?", input: "radio", options: ["a", "b"], required: true }] });
+  const posted = { text, name: "d.board.json", revision: "r1" }, id = "8c6f0a5e-4d43-4b8e-9b0e-2f3c1a7d9e10";
+  const sub = { sagebrush: "answers", version: 1, id, name: "d.board.json", revision: "r1", page: { number: 1 }, answers: { q: "b" }, comment: "", extra: 1 };
+  const ok = checkSubmission(posted, sub);
+  check(ok.ok && JSON.stringify(ok.submission) === JSON.stringify({ id, name: "d.board.json", revision: "r1", page: { number: 1 }, answers: { q: "b" }, notes: {}, comment: "" }), "/submission: a good submission, only its known fields: " + JSON.stringify(ok));
+  const words = checkSubmission(posted, { ...sub, answers: {}, notes: { q: "neither, in my words" } });
+  check(words.ok && words.submission.notes.q === "neither, in my words", "/submission: a question answered in words only: " + JSON.stringify(words));
+  const bad = checkSubmission(posted, { ...sub, answers: { q: "c" } });
+  check(!bad.ok && bad.id === id && /not one of its options/.test(bad.message), "/submission: an answer its question doesn't take: " + JSON.stringify(bad));
+  const stale = checkSubmission(posted, { ...sub, revision: "r0" });
+  check(!stale.ok && /name and revision/.test(stale.message), "/submission: another channel's revision: " + JSON.stringify(stale));
+} catch (e) {
+  fails.push("/submission: " + String(e?.stack ?? e));
+}
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);
 process.exit(fails.length ? 1 : 0);
