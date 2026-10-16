@@ -226,6 +226,12 @@ test("fft2, ifft2, fftn and ifftn refuse a transform size that is not a positive
     "S = sparse(100000, 100000); S(1, 1) = 1; try, x = fft2(S, -1, 2); disp('ran'), catch e, disp(e.message), end",
     "try, x = fft2(S, struct(), 2); disp('ran'), catch e, disp(e.message), end",
     "try, x = ifftn(S, {2 2}, 'symmetric'); disp('ran'), catch e, disp(e.message), end",
+    "try, x = ifft2(S, \"bogus\", 2); disp('ran'), catch e, disp(e.message), end",
+    "try, x = ifft2(S, 2, 2, 'bogus'); disp('ran'), catch e, disp(e.message), end",
+    "try, x = fft2(S, 'a', 2); disp('ran'), catch e, disp(e.message), end",
+    // (and as the full functions do: the flag only last, known flags only)
+    "disp(mat2str(size(ifft2(ones(2), 'symmetric')))); disp(mat2str(size(ifftn(ones(2), [2 3], 'nonsymmetric'))))",
+    "try, x = ifft2(ones(2), 'bogus'); disp('ran'), catch e, disp(e.message), end",
   ].join("\n")));
   assert.deepEqual(out, [
     "Invalid number of FFT data points (-1) specified.", "Invalid number of FFT data points (-1) specified.",
@@ -235,6 +241,11 @@ test("fft2, ifft2, fftn and ifftn refuse a transform size that is not a positive
     "Invalid number of FFT data points (-1) specified.",
     "Expected a numeric value, not struct.",
     "Expected a numeric value, not cell.",
+    "Invalid number of FFT data points: a text size is not supported.",
+    "ifft2: the option 'bogus' is not supported.",
+    "Invalid number of FFT data points: a text size is not supported.",
+    "[2 2]", "[2 3]",
+    "ifft2: the option 'bogus' is not supported.",
   ]);
 });
 

@@ -5237,6 +5237,8 @@ def _fft_sizes(sizes):
     """the transform sizes as ints: each a positive integer, as the pages specify; anything
     else refused, not truncated or made empty (the sparse fft2 and others check them before
     making X full, so a large sparse X with a bad size is refused at once)"""
+    if _istext(sizes):
+        raise _err("Invalid number of FFT data points: a text size is not supported.")
     sz = [float(v) for v in _arr(sizes).reshape(-1)]
     for v in sz:
         if not (v == v and v >= 1 and v == _math.floor(v) and v != _math.inf):
@@ -5316,13 +5318,36 @@ def _hermitian(A, axes):
 
 @_bs("fft2")
 def fft2_(x, m=None, n=None):
+    for a in (m, n):
+        if a is not None:
+            _fft_sizes(a)  # (a text or other bad size refused before _scalar reads it)
     return _fftn_call(x, None if m is None else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None else m), False, "fft2", 2)
 
 
+def _ifft_args(name, rest, nsizes):
+    """the size arguments and 'symmetric' of ifft2/ifftn: the flag, 'symmetric' or
+    'nonsymmetric', only last; any other text, or text in a size's place, is refused
+    rather than ignored"""
+    rest = list(rest)
+    sym = False
+    if rest and _istext(rest[-1]):
+        flag = _text(rest[-1]).lower()
+        if flag not in ("symmetric", "nonsymmetric"):
+            raise _err("%s: the option '%s' is not supported." % (name, _text(rest[-1])))
+        sym = flag == "symmetric"
+        rest.pop()
+    if len(rest) > nsizes:
+        raise _err("Too many input arguments.", "MATLAB:TooManyInputs")
+    for a in rest:
+        _fft_sizes(a)
+    return rest, sym
+
+
 @_bs("ifft2")
-def ifft2_(x, m=None, n=None, *flags):
-    sym = any(_istext(f) and _text(f).lower() == "symmetric" for f in (m, n) + flags if f is not None)
-    return _fftn_call(x, None if m is None or _istext(m) else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None and not _istext(n) else m), True, "ifft2", 2, sym)
+def ifft2_(x, *rest):
+    sizes, sym = _ifft_args("ifft2", rest, 2)
+    m, n = (sizes + [None, None])[:2]
+    return _fftn_call(x, None if m is None else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None else m), True, "ifft2", 2, sym)
 
 
 @_bs("fftn")
@@ -5331,9 +5356,9 @@ def fftn_(x, sizes=None):
 
 
 @_bs("ifftn")
-def ifftn_(x, sizes=None, *flags):
-    sym = any(_istext(f) and _text(f).lower() == "symmetric" for f in (sizes,) + flags if f is not None)
-    return _fftn_call(x, None if sizes is None or _istext(sizes) else sizes, True, "ifftn", None, sym)
+def ifftn_(x, *rest):
+    sizes, sym = _ifft_args("ifftn", rest, 1)
+    return _fftn_call(x, sizes[0] if sizes else None, True, "ifftn", None, sym)
 
 
 def _fftshift_call(x, dim, inverse):
