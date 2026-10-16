@@ -1685,6 +1685,20 @@ class FFMatrix:
             sage: A = matrix(GF(7), [[1, 2, 3], [2, 4, 6]]); A.solve_right(vector(GF(7), [1, 2]))
             (1, 0, 0)
         """
+        # (the right-hand side's size first, as Sage: zip dropped equations,
+        # so a short b was solved as if the missing entries did not exist)
+        if isinstance(b, FFMatrix):
+            if b.nrows() != self.nrows():
+                raise ValueError("number of rows of self must equal number of rows of right-hand side")
+        else:
+            from _sage_matrix import _bounded_list
+            if not hasattr(b, "__len__"):
+                try:
+                    b = _bounded_list(b, self.nrows() + 1)
+                except ValueError:
+                    raise ValueError("number of rows of self must equal degree of right-hand side")
+            if len(b) != self.nrows():
+                raise ValueError("number of rows of self must equal degree of right-hand side")
         if _double_field(self._base) and self.is_square():
             import _sage_rdf
             return _sage_rdf._solve_right(self, b)
@@ -1692,8 +1706,7 @@ class FFMatrix:
             _admit_size(self._base, self._ncols, b.ncols())
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
-        from _sage_matrix import _bounded_list
-        b = [self._base(x) for x in _bounded_list(b, self.nrows())]
+        b = [self._base(x) for x in b]
         aug = [r + [bi] for r, bi in zip(self._rows, b)]
         m, piv, d = _echelon(aug, self._base, self._ncols + 1)
         if self._ncols in piv:
@@ -1712,7 +1725,11 @@ class FFMatrix:
             (1, 0)
         """
         if isinstance(b, FFMatrix):
+            if b.ncols() != self.ncols():
+                raise ValueError("number of columns of self must equal number of columns of right-hand side")
             return self.transpose().solve_right(b.transpose()).transpose()
+        if hasattr(b, "__len__") and len(b) != self.ncols():
+            raise ValueError("number of columns of self must equal degree of right-hand side")
         return self.transpose().solve_right(b)
 
     def __truediv__(self, o):

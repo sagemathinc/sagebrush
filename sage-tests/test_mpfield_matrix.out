@@ -25,3 +25,73 @@ C200 inverse :: [(0.500000000000000000, 0.250000000000000000), (0, 0), (0, -0.25
 C200 4 det :: (351.000000000000000, -18.0000000000000000)
 C200 4 rank :: 4
 C200 one :: 1.0000000000000000000000000000000000000000000000000000000000
+Real Field with 100 bits of precision right vec1 :: ValueError : number of rows of self must equal degree of right-hand side
+Real Field with 100 bits of precision right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Real Field with 100 bits of precision right mat1x1 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Real Field with 100 bits of precision right mat3x0 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Real Field with 100 bits of precision right mat2x0 :: (2, 0)
+Real Field with 100 bits of precision left vec1 :: ValueError : number of columns of self must equal degree of right-hand side
+Real Field with 100 bits of precision left vec3 :: ValueError : number of columns of self must equal degree of right-hand side
+Real Field with 100 bits of precision left mat1x1 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Real Field with 100 bits of precision left mat0x3 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Real Field with 100 bits of precision left mat0x2 :: (0, 2)
+Real Field with 100 bits of precision B right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Real Field with 100 bits of precision B left vec2 :: ValueError : number of columns of self must equal degree of right-hand side
+Real Field with 100 bits of precision B right vec2 :: True
+Real Field with 100 bits of precision B left vec3 :: True
+Complex Field with 100 bits of precision right vec1 :: ValueError : number of rows of self must equal degree of right-hand side
+Complex Field with 100 bits of precision right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Complex Field with 100 bits of precision right mat1x1 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Complex Field with 100 bits of precision right mat3x0 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Complex Field with 100 bits of precision right mat2x0 :: (2, 0)
+Complex Field with 100 bits of precision left vec1 :: ValueError : number of columns of self must equal degree of right-hand side
+Complex Field with 100 bits of precision left vec3 :: ValueError : number of columns of self must equal degree of right-hand side
+Complex Field with 100 bits of precision left mat1x1 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Complex Field with 100 bits of precision left mat0x3 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Complex Field with 100 bits of precision left mat0x2 :: (0, 2)
+Complex Field with 100 bits of precision B right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Complex Field with 100 bits of precision B left vec2 :: ValueError : number of columns of self must equal degree of right-hand side
+Complex Field with 100 bits of precision B right vec2 :: True
+Complex Field with 100 bits of precision B left vec3 :: True
+Finite Field of size 7 right vec1 :: ValueError : number of rows of self must equal degree of right-hand side
+Finite Field of size 7 right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Finite Field of size 7 right mat1x1 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Finite Field of size 7 right mat3x0 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Finite Field of size 7 right mat2x0 :: (2, 0)
+Finite Field of size 7 left vec1 :: ValueError : number of columns of self must equal degree of right-hand side
+Finite Field of size 7 left vec3 :: ValueError : number of columns of self must equal degree of right-hand side
+Finite Field of size 7 left mat1x1 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Finite Field of size 7 left mat0x3 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Finite Field of size 7 left mat0x2 :: (0, 2)
+Finite Field of size 7 B right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Finite Field of size 7 B left vec2 :: ValueError : number of columns of self must equal degree of right-hand side
+Finite Field of size 7 B right vec2 :: True
+Finite Field of size 7 B left vec3 :: True
+Algebraic Field right vec1 :: ValueError : number of rows of self must equal degree of right-hand side
+Algebraic Field right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Algebraic Field right mat1x1 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Algebraic Field right mat3x0 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Algebraic Field right mat2x0 :: (2, 0)
+Algebraic Field left vec1 :: ValueError : number of columns of self must equal degree of right-hand side
+Algebraic Field left vec3 :: ValueError : number of columns of self must equal degree of right-hand side
+Algebraic Field left mat1x1 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Algebraic Field left mat0x3 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Algebraic Field left mat0x2 :: (0, 2)
+Algebraic Field B right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Algebraic Field B left vec2 :: ValueError : number of columns of self must equal degree of right-hand side
+Algebraic Field B right vec2 :: True
+Algebraic Field B left vec3 :: True
+Real Double Field right vec1 :: ValueError : number of rows of self must equal degree of right-hand side
+Real Double Field right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Real Double Field right mat1x1 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Real Double Field right mat3x0 :: ValueError : number of rows of self must equal number of rows of right-hand side
+Real Double Field right mat2x0 :: (2, 0)
+Real Double Field left vec1 :: ValueError : number of columns of self must equal degree of right-hand side
+Real Double Field left vec3 :: ValueError : number of columns of self must equal degree of right-hand side
+Real Double Field left mat1x1 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Real Double Field left mat0x3 :: ValueError : number of columns of self must equal number of columns of right-hand side
+Real Double Field left mat0x2 :: (0, 2)
+Real Double Field B right vec3 :: ValueError : number of rows of self must equal degree of right-hand side
+Real Double Field B left vec2 :: ValueError : number of columns of self must equal degree of right-hand side
+Real Double Field B right vec2 :: True
+Real Double Field B left vec3 :: True
