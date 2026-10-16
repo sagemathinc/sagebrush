@@ -194,6 +194,57 @@ class Parser {
   }
   fresh(base = "_mt") { return `${base}${++this.tmp}`; }
 
+  /** A construct of Magma's that Sagebrush's parser doesn't have, among
+   * the tokens of a statement up to its syntax error, and where: said
+   * "not supported yet" rather than "bad syntax", which would say the code
+   * is wrong (the coverage run's 254 Handbook programs). */
+  unsupported(from: number, to: number): { name: string; tok: Tok } | null {
+    const T = this.toks, end = Math.min(to + 1, T.length - 1);
+    const next = (a: Tok, b: Tok) => b.line === a.line && b.col === a.col + a.v.length;
+    for (let k = from; k <= end; k++) {
+      const a = T[k], b = T[k + 1] ?? a, c = T[k + 2] ?? b;
+      const found = (name: string) => ({ name, tok: a });
+      // ($1 where an operand starts: 3 $ 4 is bad syntax, as Magma says)
+      const operandBefore = k > from && (["num", "real", "id", "str"].includes(T[k - 1].t) || ")]}".includes(T[k - 1].v));
+      if (a.v === "$" && b.t === "num" && !operandBefore) return found("$1 (the values printed last)");
+      if (a.v === "$$" && T.slice(from, k).some((x) => x.v === "func")) return found("$$ in func< >");
+      if (a.t === "id" && b.v === "<" && c.v === "[") return found(`${a.v}<[...]> (generator names in a sequence)`);
+      if (a.t === "kw" && ["join", "meet", "cat", "diff", "sdiff", "div", "mod", "and", "or", "xor"].includes(a.v) && b.v === ":=") return found(`${a.v}:= (an assignment with ${a.v})`);
+      if (a.v === "for" && b.t === "id" && c.v === ",") return found("for x, y in S (several loop variables)");
+      if ((a.v === "exists" || a.v === "forall") && a.t === "id" && b.v === "(") return found(`${a.v}(t){ ... } (with a witness)`);
+      if ((a.v === "exists" || a.v === "forall") && a.t === "id" && b.v === "{") return found(`${a.v}{ ... }`);
+      if (a.v === "load" && a.t === "id" && k === from) return found("load (Magma's library files)");
+      if (a.v === "for" && b.t === "id" && c.v === "in") {
+        // for i in S, j in T do: several loops in one
+        let depth = 0;
+        for (let q = k + 3; q < T.length && T[q].v !== "do"; q++) {
+          if ("([{<".includes(T[q].v)) depth++;
+          else if (")]}>".includes(T[q].v)) depth--;
+          else if (T[q].v === "," && depth === 0) return found("for i in S, j in T (several loops in one for)");
+        }
+      }
+      if (a.t === "id" && b.v === "<" && k === from) {
+        // S<y>, h := f(...): generator names, and other values
+        let q = k + 2;
+        while (q < T.length && T[q].v !== ">" && T[q].v !== ";") q++;
+        if (T[q]?.v === ">" && T[q + 1]?.v === ",") return found(`${a.v}<...>, ... := (generator names with other values)`);
+      }
+      if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
+      if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
+      if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
+      if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
+      if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
+      if (a.v === "eval" && a.t === "kw") return found("eval");
+      if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
+      if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
+      if (a.v === "case" && b.v === "<") return found("case< ... >");
+      if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
+      if (a.v === "!" && b.v === "!" && next(a, b)) return found("!! (a coercion that may change the structure)");
+      if (a.v === "\\") return found("\\ (a line continued)");
+    }
+    return null;
+  }
+
   // The loops being parsed, innermost last (a function's body starts its
   // own): for `break x` / `continue x`, which leave or go on with the for
   // loop of x through the loops inside it.  Such a jump sets
@@ -282,6 +333,7 @@ class Parser {
     this.emit(`_m._source(${JSON.stringify(this.filename)}, ${JSON.stringify(this.toks.length ? this.src : "")}${mode})`);
     while (this.peek().t !== "eof") {
       const t = this.peek();
+      const i0 = this.i;
       const saved = { out: this.out, n: this.out.length, ind: this.ind, fns: this.fns.length };
       try {
         // each top-level statement on its own, as Magma runs them; what an
@@ -302,6 +354,15 @@ class Parser {
           this.emit(`_m._compile_error(${r.line}, ${r.col}, ${JSON.stringify(r.msg)})`);
         }
       } catch (e) {
+        // (a construct Sagebrush doesn't have yet: said so, where it is)
+        const u = e instanceof MagmaSyntaxError ? this.unsupported(i0, this.i) : null;
+        // (the line the statement is dropped through, in a session: the error's)
+        const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
+        if (u && e instanceof MagmaSyntaxError) {
+          e.message = `${u.name} is not supported yet`;
+          e.line = u.tok.line;
+          e.col = u.tok.col;
+        }
         if (!(e instanceof MagmaSyntaxError) || this.recover === null) throw e;
         // Magma's rule: the statements before a syntax error have run; the
         // error is reported; a file stops there, and a session drops the
@@ -311,9 +372,9 @@ class Parser {
         this.ind = saved.ind;
         this.fns.length = saved.fns;
         const atEnd = this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
-        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)})`);
+        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)}${u ? ", True" : ""})`);
         if (this.recover === "file" || atEnd) break;
-        while (this.peek().t !== "eof" && this.peek().line <= e.line) this.i++;
+        while (this.peek().t !== "eof" && this.peek().line <= Math.max(errLine, e.line)) this.i++;
       }
     }
     return this.out.join("\n") + "\n";
