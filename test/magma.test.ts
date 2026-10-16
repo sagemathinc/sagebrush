@@ -72,6 +72,14 @@ test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprim
   const flat = r.stdout.replace(/\s+/g, " ");
   assert.match(flat, new RegExp(`QuadraticField: the squarefree part of ${n} was not found within the limit \\(its prime factors above 100000 are not known\\); this is not supported yet`));
   assert.match(flat, /Quadratic Field with defining polynomial x\^2 - 3 over the Rational Field/);
+  // more than 1024 bits: refused before any of the work, a prime too (HARD-4A9-1)
+  const t0 = Date.now();
+  const big = spawnSync(process.execPath, [cli, "--magma"], { input: "K := QuadraticField(2^44497 - 1);\nK := QuadraticField(2^1279 - 1);\nK := QuadraticField(-2^1100);\n1;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(big.signal, null);
+  // (the message wraps at 80 columns, so whitespace is flattened)
+  assert.equal((big.stdout.replace(/\s+/g, " ").match(/QuadraticField of an integer of more than 1024 bits is not supported yet/g) ?? []).length, 3, big.stdout);
+  assert.match(big.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 30000);
 });
 
 test("what Sagebrush lacks is refused in words, never a Python exception, class or function", () => {

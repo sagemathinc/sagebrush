@@ -4529,8 +4529,11 @@ def NumberField(f, *, Check=True):
 
 
 # (the squarefree part's work: trial division by the primes up to this,
-# then what is left must be decided without factoring it, HARD-731-1)
+# then what is left must be decided without factoring it, HARD-731-1; and
+# no more than this many bits at all, checked before any of it: the
+# primality test and isqrt of a 44497-bit integer took 30 s, HARD-4A9-1)
 _SQUAREFREE_TRIAL = 10 ** 5
+_SQUAREFREE_BITS = 1024
 
 
 def _squarefree_part(d):
@@ -4543,6 +4546,8 @@ def _squarefree_part(d):
     factor it)."""
     if d == 0:
         return 0
+    if abs(d).bit_length() > _SQUAREFREE_BITS:
+        raise MagmaError("QuadraticField of an integer of more than %d bits is not supported yet" % _SQUAREFREE_BITS, "'QuadraticField'")
     s, m = (-1 if d < 0 else 1), abs(d)
     for p in _sa.prime_range(2, _SQUAREFREE_TRIAL + 1):
         if p * p > m:
