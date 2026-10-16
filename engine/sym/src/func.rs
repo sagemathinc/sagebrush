@@ -218,6 +218,21 @@ pub fn ipi_multiple(e: &Expr) -> Option<Q> {
     None
 }
 
+/// (n - a) (n - a - 1) ... (n - b + 1), as a product tree (balanced
+/// products keep a million-bit result quick, where multiplying in one
+/// factor at a time is quadratic).
+fn falling(n: &BigInt, a: u64, b: u64) -> BigInt {
+    if b - a <= 16 {
+        let mut r = BigInt::one();
+        for i in a..b {
+            r *= n - BigInt::from(i);
+        }
+        return r;
+    }
+    let m = a + (b - a) / 2;
+    falling(n, a, m) * falling(n, m, b)
+}
+
 fn qq(n: i64, d: i64) -> Q {
     crate::num::qr(n, d)
 }
@@ -448,13 +463,15 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if n.is_negative() {
                 return None;
             }
-            let mut r = BigInt::one();
-            let mut k = BigInt::from(2);
-            while k <= n {
-                r *= &k;
-                k += 1;
+            // n! >= sqrt(2 pi n) (n/e)^n: refuse before the product
+            let nf = n.to_f64().unwrap_or(f64::INFINITY);
+            if nf >= 1.0 {
+                let lb = (nf * (nf.ln() - 1.0) + 0.5 * (2.0 * std::f64::consts::PI * nf).ln()) / std::f64::consts::LN_2;
+                crate::num::check_int_bits_at_least((lb - 1.0).max(0.0) as u64);
             }
-            Some(big(r))
+            // (n below about 160000 now)
+            let n = n.to_u64()?;
+            Some(big(falling(&BigInt::from(n), 0, n)))
         }
         Fun::Gamma => {
             let r = x.as_rat()?;
@@ -489,12 +506,20 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if k.is_negative() || n.is_negative() || k > n {
                 return if !n.is_negative() { Some(zero()) } else { None };
             }
-            let mut r = BigInt::one();
-            let mut i = BigInt::zero();
-            while i < k {
-                r = r * (&n - &i) / (&i + 1);
-                i += 1;
+            // binomial(n, k) = binomial(n, n - k): the shorter product
+            let k = std::cmp::min(k.clone(), &n - &k);
+            // binomial(n, k) >= (n/k)^k and >= 2^(n H(k/n)) / (n + 1), H the
+            // binary entropy: refuse before the product
+            let (nf, kf) = (n.to_f64().unwrap_or(f64::INFINITY), k.to_f64().unwrap_or(f64::INFINITY));
+            if kf >= 1.0 {
+                let p = kf / nf;
+                let h = -p * p.log2() - (1.0 - p) * (1.0 - p).log2();
+                let lb = (kf * (nf / kf).log2()).max(nf * h - (nf + 1.0).log2());
+                crate::num::check_int_bits_at_least((lb - 1.0).max(0.0) as u64);
             }
+            // n (n-1) ... (n-k+1) / k!, each a product tree
+            let k = k.to_u64()?;
+            let r = falling(&n, 0, k) / falling(&BigInt::from(k), 0, k);
             Some(big(r))
         }
         Fun::Conjugate => {

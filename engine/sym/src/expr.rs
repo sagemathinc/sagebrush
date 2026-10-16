@@ -828,21 +828,9 @@ fn power_parts(n: &BigInt, f: u32, k: u32) -> (BigInt, Vec<(BigInt, Q)>) {
 fn small_factor(n: &BigInt) -> Vec<(BigInt, u32)> {
     let mut out = vec![];
     let mut m = n.clone();
-    let mut p = 2u32;
-    while p < 10000 {
-        let bp = BigInt::from(p);
-        if &bp * &bp > m {
-            break;
-        }
-        let mut e = 0;
-        while (&m % &bp).is_zero() {
-            m /= &bp;
-            e += 1;
-        }
-        if e > 0 {
-            out.push((bp, e));
-        }
-        p += if p == 2 { 1 } else { 2 };
+    for p in crate::num::small_prime_divisors(n) {
+        let e = crate::num::strip_factor(&mut m, p);
+        out.push((BigInt::from(p), e));
     }
     if m > BigInt::one() {
         for k in (2..=8u32).rev() {

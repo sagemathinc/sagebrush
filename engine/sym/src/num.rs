@@ -11,6 +11,41 @@ use std::hash::{Hash, Hasher};
 
 pub type Q = BigRational;
 
+/// The largest integer (numerator, denominator) an expression may hold.
+/// Expressions cross the engine boundary as decimal text, whose cost grows
+/// faster than linearly: past this every operation would take seconds, so
+/// it is refused, as CPython refuses int-to-str past its digit limit.
+pub const MAX_INT_BITS: u64 = 1 << 21;
+
+/// Refuse an integer of `bits` bits past MAX_INT_BITS.
+pub fn check_int_bits(bits: u64) {
+    if bits > MAX_INT_BITS {
+        int_too_big(bits, "");
+    }
+}
+
+/// Refuse a result known to need at least `bits` bits, before computing it.
+pub fn check_int_bits_at_least(bits: u64) {
+    if bits > MAX_INT_BITS {
+        int_too_big(bits, "at least ");
+    }
+}
+
+fn int_too_big(bits: u64, qual: &str) -> ! {
+    crate::err::not_implemented(format!(
+        "an integer of {}{} bits in a symbolic expression: sagebrush's symbolic ring holds integers of at most {} bits",
+        qual, bits, MAX_INT_BITS
+    ))
+}
+
+pub fn check_q_bits(x: &Q) {
+    check_int_bits(x.numer().bits().max(x.denom().bits()));
+}
+
+fn q_bits(x: &Q) -> u64 {
+    x.numer().bits().max(x.denom().bits())
+}
+
 #[derive(Clone, Debug)]
 pub enum Num {
     /// re + im*I, exact
@@ -195,31 +230,49 @@ impl Num {
         }
         match self {
             Num::Exact(a, b) if b.is_zero() => {
+                // r and base are powers of the reduced a, so a product has
+                // at least bits(r) + bits(base) - 1 bits: refuse before
+                // computing one past MAX_INT_BITS
                 let mut r = Q::one();
                 let mut base = a.clone();
                 let mut e = e as u64;
                 while e > 0 {
                     if e & 1 == 1 {
+                        check_int_bits_at_least((q_bits(&r) + q_bits(&base)).saturating_sub(1));
                         r = &r * &base;
                     }
-                    base = &base * &base;
                     e >>= 1;
+                    if e > 0 {
+                        check_int_bits_at_least((2 * q_bits(&base)).saturating_sub(1));
+                        base = &base * &base;
+                    }
                 }
                 Num::Exact(r, Q::zero())
             }
             _ => {
+                let exact = self.is_exact();
+                let check = |x: &Num| {
+                    if let Num::Exact(p, q) = x {
+                        check_q_bits(p);
+                        check_q_bits(q);
+                    }
+                };
                 let mut r = Num::one();
                 let mut base = self.clone();
-                if !self.is_exact() {
+                if !exact {
                     r = Num::float(1.0);
                 }
                 let mut e = e as u64;
                 while e > 0 {
                     if e & 1 == 1 {
                         r = r.mul(&base);
+                        check(&r);
                     }
-                    base = base.mul(&base);
                     e >>= 1;
+                    if e > 0 {
+                        base = base.mul(&base);
+                        check(&base);
+                    }
                 }
                 r
             }
@@ -391,6 +444,9 @@ pub fn exact_root(n: &BigInt, k: u32) -> Option<BigInt> {
     if n.is_zero() || n.is_one() {
         return Some(n.clone());
     }
+    if k > 1 && !power_residues(n, k) {
+        return None;
+    }
     let r = nth_root_floor(n, k);
     if pow_big(&r, k) == *n {
         Some(r)
@@ -399,21 +455,136 @@ pub fn exact_root(n: &BigInt, k: u32) -> Option<BigInt> {
     }
 }
 
-pub fn pow_big(b: &BigInt, k: u32) -> BigInt {
-    let mut r = BigInt::one();
-    for _ in 0..k {
-        r = &r * b;
+/// Whether n > 1 is a k-th power modulo a dozen primes p = 1 mod k (false
+/// proves n is not a k-th power; a k-th power always passes).  Each test
+/// is one pass over n, where computing the root costs a few divisions.
+fn power_residues(n: &BigInt, k: u32) -> bool {
+    let k = k as u64;
+    if k > 1 << 20 {
+        return true;
     }
-    r
+    let mut found = 0;
+    let mut p = (1_000_000 / k + 1) * k + 1;
+    while found < 12 {
+        if is_small_prime(p) {
+            found += 1;
+            let r = (n % BigInt::from(p)).to_u64().unwrap();
+            if r != 0 && powmod_u64(r, (p - 1) / k, p) != 1 {
+                return false;
+            }
+        }
+        p += k;
+    }
+    true
+}
+
+fn is_small_prime(p: u64) -> bool {
+    if p < 2 {
+        return false;
+    }
+    let mut d = 2;
+    while d * d <= p {
+        if p % d == 0 {
+            return false;
+        }
+        d += 1;
+    }
+    true
+}
+
+fn powmod_u64(b: u64, mut e: u64, m: u64) -> u64 {
+    let (m, mut b, mut r) = (m as u128, (b % m) as u128, 1u128);
+    while e > 0 {
+        if e & 1 == 1 {
+            r = r * b % m;
+        }
+        b = b * b % m;
+        e >>= 1;
+    }
+    r as u64
+}
+
+/// The primes below 10^4 dividing m, increasing: one division of m by
+/// their product, then remainders of that small remainder (a remainder of
+/// m for each of the 1229 primes took seconds for a million-bit m).
+pub fn small_prime_divisors(m: &BigInt) -> Vec<u32> {
+    thread_local! {
+        static SMALL: (Vec<u32>, BigInt) = {
+            let mut sieve = vec![true; 10000];
+            let mut ps = vec![];
+            for p in 2..10000usize {
+                if sieve[p] {
+                    ps.push(p as u32);
+                    for q in (p * p..10000).step_by(p) {
+                        sieve[q] = false;
+                    }
+                }
+            }
+            let prod = ps.iter().fold(BigInt::one(), |a, &p| a * BigInt::from(p));
+            (ps, prod)
+        };
+    }
+    SMALL.with(|(ps, prod)| {
+        let r = m.abs() % prod;
+        ps.iter().copied().filter(|&p| (&r % BigInt::from(p)).is_zero()).collect()
+    })
+}
+
+/// Divide p out of m != 0 completely, returning its multiplicity: one
+/// division per bit of the multiplicity, so 3^600000 costs about 20.
+pub fn strip_factor(m: &mut BigInt, p: u32) -> u32 {
+    if p == 2 {
+        let t = m.trailing_zeros().unwrap_or(0);
+        *m >>= t as usize;
+        return t as u32;
+    }
+    let bp = BigInt::from(p);
+    if !(&*m % &bp).is_zero() {
+        return 0;
+    }
+    // p, p^2, p^4, ... while they divide m
+    let mut pows = vec![bp];
+    loop {
+        let last = pows.last().unwrap();
+        let sq = last * last;
+        if sq.bits() > m.bits() || !(&*m % &sq).is_zero() {
+            break;
+        }
+        pows.push(sq);
+    }
+    // the multiplicity is below 2^len: its binary digits, greatest first
+    let mut e = 0u32;
+    for j in (0..pows.len()).rev() {
+        if (&*m % &pows[j]).is_zero() {
+            *m /= &pows[j];
+            e += 1 << j;
+        }
+    }
+    e
+}
+
+pub fn pow_big(b: &BigInt, k: u32) -> BigInt {
+    b.pow(k)
 }
 
 fn nth_root_floor(n: &BigInt, k: u32) -> BigInt {
-    // Newton on integers
     if k == 1 {
         return n.clone();
     }
+    if k == 2 {
+        return n.sqrt();
+    }
     let bits = n.bits();
-    let mut x = BigInt::one() << ((bits / k as u64) as usize + 1);
+    let mut x = if bits <= 64 * k as u64 {
+        BigInt::one() << ((bits / k as u64) as usize + 1)
+    } else {
+        // the root of the top half of the bits, an upper bound to half
+        // the precision, so Newton below needs only a couple of steps
+        let h = (bits / k as u64 / 2) as usize;
+        let a = nth_root_floor(&(n >> (h * k as usize)), k);
+        (a + 1) << h
+    };
+    // Newton on integers, decreasing from an upper bound
     loop {
         // y = ((k-1) x + n / x^(k-1)) / k
         let xk1 = pow_big(&x, k - 1);
@@ -441,22 +612,11 @@ pub fn extract_power(n: &BigInt, k: u32) -> (BigInt, BigInt) {
     let mut a = BigInt::one();
     let mut b = BigInt::one();
     let mut m = n.clone();
-    let mut p = 2u32;
-    while p < 10000 {
+    for p in small_prime_divisors(n) {
         let bp = BigInt::from(p);
-        if (&bp * &bp) > m && m > BigInt::one() {
-            break;
-        }
-        let mut e = 0u32;
-        while (&m % &bp).is_zero() {
-            m /= &bp;
-            e += 1;
-        }
-        if e > 0 {
-            a *= pow_big(&bp, e / k);
-            b *= pow_big(&bp, e % k);
-        }
-        p += if p == 2 { 1 } else { 2 };
+        let e = strip_factor(&mut m, p);
+        a *= pow_big(&bp, e / k);
+        b *= pow_big(&bp, e % k);
     }
     if m > BigInt::one() {
         match exact_root(&m, k) {
@@ -497,5 +657,38 @@ mod tests {
         let big = pow_big(&BigInt::from(1_000_003), 2) * 7;
         assert_eq!(extract_power(&big, 2), (BigInt::from(1_000_003), BigInt::from(7)));
         assert_eq!(exact_root(&BigInt::from(1u64 << 40), 4), Some(BigInt::from(1024)));
+    }
+
+    #[test]
+    fn large_roots() {
+        // floor roots against the defining inequalities, across the
+        // recursive (precision-doubling) range
+        let mut n = BigInt::from(3);
+        for i in 0..40 {
+            n = &n * &n + BigInt::from(i);
+            for k in 2..=9u32 {
+                let r = nth_root_floor(&n, k);
+                assert!(pow_big(&r, k) <= n && pow_big(&(&r + 1), k) > n, "{} {}", i, k);
+            }
+            if n.bits() > 20000 {
+                break;
+            }
+        }
+        let q = (BigInt::one() << 521usize) - 1;
+        for k in 2..=8u32 {
+            assert_eq!(exact_root(&pow_big(&q, k), k), Some(q.clone()));
+            assert_eq!(exact_root(&(pow_big(&q, k) + 1), k), None);
+            assert_eq!(exact_root(&(pow_big(&q, k) - 1), k), None);
+        }
+        let mut m = pow_big(&BigInt::from(3), 600000) * 7;
+        assert_eq!(strip_factor(&mut m, 3), 600000);
+        assert_eq!(m, BigInt::from(7));
+        let mut m = (BigInt::one() << 1000000usize) * 5;
+        assert_eq!(strip_factor(&mut m, 2), 1000000);
+        assert_eq!(strip_factor(&mut m, 3), 0);
+        assert_eq!(m, BigInt::from(5));
+        let mut m = pow_big(&BigInt::from(9973), 1023);
+        assert_eq!(strip_factor(&mut m, 9973), 1023);
+        assert!(m.is_one());
     }
 }
