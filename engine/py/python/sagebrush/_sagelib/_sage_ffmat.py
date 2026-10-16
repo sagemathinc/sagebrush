@@ -111,6 +111,35 @@ def _admit_size(base, m, n, factor=1):
     return m, n
 
 
+def _alg_base(base):
+    import _sage_qqbar as qb
+    return base is qb.QQbar or base is qb.AA
+
+
+class _AlgCharge:
+    """The running charge of a matrix's entries over QQbar or AA: each
+    entry, and each distinct number field once (_sage_qqbar._heap_units),
+    against the budget for one matrix.  A charge per entry alone admitted
+    100 x 100 entries sqrt(k) + sqrt(3), each in its own degree-4 field,
+    which ran a 96 MiB heap out (2290 to 9300 units an entry where 1500
+    was charged).  Rows are charged as they are made, so a refusal comes
+    within one row of the budget and nothing is kept."""
+
+    def __init__(self, base):
+        self.base, self.seen, self.total = base, set(), 0
+        self.limit = _heap_limit() // _HEAP_SHARE
+
+    def row(self, r):
+        import _sage_qqbar as qb
+        for x in r:
+            self.total += qb._heap_units(x, self.seen)
+        if self.total > self.limit:
+            mib = 1 << 20
+            raise NotImplementedError("a matrix over %r of these algebraic numbers needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap): each entry, and each of their number fields, counts" % (
+                self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib))
+        return r
+
+
 def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
     """The rows of a matrix over base, each a list (_read_rows; loose:
     _bounded_rows, whose rows may be vectors or single entries), read no
@@ -520,7 +549,12 @@ class FFMatrix:
             raise ValueError("the rows of a matrix must all have %d entries" % ncols)
         _admit_size(base, len(rows), ncols)
         self._base = base
-        self._rows = [[base(x) for x in r] for r in rows]
+        if _alg_base(base):
+            # (charged by what the entries hold, row by row as converted)
+            charge = _AlgCharge(base)
+            self._rows = [charge.row([base(x) for x in r]) for r in rows]
+        else:
+            self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols
 
     # ---- data
@@ -1499,6 +1533,18 @@ def matrix(base, *args, **kwds):
             return FFMatrix(base, _admitted_rows(base, entries, n, loose=True), n)
         if len(entries) != m * n:
             raise ValueError("entries has the wrong length")
+    if callable(entries) and not hasattr(entries, "__iter__") and not hasattr(entries, "__len__") and not hasattr(entries, "__getitem__"):
+        # matrix(F, m, n, f): the entries f(i, j), as Sage, after the shape
+        # is checked; each value converted as it is returned, and over QQbar
+        # and AA each row charged as it is made (was a TypeError: "Illegal
+        # initializer for algebraic number")
+        _admit_size(base, m, n)
+        charge = _AlgCharge(base) if _alg_base(base) else None
+        rows = []
+        for i in range(m):
+            r = [base(entries(i, j)) for j in range(n)]
+            rows.append(charge.row(r) if charge is not None else r)
+        return FFMatrix(base, rows, n)
     if isinstance(entries, (list, tuple, range)):
         _admit_size(base, m, n)
         e = _bounded_list(entries, max(m * n, m))
