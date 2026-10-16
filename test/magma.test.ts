@@ -710,10 +710,11 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   const { join } = require("node:path");
   const t0 = Date.now();
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], {
-    input: "[1.0 .. 1e100000000];\n{1 .. 100000000};\n{@ 1 .. 100000000 @};\n{* 1 .. 100000000 *};\n[1.0 .. 1e-100000000];\n#[1 .. 100000000];\n\"end\";\n",
+    input: "[1.0 .. 1e100000000];\n[1.0 .. (1e10000)^20];\n{1 .. 100000000};\n{@ 1 .. 100000000 @};\n{* 1 .. 100000000 *};\n[1.0 .. 1e-100000000];\n[1.0 .. (1e-10000)^20];\n#[1 .. 100000000];\n\"end\";\n",
     encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a real literal with an exponent of more than 10000 is not supported yet/g) ?? []).length, 2, r.stdout);
   assert.match(out, /a range endpoint of more than 100000 digits is not supported yet/);
   assert.equal((out.match(/a set of more than 1000000 elements is not supported yet/g) ?? []).length, 3, r.stdout);
   assert.match(out, /Sequence range does not consist of integers/);
