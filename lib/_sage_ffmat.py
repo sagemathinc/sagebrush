@@ -56,7 +56,9 @@ def _admit(B, o):
     is never admitted (identity_matrix(GF(7), 2) == 1.5 was True and + 1.5
     added 1, the float truncated) nor an element of another field (GF(5)
     in GF(7)), astra's CORR-BD3-1.  Other bases convert as before."""
-    if isinstance(o, (list, tuple, str, dict)) or getattr(o, "_is_ffmatrix", False) or isinstance(o, FFVector):
+    # (None first: isinstance(None, Fraction) below raised, so A == None was
+    # a TypeError: astra's CORR-8F9-2)
+    if o is None or isinstance(o, (list, tuple, str, dict)) or getattr(o, "_is_ffmatrix", False) or isinstance(o, FFVector):
         return None
     if not _strict_base(B):
         try:
