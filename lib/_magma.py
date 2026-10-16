@@ -2279,7 +2279,8 @@ def _div(a, b, pos=None, op="/"):
         # over the integers a number divides only if it is a unit
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
-        return MReal.of(a) / MReal.of(b)
+        a, b = _real_pair(a, b)
+        return a / b
     a, b = _ff_operands(a, b)
     return a / b
 
@@ -2322,6 +2323,12 @@ def _pow(a, b, pos=None, op="^"):
     if _num(a) and isinstance(b, _Fraction):
         return _rat_pow(a, b, op, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
+        if isinstance(a, MReal) and isinstance(b, int):
+            if abs(b) >= 1 << 30:
+                raise MagmaError("Argument 2 (%d) is too large" % b, "'%s'" % op, True, pos)
+            return a ** b  # (exactly, rounded once)
+        if isinstance(b, MReal) and not isinstance(a, MReal):
+            a = MReal.of(a, b.prec)  # (in the exponent's field, CORR-C682-1)
         return MReal.of(a) ** b
     return a ** b
 
@@ -2503,8 +2510,19 @@ def _scalar(x):
 
 def _num_eq(a, b):
     if isinstance(a, MReal) or isinstance(b, MReal):
-        return MReal.of(a) == MReal.of(b)
+        a, b = _real_pair(a, b)
+        return a == b
     return a == b
+
+
+def _real_pair(a, b):
+    """A real and a number: the number coerced into the real's own field,
+    as Magma does (not at the default precision, CORR-C682-1)."""
+    if isinstance(a, MReal) and not isinstance(b, MReal):
+        return a, MReal.of(b, a.prec)
+    if isinstance(b, MReal) and not isinstance(a, MReal):
+        return MReal.of(a, b.prec), b
+    return a, b
 
 
 def _elt_eq(a, b):
@@ -2619,7 +2637,7 @@ def _order(a, b, op, pos):
     da, db = _desc(a), _desc(b)
     num = ("Z", "Q", "R")
     if da is not None and db is not None and da[0] in num and db[0] in num:
-        fa, fb = (MReal.of(a), MReal.of(b)) if "R" in (da[0], db[0]) else (a, b)
+        fa, fb = _real_pair(a, b)
         return (fa > fb) - (fa < fb)
     if da == db == ("Str",) or da == db == ("Bool",):
         return (a > b) - (a < b)
@@ -3015,29 +3033,81 @@ def _admit_real_parts(n, d):
         raise MagmaError("a real from a rational with a numerator or denominator of more than %d bits is not supported yet" % _REAL_PART_BITS)
 
 
-class MReal:
-    """A real number to `prec` significant decimal digits (RealField(prec)),
-    printed as Magma prints it."""
+def _bits(prec):
+    """The bits of RealField(prec)'s numbers: the least b with 2^b >= 10^prec
+    (Magma's: 100 for 30 digits, 167 for 50, 34 for 10, measured as the
+    least k with 1 + 2^-k eq 1; CORR-C682-2)."""
+    return (10 ** prec).bit_length()
 
-    __slots__ = ("m", "e", "prec")  # value m * 10^e, |m| < 10^prec
+
+def _pow_pair(m, e, n, bits):
+    """(m * 2^e)^n for m > 0 and n >= 0, as a pair (m', e'): exactly while
+    it stays small, else by squaring, each step rounded to `bits` bits (64
+    more than the real's, so that the one rounding to the real's own bits
+    is Magma's but in a vanishing few cases); never a huge integer, so that
+    a large n costs only its bits' steps."""
+    if n * m.bit_length() <= 4 * bits:
+        return m ** n, e * n
+
+    def close(m, e):
+        if m.bit_length() > bits:
+            q, k = _round_bits(m, 1, bits)
+            return q, e + k
+        return m, e
+
+    r, b = (1, 0), close(m, e)
+    while n:
+        if n & 1:
+            r = close(r[0] * b[0], r[1] + b[1])
+        n >>= 1
+        if n:
+            b = close(b[0] * b[0], 2 * b[1])
+    return r
+
+
+# A real's binary exponent is at most this (about 10^301030): past it, the
+# number is refused rather than made (its digits would be huge)
+_REAL_EXP_BITS = 10 ** 6
+
+
+def _round_bits(n, d, bits):
+    """The positive rational n/d rounded to `bits` significant bits, to
+    nearest with ties to even, as (m, e): m * 2^e, 2^(bits-1) <= m < 2^bits."""
+    k = bits - (n.bit_length() - d.bit_length())
+    while True:
+        N, D = (n << k, d) if k >= 0 else (n, d << -k)
+        q, r = divmod(N, D)
+        if q >> bits:
+            k -= 1
+        elif not q >> (bits - 1):
+            k += 1
+        else:
+            break
+    if 2 * r > D or (2 * r == D and q & 1):
+        q += 1
+        if q >> bits:
+            q >>= 1
+            k -= 1
+    return q, -k
+
+
+class MReal:
+    """A real number of RealField(prec): a binary number of _bits(prec)
+    significant bits, as Magma's, every operation rounded once to nearest
+    (ties to even) from its exact result, and printed to `prec` significant
+    decimal digits as Magma prints it (CORR-C682-1, CORR-C682-2)."""
+
+    __slots__ = ("m", "e", "prec")  # value m * 2^e, |m| < 2^_bits(prec)
 
     def __init__(self, m, e, prec=30):
         self.prec = prec
         if m == 0:
             self.m, self.e = 0, 0
             return
-        # round m to prec significant digits
-        digits = len(str(abs(m)))
-        if digits > prec:
-            drop = digits - prec
-            q, r = divmod(abs(m), 10 ** drop)
-            if 2 * r >= 10 ** drop:
-                q += 1
-            m = q if m > 0 else -q
-            e += drop
-            if len(str(abs(m))) > prec:
-                m //= 10
-                e += 1
+        bits = _bits(prec)
+        if abs(m).bit_length() > bits:
+            q, k = _round_bits(abs(m), 1, bits)
+            m, e = (q if m > 0 else -q), e + k
         self.m, self.e = m, e
 
     @staticmethod
@@ -3057,23 +3127,20 @@ class MReal:
 
     @staticmethod
     def _frac(f, prec):
-        # (by its parts, in integers: a Fraction or Rational with big parts
-        # went through a JS number, CORR-56E-1)
+        """The rational f rounded once into RealField(prec).  (By its parts,
+        in integers: a Fraction or Rational with big parts went through a JS
+        number, CORR-56E-1.)"""
         n, d = int(f._numerator), int(f._denominator)
         if n == 0:
             return MReal(0, 0, prec)
         _admit_real_parts(n, d)
-        # n / d as m / 10^k with prec + 5 digits, then rounded
-        k = prec + 5 - (len(str(abs(n))) - len(str(d)))
-        if k >= 0:
-            n *= 10 ** k
-        else:
-            d *= 10 ** (-k)
-        q = (2 * abs(n) + d) // (2 * d)
-        return MReal(q if n > 0 else -q, -k, prec)
+        q, e = _round_bits(abs(n), d, _bits(prec))
+        r = MReal(0, 0, prec)
+        r.m, r.e = (q if n > 0 else -q), e
+        return r
 
     def frac(self):
-        return _Fraction(self.m) * (_Fraction(10) ** self.e)
+        return _Fraction(self.m << self.e) if self.e >= 0 else _Fraction(self.m, 1 << -self.e)
 
     def __float__(self):
         return float(self.frac())
@@ -3081,24 +3148,30 @@ class MReal:
     def _p(self, o):
         return min(self.prec, o.prec) if isinstance(o, MReal) else self.prec
 
+    def _o(self, o):
+        """The other operand's value: an exact one coerced into this real's
+        own field first, as Magma does (not at the default precision:
+        RealField(50)!(10^40+1) - (10^40+1) is 0, CORR-C682-1)."""
+        return MReal.of(o, self.prec).frac()
+
     def __add__(self, o):
-        return MReal._frac(self.frac() + MReal.of(o).frac(), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self.frac() + self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     __radd__ = __add__
 
     def __sub__(self, o):
-        return MReal._frac(self.frac() - MReal.of(o).frac(), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self.frac() - self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     def __rsub__(self, o):
-        return MReal._frac(MReal.of(o).frac() - self.frac(), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self._o(o) - self.frac(), self._p(o)) if _real_ok(o) else NotImplemented
 
     def __mul__(self, o):
-        return MReal._frac(self.frac() * MReal.of(o).frac(), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self.frac() * self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
-        d = MReal.of(o).frac()
+        d = self._o(o)
         if d == 0:
             raise MagmaError("Division by zero")
         return MReal._frac(self.frac() / d, self._p(o))
@@ -3108,7 +3181,23 @@ class MReal:
 
     def __pow__(self, n):
         if isinstance(n, int):
-            return MReal._frac(self.frac() ** n, self.prec)
+            if self.m == 0:
+                if n < 0:
+                    raise MagmaError("Division by zero")
+                return MReal(0 if n else 1, 0, self.prec)
+            bits = _bits(self.prec)
+            m, e = _pow_pair(abs(self.m), self.e, abs(n), bits + 64)
+            if n < 0:
+                q, k = _round_bits(1, m, bits)
+                m, e = q, k - e
+            else:
+                q, k = _round_bits(m, 1, bits)
+                m, e = q, e + k
+            if abs(e) > _REAL_EXP_BITS:
+                raise MagmaError("a real with a binary exponent of more than %d is not supported yet" % _REAL_EXP_BITS)
+            r = MReal(0, 0, self.prec)
+            r.m, r.e = (-m if self.m < 0 and n % 2 else m), e
+            return r
         return Exp(MReal.of(n, self.prec) * Log(self))
 
     def __neg__(self):
@@ -3118,31 +3207,54 @@ class MReal:
         return MReal(abs(self.m), self.e, self.prec)
 
     def __eq__(self, o):
-        return _real_ok(o) and self.frac() == MReal.of(o).frac()
+        return _real_ok(o) and self.frac() == self._o(o)
 
     def __hash__(self):
         return hash(self.frac())
 
     def __lt__(self, o):
-        return self.frac() < MReal.of(o).frac()
+        return self.frac() < self._o(o)
 
     def __le__(self, o):
-        return self.frac() <= MReal.of(o).frac()
+        return self.frac() <= self._o(o)
 
     def __gt__(self, o):
-        return self.frac() > MReal.of(o).frac()
+        return self.frac() > self._o(o)
 
     def __ge__(self, o):
-        return self.frac() >= MReal.of(o).frac()
+        return self.frac() >= self._o(o)
+
+    def _dec(self):
+        """The value to prec significant decimal digits: (m, e) with value
+        about m * 10^e, 10^(prec-1) <= |m| < 10^prec (rounded to nearest)."""
+        p = self.prec
+        f = abs(self.frac())
+        n, d = f.numerator, f.denominator
+        e = len(str(n)) - len(str(d)) - p
+        while True:
+            N, D = (n, d * 10 ** e) if e >= 0 else (n * 10 ** -e, d)
+            q, r = divmod(N, D)
+            if q >= 10 ** p:
+                e += 1
+            elif q < 10 ** (p - 1):
+                e -= 1
+            else:
+                break
+        if 2 * r >= D:
+            q += 1
+            if q == 10 ** p:
+                q //= 10
+                e += 1
+        return (q if self.m > 0 else -q), e
 
     def __repr__(self):
         p = self.prec
         if self.m == 0:
             return "0." + "0" * p
         sign = "-" if self.m < 0 else ""
-        d = str(abs(self.m))
-        d = d + "0" * (p - len(d))  # exactly p significant digits
-        e = self.e + len(str(abs(self.m))) - 1  # value = d[0].d[1:] * 10^e
+        dm, de = self._dec()
+        d = str(abs(dm))
+        e = de + len(d) - 1  # value = d[0].d[1:] * 10^e
         if 0 <= e < p:
             return sign + d[: e + 1] + "." + d[e + 1:]
         if -4 <= e <= -1:
@@ -3590,7 +3702,7 @@ def _fixed(x, n):
     Those are refused rather than guessed."""
     if n < 1 or x.m == 0:
         return None
-    v = _Fraction(x.m) * _Fraction(10) ** x.e
+    v = x.frac()
     a = abs(v)
     if not (1 <= a < 10 ** 20):
         return None
