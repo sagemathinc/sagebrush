@@ -47,6 +47,8 @@ try {
   await ev(`${B}.load(${JSON.stringify({ title: "One", nodes: [{ id: "p", code: "1 + 1" }] })}).then(() => 1)`);
   check(await settled(["p"]), "(the one-language board ran)");
   check((await engines()) === 1, "a board in one language: one interpreter: " + (await engines()));
+  // (its code highlighted once its interpreter is ready: made as its items came, after the code was first drawn, UI-C5A-1)
+  check(await until("[...document.querySelectorAll('.board-code-src')].length > 0 && [...document.querySelectorAll('.board-code-src')].every((e) => !!e.querySelector('span'))", 30000), "the code highlighted once its interpreter is ready: " + JSON.stringify(await ev("[...document.querySelectorAll('.board-code-src')].map((e) => e.innerHTML.slice(0, 80))")));
 
   // three languages: Python (the board's), Sage and MATLAB items
   await send("Page.navigate", { url: `${base}board/?runner=0&fresh=${Math.random()}` });
