@@ -906,6 +906,16 @@ test("intrinsics taking integers refuse a rational, an integral one too (CORR-76
   assert.equal(session("Factorial(4); IsEven(4); Gcd(4, 6); Binomial(4, 2);\n"), "24\ntrue\n2\n6\n");
 });
 
+test("a constructor not implemented yet is refused in words (the signature registry's helper doesn't shadow it)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
+    { input: "G := Graph<4 | [ {1, 2}, {2, 3} ]>;\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  assert.ok(out.includes("Graph< ... > is not supported yet"), out);
+  assert.doesNotMatch(out, /AssertionError|Traceback|Error: /);
+  assert.match(out, /\nend\n$/);
+});
+
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
