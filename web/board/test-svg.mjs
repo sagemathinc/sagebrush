@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { cleanDoc, pageCount } from "./doc.ts";
 import { boardSvg } from "./svg.ts";
+import { texSvg } from "../../src/board-math.ts";
 
 const fails = [];
 let checks = 0;
@@ -24,7 +25,9 @@ const COLOR = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]
 const ATTRS = {
   xmlns: (v) => v === "http://www.w3.org/2000/svg", width: NUM, height: NUM, x: NUM, y: NUM, rx: NUM, ry: NUM, "font-size": NUM,
   viewBox: /^-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+$/, "font-family": /^[A-Za-z ,-]+$/, fill: COLOR, stroke: COLOR, "stroke-opacity": NUM, "fill-opacity": NUM, "stroke-width": NUM,
-  "stroke-dasharray": /^[\d. ]+$/, d: /^[MLQAVHZ0-9 .,-]+$/, points: /^[0-9 .,-]+$/, id: /^c\d+$/, "clip-path": /^url\(#c\d+\)$/, "font-weight": /^(bold|600)$/,
+  "stroke-dasharray": /^[\d. ]+$/, d: /^[MLQTCAVHZ0-9 .,-]+$/,
+  // (typeset math: MathJax's own paths, placed and scaled)
+  transform: /^((translate|scale|matrix)\([-\d., e]+\) ?)+$/, color: COLOR, overflow: /^visible$/, points: /^[0-9 .,-]+$/, id: /^c\d+$/, "clip-path": /^url\(#c\d+\)$/, "font-weight": /^(bold|600)$/,
   "font-style": /^italic$/, "text-anchor": /^middle$/, "dominant-baseline": /^middle$/, "xml:space": /^preserve$/,
 };
 function inspect(svg) {
@@ -55,6 +58,25 @@ function inspect(svg) {
   }
   if (stack.length) bad.push("unclosed " + stack.join(","));
   return { bad, texts };
+}
+
+// ---- math, typeset (the CLI's renderer, src/board-math.ts) -----------------
+{
+  const doc = { nodes: [{ id: "a", title: "Area", text: "The area is $\\pi r^2$, and\n\n$$\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$$\n\n- [x] $p \\equiv 1 \\pmod 4$" }] };
+  const r = boardSvg(doc, { math: texSvg }), { bad, texts } = inspect(r.svg);
+  check(!bad.length, "math typeset: only what the renderer writes: " + bad.slice(0, 3).join("; "));
+  check((r.svg.match(/<svg x=/g) ?? []).length === 3 && /<path d="M/.test(r.svg), "math typeset: three formulas, each its own SVG of paths: " + (r.svg.match(/<svg x=/g) ?? []).length);
+  check(!texts.some((t) => /\\pi|\\frac|\\pmod|\$/.test(t)) && !r.left.includes("math (shown as its TeX)"), "math typeset: no TeX left as text: " + JSON.stringify(texts.filter((t) => /\\|\$/.test(t))));
+  check(!r.overflow.length, "math typeset: it fits its note: " + r.overflow.join(","));
+  // (the same board without a renderer: TeX, and said)
+  check(boardSvg(doc).left.includes("math (shown as its TeX)"), "no renderer: math shown as TeX, and said");
+  // (a TeX error, and TeX the renderer won't load (links, styles): its TeX, said; nothing of theirs in the file)
+  const hostile = boardSvg({ nodes: [{ id: "h", text: "$\\frac{1$ and $\\href{javascript:alert(1)}{x}$ and $\\style{color:red}{y}$ and $\\class{a}{z}$" }] }, { math: texSvg });
+  const hb = inspect(hostile.svg).bad;
+  check(!hb.length && !/href=|style=|class=/.test(hostile.svg) && hostile.left.includes("math (shown as its TeX)"), "hostile or broken TeX: shown as text, nothing of theirs in the file: " + JSON.stringify({ bad: hb.slice(0, 3), left: hostile.left }));
+  check(texSvg("x".repeat(5000), false, 14) === null && texSvg("  ", false, 14) === null, "a formula too long, or empty: left as its TeX");
+  const m = texSvg("x^2", false, 14);
+  check(m && m.w > 5 && m.w < 40 && m.h > 8 && m.h < 30 && m.d >= 0, "a formula's size in pixels: " + JSON.stringify(m && { w: m.w, h: m.h, d: m.d }));
 }
 
 // ---- the example boards: every page; the same each time; nothing overflows --

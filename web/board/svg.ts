@@ -4,13 +4,15 @@
 // notes as their outlines with their text as SVG text, pen strokes and
 // stickers.  Text is measured with DejaVu Sans's widths (Verdana's are
 // close), the font the file names, so it is wrapped where it fits; math
-// shows as its TeX, pictures and code's outputs as a box saying so.
+// typeset as SVG by the renderer the caller gives (`math`: the CLI's,
+// src/board-math.ts), else shown as its TeX; pictures and code's outputs
+// as a box saying so.
 //
 // Every text in a board is untrusted: it is only ever character data or a
 // quoted attribute, escaped, with characters XML does not allow dropped;
 // no element of the document's choosing, no link, no style, no
 // foreignObject.  Colors are the document's, which cleanDoc has made
-// colors.
+// colors.  Typeset math is the renderer's own paths, which it has checked.
 
 import { Lexer, type Token, type Tokens } from "marked";
 import { cleanDoc, layout, lookOf, pageView, refLabel, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
@@ -27,8 +29,24 @@ const BOLD = [348, 456, 521, 838, 696, 1002, 872, 306, 457, 457, 523, 838, 380, 
 const MONO = 602;
 // (wide: East Asian scripts and emoji, a full em)
 const wide = (c: number) => (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) || (c >= 0x1f000 && c <= 0x1faff) || (c >= 0x20000 && c <= 0x3fffd);
-interface Run { t: string; b?: boolean; i?: boolean; m?: boolean }
+interface Run { t: string; b?: boolean; i?: boolean; m?: boolean; math?: MathSvg }
+/** Math typeset as SVG (src/board-math.ts): its viewBox and inside, and its
+ * width, height and depth below the baseline, in pixels. */
+export interface MathSvg { viewBox: string; inner: string; w: number; h: number; d: number }
+export type MathRenderer = (tex: string, display: boolean, size: number) => MathSvg | null;
+// (the renderer of the board being drawn, and its formulas so far, by size
+// and TeX; whether one stayed TeX: boardSvg sets them)
+let mathOf: MathRenderer | null = null, mathCache = new Map<string, MathSvg | null>(), mathTex = false;
+function typeset(m: string, size: number): MathSvg | null {
+  if (!mathOf) { mathTex = true; return null; }
+  const display = m.startsWith("$$"), tex = m.slice(display ? 2 : 1, display ? -2 : -1), key = `${display ? "D" : "I"}${size}\u0000${tex}`;
+  if (!mathCache.has(key)) mathCache.set(key, mathOf(tex, display, size));
+  const r = mathCache.get(key)!;
+  if (!r) mathTex = true;
+  return r;
+}
 function width(r: Run, size: number): number {
+  if (r.math) return r.math.w;
   let w = 0;
   for (const ch of r.t) {
     const c = ch.codePointAt(0)!;
@@ -39,8 +57,9 @@ function width(r: Run, size: number): number {
 
 // ---- text: Markdown as lines -----------------------------------------------
 
-/** A line of text: its runs, size, height, and where it starts (left, or centered). */
-interface Line { runs: Run[]; size: number; lh: number; indent: number; gap: number; color?: string; box?: "code" }
+/** A line of text: its runs, size, height, and where it starts (left, or
+ * centered); `base`: its baseline from its top, when math makes it taller. */
+interface Line { runs: Run[]; size: number; lh: number; indent: number; gap: number; color?: string; box?: "code"; base?: number }
 const FONT = 14, LH = 1.45;
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 const decode = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
@@ -51,21 +70,35 @@ const decode = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: 
 // (math kept as its TeX: never read as Markdown)
 const MATH = /\$\$[\s\S]+?\$\$|\$[^$\n]+\$/g;
 
-function inline(tokens: Token[] | undefined, style: Omit<Run, "t">, math: string[], out: Run[]) {
+function inline(tokens: Token[] | undefined, style: Omit<Run, "t">, math: string[], out: Run[], size = FONT) {
   for (const t of tokens ?? []) {
     const back = (s: string) => s.replace(/\u0000(\d+)\u0000/g, (_, k) => math[Number(k)]);
+    // (text with math: the math typeset, a run of its own, if it can be;
+    // else its TeX in the text, as before, so wrapped as one word with what touches it)
+    const text = (s: string, st: Omit<Run, "t">) => {
+      let acc = "";
+      for (const [k, piece] of s.split(/\u0000(\d+)\u0000/).entries()) {
+        if (k % 2 === 0) { acc += piece; continue; }
+        const tex = math[Number(piece)], m = typeset(tex, size);
+        if (!m) { acc += tex; continue; }
+        if (acc) out.push({ ...st, t: acc });
+        acc = "";
+        out.push({ ...st, t: tex, math: m });
+      }
+      if (acc) out.push({ ...st, t: acc });
+    };
     switch (t.type) {
-      case "strong": inline(t.tokens, { ...style, b: true }, math, out); break;
-      case "em": inline(t.tokens, { ...style, i: true }, math, out); break;
-      case "del": case "link": inline(t.tokens, style, math, out); break;
+      case "strong": inline(t.tokens, { ...style, b: true }, math, out, size); break;
+      case "em": inline(t.tokens, { ...style, i: true }, math, out, size); break;
+      case "del": case "link": inline(t.tokens, style, math, out, size); break;
       case "codespan": out.push({ ...style, m: true, t: back(t.text) }); break;
       case "image": out.push({ ...style, i: true, t: `[${back(t.text) || "picture"}]` }); break;
       case "br": out.push({ t: "\n" }); break;
       // (HTML: not shown, as on the board)
       case "html": break;
       default:
-        if ("tokens" in t && t.tokens?.length) inline(t.tokens, style, math, out);
-        else out.push({ ...style, t: back(decode((t as Tokens.Text).text ?? "")) });
+        if ("tokens" in t && t.tokens?.length) inline(t.tokens, style, math, out, size);
+        else text(decode((t as Tokens.Text).text ?? ""), style);
     }
   }
 }
@@ -80,7 +113,7 @@ function lines(md: string, w: number, size = FONT, color?: string, plain?: Omit<
     for (const t of tokens) {
       const gap = out.length ? 6 : 0;
       if (t.type === "space" || t.type === "hr") continue;
-      if (t.type === "heading") { const s = t.depth <= 1 ? size + 4 : t.depth === 2 ? size + 2 : size + 1; flow(runsOf(t.tokens, { b: true }), w - indent, s, indent, gap); }
+      if (t.type === "heading") { const s = t.depth <= 1 ? size + 4 : t.depth === 2 ? size + 2 : size + 1; flow(runsOf(t.tokens, { b: true }, s), w - indent, s, indent, gap); }
       else if (t.type === "paragraph" || t.type === "text") flow(runsOf(t.tokens ?? [{ type: "text", raw: t.raw, text: t.text } as Token], {}), w - indent, size, indent, gap);
       else if (t.type === "list") {
         t.items.forEach((item: Tokens.ListItem, k: number) => {
@@ -101,21 +134,38 @@ function lines(md: string, w: number, size = FONT, color?: string, plain?: Omit<
       else if ("tokens" in t && t.tokens) block(t.tokens as Token[], indent);
     }
   };
-  const runsOf = (tokens: Token[] | undefined, style: Omit<Run, "t">) => { const r: Run[] = []; inline(tokens, style, math, r); return r; };
+  const runsOf = (tokens: Token[] | undefined, style: Omit<Run, "t">, s = size) => { const r: Run[] = []; inline(tokens, style, math, r, s); return r; };
   // (runs wrapped into lines at width ww: at spaces, a word longer than a line at a character)
   const flow = (runs: Run[], ww: number, s: number, indent: number, gap: number, box?: "code") => {
     let line: Run[] = [], used = 0, first = true;
-    const end = () => { out.push({ runs: line, size: s, lh: s * LH, indent, gap: first ? gap : 0, color, ...(box ? { box } : {}) }); line = []; used = 0; first = false; };
+    const end = () => {
+      // (math taller than the text: the line as tall as it, its baseline lower)
+      const ms = line.filter((r) => r.math).map((r) => r.math!);
+      const above = Math.max(s * LH * 0.74, ...ms.map((m) => m.h - m.d + 3)), below = Math.max(s * LH * 0.26, ...ms.map((m) => m.d + 3));
+      out.push({ runs: line, size: s, lh: ms.length ? above + below : s * LH, indent, gap: first ? gap : 0, color, ...(box ? { box } : {}), ...(ms.length ? { base: above } : {}) });
+      line = []; used = 0; first = false;
+    };
     for (const r of runs) {
       if (r.t === "\n") { end(); continue; }
+      // (a formula: never broken; displayed math on a line of its own)
+      if (r.math) {
+        const display = r.t.startsWith("$$");
+        if (used && (display || used + r.math.w > ww)) { while (line.length && /^ $/.test(line[line.length - 1].t)) { used -= width(line.pop()!, s); } end(); }
+        line.push(r);
+        used += r.math.w;
+        if (display) end();
+        continue;
+      }
       for (const piece of r.t.split(/(\s+)/)) {
         if (!piece) continue;
         const space = /^\s+$/.test(piece);
+        // (what touches a formula's end, its punctuation: never at the start of the next line)
+        const glued = !space && line.length > 0 && !!line[line.length - 1].math;
         // (code keeps its spaces as they are, at a line's start too: its indentation)
         const p: Run = { ...r, t: space && box !== "code" ? " " : piece };
         let pw = width(p, s);
         if (space) { if ((used || box === "code") && used + pw <= ww) { line.push(p); used += pw; } continue; }
-        if (used + pw > ww && used) { while (line.length && /^ $/.test(line[line.length - 1].t)) { used -= width(line.pop()!, s); } end(); }
+        if (used + pw > ww && used && !glued) { while (line.length && /^ $/.test(line[line.length - 1].t)) { used -= width(line.pop()!, s); } end(); }
         // (a word wider than the line: broken)
         while (pw > ww && p.t.length > 1) {
           let k = 1;
@@ -225,10 +275,24 @@ function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean)
     if (l.box === "code") out.push(`<rect x="${n1(x)}" y="${n1(at)}" width="${n1(w)}" height="${n1(l.lh)}" fill="#000" fill-opacity=".05"/>`);
     const lw = lineWidth(l) - l.indent;
     const tx = center ? x + (w - lw) / 2 : x + l.indent;
-    // (runs of one style next to each other: one tspan)
-    const runs: Run[] = [];
-    for (const r of l.runs) { const p = runs[runs.length - 1]; if (p && !p.b === !r.b && !p.i === !r.i && !p.m === !r.m) p.t += r.t; else runs.push({ ...r }); }
-    out.push(`<text x="${n1(tx)}" y="${n1(at + l.lh * 0.74)}" font-size="${n1(l.size)}"${l.color ? ` fill="${l.color}"` : ""} xml:space="preserve">${runs.map(tspan).join("")}</text>`);
+    const base = at + (l.base ?? l.lh * 0.74);
+    // (runs of one style next to each other: one tspan; a formula: its own
+    // SVG, at the place the text before it ends, as the file's font measures it)
+    let runs: Run[] = [], rx = tx, sx = tx;
+    const flush = () => { if (runs.length) out.push(`<text x="${n1(sx)}" y="${n1(base)}" font-size="${n1(l.size)}"${l.color ? ` fill="${l.color}"` : ""} xml:space="preserve">${runs.map(tspan).join("")}</text>`); runs = []; };
+    for (const r of l.runs) {
+      if (r.math) {
+        flush();
+        out.push(`<svg x="${n1(rx)}" y="${n1(base - (r.math.h - r.math.d))}" width="${n1(r.math.w)}" height="${n1(r.math.h)}" viewBox="${r.math.viewBox}" overflow="visible" color="${l.color ?? TEXT}">${r.math.inner}</svg>`);
+        rx += r.math.w;
+        sx = rx;
+        continue;
+      }
+      const p = runs[runs.length - 1];
+      if (p && !p.b === !r.b && !p.i === !r.i && !p.m === !r.m) p.t += r.t; else runs.push({ ...r });
+      rx += width(r, l.size);
+    }
+    flush();
     at += l.lh;
   }
   return out.join("");
@@ -239,7 +303,13 @@ function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean)
  * their box (one of a given size, cut there as on the board). */
 // (an edge's label's plate: its 12 px text as DejaVu Sans sets it, and a margin)
 const labelPlate = (label: string) => width({ t: label }, 12) + 10;
-export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: string; left: string[]; overflow: string[] } {
+export function boardSvg(doc: BoardDoc, o: { page?: number; math?: MathRenderer } = {}): { svg: string; left: string[]; overflow: string[] } {
+  mathOf = o.math ?? null;
+  mathCache = new Map();
+  mathTex = false;
+  try { return drawBoard(doc, o); } finally { mathOf = null; mathCache = new Map(); }
+}
+function drawBoard(doc: BoardDoc, o: { page?: number }): { svg: string; left: string[]; overflow: string[] } {
   const d = cleanDoc(doc), v = pageView(d, o.page ?? 0), left = new Set<string>(), overflow: string[] = [];
   const { items, edges } = layout(v, measure);
   // (places within ten million, sizes from 1 to ten million: a board's
@@ -290,8 +360,6 @@ export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: strin
   notes.forEach((it, k) => {
     const fill = esc(it.color ?? "#fff"), sp = sidePad(it.shape), centered = !!it.shape;
     const c = content({ title: it.title, text: it.text, code: it.code, hideCode: it.hideCode, ref: it.ref, img: it.image }, it.w - 2 * sp - 2);
-    if (it.text && MATH.test(it.text)) left.add("math (shown as its TeX)");
-    MATH.lastIndex = 0;
     if (it.image) left.add("pictures (shown as a box)");
     if (it.code !== undefined) left.add("code's outputs");
     clips.push(`<clipPath id="c${k}"><rect x="${n1(it.x)}" y="${n1(it.y)}" width="${n1(it.w)}" height="${n1(it.h)}" rx="8"/></clipPath>`);
@@ -314,6 +382,7 @@ export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: strin
   }
   // pen strokes, over all
   for (const it of items.filter((it) => it.kind === "ink" && it.outline)) out.push(`<path d="${inkPath(it.outline!.map((p, i) => p + (i % 2 ? it.y : it.x)), 1)}" fill="${esc(it.color ?? TEXT)}"${it.opacity !== undefined ? ` fill-opacity="${it.opacity}"` : ""}/>`);
+  if (mathTex) left.add("math (shown as its TeX)");
   const title = v.title ?? d.title;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${n1(W)}" height="${n1(H)}" viewBox="${n1(x0)} ${n1(y0)} ${n1(W)} ${n1(H)}" font-family="DejaVu Sans, Verdana, sans-serif" font-size="${FONT}">` +
     (title ? `<title>${esc(title)}</title>` : "") + `<defs>${clips.join("")}</defs>` + out.join("") + "</svg>\n";
