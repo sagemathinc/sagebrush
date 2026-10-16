@@ -1185,36 +1185,69 @@ const intOrStr = (x: any): any => (x instanceof IntLayout || x instanceof StrLay
 // before it is built, HARD-978-2)
 const MAX_STR = 2 ** 29 - 24;
 method(S, "translate", (s: string, table: any) => {
-  const out: string[] = [];
-  let size = 0, n = 0;
-  for (const ch of s) {
+  // The output in blocks: unchanged runs are sliced, the pieces joined every
+  // 4096 and the blocks appended, so memory goes with the output, not with a
+  // JS entry per input character (HARD-C56-1).  A plain dict is read without
+  // a KeyError per unmapped character, and what each code point maps to is
+  // remembered (at most one entry per distinct code point).
+  const plain = table instanceof PyDict && (table as any).$cls === T.dict;
+  const seen = plain ? new Map<number, any>() : null;
+  const NONE = {}; // (a key that is not in the table: kept as is)
+  let out = "";
+  let pieces: string[] = [];
+  let size = 0, n = 0, run = 0;
+  const flush = (upto: number) => {
+    if (upto > run) pieces.push(s.slice(run, upto));
+    if (pieces.length >= 4096) {
+      out += pieces.join("");
+      pieces = [];
+    }
+  };
+  for (let i = 0; i < s.length; ) {
     // (Stop, every 4096 characters: the table's __getitem__ may be a builtin)
     if ((++n & 4095) === 0) O.pollInterrupt();
+    const cp = s.codePointAt(i)!;
+    const w = cp > 0xffff ? 2 : 1;
     let r: any;
-    try {
-      r = O.getitem(table, ch.codePointAt(0)!);
-    } catch (e: any) {
-      if (isinstance(toPyExc(e), T.LookupError)) {
-        out.push(ch);
-        continue;
+    if (seen !== null) {
+      r = seen.get(cp);
+      if (r === undefined) {
+        const v = dictGet(table, cp);
+        r = v === undefined ? NONE : v;
+        seen.set(cp, r);
       }
-      throw e;
+    } else {
+      try {
+        r = O.getitem(table, cp);
+      } catch (e: any) {
+        if (!isinstance(toPyExc(e), T.LookupError)) throw e;
+        r = NONE;
+      }
     }
+    if (r === NONE) {
+      size += w;
+      i += w;
+      continue;
+    }
+    flush(i);
+    i += w;
+    run = i;
     if (r === null) continue;
     r = intOrStr(r);
     if (typeof r === "string") {
       size += r.length;
       if (size > MAX_STR) raise(T.MemoryError);
-      out.push(r);
+      pieces.push(r);
     } else if (O.isPyInt(r)) {
       const c = Number(r);
       if (!(c >= 0 && c < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
       size += c > 0xffff ? 2 : 1;
       if (size > MAX_STR) raise(T.MemoryError);
-      out.push(String.fromCodePoint(c));
+      pieces.push(String.fromCodePoint(c));
     } else raise(T.TypeError, "character mapping must return integer, None or str");
   }
-  return out.join("");
+  flush(s.length);
+  return out + pieces.join("");
 });
 S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
   if (a.length === 0) raise(T.TypeError, "maketrans expected at least 1 argument, got 0");
@@ -1242,17 +1275,31 @@ S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
   }
   if (typeof intOrStr(a[0]) !== "string") raise(T.TypeError, "first maketrans argument must be a string if there is a second argument");
   a[0] = intOrStr(a[0]);
-  const x = [...a[0]], y = [...a[1]];
-  if (x.length !== y.length) raise(T.ValueError, "the first two maketrans arguments must have equal length");
-  x.forEach((c, i) => {
-    if ((i & 4095) === 4095) O.pollInterrupt();
-    dictSet(d, c.codePointAt(0)!, y[i].codePointAt(0)!);
-  });
+  // (by code points, both strings in step: no array of either, HARD-C56-1;
+  // the dict has at most one entry per code point)
+  const x: string = a[0], y: string = a[1];
+  const count = (t: string) => {
+    let k = 0;
+    for (let i = 0; i < t.length; i += t.codePointAt(i)! > 0xffff ? 2 : 1) {
+      if ((++k & 65535) === 0) O.pollInterrupt();
+    }
+    return k;
+  };
+  if (count(x) !== count(y)) raise(T.ValueError, "the first two maketrans arguments must have equal length");
+  for (let i = 0, j = 0, n = 0; i < x.length; n++) {
+    if ((n & 4095) === 4095) O.pollInterrupt();
+    const c = x.codePointAt(i)!, e = y.codePointAt(j)!;
+    dictSet(d, c, e);
+    i += c > 0xffff ? 2 : 1;
+    j += e > 0xffff ? 2 : 1;
+  }
   if (a.length === 3) {
-    let n = 0;
-    for (const c of a[2]) {
-      if ((++n & 4095) === 0) O.pollInterrupt();
-      dictSet(d, c.codePointAt(0)!, null);
+    const z: string = a[2];
+    for (let i = 0, n = 0; i < z.length; n++) {
+      if ((n & 4095) === 4095) O.pollInterrupt();
+      const c = z.codePointAt(i)!;
+      dictSet(d, c, null);
+      i += c > 0xffff ? 2 : 1;
     }
   }
   return d;

@@ -16,6 +16,16 @@ __all__ = ['TextWrapper', 'wrap', 'fill', 'dedent', 'indent', 'shorten']
 # some Unicode spaces (like \u00a0) are non-breaking whitespaces.
 _whitespace = '\t\n\x0b\x0c\r '
 
+def _refuse_astral(strings):
+    # (each as a plain str, so a subclass's __iter__ can't hide a character)
+    for _s in strings:
+        if isinstance(_s, str):
+            for _c in str.__add__("", _s):
+                if ord(_c) > 0xFFFF:
+                    raise NotImplementedError("textwrap: text with characters beyond U+FFFF (such as %r) "
+                                              "is not supported in Sagebrush yet" % _c)
+
+
 class TextWrapper:
     """
     Object for wrapping/filling text.  The public interface consists of
@@ -356,18 +366,15 @@ class TextWrapper:
         converted to space.
         """
         # Sagebrush's strings count such a character as two, so the widths
-        # would be wrong and a long word could be cut inside one: the text
-        # and every string whose width counts, each as a plain str (so a
-        # subclass's __iter__ can't hide one).
-        for _s in (text, self.initial_indent, self.subsequent_indent, self.placeholder):
-            if isinstance(_s, str):
-                for _c in str.__add__("", _s):
-                    if ord(_c) > 0xFFFF:
-                        raise NotImplementedError("textwrap: text with characters beyond U+FFFF (such as %r) "
-                                                  "is not supported in Sagebrush yet" % _c)
+        # would be wrong and a long word could be cut inside one: refused,
+        # in the text and every string whose width counts, and in the
+        # chunks actually measured (a subclass's expandtabs or translate,
+        # or an overridden _split_chunks, may bring one back, CORR-978-4)
+        _refuse_astral((text, self.initial_indent, self.subsequent_indent, self.placeholder))
         chunks = self._split_chunks(text)
         if self.fix_sentence_endings:
             self._fix_sentence_endings(chunks)
+        _refuse_astral(chunks)
         return self._wrap_chunks(chunks)
 
     def fill(self, text):

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Worker } from "node:worker_threads";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 // HARD-978-1 and -2: str.translate, str.maketrans, the re loops textwrap
 // uses, and translate's output size.  Each input is built first; only then
@@ -68,4 +68,24 @@ test("an output too long to make is a MemoryError, from translate before it is b
   ].join("\n");
   const out = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", timeout: 60000 });
   assert.equal(out, "MemoryError MemoryError()\nMemoryError MemoryError()\nMemoryError MemoryError()\n3000\n");
+});
+
+test("translate and maketrans stream large strings: 20M characters in a 96 MB heap, without an entry per character (HARD-C56-1)", () => {
+  const code = [
+    "import time",
+    "s = 'abcdefgh' * 2_500_000",
+    "t = time.perf_counter()",
+    "r = s.translate({})",
+    "print(r is s or r == s, len(r), time.perf_counter() - t < 10)",
+    "r = s.translate({97: None, 98: 'BB'})",
+    "print(len(r), r[:6])",
+    "a = ''.join(chr(0x4e00 + i % 20000) for i in range(100_000)) * 100",
+    "b = a[1:] + a[:1]",
+    "t = time.perf_counter()",
+    "m = str.maketrans(a, b)",
+    "print(len(m), time.perf_counter() - t < 10)",
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", CLI, "-c", code], { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "True 20000000 True\n20000000 BBcdef\n20000 True\n");
 });
