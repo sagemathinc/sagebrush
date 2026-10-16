@@ -72,14 +72,17 @@ time a different computation: `2^3` would be exclusive or.
 **Integers.** A Sage integer is a Python integer. In the browser,
 Sagebrush's Python gives the integer type Sage's methods (`factor`,
 `is_prime`, `digits`, `nth_root` and many more). CPython cannot extend its
-`int`, so there `Integer` is a subclass of it with the same methods. Big
-integers run on Sagebrush's own big-integer code (see
-[the foundations](/articles/foundations/)).
+`int`, so there `Integer` is a subclass of it with the same methods.
+Ordinary integer arithmetic (`+`, `*`, `^`) is the runtime's own: in the
+browser, JavaScript's `BigInt`; under CPython, CPython's `int`. The Rust
+engines have big integers of their own, Sagebrush's code (see
+[the foundations](/articles/foundations/)), for the computations they do:
+factoring, exact linear algebra, number theory.
 
 **Rationals** are exact fractions, always reduced, with Sage's printing
 and methods. Where Sage's rules for $\mathbb{Q}$ differ from Python's, the
-library follows Sage. For example, `gcd(2/3, 4/9)` is $2/9$, and
-`xgcd(1/3, 2)` is $(1/3, 1, 0)$.
+library follows Sage. For example, `gcd(2/3, 4/9)` is $2/9$, the gcd
+of the numerators over the lcm of the denominators.
 
 **Real numbers.** `RealField(prec)` is real arithmetic of any precision,
 written from scratch: a number is $m \cdot 2^e$ with $m$ an integer of
@@ -228,9 +231,13 @@ Rust engine (`engine/arith`), with multimodular and $p$-adic algorithms,
 and every answer is certified. Hermite and Smith forms with their
 transforms, elementary divisors and LLL come from the number field engine;
 as in Sage, `echelon_form()` over $\mathbb{Z}$ is the Hermite form.
-Matrices over finite fields and $\mathbb{Z}/n\mathbb{Z}$ use Gaussian
-elimination over the field, with echelon forms, kernels, inverses,
-solving, characteristic polynomials and multiplicative orders.
+Matrices over finite fields use Gaussian elimination over the field,
+with echelon forms, kernels, inverses, solving, characteristic polynomials
+and multiplicative orders. Over $\mathbb{Z}/n\mathbb{Z}$ with $n$
+composite, which is not a field, the ring arithmetic works, but the same
+elimination can meet a pivot that is not a unit, and then it raises an
+error instead of answering. For example, the determinant of
+`matrix(Zmod(6), [[2, 0], [0, 3]])` (which is $0$) is not computed yet.
 
 **Hilbert modular forms.** `HilbertModularForms(N)` gives the forms of
 weight $(2,2)$ over $F = \mathbb{Q}(\sqrt 5)$. It ports William Stein's
@@ -301,36 +308,43 @@ arguments, empty matrices, rationals where integers are usual.
 The latest coverage run was made on 16 October 2026, at commit
 `e4a9ce94`, with SageMath 10.10 as the oracle.
 
-| corpus | scored | same output | different output | error | refused |
-|---|---:|---:|---:|---:|---:|
-| Sage Tutorial | 1,069 | 784 (73.3%) | 45 (4.2%) | 194 (18.1%) | 45 (4.2%) |
-| *Computational Mathematics with SageMath* | 2,615 | 1,666 (63.7%) | 174 (6.7%) | 719 (27.5%) | 47 (1.8%) |
+| corpus | scored | match | different | error | refused | by design | timeout |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Sage Tutorial | 1,069 | 784 (73.3%) | 45 (4.2%) | 194 (18.1%) | 45 (4.2%) | 1 | 0 |
+| *Computational Mathematics with SageMath* | 2,615 | 1,666 (63.7%) | 174 (6.7%) | 719 (27.5%) | 47 (1.8%) | 6 | 3 |
 
 How to read the columns:
 
-- **Same output** means the printed output is identical to SageMath's.
-- **Different output** counts every case where the printed output
-  differs, whatever the reason. Many of these are the same mathematics in
-  another form or order: an equivalent expression, or the same terms or
+- **Match** means the case passes the comparison rules, which are those
+  of a doctest, not byte-for-byte identity. Whitespace, warnings and
+  memory addresses are normalized; numbers may differ within a small
+  tolerance; an error matches an error of the same exception class; and a
+  case the source marks as random matches if it runs. Of the book's 1,666
+  matches, 159 are matching exceptions, 6 are within the tolerance and 1
+  is a random case; of the tutorial's 784, 62, 1 and 5.
+- **Different** counts every other case where Sagebrush gives a result or
+  an exception different from SageMath's, whatever the reason, including
+  a missing or different exception. Many of these are the same mathematics
+  in another form or order: an equivalent expression, or the same terms or
   roots listed in another order. Others follow from an earlier case that
-  failed. When
-  these were triaged by hand, about 10 cases in the book were confirmed as
-  new wrong values, and all of them are being fixed.
+  failed. When these were triaged by hand, about 10 cases in the book were
+  confirmed as new wrong values, and all of them are being fixed.
 - **Error** mostly means a missing feature (a function or method
   Sagebrush does not have yet), or an earlier failure in the same session,
   such as a name that was never defined.
 - **Refused** means an explicit error instead of a guess: Sagebrush
   recognized the request and said it cannot answer it correctly yet.
 
-A handful of cases are counted as differences by design, and not in the
-"different output" column. For example, `solve(sin(x) == 0, x)` returns
+**By design** are the few cases where Sagebrush deliberately answers
+differently. For example, `solve(sin(x) == 0, x)` returns
 every solution, `x == pi*n1` for an integer `n1`, where SageMath returns
-only `x == 0`.
+only `x == 0`. A **timeout** is a case that did not finish within the
+harness's time limit.
 
 The book's weakest chapters are numerical integration, combinatorics and
 graph theory, where much is still missing. Its strongest are the first
-steps, programming, and finite fields and number theory, at 86–94% the
-same.
+steps, programming, and finite fields and number theory, where 86–94%
+of the cases match.
 
 ## What would have saved time
 
