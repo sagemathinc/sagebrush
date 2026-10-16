@@ -1149,6 +1149,9 @@ def ishold_(nargout, args):
 @_fn("subplot")
 def subplot_(nargout, args):
     f = gcf()
+    if args and _m._istext(args[0]) and _m._text(args[0]).lower() == "position":
+        # (subplot('Position', pos): new axes at pos, as axes('Position', pos) makes them)
+        return _FUNCS["axes"](nargout, [_m.Char("Position")] + list(args[1:]))
     if len(args) == 1 and not _m._istext(args[0]) and _m._numel(args[0]) == 1:
         k = int(_f(args[0]))
         m, n, p = k // 100, (k // 10) % 10, [k % 10]
@@ -1336,7 +1339,15 @@ def _bar(args, horizontal):
         x = _colvec(list(range(1, n + 1)))
     ax.newplot()
     xs = _vec(x)
-    series = [_vec(y)] if _m._isvec(y) or _m._numel(y) == 1 else [[float(t) for t in col] for col in _m._mat(y).T]
+    if _m._isvec(y) or _m._numel(y) == 1:
+        series = [_vec(y)]
+    else:
+        Y = _m._mat(y)
+        # (a matrix y: a series per column, or per row when x's length is y's number of columns
+        # and not of its rows, as bar's page shows: x = [1 2 3], vals 2-by-3 is two series)
+        if len(xs) == Y.shape[1] and len(xs) != Y.shape[0]:
+            Y = Y.T
+        series = [[float(t) for t in col] for col in Y.T]
     bars = []
     group = object()
     for k, ys in enumerate(series):
@@ -1660,6 +1671,10 @@ def errorbar_(nargout, args):
 @_fn("fill", "patch")
 def fill_(nargout, args):
     ax = gca()
+    if len(args) == 1 and type(args[0]) is _m.Struct and _m._numel(args[0]) == 1:
+        # (patch(S): the structure's fields as property names and values, as patch's page shows)
+        d = args[0].a[0]
+        args = [v for f in args[0].fields for v in (_m.Char(f), d[f])]
     pos, props = _split_props(args, 2)
     if len(pos) == 0 and props:
         p = Patch(ax)
