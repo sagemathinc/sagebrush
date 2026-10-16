@@ -57,3 +57,20 @@ class Falsy:
 class Bad:
     def __bool__(self): raise ValueError('no')
 print(binascii.b2a_base64(b'a', newline=[]), binascii.b2a_base64(b'a', newline=Falsy()), binascii.b2a_base64(b'a', newline=[1]), kind(lambda: binascii.b2a_base64(b'a', newline=Bad())))
+# b2a_base64: the buffer first, newline's truth second, the encoding third (CORR-644-1)
+class Switch:
+    def __init__(self, b): self.b = b
+    def __bool__(self):
+        self.b[0] = 98
+        return False
+ba = bytearray(b'a')
+print('mutated', binascii.b2a_base64(ba, newline=Switch(ba)), ba)
+class Loud:
+    def __bool__(self):
+        print('bool called')
+        raise ValueError('newline failed')
+for d in [b'a', None, 5]:
+    try:
+        print('value', binascii.b2a_base64(d, newline=Loud()))
+    except Exception as e:
+        print(type(e).__name__, e)

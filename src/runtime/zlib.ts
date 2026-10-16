@@ -3,7 +3,7 @@
 // no compression), crc32 and adler32; base64 and hex for binascii.  Enough
 // for scipy.io.loadmat's compressed MATLAB arrays and for base64 data.
 
-import { T, PyBytes, raise, objectType, tuple } from "./object";
+import { T, PyBytes, raise, objectType, tuple, typeName } from "./object";
 import { newBuiltinModule } from "./modules";
 import * as O from "./ops";
 
@@ -12,7 +12,7 @@ let ZlibError: any;
 function bytesOf(b: any): Uint8Array {
   if (b instanceof PyBytes) return b.a.subarray(0, b.n);
   if (typeof b === "string") return new TextEncoder().encode(b);
-  raise(T.TypeError, "a bytes-like object is required");
+  raise(T.TypeError, `a bytes-like object is required, not '${typeName(b)}'`);
 }
 
 // ------------------------------------------------------------------ inflate
@@ -367,8 +367,12 @@ newBuiltinModule("binascii", (m) => {
   };
   // (newline is keyword-only, as CPython's: b2a_base64(data, False) is a TypeError)
   const b2a = (data: any, newline: any = true) => {
-    const e = b64encode(bytesOf(data));
-    if (!O.truth(newline)) return new PyBytes(e); // (Python's truth: newline=[] is false, and __bool__'s errors propagate)
+    // (as CPython: the buffer first, then newline's truth, which may run
+    // Python code, then the encoding, of the buffer as it is then, CORR-644-1)
+    const buf = bytesOf(data);
+    const nl = O.truth(newline); // (Python's truth: newline=[] is false, and __bool__'s errors propagate)
+    const e = b64encode(buf);
+    if (!nl) return new PyBytes(e);
     const out = new Uint8Array(e.length + 1);
     out.set(e);
     out[e.length] = 10;
