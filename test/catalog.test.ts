@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -52,15 +52,12 @@ for (const mode of publicModes) {
 
 for (const mode of runnerModes) {
   test(`catalog gate 3: every ${mode} example prints exactly its expected output (Node)`, () => {
-    // (in a directory of its own: examples write files)
-    const dir = mkdtempSync(join(tmpdir(), "sagebrush-catalog-"));
-    try {
-      // (lib/_catalog.py compare: exactly one result per example, each its expected)
-      const code = `import json, _catalog as c\nes = [e for _, e in c.load(${JSON.stringify(mode)})]\nprint(json.dumps(c.compare(es, c.run_all(${JSON.stringify(mode)}, es, 'node'), 'node')))`;
-      assert.deepEqual(JSON.parse(cli(["-c", code], dir).trim().split("\n").pop()!), []);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // (scripts/catalog-run.py: child processes, with a deadline per example,
+    // so a stuck example is named and the others still run; each runs in a
+    // directory of its own: examples write files)
+    const r = spawnSync("python3", [__dirname + "/../../scripts/catalog-run.py", "--runtime", "node", "--mode", mode], { encoding: "utf8", timeout: 3600e3 });
+    assert.equal(r.status, 0, (r.stdout ?? "") + (r.stderr ?? ""));
+    assert.match(r.stdout, new RegExp(`^${mode} on node: \\d+ examples, 0 differ$`, "m"), r.stdout);
   });
 }
 
@@ -172,4 +169,20 @@ test("the CPython package searches Python mode's index it ships (docs-index-pyth
   assert.equal(names[0], "numpy.linalg.solve");
   assert.equal(numpy, false);
   assert.deepEqual(JSON.parse(cli(["-m", "_python_docsearch", "--index"])), JSON.parse(readFileSync(lib + "/docs-index-python.json", "utf8")));
+});
+
+// HARD-805-1: a MATLAB example that never finishes is stopped at its deadline, named,
+// and the examples after it still run
+test("scripts/catalog-run.py: a MATLAB example that does not finish times out, and the next one still runs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sagebrush-catalog-"));
+  try {
+    mkdirSync(join(dir, "matlab"));
+    writeFileSync(join(dir, "schema.json"), "{}");
+    const entry = (name: string, code: string, expected: string) => ({ name, kind: "function", signature: "()", summary: "S.", examples: [{ code, expected }], differs: [], status: "partial" });
+    writeFileSync(join(dir, "matlab", "t.json"), JSON.stringify([entry("loop", "while true, end", "TimeoutError: the example ran for more than 5 seconds\n"), entry("after", "disp(1 + 2)", "     3\n")]));
+    const out = execFileSync("python3", [__dirname + "/../../scripts/catalog-run.py", "--runtime", "node", "--mode", "matlab", "--timeout", "5"], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_CATALOG: dir }, timeout: 120e3 });
+    assert.match(out, /^matlab on node: 2 examples, 0 differ$/m, out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
