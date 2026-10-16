@@ -1,0 +1,66 @@
+[
+  {
+    "name": "Sprint",
+    "kind": "function",
+    "signature": "(<Any> x) -> MonStgElt",
+    "summary": "The string Magma would print for x.",
+    "examples": [
+      {
+        "code": "Sprint([1, 2]) cat \"!\";",
+        "expected": "[ 1, 2 ]!\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Sprintf"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "strings and printing"
+    ]
+  },
+  {
+    "name": "IntegerToString",
+    "kind": "function",
+    "signature": "(<RngIntElt> n [, <RngIntElt> b]) -> MonStgElt",
+    "summary": "The digits of n in base b (2 to 36, 10 by default) as a string.",
+    "examples": [
+      {
+        "code": "IntegerToString(255, 16); IntegerToString(-10, 2);",
+        "expected": "FF\n-1010\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "StringToInteger",
+      "Intseq"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "strings and printing"
+    ]
+  },
+  {
+    "name": "StringToInteger",
+    "kind": "function",
+    "signature": "(<MonStgElt> s [, <RngIntElt> b]) -> RngIntElt",
+    "summary": "The integer written in the string s in base b (2 to 36, 10 by default).",
+    "examples": [
+      {
+        "code": "StringToInteger(\"123\"); StringToInteger(\"ff\", 16);",
+        "expected": "123\n255\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "IntegerToString"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "strings and printing"
+    ]
+  }
+]
