@@ -3875,7 +3875,12 @@ def _int_limit(name, a, k):
         raise _err("%s: specify the name of an integer class, or \"like\", p." % name)
     if c not in _INTS:
         raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
-    return np.array([[_INTS[c][k]]], dtype=_INTS[c][0])
+    v = _INTS[c][k]
+    if len(a) == 2 and float(v) != v:
+        # (the "like" form, new here: a 64-bit limit Sagebrush's double-backed 64-bit
+        # integers can't hold exactly, 2^63 - 1 or 2^64 - 1, is refused rather than rounded)
+        raise _err("%s(\"like\", p) for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (name, c, v))
+    return np.array([[v]], dtype=_INTS[c][0])
 
 
 @_bs("intmax")
@@ -5018,7 +5023,8 @@ def mode_(nargout, x, *args):
             return np.array(out, dtype=float).reshape(shp)
         return f
     cls = class_(x)
-    M = _reduce(x, args, part(0), "mode", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
+    # (M keeps A's class: integer, single or logical; F is double)
+    M = _reduce(x, args, part(0), "mode", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls in ("single", "logical") else "double")
     if nargout < 2:
         return M
     F = _reduce(x, args, part(1), "mode", out_cls="double")
