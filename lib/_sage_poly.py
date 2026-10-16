@@ -218,7 +218,13 @@ def _algebraic_extension(R, gens):
     try:
         a = _sage_qqbar.QQbar(cs[0])
     except (TypeError, ValueError, NotImplementedError, ArithmeticError):
-        return None  # (not algebraic: a polynomial ring)
+        if str(cs[0]).isidentifier():
+            return None  # QQ[pi]: a polynomial ring in the name, as Sage
+        # Sage makes QQ[sin(pi/7)] a number field (it is algebraic) and
+        # refuses QQ[log(2)] (not a name); sagebrush tells neither apart
+        # here, so it refuses both (a polynomial ring "in sin(1/7*pi)" was
+        # a wrong answer: astra's report on ec120478)
+        raise NotImplementedError("QQ[%s]: %s is not recognised as an algebraic number in sagebrush, and is not a variable name" % (cs[0], cs[0])) from None
     if len(gs) > 1:
         raise NotImplementedError("%s[%s]: relative number fields are not available in sagebrush yet" % ("QQ" if R._field else "ZZ", ", ".join(map(str, gs))))
     if not R._field:
@@ -233,10 +239,12 @@ def _algebraic_extension(R, gens):
     import _sage_nf
     try:
         emb = repr(_sage_qqbar.AA(a)) if a._is_real() else repr(a)
-        if emb == "I":
-            emb = "1*I"  # (as Sage prints the embedding of QQ[I])
+        if emb in ("I", "-I"):
+            emb = emb[:-1] + "1*I"  # (as Sage prints the embeddings of QQ[I], QQ[-I])
         return _sage_nf._unique(_sage_nf.NumberField_absolute(f, name, emb))
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, NotImplementedError) as e:
+        # (e.g. a minimal polynomial with non-integral coefficients, as for
+        # cos(2*pi/5): Sage's field is defined by x^2 + 1/2*x - 1/4)
         raise NotImplementedError("QQ[%s]: the number field of %s is not available in sagebrush yet (%s)" % (cs[0], f, e)) from None
 
 
