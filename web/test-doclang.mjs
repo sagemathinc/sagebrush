@@ -79,7 +79,8 @@ try {
   let hits = await search("galois group");
   check(!hits.some((t) => /galois/i.test(t)), "in a MATLAB notebook, the search has no Sage functions: " + JSON.stringify(hits[0]?.slice(0, 80)));
   hits = await search("linspace");
-  check(hits.some((t) => t.startsWith("linspace")), "and finds MATLAB's: " + JSON.stringify(hits[0]?.slice(0, 60)));
+  // (a MATLAB catalog entry shows its signature, "y = linspace(x1, x2)")
+  check(hits.some((t) => /^(?:\S+ = )?linspace\b/.test(t)), "and finds MATLAB's: " + JSON.stringify(hits[0]?.slice(0, 60)));
 
   await choose("sage");
   hits = await search("galois group");
