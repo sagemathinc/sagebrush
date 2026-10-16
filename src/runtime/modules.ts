@@ -257,7 +257,7 @@ function oldSpaceFlag(): number | null {
   return mib === null ? null : mib * 2 ** 20;
 }
 
-function heapLimit(): number {
+export function heapLimit(): number {
   const g: any = globalThis;
   const flag = oldSpaceFlag();
   if (flag !== null) return flag;

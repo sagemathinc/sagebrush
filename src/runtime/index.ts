@@ -265,11 +265,27 @@ export function reraise(): any {
 
 export function sortedKeys(d: any): any[] {
   if (Obj.typeOf(d) === T.dict) return O.toArray(d).sort();
-  // (dir() over exec's locals mapping: its keys(), as CPython's PyMapping_Keys)
+  const a = mappingKeys(d);
+  Ty.sortList(a, null, false);
+  return a;
+}
+// dir() over exec's locals mapping: its keys(), as CPython's PyMapping_Keys,
+// read one at a time against a budget of the list CPython would build (a
+// repeated key counts each time): past it, a MemoryError, never the heap
+// running out (HARD-5F6-1)
+function mappingKeys(d: any): any[] {
   const ks = Obj.callObj(Obj.getattr(d, "keys"), []);
   if (Ty.lookupDunder(ks, "__iter__") === undefined && Ty.lookupDunder(ks, "__getitem__") === undefined) raise(T.TypeError, `${typeName(d)}.keys() returned a non-iterable (type ${typeName(ks)})`);
-  const a = O.toArray(ks);
-  Ty.sortList(a, null, false);
+  // (bytes: a list slot and an object's header per key, a string's chars)
+  const budget = M.heapLimit() / 8;
+  let work = 0;
+  const a: any[] = [];
+  const it = O.iter(ks);
+  for (let v = it.$next(); v !== Obj.DONE; v = it.$next()) {
+    work += 64 + (typeof v === "string" ? 2 * v.length : 0);
+    if (work > budget) raise(T.MemoryError, `${typeName(d)}.keys() is too long to list`);
+    a.push(v);
+  }
   return a;
 }
 
@@ -330,7 +346,7 @@ function mappingNamespace(m: any): any {
       }
       return true;
     },
-    ownKeys: () => [...new Set(sortedKeys(m).filter((k: any) => typeof k === "string"))],
+    ownKeys: () => [...new Set(mappingKeys(m).filter((k: any) => typeof k === "string"))],
     getOwnPropertyDescriptor: (_t, k) => {
       const v = typeof k === "string" ? get(k) : undefined;
       return v === undefined ? undefined : { value: v, writable: true, enumerable: true, configurable: true };
