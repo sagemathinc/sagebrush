@@ -72,8 +72,8 @@
     "name": "num2str",
     "kind": "function",
     "signature": "s = num2str(A)\ns = num2str(A, precision)\ns = num2str(A, formatSpec)",
-    "summary": "A number or array as text: four digits after the point by default, a given number of significant digits, or a format.",
-    "doc": "Integers print without a decimal point. A matrix gives a char matrix, a row per row, with columns aligned. `precision` is the number of significant digits. Leading spaces are removed, even with a format: `num2str(pi, '%10.5f')` is '3.14159', as in MATLAB (use sprintf to keep them).",
+    "summary": "A number or array as text: about five significant digits by default, a given number of significant digits, or a format.",
+    "doc": "Integers print without a decimal point; other values use about five significant digits (num2str(pi) is '3.1416' and num2str(0.000123456789) is '0.00012346'). A matrix gives a char matrix, a row per row, with columns aligned. `precision` is the number of significant digits. Leading spaces are removed, even with a format: `num2str(pi, '%10.5f')` is '3.14159', as in MATLAB (use sprintf to keep them).",
     "examples": [
       {
         "code": "num2str(pi)",

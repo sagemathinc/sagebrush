@@ -232,7 +232,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "fminsearch for an unconstrained minimum (constraints through a penalty term), fminbnd for one variable on an interval, lsqnonneg for nonnegative least squares.",
+    "alternative": "fminsearch for an unconstrained minimum, fminbnd for one variable on an interval, lsqnonneg for nonnegative least squares. General constraints have no solver in Sagebrush (a penalty term only approximates them, and can return an infeasible point).",
     "tags": [
       "optimization"
     ]
@@ -452,7 +452,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "(A - mean(A)) ./ std(A).",
+    "alternative": "(A - mean(A, 'omitnan')) ./ std(A, 'omitnan') for a vector, or the columns of a matrix: normalize computes the statistics without NaN elements, which stay NaN.",
     "tags": [
       "statistics"
     ]
@@ -530,7 +530,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Without constraints, the minimum solves H*x = -f: x = -H \\ f. With constraints, fminsearch with a penalty term.",
+    "alternative": "Without constraints and with H positive definite (the problem then has a unique minimum), x = -H \\ f. Constrained quadratic programs have no solver in Sagebrush; a penalty term with fminsearch only approximates them and can return an infeasible point.",
     "tags": [
       "optimization"
     ]
@@ -582,7 +582,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "(A - min(A)) ./ (max(A) - min(A)).",
+    "alternative": "(A - min(A(:))) ./ (max(A(:)) - min(A(:))) for an array that isn't constant (rescale scales by the extrema of the whole array; for [1 10; 3 20] that is [0 9/19; 2/19 1]).",
     "tags": [
       "statistics"
     ]
