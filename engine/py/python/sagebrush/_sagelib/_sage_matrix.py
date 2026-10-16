@@ -2555,13 +2555,14 @@ def _plain_base(base):
 
 def _is_parent(R):
     """Whether R is a ring or other parent rather than a list of rows.  A
-    parent is also anything callable (K(3)) without a length, as row data
-    has one: NumberField(t^2 - 2, 'a') has none of the methods above, and
-    matrix(K, 0, 0, []) iterated K[0], K[1], ... until the heap ran out
-    (astra's HARD-541-1)."""
+    number field or an order in one is recognised by its type: it has none
+    of the methods above, and matrix(K, 0, 0, []) iterated K[0], K[1], ...
+    until the heap ran out (astra's HARD-541-1).  (A callable object that
+    iterates rows is row data, as in Sage: astra's CORR-260-1.)"""
     if callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows"):
         return True
-    return callable(R) and not hasattr(R, "__len__") and not hasattr(R, "nrows") and not isinstance(R, type)
+    import _sage_nf
+    return isinstance(R, (_sage_nf.NumberField_absolute, _sage_nf.Order))
 
 
 def _int_dims(args):
@@ -2654,6 +2655,10 @@ def matrix(*args, **kwds):
                 # (matrix(QQ, 2, 3, 1) was a 2 x 3 "diagonal" matrix)
                 raise TypeError("nonzero scalar matrix must be square")
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
+        elif callable(ent) and not hasattr(ent, "__iter__") and not hasattr(ent, "__len__") and not hasattr(ent, "__getitem__"):
+            # matrix(QQ, 2, 2, lambda i, j: i + j): the entries f(i, j), as
+            # Sage (the shape is checked above, before any call)
+            rows = [[ent(i, j) for j in range(c)] for i in range(r)]
         else:
             # at most r c + 1 entries are read (r rows of a list of rows)
             ent = _bounded_list(ent, max(r * c, r))

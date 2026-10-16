@@ -130,3 +130,13 @@ test("matrix() over a number field is refused before anything is read (HARD-541-
   assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(3) + "-2\n");
   assert.ok(Date.now() - t < 30000);
 });
+
+test("matrix() keeps callable row iterables as rows, and takes an entry function (CORR-260-1)", () => {
+  // (the HARD-541-1 rule had refused any callable object without a length;
+  // and matrix(QQ, 2, 2, f) was a TypeError; values as Sage 10.10's)
+  const src = "class Rows:\n def __iter__(self): return iter([[1, 2], [3, 4]])\n def __call__(self): return 0\n" +
+    "def f(i, j): return i + j\n" +
+    "for m in (matrix(Rows()), matrix(QQ, 2, 2, f), matrix(QQ, 2, 2, lambda i, j: i - j), matrix(ZZ, 2, 3, lambda i, j: 10*i + j)):\n print(m.dimensions(), m.list())\n";
+  assert.equal(cli("--sage", "-c", src),
+    "(2, 2) [1, 2, 3, 4]\n(2, 2) [0, 1, 1, 2]\n(2, 2) [0, -1, 1, 0]\n(2, 3) [0, 1, 2, 10, 11, 12]\n");
+});
