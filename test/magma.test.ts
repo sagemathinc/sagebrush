@@ -737,6 +737,20 @@ test("a rational with huge parts made a real is refused in words, before any dec
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("a real power too large to make is refused in words, quickly (CORR-C682-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], {
+    input: "10.0^(2^29);\n0.1^(2^29);\n1.0001^(2^29) gt 1;\n\"end\";\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /Error:|Traceback/);
+  assert.equal((r.stdout.replace(/\s+/g, " ").match(/a real with a binary exponent of more than 1000000 is not supported yet/g) ?? []).length, 2, r.stdout);
+  // (within the bound: about 10^23316, made in 29 squarings)
+  assert.match(r.stdout, /\ntrue\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("intrinsics taking integers refuse a rational, an integral one too (CORR-765-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
