@@ -347,7 +347,11 @@ class BytesIO(BufferedIOBase):
 
 class StringIO(TextIOBase):
     def __init__(self, initial_value="", newline="\n"):
+        if initial_value is not None and not isinstance(initial_value, str):
+            raise TypeError(f"initial_value must be str or None, not {type(initial_value).__name__}")
         self._parts = [initial_value] if initial_value else []
+        # (the value's length, kept so a write at the end needn't join the parts)
+        self._len = len(initial_value) if initial_value else 0
         self._pos = 0
         self.closed = False
 
@@ -365,11 +369,13 @@ class StringIO(TextIOBase):
         if not isinstance(s, str):
             raise TypeError(f"string argument expected, got '{type(s).__name__}'")
         self._check()
-        v = self._value()
-        if self._pos == len(v):
+        if self._pos == self._len:
             self._parts.append(s)
+            self._len += len(s)
         else:
+            v = self._value()
             self._parts = [v[: self._pos] + s + v[self._pos + len(s) :]]
+            self._len = len(self._parts[0])
         self._pos += len(s)
         return len(s)
 
@@ -431,6 +437,7 @@ class StringIO(TextIOBase):
         v = self._value()
         size = self._pos if size is None else size
         self._parts = [v[:size]]
+        self._len = len(self._parts[0])
         return size
 
     def readable(self):

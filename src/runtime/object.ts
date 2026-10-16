@@ -103,6 +103,7 @@ export function objectType(name: string, bases: PyType[], dict: Map<string, any>
     return construct(cls, args);
   } as PyType;
   cls.$kw = (pos, names, values) => constructKw(cls, pos, names, values);
+  (cls as any).$kwPos = true;
   // Subclasses of list/tuple/dict/set use a JS subclass of the runtime
   // class (layout); everything else is an attribute-dict object.
   let layout: any = null;
@@ -336,6 +337,7 @@ export function bindMethod(f: any, self: any): any {
   // (__func__: a builtin method's receiver-checking form, never the raw function)
   m.$func = f.$owner !== undefined ? selfChecked(f) : f;
   m.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, [self, ...pos], names, values);
+  m.$kwPos = true;
   return m;
 }
 
@@ -349,16 +351,45 @@ function callSlot(c: any, f: any): any {
   return get !== undefined ? callObj(get, [c, f, typeOf(f)]) : c;
 }
 
+// A call with this many positional arguments or more is never spread into a
+// JS call: V8 puts spread arguments on the stack, so f(*xs) of a few hundred
+// thousand items was a RecursionError where CPython takes it.  It goes
+// through the function's own array forms instead (callKw).
+export const BIG_CALL = 2048;
+
 export function callObj(f: any, args: any[]): any {
+  if (args.length >= BIG_CALL) return callKw(f, args, [], []);
   if (typeof f === "function") return f(...args);
   const c = lookupType(typeOf(f), "__call__");
   if (c !== undefined) return typeof c === "function" ? c(f, ...args) : callObj(callSlot(c, f), args);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
+// Give a builtin that takes only positional arguments, any number of them, an
+// array form for calls too big to spread (BIG_CALL); keywords stay refused.
+export function positionalArray(f: any, impl: (pos: any[]) => any): any {
+  f.$kw = (pos: any[], names: string[], _values: any[]) => {
+    if (names.length) raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
+    return impl(pos);
+  };
+  f.$kwPos = true;
+  return f;
+}
+
 export function callKw(f: any, pos: any[], names: string[], values: any[]): any {
   if (typeof f === "function") {
-    if (names.length === 0) return f(...pos);
+    if (names.length === 0) {
+      if (pos.length < BIG_CALL) return f(...pos);
+      // The arguments as an array: a builtin's count checked first; then a
+      // keyword adapter known to check the positional count itself ($kwPos:
+      // compiled functions, bound methods, classes) or behind that check,
+      // else the signature's binding; anything else is spread as before.
+      if (f.$arity !== undefined) f.$arity(pos.length);
+      if (f.$kw !== undefined) {
+        if (f.$arity !== undefined || f.$kwPos === true) return f.$kw(pos, names, values);
+      } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
+      return f(...pos);
+    }
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
     if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
     raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
@@ -635,6 +666,7 @@ export function selfChecked(f: any): any {
       check(a[0]);
       return (f.$raw ?? f)(...a);
     };
+    c.$kwPos = true;
   }
   c.$selfChecked = c;
   f.$selfChecked = c;
@@ -1392,6 +1424,10 @@ export function checkArity(f: any, name: string, self: boolean, range?: [number,
   // Keyword calls bind all parameters and call the unchecked function.
   w.$raw = f;
   w.$argRange = [min, max]; // (the positional counts it takes: test/module-arity.test.ts)
+  // (the count check, for calls too big to spread: BIG_CALL)
+  w.$arity = (n: number) => {
+    if (n < min || n > max) arityError(name, min, max, n, self);
+  };
   return w;
 }
 
