@@ -2537,7 +2537,7 @@ subclassable(bytearray, PyByteArray, ["a", "n"]);
     // (under an export, refused as soon as it would grow: an exact list or
     // tuple before its items are converted, another iterable after its
     // first item, a count before its allocation, as CPython's; HARD-CBE-1)
-    if (b.$exports > 0 && (typeOf(source) === T.list || typeOf(source) === T.tuple) && source.length > 0) checkResizable(b);
+    if (b.$exports > 0 && source !== undefined && (typeOf(source) === T.list || typeOf(source) === T.tuple) && source.length > 0) checkResizable(b);
     const a = toBytes(source, encoding, errors, true, b.$exports > 0 ? (n) => { if (n !== 0) checkResizable(b); } : undefined);
     if (a.length !== 0) checkResizable(b);
     b.a = a;
