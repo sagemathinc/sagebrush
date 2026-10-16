@@ -41,6 +41,24 @@ def _ssize(v):
     return v
 
 
+def _special(obj, name):
+    """obj's special method name, as CPython's _PyObject_LookupSpecial: found
+    in its type's MRO, not the instance, and bound by the attribute's own
+    __get__ if it has one; _MISSING if there is none (an attribute set to
+    None is None, which the caller then fails to call, as CPython's)"""
+    tp = type(obj)
+    for k in tp.__mro__:
+        d = k.__dict__
+        if name in d:
+            a = d[name]
+            get = getattr(type(a), "__get__", None)
+            return a if get is None else get(a, obj, tp)
+    return _MISSING
+
+
+_MISSING = object()
+
+
 def _index_hint(hint, msg):
     """StringIO's and a file's readlines hint, as CPython's
     _Py_convert_optional_to_ssize_t: None, or an index (an int's own value;
@@ -51,10 +69,10 @@ def _index_hint(hint, msg):
     if isinstance(hint, int):
         v = int.__index__(hint)
     else:
-        f = getattr(type(hint), "__index__", None)
-        if f is None:
+        f = _special(hint, "__index__")
+        if f is _MISSING:
             raise TypeError(msg % type(hint).__name__)
-        v = f(hint)
+        v = f()
         if not isinstance(v, int):
             raise TypeError("__index__ returned non-int (type %s)" % type(v).__name__)
         v = int.__index__(v)
