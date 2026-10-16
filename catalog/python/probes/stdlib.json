@@ -1,0 +1,867 @@
+{
+ "bisect.bisect": {
+  "calls": 112,
+  "differ": 7,
+  "first": [
+   {
+    "args": "[3, 1, 2], 2, -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, -float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, 2 ** 70",
+    "cpython": "raise OverflowError",
+    "sagebrush": "1180591620717411303424 | [[3, 1, 2], 2, 1180591620717411303424]"
+   },
+   {
+    "args": "[3, 1, 2], 2, float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "inf | [[3, 1, 2], 2, inf]"
+   },
+   {
+    "args": "[3, 1, 2], 2, float('nan')",
+    "cpython": "raise TypeError",
+    "sagebrush": "nan | [[3, 1, 2], 2, nan]"
+   }
+  ]
+ },
+ "bisect.bisect_left": {
+  "calls": 112,
+  "differ": 7,
+  "first": [
+   {
+    "args": "[3, 1, 2], 2, -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, -float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, 2 ** 70",
+    "cpython": "raise OverflowError",
+    "sagebrush": "1180591620717411303424 | [[3, 1, 2], 2, 1180591620717411303424]"
+   },
+   {
+    "args": "[3, 1, 2], 2, float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "inf | [[3, 1, 2], 2, inf]"
+   },
+   {
+    "args": "[3, 1, 2], 2, float('nan')",
+    "cpython": "raise TypeError",
+    "sagebrush": "nan | [[3, 1, 2], 2, nan]"
+   }
+  ]
+ },
+ "bisect.bisect_right": {
+  "calls": 112,
+  "differ": 7,
+  "first": [
+   {
+    "args": "[3, 1, 2], 2, -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, -float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, 2 ** 70",
+    "cpython": "raise OverflowError",
+    "sagebrush": "1180591620717411303424 | [[3, 1, 2], 2, 1180591620717411303424]"
+   },
+   {
+    "args": "[3, 1, 2], 2, float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "inf | [[3, 1, 2], 2, inf]"
+   },
+   {
+    "args": "[3, 1, 2], 2, float('nan')",
+    "cpython": "raise TypeError",
+    "sagebrush": "nan | [[3, 1, 2], 2, nan]"
+   }
+  ]
+ },
+ "bisect.insort": {
+  "calls": 112,
+  "differ": 5,
+  "first": [
+   {
+    "args": "[3, 1, 2], 2, -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, -float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, 2 ** 70",
+    "cpython": "raise OverflowError",
+    "sagebrush": "None | [[3, 1, 2, 2], 2, 1180591620717411303424]"
+   },
+   {
+    "args": "{1: 2}, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise KeyError"
+   },
+   {
+    "args": "{1: 2}, 2, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "bisect.insort_left": {
+  "calls": 112,
+  "differ": 5,
+  "first": [
+   {
+    "args": "[3, 1, 2], 2, -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, -float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, 2 ** 70",
+    "cpython": "raise OverflowError",
+    "sagebrush": "None | [[3, 1, 2, 2], 2, 1180591620717411303424]"
+   },
+   {
+    "args": "{1: 2}, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise KeyError"
+   },
+   {
+    "args": "{1: 2}, 2, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "bisect.insort_right": {
+  "calls": 112,
+  "differ": 5,
+  "first": [
+   {
+    "args": "[3, 1, 2], 2, -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, -float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise ValueError"
+   },
+   {
+    "args": "[3, 1, 2], 2, 2 ** 70",
+    "cpython": "raise OverflowError",
+    "sagebrush": "None | [[3, 1, 2, 2], 2, 1180591620717411303424]"
+   },
+   {
+    "args": "{1: 2}, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise KeyError"
+   },
+   {
+    "args": "{1: 2}, 2, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "collections.ChainMap": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "collections.UserList": {
+  "calls": 24,
+  "differ": 0,
+  "first": []
+ },
+ "collections.UserString": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "collections.namedtuple": {
+  "calls": 45,
+  "differ": 6,
+  "first": [
+   {
+    "args": "'abc', ''",
+    "cpython": "<class '__main__.abc'> | ['abc', '']",
+    "sagebrush": "<class 'collections.abc'> | ['abc', '']"
+   },
+   {
+    "args": "'abc', 'abc'",
+    "cpython": "<class '__main__.abc'> | ['abc', 'abc']",
+    "sagebrush": "<class 'collections.abc'> | ['abc', 'abc']"
+   },
+   {
+    "args": "'abc', ()",
+    "cpython": "<class '__main__.abc'> | ['abc', ()]",
+    "sagebrush": "<class 'collections.abc'> | ['abc', ()]"
+   },
+   {
+    "args": "'abc', []",
+    "cpython": "<class '__main__.abc'> | ['abc', []]",
+    "sagebrush": "<class 'collections.abc'> | ['abc', []]"
+   },
+   {
+    "args": "float('inf'), 'abc'",
+    "cpython": "<class '__main__.inf'> | [inf, 'abc']",
+    "sagebrush": "<class 'collections.inf'> | [inf, 'abc']"
+   }
+  ]
+ },
+ "fractions.Fraction.limit_denominator": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "functools.cache": {
+  "calls": 23,
+  "differ": 23,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "raise TypeError",
+    "sagebrush": "<function _lru_cache_wrapper.<locals>.wrapper at 0x7f00000013a0> | ['']"
+   },
+   {
+    "args": "'abc'",
+    "cpython": "raise TypeError",
+    "sagebrush": "<function _lru_cache_wrapper.<locals>.wrapper at 0x7f00000013c0> | ['abc']"
+   },
+   {
+    "args": "()",
+    "cpython": "raise TypeError",
+    "sagebrush": "<function _lru_cache_wrapper.<locals>.wrapper at 0x7f00000013e0> | [()]"
+   },
+   {
+    "args": "(1, 2)",
+    "cpython": "raise TypeError",
+    "sagebrush": "<function _lru_cache_wrapper.<locals>.wrapper at 0x7f0000001400> | [(1, 2)]"
+   },
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "raise TypeError",
+    "sagebrush": "<function _lru_cache_wrapper.<locals>.wrapper at 0x7f0000001420> | [-1180591620717411303424]"
+   }
+  ]
+ },
+ "functools.cached_property": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "functools.cmp_to_key": {
+  "calls": 23,
+  "differ": 23,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "<functools.KeyWrapper object at 0x7bbcceb63eb0> | ['']",
+    "sagebrush": "<class 'functools.cmp_to_key.<locals>.K'> | ['']"
+   },
+   {
+    "args": "'abc'",
+    "cpython": "<functools.KeyWrapper object at 0x7bbcceb63eb0> | ['abc']",
+    "sagebrush": "<class 'functools.cmp_to_key.<locals>.K'> | ['abc']"
+   },
+   {
+    "args": "()",
+    "cpython": "<functools.KeyWrapper object at 0x7bbcceb63eb0> | [()]",
+    "sagebrush": "<class 'functools.cmp_to_key.<locals>.K'> | [()]"
+   },
+   {
+    "args": "(1, 2)",
+    "cpython": "<functools.KeyWrapper object at 0x7bbcceb63eb0> | [(1, 2)]",
+    "sagebrush": "<class 'functools.cmp_to_key.<locals>.K'> | [(1, 2)]"
+   },
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "<functools.KeyWrapper object at 0x7bbcceb63eb0> | [-1180591620717411303424]",
+    "sagebrush": "<class 'functools.cmp_to_key.<locals>.K'> | [-1180591620717411303424]"
+   }
+  ]
+ },
+ "functools.lru_cache": {
+  "calls": 69,
+  "differ": 0,
+  "first": []
+ },
+ "functools.singledispatch": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "functools.singledispatchmethod": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "functools.total_ordering": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "functools.update_wrapper": {
+  "calls": 112,
+  "differ": 0,
+  "first": []
+ },
+ "functools.wraps": {
+  "calls": 135,
+  "differ": 0,
+  "first": []
+ },
+ "heapq.heapify": {
+  "calls": 23,
+  "differ": 3,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "raise TypeError",
+    "sagebrush": "None | ['']"
+   },
+   {
+    "args": "()",
+    "cpython": "raise TypeError",
+    "sagebrush": "None | [()]"
+   },
+   {
+    "args": "{1: 2}",
+    "cpython": "raise TypeError",
+    "sagebrush": "None | [{1: 2}]"
+   }
+  ]
+ },
+ "heapq.heapify_max": {
+  "calls": 23,
+  "differ": 3,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "raise TypeError",
+    "sagebrush": "None | ['']"
+   },
+   {
+    "args": "()",
+    "cpython": "raise TypeError",
+    "sagebrush": "None | [()]"
+   },
+   {
+    "args": "{1: 2}",
+    "cpython": "raise TypeError",
+    "sagebrush": "None | [{1: 2}]"
+   }
+  ]
+ },
+ "heapq.heappop": {
+  "calls": 23,
+  "differ": 20,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "'abc'",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "()",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(1, 2)",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "heapq.heappop_max": {
+  "calls": 23,
+  "differ": 20,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "'abc'",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "()",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(1, 2)",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "heapq.heappush": {
+  "calls": 45,
+  "differ": 21,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "'abc', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(1, 2), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "-(2 ** 70), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "heapq.heappush_max": {
+  "calls": 45,
+  "differ": 21,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "'abc', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(1, 2), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "-(2 ** 70), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "heapq.heappushpop": {
+  "calls": 45,
+  "differ": 7,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | ['', 2]"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [(), 2]"
+   },
+   {
+    "args": "-0.0, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [-0.0, 2]"
+   },
+   {
+    "args": "0, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [0, 2]"
+   },
+   {
+    "args": "False, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [False, 2]"
+   }
+  ]
+ },
+ "heapq.heappushpop_max": {
+  "calls": 45,
+  "differ": 9,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | ['', 2]"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [(), 2]"
+   },
+   {
+    "args": "(1, 2), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [(1, 2), 2]"
+   },
+   {
+    "args": "-0.0, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [-0.0, 2]"
+   },
+   {
+    "args": "0, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "2 | [0, 2]"
+   }
+  ]
+ },
+ "heapq.heapreplace": {
+  "calls": 45,
+  "differ": 3,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise IndexError"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise IndexError"
+   },
+   {
+    "args": "{1: 2}, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise KeyError"
+   }
+  ]
+ },
+ "heapq.heapreplace_max": {
+  "calls": 45,
+  "differ": 3,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise IndexError"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise IndexError"
+   },
+   {
+    "args": "{1: 2}, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise KeyError"
+   }
+  ]
+ },
+ "heapq.merge": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "heapq.nlargest": {
+  "calls": 112,
+  "differ": 0,
+  "first": []
+ },
+ "heapq.nsmallest": {
+  "calls": 112,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.accumulate": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.batched": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.chain": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.combinations": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.combinations_with_replacement": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.compress": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.count": {
+  "calls": 69,
+  "differ": 29,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "'abc'",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "'abc', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "()",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   }
+  ]
+ },
+ "itertools.cycle": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.dropwhile": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.filterfalse": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.groupby": {
+  "calls": 68,
+  "differ": 36,
+  "first": [
+   {
+    "args": "'abc'",
+    "cpython": "[('a', <itertools._grouper object at 0x7bbccebaf790>), ('b', <itertools._grouper object at 0x7bbccebaf7f0>), ('c', <itertools._grouper object at 0x7bbccebaf820>)] | ['abc']",
+    "sagebrush": "[('a', <generator object groupby.<locals>.grouper at 0x7f0000001020>), ('b', <generator object groupby.<locals>.grouper at 0x7f0000001040>), ('c', <generator object groupby.<locals>.grouper at 0x7f0000001060>)] | ['abc']"
+   },
+   {
+    "args": "(1, 2)",
+    "cpython": "[(1, <itertools._grouper object at 0x7bbccebaf790>), (2, <itertools._grouper object at 0x7bbccebaf7c0>)] | [(1, 2)]",
+    "sagebrush": "[(1, <generator object groupby.<locals>.grouper at 0x7f0000001080>), (2, <generator object groupby.<locals>.grouper at 0x7f00000010a0>)] | [(1, 2)]"
+   },
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-(2 ** 70), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-0.0",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   }
+  ]
+ },
+ "itertools.pairwise": {
+  "calls": 23,
+  "differ": 15,
+  "first": [
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-0.0",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-1",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-float('inf')",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "0",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   }
+  ]
+ },
+ "itertools.permutations": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.product": {
+  "calls": 68,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.starmap": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.takewhile": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ },
+ "itertools.tee": {
+  "calls": 68,
+  "differ": 1,
+  "first": [
+   {
+    "args": "[3, 1, 2], -(2 ** 70)",
+    "cpython": "raise OverflowError",
+    "sagebrush": "raise ValueError"
+   }
+  ]
+ },
+ "itertools.zip_longest": {
+  "calls": 68,
+  "differ": 45,
+  "first": [
+   {
+    "args": "-(2 ** 70)",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-(2 ** 70), [3, 1, 2]",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-0.0",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-0.0, [3, 1, 2]",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   },
+   {
+    "args": "-1",
+    "cpython": "raise TypeError",
+    "sagebrush": "iter raise TypeError"
+   }
+  ]
+ },
+ "random.choice": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "random.randint": {
+  "calls": 45,
+  "differ": 19,
+  "first": [
+   {
+    "args": "'', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "'abc', 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "(1, 2), 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   },
+   {
+    "args": "-0.0, 2",
+    "cpython": "raise TypeError",
+    "sagebrush": "raise AttributeError"
+   }
+  ]
+ },
+ "random.shuffle": {
+  "calls": 23,
+  "differ": 0,
+  "first": []
+ },
+ "random.uniform": {
+  "calls": 45,
+  "differ": 0,
+  "first": []
+ }
+}

@@ -11,7 +11,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -28,7 +28,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -45,7 +45,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -62,7 +62,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -79,9 +79,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. tee([3, 1, 2], -(2 ** 70)).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -96,7 +97,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -113,7 +114,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -130,7 +131,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -147,7 +148,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -168,7 +169,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -185,7 +186,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -202,9 +203,11 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It raises an argument's TypeError when first iterated, where Python 3.14 raises it at the call, e.g. count('').",
+      "count(False) gives [False, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ..., where Python 3.14 gives [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, ....",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -219,7 +222,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -270,9 +273,11 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "groupby('abc') gives [('a', <generator object groupby.<locals>.group..., where Python 3.14 gives [('a', <itertools._grouper object at 0x7bbcceba....",
+      "It raises an argument's TypeError when first iterated, where Python 3.14 raises it at the call, e.g. groupby(-(2 ** 70)).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -287,9 +292,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It raises an argument's TypeError when first iterated, where Python 3.14 raises it at the call, e.g. pairwise(-(2 ** 70)).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -304,9 +310,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It raises an argument's TypeError when first iterated, where Python 3.14 raises it at the call, e.g. zip_longest(-(2 ** 70)).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -321,7 +328,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -338,7 +345,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"

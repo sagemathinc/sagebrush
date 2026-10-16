@@ -29,9 +29,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises AttributeError where Python 3.14 raises TypeError, e.g. randint('', 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -46,7 +47,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -63,7 +64,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -80,7 +81,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
