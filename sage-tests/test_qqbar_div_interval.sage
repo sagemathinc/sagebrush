@@ -20,3 +20,8 @@ y = QQbar(2).sqrt() + QQbar(I)
 for k in range(8):
     y = (y * y - 1) / (y + 1) + QQbar(I)
 print(y.minpoly().degree())
+# (a complex number whose real part excludes 0 but whose imaginary part's interval spans it: the norm's interval
+# contained 0 by the generic product im*im, astra's CORR-F30-1)
+a = QQbar(2).sqrt() * QQbar(I); b = QQbar(3).sqrt() * QQbar(I)
+for w in (1 + (a - a)*10^20, a/1000 + (b - b)*10^20, QQbar(I) + (a - a)*10^20, AA(2).sqrt() + (b - b)*10^20):
+    print(1/w == 1/(w + 0), (1/w)*w == 1)

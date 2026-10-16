@@ -86,6 +86,16 @@ class _Iv:
         p = [self.lo * o.lo, self.lo * o.hi, self.hi * o.lo, self.hi * o.hi]
         return _Iv(_rnd(min(p), False), _rnd(max(p), True))
 
+    def _sq(self):
+        """The interval of x^2 for x in self: from 0 when self contains 0
+        (the product self * self had a negative lower bound, so the norm
+        re^2 + im^2 of a complex interval could contain 0 when its real
+        part excluded it: astra's CORR-F30-1)."""
+        if self.lo <= 0 <= self.hi:
+            m = max(-self.lo, self.hi)
+            return _Iv(_F(0), _rnd(m * m, True))
+        return self * self
+
     def _inv(self):
         if self.lo <= 0 <= self.hi:
             raise ZeroDivisionError("interval contains 0")
@@ -119,7 +129,7 @@ class _CIv:
     def _inv(self):
         if self.im._is_zero():
             return _CIv(self.re._inv())
-        n = self.re * self.re + self.im * self.im
+        n = self.re._sq() + self.im._sq()
         ni = n._inv()
         return _CIv(self.re * ni, -(self.im * ni))
 
