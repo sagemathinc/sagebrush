@@ -215,6 +215,13 @@ const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush
     process.exit(1);
   }
   builds.push(["the board", r]);
+  // (the command line's `board render` math, MathJax: in the CLI's bundle,
+  // not a page's; built here only to list its packages, so that the
+  // packages that carry the CLI name them, src/board-math.ts)
+  const cliMath = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "..", "src", "board-math.ts")], outdir: join(here, "dist", ".cli-math"), target: "node", format: "cjs" });
+  if (!cliMath.success) { for (const m of cliMath.logs) console.error(m); process.exit(1); }
+  rmSync(join(here, "dist", ".cli-math"), { recursive: true, force: true });
+  builds.push(["the command line's board render (math)", cliMath]);
   copyFileSync(join(here, "board", "index.html"), join(here, "dist", "board", "index.html"));
   mkdirSync(join(here, "dist", "board", "examples"), { recursive: true });
   for (const f of readdirSync(join(here, "board", "examples"))) if (/\.(json|md|mmd)$/.test(f)) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));

@@ -88,7 +88,9 @@ export async function boardCommand(argv: string[]): Promise<number> {
   if (pics) process.stderr.write(`sagebrush board render: ${pics}\n`);
   const pages = pageCount(doc);
   if (!Number.isInteger(page) || page < 1 || page > pages) { process.stderr.write(`sagebrush board render: --page: from 1 to ${pages}\n`); return 2; }
-  const { svg, left, overflow } = boardSvg(doc, { page: page - 1 });
+  // (math typeset: MathJax, loaded only for a board with math in it)
+  const math = JSON.stringify(doc).includes("$") ? (await import("./board-math")).texSvg : undefined;
+  const { svg, left, overflow } = boardSvg(doc, { page: page - 1, math });
   if (out === null) process.stdout.write(svg);
   else writeFileSync(out, svg);
   if (left.length) process.stderr.write(`sagebrush board render: shown only in part: ${left.join(", ")}\n`);
