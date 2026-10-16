@@ -36,9 +36,9 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
-    "status": "partial",
+    "status": "full",
     "upstream_version": "Python 3.14"
   }
 ]

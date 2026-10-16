@@ -59,6 +59,9 @@ Copyright (c) 2001 Python Software Foundation. See
   (vendored in `pyparse/vendor/cpython`), with TypeScript ports of parts of
   CPython's `Parser/` directory, and a Unicode character-name table generated
   from Python's `unicodedata`.
+- `src/runtime/casefold-data.ts`: a table of Python 3.14's `str.casefold()`
+  (the Unicode 16.0.0 full case folding of `CaseFolding.txt`), generated from
+  CPython's own `str.casefold` by `scripts/gen-casefold.py`.
 - `src/runtime/ops.ts`, `intTrueDiv`: int / int follows the scheme of
   CPython's `long_true_divide` (`Objects/longobject.c`): the shift, the two
   extra bits and the sticky bit, a single round to even at the result's

@@ -11,7 +11,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument ndmax, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -28,7 +29,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -49,7 +51,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -66,7 +69,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -83,7 +87,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -100,7 +105,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -117,7 +123,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -134,7 +141,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -151,7 +159,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -168,7 +177,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -185,7 +195,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -202,7 +213,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -219,7 +231,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -236,7 +249,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument device, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -253,7 +267,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -274,7 +289,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -291,7 +307,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument like, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -308,7 +325,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -325,7 +343,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -342,7 +361,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -359,7 +379,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -376,7 +397,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument sparse, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -410,7 +432,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments iter, like, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -427,7 +450,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -444,7 +468,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments converters, encoding, max_rows, quotechar, like, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -461,7 +486,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -478,7 +504,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -495,7 +522,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -512,7 +540,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -529,7 +558,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -546,7 +576,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -563,7 +594,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -580,7 +612,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -597,7 +630,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -614,7 +648,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument casting, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -631,7 +666,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments dtype, casting, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -648,7 +684,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument casting, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -665,7 +702,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument casting, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -682,7 +720,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -699,7 +738,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -716,7 +756,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -733,7 +774,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -750,7 +792,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -767,7 +810,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -784,7 +828,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -801,7 +846,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -822,7 +868,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -839,7 +886,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -856,7 +904,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -873,7 +922,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -890,7 +940,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -907,7 +958,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -924,7 +976,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -941,7 +994,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1489,7 +1543,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1642,7 +1697,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments out, where, casting, order, dtype, subok, signature, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1659,7 +1715,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments out, where, casting, order, dtype, subok, signature, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1676,7 +1733,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1693,7 +1751,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1710,7 +1769,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments out, where, casting, order, dtype, subok, signature, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1727,7 +1787,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1795,7 +1856,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1812,7 +1874,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments out, where, casting, order, dtype, subok, signature, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1829,7 +1892,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1843,10 +1907,20 @@
       {
         "code": "np.interp([0.5, 1.5], [0, 1, 2], [0, 10, 0])",
         "expected": "array([5., 5.])\n"
+      },
+      {
+        "code": "np.interp([-45, 45, 315, 405], [0, 90, 180, 270], [0, 2, 0, -2], period=360)",
+        "expected": "array([-1.,  1., -1.,  1.])\n"
+      },
+      {
+        "code": "np.interp(0.25, [3], [8], period=float('inf'))",
+        "expected": "NotImplementedError: numpy.interp with a period that is not finite is not supported in Sagebrush\n"
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "A period that is not finite (inf, -inf, nan) is refused (NotImplementedError); NumPy gives an answer from its own arithmetic on it.",
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1884,7 +1958,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1901,7 +1976,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1918,7 +1994,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments doc, cache, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1939,7 +2016,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1956,7 +2034,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1973,7 +2052,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -1990,7 +2070,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2011,7 +2092,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2028,7 +2110,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2045,7 +2128,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2062,7 +2146,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2079,7 +2164,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2096,7 +2182,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2113,7 +2200,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2134,7 +2222,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2151,7 +2240,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2168,7 +2258,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2189,7 +2280,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2206,7 +2298,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2223,7 +2316,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument weights, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2240,7 +2334,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument weights, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2257,7 +2352,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument where, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2274,7 +2370,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments initial, where, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2291,7 +2388,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments initial, where, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2308,7 +2406,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments fweights, aweights, dtype, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2325,7 +2424,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument dtype, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2342,7 +2442,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2359,7 +2460,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2376,7 +2478,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2393,7 +2496,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2410,7 +2514,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2427,7 +2532,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2444,7 +2550,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2465,7 +2572,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument descending, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2482,7 +2590,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument descending, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2499,7 +2608,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2516,7 +2626,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2533,7 +2644,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2550,7 +2662,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2571,7 +2684,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument sorted, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2588,7 +2702,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument kind, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2605,7 +2720,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments ar1, ar2, return_indices, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2622,7 +2738,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments ar1, ar2, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2639,7 +2756,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments ar1, ar2, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2656,7 +2774,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2673,7 +2792,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2690,7 +2810,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2745,7 +2866,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2762,7 +2884,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the arguments axes, axis, keepdims, casting, order, dtype, subok, signature, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2779,7 +2902,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2796,7 +2920,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2813,7 +2938,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2830,7 +2956,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2847,7 +2974,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2864,7 +2992,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2885,7 +3014,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument out, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2902,7 +3032,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2919,7 +3050,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2936,7 +3068,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2953,7 +3086,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2970,7 +3104,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -2987,7 +3122,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3004,7 +3140,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3021,7 +3158,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3038,7 +3176,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3055,7 +3194,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3072,7 +3212,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3089,7 +3230,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3110,7 +3252,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3148,7 +3291,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument dtype, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3165,7 +3309,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Does not accept the argument int_type, which NumPy 2.5.1 has (a TypeError).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3182,7 +3327,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3199,7 +3345,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
@@ -3216,7 +3363,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
