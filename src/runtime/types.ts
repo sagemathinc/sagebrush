@@ -1333,9 +1333,11 @@ method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict")
 method(S, "expandtabs", (s: string, ts: any = 8) => {
   let out = "", col = 0;
   const n = Number(ts);
+  const seams: number[] = []; // (a tab expanded to nothing joins its neighbours: SP.checkSeams)
   for (const c of s) {
     if (c === "\t") {
       const k = n > 0 ? n - (col % n) : 0;
+      if (k === 0) seams.push(out.length);
       out += " ".repeat(k);
       col += k;
     } else {
@@ -1343,7 +1345,7 @@ method(S, "expandtabs", (s: string, ts: any = 8) => {
       col = c === "\n" || c === "\r" ? 0 : col + 1;
     }
   }
-  return out;
+  return SP.checkSeams(out, seams);
 });
 method(S, "format", (s: string, ...args: any[]) => strFormat(s, args, new Map()));
 S.$dict.get("format").$kw = (pos: any[], names: string[], values: any[]) => strFormat(pos[0], pos.slice(1), new Map(names.map((n, i) => [n, values[i]])));
