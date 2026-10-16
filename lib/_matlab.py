@@ -433,14 +433,17 @@ def _int_round(r, cls):
 
 def _int64_exact(a, cls):
     """a, if an int64 or uint64 result Sagebrush holds exactly: its 64-bit integers keep 53
-    bits, as doubles do, so a value beyond 2^53 in magnitude (int64(2)^62, uint64(2^53) + 1,
-    a saturated limit) is refused rather than shown rounded; -2^63, exact, is kept"""
+    bits, as doubles do, so a value of 2^53 or more in magnitude (int64(2)^62, uint64(2^53) + 1,
+    computed as 2^53, a saturated limit) is refused rather than shown rounded; -2^63, exact,
+    is kept"""
     if cls in ("int64", "uint64") and a.size:
         m = np.abs(a.astype(np.float64))
-        bad = (m > 2.0 ** 53) & (a.astype(np.float64) != -(2.0 ** 63))
+        # (2^53 itself too: a double result there may be a rounded 2^53 + 1, while one below
+        # it is exact for integer operands)
+        bad = (m >= 2.0 ** 53) & (a.astype(np.float64) != -(2.0 ** 63))
         if np.any(bad):
             v = float(a.reshape(-1)[np.flatnonzero(bad)[0]])
-            raise _err("%s values beyond 2^53 in magnitude (here about %.17g) are not supported: Sagebrush's 64-bit integers are not exact there." % (cls, v))
+            raise _err("%s values of 2^53 or more in magnitude (here about %.17g) are not supported: Sagebrush's 64-bit integers are not exact there." % (cls, v))
     return a
 
 
@@ -8005,6 +8008,10 @@ def _regexp_row(e):
     return Char(_text(e))
 
 
+# (the group slots, matches times groups plus one, a regexp call may keep)
+_MATCH_SLOTS = 200_000
+
+
 def _regexp(nargout, s, pat, opts, flags):
     if type(pat) is StrArr or (type(pat) is Cell and (type(s) is StrArr or type(s) is Str)):
         # (string arrays of expressions give string outputs whose exact forms the page
@@ -8079,9 +8086,30 @@ def _regexp(nargout, s, pat, opts, flags):
     if not wanted:
         wanted = ["start", "end", "tokenextents", "match", "tokens", "names", "split"]
     rx = _re.compile(_regex(_text(pat)), flags)
-    ms = [m for m in rx.finditer(t) if empty_ok or m.end() > m.start()]
-    if once:
-        ms = ms[:1]
+    # (the matches kept, each holding its groups, admitted as they are found: past
+    # _MATCH_SLOTS group slots the call is refused rather than run out of memory; 'once'
+    # stops at the first)
+    ms = []
+    slots = rx.groups + 1
+
+    def stepwise():
+        # (one match at a time, for an input that could pass the limit: the runtime's
+        # finditer may find them all before the first is seen)
+        pos = 0
+        while pos <= len(t):
+            m = rx.search(t, pos)
+            if m is None:
+                return
+            yield m
+            pos = m.end() + 1 if m.end() == m.start() else m.end()
+
+    for m in (stepwise() if (len(t) + 1) * slots > _MATCH_SLOTS else rx.finditer(t)):
+        if empty_ok or m.end() > m.start():
+            ms.append(m)
+            if once:
+                break
+            if len(ms) * slots > _MATCH_SLOTS:
+                raise _err("regexp: more than %d matches of a pattern with %d groups are not supported in Sagebrush." % (_MATCH_SLOTS // slots, rx.groups))
 
     def row(vals):
         return Cell(vals, (1, len(vals)))
@@ -8123,13 +8151,23 @@ def _regexp(nargout, s, pat, opts, flags):
                 # The fields in the order the names first appear; a name used in several
                 # alternatives takes the group that took part in the match)
                 groups = _group_names(_text(pat), bool(rx.flags & _re.VERBOSE))
+                # (each name's groups found once, so a match costs O(groups); the fields built,
+                # matches times names, admitted first)
+                cands = {}
+                for g, x in groups:
+                    if g <= rx.groups:
+                        cands.setdefault(x, []).append(g)
                 names = list(dict.fromkeys(nm for _, nm in groups))
+                fields = (1 if once else len(ms)) * len(names)
+                if fields > _CS_MAX:
+                    raise _err("regexp 'names' would build %d fields (%d matches, %d names), beyond Sagebrush's limit of %d." % (fields, len(ms), len(names), _CS_MAX))
                 def value(m, nm):
-                    for g, x in groups:
-                        if x == nm and g <= rx.groups and m.group(g) is not None:
-                            return m.group(g)
+                    for g in cands.get(nm, ()):
+                        v = m.group(g)
+                        if v is not None:
+                            return v
                     return ""
-                items = [{k: Char(value(m, k)) for k in names} for m in ms]
+                items = [{k: Char(value(m, k)) for k in names} for m in (ms[:1] if once else ms)]
                 out.append(_struct1(items[0]) if once or len(items) == 1 else Struct(items, (1, len(items)), names))
             else:
                 out.append(Struct([{}], (1, 1), []))
