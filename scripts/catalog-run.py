@@ -51,28 +51,20 @@ def run_on(runtime, mode, entries):
         os.mkdir(work)
         env = dict(os.environ, SAGEBRUSH_CATALOG="")
         cmd = COMMANDS[runtime] + ["-m", "_catalog", "--run", "--mode", mode, "--runtime", runtime.split("-")[0], "--entries", path]
+        # (each example's output is bounded by its runner: lib/_python_examples.py LIMIT)
         r = subprocess.run(cmd, cwd=work, capture_output=True, text=True, env=env, timeout=1800)
         if r.returncode:
             sys.exit("%s: %s" % (" ".join(cmd), r.stderr[-2000:]))
         return json.loads(r.stdout.strip().split("\n")[-1])
 
 
-def compare(mode, entries, results, label):
-    """The number of outputs that differ, each reported"""
-    want = {(e["name"], e["signature"], i): ex["expected"] for e in entries for i, ex in enumerate(e["examples"])}
-    bad = 0
-    for r in results:
-        key = (r["name"], r["signature"], r["index"])
-        if r["got"] != want[key]:
-            bad += 1
-            code = entries_by_key(entries)[key]
-            print("--- %s %s example %d (%s)\n    code:     %s\n    expected: %r\n    got:      %r" % (
-                mode, r["name"], r["index"] + 1, label, code.replace("\n", "; "), want[key], r["got"]))
-    return bad
-
-
-def entries_by_key(entries):
-    return {(e["name"], e["signature"], i): ex["code"] for e in entries for i, ex in enumerate(e["examples"])}
+def compare(mode, entries, results, runtime, label):
+    """The number of problems (_catalog.compare: an output that differs, or
+    an example with no result, or more than one), each reported"""
+    probs = _catalog.compare(entries, results, runtime)
+    for p in probs:
+        print("--- %s %s (%s)" % (mode, p, label))
+    return len(probs)
 
 
 def update(mode, results):
@@ -90,8 +82,13 @@ def update(mode, results):
                 if k in got and got[k] != ex["expected"]:
                     ex["expected"] = got[k]
                     changed += 1
-        with open(p, "w", encoding="utf-8") as fh:
+        # (a new file renamed over the old: an interruption leaves one or the other)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, p)
     print("%s: %d expected outputs rewritten" % (mode, changed))
 
 
@@ -129,7 +126,7 @@ def main():
         if "--cpython" in sys.argv:
             if mode != "python":
                 continue
-            n = compare(mode, entries, cpython(entries), "CPython %s" % sys.version.split()[0])
+            n = compare(mode, entries, cpython(entries), None, "CPython %s" % sys.version.split()[0])
             total = sum(len(e["examples"]) for e in entries)
             print("python: %d of %d examples print the same under CPython %s" % (total - n, total, sys.version.split()[0]))
             bad += n
@@ -138,7 +135,7 @@ def main():
         if "--update" in sys.argv:
             update(mode, results)
             continue
-        n = compare(mode, entries, results, runtime)
+        n = compare(mode, entries, results, runtime.split("-")[0], runtime)
         print("%s on %s: %d examples, %d differ" % (mode, runtime, len(results), n))
         bad += n
     return 1 if bad else 0
