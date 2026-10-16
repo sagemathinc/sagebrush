@@ -516,3 +516,22 @@ for c in (IxS, IxC, IxP, IxN, IxF, IxNone):
     except Exception as e:
         print('operator.index', c.__name__, type(e).__name__, e)
 print(operator.index(True), operator.index(2**70), [10, 20, 30][IxS()], list(range(10))[IxS():IxC()])
+
+# product's repeat is an index, converted before any pool is read (CORR-DC4-1)
+class Twice(int):
+    def __bool__(self): return False
+class RepIx:
+    def __index__(self): return 2
+for r in (0.0, -1, 2**70, '2', Twice(2), RepIx(), True, 0):
+    src = iter([1, 2])
+    try:
+        print('product repeat', repr(r) if not isinstance(r, RepIx) else 'RepIx', len(list(I.product(src, repeat=r))), list(src))
+    except Exception as e:
+        print('product repeat', repr(r) if not isinstance(r, RepIx) else 'RepIx', type(e).__name__, e, list(src))
+for f, args in [(I.combinations, ('abc', 2.0)), (I.combinations, ('abc', Twice(2))), (I.combinations_with_replacement, ('ab', RepIx())),
+                (I.permutations, ('abc', 2.0)), (I.permutations, ('abc', Twice(1))), (I.permutations, ('abc', None)), (I.permutations, ('abc', RepIx())), (I.permutations, ('abc', True)), (I.batched, ('abcde', 2.0)),
+                (I.batched, ('abcde', Twice(2))), (I.combinations, ('ab', 2**70))]:
+    try:
+        print(f.__name__, len(list(f(*args))))
+    except Exception as e:
+        print(f.__name__, type(e).__name__, e)

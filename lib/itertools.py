@@ -344,11 +344,21 @@ def zip_longest(*args, fillvalue=None):
 
 # (product, permutations and the combinations read their input when called,
 # as CPython's)
+def _ssize(x):
+    # (an argument CPython takes as a Py_ssize_t: an index, in its range)
+    x = _operator.index(x)
+    if not -9223372036854775808 <= x <= 9223372036854775807:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return x
+
+
 def product(*args, repeat=1):
+    # (repeat is a Py_ssize_t, as CPython's: an index, converted before
+    # anything is read; then 0 reads nothing)
+    repeat = _ssize(repeat)
     if repeat < 0:
         raise ValueError("repeat argument cannot be negative")
-    # (with repeat=0 nothing is read, as CPython's)
-    return _product([tuple(pool) for pool in args] * repeat if repeat else [])
+    return _product([tuple(pool) for pool in args] * repeat if repeat != 0 else [])
 
 
 def _product(pools):
@@ -361,6 +371,11 @@ def _product(pools):
 
 def permutations(iterable, r=None):
     pool = tuple(iterable)
+    if r is not None:
+        # (an int itself, not an index, as CPython's)
+        if not isinstance(r, int):
+            raise TypeError("Expected int as r")
+        r = _ssize(int.__index__(r))
     if r is not None and r < 0:
         raise ValueError("r must be non-negative")
     return _permutations(pool, len(pool) if r is None else r)
@@ -390,6 +405,7 @@ def _permutations(pool, r):
 
 def combinations(iterable, r):
     pool = tuple(iterable)
+    r = _ssize(r)
     if r < 0:
         raise ValueError("r must be non-negative")
     return _combinations(pool, r)
@@ -415,6 +431,7 @@ def _combinations(pool, r):
 
 def combinations_with_replacement(iterable, r):
     pool = tuple(iterable)
+    r = _ssize(r)
     if r < 0:
         raise ValueError("r must be non-negative")
     return _combinations_with_replacement(pool, r)
@@ -448,6 +465,7 @@ def pairwise(iterable):
 
 
 def batched(iterable, n, *, strict=False):
+    n = _ssize(n)
     if n < 1:
         raise ValueError("n must be at least one")
     return _batched(iter(iterable), n, strict)
