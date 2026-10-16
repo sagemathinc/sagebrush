@@ -12,3 +12,7 @@ ValueError variable name '2' does not start with a letter
 Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
 Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
 Number Field in a with defining polynomial x^3 - 2 with a = 1.259921049894873?
+Number Field in a with defining polynomial x^2 - 2 with a = -1.414213562373095?
+a a + 1
+Number Field in a with defining polynomial x^2 + 1 with a = -1*I
+a
