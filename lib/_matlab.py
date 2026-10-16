@@ -7422,11 +7422,27 @@ def _cmp_text(a, b, f, same_size=False):
             return list(v.a), v.shape
         if type(v) is Char:
             if _dims(v)[0] > 1:
-                return [None], (1, 1)
+                # (a character matrix against a cell or string array: its rows, as a
+                # column; a row ending in blanks may be padding, which the pages don't
+                # settle, so that is refused)
+                rows = v.rows()
+                if any(r != r.rstrip(" ") for r in rows):
+                    raise _err("Comparing a character matrix whose rows end in blanks is not supported.")
+                return rows, (len(rows), 1)
             return [v.text()], None
         if type(v) is Str:
             return [v.s], None
         return [None], None
+    multi = [type(v) is Char and _dims(v)[0] > 1 for v in (a, b)]
+    if any(multi):
+        if type(a) is Char and type(b) is Char:
+            # (two character arrays: compared whole, as before; a prefix of a matrix is refused)
+            if not same_size:
+                raise _err("Comparing the first characters of a character matrix is not supported.")
+            return _dims(a) == _dims(b) and f(a.text(), b.text())
+        other = b if multi[0] else a
+        if type(other) is not Cell and type(other) is not StrArr:
+            raise _err("Comparing a character matrix with this argument is not supported.")
     A, sa = items(a)
     B, sb = items(b)
     if sa is None and sb is None:
