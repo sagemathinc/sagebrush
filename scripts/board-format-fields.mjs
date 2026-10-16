@@ -32,12 +32,14 @@ const SECTIONS = [
   ["web/board/doc.ts", "DocStep", "A tour step"],
   ["web/board/doc.ts", "DocSticker", "A sticker"],
   ["web/board/doc.ts", "DocInk", "Ink"],
+  ["web/board/doc.ts", "DocAsk", "A question (`kind: \"ask\"`)"],
+  ["web/board/doc.ts", "AskChoice", "An option (in a question's `options`)"],
   ["web/board/doc.ts", "SlideRect", "A slide's card (`slide`)"],
   ["web/board/doc.ts", "PageBackground", "A background (`background`)"],
   ["web/board/images.ts", "ImageInfo", "A picture (in `images`)"],
 ];
 // (a type that is a section: named as the section's item)
-const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", DocSticker: "sticker", DocInk: "ink" };
+const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", DocSticker: "sticker", DocInk: "ink", DocAsk: "question", AskChoice: "option" };
 // (a type Sagebrush writes, whose fields a writer never does: written as `object`)
 const OPAQUE = new Set(["Preview"]);
 

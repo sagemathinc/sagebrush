@@ -117,6 +117,9 @@ export const BOARD_SCHEMA = {
      },
      {
       "$ref": "#/$defs/DocSticker"
+     },
+     {
+      "$ref": "#/$defs/DocAsk"
      }
     ]
    },
@@ -246,6 +249,9 @@ export const BOARD_SCHEMA = {
        },
        {
         "$ref": "#/$defs/DocSticker"
+       },
+       {
+        "$ref": "#/$defs/DocAsk"
        }
       ]
      },
@@ -447,6 +453,9 @@ export const BOARD_SCHEMA = {
        },
        {
         "$ref": "#/$defs/DocSticker"
+       },
+       {
+        "$ref": "#/$defs/DocAsk"
        }
       ]
      },
@@ -614,6 +623,168 @@ export const BOARD_SCHEMA = {
     }
    ]
   },
+  "DocAsk": {
+   "type": "object",
+   "description": "A question for the person reading the board, answered on the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "required: unique on its page (an answer names it)"
+    },
+    "kind": {
+     "const": "ask",
+     "description": "required: `\"ask\"`"
+    },
+    "title": {
+     "type": "string",
+     "description": "a heading (plain text, math allowed)"
+    },
+    "text": {
+     "type": "string",
+     "description": "the question: Markdown with math (`$...$`)"
+    },
+    "input": {
+     "enum": [
+      "check",
+      "radio",
+      "choice",
+      "text",
+      "number",
+      "scale"
+     ],
+     "description": "required: how it is answered: `check` (any of `options`, or without them one yes/no box), `radio` (one of `options`), `choice` (one of `options`, from a list: for many), `text`, `number` or `scale` (a whole number from `min` to `max`)"
+    },
+    "options": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "$ref": "#/$defs/AskChoice"
+       }
+      ]
+     },
+     "description": "`check`, `radio` and `choice`: what may be chosen; each a text, or `{ \"value\": ..., \"label\": ... }` to keep its answers when its words change"
+    },
+    "required": {
+     "type": "boolean",
+     "description": "`true`: it must be answered before the answers are sent"
+    },
+    "min": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "`number`: the least it takes; `scale`: its first value (default 1)"
+    },
+    "max": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "`number`: the most it takes; `scale`: its last value (default 5)"
+    },
+    "step": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "`number`: the step between the values it takes"
+    },
+    "low": {
+     "type": "string",
+     "description": "`scale`: the words at its low end (\"disagree\")"
+    },
+    "high": {
+     "type": "string",
+     "description": "`scale`: the words at its high end (\"agree\")"
+    },
+    "lines": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "`text`: how many lines its field shows (default 1)"
+    },
+    "answer": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "number",
+       "minimum": -1.7976931348623157e+308,
+       "maximum": 1.7976931348623157e+308
+      },
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     ],
+     "description": "the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number"
+    },
+    "detail": {
+     "type": "string",
+     "description": "Markdown shown only when zoomed in"
+    },
+    "color": {
+     "type": "string",
+     "pattern": "^\\s*(?:(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|([rR][gG][bB][aA]?|[hH][sS][lL][aA]?)\\(\\s*[-\\d.]+%?([dD][eE][gG])?\\s*(,\\s*[-\\d.]+%?\\s*){2,3}\\)))\\s*$",
+     "description": "a color"
+    },
+    "x": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its position: leave it out, and the board places it"
+    },
+    "y": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "as `x`"
+    },
+    "w": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its width (default 320)"
+    },
+    "h": {
+     "type": "number",
+     "minimum": -1.7976931348623157e+308,
+     "maximum": 1.7976931348623157e+308,
+     "description": "its height (default: as tall as what it shows)"
+    }
+   },
+   "required": [
+    "id",
+    "kind",
+    "input"
+   ],
+   "additionalProperties": false
+  },
+  "AskChoice": {
+   "type": "object",
+   "description": "One of a question's options, whose `value` its answer names: its `label` (default: the value) is what the reader sees.",
+   "properties": {
+    "value": {
+     "type": "string",
+     "description": "required: what an answer says when this is chosen"
+    },
+    "label": {
+     "type": "string",
+     "description": "what the reader sees (Markdown with math; default: `value`)"
+    }
+   },
+   "required": [
+    "value"
+   ],
+   "additionalProperties": false
+  },
   "DocEdge": {
    "type": "object",
    "description": "An edge between two items on a page, drawn as an arrow from `from` to `to`.",
@@ -775,7 +946,7 @@ export const BOARD_SCHEMA = {
    "additionalProperties": false
   },
   "DocNode": {
-   "description": "An item: a note, a group, ink or a sticker, as its `kind` says (a note's `kind` is `\"note\"`, or left out).",
+   "description": "An item: a note, a group, ink, a sticker or a question, as its `kind` says (a note's `kind` is `\"note\"`, or left out).",
    "anyOf": [
     {
      "$ref": "#/$defs/DocNote"
@@ -788,6 +959,9 @@ export const BOARD_SCHEMA = {
     },
     {
      "$ref": "#/$defs/DocSticker"
+    },
+    {
+     "$ref": "#/$defs/DocAsk"
     }
    ]
   }
