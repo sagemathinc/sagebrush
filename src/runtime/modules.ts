@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr, currentExc } from "./object";
+import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
@@ -8,7 +8,7 @@ import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
 import * as PG from "./pygamma";
-import { floatRepr } from "./format";
+import { floatRepr, intDigits } from "./format";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -223,6 +223,26 @@ newBuiltinModule("sys", (m) => {
   m.meta_path = [];
   m.flags = Ty.newModule("flags");
   m.flags.optimize = 0;
+  m.flags.int_max_str_digits = intDigits.max;
+  fn(m, "get_int_max_str_digits", () => intDigits.max);
+  // (as CPython's: the exact integer, in C int range, checked before
+  // anything is changed, CORR-606-2)
+  const setDigits = (maxdigits: any) => {
+    const i = O.index(maxdigits);
+    const b = typeof i === "bigint" ? i : BigInt(i);
+    if (b > 2147483647n || b < -2147483648n) raise(T.OverflowError, "Python int too large to convert to C int");
+    const n = Number(b);
+    if (n !== 0 && n < 640) raise(T.ValueError, "maxdigits must be >= 640 or 0 for unlimited");
+    intDigits.max = n;
+    m.flags.int_max_str_digits = n;
+    return null;
+  };
+  fn(m, "set_int_max_str_digits", setDigits);
+  m.set_int_max_str_digits.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (names.length !== 1 || names[0] !== "maxdigits" || pos.length !== 0)
+      raise(T.TypeError, names.find((k) => k !== "maxdigits") !== undefined ? `set_int_max_str_digits() got an unexpected keyword argument '${names.find((k) => k !== "maxdigits")}'` : "set_int_max_str_digits() takes exactly one argument");
+    return setDigits(values[0]);
+  };
   let limit = 1000;
   fn(m, "getrecursionlimit", () => limit);
   fn(m, "setrecursionlimit", (n: any) => ((limit = Number(n)), null));
@@ -692,6 +712,18 @@ newBuiltinModule("math", (m) => {
 });
 
 // ------------------------------------------------------------------ __future__
+
+// A type's attribute as CPython's _PyType_Lookup finds it: from the type's
+// own MRO and dicts, raw, with no descriptor, metaclass property or
+// __getattribute__ consulted (lib/io.py's special-method lookup).
+newBuiltinModule("_pyjs_types", (m) => {
+  // (found, value): (False, None) when no class in the MRO has it
+  m.lookup = builtin((tp: any, name: any) => {
+    if (typeof name !== "string" || !isType(tp)) raise(T.TypeError, "lookup(type, str)");
+    const v = lookupType(tp, name);
+    return tuple(v === undefined ? [false, null] : [true, v]);
+  }, "lookup");
+});
 
 newBuiltinModule("types", (m) => {
   m.FunctionType = m.LambdaType = T.function;

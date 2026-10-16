@@ -376,7 +376,7 @@ export class Emitter {
     if (f.id === "globals" && n === 0) return "R.globalsDict($g)";
     const scope = this.fn.scope;
     const localsExpr = (): string => {
-      if (scope.kind === "module") return "R.globalsDict($g)";
+      if (scope.kind === "module") return "R.moduleLocals($g)";
       if (scope.kind === "class") return "R.localsDict([...$ns.keys()], [...$ns.values()])";
       const ls = [...scope.bound].filter((x) => !scope.globals.has(x));
       return `R.localsDict(${JSON.stringify(ls)}, [${ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x))).join(", ")}])`;

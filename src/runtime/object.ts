@@ -1414,6 +1414,13 @@ export class ObjMap {
   }
 }
 export function globalsDict(g: any): PyDict {
+  // (exec/eval's namespace over a dict: that dict itself; a property must
+  // not be defined on the proxy, whose get answers from the dict)
+  const own = g[NS_DICT];
+  if (own !== undefined) return own;
+  // (a layered namespace, exec/eval with locals: its globals' dict)
+  const back = g[NS_GLOBALS];
+  if (back !== undefined) return globalsDict(back);
   if (g.$globalsDict === undefined) {
     const d = new PyDict();
     (d as any).$m = new ObjMap(g);
@@ -1426,6 +1433,12 @@ export function globalsDict(g: any): PyDict {
 export const NS_DICT = Symbol("globals dict");
 
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
+export const NS_LOCALS = Symbol("locals of a layered namespace");
+// locals() at a module's top level: the module's dict, or, in exec/eval with
+// separate locals, the locals mapping
+export function moduleLocals(g: any): PyDict {
+  return g[NS_LOCALS] ?? globalsDict(g);
+}
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
   return new Proxy(Object.create(null), {

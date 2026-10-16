@@ -1487,7 +1487,7 @@ export function forEach(x: any, f: (v: any) => void) {
   }
 }
 
-function pollInterrupt() {
+export function pollInterrupt() {
   if (INTR[0]) {
     INTR[0] = 0;
     raise(T.KeyboardInterrupt);
