@@ -968,7 +968,10 @@ def _fixed_universe(c):
     return inf if inf is _ZZ or inf is _QQ else None
 
 
-def _like(c, val, refuse):
+_LIKE_DEPTH_MAX = 100
+
+
+def _like(c, val, refuse, depth=2):
     """val made an element of the same universe as c (the first defined
     element of the collection val goes into), all the way down, or
     refused: Magma fixed one universe for the collection's elements
@@ -980,12 +983,20 @@ def _like(c, val, refuse):
     - c a tuple: val a tuple of its length, each part made like c's;
     - c a scalar: val coerced into c's parent when Sagebrush knows it, else
       of c's own type; anything else is refused as not supported (Magma
-      may convert it), never written unchecked."""
+      may convert it), never written unchecked.
+    depth is val's level in the value it goes into (an element of a
+    sequence is at level 2): past 100 it is refused in words, before the
+    host's recursion limit, whatever bounds the caller has (HARD-934-1)."""
+    if depth > _LIKE_DEPTH_MAX and isinstance(val, (MSeq, MSet, MTuple, MRange)):
+        raise MagmaError("a value nested more than %d deep is not supported yet" % _LIKE_DEPTH_MAX)
     if isinstance(c, (MSeq, MSet)):
         if not isinstance(val, (MSeq, MRange) if isinstance(c, MSeq) else MSet):
             raise refuse()
         if isinstance(c, MSet) and val.kind == "multi" and c.kind != "multi":
             raise refuse()  # (a multiset doesn't go into a set's universe)
+        if isinstance(val, MRange) and val.size() > _COLLECT_MAX:
+            # (a range becomes a sequence of its elements: bounded first)
+            raise MagmaError("a sequence of more than %d elements is not supported yet" % _COLLECT_MAX)
         u = _fixed_universe(c)
         du = _udesc(u) if u is not None else None
         inner = None if du is not None else next((x for x in (c if isinstance(c, MSeq) else c.items) if x is not _UNDEF), None)
@@ -999,9 +1010,9 @@ def _like(c, val, refuse):
                     raise refuse()
                 out.append(y)
             elif inner is not None:
-                out.append(_like(inner, x, refuse))
+                out.append(_like(inner, x, refuse, depth + 1))
             elif u is not None:
-                raise MagmaError("an element of a collection over %s is not supported yet" % _str(u), ":=")
+                raise MagmaError("an element of a collection over %s is not supported yet" % _str(u))
             else:
                 out.append(x)  # (c empty, with no universe: anything goes in)
         if isinstance(c, MSeq):
@@ -1013,7 +1024,7 @@ def _like(c, val, refuse):
     if isinstance(c, MTuple):
         if not isinstance(val, MTuple) or len(val) != len(c):
             raise refuse()
-        return MTuple([_like(p, q, refuse) for p, q in zip(c, val)])
+        return MTuple([_like(p, q, refuse, depth + 1) for p, q in zip(c, val)])
     if isinstance(val, (MSeq, MSet, MTuple, MRange)):
         raise refuse()
     d = _desc(c)
@@ -1024,7 +1035,7 @@ def _like(c, val, refuse):
         return y
     if type(val) is type(c):
         return val
-    raise MagmaError("putting a %s among elements of type %s is not supported yet" % (_ext_type(val), _ext_type(c)), ":=")
+    raise MagmaError("putting a %s among elements of type %s is not supported yet" % (_ext_type(val), _ext_type(c)))
 
 
 def _as_seq(s):

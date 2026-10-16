@@ -671,6 +671,35 @@ test("writes after a million leading holes don't each scan them (HARD-400-1)", (
   assert.ok(Date.now() - t0 < 15000);
 });
 
+test("admitting a value refuses past 100 deep in words, whatever bounds its callers have (HARD-934-1)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const f = join(mkdtempSync(join(tmpdir(), "magma-like-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m",
+    "def deep(n, mk):",
+    "    x = 1",
+    "    for _ in range(n):",
+    "        x = mk(x)",
+    "    return x",
+    "no = lambda: m.MagmaError('refused')",
+    "for mk in (lambda x: m.MSeq([x]), lambda x: m.MTuple([x])):",
+    "    for n in (98, 99, 5000):",
+    "        try:",
+    "            m._like(mk(deep(n, mk)), mk(deep(n, mk)), no)",
+    "            print(n, 'admitted')",
+    "        except m.MagmaError as e:",
+    "            print(n, e)",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: 60000 });
+  // (an element is at level 2: 99 sequences around 1 make it 100 deep)
+  const said = "a value nested more than 100 deep is not supported yet";
+  assert.equal(r.stdout, `98 admitted\n99 ${said}\n5000 ${said}\n`.repeat(2), r.stderr);
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
