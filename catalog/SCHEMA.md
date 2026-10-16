@@ -61,6 +61,7 @@ two-space indentation, and keys are in the order below, so diffs stay small.
 | `see_also` | no | Names of related entries in the same mode. |
 | `upstream` | no | The upstream name, when it differs from `name`: for example `"sage.rings.integer.Integer.factor"`, or for a MATLAB function the toolbox it belongs to. |
 | `upstream_version` | no | The upstream release `differs` and `status` were judged against: `"NumPy 2.3"`, `"SciPy 1.16"`, `"Python 3.14"`, `"Sage 10.10"`, `"Magma 2.28"`, `"MATLAB R2025b"`. |
+| `source` | no | The code that implements it: a link to the lines, `https://github.com/sagemathinc/sagebrush/blob/COMMIT/lib/FILE#Lstart-Lend`. Leave it out: the index build fills it in from the mode's resolver (lib/_catalog.py SOURCES) at the commit it builds from, wherever the implementation is Python in lib/. Write it only for what the build cannot find. |
 | `tags` | no | Search areas: `["linear algebra"]`, `["number fields", "class groups"]`. |
 
 ### Status

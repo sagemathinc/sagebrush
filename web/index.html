@@ -1734,7 +1734,7 @@ function openDoc(e) {
   hideDocList();
   docOpen = e;
   $("#doctitle").textContent = docHead(e);
-  $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}`;
+  $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : "");
   // (its examples go into a notebook of its own language only: inserting never changes the notebook's)
   $("#docinsert").hidden = !e._nex || e.lang !== nb.mode;
   docDlg.showModal();

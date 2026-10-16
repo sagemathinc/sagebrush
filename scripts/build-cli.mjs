@@ -81,7 +81,17 @@ for (const mode of existsSync(catalogDir) ? readdirSync(catalogDir).sort() : [])
   const miss = existsSync(join(d, "missing.txt")) ? readFileSync(join(d, "missing.txt"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
   catalog[mode] = { groups, missing: miss };
 }
-writeFileSync(join(out, "catalog.gen.js"), `globalThis.__SAGEBRUSH_CATALOG__ = ${JSON.stringify(JSON.stringify(catalog))};\n`);
+// (and the commit it is built from, for the catalog's links to the source,
+// lib/_catalog.py source_url: only from a clean tree, whose lines are that
+// commit's; none otherwise)
+let commit = null;
+try {
+  const git = (...a) => execFileSync("git", a, { cwd: root, encoding: "utf8" }).trim();
+  if (git("status", "--porcelain", "--untracked-files=no") === "") commit = git("rev-parse", "HEAD");
+} catch {
+  // (no git: no links)
+}
+writeFileSync(join(out, "catalog.gen.js"), `globalThis.__SAGEBRUSH_CATALOG__ = ${JSON.stringify(JSON.stringify(catalog))};\nglobalThis.__SAGEBRUSH_COMMIT__ = ${JSON.stringify(commit)};\n`);
 writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "./web.gen.js";\nimport "./catalog.gen.js";\nimport "../../src/cli";\n`);
 
 // 2. One CommonJS file for Node 22+ and Bun.
