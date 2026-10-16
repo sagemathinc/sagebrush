@@ -1687,8 +1687,11 @@ export function shimName(r: any, base: string): string | null {
   return null;
 }
 const resultTypeName = (r: any) => (typeOf(r).$module === "numpy" ? `numpy.${typeName(r)}` : typeName(r));
+export function deprecationWarning(msg: string): void {
+  callObj(getattr(hooks.importModule("warnings"), "warn"), [msg, T.DeprecationWarning, 2]);
+}
 export function deprecatedSubclass(what: string, r: any, base: string): void {
-  callObj(getattr(hooks.importModule("warnings"), "warn"), [`${what} returned non-${base} (type ${resultTypeName(r)}).  The ability to return an instance of a strict subclass of ${base} is deprecated, and may be removed in a future version of Python.`, T.DeprecationWarning, 2]);
+  deprecationWarning(`${what} returned non-${base} (type ${resultTypeName(r)}).  The ability to return an instance of a strict subclass of ${base} is deprecated, and may be removed in a future version of Python.`);
 }
 export function intResult(what: string, r: any): number | bigint {
   if ((typeof r === "number" && isInt(r)) || typeof r === "bigint") return r;

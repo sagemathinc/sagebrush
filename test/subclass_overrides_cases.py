@@ -105,3 +105,14 @@ for c in ["complex(S(), 1)", "complex(C(1+2j), 1)", "complex(1, C(1+2j))", "comp
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         print(c, '->', t(lambda: eval(c)))
+# complex(): one positional argument as CPython's actual_complex_new, two or a
+# keyword as complex_new_impl (PyNumber_Float: a float subclass's __float__),
+# complex parts with the DeprecationWarning
+for c in ["complex(G(2))", "complex(real=G(2))", "complex(G(2), 0)", "complex(J(2))", "complex([])", "complex(1, [])", "complex(real=[])",
+          "complex(real=1+2j)", "complex(imag=2)", "complex(O2())", "complex(real=O2())", "complex(S())"]:
+    print(c, '->', t(lambda: eval(c)))
+for c in ["complex(1+2j, 1)", "complex(1, 2j)", "complex(C(1+2j), 1)", "complex(S(), 1)", "complex(2, 3)"]:
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        out = t(lambda: eval(c))
+    print(c, '->', out, [str(x.message)[:60] for x in w])
