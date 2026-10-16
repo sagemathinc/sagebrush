@@ -40,3 +40,20 @@ complex(0.0, -0.0) -> -0j
 complex(N64()) -> TypeError: __complex__ returned non-complex (type numpy.complex64)
 complex(N128()) -> 1j
 complex(G(2), 1) -> (9+1j)
+complex(G(2)) -> (2+0j)
+complex(real=G(2)) -> (9+0j)
+complex(G(2), 0) -> (9+0j)
+complex(J(2)) -> (2+0j)
+complex([]) -> TypeError: complex() argument must be a string or a number, not list
+complex(1, []) -> TypeError: complex() argument 'imag' must be a real number, not list
+complex(real=[]) -> TypeError: complex() argument 'real' must be a real number, not list
+complex(real=1+2j) -> (1+2j)
+complex(imag=2) -> 2j
+complex(O2()) -> (1+1j)
+complex(real=O2()) -> (1+1j)
+complex(S()) -> (9+2j)
+complex(1+2j, 1) -> (1+3j) ["complex() argument 'real' must be a real number, not complex"]
+complex(1, 2j) -> (-1+0j) ["complex() argument 'imag' must be a real number, not complex"]
+complex(C(1+2j), 1) -> 6j ["complex() argument 'real' must be a real number, not C"]
+complex(S(), 1) -> (9+3j) ["complex() argument 'real' must be a real number, not S"]
+complex(2, 3) -> (2+3j) []
