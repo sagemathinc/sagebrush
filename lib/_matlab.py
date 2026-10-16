@@ -1511,15 +1511,34 @@ def cp(v):
 # ------------------------------------------------------------------ functions and handles
 
 
+def _arity(f, skip):
+    """(fewest, most) positional arguments of the Python function f, less skip leading ones
+    (nargout); most is None with *args"""
+    try:
+        c = f.__code__
+    except AttributeError:
+        return 0, None
+    n = c.co_argcount - skip
+    nd = len(f.__defaults__ or ())
+    return max(0, n - nd), (None if c.co_flags & 4 else max(0, n))
+
+
 class Builtin:
     """A built-in function: f(nargout, *args)."""
-    __slots__ = ("f", "name")
+    __slots__ = ("f", "name", "lo", "hi")
 
-    def __init__(self, f, name):
+    def __init__(self, f, name, arity=None):
         self.f = f
         self.name = name
+        # (how many inputs its Python function takes: more is a form Sagebrush does not implement,
+        # an explicit refusal rather than Python's TypeError; fewer is MATLAB's own error)
+        self.lo, self.hi = arity if arity is not None else _arity(f, 1)
 
     def call(self, nargout, args):
+        if self.hi is not None and len(args) > self.hi:
+            raise _err("%s with %d inputs is not supported in Sagebrush (it takes at most %d here)." % (self.name, len(args), self.hi))
+        if len(args) < self.lo:
+            raise _err("Not enough input arguments.", "MATLAB:minrhs")
         return self.f(nargout, *args)
 
     def __repr__(self):
@@ -1615,8 +1634,9 @@ def _bs(*names):
             r = f(*args)
             return NOVAL if r is None else r
         g.__doc__ = f.__doc__  # (its documentation: the search box's, _matlab_docsearch)
+        ar = _arity(f, 0)
         for n in names:
-            _B[n] = Builtin(g, n)
+            _B[n] = Builtin(g, n, ar)
         return f
     return deco
 
@@ -7456,19 +7476,48 @@ def _regexp(nargout, s, pat, opts, flags):
         return [Cell([p[k] for p in per], s.shape) for k in range(nargout)]
     t = _text(s)
     once = False
+    force_cell = False
+    empty_ok = False
     wanted = []
+    # (the options of regexp's page: '.' matches newlines by default (dotall), zero-length
+    # matches are left out by default (noemptymatch))
+    flags |= _re.DOTALL
     for o in opts:
         k = _text(o).lower()
         if k == "once":
             once = True
         elif k == "ignorecase":
             flags |= _re.IGNORECASE
-        else:
+        elif k == "matchcase":
+            flags &= ~_re.IGNORECASE
+        elif k == "dotexceptnewline":
+            flags &= ~_re.DOTALL
+        elif k == "dotall":
+            flags |= _re.DOTALL
+        elif k == "lineanchors":
+            flags |= _re.MULTILINE
+        elif k == "stringanchors":
+            flags &= ~_re.MULTILINE
+        elif k == "freespacing":
+            flags |= _re.VERBOSE
+        elif k == "literalspacing":
+            flags &= ~_re.VERBOSE
+        elif k == "emptymatch":
+            empty_ok = True
+        elif k == "noemptymatch":
+            empty_ok = False
+        elif k in ("warnings", "nowarnings"):
+            pass
+        elif k == "forcecelloutput":
+            force_cell = True
+        elif k in ("start", "end", "tokenextents", "match", "tokens", "names", "split"):
             wanted.append(k)
+        else:
+            raise _err("regexp: the option '%s' is not supported in Sagebrush." % _text(o))
     if not wanted:
         wanted = ["start", "end", "tokenextents", "match", "tokens", "names", "split"]
     rx = _re.compile(_regex(_text(pat)), flags)
-    ms = list(rx.finditer(t))
+    ms = [m for m in rx.finditer(t) if empty_ok or m.end() > m.start()]
     if once:
         ms = ms[:1]
 
@@ -7494,8 +7543,10 @@ def _regexp(nargout, s, pat, opts, flags):
             out.append(v[0] if once and v else _box(np.array(v).reshape((len(v), 1))) if v else np.zeros((0, 1)) if not once else np.zeros((0, 0)))
         elif w == "names":
             if ms and rx.groupindex:
-                d = {k: Char(ms[0].group(k) or "") for k in rx.groupindex}
-                out.append(_struct1(d))
+                # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one)
+                names = sorted(rx.groupindex, key=lambda k: rx.groupindex[k])
+                items = [{k: Char(m.group(k) or "") for k in names} for m in ms]
+                out.append(_struct1(items[0]) if once or len(items) == 1 else Struct(items, (1, len(items)), names))
             else:
                 out.append(Struct([{}], (1, 1), []))
         elif w == "split":
@@ -7508,6 +7559,9 @@ def _regexp(nargout, s, pat, opts, flags):
             out.append(row(parts))
         elif w == "tokenextents":
             out.append(row([np.array([float(m.start() + 1), float(m.end())]).reshape((2, 1)) for m in ms]))
+    if force_cell:
+        # ('forceCellOutput': each output a scalar cell)
+        out = [Cell([v], (1, 1)) for v in out]
     if nargout <= 1:
         return out[0]
     return out[:nargout]
@@ -8718,6 +8772,18 @@ _CMATH = {"sqrt": _cmath.sqrt, "exp": _cmath.exp, "log": _cmath.log, "log10": _c
           "atanh": _cmath.atanh, "sec": lambda z: 1 / _cmath.cos(z), "csc": lambda z: 1 / _cmath.sin(z), "cot": lambda z: 1 / _cmath.tan(z)}
 
 
+def _cmath_log(f):
+    """a complex logarithm, -Inf + 0i at 0 (cmath raises there)"""
+    def g(z):
+        return complex(-_math.inf, 0.0) if z == 0 else f(z)
+    return g
+
+
+for _n in ("log", "log10", "log2"):
+    _CMATH[_n] = _cmath_log(_CMATH[_n])
+_CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else _cmath.log(1 + z)
+
+
 def _complex_fallback(name):
     """the elementwise math function for complex arrays numpy here lacks"""
     old = _B[name].f
@@ -8968,22 +9034,38 @@ def num2cell_n(x, dims=None):
 
 @_bs("trapz")
 def trapz_n(*args):
-    if len(args) == 1:
-        x, y = None, args[0]
-    else:
-        x, y = args[0], args[1]
-    if _isvec(y):
-        yv = _farr(y).reshape(-1)
-        dx = np.diff(_farr(x).reshape(-1)) if x is not None else np.ones(yv.size - 1)
-        return float(np.sum(dx * (yv[1:] + yv[:-1]) / 2))
-    Y = _mat(y)
+    """trapz(Y), trapz(X, Y), trapz(Y, dim), trapz(X, Y, dim): the trapezoidal rule along dim
+    (the first non-singleton by default), X a scalar spacing or the points along dim"""
+    args = list(args)
+    dim = None
+    if len(args) == 3:
+        dim = _int_arg(args.pop(), "dimension")
+    elif len(args) == 2 and _numel(args[1]) == 1 and _numel(args[0]) > 1:
+        dim = _int_arg(args.pop(), "dimension")
+    x, y = (None, args[0]) if len(args) == 1 else (args[0], args[1])
+    d = _dims(y)
+    if len(d) > 2:
+        raise _err("trapz: Sagebrush integrates arrays of at most 2 dimensions.")
+    if dim is None:
+        dim = _default_dim(d)
+    Y = _mat(y).astype(np.complex128 if _arr(y).dtype.kind == "c" else np.float64)
+    if dim > 2:
+        return _unmat(np.zeros(Y.shape))
+    A = Y if dim == 1 else Y.T
+    n = A.shape[0]
     if x is None:
-        dx = np.ones((Y.shape[0] - 1, 1))
+        dx = np.ones((max(n - 1, 0), 1))
     elif _numel(x) == 1:
-        dx = np.full((Y.shape[0] - 1, 1), _scalar(x))
+        dx = np.full((max(n - 1, 0), 1), _scalar(x))
     else:
-        dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
-    return _unmat(np.sum(dx * (Y[1:] + Y[:-1]) / 2, axis=0).reshape((1, -1)))
+        xv = _farr(x).reshape(-1)
+        if xv.size != n:
+            raise _err("Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension.")
+        dx = np.diff(xv).reshape((-1, 1))
+    q = np.sum(dx * (A[1:] + A[:-1]) / 2, axis=0) if n > 1 else np.zeros(A.shape[1])
+    q = q.reshape((1, -1)) if dim == 1 else q.reshape((-1, 1))
+    r = _unmat(q)
+    return r
 
 
 _CLEAR_ITEMTYPES = ("all", "classes", "functions", "global", "import", "java", "mex", "variables")

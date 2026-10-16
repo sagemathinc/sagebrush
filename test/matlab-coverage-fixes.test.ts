@@ -18,7 +18,8 @@ const run = (code: string, env: Record<string, string> = {}) => {
     rmSync(d, { recursive: true, force: true });
   }
 };
-const lines = (s: string) => s.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "");
+// (the CLI's notes of the figures it draws are not MATLAB's output)
+const lines = (s: string) => s.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "" && !/^(Plot: |Saved )/.test(l.trim()));
 
 test("sets, comparisons and text: the pages' values", () => {
   const out = run([
@@ -227,5 +228,38 @@ test("fft2, ifft2, fftn and ifftn refuse a transform size that is not a positive
     "Invalid number of FFT data points (-1) specified.", "Invalid number of FFT data points (-1) specified.",
     "Invalid number of FFT data points (1.5) specified.", "Invalid number of FFT data points (0) specified.",
     "[3 1]",
+  ]);
+});
+
+test("errors that leaked from the implementation: the documented forms, or MATLAB's errors and explicit refusals", () => {
+  const out = run([
+    "X = [1 2.5 7 10]; Y = [5.2 7.7 9.6 13.2; 4.8 7.0 10.5 14.5; 4.9 6.5 10.2 13.8];",
+    "fprintf('%.4f ', trapz(X, Y, 2)); fprintf('|%g %g %g\\n', trapz([1 2 3]), trapz(0.5, [1 2 3]), trapz([1 2 3]', 1));",
+    "z = log10([0 1i]); fprintf('%g %g %.4f\\n', real(z(1)), imag(z(1)), imag(z(2)));",
+    "[m, s] = regexp('bat cat coat', 'c[aeiou]+t', 'match', 'split', 'forceCellOutput'); fprintf('%s %d %d\\n', class(m), numel(m{1}), numel(s{1}));",
+    "t = regexp('01/11 02/20', '(?<m>\\d+)/(?<d>\\d+)', 'names'); fprintf('%d %d %s\\n', size(t), t(2).d);",
+    "fprintf('%d\\n', numel(regexp(sprintf('abc\\n de'), '.*', 'match', 'once')));",
+    "fprintf('%d\\n', numel(regexp('abc', 'x*', 'match')));",
+    "try, regexp('a', 'a', 'bogus'), catch e, disp(e.message), end",
+    "try, intmax('int8', 'like', 1), catch e, disp(e.message), end",
+    "try, foo = sortrows([3 1; 1 2], 1, 'descend', 'x'); catch e, disp(e.message), end",
+    "try, isstrprop(), catch e, disp(e.message), end",
+    "b = bar([1 2 3], [2 3 6; 11 23 26]); fprintf('%d %d\\n', numel(b), numel(b(1).YData));",
+  ].join("\n") + "\n");
+  assert.deepEqual(lines(out), [
+    // (trapz's page: 82.8000, 85.7250, 82.1250)
+    "82.8000 85.7250 82.1250 |4 2 4",
+    "-Inf 0 0.6822",
+    "cell 2 3",
+    "1 2 20",
+    "7",
+    // (zero-length matches are left out, as regexp's page says of the default 'noemptymatch')
+    "0",
+    "regexp: the option 'bogus' is not supported in Sagebrush.",
+    "intmax with 3 inputs is not supported in Sagebrush (it takes at most 1 here).",
+    "sortrows with 4 inputs is not supported in Sagebrush (it takes at most 2 here).",
+    "Not enough input arguments.",
+    // (bar's page: x = [1 2 3] with a 2-by-3 vals is two series of three bars)
+    "2 3",
   ]);
 });

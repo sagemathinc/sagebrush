@@ -685,7 +685,16 @@ They also settled several function rules:
   the last with `'legacy'`), with C oriented as each function's page says;
 - `func2str(@cos)` is `'cos'`;
 - a real times a complex number keeps a zero part zero (`NaN*1i` is
-  $0 + \mathrm{NaN}\,i$).
+  $0 + \mathrm{NaN}\,i$);
+- a builtin given more inputs than its implementation takes is refused
+  ("f with 4 inputs is not supported in Sagebrush"), and one given fewer
+  than it needs raises MATLAB's "Not enough input arguments.", rather than
+  Python's own message about the call;
+- `log`, `log10` and `log2` of 0 are `-Inf` also inside complex arrays;
+- `regexp` takes its documented options (`'dotexceptnewline'`,
+  `'lineanchors'`, `'freespacing'`, `'emptymatch'`, `'forceCellOutput'` and
+  the others) and refuses ones it does not know; `'names'` returns a 1×n
+  struct array when there are several matches.
 
 `gamma`, `gammaln`, `erf` and `erfc` use Python's `math` (src/runtime:
 fdlibm's erf and lgamma, musl's tgamma). `gamma` is exact at the integers,
