@@ -1,7 +1,7 @@
 // Builtin types and their methods.
 
 import {
-  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
+  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
@@ -1996,6 +1996,7 @@ const grow = (b: PyByteArray, extra: number) => {
 method(bytearray, "append", (b: PyByteArray, x: any) => {
   if (!O.isPyInt(x)) raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
   if (x < 0 || x > 255) raise(T.ValueError, "byte must be in range(0, 256)");
+  checkResizable(b);
   grow(b, 1);
   b.a[b.n++] = Number(x);
   return null;
@@ -2007,6 +2008,7 @@ method(bytearray, "extend", (b: PyByteArray, x: any) => {
     raise(T.TypeError, `can't extend bytearray with ${typeName(x)}`);
   }
   const add = toBytes(x, undefined, undefined, true);
+  checkResizable(b);
   grow(b, add.length);
   b.a.set(add, b.n);
   b.n += add.length;
@@ -2014,6 +2016,7 @@ method(bytearray, "extend", (b: PyByteArray, x: any) => {
 });
 method(bytearray, "pop", (b: PyByteArray) => {
   if (b.n === 0) raise(T.IndexError, "pop from empty bytearray");
+  checkResizable(b);
   return b.a[--b.n];
 });
 

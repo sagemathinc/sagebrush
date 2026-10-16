@@ -74,3 +74,23 @@ for d in [b'a', None, 5]:
         print('value', binascii.b2a_base64(d, newline=Loud()))
     except Exception as e:
         print(type(e).__name__, e)
+# while newline's __bool__ runs, the bytearray is exported: writes are seen,
+# re-sizing is a BufferError, and the export ends after, errors included (CORR-59A-1, -2)
+class Do:
+    def __init__(self, f): self.f = f
+    def __bool__(self):
+        self.f()
+        return False
+for label, act in [('same-length slice', lambda b: b.__setitem__(slice(None), b'cd')), ('item', lambda b: b.__setitem__(0, 100)),
+                   ('append', lambda b: b.append(99)), ('extend', lambda b: b.extend(b'xy')), ('pop', lambda b: b.pop()),
+                   ('growing slice', lambda b: b.__setitem__(slice(0, 1), b'xyz')), ('shrinking slice', lambda b: b.__setitem__(slice(0, 2), b''))]:
+    ba = bytearray(b'ab')
+    try:
+        r = binascii.b2a_base64(ba, newline=Do(lambda: act(ba)))
+    except Exception as e:
+        r = type(e).__name__ + ': ' + str(e)
+    ba.append(33)  # (the export is over)
+    print(label, r, ba)
+ba = bytearray(b'ab')
+ba.append(1); ba.extend(b'z'); ba.pop(); ba[0:1] = b'qq'
+print('no export', ba)
