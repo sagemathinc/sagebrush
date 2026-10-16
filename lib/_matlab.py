@@ -5067,8 +5067,23 @@ def rat_(nargout, x, tol=None):
     return [_finish(N.reshape(shape), cls), _finish(D.reshape(shape), cls)] + [NOVAL] * (nargout - 2)
 
 
-# (the most elements perms makes: n! rows of n; 9 elements are 362880 rows)
-_PERMS_MAX = 4_000_000
+# (the most perms makes: bytes of its result, whose indexing and copy take about three
+# times that; n! rows of n, so 8 doubles' permutations, or 9 of a char or 8-bit class)
+_PERMS_BYTES_MAX = 8 << 20
+
+
+def _lex_perms(n):
+    """the permutations of 0..n-1 in lexicographic order, rows of an int8 array, built
+    from those of n-1 (each first element, then the others in order) without tuples"""
+    P = np.zeros((1, 0), dtype=np.int8)
+    for k in range(1, n + 1):
+        m = P.shape[0]
+        blocks = []
+        for first in range(k):
+            rest = (P + (P >= first)).astype(np.int8)
+            blocks.append(np.concatenate([np.full((m, 1), first, dtype=np.int8), rest], axis=1))
+        P = np.concatenate(blocks, axis=0)
+    return P
 
 
 @_bs("perms")
@@ -5081,14 +5096,14 @@ def perms_(v):
     if t is Str:
         raise _err("perms of a string scalar is not supported in Sagebrush.")
     n = _numel(v)
-    if n and _math.factorial(n) * n > _PERMS_MAX:
-        raise _err("perms of %d elements (%d permutations) is not supported in Sagebrush: at most %d elements are made." % (n, _math.factorial(n), _PERMS_MAX))
     flat = _arr(v).reshape(-1)
+    # (the result's size before any of it is made; past 12 elements, before n! is computed)
+    if n > 12 or _math.factorial(n) * n * flat.dtype.itemsize > _PERMS_BYTES_MAX:
+        raise _err("perms of %d elements is not supported in Sagebrush: its result is limited to %d bytes (8 elements of a double vector); loop over the permutations instead." % (n, _PERMS_BYTES_MAX))
     if n == 0:
         return _box(np.zeros((0, 1), dtype=flat.dtype)) if t is not Char else Char(np.zeros((0, 1), dtype=flat.dtype))
-    import itertools
-    rows = np.array(list(itertools.permutations(range(n)))[::-1], dtype=np.int64)
-    out = _canon(_contig(flat[rows].T))
+    rows = _lex_perms(n)[::-1]
+    out = _canon(_contig(flat[rows.astype(np.int64)].T))
     if t is Char:
         return Char(out)
     return _box(out) if out.dtype == np.float64 else out
@@ -6893,8 +6908,9 @@ def conv_(a, b, shape=None):
     return _box(r.reshape((1, -1)) if col else r.reshape((-1, 1)))
 
 
-# (the most multiply-adds one xcorr may do: lengths times lags)
+# (the most multiply-adds one xcorr may do, lengths times lags, and the most lags)
 _XCORR_WORK = 20_000_000
+_XCORR_LAGS_MAX = 1_000_000
 
 
 @_bi("xcorr")
@@ -6937,7 +6953,11 @@ def xcorr_(nargout, x, *args):
     N = max(X.size, Y.size)
     if scale != "none" and y is not None and X.size != Y.size:
         raise _err("xcorr: with scaleopt '%s', x and y must have the same length." % scale)
+    if N == 0:
+        raise _err("xcorr of empty vectors is not supported in Sagebrush.")
     L = N - 1 if maxlag is None else maxlag
+    if 2 * L + 1 > _XCORR_LAGS_MAX:
+        raise _err("xcorr at %d lags is not supported in Sagebrush: at most %d." % (2 * L + 1, _XCORR_LAGS_MAX))
     if N * (2 * min(L, N) + 1) > _XCORR_WORK:
         raise _err("xcorr of vectors of %d elements is not supported in Sagebrush: too much work." % N)
     Xp = np.concatenate([X, np.zeros(N - X.size, dtype=X.dtype)])
