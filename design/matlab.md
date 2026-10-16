@@ -18,7 +18,12 @@ and runs on a runtime library with MATLAB's semantics:
     fix their shapes on the grid, so they are refused);
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
-    moving statistics);
+    moving statistics). The moving statistics' `'Endpoints'` value or
+    `'fill'` supplies the nonexisting elements, which take part in each
+    window's statistic, count and variance, as movmean's page says (with
+    `'omitnan'`, filled NaNs are left out). For a vector and no `dim`,
+    quantile and prctile return `p`'s orientation ("the same length as
+    p"; only generated code follows the data's);
   - **lib/_matlab_ode.py**: odeset, odeget, ode45, ode23 and deval:
     the Dormand-Prince (1980) and Bogacki-Shampine (1989) pairs, with
     Shampine's (1986) interpolant for ode45 and cubic Hermite

@@ -444,7 +444,7 @@ test("format's two-word forms (format long g) are its one-word ones; an unknown 
   assert.deepEqual(lines.slice(4, 6), ["Invalid format option 'foo'.", "refused"]);
 });
 
-test("data functions where Octave differs from MATLAB: prctile down a column vector, mov* with a numeric Endpoints fill, sprand's published nonzero count, corrcoef's range and conjugate", () => {
+test("data functions: prctile in p's orientation, mov* padding with a numeric Endpoints fill (as Octave, STAT-1016); where Octave differs: sprand's published nonzero count, corrcoef's range and conjugate", () => {
   const { execFileSync } = require("node:child_process");
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
@@ -463,7 +463,9 @@ test("data functions where Octave differs from MATLAB: prctile down a column vec
   // (corrcoef: the documented range, |r| <= 1, where Octave gives 1.0000000000000002; and the
   // documented conj(A - mean A) .* (B - mean B), where Octave's entry is the conjugate; and its
   // documented one-observation cases: corrcoef(5) NaN, corrcoef(1, 2) 1, corrcoef(1, 1) NaN)
-  assert.deepEqual(out.trim().split("\n"), ["[1;8.1]", "[7;7;7]", "[0 0 8 8 6 -1 3 4 5 0]", "47663 47663", "1 1", "-0.6250 -0.3750", "[NaN 1 NaN]", "1"]);
+  // (prctile: P has pct's orientation, only generated code follows A's; movmax: the fill 0
+  // supplies the nonexisting elements, so the windows [0 0 4 8] .. [3 4 5 0] give 8 .. 5)
+  assert.deepEqual(out.trim().split("\n"), ["[1 8.1]", "[7 7 7]", "[8 8 8 8 6 -1 3 4 5 5]", "47663 47663", "1 1", "-0.6250 -0.3750", "[NaN 1 NaN]", "1"]);
 });
 
 test("normest, Higham's power method for the 2-norm with MATLAB's documented stopping rule: its first estimate, agreement with the published examples' four digits, complex matrices, a matrix that annihilates the start", () => {
@@ -1535,5 +1537,34 @@ test("a newline in a struct's text field or a string array's element is displaye
     "    \"This is line one.↵\"",
     "    \"Here is line two.↵\"",
     "    a: <missing>",
+  ]);
+});
+
+test("statistics as documented: moving windows padded by 'Endpoints', quantile in p's orientation, complex median by magnitude (astra2's STAT-1016-1..3)", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "x = [2 7 1 8 3];",
+    // (the padded windows [0 2 7] and [8 3 0]; [2 2 7] and [8 3 2])
+    "fprintf('%.6g ', movmean(x, 3, 'Endpoints', 0)); fprintf('\\n');",
+    "f = {@movmean, @movmedian, @movmax, @movsum, @movprod, @movvar, @movstd};",
+    "for k = 1:numel(f), y = f{k}(x, 3, 'Endpoints', 2); fprintf('%.6g %.6g|', y(1), y(end)); end; fprintf('\\n');",
+    "y = movmin(x, 3, 'Endpoints', 99); fprintf('%g %g\\n', y(1), y(end));",
+    "fprintf('%.6g ', movmean(x, 3, 'Endpoints', 'fill'), movmean(x, 3, 'Endpoints', 'fill', 'omitnan')); fprintf('\\n');",
+    "fprintf('%g ', movsum([1 2; 3 4; 5 6], 2, 'Endpoints', true)); fprintf('\\n');",
+    "fprintf('%d %d|', size(quantile([2 4 8], [0.25; 0.75])), size(quantile([2; 4; 8], [0.25 0.75])), size(prctile([2 4 8], [25; 75])), size(prctile([2; 4; 8], [25 75])), size(quantile(9, [0 0.5 1]))); fprintf('\\n');",
+    "fprintf('%g ', quantile([1 2; 3 4; 5 6], [0.25 0.75])); fprintf('\\n');",
+    "m = [median([1+2i 3-1i -2+4i]), median([1+2i 3-1i -2+4i 4]), median([1i -1i 1 -1 2]), median([1+2i NaN 3-1i], 'omitnan')];",
+    "fprintf('%g%+gi ', [real(m); imag(m)]); fprintf('\\n');",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((l: string) => l.trim()), [
+    "3 3.33333 5.33333 4 3.66667",
+    "3.66667 4.33333|2 3|7 8|11 13|28 48|8.33333 10.3333|2.88675 3.21455|",
+    "2 3",
+    "NaN 3.33333 5.33333 4 NaN 4.5 3.33333 5.33333 4 5.5",
+    "2 4 8 3 6 10",
+    "2 1|1 2|2 1|1 2|1 3|",
+    "1.5 4.5 2.5 5.5",
+    // (sort's order for complex numbers: by magnitude, then phase angle)
+    "3-1i 3.5-0.5i 0+1i 2+0.5i",
   ]);
 });
