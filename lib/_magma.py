@@ -1496,15 +1496,18 @@ class MRec:
         names = [n for n in self.fmt.names if n in self.vals]
         if not names:
             return head + ">"
-        pad = " " * (indent + 4)
+        # (no indentation in a string Sprint or printf makes)
+        step = 0 if _SPRINT[0] is not None else 4
+        pad = " " * (indent + step)
         lines = []
         for n in names:
             start = "%s := " % n
             v = self.vals[n]
-            # a record or a list of structures nests 4 deeper; a value that
-            # wraps (a long sequence or string) continues 8 deeper
-            deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet)) and not all(_atomic(x) for x in v))
-            lines.append(pad + start + _str(v, indent + (4 if deep else 8), indent + 4 + len(start)))
+            # a record, a list of structures or a tuple of one nests 4
+            # deeper; a value that wraps (a long sequence or string)
+            # continues 8 deeper
+            deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet, MTuple)) and _multiline(v))
+            lines.append(pad + start + _str(v, indent + (step if deep else 2 * step), indent + step + len(start)))
         return head + "\n" + ",\n".join(lines) + ">"
 
 
@@ -3151,10 +3154,12 @@ def _items(v):
 _SPRINT = [None]
 
 
-def _sprint_str(v):
-    """v as Sprint and Sprintf's %o make it a string."""
+def _sprint_str(v, nowidth=True):
+    """v as Sprint and Sprintf's %o make it a string; nowidth=False: as
+    printf's %o writes it, without indentation but laid out on 80 columns
+    (checked against Magma 2.18)."""
     old = _SPRINT[0]
-    _SPRINT[0] = (v,)
+    _SPRINT[0] = (v, nowidth)
     try:
         return _str(v)
     finally:
@@ -3163,7 +3168,7 @@ def _sprint_str(v):
 
 def _making_string():
     """Whether a string is being made: no width layout anywhere in it."""
-    return _SPRINT[0] is not None
+    return _SPRINT[0] is not None and _SPRINT[0][1]
 
 
 def _str(v, indent=0, col=None, tail=""):
@@ -3231,9 +3236,54 @@ def _str1(v, indent, col, tail):
         return v._str(indent), False
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
+    if isinstance(v, MTuple) and any(_multiline(p) for p in v):
+        return _tuple_str(v, indent, col, tail), True
     if _making_string():
         return _inline(v) + tail, True
     return _wrap(_inline(v) + tail, col, indent + _extra(v), indent), True
+
+
+def _multiline(v, depth=0):
+    """Whether v prints over several lines: a sequence or set of
+    structures, a record with fields, a tuple holding one."""
+    if depth > _PRINT_DEPTH_MAX:
+        return False
+    if isinstance(v, MRec):
+        return any(n in v.vals for n in v.fmt.names)
+    if isinstance(v, (MSeq, MSet)):
+        raw = v.ordered() if isinstance(v, MSet) else list(v)
+        return bool(raw) and not all(_atomic(x) or x is _UNDEF for x in raw)
+    if isinstance(v, MTuple):
+        return any(_multiline(p, depth + 1) for p in v)
+    return False
+
+
+def _tuple_str(v, indent, col, tail):
+    """A tuple with a part printed over several lines, as Magma prints it:
+    that part laid out at the tuple's indentation, from where the tuple's
+    line has got to, the other parts on the lines around it, laid out on
+    80 columns from the indentation (checked against Magma 2.18)."""
+    out, c, seg = [], col, "<"
+
+    def flush(text, c):
+        if not text:
+            return c
+        t = text if _making_string() else _wrap(text, c, indent, indent)
+        out.append(t)
+        return len(t) - t.rfind("\n") - 1 if "\n" in t else c + len(t)
+
+    for k, p in enumerate(v):
+        sep = ">" + tail if k == len(v) - 1 else ", "
+        if _multiline(p):
+            c = flush(seg, c)
+            t = _str(p, indent, c)
+            out.append(t)
+            c = len(t) - t.rfind("\n") - 1 if "\n" in t else c + len(t)
+            seg = sep
+        else:
+            seg += _inline(p, True) + sep
+    flush(seg, c)
+    return "".join(out)
 
 
 def _extra(v):
@@ -3438,8 +3488,9 @@ def _sprintf(fmt, *args, where="printf", string=False):
             if t is None:
                 raise MagmaError("printf's precision (%%.%do) for this real is not supported yet" % prec, where, blank)
         else:
-            # (Sprintf makes a string: no session layout, _sprint_str)
-            t = _sprint_str(x) if string else _str(x)
+            # (Sprintf makes a string: no session layout; printf writes
+            # without indentation, _sprint_str)
+            t = _sprint_str(x, string)
         out.append(t.ljust(-width) if width < 0 else t.rjust(width))
     return "".join(out)
 
