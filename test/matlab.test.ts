@@ -1739,6 +1739,56 @@ test("command syntax: a comma or semicolon inside a word's brackets is refused, 
   assert.doesNotThrow(() => matlabToPython("disp 'a{0,31}'"));
 });
 
+test("text: strncmp past the end and with a negative n, strcmp's sizes and scalar cells, regexp's token extents, strcat of character matrices (TEXT-1016-1..4)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  // (strncmp: equal text shorter than n is equal; a negative n counts as zero)
+  assert.deepEqual(run("disp(mat2str([strncmp('elm','elm',7) strncmpi('Elm','eLM',7) strncmp('oak','elm',-1) strncmp('el','elm',7) strncmp('elm','elf',2) strncmp('elm','elf',3)]))"),
+    ["[true true true false true false]"]);
+  // (strcmp: a one-element cell against each element; otherwise the same size)
+  assert.deepEqual(run([tryIt("strcmp({'oak','elm'}, {'oak';'elm'})"),
+    "disp(mat2str(strcmp({'oak'}, {'oak','elm'}))); disp(mat2str(strcmpi({'OAK';'elm'}, {'oak'}))); disp(mat2str(strcmp({'oak';'elm'}, {'oak';'ash'}))); disp(mat2str(strncmp({'oak','elm'}, 'oa', 2)))"].join("\n")),
+    ["refused", "[true false]", "[true;false]", "[true;false]", "[true false]"]);
+  // (regexp: a match's token extents, one row per token; 'once' gives the matrix itself)
+  assert.deepEqual(run([
+    "e = regexp('xAB-357y', '(AB)-(357)', 'tokenExtents'); disp(class(e)); disp(mat2str(e{1}))",
+    "e = regexp('xAB-357y AB-1', '(AB)-(\\d+)', 'tokenExtents'); disp(mat2str(size(e))); disp(mat2str(e{2}))",
+    "e = regexp('xAB-357y', '(AB)-(357)', 'tokenExtents', 'once'); disp(class(e)); disp(mat2str(e))",
+    "t = regexp('xAB-357y', '(AB)-(357)', 'tokens'); disp(strjoin(t{1}, ','))",
+    tryIt("regexp('xAB357y', 'AB[0-9]+', 'tokens')"), tryIt("regexp('xAB357y', '(?:AB)[0-9]+', 'tokenExtents')"),
+    "disp(regexp('xAB357y', 'AB[0-9]+', 'match', 'once'))",
+  ].join("\n")), ["cell", "[2 3;5 7]", "[1 2]", "[10 11;13 13]", "double", "[2 3;5 7]", "AB,357", "refused", "refused", "AB357"]);
+  // (strcat: character matrices row by row)
+  assert.deepEqual(run(["x = strcat(['oak';'elm'], ['_a';'_b']); disp(mat2str(size(x))); disp(x)", tryIt("strcat(['oak';'elm'], ['_a';'_b';'_c'])"), "disp(strcat('oak  ', '_a'))"].join("\n")),
+    ["[2 5]", "oak_a", "elm_b", "refused", "oak_a"]);
+});
+
+test("strcmp and its relatives: a character matrix's rows against a cell or string array (CORR-C4D9-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    "C = ['ab'; 'cd'];",
+    "disp(mat2str(strcmp({'ab'; 'cd'}, C))); disp(mat2str(strcmp(C, {'ab'; 'xx'}))); disp(mat2str(strcmpi({'AB'; 'cD'}, C)))",
+    "disp(mat2str(strncmp({'ax'; 'cd'}, C, 1))); disp(mat2str(strncmpi({'AX'; 'Cy'}, C, 1)))",
+    // (a one-element cell against each row; a string array of the rows' shape)
+    "disp(mat2str(strcmp({'ab'}, C))); disp(mat2str(strcmp([\"ab\"; \"zz\"], C)))",
+    // (two character arrays: compared whole)
+    "disp(mat2str([strcmp(C, ['ab'; 'cd']) strcmp(C, 'ab') strcmp(C, ['ab'; 'ce'])]))",
+    // (rows as stored, padding blanks included: char('a', 'bb') has the row 'a ')
+    "M = char('a', 'bb'); disp(mat2str([strcmp({'a '; 'bb'}, M) strcmp({'a'; 'bb'}, M) strncmp({'a'; 'b'}, M, 1) strncmpi(M, {'A'; 'BX'}, 1) strncmp(M, {'a'; 'bb'}, 2)]))",
+    tryIt("strcmp({'ab'; 'cd'; 'ef'}, C)"), tryIt("strncmp(C, ['ab'; 'cd'], 1)"), tryIt("strcmp(\"ab\", C)"),
+  ].join("\n")), [
+    "[true;true]", "[true;false]", "[true;true]", "[true;true]", "[true;true]",
+    "[true;false]", "[true;false]", "[true false false]",
+    "[true false true true false;true true true true true]",
+    "refused", "refused", "refused",
+  ]);
+});
+
 test("exact int64 literals, std/var flags, integer classes kept, strfind's [], NaN in ismember and unique, atanh's branch, c{:} displayed", () => {
   const { execFileSync } = require("node:child_process");
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
