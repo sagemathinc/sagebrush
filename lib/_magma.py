@@ -733,23 +733,30 @@ def _frange(a, b, c):
     return out
 
 
-def _own(v, name=None):
+# a container nested deeper than this is refused when it is copied (value
+# semantics), below the host's recursion limit (HARD-133-1)
+_NEST_MAX = 100
+
+
+def _own(v, name=None, depth=0):
     """Value semantics: an assigned (or passed) container is a copy.  The
     name of the variable assigned lets some structures print it (2*C.1 = 0)."""
     if v is _UNDECLARED:
         v._fail()
     if name is not None and hasattr(v, "_magma_assigned"):
         v._magma_assigned(name)
+    if isinstance(v, (MSeq, MSet, MTuple)) and depth >= _NEST_MAX:
+        raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
     if isinstance(v, MSeq):
-        return MSeq((_own(x) for x in v), v.universe, getattr(v, "sample", None))
+        return MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
-        s.items = [_own(x) for x in v.items]
+        s.items = [_own(x, None, depth + 1) for x in v.items]
         s.keys = {k: (list(val) if v.kind == "multi" else val) for k, val in v.keys.items()}
         s.range = v.range
         return s
     if isinstance(v, MTuple):
-        return MTuple(_own(x) for x in v)
+        return MTuple([_own(x, None, depth + 1) for x in v])
     if isinstance(v, MRec):
         return v._copy()
     return v
@@ -2587,16 +2594,43 @@ def RealField(prec=30):
 
 # ------------------------------------------------------------------ printing
 
+# Printing descends into nested values; a value nested deeper than this is
+# refused before the host's recursion limit, in Magma's form (HARD-133-1)
+_PRINT_DEPTH_MAX = 100
+_print_depth = [0]
+
+
+def _nested(f, *args):
+    """f(*args) one level deeper into a value being printed (only
+    containers come here, so a long flat sequence pays nothing)."""
+    d = _print_depth[0]
+    if d >= _PRINT_DEPTH_MAX:
+        raise MagmaError("printing a value nested more than %d deep is not supported yet" % _PRINT_DEPTH_MAX)
+    _print_depth[0] = d + 1
+    try:
+        return f(*args)
+    finally:
+        _print_depth[0] = d
+
+
+def _container(v):
+    return isinstance(v, (MTuple, MSeq, MSet, MRec)) or type(v).__name__ == "MList"
+
+
 def _atomic(v):
     if isinstance(v, (bool, int, str, _Fraction, MReal)) or _is_ff(v):
         return True
     if isinstance(v, MTuple):
-        return all(_atomic(x) for x in v)
+        return _nested(lambda: all(_atomic(x) for x in v))
     return False
 
 
 def _inline(v, in_tuple=False):
     """v on one line (as inside a tuple)."""
+    return _nested(_inline1, v, in_tuple) if _container(v) else _inline1(v, in_tuple)
+
+
+def _inline1(v, in_tuple):
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, str):
@@ -2646,7 +2680,7 @@ def _str(v, indent=0, col=None, tail=""):
     column `col` (default: the indentation), followed by `tail` (the comma
     after an element of a sequence printed one element a line), which is
     laid out with v's last chunk, as Magma's printer does."""
-    s, used = _str1(v, indent, col, tail)
+    s, used = _nested(_str1, v, indent, col, tail) if _container(v) else _str1(v, indent, col, tail)
     return s if used else s + tail
 
 

@@ -254,6 +254,25 @@ test("a long integer is laid out in lines of 79 digits and a backslash, in time 
   assert.ok(Date.now() - t0 < 30000);
 });
 
+test("printing a value nested deeper than 100 is refused in Magma's form, not a host RecursionError (HARD-133-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (input: string) => spawnSync(process.execPath, [cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
+  // (built in a loop, a value is copied as it is assigned: refused there)
+  const deep = run("x := 1; for i in [1..5000] do x := [x]; end for;\nt := 1; for i in [1..5000] do t := <t>; end for;\n1;\n");
+  assert.equal(deep.signal, null, deep.stderr);
+  assert.equal((deep.stdout.match(/Runtime error: a value nested more than 100 deep is not supported yet/g) ?? []).length, 2, deep.stdout.slice(0, 2000));
+  assert.doesNotMatch(deep.stdout + deep.stderr, /RecursionError|Traceback/);
+  assert.match(deep.stdout, /\n1\n$/);
+  // 100 deep still prints (at that indentation the innermost [ 1 ] is
+  // laid out a chunk a line): 100 brackets each way, no error
+  const ok = run("x := 1; for i in [1..100] do x := [x]; end for;\nx;\n");
+  assert.equal((ok.stdout.match(/\[/g) ?? []).length, 100, ok.stdout.slice(0, 500));
+  assert.equal((ok.stdout.match(/\]/g) ?? []).length, 100);
+  assert.doesNotMatch(ok.stdout, /error/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
