@@ -2329,7 +2329,7 @@ def vector(*args):
     """
     import _sage_ffmat
     if len(args) == 2 and _sage_ffmat._is_ff(args[0]):
-        return _sage_ffmat.vector(args[0], _bounded_list(args[1]))
+        return _sage_ffmat.vector(args[0], args[1])
     if args and _is_padic(args[0]):
         raise NotImplementedError("vectors over %r are not available in sagebrush yet" % (args[0],))
     ring = None
