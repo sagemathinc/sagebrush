@@ -21,8 +21,8 @@
     ],
     "differs": [
       "Matrix input, the correlations of all pairs of columns, is refused.",
-      "Integer-class input is refused; give double or single vectors.",
-      "Vectors of more than a few thousand elements, at many lags, are refused (the work is lengths times lags)."
+      "Integer-class input and empty vectors are refused.",
+      "At most 1,000,000 lags, and vectors of more than a few thousand elements at many lags are refused (the work is lengths times lags)."
     ],
     "status": "partial",
     "see_also": [
