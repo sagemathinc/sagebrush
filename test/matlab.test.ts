@@ -2270,6 +2270,6 @@ test("perms and xcorr are made within their limits, and refused past them, under
     { encoding: "utf8", timeout: 120000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
-    "[40320 8]", "[362880 9]", "[362880 9]", "refused: perms of 9 elements is n", "refused: perms of 1000000 element",
+    "[40320 8]", "[362880 9]", "refused: perms of 9 elements is n", "refused: perms of 9 elements is n", "refused: perms of 1000000 element",
     "[1 999999]", "refused: xcorr at 1000001 lags is", "refused: xcorr of empty vectors i", "[1 5999]", "refused: xcorr of vectors of 4000"]);
 });

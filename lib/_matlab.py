@@ -5073,7 +5073,7 @@ def rat_(nargout, x, tol=None):
 
 
 # (the most perms makes: bytes of its result, whose indexing and copy take about three
-# times that; n! rows of n, so 8 doubles' permutations, or 9 of a char or 8-bit class)
+# times that; n! rows of n, so 8 doubles' or chars' permutations, or 9 of an 8-bit class)
 _PERMS_BYTES_MAX = 8 << 20
 
 
