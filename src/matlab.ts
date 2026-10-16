@@ -218,10 +218,13 @@ export function lex(src: string): Tok[] {
         if (isCmd) {
           const args: string[] = [];
           let a = k;
+          let depth = 0; // (unquoted brackets open in the words)
           while (a < n && src[a] !== "\n" && src[a] !== ";" && src[a] !== "," && src[a] !== "%") {
             if (src[a] === " " || src[a] === "\t" || src[a] === "\r") { a++; continue; }
             let word = "";
             while (a < n && !/[\s;,%]/.test(src[a])) {
+              if ("([{".includes(src[a])) depth++;
+              else if (")]}".includes(src[a]) && depth > 0) depth--;
               if (src[a] === "'") {
                 a++;
                 while (a < n && src[a] !== "\n") {
@@ -236,6 +239,10 @@ export function lex(src: string): Tok[] {
             }
             args.push(word);
           }
+          // (a comma or semicolon inside a word's brackets, `clear -regexp a{0,31}`: whether it
+          // ends the command is not settled here, so refused rather than split)
+          if (depth > 0 && (src[a] === "," || src[a] === ";"))
+            throw new MatlabSyntaxError(`a '${src[a]}' inside brackets in command syntax (${w} ...) is not supported; use function syntax, e.g. ${w}('...')`, L, C);
           push("cmd", w, L, C, { args });
           i = a;
           continue;
