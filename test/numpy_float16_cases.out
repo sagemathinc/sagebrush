@@ -110,3 +110,10 @@ np.negative(True, dtype=np.int8, casting='safe') -> -1 int8
 np.sqrt(1j, dtype=np.complex64, casting='safe') -> TypeError: Cannot cast ufunc 'sqrt' input from dtype('complex128') to dtype('complex64') with casting rule 'safe'
 np.negative(-1, dtype=np.uint8) -> TypeError: Cannot cast ufunc 'negative' input from dtype('int64') to dtype('uint8') with casting rule 'same_kind'
 np.absolute(-2, dtype=np.float64, casting='safe') -> 2.0 float64
+1-D int8 (200000,) True int8
+broadcast float32 (500, 400) True float32
+long row float32 (1, 120000) True float32
+same dtype float64 (1, 400) True float64
+unary float32 (200000,) True float32
+complex abs float64 (400, 500) True float64
+True

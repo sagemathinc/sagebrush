@@ -74,3 +74,17 @@ for c in ("np.absolute(1, dtype=np.float32, casting='no')", "np.sqrt(1, dtype=np
           "np.negative(1.5, dtype=np.float32, casting='safe')", "np.negative(1.5, dtype=np.float32)", "np.negative(True, dtype=np.int8, casting='safe')",
           "np.sqrt(1j, dtype=np.complex64, casting='safe')", "np.negative(-1, dtype=np.uint8)", "np.absolute(-2, dtype=np.float64, casting='safe')"):
     print(c, "->", tr(lambda: eval(c)))
+# dtype= uses an input already of dtype as it is, and casts others a block
+# at a time into one result: the same values as casting first (HARD-7A1-1)
+x = np.arange(200000) % 251 - 125
+y = (np.arange(400) * 0.37).reshape(1, 400)
+w = np.arange(120000).reshape(1, 120000) % 7
+for name, got, want in (
+        ('1-D', np.add(x, x, dtype=np.int8), (x.astype(np.int8) + x.astype(np.int8))),
+        ('broadcast', np.multiply(x.reshape(500, 400), y, dtype=np.float32), x.reshape(500, 400).astype(np.float32) * y.astype(np.float32)),
+        ('long row', np.subtract(w, 3.5, dtype=np.float32), w.astype(np.float32) - np.float32(3.5)),
+        ('same dtype', np.add(y, y, dtype=np.float64), y + y),
+        ('unary', np.sqrt(x % 100, dtype=np.float32), np.sqrt((x % 100).astype(np.float32))),
+        ('complex abs', np.absolute((x + 1j * x).reshape(400, 500), dtype=np.float64), np.absolute(x + 1j * x).reshape(400, 500))):
+    print(name, got.dtype, got.shape, bool((got == want).all()), want.dtype)
+print(np.add.reduce(y, axis=1, dtype=np.float64).tolist() == np.add.reduce(y, axis=1).tolist())

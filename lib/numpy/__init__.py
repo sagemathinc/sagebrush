@@ -603,6 +603,27 @@ def _can_cast_rule(a, b, casting):
     return casting == "safe" and can_cast(a, b)
 
 
+_CAST_BLOCK = 1 << 16  # (elements cast at a time by a ufunc's dtype=)
+
+
+def _blocks(shape, size, prefix=()):
+    """Index tuples splitting an array of shape into blocks of at most size
+    elements (but one element), in C order"""
+    if not shape:
+        yield prefix
+        return
+    inner = 1
+    for d in shape[1:]:
+        inner *= d
+    if inner <= size:
+        step = _builtins.max(1, size // _builtins.max(inner, 1))
+        for k in range(0, shape[0], step):
+            yield prefix + (slice(k, k + step),)
+    else:
+        for k in range(shape[0]):
+            yield from _blocks(shape[1:], size, prefix + (k,))
+
+
 def _wraps_in(op, dt):
     # (a product in an int dtype narrower than int64 is computed step by
     # step, wrapping in it: prod's double accumulator loses its low bits)
@@ -636,11 +657,11 @@ class ufunc:
             # in it; but a comparison's dtype names only its output, bool)
             dt = self._loop(dtype)
             if self._op not in _BOOL_OUT:
-                args = tuple(self._cast_in(x, i, dt, casting) for i, x in enumerate(args))
-        if self.nin == 1:
-            r = getattr(_np, "u_" + self._op)(args[0])
+                r = self._apply_cast([self._cast_in(x, i, dt, casting) for i, x in enumerate(args)])
+            else:
+                r = self._apply(args)
         else:
-            r = _np.binary(self._op, args[0], args[1])
+            r = self._apply(args)
         if dtype is not None:
             r = asarray(r)
             if r.dtype != dt:
@@ -698,13 +719,44 @@ class ufunc:
         if not _can_cast_rule(src, dt, casting):
             raise TypeError("Cannot cast ufunc '%s' input %sfrom %r to %r with casting rule '%s'"
                             % (self.__name__, "" if self.nin == 1 else "%d " % i, src, dt, casting))
-        return asarray(x).astype(dt)
+        x = asarray(x)
+        # (a Python scalar cast now; an array, if it is not already of dt,
+        # by _apply_cast)
+        return (x, dt) if isinstance(x, ndarray) and x.ndim else (x.astype(dt), dt)
+
+    def _apply(self, args):
+        if self.nin == 1:
+            return getattr(_np, "u_" + self._op)(args[0])
+        return _np.binary(self._op, args[0], args[1])
+
+    def _apply_cast(self, pairs):
+        """The ufunc of (array, dtype) pairs, each array cast to its dtype:
+        one already of its dtype is used as it is, and a cast is made a
+        block at a time, written into one result, so no full-size cast
+        copy is kept (HARD-7A1-1)"""
+        if _builtins.all(x.dtype == t for x, t in pairs):
+            return self._apply([x for x, _ in pairs])
+        shape = broadcast_shapes(*[x.shape for x, _ in pairs])
+        n = 1
+        for d in shape:
+            n *= d
+        if n <= _CAST_BLOCK:
+            return self._apply([x if x.dtype == t else x.astype(t) for x, t in pairs])
+        views = [broadcast_to(x, shape) for x, _ in pairs]
+        res = None
+        for idx in _blocks(shape, _CAST_BLOCK):
+            r = asarray(self._apply([v[idx] if v.dtype == t else v[idx].astype(t) for v, (_, t) in zip(views, pairs)]))
+            if res is None:
+                res = empty(shape, r.dtype)
+            res[idx] = r
+        return res
 
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
-            a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
+            if a.dtype != dt:
+                a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
@@ -741,7 +793,8 @@ class ufunc:
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
-            a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
+            if a.dtype != dt:
+                a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         if self._op == "add":
             return cumsum(a, axis=axis, dtype=dtype)
         if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
