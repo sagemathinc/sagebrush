@@ -3,7 +3,8 @@
 A *host* is a page that shows a board to its user and passes what the user
 answers back to whoever made the board. The first host will be CoCalc's
 chat artifact card. It shows a `.board.json` file an agent published, and
-turns the user's answers into the next chat turn. This file is the contract
+gives the user's answers to the agent: as guidance to its turn if one is
+running, else as a new turn (see Delivery). This file is the contract
 between such a host and the board. design/frame.md covers the frame itself:
 what it is, its sandbox, and showing a board without answers.
 
@@ -20,7 +21,8 @@ what it is, its sandbox, and showing a board without answers.
    frame sends the page's answers over that channel.
 4. The host checks the submission against the board it posted on that
    channel. It then gives the submission to the agent as data the user
-   submitted.
+   submitted: as guidance to the agent's running turn, or, if none is
+   running, as a new turn.
 5. The agent records the answers in the file
    (`sb board answers FILE --apply SUBMISSION.json`), updates the board,
    and publishes it again. The host shows the new board in a new frame, with
@@ -104,7 +106,7 @@ On the window (`postMessage` to `window.parent`, or to the frame's
 
 On the channel:
 
-- From the frame: `{ sagebrush: "answers", version: 1, id, name, revision, page, answers, comment }`.
+- From the frame: `{ sagebrush: "answers", version: 1, id, name, revision, page, answers, notes, comment }`.
   - `id`: `crypto.randomUUID()`, made when the user presses Submit with
     answers not sent before. A press that sends again (see Once) reuses it.
   - `name`, `revision`: as posted in `board`, or `null`.
@@ -114,10 +116,15 @@ On the channel:
     has an answer to its answer, in the shape of the item's input
     (web/board-format.md). Unanswered items are left out. Submit can't be
     pressed while a `required` item is unanswered.
+  - `notes`: an object. It maps the id of each ask item on that page that
+    the user answered in their own words to those words. Every question
+    offers this, beside its controls or in place of them. A question with a
+    note and no answer counts as answered: `required` is met. Questions
+    without a note are left out.
   - `comment`: the text of the Submit bar's comment field, possibly `""`.
 - From the host: `{ sagebrush: "received", version: 1, id }`. The submission
-  `id` was admitted durably as the agent's turn (see Once); the frame shows
-  "Received".
+  `id` was durably delivered to the agent, as guidance or as a turn (see
+  Delivery and Once); the frame shows "Received".
 - From the host: `{ sagebrush: "refused", version: 1, id, message }`. The
   submission `id` was refused; the frame shows `message` and lets the user
   change the answers and submit again.
@@ -150,16 +157,38 @@ checked against the board it was made from, never the current one.
 | `id` | a UUID (36 characters, `8-4-4-4-12` hexadecimal) |
 | `name`, `revision` | equal to what was posted on this channel (`null` if nothing was) |
 | `page.number` | a whole number, a page of that board; `page.id` and `page.title` that page's, if given |
-| `answers` | at most 200 keys, each the id of an ask item on that page |
+| `answers`, `notes` | each at most 200 keys, each the id of an ask item on that page |
 | each answer | the item's shape: `check` a list of at most 100 distinct values of its options (`true` or `false` without options); `radio` and `choice` one value of its options; `text` a string; `number` a number within its `min`/`max` and on its `step`; `scale` a whole number from its `min` to its `max` |
-| a text answer, `comment` | strings of at most 10,000 characters |
-| required items | each has an answer |
+| a text answer, a note, `comment` | strings of at most 10,000 characters |
+| required items | each has an answer, or a note that is not only spaces |
 
 - Fields other than these are dropped, not passed on.
 
 Sagebrush provides the check as a function of the board's text and the
 message, so that every host checks the same way. It goes in the
 `sagebrush-board` package, built with the Submit bar.
+
+## Delivery
+
+A submission goes to the agent that published the board, in the thread
+where it published it:
+
+- **A turn of that agent is running** in the thread: the host delivers the
+  submission to it as guidance (in CoCalc, a message steering the running
+  turn). The turn goes on, now with the answers. Turns can be long, and an
+  agent takes guidance well.
+- **No turn is running:** the host starts one, with the submission as its
+  message.
+- **Racing the end of a turn:** if the turn ends while the host is
+  delivering to it, the delivery is as one of the two, never both and
+  never neither. The service decides, under the submission's idempotency
+  key (see Once).
+
+Either way the delivery is the "admission" of Once: `received` means the
+guidance, or the new turn, was saved durably. The submission `id` is the
+idempotency key of that delivery at the service, whichever kind it is. A
+submission sent again therefore can't be delivered twice, as guidance or
+as a turn.
 
 ## The host's duties
 
@@ -183,8 +212,9 @@ message, so that every host checks the same way. It goes in the
   - The host marks an `id` *pending* synchronously, when the message
     arrives, before any asynchronous step. A repeat of a pending `id` is
     ignored: the first one's outcome answers both.
-  - `received` means the agent's turn was admitted durably (in CoCalc, the
-    chat message saved), not that the message arrived. The host awaits
+  - `received` means the delivery (see Delivery: guidance to a running
+    turn, or a new turn) was admitted durably (in CoCalc, the message
+    saved), not that the message arrived. The host awaits
     that admission, then marks the `id` taken and sends `received`. It
     answers a repeat of a taken `id` with `received` again.
   - When admission definitely fails, the host forgets the pending `id` and
@@ -192,9 +222,9 @@ message, so that every host checks the same way. It goes in the
     `id`.
   - When the outcome is unknown (a timeout, a lost connection), the host
     asks the service with the `id` before it answers. The submission `id`
-    is the idempotency key of the turn it starts, at the service and not
-    only in the page, so that a submission sent again after a reload or
-    from another tab can't start a second turn.
+    is the idempotency key of its delivery, at the service and not only in
+    the page. So a submission sent again after a reload or from another tab
+    can't be delivered a second time, as guidance or as a turn.
   - Each channel has its own board, pending ids and taken ids. A handler
     still running when a new board replaces its channel sees and changes
     only its own; its reply goes to its closed port and is lost.
@@ -258,9 +288,11 @@ function openChannel(me) {
     if (pending.has(m.id)) return; // (the first one's outcome answers)
     if (taken.size + pending.size >= 100) return say("refused", m.id, "too many submissions");
     pending.add(m.id); // (before anything asynchronous)
-    // (admitDurably: resolves once the turn is saved, rejects on a definite
-    // failure; the submission id is the turn's idempotency key at the
-    // service, which it asks again on an unknown outcome)
+    // (admitDurably: delivers it as guidance to the agent's running turn,
+    // else as a new turn (Delivery); resolves once that is saved, rejects
+    // on a definite failure; the submission id is the delivery's
+    // idempotency key at the service, which it asks again on an unknown
+    // outcome)
     try {
       await admitDurably({ idempotencyKey: m.id, from: currentUser, stale: posted.revision !== currentRevision(), submission: r.submission });
       taken.add(m.id);
