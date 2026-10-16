@@ -1998,8 +1998,9 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
     const f = O.lookupSpecial(v, "__index__");
     if (f === undefined) return undefined;
     const r = f(v);
-    if (O.isPyInt(r)) return typeof r === "boolean" ? +r : r;
-    if (r instanceof PrimBox && isinstance(r, int)) return unbox(r);
+    // (a strict int subclass, bool among them: with CPython's DeprecationWarning)
+    if (typeof r === "boolean" || (r instanceof PrimBox && isinstance(r, int))) return O.intResult("__index__", r);
+    if (O.isPyInt(r)) return r;
     return { bad: r };
   };
   if (typeof x === "object" && x !== null && O.lookupSpecial(x, "__index__") !== undefined) {

@@ -1711,7 +1711,8 @@ export function seqIndex(i: any, len: number, what: string): number {
   else {
     const f = special(i, "__index__");
     if (f === undefined) raise(T.TypeError, `${what} indices must be integers or slices, not ${typeName(i)}`);
-    j = Number(f(i));
+    const r = intResult("__index__", f(i));
+    j = typeof r === "bigint" ? (r < 0n ? -Infinity : Infinity) : r;
   }
   if (j < 0) j += len;
   if (j < 0 || j >= len) raise(T.IndexError, `${what} index out of range`);
