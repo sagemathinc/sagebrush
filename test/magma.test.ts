@@ -648,6 +648,9 @@ test("a value added to a collection is made like its elements, all the way down 
     // after leading holes, the first defined element fixes the universe
     ["S := []; S[3] := \"x\"; Append(~S, 4);", "Runtime error in 'Append': Cannot coerce element into the universe"],
     ["T := []; T[2] := <1,\"a\">; Include(~T, <2,3>);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    // a child emptied of its elements keeps its universe (CORR-9348-FU1)
+    ["Z := [[\"q\"]]; Remove(~Z[1], 1); Append(~Z, [3]);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["K := GF(11); Af := [K|4,6]; Append(~Af, 1/11);", "Runtime error in 'Append': Cannot coerce element into the universe"],
   ];
   // (each refusal is an error, and the session goes on to the next one;
   // a refused Append changes nothing)
