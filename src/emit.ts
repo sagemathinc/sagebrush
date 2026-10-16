@@ -35,7 +35,6 @@ class Fn {
   assigned = new Set<string>();
   buf: Line[] = [];
   loops: { label: string | null }[] = [];
-  handlers: string[] = []; // JS variables holding the exceptions being handled
   constructor(
     public scope: Scope,
     public parent: Fn | null,
@@ -720,10 +719,9 @@ export class Emitter {
       case "Nonlocal":
         return;
       case "Raise": {
-        if (st.exc === null) {
-          const h = this.fn.handlers[this.fn.handlers.length - 1];
-          return this.w(h !== undefined ? `throw ${h};` : "throw reraise();");
-        }
+        // (the exception being handled, which in a finally run for one is
+        // that one, not the enclosing except clause's)
+        if (st.exc === null) return this.w("throw reraise();");
         const cause = st.cause === null ? "" : `, ${this.ex(st.cause)}`;
         return this.w(`throw raiseExc(${this.ex(st.exc)}${cause});`);
       }
@@ -939,7 +937,10 @@ export class Emitter {
   tryStmt(st: Extract<A.Stmt, { k: "Try" }>) {
     const before = new Set(this.fn.assigned);
     const hasFinally = st.finalbody.length > 0;
-    if (hasFinally) {
+    // (the exception passing through the finally, if any)
+    const p = hasFinally ? this.temp() : null;
+    if (p !== null) {
+      this.w(`${p} = undefined;`);
       this.w("try {");
       this.indent++;
     }
@@ -954,6 +955,11 @@ export class Emitter {
       this.w(`} catch (${e}_) {`);
       this.indent++;
       this.w(`${e} = toPyExc(${e}_);`);
+      // It is the exception being handled, for sys.exception() and
+      // sys.exc_info(), while the clauses are matched and the chosen one runs.
+      this.w(`excEnter(${e});`);
+      this.w("try {");
+      this.indent++;
       st.handlers.forEach((h, i) => {
         this.line = h.line;
         if (h.type === null && i !== st.handlers.length - 1) this.fail("default 'except:' must be last", h.line);
@@ -961,13 +967,12 @@ export class Emitter {
         this.w(`${i === 0 ? "" : "} else "}if (${cond}) {`);
         this.indent++;
         if (h.name !== null) this.w(this.storeName(h.name, e));
-        // Exceptions raised while handling get this one as __context__.
+        // Exceptions raised while handling get this one as __context__ when
+        // raised (raiseExc); this catches the runtime's own errors.
         const x = this.temp();
         this.w("try {");
-        this.fn.handlers.push(e);
         this.block(h.body);
-        this.fn.handlers.pop();
-        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ == null) ${x}.__context__ = ${e}; throw ${x}; }`);
+        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }`);
         if (h.name !== null) {
           this.w(this.storeName(h.name, "undefined"));
           this.fn.assigned.delete(h.name);
@@ -975,6 +980,8 @@ export class Emitter {
         this.indent--;
       });
       this.w(`} else throw ${e};`);
+      this.indent--;
+      this.w(`} finally { excLeave(${e}); }`);
       this.indent--;
       this.w("}");
     } else {
@@ -988,10 +995,18 @@ export class Emitter {
       this.w("}");
     }
     this.fn.assigned = before;
-    if (hasFinally) {
+    if (p !== null) {
+      // An exception passing through is the one being handled while the
+      // finally runs, and the __context__ of one the finally raises.
+      const x = this.temp();
       this.indent--;
-      this.w("} finally {");
+      this.w(`} catch (${p}_) { ${p} = toPyExc(${p}_); throw ${p}; } finally {`);
+      this.indent++;
+      this.w(`if (${p} !== undefined) excEnter(${p});`);
+      this.w("try {");
       this.block(st.finalbody);
+      this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${p} !== undefined && ${x} !== ${p} && ${x}.__context__ === undefined) ${x}.__context__ = ${p}; throw ${x}; } finally { if (${p} !== undefined) excLeave(${p}); }`);
+      this.indent--;
       this.w("}");
     }
   }
@@ -1010,7 +1025,9 @@ export class Emitter {
       this.withStmt(st, i + 1);
       this.indent--;
     } else this.block(st.body);
-    this.w(`} catch (${e}_) { ${ok} = false; ${e} = toPyExc(${e}_); if (!truth(${exit}(typeOf(${e}), ${e}, null))) throw ${e}; } finally { if (${ok}) ${exit}(null, null, null); }`);
+    // (the body's exception is the one being handled while __exit__ runs)
+    const x = this.temp();
+    this.w(`} catch (${e}_) { ${ok} = false; ${e} = toPyExc(${e}_); excEnter(${e}); try { if (!truth(${exit}(typeOf(${e}), ${e}, null))) throw ${e}; } catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; } finally { excLeave(${e}); } } finally { if (${ok}) ${exit}(null, null, null); }`);
   }
 
   // ------------------------------------------------------------ module
@@ -1062,7 +1079,7 @@ const RUNTIME_NAMES = [
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
   "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf", "superAttr", "superNoArgs", "newCell", "classCellGet",
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
-  "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "classDef",
+  "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "excEnter", "excLeave", "classDef",
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
   "sortedKeys", "INTR", "interrupted",
 ];

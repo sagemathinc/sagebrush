@@ -4,7 +4,7 @@
 
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
+  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
 import { INTR } from "./interrupt";
@@ -1286,9 +1286,18 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     if (!isThrow && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
     g.$started = true;
   }
+  // The generator's own handled exceptions go above its caller's while it
+  // runs, and come off with it when it pauses (CPython's per-frame exc_info).
+  const base = handledExceptions.length;
+  if (g.$exc !== undefined) {
+    handledExceptions.push(...g.$exc);
+    g.$exc = undefined;
+  }
+  let paused = false;
   try {
     const r = isThrow ? g.throw(arg) : g.next(arg);
     if (r.done && r.value === undefined) r.value = null;
+    paused = !r.done;
     return r;
   } catch (e: any) {
     if (isExc(e, T.StopIteration)) {
@@ -1298,8 +1307,56 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     }
     if (e instanceof TypeError && /already running|is executing/.test(e.message)) raise(T.ValueError, "generator already executing");
     throw e;
+  } finally {
+    if (handledExceptions.length > base) {
+      const own = handledExceptions.splice(base);
+      if (paused) g.$exc = own;
+    }
   }
 }
+// A generator's return(v) (JS's, when the frame delegating to it is
+// returned from), with its own handled exceptions around it, as genStep.
+export function genReturn(g: any, v: any): IteratorResult<any> {
+  const base = handledExceptions.length;
+  if (g.$exc !== undefined) {
+    handledExceptions.push(...g.$exc);
+    g.$exc = undefined;
+  }
+  let paused = false;
+  try {
+    const r = g.return(v);
+    paused = !r.done;
+    return r;
+  } finally {
+    if (handledExceptions.length > base) {
+      const own = handledExceptions.splice(base);
+      if (paused) g.$exc = own;
+    }
+  }
+}
+
+// What a `yield from` or `await` of a generator or coroutine delegates to
+// (JS's yield*): its every step a step of its own frame, through genStep, so
+// it keeps its own handled exceptions however it is resumed (CORR-B7F-1).
+class Delegate {
+  constructor(public g: any) {}
+  [Symbol.iterator]() {
+    return this;
+  }
+  next(v: any) {
+    return genStep(this.g, false, v);
+  }
+  throw(e: any) {
+    return genStep(this.g, true, e);
+  }
+  return(v: any) {
+    return genReturn(this.g, v);
+  }
+}
+export function delegateTo(g: any): any {
+  return new Delegate(g);
+}
+
 // The StopIteration a ProtoIter swallowed most recently, so wrappers such as
 // enumerate and map can re-raise it with its value.
 export const lastStop: { e: any } = { e: null };
