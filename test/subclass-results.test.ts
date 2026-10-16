@@ -21,3 +21,9 @@ test("a subclass's own conversion hooks are called where CPython calls them, and
   const got = execFileSync(process.execPath, [CLI, TEST + "subclass_overrides_cases.py"], { encoding: "utf8" });
   assert.equal(got, readFileSync(TEST + "subclass_overrides_cases.out", "utf8"));
 });
+// The hooks bound as special methods, a subclass result made exact
+// (test/subclass_binding_cases.py; its .out is CPython 3.14's)
+test("float(), int() and complex() bind their hooks as special methods and give exact results", () => {
+  const got = execFileSync(process.execPath, [CLI, TEST + "subclass_binding_cases.py"], { encoding: "utf8" });
+  assert.equal(got, readFileSync(TEST + "subclass_binding_cases.out", "utf8"));
+});
