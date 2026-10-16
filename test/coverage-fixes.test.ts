@@ -39,3 +39,11 @@ test("Sage, Magma and MATLAB have no CPython-style 4300-digit limit on an intege
   assert.equal(run(["--magma", "-c", "print #Sprint(2^20000);"]), "6021");
   assert.equal(run(["-c", "import sys\nprint(sys.get_int_max_str_digits())"]), "4300");
 });
+
+test("readlines' hint, each class's own way (an index, or BytesIO's int), counted in characters; a write takes only a real buffer (CORR-606-3, CORR-50F-1)", () => {
+  cases("io_hint_cases.py");
+});
+
+test("compile(..., 'single') reads a decorated or inline compound statement whole before the extra one (CORR-50F-2)", () => {
+  cases("single_edges_cases.py");
+});

@@ -253,14 +253,27 @@ function checkSingle(src: string, filename: string, opts: CompileOptions): void 
     toks.push({ t, ...raw, text: raw.start >= 0 ? decodeBytes(tok.buf, raw.start, raw.end) : "" });
     if (t === TK.ENDMARKER || t < 0 || toks.length > src.length + 16) break;
   }
-  let depth = 0, end = -1;
+  // (the next token that begins something: past NL and DEDENT)
+  const nextText = (i: number) => {
+    for (let j = i + 1; j < toks.length; j++) if (toks[j].t !== TK.DEDENT && toks[j].t !== TK.NL) return toks[j].text;
+    return undefined;
+  };
+  let depth = 0, end = -1, first = -1;
   for (let i = 0; i < toks.length && end < 0; i++) {
     const t = toks[i].t;
+    // (the first token of the logical line)
+    if (first < 0 && t !== TK.NL && t !== TK.INDENT && t !== TK.DEDENT) first = i;
     if (t === TK.INDENT) depth++;
     else if (t === TK.DEDENT) {
       // (back at the top level, unless a clause of the same statement follows)
-      if (--depth === 0 && !CLAUSES.has(toks.slice(i + 1).find((x) => x.t !== TK.DEDENT && x.t !== TK.NL)?.text)) end = i;
-    } else if (t === TK.NEWLINE && depth === 0 && toks[i + 1]?.t !== TK.INDENT) end = i;
+      if (--depth === 0 && !CLAUSES.has(nextText(i))) end = i;
+    } else if (t === TK.NEWLINE) {
+      // (a logical line at the top level ends the statement unless a block,
+      // or a clause of the same statement (an inline if's else), follows,
+      // or it is a decorator, CORR-50F-2)
+      if (depth === 0 && toks[i + 1]?.t !== TK.INDENT && toks[first]?.text !== "@" && !CLAUSES.has(nextText(i))) end = i;
+      first = -1;
+    }
   }
   if (end < 0) return;
   const second = toks.slice(end + 1).find((x) => x.t !== TK.NL && x.t !== TK.DEDENT && x.t !== TK.NEWLINE);

@@ -18,24 +18,67 @@ _CLOSED = "I/O operation on closed file."
 
 
 def _bytes_like(b):
-    """b's bytes, for a write: a bytes-like object (bytes, bytearray,
-    memoryview, an array's buffer), or CPython's TypeError"""
-    if isinstance(b, (bytes, bytearray, memoryview)):
+    """b's bytes, for a write: a bytes-like object (one that exports a buffer,
+    as memoryview takes: bytes, bytearray, memoryview, an array), or
+    CPython's TypeError.  A method named tobytes is no buffer (CORR-50F-1)."""
+    if isinstance(b, (bytes, bytearray)):
         return bytes(b)
-    if not isinstance(b, (str, int, float, complex, list, tuple, dict, set)) and b is not None and hasattr(b, "tobytes"):
-        return b.tobytes()
-    raise TypeError("a bytes-like object is required, not '%s'" % type(b).__name__)
+    if isinstance(b, (str, int, float, complex, list, tuple, dict, set)) or b is None:
+        raise TypeError("a bytes-like object is required, not '%s'" % type(b).__name__)
+    try:
+        view = memoryview(b)
+    except TypeError:
+        raise TypeError("a bytes-like object is required, not '%s'" % type(b).__name__) from None
+    return view.tobytes()
 
 
-def _readlines(f, hint, stop_at_hint, msg):
+_SSIZE_MAX = (1 << 63) - 1
+
+
+def _ssize(v):
+    if not -_SSIZE_MAX - 1 <= v <= _SSIZE_MAX:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return v
+
+
+def _index_hint(hint, msg):
+    """StringIO's and a file's readlines hint, as CPython's
+    _Py_convert_optional_to_ssize_t: None, or an index (an int's own value;
+    else its type's __index__, whose result must be an int), in ssize_t
+    range"""
+    if hint is None:
+        return None
+    if isinstance(hint, int):
+        v = int.__index__(hint)
+    else:
+        f = getattr(type(hint), "__index__", None)
+        if f is None:
+            raise TypeError(msg % type(hint).__name__)
+        v = f(hint)
+        if not isinstance(v, int):
+            raise TypeError("__index__ returned non-int (type %s)" % type(v).__name__)
+        v = int.__index__(v)
+    if not -_SSIZE_MAX - 1 <= v <= _SSIZE_MAX:
+        raise OverflowError("cannot fit '%s' into an index-sized integer" % type(hint).__name__)
+    return v
+
+
+def _int_hint(hint, msg):
+    """BytesIO's readlines size: None or an int (its own value), else
+    CPython's TypeError"""
+    if hint is None:
+        return None
+    if not isinstance(hint, int):
+        raise TypeError(msg % type(hint).__name__)
+    return _ssize(int.__index__(hint))
+
+
+def _readlines(f, hint, stop_at_hint, text):
     """f's lines, as CPython's readlines(hint): all of them for a hint that is
     None, 0 or negative; else up to the line after which their total length
-    exceeds the hint (or, stop_at_hint, reaches it, as BytesIO's)"""
-    if hint is not None:
-        try:
-            hint = hint.__index__() if not isinstance(hint, int) else int(hint)
-        except AttributeError:
-            raise TypeError(msg % type(hint).__name__) from None
+    exceeds the hint (or, stop_at_hint, reaches it, as BytesIO's).  The hint
+    is already converted; a text line's length is in characters (Sagebrush's
+    strings count one beyond U+FFFF as two)."""
     out = []
     total = 0
     while True:
@@ -43,7 +86,7 @@ def _readlines(f, hint, stop_at_hint, msg):
         if not line:
             return out
         out.append(line)
-        total += len(line)
+        total += len(list(line)) if text else len(line)
         if hint is not None and hint > 0 and (total >= hint if stop_at_hint else total > hint):
             return out
 
@@ -114,8 +157,9 @@ class IOBase:
         return bytes(res)
 
     def readlines(self, hint=None):
+        hint = _index_hint(hint, "argument should be integer or None, not '%s'")
         self._checkClosed()
-        return _readlines(self, hint, False, "argument should be integer or None, not '%s'")
+        return _readlines(self, hint, False, isinstance(self, TextIOBase))
 
     def writelines(self, lines):
         self._checkClosed()
@@ -220,8 +264,9 @@ class BytesIO(BufferedIOBase):
         return b
 
     def readlines(self, size=None):
+        # (closed first, then the size, as CPython's)
         self._checkClosed()
-        return _readlines(self, size, True, "integer argument expected, got '%s'")
+        return _readlines(self, _int_hint(size, "integer argument expected, got '%s'"), True, False)
 
     def write(self, b):
         b = _bytes_like(b)  # (the argument first, then closed, as CPython's)
@@ -330,8 +375,10 @@ class StringIO(TextIOBase):
         return s
 
     def readlines(self, hint=None):
+        # (the hint first, then closed, as CPython's)
+        hint = _index_hint(hint, "argument should be integer or None, not '%s'")
         self._checkClosed()
-        return _readlines(self, hint, False, "argument should be integer or None, not '%s'")
+        return _readlines(self, hint, False, True)
 
     def __iter__(self):
         self._checkClosed()
