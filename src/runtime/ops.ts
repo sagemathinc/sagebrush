@@ -1310,6 +1310,40 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     }
   }
 }
+// A generator's return(v) (JS's, when the frame delegating to it is
+// returned from), with its own handled exceptions around it, as genStep.
+export function genReturn(g: any, v: any): IteratorResult<any> {
+  const base = handledExceptions.length;
+  if (g.$exc !== undefined) {
+    handledExceptions.push(...g.$exc);
+    g.$exc = undefined;
+  }
+  let paused = false;
+  try {
+    const r = g.return(v);
+    paused = !r.done;
+    return r;
+  } finally {
+    if (handledExceptions.length > base) {
+      const own = handledExceptions.splice(base);
+      if (paused) g.$exc = own;
+    }
+  }
+}
+
+// What a `yield from` or `await` of a generator or coroutine delegates to
+// (JS's yield*): its every step a step of its own frame, through genStep, so
+// it keeps its own handled exceptions however it is resumed (CORR-B7F-1).
+export function delegateTo(g: any): any {
+  const d = {
+    [Symbol.iterator]: () => d,
+    next: (v: any) => genStep(g, false, v),
+    throw: (e: any) => genStep(g, true, e),
+    return: (v: any) => genReturn(g, v),
+  };
+  return d;
+}
+
 // The StopIteration a ProtoIter swallowed most recently, so wrappers such as
 // enumerate and map can re-raise it with its value.
 export const lastStop: { e: any } = { e: null };
