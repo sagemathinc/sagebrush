@@ -167,6 +167,9 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
+// (the toolbar's Code: a note with code in the board's language)
+const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
 const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
@@ -358,6 +361,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
    * being looked at in TimeTravel, which is not the document and does not
    * run).  False if it was overtaken (another document loaded, the board
    * destroyed) and drew nothing. */
+  // (the board's language, as the toolbar's Code says it)
+  let codeMode = "python";
   async function show(d: BoardDoc, view = false): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
     if (over()) return false;
@@ -418,6 +423,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
+    // (the toolbar's Code: the board's language; its tool's title reads it
+    // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
+    // the button and an open menu's row (on document.body), is told now)
+    codeMode = d.mode ?? "python";
+    for (const el of [...root.querySelectorAll<HTMLElement>("[data-tool=code][title]"), ...document.querySelectorAll<HTMLElement>(".board-toolbar-panel [data-tool=code][title]")]) el.title = codeTitle(codeMode);
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
     // (code items' heights were for these two layouts, the page's and its template's: PERF-F2A-1)
@@ -923,7 +933,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const toolbar = new Toolbar(root, [
     { id: "select", label: "Select", icon: "↖", title: "Select: drag on the background to select what the rectangle holds (Space-drag pans); Esc to stop", toggle: editor.selecting },
     { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y, true); } },
-    { id: "code", label: "Code", icon: "{ }", title: "Add a note with Python code (any note can have code: + Code in its editor)", run: () => { const c = center(); editor.addCode(c.x, c.y, true); } },
+    { id: "code", label: "Code", icon: "{ }", get title() { return codeTitle(codeMode); }, run: () => { const c = center(); editor.addCode(c.x, c.y, true); } },
     { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
     { id: "sticker", label: "Sticker", icon: "☺", title: "Add a sticker: an emoji (double-click one to change it)", run: () => editor.pickSticker({ at: center(), under: toolbar.el }) },
     { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y, true); } },
