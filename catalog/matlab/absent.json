@@ -140,6 +140,19 @@
     ]
   },
   {
+    "name": "digraph",
+    "kind": "class",
+    "signature": "G = digraph(s, t, weights)",
+    "summary": "A directed graph object, with nodes, weighted edges and graph algorithms.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's Graph for undirected graphs; in MATLAB mode, an adjacency matrix with loops (shortest paths by Dijkstra's or Floyd's algorithm in a few lines).",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
     "name": "dlmread",
     "kind": "function",
     "signature": "M = dlmread(filename)",
@@ -287,6 +300,19 @@
     "alternative": "Ordinary arrays: there is no GPU, and none is needed.",
     "tags": [
       "parallel"
+    ]
+  },
+  {
+    "name": "graph",
+    "kind": "class",
+    "signature": "G = graph(s, t, weights)",
+    "summary": "An undirected graph object, with nodes, weighted edges and graph algorithms.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's Graph: shortest_path, distance, connected_components, degree and adjacency_matrix (no minimum spanning tree there). In MATLAB mode, an adjacency matrix or an edge list with loops: for a minimum spanning tree, sortrows of the edges by weight and add each one that joins two components (Kruskal).",
+    "tags": [
+      "graphs"
     ]
   },
   {
@@ -445,6 +471,19 @@
     ]
   },
   {
+    "name": "minspantree",
+    "kind": "function",
+    "signature": "T = minspantree(G)",
+    "summary": "A minimum spanning tree of a graph.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No graph objects in Sagebrush: sortrows of the edge list [s t w] by weight, then add each edge that joins two components (Kruskal), tracking components in a vector.",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
     "name": "normalize",
     "kind": "function",
     "signature": "N = normalize(A)",
@@ -510,19 +549,6 @@
     ]
   },
   {
-    "name": "perms",
-    "kind": "function",
-    "signature": "P = perms(v)",
-    "summary": "All permutations of a vector's elements, one per row.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "nchoosek(v, k) for combinations; in Python mode, itertools.permutations.",
-    "tags": [
-      "combinatorics"
-    ]
-  },
-  {
     "name": "quadprog",
     "kind": "function",
     "signature": "x = quadprog(H, f, A, b)",
@@ -533,6 +559,19 @@
     "alternative": "Without constraints and with H positive definite (the problem then has a unique minimum), x = -H \\ f. Constrained quadratic programs have no solver in Sagebrush; a penalty term with fminsearch only approximates them and can return an infeasible point.",
     "tags": [
       "optimization"
+    ]
+  },
+  {
+    "name": "rats",
+    "kind": "function",
+    "signature": "S = rats(X)",
+    "summary": "Numbers as text in the form of ratios of integers.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "[N, D] = rat(X), then sprintf('%d/%d', N, D) for each element.",
+    "tags": [
+      "numbers"
     ]
   },
   {
@@ -601,6 +640,19 @@
     ]
   },
   {
+    "name": "shortestpath",
+    "kind": "function",
+    "signature": "P = shortestpath(G, s, t)",
+    "summary": "A shortest path between two nodes of a graph.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's Graph(...).shortest_path(s, t, by_weight=True); in MATLAB mode, Dijkstra's algorithm on an adjacency matrix, with min over the unvisited nodes.",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
     "name": "smoothdata",
     "kind": "function",
     "signature": "B = smoothdata(A)",
@@ -662,7 +714,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Sage mode, which has symbolic computation: x = var('x'); solve(x^2 - 2 == 0, x). In MATLAB mode, roots for polynomials and fzero for one equation.",
+    "alternative": "Sage mode for symbolic work: x = var('x'); solve(x^2 - 2 == 0, x). For exact fractions of numbers in MATLAB mode, [N, D] = rat(X) gives X as N./D; roots for polynomials and fzero for one equation.",
     "tags": [
       "symbolic"
     ]

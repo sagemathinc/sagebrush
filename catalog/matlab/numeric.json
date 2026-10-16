@@ -181,5 +181,37 @@
     "tags": [
       "polynomials"
     ]
+  },
+  {
+    "name": "rat",
+    "kind": "function",
+    "signature": "[N, D] = rat(X)\n[N, D] = rat(X, tol)",
+    "summary": "Each element as a ratio of integers N./D, from its continued fraction, within a tolerance.",
+    "doc": "The expansion stops once abs(X - N./D) <= tol, by default 1e-6 times the sum of the absolute values of X's finite elements. D is positive. Inf is 1/0 and NaN is 0/0. Exact rational arithmetic is Sage mode's.",
+    "examples": [
+      {
+        "code": "[n, d] = rat(0.75)",
+        "expected": "\nn =\n\n     3\n\n\nd =\n\n     4\n\n"
+      },
+      {
+        "code": "[n, d] = rat(pi)",
+        "expected": "\nn =\n\n   355\n\n\nd =\n\n   113\n\n"
+      },
+      {
+        "code": "[n, d] = rat([1/4 2/5])",
+        "expected": "\nn =\n\n     1     2\n\n\nd =\n\n     4     5\n\n"
+      }
+    ],
+    "differs": [
+      "The one-output form, the continued fraction as text, is refused: use [N, D] = rat(X)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "rats",
+      "fix"
+    ],
+    "tags": [
+      "numbers"
+    ]
   }
 ]
