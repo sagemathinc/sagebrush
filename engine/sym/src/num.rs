@@ -444,7 +444,8 @@ impl Num {
                     format!("{} + {}", im, Num::rat(a.clone()).latex())
                 }
             }
-            Num::Float(..) => self.sage_str().replace("*I", " i"),
+            // (2.00000000000000 - 3.00000000000000i, as Sage)
+            Num::Float(..) => self.sage_str().replace("*I", "i"),
         }
     }
 }
