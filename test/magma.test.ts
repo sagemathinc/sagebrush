@@ -737,6 +737,54 @@ test("a rational with huge parts made a real is refused in words, before any dec
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("integer intrinsics refuse arguments as Magma does, in its words, not with a plausible answer or Python's error", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [input, intrinsic, Magma 2.18's message] (its caret is at the call, which Sagebrush doesn't say yet)
+  const cases: [string, string, string][] = [
+    ["NextPrime(-5);", "NextPrime", "Argument 1 (-5) should be >= 0"],
+    ["PreviousPrime(2);", "PreviousPrime", "Argument 1 (2) should be >= 3"],
+    ["PrimesUpTo(0);", "PrimesUpTo", "Limit must be positive"],
+    ["PrimesInInterval(0, 10);", "PrimesInInterval", "Lower limit must be positive"],
+    ["PrimesInInterval(10, 5);", "PrimesInInterval", "Upper limit < Lower Limit !"],
+    ["NthPrime(-1);", "NthPrime", "Argument 1 (-1) should be >= 0"],
+    ["Factorization(0);", "Factorization", "Argument 1 is not non-zero"],
+    ["Factorization(7/2);", "Factorization", "Bad argument types\nArgument types given: FldRatElt"],
+    ["Divisors(-12);", "Divisors", "Argument 1 (-12) should be >= 1"],
+    ["PrimeDivisors(0);", "PrimeDivisors", "Argument 1 is not non-zero"],
+    ["NumberOfDivisors(0);", "NumberOfDivisors", "Argument 1 is not positive"],
+    ["SumOfDivisors(-12);", "SumOfDivisors", "Argument 1 is not positive"],
+    ["MoebiusMu(0);", "MoebiusMu", "Argument 1 (0) should be >= 1"],
+    ["IsPrimePower(1);", "IsPrimePower", "Argument 1 (1) should be >= 2"],
+    ["Gcd(12, 18, 8);", "Gcd", "Bad argument types\nArgument types given: RngIntElt, RngIntElt, RngIntElt"],
+    ["Lcm(4, 6, 10);", "Lcm", "Bad argument types\nArgument types given: RngIntElt, RngIntElt, RngIntElt"],
+    ["Modexp(2, 10, 1);", "Modexp", "Argument 3 (1) should be >= 2"],
+    ["Modexp(2, 3, -7);", "Modexp", "Argument 3 (-7) should be >= 2"],
+    ["Modinv(3, -7);", "Modinv", "Argument 2 (-7) should be >= 1"],
+    ["Modinv(2, 4);", "Modinv", "Argument 1 is not a unit mod argument 2"],
+    ["Factorial(-1);", "Factorial", "Argument 1 (-1) should be >= 0"],
+    ["EulerPhi(0);", "EulerPhi", "Argument 1 is not positive"],
+    ["Isqrt(-1);", "Isqrt", "Argument 1 is not non-negative"],
+    ["Seqint([1, -1]);", "Seqint", "Sequence digit 2 should be >= 0 and < 10"],
+    ["ChineseRemainderTheorem([1, 2], [0, 5]);", "ChineseRemainderTheorem", "Element of second argument (moduli M) is zero"],
+    ["Valuation(24, 4);", "Valuation", "Argument 2 (4) should be prime"],
+    ["Valuation(24, -2);", "Valuation", "Argument 2 is not positive"],
+    ["Max([]);", "Max", "Argument 1 is not non-empty"],
+    ["Minimum([]);", "Minimum", "Argument 1 is not non-empty"],
+    ["StringToInteger(\"12a\");", "StringToInteger", "String \"12a\" does not represent an number in base 10"],
+    ["StringToInteger(\"1_2\");", "StringToInteger", "String \"1_2\" does not represent an number in base 10"],
+    ["StringToInteger(\"12\", 37);", "StringToInteger", "Argument 2 (37) should be in the range [2 .. 36]"],
+  ];
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
+    { input: cases.map((c) => c[0]).join("\n") + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  // (Magma wraps a long message at 80 columns; compared unwrapped)
+  const flat = out.replace(/ ?\n(?!>>|Runtime|Argument types|\n|end)/g, " ");
+  for (const [src, name, said] of cases)
+    assert.ok(flat.includes(`Runtime error in '${name}': ${said}\n`), `${src}\n${out}`);
+  assert.doesNotMatch(out, /Error:|Traceback|UserWarning/);
+  assert.match(out, /\nend\n$/);
+});
+
 test("a real field of a huge precision is refused in words before any of its numbers is made (HARD-762-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
