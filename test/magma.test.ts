@@ -317,6 +317,69 @@ test("records nested deep or sharing their parts are bounded when copied too (HA
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("index selections are admitted before they are taken, and a long chain of indexes is refused in words (HARD-A57-1, HARD-A57-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
+  const t0 = Date.now();
+  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1]; #T;\n');
+  assert.equal(sel.signal, null, sel.stderr);
+  const flat = sel.stdout.replace(/\s+/g, " ");
+  assert.match(flat, /a selection of more than 1000000 elements is not supported yet/);
+  assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
+  assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
+  assert.match(sel.stdout, /\n1000000\n$/);
+  assert.ok(Date.now() - t0 < 30000);
+  // 5000 links: refused before running; 64 still work
+  const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\n");
+  assert.doesNotMatch(long.stdout + long.stderr, /RecursionError|Traceback/);
+  assert.match(long.stdout, /User error: a chain of more than 64 calls or indexes is not supported yet/);
+  assert.match(long.stdout, /\n1\n$/);
+  const ok = run("x := 7; for i in [1..64] do x := [x]; end for;\nx" + "[1]".repeat(64) + ";\n");
+  assert.equal(ok.stdout, "7\n");
+});
+
+test("a selection keeps its source's universe, so what doesn't belong is refused later (CORR-927-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: 'S := {@2,5@}; T := S[[]]; Include(~T, 1/2);\nA := [2/3]; A[3] := 5/4; B := A[[]]; Append(~B, "x");\nC := [2,5]; D := C[[1]]; Append(~D, 1/2);\n1;\n', encoding: "utf8", timeout: 60000 });
+  const flat = r.stdout.replace(/\s+/g, " ");
+  // (refused; Magma's words here are "Rational argument is not a whole
+  // integer", Sagebrush's "Illegal coercion": a follow-up of Include's)
+  assert.match(flat, /Runtime error in 'Include': /, r.stdout);
+  assert.equal((flat.match(/Runtime error in 'Append': Cannot coerce element into the universe/g) ?? []).length, 2, r.stdout);
+  assert.match(r.stdout, /\n1\n$/);
+});
+
+test("a selection's inferred universe is found once per source, not per selection (HARD-927-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  // 200000 elements, the rational last; 300 selections; and Magma's rule
+  // that the inferred universe is fixed when the sequence is made and only
+  // widens: K keeps the rationals after K[1] := 4, and after Remove
+  const r = spawnSync(process.execPath, [cli, "--magma"], {
+    input: "S := [1..200000] cat [1/2]; for i in [1..300] do T := S[[1]]; end for; Universe(T);\nI := [1..200000]; for i in [1..300] do T := I[[1]]; end for; Universe(T);\nK := [2/3, 5]; K[1] := 4; Universe(K[[]]);\nM := [2/3, 5]; Remove(~M, 1); Universe(M[[]]);\nL := [2, 5]; L[4] := 3; Universe(L[[]]);\n",
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  assert.equal(r.stdout, "Rational Field\nInteger Ring\nRational Field\nRational Field\nInteger Ring\n", r.stderr);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("Append into a fixed universe refuses what doesn't go in, a range's too (CORR-D689-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: "I := [2,5]; Append(~I, 1/2);\nI;\nR := [1..3]; Append(~R, 1/2);\nR;\n", encoding: "utf8", timeout: 60000 });
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.equal((flat.match(/Runtime error in 'Append': Cannot coerce element into the universe/g) ?? []).length, 2, r.stdout);
+  assert.match(r.stdout, /\[ 2, 5 \]\n[\s\S]*\[ 1 \.\. 3 \]\n$/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
@@ -566,6 +629,80 @@ test("intrinsics refuse strings and booleans where Python would read \"7\" as 7 
     session("Append([\"a\"], \"b\");\nIndex(\"abcd\", \"cd\");\nPosition([true, false], false);\nReverse(\"abc\");\nSprint(true);\nType(\"a\");\nInclude({\"a\"}, \"b\") eq {\"a\", \"b\"};\nStringToInteger(\"12\");\nIntseq(9, 2);\nIntegerToString(255, 16);\n"),
     "[ a, b ]\n3\n2\ncba\ntrue\nMonStgElt\ntrue\n12\n[ 1, 0, 0, 1 ]\nFF\n",
   );
+});
+
+test("a value added to a collection is made like its elements, all the way down (CORR-400-1/2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const session = (src: string) =>
+    spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8", input: src }).stdout as string;
+  // Magma's refusals (checked against Magma); their caret is said at the call
+  const refused: [string, string][] = [
+    ["A := [<2,\"p\">]; Append(~A, <1/5,\"r\">);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["A := [<2,\"p\">]; Include(~A, <1/5,\"r\">);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["B := [{2,3}]; Include(~B, {7/2});", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["C := [{@ 4 @}]; Append(~C, {9/4});", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["E := [[[3]]]; Append(~E, [[2/7]]);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["E := [[[3]]]; Include(~E, [[2/7]]);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["H := [{* 2 *}]; Include(~H, {* 1/9 *});", "Runtime error in 'Include': Cannot lift element into sequence"],
+    // after leading holes, the first defined element fixes the universe
+    ["S := []; S[3] := \"x\"; Append(~S, 4);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["T := []; T[2] := <1,\"a\">; Include(~T, <2,3>);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    // a child emptied of its elements keeps its universe (CORR-9348-FU1)
+    ["Z := [[\"q\"]]; Remove(~Z[1], 1); Append(~Z, [3]);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["K := GF(11); Af := [K|4,6]; Append(~Af, 1/11);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    // an empty selection keeps the universe of what it was selected from
+    ["Ss := [<2/3,\"q\">]; Ss[1] := <4,\"r\">; W := Ss[[]]; Append(~W, <5,6>);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+  ];
+  // (each refusal is an error, and the session goes on to the next one;
+  // a refused Append changes nothing)
+  const out = session(refused.map(([src]) => src).join("\n") + "\nA;\n");
+  for (const [src, msg] of refused) assert.ok(out.includes(msg), `${src}\n${out}`);
+  assert.match(out, /\[ <2, "p"> \]\n$/);
+  // elements Sagebrush knows no parent for: a value of another type is
+  // refused in words, never written unchecked
+  const f = session("f := map< {1} -> {1} | x :-> x >; A := [f]; A[1] := 3;\nA;\n");
+  assert.match(f, /not supported yet/);
+  assert.doesNotMatch(f, /\[ 3 \]/);
+});
+
+test("writes after a million leading holes don't each scan them (HARD-400-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = "S := []; S[1000000] := \"x\";\nfor j in [1..1000] do S[1000000+j] := \"y\"; end for; print #S;\n";
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma", "-c", src], { encoding: "utf8", timeout: 15000 });
+  assert.equal(r.stdout, "1001000\n", r.stderr);
+  assert.ok(Date.now() - t0 < 15000);
+});
+
+test("admitting a value refuses past 100 deep in words, whatever bounds its callers have (HARD-934-1)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const f = join(mkdtempSync(join(tmpdir(), "magma-like-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m",
+    "def deep(n, mk):",
+    "    x = 1",
+    "    for _ in range(n):",
+    "        x = mk(x)",
+    "    return x",
+    "no = lambda: m.MagmaError('refused')",
+    "for mk in (lambda x: m.MSeq([x]), lambda x: m.MTuple([x])):",
+    "    for n in (98, 99, 5000):",
+    "        try:",
+    "            m._like(mk(deep(n, mk)), mk(deep(n, mk)), no)",
+    "            print(n, 'admitted')",
+    "        except m.MagmaError as e:",
+    "            print(n, e)",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: 60000 });
+  // (an element is at level 2: 99 sequences around 1 make it 100 deep)
+  const said = "a value nested more than 100 deep is not supported yet";
+  assert.equal(r.stdout, `98 admitted\n99 ${said}\n5000 ${said}\n`.repeat(2), r.stderr);
 });
 
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {

@@ -815,7 +815,8 @@ class Parser {
       this.declareGlobal(t.py, p0.kind === "idx" ? p0.tok : ({ line: p0.line, col: p0.col } as Tok), "p");
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
       const path = t.path!;
-      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code})`)).join(", ");
+      // (an index's "[": where an assignment Magma refuses is said, CORR-D689-1)
+      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code}, (${p.tok.line}, ${p.tok.col}))`)).join(", ");
       this.emit(`${t.py} = _m._assign_path(${t.py}, [${enc}], ${val})`);
     }
   }
@@ -1310,7 +1311,14 @@ class Parser {
 
   postfix(): string {
     let e = this.primary();
+    let chainAt = ""; // the first "[" of consecutive indexes
+    let links = 0;
     while (true) {
+      // a chain of calls and indexes nests its translation: past a limit it
+      // is refused in words, before any host limit (HARD-A57-2)
+      if ((this.at("(") || this.at("[")) && ++links > MAX_CHAIN) {
+        this.reject(this.peek(), `a chain of more than ${MAX_CHAIN} calls or indexes is not supported yet`);
+      }
       if (this.at("(")) {
         this.next();
         const a = this.args(")");
@@ -1326,19 +1334,24 @@ class Parser {
           this.calls.set(e, call);
         }
       } else if (this.at("[")) {
-        this.next();
+        // (its errors are said at the "[", as Magma does: in c[i][j], at
+        // the first one)
+        const lb = this.next();
+        if (!(chainAt && this.toks[this.i - 2]?.v === "]")) chainAt = `(${lb.line}, ${lb.col})`;
+        const at = chainAt;
         const idx = [this.expr()];
         if (this.eat("..")) {
           // L[a..b]: a subsequence
           const b = this.expr();
           const by = this.eat("by") ? this.expr() : "1";
           this.expect("]");
-          e = `_m._index(${e}, _m._range(${idx[0]}, ${b}, ${by}, "["))`;
+          e = `_m._index(${e}, _m._range(${idx[0]}, ${b}, ${by}, "["), ${at})`;
           continue;
         }
         while (this.eat(",")) idx.push(this.expr());
         this.expect("]");
-        e = idx.length === 1 ? `_m._index(${e}, ${idx[0]})` : `_m._index(${e}, _m.MTuple([${idx.join(", ")}]))`;
+        // (S[i, j]: its own helper, as S[<i, j>], a tuple index, is refused)
+        e = idx.length === 1 ? `_m._index(${e}, ${idx[0]}, ${at})` : `_m._index_multi(${e}, [${idx.join(", ")}], ${at})`;
       } else if (this.at(".") && this.peek(1).t === "num") {
         this.next();
         e = `_m._gen(${e}, ${this.next().v})`;
@@ -1723,6 +1736,9 @@ class Parser {
     return `${ctor}([${elems.join(", ")}], universe=${universe})`;
   }
 }
+
+/** The most calls and indexes one chain such as S[1][2](x) may have. */
+const MAX_CHAIN = 64;
 
 /** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
 type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok };

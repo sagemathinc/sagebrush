@@ -395,11 +395,14 @@ def _define_top(g, name, f):
 class MSeq(list):
     """A Magma sequence: 1-based, printed [ 1, 2, 3 ]."""
 
-    __slots__ = ("universe", "sample")
+    __slots__ = ("universe", "sample", "_inf", "_wit")
 
     def __init__(self, it=(), universe=None, sample=None):
         list.__init__(self, it)
         self.universe = universe
+        # (_inf, the universe Magma infers for it, and _wit, its first
+        # defined element, are set only once known: unset, they cost a
+        # sequence nothing, as a large copy needs, HARD-756-1)
         # an element that stands for the universe when none is declared, kept
         # when the sequence is emptied (Magma's sequence keeps its universe)
         self.sample = sample if sample is not None or not len(self) else self[0]
@@ -446,7 +449,7 @@ class MRange:
 class MSet:
     """A Magma set (also indexed sets {@ @} and multisets {* *})."""
 
-    __slots__ = ("items", "keys", "kind", "universe", "range")
+    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf")
 
     def __init__(self, it=(), kind="set", universe=None):
         self.items, self.keys, self.kind, self.universe, self.range = [], {}, kind, universe, None
@@ -627,7 +630,10 @@ def _seq(items, universe=None):
         _ff_universe(items, "[ ... ]")
     else:
         items = _into_universe(items, universe, "seq")
-    return MSeq(items, universe)
+    t = MSeq(items, universe)
+    if universe is None:
+        t._inf = _infer_from(items)  # (Magma fixes it as the sequence is made)
+    return t
 
 
 def _set_universe(items):
@@ -641,15 +647,24 @@ def _set_universe(items):
 
 
 def _set(items, universe=None):
-    return MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
+    m = MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
+    if universe is None:
+        m._inf = _infer_from(m.items)
+    return m
 
 
 def _iset(items, universe=None):
-    return MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
+    m = MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
+    if universe is None:
+        m._inf = _infer_from(m.items)
+    return m
 
 
 def _mset(items, universe=None):
-    return MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
+    m = MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
+    if universe is None:
+        m._inf = _infer_from(m.items)
+    return m
 
 
 def _still_range(v):
@@ -793,9 +808,12 @@ def _own(v, name=None, depth=0):
         if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
             raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
     if isinstance(v, MSeq):
-        return MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
+        t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
+        _keep_inf(t, v, v[0] if len(v) else _UNDEF)
+        return t
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
+        _keep_inf(s, v, v.items[0] if v.items else _UNDEF)
         s.items = [_own(x, None, depth + 1) for x in v.items]
         s.keys = {k: (list(val) if v.kind == "multi" else val) for k, val in v.keys.items()}
         s.range = v.range
@@ -805,6 +823,34 @@ def _own(v, name=None, depth=0):
     if isinstance(v, MRec):
         return v._copy(depth)
     return v
+
+
+def _keep_inf(t, v, first):
+    """The copy t keeps what v knows of its universe: its first defined
+    element (_wit) whenever it was looked for, since it stands for the
+    universe fixed for the elements when the present ones may not (a
+    rational part of a tuple replaced by an integer, CORR-47D-1); its
+    inferred universe (_inf) where finding it again would cost more than
+    a look at its first element: the integers or rationals (a scan), and
+    anything after leading holes.  (_wit is set only by a write, so a
+    large copy of a value made by literals keeps no attributes and fits
+    its heap, HARD-756-1.)"""
+    inf = getattr(v, "_inf", None)
+    if inf is not None and (inf is not _NOINF or first is _UNDEF):
+        t._inf = inf
+    wit = getattr(v, "_wit", None)
+    if wit is not None:
+        t._wit = wit
+
+
+def _keep_wit(t, s):
+    """t, a selection from s, keeping the element that stands for s's
+    universe (CORR-765-2: S[1..1] after S[1] := <4,"r"> in a sequence of
+    <rational, string> tuples still takes <1/3,"s">)."""
+    wit = getattr(s, "_wit", None)
+    if wit is not None:
+        t._wit = wit
+    return t
 
 
 def _iter(s):
@@ -832,28 +878,371 @@ def _check_index(n, i):
         raise MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (abs(i), i, n) if i < 1 else "Sequence element %d not defined" % i)
 
 
-def _index(s, i):
+def _read_index(n, i, pos, seq):
+    """s[i]'s checks, in Magma's words at the "[" (checked against Magma):
+    an index outside [1 .. n] is "Index 1 (i) should be in the range
+    [1 .. n]", but any index of an empty sequence is "Sequence element i
+    not defined"."""
+    if not isinstance(i, int) or isinstance(i, bool):
+        raise MagmaError("Bad argument types", "'[]'", True, pos)
+    if i < 1 or i > n:
+        if seq and n == 0:
+            raise MagmaError("Sequence element %d not defined" % i, "'[]'", True, pos)
+        raise MagmaError("Index 1 (%d) should be in the range [1 .. %d]" % (i, n), "'[]'", True, pos)
+
+
+def _int_index(j):
+    return isinstance(j, int) and not isinstance(j, bool)
+
+
+def _first_outside(r, n):
+    """The first place k (1-based) and member j of the range r outside
+    [1 .. n], from its ends without walking it (HARD-A57-1), or None."""
+    size = r.size()
+    if size == 0:
+        return None
+    if not 1 <= r.a <= n:
+        return 1, r.a
+    last = r.a + (size - 1) * r.c
+    if 1 <= last <= n:
+        return None
+    # the first member past n (going up) or below 1 (going down)
+    k = (n - r.a) // r.c + 2 if r.c > 0 else (r.a - 1) // (-r.c) + 2
+    return k, r.a + (k - 1) * r.c
+
+
+def _admit_selection(i, n, pos, outside):
+    """An index list's checks before any element is taken: a range's
+    members outside [1 .. n] from its ends (outside(k, j) says it), then
+    the result's size against _COLLECT_MAX (HARD-A57-1)."""
+    if isinstance(i, MRange):
+        bad = _first_outside(i, n)
+        if bad is not None:
+            raise outside(*bad)
+        if i.size() > _COLLECT_MAX:
+            raise MagmaError("a selection of more than %d elements is not supported yet" % _COLLECT_MAX, "'[]'", True, pos)
+
+
+_NOINF = object()  # (an inferred universe that is neither the integers nor the rationals)
+
+
+def _infer_from(items):
+    """The universe Magma infers for these elements: the integers, the
+    rationals with a rational among them, _NOINF for anything else, None for
+    none at all (undefined elements don't count)."""
+    u, frac = None, False
+    for x in items:
+        if x is _UNDEF:
+            continue
+        if isinstance(x, bool) or not isinstance(x, (int, _Fraction)):
+            return _NOINF
+        u = _ZZ
+        frac = frac or isinstance(x, _Fraction)
+    return _QQ if frac else u
+
+
+def _settle(s):
+    """s has no known universe yet (it was empty, or only undefined): its
+    universe is fixed from its first defined elements, as Magma fixes it,
+    even after holes (CORR-BCFD-2).  Once known it never changes: Magma
+    doesn't widen it, it refuses what doesn't go in (CORR-D689-1).  (Found
+    once: while nothing is defined a scan finds only holes.)"""
+    if getattr(s, "_inf", None) is None:
+        s._inf = _infer_from(s.items if isinstance(s, MSet) else s)
+
+
+def _admit_element(obj, val, pos):
+    """val as an element of the sequence obj, coerced into obj's fixed
+    universe, or refused before anything is written ("Sequence mutation
+    failed", CORR-D689-1).  A sequence of sequences: its element universe
+    is a sequence universe with its own universe, so a whole new element
+    must be a sequence whose elements go into the other elements' universe,
+    and it takes that universe (CORR-BCFD-3)."""
+    refuse = lambda: MagmaError("Sequence mutation failed", ":=", False, pos)
+    _settle(obj)  # (one made elsewhere: its universe fixed from what it holds)
+    w = _universe(obj, True)
+    # (the universe fixed for it: declared, a finite field too, or inferred)
+    u = w[1] if w is not None and w[0] == "struct" else obj.universe
+    if u is not None:
+        y = _coerce_struct(val, u)
+        if y is _NOCOERCE:
+            raise refuse()
+        if y is not None:
+            return y
+    # (its first defined element says what its elements are: Magma fixed
+    # them all in one universe)
+    c = _first_defined(obj)
+    if c is None and u is not None:
+        raise MagmaError("an element of a sequence over %s is not supported yet" % _str(u))
+    return val if c is None else _like(c, val, refuse)
+
+
+def _coerce_struct(x, u):
+    """x coerced into the structure u, as Magma coerces into a fixed
+    universe: _NOCOERCE where it can't, None where Sagebrush doesn't know
+    u's elements (the caller then refuses, CORR-9348-1).  A finite field
+    takes integers, rationals prime to p and its subfields' elements
+    (_ff_into); the integers take a prime field's elements, the rationals
+    none (as Magma does, CORR-A6D-1)."""
+    if isinstance(u, _MFinField):
+        y = _ff_into(u, x)
+        return _NOCOERCE if y is None else y
+    if (u is _ZZ or u is _QQ) and _is_ff(x):
+        W = _ffwrap(x.parent())
+        if u is _ZZ and W.n == 1:
+            return int(x)
+        if u is _ZZ and x ** W.p == x:
+            return int(x.list()[0])
+        return _NOCOERCE
+    d = _udesc(u)
+    return None if d is None else _into(x, d, u)
+
+
+def _elt_into(x, c):
+    """x as an element of the parent of the element c, or _NOCOERCE; None
+    where Sagebrush doesn't know how Magma coerces into it."""
+    if _is_ff(c):
+        return _coerce_struct(x, _ffwrap(c.parent()))
+    d = _desc(c)
+    if d is not None and d[0] != "elt":
+        if (d[0] == "Z" or d[0] == "Q") and _is_ff(x):
+            return _coerce_struct(x, _ZZ if d[0] == "Z" else _QQ)
+        return _into(x, d, c.parent() if isinstance(c, _sp.Polynomial) else None)
+    if type(x) is type(c) and (not hasattr(c, "parent") or x.parent() is c.parent()):
+        return x
+    return None
+
+
+def _first_defined(s):
+    """The first defined element of the sequence s, which stands for the
+    universe Magma fixed for its elements; found once and kept, since that
+    universe never changes (HARD-400-1: a write after many holes doesn't
+    scan them each time).  None while s has none."""
+    w = getattr(s, "_wit", None)
+    if w is None:
+        w = next((x for x in s if x is not _UNDEF), None)
+        s._wit = w
+    return w
+
+
+def _fixed_universe(c):
+    """The universe fixed for the collection c, declared or inferred (the
+    integers or the rationals), or None."""
+    if c.universe is not None:
+        return c.universe
+    inf = getattr(c, "_inf", None)
+    return inf if inf is _ZZ or inf is _QQ else None
+
+
+_LIKE_DEPTH_MAX = 100
+
+
+def _like(c, val, refuse, depth=2):
+    """val made an element of the same universe as c (the first defined
+    element of the collection val goes into), all the way down, or
+    refused: Magma fixed one universe for the collection's elements
+    (CORR-BCFD-3, CORR-400-1, CORR-400-2).
+    - c a sequence or a set of any kind: val a collection of c's kind (a
+      set becomes c's kind of set), its elements coerced into c's fixed
+      universe or, when that isn't a known structure, each made like c's
+      first defined element; it keeps c's declared and fixed universe;
+    - c a tuple: val a tuple of its length, each part made like c's;
+    - c a scalar: val coerced into c's parent when Sagebrush knows it, else
+      of c's own type; anything else is refused as not supported (Magma
+      may convert it), never written unchecked.
+    depth is val's level in the value it goes into (an element of a
+    sequence is at level 2): past 100 it is refused in words, before the
+    host's recursion limit, whatever bounds the caller has (HARD-934-1)."""
+    if depth > _LIKE_DEPTH_MAX and isinstance(val, (MSeq, MSet, MTuple, MRange)):
+        raise MagmaError("a value nested more than %d deep is not supported yet" % _LIKE_DEPTH_MAX)
+    if isinstance(c, (MSeq, MSet)):
+        if not isinstance(val, (MSeq, MRange) if isinstance(c, MSeq) else MSet):
+            raise refuse()
+        if isinstance(c, MSet) and val.kind == "multi" and c.kind != "multi":
+            raise refuse()  # (a multiset doesn't go into a set's universe)
+        if isinstance(val, MRange) and val.size() > _COLLECT_MAX:
+            # (a range becomes a sequence of its elements: bounded first)
+            raise MagmaError("a sequence of more than %d elements is not supported yet" % _COLLECT_MAX)
+        u = _fixed_universe(c)
+        known = u is not None and (_udesc(u) is not None or isinstance(u, _MFinField))
+        # (else the elements are made like c's first defined element; an
+        # emptied c keeps its sample, CORR-9348-FU1)
+        inner = None
+        if not known:
+            inner = _first_defined(c) if isinstance(c, MSeq) else next(iter(c.items), None)
+            if inner is None and isinstance(c, MSeq):
+                inner = c.sample
+        out = []
+        for x in list(val):  # (a multiset's elements as often as they occur)
+            if x is _UNDEF:
+                out.append(x)
+            elif known:
+                y = _coerce_struct(x, u)
+                if y is _NOCOERCE:
+                    raise refuse()
+                out.append(y)
+            elif inner is not None:
+                out.append(_like(inner, x, refuse, depth + 1))
+            elif u is not None:
+                raise MagmaError("an element of a collection over %s is not supported yet" % _str(u))
+            else:
+                out.append(x)  # (c empty, with no universe: anything goes in)
+        if isinstance(c, MSeq):
+            t = MSeq(out, c.universe, getattr(c, "sample", None))
+        else:
+            t = MSet(out, c.kind, c.universe)
+        inf = getattr(c, "_inf", None)
+        if inf is not None:
+            t._inf = inf
+        return t
+    if isinstance(c, MTuple):
+        if not isinstance(val, MTuple) or len(val) != len(c):
+            raise refuse()
+        return MTuple([_like(p, q, refuse, depth + 1) for p, q in zip(c, val)])
+    if isinstance(val, (MSeq, MSet, MTuple, MRange)):
+        raise refuse()
+    y = _elt_into(val, c)
+    if y is _NOCOERCE:
+        raise refuse()
+    if y is not None:
+        return y
+    raise MagmaError("putting a %s among elements of type %s is not supported yet" % (_ext_type(val), _ext_type(c)))
+
+
+def _as_seq(s):
+    """A sequence copy of s, keeping its declared universe, sample and fixed
+    universe (a range's being the integers), for the intrinsics that make a
+    new sequence from an old one (CORR-D689-2)."""
+    t = MSeq(s, getattr(s, "universe", None), getattr(s, "sample", None))
+    inf = _ZZ if isinstance(s, MRange) else getattr(s, "_inf", None)
+    if inf is not None:
+        t._inf = inf
+    wit = getattr(s, "_wit", None)
+    if wit is not None:
+        t._wit = wit  # (CORR-47D-1)
+    return t
+
+
+def _inferred(s, items):
+    """s's inferred universe: kept on s from when it was made (Magma fixes
+    it then, widening only), or found once from its elements and kept
+    (HARD-927-1: a selection doesn't scan s each time)."""
+    u = getattr(s, "_inf", None)
+    if u is None:
+        u = _infer_from(items)
+        if u is None:
+            return None
+        s._inf = u
+    return None if u is _NOINF else u
+
+
+def _selection_universe(s, items):
+    """The universe a selection from s keeps: s's declared one, or the one
+    Magma infers for s, the integers, or the rationals with a rational among
+    them (CORR-451-1, CORR-927-1; Universe of {@ 2, 5/2 @}[[1]] is the
+    Rational Field, of {@ 2, 5 @}[[]] the Integer Ring)."""
+    u = getattr(s, "universe", None)
+    if u is not None:
+        return u
+    if isinstance(s, MRange):
+        return _ZZ
+    return _inferred(s, items)
+
+
+def _index(s, i, pos=None):
+    """s[i], with Magma's rules and words for each kind of s (checked
+    against Magma): an integer index; a sequence of them (a range too)
+    for a sequence, a string or an indexed set; never a tuple (s[i, j] is
+    _index_multi's)."""
+    bad = lambda: MagmaError("Bad argument types", "'[]'", True, pos)
     if isinstance(s, (MSeq, MRange, MTuple, list)):
         if isinstance(i, (MSeq, MRange)):
-            return MSeq(_index(s, j) for j in i)
-        _check_index(len(s), i)
+            # S[[i, j, ...]], S[a..b]: a sequence (not of a tuple); an
+            # index outside S, or an undefined element, is said without it,
+            # but S[a..b] (step 1) keeps undefined elements, except at the
+            # end (a sequence ends at its last one)
+            if isinstance(s, MTuple):
+                raise bad()
+            n = s.size() if isinstance(s, MRange) else len(s)
+            universe = _selection_universe(s, s) if isinstance(s, (MSeq, MRange)) else None
+            if n == 0:
+                if (i.size() if isinstance(i, MRange) else len(i)) == 0:
+                    return _keep_wit(MSeq([], universe), s)
+                if getattr(s, "universe", None) is None and isinstance(s, MSeq):
+                    # (only an untyped empty sequence: for an empty range or
+                    # an empty sequence with a universe, the selection is
+                    # outside it, CORR-451-2)
+                    raise MagmaError("Illegal null sequence", "'[]'", True, pos)
+            _admit_selection(i, n, pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
+            holes = isinstance(i, MRange) and i.c == 1
+            out = []
+            for j in i:
+                if not _int_index(j):
+                    raise bad()
+                if not 1 <= j <= n or (s[j - 1] is _UNDEF and not holes):
+                    raise MagmaError("Sequence element not defined", "'[]'", True, pos)
+                out.append(s[j - 1])
+            while out and out[-1] is _UNDEF:
+                out.pop()
+            return _keep_wit(MSeq(out, universe), s)
+        # (any index of an untyped empty sequence is "not defined"; a typed
+        # one's is out of its range)
+        _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, isinstance(s, (MSeq, list)) and getattr(s, "universe", None) is None)
         v = s[i - 1]
         if v is _UNDEF:
-            raise MagmaError("Sequence element %d not defined" % i)
+            raise MagmaError("Sequence element %d not defined" % i, "'[]'", True, pos)
         return v
     if isinstance(s, str):
         if isinstance(i, (MSeq, MRange)):
-            return "".join(_index(s, j) for j in i)
-        _check_index(len(s), i)
+            # (an index outside the string is named by its place in the list)
+            _admit_selection(i, len(s), pos, lambda k, j: MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (k, j, len(s)), "'[]'", True, pos))
+            out = []
+            for k, j in enumerate(i):
+                if not _int_index(j):
+                    raise bad()
+                if not 1 <= j <= len(s):
+                    raise MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (k + 1, j, len(s)), "'[]'", True, pos)
+                out.append(s[j - 1])
+            return "".join(out)
+        _read_index(len(s), i, pos, False)
         return s[i - 1]
     if isinstance(s, MSet) and s.kind == "indexed":
-        _check_index(len(s.items), i)
+        if isinstance(i, (MSeq, MRange)):
+            if not s.items and s.universe is None and (i.size() if isinstance(i, MRange) else len(i)):
+                raise MagmaError("Illegal null indexed set", "'[]'", True, pos)
+            _admit_selection(i, len(s.items), pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
+            out = []
+            for j in i:
+                if not _int_index(j):
+                    raise bad()
+                if not 1 <= j <= len(s.items):
+                    raise MagmaError("Sequence element not defined", "'[]'", True, pos)
+                out.append(s.items[j - 1])
+            return MSet(out, "indexed", _selection_universe(s, s.items))
+        if not _int_index(i):
+            raise bad()
+        if not s.items and s.universe is None:
+            raise MagmaError("Illegal null indexed set", "'[]'", True, pos)
+        _read_index(len(s.items), i, pos, False)
         return s.items[i - 1]
     if hasattr(s, "_magma_index"):
         return s._magma_index(i)
     if callable(s):
         return s(i)
     raise MagmaError("cannot index %s" % _str(s))
+
+
+def _index_multi(s, idx, pos=None):
+    """S[i, j, ...] as written: for a sequence, string, tuple or indexed set
+    S[i][j]...; an element that can't be indexed is Magma's "Bad argument
+    types".  Anything else (a matrix) takes the indices together."""
+    if not isinstance(s, (MSeq, MRange, MTuple, list, str, MSet)):
+        return _index(s, MTuple(idx), pos)
+    for j in idx:
+        if not isinstance(s, (MSeq, MRange, MTuple, list, str)) and not (isinstance(s, MSet) and s.kind == "indexed"):
+            raise MagmaError("Bad argument types", "'[]'", True, pos)
+        s = _index(s, j, pos)
+    return s
 
 
 _UNDEF = object()
@@ -875,15 +1264,33 @@ def _assign_path(obj, path, val):
             return obj
         raise _no_attributes(i, pos)
     if isinstance(obj, MRange):
-        obj = MSeq(obj)
+        obj = _as_seq(obj)
     if obj is None:
         obj = MSeq()
     if isinstance(obj, MSeq):
         if not isinstance(i, int) or i < 1:
             raise MagmaError("Index %s should be positive" % _str(i))
+        # (everything is checked, and the deeper parts assigned, before obj
+        # grows or changes: a refused write leaves the whole path as it
+        # was, CORR-BCFD-1)
+        if len(path) == 1:
+            new = val if val is _DELETE else _own(_admit_element(obj, val, pos))
+        else:
+            child = obj[i - 1] if i <= len(obj) else _UNDEF
+            if child is _UNDEF and path[1][0] == "idx":
+                # (an index into an element that isn't there: Magma's words)
+                empty = not len(obj) and obj.universe is None
+                raise MagmaError("Sequence mutation failed" if empty else "Bad indexed assign", ":=", False, pos)
+            try:
+                new = _assign_path(None if child is _UNDEF else child, path[1:], val)
+            except MagmaError as e:
+                if e.where == ":=" and pos is not None:
+                    e.pos = pos  # (said at the first "[", as Magma says it)
+                raise
         while len(obj) < i:
             obj.append(_UNDEF)
-        obj[i - 1] = _assign_path(obj[i - 1] if obj[i - 1] is not _UNDEF else None, path[1:], val)
+        obj[i - 1] = new
+        _settle(obj)
         return obj
     if isinstance(obj, MTuple):
         l = list(obj)
@@ -2195,7 +2602,7 @@ def _cmpne(a, b):
 _NOCOERCE = object()
 
 
-def _universe(s):
+def _universe(s, fixed=False):
     """What decides the universe of the sequence or set s: ("struct", u)
     for one made with a structure ([ Integers() | ]), ("elt", y) for a
     first element y, None when empty.  One element is looked at, not the
@@ -2203,13 +2610,23 @@ def _universe(s):
     u = getattr(s, "universe", None)
     if u is not None and _is_struct(u):
         return ("struct", u)
+    # (fixed: for what goes into s, the universe fixed when it was made,
+    # the integers or the rationals: what Magma coerces into, not the first
+    # element's, CORR-D689-2)
+    inf = getattr(s, "_inf", None)
+    if fixed and u is None and (inf is _ZZ or inf is _QQ):
+        return ("struct", inf)
     if isinstance(s, MRange):
-        return ("elt", s.a) if len(s) else None
+        return ("struct", _ZZ) if fixed else (("elt", s.a) if len(s) else None)
     if isinstance(s, MSet):
         return ("elt", s.items[0]) if s.items else None
     if len(s):
-        return ("elt", s[0])
+        y = s[0] if s[0] is not _UNDEF or not isinstance(s, MSeq) else _first_defined(s)
+        if y is not None:
+            return ("elt", y)
     sample = getattr(s, "sample", None)
+    if sample is None:
+        sample = getattr(s, "_wit", None)  # (an empty selection's, CORR-765-2)
     return ("elt", sample) if sample is not None else None
 
 
@@ -2789,7 +3206,8 @@ def _str1(v, indent, col, tail):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
         if not raw:
-            return o.strip() + c.strip(), False
+            # [] and {}, but {@ @} and {* *}, as Magma prints them
+            return o.strip() + c.strip() if isinstance(v, MSeq) or v.kind == "set" else o + c.strip(), False
         if all(_atomic(x) or x is _UNDEF for x in raw):
             items = _items(v)
             # the opening bracket, each item with its comma, and the closing
@@ -2806,7 +3224,8 @@ def _str1(v, indent, col, tail):
             return _flow(chunks, col, indent), True
         step = 0 if _SPRINT[0] is not None else 4
         pad = " " * (indent + step)
-        inner = [pad + _str(x, indent + step, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
+        # (an undefined element prints as undef, as in a one-line sequence)
+        inner = [pad + ("undef" + ("," if k < len(raw) - 1 else "") if x is _UNDEF else _str(x, indent + step, None, "," if k < len(raw) - 1 else "")) for k, x in enumerate(raw)]
         return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
         return v._str(indent), False
@@ -4077,8 +4496,9 @@ def IsPrimitive(x):
 
 def Append(s, x):
     x = _lift("Append", s, x, "Cannot coerce element into the universe")
-    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
+    s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
     s.append(x)
+    _settle(s)
     return s
 
 
@@ -4134,15 +4554,23 @@ def _into(x, d, ring):
     return x if dx == d else _NOCOERCE
 
 
+class _Refused(Exception):
+    """A value _like refused, for callers with their own error."""
+
+
 def _lift(name, s, x, cannot="Cannot lift element into sequence"):
     """x converted into the universe of s, for Include, Exclude, Append and
     Insert (the declared universe, else that of an element); Magma's
     errors if not."""
-    w = _universe(s)
+    w = _universe(s, True)
+    if isinstance(getattr(s, "universe", None), _MFinField):
+        w = ("struct", s.universe)  # (declared, and known to _coerce_struct)
     if w is None:
         return x
     if w[0] == "struct":
-        y = _into(x, _udesc(w[1]) or ("?",), w[1])
+        y = _coerce_struct(x, w[1])
+        if y is None:
+            y = _into(x, ("?",), w[1])
     else:
         e = w[1]
         if isinstance(e, MRec):
@@ -4157,7 +4585,12 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
                 raise MagmaError("No equality algorithm for sequence elements", "'%s'" % name)
             return x
         de = _desc(e)
-        if de is not None:
+        if _is_ff(e) or (_is_ff(x) and de in (("Z",), ("Q",))):
+            # (a finite field's elements: Magma's coercion, CORR-9348-1)
+            y = _elt_into(x, e)
+            if y is None:
+                y = _NOCOERCE
+        elif de is not None:
             y = _into(x, de, e.parent() if hasattr(e, "parent") and isinstance(e, _sp.Polynomial) else None)
         else:
             kx, ke = _eq_kind(x), _eq_kind(e)
@@ -4169,14 +4602,13 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
                 raise MagmaError(cannot, "'%s'" % name)
             if ke == "seq" and kx != "seq" and not len(e):
                 raise MagmaError("Sequence mutation failed", "'%s'" % name)
-            if kx in ("set", "mset") and ke in ("set", "mset") and ok:
-                y = MSet(list(x), e.kind)  # into the kind of set the elements are
-            elif kx == ke == "seq":
-                # a sequence goes in if its elements go into the element's universe
+            if ok and ke in ("set", "mset", "tup") or kx == ke == "seq":
+                # a collection goes in made like the elements, all the way
+                # down: into their kind of set, their universes (CORR-400-2)
                 try:
-                    y = MSeq([_lift(name, e, v) for v in x]) if len(e) else x
+                    y = _like(e, x, _Refused)
                     ok = True
-                except MagmaError:
+                except _Refused:
                     ok = False
             elif not (kx in ("set", "mset") and ke in ("set", "mset")):
                 y = x
@@ -4194,10 +4626,12 @@ def Include(s, x):
     if isinstance(s, MSet):
         t = _own(s)
         t.add(x)
+        _settle(t)
         return t
-    s = _own(MSeq(s))
+    s = _own(_as_seq(s))
     if not any(_cmpeq(x, y) for y in s):
         s.append(x)
+        _settle(s)
     return s
 
 
@@ -4207,7 +4641,7 @@ def Exclude(s, x):
         t = _own(s)
         t.remove(x)
         return t
-    s = _own(MSeq(s))
+    s = _own(_as_seq(s))
     for k, y in enumerate(s):
         if _cmpeq(x, y):
             del s[k]
@@ -4224,15 +4658,18 @@ def Remove(s, i):
 
 def Insert(s, i, x):
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
-    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
+    s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
     s.insert(i - 1, x)
+    _settle(s)
     return s
 
 
 def Reverse(s):
     if isinstance(s, str):
         return s[::-1]
-    return MSeq(reversed(list(s)), getattr(s, "universe", None), getattr(s, "sample", None))
+    t = _as_seq(s)
+    t.reverse()
+    return t
 
 
 class Perm(tuple):
@@ -4323,6 +4760,9 @@ def Universe(s):
     u = getattr(s, "universe", None)
     if u is not None:
         return u
+    inf = getattr(s, "_inf", None)
+    if inf is _ZZ or inf is _QQ:
+        return inf
     items = list(_iter(s))
     if not items:
         if isinstance(s, (MSeq, MRange)):
