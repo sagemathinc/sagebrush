@@ -6,7 +6,6 @@
 use crate::err::value_error;
 use crate::expr::*;
 use crate::num::Num;
-use sagebrush_bigint::BigInt;
 
 struct P<'a> {
     s: &'a [u8],
@@ -136,7 +135,7 @@ impl<'a> P<'a> {
             if t.contains('.') || t.contains('e') || t.contains('E') {
                 return float(t.parse::<f64>().unwrap_or_else(|_| value_error(format!("bad number {}", t))));
             }
-            return num(Num::big(t.parse::<BigInt>().unwrap()));
+            return num(Num::big(crate::api::parse_int(t).unwrap()));
         }
         if c.is_ascii_alphabetic() || c == b'_' {
             let st = self.i;
