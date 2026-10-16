@@ -259,6 +259,21 @@ fn last_term_negative(v: &Expr) -> bool {
     }
 }
 
+/// The most terms reduce_trig expands one product into.
+const MAX_REDUCE_TERMS: u64 = 1024;
+
+/// prod (m_u + 1) over the distinct arguments u of the factors.
+fn projected_terms(ws: &[(Wave, Expr)]) -> u64 {
+    let mut counts: Vec<(&Expr, u64)> = vec![];
+    for (_, u) in ws {
+        match counts.iter_mut().find(|(v, _)| *v == u) {
+            Some(c) => c.1 += 1,
+            None => counts.push((u, 1)),
+        }
+    }
+    counts.iter().fold(1u64, |p, (_, m)| p.saturating_mul(m + 1))
+}
+
 fn reduce_product(e: &Expr) -> Reduce {
     let fs = match &e.kind {
         Kind::Mul(v) => v.clone(),
@@ -290,6 +305,18 @@ fn reduce_product(e: &Expr) -> Reduce {
     }
     if trig.len() + hyp.len() <= 1 {
         return Reduce::NoWaves;
+    }
+    // the expansion has at most prod (m_u + 1) terms over the distinct
+    // arguments u (m_u factors each), trig times hyperbolic: refused past
+    // MAX_REDUCE_TERMS before expanding (24 distinct sines are 2^24 terms)
+    let projected = projected_terms(&trig).saturating_mul(projected_terms(&hyp));
+    if projected > MAX_REDUCE_TERMS {
+        crate::err::not_implemented(format!(
+            "reduce_trig of a product of {} sine and cosine factors (up to {} terms): past sagebrush's limit of {} terms",
+            trig.len() + hyp.len(),
+            projected,
+            MAX_REDUCE_TERMS
+        ));
     }
     let t = if trig.is_empty() { vec![one()] } else { reduce_waves(&trig, false) };
     let h = if hyp.is_empty() { vec![one()] } else { reduce_waves(&hyp, true) };

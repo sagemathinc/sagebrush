@@ -785,3 +785,32 @@ from sagebrush.sage import gamma as _gamma2
 _r = (_fact2(_n2 + 2**63 - 1) * _gamma2(_n2 + 2**63)).simplify_factorial()
 assert str(_r) == "factorial(n + 9223372036854775807)^2", str(_r)
 print("simplify_factorial shift bound ok")
+# reduce_trig refuses a product whose expansion would pass 1024 terms
+# (prod (m_u + 1) over the distinct arguments), before expanding
+from sagebrush.sage import var as _var3, sin as _sin3, sinh as _sinh3
+import time as _time3, random as _random3
+_xs = [_var3("x%d" % i) for i in range(24)]
+_p = 1
+for _v in _xs:
+    _p = _p * _sin3(_v)
+_t = _time3.time()
+assert "past sagebrush's limit of 1024 terms" in raises(NotImplementedError, _p.reduce_trig)
+assert _time3.time() - _t < 5
+_p11 = 1
+for _v in _xs[:11]:
+    _p11 = _p11 * _sin3(_v)
+assert "1024" in raises(NotImplementedError, _p11.reduce_trig)
+_ph = 1
+for _v in _xs[:6]:
+    _ph = _ph * _sin3(_v)
+for _v in _xs[6:12]:
+    _ph = _ph * _sinh3(_v)
+assert "4096 terms" in raises(NotImplementedError, _ph.reduce_trig)
+_p8 = 1
+for _v in _xs[:8]:
+    _p8 = _p8 * _sin3(_v)
+_r8 = _p8.reduce_trig()
+for _ in range(3):
+    _pt = {str(_v): _random3.uniform(-2, 2) for _v in _xs[:8]}
+    assert abs(float(_r8.subs(**_pt)) - float(_p8.subs(**_pt))) < 1e-9
+print("reduce_trig term bound ok")
