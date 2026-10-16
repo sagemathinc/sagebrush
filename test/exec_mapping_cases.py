@@ -106,3 +106,19 @@ def h():
     global zz
     del zz
 print(t(h))
+
+# the introspection builtins are names like any: the locals, the globals or
+# the builtins can bind them otherwise
+print(t(lambda: exec("print(locals(), vars(), dir(), globals())", {}, {'locals': lambda: 5, 'vars': lambda: 6, 'dir': lambda: 7, 'globals': lambda: 8})))
+print(t(lambda: exec("print(locals())", {'locals': lambda: 6})))
+print(t(lambda: exec("print(eval('1'), exec('2'))", {}, {'eval': lambda s: 'e' + s, 'exec': lambda s: 'x' + s})))
+print(t(lambda: exec("def f():\n    return locals()\nprint(f())", {'locals': lambda: 'g'})))
+print(t(lambda: exec("class C:\n    a = 1\n    print(sorted(locals()))", {}, {'locals': lambda: 'no'})))
+print(t(lambda: exec("locals = 9\nprint(locals)", {}, {})))
+
+# a function's and a class's __module__ are the globals' __name__, not
+# exec's locals'; a class body's, missing there, is the builtins'
+print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))\ndef f(): pass\nprint(repr(f.__module__), repr((lambda: 0).__module__))", {}, {'__name__': 'X'})))
+print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))\ndef f(): pass\nprint(repr(f.__module__))", {'__name__': 'G'}, {'__name__': 'X'})))
+print(t(lambda: exec("class C:\n    del __module__\nprint(repr(C.__module__))", {'__name__': 'G'}, {})))
+print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))", {'__name__': None})))

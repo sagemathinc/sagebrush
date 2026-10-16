@@ -34,3 +34,25 @@ NameError: name 'len' is not defined
 1
 None
 NameError: name 'zz' is not defined
+5 6 7 8
+None
+6
+None
+e1 x2
+None
+g
+None
+['__firstlineno__', '__module__', '__qualname__', 'a']
+None
+9
+None
+'builtins'
+None None
+None
+'G'
+'G'
+None
+'G'
+None
+None
+None
