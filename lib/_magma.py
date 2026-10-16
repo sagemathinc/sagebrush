@@ -1843,7 +1843,13 @@ def _qelt(x):
     Rational even when it is integral, so that its type and parent are
     FldRatElt and the Rational Field, as Magma's (it prints, compares and
     hashes as the integer; CORR-765-1)."""
-    return _sa._q(_Fraction(x))
+    if isinstance(x, _sa.Rational):
+        return x
+    if isinstance(x, _Fraction):
+        # (by its parts: Fraction(q) of a Rational with big parts reads its
+        # numerator() method, which fails on the host, CORR-56E-1)
+        return _sa.Rational._from_coprime_ints(x._numerator, x._denominator)
+    return _sa.Rational._from_coprime_ints(int(x), 1)
 
 
 # Values Python's operators give a meaning Magma's don't ("ab" * 3,
@@ -2324,7 +2330,7 @@ def _rat_pow(a, b, op, pos):
     """a^b for a rational exponent b, an integral one too: a real, as
     Magma's (2^(8/2) is 16.000..., (-8)^(1/3) is -2.000...; checked against
     Magma, CORR-765-1)."""
-    p, q = b.numerator, b.denominator
+    p, q = int(b._numerator), int(b._denominator)
     if q == 1:
         return MReal.of(a) ** p
     if a == 0:
@@ -2989,6 +2995,15 @@ def _apply(f, x):
 
 # ------------------------------------------------------------------ reals
 
+def _iround(f):
+    """The rational f rounded to an integer (halves away from zero) in
+    integers only: round() of a Fraction with a big numerator or
+    denominator went through a JS number (CORR-56E-1)."""
+    n, d = int(f._numerator), int(f._denominator)
+    q = (2 * abs(n) + d) // (2 * d)
+    return q if n >= 0 else -q
+
+
 class MReal:
     """A real number to `prec` significant decimal digits (RealField(prec)),
     printed as Magma prints it."""
@@ -3024,23 +3039,26 @@ class MReal:
         if isinstance(x, int):
             return MReal(x, 0, prec)
         if isinstance(x, _Fraction):
-            return MReal._frac(_Fraction(x), prec)
+            return MReal._frac(x, prec)
         if isinstance(x, float):
             return MReal._frac(_Fraction(x), prec)
         raise MagmaError("cannot convert %s to a real" % _type_of(x))
 
     @staticmethod
     def _frac(f, prec):
-        if f == 0:
+        # (by its parts, in integers: a Fraction or Rational with big parts
+        # went through a JS number, CORR-56E-1)
+        n, d = int(f._numerator), int(f._denominator)
+        if n == 0:
             return MReal(0, 0, prec)
-        # m / 10^k with prec + 5 digits, then rounded
-        k = prec + 5 - (len(str(abs(f.numerator))) - len(str(f.denominator)))
+        # n / d as m / 10^k with prec + 5 digits, then rounded
+        k = prec + 5 - (len(str(abs(n))) - len(str(d)))
         if k >= 0:
-            m = _Fraction(f.numerator * 10 ** k, f.denominator)
+            n *= 10 ** k
         else:
-            m = _Fraction(f.numerator, f.denominator * 10 ** (-k))
-        q = round(m)
-        return MReal(int(q), -k, prec)
+            d *= 10 ** (-k)
+        q = (2 * abs(n) + d) // (2 * d)
+        return MReal(q if n > 0 else -q, -k, prec)
 
     def frac(self):
         return _Fraction(self.m) * (_Fraction(10) ** self.e)
@@ -4275,11 +4293,11 @@ def Exp(x):
         s += 1
     term, total, n = _Fraction(1), _Fraction(1), 1
     while abs(term) > eps:
-        term = _Fraction(round(term * f / n * 10 ** (p + 15)), 10 ** (p + 15))
+        term = _Fraction(_iround(term * f / n * 10 ** (p + 15)), 10 ** (p + 15))
         total += term
         n += 1
     for _ in range(s):
-        total = _Fraction(round(total * total * 10 ** (p + 15)), 10 ** (p + 15))
+        total = _Fraction(_iround(total * total * 10 ** (p + 15)), 10 ** (p + 15))
     return MReal._frac(total, p)
 
 
@@ -4315,7 +4333,7 @@ def Log(x, b=None):
     eps = _Fraction(1, 10 ** (p + 10))
     term, total, n = z, z, 1
     while abs(term) > eps:
-        term = _Fraction(round(term * z2 * 10 ** (p + 15)), 10 ** (p + 15))
+        term = _Fraction(_iround(term * z2 * 10 ** (p + 15)), 10 ** (p + 15))
         n += 2
         total += term / n
     total *= 2
