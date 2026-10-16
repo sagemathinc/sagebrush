@@ -269,13 +269,17 @@ export function lex(src: string): Tok[] {
 
 // ------------------------------------------------------------------ syntax tree
 
-interface Frame { code: string; n: number; cur: number } // what `end` in an index refers to (cur: the argument being parsed)
+// what `end` in an index refers to (cur: the argument being parsed; fn: its base is a name that
+// may be a function, known only when the code runs)
+interface Frame { code: string; n: number; cur: number; fn?: boolean }
 
 type Expr =
   | { k: "num"; v: string }
   | { k: "str"; v: string; dq: boolean }
   | { k: "id"; name: string; line: number; col: number }
-  | { k: "end"; frame: Frame; pos: number }
+  // (outer: the enclosing indexes, innermost first, each with the argument end is in: an
+  // end inside a function call's arguments is the enclosing indexed variable's, as in MATLAB)
+  | { k: "end"; frame: Frame; pos: number; outer: { frame: Frame; pos: number }[] }
   | { k: "colon" } // a bare `:` index
   | { k: "bin"; op: string; l: Expr; r: Expr }
   | { k: "un"; op: string; e: Expr }
@@ -809,7 +813,8 @@ class Parser {
     if (t.t === "kw" && t.v === "end" && this.frames.length) {
       this.next();
       const frame = this.frames[this.frames.length - 1];
-      return { k: "end", frame, pos: frame.cur };
+      const outer = this.frames.slice(0, -1).reverse().map((f) => ({ frame: f, pos: f.cur }));
+      return { k: "end", frame, pos: frame.cur, outer };
     }
     if (this.at("(")) {
       this.next();
@@ -1441,7 +1446,19 @@ class Emitter {
         if (WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
         return `_m.val(${this.lookup(e.name, scope)})`;
       }
-      case "end": return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
+      case "end": {
+        // (an end whose index may be a function call: the enclosing indexes, tried in turn
+        // when the code runs, up to the first whose base is surely a value)
+        if (!e.frame.fn || !e.outer.length) return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
+        const rest: string[] = [];
+        for (const o of e.outer) {
+          if (!o.frame.code) break;
+          rest.push(`lambda: ${o.frame.code}, ${o.pos}, ${o.frame.n}`);
+          if (!o.frame.fn) break;
+        }
+        if (!rest.length) return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
+        return `_m.end_chain(${e.frame.code}, ${e.pos}, ${e.frame.n}, ${rest.join(", ")})`;
+      }
       case "colon": return "_m.COLON";
       case "bin": {
         if (e.op === "&&") return `(_m.sc(${this.expr(e.l, scope)}) and _m.sc(${this.expr(e.r, scope)}))`;
@@ -1555,9 +1572,16 @@ class Emitter {
         return `_m.ws_call(${JSON.stringify(f.name)}, ${ns}, ${this.argList(e.args, scope)}, ${nargout})`;
       }
       base = this.lookup(f.name, scope);
-    } else if (f.k === "id" && scope.caps?.has(f.name)) base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
+      e.frame.fn = true;
+    } else if (f.k === "id" && scope.caps?.has(f.name)) {
+      base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
+      e.frame.fn = true;
+    }
     // (at the top level, x(args) after clear x is the function x again)
-    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) base = this.lookup(f.name, scope);
+    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) {
+      base = this.lookup(f.name, scope);
+      e.frame.fn = true;
+    }
     else if (f.k === "field" && f.e.k === "id" && !this.isVar(f.e.name, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
     else base = this.expr(f, scope);
     e.frame.code = base;
