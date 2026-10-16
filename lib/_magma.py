@@ -691,9 +691,24 @@ def _still_range(v):
     return len(v.items) == n and all(isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi and (x - lo) % step == 0 for x in v.items)
 
 
-# a comprehension ([ e : x in S ], { ... }, {@ ... @}, {* ... *}) builds at
-# most this many elements (HARD-FCC-1)
-_COLLECT_MAX = 10 ** 6
+# a comprehension ([ e : x in S ], { ... }, {@ ... @}, {* ... *}), a
+# selection S[I], a set of a range or a sequence made from one builds at
+# most this many elements (HARD-FCC-1, HARD-A57-1): 10^6, or fewer in a
+# small heap, _COLLECT_COST bytes of heap for each.  (Measured in a 96 MiB
+# heap, Node 24: a selection of 10^6 integers took about 90 MB and aborted
+# V8 on GitHub's Node 24; a comprehension of 100000 pairs <x, x> or
+# sequences [x] fits, 200000 aborts; 65536 triples <x, [x, x+1], x/3>
+# fit on Node 24 and 26 but not 22.  So 49152 elements there.)
+_COLLECT_COST = 2048
+
+
+def _collect_max():
+    n = getattr(_sys, "_sagebrush_heap_limit", None)
+    # (CPython, or a host that cannot say: a nominal 1 GiB)
+    return min(10 ** 6, (int(n) if n else 1 << 30) // _COLLECT_COST)
+
+
+_COLLECT_MAX = _collect_max()
 
 
 def _collect_refusal():
