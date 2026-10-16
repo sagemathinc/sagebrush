@@ -69,6 +69,15 @@ function scan(s: string): Pos | null {
   return n ? new Pos(s, c, n) : null;
 }
 
+// An equal string that is another object becomes the one every reference
+// here holds (lastKey, bigKey, its index's s): one body is kept alive, not
+// two equal ones (HARD-3F4-1), and the next comparisons are of pointers.
+function adopt(s: string, p: Pos | null): void {
+  if (lastKey === s) lastKey = s;
+  if (bigKey === s) bigKey = s;
+  if (p !== null) p.s = s;
+}
+
 // The surrogate-pair index of s, or null if it has none.
 let lastKey: string | null = null;
 let lastVal: Pos | null = null;
@@ -80,7 +89,7 @@ export function pairs(s: string): Pos | null {
   // compare pointers again: json.loads of a new json.dumps result took a
   // full comparison per character)
   if (s === lastKey) {
-    lastKey = s;
+    adopt(s, lastVal);
     return lastVal;
   }
   const p = longPairs(s);
@@ -89,13 +98,15 @@ export function pairs(s: string): Pos | null {
 }
 function longPairs(s: string): Pos | null {
   if (s === bigKey) {
-    bigKey = s;
+    adopt(s, bigVal);
     return bigVal;
   }
   const hit = cache.get(s);
   if (hit !== undefined) {
+    // (re-inserted under the new object, which the index then holds too)
     cache.delete(s);
     cache.set(s, hit);
+    adopt(s, hit);
     return hit;
   }
   const p = scan(s);
