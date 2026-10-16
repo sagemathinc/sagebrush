@@ -4395,6 +4395,14 @@ def cellstr_(x):
 _REAL_FIX = {}  # (name: real_fix, for _complex_fallback too)
 
 
+def _apply_real_fix(fix, A, r):
+    """fix(A, r) for a real A; for a complex A, at its elements with a zero imaginary part,
+    which MATLAB's examples treat as the real numbers (acos([2 -3 1+2i]) starts 0 + 1.3170i)"""
+    if A.dtype.kind != "c":
+        return fix(A, r)
+    return np.where(A.imag == 0, fix(A.real, r), r)
+
+
 def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
     """a math function on every element; complex_if(A): where the result is complex;
     real_fix(A, r): the result r adjusted for a real A made complex (MATLAB's own
@@ -4415,8 +4423,8 @@ def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
             A = A.astype(np.complex128)
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             r = f(A)
-            if A0 is not None and real_fix is not None:
-                r = real_fix(A0, r)
+            if real_fix is not None:
+                r = _apply_real_fix(real_fix, A0 if A0 is not None else A, r)
         if cls in _INTS:
             if keep_int:
                 return _finish(r, cls)
@@ -4457,8 +4465,11 @@ _unary("expm1", np.expm1)
 _unary("sin", np.sin)
 _unary("cos", np.cos)
 _unary("tan", np.tan)
-_unary("asin", np.arcsin, lambda A: np.abs(A) > 1)
-_unary("acos", np.arccos, lambda A: np.abs(A) > 1)
+# (for real x > 1, MATLAB's asin and acos take the conjugate of the C library's value at x + 0i,
+# as their pages' examples show: acos(2) = 0 + 1.3170i, asin(2) = 1.5708 - 1.3170i; for x < -1
+# they agree: acos(-3) = 3.1416 - 1.7627i)
+_unary("asin", np.arcsin, lambda A: np.abs(A) > 1, real_fix=lambda A, r: np.where(A > 1, np.conj(r), r))
+_unary("acos", np.arccos, lambda A: np.abs(A) > 1, real_fix=lambda A, r: np.where(A > 1, np.conj(r), r))
 _unary("atan", np.arctan)
 _unary("sinh", np.sinh)
 _unary("cosh", np.cosh)
@@ -4487,6 +4498,11 @@ def _recip_inverse(name, base):
         A = _farr(x, name)
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             R = 1 / A
+        if R.dtype.kind == "c":
+            # (a zero imaginary part as +0: 1/(-3+0i) is -1/3 - 0i, which would put the base
+            # function on the other side of its branch cut from the real -1/3)
+            R = R.copy()
+            R.imag = np.where(R.imag == 0, 0.0, R.imag)
         return _B[base].f(nargout, _finish(R, "single" if cls == "single" else "double"))
     _B[name] = Builtin(g, name)
 
@@ -9027,6 +9043,9 @@ def _cmath_log(f):
 for _n in ("log", "log10", "log2"):
     _CMATH[_n] = _cmath_log(_CMATH[_n])
 _CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else _cmath.log(1 + z)
+# (the poles, where cmath raises: atanh(±1) = ±Inf, atan(±1i) = ±Inf i, as MATLAB gives)
+_CMATH["atanh"] = lambda z: complex(_math.copysign(_math.inf, z.real), 0.0) if z.imag == 0 and abs(z.real) == 1 else _cmath.atanh(z)
+_CMATH["atan"] = lambda z: complex(0.0, _math.copysign(_math.inf, z.imag)) if z.real == 0 and abs(z.imag) == 1 else _cmath.atan(z)
 
 
 def _complex_fallback(name):
@@ -9043,8 +9062,8 @@ def _complex_fallback(name):
             A0 = _farr(x)
             A = A0.astype(np.complex128)
             out = np.array([f(complex(z)) for z in A.reshape(-1)], dtype=np.complex128).reshape(A.shape)
-            if A0.dtype.kind != "c" and name in _REAL_FIX:
-                out = _REAL_FIX[name](A0, out)
+            if name in _REAL_FIX:
+                out = _apply_real_fix(_REAL_FIX[name], A0, out)
             return _finish(out, "single" if class_(x) == "single" else "double")
     _B[name] = Builtin(g, name)
 

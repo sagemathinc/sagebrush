@@ -1826,3 +1826,31 @@ test("asec, acsc, acot, asech, acsch and acoth: the base inverse function of 1./
     tryIt("asec(int8(2))"), tryIt("acot({1})"),
   ].join("\n")), ["1.0472 0.5236 0.7854 1.5708 1.3170 0.8814 0.5493", "[true true true true true]", "[true true]", "single", "[2 3]", "refused", "refused"]);
 });
+
+test("asin, acos, atanh and the reciprocal inverses on the real axis outside the domain, as the pages' examples; the poles of atanh and atan (CORR-EB2-1, -2, -3)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).'; imag(z(:)).']); fprintf('\\n')`;
+  assert.deepEqual(run([
+    // (the functions' own examples: real elements, in a real or a complex array)
+    z("acos([2 -3 1+2i])"), z("asin([2 -3 1+2i])"), z("atanh([2 -3 1+2i])"),
+    z("acos([2 -3])"), z("asin([2 -3])"),
+    // (the reciprocal inverses: asec(0.5) is acos(2), acsc(0.5) asin(2), asech's example)
+    z("[asec(0.5) acsc(0.5) asec(-0.5)]"), z("asech([2 -3 1+2i])"), z("asech(single([2 -3]))"),
+    // (atanh's poles in a complex array, and acoth's example; atan's poles)
+    z("acoth([-pi/2 -1 0 1/2 1 pi/2])"), z("acoth([1 0.5])"), z("[atan(1i) atan(-1i) acot(1i)]"),
+  ].join("\n")), [
+    "0.0000+1.3170i 3.1416-1.7627i 1.1437-1.5286i",
+    "1.5708-1.3170i -1.5708+1.7627i 0.4271+1.5286i",
+    "0.5493+1.5708i -0.3466-1.5708i 0.1733+1.1781i",
+    "0.0000+1.3170i 3.1416-1.7627i",
+    "1.5708-1.3170i -1.5708+1.7627i",
+    "0.0000+1.3170i 1.5708-1.3170i 3.1416-1.3170i",
+    "0.0000+1.0472i 0.0000+1.9106i 0.3966-1.3845i",
+    "0.0000+1.0472i 0.0000+1.9106i",
+    "-0.7525+0.0000i -Inf+0.0000i 0.0000+1.5708i 0.5493+1.5708i Inf+0.0000i 0.7525+0.0000i",
+    "Inf+0.0000i 0.5493+1.5708i",
+    "0.0000+Infi 0.0000-Infi 0.0000-Infi",
+  ]);
+});
