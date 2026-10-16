@@ -717,6 +717,35 @@ def _witness(gen):
     return next(iter(gen), None)
 
 
+# A range's endpoint from a real has at most this many digits (HARD-1CD-1)
+_RANGE_DIGITS = 10 ** 5
+
+
+def _range_int(v, open_, pos):
+    """A range's endpoint or step as the integer it is (2/1 or 3.0 too, as
+    Magma takes it), or Magma's refusal of one that is not."""
+    if isinstance(v, bool) or not (isinstance(v, (int, _Fraction)) or isinstance(v, MReal)):
+        return v  # (another type: its own errors, as before)
+    if isinstance(v, MReal):
+        # (decided from its digits m and exponent e, value m * 10^e, before
+        # any expansion: a huge exponent is never made into a huge integer,
+        # HARD-1CD-1)
+        m, e = v.m, v.e
+        nd = len(str(abs(m)))
+        if m and e >= 0 and nd + e > _RANGE_DIGITS:
+            raise MagmaError("a range endpoint of more than %d digits is not supported yet" % _RANGE_DIGITS)
+        if not m or e >= 0:
+            return m * 10 ** e
+        f = _Fraction(m, 10 ** -e) if -e <= nd else _Fraction(1, 2)  # (|m| < 10^-e: not an integer)
+    else:
+        f = _Fraction(v)
+    if f.denominator != 1:
+        what = "Sequence" if open_ == "[" else "Set"
+        where = "[ ... ]" if open_ == "[" else "%s ... %s" % (open_, {"{": "}", "{@": "@}", "{*": "*}"}[open_])
+        raise MagmaError("%s range does not consist of integers" % what, where, True, pos)
+    return int(f.numerator)
+
+
 def _range(a, b, c, open_, universe=None, pos=None):
     if universe is not None and universe is not _ZZ:
         # (a range's elements are integers: Magma refuses another universe)
@@ -725,6 +754,15 @@ def _range(a, b, c, open_, universe=None, pos=None):
         if open_ == "{":
             raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }", True, pos)
         raise MagmaError("a range with a universe in %s ... is not supported yet" % open_)
+    # (the universe first, as Magma checks it, CORR-1CD-1)
+    a, b, c = (_range_int(v, open_, pos) for v in (a, b, c))
+    if isinstance(c, int) and c == 0 and isinstance(a, int) and isinstance(b, int):
+        raise MagmaError("Set/Sequence constructor: step must be non-zero", "[ ... ]" if open_ == "[" else "{ ... }", True, pos)
+    if open_ != "[" and all(isinstance(v, int) and not isinstance(v, bool) for v in (a, b, c)) \
+            and MRange(a, b, c).size() > _COLLECT_MAX:
+        # (a set of a range is made element by element: bounded first, as a
+        # sequence's range, which stays lazy, needn't be; HARD-1CD-1)
+        raise MagmaError("a set of more than %d elements is not supported yet" % _COLLECT_MAX)
     if open_ == "[":
         if isinstance(a, int) and isinstance(b, int) and isinstance(c, int):
             return MRange(a, b, c)
@@ -3036,9 +3074,33 @@ def _real_ok(o):
     return isinstance(o, (MReal, int, _Fraction, float)) and not isinstance(o, bool)
 
 
+# A real literal with more significant digits, or a larger exponent once
+# its leading and trailing zeros are folded in, is refused
+_REAL_LITERAL_DIGITS = 10000
+_REAL_LITERAL_EXP = 10000
+
+
 def _real(s):
-    f = _Fraction(s)
-    return MReal._frac(f, 30)
+    """A real literal (1.5, 2., 3e10, 1.5e-3) as a real of the default
+    field, converted exactly as Fraction(s) is: its insignificant zeros
+    are folded into the exponent first, and a literal still out of
+    bounds is refused, so 1e100000000 is never expanded (HARD-1CD-1)
+    and no literal is rounded another way (CORR-9FA-1, CORR-54E-1)."""
+    m = _re.fullmatch(r"(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?", s)
+    if not m:
+        return MReal._frac(_Fraction(s), 30)
+    whole, frac, e = m.group(1) or "", m.group(2) or "", m.group(3) or "0"
+    digits = (whole + frac).lstrip("0")
+    stripped = digits.rstrip("0")
+    if not stripped:
+        return MReal(0, 0, 30)
+    if len(stripped) > _REAL_LITERAL_DIGITS:
+        raise MagmaError("a real literal of more than %d significant digits is not supported yet" % _REAL_LITERAL_DIGITS)
+    big = len(e.lstrip("+-").lstrip("0")) > len(str(_REAL_LITERAL_EXP)) + 1
+    exp = 0 if big else int(e) - len(frac) + len(digits) - len(stripped)
+    if big or abs(exp) > _REAL_LITERAL_EXP:
+        raise MagmaError("a real literal with an exponent of more than %d is not supported yet" % _REAL_LITERAL_EXP)
+    return MReal._frac(_Fraction(int(stripped)) * _Fraction(10) ** exp, 30)
 
 
 class RealField_:
