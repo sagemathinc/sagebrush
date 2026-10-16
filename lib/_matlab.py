@@ -8530,9 +8530,10 @@ def clear_select(fn, tokens, defined, protected=()):
         if any(t.startswith("-") and t.lower() != "-regexp" for t in targets + keep):
             raise _err("clearvars: the option '%s' is not supported." % next(t for t in targets + keep if t.startswith("-") and t.lower() != "-regexp"))
         everything = defined + [p for p in protected if p not in defined]
-        chosen = _clear_match(targets, everything) if [t for t in targets if not t.startswith("-")] else everything
+        budget = [0]  # (the -regexp work of the targets and -except together)
+        chosen = _clear_match(targets, everything, budget) if [t for t in targets if not t.startswith("-")] else everything
         if keep:
-            kept = set(_clear_match(keep, everything))
+            kept = set(_clear_match(keep, everything, budget))
             chosen = [v for v in chosen if v not in kept]
     bad = [v for v in chosen if v in protected]
     if bad:
@@ -8540,25 +8541,36 @@ def clear_select(fn, tokens, defined, protected=()):
     return [v for v in chosen if v in defined]
 
 
-def _clear_match(tokens, names):
+def _clear_match(tokens, names, budget=None):
     """names matched by tokens: wildcards (* ?), and regular expressions after -regexp
-    (a match anywhere in the name, as regexp finds it)"""
+    (a match anywhere in the name, as regexp finds it). Each expression's weight
+    (_regex_linearish) times the number of names counts against 4,000,000, with budget
+    carrying the count between clearvars' targets and -except, so many expressions
+    over a large workspace are refused as many wildcards are"""
     if "-regexp" in [t.lower() for t in tokens]:
         k = [t.lower() for t in tokens].index("-regexp")
         plain, rx = tokens[:k], tokens[k + 1:]
     else:
         plain, rx = tokens, []
     chosen = set(_glob_select(plain, names)) if plain else set()
+    weights = []
     for r in rx:
-        if not _regex_linearish(r):
+        w = _regex_linearish(r)
+        if not w:
             raise _err("The -regexp pattern '%s' repeats a repetition or an alternation (it could take exponential time to match): not supported." % r)
+        weights.append(w)
+    budget = budget if budget is not None else [0]
+    budget[0] += sum(weights) * len(names)
+    if budget[0] > 4000000:
+        raise _err("Too many -regexp patterns, or patterns too complex, for this workspace: not supported.")
+    for r in rx:
         pat = _re.compile(_regex(r))
         chosen.update(n for n in names if pat.search(n))
     return [n for n in names if n in chosen]
 
 
 def _regex_linearish(p):
-    """False for a pattern that could backtrack badly. Each repetition has a weight, the
+    """The pattern's weight, or 0 for a pattern that could backtrack badly. Each repetition has a weight, the
     number of lengths it can take on a name of at most 63 characters (? two, {m,n}
     min(n,63)-m+1, *, + and {m,} sixty-four); a sequence's weight is the product of its
     parts', an alternation's the sum of its branches'. Past 10^5 the pattern is refused,
@@ -8576,7 +8588,7 @@ def _regex_linearish(p):
         group = None
         if c == "\\":
             if i + 1 < n and p[i + 1].isdigit():
-                return False
+                return 0
             i += 2
         elif c == "[":
             j = i + 1
@@ -8622,15 +8634,16 @@ def _regex_linearish(p):
             if i < n and p[i] in "?+":
                 i += 1
             if group is not None and (group[2] or weight > 1):
-                return False
+                return 0
             weight *= times
             stack[-1][2] = True
         elif group is not None and group[2]:
             stack[-1][2] = True
         stack[-1][0] *= weight
         if stack[-1][0] > limit:
-            return False
-    return stack[0][0] + stack[0][1] <= limit
+            return 0
+    weight = stack[0][0] + stack[0][1]
+    return weight if weight <= limit else 0
 
 
 def _glob_select(pats, names):
