@@ -184,7 +184,7 @@ export class Emitter {
         // (the globals' loads, $GL, where they are $G: LOAD_GLOBAL's; then
         // the code's builtins, $B)
         const ns = this.gns(id) === "$G" ? (nameLoad ? "$G" : "$GL") : "$g";
-        if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : (${t} = $B${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
+        if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : (${t} = $B${prop(id)}) !== undefined ? ${t} : R.unboundName(${q(id)}))`;
         return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
       }
       case "class": {
@@ -239,7 +239,7 @@ export class Emitter {
   clearName(id: string): string {
     const r = resolve(this.fn.scope, id);
     if (r.kind === "global") return `${this.gns(id)}${prop(id)} = null; R.delName(${this.gns(id)}, ${q(id)});`;
-    if (r.kind === "class") return `$ns.set(${q(id)}, null); $ns.delete(${q(id)});`;
+    if (r.kind === "class") return `$ns.set(${q(id)}, null); if (!$ns.delete(${q(id)})) R.unboundName(${q(id)});`;
     return this.storeName(id, "undefined");
   }
 
@@ -494,7 +494,7 @@ export class Emitter {
     const callerLocals = n === 1 && scope.kind !== "module" ? localsExpr() : "null";
     const fn = f.id === "eval" ? "R.evalIn" : "R.execIn";
     // (a function's exec and eval run in its globals, $G)
-    return `${fn}(${args[0]}, ${args[1] ?? "undefined"}, ${args[2] ?? "undefined"}, ${scope.kind === "module" ? "$g" : "$G"}, ${callerLocals})`;
+    return `${fn}(${args[0]}, ${args[1] ?? "undefined"}, ${args[2] ?? "undefined"}, ${scope.kind === "module" ? "$g" : "$G"}, ${callerLocals}, $B)`;
   }
 
   // `tuple(x for ...)`, `sum(...)`, `any(...)` etc. on the builtin: run the
@@ -807,13 +807,13 @@ export class Emitter {
         return this.classDef(st);
       case "Import":
         for (const a of st.names) {
-          if (a.asname !== null) this.w(this.storeName(a.asname, `importAs(${q(a.name)}, $g)`));
-          else this.w(this.storeName(a.name.split(".")[0], `importTop(${q(a.name)}, $g)`));
+          if (a.asname !== null) this.w(this.storeName(a.asname, `importAs(${q(a.name)}, $g, $B)`));
+          else this.w(this.storeName(a.name.split(".")[0], `importTop(${q(a.name)}, $g, $B)`));
         }
         return;
       case "ImportFrom": {
         const m = this.temp();
-        this.w(`${m} = importFromStmt(${q(st.module)}, [${st.names.map((a) => q(a.name)).join(", ")}], ${st.level}, $g);`);
+        this.w(`${m} = importFromStmt(${q(st.module)}, [${st.names.map((a) => q(a.name)).join(", ")}], ${st.level}, $g, $B);`);
         for (const a of st.names) {
           if (a.name === "*") {
             if (this.fn.scope.kind !== "module") this.fail("import * only allowed at module level");

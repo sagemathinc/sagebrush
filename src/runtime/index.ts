@@ -299,12 +299,13 @@ export function localsDict(names: string[], values: any[]): Obj.PyDict {
 
 // The namespace exec/eval code runs in: explicit globals (and locals), or
 // the caller's module plus, inside a function, a snapshot of its locals.
-function execNamespace(globals: any, locals: any, g: any, callerLocals: any): any {
+function execNamespace(globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
   if (locals !== undefined && locals !== null && !(locals instanceof Obj.PyDict) && Ty.lookupDunder(locals, "__getitem__") === undefined) raise(T.TypeError, `locals must be a mapping or None, not ${typeName(locals)}`);
   if (globals !== undefined && globals !== null) {
     if (!(globals instanceof Obj.PyDict)) raise(T.TypeError, `globals must be a dict, not ${typeName(globals)}`);
     // (as CPython's exec/eval: the builtins module's dict, not the module)
-    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", Obj.instanceDict(B.builtins));
+    // (the calling code's builtins, CPython's frame builtins, CORR-6C9-2)
+    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", M.builtinsObject(bl));
     const ns = Obj.namespaceOf(globals);
     if (locals !== undefined && locals !== null && locals !== globals) return layered(localsNamespace(locals), ns);
     // (a dict subclass as both: its own methods for the names, as locals,
@@ -315,7 +316,8 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
   // (explicit locals over the real globals: an exec inside exec's top level
   // reads its locals, then the globals, never the outer locals, CORR-C0F-3)
   if (locals !== undefined && locals !== null) return layered(localsNamespace(locals), Obj.realGlobals(g));
-  if (callerLocals !== null && callerLocals !== undefined) return layered(Obj.namespaceOf(callerLocals), g);
+  // (a class body's prepared namespace through its own methods, CORR-6C9-3)
+  if (callerLocals !== null && callerLocals !== undefined) return layered(localsNamespace(callerLocals), g);
   return g;
 }
 // exec/eval's locals: an exact dict's storage, else the mapping itself,
@@ -436,17 +438,17 @@ function sourceOf(src: any, fn: string): [string, string] {
   return [src, "<string>"];
 }
 
-export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
+export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
   const [text, filename] = sourceOf(src, "exec");
   const sage = src instanceof CodeObject && src.sage;
-  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, { sage });
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals, bl), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, { sage });
   return null;
 }
-export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
-  if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals);
+export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
+  if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals, bl);
   const [text, filename] = sourceOf(src, "eval");
   const sage = src instanceof CodeObject && src.sage;
-  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename, { sage });
+  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals, bl), "eval", filename, { sage });
 }
 function compileSource(src: any, filename: any, mode: any, sage: boolean): CodeObject {
   const [text] = sourceOf(src, "compile");

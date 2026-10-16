@@ -227,3 +227,116 @@ def nodel():
     class V(metaclass=MM):
         del nothere
 print(t(nodel))
+
+# astra's reproductions for CORR-6C9-1 to -5 (python-exec-gaps 6c9520cc review)
+
+
+def run(label, f):
+    try: print(label, 'ok', f())
+    except BaseException as e: print(label, type(e).__name__, str(e))
+
+# First miss must not be retried.
+class B:
+    def __init__(self): self.n=0
+    def __getitem__(self, key):
+        self.n+=1
+        if self.n == 1: raise KeyError(key)
+        return 99
+b=B()
+run('builtin retry',lambda: eval('len', {'__builtins__':b}))
+print('builtin calls',b.n)
+
+# Old frames keep their builtins for IMPORT_NAME too.
+log=[]
+def old_import(*args): log.append('old'); return builtins
+def new_import(*args): log.append('new'); return builtins
+g={'__builtins__':dict(vars(builtins), __import__=old_import)}
+exec('def f():\n    import anything',g)
+g['__builtins__']=dict(vars(builtins), __import__=new_import)
+run('frame import',g['f'])
+print('import log',log)
+
+# Nested exec should inherit the caller frame builtins when absent in G.
+child={}
+g={'__builtins__':dict(vars(builtins), len=lambda x:99),'child':child}
+exec('exec("r=len([])",child)',g)
+print('nested builtins', child['r'])
+
+# Default eval must use the prepared mapping's methods, even for a dict subclass.
+class N(dict):
+    def __getitem__(self,k):
+        if k=='x': return 42
+        return super().__getitem__(k)
+    def __setitem__(self,k,v):
+        if k=='x': v*=10
+        return super().__setitem__(k,v)
+class M(type):
+    @classmethod
+    def __prepare__(m,n,b): return N(x=1)
+def prepared_eval():
+    class C(metaclass=M):
+        y=eval('x')
+        exec('x=3')
+    return C.y,C.x
+run('prepared eval/exec',prepared_eval)
+
+# Non-dict prepared mappings must work too.
+class N2:
+    def __init__(self): self.d={}
+    def __getitem__(self,k): return self.d[k]
+    def __setitem__(self,k,v): self.d[k]=v
+    def __delitem__(self,k): del self.d[k]
+class M2(type):
+    @classmethod
+    def __prepare__(m,n,b): return N2()
+    def __new__(m,n,b,d): return super().__new__(m,n,b,d.d)
+def prepared_nondict():
+    class C(metaclass=M2):
+        x=7
+        y=eval('x')
+    return C.y
+run('prepared nondict',prepared_nondict)
+
+# Except-target DELETE_NAME must not swallow failed mapping deletion.
+class N3(dict):
+    def __delitem__(self,k): raise RuntimeError('denied')
+class M3(type):
+    @classmethod
+    def __prepare__(m,n,b): return N3()
+def cleanup():
+    class C(metaclass=M3):
+        try: 1/0
+        except Exception as e: pass
+    return 'class built'
+run('prepared cleanup',cleanup)
+
+log = []
+class Prep:
+    def __get__(self, obj, owner):
+        log.append('lookup')
+        return type.__prepare__
+class M(type): __prepare__=Prep()
+log.clear()
+class C(metaclass=M): log.append('body')
+print(log)
+
+# the frame's builtins for `import x as y` and `from x import y` too, and a
+# nested eval's new globals
+log = []
+def old_import(*args): log.append(('old', args[0], args[3])); return builtins
+def new_import(*args): log.append(('new', args[0], args[3])); return builtins
+g = {'__builtins__': dict(vars(builtins), __import__=old_import)}
+exec('def f():\n    import anything as a\n    from other import len\n    return a is builtins', g)
+g['__builtins__'] = dict(vars(builtins), __import__=new_import)
+print(t(g['f']), log)
+child = {}
+g = {'__builtins__': dict(vars(builtins), len=lambda x: 98), 'child': child}
+print(t(lambda: exec('r = eval("len([])", child)\nimport builtins as b2', g)), sorted(child['__builtins__']) == sorted(g['__builtins__']), g['r'])
+# metaclass=None and __prepare__ = None are called, a TypeError
+def mnone():
+    class C(metaclass=None): pass
+print(t(mnone))
+class PN(type): __prepare__ = None
+def pnone():
+    class C(metaclass=PN): print('body ran')
+print(t(pnone))

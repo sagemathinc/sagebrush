@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, realGlobals, namespaceOf, instanceDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
+import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
@@ -154,7 +154,7 @@ export function builtinsOf(G: any): any {
   if (b instanceof PyDict && typeOf(b) === T.dict) return namespaceOf(b);
   return new Proxy(Object.create(null), {
     get: (_t, k) => {
-      if (typeof k !== "string") return undefined;
+      if (typeof k !== "string") return k === NS_DICT ? b : undefined;
       try {
         return O.getitem(b, k);
       } catch (e) {
@@ -165,37 +165,45 @@ export function builtinsOf(G: any): any {
   });
 }
 // A name the builtins `b` must have: its value, else the NameError
+// The builtins `b` as the object a frame's are (exec's default
+// __builtins__ for new globals): a dict, a module's __dict__, the mapping
+export function builtinsObject(b: any): any {
+  if (b === undefined || b === builtins) return instanceDict(builtins);
+  // (an exact dict's or a mapping's namespace: that object)
+  const d = b[NS_DICT];
+  return d !== undefined ? d : instanceDict(b);
+}
 export function builtinName(b: any, k: string): any {
   const v = b === builtins ? (Object.prototype.hasOwnProperty.call(b, k) ? b[k] : undefined) : b[k];
   if (v === undefined) raise(T.NameError, `name '${k}' is not defined`);
   return v;
 }
-// (the importing code's builtins' __import__: CPython's IMPORT_NAME)
-const customImport = (g: any): any => {
-  const b = g === undefined || g === null ? builtins : builtinsOf(realGlobals(g));
+// (the importing code's builtins' __import__, those it started with:
+// CPython's IMPORT_NAME, the frame's builtins)
+const customImport = (b: any = builtins): any => {
   const f = b.__import__;
   if (f === undefined) raise(T.ImportError, "__import__ not found");
   return f === defaultImport ? null : f;
 };
 const gdict = (g: any) => (g === undefined || g === null ? null : globalsDict(g));
 // `import a.b.c` binds `a`.
-export function importTop(name: string, g?: any): any {
-  const c = customImport(g);
+export function importTop(name: string, g?: any, b?: any): any {
+  const c = customImport(b);
   if (c !== null) return callObj(c, [name, gdict(g), null, null, 0]);
   importModule(name);
   return dictGet(sysModules, name.split(".")[0]);
 }
 // `import a.b.c as x`
-export function importAs(name: string, g?: any): any {
-  const c = customImport(g);
+export function importAs(name: string, g?: any, b?: any): any {
+  const c = customImport(b);
   if (c === null) return importModule(name);
   let m = callObj(c, [name, gdict(g), null, null, 0]);
   for (const part of name.split(".").slice(1)) m = getattr(m, part);
   return m;
 }
 // The module of `from m import names` (relative when level > 0).
-export function importFromStmt(module: string, names: string[], level: number, g: any): any {
-  const c = customImport(g);
+export function importFromStmt(module: string, names: string[], level: number, g: any, b?: any): any {
+  const c = customImport(b);
   if (c !== null) return callObj(c, [module, gdict(g), null, tuple(names), level]);
   // (the globals' __package__, never exec's locals')
   return importModule(level ? resolveRelative(module, level, realGlobals(g).__package__) : module);
