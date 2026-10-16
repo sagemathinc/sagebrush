@@ -363,6 +363,12 @@ function layered(front: any, back: any): any {
     },
   });
 }
+// A class body's __module__: its __name__, as LOAD_NAME there, the globals'
+// (not exec's locals) and then the builtins'
+export function classModule(g: any): any {
+  const v = g.__name__;
+  return v !== undefined ? v : B.gname("__name__");
+}
 // `del name` at a module's top level, or of a name declared global
 export function delName(ns: any, k: string): void {
   // (a layered namespace checks its locals itself; elsewhere a builtin's
@@ -735,6 +741,7 @@ export const R: any = {
   localsDict,
   sortedKeys,
   delName,
+  classModule,
   execIn,
   evalIn,
   callEx,

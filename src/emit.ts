@@ -369,9 +369,21 @@ export class Emitter {
     const f = e.func;
     if (this.isZeroArgSuper(e)) return this.zeroArgSuper(false);
     const intro = this.introspectionCall(e);
-    if (intro !== null) return intro;
+    if (intro !== null) {
+      // (guarded on the name still being the builtin: a locals mapping, the
+      // globals or the builtins can bind it otherwise, and CPython looks it
+      // up as any name)
+      const t = this.temp();
+      const id = (f as Extract<A.Expr, { k: "Name" }>).id;
+      return `((${t} = ${this.load(id)}) === $B${prop(id)} ? ${intro} : ${this.plainCall(e, t)})`;
+    }
     const consumed = this.consumingCall(e);
     if (consumed !== null) return consumed;
+    return this.plainCall(e);
+  }
+  // A call of e.func, or of `callee`, the JavaScript holding it
+  plainCall(e: Extract<A.Expr, { k: "Call" }>, callee?: string): string {
+    const f = e.func;
     const simple = !e.args.some((a) => a.k === "Starred") && e.keywords.length === 0;
     if (simple) {
       if (f.k === "Attribute") {
@@ -381,7 +393,7 @@ export class Emitter {
       // Evaluate the callee and arguments into temporaries so the generated
       // code stays linear in the nesting depth.
       const t = this.temp();
-      const pre = [`${t} = ${this.ex(f)}`];
+      const pre = [`${t} = ${callee ?? this.ex(f)}`];
       const args = e.args.map((a) => {
         const at = this.temp();
         pre.push(`${at} = ${this.ex(a)}`);
@@ -389,7 +401,7 @@ export class Emitter {
       });
       return `(${pre.join(", ")}, typeof ${t} === "function" ? ${t}(${args.join(", ")}) : callObj(${t}, [${args.join(", ")}]))`;
     }
-    const callee = this.ex(f);
+    const fn = callee ?? this.ex(f);
     const pos = this.items(e.args);
     const names: string[] = [], values: string[] = [], maps: string[] = [];
     for (const k of e.keywords) {
@@ -400,8 +412,8 @@ export class Emitter {
         values.push(this.ex(k.value));
       }
     }
-    if (maps.length === 0) return `callKw(${callee}, ${pos}, [${names.join(", ")}], [${values.join(", ")}])`;
-    return `callEx(${callee}, ${pos}, [${names.join(", ")}], [${values.join(", ")}], [${maps.join(", ")}])`;
+    if (maps.length === 0) return `callKw(${fn}, ${pos}, [${names.join(", ")}], [${values.join(", ")}])`;
+    return `callEx(${fn}, ${pos}, [${names.join(", ")}], [${values.join(", ")}], [${maps.join(", ")}])`;
   }
 
   // globals(), locals(), vars(), dir(), eval() and exec() need the caller's
@@ -616,7 +628,7 @@ export class Emitter {
     const decls = [...locals, ...this.fn.temps];
     const star = scope.isGenerator ? "*" : "";
     this.fn = saved;
-    return `defn(function${star} ${self}(${ps}) { ${pro.join(" ")} ${decls.length ? `let ${decls.join(", ")}; ` : ""}return ${body}; }, "<lambda>", ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, null, $g)`;
+    return `defn(function${star} ${self}(${ps}) { ${pro.join(" ")} ${decls.length ? `let ${decls.join(", ")}; ` : ""}return ${body}; }, "<lambda>", ${q(scope.qualname)}, $G.__name__, ${defaults}, ${kwdefaults}, ${sig}, null, $g)`;
   }
 
   isParam(p: A.Params, n: string): boolean {
@@ -942,7 +954,7 @@ export class Emitter {
     this.indent--;
     this.splice(lines);
     this.line = st.line;
-    this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc}, $g);`);
+    this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc}, $g);`);
     this.w(`${f}.$line = ${st.line};`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
   }
@@ -957,7 +969,7 @@ export class Emitter {
     this.w(`${b} = ${bases};`);
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
-      this.w(`$ns.set("__module__", $g.__name__); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
+      this.w(`$ns.set("__module__", R.classModule($G)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
       if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(body[0].value.value.v)});`);
       for (const s of body) this.stmt(s);
     });
@@ -974,7 +986,7 @@ export class Emitter {
     this.line = st.line;
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
-    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $g.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}]${cell ? `, ${cell}` : ""});`);
+    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}]${cell ? `, ${cell}` : ""});`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
