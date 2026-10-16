@@ -60,6 +60,9 @@ const SPECS: Record<Mode, { dir: string; display: string; language: string; info
 };
 
 const VERSION = () => (globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev";
+// (said of a run whose worker was ended: it did not stop when interrupted;
+// the same words as the notebook page's, web/notebook/worker-kernel.js)
+const STOPPED = "it did not stop when interrupted, so the interpreter was restarted; variables are gone";
 
 // ------------------------------------------------------------------ install
 
@@ -279,6 +282,10 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
     if (intr) intr[0] = 0;
     worker.postMessage({ id, code: ct.code });
     const r = await done;
+    if (killTimer !== null) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
     const err = current.error ? r.error ?? { ename: "Error", evalue: "", traceback: [] } : null;
     current = null;
     if (err) {
@@ -301,11 +308,35 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
     running = false;
   };
 
+  // (a run that does not stop within 2 s of an interrupt is in a call that
+  // never checks the flag, a backtracking re match: its worker is ended and
+  // a new one started, the run reported stopped, as the notebook page does)
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
   const interrupt = () => {
     if (intr) {
       intr[0] = 1;
       Atomics.notify(intr, 0);
     }
+    if (current === null || killTimer !== null) return;
+    const id = current.id;
+    killTimer = setTimeout(() => {
+      killTimer = null;
+      if (current === null || current.id !== id) return;
+      worker.terminate();
+      const run = current;
+      const f = pending.get(id);
+      pending.delete(id);
+      // (what else waited on the old worker: completion, is_complete)
+      for (const [k, g] of [...pending]) {
+        pending.delete(k);
+        g({ done: true, matches: [], prefix: "", more: false });
+      }
+      const error = { ename: "KeyboardInterrupt", evalue: STOPPED, traceback: [`KeyboardInterrupt: ${STOPPED}`] };
+      run.error = true;
+      if (!run.silent) send(iopub, "error", error, run.msg);
+      startWorker();
+      f?.({ done: true, error });
+    }, 2000);
   };
 
   let shuttingDown = false;
