@@ -4938,9 +4938,13 @@ def nchoosek_(n, k):
         # (the result's size from log-gamma before the exact binomial is computed: one past
         # its class's range, with some bits to spare for rounding, is refused unbuilt)
         if 0 < k < nn:
-            bits = (_math.lgamma(nn + 1.0) - _math.lgamma(k + 1.0) - _math.lgamma(nn - k + 1.0)) / _math.log(2)
-            if bits > (64 if cls in _INTS else 128 if cls == "single" else 1024) + 8:
-                raise _err("nchoosek: the result, about 2^%d, is outside %s's range: not supported in Sagebrush." % (int(bits), cls))
+            # (an estimate that overflows, or isn't finite, is past every class's range)
+            try:
+                bits = (_math.lgamma(nn + 1.0) - _math.lgamma(k + 1.0) - _math.lgamma(nn - k + 1.0)) / _math.log(2)
+            except (OverflowError, ValueError):
+                bits = _math.inf
+            if not _math.isfinite(bits) or bits > (64 if cls in _INTS else 128 if cls == "single" else 1024) + 8:
+                raise _err("nchoosek: the result, about 2^%s, is outside %s's range: not supported in Sagebrush." % ("%d" % bits if _math.isfinite(bits) else "1024 or more", cls))
         c = _math.comb(nn, k)
         if cls in _INTS:
             if c > _INTS[cls][2]:

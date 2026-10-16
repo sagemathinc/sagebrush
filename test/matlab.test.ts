@@ -2120,6 +2120,7 @@ test("nchoosek refuses mixed classes and results past their class's range before
     tryIt("nchoosek(int32(2000000000), uint32(1000000000))"), tryIt("nchoosek(single(1e7), int8(100))"),
     tryIt("nchoosek(int32(2000000000), int32(1000000000))"), tryIt("nchoosek(1e9, 5e8)"), tryIt("nchoosek(2000, 1000)"),
     tryIt("nchoosek(1030, 515)"), tryIt("nchoosek(single(300), 150)"), tryIt("nchoosek(5, 7)"), tryIt("nchoosek(5, -1)"),
+    tryIt("nchoosek(1e307, 5e306)"), tryIt("nchoosek(realmax, floor(realmax / 2))"), tryIt("nchoosek(1e300, 2)"),
     "disp(nchoosek(30, 15)), disp(nchoosek(int8(10), 3)), disp(nchoosek(1e9, 1))",
   ].join("\n");
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
@@ -2129,5 +2130,6 @@ test("nchoosek refuses mixed classes and results past their class's range before
     "refused: nchoosek: N and K must b", "refused: nchoosek: N and K must b",
     "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab",
     "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: K must be an i", "refused: nchoosek: K must be an i",
+    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab",
     "155117520", "120", "1.0000e+09"]);
 });
