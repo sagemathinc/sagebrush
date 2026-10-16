@@ -766,3 +766,64 @@ assert str(_SR1(_I1) ** (10**20 + 3)) == "-I"
 assert str(_SR1(-1) ** (10**30 + 1)) == "-1"
 assert str((-_SR1(_I1)) ** (-(10**20) - 2)) == "-1"
 print("symbolic unit powers ok")
+
+
+# SR-GAPS-1: simplify_factorial's exponents are exact (no i64 wrapping),
+# and shifts too far apart to combine stay as they are, quickly
+from sagebrush.sage import var as _var2, factorial as _fact2, sin as _sin2
+_n2 = _var2("n")
+_r = (_fact2(_n2) ** (2**63 - 1) * _fact2(_n2 + 1)).simplify_factorial()
+assert str(_r) == "(n + 1)*factorial(n)^9223372036854775808", str(_r)
+_r = (_fact2(_n2) ** (-(2**63)) * _fact2(_n2 + 1)).simplify_factorial()
+assert str(_r) == "(n + 1)/factorial(n)^9223372036854775807", str(_r)
+_r = (_fact2(_n2 + 2**63 - 1) / _fact2(_n2 - 2)).simplify_factorial()
+assert "factorial" in str(_r), str(_r)
+assert str(_sin2(-(2**63) * _var2("x")).expand_trig()) == str(_sin2(-(2**63) * _var2("x"))), "no multiple-angle expansion past 1000"
+print("simplify_factorial exponents ok")
+# equal shifts at the end of i64 (lo + 1 does not exist): no wrap, no hang
+from sagebrush.sage import gamma as _gamma2
+_r = (_fact2(_n2 + 2**63 - 1) * _gamma2(_n2 + 2**63)).simplify_factorial()
+assert str(_r) == "factorial(n + 9223372036854775807)^2", str(_r)
+print("simplify_factorial shift bound ok")
+# reduce_trig refuses a product whose expansion would pass 1024 terms
+# (prod (m_u + 1) over the distinct arguments), before expanding
+from sagebrush.sage import var as _var3, sin as _sin3, sinh as _sinh3
+import time as _time3, random as _random3
+_xs = [_var3("x%d" % i) for i in range(24)]
+_p = 1
+for _v in _xs:
+    _p = _p * _sin3(_v)
+_t = _time3.time()
+assert "past sagebrush's limit of 1024 terms" in raises(NotImplementedError, _p.reduce_trig)
+assert _time3.time() - _t < 5
+_p11 = 1
+for _v in _xs[:11]:
+    _p11 = _p11 * _sin3(_v)
+assert "1024" in raises(NotImplementedError, _p11.reduce_trig)
+_ph = 1
+for _v in _xs[:6]:
+    _ph = _ph * _sin3(_v)
+for _v in _xs[6:12]:
+    _ph = _ph * _sinh3(_v)
+assert "4096 terms" in raises(NotImplementedError, _ph.reduce_trig)
+_p8 = 1
+for _v in _xs[:8]:
+    _p8 = _p8 * _sin3(_v)
+_r8 = _p8.reduce_trig()
+for _ in range(3):
+    _pt = {str(_v): _random3.uniform(-2, 2) for _v in _xs[:8]}
+    assert abs(float(_r8.subs(**_pt)) - float(_p8.subs(**_pt))) < 1e-9
+# floating arguments: 0.1*x sums need not cancel, so the bound does not
+# hold (sin(0.1*x)^48*sin(0.1*y)^19 had 3386 terms against 980): refused
+_x3, _y3 = _xs[0], _xs[1]
+for _e in [_sin3(0.1 * _x3)**48 * _sin3(0.1 * _y3)**19, _sin3(0.1 * _x3)**31 * _sin3(0.1 * _y3)**31,
+           _sin3(0.1 * _x3)**64, _sin3(0.1 * _x3) * _sinh3(_y3)]:
+    _t = _time3.time()
+    assert "floating-point arguments" in raises(NotImplementedError, _e.reduce_trig)
+    assert _time3.time() - _t < 1
+assert str(_sin3(0.1 * _x3).reduce_trig()) == str(_sin3(0.1 * _x3))
+_e64 = _sin3(_x3 / 10)**64
+_r64 = _e64.reduce_trig()
+assert len(_r64.operands()) == 33, len(_r64.operands())
+assert abs(float(_r64.subs(x0=1.3)) - float(_e64.subs(x0=1.3))) < 1e-12
+print("reduce_trig term bound ok")
