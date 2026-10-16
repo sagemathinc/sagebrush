@@ -230,8 +230,20 @@ answers are exact.
 characteristic polynomials, echelon forms, kernels and solving run in the
 Rust engine (`engine/arith`), with multimodular and $p$-adic algorithms,
 and every answer is certified. Hermite and Smith forms with their
-transforms, elementary divisors and LLL come from the number field engine;
-as in Sage, `echelon_form()` over $\mathbb{Z}$ is the Hermite form.
+transforms, elementary divisors and LLL come from the number field engine.
+As in Sage, `echelon_form()` and `rref()` differ over $\mathbb{Z}$:
+`echelon_form()` stays in $\mathbb{Z}$ and is the Hermite normal form,
+while `rref()` works over the fraction field $\mathbb{Q}$, so its pivots
+are 1 (`matrix(ZZ, 1, 1, [2])` has `rref()` equal to `[1]` over
+$\mathbb{Q}$ and `echelon_form()` equal to `[2]`). Empty matrices keep
+their shape: `matrix(QQ, 0, 3, []).rref()` is $0 \times 3$, and the basis
+matrix of a zero kernel in $\mathbb{Q}^n$ is $0 \times n$; this holds for
+the echelon, Hermite and Smith forms, LLL, `change_ring`, `solve_right`,
+block and random matrices and basis matrices. `matrix(R, r, c, f)`, with
+a function `f` of `(i, j)`, checks the shape against the size limits
+before the first call, and over $\mathbb{Z}$ and $\mathbb{Q}$ converts
+each value strictly as it is returned, so a value that does not convert
+raises its error at once. Matrices over number fields are not available yet.
 Matrices over finite fields use Gaussian elimination over the field,
 with echelon forms, kernels, inverses, solving, characteristic polynomials
 and multiplicative orders. Over $\mathbb{Z}/n\mathbb{Z}$ with $n$
