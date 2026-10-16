@@ -27,6 +27,12 @@ RUNTIMES = ["node", "deno", "bun", "browser", "package"]
 FIELDS = ["name", "aliases", "kind", "signature", "summary", "doc", "examples", "differs", "status", "alternative",
           "domains", "see_also", "upstream", "upstream_version", "tags"]
 REQUIRED = ["name", "kind", "signature", "summary", "examples", "differs", "status"]
+# the sizes schema.json allows (what a search hands an agent stays small:
+# lib/_pyjs_docsearch.py budgets, HARD-012-1)
+MAX_CHARS = {"signature": 1000, "doc": 20000, "alternative": 500}
+MAX_ITEMS = {"differs": 20, "examples": 10, "aliases": 20, "see_also": 20, "tags": 20, "domains": 20}
+ITEM_CHARS = {"differs": 500}
+CODE_CHARS, EXPECTED_CHARS = 4000, 8000
 
 # how a mode runs one example's code: "module:function", which returns what
 # the mode's prompt prints (catalog/SCHEMA.md, Examples); a mode without one
@@ -167,6 +173,20 @@ def validate(entry):
                 errs.append(where + ": expected must be a string, empty or ending with a newline")
             if "runtimes" in ex and not (isinstance(ex["runtimes"], list) and ex["runtimes"] and all(r in RUNTIMES for r in ex["runtimes"])):
                 errs.append("%s: runtimes must be a non-empty list of %s" % (where, ", ".join(RUNTIMES)))
+    for k, n in MAX_CHARS.items():
+        if isinstance(entry.get(k), str) and len(entry[k]) > n:
+            errs.append("%s is longer than %d characters" % (k, n))
+    for k, n in MAX_ITEMS.items():
+        if isinstance(entry.get(k), list) and len(entry[k]) > n:
+            errs.append("%s has more than %d items" % (k, n))
+    for k, n in ITEM_CHARS.items():
+        if isinstance(entry.get(k), list) and any(isinstance(x, str) and len(x) > n for x in entry[k]):
+            errs.append("an item of %s is longer than %d characters" % (k, n))
+    for i, ex in enumerate(exs if isinstance(exs, list) else []):
+        if isinstance(ex, dict) and isinstance(ex.get("code"), str) and len(ex["code"]) > CODE_CHARS:
+            errs.append("examples[%d]: code is longer than %d characters" % (i, CODE_CHARS))
+        if isinstance(ex, dict) and isinstance(ex.get("expected"), str) and len(ex["expected"]) > EXPECTED_CHARS:
+            errs.append("examples[%d]: expected is longer than %d characters" % (i, EXPECTED_CHARS))
     if status == "absent" and "alternative" not in entry:
         errs.append("an absent entry needs an alternative")
     if status in ("full", "partial", "stub-error") and isinstance(exs, list) and not exs:

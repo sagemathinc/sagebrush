@@ -42,6 +42,23 @@ test("sagebrush --search --mode searches that language's index; the default is u
   // (an alias is a name of its entry: found and ranked by it, catalog/SCHEMA.md)
   const alias = run("-c", "import _pyjs_docsearch as d\ne = {'name': 'diff', 'aliases': ['derivative'], 'summary': 'S.', 'doc': '', 'open_problem': False}\nprint(d.score(e, ['derivative'], 'derivative'), d.score(dict(e, aliases=[]), ['derivative'], 'derivative'))").stdout.trim();
   assert.equal(alias, "30 0");
+  // (what a search hands an agent is bounded: HARD-012-1)
+  const huge = [
+    "import json, _pyjs_docsearch as d",
+    "e = {'name': 'f', 'kind': 'function', 'signature': '(x)' + ''.join('\\nf(%d)' % i for i in range(50)), 'summary': 'S.', 'doc': 'D' * 10**6,",
+    "     'examples': [{'code': 'x = 1\\n' * 5000, 'expected': 'y' * 10**6 + '\\n'}], 'differs': ['z' * 5000] * 100, 'alternative': 'w' * 10**5}",
+    "t = d.describe(e, 'python')",
+    "kept, omitted = d.bounded_entries([e] * 3)",
+    "small, n = d.bounded_entries([dict(e, doc='D' * 6000, examples=[], differs=[], alternative='a')] * 50)",
+    "print(json.dumps([len(t) <= d.HIT_CHARS + 40, 'more call forms' in t, 'more lines' in t, 'more characters' in t, 'more differs lines' in t,",
+    "  len(kept), omitted, len(small) < 50 and n == 50 - len(small), len(json.dumps(small, indent=1)) <= d.JSON_BYTES,",
+    "  len(d.search('e', 10**9)), d.clamp_limit(-5), d.clamp_limit('x'),",
+    "  len(d.within(['x' * 1000] * 100)) <= 61 and d.within(['x' * 1000] * 100)[-1].startswith('...[')]))",
+  ].join("\n");
+  assert.deepEqual(JSON.parse(run("-c", huge).stdout), [true, true, true, true, true, 0, 3, true, true, 50, 1, 20, true]);
+  const lots = run("--search", "e", "--mode", "python", "--limit", "100000").stdout;
+  assert.ok(lots.split("\n").filter((l) => l && !l.startsWith(" ")).length <= 50 && lots.length <= 61000, "hits: " + lots.length);
+  assert.ok(JSON.parse(run("--search", "e", "--mode", "python", "--json").stdout).length <= 10);
   const bad = run("--search", "x", "--mode", "fortran");
   assert.equal(bad.status, 2);
   assert.match(bad.stdout, /--mode must be one of sage, python, magma, matlab/);
