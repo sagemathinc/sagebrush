@@ -762,7 +762,9 @@ export function isub(a: any, b: any): any {
 }
 export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
-  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) {
+  // (a list subclass's own __mul__ too: CPython's in-place multiply tries
+  // the subclass's __mul__ before repeating, CORR-970-1)
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && !overrides(a, "__mul__") && repeatCount(b) !== undefined) {
     const r = repeatArray(a, repeatCount(b)!);
     a.length = 0;
     for (const v of r) a.push(v);
@@ -1676,10 +1678,10 @@ export function index(x: any): number | bigint {
 // NumPy's are not, but for float64, a float subclass there too: a shim's
 // result is refused, as CPython refuses NumPy's, and named as CPython names
 // it, "numpy.int64")
-function shimName(r: any, base: string): string | null {
+export function shimName(r: any, base: string): string | null {
   for (const c of typeOf(r).$mro) {
     if (c.$module !== "numpy") continue;
-    if (base === "float" && c.$name === "float64") return null;
+    if ((base === "float" && c.$name === "float64") || (base === "complex" && c.$name === "complex128")) return null;
     return c === typeOf(r) ? `numpy.${c.$name}` : typeName(r);
   }
   return null;

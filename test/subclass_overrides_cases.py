@@ -57,3 +57,51 @@ class JM(int):
 
 
 print([0] * JI(2), 'ab' * JI(2), b'a' * JI(2), (1,) * JI(2), JI(2) * [1], [0] * JM(2))
+# a list subclass's own __mul__ before repetition, in place too, by an int or
+# an int subclass (CORR-970-1); two-argument complex(): real converted by
+# __complex__ (a bound descriptor, a subclass's override) and complex when
+# that is, imag a complex's value or a real number (CORR-970-2); numpy's
+# complex64 is no complex subclass, complex128 is (CORR-970-3)
+import numpy as np
+
+
+class L(list):
+    def __mul__(self, o):
+        return 'custom-mul'
+
+
+class J2(int):
+    pass
+
+
+for n in (J2(2), 2):
+    a = L([1, 2])
+    alias = a
+    a *= n
+    print('L *=', type(n).__name__, a, alias)
+
+
+class S:
+    __complex__ = staticmethod(lambda: 9 + 2j)
+
+
+class O2:
+    def __complex__(self):
+        return 1 + 1j
+
+
+class N64:
+    def __complex__(self):
+        return np.complex64(1j)
+
+
+class N128:
+    def __complex__(self):
+        return np.complex128(1j)
+
+
+for c in ["complex(S(), 1)", "complex(C(1+2j), 1)", "complex(1, C(1+2j))", "complex(1, O2())", "complex(O2(), 2j)", "complex(C(1+2j), 2j)",
+          "complex(2, 3j)", "complex(0.0, -0.0)", "complex(N64())", "complex(N128())", "complex(G(2), 1)"]:
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        print(c, '->', t(lambda: eval(c)))

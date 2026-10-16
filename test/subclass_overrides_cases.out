@@ -27,3 +27,16 @@ list(range(JI(3))) -> [0, 1, 2]
 math.factorial(JI(3)) -> 6
 complex(CS(1)) -> 3j ['__complex__ returned non-complex (type CF).  The a']
 [0, 0] abab b'aa' (1, 1) [1, 1] JM.__rmul__
+L *= J2 custom-mul [1, 2]
+L *= int custom-mul [1, 2]
+complex(S(), 1) -> (9+3j)
+complex(C(1+2j), 1) -> 6j
+complex(1, C(1+2j)) -> (-1+1j)
+complex(1, O2()) -> TypeError: complex() argument 'imag' must be a real number, not O2
+complex(O2(), 2j) -> (-1+1j)
+complex(C(1+2j), 2j) -> (-2+5j)
+complex(2, 3j) -> (-1+0j)
+complex(0.0, -0.0) -> -0j
+complex(N64()) -> TypeError: __complex__ returned non-complex (type numpy.complex64)
+complex(N128()) -> 1j
+complex(G(2), 1) -> (9+1j)
