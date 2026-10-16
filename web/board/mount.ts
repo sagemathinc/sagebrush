@@ -360,6 +360,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // gesture dropped, nothing of it kept in this one, CORR-59E-1; the same
     // one laid out again waits for its release, below)
     const replacing = !view && d !== doc;
+    // (the document shown, drawn again (a relayout, a refit): if another is
+    // shown meanwhile, an edit's while this one awaited its pictures, this
+    // one stands down, or it would put the older document back)
+    const again = !view ? doc : null;
     if (replacing && editor.moving) editor.cancelGesture();
     const bad = formatError(d);
     if (bad) throw new Error(bad);
@@ -370,6 +374,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (over()) return false;
     await images.ensure(Object.keys(d.images ?? {}));
     if (over()) return false;
+    if (!view && !replacing && doc !== again) return false;
     if (!view) doc = d;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
@@ -534,12 +539,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.cache = host.outputs ?? null;
     c.cacheId = outputsId;
     c.usePictures(docPixels);
+    // (a language's interpreter could not start: the caption says why, until the next edit)
+    c.onError = (why) => { if (code === c) say(plain("The code can't run here:", why)); };
     c.ready.then((ok) => {
-      // (it could not start: the caption says why, until the next edit)
-      if (!ok) {
-        if (code === c && c.error) say(plain("The code can't run here:", c.error));
-        return;
-      }
+      if (!ok) return;
       board.setCode({ highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
       relayout();
     });
