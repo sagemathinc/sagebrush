@@ -286,7 +286,7 @@ export class PyPattern {
 // pos and endpos, given in code points, as UTF-16 offsets into s
 function bounds(s: string, pos: any, endpos: any): [number, number] {
   const sp = SP.pairs(s);
-  const n = sp === null ? s.length : s.length - sp.length;
+  const n = sp === null ? s.length : s.length - sp.n;
   let p = Number(pos ?? 0), e = endpos === null || endpos === undefined ? n : Number(endpos);
   if (p < 0) p = 0;
   if (p > n) p = n;

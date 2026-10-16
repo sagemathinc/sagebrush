@@ -31,3 +31,19 @@ test("indexing every character of a 2-million-character string, with or without 
     assert.ok(Number(out[1]) < 2, `${fill}: ${out.join(" ")}`);
   }
 });
+
+// The index of a string's surrogate pairs is sparse and made in place
+// (HARD-AF6-1): a string of ten million astral characters, or of every
+// astral character four times over, is measured, indexed and searched in a
+// 96 MiB heap, where the per-pair table aborted Node.
+test("a string of millions of astral characters is indexed in a 96 MiB heap (HARD-AF6-1)", () => {
+  const code = [
+    "s = chr(0x1F600) * 10_000_000",
+    "print(len(s), s[5_000_000] == chr(0x1F600), s[-1] == chr(0x1F600), s.find('x'), len(s[9_999_990:]))",
+    "s = None",
+    "t = ''.join(map(chr, range(0x10000, 0x110000))) * 4",
+    "print(len(t), t[1_048_576 * 3 + 5] == chr(0x10005), t.index(chr(0x10FFFF)), t.rfind(chr(0x10000)))",
+  ].join("\n");
+  const out = execFileSync(process.execPath, ["--max-old-space-size=96", CLI, "-c", code], { encoding: "utf8", timeout: 120000 });
+  assert.equal(out, "10000000 True True -1 10\n4194304 True 1048575 3145728\n");
+});
