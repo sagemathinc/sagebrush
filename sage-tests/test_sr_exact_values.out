@@ -109,3 +109,4 @@ latex(1/2*I/(x + 1)) = \frac{i}{2 \, {\left(x + 1\right)}}
 parts of a float subclass = (3.0, True, 3.0, 0.0)
 float subclasses' parts are float()'s = (2.0, 2.0, 0.0, 9.0, 9.0, 0.0, 2.0)
 RDF parts = (2.0, Real Double Field, Real Double Field, 0.0, Real Double Field)
+__float__ bound as on an instance, its result an exact float = (5.0, 6.0, 9.0, 9.0, 0.0, 10.0, 10.0, 10.0, -0.0)
