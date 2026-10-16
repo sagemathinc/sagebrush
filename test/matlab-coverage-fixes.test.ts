@@ -19,7 +19,7 @@ const run = (code: string, env: Record<string, string> = {}) => {
   }
 };
 // (the CLI's notes of the figures it draws are not MATLAB's output)
-const lines = (s: string) => s.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "" && !/^(Plot: |Saved )/.test(l.trim()));
+const lines = (s: string) => s.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "" && !/^(Plot: |Saved |\(figures are removed )/.test(l.trim()));
 
 test("sets, comparisons and text: the pages' values", () => {
   const out = run([
