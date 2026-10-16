@@ -471,6 +471,78 @@ show(v);
 clear
 v = trapz([1 2 3]);
 show(v);
+% int16
+clear
+v = int16([-40000 -2.5 2.5 40000]);
+show(v);
+% int64
+clear
+v = int64([-2.5 0 2.5]);
+show(v);
+% uint16
+clear
+v = uint16([-1 12.5 70000]);
+show(v);
+% uint32
+clear
+v = uint32([-1 2.5 4294967296]);
+show(v);
+% uint64
+clear
+v = uint64([-1 2.5 20]);
+show(v);
+% isfloat
+clear
+v = isfloat(single([2 5]));
+show(v);
+% isinteger
+clear
+v = isinteger(int16([3 -4]));
+show(v);
+% ismatrix
+clear
+v = ismatrix(ones(2, 1, 3));
+show(v);
+% isdiag
+clear
+v = isdiag([3 0; 0 -2]);
+show(v);
+% ishermitian
+clear
+v = ishermitian([2 3i; -3i 4]);
+show(v);
+% istril
+clear
+v = istril([2 0; 5 -1]);
+show(v);
+% istriu
+clear
+v = istriu([2 5; 0 -1]);
+show(v);
+% isbanded
+clear
+v = isbanded([1 4 0; 2 3 5; 0 6 7], 1, 1);
+show(v);
+% issparse
+clear
+v = issparse(speye(3));
+show(v);
+% iscellstr
+clear
+v = iscellstr({'oak', 'fir'});
+show(v);
+% isletter
+clear
+v = isletter('A7 z');
+show(v);
+% isvarname
+clear
+v = isvarname('unit_7');
+show(v);
+% iskeyword
+clear
+v = iskeyword('while');
+show(v);
 % class
 clear
 v = class(int8(1));
