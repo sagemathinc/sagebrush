@@ -2099,3 +2099,41 @@ test("abs of an integer class's minimum saturates, as MATLAB's; int64's is refus
     tryIt("abs(intmin('int64'))"), tryIt("-intmin('int64')"),
   ].join("\n")), ["127 32767 2147483647 5 7", "int8", "uint16", "refused", "refused"]);
 });
+
+test("nchoosek's N and K the same class or one double; unique's TreatMissingAsDistinct refused with 'legacy' (CORR-24A-1, CORR-24A-2)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    tryIt("nchoosek(int8(10), uint8(3))"), tryIt("nchoosek(single(5), int8(2))"),
+    tryIt("nchoosek(int8(10), int8(3))"), tryIt("nchoosek(int8(10), 3)"), tryIt("nchoosek(10, single(3))"),
+    tryIt("unique([1 1], 'legacy', 'TreatMissingAsDistinct', false)"), tryIt("unique([1 1], 'legacy')"),
+    tryIt("unique([1 NaN], 'TreatMissingAsDistinct', false)"),
+  ].join("\n")), ["refused", "refused", "ran", "ran", "ran", "refused", "ran", "ran"]);
+});
+
+test("nchoosek refuses mixed classes and results past their class's range before computing the binomial, under a 96 MiB heap, and keeps exact results near the limits", () => {
+  const { spawnSync } = require("node:child_process");
+  const tryIt = (e: string) => `try, x = ${e}; disp(class(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 24))]), end`;
+  const code = [
+    tryIt("nchoosek(int32(2000000000), uint32(1000000000))"), tryIt("nchoosek(single(1e7), int8(100))"),
+    tryIt("nchoosek(int32(2000000000), int32(1000000000))"), tryIt("nchoosek(1e9, 5e8)"), tryIt("nchoosek(2000, 1000)"),
+    tryIt("nchoosek(1030, 515)"), tryIt("nchoosek(single(300), 150)"), tryIt("nchoosek(5, 7)"), tryIt("nchoosek(5, -1)"),
+    tryIt("nchoosek(1e307, 5e306)"), tryIt("nchoosek(realmax, floor(realmax / 2))"), tryIt("nchoosek(1e300, 2)"),
+    "x = nchoosek(int64(2^53 - 1), 1); disp([class(x) ' ' sprintf('%d', x)])", "x = nchoosek(uint64(2^53 - 1), 1); disp([class(x) ' ' sprintf('%d', x)])",
+    "x = nchoosek(int64(2^53 - 1), int64(2^53 - 2)); disp([class(x) ' ' sprintf('%d', x)])",
+    "disp(num2str([nchoosek(realmax, 1) == realmax, nchoosek(2^1020, 1) == 2^1020, nchoosek(1e307, 1) == 1e307]))",
+    "disp(nchoosek(30, 15)), disp(nchoosek(int8(10), 3)), disp(nchoosek(1e9, 1))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
+    "refused: nchoosek: N and K must b", "refused: nchoosek: N and K must b",
+    "refused: nchoosek: the result, at", "refused: nchoosek: the result, at", "refused: nchoosek: the result, ab",
+    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, at", "refused: nchoosek: K must be an i", "refused: nchoosek: K must be an i",
+    "refused: nchoosek: the result, at", "refused: nchoosek: the result, at", "refused: nchoosek: the result, at",
+    "int64 9007199254740991", "uint64 9007199254740991", "int64 9007199254740991", "1 1 1",
+    "155117520", "120", "1.0000e+09"]);
+});
