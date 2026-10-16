@@ -2728,9 +2728,9 @@ def _items(v):
 
 # While Sprint or Sprintf makes a string (the value it was given, in a
 # tuple), not session output: Magma lays a value given that way out
-# without the 80-column layout, its nested elements a line each without
-# indentation, each such line laid out on 80 columns (checked against
-# Magma 2.18)
+# without the 80-column layout at any depth, keeping a nested value's
+# line breaks, its elements a line each without indentation (checked
+# against Magma 2.18, the string's characters themselves, CORR-173-1)
 _SPRINT = [None]
 
 
@@ -2744,8 +2744,9 @@ def _sprint_str(v):
         _SPRINT[0] = old
 
 
-def _sprint_top(v):
-    return _SPRINT[0] is not None and v is _SPRINT[0][0]
+def _making_string():
+    """Whether a string is being made: no width layout anywhere in it."""
+    return _SPRINT[0] is not None
 
 
 def _str(v, indent=0, col=None, tail=""):
@@ -2774,7 +2775,7 @@ def _str1(v, indent, col, tail):
             return "[* *]", False
         if all(_atomic(x) for x in v):
             t = "[* " + ", ".join(_inline(x) for x in v) + " *]"
-            return (t if _sprint_top(v) else _wrap(t, indent, indent)), False
+            return (t if _making_string() else _wrap(t, indent, indent)), False
         if all(type(x).__name__ == "MList" for x in v):
             return "[* " + ", ".join(_str(x, indent) for x in v) + " *]", False
         pad = " " * (indent + 4)
@@ -2800,7 +2801,7 @@ def _str1(v, indent, col, tail):
                 words = (it + ("," if k < len(items) - 1 else "")).split(" ")
                 chunks += [(w, True) for w in words]
             chunks.append((c.strip() + tail, False))
-            if _sprint_top(v):
+            if _making_string():
                 return "".join(t + (" " if sp else "") for t, sp in chunks), True
             return _flow(chunks, col, indent), True
         step = 0 if _SPRINT[0] is not None else 4
@@ -2811,7 +2812,7 @@ def _str1(v, indent, col, tail):
         return v._str(indent), False
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
-    if _sprint_top(v):
+    if _making_string():
         return _inline(v) + tail, True
     return _wrap(_inline(v) + tail, col, indent + _extra(v), indent), True
 
