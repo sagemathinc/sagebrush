@@ -147,6 +147,8 @@ class NumberField_absolute:
     """
 
     _element_class = None  # NumberFieldElement (set below; subclasses override)
+    # matrices over K by exact Gaussian elimination, as over QQbar
+    _is_generic_field = True
 
     def __init__(self, f, name, embedding_repr=None):
         self._f, self._var = _int_coeffs(f)
@@ -288,6 +290,84 @@ class NumberField_absolute:
         return "\\Bold{Q}[%s]/(%s)" % (v, s)
 
     # ---- invariants
+    def zero(self):
+        """0 and 1 of K (as the matrices over K, which run Gaussian
+        elimination over the field, ask for them).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 - 2, 'a'); K.zero(), K.one()
+            (0, 1)
+        """
+        return self(0)
+
+    def one(self):
+        """1.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'b').one()
+            1
+        """
+        return self(1)
+
+    def characteristic(self):
+        """0.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 1, 'i').characteristic()
+            0
+        """
+        return _sa().Integer(0)
+
+    def is_field(self, proof=True):
+        """True.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 - 2, 'a'); K.is_field(), K.is_exact(), K.is_finite()
+            (True, True, False)
+        """
+        return True
+
+    def is_exact(self):
+        """True.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').is_exact()
+            True
+        """
+        return True
+
+    def is_finite(self):
+        """False.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').is_finite()
+            False
+        """
+        return False
+
+    def order(self):
+        """+Infinity.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').order()
+            +Infinity
+        """
+        return _sa().infinity
+
     def degree(self):
         """The degree over QQ.
 
