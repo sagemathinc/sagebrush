@@ -736,12 +736,24 @@ def _assigned(x, name):
 
 
 def _assigned_name(read):
-    """assigned x, for a variable x."""
+    """assigned x, for a variable x (unassigned too when a witness search
+    found none: _NOVAL)."""
     try:
-        read()
-        return True
+        return read() is not _NOVAL
     except NameError:
         return False
+
+
+def _wread(v, name, pos, local):
+    """A read of a name exists(t){ } or forall(t){ } may have unassigned
+    (_NOVAL): Magma's error for an unassigned name, a local's in a function."""
+    if v is _NOVAL:
+        if local:
+            raise UnboundLocalError("cannot access local variable '%s' where it is not associated with a value" % name)
+        e = NameError("name '%s' is not defined" % name)
+        e._mpos = pos
+        raise e
+    return v
 
 
 # ------------------------------------------------------------------ records

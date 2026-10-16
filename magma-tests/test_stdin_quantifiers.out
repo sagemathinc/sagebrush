@@ -25,3 +25,18 @@ Runtime error in :=: Expected to assign 2 value(s) but only computed 1 value(s)
 >> a, b, c := g();
            ^
 Runtime error in :=: Expected to assign 3 value(s) but only computed 2 value(s)
+false
+false
+
+>> w;
+   ^
+User error: Identifier 'w' has not been declared or assigned
+true
+false
+false
+false false
+false
+false
+false
+true
+6

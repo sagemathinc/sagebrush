@@ -169,7 +169,22 @@ class Parser {
     if (!this.rejected) this.rejected = { line: t.line, col: t.col, msg };
   }
 
-  constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {}
+  constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {
+    // the names a witness of exists(t){ } or forall(t){ } may unassign
+    // (Magma unassigns them when there is no witness): their reads check
+    for (let k = 0; k + 2 < toks.length; k++) {
+      if ((toks[k].v !== "exists" && toks[k].v !== "forall") || toks[k].t !== "id" || toks[k + 1].v !== "(") continue;
+      let q = k + 2;
+      const names: string[] = [];
+      while (toks[q]?.t === "id" && (toks[q + 1]?.v === "," || toks[q + 1]?.v === ")")) {
+        names.push(toks[q].v);
+        q += 2;
+        if (toks[q - 1].v === ")") break;
+      }
+      if (toks[q - 1]?.v === ")" && toks[q]?.v === "{") names.forEach((n) => this.witnesses.add(n));
+    }
+  }
+  private witnesses = new Set<string>();
 
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
@@ -1345,7 +1360,9 @@ class Parser {
     if (t.t === "id") {
       this.next();
       const n = pyName(t.v);
-      return this.capturing ? this.useVar(n, "r", t) : n;
+      const r = this.capturing ? this.useVar(n, "r", t) : n;
+      // (a witness exists(t){ } may have unassigned: Magma's error, not its old value)
+      return this.witnesses.has(t.v) ? `_m._wread(${r}, ${JSON.stringify(n)}, (${t.line}, ${t.col}), ${this.fns.length ? "True" : "False"})` : r;
     }
     if (this.at("assigned")) return this.assignedExpr(this.next());
     if (this.eat("true")) return "True";
@@ -1644,7 +1661,11 @@ class Parser {
     const names = wit.map((w) => pyName(w.v));
     names.forEach((n, k) => this.declareGlobal(n, wit[k]));
     const assign = names.map((n, k) => `(${n} := ${names.length === 1 ? `${t}[0]` : `_m._index(${t}[0], ${k + 1})`})`).join(", ");
-    return kw === "exists" ? `(${found} is not None and (${assign}, True)[-1])` : `(${found} is None or (${assign}, False)[-1])`;
+    // (no witness: they are unassigned, as in Magma, not left with old values)
+    const unassign = names.map((n) => `(${n} := _m._NOVAL)`).join(", ");
+    return kw === "exists"
+      ? `((${found} is not None and (${assign}, True)[-1]) or (${unassign}, False)[-1])`
+      : `((${found} is None and (${unassign}, True)[-1]) or (${assign}, False)[-1])`;
   }
 
   /** [ ... ], { ... }: elements, a range a..b [by c], or a comprehension. */
