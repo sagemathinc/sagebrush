@@ -102,10 +102,25 @@ class _Ring:
         return _sa().Integer(x)
 
     def __getitem__(self, names):
+        """QQ['x'] (a polynomial ring), QQ[['x']] (power series), and QQ[a]
+        for an algebraic number a: the number field it generates, as in Sage.
+
+        EXAMPLES::
+
+            sage: QQ[sqrt(2)]
+            Number Field in sqrt2 with defining polynomial x^2 - 2 with sqrt2 = 1.414213562373095?
+            sage: L.<a> = QQ[sqrt(2 - sqrt(3))]; L, a^4 - 4*a^2 + 1
+            (Number Field in a with defining polynomial x^4 - 4*x^2 + 1 with a = 0.5176380902050415?, 0)
+            sage: QQ[pi]
+            Univariate Polynomial Ring in pi over Rational Field
+        """
         if isinstance(names, list):
             # QQ[['x']]: power series
             import _sage_series
             return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+        K = _algebraic_extension(self, names)
+        if K is not None:
+            return K
         return PolynomialRing(self, names)
 
     def __contains__(self, x):
@@ -182,6 +197,49 @@ class _Ring:
 
 
 ZZ = _Ring("Integer Ring", False)
+def _algebraic_extension(R, gens):
+    """R[a] for a constant symbolic algebraic number a: for R = QQ the
+    number field of a's minimal polynomial, embedded at a (the generator is
+    named after a, as Sage does: sqrt(2) gives sqrt2, I gives I, anything else
+    a). None when gens are names or symbols (a polynomial ring); a
+    transcendental constant (pi) is also a polynomial ring, as in Sage. (A
+    polynomial ring "in sqrt(2)" made sqrt(2)^2 a polynomial: the sagebook,
+    p. 211.)"""
+    import _sage_expr
+    import _sage_qqbar
+    if isinstance(gens, int) and not isinstance(gens, bool):
+        # QQ[2] and QQ[sqrt(4)] (an Integer): a number is not a name, as Sage
+        raise ValueError("variable name %r does not start with a letter" % str(gens))
+    gs = gens if isinstance(gens, tuple) else (gens,)
+    cs = [g for g in gs if (isinstance(g, _sage_expr.Expression) and not g.variables())
+          or isinstance(g, (_F, _sage_qqbar.AlgebraicNumber))]
+    if not cs:
+        return None
+    try:
+        a = _sage_qqbar.QQbar(cs[0])
+    except (TypeError, ValueError, NotImplementedError, ArithmeticError):
+        return None  # (not algebraic: a polynomial ring)
+    if len(gs) > 1:
+        raise NotImplementedError("%s[%s]: relative number fields are not available in sagebrush yet" % ("QQ" if R._field else "ZZ", ", ".join(map(str, gs))))
+    if not R._field:
+        raise NotImplementedError("ZZ[%s]: orders of number fields are not available in sagebrush yet" % (cs[0],))
+    f = a.minpoly()
+    if f.degree() == 1:
+        # Sage: the number field x - r (QQ[2/3], QQ[SR(2)], QQ[QQbar(2)])
+        raise NotImplementedError("QQ[%s]: number fields of degree 1 are not available in sagebrush yet" % (cs[0],))
+    name = str(cs[0]).replace("(", "").replace(")", "")
+    if not isinstance(cs[0], _sage_expr.Expression) or not name.isidentifier():
+        name = "a"
+    import _sage_nf
+    try:
+        emb = repr(_sage_qqbar.AA(a)) if a._is_real() else repr(a)
+        if emb == "I":
+            emb = "1*I"  # (as Sage prints the embedding of QQ[I])
+        return _sage_nf._unique(_sage_nf.NumberField_absolute(f, name, emb))
+    except (TypeError, ValueError) as e:
+        raise NotImplementedError("QQ[%s]: the number field of %s is not available in sagebrush yet (%s)" % (cs[0], f, e)) from None
+
+
 QQ = _Ring("Rational Field", True)
 
 

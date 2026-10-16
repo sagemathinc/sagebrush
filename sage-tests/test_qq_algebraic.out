@@ -1,0 +1,14 @@
+Number Field in sqrt2 with defining polynomial x^2 - 2 with sqrt2 = 1.414213562373095?
+Number Field in a with defining polynomial x^4 - 4*x^2 + 1 with a = 0.5176380902050415?
+Number Field in I with defining polynomial x^2 + 1 with I = 1*I
+Number Field in a with defining polynomial x^3 - 2 with a = 1.259921049894873?
+Number Field in a with defining polynomial x^4 - 10*x^2 + 1 with a = 3.146264369941973?
+Univariate Polynomial Ring in pi over Rational Field
+Univariate Polynomial Ring in x over Rational Field
+ValueError variable name '2' does not start with a letter
+0 x^4 - 4*x^2 + 1
+2 True 2
+2 -108
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Number Field in a with defining polynomial x^3 - 2 with a = 1.259921049894873?
