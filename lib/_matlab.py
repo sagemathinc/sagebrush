@@ -425,10 +425,32 @@ def _int_round(r, cls):
     if r.dtype.kind in "iu":
         # (the bounds inside the source class's own range, which clip needs)
         _, slo, shi = _INTS[_dtclass(r.dtype)]
-        return np.clip(r, max(lo, slo), min(hi, shi)).astype(dt)
+        # (an integer source holding -2^63 holds it exactly: intmin, or saturation to it)
+        return _int64_exact(np.clip(r, max(lo, slo), min(hi, shi)).astype(dt), cls, True)
     r = np.where(np.isnan(r), 0.0, r)
-    r = np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5))
-    return np.clip(r, float(lo), float(hi)).astype(dt)
+    # (a double of magnitude 2^52 or more is already an integer: adding 0.5 there would round
+    # it up, uint64(2^53 - 1) becoming 2^53)
+    r = np.where(np.abs(r) >= 2.0 ** 52, r, np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5)))
+    # (-2^63 from a double is exact only when it saturates a value strictly below it: a
+    # double equal to -2^63 may be a rounded -2^63 + k, intmin('int64') + 1 among them)
+    low = r < -(2.0 ** 63)
+    return _int64_exact(np.clip(r, float(lo), float(hi)).astype(dt), cls, low)
+
+
+def _int64_exact(a, cls, exact_low=False):
+    """a, if an int64 or uint64 result Sagebrush holds exactly: its 64-bit integers keep 53
+    bits, as doubles do, so a value of 2^53 or more in magnitude (int64(2)^62, uint64(2^53) + 1,
+    computed as 2^53, a saturated limit) is refused rather than shown rounded; -2^63 is kept
+    where exact_low says it is exact (saturation from below, or an integer source)"""
+    if cls in ("int64", "uint64") and a.size:
+        m = np.abs(a.astype(np.float64))
+        # (2^53 itself too: a double result there may be a rounded 2^53 + 1, while one below
+        # it is exact for integer operands)
+        bad = (m >= 2.0 ** 53) & ~((a.astype(np.float64) == -(2.0 ** 63)) & exact_low)
+        if np.any(bad):
+            v = float(a.reshape(-1)[np.flatnonzero(bad)[0]])
+            raise _err("%s values of 2^53 or more in magnitude (here about %.17g) are not supported: Sagebrush's 64-bit integers are not exact there." % (cls, v))
+    return a
 
 
 def _finish(r, cls):
@@ -3883,10 +3905,12 @@ def _int_limit(name, a, k):
     if c not in _INTS:
         raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
     v = _INTS[c][k]
-    if len(a) == 2 and float(v) != v:
-        # (the "like" form, new here: a 64-bit limit Sagebrush's double-backed 64-bit
-        # integers can't hold exactly, 2^63 - 1 or 2^64 - 1, is refused rather than rounded)
-        raise _err("%s(\"like\", p) for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (name, c, v))
+    if float(v) != v:
+        # (a 64-bit limit Sagebrush's double-backed 64-bit integers can't hold exactly,
+        # 2^63 - 1 or 2^64 - 1, is refused rather than rounded: intmax('uint64') showed
+        # 18446744073709551616; intmin('int64'), -2^63, is exact)
+        form = "%s(\"like\", p)" % name if len(a) == 2 else "%s('%s')" % (name, c)
+        raise _err("%s for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (form, c, v))
     return np.array([[v]], dtype=_INTS[c][0])
 
 
@@ -4710,8 +4734,15 @@ def angle_(x):
 
 @_bs("complex")
 def complex_(a, b=0.0):
+    ca, cb = class_(a), class_(b)
+    if ca in _INTS or cb in _INTS:
+        # (complex integers, as complex(uint8(1), uint8(2)) makes in MATLAB, are not
+        # represented: refused rather than made double)
+        raise _err("complex of %s values is not supported in Sagebrush: complex integers are not represented." % (ca if ca in _INTS else cb))
     r = _broadcast(lambda x, y: x + 1j * y, _farr(a), _farr(b))
     r = np.asarray(r, dtype=np.complex128)
+    if "single" in (ca, cb):
+        return _canon(_contig(r.astype(np.complex64)))
     if r.size == 1:
         z = complex(r.reshape(-1)[0])
         return np.array([[z]], dtype=np.complex128) if z.imag == 0 else z
@@ -4912,6 +4943,8 @@ def nchoosek_(n, k):
 @_bs("primes")
 def primes_(n):
     # (in the class of n: primes(uint16(12)) is uint16)
+    if _numel(n) != 1:
+        raise _err("N must be a scalar.")
     cls = class_(n)
     if cls in _INTS or cls == "single":
         r = primes_(float(_scalar(n)))
@@ -7448,6 +7481,7 @@ def str2num_(nargout, s):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
     vals = []
+    logical = True
     for r in rows:
         parts = [p for p in _re.split(r"[,\s]+", r.strip()) if p]
         row = []
@@ -7457,8 +7491,12 @@ def str2num_(nargout, s):
                 if p.lower() in ("true", "false"):
                     v = 1.0 if p.lower() == "true" else 0.0
                 else:
-                    out = np.zeros((0, 0))
-                    return out if nargout <= 1 else [out, False]
+                    # (str2num evaluates its text: an expression, 2+3, is 5 in MATLAB; only
+                    # numbers and true/false are read here, so anything else is refused
+                    # rather than given as [])
+                    raise _err("str2num of '%s' is not supported in Sagebrush: only numbers and true/false are read." % t[:40])
+            else:
+                logical = False
             row.append(v)
         vals.append(row)
     if not vals:
@@ -7469,6 +7507,9 @@ def str2num_(nargout, s):
             out = np.zeros((0, 0))
             return out if nargout <= 1 else [out, False]
         out = _unmat(np.array(vals))
+        if logical:
+            # (true and false only: a logical array, as MATLAB's evaluation gives)
+            out = _box(_arr(out).astype(bool)) if type(out) is not float else bool(out)
     return out if nargout <= 1 else [out, True]
 
 # ---- text functions
@@ -7859,6 +7900,54 @@ def isstrprop_(s, kind):
     return _char_pred(f)(1, s)
 
 
+def _group_names(p, freespacing=False):
+    """[(group number, name)] of a MATLAB pattern's named capturing groups, in order: a name may
+    appear more than once, in different alternatives ('(?<day>\\d+)-...|...(?<day>\\d+)').
+    Comments are skipped: (?#...), and with freespacing (the compiled flags: the option or any
+    inline flag group containing x, such as (?ix)) a
+    # to the end of the line"""
+    out = []
+    i, n, k = 0, len(p), 0
+    while i < n:
+        c = p[i]
+        if c == "\\":
+            i += 2
+            continue
+        if p.startswith("(?#", i):
+            e = p.find(")", i)
+            i = n if e < 0 else e + 1
+            continue
+        if p.startswith("(?x)", i):
+            freespacing = True
+            i += 4
+            continue
+        if freespacing and c == "#":
+            e = p.find("\n", i)
+            i = n if e < 0 else e + 1
+            continue
+        if c == "[":
+            j = i + 1
+            if j < n and p[j] == "^":
+                j += 1
+            if j < n and p[j] == "]":
+                j += 1
+            while j < n and p[j] != "]":
+                j += 2 if p[j] == "\\" else 1
+            i = j + 1
+            continue
+        if c == "(":
+            if p.startswith("(?<", i) or p.startswith("(?P<", i):
+                j = i + (3 if p[i + 2] == "<" else 4)
+                if j < n and p[j] not in "=!":
+                    e = p.find(">", j)
+                    k += 1
+                    out.append((k, p[j:e]))
+            elif not p.startswith("(?", i):
+                k += 1
+        i += 1
+    return out
+
+
 def _regex(p):
     """MATLAB's regular expression syntax as Python's"""
     p = p.replace("(?<", "(?P<").replace("(?P<=", "(?<=").replace("(?P<!", "(?<!")
@@ -7894,6 +7983,13 @@ def regexprep_(s, pat, rep, *opts):
             flags |= _re.IGNORECASE
         elif t == "once":
             count = 1
+        elif t != "matchcase":
+            # ('preservecase', 'emptymatch', a match number and the rest change the result:
+            # refused rather than ignored)
+            raise _err("regexprep: the option '%s' is not supported in Sagebrush." % _text(o))
+    if "${" in _text(rep) or "(??@" in _text(pat) or "(?@" in _text(pat):
+        # (dynamic expressions run MATLAB code on each match: not supported, and not left as text)
+        raise _err("regexprep: dynamic expressions ($" + "{...}, (??@...), (?@...)) are not supported in Sagebrush.")
     if type(s) is Cell:
         return Cell([regexprep_(e, pat, rep, *opts) for e in s.a], s.shape)
     rx = _re.compile(_regex(_text(pat)), flags)
@@ -7916,6 +8012,12 @@ def _regexp_row(e):
     if type(e) is Char and _dims(e)[0] > 1:
         raise _err("regexp: character matrices are not supported; use a cell array of character vectors.")
     return Char(_text(e))
+
+
+# (the slots a regexp call may use, its matches times their groups and outputs; a call
+# over the elements of a cell array shares one budget, _RX_BUDGET, between them)
+_MATCH_SLOTS = 200_000
+_RX_BUDGET = [None]
 
 
 def _regexp(nargout, s, pat, opts, flags):
@@ -7944,8 +8046,15 @@ def _regexp(nargout, s, pat, opts, flags):
             return Cell(per, pat.shape)
         return [Cell([q[k] for q in per], pat.shape) for k in range(nargout)]
     if type(s) is Cell or type(s) is StrArr:
-        # (each element: a cell of results)
-        per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
+        # (each element: a cell of results; the elements share one match budget)
+        owner = _RX_BUDGET[0] is None
+        if owner:
+            _RX_BUDGET[0] = _MATCH_SLOTS
+        try:
+            per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
+        finally:
+            if owner:
+                _RX_BUDGET[0] = None
         if nargout <= 1:
             return Cell(per, s.shape)
         return [Cell([p[k] for p in per], s.shape) for k in range(nargout)]
@@ -7992,9 +8101,35 @@ def _regexp(nargout, s, pat, opts, flags):
     if not wanted:
         wanted = ["start", "end", "tokenextents", "match", "tokens", "names", "split"]
     rx = _re.compile(_regex(_text(pat)), flags)
-    ms = [m for m in rx.finditer(t) if empty_ok or m.end() > m.start()]
-    if once:
-        ms = ms[:1]
+    # (the matches kept, and per match the outputs asked for, admitted as they are found:
+    # each match holds its groups, start and end a number each, match and split a char
+    # array, tokens, tokenExtents and names one entry per group; past _MATCH_SLOTS the call
+    # is refused rather than run out of memory. 'once' stops at the first)
+    ms = []
+    g = rx.groups
+    cost = {"start": 1, "end": 1, "match": 2, "split": 2, "tokens": 1 + g, "tokenextents": 1 + g, "names": 1 + g}
+    slots = (g + 1) + sum(cost[w] for w in wanted[:max(1, nargout)])
+
+    def stepwise():
+        # (one match at a time, for an input that could pass the limit: the runtime's
+        # finditer may find them all before the first is seen)
+        pos = 0
+        while pos <= len(t):
+            m = rx.search(t, pos)
+            if m is None:
+                return
+            yield m
+            pos = m.end() + 1 if m.end() == m.start() else m.end()
+
+    for m in (stepwise() if (len(t) + 1) * slots > _MATCH_SLOTS else rx.finditer(t)):
+        if empty_ok or m.end() > m.start():
+            ms.append(m)
+            if once:
+                break
+            if len(ms) * slots > (_RX_BUDGET[0] if _RX_BUDGET[0] is not None else _MATCH_SLOTS):
+                raise _err("regexp: more than %d matches are not supported in Sagebrush for this pattern (%d groups) and these %d outputs." % (_MATCH_SLOTS // slots, rx.groups, min(len(wanted), max(1, nargout))))
+    if _RX_BUDGET[0] is not None:
+        _RX_BUDGET[0] -= len(ms) * slots
 
     def row(vals):
         return Cell(vals, (1, len(vals)))
@@ -8032,9 +8167,27 @@ def _regexp(nargout, s, pat, opts, flags):
             out.append(v[0] if once and v else _box(np.array(v).reshape((len(v), 1))) if v else np.zeros((0, 1)) if not once else np.zeros((0, 0)))
         elif w == "names":
             if ms and rx.groupindex:
-                # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one)
-                names = sorted(rx.groupindex, key=lambda k: rx.groupindex[k])
-                items = [{k: Char(m.group(k) or "") for k in names} for m in ms]
+                # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one.
+                # The fields in the order the names first appear; a name used in several
+                # alternatives takes the group that took part in the match)
+                groups = _group_names(_text(pat), bool(rx.flags & _re.VERBOSE))
+                # (each name's groups found once, so a match costs O(groups); the fields built,
+                # matches times names, admitted first)
+                cands = {}
+                for g, x in groups:
+                    if g <= rx.groups:
+                        cands.setdefault(x, []).append(g)
+                names = list(dict.fromkeys(nm for _, nm in groups))
+                fields = (1 if once else len(ms)) * len(names)
+                if fields > _CS_MAX:
+                    raise _err("regexp 'names' would build %d fields (%d matches, %d names), beyond Sagebrush's limit of %d." % (fields, len(ms), len(names), _CS_MAX))
+                def value(m, nm):
+                    for g in cands.get(nm, ()):
+                        v = m.group(g)
+                        if v is not None:
+                            return v
+                    return ""
+                items = [{k: Char(value(m, k)) for k in names} for m in (ms[:1] if once else ms)]
                 out.append(_struct1(items[0]) if once or len(items) == 1 else Struct(items, (1, len(items)), names))
             else:
                 out.append(Struct([{}], (1, 1), []))
