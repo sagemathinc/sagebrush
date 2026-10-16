@@ -38,13 +38,16 @@ def _field(base):
 
 # ------------------------------------------------------------------ memory
 
-# One matrix may use at most this share of the JavaScript heap the process
-# can grow to (sys._sagebrush_heap_limit, from the host).  The admitted
+# One matrix may use at most this share of the old generation the process
+# can grow to (sys._sagebrush_heap_limit, from the host: --max-old-space-size
+# when given; V8's heap_size_limit, which adds a young generation of a size
+# that varies by Node version, gave GitHub's Node 24 half again the budget
+# the VMs had, and its test admitted a matrix the VMs refused).  The admitted
 # matrix, the operands of the operation that made it and that operation's
 # working copies then fit together: a 512 x 512 matrix over AA ran V8 out
 # of memory in a 96 MiB heap instead of being refused (daybreak2's
 # HARD-F4E-1).  _MAX_ENTRIES stays the absolute ceiling.
-_HEAP_SHARE = 8
+_HEAP_SHARE = 4
 
 
 def _heap_limit():
