@@ -1132,13 +1132,11 @@ def _fft_sizes_first(name):
     def g(nargout, *args):
         if _has_sparse(args):
             rest = list(args[1:])
-            if name in ("ifft2", "ifftn") and rest and _m._istext(rest[-1]):
-                # (the flag: checked as the full function checks it, then left to it)
-                _m._ifft_args(name, [rest.pop()], 0)
             for a in rest:
                 if type(a) is Sparse and a.m * a.n > 64:
                     raise _err("%s: a sparse size argument with %d elements is not supported." % (name, a.m * a.n))
-                _m._fft_sizes(full(a) if type(a) is Sparse else a)
+            # (the whole signature, as the full function checks it: count, sizes, flag)
+            _m._fft_parse(name, [full(a) if type(a) is Sparse else a for a in rest])
             args = [full(a) if type(a) is Sparse else a for a in args]
         return f(nargout, *args)
     return g
