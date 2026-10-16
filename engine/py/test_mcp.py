@@ -56,6 +56,11 @@ def raw():
     assert rpc(p, 14, "nonexistent/method")["error"]["code"] == -32601
     t = text(rpc(p, 15, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent"}}))
     assert t.startswith("EllipticCurve_rational_field.two_descent("), t
+    j = json.loads(text(rpc(p, 16, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent", "json": True}})))
+    assert j["entries"][0]["name"] == "EllipticCurve_rational_field.two_descent" and "summary" in j["entries"][0] and j["omitted"] == 0, str(j)[:300]
+    # (the hit count is bounded, whatever is asked: HARD-012-1)
+    many = text(rpc(p, 17, "tools/call", {"name": "search_docs", "arguments": {"query": "e", "limit": 100000}}))
+    assert len(many) <= 61000 and many.count("\n    ") >= 1, len(many)
     p.stdin.close()
     p.wait(10)
     print("raw protocol: ok")

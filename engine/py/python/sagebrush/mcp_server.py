@@ -104,16 +104,27 @@ def _docsearch():
     return mod
 
 
-def search_docs(query, limit=10, full=False):
-    hits = _docsearch().search(query, limit)
+def search_docs(query, limit=10, full=False, as_json=False):
+    ds = _docsearch()
+    hits = ds.search(query, ds.clamp_limit(limit))
+    if as_json:
+        # (whole entries, for an agent to read, as many as fit in the budget,
+        # and how many did not: lib/_pyjs_docsearch.py, HARD-012-1)
+        import json
+        entries, omitted = ds.bounded_entries([dict(e, score=s) for s, e in hits], wrap=lambda xs: {"entries": xs, "omitted": len(hits)})
+        return json.dumps({"entries": entries, "omitted": omitted}, indent=1)
     if not hits:
         return "No function's documentation has all of the words: %s" % query
     out = []
     for _, e in hits:
-        head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
-        out.append(head + ("  [open problem]" if e["open_problem"] else ""))
-        out.append(("    " + e["doc"].replace("\n", "\n    ")) if full else "    " + e["summary"])
-    return "\n".join(out)
+        if full:
+            head = ds._clip(e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()")), 600)
+            doc = ds._clip(e["doc"], ds.HIT_CHARS * 2)
+            out.append(head + ("  [open problem]" if e["open_problem"] else "") + "\n    " + doc.replace("\n", "\n    "))
+        else:
+            # (as `sagebrush --search` shows it: lib/_pyjs_docsearch.py describe)
+            out.append(ds.describe(e))
+    return "\n".join(ds.within(out))
 
 
 def _text(s):
@@ -161,8 +172,9 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\""},
-                "limit": {"type": "number", "description": "at most this many results (default 10)"},
+                "limit": {"type": "number", "description": "at most this many results (default 10, at most 50)"},
                 "full": {"type": "boolean", "description": "include each result's whole docstring (default false)"},
+                "json": {"type": "boolean", "description": "return the matching entries whole, as JSON {entries, omitted}: signature, summary, examples with their expected output, what differs from upstream, status; as many as fit in 256 KiB (default false)"},
             },
             "required": ["query"],
         },
@@ -274,7 +286,7 @@ class Server:
         if name == "guide":
             return [_text(GUIDE)], False
         if name == "search_docs":
-            return [_text(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full"))))], False
+            return [_text(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full")), bool(args.get("json"))))], False
         if name == "factor":
             n = str(args.get("n", "")).strip()
             if not n:

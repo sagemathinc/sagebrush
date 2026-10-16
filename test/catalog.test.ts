@@ -25,7 +25,10 @@ test("catalog gate 1: the validator refuses what catalog/schema.json refuses", (
     "ok = {'name': 'f', 'kind': 'function', 'signature': '(x)', 'summary': 'S.', 'examples': [{'code': 'f(1)', 'expected': '1\\n'}], 'differs': [], 'status': 'full'}",
     "bad = [dict(ok, kind='func'), dict(ok, summary='x' * 151), dict(ok, examples=[]), dict(ok, status='absent'), dict(ok, status='partial'),",
     "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1'}]), dict(ok, extra=1), {k: v for k, v in ok.items() if k != 'differs'},",
-    "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1\\n', 'runtimes': ['jvm']}]), dict(ok, name='two words'), dict(ok, aliases=['a b']), dict(ok, aliases='g')]",
+    "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1\\n', 'runtimes': ['jvm']}]), dict(ok, name='two words'), dict(ok, aliases=['a b']), dict(ok, aliases='g'),",
+    "       dict(ok, differs=['d'] * 21), dict(ok, differs=['d' * 501]), dict(ok, alternative='a' * 501), dict(ok, signature='s' * 1001),",
+    "       dict(ok, examples=[{'code': 'c' * 4001, 'expected': ''}]), dict(ok, examples=[{'code': 'c', 'expected': 'e' * 8001 + '\\n'}]),",
+    "       dict(ok, examples=[{'code': 'c', 'expected': ''}] * 11), dict(ok, doc='d' * 20001)]",
     "print(json.dumps([c.validate(ok), [len(c.validate(b)) > 0 for b in bad],",
     "  c.validate(dict(ok, status='absent', examples=[], alternative='use g')) + c.validate(dict(ok, aliases=['g', 'h.k']))]))",
   ].join("\n");
@@ -119,7 +122,7 @@ test("Python mode's search index: the catalog's entries whole, then every other 
   assert.equal(solve.signature, "(a, b)");
   assert.equal(solve.status, "partial");
   assert.ok(solve.differs.length > 0);
-  assert.deepEqual(solve.examples[0], { code: "np.linalg.solve([[3, 1], [1, 2]], [9, 8])", expected: "array([2., 3.])\n" });
+  assert.deepEqual(solve.examples[0], { code: "np.linalg.solve([[3, 1], [1, 2]], [9, 8])", expected: "array([2., 3.])\n", setup: "import numpy as np" });
   assert.match(solve.doc, /\n\nExamples:\n\n>>> np\.linalg\.solve\(\[\[3, 1\], \[1, 2\]\], \[9, 8\]\)\narray\(\[2\., 3\.\]\)$/);
   assert.match(by("functools.lru_cache").doc, />>> @functools\.lru_cache\(maxsize=None\)\n\.\.\. def fib\(n\):\n\.\.\.     return .*\n\.\.\.\n>>> fib\(80\)\n23416728348467685$/);
   assert.equal(by("numpy.amax").summary, "Another name for numpy.max.");

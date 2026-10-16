@@ -14,9 +14,13 @@ method of the Sage library, its signature and its docstring.
     sagebrush -m _pyjs_docsearch --index the index as JSON (sagebrush.space and
                                          the MCP server's search_docs tool)
 
-Every word of the query must occur in the name, the summary or the docstring;
-matches in the name count most.  The same ranking is in web/docsearch.ts and
-in the MCP server (sagebrush/mcp_server.py), which read the JSON index.
+Every word of the query must occur in the name (or an alias), the summary
+or the docstring; matches in the name count most.  The same ranking is in
+web/index.html (docScore), and the MCP server's search_docs
+(sagebrush/mcp_server.py) uses this module, both reading the JSON index.
+A hit shows as describe() writes it, for agents: the call form and status,
+the summary, the first example, what differs from upstream, and what to use
+instead; --json gives each entry whole.
 """
 
 import re as _re
@@ -134,8 +138,10 @@ def _words(s):
 def score(entry, words, phrase):
     """The rank of an entry for the query words (0: no match).  Mirrored in
     web/docsearch.ts and sagebrush/mcp_server.py."""
-    name = entry["name"].lower()
-    name_words = set(_words(entry["name"]))
+    # (a catalog entry's aliases are names of it too: catalog/SCHEMA.md)
+    names = [entry["name"]] + list(entry.get("aliases") or [])
+    name = " ".join(names).lower()
+    name_words = set(w for n in names for w in _words(n))
     summary = entry["summary"].lower()
     doc = entry["doc"].lower()
     total = 0
@@ -150,17 +156,50 @@ def score(entry, words, phrase):
             total += 1
         else:
             return 0
-    last = name.split(".")[-1]
-    if phrase == last or phrase.replace(" ", "_") == last:
+    lasts = [n.lower().split(".")[-1] for n in names]
+    if phrase in lasts or phrase.replace(" ", "_") in lasts:
         total += 20
     if entry["open_problem"] and "open" in words:
         total += 5
     return total
 
 
+# What a search may hand an agent (HARD-012-1): at most MAX_HITS hits; a hit
+# as describe() writes it at most HIT_CHARS, each part of it clipped first;
+# a whole text answer at most TOTAL_CHARS; a JSON answer at most JSON_BYTES,
+# whole entries only.  Anything cut says so.
+MAX_HITS = 50
+HIT_CHARS = 4000
+TOTAL_CHARS = 60000
+JSON_BYTES = 256 * 1024
+_FORMS, _LINES, _PART, _DIFFERS = 4, 12, 300, 5
+
+
+def clamp_limit(limit):
+    """A requested number of hits as one from 1 to MAX_HITS"""
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        n = 20
+    return max(1, min(n, MAX_HITS))
+
+
+def _clip(s, n):
+    return s if len(s) <= n else s[:n] + " ...[%d more characters]" % (len(s) - n)
+
+
+def _clip_lines(text, nlines=_LINES, nchars=_PART):
+    lines = text.split("\n")
+    out = "\n".join(lines[:nlines])
+    more = len(lines) - nlines
+    out = _clip(out, nchars)
+    return out + ("\n...[%d more lines]" % more if more > 0 else "")
+
+
 def search(query, limit=20, mode=None):
     """The best matches for query: [(score, entry)], in the index of the
-    language `mode` (default: the Sage library)."""
+    language `mode` (default: the Sage library), at most clamp_limit(limit)."""
+    limit = clamp_limit(limit)
     words = _words(query)
     if not words:
         return []
@@ -169,6 +208,109 @@ def search(query, limit=20, mode=None):
     hits = [h for h in hits if h[0] > 0]
     hits.sort(key=lambda h: (-h[0], len(h[1]["name"]), h[1]["name"]))
     return hits[:limit]
+
+
+# (each mode's prompt and continuation, for an example's code)
+PROMPTS = {None: ("sage: ", "....:"), "sage": ("sage: ", "....:"), "python": (">>> ", "..."), "matlab": (">> ", None), "magma": ("> ", None)}
+
+
+def prompted(code, first=">>> ", cont="..."):
+    """code as typed at a prompt: `first` before each statement, `cont` and a
+    space before the lines of a block (and a decorator's def), and a `cont`
+    line ending it; a mode without continuations (cont None): `first` before
+    every line"""
+    if cont is None:
+        return "\n".join(first + line for line in code.split("\n"))
+    out, block, prev = [], False, ""
+    for line in code.split("\n"):
+        indented = line.startswith((" ", "\t"))
+        if block and not indented and not prev.lstrip().startswith("@"):
+            out.append(cont)
+            block = False
+        c = block and (indented or prev.lstrip().startswith("@"))
+        out.append((cont + " " if c else first) + line)
+        if line.startswith("@") or line.rstrip().endswith(":") or c:
+            block = True
+        prev = line
+    if block:
+        out.append(cont)
+    return "\n".join(out)
+
+
+def call_form(e, form):
+    """A signature as written after its name: `(a, b)` follows the name; any
+    other form (MATLAB's `M = max(A)`, `[M, I] = max(___)`) is a whole call,
+    shown as it is (catalog/SCHEMA.md, CORR-012-2)"""
+    if form and not form.startswith("("):
+        return form
+    return e["name"] + (form or ("" if e["kind"] in ("class", "constant", "module", "keyword") else "()"))
+
+
+def describe(e, mode=None):
+    """An entry as an agent reads it: the call form with its status, the
+    summary, and for a catalog entry its first example (at the mode's
+    prompt, then what it prints), what differs from upstream, and what to
+    use instead"""
+    forms = [_clip(f, _PART) for f in (e.get("signature") or "").split("\n")]
+    head = call_form(e, forms[0])
+    tags = ("    [%s]" % mode if mode else "") + ("    [open problem]" if e.get("open_problem") else "")
+    if e.get("status") and e["status"] != "full":
+        tags += "    [%s]" % e["status"]
+    out = [head + tags]
+    extra = [f for f in forms[1:] if f]
+    out.extend("    also: " + call_form(e, f) for f in extra[:_FORMS])
+    if len(extra) > _FORMS:
+        out.append("    ...[%d more call forms]" % (len(extra) - _FORMS))
+    s = e["summary"]
+    out.append("    " + (s if len(s) <= 150 else s[:147] + "..."))
+    exs = e.get("examples")
+    if isinstance(exs, list) and exs:
+        first, cont = PROMPTS.get(mode, PROMPTS[None])
+        # (with the imports it needs, so that it runs where it is copied to)
+        code = ((exs[0].get("setup") or "") + "\n" + exs[0]["code"]).lstrip("\n")
+        out.extend("    " + ln for ln in _clip_lines(prompted(code, first, cont)).split("\n"))
+        if exs[0]["expected"]:
+            out.extend("    " + ln for ln in _clip_lines(exs[0]["expected"].rstrip("\n")).split("\n"))
+    differs = list(e.get("differs") or [])
+    out.extend("    differs: " + _clip(d, _PART) for d in differs[:_DIFFERS])
+    if len(differs) > _DIFFERS:
+        out.append("    ...[%d more differs lines: --json has them]" % (len(differs) - _DIFFERS))
+    if e.get("alternative"):
+        out.append("    instead: " + _clip(e["alternative"], _PART))
+    return _clip("\n".join(out), HIT_CHARS)
+
+
+def within(texts, budget=TOTAL_CHARS):
+    """As many of texts, in order, as fit in budget characters, and a last
+    line saying how many did not"""
+    out, used = [], 0
+    room = budget - 80  # (for the marker, and a clipped text's own)
+    for i, t in enumerate(texts):
+        if used + len(t) > room:
+            if not out:
+                # (a first text longer than the whole budget: clipped, HARD-0E9-1)
+                out.append(_clip(t, max(room, 0)))
+                i += 1
+            if i < len(texts):
+                out.append("...[%d more hits not shown: narrow the query]" % (len(texts) - i))
+            break
+        out.append(t)
+        used += len(t) + 1
+    return out
+
+
+def bounded_entries(entries, budget=JSON_BYTES, wrap=lambda xs: xs):
+    """(the entries, in order, whose JSON fits in budget bytes, whole; how
+    many did not fit), measured as wrap(entries) prints"""
+    import json
+    # (measured as printed, in the list: at most MAX_HITS entries, so the
+    # list is serialized at most that many times)
+    out = []
+    for i, e in enumerate(entries):
+        if len(json.dumps(wrap(out + [e]), indent=1).encode("utf-8")) > budget:
+            return out, len(entries) - i
+        out.append(e)
+    return out, 0
 
 
 def search_doc(query, limit=20, mode=None):
@@ -187,12 +329,7 @@ def search_doc(query, limit=20, mode=None):
     if not hits:
         print("no function's documentation contains all of: %s" % query)
         return
-    for _, e in hits:
-        head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
-        tag = "    [%s]" % mode if mode else ""
-        print(head + tag + ("    [open problem]" if e["open_problem"] else ""))
-        s = e["summary"]
-        print("    " + (s if len(s) <= 150 else s[:147] + "..."))
+    print("\n".join(within([describe(e, mode) for _, e in hits])))
 
 
 def main(argv):
@@ -209,13 +346,24 @@ def main(argv):
     if "--index" in argv:
         print(json.dumps(index_for(mode), separators=(",", ":")))
         return 0
+    limit = 10
+    if "--limit" in argv:
+        # (--limit N: at most N hits, from 1 to MAX_HITS; 10 by default)
+        k = argv.index("--limit")
+        limit = clamp_limit(argv[k + 1] if k + 1 < len(argv) else 10)
+        del argv[k:k + 2]
     query = " ".join(a for a in argv if not a.startswith("--"))
     if "--json" in argv:
-        hits = search(query, 50, mode)
+        hits = search(query, limit, mode)
         lang = {"language": mode} if mode else {}
-        print(json.dumps([dict(e, score=s, **lang) for s, e in hits], indent=1))
+        # (whole entries, as many as fit: HARD-012-1; the rest counted on stderr)
+        entries, omitted = bounded_entries([dict(e, score=s, **lang) for s, e in hits])
+        print(json.dumps(entries, indent=1))
+        if omitted:
+            import sys
+            print("sagebrush --search: %d more matching entries not shown (%d bytes at most): narrow the query" % (omitted, JSON_BYTES), file=sys.stderr)
         return 0
-    search_doc(query, 30, mode)
+    search_doc(query, limit, mode)
     return 0
 
 
