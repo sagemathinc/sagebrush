@@ -1865,3 +1865,25 @@ test("asin, acos, atanh and the reciprocal inverses on the real axis outside the
     "1.5708+0.0000i 0.2318-0.4024i",
   ]);
 });
+
+test("asind, acosd, atand, asecd, acscd, acotd, secd, cscd and cotd: the radian functions in degrees", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).'; imag(z(:)).']); fprintf('\\n')`;
+  assert.deepEqual(run([
+    "fprintf('%.4f ', [asind(0.5) acosd(0.5) atand(1) asecd(2) acscd(2) acotd(1) secd(60) cscd(30) cotd(45)]); fprintf('\\n')",
+    // (exact where the radian function is: the ends of the domains, and the zeros of sind and cosd)
+    "disp(mat2str([asind(1) acosd(-1) atand(Inf) acotd(0) secd(90) cscd(0) cotd(90) cotd(0)]))",
+    // (outside the real domain: the radian function's complex value, in degrees)
+    z("[asind(2) acosd(2) asecd(0.5) acscd(0.5)]"),
+    "disp(class(asind(single(0.5)))); disp(class(secd(single(60)))); disp(mat2str(size(acotd(ones(2, 3)))))",
+    tryIt("asind(int8(1))"), tryIt("acosd({1})"),
+  ].join("\n")), [
+    "30.0000 60.0000 45.0000 60.0000 30.0000 45.0000 2.0000 2.0000 1.0000",
+    "[90 180 90 90 Inf Inf 0 Inf]",
+    "90.0000-75.4561i 0.0000+75.4561i 0.0000+75.4561i 90.0000-75.4561i",
+    "single", "single", "[2 3]", "refused", "refused",
+  ]);
+});
