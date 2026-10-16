@@ -7801,19 +7801,18 @@ def _ws_vars(ns):
 def ws_call(name, ns, args, nargout):
     """functions that see the caller's variables"""
     if name in ("clear", "clearvars"):
-        names = [_text(a) for a in args]
-        flags = [n for n in names if n.startswith("-")]
-        names = [n for n in names if not n.startswith("-")]
-        if not names or names[0] in ("all", "variables", "-all"):
-            if names and names[0] == "all":
-                _globals.clear()
-                _persistents.clear()
-            names = _ws_vars(ns)
-        elif names[0] in ("functions", "classes", "global", "import"):
-            if names[0] == "global":
-                _globals.clear()
+        tokens = [_text(a) for a in args]
+        if "__name__" not in ns:
+            # (a function's locals() is a copy, which can't delete its variables: the
+            # compiler handles clear in functions; anything reaching here is refused)
+            raise _err("This form of %s inside a function is not supported." % name)
+        if name == "clear" and tokens in (["all"], ["-all"]) and "all" not in _ws_vars(ns):
+            _globals.clear()
+            _persistents.clear()
+        if name == "clear" and tokens == ["global"] and "global" not in _ws_vars(ns):
+            _globals.clear()
             return NOVAL
-        for v in _glob_select(names, _ws_vars(ns)):
+        for v in clear_select(name, tokens, _ws_vars(ns)):
             key = "_k_" + v if v in _PYKW else v
             if key in ns:
                 try:
@@ -8475,6 +8474,77 @@ def trapz_n(*args):
     else:
         dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
     return _unmat(np.sum(dx * (Y[1:] + Y[:-1]) / 2, axis=0).reshape((1, -1)))
+
+
+_CLEAR_ITEMTYPES = ("all", "classes", "functions", "global", "import", "java", "mex", "variables")
+
+
+def clear_select(fn, tokens, defined, protected=()):
+    """the variables clear or clearvars removes, of those defined (holding a value):
+    - clear WORD alone, WORD an ItemType: the variable WORD if it exists (MATLAB's clear
+      page), else the keyword (all, variables, classes, java: every variable; the others
+      none here);
+    - names and wildcards (* ?), or after -regexp regular expressions;
+    - clearvars: its words are always names; with -except, the variables matched after
+      it are kept.
+    protected: names that may not be removed (a function's globals and persistents,
+    which Sagebrush can't unlink exactly): one selected is refused."""
+    tokens = [t if type(t) is str else _text(t) for t in tokens]
+    defined = list(defined)
+    if fn == "clear":
+        flags = [t for t in tokens if t.startswith("-")]
+        words = [t for t in tokens if not t.startswith("-")]
+        if any(f.lower() not in ("-regexp", "-all") for f in flags):
+            raise _err("clear: the option '%s' is not supported." % next(f for f in flags if f.lower() not in ("-regexp", "-all")))
+        if tokens and tokens[0].lower() == "-all":
+            words = ["all"] + words[0:]
+            tokens = tokens[1:]
+        if len(words) == 1 and words[0] in _CLEAR_ITEMTYPES and not flags:
+            w = words[0]
+            if w in defined:
+                chosen = [w]
+            elif w in ("all", "variables", "classes", "java"):
+                chosen = defined + [p for p in protected if p not in defined]
+            else:
+                chosen = []
+        elif any(w in _CLEAR_ITEMTYPES for w in words) and not flags:
+            raise _err("clear: an ItemType word (%s) among other names is not supported." % next(w for w in words if w in _CLEAR_ITEMTYPES))
+        elif not tokens:
+            chosen = defined + [p for p in protected if p not in defined]
+        else:
+            chosen = _clear_match(tokens, defined + list(protected))
+    else:
+        if any(t.lower() == "-global" for t in tokens):
+            raise _err("clearvars -global is not supported.")
+        lower = [t.lower() for t in tokens]
+        cut = lower.index("-except") if "-except" in lower else len(tokens)
+        targets, keep = tokens[:cut], tokens[cut + 1:]
+        if any(t.startswith("-") and t.lower() != "-regexp" for t in targets + keep):
+            raise _err("clearvars: the option '%s' is not supported." % next(t for t in targets + keep if t.startswith("-") and t.lower() != "-regexp"))
+        everything = defined + [p for p in protected if p not in defined]
+        chosen = _clear_match(targets, everything) if [t for t in targets if not t.startswith("-")] else everything
+        if keep:
+            kept = set(_clear_match(keep, everything))
+            chosen = [v for v in chosen if v not in kept]
+    bad = [v for v in chosen if v in protected]
+    if bad:
+        raise _err("Clearing the global or persistent variable '%s' inside a function is not supported." % bad[0])
+    return [v for v in chosen if v in defined]
+
+
+def _clear_match(tokens, names):
+    """names matched by tokens: wildcards (* ?), and regular expressions after -regexp
+    (a match anywhere in the name, as regexp finds it)"""
+    if "-regexp" in [t.lower() for t in tokens]:
+        k = [t.lower() for t in tokens].index("-regexp")
+        plain, rx = tokens[:k], tokens[k + 1:]
+    else:
+        plain, rx = tokens, []
+    chosen = set(_glob_select(plain, names)) if plain else set()
+    for r in rx:
+        pat = _re.compile(_regex(r))
+        chosen.update(n for n in names if pat.search(n))
+    return [n for n in names if n in chosen]
 
 
 def _glob_select(pats, names):
