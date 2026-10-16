@@ -844,36 +844,66 @@ def _read_index(n, i, pos, seq):
         raise MagmaError("Index 1 (%d) should be in the range [1 .. %d]" % (i, n), "'[]'", True, pos)
 
 
+def _int_index(j):
+    return isinstance(j, int) and not isinstance(j, bool)
+
+
 def _index(s, i, pos=None):
+    """s[i], with Magma's rules and words for each kind of s (checked
+    against Magma): an integer index; a sequence of them (a range too)
+    for a sequence, a string or an indexed set; never a tuple (s[i, j] is
+    _index_multi's)."""
+    bad = lambda: MagmaError("Bad argument types", "'[]'", True, pos)
     if isinstance(s, (MSeq, MRange, MTuple, list)):
-        seq = not isinstance(s, MTuple)
-        if isinstance(i, (MSeq, MRange)) and seq:
-            # S[[i, j, ...]], S[a..b]: an index out of range is said without it
+        if isinstance(i, (MSeq, MRange)):
+            # S[[i, j, ...]], S[a..b]: a sequence (not of a tuple); an
+            # index outside S is said without it; undefined elements are
+            # kept, but not at the end (a sequence ends at its last one)
+            if isinstance(s, MTuple):
+                raise bad()
             n = s.size() if isinstance(s, MRange) else len(s)
+            if n == 0:
+                raise MagmaError("Illegal null sequence", "'[]'", True, pos)
             out = []
             for j in i:
-                if isinstance(j, int) and not isinstance(j, bool) and (not 1 <= j <= n or s[j - 1] is _UNDEF):
+                if not _int_index(j):
+                    raise bad()
+                if not 1 <= j <= n:
                     raise MagmaError("Sequence element not defined", "'[]'", True, pos)
-                out.append(_index(s, j, pos))
+                out.append(s[j - 1])
+            while out and out[-1] is _UNDEF:
+                out.pop()
             return MSeq(out)
-        if isinstance(i, (MSeq, MRange)):
-            return MSeq(_index(s, j, pos) for j in i)
-        if isinstance(i, MTuple) and seq:
-            # S[i, j]: S[i][j]
-            for j in i:
-                s = _index(s, j, pos)
-            return s
-        _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, seq)
+        _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, not isinstance(s, MTuple))
         v = s[i - 1]
         if v is _UNDEF:
             raise MagmaError("Sequence element %d not defined" % i, "'[]'", True, pos)
         return v
     if isinstance(s, str):
         if isinstance(i, (MSeq, MRange)):
-            return "".join(_index(s, j, pos) for j in i)
+            # (an index outside the string is named by its place in the list)
+            out = []
+            for k, j in enumerate(i):
+                if not _int_index(j):
+                    raise bad()
+                if not 1 <= j <= len(s):
+                    raise MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (k + 1, j, len(s)), "'[]'", True, pos)
+                out.append(s[j - 1])
+            return "".join(out)
         _read_index(len(s), i, pos, False)
         return s[i - 1]
     if isinstance(s, MSet) and s.kind == "indexed":
+        if isinstance(i, (MSeq, MRange)):
+            out = []
+            for j in i:
+                if not _int_index(j):
+                    raise bad()
+                if not 1 <= j <= len(s.items):
+                    raise MagmaError("Sequence element not defined", "'[]'", True, pos)
+                out.append(s.items[j - 1])
+            return MSet(out, "indexed")
+        if not _int_index(i):
+            raise bad()
         if not s.items:
             raise MagmaError("Illegal null indexed set", "'[]'", True, pos)
         _read_index(len(s.items), i, pos, False)
@@ -883,6 +913,19 @@ def _index(s, i, pos=None):
     if callable(s):
         return s(i)
     raise MagmaError("cannot index %s" % _str(s))
+
+
+def _index_multi(s, idx, pos=None):
+    """S[i, j, ...] as written: for a sequence, string, tuple or indexed set
+    S[i][j]...; an element that can't be indexed is Magma's "Bad argument
+    types".  Anything else (a matrix) takes the indices together."""
+    if not isinstance(s, (MSeq, MRange, MTuple, list, str, MSet)):
+        return _index(s, MTuple(idx), pos)
+    for j in idx:
+        if not isinstance(s, (MSeq, MRange, MTuple, list, str)) and not (isinstance(s, MSet) and s.kind == "indexed"):
+            raise MagmaError("Bad argument types", "'[]'", True, pos)
+        s = _index(s, j, pos)
+    return s
 
 
 _UNDEF = object()
@@ -2794,7 +2837,8 @@ def _str1(v, indent, col, tail):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
         if not raw:
-            return o.strip() + c.strip(), False
+            # [] and {}, but {@ @} and {* *}, as Magma prints them
+            return o.strip() + c.strip() if isinstance(v, MSeq) or v.kind == "set" else o + c.strip(), False
         if all(_atomic(x) or x is _UNDEF for x in raw):
             items = _items(v)
             # the opening bracket, each item with its comma, and the closing
