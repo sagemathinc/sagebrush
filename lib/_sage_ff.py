@@ -631,6 +631,8 @@ class IntegerMod:
         return self ** -1
 
     def __eq__(self, b):
+        if getattr(b, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: a == A as A == a)
         if isinstance(b, IntegerMod) and b._parent is not self._parent:
             na, nb = self._parent._n, b._parent._n
             if nb % na == 0:
@@ -1875,6 +1877,8 @@ class FiniteFieldElement:
         return K._make(_ppowmod(_ptrim(list(self._c)), e, K._f, K._p))
 
     def __eq__(self, b):
+        if getattr(b, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: a == A as A == a)
         try:
             b = self._coerce(b, "==")
         except TypeError:

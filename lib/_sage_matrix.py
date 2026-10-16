@@ -2985,12 +2985,22 @@ def diagonal_matrix(*args):
     """
     sa = _sa()
     base = None
-    if args and args[0] in (sa.ZZ, sa.QQ):
+    # any ring first, not only ZZ and QQ: diagonal_matrix(K, [a, a]) read
+    # K itself as the entries (K[0], K[1], ... until the heap ran out),
+    # and diagonal_matrix(GF(7), [1, 2]) had the field's elements on the
+    # diagonal
+    if args and _is_parent(args[0]):
         base, args = args[0], args[1:]
+    if len(args) != 1:
+        raise NotImplementedError("diagonal_matrix with these arguments is not available in sagebrush yet")
     d = _bounded_list(args[0])
     _shape(len(d), len(d))
-    m = matrix([[d[i] if i == j else 0 for j in range(len(d))] for i in range(len(d))])
-    return m if base is None else m.change_ring(base)
+    rows = [[d[i] if i == j else 0 for j in range(len(d))] for i in range(len(d))]
+    if base is None:
+        return matrix(rows)
+    if base is sa.ZZ or base is sa.QQ:
+        return matrix(rows).change_ring(base)
+    return matrix(base, len(d), len(d), rows)
 
 
 def _sa_ff_base(R):
@@ -3115,25 +3125,39 @@ class ComplexNumber(complex):
         return _sa().RealNumber(abs(complex(self)))
 
     def __add__(self, o):
+        # (a matrix over a field answers for itself: complex(M) was the
+        # TypeError, so CC(I) + M over QQbar never reached M.__radd__)
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) + _cc(o))
 
     __radd__ = __add__
 
     def __sub__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) - _cc(o))
 
     def __rsub__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(_cc(o) - complex(self))
 
     def __mul__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) * _cc(o))
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) / _cc(o))
 
     def __rtruediv__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(_cc(o) / complex(self))
 
     def __neg__(self):
