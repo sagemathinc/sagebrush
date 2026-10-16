@@ -5260,8 +5260,10 @@ def _fft_sizes(sizes):
         raise _err("Invalid number of FFT data points: a text size is not supported.")
     sz = [float(v) for v in _arr(sizes).reshape(-1)]
     for v in sz:
-        if not (v == v and v >= 1 and v == _math.floor(v) and v != _math.inf):
-            shown = int(v) if v == v and abs(v) != _math.inf and v == _math.floor(v) else v
+        # (finiteness first: floor(Inf) has no integer)
+        if not (v == v and abs(v) != _math.inf and v >= 1 and v == _math.floor(v)):
+            shown = ("NaN" if v != v else "Inf" if v > 0 else "-Inf") if v != v or abs(v) == _math.inf \
+                else int(v) if v == _math.floor(v) else v
             raise _err("Invalid number of FFT data points (%s) specified." % shown)
     return [int(v) for v in sz]
 
