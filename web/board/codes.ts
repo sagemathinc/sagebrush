@@ -9,7 +9,7 @@
 // the language of the items it names.
 
 import type { BoardMode } from "./doc";
-import { BOARD_SEED, BoardCode, type CodeState } from "./code";
+import { BOARD_SEED, BoardCode, type CodeState, type Evaluated } from "./code";
 import { DOC_CAP, ENTRY_MAX, sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 import type { Preview } from "./preview";
 
@@ -172,7 +172,7 @@ export class BoardCodes {
     for (const e of this.engines.values()) e.interrupt();
   }
   /** A board question's check, or a computed hint, in the language's interpreter (made if there is none yet). */
-  evaluate(mode: BoardMode, code: string, answer: unknown, ms: number) {
+  evaluate(mode: BoardMode, code: string, answer: unknown, ms: number): Promise<Evaluated> {
     const e = this.engine(mode);
     return e ? e.evaluate(code, answer, ms) : Promise.resolve({ ok: false, error: this.error ?? "no interpreter for this language" });
   }

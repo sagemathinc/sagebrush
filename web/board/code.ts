@@ -13,6 +13,8 @@ import type { BoardMode } from "./doc";
 
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
+/** A question's check, or a computed hint, as run (BoardCode.evaluate): its value, or why it has none. */
+export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean }
 
 /** Where a board's code engine comes from (design/engines.md): its notebook
  * module, the interpreter's worker, the reactive notebook's analyzer, and
@@ -509,7 +511,7 @@ export class BoardCode {
 
   /** A board question's check, or a computed hint, in this interpreter,
    * after what was asked to run (WorkerKernel.evaluate): its verdict. */
-  async evaluate(code: string, answer: unknown, ms: number): Promise<{ ok: boolean; value?: unknown; error?: string; timedOut?: boolean }> {
+  async evaluate(code: string, answer: unknown, ms: number): Promise<Evaluated> {
     if (!(await this.ready) || !this.kernel) return { ok: false, error: "the interpreter is not running" };
     await this.last;
     return this.kernel.evaluate(code, answer, this.mode, ms);
