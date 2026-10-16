@@ -206,8 +206,9 @@ positive-dimensional ideal raises Sage's `ValueError`.
    squarefree $\chi$, so every point is exact.
 
 Over `AA` and `QQbar` the points are exact algebraic numbers; over the
-real and complex fields they are those exact points, correctly rounded to
-the field's precision. The real points come first, then the rest in
+real and complex fields they are those exact points, evaluated exactly
+and then rounded, with a certified error of at most one unit in the last
+place at the field's precision. The real points come first, then the rest in
 increasing order, as Sage orders `AA` and `QQbar` points. Every size is
 capped before the work it bounds (an eliminant's degree at most 4096, at
 most 100 points, at most 32 tries for a separating form, at most 20,000
