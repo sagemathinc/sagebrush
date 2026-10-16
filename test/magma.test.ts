@@ -340,6 +340,36 @@ test("index selections are admitted before they are taken, and a long chain of i
   assert.equal(ok.stdout, "7\n");
 });
 
+test("a selection keeps its source's universe, so what doesn't belong is refused later (CORR-927-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: 'S := {@2,5@}; T := S[[]]; Include(~T, 1/2);\nA := [2/3]; A[3] := 5/4; B := A[[]]; Append(~B, "x");\nC := [2,5]; D := C[[1]]; Append(~D, 1/2);\n1;\n', encoding: "utf8", timeout: 60000 });
+  const flat = r.stdout.replace(/\s+/g, " ");
+  // (refused; Magma's words here are "Rational argument is not a whole
+  // integer", Sagebrush's "Illegal coercion": a follow-up of Include's)
+  assert.match(flat, /Runtime error in 'Include': /, r.stdout);
+  assert.equal((flat.match(/Runtime error in 'Append': Cannot coerce element into the universe/g) ?? []).length, 2, r.stdout);
+  assert.match(r.stdout, /\n1\n$/);
+});
+
+test("a selection's inferred universe is found once per source, not per selection (HARD-927-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  // 200000 elements, the rational last; 300 selections; and Magma's rule
+  // that the inferred universe is fixed when the sequence is made and only
+  // widens: K keeps the rationals after K[1] := 4, and after Remove
+  const r = spawnSync(process.execPath, [cli, "--magma"], {
+    input: "S := [1..200000] cat [1/2]; for i in [1..300] do T := S[[1]]; end for; Universe(T);\nI := [1..200000]; for i in [1..300] do T := I[[1]]; end for; Universe(T);\nK := [2/3, 5]; K[1] := 4; Universe(K[[]]);\nM := [2/3, 5]; Remove(~M, 1); Universe(M[[]]);\nL := [2, 5]; L[4] := 3; Universe(L[[]]);\n",
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  assert.equal(r.stdout, "Rational Field\nInteger Ring\nRational Field\nRational Field\nInteger Ring\n", r.stderr);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
