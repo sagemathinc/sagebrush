@@ -27,8 +27,9 @@ const show = (v: unknown) => {
   return s === undefined ? String(v) : s.length > 60 ? s.slice(0, 57) + "..." : s;
 };
 const kindOf = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "a list" : typeof v === "object" ? "an object" : typeof v === "string" ? "a string" : typeof v === "number" ? "a number" : typeof v === "boolean" ? "true or false" : typeof v);
-// (a field written on an item that belongs to the whole document)
-const HINTS: Record<string, string> = { mode: "`mode` is the board's, written once at the top: one language per board", seed: "`seed` is the board's, written at the top", refBase: "`refBase` is the board's, written at the top" };
+// (a field written on an item that belongs to the whole document; `mode`
+// also to a code item, item 16, so it is unknown only elsewhere: a group's, a stroke's, a sticker's)
+const HINTS: Record<string, string> = { mode: "`mode` is the board's, written at the top, or a code item's own", seed: "`seed` is the board's, written at the top", refBase: "`refBase` is the board's, written at the top" };
 const TYPE_WORDS: Record<string, string> = { string: "a string", number: "a number", integer: "a whole number", boolean: "true or false", object: "an object", array: "a list" };
 
 /** Edit distance (for "did you mean"), a transposition of two letters

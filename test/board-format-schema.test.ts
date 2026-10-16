@@ -209,8 +209,15 @@ test("the validator's messages say where, what, and for a misspelt field what wa
   assert.equal(didYouMean("titel", ["title", "text"]), "title");
   // (a document's field on an item: where it belongs)
   const m = full();
-  m.pages[1].nodes[0].mode = "sage";
-  assert.equal(v.validate(m)[0].message, "unknown field `mode` (`mode` is the board's, written once at the top: one language per board)");
+  m.pages[1].nodes[0].seed = "ab".repeat(32);
+  assert.equal(v.validate(m)[0].message, "unknown field `seed` (`seed` is the board's, written at the top)");
+  // (`mode`: a code item may have its own (item 16); on a group it is unknown, and says where it belongs)
+  const own = full();
+  own.pages[1].nodes[0].mode = "sage";
+  assert.deepEqual(v.validate(own), []);
+  const grp = full();
+  grp.pages[1].nodes[1].mode = "sage";
+  assert.equal(v.validate(grp)[0].message, "unknown field `mode` (`mode` is the board's, written at the top, or a code item's own)");
   assert.equal(didYouMean("zzz", ["columns", "color"]), null);
   // (bounded work, PERF-619-1: a name past 64 characters gets no suggestion;
   // up to there, the same as a whole matrix would say)
