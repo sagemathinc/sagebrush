@@ -271,6 +271,15 @@ test("printing a value nested deeper than 100 is refused in Magma's form, not a 
   assert.equal((ok.stdout.match(/\[/g) ?? []).length, 100, ok.stdout.slice(0, 500));
   assert.equal((ok.stdout.match(/\]/g) ?? []).length, 100);
   assert.doesNotMatch(ok.stdout, /error/);
+  // a tuple counts once too (CORR-90E-1): 100 deep prints, in a session and
+  // by Sprintf, mixed with sequences and records; 101 deep is refused
+  const t = run("v := 1; for i in [1..100] do v := <v>; end for;\n#Sprint(v) gt 0;\n#Sprintf(\"%o\", v) gt 0;\n" +
+    "w := [4]; for i in [1..98] do w := [w]; end for; w := <w>; #Sprint(w) gt 0;\n" +
+    "F := recformat< a >; r := <5>; for i in [1..99] do r := rec< F | a := r >; end for; #Sprint(r) gt 0;\n" +
+    "u := 1; for i in [1..101] do u := <u>; end for;\n");
+  assert.match(t.stdout, /^true\ntrue\ntrue\ntrue\n/, t.stdout.slice(0, 500));
+  assert.equal((t.stdout.match(/a value nested more than 100 deep is not supported yet/g) ?? []).length, 1, t.stdout.slice(0, 2000));
+  assert.doesNotMatch(t.stdout, /printing a value nested/);
 });
 
 test("a copy of a value that shares its parts is admitted before it is made: x := [x, x] doubled is refused quickly (HARD-756-1, _own)", () => {

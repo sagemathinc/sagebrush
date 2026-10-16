@@ -2643,19 +2643,24 @@ def RealField(prec=30):
 # refused before the host's recursion limit, in Magma's form (HARD-133-1)
 _PRINT_DEPTH_MAX = 100
 _print_depth = [0]
+_print_at = [None]  # the container the depth was last charged for
 
 
-def _nested(f, *args):
-    """f(*args) one level deeper into a value being printed (only
-    containers come here, so a long flat sequence pays nothing)."""
-    d = _print_depth[0]
+def _nested(v, f, *args):
+    """f(*args) one level deeper into the container v being printed (only
+    containers come here, so a long flat sequence pays nothing).  Each
+    container is charged once: _str, _inline and _atomic on the same v
+    are one level (CORR-90E-1)."""
+    if v is _print_at[0]:
+        return f(*args)
+    d, at = _print_depth[0], _print_at[0]
     if d >= _PRINT_DEPTH_MAX:
         raise MagmaError("printing a value nested more than %d deep is not supported yet" % _PRINT_DEPTH_MAX)
-    _print_depth[0] = d + 1
+    _print_depth[0], _print_at[0] = d + 1, v
     try:
         return f(*args)
     finally:
-        _print_depth[0] = d
+        _print_depth[0], _print_at[0] = d, at
 
 
 def _container(v):
@@ -2666,13 +2671,13 @@ def _atomic(v):
     if isinstance(v, (bool, int, str, _Fraction, MReal)) or _is_ff(v):
         return True
     if isinstance(v, MTuple):
-        return _nested(lambda: all(_atomic(x) for x in v))
+        return _nested(v, lambda: all(_atomic(x) for x in v))
     return False
 
 
 def _inline(v, in_tuple=False):
     """v on one line (as inside a tuple)."""
-    return _nested(_inline1, v, in_tuple) if _container(v) else _inline1(v, in_tuple)
+    return _nested(v, _inline1, v, in_tuple) if _container(v) else _inline1(v, in_tuple)
 
 
 def _inline1(v, in_tuple):
@@ -2725,7 +2730,7 @@ def _str(v, indent=0, col=None, tail=""):
     column `col` (default: the indentation), followed by `tail` (the comma
     after an element of a sequence printed one element a line), which is
     laid out with v's last chunk, as Magma's printer does."""
-    s, used = _nested(_str1, v, indent, col, tail) if _container(v) else _str1(v, indent, col, tail)
+    s, used = _nested(v, _str1, v, indent, col, tail) if _container(v) else _str1(v, indent, col, tail)
     return s if used else s + tail
 
 
