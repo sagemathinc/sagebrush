@@ -138,6 +138,71 @@ try {
   // inline math with the punctuation that touches it: one line
   const glued = await ev("[...document.querySelectorAll('.board-nowrap')].map((g) => g.textContent.trim().slice(-1) + g.textContent.trim()[0])");
   check(glued.some((s) => s.startsWith("?")) && glued.some((s) => s.startsWith(")") && s.endsWith("(")), "math kept with the punctuation that touches it: " + JSON.stringify(glued));
+  // ---- the reviews' cases (astra's CORR-448-1, -3, -4, UI-448-2; daybreak2's HARD-448-1, -2)
+  const B = "window.sagebrush.board";
+  await ev(`${B}.load(${JSON.stringify({ title: "Review", layout: "grid", columns: 3, nodes: [
+    { id: "v", kind: "ask", input: "radio", text: "Choose", options: [{ value: "old", label: "Same label" }] },
+    { id: "s", kind: "ask", input: "number", text: "Even?", min: 0, max: 10, step: 1 },
+    { id: "w", kind: "ask", input: "radio", text: "Words", options: ["a", "b"] },
+    { id: "big", kind: "ask", input: "scale", text: "Huge", min: 9007199254740992, max: 9007199254740994 },
+    { id: "t", kind: "ask", input: "text", text: "Long" },
+  ] })}).then(() => 1)`);
+  await until("!!document.querySelector('.board-ask[data-ask=\"v\"]')", 10000);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  // (a changed option value, the same label: the control the current question's)
+  await ev(`${B}.edit((d) => { d.nodes[0].options[0].value = "new"; }).then(() => 1)`);
+  await sleep(300);
+  await press('.board-ask[data-ask="v"] input[type=radio]');
+  check((await answer("v")) === "new", "an option's value changed under the same label: the new value kept: " + JSON.stringify(await answer("v")));
+  // (a changed step: 3 refused against step 2)
+  await ev(`${B}.edit((d) => { d.nodes[1].step = 2; }).then(() => 1)`);
+  await sleep(300);
+  await press('.board-ask[data-ask="s"] .board-ask-number');
+  await type("3");
+  await click(1200, 760); await sleep(300);
+  check((await answer("s")) === undefined && /not on its step, 2/.test(await ev("document.querySelector('.board-ask[data-ask=\"s\"] .board-ask-why').textContent")), "a changed step: an answer off it refused: " + JSON.stringify(await answer("s")));
+  // (In your own words opened by a real click: the card grows, the field visible and pressable)
+  const h0 = await ev("document.querySelector('.board-ask[data-ask=\"w\"]').closest('.board-item').offsetHeight");
+  await press('.board-ask[data-ask="w"] summary');
+  await sleep(500);
+  const hit = await ev("(() => { const t = document.querySelector('.board-ask[data-ask=\"w\"] details textarea'), r = t.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === t; })()");
+  const h1 = await ev("document.querySelector('.board-ask[data-ask=\"w\"]').closest('.board-item').offsetHeight");
+  check(hit && h1 > h0, "In your own words, opened: its field inside a taller card: " + JSON.stringify({ hit, h0, h1 }));
+  await press('.board-ask[data-ask="w"] details textarea');
+  await type("some $x^2$ words");
+  await sleep(600);
+  const h2 = await ev("document.querySelector('.board-ask[data-ask=\"w\"]').closest('.board-item').offsetHeight");
+  const focused = await ev("document.activeElement === document.querySelector('.board-ask[data-ask=\"w\"] details textarea')");
+  check(h2 > h1 && focused, "its typeset preview grows the card, the field keeps its focus: " + JSON.stringify({ h1, h2, focused }));
+  await click(1200, 760); await sleep(300);
+  check((await note("w")) === "some $x^2$ words", "...and the words are kept");
+  // (a scale whose ends are past 2^53: no buttons, and refused by the check)
+  check((await ev("document.querySelectorAll('.board-ask[data-ask=\"big\"] .board-ask-scale button').length")) === 0, "a scale with ends past 2^53: no buttons made");
+  // (a paste longer than an answer may be: not previewed, not kept, said)
+  await press('.board-ask[data-ask="t"] .board-ask-text');
+  await type("y".repeat(12000));
+  await sleep(500);
+  await click(1200, 760); await sleep(300);
+  check((await answer("t")) === undefined && /Longer than 10000 characters/.test(await ev("document.querySelector('.board-ask[data-ask=\"t\"] .board-ask-preview').textContent")), "a 12000-character paste: said, not kept");
+  // (a touch double tap on a control: the board does not move)
+  const cam0 = await ev("JSON.stringify(window.board.camera)");
+  const [tx, ty] = await at('.board-ask[data-ask="w"] input[type=radio]');
+  for (let k = 0; k < 2; k++) {
+    await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: tx, y: ty }] });
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await sleep(60);
+  }
+  await sleep(500);
+  check((await ev("JSON.stringify(window.board.camera)")) === cam0, "a double tap on a control: the board stays where it is");
+  // (TimeTravel: its version's questions shown, not answerable; the board's again after)
+  await ev("document.querySelector('[data-sbb=timetravel]').click(), 1");
+  await until("!document.querySelector('[data-sbb=tt]').hidden", 5000);
+  await sleep(500);
+  check(await ev("[...document.querySelectorAll('.board-ask input, .board-ask textarea')].every((x) => x.disabled)"), "while viewing a version: every control disabled");
+  await ev("document.querySelector('[data-sbb=ttclose]').click(), 1");
+  await sleep(500);
+  check(await ev("[...document.querySelectorAll('.board-ask[data-ask=\"w\"] input')].every((x) => !x.disabled)"), "TimeTravel closed: the controls answer again");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

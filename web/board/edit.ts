@@ -9,6 +9,7 @@
 
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
+import { answerProblem, ASK_LIMITS } from "./ask";
 import { inkNode, isNote, STICKER_SIZE, GROUP_PAD, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
@@ -967,6 +968,9 @@ export class Editor {
     return this.commit((d) => {
       const n = find(this.pg(d), id)?.node;
       if (n?.kind !== "ask") return;
+      // (only what the question takes: an answer it refuses, a note past the length an answer may have, not kept, HARD-448-1)
+      if (patch.answer !== undefined && patch.answer !== null && answerProblem(n, patch.answer)) return;
+      if (typeof patch.note === "string" && patch.note.length > ASK_LIMITS.text) return;
       for (const k of ["answer", "note"] as const) {
         if (!(k in patch)) continue;
         const v = patch[k];
