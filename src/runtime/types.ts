@@ -1212,8 +1212,17 @@ method(S, "translate", (s: string, table: any) => {
   let out = "";
   let pieces: string[] = [];
   let size = 0, n = 0, run = 0;
+  // (every piece goes through put: a deleted or mapped character must not
+  // leave a lone high surrogate before a lone low one, CORR-C4D-1)
+  let high = false;
+  const put = (piece: string) => {
+    if (piece.length === 0) return;
+    if (high && (piece.charCodeAt(0) & 0xfc00) === 0xdc00) SP.refuseMerge();
+    high = (piece.charCodeAt(piece.length - 1) & 0xfc00) === 0xd800;
+    pieces.push(piece);
+  };
   const flush = (upto: number) => {
-    if (upto > run) pieces.push(s.slice(run, upto));
+    if (upto > run) put(s.slice(run, upto));
     if (pieces.length >= 4096) {
       out += pieces.join("");
       pieces = [];
@@ -1250,13 +1259,13 @@ method(S, "translate", (s: string, table: any) => {
     if (typeof r === "string") {
       size += r.length;
       if (size > MAX_STR) raise(T.MemoryError);
-      pieces.push(r);
+      put(r);
     } else if (O.isPyInt(r)) {
       const c = Number(r);
       if (!(c >= 0 && c < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
       size += c > 0xffff ? 2 : 1;
       if (size > MAX_STR) raise(T.MemoryError);
-      pieces.push(String.fromCodePoint(c));
+      put(String.fromCodePoint(c));
     } else raise(T.TypeError, "character mapping must return integer, None or str");
   }
   flush(s.length);
