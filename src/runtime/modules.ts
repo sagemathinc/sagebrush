@@ -2,7 +2,7 @@
 
 import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
+import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
@@ -541,8 +541,11 @@ newBuiltinModule("math", (m) => {
     while (b) [a, b] = [b, a % b];
     return a;
   };
-  fn(m, "gcd", (...xs: any[]) => O.normBig(xs.map(bigOf).reduce(gcd2, 0n)));
-  fn(m, "lcm", (...xs: any[]) => O.normBig(xs.map(bigOf).reduce((a, b) => (a === 0n || b === 0n ? 0n : ((a * b < 0n ? -(a * b) : a * b) / gcd2(a, b))), 1n)));
+  // (each also as an array of its arguments, for gcd(*xs) of any length: BIG_CALL)
+  const gcdN = (xs: any[]) => O.normBig(xs.map(bigOf).reduce(gcd2, 0n));
+  const lcmN = (xs: any[]) => O.normBig(xs.map(bigOf).reduce((a, b) => (a === 0n || b === 0n ? 0n : ((a * b < 0n ? -(a * b) : a * b) / gcd2(a, b))), 1n));
+  fn(m, "gcd", positionalArray((...xs: any[]) => gcdN(xs), gcdN));
+  fn(m, "lcm", positionalArray((...xs: any[]) => lcmN(xs), lcmN));
   fn(m, "isqrt", (x: any) => {
     const n = bigOf(x);
     if (n < 0n) raise(T.ValueError, "isqrt() argument must be nonnegative");
