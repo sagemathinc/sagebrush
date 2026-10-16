@@ -171,3 +171,6 @@ simplify_factorial[4] = ['1/6', 'n', 'n - 1', 'n - 2']
 simplify_factorial[5] = ['1/factorial(n)', 'factorial(2*n)']
 simplify_factorial[6] = n
 simplify_factorial[7] = ['1/n', 'n + 1']
+sage_eval 3-tuple = 5
+sage_eval cmds update locals = (3, 3)
+sage_eval cmds update empty locals = (5, 4)

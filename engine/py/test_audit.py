@@ -766,3 +766,17 @@ assert str(_SR1(_I1) ** (10**20 + 3)) == "-I"
 assert str(_SR1(-1) ** (10**30 + 1)) == "-1"
 assert str((-_SR1(_I1)) ** (-(10**20) - 2)) == "-1"
 print("symbolic unit powers ok")
+
+
+# SR-GAPS-1: simplify_factorial's exponents are exact (no i64 wrapping),
+# and shifts too far apart to combine stay as they are, quickly
+from sagebrush.sage import var as _var2, factorial as _fact2, sin as _sin2
+_n2 = _var2("n")
+_r = (_fact2(_n2) ** (2**63 - 1) * _fact2(_n2 + 1)).simplify_factorial()
+assert str(_r) == "(n + 1)*factorial(n)^9223372036854775808", str(_r)
+_r = (_fact2(_n2) ** (-(2**63)) * _fact2(_n2 + 1)).simplify_factorial()
+assert str(_r) == "(n + 1)/factorial(n)^9223372036854775807", str(_r)
+_r = (_fact2(_n2 + 2**63 - 1) / _fact2(_n2 - 2)).simplify_factorial()
+assert "factorial" in str(_r), str(_r)
+assert str(_sin2(-(2**63) * _var2("x")).expand_trig()) == str(_sin2(-(2**63) * _var2("x"))), "no multiple-angle expansion past 1000"
+print("simplify_factorial exponents ok")

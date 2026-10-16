@@ -65,7 +65,7 @@ fn is_expandable(f: &Fun) -> bool {
 fn integer_multiple(u: &Expr) -> Option<(i64, Expr)> {
     if let Kind::Mul(fs) = &u.kind {
         let n = fs[0].as_i64()?;
-        if !fs[0].as_num()?.is_exact() || n.abs() < 2 || n.abs() > 1000 {
+        if !fs[0].as_num()?.is_exact() || n.unsigned_abs() < 2 || n.unsigned_abs() > 1000 {
             return None;
         }
         return Some((n, mul(fs[1..].to_vec())));
@@ -511,8 +511,8 @@ fn integer_shift(u: &Expr) -> (Expr, i64) {
 
 fn combine_factorials(fs: &[Expr]) -> Option<Expr> {
     // (s, shift, exponent) of each factorial(s + shift)^exponent
-    // (gamma(u) = factorial(u - 1))
-    let mut facts: Vec<(Expr, i64, i64)> = vec![];
+    // (gamma(u) = factorial(u - 1)); exponents exact (no wrapping)
+    let mut facts: Vec<(Expr, i64, BigInt)> = vec![];
     let mut other = vec![];
     for f in fs {
         let (b, k) = base_exp(f);
@@ -521,7 +521,7 @@ fn combine_factorials(fs: &[Expr]) -> Option<Expr> {
             Kind::Fun(Fun::Gamma, a) if a.len() == 1 => Some(sub(&a[0], &one())),
             _ => None,
         };
-        match (arg, k.as_i64()) {
+        match (arg, k.as_int()) {
             (Some(u), Some(m)) if !u.is_num() => {
                 let (s, c) = integer_shift(&u);
                 facts.push((s, c, m));
@@ -544,24 +544,26 @@ fn combine_factorials(fs: &[Expr]) -> Option<Expr> {
         }
         let lo = members.iter().map(|&k| facts[k].1).min().unwrap();
         let hi = members.iter().map(|&k| facts[k].1).max().unwrap();
-        if members.len() < 2 || hi - lo > 1000 {
+        // (the span checked: shifts near the ends of i64 do not combine)
+        let span_ok = hi.checked_sub(lo).map_or(false, |d| d <= 1000);
+        if members.len() < 2 || !span_ok {
             for &k in &members {
-                out.push(pow(&f1(Fun::Factorial, &add2(&s, &int(facts[k].1))), &int(facts[k].2)));
+                out.push(pow(&f1(Fun::Factorial, &add2(&s, &int(facts[k].1))), &big(facts[k].2.clone())));
             }
             continue;
         }
         changed = true;
         // factorial(s + c) = factorial(s + lo) * (s + lo + 1) ... (s + c)
-        let mut total = 0;
+        let mut total = BigInt::zero();
         for &k in &members {
-            let (c, m) = (facts[k].1, facts[k].2);
+            let (c, m) = (facts[k].1, &facts[k].2);
             total += m;
             for t in (lo + 1)..=c {
-                out.push(pow(&add2(&s, &int(t)), &int(m)));
+                out.push(pow(&add2(&s, &int(t)), &big(m.clone())));
             }
         }
-        if total != 0 {
-            out.push(pow(&f1(Fun::Factorial, &add2(&s, &int(lo))), &int(total)));
+        if !total.is_zero() {
+            out.push(pow(&f1(Fun::Factorial, &add2(&s, &int(lo))), &big(total)));
         }
     }
     if changed {
