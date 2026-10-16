@@ -344,9 +344,12 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // notebook needs to start and run offline.  LAZY is kept once it is used
 // online (fetched under the service worker, verified by its digest like the
 // shell): the engine (only some code needs it), the documentation
-// indexes (only the search box does)
+// indexes (only the search box does), and the Python library's chunks (a
+// mode's, when it is first used; offline, a module whose sources were
+// never fetched can't be imported, and one whose compiled code wasn't is
+// compiled from its source: src/compile.ts)
 const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
-const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`];
+const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + libManifestHash);
