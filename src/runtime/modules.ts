@@ -401,7 +401,9 @@ newBuiltinModule("math", (m) => {
     return O.mkfloat(r);
   });
   fn(m, "atan2", (y: any, x: any) => O.mkfloat(CR.atan2(F(y), F(x))));
-  fn(m, "hypot", (...xs: any[]) => O.mkfloat(CR.hypotN(xs.map(F))));
+  // (also as an array of its arguments, for hypot(*xs) of any length: BIG_CALL)
+  const hypotN = (xs: any[]) => O.mkfloat(CR.hypotN(xs.map(F)));
+  fn(m, "hypot", positionalArray((...xs: any[]) => hypotN(xs), hypotN));
   fn(m, "copysign", (x: any, y: any) => {
     // (through the bits: y's sign bit, a NaN's too, on x's magnitude)
     const dv = new DataView(new ArrayBuffer(16));

@@ -167,7 +167,6 @@ type.$jsBase = TypeLayout;
 // so a metaclass __call__ can delegate to it through super().
 const typeCallM = method(type, "__call__", (c: any, ...args: any[]) => constructPlain(c, args));
 typeCallM.$kw = (pos: any[], names: string[], values: any[]) => constructPlainKw(pos[0], pos.slice(1), names, values);
-typeCallM.$kw = (pos: any[], names: string[], values: any[]) => constructPlainKw(pos[0], pos.slice(1), names, values);
 hooks.typeCall = typeCallM;
 // type.__new__(mcls, name, bases, ns, **kw)
 const typeNew = pyfn(function __new__(mcls: any, ...args: any[]) {
