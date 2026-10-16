@@ -40,6 +40,7 @@ export const MAX_FRAMES = 300;
 export const PART_COST = 64;
 const DEFAULT_ITERATIONS = 300;
 const FINAL_SWEEPS = 60;
+const MARGIN = 1e-3;
 
 // mulberry32: a small seeded generator, the same on every engine
 function rng(seed: number): () => number {
@@ -53,7 +54,7 @@ function rng(seed: number): () => number {
   };
 }
 
-type Body = { id: string; w: number; h: number; r: number; x: number; y: number; fixed: boolean };
+type Body = { id: string; w: number; h: number; r: number; x: number; y: number; fixed: boolean; fx: number; fy: number };
 
 class Part {
   bodies: Body[];
@@ -127,7 +128,8 @@ function separate(B: Body[], gap: number): boolean {
       const alongX = ox < oy || (ox === oy && i % 2 === 0);
       const before = alongX ? a.x < b.x || (a.x === b.x && i < j) : a.y < b.y || (a.y === b.y && i < j);
       const sign = before ? -1 : 1;
-      const need = (alongX ? ox : oy) + 1e-6;
+      // (a margin, so that rounding to 1e-6 cannot bring them closer than gap)
+      const need = (alongX ? ox : oy) + MARGIN;
       const sa = a.fixed ? 0 : b.fixed ? 1 : 0.5, sb = 1 - sa;
       if (alongX) { a.x += sign * need * sa; b.x -= sign * need * sb; }
       else { a.y += sign * need * sa; b.y -= sign * need * sb; }
@@ -158,7 +160,8 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
   nodes.forEach((_, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r)!.push(i); });
   // (the work: each part's iterations x k^2, and the final sweeps over all)
   const n = nodes.length;
-  const budget = WORK - FINAL_SWEEPS * n * n;
+  // (and the shelf and the final check: 3 n^2 more)
+  const budget = WORK - (FINAL_SWEEPS + 3) * n * n;
   const sq = [...groups.values()].reduce((s, g) => s + (g.length > 1 ? g.length * g.length + PART_COST : 0), 0);
   if (budget < MIN_ITERATIONS * sq) return null;
   const asked = Math.min(Math.max(Math.floor(opts.iterations ?? DEFAULT_ITERATIONS), 1), MAX_ITERATIONS);
@@ -166,7 +169,7 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
   const random = rng(opts.seed);
   const all: Body[] = nodes.map((nd) => {
     const w = Math.max(0, nd.w), h = Math.max(0, nd.h);
-    return { id: nd.id, w, h, r: Math.sqrt(w * w + h * h) / 2, x: nd.fixed ? nd.fixed.x + w / 2 : 0, y: nd.fixed ? nd.fixed.y + h / 2 : 0, fixed: !!nd.fixed };
+    return { id: nd.id, w, h, r: Math.sqrt(w * w + h * h) / 2, x: nd.fixed ? nd.fixed.x + w / 2 : 0, y: nd.fixed ? nd.fixed.y + h / 2 : 0, fixed: !!nd.fixed, fx: nd.fixed ? nd.fixed.x : 0, fy: nd.fixed ? nd.fixed.y : 0 };
   });
   const parts: Part[] = [];
   const where = new Map<number, number>(); // node -> its index in its part
@@ -189,8 +192,58 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
 function snapshot(all: Body[]): Positions {
   const out: Positions = new Map();
   const r = (v: number) => Math.round(v * 1e6) / 1e6 + 0;
-  for (const b of all) out.set(b.id, { x: r(b.x - b.w / 2), y: r(b.y - b.h / 2) });
+  // (a fixed box exactly where it was given)
+  for (const b of all) out.set(b.id, b.fixed ? { x: b.fx, y: b.fy } : { x: r(b.x - b.w / 2), y: r(b.y - b.h / 2) });
   return out;
+}
+
+/** The pairs of boxes in pos closer than gap (two fixed ones aside: where a
+ * person put them), by index; an empty list is the layout's promise. */
+export function gapViolations(nodes: { id: string; w: number; h: number; fixed?: unknown }[], pos: Positions, gap: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      if (a.fixed && b.fixed) continue;
+      const p = pos.get(a.id)!, q = pos.get(b.id)!;
+      const aw = Math.max(0, a.w), ah = Math.max(0, a.h), bw = Math.max(0, b.w), bh = Math.max(0, b.h);
+      if (p.x < q.x + bw + gap && q.x < p.x + aw + gap && p.y < q.y + bh + gap && q.y < p.y + ah + gap) out.push([i, j]);
+    }
+  }
+  return out;
+}
+
+/** The movable boxes still closer than gap to another, if any, in a row
+ * below every other box, gap apart: nothing can be closer than gap to them
+ * there (CORR-828-1). */
+function shelve(all: Body[], gap: number): void {
+  const bad = new Set<number>();
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = all[i], b = all[j];
+      if (a.fixed && b.fixed) continue;
+      const ox = (a.w + b.w) / 2 + gap - Math.abs(a.x - b.x);
+      const oy = (a.h + b.h) / 2 + gap - Math.abs(a.y - b.y);
+      if (ox > -MARGIN / 2 && oy > -MARGIN / 2) bad.add(a.fixed ? j : i);
+    }
+  }
+  if (bad.size === 0) return;
+  let left = Infinity, bottom = -Infinity;
+  for (let i = 0; i < all.length; i++) {
+    if (bad.has(i)) continue;
+    left = Math.min(left, all[i].x - all[i].w / 2);
+    bottom = Math.max(bottom, all[i].y + all[i].h / 2);
+  }
+  if (left === Infinity) { left = 0; bottom = -gap; }
+  let x = left;
+  const y = bottom + gap + MARGIN;
+  for (let i = 0; i < all.length; i++) {
+    if (!bad.has(i)) continue;
+    const b = all[i];
+    b.x = x + b.w / 2;
+    b.y = y + b.h / 2;
+    x += b.w + gap + MARGIN;
+  }
 }
 
 /** The parts packed in rows, largest first, below the parts with a fixed
@@ -224,6 +277,7 @@ function finish(p: Plan): void {
     rowH = Math.max(rowH, h);
   }
   for (let k = 0; k < FINAL_SWEEPS && separate(all, gap); k++);
+  shelve(all, gap);
 }
 
 export function springLayout(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts): Positions | null {
@@ -231,7 +285,12 @@ export function springLayout(nodes: SpringNode[], edges: [string, string][], opt
   if (p === null) return null;
   for (const part of p.parts) while (part.done < part.iterations) part.step(p.gap);
   finish(p);
-  return snapshot(p.all);
+  return checked(nodes, snapshot(p.all), p.gap);
+}
+// (the promise checked on what is returned, rounded: never a layout with
+// two boxes closer than gap; null rather than that)
+function checked(nodes: SpringNode[], pos: Positions, gap: number): Positions | null {
+  return gapViolations(nodes, pos, gap).length === 0 ? pos : null;
 }
 
 export function* springSteps(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts, every = 1): Generator<Positions> {
@@ -244,5 +303,6 @@ export function* springSteps(nodes: SpringNode[], edges: [string, string][], opt
     if ((k + 1) % k0 === 0) yield snapshot(p.all);
   }
   finish(p);
-  yield snapshot(p.all);
+  const last = checked(nodes, snapshot(p.all), p.gap);
+  if (last !== null) yield last;
 }

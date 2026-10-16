@@ -3,7 +3,8 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, MAX_NODES, MAX_EDGES, MAX_FRAMES } from "./spring.ts";
+import { springLayout, springSteps, gapViolations, MAX_NODES, MAX_EDGES, MAX_FRAMES } from "./spring.ts";
+import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -133,6 +134,45 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
   rmSync(dir, { recursive: true, force: true });
 }
 
+// never a layout with two boxes closer than gap (CORR-828-1): astra's two
+// cases (web/graph/spring-cases.json), and many random graphs, with fixed
+// boxes, mixed sizes and seeds; checked strictly, after rounding
+const strict = (nodes, pos, gap) => {
+  for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+    const a = nodes[i], b = nodes[j];
+    if (a.fixed && b.fixed) continue;
+    const p = pos.get(a.id), q = pos.get(b.id);
+    if (p.x < q.x + b.w + gap && q.x < p.x + a.w + gap && p.y < q.y + b.h + gap && q.y < p.y + a.h + gap) return [a.id, b.id];
+  }
+  return null;
+};
+const CASES = JSON.parse(readFileSync(new URL("./spring-cases.json", import.meta.url), "utf8"));
+for (const c of CASES) {
+  const pos = springLayout(c.nodes, c.edges, c.opts);
+  check(pos !== null && strict(c.nodes, pos, c.opts.gap ?? 24) === null, `${c.label}: no two boxes closer than the gap`);
+  check(pos !== null && c.nodes.every((n) => !n.fixed || (pos.get(n.id).x === n.fixed.x && pos.get(n.id).y === n.fixed.y)), `${c.label}: fixed boxes exactly where given`);
+}
+{
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  let bad = 0, refused = 0, runs = 0;
+  for (let t = 0; t < 300; t++) {
+    const n = 2 + Math.floor(rnd() * 40);
+    const nodes = Array.from({ length: n }, (_, i) => ({ id: "n" + i, w: Math.floor(rnd() * 160), h: Math.floor(rnd() * 120) }));
+    // (fixed boxes well apart, so that the promise can be kept)
+    for (let i = 0; i < n; i++) if (rnd() < 0.15) nodes[i].fixed = { x: i * 400, y: Math.floor(rnd() * 3) * 400 + 0.123456789 };
+    const edges = [];
+    for (let k = 0; k < n * 1.5; k++) edges.push(["n" + Math.floor(rnd() * n), "n" + Math.floor(rnd() * n)]);
+    const gap = [0, 8, 24, 40][Math.floor(rnd() * 4)];
+    const pos = springLayout(nodes, edges, { seed: Math.floor(rnd() * 1e9), iterations: [10, 50, 300][Math.floor(rnd() * 3)], gap });
+    runs++;
+    if (pos === null) { refused++; continue; }
+    if (strict(nodes, pos, gap) !== null || gapViolations(nodes, pos, gap).length) bad++;
+    if (nodes.some((nd) => nd.fixed && (pos.get(nd.id).x !== nd.fixed.x || pos.get(nd.id).y !== nd.fixed.y))) bad++;
+  }
+  check(bad === 0 && refused === 0, `300 random graphs: none closer than the gap, fixed boxes exact, none refused (${bad} bad, ${refused} refused)`);
+}
+
 // the same in Python (lib/_graph_spring.py, which Graph.plot uses): under
 // CPython and under Sagebrush's own runtime (dist/, when built)
 {
@@ -142,16 +182,19 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
   fixedCase[0].fixed = { x: 100, y: 50 };
   cases.push(["fixed", fixedCase, Array.from({ length: 11 }, (_, i) => ["v" + i, "v" + (i + 1)])]);
   cases.push(["lone", pts(6, 10, 10), [["v0", "v1"]]]);
-  const want = cases.map(([, nodes, edges]) => Object.fromEntries([...springLayout(nodes, edges, { seed: 5 })].map(([k, v]) => [k, [v.x, v.y]])));
+  for (const c of CASES) cases.push([c.label, c.nodes, c.edges, c.opts]);
+  const want = cases.map(([, nodes, edges, opts]) => Object.fromEntries([...springLayout(nodes, edges, opts ?? { seed: 5 })].map(([k, v]) => [k, [v.x, v.y]])));
   const py = [
     "import json, sys",
     "sys.path.insert(0, sys.argv[1] + '/lib')",
     "import _graph_spring as g",
     "cases = json.loads(sys.stdin.read())",
     "out = []",
-    "for name, nodes, edges in cases:",
+    "for case in cases:",
+    "    name, nodes, edges = case[:3]",
+    "    opts = case[3] if len(case) > 3 and case[3] else {'seed': 5}",
     "    ns = [(n['id'], n['w'], n['h'], (n['fixed']['x'], n['fixed']['y']) if n.get('fixed') else None) for n in nodes]",
-    "    out.append({k: list(v) for k, v in g.spring_layout(ns, [tuple(e) for e in edges], 5).items()})",
+    "    out.append({k: list(v) for k, v in g.spring_layout(ns, [tuple(e) for e in edges], opts['seed'], opts.get('iterations'), opts.get('gap', 24)).items()})",
     "print(json.dumps(out))",
   ].join("\n");
   const input = JSON.stringify(cases);
