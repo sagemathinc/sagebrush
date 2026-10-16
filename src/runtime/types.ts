@@ -1,5 +1,6 @@
 // Builtin types and their methods.
 
+import * as SP from "./strpos";
 import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
@@ -1027,13 +1028,18 @@ function rsplitWhitespace(s: string, maxsplit: number): string[] {
   }
   return out.reverse();
 }
+// start and end as UTF-16 offsets, from code-point positions (a start past
+// the end stays past it)
 function clampRange(s: string, start: any, end: any): [number, number] {
-  const n = s.length;
+  const p = SP.pairs(s);
+  const n = p === null ? s.length : s.length - p.n;
   let a = start === undefined || start === null ? 0 : Number(start);
   let b = end === undefined || end === null ? n : Number(end);
   if (a < 0) a = Math.max(0, a + n);
   if (b < 0) b = Math.max(0, b + n);
-  return [a, Math.min(b, n)];
+  b = Math.min(b, n);
+  if (p === null) return [a, b];
+  return [a > n ? s.length + 1 : SP.unitOf(p, a), SP.unitOf(p, Math.max(b, 0))];
 }
 method(S, "join", (sep: string, items: any) => {
   const parts = Array.isArray(items) ? items : O.toArray(items);
@@ -1044,14 +1050,14 @@ method(S, "join", (sep: string, items: any) => {
     if (parts[i] instanceof PrimBox && typeof parts[i].$v === "string") { if (out === parts) out = parts.slice(); out[i] = parts[i].$v; continue; }
     raise(T.TypeError, `sequence item ${i}: expected str instance, ${typeName(parts[i])} found`);
   }
-  return out.join(sep);
+  return SP.joinChecked(out, sep);
 });
 method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
   const m = Number(maxsplit);
   if (sep === null) return splitWhitespace(s, m);
   if (typeof sep !== "string") raise(T.TypeError, `must be str or None, not ${typeName(sep)}`);
   if (sep === "") raise(T.ValueError, "empty separator");
-  const parts = s.split(sep);
+  const parts = SP.split(s, sep);
   if (m >= 0 && parts.length > m + 1) return [...parts.slice(0, m), parts.slice(m).join(sep)];
   return parts;
 }, sig(["self", "sep", "maxsplit"]));
@@ -1060,7 +1066,7 @@ method(S, "rsplit", (s: string, sep: any = null, maxsplit: any = -1) => {
   if (sep === null) return m < 0 ? splitWhitespace(s, -1) : rsplitWhitespace(s, m);
   needStr(sep);
   if (sep === "") raise(T.ValueError, "empty separator");
-  const parts = s.split(sep);
+  const parts = SP.split(s, sep);
   if (m >= 0 && parts.length > m + 1) return [parts.slice(0, parts.length - m).join(sep), ...parts.slice(parts.length - m)];
   return parts;
 }, sig(["self", "sep", "maxsplit"]));
@@ -1084,28 +1090,37 @@ method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
   needStr(a, "replace() argument 1 must be str");
   needStr(b, "replace() argument 2 must be str");
   let c = Number(count);
-  if (c < 0 && a !== "") return s.split(a).join(b);
+  // (matches on code-point boundaries, and no lone surrogates joined: SP)
+  if (c < 0 && a !== "") return SP.joinChecked(SP.split(s, a), b);
   if (c < 0) c = Infinity;
-  let out = "", i = 0, k = 0;
+  const out: string[] = [];
+  let i = 0, k = 0;
   if (a === "") {
-    for (const ch of s) out += k++ < c ? b + ch : ch;
-    return k < c ? out + b : out;
+    for (const ch of s) {
+      if (k++ < c) out.push(b);
+      out.push(ch);
+    }
+    if (k < c) out.push(b);
+    return SP.joinChecked(out, "");
   }
   while (k < c) {
-    const j = s.indexOf(a, i);
+    const j = SP.indexOf(s, a, i);
     if (j < 0) break;
-    out += s.slice(i, j) + b;
+    out.push(s.slice(i, j), b);
     i = j + a.length;
     k++;
   }
-  return out + s.slice(i);
+  out.push(s.slice(i));
+  return SP.joinChecked(out, "");
 });
 function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): number {
   needStr(sub);
   const [a, b] = clampRange(s, start, end);
   if (b - a < sub.length || a > s.length) return -1;
-  const j = rev ? s.lastIndexOf(sub, b - sub.length) : s.indexOf(sub, a);
-  return j < a || j + sub.length > b ? -1 : j;
+  const j = rev ? SP.lastIndexOf(s, sub, b - sub.length) : SP.indexOf(s, sub, a);
+  if (j < a || j + sub.length > b) return -1;
+  const p = SP.pairs(s);
+  return p === null ? j : SP.cpOf(p, j);
 }
 method(S, "find", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, false));
 method(S, "rfind", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, true));
@@ -1124,7 +1139,7 @@ method(S, "count", (s: string, sub: string, start: any = undefined, end: any = u
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return 0;
   const t = s.slice(a, b);
-  return sub === "" ? t.length + 1 : t.split(sub).length - 1;
+  return sub === "" ? SP.cpLen(t) + 1 : SP.split(t, sub).length - 1;
 });
 function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean {
   if (Array.isArray(x)) return x.some((p) => affix(s, p, start, end, ends));
@@ -1132,7 +1147,7 @@ function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean 
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return false;
   const t = s.slice(a, b);
-  return ends ? t.endsWith(x) : t.startsWith(x);
+  return ends ? t.endsWith(x) && SP.onBoundaries(t, t.length - x.length, x.length) : t.startsWith(x) && SP.onBoundaries(t, 0, x.length);
 }
 method(S, "startswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, false));
 method(S, "endswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, true));
@@ -1165,17 +1180,18 @@ method(S, "istitle", (s: string) => /\p{L}/u.test(s) && s === S.$dict.get("title
 function padTo(s: string, w: any, fill: string, where: string): string {
   const n = Number(w) - [...s].length;
   if (n <= 0) return s;
-  if (where === "l") return s + fill.repeat(n);
-  if (where === "r") return fill.repeat(n) + s;
+  // (the fill meets s: no lone surrogates joined, SP.glue)
+  if (where === "l") return SP.glue(s, fill.repeat(n));
+  if (where === "r") return SP.glue(fill.repeat(n), s);
   const left = Math.floor(n / 2) + (n & Number(w) & 1);
-  return fill.repeat(left) + s + fill.repeat(n - left);
+  return SP.glue(SP.glue(fill.repeat(left), s), fill.repeat(n - left));
 }
 method(S, "center", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "c"));
 method(S, "ljust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "l"));
 method(S, "rjust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "r"));
 method(S, "zfill", (s: string, w: any) => {
   const sign = s[0] === "-" || s[0] === "+" ? s[0] : "";
-  const n = Number(w) - s.length;
+  const n = Number(w) - SP.cpLen(s);
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
 // str.translate and str.maketrans, as CPython's (their messages included);
@@ -1196,8 +1212,17 @@ method(S, "translate", (s: string, table: any) => {
   let out = "";
   let pieces: string[] = [];
   let size = 0, n = 0, run = 0;
+  // (every piece goes through put: a deleted or mapped character must not
+  // leave a lone high surrogate before a lone low one, CORR-C4D-1)
+  let high = false;
+  const put = (piece: string) => {
+    if (piece.length === 0) return;
+    if (high && (piece.charCodeAt(0) & 0xfc00) === 0xdc00) SP.refuseMerge();
+    high = (piece.charCodeAt(piece.length - 1) & 0xfc00) === 0xd800;
+    pieces.push(piece);
+  };
   const flush = (upto: number) => {
-    if (upto > run) pieces.push(s.slice(run, upto));
+    if (upto > run) put(s.slice(run, upto));
     if (pieces.length >= 4096) {
       out += pieces.join("");
       pieces = [];
@@ -1234,13 +1259,13 @@ method(S, "translate", (s: string, table: any) => {
     if (typeof r === "string") {
       size += r.length;
       if (size > MAX_STR) raise(T.MemoryError);
-      pieces.push(r);
+      put(r);
     } else if (O.isPyInt(r)) {
       const c = Number(r);
       if (!(c >= 0 && c < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
       size += c > 0xffff ? 2 : 1;
       if (size > MAX_STR) raise(T.MemoryError);
-      pieces.push(String.fromCodePoint(c));
+      put(String.fromCodePoint(c));
     } else raise(T.TypeError, "character mapping must return integer, None or str");
   }
   flush(s.length);
@@ -1303,23 +1328,25 @@ S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
 }, "maketrans")));
 method(S, "partition", (s: string, sep: string) => {
   if (needStr(sep) === "") raise(T.ValueError, "empty separator");
-  const i = s.indexOf(sep);
+  const i = SP.indexOf(s, sep, 0);
   return i < 0 ? tuple([s, "", ""]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
 method(S, "rpartition", (s: string, sep: string) => {
   if (needStr(sep) === "") raise(T.ValueError, "empty separator");
-  const i = s.lastIndexOf(sep);
+  const i = SP.lastIndexOf(s, sep, s.length);
   return i < 0 ? tuple(["", "", s]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
-method(S, "removeprefix", (s: string, p: string) => (s.startsWith(p) ? s.slice(p.length) : s));
-method(S, "removesuffix", (s: string, p: string) => (p && s.endsWith(p) ? s.slice(0, -p.length) : s));
+method(S, "removeprefix", (s: string, p: string) => (s.startsWith(p) && SP.onBoundaries(s, 0, p.length) ? s.slice(p.length) : s));
+method(S, "removesuffix", (s: string, p: string) => (p && s.endsWith(p) && SP.onBoundaries(s, s.length - p.length, p.length) ? s.slice(0, -p.length) : s));
 method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict") => encode(s, encoding, errors), sig(["self", "encoding", "errors"]));
 method(S, "expandtabs", (s: string, ts: any = 8) => {
   let out = "", col = 0;
   const n = Number(ts);
+  const seams: number[] = []; // (a tab expanded to nothing joins its neighbours: SP.checkSeams)
   for (const c of s) {
     if (c === "\t") {
       const k = n > 0 ? n - (col % n) : 0;
+      if (k === 0) seams.push(out.length);
       out += " ".repeat(k);
       col += k;
     } else {
@@ -1327,16 +1354,16 @@ method(S, "expandtabs", (s: string, ts: any = 8) => {
       col = c === "\n" || c === "\r" ? 0 : col + 1;
     }
   }
-  return out;
+  return SP.checkSeams(out, seams);
 });
 method(S, "format", (s: string, ...args: any[]) => strFormat(s, args, new Map()));
 S.$dict.get("format").$kw = (pos: any[], names: string[], values: any[]) => strFormat(pos[0], pos.slice(1), new Map(names.map((n, i) => [n, values[i]])));
 method(S, "format_map", (s: string, m: any) => strFormat(s, [], m));
-method(S, "__len__", (s: string) => s.length);
+method(S, "__len__", (s: string) => SP.cpLen(s));
 method(S, "__contains__", (s: string, x: any) => O.contains(s, x));
 method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
-method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s + x : NotImplemented));
-method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? s.repeat(Math.max(0, Number(x))) : NotImplemented));
+method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? SP.glue(s, x) : NotImplemented));
+method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? SP.repeatChecked(s, Math.max(0, Number(x))) : NotImplemented));
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
@@ -1387,6 +1414,7 @@ export function strFormat(s: string, args: any[], kw: any): string {
   };
   const expand = (t: string, depth: number): string => {
     let r = "";
+    const seams: number[] = [];
     let i = 0;
     while (i < t.length) {
       const c = t[i];
@@ -1413,7 +1441,10 @@ export function strFormat(s: string, args: any[], kw: any): string {
         }
         if (m[2] === "r" || m[2] === "a") v = repr(v);
         else if (m[2] === "s") v = str(v);
+        // (a field's ends are seams: no lone surrogates joined)
+        seams.push(r.length);
         r += format(v, spec);
+        seams.push(r.length);
         i = j;
       } else if (c === "}") {
         if (t[i + 1] !== "}") raise(T.ValueError, "Single '}' encountered in format string");
@@ -1424,7 +1455,7 @@ export function strFormat(s: string, args: any[], kw: any): string {
         i++;
       }
     }
-    return r;
+    return SP.checkSeams(r, seams);
   };
   out = expand(s, 0);
   return out;
@@ -2374,7 +2405,7 @@ getset(object, "__dict__", (o) => {
   method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) <= 0 : NotImplemented));
   method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) > 0 : NotImplemented));
   method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) >= 0 : NotImplemented));
-  method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? s.repeat(Math.max(0, Number(unbox(x)))) : NotImplemented));
+  method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? SP.repeatChecked(s, Math.max(0, Number(unbox(x)))) : NotImplemented));
 }
 
 // int, float, str: the subclass instance boxes the value.

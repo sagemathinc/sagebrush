@@ -370,10 +370,23 @@ class DecodeError extends Error {}
 /** Decode Python escape sequences in a str literal body. */
 function decodeUnicodeEscapes(s: string): string {
   let out = "";
+  // (where the last escape's output ended: a lone high surrogate there and a
+  // lone low one next would read as one astral character in a JS string,
+  // which CPython keeps as two code points, so it is refused)
+  let escEnd = -1;
+  const isHigh = (u: number) => u >= 0xd800 && u < 0xdc00;
+  const isLow = (u: number) => u >= 0xdc00 && u < 0xe000;
+  const add = (piece: string, esc: boolean) => {
+    if ((esc || out.length === escEnd) && piece.length > 0 && isLow(piece.charCodeAt(0)) && out.length > 0 && isHigh(out.charCodeAt(out.length - 1))) {
+      throw new DecodeError("a lone high surrogate followed by a lone low surrogate is not supported in Sagebrush's strings");
+    }
+    out += piece;
+    if (esc) escEnd = out.length;
+  };
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c !== "\\") {
-      out += c;
+      add(c, false);
       continue;
     }
     i++;
@@ -396,7 +409,7 @@ function decodeUnicodeEscapes(s: string): string {
       case "0": case "1": case "2": case "3": case "4": case "5": case "6": case "7": {
         let j = i, v = 0;
         while (j < s.length && j < i + 3 && s[j] >= "0" && s[j] <= "7") v = v * 8 + (s.charCodeAt(j++) - 48);
-        out += String.fromCodePoint(v);
+        add(String.fromCodePoint(v), true);
         i = j - 1;
         break;
       }
@@ -408,7 +421,7 @@ function decodeUnicodeEscapes(s: string): string {
         }
         const v = parseInt(hex, 16);
         if (v > 0x10ffff) throw new DecodeError("illegal Unicode character");
-        out += String.fromCodePoint(v);
+        add(String.fromCodePoint(v), true);
         i += n;
         break;
       }
@@ -416,7 +429,7 @@ function decodeUnicodeEscapes(s: string): string {
         const m = /^\{([^}]*)\}/.exec(s.slice(i + 1));
         const cp = m ? UnicodeNameTable.lookup(m[1]) : undefined;
         if (!m || cp === undefined) throw new DecodeError(m ? "unknown Unicode character name" : "malformed \\N character escape");
-        out += String.fromCodePoint(cp);
+        add(String.fromCodePoint(cp), true);
         i += m[0].length;
         break;
       }
@@ -624,6 +637,22 @@ export function _PyPegen_concatenate_strings(p: P, strings: any[], l: number, c:
     } else fstring = true;
   }
   if ((unicode || fstring) && bytes) RAISE_SYNTAX_ERROR(p, "cannot mix bytes and nonbytes literals");
+  // (adjacent literals ending in a lone high surrogate and starting with a
+  // lone low one would read as one astral character: refused, as in
+  // decodeUnicodeEscapes)
+  if (!bytes) {
+    let prev = "";
+    for (const e of strings) {
+      for (const v of e._type === "JoinedStr" ? e.values ?? [] : [e]) {
+        const t = v._type === "Constant" && typeof v.value === "string" ? v.value : null;
+        if (t !== null && t.length > 0) {
+          const h = prev.charCodeAt(prev.length - 1), l = t.charCodeAt(0);
+          if (h >= 0xd800 && h < 0xdc00 && l >= 0xdc00 && l < 0xe000) RAISE_SYNTAX_ERROR(p, "a lone high surrogate followed by a lone low surrogate is not supported in Sagebrush's strings");
+        }
+        prev = t === null ? "" : t.length > 0 ? t : prev;
+      }
+    }
+  }
   if (!fstring) {
     if (strings.length === 1) return strings[0];
     if (bytes) {
