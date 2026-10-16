@@ -1881,6 +1881,10 @@ def interp(x, xp, fp, left=None, right=None, period=None):
         period = float(period)
         if period == 0:
             raise ValueError("period must be a non-zero value")
+        # (NumPy's answers for an infinite or nan period come from its own
+        # arithmetic on them; refused rather than guessed, CORR-928-1)
+        if period != period or period in (float("inf"), float("-inf")):
+            raise NotImplementedError("numpy.interp with a period that is not finite is not supported in Sagebrush")
         period = abs(period)
         if len(xp_l) != len(fp_l):
             raise ValueError("fp and xp are not of the same length")
