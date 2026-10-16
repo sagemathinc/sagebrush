@@ -80,12 +80,17 @@ function floatFor(op: string, dt: DType): DType {
 // smallest float type each input (but a Python scalar, which is weak) casts
 // to safely, the wider of the two; not the float type of the inputs'
 // promoted int type (int8 with uint8 promotes to int16, but its loop is
-// float16; int16 with uint16 to int32, but its loop is float32)
+// float16; int16 with uint16 to int32, but its loop is float32). A Python
+// int with a bool array is int64 (its kind is higher), so float64
 function floatLoop(op: string, a: { arr: NDArray; weak: Weak | null }, b: { arr: NDArray; weak: Weak | null }, ct: DType): DType {
   if (op === "true_divide") return D.float64;
   let bits = 0;
   for (const x of [a, b]) {
-    if (x.weak) continue;
+    if (x.weak) {
+      const other = x === a ? b : a;
+      if (x.weak.kind !== "b" && !other.weak && other.arr.dt.kind === "b") bits = 64;
+      continue;
+    }
     const dt = x.arr.dt;
     if (dt.kind === "f" || dt.kind === "c") return ct;
     bits = Math.max(bits, dt.kind === "b" || dt.itemsize === 1 ? 16 : dt.itemsize === 2 ? 32 : 64);
@@ -101,8 +106,8 @@ const ALIASES: Record<string, string> = Obj.table({
   uint8: "uint8", u1: "uint8", ubyte: "uint8", B: "uint8", uint16: "uint16", u2: "uint16", uint32: "uint32", u4: "uint32", uint: "uint64",
   uint64: "uint64", u8: "uint64", uintp: "uint64", float16: "float16", half: "float16", f2: "float16", e: "float16",
   float32: "float32", f4: "float32", single: "float32", f: "float32", float64: "float64", f8: "float64", float: "float64", double: "float64", d: "float64",
-  float_: "float64", longdouble: "longdouble", float128: "longdouble", g: "longdouble", clongdouble: "clongdouble", complex256: "clongdouble",
-  G: "clongdouble", complex64: "complex64", c8: "complex64", F: "complex64", csingle: "complex64",
+  float_: "float64", longdouble: "longdouble", float128: "longdouble", g: "longdouble", f16: "longdouble", clongdouble: "clongdouble",
+  complex256: "clongdouble", G: "clongdouble", c32: "clongdouble", complex64: "complex64", c8: "complex64", F: "complex64", csingle: "complex64",
   complex128: "complex128", c16: "complex128", complex: "complex128", D: "complex128", cdouble: "complex128", complex_: "complex128",
 });
 const RANGE: Record<string, [number, number]> = Obj.table({
@@ -2686,7 +2691,7 @@ newBuiltinModule("_numpy", (m) => {
   fn("result_type", (...xs: any[]) => {
     let r: DType | null = null;
     for (const x of xs) {
-      const dt = x instanceof DType ? x : x instanceof NDArray ? x.dt : (() => { try { return toDtype(x); } catch (e) { if (Obj.isinstance(e, T.NotImplementedError)) throw e; // (float16, longdouble: refused, not float64)
+      const dt = x instanceof DType ? x : x instanceof NDArray ? x.dt : (() => { try { return toDtype(x); } catch (e) { if (typeof x === "string" || Obj.isinstance(e, T.NotImplementedError)) throw e; // (float16, longdouble: refused, not float64; an unknown name: TypeError)
  const w = pyScalar(x); return w ? scalarDtype(w) : D.float64; } })();
       r = r ? promote(r, dt) : dt;
     }

@@ -22,3 +22,37 @@ print(np.sqrt(np.array([2], np.int8), dtype=np.float64).tolist(), np.sqrt(np.arr
 print(np.add.reduce(np.array([100, 100], np.int8), dtype=np.int16).tolist(), np.add.reduce([1, 2], dtype=np.float32).dtype,
       np.maximum.accumulate(np.array([1, 3, 2]), dtype=np.float64).tolist(), np.add.outer([1, 2], [10], dtype=np.float32).dtype,
       np.geomspace(1, 8, 4, dtype=np.float32).dtype, np.geomspace(1, 8, 4, dtype=np.int64).tolist(), np.mean(np.array([0, 1, 1], np.int8)))
+# a Python int with a bool array is int64, so float64 (a Python bool:
+# float16, refused); a comparison's dtype names its output; an input casts
+# to dtype only as the casting rule allows; reduce accumulates in dtype
+# (CORR-765-1..3)
+def tr(f):
+    try:
+        r = f()
+        return "%r %s" % (r.tolist() if hasattr(r, "tolist") else r, getattr(r, "dtype", type(r).__name__))
+    except Exception as e:
+        return "%s: %s" % ("TypeError" if isinstance(e, TypeError) else type(e).__name__, e)
+b = np.array([True])
+for f in (np.hypot, np.arctan2, np.copysign, np.logaddexp):
+    print(f.__name__, tr(lambda: f(b, 2)), tr(lambda: f(2, b)), tr(lambda: f(b, 2.0)))
+for c in ("np.greater([2], [1], dtype=bool)", "np.equal([2], [1], dtype=bool)", "np.less([2], [1], dtype='?')", "np.greater(1, 2, dtype=bool)",
+          "np.greater([2], [1], dtype=int)", "np.isnan([2.0], dtype=bool)", "np.isnan([2.0], dtype=float)", "np.logical_and([2], [1], dtype=bool)",
+          "np.logical_and([2], [0], dtype=int)", "np.add([1.9], [1.0], dtype=np.int8)", "np.add([1.9], [1.0], dtype=np.int8, casting='unsafe')",
+          "np.add([1], 1.5, dtype=np.int8)", "np.add([1], 300, dtype=np.int8)", "np.add(1, 2, dtype=np.int8)", "np.add([1], [2], dtype=float)",
+          "np.add([1+1j], [2], dtype=float)", "np.add([1], [2], dtype=bool)", "np.add([True], [True], dtype=np.int8)", "np.add([True], True, dtype=bool)",
+          "np.add([True], 1, dtype=bool)", "np.sqrt([4], dtype=np.int8)", "np.sqrt([4], dtype=np.float32)", "np.negative([1.5], dtype=np.int8)",
+          "np.add([1], [2], dtype=np.uint8)", "np.add(np.array([1], np.int64), [2], dtype=np.int8)", "np.add(np.array([1], np.uint8), 1, dtype=np.uint8)",
+          "np.add(np.array([1], np.uint8), -1, dtype=np.uint8)", "np.add([1], np.float32(2), dtype=np.int8)", "np.add([1], 2j, dtype=float)",
+          "np.add(np.array([1], np.int8), [1], dtype=np.int16, casting='safe')", "np.add(np.array([1], np.int16), np.array([1], np.int16), dtype=np.int8, casting='no')",
+          "np.add([1], [2], casting='bogus')", "np.invert([1], dtype=float)", "np.invert([1], dtype=bool)", "np.left_shift([1], [1], dtype=bool)",
+          "np.bitwise_and([1], [1], dtype=float)", "np.floor_divide([1], [1], dtype=complex)", "np.rint([4.0], dtype=np.int64)", "np.floor([4.0], dtype=np.int64)",
+          "np.absolute([1+1j], dtype=float)", "np.absolute([3+4j], dtype=np.float32)", "np.sign([1+1j], dtype=float)",
+          "np.add.reduce([120, 120], dtype=np.int8)", "np.multiply.reduce([20, 20], dtype=np.int8)", "np.add.reduce([1, 2], dtype=bool)",
+          "np.multiply.reduce([3] * 40, dtype=np.uint8)", "np.multiply.reduce([[3] * 40, [5] * 40], axis=1, dtype=np.int16, keepdims=True)",
+          "np.hypot.reduce([3, 4], dtype=np.int16)", "np.add.reduce([1.5, 2], dtype=np.int8)", "np.maximum.reduce([1.5, 2], dtype=np.int8)",
+          "np.add.reduce([[1, 2], [3, 4]], axis=0, dtype=np.int8)", "np.add.reduce([[1, 2], [3, 4]], axis=None, dtype=float)",
+          "np.multiply.reduce([True, False], dtype=bool)", "np.logical_and.reduce([1, 2], dtype=bool)", "np.logical_and.reduce([1, 2], dtype=int)",
+          "np.add.reduce([1, 2], dtype=np.int8, initial=5)", "np.hypot.reduce([3.0, 4.0], dtype=np.float32)", "np.subtract.reduce([1, 2], dtype=np.int8)",
+          "np.add.accumulate([1.5, 2], dtype=np.int8)", "np.multiply.accumulate([3] * 40, dtype=np.uint8)[-3:]", "np.hypot.accumulate([3, 4], dtype=np.int16)",
+          "np.equal.reduce([1, 1], dtype=bool)", "str(np.result_type(1, 'i1'))", "np.result_type('abc')"):
+    print(c, "->", tr(lambda: eval(c)))

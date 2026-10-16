@@ -583,6 +583,32 @@ def fromiter(iterable, dtype, count=-1):
 
 # ------------------------------------------------------------------ ufuncs
 
+_CASTINGS = ("no", "equiv", "safe", "same_kind", "unsafe")
+# (ufuncs whose only output type is bool, a float, or an int or bool)
+_BOOL_OUT = frozenset(["equal", "not_equal", "less", "less_equal", "greater", "greater_equal", "logical_and",
+                       "logical_or", "logical_xor", "isnan", "isinf", "isfinite", "signbit", "logical_not"])
+_FLOAT_OUT = frozenset(["true_divide", "arctan2", "hypot", "copysign", "logaddexp", "sqrt", "cbrt", "exp", "exp2",
+                        "expm1", "log", "log2", "log10", "log1p", "sin", "cos", "tan", "arcsin", "arccos", "arctan",
+                        "sinh", "cosh", "tanh", "arcsinh", "arccosh", "arctanh", "deg2rad", "rad2deg", "rint", "fabs"])
+_BITWISE = frozenset(["bitwise_and", "bitwise_or", "bitwise_xor", "invert", "left_shift", "right_shift"])
+
+
+def _can_cast_rule(a, b, casting):
+    """np.can_cast(a, b, casting) for dtypes a and b"""
+    if casting == "unsafe" or a == b:
+        return True
+    if casting == "same_kind":
+        # (a safe cast, or one to the same kind or a later one)
+        return "buifc".index(a.kind) <= "buifc".index(b.kind)
+    return casting == "safe" and can_cast(a, b)
+
+
+def _wraps_in(op, dt):
+    # (a product in an int dtype narrower than int64 is computed step by
+    # step, wrapping in it: prod's double accumulator loses its low bits)
+    return op == "multiply" and dt.kind in "iu" and dt.itemsize < 8
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -601,12 +627,16 @@ class ufunc:
                 args = args[:-1]
             else:
                 raise TypeError("%s() takes from %d to %d positional arguments but %d were given" % (self.__name__, self.nin, self.nin + 1, len(args)))
+        if casting not in _CASTINGS:
+            raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
         scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
         if dtype is not None:
             # (the loop is resolved from dtype before computing, as NumPy's:
-            # the inputs cast to it, then the operation in it)
-            dt = _dtype_of(dtype)
-            args = tuple(asarray(x).astype(dt) for x in args)
+            # the inputs cast to it under the casting rule, then the operation
+            # in it; but a comparison's dtype names only its output, bool)
+            dt = self._loop(dtype)
+            if self._op not in _BOOL_OUT:
+                args = tuple(self._cast_in(x, i, dt, casting) for i, x in enumerate(args))
         if self.nin == 1:
             r = getattr(_np, "u_" + self._op)(args[0])
         else:
@@ -628,14 +658,58 @@ class ufunc:
             return out
         return r
 
+    def _loop(self, dtype):
+        """dtype's loop, or NumPy's TypeError where the ufunc has none (a
+        comparison's output is bool, a float function's a float, a bitwise
+        operation's an int or bool)"""
+        dt = _dtype_of(dtype)
+        op = self._op
+        if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
+                else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
+                else dt.kind == "c" and op in ("floor_divide", "remainder")):
+            raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+        return dt
+
+    def _cast_in(self, x, i, dt, casting):
+        """Input i cast to the loop's dtype, if the casting rule allows it"""
+        if isinstance(x, (bool, int, float, complex)) and not isinstance(x, generic):
+            # (a Python scalar is weak: an int takes an int loop's type if it
+            # fits, a float a float loop's, a complex a complex loop's)
+            k = "b" if isinstance(x, bool) else "i" if isinstance(x, int) else "f" if isinstance(x, float) else "c"
+            if k == "i" and dt.kind in "iu":
+                info = iinfo(dt)
+                if not info.min <= x <= info.max:
+                    raise OverflowError("Python integer %d out of bounds for %s" % (x, dt.name))
+            src = dt if k == dt.kind or (k == "i" and dt.kind == "u") or (k == "f" and dt.kind == "c") else \
+                _dtype_of({"b": "bool", "i": "int64", "f": "float64", "c": "complex128"}[k])
+        else:
+            x = asarray(x)
+            src = x.dtype
+        if self._op == "absolute" and src == _dtype_of("complex128") and dt == _dtype_of("float64"):
+            dt = src  # (its loop of complex128 to float64)
+        if not _can_cast_rule(src, dt, casting):
+            raise TypeError("Cannot cast ufunc '%s' input %sfrom %r to %r with casting rule '%s'"
+                            % (self.__name__, "" if self.nin == 1 else "%d " % i, src, dt, casting))
+        return asarray(x).astype(dt)
+
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
         a = asarray(a)
         if dtype is not None:
-            a = a.astype(dtype)  # (accumulated in dtype, as NumPy's)
+            dt = self._loop(dtype)
+            a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
-        if self._op in quick and initial is None:
-            return quick[self._op](a, axis=axis, keepdims=keepdims)
+        if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
+            r = quick[self._op](a, axis=axis, keepdims=keepdims)
+            if dtype is not None:
+                # (sum promotes small ints to int64 and bools to int: the
+                # accumulator is dtype, where an int sum wraps as it does
+                # here, and a bool sum is True if any is)
+                r = asarray(r).astype(dt)
+                if r.ndim == 0:
+                    r = r[()]
+            return r
+        nd = a.ndim
         if axis is None:
             a, axis = a.ravel(), 0
         a = moveaxis(a, axis, 0)
@@ -646,15 +720,18 @@ class ufunc:
         acc = a[0] if initial is None else self(initial, a[0])
         for i in range(1, a.shape[0]):
             acc = self(acc, a[i])
+        if keepdims:
+            acc = asarray(acc).reshape((1,) * nd) if a.ndim == 1 else expand_dims(acc, axis)
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
         a = asarray(a)
         if dtype is not None:
-            a = a.astype(dtype)  # (accumulated in dtype, as NumPy's)
+            dt = self._loop(dtype)
+            a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         if self._op == "add":
             return cumsum(a, axis=axis, dtype=dtype)
-        if self._op == "multiply":
+        if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
             return cumprod(a, axis=axis, dtype=dtype)
         a = moveaxis(a, axis, 0)
         res = []
