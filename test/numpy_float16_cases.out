@@ -117,3 +117,4 @@ same dtype float64 (1, 400) True float64
 unary float32 (200000,) True float32
 complex abs float64 (400, 500) True float64
 True
+True 24

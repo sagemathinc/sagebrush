@@ -88,3 +88,16 @@ for name, got, want in (
         ('complex abs', np.absolute((x + 1j * x).reshape(400, 500), dtype=np.float64), np.absolute(x + 1j * x).reshape(400, 500))):
     print(name, got.dtype, got.shape, bool((got == want).all()), want.dtype)
 print(np.add.reduce(y, axis=1, dtype=np.float64).tolist() == np.add.reduce(y, axis=1).tolist())
+# a reduction over an axis of length 1 is a new array, not a view of the
+# input (CORR-904-1); accumulate's too
+out = []
+for f in (np.multiply, np.subtract, np.bitwise_xor, np.maximum):
+    for dt in (np.int8, None):
+        for axis, kd in ((0, False), (1, False), (0, True)):
+            a = np.array([[2, 3, 4]], dtype=np.int8) if axis == 0 else np.array([[2], [3]], dtype=np.int8)
+            r = f.reduce(a, axis=axis, dtype=dt, keepdims=kd)
+            r[...] = 99
+            c = f.accumulate(a, axis=axis, dtype=dt)
+            c[...] = 77
+            out.append(a.tolist() == ([[2, 3, 4]] if axis == 0 else [[2], [3]]))
+print(all(out), len(out))
