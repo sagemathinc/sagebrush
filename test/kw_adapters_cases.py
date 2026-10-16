@@ -59,3 +59,11 @@ for label, f in [
     ('cmath.isclose bad tolerance type', lambda: cmath.isclose(1, 1, rel_tol='x')),
 ]:
     print(label, '|', t(f))
+# zip's keyword count first, in CPython's words (more than one keyword is
+# refused by count, whatever their names)
+for f in (lambda: zip([1], strict=False, bogus=1), lambda: zip([1], bogus=1), lambda: zip([1], bogus=1, other=2),
+          lambda: zip([1], [2], [3], a=1, b=2, c=3), lambda: list(zip(strict=True))):
+    try:
+        print('zip words |', list(f()))
+    except TypeError as e:
+        print('zip words |', e)
