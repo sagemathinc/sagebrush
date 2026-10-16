@@ -89,7 +89,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
   const src = [
-    "Integers(7);",
+    "Integers(1);",
     "P<a, b, c> := PolynomialRing(Rationals(), 3);",
     "K := Integers(); K`__class__;",
     "x := 5; x`real;",
@@ -112,7 +112,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
   // (messages are wrapped at 80 columns, as Magma's are)
   const flat = out.replace(/\s+/g, " ");
   for (const said of [
-    "Runtime error in 'Integers': Integers(m), the integers modulo m, is not supported yet",
+    "Runtime error in 'Integers': Integers(1), the zero ring, is not supported yet",
     "Runtime error in 'PolynomialRing': PolynomialRing in more than one variable (or with weights) is not supported yet",
     "Runtime error in `: the attribute __class__ of this object (not a record) is not supported yet",
     "Runtime error in `: the attribute real of this object (not a record) is not supported yet",
@@ -916,6 +916,96 @@ test("a constructor not implemented yet is refused in words (the signature regis
   assert.ok(out.includes("Graph< ... > is not supported yet"), out);
   assert.doesNotMatch(out, /AssertionError|Traceback|Error: /);
   assert.match(out, /\nend\n$/);
+});
+
+test("vectors keep their ring, residue collections their universe, permutations their degree: Magma's refusals (CORR-DFC-1..4)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [input, where, Magma 2.18's message] (its caret is at the operation, which Sagebrush doesn't say yet)
+  const cases: [string, string, string][] = [
+    ["u + w;", "'+'", "Bad argument types\nArgument types given: ModTupRngElt[RngInt], ModTupFldElt[FldRat]"],
+    ["u eq Vector(Rationals(), [1, 2]);", "'eq'", "Bad argument types\nArgument types given: ModTupRngElt[RngInt], ModTupFldElt[FldRat]"],
+    ["u * Matrix(Rationals(), 2, 2, [1, 0, 0, 1]);", "'*'", "Arguments have incompatible coefficient rings"],
+    ["(1/2) * u;", "'*'", "Arguments are not compatible\nArgument types given: FldRatElt, ModTupRngElt[RngInt]"],
+    ["u * (1/2);", "'*'", "Arguments are not compatible\nArgument types given: ModTupRngElt[RngInt], FldRatElt"],
+    ["Solution(Matrix(Integers(), 2, 2, [2, 0, 0, 2]), Vector(Rationals(), [1, 1]));", "'Solution'", "Arguments have incompatible coefficient rings"],
+    ["Sym(1)![true];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [BoolElt]"],
+    ["Sym(3)![2/1, 3/1, 1/1];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [FldRatElt]"],
+    ["Sym(3)![2.0, 3.0, 1.0];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [FldReElt]"],
+    ["Sym(3)!(1, 2) eq Sym(4)!(1, 2);", "'eq'", "Arguments are not compatible\nArgument types given: GrpPermElt, GrpPermElt"],
+    ["Integers(5)!(Integers(12)!7);", "'!'", "Illegal coercion\nLHS: RngIntRes\nRHS: RngIntResElt"],
+    ["Intseq(7, 2, 3/1);", "'Intseq'", "Bad argument types\nArgument types given: RngIntElt, RngIntElt, FldRatElt"],
+  ];
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8",
+    input: "u := Vector(Integers(), [1, 2]); w := Vector(Rationals(), [1/2, 1]);\n" + cases.map((c) => c[0]).join("\n") + "\n\"end\";\n" }).stdout as string;
+  for (const [src, where, said] of cases)
+    assert.ok(out.includes(`Runtime error in ${where}: ${said}\n`), `${src}\n${out}`);
+  assert.doesNotMatch(out, /Error: |Traceback|Fraction\(/);
+  assert.match(out, /\nend\n$/);
+});
+
+test("Vector, Subsets and Solution are admitted before they copy or compute (HARD-DFC-1, -2, -3)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
+    // (many small subsets: their sets are charged with their elements)
+    "U := {1..40000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
+    "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a vector of more than \d+ entries is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.equal((out.match(/a set of subsets holding more than \d+ elements in all is not supported yet/g) ?? []).length, 3, r.stdout);
+  assert.match(out, /Solution of a system of more than 200000 \(rows times columns times the smaller\) steps is not supported yet/);
+  assert.match(r.stdout, /\n1\n256\n/);
+  assert.match(r.stdout, /\n1\n300\n/);
+  assert.match(r.stdout, /\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("the intrinsics agents reached for refuse as Magma does, and a missing one names the catalog's alternative", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // [input, where, Magma 2.18's message] (its caret is at the call, which Sagebrush doesn't say yet)
+  const cases: [string, string, string][] = [
+    ["(R!4)^-1;", "'^'", "Can not take negative power of non-unit"],
+    ["(R!4) / 2;", "'/'", "Tried to divide by non-unit (2)"],
+    ["R!(1/2);", "'!'", "Denominator is not a unit\nLHS: RngIntRes\nRHS: FldRatElt"],
+    ["R!3 + Integers(7)!1;", "'+'", "Arguments are not compatible\nArgument types given: RngIntResElt, RngIntResElt"],
+    ["R!3 + 1/2;", "'+'", "Bad argument types\nArgument types given: RngIntResElt, FldRatElt"],
+    ["Modexp(R!5, 3, 12);", "'Modexp'", "Bad argument types\nArgument types given: RngIntResElt, RngIntElt, RngIntElt"],
+    ["Order(R!0);", "'Order'", "Can not take order of zero element"],
+    ["Submatrix(M, 2, 2, 3, 3);", "'Submatrix'", "Argument 4 (3) should be in the range [0 .. 2]"],
+    ["Submatrix(M, 0, 1, 1, 1);", "'Submatrix'", "Argument 2 (0) should be in the range [1 .. 4]"],
+    ["Solution(Matrix(Rationals(), 2, 2, [1, 2, 2, 4]), Vector(Rationals(), [1, 3]));", "'Solution'", "No solution exists"],
+    ["Subsets([1, 2]);", "'Subsets'", "Bad argument types\nArgument types given: SeqEnum[RngIntElt]"],
+    ["Subsets({1, 2}, -1);", "'Subsets'", "Argument 2 (-1) should be >= 0"],
+    ["Sym(0);", "'Sym'", "Argument 1 (0) should be >= 1"],
+    ["G!(1, 5);", "elt< ... >", "Bad arguments to cycle or commutator construction"],
+    ["G![2, 2, 3, 4];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [RngIntElt]"],
+    ["5^(G!(1, 2));", "'^'", "Cannot apply permutation to this object"],
+    ["#Vector([1, 2]);", "'#'", "Bad argument types\nArgument types given: ModTupRngElt[RngInt]"],
+    ["Intseq(5, 2, -1);", "'Intseq'", "Argument 3 (-1) is not small and non-negative"],
+  ];
+  const run = (src: string) => spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  const out = run("R := Integers(12); M := Matrix(Integers(), 3, 3, [1, 2, 3, 4, 5, 6, 7, 8, 9]); G := Sym(4);\n" + cases.map((c) => c[0]).join("\n") + "\n\"end\";\n");
+  for (const [src, where, said] of cases)
+    assert.ok(out.includes(`Runtime error in ${where}: ${said}\n`), `${src}\n${out}`);
+  assert.doesNotMatch(out, /Error: |Traceback/);
+  assert.match(out, /\nend\n$/);
+  // Sagebrush's own refusals, in words
+  const own = run("Integers(1);\nSolution(Matrix(Rationals(), 2, 2, [1, 2, 2, 4]), Vector(Rationals(), [1, 2]));\nP<x> := PolynomialRing(GF(5));\n" +
+    "G := Graph<3 | [ {1, 2} ]>;\nLegendreSymbol(3, 7);\n\"end\";\n");
+  // (long messages wrap at 80 columns: compared unwrapped)
+  assert.ok(own.replace(/\s+/g, " ").includes("Integers(1), the zero ring, is not supported yet"), own);
+  assert.ok(own.replace(/\s+/g, " ").includes("Solution of a system with more than one solution is not supported yet"), own);
+  // (a missing function's refusal names what to use instead: agents read refusals)
+  assert.ok(own.replace(/\s+/g, " ").includes("PolynomialRing over a FldFin (not the integers or the rationals) is not supported yet; instead: Sage mode, R.<x> = GF(5)[]"), own);
+  assert.ok(own.replace(/\s+/g, " ").includes("Graph< ... > is not supported yet; instead: Sage mode's Graph"), own);
+  assert.ok(own.replace(/\s+/g, " ").includes("'LegendreSymbol' is a Magma intrinsic not implemented in Sagebrush; instead: Modexp(n, (m - 1) div 2, m)"), own);
+  assert.match(own, /\nend\n$/);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {

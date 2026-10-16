@@ -29,8 +29,6 @@ HermiteForm
 Image
 Include
 Insert
-IntegerRing
-Integers
 IntegralBasis
 Inverse
 ISA
