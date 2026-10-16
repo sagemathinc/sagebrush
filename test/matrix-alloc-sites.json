@@ -117,7 +117,7 @@
  "lib/_sage_ffmat.py: FFMatrix.solve_right :: call :: enumerate(piv)": 1,
  "lib/_sage_ffmat.py: FFMatrix.solve_right :: call :: range(self._ncols)": 1,
  "lib/_sage_ffmat.py: FFMatrix.solve_right :: call :: zip(self._rows, b)": 1,
- "lib/_sage_ffmat.py: FFMatrix.solve_right :: comprehension :: _bounded_list(b, self.nrows())": 1,
+ "lib/_sage_ffmat.py: FFMatrix.solve_right :: comprehension :: b": 1,
  "lib/_sage_ffmat.py: FFMatrix.solve_right :: comprehension :: b.columns()": 1,
  "lib/_sage_ffmat.py: FFMatrix.solve_right :: comprehension :: cols": 1,
  "lib/_sage_ffmat.py: FFMatrix.solve_right :: comprehension :: range(self._ncols)": 1,
