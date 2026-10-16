@@ -2411,17 +2411,53 @@ def prod(xs, start=1):
 
 
 def continued_fraction(x, nterms=20):
-    """The continued fraction of x (partial quotients).
+    """The continued fraction of x: finite for a rational, and for an exact
+    real number the lazy sequence of its partial quotients, each one
+    certified (a float never decides a quotient: SAGE-541-1).  A quadratic
+    irrational is computed exactly by its periodic (P, Q) recurrence; another
+    algebraic number, pi or e, from certified enclosures refined as needed.
+    Where no enclosure is precise enough, NotImplementedError.
 
     EXAMPLES::
 
-        sage: continued_fraction(415/93)
-        [4; 2, 6, 7]
-        sage: continued_fraction(sqrt(2), 10)  # random
+        sage: continued_fraction(415/93), continued_fraction(-7/3), continued_fraction([2, 4, 1])
+        ([4; 2, 6, 7], [-3; 1, 2], [2; 5])
+        sage: continued_fraction(sqrt(17))
+        [4; 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, ...]
+        sage: c = continued_fraction(sqrt(2)/3); list(c[:6]), c.convergent(3)
+        ([0, 2, 8, 4, 8, 4], 33/70)
+        sage: continued_fraction(pi)[4], continued_fraction(2^(1/3))[9]
+        (292, 8)
+
+    Further quotients, certified (also checked against mpmath at 2000
+    digits); a slice is the finite continued fraction of a convergent, in
+    canonical form (a last quotient 1 merges into the one before), as
+    Sage's::
+
+        sage: c = continued_fraction(e); [c[k] for k in range(20, 30)]
+        [14, 1, 1, 16, 1, 1, 18, 1, 1, 20]
+        sage: c = continued_fraction(pi); [c[k] for k in range(20, 30)]
+        [1, 84, 2, 1, 1, 15, 3, 13, 1, 4]
+        sage: c = continued_fraction(2^(1/3)); [c[k] for k in range(30, 40)]
+        [1, 15, 3, 1, 4, 534, 1, 1, 5, 1]
+        sage: c = continued_fraction(sqrt(2) + sqrt(3)); [c[k] for k in range(35, 45)]
+        [31, 2, 1, 1, 3, 1, 44, 1, 89, 1]
+        sage: continued_fraction(e)[:24], continued_fraction((1 + sqrt(5))/2)[:4]
+        ([2; 1, 2, 1, 1, 4, 1, 1, 6, 1, 1, 8, 1, 1, 10, 1, 1, 12, 1, 1, 14, 1, 1, 16], [1; 1, 2])
     """
+    if isinstance(x, (list, tuple)):
+        qs = [int(a) for a in x]
+        if len(qs) > 1 and qs[-1] == 1:
+            # the canonical form, as Sage's: [..., a, 1] is [..., a + 1]
+            qs[-2] += 1
+            qs.pop()
+        return _ContinuedFraction(qs)
     if isinstance(x, _Expr):
-        x = float(x)
-    """The (simple) continued fraction partial quotients of x."""
+        c = _ContinuedFractionReal(x)
+        q = c._rational()
+        if q is None:
+            return c
+        x = q
     if isinstance(x, (int, _Fraction)):
         f = _Fraction(x)
         out = []
@@ -2430,7 +2466,7 @@ def continued_fraction(x, nterms=20):
             out.append(a)
             f -= a
             if f == 0:
-                return _ContinuedFraction(out)
+                return _ContinuedFraction(out, x)
             f = 1 / f
     out = []
     for _ in range(nterms):
@@ -2443,11 +2479,246 @@ def continued_fraction(x, nterms=20):
     return _ContinuedFraction(out)
 
 
+def _cf_convergent(qs, n):
+    """The n-th convergent of the partial quotients qs[0..n]."""
+    h0, h1, k0, k1 = 1, qs[0], 0, 1
+    for a in qs[1:n + 1]:
+        h0, h1, k0, k1 = h1, a * h1 + h0, k1, a * k1 + k0
+    return _q(_Fraction(h1, k1))
+
+
 class _ContinuedFraction(list):
     """Partial quotients, printed as Sage prints a continued fraction."""
 
+    def __init__(self, qs=(), value=None):
+        list.__init__(self, qs)
+        self._value = value
+
     def __repr__(self):
         return "[%s]" % (str(self[0]) + ("; " + ", ".join(str(a) for a in self[1:]) if len(self) > 1 else ""))
+
+    def __getitem__(self, i):
+        r = list.__getitem__(self, i)
+        return _ContinuedFraction(r) if isinstance(i, slice) else r
+
+    def quotient(self, n):
+        return self[n]
+
+    def convergent(self, n):
+        return _cf_convergent(self, n)
+
+    def convergents(self):
+        return [_cf_convergent(self, n) for n in range(len(self))]
+
+    def numerator(self, n):
+        return self.convergent(n).numerator()
+
+    def denominator(self, n):
+        return self.convergent(n).denominator()
+
+    def value(self):
+        return self._value if self._value is not None else self.convergent(len(self) - 1)
+
+
+class _ContinuedFractionReal:
+    """The continued fraction of an exact irrational real number: its
+    partial quotients, computed on demand and each certified.
+
+    EXAMPLES::
+
+        sage: c = continued_fraction(sqrt(17)); c[3], c.quotient(5), c.convergent(3), c.value()
+        (8, 8, 2177/528, sqrt(17))
+        sage: c[10^12], continued_fraction(-sqrt(3))[10^12 + 1]  # sagebrush only (periodic: no list to 10^12)
+        (8, 2)
+        sage: c[:5], len(continued_fraction(-sqrt(3))[:4])
+        ([4; 8, 8, 8, 8], 4)
+    """
+
+    def __init__(self, x):
+        self._x = x
+        self._qs = []
+        self._periodic = None
+        self._gen = self._quotients()
+
+    def value(self):
+        return self._x
+
+    def __len__(self):
+        raise ValueError("the length is infinite!")
+
+    def __iter__(self):
+        i = 0
+        while True:
+            yield self.quotient(i)
+            i += 1
+
+    def quotient(self, n):
+        n = int(n)
+        if n < 0:
+            raise IndexError("negative index")
+        if self._periodic is None and not self._qs:
+            # the first step: a quadratic irrational sets _periodic (and
+            # yields nothing); anything else yields its first quotient
+            first = next(self._gen, None)
+            if self._periodic is None:
+                self._qs.append(first)
+        if self._periodic is not None:
+            pre, per = self._periodic
+            return pre[n] if n < len(pre) else per[(n - len(pre)) % len(per)]
+        while len(self._qs) <= n:
+            self._qs.append(next(self._gen))
+        return self._qs[n]
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            if i.stop is None or i.stop < 0 or (i.start or 0) < 0:
+                raise NotImplementedError("only finite slices of an infinite continued fraction")
+            return continued_fraction([self.quotient(k) for k in range(*i.indices(int(i.stop)))])
+        return self.quotient(i)
+
+    def convergent(self, n):
+        n = int(n)
+        if n < 0:
+            raise IndexError("negative index")
+        h0, h1, k0, k1 = 1, self.quotient(0), 0, 1
+        for i in range(1, n + 1):
+            a = self.quotient(i)
+            h0, h1, k0, k1 = h1, a * h1 + h0, k1, a * k1 + k0
+        return _q(_Fraction(h1, k1))
+
+    def convergents(self):
+        """The convergents, lazily.
+
+        EXAMPLES::
+
+            sage: continued_fraction(sqrt(17)).convergents()
+            lazy list [4, 33/8, 268/65, ...]
+        """
+        return _LazyConvergents(self)
+
+    def numerator(self, n):
+        return self.convergent(n).numerator()
+
+    def denominator(self, n):
+        return self.convergent(n).denominator()
+
+    def __repr__(self):
+        return "[%d; %s, ...]" % (self.quotient(0), ", ".join(str(self.quotient(k)) for k in range(1, 20)))
+
+
+    def _algebraic(self):
+        # (the number in AA, its minimal polynomial's coefficients), or None
+        if not hasattr(self, "_aa"):
+            try:
+                a = AA(self._x)
+                self._aa = (a, [_Fraction(c) for c in a.minpoly().list()])
+            except Exception:
+                self._aa = None
+        return self._aa
+
+    def _rational(self):
+        t = self._algebraic()
+        return -t[1][0] / t[1][1] if t is not None and len(t[1]) == 2 else None
+
+    def _quotients(self):
+        t = self._algebraic()
+        if t is not None and len(t[1]) == 3:
+            # periodic: quotient(n) indexes it, with no list up to n
+            self._periodic = _cf_quadratic(*t)
+            return
+            yield
+        yield from _cf_enclosed(self._x, t[0] if t is not None else None)
+
+
+class _LazyConvergents:
+    """The convergents of an infinite continued fraction, as a lazy list."""
+
+    def __init__(self, cf):
+        self._cf = cf
+
+    def __iter__(self):
+        h0, h1, k0, k1 = 1, self._cf.quotient(0), 0, 1
+        yield _q(_Fraction(h1, k1))
+        n = 1
+        while True:
+            a = self._cf.quotient(n)
+            h0, h1, k0, k1 = h1, a * h1 + h0, k1, a * k1 + k0
+            yield _q(_Fraction(h1, k1))
+            n += 1
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            if i.stop is None or i.stop < 0 or (i.start or 0) < 0:
+                raise NotImplementedError("only finite slices of an infinite list")
+            return [self._cf.convergent(k) for k in range(*i.indices(int(i.stop)))]
+        return self._cf.convergent(int(i))
+
+    def __len__(self):
+        raise ValueError("the length is infinite!")
+
+    def __repr__(self):
+        return "lazy list [%s, ...]" % ", ".join(str(self._cf.convergent(k)) for k in range(3))
+
+
+def _cf_quadratic(a, m):
+    """(preperiod, period) of the partial quotients of the quadratic
+    irrational a, a root of
+    m[2] t^2 + m[1] t + m[0]: with D = B^2 - 4AC, a = (P + sqrt(D))/Q, and
+    a_k = floor((P + sqrt(D))/Q), P' = a_k Q - P, Q' = (D - P'^2)/Q, all in
+    integers (Q divides D - P^2 throughout); periodic from the first
+    repeated (P, Q)."""
+    den = 1
+    for c in m:
+        den = den * c.denominator // _math.gcd(den, c.denominator)
+    C, B, A = (int(c * den) for c in m)
+    D = B * B - 4 * A * C
+    # which root: a is above the midpoint -B/(2A) exactly when it is the
+    # (-B + sqrt(D))/(2A) root with A > 0, or the other one with A < 0
+    above = a > AA(_q(_Fraction(-B, 2 * A)))
+    P, Q = (-B, 2 * A) if above == (A > 0) else (B, -2 * A)
+    r = _math.isqrt(D)
+    seen, qs = {}, []
+    while (P, Q) not in seen:
+        seen[(P, Q)] = len(qs)
+        k = (P + r) // Q if Q > 0 else -((P + r) // -Q + 1)
+        qs.append(k)
+        P = k * Q - P
+        Q = (D - P * P) // Q
+    start = seen[(P, Q)]
+    return qs[:start], qs[start:]
+
+
+def _cf_enclosed(x, a):
+    """Partial quotients of x read from certified enclosures [lo, hi]: a
+    quotient is emitted only when every number in the interval has it.  The
+    enclosure is refined (an algebraic number's certified ball, or RIF at a
+    higher precision); when it no longer narrows, NotImplementedError."""
+    def enclose(digits):
+        if a is not None:
+            re, _, err = a._ball(digits)
+            return re - err, re + err
+        I = RealIntervalField(int(digits * 3.33) + 10)(x)
+        return _Fraction(I._lo), _Fraction(I._hi)
+    emitted, digits, width = 0, 30, None
+    while True:
+        lo, hi = enclose(digits)
+        w = hi - lo
+        if width is not None and w * 2 > width:
+            raise NotImplementedError("the continued fraction of %s: no certified enclosure precise enough for partial quotient %d" % (x, emitted))
+        width = w
+        k = 0
+        while True:
+            fa, fb = _math.floor(lo), _math.floor(hi)
+            if fa != fb or lo == fa:
+                break
+            if k >= emitted:
+                yield fa
+                emitted += 1
+            k += 1
+            lo, hi = 1 / (hi - fa), 1 / (lo - fa)
+        if digits > 100000:
+            raise NotImplementedError("the continued fraction of %s: precision limit reached at partial quotient %d" % (x, emitted))
+        digits *= 2
 
 
 # Sage's Integer methods on Python ints: (12).factor(), 13.is_prime(); under
