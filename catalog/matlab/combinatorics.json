@@ -16,7 +16,7 @@
       }
     ],
     "differs": [
-      "Its result is limited to 8 MiB: the permutations of 8 elements of a double vector, or 9 of a char or 8-bit one; more are refused.",
+      "Its result is limited to 8 MiB: the permutations of 8 elements of a double or char vector, or 9 of an 8-bit integer or logical one; more are refused.",
       "Cell and string arrays are refused; permute an index vector instead."
     ],
     "status": "partial",
