@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr, handledExceptions } from "./object";
+import { globalsDict, hooks, setattr, putAttr, currentExc } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
@@ -233,8 +233,8 @@ newBuiltinModule("sys", (m) => {
   fn(m, "audit", (..._a: any[]) => null);
   fn(m, "addaudithook", (_f: any) => null);
   fn(m, "getsizeof", (_x: any) => 64);
-  // (the exception an except clause is handling, innermost; None outside one)
-  const handled = () => (handledExceptions.length ? handledExceptions[handledExceptions.length - 1] : null);
+  // (the exception being handled, innermost; None outside any)
+  const handled = currentExc;
   fn(m, "exception", () => handled());
   fn(m, "exc_info", () => {
     const e = handled();

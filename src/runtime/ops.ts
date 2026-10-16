@@ -4,7 +4,7 @@
 
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
+  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
 import { INTR } from "./interrupt";
@@ -1282,9 +1282,18 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     if (!isThrow && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
     g.$started = true;
   }
+  // The generator's own handled exceptions go above its caller's while it
+  // runs, and come off with it when it pauses (CPython's per-frame exc_info).
+  const base = handledExceptions.length;
+  if (g.$exc !== undefined) {
+    handledExceptions.push(...g.$exc);
+    g.$exc = undefined;
+  }
+  let paused = false;
   try {
     const r = isThrow ? g.throw(arg) : g.next(arg);
     if (r.done && r.value === undefined) r.value = null;
+    paused = !r.done;
     return r;
   } catch (e: any) {
     if (isExc(e, T.StopIteration)) {
@@ -1294,6 +1303,11 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     }
     if (e instanceof TypeError && /already running|is executing/.test(e.message)) raise(T.ValueError, "generator already executing");
     throw e;
+  } finally {
+    if (handledExceptions.length > base) {
+      const own = handledExceptions.splice(base);
+      if (paused) g.$exc = own;
+    }
   }
 }
 // The StopIteration a ProtoIter swallowed most recently, so wrappers such as

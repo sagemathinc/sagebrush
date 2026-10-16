@@ -55,3 +55,9 @@ print(sys.exception())
   const want = execFileSync("python3", ["-c", code], { encoding: "utf8" });
   assert.equal(cli(["-c", code]), want);
 });
+
+test("the exception being handled is per frame, as CPython's: generators and coroutines keep theirs while paused; finally, with and except matching see the one in flight; __context__ is set when raised, so exit stacks keep the whole chain", () => {
+  // (-W ignore: CPython 3.14 warns of return and break in a finally)
+  const want = execFileSync("python3", ["-W", "ignore", TEST + "exception_state_cases.py"], { encoding: "utf8" });
+  assert.equal(cli([TEST + "exception_state_cases.py"]), want);
+});
