@@ -199,6 +199,8 @@ if (fromParent) {
   }
 }
 
+// (the engine an exported file's code last ran with, as chooseEngine chose it)
+let chosen: string | null = null;
 const host: BoardHost = {
   store: {
     async load() {
@@ -276,7 +278,7 @@ const host: BoardHost = {
   // it to someone else's code; only in Chromium, as on the notebook page)
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
-    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
+    : ref ? (d) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine).then((e) => ((chosen = e.id), e)), { sage: d.mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
@@ -308,9 +310,11 @@ const host: BoardHost = {
     },
   },
   // (which Sagebrush: the site's /version.json, each field checked, as data;
-  // an exported file, or a site without it, the engine it was built with or carries)
+  // an exported file, or a site without it, the engine that ran its code
+  // (the latest, or its own when it fell back: CORR-20A-1), else the one it
+  // was built with or carries)
   version: async () => {
-    const own = ref?.id ?? OWN_ENGINE?.id, v: { version?: string; build?: string; engine?: string } = {};
+    const own = chosen ?? ref?.id ?? OWN_ENGINE?.id, v: { version?: string; build?: string; engine?: string } = {};
     if (!file) {
       try {
         const r = await fetch(new URL("/version.json", location.href), { cache: "no-store" });

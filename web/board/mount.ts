@@ -951,9 +951,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     };
   }
   // (at the ⋯ menu's foot, which Sagebrush runs this board's code, as text,
-  // read once: round 0's 17, to compare with `sagebrush --version`)
-  let version: Promise<BoardVersion | null> | null = null;
-  const versionOf = () => (version ??= host.version ? host.version().catch(() => null) : Promise.resolve(null));
+  // asked each time: the engine that runs it may be chosen, or change, after
+  // the first time, CORR-20A-1; round 0's 17, to compare with `sagebrush --version`)
+  const versionOf = () => (host.version ? host.version().catch(() => null) : Promise.resolve(null));
   function showVersion() {
     versionOf().then((v) => {
       const el = $("ver"), parts = v ? [v.version && `Sagebrush ${v.version}`, v.build && `build ${v.build}`, v.engine && `engine ${v.engine.slice(0, 12)}`].filter(Boolean) : [];
