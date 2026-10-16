@@ -4474,6 +4474,27 @@ _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
 _unary("tand", lambda A: _sind(A) / _cosd(A))
+
+
+def _recip_inverse(name, base):
+    """asec, acsc, acot and the hyperbolic three: the base inverse function of 1./X, as
+    their pages define them (asec(X) is acos(1./X)), so the complex results of real
+    arguments outside the domain follow the base function's conventions"""
+    def g(nargout, x):
+        cls = class_(x)
+        if cls in ("cell", "struct", "string", "function_handle") or cls in _INTS:
+            raise _err("Undefined function '%s' for input arguments of type '%s'." % (name, cls), "MATLAB:UndefinedFunction")
+        A = _farr(x, name)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            R = 1 / A
+        return _B[base].f(nargout, _finish(R, "single" if cls == "single" else "double"))
+    _B[name] = Builtin(g, name)
+
+
+for _n, _b in (("asec", "acos"), ("acsc", "asin"), ("acot", "atan"), ("asech", "acosh"), ("acsch", "asinh"), ("acoth", "atanh")):
+    _recip_inverse(_n, _b)
+
+
 def _gamma(x):
     """MATLAB's gamma: exact (x-1)! at the integers up to 171, Inf at the poles"""
     if x != x or x == -_math.inf:
