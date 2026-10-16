@@ -15,6 +15,20 @@ from _numpy import ndarray, dtype
 
 __version__ = "2.5.1+sagebrush"
 
+
+def _removed_alias(f, name, replacement):
+    # (a deprecated name current NumPy no longer has: kept, as old scripts
+    # use it, with a DeprecationWarning naming what replaces it)
+    def alias(*args, **kwargs):
+        import warnings
+
+        warnings.warn(f"`np.{name}` is deprecated (current NumPy no longer has it); use `{replacement}` instead", DeprecationWarning, stacklevel=2)
+        return f(*args, **kwargs)
+
+    alias.__name__ = alias.__qualname__ = name
+    alias.__doc__ = f"Deprecated, not in current NumPy (warns): use {replacement}."
+    return alias
+
 pi = _math.pi
 e = _math.e
 euler_gamma = 0.5772156649015329
@@ -396,7 +410,22 @@ def asarray(a, dtype=None, order=None, *, copy=None, like=None):
     return _np.asarray(a, dtype)
 
 
-asanyarray = asfarray = asarray
+asanyarray = asarray
+
+
+def _asfarray(a, dtype="float64"):
+    # (NumPy 1.26's: float64 unless dtype is an inexact type; an explicit
+    # dtype=None keeps the input's type, CORR-B12-1)
+    if dtype is None:
+        return asarray(a)
+    d = _np_dtype(dtype)
+    if d.kind not in "fc":
+        d = _np_dtype("float64")
+    return asarray(a, dtype=d)
+
+
+_np_dtype = dtype
+asfarray = _removed_alias(_asfarray, "asfarray", "np.asarray(a, dtype=float)")
 
 
 def _contiguous(a, forward):
@@ -706,19 +735,67 @@ def isrealobj(x):
 
 def around(a, decimals=0, out=None):
     a = asarray(a)
+    if out is not None:
+        return _around_out(a, decimals, out)
     if a.dtype.kind in "iub" and decimals >= 0:
         return a.copy() if a.ndim else a[()]
-    if decimals == 0:
-        r = rint(a)
-    else:
-        f = 10.0 ** decimals
-        r = rint(a * f) / f
-        if a.dtype.kind in "iu":
-            r = r.astype(a.dtype)  # (an integer array stays one, as in NumPy)
+    r = _round_float(a, decimals)
+    if a.dtype.kind in "iu":
+        r = r.astype(a.dtype)  # (an integer array stays one, as in NumPy)
     return r if a.ndim else r[()]
 
 
-round = round_ = around
+def _round_float(a, decimals):
+    if decimals == 0:
+        return rint(a)
+    f = 10.0 ** decimals
+    return rint(a * f) / f
+
+
+def _around_out(a, decimals, out):
+    # (the result written into out, which is returned, as NumPy's, under
+    # its rules: the same shape, same_kind casting, and the rounding done in
+    # the wider of the two types; CORR-90C-1..3)
+    if not isinstance(out, ndarray):
+        raise TypeError("output must be an array")
+    if tuple(out.shape) != tuple(a.shape):
+        raise ValueError("invalid output shape")
+    sk, ok = a.dtype.kind, out.dtype.kind
+
+    def refuse(src):
+        raise TypeError(f"Cannot cast ufunc 'rint' output from {src!r} to {out.dtype!r} with casting rule 'same_kind'")
+
+    if sk == "b" or (sk in "fc" and ok in "iub"):
+        refuse(a.dtype)
+    if sk in "iu":
+        if ok == "b":
+            refuse(a.dtype)
+        if ok in "iu":
+            if decimals < 0:
+                refuse(dtype("float64"))
+            if sk == "i" and ok == "u":
+                raise TypeError(f"Cannot cast array data from {a.dtype!r} to {out.dtype!r} according to the rule 'same_kind'")
+            out[...] = a
+            return out
+        out[...] = a if decimals >= 0 else _round_float(a.astype("float64"), decimals)
+        return out
+    if sk == "c" and ok == "f":
+        raise TypeError("Cannot set imaginary part of non-complex array.")
+    if ok == "c" and sk != "c":
+        # (NumPy rounds such a value as a complex number, with complex
+        # division's rounding; not implemented: refused, not answered)
+        raise NotImplementedError("np.round of a real array into a complex out is not supported")
+    wide = result_type(a.dtype, out.dtype)
+    if wide != out.dtype:
+        # (into a narrower out NumPy casts between its stages, so a near tie
+        # rounds by out's precision; not implemented: refused, CORR-90C-3)
+        raise NotImplementedError(f"np.round of a {a.dtype} array into a narrower {out.dtype} out is not supported")
+    out[...] = _round_float(a.astype(wide), decimals)
+    return out
+
+
+round = around
+round_ = _removed_alias(around, "round_", "np.round")
 
 
 def clip(a, a_min=None, a_max=None, out=None, **kw):
@@ -821,7 +898,7 @@ def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where
     return _out(r, out)
 
 
-product = prod
+product = _removed_alias(prod, "product", "np.prod")
 
 
 def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
@@ -1176,7 +1253,7 @@ def vstack(tup, *, dtype=None):
     return concatenate([atleast_2d(a) for a in tup], axis=0, dtype=dtype)
 
 
-row_stack = vstack
+row_stack = _removed_alias(vstack, "row_stack", "np.vstack")
 
 
 def hstack(tup, *, dtype=None):
@@ -1472,7 +1549,12 @@ def isin(element, test_elements, assume_unique=False, invert=False):
     return ~r if invert else r
 
 
-in1d = isin
+def _in1d(ar1, ar2, assume_unique=False, invert=False):
+    # (NumPy 1.x's: the first argument flattened, a 1-D result)
+    return isin(ravel(ar1), ar2, assume_unique=assume_unique, invert=invert)
+
+
+in1d = _removed_alias(_in1d, "in1d", "np.isin")
 
 
 def intersect1d(a, b, assume_unique=False):
@@ -1602,7 +1684,7 @@ def trapezoid(y, x=None, dx=1.0, axis=-1):
     return sum(d * (y[tuple(hi)] + y[tuple(lo)]) / 2.0, axis=axis)
 
 
-trapz = trapezoid
+trapz = _removed_alias(trapezoid, "trapz", "np.trapezoid")
 
 
 def cross(a, b, axisa=-1, axisb=-1, axisc=-1, axis=None):
