@@ -737,6 +737,30 @@ test("a rational with huge parts made a real is refused in words, before any dec
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("a real field of a huge precision is refused in words before any of its numbers is made (HARD-762-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = "R := RealField(100000000); R!1;\nRealField(1001);\nprintf \"%.100000000o\\n\", 1.5;\n" +
+    "S := RealField(1000); x := S!2; y := Sqrt(x); z := Exp(S!1); w := Log(x); #Sprint(y); #Sprint(z); #Sprint(w);\n\"end\";\n";
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.equal(r.status, 0, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a real field of precision more than 1000 is not supported yet/g) ?? []).length, 2, r.stdout.slice(0, 2000));
+  assert.match(out, /printf's precision \(%\.100000000o\) for this real is not supported yet/);
+  // (Magma's own refusals of a precision; its caret is at the call, which
+  // Sagebrush doesn't say yet)
+  const bad = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
+    { input: "RealField(0);\nRealField(-3);\nRealField(3/2);\nRealField(2.0);\n", encoding: "utf8" }).stdout;
+  assert.equal(bad.split("Runtime error in 'RealField': Argument 1 is not positive\n").length, 3, bad);
+  assert.ok(bad.includes("Runtime error in 'RealField': Bad argument types\nArgument types given: FldRatElt\n"), bad);
+  assert.ok(bad.includes("Runtime error in 'RealField': Bad argument types\nArgument types given: FldReElt\n"), bad);
+  // (precision 1000 itself still works, quickly: its numbers print 1000 digits, with a point)
+  assert.match(r.stdout, /\n100[1-9]\n100[1-9]\n100[1-9]\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("a real power too large to make is refused in words, quickly (CORR-C682-2)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
