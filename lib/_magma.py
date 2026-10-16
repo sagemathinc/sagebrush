@@ -558,10 +558,73 @@ def _ff_universe(items, where):
     return items
 
 
+def _ff_into(U, x):
+    """x coerced into the finite field U (a declared universe), or None
+    where Magma's coercion fails: an integer, a rational with a denominator
+    prime to p, an element of U, of its prime field, or of another field of
+    characteristic p lying in the prime field (checked against Magma)."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, int):
+        return U.K(x)
+    if isinstance(x, _Fraction):
+        if x.denominator % U.p == 0:
+            return None
+        return U.K(x.numerator) / U.K(x.denominator)
+    if _is_ff(x):
+        if x.parent() is U.K:
+            return x
+        Kx = _ffwrap(x.parent())
+        if Kx.p != U.p:
+            return None
+        if Kx.n == 1:
+            return U.K(int(x))
+        if x ** U.p == x:
+            return U.K(int(x.list()[0]))
+        if U.n % Kx.n == 0:
+            raise MagmaError("an element of a subfield of a finite field in a collection over it is not supported yet")
+        return None
+    if isinstance(x, (MSeq, MSet, MTuple, MRange, list, tuple)):
+        raise MagmaError("a collection in a collection over a finite field is not supported yet")
+    return None
+
+
+# where Magma reports a failed coercion into a declared universe, by kind
+_UNIVERSE_FAIL = {"seq": "[ ... ]", "set": "{ ... }", "indexed": "{@ ... @}", "multi": "sub< ... >"}
+
+
+def _into_universe(items, universe, kind):
+    """A collection's items with a declared universe: coerced into a finite
+    field; a finite field's elements into the integers (those of the prime
+    field) or the rationals (none), as Magma does (CORR-A6D-1).  Other
+    universes keep their items as before."""
+    ff = isinstance(universe, _MFinField)
+    if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
+        return items
+    out = []
+    for k, x in enumerate(items):
+        if ff:
+            y = _ff_into(universe, x)
+        elif not _is_ff(x):
+            y = x
+        elif universe is _ZZ and _ffwrap(x.parent()).n == 1:
+            y = int(x)
+        elif universe is _ZZ and x ** _ffwrap(x.parent()).p == x:
+            y = int(x.list()[0])
+        else:
+            y = None
+        if y is None:
+            raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
+        out.append(y)
+    return out
+
+
 def _seq(items, universe=None):
     items = list(items)
     if universe is None:
         _ff_universe(items, "[ ... ]")
+    else:
+        items = _into_universe(items, universe, "seq")
     return MSeq(items, universe)
 
 
@@ -576,15 +639,15 @@ def _set_universe(items):
 
 
 def _set(items, universe=None):
-    return MSet(_set_universe(list(items)), "set", universe)
+    return MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
 
 
 def _iset(items, universe=None):
-    return MSet(_set_universe(list(items)), "indexed", universe)
+    return MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
 
 
 def _mset(items, universe=None):
-    return MSet(_set_universe(list(items)), "multi", universe)
+    return MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
 
 
 def _still_range(v):
@@ -3711,6 +3774,11 @@ class _MFinField:
             # integers or the prime field's elements; a sequence of F's own
             # (or other fields') elements lifts only one; Magma's words else
             v, rhs = list(x), "[%s]" % _elt_type(x)
+            # (a declared universe other than the integers or a prime field
+            # of p: Magma's words, not its items' (CORR-A6D-1))
+            u = getattr(x, "universe", None)
+            if u is not None and u is not _ZZ and not (isinstance(u, _MFinField) and (u.n == 1 and u.p == self.p or u is self)):
+                raise MagmaError("Illegal coercion\nLHS: FldFin\nRHS: %s" % rhs, "'!'", False)
             coeff = lambda c: (isinstance(c, int) and not isinstance(c, bool)) or (_is_ff(c) and _ffwrap(c.parent()).n == 1 and _ffwrap(c.parent()).p == self.p)
             if v and all(coeff(c) for c in v) and (self.n > 1 or len(v) == 1):
                 if len(v) == self.n or self.n == 1:
