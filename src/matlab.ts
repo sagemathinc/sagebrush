@@ -1744,6 +1744,17 @@ export function matlabSyntaxMessage(e: MatlabSyntaxError, src: string, file: str
  */
 export function matlabHostOps(): Record<string, (...args: any[]) => any> {
   return {
+    // (code run as a notebook cell is, for the catalog's examples, lib/_matlab_examples.py
+    // run: a syntax error becomes Python that reports it on stderr, as a cell's is)
+    matlab_cell(src: unknown, file: unknown) {
+      const s = String(src), f = String(file);
+      try {
+        return matlabToPython(s, f, { cell: true });
+      } catch (e) {
+        if (!(e instanceof MatlabSyntaxError)) throw e;
+        return `import sys\nsys.stderr.write(${JSON.stringify(matlabSyntaxMessage(e, s, f))})\n`;
+      }
+    },
     matlab_function_file(src: unknown, file: unknown) {
       const s = String(src), f = String(file);
       try {

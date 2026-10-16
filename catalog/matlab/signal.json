@@ -1,0 +1,36 @@
+[
+  {
+    "name": "xcorr",
+    "kind": "function",
+    "signature": "r = xcorr(x, y)\nr = xcorr(x)\nr = xcorr(___, maxlag)\nr = xcorr(___, scaleopt)\n[r, lags] = xcorr(___)",
+    "summary": "The cross-correlation of two vectors, or the autocorrelation of one, at each lag, with the lags.",
+    "doc": "$r(m) = \\sum_n x(n+m)\\,\\overline{y(n)}$, the shorter vector padded with zeros, for lags $-L, \\ldots, L$; L is maxlag, or N - 1 for N the longer length. scaleopt is 'none' (the default), 'biased' (r/N), 'unbiased' (r/(N - |m|)) or 'normalized' ('coeff': an autocorrelation is 1 at lag 0); a scaled correlation needs vectors of the same length. r is oriented as x; lags is a row. The lag of the peak, lags(k) for [~, k] = max(r), is how far y is delayed relative to x, negated.",
+    "examples": [
+      {
+        "code": "[r, lags] = xcorr([1 2 3], [0 1 2])",
+        "expected": "\nr =\n\n     2     5     8     3     0\n\n\nlags =\n\n    -2    -1     0     1     2\n\n"
+      },
+      {
+        "code": "xcorr([1 2 3])",
+        "expected": "\nans =\n\n     3     8    14     8     3\n\n"
+      },
+      {
+        "code": "r = xcorr([1 2 3 4], 'normalized'); r(4)",
+        "expected": "\nans =\n\n     1\n\n"
+      }
+    ],
+    "differs": [
+      "Matrix input, the correlations of all pairs of columns, is refused.",
+      "Integer-class input and empty vectors are refused.",
+      "At most 1,000,000 lags, and vectors of more than a few thousand elements at many lags are refused (the work is lengths times lags)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "conv",
+      "filter"
+    ],
+    "tags": [
+      "signal processing"
+    ]
+  }
+]

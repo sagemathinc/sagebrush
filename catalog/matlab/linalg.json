@@ -1,0 +1,120 @@
+[
+  {
+    "name": "det",
+    "kind": "function",
+    "signature": "d = det(A)",
+    "summary": "The determinant of a square matrix, from its LU factorization.",
+    "doc": "`det([])` is 1. Like MATLAB's, the result carries round-off: test singularity with `cond` or `rank`, not `det(A) == 0`.",
+    "examples": [
+      {
+        "code": "det([1 2; 3 4])",
+        "expected": "\nans =\n\n    -2\n\n"
+      },
+      {
+        "code": "det(magic(3))",
+        "expected": "\nans =\n\n  -360\n\n"
+      }
+    ],
+    "differs": [
+      "Integer-class input is accepted (MATLAB refuses it) and computed in double."
+    ],
+    "status": "full",
+    "see_also": [
+      "inv",
+      "rank",
+      "cond"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "eig",
+    "kind": "function",
+    "signature": "e = eig(A)\n[V, D] = eig(A)\n[V, D, W] = eig(A)\ne = eig(A, B)\n[V, D] = eig(A, B)\n___ = eig(___, outputForm)",
+    "summary": "The eigenvalues of a square matrix, with right and left eigenvectors, or of the generalized problem A v = lambda B v.",
+    "doc": "`outputForm` is `'vector'` or `'matrix'`. `'nobalance'` is accepted. A real symmetric matrix gives real eigenvalues in ascending order.",
+    "examples": [
+      {
+        "code": "eig([2 0; 0 3])",
+        "expected": "\nans =\n\n     2\n     3\n\n"
+      },
+      {
+        "code": "eig([0 1; -1 0])",
+        "expected": "\nans =\n\n   0.0000 + 1.0000i\n   0.0000 - 1.0000i\n\n"
+      }
+    ],
+    "differs": [
+      "Eigenvectors are normalized as MATLAB's are, but their signs (and the phase of complex ones) can differ.",
+      "The 'qz' algorithm option is refused ('chol' is accepted)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "eigs",
+      "svd",
+      "schur"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "inv",
+    "kind": "function",
+    "signature": "Y = inv(X)",
+    "summary": "The inverse of a square matrix; a singular one gives a warning and Inf entries.",
+    "doc": "For solving a linear system, `A\\b` is faster and more accurate than `inv(A)*b`.",
+    "examples": [
+      {
+        "code": "inv([2 0; 0 4])",
+        "expected": "\nans =\n\n    0.5000         0\n         0    0.2500\n\n"
+      },
+      {
+        "code": "inv([1 2; 3 4])",
+        "expected": "\nans =\n\n   -2.0000    1.0000\n    1.5000   -0.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Integer-class input is accepted (MATLAB refuses it) and inverted in double."
+    ],
+    "status": "full",
+    "see_also": [
+      "mldivide",
+      "pinv",
+      "det"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "norm",
+    "kind": "function",
+    "signature": "n = norm(v)\nn = norm(v, p)\nn = norm(X)\nn = norm(X, p)\nn = norm(X, 'fro')",
+    "summary": "A vector's p-norm, or a matrix's 2-norm (its largest singular value), 1-norm, infinity norm or Frobenius norm.",
+    "doc": "For vectors, `p` is any positive number, Inf or -Inf; for matrices, 1, 2, Inf or `'fro'`. `norm([])` is 0.",
+    "examples": [
+      {
+        "code": "norm([3 4])",
+        "expected": "\nans =\n\n     5\n\n"
+      },
+      {
+        "code": "norm([1 2; 3 4], 'fro')",
+        "expected": "\nans =\n\n    5.4772\n\n"
+      }
+    ],
+    "differs": [
+      "N-D arrays are refused, as in MATLAB.",
+      "Integer-class input is accepted (MATLAB refuses it) and computed in double."
+    ],
+    "status": "full",
+    "see_also": [
+      "vecnorm",
+      "svd",
+      "cond"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  }
+]

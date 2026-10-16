@@ -1,0 +1,97 @@
+[
+  {
+    "name": "find",
+    "kind": "function",
+    "signature": "k = find(X)\nk = find(X, n)\nk = find(X, n, direction)\n[row, col] = find(___)\n[row, col, v] = find(___)",
+    "summary": "The indices of the nonzero elements of an array: all of them, or the first or last n, as linear indices or rows and columns.",
+    "doc": "`direction` is `'first'` (the default) or `'last'`. A row vector gives a row of indices, any other array a column. `v` holds the nonzero values. No nonzero element gives an empty array.",
+    "examples": [
+      {
+        "code": "find([0 4 0 7])",
+        "expected": "\nans =\n\n     2     4\n\n"
+      },
+      {
+        "code": "[r, c] = find([0 1; 1 0])",
+        "expected": "\nr =\n\n     2\n     1\n\n\nc =\n\n     1\n     2\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "any",
+      "nnz",
+      "logical"
+    ],
+    "tags": [
+      "searching"
+    ]
+  },
+  {
+    "name": "sort",
+    "kind": "function",
+    "signature": "B = sort(A)\nB = sort(A, dim)\nB = sort(___, direction)\n[B, I] = sort(___)\nB = sort(___, 'ComparisonMethod', method)",
+    "summary": "An array's elements sorted along a dimension, ascending or descending, with the permutation that sorts them.",
+    "doc": "`direction` is `'ascend'` (the default) or `'descend'`. The sort is stable: equal elements keep their order. NaN goes last ascending and first descending. Complex values sort by magnitude, then phase angle; `'ComparisonMethod'` is `'auto'`, `'real'` or `'abs'`. Cell arrays of character vectors and string arrays sort as text.",
+    "examples": [
+      {
+        "code": "[s, k] = sort([3 1 2], 'descend')",
+        "expected": "\ns =\n\n     3     2     1\n\n\nk =\n\n     1     3     2\n\n"
+      },
+      {
+        "code": "sort({'pear', 'apple', 'fig'})",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'apple'}    {'fig'}    {'pear'}\n\n"
+      }
+    ],
+    "differs": [
+      "The 'MissingPlacement' option is refused.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sortrows",
+      "unique",
+      "max"
+    ],
+    "tags": [
+      "sorting"
+    ]
+  },
+  {
+    "name": "unique",
+    "kind": "function",
+    "signature": "C = unique(A)\nC = unique(A, setOrder)\nC = unique(A, occurrence)\nC = unique(A, 'rows')\n[C, ia, ic] = unique(___)",
+    "summary": "An array's distinct values, sorted or in the order they first appear, with indices that map between the input and the result.",
+    "doc": "`setOrder` is `'sorted'` (the default) or `'stable'`; `occurrence` is `'first'` (the default) or `'last'`, for `ia`. `C = A(ia)` and `A = C(ic)`. Each NaN is distinct. Works for cell arrays of character vectors and string arrays too.",
+    "examples": [
+      {
+        "code": "unique([3 1 2 3 1])",
+        "expected": "\nans =\n\n     1     2     3\n\n"
+      },
+      {
+        "code": "[c, ia, ic] = unique([3 1 2 3 1])",
+        "expected": "\nc =\n\n     1     2     3\n\n\nia =\n\n     2\n     3\n     1\n\n\nic =\n\n     3\n     1\n     2\n     3\n     1\n\n"
+      },
+      {
+        "code": "unique([3 1 2 3 1], 'stable')",
+        "expected": "\nans =\n\n     3     1     2\n\n"
+      },
+      {
+        "code": "unique([3 1 3 2 1])",
+        "expected": "\nans =\n\n     1     2     3\n\n"
+      }
+    ],
+    "differs": [
+      "'TreatMissingAsDistinct' together with 'legacy' is refused, as unique's page rules it out.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sort",
+      "ismember",
+      "union"
+    ],
+    "tags": [
+      "sets"
+    ]
+  }
+]
