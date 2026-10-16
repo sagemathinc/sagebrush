@@ -723,6 +723,20 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("a rational with huge parts made a real is refused in words, before any decimal conversion (HARD-C68-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = "x := (2^2000000 + 1)/3; y := 3/(2^2000000 + 1);\nRealField()!x;\nRealField()!y;\nx^(1/2);\n2^y;\nExp(y);\nLog(x);\n\"end\";\n";
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /ValueError|Traceback|SystemError/);
+  const said = /a real from a rational with a numerator or denominator of more than 1000000 bits is not supported yet/g;
+  assert.equal((r.stdout.replace(/\s+/g, " ").match(said) ?? []).length, 6, r.stdout.slice(0, 2000));
+  assert.match(r.stdout, /\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("intrinsics taking integers refuse a rational, an integral one too (CORR-765-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
