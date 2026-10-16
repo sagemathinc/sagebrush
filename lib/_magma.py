@@ -3045,11 +3045,28 @@ def _shown(prec):
     return max(prec, 2)
 
 
+# A real field's precision is at most this many digits: a higher one is
+# refused before any of its numbers, or 10^prec, is made (HARD-762-1)
+_REAL_PREC_MAX = 1000
+
+
+def _admit_prec(prec):
+    if prec > _REAL_PREC_MAX:
+        raise MagmaError("a real field of precision more than %d is not supported yet" % _REAL_PREC_MAX)
+
+
+_BITS = {}
+
+
 def _bits(prec):
     """The bits of RealField(prec)'s numbers: the least b with 2^b >= 10^prec
     (Magma's: 100 for 30 digits, 167 for 50, 34 for 10, measured as the
     least k with 1 + 2^-k eq 1; CORR-C682-2)."""
-    return (10 ** prec).bit_length()
+    b = _BITS.get(prec)
+    if b is None:
+        _admit_prec(prec)
+        b = _BITS[prec] = (10 ** prec).bit_length()
+    return b
 
 
 def _pow_pair(m, e, n, bits):
@@ -3318,6 +3335,7 @@ def _real(s):
 
 class RealField_:
     def __init__(self, prec=30):
+        _admit_prec(prec)
         self.prec = prec
 
     def __repr__(self):
@@ -3336,6 +3354,12 @@ class RealField_:
 
 
 def RealField(prec=30):
+    # (as Magma checks it: an integer, positive; Magma's own bound is far
+    # above ours, which RealField_ applies, HARD-762-1)
+    if not isinstance(prec, int) or isinstance(prec, bool):
+        raise _bad_types("RealField", [prec])
+    if prec <= 0:
+        raise MagmaError("Argument 1 is not positive", "'RealField'", True)
     return RealField_(prec)
 
 
@@ -3720,7 +3744,7 @@ def _fixed(x, n):
     or when rounding adds a digit (99.999 to 100.00), Magma may print
     1.E2-style; and with no digit after the point its rules differ again.
     Those are refused rather than guessed."""
-    if n < 1 or x.m == 0:
+    if n < 1 or n > _REAL_PREC_MAX or x.m == 0:
         return None
     v = x.frac()
     a = abs(v)

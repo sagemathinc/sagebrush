@@ -50,3 +50,6 @@ R1 := RealField(1); R1!(5/2); R1!(-5/2); R1!(1/3); R1!3; R1!(15/4); R1!(9/4); R1
 3.234567890123456789012345678904999999e-2000;
 3.234567890123456789012345678904999999e1700;
 "end-literal";
+// a real field's precision: a positive integer (its refusals: test/magma.test.ts)
+RealField(1);
+"end-prec";
