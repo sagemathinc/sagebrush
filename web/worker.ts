@@ -108,6 +108,12 @@ function setBroker(b: { ctrl: SharedArrayBuffer; data: SharedArrayBuffer }) {
 // if its bytes have the SHA-256 this worker was built with (design/security.md,
 // SEC-8D6-1).  Without them, modules compile as before.
 declare const __SB_PRECOMPILED_HASH__: string;
+async function digestHex(bytes: ArrayBuffer): Promise<string> {
+  const subtle = (globalThis as any).isSecureContext ? globalThis.crypto?.subtle : undefined;
+  if (!subtle) return sha256Hex(new Uint8Array(bytes));
+  const h = new Uint8Array(await subtle.digest("SHA-256", bytes));
+  return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 const precompiled = (async () => {
   try {
     const url = FILES?.["sagebrush-precompiled.json"] ?? new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), BASE).href;
@@ -120,8 +126,10 @@ const precompiled = (async () => {
       if (!r.ok) return;
       bytes = await r.arrayBuffer();
     }
-    // (the runner's worker is not a secure context, so no crypto.subtle: the synchronous SHA-256)
-    if (sha256Hex(new Uint8Array(bytes)) !== __SB_PRECOMPILED_HASH__) return;
+    // (the native digest where there is one: a 15 MB file took 130 ms in the
+    // synchronous JS SHA-256, 11 ms natively; the runner's worker is not a
+    // secure context, so no crypto.subtle there: the synchronous one)
+    if ((await digestHex(bytes)) !== __SB_PRECOMPILED_HASH__) return;
     (globalThis as any).__SAGEBRUSH_PRECOMPILED__ = JSON.parse(new TextDecoder().decode(bytes));
   } catch {}
 })();
