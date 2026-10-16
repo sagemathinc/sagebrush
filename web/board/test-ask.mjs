@@ -244,6 +244,11 @@ try {
   await sleep(300);
   t = await kText();
   check(/Hint 2/.test(t) && /7 is not one of those/.test(t), "wrong twice: the computed hint, with this answer: " + t.slice(0, 300));
+  // (its card as tall as what the check said, also when that changes and the
+  // question doesn't, as a second error with the same answer: nothing cut off below)
+  await ev(`(() => { window.board.askFeedback.set("k", { message: "a longer message:\\n\\n" + "it says more, line after line. ".repeat(12), hints: [null, "a hint"] }); return ${B}.edit((d) => { d.title = "Checked again"; }).then(() => 1); })()`);
+  await sleep(500);
+  check(await ev(`(() => { const c = ${q$(K(".board-ask-clear"))}, card = c?.closest(".board-item"); if (!c || !card) return false; return c.getBoundingClientRect().bottom <= card.getBoundingClientRect().bottom + 1; })()`), "wrong twice: the card holds its hints, nothing cut off");
   // (right: the verdict, sent on to next.right)
   await setK("4");
   await press(K(".board-ask-check"));

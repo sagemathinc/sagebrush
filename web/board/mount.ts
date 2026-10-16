@@ -526,8 +526,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     redraw().catch(fail);
   };
 
-  // (a question's height also as its fields are open and as far as it has grown: UI-448-2)
-  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0] : null; };
+  // (a question's height also as its fields are open, as far as it has grown (UI-448-2) and with what its check said)
+  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0, board.askFeedback.get(a.id) ?? null] : null; };
   const atLeastGrown = (n: MeasuredNote, h: number) => { const a = (n as { ask?: DocAsk }).ask; return a ? Math.max(h, board.askGrown.get(a.id) ?? 0) : h; };
   const heightKey = (n: MeasuredNote, w: number) => JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w, askState(n)]);
   const widthKey = (n: MeasuredNote, max: number) => JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
