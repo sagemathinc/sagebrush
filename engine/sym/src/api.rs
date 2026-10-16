@@ -443,6 +443,16 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
         "factor" => one_(crate::simplify::factor(&d(arg(0)))),
         "simplify_rational" => one_(crate::simplify::simplify_rational(&d(arg(0)))),
         "simplify_trig" => one_(crate::simplify::simplify_trig(&d(arg(0)))),
+        "expand_trig" => one_(crate::rewrite::expand_trig(&d(arg(0)))),
+        "reduce_trig" => one_(crate::rewrite::reduce_trig(&d(arg(0)))),
+        "expand_log" => one_(crate::rewrite::expand_log(&d(arg(0)), a.get(1).copied() != Some("powers"))),
+        "simplify_log" => one_(crate::rewrite::simplify_log(&d(arg(0)))),
+        "canonicalize_radical" => one_(crate::rewrite::canonicalize_radical(&d(arg(0)))),
+        "simplify_factorial" => one_(crate::rewrite::simplify_factorial(&d(arg(0)))),
+        "partial_fraction" => match crate::rewrite::partial_fraction(&d(arg(0)), arg(1)) {
+            Some(r) => one_(r),
+            None => crate::err::not_implemented("partial_fraction: only rational functions with rational coefficients are implemented in sagebrush yet"),
+        },
         "simplify_full" => one_(crate::simplify::simplify_full(&d(arg(0)))),
         "together" => {
             let (n, q) = crate::simplify::together(&d(arg(0)));

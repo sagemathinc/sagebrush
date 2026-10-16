@@ -23,6 +23,7 @@ pub mod poly;
 pub mod mpoly;
 pub mod print;
 pub mod qpoly;
+pub mod rewrite;
 pub mod ratint;
 pub mod series;
 pub mod simplify;

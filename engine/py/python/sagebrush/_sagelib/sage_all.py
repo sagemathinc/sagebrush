@@ -302,6 +302,60 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
             break
 
 
+def sage_eval(source, locals=None, cmds="", preparse=True):
+    """The value of the Sage expression source (a string), with the names
+    in locals; cmds (statements) run first, and their assignments update
+    locals.  A tuple source is (cmds, expression) or (cmds, expression,
+    locals).
+
+    EXAMPLES::
+
+        sage: sage_eval('2^10'), sage_eval('1/3 + 1/6'), sage_eval('[1..5]')
+        (1024, 1/2, [1, 2, 3, 4, 5])
+        sage: sage_eval('x^2 + 1', locals={'x': 3}), sage_eval('t^2', locals={'t': x + 1})
+        (10, (x + 1)^2)
+        sage: sage_eval(('y = 3', 'y^2')), sage_eval(('a = 2', 'a + b', {'b': 3}), locals={'b': 7})
+        (9, 5)
+        sage: d = {'x': 2}; sage_eval('x', locals=d, cmds='x = 3'), d['x']
+        (3, 3)
+    """
+    import builtins as _b
+    if isinstance(source, (tuple, list)):
+        if len(source) == 3:
+            # (a copy of the tuple's locals, as Sage)
+            cmds, source, locals = source[0], source[1], dict(source[2])
+        elif len(source) == 2:
+            cmds, source = source
+        else:
+            raise ValueError("a tuple source is (cmds, expression) or (cmds, expression, locals)")
+    source, cmds = str(source), str(cmds)
+
+    def comp(code, mode):
+        if not preparse:
+            return compile(code, "<sage_eval>", mode)
+        if hasattr(_b, "__pyjs_compile_sage__"):
+            return _b.__pyjs_compile_sage__(code, "<sage_eval>", mode)
+        from sagebrush.preparse import preparse as _preparse
+        return compile(_preparse(code).strip(), "<sage_eval>", mode)
+
+    # as Sage: the commands and the assignment of the expression's value
+    # run as one block (so a global statement in cmds governs the
+    # expression too), with the globals and the caller's locals as separate
+    # namespaces: assignments, del and := act on locals itself (also when
+    # a command raises), and the value is locals['_sage_eval_returnval_']
+    # (without cmds, the expression alone, leaving locals as it is)
+    g = dict(globals())
+    if locals is None:
+        locals = {}
+    if not cmds.strip():
+        return eval(comp(source, "eval"), g, locals)
+    exec(comp(cmds + "\n_sage_eval_returnval_ = " + source, "exec"), g, locals)
+    return locals["_sage_eval_returnval_"]
+
+
+__all__.append("sage_eval")
+
+
 def VectorSpace(base, n):
     """The vector space base^n (over a finite field, so far).
 
