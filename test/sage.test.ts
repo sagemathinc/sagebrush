@@ -150,3 +150,11 @@ test("matrix() converts each entry function value as it is returned (CORR-C12-1)
     "calls = []\ndef g(i, j):\n calls.append((int(i), int(j)))\n return QQ(i - j)/2\ntry:\n matrix(ZZ, 2, 3, g)\nexcept TypeError:\n print(calls)\n";
   assert.equal(cli("--sage", "-c", src), "[0, 1, 1, 2]\n[(0, 0), (0, 1)]\n");
 });
+
+test("matrix(QQ, r, c, f) converts each value strictly before the next call (CORR-798-1)", () => {
+  // (a value that failed to convert was kept and changed by later calls:
+  // [2, 1, 1, 2] where Sage 10.10 raises the value's own TypeError after (0, 0))
+  const src = "from fractions import Fraction\nclass V(Fraction):\n @property\n def numerator(self):\n  if self.n == 0: raise TypeError('not rational yet')\n  return self.n\n @property\n def denominator(self): return 1\n" +
+    "v = V(1)\nv.n = 0\ncalls = []\ndef f(i, j):\n calls.append((int(i), int(j)))\n v.n = int(i + j)\n return v\ntry:\n print(matrix(QQ, 2, 2, f).list())\nexcept TypeError as e:\n print('TypeError', e, calls)\n";
+  assert.equal(cli("--sage", "-c", src), "TypeError not rational yet [(0, 0)]\n");
+});
