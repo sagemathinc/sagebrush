@@ -680,8 +680,14 @@ class ufunc:
                 info = iinfo(dt)
                 if not info.min <= x <= info.max:
                     raise OverflowError("Python integer %d out of bounds for %s" % (x, dt.name))
-            src = dt if k == dt.kind or (k == "i" and dt.kind == "u") or (k == "f" and dt.kind == "c") else \
-                _dtype_of({"b": "bool", "i": "int64", "f": "float64", "c": "complex128"}[k])
+            # (one whose kind fits is the loop's dtype, under any casting
+            # rule: np.add(1, 1, dtype=np.float32, casting='no') is 2.0)
+            if dt.kind in {"b": "b", "i": "uifc", "f": "fc", "c": "c"}[k]:
+                src = dt
+            elif k == "c":
+                src = _dtype_of("complex64" if dt == _dtype_of("float32") else "complex128")
+            else:
+                src = _dtype_of({"b": "bool", "i": "int64", "f": "float64"}[k])
         else:
             x = asarray(x)
             src = x.dtype
@@ -714,12 +720,17 @@ class ufunc:
             a, axis = a.ravel(), 0
         a = moveaxis(a, axis, 0)
         if a.shape[0] == 0:
-            if initial is not None:
-                return full(a.shape[1:], initial)
-            raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
-        acc = a[0] if initial is None else self(initial, a[0])
-        for i in range(1, a.shape[0]):
-            acc = self(acc, a[i])
+            # (the identity, or initial, in dtype, for each of the other axes)
+            ident = initial if initial is not None else {"add": 0, "multiply": 1}.get(self._op)
+            if ident is None:
+                raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
+            acc = full(a.shape[1:], ident, dtype=dt if dtype is not None else None)
+            if acc.ndim == 0 and not keepdims:
+                return acc[()]
+        else:
+            acc = a[0] if initial is None else self(initial, a[0])
+            for i in range(1, a.shape[0]):
+                acc = self(acc, a[i])
         if keepdims:
             acc = asarray(acc).reshape((1,) * nd) if a.ndim == 1 else expand_dims(acc, axis)
         return acc
@@ -733,6 +744,8 @@ class ufunc:
             return cumsum(a, axis=axis, dtype=dtype)
         if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
             return cumprod(a, axis=axis, dtype=dtype)
+        if a.shape[axis] == 0:
+            return a.copy()  # (empty, of its dtype and shape)
         a = moveaxis(a, axis, 0)
         res = []
         acc = None

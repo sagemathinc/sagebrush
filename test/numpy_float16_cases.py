@@ -57,3 +57,14 @@ for c in ("np.greater([2], [1], dtype=bool)", "np.equal([2], [1], dtype=bool)", 
           "np.equal.reduce([1, 1], dtype=bool)", "str(np.result_type(1, 'i1'))", "np.result_type('abc')"):
     print(c, "->", tr(lambda: eval(c)))
 print([str(np.result_type(*a)) for a in ((1, 'i1'), (True, 'i1'), (1.5, 'f4'), (1, 'u1'), (1, 1.5), (True,), (1j, 'f4'), (1, 2), (1.5, 'i1'), (True, 1))])
+# a weak Python scalar is the loop's dtype under any casting rule; an empty
+# narrow-int product is the identity in dtype (CORR-9B2-1, -2)
+for c in ("np.add(1, 1, dtype=np.float32, casting='no')", "np.add(1, 1, dtype=np.float32, casting='safe')", "np.multiply(2, 3, dtype=np.complex64, casting='no')",
+          "np.add(1.5, 1, dtype=np.float32, casting='no')", "np.add(1.5, 1, dtype=np.int8, casting='no')", "np.add(1.5, 1, dtype=np.int8, casting='unsafe')",
+          "np.add(True, 1, dtype=np.int8, casting='no')", "np.add(1, [1], dtype=np.int8, casting='no')", "np.add(1, np.array([1], np.int8), dtype=np.int8, casting='no')",
+          "np.add(1, np.array([1], np.int8), dtype=np.int16, casting='no')", "np.add(1, True, dtype=bool)", "np.add(1, 1, dtype=bool, casting='unsafe')",
+          "np.multiply.reduce(np.array([], np.int8), dtype=np.int8)", "np.multiply.accumulate(np.array([], np.int8), dtype=np.int8)",
+          "np.multiply.reduce(np.zeros((2, 0), np.int16), axis=1, dtype=np.int16, keepdims=True)", "np.multiply.reduce(np.zeros((0, 2), np.int16), axis=0, dtype=np.int16)",
+          "np.multiply.reduce(np.zeros((2, 0), np.uint8), axis=None, dtype=np.uint8, keepdims=True)", "np.multiply.accumulate(np.zeros((0, 2), np.int8), dtype=np.int8).shape",
+          "np.multiply.reduce([], dtype=np.int8, initial=3)", "np.multiply.reduce(np.array([], np.uint32), dtype=np.uint32)"):
+    print(c, "->", tr(lambda: eval(c)))
