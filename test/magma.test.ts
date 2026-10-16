@@ -820,8 +820,10 @@ test("polynomial, finite field and real intrinsics refuse arguments as Magma doe
   for (const [src, name, said] of cases)
     assert.ok(out.includes(`Runtime error in '${name}': ${said}\n`), `${src}\n${out}`);
   // (Magma's answers are real or complex numbers, which these don't give: refused in words)
-  assert.ok(out.includes("Runtime error in 'Roots': Roots in a ring other than the integers or the rationals is not supported yet\n"), out);
-  assert.ok(out.includes("Runtime error in 'Sqrt': Sqrt of a negative number (a complex number in Magma) is not supported yet\n"), out);
+  // (long messages wrap at 80 columns, as Magma's do: compared unwrapped)
+  const flat = out.replace(/\s+/g, " ");
+  assert.ok(flat.includes("Runtime error in 'Roots': Roots in a ring other than the integers or the rationals is not supported yet "), out);
+  assert.ok(flat.includes("Runtime error in 'Sqrt': Sqrt of a negative number (a complex number in Magma) is not supported yet "), out);
   assert.doesNotMatch(out, /Error:|Traceback/);
   assert.match(out, /\nend\n$/);
 });
@@ -904,6 +906,16 @@ test("intrinsics taking integers refuse a rational, an integral one too (CORR-76
   assert.match(out, /\nend\n$/);
   // integers still work
   assert.equal(session("Factorial(4); IsEven(4); Gcd(4, 6); Binomial(4, 2);\n"), "24\ntrue\n2\n6\n");
+});
+
+test("a constructor not implemented yet is refused in words (the signature registry's helper doesn't shadow it)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
+    { input: "G := Graph<4 | [ {1, 2}, {2, 3} ]>;\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  assert.ok(out.includes("Graph< ... > is not supported yet"), out);
+  assert.doesNotMatch(out, /AssertionError|Traceback|Error: /);
+  assert.match(out, /\nend\n$/);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
