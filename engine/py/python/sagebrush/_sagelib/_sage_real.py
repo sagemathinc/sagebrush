@@ -3739,23 +3739,29 @@ class RealIntervalElement:
         """As Sage prints an interval: sage.rings.real_mpfi.printing_style
         'question' (the default) or 'brackets' (examples in the class's
         docstring)."""
-        import sys
-        m = sys.modules.get("sage.rings.real_mpfi")
-        if m is not None and m.__dict__.get("printing_style") == "brackets":
-            return self.str(style="brackets")
-        from _sage_qqbar import _str_interval
-        return _str_interval(self._lo, self._hi, self._F_._prec)
+        return self.str()
 
     __str__ = __repr__
 
-    def str(self, style="question"):
-        """The interval as text (style='brackets': [lo .. hi]).
+    def str(self, style=None):
+        """The interval as text: style 'question' (2.?) or 'brackets'
+        ([lo .. hi]); None, the default, follows
+        sage.rings.real_mpfi.printing_style, as Sage does. An explicit style
+        is always honoured (astra's CORR-42D-1).
 
         EXAMPLES::
 
             sage: RIF(1/3).str(style='brackets')
             '[0.33333333333333331 .. 0.33333333333333338]'
+            sage: import sage.rings.real_mpfi as M; M.printing_style = 'brackets'
+            sage: RIF(1, 2).str(style='question'), RIF(1, 2).str()
+            ('2.?', '[1.0000000000000000 .. 2.0000000000000000]')
+            sage: M.printing_style = 'question'
         """
+        if style is None:
+            import sys
+            m = sys.modules.get("sage.rings.real_mpfi")
+            style = "brackets" if m is not None and m.__dict__.get("printing_style") == "brackets" else "question"
         if style == "brackets":
             D = 1 + int(math.ceil(self._F_._prec * _LOG10_2 - 1e-12))
 
@@ -3763,7 +3769,8 @@ class RealIntervalElement:
                 # (a zero endpoint has D digits in all, as Sage prints it)
                 return "0." + "0" * (D - 1) if q == 0 else _format(q, D, rnd=rnd)
             return "[%s .. %s]" % (end(self._lo, "D"), end(self._hi, "U"))
-        return repr(self)
+        from _sage_qqbar import _str_interval
+        return _str_interval(self._lo, self._hi, self._F_._prec)
 
     def lower(self):
         """The lower endpoint (in a field rounding down).
@@ -3876,7 +3883,9 @@ class RealIntervalElement:
         """x^n for an integer n: the tight interval of the endpoints' powers
         (an even power of an interval containing 0 starts at 0, as in Sage:
         RIF(-1, 1)^2 is [0, 1], not the product [-1, 1]), rounded outward
-        once (examples in the class's docstring)."""
+        once for n >= 0; a negative power is the reciprocal of that, rounded
+        outward again, so it may be an ulp wider than tight (examples in the
+        class's docstring)."""
         if isinstance(n, bool) or not isinstance(n, int):
             if isinstance(n, _F) and n.denominator == 1:
                 n = int(n)

@@ -2472,3 +2472,10 @@ sage.rings.real_mpfi.printing_style = 'brackets'
 print(1 - x^2, 1 - x*x, (1 - x)*(1 + x), RIF(2), RIF(0, 1), RIF(-1, 0), RIF(1/3), RealIntervalField(100)(1/3))
 sage.rings.real_mpfi.printing_style = 'question'
 print(1 - x^2, RIF(2), RIF(1/3))
+# an explicit style is honoured under either global style (astra's CORR-42D-1)
+import sage.rings.real_mpfi as M
+for g in ['question', 'brackets']:
+    M.printing_style = g
+    x = RIF(1, 2)
+    print(g, '|', x, '|', x.str(), '|', x.str(style='question'), '|', x.str(style='brackets'), '|', repr(RIF(1/3)), '|', str(RIF(-8, -1)))
+M.printing_style = 'question'
