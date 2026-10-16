@@ -74,3 +74,9 @@ F![a];
 [1, a];
 Log(F!1, F!1);
 Log(a^2, a);
+// Random and iteration without all the field's elements
+F := GF(1000003); x := Random(F); x in F;
+exists(t){ y : y in F | y^2 eq 4 }; t;
+r := Random(GF(3^5)); r in GF(3^5);
+Random({* 7, 7, 7 *});
+Random([1..10^30]) le 10^30;
