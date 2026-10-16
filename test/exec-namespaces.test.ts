@@ -23,6 +23,14 @@ test("exec and eval with a locals mapping use its methods as CPython", () => {
   const got = execFileSync(process.execPath, [CLI, TEST + "exec_mapping_cases.py"], { encoding: "utf8" });
   assert.equal(got, readFileSync(TEST + "exec_mapping_cases.out", "utf8"));
 });
+// (test/exec_gaps_cases.py, its .out CPython 3.14's): a local an inner
+// scope's `nonlocal x; del x` unbinds; a function's global reads through a
+// dict subclass's __getitem__; the globals' own __builtins__ for names,
+// imports and classes; the in-place builtins guarded on the originals
+test("names read past the locals follow CPython: closures, globals and builtins", () => {
+  const got = execFileSync(process.execPath, [CLI, TEST + "exec_gaps_cases.py"], { encoding: "utf8" });
+  assert.equal(got, readFileSync(TEST + "exec_gaps_cases.out", "utf8"));
+});
 // (HARD-5F6-1) dir() over a mapping whose keys() never ends, or repeats one
 // key forever: a MemoryError at a budget of the heap, never V8's abort
 test("dir() over a locals mapping refuses an endless keys()", () => {

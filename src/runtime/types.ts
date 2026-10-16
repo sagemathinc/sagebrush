@@ -506,8 +506,92 @@ export function newModule(name: string): any {
 
 // ------------------------------------------------------------------ classes
 
+// A class body's namespace from its metaclass's __prepare__ (made before
+// the body, as CPython's __build_class__): the body's names are read,
+// written and deleted through its own methods, an exact dict's storage
+// otherwise, and the metaclass receives it itself
+export class PreparedNs {
+  private exact: boolean;
+  constructor(public m: any, public meta: any, public kw: Map<string, any>) {
+    this.exact = typeOf(m) === T.dict;
+  }
+  get(k: string): any {
+    if (this.exact) return dictGet(this.m, k);
+    try {
+      return O.getitem(this.m, k);
+    } catch (e) {
+      // (a KeyError: unbound here, the globals next)
+      if (isinstance(e, T.KeyError)) return undefined;
+      throw e;
+    }
+  }
+  has(k: string): boolean {
+    return this.get(k) !== undefined;
+  }
+  set(k: string, v: any): this {
+    if (this.exact) dictSet(this.m, k, v);
+    else O.setitem(this.m, k, v);
+    return this;
+  }
+  // (false, the name's NameError, for any failure, as DELETE_NAME's)
+  delete(k: string): boolean {
+    try {
+      if (this.exact) return dictDelete(this.m, k);
+      O.delitem(this.m, k);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+// The metaclass of `class C(bases, metaclass=..., **kw)` and the other
+// keywords: the explicit one, else type; a type is replaced by the most
+// derived of it and the bases' types (a conflict: TypeError)
+export function classMetaclass(bases: any[], kwNames: string[], kwValues: any[]): { meta: any; kw: Map<string, any> } {
+  // (an explicit metaclass=None too: called, a TypeError)
+  let meta: any = undefined;
+  const kw = new Map<string, any>();
+  kwNames.forEach((k, i) => (k === "metaclass" ? (meta = kwValues[i]) : kw.set(k, kwValues[i])));
+  if (meta !== undefined && !isType(meta)) return { meta, kw };
+  let winner: PyType = meta ?? T.type;
+  for (const b of bases) {
+    const mb = typeOf(b);
+    if (winner.$mro.includes(mb)) continue;
+    if (mb.$mro.includes(winner)) winner = mb;
+    else raise(T.TypeError, "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases");
+  }
+  return { meta: winner, kw };
+}
+// The namespace a class body runs in, before it runs: its metaclass's
+// __prepare__'s mapping, or for type's own a Map
+// type's own __prepare__'s namespace, a Map, with the metaclass and the
+// keywords found before the body: never looked up again after it
+// (CORR-6C9-5)
+export class ClassNs extends Map<string, any> {
+  constructor(public meta: any, public kw: Map<string, any>) {
+    super();
+  }
+}
+const NO_PREPARE = {};
+export function classNamespace(name: string, bases: any[], kwNames: string[], kwValues: any[]): ClassNs | PreparedNs {
+  const { meta, kw } = classMetaclass(bases, kwNames, kwValues);
+  // (only a missing one is none: __prepare__ = None is called, a TypeError)
+  const prep = getattr(meta, "__prepare__", NO_PREPARE);
+  if (prep === NO_PREPARE || prep === typePrepare) return new ClassNs(meta, kw);
+  const m = callKw(prep, [name, tuple(bases)], [...kw.keys()], [...kw.values()]);
+  if (!(m instanceof PyDict) && lookupDunder(m, "__getitem__") === undefined) raise(T.TypeError, `${isType(meta) ? getattr(meta, "__name__") : "<metaclass>"}.__prepare__() must return a mapping, not ${typeName(m)}`);
+  return new PreparedNs(m, meta, kw);
+}
 // `class C(bases, **kw): body` once the body has filled `ns`.
-export function makeClass(name: string, bases: any[], ns: Map<string, any>, module: string, qualname: string, kwNames: string[], kwValues: any[]): PyType {
+export function makeClass(name: string, bases: any[], ns: Map<string, any> | PreparedNs, module: string, qualname: string, kwNames: string[], kwValues: any[]): PyType {
+  if (ns instanceof PreparedNs) return callKw(ns.meta, [name, tuple(bases), ns.m], [...ns.kw.keys()], [...ns.kw.values()]);
+  if (ns instanceof ClassNs) {
+    const { meta, kw } = ns;
+    if (!isType(meta)) return callKw(meta, [name, tuple(bases), nsDict(ns, module, qualname)], [...kw.keys()], [...kw.values()]);
+    for (const b of bases) if (!isType(b)) raise(T.TypeError, `bases must be types, not ${typeName(b)}`);
+    if (meta !== T.type) return callKw(meta, [name, tuple(bases), nsDict(ns, module, qualname)], [...kw.keys()], [...kw.values()]);
+    return buildClass(name, bases, ns, module, qualname, kw, T.type);
+  }
   let meta: any = null;
   const kw = new Map<string, any>();
   kwNames.forEach((k, i) => (k === "metaclass" ? (meta = kwValues[i]) : kw.set(k, kwValues[i])));
