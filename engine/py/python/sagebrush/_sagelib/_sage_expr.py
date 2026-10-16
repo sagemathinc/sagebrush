@@ -223,7 +223,11 @@ class Expression:
     def __rmul__(self, o): return self._bin("mul", o, True)
     def __truediv__(self, o): return self._bin("div", o)
     def __rtruediv__(self, o): return self._bin("div", o, True)
-    def __pow__(self, o, mod=None): return self._bin("pow", o)
+    def __pow__(self, o, mod=None):
+        if mod is not None:
+            # (the modulus was ignored: pow(SR(2), 3/2, 5) was 2*sqrt(2)), as Sage
+            raise TypeError("the 3-argument version of pow() is not supported")
+        return self._bin("pow", o)
     def __rpow__(self, o): return self._bin("pow", o, True)
     def __xor__(self, o): raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
     __rxor__ = __xor__

@@ -1683,7 +1683,7 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 // ------------------------------------------------------------------ bytes, bytearray
 
 const Ty_lookup = (x: any, name: string) => lookupType(typeOf(x), name);
-function toBytes(x: any, encoding: any = undefined, errors: any = undefined): Uint8Array {
+function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
   if (x === undefined) return new Uint8Array(0);
   if (typeof x === "string") {
     if (encoding === undefined) raise(T.TypeError, "string argument without an encoding");
@@ -1702,26 +1702,41 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined): Ui
     if (!(r instanceof PyBytes)) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
     return r.a.slice(0, r.n);
   }
-  // an object with __index__ is a count, and so is each item, as in CPython
-  // (bytes(4/2) for Sage's Rational 2 was "not iterable")
-  const index = (v: any) => {
-    if (O.isPyInt(v) || typeof v !== "object" || v === null) return v;
-    const f = Ty_lookup(v, "__index__");
-    if (f === undefined) return v;
+  // an object with __index__ is a count, and so is each item, as in CPython:
+  // the special method resolved as any other (a staticmethod or classmethod
+  // too), each item converted as it is fetched (bytes of Sage's Rational 4/2
+  // was "not iterable")
+  const index = (v: any): any => {
+    if (O.isPyInt(v)) return typeof v === "boolean" ? +v : v;
+    if (typeof v !== "object" || v === null) return undefined;
+    const f = lookupDunder(v, "__index__");
+    if (f === undefined) return undefined;
     const r = f(v);
-    if (!O.isPyInt(r)) raise(T.TypeError, `cannot convert '${typeName(v)}' object to bytes`);
-    return r;
+    if (O.isPyInt(r)) return typeof r === "boolean" ? +r : r;
+    if (r instanceof PrimBox && isinstance(r, int)) return unbox(r);
+    return { bad: r };
   };
-  if (typeof x === "object" && x !== null && !O.isPyInt(x) && Ty_lookup(x, "__index__") !== undefined) return toBytes(index(x));
-  return Uint8Array.from(O.toArray(x).map((v) => {
-    v = index(v);
-    if (!O.isPyInt(v)) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
-    if (v < 0 || v > 255) raise(T.ValueError, "bytes must be in range(0, 256)");
-    return Number(v);
-  }));
+  if (typeof x === "object" && x !== null && lookupDunder(x, "__index__") !== undefined) {
+    const n = index(x);
+    if (n === undefined || (typeof n === "object" && "bad" in n)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
+    return toBytes(n, undefined, undefined, array);
+  }
+  const it = O.iter(x);
+  const out: number[] = [];
+  const END = {};
+  for (;;) {
+    const v = O.next(it, END);
+    if (v === END) break;
+    const n = index(v);
+    if (n === undefined) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
+    if (typeof n === "object") raise(T.TypeError, `__index__ returned non-int (type ${typeName(n.bad)})`);
+    if (n < 0 || n > 255) raise(T.ValueError, array ? "byte must be in range(0, 256)" : "bytes must be in range(0, 256)");
+    out.push(Number(n));
+  }
+  return Uint8Array.from(out);
 }
 const bytesType = builtinType("bytes", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyBytes(toBytes(x, enc, errors)));
-const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyByteArray(toBytes(x, enc, errors)));
+const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyByteArray(toBytes(x, enc, errors, true)));
 bindClass(PyBytes, bytesType);
 bindClass(PyByteArray, bytearray);
 for (const bt of [bytesType, bytearray]) {
@@ -1757,7 +1772,12 @@ method(bytearray, "append", (b: PyByteArray, x: any) => {
   return null;
 });
 method(bytearray, "extend", (b: PyByteArray, x: any) => {
-  const add = toBytes(x);
+  // an iterable of bytes, never a count (extend(5) added five zero bytes)
+  if (O.isPyInt(x) || (typeof x === "object" && x !== null && O.bufferOf(x) === undefined
+      && lookupDunder(x, "__iter__") === undefined && lookupDunder(x, "__getitem__") === undefined)) {
+    raise(T.TypeError, `can't extend bytearray with ${typeName(x)}`);
+  }
+  const add = toBytes(x, undefined, undefined, true);
   grow(b, add.length);
   b.a.set(add, b.n);
   b.n += add.length;

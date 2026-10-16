@@ -112,7 +112,7 @@ dimensions :: [[1 0]
 [3 4], [0 0]
 [0 0], Vector space of dimension 2 over Rational Field, Full MatrixSpace of 2 by 2 dense matrices over Rational Field, Multivariate Polynomial Ring in x0, x1 over Rational Field, Finite Field of size 2, Ring of integers modulo 3]
 shifts :: [4, 2, 5, 5/4, 4, 4, Rational Field, Integer Ring]
-pow :: [4, 1024]
+pow :: [4, 1024, 4, 4]
 pow rational base :: TypeError
 bytes :: [b'\x00\x00', bytearray(b'\x00\x00'), b'\x02A']
 bytes not integral :: TypeError
@@ -132,4 +132,10 @@ shift refused :: TypeError
 shift refused :: TypeError
 shift refused :: ValueError
 shift refused :: TypeError
-pow 2 :: [4, 2, 4, 2, 9, 4]
+pow 2 :: [4, 4, 4, 2]
+pow refused :: TypeError
+pow refused :: TypeError
+pow refused :: TypeError
+pow refused :: TypeError
+pow refused :: TypeError
+sqrt float prec :: [1.41421356237310, 1.4]

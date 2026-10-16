@@ -123,7 +123,7 @@ for f in [lambda: range(5/2), lambda: L[3/2], lambda: bin(5/2)]:
     t('not integral', f)
 t('dimensions', lambda: [matrix(QQ, 4/2, 4/2, 1), matrix(ZZ, 4/2, 2, [1, 2, 3, 4]), zero_matrix(QQ, 4/2, 2), QQ^(4/2), MatrixSpace(QQ, 4/2), PolynomialRing(QQ, 4/2, 'x'), GF(4/2), Zmod(6/2)])
 t('shifts', lambda: [(6/3) << 1, (8/2) >> 1, (5/2) << 1, (5/2) >> 1, 1 << (4/2), 16 >> (4/2), parent((6/3) << 1), parent(1 << (4/2))])
-t('pow', lambda: [pow(3, 4/2, 5), pow(2, 10)])
+t('pow', lambda: [pow(2, 4/2), pow(2, 10), 2^(4/2), pow(4/2, 2)])
 t('pow rational base', lambda: pow(2/1, 3, 7))
 t('bytes', lambda: [bytes(4/2), bytearray(6/3), bytes([4/2, 65])])
 t('bytes not integral', lambda: bytes(5/2))
@@ -141,4 +141,7 @@ for f in [lambda: matrix(QQ, 2, 3, 1), lambda: matrix(GF(5), 2, 3, 1), lambda: m
 t('shifts 2', lambda: [True >> (2/1), True << (2/1), (3/2) << True, (3/2) << (2/1), (3/2) << -1, (3/2) >> -1, 5 << (-2/1), 5 >> (-2/1)])
 for f in [lambda: (3/2) << GF(5)(2), lambda: (3/2) >> GF(5)(2), lambda: (3/2) << (1/2), lambda: 1 << (1/2)]:
     t('shift refused', f)
-t('pow 2', lambda: [pow(3, 2, -5), pow(3, -1, -5), pow(3, 2/1, -5), pow(3, -1/1, -5), pow(3, 2, 0), pow(GF(5)(2), 2, 3/2)])
+t('pow 2', lambda: [pow(GF(5)(2), 2, 3/2), GF(5)(2)^(4/2), pow(GF(5)(2), 4/2, 5), pow(QQ(4), QQ(1)/2)])
+for f in [lambda: GF(5)(2)^(3/2), lambda: pow(GF(5)(2), 3/2, 5), lambda: pow(QQ(3)/2, 2, 7), lambda: pow(SR(2), 3, 5), lambda: pow(SR(2), QQ(3)/2, 5)]:
+    t('pow refused', f)
+t('sqrt float prec', lambda: [(2/1).sqrt(prec=float(53)), (2/1).sqrt(prec=float(10))])
