@@ -1959,7 +1959,7 @@ function codecArgs(array: boolean, encoding: any, errors: any): [any, any] {
 }
 function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
   [encoding, errors] = codecArgs(array, encoding, errors);
-  if (typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
+  if (x !== undefined && typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
   if (typeof x !== "string") {
     // (with no source too: bytes(encoding='ascii') is TypeError, as CPython's)
     if (encoding !== undefined) raise(T.TypeError, "encoding without a string argument");
