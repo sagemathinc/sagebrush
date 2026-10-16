@@ -27,6 +27,9 @@ FINAL_SWEEPS = 60
 MARGIN = 1e-3
 _M = 0xFFFFFFFF
 
+# the final sweeps run by every layout so far (spring.ts's springWork.sweeps)
+work = {"sweeps": 0}
+
 
 def _imul(a, b):
     """Math.imul: the low 32 bits of a * b, as a signed int"""
@@ -219,10 +222,24 @@ def _plan(nodes, edges, seed, iterations, gap):
                 b.x = random() * side
                 b.y = random() * side
         parts.append(part)
-    return parts, all_, gap
+    # (what the iterations leave, less the shelf and the check: the final
+    # sweeps are counted against it, spring.ts's p.left, HARD-2F4-1)
+    used = sum(pt.iterations * (len(pt.bodies) * len(pt.bodies) + PART_COST) for pt in parts)
+    return parts, all_, gap, WORK - used - 2 * n * n
 
 
-def _finish(parts, all_, gap):
+def _finish(parts, all_, gap, work_left):
+    def sweeps(bs):
+        nonlocal work_left
+        cost = len(bs) * (len(bs) - 1) / 2
+        for _ in range(FINAL_SWEEPS):
+            if cost > work_left:
+                break
+            work_left -= cost
+            work["sweeps"] += 1
+            if not _separate(bs, gap):
+                break
+
     def box(bs):
         x0 = y0 = math.inf
         x1 = y1 = -math.inf
@@ -233,9 +250,7 @@ def _finish(parts, all_, gap):
             y1 = max(y1, b.y + b.h / 2)
         return x0, y0, x1, y1
     for part in parts:
-        for _ in range(FINAL_SWEEPS):
-            if not _separate(part.bodies, gap):
-                break
+        sweeps(part.bodies)
     pinned = [pt for pt in parts if any(b.fixed for b in pt.bodies)]
     free = [(pt, i, box(pt.bodies)) for i, pt in enumerate(pt for pt in parts if not any(b.fixed for b in pt.bodies))]
     free.sort(key=lambda f: (-len(f[0].bodies), f[1]))
@@ -260,9 +275,7 @@ def _finish(parts, all_, gap):
             b.y += oy
         x += w + gap * 2
         row_h = max(row_h, h)
-    for _ in range(FINAL_SWEEPS):
-        if not _separate(all_, gap):
-            break
+    sweeps(all_)
     _shelve(all_, gap)
 
 
@@ -322,11 +335,11 @@ def spring_layout(nodes, edges, seed, iterations=None, gap=24):
     p = _plan(nodes, edges, seed, iterations, gap)
     if p is None:
         return None
-    parts, all_, gap = p
+    parts, all_, gap, work_left = p
     for part in parts:
         while part.done < part.iterations:
             part.step(gap)
-    _finish(parts, all_, gap)
+    _finish(parts, all_, gap, work_left)
     # (a fixed box exactly where it was given; the promise checked on what
     # is returned: None rather than two boxes closer than gap)
     pos = {b.id: (b.fx, b.fy) if b.fixed else (_round(b.x - b.w / 2), _round(b.y - b.h / 2)) for b in all_}

@@ -3,7 +3,7 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, gapViolations, MAX_NODES, MAX_EDGES, MAX_FRAMES } from "./spring.ts";
+import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES } from "./spring.ts";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -90,6 +90,22 @@ check(springLayout(pts(10), Array.from({ length: MAX_EDGES + 1 }, () => ["v0", "
   check(pos !== null && pos.size === MAX_NODES, "MAX_NODES nodes: laid out");
   check(ms < 60000, `MAX_NODES nodes: within a minute (${ms} ms)`);
   console.log(`  ${MAX_NODES} nodes in ${ms} ms`);
+}
+// the work, counted: never more pair evaluations than WORK, also when the
+// final sweeps do not settle (HARD-2F4-1). One part of MAX_NODES boxes on a
+// path, its iterations cut to fit the budget, with a fixed box as large as
+// the whole layout under all of them, so the sweeps keep moving boxes.
+{
+  const nodes = pts(MAX_NODES, 60, 60);
+  nodes[0] = { id: "v0", w: 4e5, h: 4e5, fixed: { x: -2e5, y: -2e5 } };
+  const edges = Array.from({ length: MAX_NODES - 1 }, (_, i) => ["v" + i, "v" + (i + 1)]);
+  springWork.pairs = springWork.sweeps = 0;
+  const t = Date.now();
+  const pos = springLayout(nodes, edges, { seed: 3, iterations: 1000 });
+  const ms = Date.now() - t;
+  console.log(`  forced: ${springWork.pairs} pair evaluations, ${springWork.sweeps} sweeps, ${ms} ms`);
+  check(springWork.pairs <= WORK, `forced sweeps: ${springWork.pairs} pair evaluations, within WORK`);
+  check(pos !== null && gapViolations(nodes, pos, 24).length === 0, "forced sweeps: still no two boxes closer than the gap");
 }
 check(springLayout([], [], { seed: 1 }).size === 0, "no nodes: an empty layout");
 // huge iterations, many parts: bounded (HARD-828-1)

@@ -26,8 +26,12 @@ export type Positions = Map<string, { x: number; y: number }>;
 export const MAX_NODES = 1500;
 export const MAX_EDGES = 20000;
 /** Pair evaluations allowed in one layout: iterations x k^2 summed over the
- * parts, and the final overlap sweeps over all n^2 pairs. A layout that cannot
- * have MIN_ITERATIONS within it is refused. */
+ * parts (an iteration evaluates k(k-1)), the final overlap sweeps (k(k-1)/2
+ * each), the shelf and the check (n(n-1)/2 each). The iterations leave
+ * (FINAL_SWEEPS + 3) n^2 of it; the sweeps are counted against what is left
+ * and stop when the next would not fit, the shelf then taking what is still
+ * too close (HARD-2F4-1). A layout that cannot have MIN_ITERATIONS within it
+ * is refused. */
 export const WORK = 3e8;
 export const MIN_ITERATIONS = 50;
 /** At most this many iterations, whatever is asked; at most MAX_FRAMES
@@ -41,6 +45,11 @@ export const PART_COST = 64;
 const DEFAULT_ITERATIONS = 300;
 const FINAL_SWEEPS = 60;
 const MARGIN = 1e-3;
+
+/** The pair evaluations done and the final sweeps run, by every layout so
+ * far: for the tests, which check the work against WORK. */
+export const springWork = { pairs: 0, sweeps: 0 };
+const pairsOf = (k: number) => (k * (k - 1)) / 2;
 
 // mulberry32: a small seeded generator, the same on every engine
 function rng(seed: number): () => number {
@@ -109,12 +118,14 @@ class Part {
       B[i].y += dy[i] * s;
     }
     separate(B, gap);
+    springWork.pairs += pairsOf(n);
     this.done++;
   }
 }
 
 /** One pass pushing apart boxes closer than gap; true if any moved. */
 function separate(B: Body[], gap: number): boolean {
+  springWork.pairs += pairsOf(B.length);
   let moved = false;
   for (let i = 0; i < B.length; i++) {
     for (let j = i + 1; j < B.length; j++) {
@@ -138,7 +149,8 @@ function separate(B: Body[], gap: number): boolean {
   return moved;
 }
 
-type Plan = { parts: Part[]; all: Body[]; gap: number };
+// left: the pair evaluations the final sweeps may still do
+type Plan = { parts: Part[]; all: Body[]; gap: number; left: number };
 
 function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts): Plan | null {
   if (nodes.length > MAX_NODES || edges.length > MAX_EDGES) return null;
@@ -186,7 +198,9 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
     for (const b of part.bodies) if (!b.fixed) { b.x = random() * side; b.y = random() * side; }
     parts.push(part);
   }
-  return { parts, all, gap };
+  // (what the iterations leave, less the shelf and the check)
+  const used = parts.reduce((s, pt) => s + pt.iterations * (pt.bodies.length * pt.bodies.length + PART_COST), 0);
+  return { parts, all, gap, left: WORK - used - 2 * n * n };
 }
 
 function snapshot(all: Body[]): Positions {
@@ -200,6 +214,7 @@ function snapshot(all: Body[]): Positions {
 /** The pairs of boxes in pos closer than gap (two fixed ones aside: where a
  * person put them), by index; an empty list is the layout's promise. */
 export function gapViolations(nodes: { id: string; w: number; h: number; fixed?: unknown }[], pos: Positions, gap: number): [number, number][] {
+  springWork.pairs += pairsOf(nodes.length);
   const out: [number, number][] = [];
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
@@ -217,6 +232,7 @@ export function gapViolations(nodes: { id: string; w: number; h: number; fixed?:
  * below every other box, gap apart: nothing can be closer than gap to them
  * there (CORR-828-1). */
 function shelve(all: Body[], gap: number): void {
+  springWork.pairs += pairsOf(all.length);
   const bad = new Set<number>();
   for (let i = 0; i < all.length; i++) {
     for (let j = i + 1; j < all.length; j++) {
@@ -258,7 +274,15 @@ function finish(p: Plan): void {
     }
     return { x0, y0, x1, y1 };
   };
-  for (const part of parts) for (let k = 0; k < FINAL_SWEEPS && separate(part.bodies, gap); k++);
+  // (up to FINAL_SWEEPS passes while boxes move, each counted against p.left)
+  const sweeps = (bs: Body[]) => {
+    for (let k = 0; k < FINAL_SWEEPS && pairsOf(bs.length) <= p.left; k++) {
+      p.left -= pairsOf(bs.length);
+      springWork.sweeps++;
+      if (!separate(bs, gap)) break;
+    }
+  };
+  for (const part of parts) sweeps(part.bodies);
   const pinned = parts.filter((pt) => pt.bodies.some((b) => b.fixed));
   const free = parts.filter((pt) => !pt.bodies.some((b) => b.fixed)).map((pt, i) => ({ pt, i, bb: box(pt.bodies) }));
   free.sort((a, b) => b.pt.bodies.length - a.pt.bodies.length || a.i - b.i);
@@ -276,7 +300,7 @@ function finish(p: Plan): void {
     x += w + gap * 2;
     rowH = Math.max(rowH, h);
   }
-  for (let k = 0; k < FINAL_SWEEPS && separate(all, gap); k++);
+  sweeps(all);
   shelve(all, gap);
 }
 
