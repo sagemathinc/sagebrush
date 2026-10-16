@@ -57,6 +57,7 @@ jobs:
           sleep 1
           CHROME=google-chrome node web/test-runner.mjs
           CHROME=google-chrome node web/test-runner-files.mjs
+          CHROME=google-chrome node web/test-catalog.mjs
           CHROME=google-chrome node web/board/test-frame.mjs
       - name: conformance (Node)
         run: python3 conformance/run.py --runtime node --show 20
@@ -64,6 +65,13 @@ jobs:
         run: python3 conformance/run.py --runtime deno --show 20
       - name: conformance (Bun)
         run: python3 conformance/run.py --runtime bun --show 20
+      # The function catalog's examples (catalog/SCHEMA.md) on Deno and Bun
+      # (Node: test/catalog.test.ts), and its coverage per mode
+      - name: catalog examples (Deno, Bun)
+        run: |
+          python3 scripts/catalog-run.py --runtime deno
+          python3 scripts/catalog-run.py --runtime bun
+          node dist/src/cli.js -m _catalog --coverage
       - name: .ipynb round trips keep metadata and raw cells
         run: node web/test-ipynb.mjs
       - name: TimeTravel and its Resume from here (the session recreated by replay), and ipywidgets, in headless Chrome

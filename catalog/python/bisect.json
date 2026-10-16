@@ -1,0 +1,104 @@
+[
+  {
+    "name": "bisect.bisect",
+    "kind": "function",
+    "signature": "(a, x, lo=0, hi=len(a), *, key=None)",
+    "summary": "The insertion index to the right of existing equal values.",
+    "examples": [
+      {
+        "code": "bisect.bisect([1, 2, 2, 4], 2)",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "bisect.bisect_right",
+    "kind": "function",
+    "signature": "(a, x, lo=0, hi=len(a), *, key=None)",
+    "summary": "The insertion index to the right of existing equal values.",
+    "examples": [
+      {
+        "code": "bisect.bisect_right([1, 2, 2, 4], 2)",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "bisect.insort_left",
+    "kind": "function",
+    "signature": "(a, x, lo=0, hi=len(a), *, key=None)",
+    "summary": "Insert x into a sorted list, before equal keys.",
+    "examples": [
+      {
+        "code": "rows = [(1, \"a\"), (2, \"b\"), (2, \"c\")]\nbisect.insort_left(rows, (2, \"new\"), key=lambda row: row[0])\nrows",
+        "expected": "[(1, 'a'), (2, 'new'), (2, 'b'), (2, 'c')]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "bisect.insort_right",
+    "kind": "function",
+    "signature": "(a, x, lo=0, hi=len(a), *, key=None)",
+    "summary": "Insert x into a sorted list, after equal keys.",
+    "examples": [
+      {
+        "code": "rows = [(1, \"a\"), (2, \"b\"), (2, \"c\")]\nbisect.insort_right(rows, (2, \"new\"), key=lambda row: row[0])\nrows",
+        "expected": "[(1, 'a'), (2, 'b'), (2, 'c'), (2, 'new')]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "bisect.bisect_left",
+    "kind": "function",
+    "signature": "(a, x)",
+    "summary": "Where x would be inserted to keep the sorted list a sorted (before equal elements).",
+    "examples": [
+      {
+        "code": "bisect.bisect_left([1, 2, 4, 4, 8], 4)",
+        "expected": "2\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "bisect.insort",
+    "kind": "function",
+    "signature": "(a, x)",
+    "summary": "x inserted into a sorted list, keeping it sorted.",
+    "examples": [
+      {
+        "code": "a = [1, 3, 5]\nbisect.insort(a, 4)\na",
+        "expected": "[1, 3, 4, 5]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

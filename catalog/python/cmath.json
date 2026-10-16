@@ -1,0 +1,393 @@
+[
+  {
+    "name": "cmath.acos",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex inverse cosine.",
+    "examples": [
+      {
+        "code": "z = cmath.acos(1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(1.570796, -0.881374)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.acosh",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex inverse hyperbolic cosine.",
+    "examples": [
+      {
+        "code": "z = cmath.acosh(1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.881374, 1.570796)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.asin",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex inverse sine.",
+    "examples": [
+      {
+        "code": "z = cmath.asin(1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.0, 0.881374)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.asinh",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex inverse hyperbolic sine.",
+    "examples": [
+      {
+        "code": "z = cmath.asinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(1.061275, 0.666239)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.atan",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex inverse tangent.",
+    "examples": [
+      {
+        "code": "z = cmath.atan(1+1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(1.017222, 0.402359)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.atanh",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex inverse hyperbolic tangent.",
+    "examples": [
+      {
+        "code": "z = cmath.atanh(0.5+0.5j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.402359, 0.553574)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.cos",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex cosine.",
+    "examples": [
+      {
+        "code": "z = cmath.cos(1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(1.543081, -0.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.cosh",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex hyperbolic cosine.",
+    "examples": [
+      {
+        "code": "z = cmath.cosh(1+1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.83373, 0.988898)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.log10",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex base-ten logarithm.",
+    "examples": [
+      {
+        "code": "z = cmath.log10(10j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(1.0, 0.682188)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.sin",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex sine.",
+    "examples": [
+      {
+        "code": "z = cmath.sin(1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.0, 1.175201)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.sinh",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex hyperbolic sine.",
+    "examples": [
+      {
+        "code": "z = cmath.sinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.634964, 1.298458)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.tan",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex tangent.",
+    "examples": [
+      {
+        "code": "z = cmath.tan(1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(0.0, 0.761594)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.tanh",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex hyperbolic tangent.",
+    "examples": [
+      {
+        "code": "z = cmath.tanh(1+1j)\n(round(z.real, 6), round(z.imag, 6))",
+        "expected": "(1.083923, 0.271753)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.isfinite",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "Whether both components of z are finite.",
+    "examples": [
+      {
+        "code": "[cmath.isfinite(z) for z in (1+2j, complex(math.inf, 0), complex(0, math.nan))]",
+        "expected": "[True, False, False]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.isinf",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "Whether either component of z is infinite.",
+    "examples": [
+      {
+        "code": "[cmath.isinf(z) for z in (1+2j, complex(0, math.inf))]",
+        "expected": "[False, True]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.isnan",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "Whether either component of z is NaN.",
+    "examples": [
+      {
+        "code": "[cmath.isnan(z) for z in (1+2j, complex(math.nan, 0))]",
+        "expected": "[False, True]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.sqrt",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex square root.",
+    "examples": [
+      {
+        "code": "cmath.sqrt(-4)",
+        "expected": "2j\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.exp",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The complex exponential.",
+    "examples": [
+      {
+        "code": "cmath.exp(1j * math.pi)",
+        "expected": "(-1+1.2246467991473532e-16j)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.log",
+    "kind": "function",
+    "signature": "(z, base=e)",
+    "summary": "The complex logarithm.",
+    "examples": [
+      {
+        "code": "cmath.log(-1)",
+        "expected": "3.141592653589793j\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.phase",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "The argument of z, in (-pi, pi].",
+    "examples": [
+      {
+        "code": "cmath.phase(-1 + 0j)",
+        "expected": "3.141592653589793\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.polar",
+    "kind": "function",
+    "signature": "(z)",
+    "summary": "z as (modulus, argument).",
+    "examples": [
+      {
+        "code": "cmath.polar(1j)",
+        "expected": "(1.0, 1.5707963267948966)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.rect",
+    "kind": "function",
+    "signature": "(r, phi)",
+    "summary": "The complex number with modulus r and argument phi.",
+    "examples": [
+      {
+        "code": "cmath.rect(2, math.pi / 2)",
+        "expected": "(1.2246467991473532e-16+2j)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "cmath.isclose",
+    "kind": "function",
+    "signature": "(a, b, rel_tol=1e-09, abs_tol=0.0)",
+    "summary": "Whether two complex values are close.",
+    "examples": [
+      {
+        "code": "cmath.isclose(cmath.exp(1j * math.pi), -1)",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

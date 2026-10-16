@@ -68,7 +68,21 @@ const walkKatex = (dir) => {
 walkKatex(katexDir);
 if (!web["index.html"]) console.log("note: no web/dist/index.html: `sagebrush notebook` will not be available in this bundle");
 writeFileSync(join(out, "web.gen.js"), web["index.html"] ? `globalThis.__SAGEBRUSH_WEB__ = ${JSON.stringify(web)};\n` : "");
-writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "./web.gen.js";\nimport "../../src/cli";\n`);
+// The function catalog (catalog/SCHEMA.md), for search away from a source
+// tree: {mode: {groups: {group: entries}, missing: [names]}} as JSON text, in
+// the CLI only (the browser worker imports lib.gen.js, not this).
+const catalog = {};
+const catalogDir = join(root, "catalog");
+for (const mode of existsSync(catalogDir) ? readdirSync(catalogDir).sort() : []) {
+  const d = join(catalogDir, mode);
+  if (!statSync(d).isDirectory()) continue;
+  const groups = {};
+  for (const f of readdirSync(d).sort()) if (f.endsWith(".json")) groups[f.slice(0, -".json".length)] = JSON.parse(readFileSync(join(d, f), "utf8"));
+  const miss = existsSync(join(d, "missing.txt")) ? readFileSync(join(d, "missing.txt"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
+  catalog[mode] = { groups, missing: miss };
+}
+writeFileSync(join(out, "catalog.gen.js"), `globalThis.__SAGEBRUSH_CATALOG__ = ${JSON.stringify(JSON.stringify(catalog))};\n`);
+writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "./web.gen.js";\nimport "./catalog.gen.js";\nimport "../../src/cli";\n`);
 
 // 2. One CommonJS file for Node 22+ and Bun.
 run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace",

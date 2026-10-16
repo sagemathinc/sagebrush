@@ -113,7 +113,9 @@ def _examples(entries, k=6):
     """A few names: functions and classes first, those with the most tested
     examples first."""
     tops = [e for e in entries if e.get("kind") in ("function", "class") and not e["name"].endswith("_")] or list(entries)
-    tops.sort(key=lambda e: (-e.get("examples", 0), e["name"]))
+    # (a count in the older indexes, the examples themselves in the catalog's)
+    count = lambda e: len(e["examples"]) if isinstance(e.get("examples"), list) else e.get("examples", 0)
+    tops.sort(key=lambda e: (-count(e), e["name"]))
     return [e["name"] for e in tops[:k]]
 
 

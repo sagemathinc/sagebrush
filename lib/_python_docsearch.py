@@ -7,11 +7,12 @@ lib/_pyjs_docsearch.py's index.
     sagebrush -m _python_docsearch --index    (web/build.ts: docs-index-python.json)
     sagebrush --search "linear system" --mode python
 
-The significant functions have a signature, a summary and examples written
-for Sagebrush (lib/_python_examples.py, whose outputs are checked by
-test/python-doc-examples.test.ts and against CPython with NumPy and SciPy).
-Every other public function and class of those modules is listed too, with
-its docstring's first paragraph where Sagebrush's has one.
+The significant functions are the catalog's entries (catalog/python/*.json,
+lib/_catalog.py): a signature, a summary, examples with their output, what
+differs from upstream and a status, written for Sagebrush. Every other public
+function and class of those modules is listed too (public_names(); the
+catalog's missing.txt), with lib/_python_examples.py's summary or its
+docstring's first paragraph.
 """
 
 import json as _json
@@ -75,30 +76,40 @@ def _examples_text(exs):
     return "\n\nExamples:\n\n" + "\n\n".join(parts)
 
 
+def _index_module(name):
+    return next((m for m, _, _ in sorted(MODULES, key=lambda t: -len(t[0])) if name.startswith(m + ".")), name.rsplit(".", 1)[0])
+
+
+def public_names():
+    """Every public function and class of the modules Python mode indexes,
+    by their index names (the catalog gate: each has an entry or is in
+    catalog/python/missing.txt)"""
+    return [e["name"] for e in _rest(set())]
+
+
 def build_index():
-    """[{name, module, kind, signature, summary, doc, examples, open_problem}]
-    for Python mode's libraries: the documented functions first, then the
-    rest of each module's public names"""
-    import _python_examples as E
-    ex = E.examples()
+    """[{name, module, kind, signature, summary, doc, examples, open_problem,
+    ...}] for Python mode's libraries: the catalog's entries first (all their
+    fields, `doc` ending with the examples as a Python prompt shows them),
+    then the rest of each module's public names"""
+    import _catalog
     out = []
     seen = set()
-    for name, signature, summary, codes in E.ENTRIES:
-        seen.add(name)
-        module = next((m for m, _, _ in sorted(MODULES, key=lambda t: -len(t[0])) if name.startswith(m + ".")), name.rsplit(".", 1)[0])
-        out.append({
-            "name": name,
-            "module": module,
-            "kind": "class" if name.rsplit(".", 1)[-1][:1].isupper() else "function",
-            "signature": signature,
-            "summary": summary,
-            "doc": summary + _examples_text(ex.get(name, [])),
-            "examples": len(ex.get(name, [])),
-            "open_problem": False,
-        })
+    for e in _catalog.index("python"):
+        seen.add(e["name"])
+        e = dict(e, module=_index_module(e["name"]))
+        e["doc"] = (e.get("doc") or e["summary"]) + _examples_text([(x["code"], x["expected"]) for x in e["examples"]])
+        out.append(e)
+    return out + _rest(seen, [e["name"] for e in out])
+
+
+def _rest(seen, documented=()):
+    """The index's entries for the public names not in seen"""
+    import _python_examples as E
+    out = []
     # (the documented functions' objects, for naming an alias by them)
     known = {}
-    for name in [e[0] for e in E.ENTRIES] + list(E.SUMMARIES):
+    for name in list(documented) + list(E.SUMMARIES):
         index_name = next((m for m, _, _ in sorted(MODULES, key=lambda t: -len(t[0])) if name.startswith(m + ".")), None)
         if index_name is None:
             continue
@@ -133,8 +144,10 @@ def build_index():
                 "signature": "",
                 "summary": summary,
                 "doc": summary,
-                "examples": 0,
+                "examples": [],
                 "open_problem": False,
+                # (a public name with no catalog entry yet: catalog/python/missing.txt)
+                "catalog": False,
             })
     return out
 
