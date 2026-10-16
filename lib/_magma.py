@@ -4243,9 +4243,9 @@ def _factorization(n):
         consts = [MTuple([R(p), e]) for p, e in sorted(consts)]
         return _multi([MSeq(consts + out), _m_num(n.leading_coefficient())], show=1)
     if isinstance(n, _Fraction) and not isinstance(n, int):
-        raise MagmaError("Factorization of a rational")
+        raise _bad_types("Factorization", [n])
     if n == 0:
-        raise MagmaError("Factorization of 0")
+        raise _arg_error("Factorization", "Argument 1 is not non-zero")
     F = _sa.factor(abs(n))
     return _multi([MSeq(MTuple([p, e]) for p, e in F), 1 if n > 0 else -1], show=1)
 
@@ -4259,10 +4259,16 @@ Factorization = Factorisation = _factorization
 # Sage mode; by default a prime above 3.3e24 is a BPSW probable prime,
 # not proven as Magma's default would promise: the systematic review's
 # ASR-F1)
+def _arg_error(name, msg):
+    """Magma's refusal of an argument by an intrinsic (its own words)."""
+    return MagmaError(msg, "'%s'" % name, True)
+
+
 def IsPrime(n, *, Proof=None):
     if isinstance(n, _Fraction):
         return False  # (a rational, an integral one too: as Magma, no warning)
-    return _sa.is_prime(n, proof=Proof)
+    # (Magma's: -7 is prime, as 7 is)
+    return _sa.is_prime(abs(n), proof=Proof)
 
 
 def IsProbablePrime(n, *, Bases=None):
@@ -4271,26 +4277,51 @@ def IsProbablePrime(n, *, Bases=None):
     # the exact answer: a prime passes for any bases, and Magma's bases are
     # not the first primes (strong pseudoprimes to those, such as 2047
     # with Bases := 1 or 3215031751 with Bases := 4, are composite there)
-    return _sa.is_prime(n)
+    return _sa.is_prime(abs(n))
 
 
 def NextPrime(n, *, Proof=None):
+    if n < 0:
+        raise _arg_error("NextPrime", "Argument 1 (%d) should be >= 0" % n)
     return _sa.next_prime(n, proof=Proof)
 
 
 def PreviousPrime(n, *, Proof=None):
+    if n < 3:
+        raise _arg_error("PreviousPrime", "Argument 1 (%d) should be >= 3" % n)
     return _sa.previous_prime(n, proof=Proof)
 
 
+# Prime enumeration is admitted before any sieve is made, by the heap the
+# shared sieve may take (sage_all.prime_range, segmented: a narrow window
+# near 10^12 is cheap; HARD-3BE-1)
+def _admit_primes(name, start, stop, what=None):
+    if not _sa._prime_sieve_admits(start, stop):
+        raise MagmaError("%s needs more memory than Sagebrush has: not supported yet" % (what or "%s up to %d" % (name, stop - 1)), "'%s'" % name)
+
+
 def PrimesUpTo(n):
+    if n < 1:
+        raise _arg_error("PrimesUpTo", "Limit must be positive")
+    _admit_primes("PrimesUpTo", 2, n + 1)
     return MSeq(_sa.prime_range(n + 1))
 
 
 def PrimesInInterval(a, b):
+    if a < 1:
+        raise _arg_error("PrimesInInterval", "Lower limit must be positive")
+    if b < a:
+        raise _arg_error("PrimesInInterval", "Upper limit < Lower Limit !")
+    _admit_primes("PrimesInInterval", a, b + 1)
     return MSeq(_sa.prime_range(a, b + 1))
 
 
 def NthPrime(n):
+    if n < 0:
+        raise _arg_error("NthPrime", "Argument 1 (%d) should be >= 0" % n)
+    if n == 0:
+        return 1  # (Magma's NthPrime(0) is 1)
+    _admit_primes("NthPrime", 2, _sa._nth_prime_bound(n) + 1, "NthPrime(%d)" % n)
     return _sa.nth_prime(n)
 
 
@@ -4301,18 +4332,26 @@ def _int_arg(name, n):
 
 
 def PrimeDivisors(n):
-    return MSeq(p for p, _ in _sa.factor(abs(_int_arg("PrimeDivisors", n))))
+    if _int_arg("PrimeDivisors", n) == 0:
+        raise _arg_error("PrimeDivisors", "Argument 1 is not non-zero")
+    return MSeq(p for p, _ in _sa.factor(abs(n)))
 
 
 def Divisors(n):
-    return MSeq(_sa.divisors(abs(_int_arg("Divisors", n))))
+    if _int_arg("Divisors", n) < 1:
+        raise _arg_error("Divisors", "Argument 1 (%d) should be >= 1" % n)
+    return MSeq(_sa.divisors(n))
 
 
 def NumberOfDivisors(n):
+    if n < 1:
+        raise _arg_error("NumberOfDivisors", "Argument 1 is not positive")
     return _sa.number_of_divisors(n)
 
 
 def SumOfDivisors(n):
+    if n < 1:
+        raise _arg_error("SumOfDivisors", "Argument 1 is not positive")
     return _sa.sigma(n)
 
 
@@ -4321,22 +4360,29 @@ def DivisorSigma(k, n):
 
 
 def EulerPhi(n):
+    if n < 1:
+        raise _arg_error("EulerPhi", "Argument 1 is not positive")
     return _sa.euler_phi(n)
 
 
 def MoebiusMu(n):
+    if n < 1:
+        raise _arg_error("MoebiusMu", "Argument 1 (%d) should be >= 1" % n)
     return _sa.moebius(n)
 
 
 def IsPrimePower(n):
-    if n > 1:
-        F = _sa.factor(n)
-        if len(F) == 1:
-            return _multi([True, F[0][0], F[0][1]])
+    if n < 2:
+        raise _arg_error("IsPrimePower", "Argument 1 (%d) should be >= 2" % n)
+    F = _sa.factor(n)
+    if len(F) == 1:
+        return _multi([True, F[0][0], F[0][1]])
     return False
 
 
 def Gcd(*args):
+    if len(args) > 2:
+        raise _bad_types("Gcd", args)  # (two arguments, or one sequence)
     if len(args) == 2:
         _no_rationals("Gcd", *args)
     if len(args) == 1:
@@ -4353,6 +4399,8 @@ GCD = GreatestCommonDivisor = Gcd
 
 
 def Lcm(*args):
+    if len(args) > 2:
+        raise _bad_types("Lcm", args)
     if len(args) == 1:
         args = tuple(args[0])
     return _sa.lcm(*args)
@@ -4374,11 +4422,20 @@ def Quotrem(a, b):
 
 
 def Modexp(a, k, m):
+    if m < 2:
+        raise _arg_error("Modexp", "Argument 3 (%d) should be >= 2" % m)
     return pow(a, k, m)
 
 
 def Modinv(a, m):
-    return _sa.inverse_mod(a, m)
+    _no_rationals("Modinv", a, m)  # (before m == 1's 0: Modinv(3/2, 1) is refused, CORR-3BE-2)
+    if m < 1:
+        raise _arg_error("Modinv", "Argument 2 (%d) should be >= 1" % m)
+    if m == 1:
+        return 0
+    if _math.gcd(a, m) != 1:
+        raise _arg_error("Modinv", "Argument 1 is not a unit mod argument 2")
+    return pow(a, -1, m)
 
 
 InverseMod = Modinv
@@ -4389,6 +4446,8 @@ def Binomial(n, k):
 
 
 def Factorial(n):
+    if n < 0:
+        raise _arg_error("Factorial", "Argument 1 (%d) should be >= 0" % n)
     return _sa.factorial(n)
 
 
@@ -4413,6 +4472,8 @@ def IsSquare(n):
 
 
 def Isqrt(n):
+    if n < 0:
+        raise _arg_error("Isqrt", "Argument 1 is not non-negative")
     return _math.isqrt(n)
 
 
@@ -4609,35 +4670,49 @@ def Truncate(x):
     return int(f)
 
 
+def _extreme(s, f, name):
+    """The largest (f = max) or least element of s, with its position for a
+    sequence, as Magma's Max and Maximum return them."""
+    items = list(_iter(s))
+    if not items:
+        raise _arg_error(name, "Argument 1 is not non-empty")
+    m = f(items)
+    return _multi([m, items.index(m) + 1]) if isinstance(s, (MSeq, MRange)) else m
+
+
 def Max(*args):
     if len(args) == 1:
-        return Maximum(args[0])
+        return _extreme(args[0], max, "Max")
     return max(args)
 
 
 def Min(*args):
     if len(args) == 1:
-        return Minimum(args[0])
+        return _extreme(args[0], min, "Min")
     return min(args)
 
 
 def Maximum(s, *rest):
     if rest:
         return max((s,) + rest)
-    items = list(_iter(s))
-    m = max(items)
-    return _multi([m, items.index(m) + 1]) if isinstance(s, (MSeq, MRange)) else m
+    return _extreme(s, max, "Maximum")
 
 
 def Minimum(s, *rest):
     if rest:
         return min((s,) + rest)
-    items = list(_iter(s))
-    m = min(items)
-    return _multi([m, items.index(m) + 1]) if isinstance(s, (MSeq, MRange)) else m
+    return _extreme(s, min, "Minimum")
 
 
 def Valuation(n, p):
+    if isinstance(p, int) and not isinstance(p, bool):
+        if p < 1:
+            raise _arg_error("Valuation", "Argument 2 is not positive")
+        if not _sa.is_prime(p):
+            raise _arg_error("Valuation", "Argument 2 (%d) should be prime" % p)
+    if n == 0:
+        # (Magma's is Infinity, which Sagebrush doesn't have)
+        raise MagmaError("Valuation of 0 (Infinity in Magma) is not supported yet", "'Valuation'")
     if isinstance(n, _Fraction) and not isinstance(n, int):
         return _sa.valuation(n.numerator, p) - _sa.valuation(n.denominator, p)
     return _sa.valuation(n, p)
@@ -4662,18 +4737,35 @@ def Intseq(n, b=10):
 def Seqint(s, b=10):
     if b < 2:
         raise MagmaError("Argument 2 (%d) should be >= 2" % b, "'Seqint'")
+    s = list(s)
+    for i, d in enumerate(s):
+        if not 0 <= d < b:
+            raise _arg_error("Seqint", "Sequence digit %d should be >= 0 and < %d" % (i + 1, b))
     r = 0
-    for d in reversed(list(s)):
+    for d in reversed(s):
         r = r * b + d
     return r
 
 
 def ChineseRemainderTheorem(a, m):
+    """The least x >= 0 with x = a[i] mod m[i] for each i, or -1 when the
+    congruences have no common solution (Magma's answer then)."""
     a, m = list(a), list(m)
-    x, M = a[0] % m[0], m[0]
-    for ai, mi in zip(a[1:], m[1:]):
-        x = _sa.crt(x, ai, M, mi)
-        M = M * mi // _math.gcd(M, mi)
+    if not a:
+        raise _arg_error("ChineseRemainderTheorem", "Sequence argument 1 must be non-empty")
+    if len(a) != len(m):
+        raise _arg_error("ChineseRemainderTheorem", "Lengths of sequence arguments should be the same")
+    if any(mi == 0 for mi in m):
+        raise _arg_error("ChineseRemainderTheorem", "Element of second argument (moduli M) is zero")
+    x, M = 0, 1
+    for ai, mi in zip(a, m):
+        mi = abs(mi)
+        g = _math.gcd(M, mi)
+        if (ai - x) % g:
+            return -1
+        t = ((ai - x) // g * pow(M // g, -1, mi // g)) % (mi // g) if mi // g > 1 else 0
+        x, M = x + M * t, M // g * mi
+        x %= M
     return x
 
 
@@ -4694,7 +4786,14 @@ def IntegerToString(n, b=10):
 
 
 def StringToInteger(s, b=10):
-    return int(s, b)
+    if not 2 <= b <= 36:
+        raise _arg_error("StringToInteger", "Argument 2 (%d) should be in the range [2 .. 36]" % b)
+    # (Magma's form: whitespace around it and after the sign, but not
+    # within the digits, and not Python's underscores, CORR-3BE-3)
+    m = _re.fullmatch(r"\s*([+-]?)\s*([0-9A-Za-z]+)\s*", s)
+    if not m or any(int(c, 36) >= b for c in m.group(2)):
+        raise _arg_error("StringToInteger", 'String "%s" does not represent an number in base %d' % (s, b))
+    return int(m.group(1) + m.group(2), b)
 
 
 def Sprint(x):
