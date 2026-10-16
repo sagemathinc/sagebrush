@@ -273,6 +273,22 @@ test("printing a value nested deeper than 100 is refused in Magma's form, not a 
   assert.doesNotMatch(ok.stdout, /error/);
 });
 
+test("a copy of a value that shares its parts is admitted before it is made: x := [x, x] doubled is refused quickly (HARD-756-1, _own)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input: "x := 1; for i in [1..40] do x := [x, x]; end for;\n1;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 100000 sequences, sets and tuples is not supported yet/);
+  assert.match(r.stdout, /\n1\n$/);
+  // (a value of 50000 sequences is copied as before; at the default heap,
+  // since each copy of it costs tens of megabytes)
+  const c = spawnSync(process.execPath, [cli, "--magma"], { input: "y := [ [i, i^2] : i in [1..50000] ]; z := y; #z;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(c.stdout, "50000\n", c.stderr);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
