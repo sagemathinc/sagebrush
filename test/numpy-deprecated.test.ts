@@ -21,6 +21,7 @@ test("each removed numpy name warns once per call with a DeprecationWarning nami
     "    np.asfarray([1]); np.in1d([1], [1]); np.product([1]); np.round_(1.5); np.row_stack(([1], [2])); np.trapz([1, 2])",
     "for m in w: print(m.category.__name__, m.message)",
     "print(np.trapz.__name__, np.round is np.around)",
+    "try:\n    np.round(np.array([1.25]), 1, out=np.zeros(1, complex))\nexcept NotImplementedError as e:\n    print(type(e).__name__)",
   ].join("\n");
   const got = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" });
   assert.equal(
@@ -33,6 +34,7 @@ test("each removed numpy name warns once per call with a DeprecationWarning nami
       "DeprecationWarning `np.row_stack` is deprecated (current NumPy no longer has it); use `np.vstack` instead",
       "DeprecationWarning `np.trapz` is deprecated (current NumPy no longer has it); use `np.trapezoid` instead",
       "trapz True",
+      "NotImplementedError",
       "",
     ].join("\n"),
   );

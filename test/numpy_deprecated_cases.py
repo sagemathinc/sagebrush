@@ -26,3 +26,28 @@ except TypeError:
     print('float into int out: TypeError', o.tolist())
 o = np.zeros(2)
 print(np.round_(np.array([3, 4]), out=o).tolist(), o.dtype.name)
+# round_ into out: same shape, same_kind casting, computed in the wider type (CORR-90C-1..3)
+def tt(f):
+    try:
+        r = f()
+        return repr(r.tolist()) + ' ' + r.dtype.name
+    except TypeError:
+        return 'TypeError'
+    except ValueError as e:
+        return 'ValueError: ' + str(e)
+for label, f in [
+    ('shape', lambda: np.round_(np.arange(3.0), out=np.zeros((2, 3)))),
+    ('i32 to u8', lambda: np.round_(np.array([-1], np.int32), out=np.zeros(1, np.uint8))),
+    ('int, negative decimals, to int', lambda: np.round_(np.array([155]), -1, out=np.zeros(1, np.int64))),
+    ('i64 to i32', lambda: np.round_(np.array([155]), out=np.zeros(1, np.int32))),
+    ('i32 to i64', lambda: np.round_(np.array([155], np.int32), out=np.zeros(1, np.int64))),
+    ('int to f64', lambda: np.round_(np.array([155]), out=np.zeros(1))),
+    ('int, negative decimals, to f64', lambda: np.round_(np.array([155]), -1, out=np.zeros(1))),
+    ('f32 to f64', lambda: np.round_(np.array([125.125], np.float32), 1, out=np.zeros(1))),
+    ('f64 to f32', lambda: np.round_(np.array([125.125]), 1, out=np.zeros(1, np.float32))),
+    ('c128 to f64', lambda: np.round_(np.array([1.25 + 0j]), 1, out=np.zeros(1))),
+    ('bool to bool', lambda: np.round_(np.array([True]), out=np.zeros(1, bool))),
+    ('0-d', lambda: np.round_(np.array(1.5), out=np.zeros(()))),
+    ('list out', lambda: np.round_(np.array([1.5]), out=[0.0])),
+]:
+    print(label, '|', tt(f))
