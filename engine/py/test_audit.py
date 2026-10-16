@@ -575,6 +575,8 @@ assert _K != _M and not (_K.gen() == _M.gen()) and _K(1) == _L(1) and _K(QQ(2) /
 print("nf parents ok")
 _R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _x, _y = _R.gens(); _sy, _sx = _S.gens(); _f = 2 * _x * _x * _y + 3 * _x * _x + _x * _y
 assert _f.coefficient(_sx**2) == 2 * _y + 3 and _f.monomial_coefficient(_sx**2 * _sy) == 2  # R2-MUL-F6
+_D = PolynomialRing(QQ, names=("x", "x")); _da, _db = _D.gens(); _g = 7 * _x**5 + 11 * _x**3
+raises(TypeError, _g.coefficient, _da**2 * _db**3); raises(TypeError, _g.monomial_coefficient, _da**2 * _db**3)  # CORR-F61-1
 print("mpoly coefficient ok")
 from sagebrush.sage import CyclotomicField
 for _n in (3, 4, 5):
@@ -614,7 +616,7 @@ print("solve review ok")
 assert str(solve(sin(_xs) == cos(_xs), _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
 assert str(solve(cos(2 * _xs) == cos(_xs), _xs)) == "[x == 2/3*pi*n1 for integer n1]"
 assert str(solve(sin(_xs) * cos(_xs) == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/12*pi for integer n1, x == pi*n2 + 5/12*pi for integer n2]"
-assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/6*pi for integer n1, x == pi*n2 - 1/6*pi for integer n2]"
+assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 - 1/6*pi for integer n1, x == pi*n2 + 1/6*pi for integer n2]"
 assert str(solve(tan(_xs) == sin(_xs), _xs)) == "[x == pi*n1 for integer n1]" and len(solve(sin(_xs) + sin(2 * _xs) + sin(3 * _xs) == 0, _xs)) == 3
 assert str(solve(log(_xs)**2 == 2, _xs)) == "[x == e^(-sqrt(2)), x == e^sqrt(2)]"
 print("solve trig ok")
