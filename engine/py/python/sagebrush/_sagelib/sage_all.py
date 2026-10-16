@@ -2316,15 +2316,12 @@ def _part(z, name):
         # (an element of CC: its parts are RR's)
         from _sage_lang import RealNumber
         return RealNumber(getattr(complex(z), name))
-    if isinstance(z, float) and type(z) is not float:
-        # a real number of RR (a float subclass): itself, and the exact 0
+    from _sage_lang import RealNumber
+    if isinstance(z, RealNumber):
+        # an element of RR: itself, and the exact 0
         return z if name == "real" else Integer(0)
     p = getattr(z, name)
-    r = p() if callable(p) else p
-    if name == "imag" and isinstance(r, float) and r == 0 and type(z) not in (float, complex):
-        # a real number of RR: the exact 0, as Sage
-        return Integer(0)
-    return r
+    return p() if callable(p) else p
 
 
 def real_part(z):
@@ -2365,8 +2362,10 @@ def conjugate(z):
         sage: conjugate(RR(2)), conjugate(RR(2)).parent(), conjugate(RR(2)).sqrt()
         (2.00000000000000, Real Field with 53 bits of precision, 1.41421356237310)
     """
-    if isinstance(z, float) and type(z) is not float:
-        # a real number of RR (a float subclass): itself, not float's conjugate
+    from _sage_lang import RealNumber
+    if isinstance(z, RealNumber):
+        # an element of RR: itself, not float's conjugate (a plain float);
+        # other float subclasses get float's, as Sage
         return z
     return z.conjugate()
 

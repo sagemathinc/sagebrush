@@ -60,3 +60,9 @@ for c in [-1-I, 1-I, 1+I, -1+I, 2*I-1, 3/2-I/2, CC(-2,-3), CC(2,-3)]:
 t("c = -2*I", lambda: (SR(-2*I)/x, SR(-2*I)/(x*y), x - 2*I/x, latex(SR(-2*I)/x)))
 t("latex of CC", lambda: (latex(SR(CC(0,2))*x), latex(SR(CC(1,-2))), latex(SR(CC(0,-2.5))), latex(x + SR(CC(0,2)))))
 t("conjugate(RR(2))", lambda: (conjugate(RR(2)), conjugate(RR(2)).parent(), conjugate(RR(2)).sqrt(), conjugate(RealField(100)(2)).parent()))
+# a coefficient's denominator in front of a grouped denominator (LaTeX)
+for e in [(3/2-I/2)/(x+1), 1/2/(x+1), (3/2-I/2)/((x+1)*(y+2)), 1/(2*(x+1)^2), (1/2+I/3)/(x^2+1), 3/(2*(x-y)^2), (I/2)/(x+1)]:
+    t("latex(%s)" % e, lambda: latex(e))
+class _F(float):
+    __add__ = lambda self, o: 999
+t("parts of a float subclass", lambda: (conjugate(_F(2)) + 1, type(conjugate(_F(2))) is float, real(_F(2)) + 1, imag(_F(2))))
