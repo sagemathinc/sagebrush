@@ -11,9 +11,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It accepts some values Python 3.14 refuses (TypeError): heapify('') gives None.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -28,9 +29,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises AttributeError where Python 3.14 raises TypeError, e.g. heappop('').",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -45,9 +47,11 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It accepts some values Python 3.14 refuses (TypeError): heappushpop('', 2) gives 2.",
+      "On some values it raises KeyError where Python 3.14 raises TypeError, e.g. heappushpop({1: 2}, 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -62,9 +66,11 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises IndexError where Python 3.14 raises TypeError, e.g. heapreplace('', 2).",
+      "On some values it raises KeyError where Python 3.14 raises TypeError, e.g. heapreplace({1: 2}, 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -79,9 +85,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It accepts some values Python 3.14 refuses (TypeError): heapify_max('') gives None.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -96,9 +103,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises AttributeError where Python 3.14 raises TypeError, e.g. heappop_max('').",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -113,9 +121,11 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "It accepts some values Python 3.14 refuses (TypeError): heappushpop_max('', 2) gives 2.",
+      "On some values it raises KeyError where Python 3.14 raises TypeError, e.g. heappushpop_max({1: 2}, 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -130,9 +140,11 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises IndexError where Python 3.14 raises TypeError, e.g. heapreplace_max('', 2).",
+      "On some values it raises KeyError where Python 3.14 raises TypeError, e.g. heapreplace_max({1: 2}, 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -147,9 +159,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises AttributeError where Python 3.14 raises TypeError, e.g. heappush_max('', 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -164,7 +177,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -181,9 +194,10 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "On some values it raises AttributeError where Python 3.14 raises TypeError, e.g. heappush('', 2).",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -198,7 +212,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
@@ -215,7 +229,7 @@
       }
     ],
     "differs": [
-      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
+      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
     ],
     "status": "full",
     "upstream_version": "Python 3.14"
