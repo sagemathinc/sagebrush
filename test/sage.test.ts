@@ -122,3 +122,11 @@ test("a large graph's adjacency matrices are refused before their n^2 entries ex
   assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(5) + "ValueError\n(3, 3)\n");
   assert.ok(Date.now() - t < 30000);
 });
+
+test("matrix() over a number field is refused before anything is read (HARD-541-1)", () => {
+  // (matrix(K, 0, 0, []) iterated K[0], K[1], ... until the heap ran out)
+  const src = "P.<t> = QQ[]\nK = NumberField(t^2 - 2, 'a')\nfor f in (lambda: matrix(K, 0, 0, []), lambda: matrix(K, [[K.gen()]]), lambda: matrix(QuadraticField(-3, 'b'), 1, 1, [1])):\n try:\n  f()\n except NotImplementedError as e:\n  print(type(e).__name__)\nprint(matrix(QQbar, 2, 2, [1, 2, 3, 4]).det())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(3) + "-2\n");
+  assert.ok(Date.now() - t < 30000);
+});
