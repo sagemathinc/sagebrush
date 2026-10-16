@@ -12,3 +12,28 @@ RDF :: [               1.0                0.5]
 AA empty :: (0, 3)
 GF7 raises :: ZeroDivisionError
 AA parent :: Algebraic Real Field
+Finite Field of size 7 RR1.25 :: TypeError
+Finite Field of size 2 RR1.25 :: TypeError
+Ring of integers modulo 6 RR1.25 :: TypeError
+Finite Field of size 7 float1.25 :: TypeError
+Finite Field of size 2 float1.25 :: TypeError
+Ring of integers modulo 6 float1.25 :: TypeError
+Finite Field of size 7 RDF1.25 :: TypeError
+Finite Field of size 2 RDF1.25 :: TypeError
+Ring of integers modulo 6 RDF1.25 :: TypeError
+Finite Field of size 7 RR2 :: 2
+Finite Field of size 2 RR2 :: 0
+Ring of integers modulo 6 RR2 :: 2
+Finite Field of size 7 float2 :: 2
+Finite Field of size 2 float2 :: 0
+Ring of integers modulo 6 float2 :: 2
+Finite Field of size 7 RR-3 :: 4
+Finite Field of size 2 RR-3 :: 1
+Ring of integers modulo 6 RR-3 :: 3
+Finite Field of size 7 RR1e30 :: 5
+Finite Field of size 2 RR1e30 :: 0
+Ring of integers modulo 6 RR1e30 :: 4
+list 1.25 :: TypeError
+list RR2 :: [2]
+fn 1.25 :: TypeError
+calls [(0, 0)]
