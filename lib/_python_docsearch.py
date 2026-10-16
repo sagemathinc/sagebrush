@@ -1,7 +1,7 @@
 """Python mode's functions for the notebook's search box: what Sagebrush
 provides of numpy (with linalg, fft, random and polynomial), scipy.integrate
 and scipy.io, math, cmath, fractions, itertools, functools, collections,
-random, bisect and heapq, as JSON entries in the form of
+random, bisect, heapq and matplotlib (pyplot, Axes, Figure), as JSON entries in the form of
 lib/_pyjs_docsearch.py's index.
 
     sagebrush -m _python_docsearch --index    (web/build.ts: docs-index-python.json)
@@ -25,6 +25,9 @@ MODULES = [
     ("math", "math", ""), ("cmath", "cmath", ""), ("fractions", "fractions", ""), ("itertools", "itertools", ""),
     ("functools", "functools", ""), ("collections", "collections", ""), ("random", "random", ""),
     ("bisect", "bisect", ""), ("heapq", "heapq", ""),
+    # (matplotlib's pyplot, and the methods of its Axes and Figure, by matplotlib's names)
+    ("matplotlib.pyplot", "matplotlib.pyplot", ""), ("matplotlib.axes.Axes", "matplotlib.pyplot", "Axes"),
+    ("matplotlib.figure.Figure", "matplotlib.pyplot", "Figure"),
 ]
 
 

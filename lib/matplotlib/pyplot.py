@@ -290,7 +290,21 @@ class ErrorbarContainer(tuple):
         return "<ErrorbarContainer object of %d artists>" % len(self)
 
 
+def _missing(what):
+    """the hint for a name of matplotlib's that Sagebrush lacks (an
+    AttributeError's, src/runtime/object.ts missingHint)"""
+    def hint(name):
+        from matplotlib import _names
+        if name in getattr(_names, what.upper()):
+            return (": matplotlib's %s.%s is not in Sagebrush yet (to find what is: sagebrush --search %s --mode python,"
+                    " or the search box)" % (what, name, name))
+        return None
+    return hint
+
+
 class Axes:
+    __sagebrush_missing__ = _missing("Axes")
+
     def __init__(self, fig, rect):
         self.figure = fig
         self._rect = rect
@@ -656,7 +670,7 @@ class Axes:
                 s = autopct % (100 * v / total) if isinstance(autopct, str) else autopct(100 * v / total)
                 self._add(Text(s, 0.6 * math.cos(mid), 0.6 * math.sin(mid), fontsize=10, color="#ffffff", no_bbox=True))
             a = b
-        self._opts.update({"aspect_ratio": 1, "axes": False, "xmin": -1.3, "xmax": 1.3, "ymin": -1.3, "ymax": 1.3})
+        self._opts.update({"aspect_ratio": 1, "axes": False, "xmin": -1.3, "xmax": 1.3, "ymin": -1.3, "ymax": 1.3, "xinvert": False, "yinvert": False})
 
     def imshow(self, X, cmap=None, norm=None, aspect=None, interpolation=None, alpha=None, vmin=None, vmax=None,
                origin=None, extent=None, **kw):
@@ -718,7 +732,8 @@ class Axes:
                      first_col_x=left, pixelated=sharp, what="image %d by %d" % (nr, nc))
         self._add(prim)
         # (the axes' limits are the extent: y inverted when bottom > top, as with origin 'upper')
-        self._opts.update({"xmin": left, "xmax": right, "ymin": bottom, "ymax": top, "margins": 0})
+        # (and not an earlier invert_xaxis/invert_yaxis: the extent's limits are set, as matplotlib's)
+        self._opts.update({"xmin": left, "xmax": right, "ymin": bottom, "ymax": top, "margins": 0, "xinvert": False, "yinvert": False})
         self._opts["_image"] = True
         if aspect in (None, "equal") or isinstance(aspect, (int, float)):
             self._opts["aspect_ratio"] = 1 if aspect in (None, "equal") else float(aspect)
@@ -816,19 +831,54 @@ class Axes:
         if isinstance(left, (tuple, list)):
             left, right = left
         _same_limits(left, right, "x")
-        if left is not None:
-            self._opts["xmin"] = left
-        if right is not None:
-            self._opts["xmax"] = right
+        self._set_lim("x", left, right)
 
     def set_ylim(self, bottom=None, top=None, **kw):
         if isinstance(bottom, (tuple, list)):
             bottom, top = bottom
         _same_limits(bottom, top, "y")
-        if bottom is not None:
-            self._opts["ymin"] = bottom
-        if top is not None:
-            self._opts["ymax"] = top
+        self._set_lim("y", bottom, top)
+
+    def _set_lim(self, a, lo, hi):
+        # (an axis inverted by invert_xaxis/invert_yaxis while autoscaled:
+        # the limit not given is the view's, as matplotlib's, and the given
+        # ones say the direction from then on)
+        if self._opts.get(a + "invert") and (lo is not None or hi is not None):
+            view = self.get_xlim() if a == "x" else self.get_ylim()
+            lo = view[0] if lo is None else lo
+            hi = view[1] if hi is None else hi
+            self._opts[a + "invert"] = False
+        if lo is not None:
+            self._opts[a + "min"] = lo
+        if hi is not None:
+            self._opts[a + "max"] = hi
+
+    def _invert(self, a):
+        # (as matplotlib's Axis.set_inverted: limits that were set are
+        # swapped; an autoscaled axis stays autoscaled, the other way round)
+        lo, hi = self._opts.get(a + "min"), self._opts.get(a + "max")
+        if lo is not None and hi is not None:
+            self._opts[a + "min"], self._opts[a + "max"] = hi, lo
+        else:
+            self._opts[a + "invert"] = not self._opts.get(a + "invert", False)
+
+    def invert_xaxis(self):
+        """Invert the x axis: its values decrease from left to right."""
+        self._invert("x")
+
+    def invert_yaxis(self):
+        """Invert the y axis: its values decrease upwards."""
+        self._invert("y")
+
+    def xaxis_inverted(self):
+        """Whether the x axis is inverted (its left limit above its right)."""
+        lo, hi = self.get_xlim()
+        return bool(hi < lo)
+
+    def yaxis_inverted(self):
+        """Whether the y axis is inverted (its bottom limit above its top)."""
+        lo, hi = self.get_ylim()
+        return bool(hi < lo)
 
     def get_xlim(self):
         p = self._panel()
@@ -1047,6 +1097,8 @@ class _AxesArray:
 
 
 class Figure:
+    __sagebrush_missing__ = _missing("Figure")
+
     def __init__(self, figsize=None, dpi=None, facecolor=None, **kw):
         fs = figsize or (6.4, 4.8)
         self._size = (float(fs[0]), float(fs[1]))
@@ -1666,3 +1718,7 @@ def _colorbar(fig, mappable, cax, ax, **kw):
     if kw.get("label"):
         cb.set_label(kw["label"])
     return cb
+
+
+# (a name of matplotlib.pyplot's that Sagebrush lacks: its AttributeError says so)
+__sagebrush_missing__ = _missing("pyplot")
