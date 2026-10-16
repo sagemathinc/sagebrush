@@ -42,6 +42,7 @@ test("Sage, Magma and MATLAB have no CPython-style 4300-digit limit on an intege
 
 test("readlines' hint, each class's own way (an index, or BytesIO's int), counted in characters; a write takes only a real buffer (CORR-606-3, CORR-50F-1)", () => {
   cases("io_hint_cases.py");
+  cases("io_hint_descriptor_cases.py");
 });
 
 test("compile(..., 'single') reads a decorated or inline compound statement whole before the extra one (CORR-50F-2)", () => {
