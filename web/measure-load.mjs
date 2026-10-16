@@ -161,14 +161,15 @@ async function measure(mode, url) {
     // (a request whose end the live events missed, a worker's script or a
     // frame's page reported to a target attached a moment too late, would
     // keep it waiting: after 15 s with no network event at all it stops,
-    // and the trace, complete, says whether each of those had finished)
+    // and the trace, complete, says whether every request had finished: by
+    // request, not by URL, so a second fetch of a URL that never ends is
+    // not hidden by the first, the review's CORR-FF8-2)
     while ((inflight.size > 0 ? Date.now() - lastNet < 15000 : Date.now() - lastNet < 3000) && Date.now() - tSettle < 120000) await sleep(200);
-    const open = [...inflight.values()].map(([, u]) => u), timedOut = Date.now() - tSettle >= 120000;
+    const timedOut = Date.now() - tSettle >= 120000;
     await new Promise((r) => { traceDone = r; send("Tracing.end"); });
-    const finished = finishedUrls(events);
-    const stuck = open.filter((u) => !finished.has(u)).slice(0, 10);
-    const settledCleanly = stuck.length === 0 && !timedOut;
     const stats = analyse(events);
+    const stuck = stats.settled.inFlight.urls;
+    const settledCleanly = stats.settled.inFlight.requests === 0 && !timedOut;
     events.length = 0;
     return { ready, ok: done && out.includes(WANT[mode]), out: out.slice(0, 200), ms: { ready: tReady, firstResult: tResult, settle: Date.now() - tSettle }, settledCleanly, ...(settledCleanly ? {} : { stuck }), ...stats };
     };
@@ -189,17 +190,6 @@ async function measure(mode, url) {
     await sleep(300);
     rmSync(profile, { recursive: true, force: true });
   }
-}
-
-// The URLs of the requests the trace saw finish
-function finishedUrls(events) {
-  const url = new Map(), done = new Set();
-  for (const e of events) {
-    const d = e.args?.data;
-    if (e.name === "ResourceSendRequest" && d?.requestId) url.set(d.requestId, d.url);
-    if (e.name === "ResourceFinish" && url.has(d?.requestId)) done.add(url.get(d.requestId));
-  }
-  return done;
 }
 
 // The trace: requests (wire and decoded bytes, by thread) and CPU per
@@ -249,7 +239,7 @@ function analyse(events) {
     let wire = 0, decoded = 0, count = 0;
     // (started by then and not finished: how many, and their wire bytes so far)
     const loading = [...reqs.values()].filter((r) => page(r) && r.ts <= until && !(r.done && r.end <= until));
-    const inFlight = { requests: loading.length, wireSoFar: loading.reduce((s, r) => s + (r.chunks ?? []).filter(([t]) => t <= until).reduce((a, [, n]) => a + n, 0), 0) };
+    const inFlight = { requests: loading.length, wireSoFar: loading.reduce((s, r) => s + (r.chunks ?? []).filter(([t]) => t <= until).reduce((a, [, n]) => a + n, 0), 0), urls: loading.slice(0, 10).map((r) => r.url) };
     for (const r of reqs.values()) {
       // (the page's own requests: not data:, blob: or the browser's chrome:// pages)
       if (!r.done || r.end > until || !page(r)) continue;
@@ -285,7 +275,10 @@ if (args.includes("--self-test")) {
   const want = { at: [1, 100, 300, 1, 0, 2], settled: [2, 1e6 + 100, 4e6 + 300, 0, 0, 10] };
   const got = { at: [s.atResult.requests, s.atResult.wire, s.atResult.decoded, s.atResult.inFlight.requests, s.atResult.inFlight.wireSoFar, s.atResult.cpuMs.main],
     settled: [s.settled.requests, s.settled.wire, s.settled.decoded, s.settled.inFlight.requests, s.settled.inFlight.wireSoFar, s.settled.cpuMs.main] };
-  const ok = JSON.stringify(got) === JSON.stringify(want);
+  // (and the same URL fetched twice, once to the end and once never: one
+  // request still in flight, though the URL finished once)
+  const twice = analyse([...trace, at(21, "ResourceSendRequest", { requestId: "c", url: "https://x/small" })]);
+  const ok = JSON.stringify(got) === JSON.stringify(want) && twice.settled.inFlight.requests === 1 && twice.settled.inFlight.urls[0] === "https://x/small";
   console.log(ok ? "self-test ok" : "self-test FAILED: " + JSON.stringify(got) + " != " + JSON.stringify(want));
   process.exit(ok ? 0 : 1);
 }
