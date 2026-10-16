@@ -103,7 +103,17 @@ cases:
   `name.m` on the path.
 - **At the top level** (a script or a notebook cell), the workspace may
   already hold a variable the code never assigns. Such a name is looked up
-  when it runs: `(x if "x" in globals() else _m.fn("x"))`.
+  when it runs: `(x if "x" in globals() else _m.fn("x"))`. So is a name
+  the code does assign, since `clear` may remove it again: `upper = 7;
+  clear; upper('abc')` calls the function `upper`, as MATLAB does. (Only
+  in a program whose text names `clear*`, `eval*`, `feval` or `run`: in
+  any other, an assigned variable can't disappear, and its reads stay
+  plain Python names.)
+- **`clear` in a function** makes the names it lists (or, alone, all the
+  function's variables) undefined again: they are Python locals, which
+  `locals()` cannot delete, so the compiler assigns them `Undef`. Using one
+  afterwards is "Unrecognized function or variable", as static resolution
+  says; patterns (`clear ab*`) still go through the run-time path.
 - **A function named without arguments is called,** as MATLAB does
   (`rand`, `pi`). A handle is a value.
 - **A global variable** is one value shared by every workspace that

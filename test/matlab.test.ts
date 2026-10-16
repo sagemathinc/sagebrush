@@ -1537,3 +1537,27 @@ test("a newline in a struct's text field or a string array's element is displaye
     "    a: <missing>",
   ]);
 });
+
+test("clear: a cleared variable's name is the function again at the top level; in a function, clear undefines the names", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "upper = 7; clear; disp(upper('abc'))",
+    "lower = 3; clear lower; disp(lower('XY'))",
+    "max = [5 9 2]; disp(max(2)); clearvars max; disp(max([5 9 2]))",
+    "try, clear; disp(nosuchthing), catch e, disp(e.message), end",
+    "disp(f1()); disp(f2()); disp(f3())",
+    "try, f4(), catch e, disp(e.message), end",
+    // (an anonymous function's parameters are its own, even where a workspace variable has the name)
+    "x = 5; g = @(x) x + 1; h = @(v) v(2); disp(g(2)); disp(h([4 5])); clear x; disp(g(3))",
+    "function r = f1()\n a = 1; b = 2;\n clear a\n a = 10;\n r = a + b;\nend",
+    "function r = f2()\n a = 5;\n clear\n r = exist('a', 'var');\nend",
+    "function r = f3()\n abc = 1; xyz = 3;\n clear ab*\n r = xyz;\nend",
+    "function f4()\n upper = 7;\n clear upper\n upper('fn')\nend",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((l: string) => l.trim()), [
+    "ABC", "xy", "9", "9", "Unrecognized function or variable 'nosuchthing'.", "12", "0", "3",
+    // (static resolution in a function: once cleared, upper is an undefined variable, not 7)
+    "Unrecognized function or variable 'upper'.",
+    "3", "5", "4",
+  ]);
+});
