@@ -1,0 +1,7 @@
+pairs :: [[x == -sqrt(a), x == sqrt(a)], [x == -sqrt(a) + 1, x == sqrt(a) + 1], [y(x) == -2, y(x) == 2], [y(x) == -1/3*x + 1/3]]
+ed :: [1/2*log(y(x))^2 == _C - cos(x), (_C, x)]
+solutions :: [2, [y(x), y(x)]]
+values :: [True, True]
+substituted :: [True, 0]
+plots :: Graphics object consisting of 10 graphics primitives
+values at 1 :: ['0.18111487', '5.52135791']
