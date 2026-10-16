@@ -98,6 +98,29 @@ try {
   await ev(`${B}.edit((d) => { d.nodes[0].mode = "sage"; }).then(() => 1)`);
   check(await until(`${B}.outputs().then((os) => { const o = os.find((x) => x.id === 'pv'); return o?.state === '' && o.output.trim() === '8'; })`, 90000), "moved to Sage: run there (2^3 is 8), not its Python preview held: " + JSON.stringify((await outputs()).pv));
 
+  // the words that name a language name the item's (William): a Magma
+  // board's Code tool and a new code item's placeholder say Magma; an item
+  // with its own language, written in place, says its own
+  await ev(`${B}.load(${JSON.stringify({ title: "Magma", mode: "magma", nodes: [{ id: "n", title: "N", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+  await ev(`${B}.editing(true), 1`);
+  await sleep(300);
+  const tool = await ev("[...document.querySelectorAll('[data-tool=code][title]')].map((e) => e.title)");
+  check(tool.length > 0 && tool.every((t) => /^Add a note with Magma code/.test(t)), "a Magma board: the Code tool says Magma: " + JSON.stringify(tool));
+  // (a code item of the board, empty, written in place: as a new one is)
+  await ev(`${B}.editing(false), 1`);
+  await ev(`${B}.load(${JSON.stringify({ title: "Magma", mode: "magma", nodes: [{ id: "c", title: "New", code: "", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+  await ev(`${B}.editing(true), 1`);
+  await sleep(300);
+  await ev("(() => { const r = window.board.clientRect('c'); const x = r.left + 30, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  check(await until("/^Magma \\(Shift\\+Enter runs it/.test(document.querySelector('.board-editing .be-code')?.placeholder ?? '')", 5000), "...and a code item's placeholder, written in place: " + (await ev("document.querySelector('.board-editing .be-code')?.placeholder ?? null")));
+  await ev(`${B}.editing(false), 1`);
+  await ev(`${B}.load(${JSON.stringify({ title: "Own", nodes: [{ id: "s", title: "In Sage", mode: "sage", code: "", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
+  await ev(`${B}.editing(true), 1`);
+  await sleep(300);
+  await ev("(() => { const r = window.board.clientRect('s'); const x = r.left + 30, y = r.top + 12, el = document.elementFromPoint(x, y); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  check(await until("/^Sage \\(Shift\\+Enter runs it/.test(document.querySelector('.board-editing .be-code')?.placeholder ?? '')", 5000), "an item in Sage on a Python board, written in place: its placeholder says Sage: " + (await ev("document.querySelector('.board-editing .be-code')?.placeholder ?? null")));
+  await ev(`${B}.editing(false), 1`);
+
   check(!errors.length, "no errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

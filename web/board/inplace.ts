@@ -196,6 +196,12 @@ export class InPlace {
     return (this.picEl = box);
   }
 
+  /** The language of its code: its own (item 16), else the board's. */
+  private language(): string {
+    const d = this.host.doc(), n = d && (this.host.node(d, this.id) as DocNote | null);
+    return n?.mode ?? d?.mode ?? "python";
+  }
+
   // the code: highlighted under a clear textarea (the board's language once the notebook is loaded)
   private codeField(src: string): HTMLElement {
     const part = document.createElement("div");
@@ -204,11 +210,15 @@ export class InPlace {
     box.className = "be-codebox";
     const pre = document.createElement("pre");
     pre.setAttribute("aria-hidden", "true");
-    const ta = area("be-code", src, "Python (Shift+Enter runs it, and what depends on it)");
+    // (its language: the item's own, else the board's; named in the placeholder)
+    const lang = this.language();
+    const ta = area("be-code", src, `${LANGUAGES[lang] ?? "Python"} (Shift+Enter runs it, and what depends on it)`);
     ta.spellcheck = false;
     ta.setAttribute("autocapitalize", "off");
     ta.setAttribute("autocomplete", "off");
-    const paint = () => { pre.innerHTML = (this.host.highlight(this.id) ?? ((s: string) => highlightPython(s, false)))(ta.value); };
+    // (until its language's interpreter is loaded: Python's and Sage's own highlighting; Magma's and MATLAB's text as it is, not as Python)
+    const fallback = (s: string) => (lang === "python" || lang === "sage" ? highlightPython(s, lang === "sage") : esc(s));
+    const paint = () => { pre.innerHTML = (this.host.highlight(this.id) ?? fallback)(ta.value); };
     ta.addEventListener("input", paint);
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
@@ -570,6 +580,7 @@ export class InPlace {
 // Where the board is clear of the top bar and the Edit toolbar (page coordinates).
 const clearTop = () => Math.max(48, document.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect().bottom ?? 0) + 6;
 
+const LANGUAGES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 function area(cls: string, value: string, placeholder: string) {
