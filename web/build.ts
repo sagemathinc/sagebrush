@@ -202,9 +202,12 @@ const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "te
 // in the manifest, which the site's Worker serves them with.  `api` is the version of the interface between a page
 // and these files (WorkerKernel, RunnerWorker, the worker's messages): a page
 // uses another engine only if its api is the same.
-const ENGINE_API = 2;
+// (3: the Python library in chunks, lib/..., web/lib-chunks.mts)
+const ENGINE_API = 3;
 let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html"];
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html", ...LIB_CHUNKS];
+// (each one's name as the site's Worker serves engine files: web/engines.ts)
+for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new Error(`engine file ${f}: not a name web/engines.ts serves`);
 {
   const { runnerPolicy } = await import("./csp-policy.mts");
   const { engineIdText } = await import("./engine-id.mts");

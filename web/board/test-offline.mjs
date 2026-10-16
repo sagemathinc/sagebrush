@@ -43,6 +43,9 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const site = `http://127.0.0.1:${server.address().port}/`;
 const own = JSON.parse(readFileSync(join(dist, "engine", "latest.json"), "utf8"));
 const ownDir = join(dist, "engine", own.id);
+// (the engine's Python library: its chunks' sources, and Sage's compiled modules: web/lib-chunks.mts)
+const ownFiles = Object.keys(JSON.parse(readFileSync(join(ownDir, "manifest.json"), "utf8")).files);
+const libSrc = ownFiles.filter((f) => /^lib\/.*\.src\./.test(f)).sort(), libSage = ownFiles.filter((f) => /^lib\/(core|sci|sage)\.pre\./.test(f)).sort();
 
 let port = Number(process.env.CDP_PORT) || 0;
 const dir = mkdtempSync(join(tmpdir(), "sb-offline-")), profile = mkdtempSync(join(tmpdir(), "sb-offline-prof-"));
@@ -82,7 +85,7 @@ const odd = (ok) => { const bad = requests.filter((u) => !ok(u)); return `${requ
 const caption = () => ev("document.querySelector('[data-sbb=say]').textContent");
 const engineNow = () => ev("window.sagebrush.board.engine().then((v) => v?.engine ?? null)");
 // (the engine's parts a file carries; board.js, in it too, has the tag's template)
-const parts = (html) => [...html.matchAll(/<script type="application\/octet-stream" data-sb-engine="(sagebrush-[^"]+)">/g)].map((m) => m[1]);
+const parts = (html) => [...html.matchAll(/<script type="application\/octet-stream" data-sb-engine="((?:sagebrush-|lib\/)[^"]+)">/g)].map((m) => m[1]);
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
@@ -107,7 +110,7 @@ try {
   check(fromOwn === withPy, "with its engine not published (a dev site), the file with Python is made all the same: " + String(fromOwn).slice(0, 80));
   const fa = join(dir, "with-python.html"), fb = join(dir, "without-python.html");
   writeFileSync(fa, withPy); writeFileSync(fb, withoutPy);
-  check(parts(withPy).sort().join() === ["sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-precompiled.json", "sagebrush-viewer3d.js", "sagebrush-worker.js"].join(), "the file in offline mode carries every part, the Sage library too (a Python board may become a Sage one): " + parts(withPy).join());
+  check(libSrc.length > 5 && libSage.length === 3 && parts(withPy).sort().join() === [...libSage, ...libSrc, "sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-viewer3d.js", "sagebrush-worker.js"].sort().join(), "the file in offline mode carries every part, the whole Python library and Sage's compiled modules too (a Python board may become a Sage one): " + parts(withPy).join());
   check(!parts(withoutPy).length && withoutPy.includes(`"id":"${own.id}"`) && withoutPy.includes(JSON.stringify(site)), "the file without carries none, only where its engine is: the site and the engine's id");
   console.log(`with Python ${(withPy.length / 1e6).toFixed(1)} MB, without ${(withoutPy.length / 1e3).toFixed(0)} KB`);
 
@@ -121,25 +124,29 @@ try {
   // exported again from that file, with Python: the same file
   check((await ev("window.sagebrush.board.exportHtml({ python: true })")) === withPy, "exported again from the file with Python: the same file");
   // offline, its board made a Sage board and the page reloaded: its code
-  // runs, in Sage, from what the file carries (William's report)
-  await ev("window.sagebrush.board.edit((d) => { d.mode = 'sage'; const walk = (ns) => { for (const x of ns) { if (x.id === 'path') x.code = 'path = [1] * 111\\nprint(len(path), \"steps\", factor(2^64 + 1))'; if (x.children) walk(x.children); } }; walk(d.nodes ?? []); }).then(() => 1)");
+  // runs, in Sage, from what the file carries (William's report); and a
+  // module no mode's start loads (heapq: its chunk read when it is imported,
+  // web/lib-lazy.ts)
+  await ev("window.sagebrush.board.edit((d) => { d.mode = 'sage'; const walk = (ns) => { for (const x of ns) { if (x.id === 'path') x.code = 'import heapq\\npath = [1] * 111\\nprint(len(path), \"steps\", factor(2^64 + 1), heapq.nsmallest(1, [3, 2]))'; if (x.children) walk(x.children); } }; walk(d.nodes ?? []); }).then(() => 1)");
   await sleep(500);
   requests = []; errors = [];
   await send("Page.reload", {});
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 30000);
-  check(await until("window.sagebrush.board.outputs().then((os) => /274177 \\* 67280421310721/.test(os.find((o) => o.id === 'path')?.output ?? ''))", 120000), "offline, made a Sage board and reloaded, the file runs its code in Sage: " + await caption());
+  check(await until("window.sagebrush.board.outputs().then((os) => /274177 \\* 67280421310721 \\[2\\]/.test(os.find((o) => o.id === 'path')?.output ?? ''))", 120000), "offline, made a Sage board and reloaded, the file runs its code in Sage, a module imported from a part of the library loaded then too: " + await caption());
   check(!requests.length, "...asking the network for nothing: " + requests.slice(0, 3).join(", "));
 
-  // a file made before offline mode carried every language's runtime (no Sage
-  // library), made a Sage board: the library from the site, by the engine's id
+  // a file made before offline mode carried every language's runtime (no
+  // Sage compiled modules), made a Sage board: those from the site, by the
+  // engine's id
   await online(true);
-  const older = withPy.replace(/<script type="application\/octet-stream" data-sb-engine="sagebrush-precompiled\.json">[^<]*<\/script>\n?/, "");
-  check(!parts(older).includes("sagebrush-precompiled.json") && parts(older).length === 5, "(an older file: no Sage library)");
+  const older = withPy.replace(/<script type="application\/octet-stream" data-sb-engine="lib\/[\w.-]+\.pre\.[0-9a-f]+\.json">[^<]*<\/script>\n?/g, "");
+  check(!parts(older).some((p) => /\.pre\./.test(p)) && parts(older).length === 5 + libSrc.length, "(an older file: no Sage compiled modules)");
   const fo = join(dir, "older.html");
   writeFileSync(fo, older.replace('"nodes":[', '"mode":"sage","nodes":['));
   await open(fo);
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === ''))", 120000), "an older file made a Sage board runs online, the Sage library from the site: " + await caption());
-  check(requests.length > 0 && requests.every((u) => u === `${site}engine/${own.id}/sagebrush-precompiled.json`), "...only the Sage library: " + odd((u) => u === `${site}engine/${own.id}/sagebrush-precompiled.json`));
+  const sageLib = (u) => libSage.some((f) => u === `${site}engine/${own.id}/${f}`);
+  check(requests.length > 0 && requests.every(sageLib), "...only Sage's compiled modules: " + odd(sageLib));
 
   // without Python: its engine from the site, by its id
   await open(fb);
@@ -157,7 +164,7 @@ try {
   await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/polynomials.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const sageHtml = await ev("window.sagebrush.board.exportHtml({ python: true })");
-  check(parts(sageHtml).includes("sagebrush-precompiled.json"), "a Sage board's file with Python carries the Sage library: " + parts(sageHtml).join());
+  check(libSage.every((f) => parts(sageHtml).includes(f)), "a Sage board's file with Python carries Sage's compiled modules: " + parts(sageHtml).join());
   const fs = join(dir, "sage.html");
   writeFileSync(fs, sageHtml);
   console.log(`a Sage board with Python ${(sageHtml.length / 1e6).toFixed(1)} MB`);
