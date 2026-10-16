@@ -1289,9 +1289,15 @@ class Polynomial:
             [(-1/2, 1), (1, 2)]
             sage: (x^2 - 2).roots(), (x^2 - 2).roots(multiplicities=False)
             ([], [])
+            sage: sorted((x^2 - 2).roots(QuadraticField(2, 'a')), key=str)
+            [(-a, 1), (a, 1)]
         """
         R = ring if ring is not None else self._ring._base
         sa = _sa()
+        if type(R).__name__ == "NumberField_absolute" and self._ring._base in (ZZ, QQ):
+            # in a number field K: those of the polynomial over K (they were
+            # always [], the rational roots' path)
+            return R[self._ring._name](self).roots(multiplicities=multiplicities)
         import _sage_qqbar
         if (R is _sage_qqbar.QQbar or R is _sage_qqbar.AA) and self._ring._base in (ZZ, QQ):
             # QQbar / AA: exact roots, real ones first (increasing), then the
@@ -1312,6 +1318,9 @@ class Polynomial:
             from _sage_matrix import numeric_roots
             out = numeric_roots(self.list(), R)
             return out if multiplicities else [r for r, _ in out]
+        if R not in (ZZ, QQ):
+            # (any other ring got the rational roots: [] for a number field)
+            raise NotImplementedError("roots in %s are not available in sagebrush yet" % (R,))
         out = []
         for g, e in self.factor():
             if isinstance(g, Polynomial) and g.degree() == 1:
