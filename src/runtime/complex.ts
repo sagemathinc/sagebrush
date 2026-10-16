@@ -55,20 +55,105 @@ function cpow(a: [number, number], b: [number, number]): PyComplex {
 }
 export const complexPow = (x: number, y: number) => cpow([x, 0], [y, 0]);
 
+const isInf = (x: number) => x === Infinity || x === -Infinity;
+const isFin = Number.isFinite;
+const sgn = (one: boolean, x: number) => (x < 0 || Object.is(x, -0) ? (one ? -1 : -0) : one ? 1 : 0);
+const copysign0 = (x: number) => (x !== x ? 0 : x); // (a NaN becomes 0; C's copysign(0, nan) is +0 for these NaNs)
+
+// a * b, with C11 Annex G's recovery of infinities (as CPython 3.14's
+// _Py_c_prod): when both parts come out NaN but an operand is infinite, the
+// infinite one is reduced to its direction and the product taken again
+function cmul(ar: number, ai: number, br: number, bi: number): PyComplex {
+  const ac = ar * br, bd = ai * bi, ad = ar * bi, bc = ai * br;
+  let x = ac - bd, y = ad + bc;
+  if (x !== x && y !== y) {
+    let a = ar, b = ai, c = br, d = bi, recalc = false;
+    if (isInf(a) || isInf(b)) {
+      a = sgn(isInf(a), a);
+      b = sgn(isInf(b), b);
+      if (c !== c) c = copysign0(c);
+      if (d !== d) d = copysign0(d);
+      recalc = true;
+    }
+    if (isInf(c) || isInf(d)) {
+      c = sgn(isInf(c), c);
+      d = sgn(isInf(d), d);
+      if (a !== a) a = copysign0(a);
+      if (b !== b) b = copysign0(b);
+      recalc = true;
+    }
+    if (!recalc && (isInf(ac) || isInf(bd) || isInf(ad) || isInf(bc))) {
+      if (a !== a) a = copysign0(a);
+      if (b !== b) b = copysign0(b);
+      if (c !== c) c = copysign0(c);
+      if (d !== d) d = copysign0(d);
+      recalc = true;
+    }
+    if (recalc) {
+      x = Infinity * (a * c - b * d);
+      y = Infinity * (a * d + b * c);
+    }
+  }
+  return new PyComplex(x, y);
+}
+
+// a / b: Smith's algorithm, as CPython's _Py_c_quot, then (when both parts
+// are NaN) C11 Annex G's recovery of infinities and zeros, as CPython 3.14's
 function cdiv(a: [number, number], b: [number, number]): PyComplex {
   const [ar, ai] = a, [br, bi] = b;
-  // Smith's algorithm, as CPython's _Py_c_quot
   const abr = Math.abs(br), abi = Math.abs(bi);
+  let x: number, y: number;
   if (abr >= abi) {
     if (abr === 0) raise(T.ZeroDivisionError, "division by zero");
     const ratio = bi / br, denom = br + bi * ratio;
-    return new PyComplex((ar + ai * ratio) / denom, (ai - ar * ratio) / denom);
-  }
-  if (abi >= abr) {
+    x = (ar + ai * ratio) / denom;
+    y = (ai - ar * ratio) / denom;
+  } else if (abi >= abr) {
     const ratio = br / bi, denom = br * ratio + bi;
-    return new PyComplex((ar * ratio + ai) / denom, (ai * ratio - ar) / denom);
+    x = (ar * ratio + ai) / denom;
+    y = (ai * ratio - ar) / denom;
+  } else {
+    x = y = NaN;
   }
-  return new PyComplex(NaN, NaN);
+  if (x !== x && y !== y) [x, y] = recoverQuot(ar, ai, br, bi, x, y);
+  return new PyComplex(x, y);
+}
+// (real: a real dividend, whose absent imaginary part has no terms here
+// either, so a zero keeps its sign, as CPython 3.14's _Py_rc_quot)
+function recoverQuot(a: number, b: number, c: number, d: number, x: number, y: number, real = false): [number, number] {
+  if ((isInf(a) || isInf(b)) && isFin(c) && isFin(d)) {
+    a = sgn(isInf(a), a);
+    b = sgn(isInf(b), b);
+    return real ? [Infinity * (a * c), Infinity * (-a * d)] : [Infinity * (a * c + b * d), Infinity * (b * c - a * d)];
+  }
+  if ((isInf(c) || isInf(d)) && isFin(a) && isFin(b)) {
+    c = sgn(isInf(c), c);
+    d = sgn(isInf(d), d);
+    return real ? [0 * (a * c), 0 * (-a * d)] : [0 * (a * c + b * d), 0 * (b * c - a * d)];
+  }
+  return [x, y];
+}
+
+// a real a divided by a complex b, as CPython 3.14's _Py_rc_quot: Smith's
+// algorithm without the terms of a's (absent) imaginary part
+function rcdiv(a: number, b: [number, number]): PyComplex {
+  const [br, bi] = b;
+  const abr = Math.abs(br), abi = Math.abs(bi);
+  let x: number, y: number;
+  if (abr >= abi) {
+    if (abr === 0) raise(T.ZeroDivisionError, "division by zero");
+    const ratio = bi / br, denom = br + bi * ratio;
+    x = a / denom;
+    y = (-a * ratio) / denom;
+  } else if (abi >= abr) {
+    const ratio = br / bi, denom = br * ratio + bi;
+    x = (a * ratio) / denom;
+    y = -a / denom;
+  } else {
+    x = y = NaN;
+  }
+  if (x !== x && y !== y) [x, y] = recoverQuot(a, 0, br, bi, x, y, true);
+  return new PyComplex(x, y);
 }
 
 function part(x: number): string {
@@ -144,20 +229,31 @@ complexType.$kw = (pos: any[], names: string[], values: any[]) => {
 Ty.subclassable(complexType, PyComplex, ["re", "im"]);
 {
   const M = (name: string, f: any) => Ty.method(complexType, name, f);
-  const bin = (name: string, f: (a: [number, number], b: [number, number]) => PyComplex) => {
+  // (complex with a real operand, as CPython 3.14's mixed-mode arithmetic:
+  // the real is not made complex(r, 0), so no 0 term meets an infinity and
+  // a zero's sign is kept: complex(inf, 1) * 2 is (inf+2j))
+  const real = (x: any): number | undefined => (unbox(x) instanceof PyComplex ? undefined : O.fv(x));
+  const mixed = (name: string, cr: (c: [number, number], r: number) => PyComplex, rc: (r: number, c: [number, number]) => PyComplex, cc: (a: [number, number], b: [number, number]) => PyComplex) => {
     M(`__${name}__`, (a: any, b: any) => {
+      const r = real(b);
+      if (r !== undefined) return cr(toC(a)!, r);
       const y = toC(b);
-      return y === undefined ? NotImplemented : f(toC(a)!, y);
+      return y === undefined ? NotImplemented : cc(toC(a)!, y);
     });
     M(`__r${name}__`, (a: any, b: any) => {
+      const r = real(b);
+      if (r !== undefined) return rc(r, toC(a)!);
       const y = toC(b);
-      return y === undefined ? NotImplemented : f(y, toC(a)!);
+      return y === undefined ? NotImplemented : cc(y, toC(a)!);
     });
   };
-  bin("add", (a, b) => new PyComplex(a[0] + b[0], a[1] + b[1]));
-  bin("sub", (a, b) => new PyComplex(a[0] - b[0], a[1] - b[1]));
-  bin("mul", (a, b) => new PyComplex(a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]));
-  bin("truediv", cdiv);
+  mixed("add", (c, r) => new PyComplex(c[0] + r, c[1]), (r, c) => new PyComplex(r + c[0], c[1]), (a, b) => new PyComplex(a[0] + b[0], a[1] + b[1]));
+  mixed("sub", (c, r) => new PyComplex(c[0] - r, c[1]), (r, c) => new PyComplex(r - c[0], -c[1]), (a, b) => new PyComplex(a[0] - b[0], a[1] - b[1]));
+  mixed("mul", (c, r) => new PyComplex(c[0] * r, c[1] * r), (r, c) => new PyComplex(r * c[0], r * c[1]), (a, b) => cmul(a[0], a[1], b[0], b[1]));
+  mixed("truediv", (c, r) => {
+    if (r === 0) raise(T.ZeroDivisionError, "division by zero");
+    return new PyComplex(c[0] / r, c[1] / r);
+  }, rcdiv, cdiv);
   M("__pow__", (a: any, b: any, m: any = null) => {
     if (m !== null) raise(T.ValueError, "complex modulo");
     const y = toC(b);
