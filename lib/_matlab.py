@@ -809,9 +809,13 @@ def _qr_solve(A, B):
     k = min(m, n)
     norms = _col_norms(R)
     for j in range(k):
-        # (the remaining column of largest norm first)
+        # (the remaining column of largest norm first; norms within 1e-12 relative of the
+        # largest count as tied, and the first is taken, as LAPACK's idamax takes the first
+        # maximum: columns of equal norm in exact arithmetic, such as magic(8)'s fifth and
+        # sixth after two steps, must not be told apart by rounding in hypot)
         if j < n - 1:
-            q = j + int(np.argmax(norms[j:]))
+            mx = float(np.max(norms[j:]))
+            q = j + int(np.argmax(norms[j:] >= mx * (1 - 1e-12)))
             if q != j:
                 R[:, [j, q]] = R[:, [q, j]]
                 perm[[j, q]] = perm[[q, j]]

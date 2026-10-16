@@ -19,9 +19,10 @@ import * as F from "./format";
 import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
-import { glibcLog, glibcExp, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow } from "./libm";
+import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow } from "./libm";
 import { gemmBuffers, wasmUnary, wasmSort, wasmArgsort } from "./kernels";
 import * as FD from "./fdlibm";
+import * as CR from "./crmath";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
 
@@ -823,8 +824,8 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)) },
   fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)) },
   fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)) },
-  arctan2: { f: FD.atan2, out: "float" },
-  hypot: { f: FD.v8hypot, out: "float" },
+  arctan2: { f: CR.atan2, out: "float" },
+  hypot: { f: CR.hypot, out: "float" },
   copysign: { f: (x, y) => (Object.is(Math.sign(y), -0) || y < 0 ? -Math.abs(x) : Math.abs(x)), out: "float" },
   logaddexp: { f: (x, y) => { const m = Math.max(x, y); return m === -Infinity ? m : m + glibcLog1p(glibcExp(-Math.abs(x - y))); }, out: "float" },
   equal: { f: (x, y) => +(x === y), out: "bool", c: (a, b, c, d) => [+(a === c && b === d), 0] },
@@ -1037,24 +1038,25 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   cbrt: { f: FD.cbrt, float: true },
   // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
   exp: { f: glibcExp, c: cexp, float: true },
-  exp2: { f: (x) => 2 ** x, float: true },
+  // (as math.exp2: glibc's, not JavaScript's 2 ** x)
+  exp2: { f: glibcExp2, float: true },
   expm1: { f: FD.expm1, float: true },
   log: { f: glibcLog, c: clog, float: true },
-  log2: { f: FD.log2, float: true },
+  log2: { f: CR.log2, float: true },
   log10: { f: FD.log10, float: true },
   log1p: { f: glibcLog1p, float: true },
-  sin: { f: FD.sin, c: (a, b) => (b === 0 ? [FD.sin(a), Number.isFinite(a) ? FD.cos(a) * b : b] : [hmul(FD.sin(a), b, "cosh"), hmul(FD.cos(a), b, "sinh")]), float: true },
-  cos: { f: FD.cos, c: (a, b) => (b === 0 ? [FD.cos(a), Number.isFinite(a) ? -FD.sin(a) * b : -b] : [hmul(FD.cos(a), b, "cosh"), -hmul(FD.sin(a), b, "sinh")]), float: true },
-  tan: { f: FD.tan, float: true },
-  arcsin: { f: FD.asin, float: true },
-  arccos: { f: FD.acos, float: true },
-  arctan: { f: FD.atan, float: true },
+  sin: { f: CR.sin, c: (a, b) => (b === 0 ? [CR.sin(a), Number.isFinite(a) ? CR.cos(a) * b : b] : [hmul(CR.sin(a), b, "cosh"), hmul(CR.cos(a), b, "sinh")]), float: true },
+  cos: { f: CR.cos, c: (a, b) => (b === 0 ? [CR.cos(a), Number.isFinite(a) ? -CR.sin(a) * b : -b] : [hmul(CR.cos(a), b, "cosh"), -hmul(CR.sin(a), b, "sinh")]), float: true },
+  tan: { f: CR.tan, float: true },
+  arcsin: { f: CR.asin, float: true },
+  arccos: { f: CR.acos, float: true },
+  arctan: { f: CR.atan, float: true },
   sinh: { f: FD.sinh, float: true },
   cosh: { f: FD.cosh, float: true },
   tanh: { f: FD.tanh, float: true },
-  arcsinh: { f: FD.asinh, float: true },
-  arccosh: { f: FD.acosh, float: true },
-  arctanh: { f: FD.atanh, float: true },
+  arcsinh: { f: CR.asinh, float: true },
+  arccosh: { f: CR.acosh, float: true },
+  arctanh: { f: CR.atanh, float: true },
   deg2rad: { f: (x) => (x * Math.PI) / 180, float: true },
   rad2deg: { f: (x) => (x * 180) / Math.PI, float: true },
   floor: { f: Math.floor, keepInt: true },
@@ -1148,10 +1150,10 @@ function roundHalfEven(x: number): number {
 // Tight loops for unary operations on real data: contiguous or strided.
 const UN_EXPR: Record<string, string> = Obj.table({
   negative: "-v", positive: "v", absolute: "Math.abs(v)", square: "v * v", sqrt: "Math.sqrt(v)", cbrt: "FD.cbrt(v)",
-  exp: "EXP(v)", exp2: "POW(2, v)", expm1: "FD.expm1(v)", log: "LOG(v)", log2: "FD.log2(v)", log10: "FD.log10(v)",
-  log1p: "LOG1P(v)", sin: "FD.sin(v)", cos: "FD.cos(v)", tan: "FD.tan(v)", arcsin: "FD.asin(v)",
-  arccos: "FD.acos(v)", arctan: "FD.atan(v)", sinh: "FD.sinh(v)", cosh: "FD.cosh(v)", tanh: "FD.tanh(v)",
-  arcsinh: "FD.asinh(v)", arccosh: "FD.acosh(v)", arctanh: "FD.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
+  exp: "EXP(v)", exp2: "EXP2(v)", expm1: "FD.expm1(v)", log: "LOG(v)", log2: "CR.log2(v)", log10: "FD.log10(v)",
+  log1p: "LOG1P(v)", sin: "CR.sin(v)", cos: "CR.cos(v)", tan: "CR.tan(v)", arcsin: "CR.asin(v)",
+  arccos: "CR.acos(v)", arctan: "CR.atan(v)", sinh: "FD.sinh(v)", cosh: "FD.cosh(v)", tanh: "FD.tanh(v)",
+  arcsinh: "CR.asinh(v)", arccosh: "CR.acosh(v)", arctanh: "CR.atanh(v)", floor: "Math.floor(v)", ceil: "Math.ceil(v)",
   trunc: "Math.trunc(v)", isnan: "+(v !== v)", isfinite: "+(v - v === 0)", isinf: "+(v === Infinity || v === -Infinity)",
   deg2rad: "v * (Math.PI / 180)", rad2deg: "v * (180 / Math.PI)", logical_not: "+(v === 0)",
 });
@@ -1173,7 +1175,7 @@ function unaryKernel(op: string, contiguous: boolean): any {
            for (; d >= 0; d--) { p += st[d]; if (++idx[d] < shape[d]) break; p -= st[d] * shape[d]; idx[d] = 0; }
            if (d < 0) return;
          }`;
-    k = new Function("EXP", "LOG", "LOG1P", "FD", "POW", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p, FD, glibcPow);
+    k = new Function("EXP", "LOG", "LOG1P", "FD", "POW", "CR", "EXP2", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p, FD, glibcPow, CR, glibcExp2);
     unKernels.set(key, k);
   }
   return k;
@@ -1189,7 +1191,7 @@ export function unary(op: string, x: any): any {
   }
   if (op === "absolute" && a.dt.cplx) {
     const out = empty(a.shape, a.dt === D.complex64 ? D.float32 : D.float64);
-    loop1(a.shape, a.strides, a.offset, (p, k) => (out.data[k] = FD.v8hypot(a.data[2 * p], a.data[2 * p + 1])));
+    loop1(a.shape, a.strides, a.offset, (p, k) => (out.data[k] = CR.hypot(a.data[2 * p], a.data[2 * p + 1])));
     return out;
   }
   if (op === "negative" && a.dt.kind === "b") raise(T.TypeError, "The numpy boolean negative, the `-` operator, is not supported, use the `~` operator or the logical_not function instead.");
