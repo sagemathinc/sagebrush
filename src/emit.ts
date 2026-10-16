@@ -155,23 +155,47 @@ export class Emitter {
     }
     return this.globalNames;
   }
-  loadRes(r: Resolution, id: string): string {
+  // (nameLoad: a class body's read past its namespace, LOAD_NAME's, whose
+  // globals are their storage)
+  loadRes(r: Resolution, id: string, nameLoad = false): string {
     switch (r.kind) {
       case "local":
-        return this.fn.assigned.has(id) ? js(id) : `(${js(id)} !== undefined ? ${js(id)} : unboundLocal(${q(id)}))`;
+        return this.fn.assigned.has(id) && !this.innerNonlocals(this.fn.scope).has(id) ? js(id) : `(${js(id)} !== undefined ? ${js(id)} : unboundLocal(${q(id)}))`;
       case "free":
         return `(${js(id)} !== undefined ? ${js(id)} : unboundFree(${q(id)}))`;
       case "global": {
         const t = this.temp();
-        if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${this.gns(id)}${prop(id)}) !== undefined ? ${t} : $B${prop(id)})`;
-        return `((${t} = ${this.gns(id)}${prop(id)}) !== undefined ? ${t} : gname(${q(id)}))`;
+        // (the globals' loads, $GL, where they are $G: LOAD_GLOBAL's; then
+        // the code's builtins, $B)
+        const ns = this.gns(id) === "$G" ? (nameLoad ? "$G" : "$GL") : "$g";
+        if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : (${t} = $B${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
+        return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
       }
       case "class":
-        return `($ns.has(${q(id)}) ? $ns.get(${q(id)}) : ${this.loadRes(r.outer, id)})`;
+        return `($ns.has(${q(id)}) ? $ns.get(${q(id)}) : ${this.loadRes(r.outer, id, true)})`;
       case "classcell":
         return `classCellGet(${this.cellOf(r.scope)})`;
     }
   }
+  // The names scopes inside `scope` declare nonlocal: a call can unbind
+  // them (`nonlocal x; del x`), so an assignment seen here does not make
+  // them bound afterwards
+  innerNonlocals(scope: Scope): Set<string> {
+    let r = this.innerNonlocalsOf.get(scope);
+    if (r === undefined) {
+      r = new Set<string>();
+      const walk = (s: Scope) => {
+        for (const c of s.children.values()) {
+          for (const n of c.nonlocals) r!.add(n);
+          walk(c);
+        }
+      };
+      walk(scope);
+      this.innerNonlocalsOf.set(scope, r);
+    }
+    return r;
+  }
+  innerNonlocalsOf = new Map<Scope, Set<string>>();
   // A statement storing `value` into a name.
   storeName(id: string, value: string): string {
     const r = resolve(this.fn.scope, id);
@@ -384,7 +408,7 @@ export class Emitter {
       // otherwise, and CPython looks it up as any name)
       const t = this.temp();
       const id = (f as Extract<A.Expr, { k: "Name" }>).id;
-      return `((${t} = ${this.load(id)}) === R.introspectionBuiltins${prop(id)} ? ${intro} : ${this.plainCall(e, t)})`;
+      return `((${t} = ${this.load(id)}) === R.originalBuiltins${prop(id)} ? ${intro} : ${this.plainCall(e, t)})`;
     }
     const consumed = this.consumingCall(e);
     if (consumed !== null) return consumed;
@@ -468,7 +492,7 @@ export class Emitter {
     const fast = this.comprehension(comp, kind);
     const slow = this.comprehension(comp);
     const wrap: Record<string, string> = { tuple: `tuple(${fast})`, list: fast, set: fast, frozenset: `R.newSet(${fast}, true)`, sum: fast, any: fast, all: fast, sorted: `${fn}(${fast})`, min: `${fn}(${fast})`, max: `${fn}(${fast})` };
-    return `((${fn} = ${this.load(f.id)}) === $B${prop(f.id)} ? ${wrap[f.id]} : callObj(${fn}, [${slow}]))`;
+    return `((${fn} = ${this.load(f.id)}) === R.originalBuiltins${prop(f.id)} ? ${wrap[f.id]} : callObj(${fn}, [${slow}]))`;
   }
 
   // super(), with no arguments, naming the builtin
@@ -822,7 +846,7 @@ export class Emitter {
       this.w(`${f} = ${this.load("range")};`);
       const [start, stop, stp] = args.length === 1 ? ["0", args[0], "1"] : args.length === 2 ? [args[0], args[1], "1"] : args;
       const ints = args.map((a) => `typeof ${a} === "number" && Number.isInteger(${a})`).join(" && ");
-      this.w(`if (${f} === $B.range && ${ints}${args.length === 3 ? ` && ${stp} !== 0` : ""}) { ${i} = ${start}; ${end} = ${stop}; ${step} = ${stp}; ${it} = null; }`);
+      this.w(`if (${f} === R.originalBuiltins.range && ${ints}${args.length === 3 ? ` && ${stp} !== 0` : ""}) { ${i} = ${start}; ${end} = ${stop}; ${step} = ${stp}; ${it} = null; }`);
       this.w(`else ${it} = iter(callObj(${f}, [${args.join(", ")}]));`);
       this.w(`for (;;) {`);
       this.indent++;
@@ -974,11 +998,15 @@ export class Emitter {
     const bases = this.items(st.bases);
     const kwNames = st.keywords.filter((k) => k.arg !== null).map((k) => q(k.arg!));
     const kwValues = st.keywords.filter((k) => k.arg !== null).map((k) => this.ex(k.value));
+    // (the builtins' __build_class__ first, CPython's LOAD_BUILD_CLASS,
+    // before the bases and the body)
+    const bc = this.temp();
+    this.w(`${bc} = R.buildClassOf($B);`);
     const b = this.temp();
     this.w(`${b} = ${bases};`);
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
-      this.w(`$ns.set("__module__", R.classModule($G)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
+      this.w(`$ns.set("__module__", R.classModule($G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
       if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(body[0].value.value.v)});`);
       for (const s of body) this.stmt(s);
     });
@@ -995,7 +1023,7 @@ export class Emitter {
     this.line = st.line;
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
-    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}]${cell ? `, ${cell}` : ""});`);
+    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}], ${cell ?? "undefined"}, ${bc});`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
@@ -1115,8 +1143,9 @@ export class Emitter {
       "(function module$$($g, R) {",
       '"use strict";',
       `const {${RUNTIME_NAMES.join(", ")}} = R;`,
-      "const $B = R.builtins;",
       "const $G = R.realGlobals($g);",
+      "const $GL = R.globalLoads($G);",
+      "const $B = R.builtinsOf($G);",
       ...this.hoisted,
     ];
     if (this.fn.temps.length) head.push(`let ${this.fn.temps.join(", ")};`);

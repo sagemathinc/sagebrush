@@ -1,0 +1,63 @@
+UnboundLocalError: cannot access local variable 'x' where it is not associated with a value
+2
+NameError: cannot access free variable 'x' where it is not associated with a value in enclosing scope
+NameError: cannot access free variable 'x' where it is not associated with a value in enclosing scope
+set f
+get print
+get f
+get x
+get len
+(42, 2)
+set fh
+get fh
+get h
+NameError: name 'h' is not defined
+set g
+get print
+get g
+get y
+5
+get x
+1 42
+get print
+get x
+42
+get print
+get range
+get x
+[42]
+set C
+get print
+get C
+1
+set f
+get f
+get missing
+NameError: name 'missing' is not defined
+NameError: name 'print' is not defined
+L L
+ImportError: __import__ not found
+ImportError: __import__ not found
+imp P [('os', None, 0), ('os', ('path',), 0)]
+2
+bget len
+bget len
+2 3
+NameError: __build_class__ not found
+BN
+dict
+S
+AssertionError: 
+NameError: name 'ValueError' is not defined
+None
+NameError: name '__import__' is not defined
+TypeError: 'NoneType' object is not subscriptable
+TypeError: 'int' object is not subscriptable
+'MA'
+NameError: name 'len' is not defined
+range ['custom', 'custom']
+sum ['custom']
+tuple ['custom']
+sorted ['custom']
+any ['custom']
+NameError: name 'len' is not defined

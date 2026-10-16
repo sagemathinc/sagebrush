@@ -388,9 +388,28 @@ export function unboundName(k: string): never {
 }
 // A class body's __module__: its __name__, as LOAD_NAME there, the globals'
 // (not exec's locals) and then the builtins'
-export function classModule(g: any): any {
+export function classModule(g: any, b: any): any {
   const v = g.__name__;
-  return v !== undefined ? v : B.gname("__name__");
+  return v !== undefined ? v : M.builtinName(b, "__name__");
+}
+// The globals a function's code reads (LOAD_GLOBAL): a dict subclass's
+// through its __getitem__, a KeyError meaning the builtins next, as
+// CPython's when the globals aren't an exact dict; the storage otherwise,
+// and for writes and deletes always
+export function globalLoads(G: any): any {
+  const d = G[Obj.NS_DICT];
+  if (d === undefined || Obj.typeOf(d) === T.dict) return G;
+  return new Proxy(Object.create(null), {
+    get: (_t, k) => {
+      if (typeof k !== "string") return G[k];
+      try {
+        return O.getitem(d, k);
+      } catch (e) {
+        if (Obj.isinstance(e, T.KeyError)) return undefined;
+        throw e;
+      }
+    },
+  });
 }
 // `del name` at a module's top level, or of a name declared global
 export function delName(ns: any, k: string): void {
@@ -578,10 +597,13 @@ B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefine
 B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
 B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");
 B.builtins.locals = Obj.builtin(() => raise(T.RuntimeError, "locals() called indirectly is not supported"), "locals");
-// The builtins the compiler runs in place: their own functions, which a
-// call's guard compares with, not the builtins module's names, which code
+// The builtins the compiler runs in place (introspection calls, consuming
+// calls of a generator expression, `for` over range): their own functions,
+// which a call's guard compares with, not the builtins' names, which code
 // can rebind (CORR-FBF-3)
-const introspectionBuiltins = Object.freeze({ globals: B.builtins.globals, locals: B.builtins.locals, vars: B.builtins.vars, dir: B.builtins.dir, eval: B.builtins.eval, exec: B.builtins.exec });
+const originalBuiltins: any = Object.create(null);
+for (const n of ["globals", "locals", "vars", "dir", "eval", "exec", "tuple", "list", "set", "frozenset", "sum", "any", "all", "sorted", "min", "max", "range"]) originalBuiltins[n] = B.builtins[n];
+Object.freeze(originalBuiltins);
 
 // ------------------------------------------------------------------ classes
 
@@ -589,8 +611,14 @@ const introspectionBuiltins = Object.freeze({ globals: B.builtins.globals, local
 // by the time it is called, so it receives a stand-in body function.
 export const defaultBuildClass = Obj.builtin((..._a: any[]) => raise(T.NotImplementedError, "calling __build_class__ directly is not supported"), "__build_class__");
 B.builtins.__build_class__ = defaultBuildClass;
-export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[], cell?: Ty.PyCell): any {
-  const bc = B.builtins.__build_class__;
+// The __build_class__ of a class statement's builtins, CPython's
+// LOAD_BUILD_CLASS
+export function buildClassOf(b: any): any {
+  const bc = b.__build_class__;
+  if (bc === undefined) raise(T.NameError, "__build_class__ not found");
+  return bc;
+}
+export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   const cls = Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
   // CPython's __build_class__: type.__new__ must have set the class cell
@@ -768,7 +796,11 @@ export const R: any = {
   localsDict,
   sortedKeys,
   delName,
-  introspectionBuiltins,
+  originalBuiltins,
+  builtinsOf: M.builtinsOf,
+  builtinName: M.builtinName,
+  globalLoads,
+  buildClassOf,
   classModule,
   unboundName,
   execIn,
