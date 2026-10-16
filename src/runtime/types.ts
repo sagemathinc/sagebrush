@@ -1957,7 +1957,10 @@ function codecArgs(array: boolean, encoding: any, errors: any): [any, any] {
   };
   return [str(encoding, "encoding"), str(errors, "errors")];
 }
-function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
+// (`reserve`, if given, is told each length the result grows to before it
+// is allocated or extended: bytearray.__init__ under an export refuses there,
+// after one item of an iterable, as CPython's, never materializing it all)
+function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false, reserve?: (n: number) => void): Uint8Array {
   [encoding, errors] = codecArgs(array, encoding, errors);
   if (x !== undefined && typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
   if (typeof x !== "string") {
@@ -1974,6 +1977,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
   if (O.isPyInt(x)) {
     if (typeof x === "bigint" || Number(x) > 2 ** 32) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
     if (Number(x) < 0) raise(T.ValueError, "negative count");
+    reserve?.(Number(x));
     return new Uint8Array(Number(x));
   }
   const buf = O.bufferOf(x);
@@ -2007,7 +2011,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
       throw e;
     }
     if (n === undefined || (typeof n === "object" && "bad" in n)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
-    return toBytes(n, undefined, undefined, array);
+    return toBytes(n, undefined, undefined, array, reserve);
   }
   const it = O.iter(x);
   const out: number[] = [];
@@ -2019,6 +2023,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
     if (n === undefined) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
     if (typeof n === "object") raise(T.TypeError, `__index__ returned non-int (type ${typeName(n.bad)})`);
     if (n < 0 || n > 255) raise(T.ValueError, array ? "byte must be in range(0, 256)" : "bytes must be in range(0, 256)");
+    reserve?.(out.length + 1);
     out.push(Number(n));
   }
   return Uint8Array.from(out);
@@ -2529,7 +2534,11 @@ subclassable(bytearray, PyByteArray, ["a", "n"]);
     codecArgs(true, encoding, errors);
     if (b.n !== 0) checkResizable(b);
     b.n = 0;
-    const a = toBytes(source, encoding, errors, true);
+    // (under an export, refused as soon as it would grow: an exact list or
+    // tuple before its items are converted, another iterable after its
+    // first item, a count before its allocation, as CPython's; HARD-CBE-1)
+    if (b.$exports > 0 && (typeOf(source) === T.list || typeOf(source) === T.tuple) && source.length > 0) checkResizable(b);
+    const a = toBytes(source, encoding, errors, true, b.$exports > 0 ? (n) => { if (n !== 0) checkResizable(b); } : undefined);
     if (a.length !== 0) checkResizable(b);
     b.a = a;
     b.n = a.length;

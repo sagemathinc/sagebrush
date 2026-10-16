@@ -73,3 +73,39 @@ for K in (bytearray, B):
         b = K(b'abc')
         out.append("%s %s" % (t(lambda: eval(c)), bytes(b)))
     print(K.__name__, out)
+# under an export (binascii's, held while newline's __bool__ runs), __init__
+# refuses after an iterable's first item, and a count before its allocation
+# (HARD-CBE-1)
+import binascii
+import itertools
+taken = []
+
+
+def endless():
+    for i in itertools.count():
+        taken.append(i)
+        yield 1
+
+
+e = bytearray()
+
+
+class LS(list):
+    pass
+
+
+class X:
+    def __bool__(self):
+        out = []
+        for src in (endless(), 10 ** 9, iter([]), 0, b'', [300], ['a'], (1, 'a'), [], (), LS([300]), iter([300]), range(3)):
+            try:
+                e.__init__(src)
+                out.append('ok %d' % len(e))
+            except Exception as ex:
+                out.append(type(ex).__name__)
+        out.append(len(taken))
+        print(out)
+        return True
+
+
+binascii.b2a_base64(e, newline=X())
