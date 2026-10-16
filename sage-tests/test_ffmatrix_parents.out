@@ -1,0 +1,40 @@
+K L zero mul :: TypeError
+K L disjoint mul :: TypeError
+K L nonzero mul :: TypeError
+K L empty mul :: TypeError
+K K mul :: ([a], True)
+GF7 GF5 zero mul :: TypeError
+GF7 GF7 mul :: [1]
+AA QQbar mul :: (Algebraic Field, [1 + 1.414213562373095?*I, 1.414213562373095?, I, 1])
+QQbar AA mul :: (Algebraic Field, [1, 1.414213562373095?, I, 1 + 1.414213562373095?*I])
+AA QQbar real mul :: (Algebraic Field, [1])
+AA QQbar empty mul :: Algebraic Field
+K L zero add :: TypeError
+K L disjoint add :: TypeError
+K L nonzero add :: TypeError
+K L empty add :: TypeError
+K K add :: ([a + 1], True)
+GF7 GF5 zero add :: TypeError
+GF7 GF7 add :: [1]
+AA QQbar add :: (Algebraic Field, [2, 1.414213562373095?, I, 2])
+QQbar AA add :: (Algebraic Field, [2, 1.414213562373095?, I, 2])
+AA QQbar real add :: (Algebraic Field, [2])
+AA QQbar empty add :: Algebraic Field
+K L zero sub :: TypeError
+K L disjoint sub :: TypeError
+K L nonzero sub :: TypeError
+K L empty sub :: TypeError
+K K sub :: ([a - 1], True)
+GF7 GF5 zero sub :: TypeError
+GF7 GF7 sub :: [5]
+AA QQbar sub :: (Algebraic Field, [0, 1.414213562373095?, -I, 0])
+QQbar AA sub :: (Algebraic Field, [0, -1.414213562373095?, I, 0])
+AA QQbar real sub :: (Algebraic Field, [0])
+AA QQbar empty sub :: Algebraic Field
+AA mat QQbar vec :: (Algebraic Field, [I + 2])
+K mat L vec :: TypeError
+K L augment :: TypeError
+K L stack :: TypeError
+GF7 GF5 augment :: TypeError
+QQbar AA augment :: (Algebraic Field, [I, 2])
+K K stack :: [a, 1]
