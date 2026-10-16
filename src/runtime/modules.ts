@@ -7,6 +7,7 @@ import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
+import * as CR from "./crmath";
 import * as PG from "./pygamma";
 import { floatRepr, intDigits } from "./format";
 
@@ -324,18 +325,18 @@ newBuiltinModule("math", (m) => {
   unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x, "expected a nonnegative input, got %s");
   unary("exp", glibcExp);
   unary("expm1", FD.expm1);
-  unary("sin", FD.sin, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
-  unary("cos", FD.cos, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
-  unary("tan", FD.tan, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
-  unary("asin", FD.asin, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
-  unary("acos", FD.acos, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
-  unary("atan", FD.atan);
+  unary("sin", CR.sin, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("cos", CR.cos, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("tan", CR.tan, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("asin", CR.asin, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
+  unary("acos", CR.acos, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
+  unary("atan", CR.atan);
   unary("sinh", FD.sinh);
   unary("cosh", FD.cosh);
   unary("tanh", FD.tanh);
-  unary("asinh", FD.asinh);
-  unary("acosh", FD.acosh, (x) => x >= 1 || x !== x, "expected argument value not less than 1, got %s");
-  unary("atanh", FD.atanh, (x) => (x > -1 && x < 1) || x !== x, "expected a number between -1 and 1, got %s");
+  unary("asinh", CR.asinh);
+  unary("acosh", CR.acosh, (x) => x >= 1 || x !== x, "expected argument value not less than 1, got %s");
+  unary("atanh", CR.atanh, (x) => (x > -1 && x < 1) || x !== x, "expected a number between -1 and 1, got %s");
   unary("fabs", Math.abs);
   unary("log1p", glibcLog1p, (x) => x > -1 || x !== x, "expected argument value > -1, got %s");
   // (x times CPython's constants, so no intermediate overflows, CORR-447-4;
@@ -385,19 +386,22 @@ newBuiltinModule("math", (m) => {
     if (den === 0) raise(T.ZeroDivisionError, "division by zero");
     return O.mkfloat(num / den);
   });
-  fn(m, "log2", (x: any) => O.mkfloat(logOf(x, FD.log2, 1)));
+  fn(m, "log2", (x: any) => O.mkfloat(logOf(x, CR.log2, 1)));
   fn(m, "log10", (x: any) => O.mkfloat(logOf(x, FD.log10, Math.log10(2))));
   fn(m, "pow", (x: any, y: any) => {
     const a = F(x), b = F(y);
-    // (0 to a negative finite power: a pole; to -inf, inf, CORR-447-5)
-    if (a === 0 && b < 0 && b !== -Infinity) domain();
-    if (a < 0 && !Number.isInteger(b) && Number.isFinite(b)) domain();
+    // (errors only for finite arguments, as CPython's: 0 to a negative finite power is a pole,
+    // pow(0, -inf) is inf (CORR-447-5), pow(-inf, 0.5) inf)
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      if (a === 0 && b < 0) domain();
+      if (a < 0 && !Number.isInteger(b)) domain();
+    }
     const r = glibcPow(a, b);
     if (!Number.isFinite(r) && Number.isFinite(a) && Number.isFinite(b)) range();
     return O.mkfloat(r);
   });
-  fn(m, "atan2", (y: any, x: any) => O.mkfloat(FD.atan2(F(y), F(x))));
-  fn(m, "hypot", (...xs: any[]) => O.mkfloat(FD.v8hypot(...xs.map(F))));
+  fn(m, "atan2", (y: any, x: any) => O.mkfloat(CR.atan2(F(y), F(x))));
+  fn(m, "hypot", (...xs: any[]) => O.mkfloat(CR.hypotN(xs.map(F))));
   fn(m, "copysign", (x: any, y: any) => {
     // (through the bits: y's sign bit, a NaN's too, on x's magnitude)
     const dv = new DataView(new ArrayBuffer(16));
@@ -707,7 +711,7 @@ newBuiltinModule("math", (m) => {
   fn(m, "dist", (p: any, q: any) => {
     const a = O.toArray(p).map(F), b = O.toArray(q).map(F);
     if (a.length !== b.length) raise(T.ValueError, "both points must have the same number of dimensions");
-    return O.mkfloat(FD.v8hypot(...a.map((v, i) => v - b[i])));
+    return O.mkfloat(CR.hypotN(a.map((v, i) => v - b[i])));
   });
 });
 
