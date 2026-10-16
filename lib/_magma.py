@@ -395,11 +395,13 @@ def _define_top(g, name, f):
 class MSeq(list):
     """A Magma sequence: 1-based, printed [ 1, 2, 3 ]."""
 
-    __slots__ = ("universe", "sample")
+    __slots__ = ("universe", "sample", "_inf")
 
     def __init__(self, it=(), universe=None, sample=None):
         list.__init__(self, it)
         self.universe = universe
+        # (the universe Magma infers for it, when known: _inferred)
+        self._inf = None
         # an element that stands for the universe when none is declared, kept
         # when the sequence is emptied (Magma's sequence keeps its universe)
         self.sample = sample if sample is not None or not len(self) else self[0]
@@ -446,14 +448,16 @@ class MRange:
 class MSet:
     """A Magma set (also indexed sets {@ @} and multisets {* *})."""
 
-    __slots__ = ("items", "keys", "kind", "universe", "range")
+    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf")
 
     def __init__(self, it=(), kind="set", universe=None):
         self.items, self.keys, self.kind, self.universe, self.range = [], {}, kind, universe, None
+        self._inf = None
         for x in it:
             self.add(x)
 
     def add(self, x):
+        _widen(self, x)
         k = _key(x)
         if self.kind == "multi":
             if k in self.keys:
@@ -627,7 +631,10 @@ def _seq(items, universe=None):
         _ff_universe(items, "[ ... ]")
     else:
         items = _into_universe(items, universe, "seq")
-    return MSeq(items, universe)
+    t = MSeq(items, universe)
+    if universe is None:
+        t._inf = _infer_from(items)  # (Magma fixes it as the sequence is made)
+    return t
 
 
 def _set_universe(items):
@@ -641,15 +648,24 @@ def _set_universe(items):
 
 
 def _set(items, universe=None):
-    return MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
+    m = MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
+    if universe is None:
+        m._inf = _infer_from(m.items)
+    return m
 
 
 def _iset(items, universe=None):
-    return MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
+    m = MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
+    if universe is None:
+        m._inf = _infer_from(m.items)
+    return m
 
 
 def _mset(items, universe=None):
-    return MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
+    m = MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
+    if universe is None:
+        m._inf = _infer_from(m.items)
+    return m
 
 
 def _still_range(v):
@@ -792,9 +808,12 @@ def _own(v, name=None, depth=0):
         if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
             raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
     if isinstance(v, MSeq):
-        return MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
+        t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
+        t._inf = v._inf  # (a copy keeps the inferred universe)
+        return t
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
+        s._inf = v._inf
         s.items = [_own(x, None, depth + 1) for x in v.items]
         s.keys = {k: (list(val) if v.kind == "multi" else val) for k, val in v.keys.items()}
         s.range = v.range
@@ -876,16 +895,60 @@ def _admit_selection(i, n, pos, outside):
             raise MagmaError("a selection of more than %d elements is not supported yet" % _COLLECT_MAX, "'[]'", True, pos)
 
 
+_NOINF = object()  # (an inferred universe that is neither the integers nor the rationals)
+
+
+def _infer_from(items):
+    """The universe Magma infers for these elements: the integers, the
+    rationals with a rational among them, _NOINF for anything else, None for
+    none at all (undefined elements don't count)."""
+    u, frac = None, False
+    for x in items:
+        if x is _UNDEF:
+            continue
+        if isinstance(x, bool) or not isinstance(x, (int, _Fraction)):
+            return _NOINF
+        u = _ZZ
+        frac = frac or isinstance(x, _Fraction)
+    return _QQ if frac else u
+
+
+def _widen(s, x):
+    """A known inferred universe of s as x joins it: Magma's never narrows,
+    and a rational widens the integers (a new kind makes it unknown)."""
+    u = getattr(s, "_inf", None)
+    if u is None or u is _NOINF or x is _UNDEF:
+        return
+    if isinstance(x, _Fraction) and not isinstance(x, bool):
+        s._inf = _QQ
+    elif isinstance(x, bool) or not isinstance(x, int):
+        s._inf = _NOINF
+
+
+def _inferred(s, items):
+    """s's inferred universe: kept on s from when it was made (Magma fixes
+    it then, widening only), or found once from its elements and kept
+    (HARD-927-1: a selection doesn't scan s each time)."""
+    u = getattr(s, "_inf", None)
+    if u is None:
+        u = _infer_from(items)
+        if u is None:
+            return None
+        s._inf = u
+    return None if u is _NOINF else u
+
+
 def _selection_universe(s, items):
     """The universe a selection from s keeps: s's declared one, or the one
-    Magma infers for s, the rationals for integers and rationals together
-    (CORR-451-1; Universe of {@ 2, 5/2 @}[[1]] is the Rational Field)."""
+    Magma infers for s, the integers, or the rationals with a rational among
+    them (CORR-451-1, CORR-927-1; Universe of {@ 2, 5/2 @}[[1]] is the
+    Rational Field, of {@ 2, 5 @}[[]] the Integer Ring)."""
     u = getattr(s, "universe", None)
     if u is not None:
         return u
-    if items and all(isinstance(x, (int, _Fraction)) and not isinstance(x, bool) for x in items) and any(isinstance(x, _Fraction) for x in items):
-        return _QQ
-    return None
+    if isinstance(s, MRange):
+        return _ZZ
+    return _inferred(s, items)
 
 
 def _index(s, i, pos=None):
@@ -903,11 +966,11 @@ def _index(s, i, pos=None):
             if isinstance(s, MTuple):
                 raise bad()
             n = s.size() if isinstance(s, MRange) else len(s)
-            universe = _selection_universe(s, s) if isinstance(s, MSeq) else None
+            universe = _selection_universe(s, s) if isinstance(s, (MSeq, MRange)) else None
             if n == 0:
                 if (i.size() if isinstance(i, MRange) else len(i)) == 0:
                     return MSeq([], universe)
-                if universe is None and isinstance(s, MSeq):
+                if getattr(s, "universe", None) is None and isinstance(s, MSeq):
                     # (only an untyped empty sequence: for an empty range or
                     # an empty sequence with a universe, the selection is
                     # outside it, CORR-451-2)
@@ -1012,6 +1075,7 @@ def _assign_path(obj, path, val):
         while len(obj) < i:
             obj.append(_UNDEF)
         obj[i - 1] = _assign_path(obj[i - 1] if obj[i - 1] is not _UNDEF else None, path[1:], val)
+        _widen(obj, obj[i - 1])  # (its inferred universe widens, never narrows)
         return obj
     if isinstance(obj, MTuple):
         l = list(obj)
@@ -4178,6 +4242,7 @@ def Append(s, x):
     x = _lift("Append", s, x, "Cannot coerce element into the universe")
     s = _own(s) if isinstance(s, MSeq) else MSeq(s)
     s.append(x)
+    _widen(s, x)
     return s
 
 
@@ -4297,6 +4362,7 @@ def Include(s, x):
     s = _own(MSeq(s))
     if not any(_cmpeq(x, y) for y in s):
         s.append(x)
+        _widen(s, x)
     return s
 
 
@@ -4325,6 +4391,7 @@ def Insert(s, i, x):
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
     s = _own(s) if isinstance(s, MSeq) else MSeq(s)
     s.insert(i - 1, x)
+    _widen(s, x)
     return s
 
 

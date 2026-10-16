@@ -70,3 +70,10 @@ A := {@ 2, 5/2 @}; Universe(A[[1]]); Universe(A[1..0]);
 B := [ 2, 5/2 ]; Universe(B[[1]]); Universe(B[1..0]);
 R := [1..0]; R[[1]];
 R[1..1];
+// the inferred universe of integers too, and of a sequence with holes
+Universe(A[[]]); Universe(A[2..1]);
+P := [2/3]; P[3] := 5/4; Universe(P[2..2]); Universe(P[[]]);
+C := [2,5]; Universe(C[[]]); Universe(C[[1]]);
+Q := [1..2]; Universe(Q[[]]); Universe(Q[[1]]);
+Universe(R[1..0]);
+G := {@ 2/3, 1 @}; Universe(G[[]]);
