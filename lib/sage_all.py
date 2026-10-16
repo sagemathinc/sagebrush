@@ -767,6 +767,10 @@ class Rational(_Fraction):
         complex); refused where the 53-bit field cannot hold the root."""
         R = RealField(prec)
         prec = int(R.prec())  # (the field's: prec=float(53) broke the shifts)
+        if prec > _SQRT_MAX_PREC:
+            # admitted before the integer square root (prec=10^8 ran for
+            # minutes in 480 MB: the review's HARD-862-1)
+            raise NotImplementedError("the square root of a rational at %d bits is past sagebrush's limit of %d bits" % (prec, _SQRT_MAX_PREC))
         n, d = self._numerator, self._denominator
         if n == 0:
             r = R(0)
@@ -908,6 +912,11 @@ class Rational(_Fraction):
             TypeError: inverse_mod of a rational is not defined: use Mod(numerator, m)/denominator
         """
         raise TypeError("inverse_mod of a rational is not defined: use Mod(numerator, m)/denominator")
+
+
+# The highest precision of Rational.sqrt(prec=...) (2^16 bits takes about a
+# second; 2^18 bits, 17 s).
+_SQRT_MAX_PREC = 1 << 16
 
 
 def _intdiv(a, b):
