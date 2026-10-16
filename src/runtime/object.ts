@@ -92,6 +92,7 @@ export function builtinType(name: string, bases: PyType[], call: (...args: any[]
   const cls = checkArity(call, name, false) as PyType;
   cls.$ctor = null;
   finishType(cls, name, bases, new Map(), module);
+  cls.$dict.set("__new__", inheritedNew(cls));
   T[name] = cls;
   return cls;
 }
@@ -418,7 +419,7 @@ function construct(cls: PyType, args: any[]): any {
 export function constructPlain(cls: PyType, args: any[]): any {
   if (cls.$ctor === null) return cls(...args);
   let c = (cls as any).$ni;
-  if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: lookupType(cls, "__new__"), init: lookupType(cls, "__init__") };
+  if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: effectiveNew(lookupType(cls, "__new__")), init: lookupType(cls, "__init__") };
   const nw = c.nw;
   let o: any;
   if (nw !== undefined && nw !== objectNew) {
@@ -445,7 +446,7 @@ function constructKw(cls: PyType, pos: any[], names: string[], values: any[]): a
 
 export function constructPlainKw(cls: PyType, pos: any[], names: string[], values: any[]): any {
   if (cls.$ctor === null) return callKw(cls, pos, names, values);
-  const nw = lookupType(cls, "__new__");
+  const nw = effectiveNew(lookupType(cls, "__new__"));
   let o: any;
   if (nw !== undefined && nw !== objectNew) {
     o = callKw(nw, [cls, ...pos], names, values);
@@ -465,10 +466,39 @@ export const objectInit = pyfn(function __init__(self: any, ...args: any[]) {
   return null;
 }, "__init__");
 export const objectNew = pyfn(function __new__(cls: PyType, ...args: any[]) {
+  if (cls === undefined) raise(T.TypeError, "object.__new__(): not enough arguments");
   if (!isType(cls)) raise(T.TypeError, `object.__new__(X): X is not a type object (${typeName(cls)})`);
   if (cls.$ctor === null) raise(T.TypeError, `object.__new__(${cls.$name}) is not safe, use ${cls.$name}.__new__()`);
   return new cls.$ctor();
 }, "__new__");
+objectNew.$static = true; // (a builtin __new__ is static: never bound to an instance, as CPython's)
+
+// A builtin type's __new__ until it has its own (an allocator, types.ts):
+// it makes only the type's subtypes ("dict.__new__(object): object is not a
+// subtype of dict", as CPython's), through the next __new__ in its MRO
+function inheritedNew(owner: PyType): any {
+  const nw: any = pyfn(function __new__(cls: any, ...args: any[]) {
+    if (cls === undefined) raise(T.TypeError, `${owner.$name}.__new__(): not enough arguments`);
+    if (!isType(cls)) raise(T.TypeError, `${owner.$name}.__new__(X): X is not a type object (${typeName(cls)})`);
+    if (!cls.$mro.includes(owner)) raise(T.TypeError, `${owner.$name}.__new__(${cls.$name}): ${cls.$name} is not a subtype of ${owner.$name}`);
+    return effectiveNew(nw)(cls, ...args);
+  }, "__new__");
+  nw.$allocator = owner;
+  nw.$inherited = true;
+  nw.$static = true;
+  return nw;
+}
+// The __new__ an inherited one calls (constructing an instance of a subtype
+// needs no check)
+function effectiveNew(nw: any): any {
+  while (nw !== undefined && nw.$inherited === true) {
+    const mro = nw.$allocator.$mro;
+    let next: any;
+    for (let i = 1; i < mro.length && next === undefined; i++) next = mro[i].$dict.get("__new__");
+    nw = next;
+  }
+  return nw;
+}
 
 // ------------------------------------------------------------------ attributes
 
@@ -512,9 +542,19 @@ export function hasInstanceDict(o: any): boolean {
   return o !== null && typeof o === "object" && o.$cls !== undefined && o.$cls.$ctor !== null;
 }
 
+// d, found on t for the instance o.  (None is JS null, which a
+// descriptor's __get__ reads as access on the class: for the instance None,
+// as on its type NoneType, a method is bound and a get/set descriptor gives
+// its value, as CPython's lookup does; None.__class__ was the descriptor
+// itself, and so isinstance(None, an ABC) a TypeError)
 function descrGet(d: any, o: any, t: PyType): any {
-  if (typeof d === "function") return d.$pyfn === true && o !== null && d.$static !== true ? bindMethod(d, o) : d;
+  const none = o === null && t === T.NoneType;
+  if (typeof d === "function") return d.$pyfn === true && (o !== null || none) && d.$static !== true ? bindMethod(d, o) : d;
   if (d !== null && typeof d === "object") {
+    if (none && typeOf(d) === T.getset_descriptor) {
+      if (!isinstance(o, d.owner)) raise(T.TypeError, `descriptor '${d.name}' for '${d.owner.$name}' objects doesn't apply to a 'NoneType' object`);
+      return d.get(o);
+    }
     const g = lookupType(typeOf(d), "__get__");
     if (g !== undefined) return g(d, o, t);
   }
@@ -694,7 +734,7 @@ export function setattr(o: any, name: string, v: any): void {
 
 export function genericSetattr(o: any, name: string, v: any, t: PyType) {
   if (reservedName(name)) reservedAttr(o, name);
-  if (implField(o, name)) reservedAttr(o, name);
+  if (o !== null && implField(o, name)) reservedAttr(o, name);
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
     const s = lookupType(typeOf(d), "__set__");
@@ -703,6 +743,9 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
       return;
     }
   }
+  // (None has no __dict__: CPython's AttributeError, after a data
+  // descriptor's own answer, such as __class__'s TypeError)
+  if (o === null) raise(T.AttributeError, `'NoneType' object has no attribute '${name}' and no __dict__ for setting new attributes`);
   if (hasInstanceDict(o)) {
     putAttr(o, name, v);
     return;
