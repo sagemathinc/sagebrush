@@ -913,14 +913,51 @@ def _infer_from(items):
 
 
 def _settle(s):
-    """s just became nonempty without a known universe (an empty sequence
-    appended to): its universe is now fixed, from its elements, as Magma
-    fixes it.  A known universe never changes: Magma doesn't widen it, it
-    refuses what doesn't go in (CORR-D689-1)."""
+    """s has no known universe yet (it was empty, or only undefined): its
+    universe is fixed from its first defined elements, as Magma fixes it,
+    even after holes (CORR-BCFD-2).  Once known it never changes: Magma
+    doesn't widen it, it refuses what doesn't go in (CORR-D689-1).  (Found
+    once: while nothing is defined a scan finds only holes.)"""
     if getattr(s, "_inf", None) is None:
-        items = s.items if isinstance(s, MSet) else s
-        if len(items) == 1:
-            s._inf = _infer_from(items)
+        s._inf = _infer_from(s.items if isinstance(s, MSet) else s)
+
+
+def _admit_element(obj, val, pos):
+    """val as an element of the sequence obj, coerced into obj's fixed
+    universe, or refused before anything is written ("Sequence mutation
+    failed", CORR-D689-1).  A sequence of sequences: its element universe
+    is a sequence universe with its own universe, so a whole new element
+    must be a sequence whose elements go into the other elements' universe,
+    and it takes that universe (CORR-BCFD-3)."""
+    refuse = lambda: MagmaError("Sequence mutation failed", ":=", False, pos)
+    _settle(obj)  # (one made elsewhere: its universe fixed from what it holds)
+    w = _universe(obj, True)
+    d = _udesc(w[1]) if w is not None and w[0] == "struct" else None
+    if d is not None:
+        y = _into(val, d, w[1])
+        if y is _NOCOERCE:
+            raise refuse()
+        return y
+    # (its first defined element says what its elements are: Magma fixed
+    # them all in one universe)
+    c = next((x for x in obj if x is not _UNDEF), None)
+    if isinstance(c, MSeq):
+        if not isinstance(val, (MSeq, MRange)):
+            raise refuse()
+        u = c.universe if c.universe is not None else (c._inf if c._inf is _ZZ or c._inf is _QQ else None)
+        du = _udesc(u) if u is not None else None
+        if du is None:
+            return val
+        out = []
+        for x in val:
+            y = x if x is _UNDEF else _into(x, du, u)
+            if y is _NOCOERCE:
+                raise refuse()
+            out.append(y)
+        t = MSeq(out, c.universe, getattr(c, "sample", None))
+        t._inf = c._inf
+        return t
+    return val
 
 
 def _as_seq(s):
@@ -1079,19 +1116,26 @@ def _assign_path(obj, path, val):
     if isinstance(obj, MSeq):
         if not isinstance(i, int) or i < 1:
             raise MagmaError("Index %s should be positive" % _str(i))
+        # (everything is checked, and the deeper parts assigned, before obj
+        # grows or changes: a refused write leaves the whole path as it
+        # was, CORR-BCFD-1)
+        if len(path) == 1:
+            new = val if val is _DELETE else _own(_admit_element(obj, val, pos))
+        else:
+            child = obj[i - 1] if i <= len(obj) else _UNDEF
+            if child is _UNDEF and path[1][0] == "idx":
+                # (an index into an element that isn't there: Magma's words)
+                empty = not len(obj) and obj.universe is None
+                raise MagmaError("Sequence mutation failed" if empty else "Bad indexed assign", ":=", False, pos)
+            try:
+                new = _assign_path(None if child is _UNDEF else child, path[1:], val)
+            except MagmaError as e:
+                if e.where == ":=" and pos is not None:
+                    e.pos = pos  # (said at the first "[", as Magma says it)
+                raise
         while len(obj) < i:
             obj.append(_UNDEF)
-        if len(path) == 1 and val is not _DELETE:
-            # (an element: coerced into the sequence's fixed universe, or
-            # refused before anything is written, CORR-D689-1)
-            w = _universe(obj, True)
-            d = _udesc(w[1]) if w is not None and w[0] == "struct" else None
-            if d is not None:
-                y = _into(val, d, w[1])
-                if y is _NOCOERCE:
-                    raise MagmaError("Sequence mutation failed", ":=", False, pos)
-                val = y
-        obj[i - 1] = _assign_path(obj[i - 1] if obj[i - 1] is not _UNDEF else None, path[1:], val)
+        obj[i - 1] = new
         _settle(obj)
         return obj
     if isinstance(obj, MTuple):
@@ -2995,7 +3039,8 @@ def _str1(v, indent, col, tail):
             chunks.append((c.strip() + tail, False))
             return _flow(chunks, col, indent), True
         pad = " " * (indent + 4)
-        inner = [pad + _str(x, indent + 4, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
+        # (an undefined element prints as undef, as in a one-line sequence)
+        inner = [pad + ("undef" + ("," if k < len(raw) - 1 else "") if x is _UNDEF else _str(x, indent + 4, None, "," if k < len(raw) - 1 else "")) for k, x in enumerate(raw)]
         return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
         return v._str(indent), False
