@@ -368,8 +368,13 @@ try {
   await ev(`sagebrush.open(${JSON.stringify(idA5)})`);
   await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idA5)}`, 10000);
   await ev("window.__runA5");
-  await sleep(1500);
-  const a5 = [await out(0), await out(1), await ev("sagebrush.notebook.graph().map((c) => c.state).join(',')")];
+  // (until the cell reaches its end, shown or stale, rather than a fixed
+  // wait: under load it is still "interrupted" after 1.5 s; at most 20 s)
+  let a5;
+  for (const t5 = Date.now(); ; await sleep(200)) {
+    a5 = [await out(0), await out(1), await ev("sagebrush.notebook.graph().map((c) => c.state).join(',')")];
+    if ((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]) || Date.now() - t5 > 20000) break;
+  }
   ok((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]), `F5: switching away and back during a run: the cell shows its output, or is stale (${JSON.stringify(a5)})`);
 
   // third review, F16: verify keeps which clip path an SVG reference names
