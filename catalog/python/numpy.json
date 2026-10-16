@@ -1911,9 +1911,14 @@
       {
         "code": "np.interp([-45, 45, 315, 405], [0, 90, 180, 270], [0, 2, 0, -2], period=360)",
         "expected": "array([-1.,  1., -1.,  1.])\n"
+      },
+      {
+        "code": "np.interp(0.25, [3], [8], period=float('inf'))",
+        "expected": "NotImplementedError: numpy.interp with a period that is not finite is not supported in Sagebrush\n"
       }
     ],
     "differs": [
+      "A period that is not finite (inf, -inf, nan) is refused (NotImplementedError); NumPy gives an answer from its own arithmetic on it.",
       "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
       "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
