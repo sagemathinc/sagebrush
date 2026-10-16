@@ -27,6 +27,8 @@ test("unsupported scoped flags and ASCII IGNORECASE backreferences are refused (
     "re.fullmatch(r'(a)\\1', 'aA', re.A | re.I)",
     "re.fullmatch(r'(?P<g>a)(?P=g)', 'aA', re.A | re.I)",
     "re.fullmatch(rb'(a)\\1', b'aA', re.I)",
+    "re.fullmatch(r'(?u:\\w)', 'é', re.A)",
+    "re.fullmatch(r'(?a)(?u:\\w)', 'é')",
   ];
   const code = ["import re"].concat(cases.map((e) => `try:\n    print(${e})\nexcept Exception as x:\n    print(type(x).__name__)`)).join("\n");
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trimEnd().split("\n");
