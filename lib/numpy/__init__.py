@@ -15,6 +15,20 @@ from _numpy import ndarray, dtype
 
 __version__ = "2.5.1+sagebrush"
 
+
+def _removed_alias(f, name, replacement):
+    # (a name NumPy 2.0 removed: kept, as old scripts use it, with the
+    # DeprecationWarning NumPy 1.x gave, naming what replaces it)
+    def alias(*args, **kwargs):
+        import warnings
+
+        warnings.warn(f"`np.{name}` was removed in NumPy 2.0; use `{replacement}` instead", DeprecationWarning, stacklevel=2)
+        return f(*args, **kwargs)
+
+    alias.__name__ = alias.__qualname__ = name
+    alias.__doc__ = f"Removed in NumPy 2.0 (warns): use {replacement}."
+    return alias
+
 pi = _math.pi
 e = _math.e
 euler_gamma = 0.5772156649015329
@@ -394,7 +408,19 @@ def asarray(a, dtype=None, order=None, *, copy=None, like=None):
     return _np.asarray(a, dtype)
 
 
-asanyarray = asfarray = asarray
+asanyarray = asarray
+
+
+def _asfarray(a, dtype=None):
+    # (NumPy 1.x's: an array of an inexact type, float64 unless dtype is one)
+    d = _np_dtype("float64") if dtype is None else _np_dtype(dtype)
+    if d.kind not in "fc":
+        d = _np_dtype("float64")
+    return asarray(a, dtype=d)
+
+
+_np_dtype = dtype
+asfarray = _removed_alias(_asfarray, "asfarray", "np.asarray(a, dtype=float)")
 
 
 def _contiguous(a, forward):
@@ -716,7 +742,8 @@ def around(a, decimals=0, out=None):
     return r if a.ndim else r[()]
 
 
-round = round_ = around
+round = around
+round_ = _removed_alias(around, "round_", "np.round")
 
 
 def clip(a, a_min=None, a_max=None, out=None, **kw):
@@ -819,7 +846,7 @@ def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where
     return _out(r, out)
 
 
-product = prod
+product = _removed_alias(prod, "product", "np.prod")
 
 
 def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
@@ -1174,7 +1201,7 @@ def vstack(tup, *, dtype=None):
     return concatenate([atleast_2d(a) for a in tup], axis=0, dtype=dtype)
 
 
-row_stack = vstack
+row_stack = _removed_alias(vstack, "row_stack", "np.vstack")
 
 
 def hstack(tup, *, dtype=None):
@@ -1470,7 +1497,7 @@ def isin(element, test_elements, assume_unique=False, invert=False):
     return ~r if invert else r
 
 
-in1d = isin
+in1d = _removed_alias(isin, "in1d", "np.isin")
 
 
 def intersect1d(a, b, assume_unique=False):
@@ -1566,7 +1593,7 @@ def trapezoid(y, x=None, dx=1.0, axis=-1):
     return sum(d * (y[tuple(hi)] + y[tuple(lo)]) / 2.0, axis=axis)
 
 
-trapz = trapezoid
+trapz = _removed_alias(trapezoid, "trapz", "np.trapezoid")
 
 
 def cross(a, b, axisa=-1, axisb=-1, axisc=-1, axis=None):
