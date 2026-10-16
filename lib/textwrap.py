@@ -356,11 +356,15 @@ class TextWrapper:
         converted to space.
         """
         # Sagebrush's strings count such a character as two, so the widths
-        # would be wrong and a long word could be cut inside one.
-        for _c in text:
-            if ord(_c) > 0xFFFF:
-                raise NotImplementedError("textwrap: text with characters beyond U+FFFF (such as %r) "
-                                          "is not supported in Sagebrush yet" % _c)
+        # would be wrong and a long word could be cut inside one: the text
+        # and every string whose width counts, each as a plain str (so a
+        # subclass's __iter__ can't hide one).
+        for _s in (text, self.initial_indent, self.subsequent_indent, self.placeholder):
+            if isinstance(_s, str):
+                for _c in str.__add__("", _s):
+                    if ord(_c) > 0xFFFF:
+                        raise NotImplementedError("textwrap: text with characters beyond U+FFFF (such as %r) "
+                                                  "is not supported in Sagebrush yet" % _c)
         chunks = self._split_chunks(text)
         if self.fix_sentence_endings:
             self._fix_sentence_endings(chunks)
