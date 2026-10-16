@@ -36,9 +36,9 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "Accepts every argument of Python 3.14's signature; checked by its signature and examples, not reviewed line by line."
     ],
-    "status": "partial",
+    "status": "full",
     "upstream_version": "Python 3.14"
   }
 ]
