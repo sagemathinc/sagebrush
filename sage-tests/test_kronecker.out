@@ -1,0 +1,12 @@
+1 -1 -1 0
+[1, 0, 1, 0] [0, -1, 0, 1, 0, 1, 0, -1, 0]
+[0, -1, 0, 0, 0, 1, 0, 1, 0, 0, 0, -1, 0]
+-1 -1 -1
+True
+451320
+[0, 1, -1, 1, 1, 1, -1, -1, -1, 1, -1] 0 -1
+[0, 1, 1, 0, 1, 0, 0, -1, 1, 0, 0, -1, 0, -1, -1] 1 1
+ValueError: p must be a prime
+ValueError: p must be odd
+ValueError: p must be a prime
+ValueError: second input must be odd, 20 is not odd

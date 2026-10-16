@@ -38,6 +38,7 @@ __all__ = [
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
+    "kronecker_symbol", "kronecker", "legendre_symbol", "jacobi_symbol",
     "binomial", "factorial", "fibonacci", "catalan_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
@@ -2115,6 +2116,108 @@ def power_mod(a, k, m):
         (1, 5)
     """
     return pow(a, k, m)
+
+
+def _kronecker_int(x):
+    import operator
+    try:
+        return operator.index(x)
+    except TypeError:
+        raise TypeError("unable to convert %s to an integer" % (x,)) from None
+
+
+def kronecker_symbol(a, n):
+    """The Kronecker symbol (a/n) of integers a and n: the Jacobi symbol for
+    odd positive n, extended by (a/2) (0 for even a, 1 for a = +-1 mod 8, -1
+    for a = +-3 mod 8), (a/-1) = sign of a and (a/0) = [a = +-1].
+
+    EXAMPLES::
+
+        sage: kronecker_symbol(2, 7), kronecker_symbol(3, -8), kronecker_symbol(-1, -1)
+        (1, -1, -1)
+        sage: [kronecker_symbol(a, 0) for a in (-1, 0, 1, 5)]
+        [1, 0, 1, 0]
+        sage: kronecker(5, 2), ZZ(6).kronecker(4)
+        (-1, 0)
+        sage: kronecker_symbol(1/2, 7)
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert 1/2 to an integer
+    """
+    a, n = _kronecker_int(a), _kronecker_int(n)
+    if n == 0:
+        return Integer(1 if abs(a) == 1 else 0)
+    t = 1
+    if n < 0:
+        n = -n
+        if a < 0:
+            t = -t
+    v = (n & -n).bit_length() - 1
+    if v:
+        if a % 2 == 0:
+            return Integer(0)
+        n >>= v
+        if v % 2 and a % 8 in (3, 5):
+            t = -t
+    # the Jacobi symbol (a/n), n odd and positive, by reciprocity
+    a %= n
+    while a:
+        while a % 2 == 0:
+            a //= 2
+            if n % 8 in (3, 5):
+                t = -t
+        a, n = n, a
+        if a % 4 == 3 and n % 4 == 3:
+            t = -t
+        a %= n
+    return Integer(t if n == 1 else 0)
+
+
+kronecker = kronecker_symbol
+
+
+def legendre_symbol(a, p):
+    """The Legendre symbol (a/p) for an odd prime p: 0 when p divides a, 1
+    when a is a nonzero square mod p, -1 otherwise.
+
+    EXAMPLES::
+
+        sage: legendre_symbol(2, 7), legendre_symbol(3, 7), legendre_symbol(14, 7)
+        (1, -1, 0)
+        sage: legendre_symbol(2, 9)
+        Traceback (most recent call last):
+        ...
+        ValueError: p must be a prime
+        sage: legendre_symbol(3, 2)
+        Traceback (most recent call last):
+        ...
+        ValueError: p must be odd
+    """
+    a, p = _kronecker_int(a), _kronecker_int(p)
+    if not is_prime(p):
+        raise ValueError("p must be a prime")
+    if p == 2:
+        raise ValueError("p must be odd")
+    return kronecker_symbol(a, p)
+
+
+def jacobi_symbol(a, b):
+    """The Jacobi symbol (a/b) for odd b: the product of the Legendre
+    symbols (a/p) over the primes p dividing b, with multiplicity.
+
+    EXAMPLES::
+
+        sage: jacobi_symbol(5, 21), jacobi_symbol(2, 15), jacobi_symbol(0, 1)
+        (1, 1, 1)
+        sage: jacobi_symbol(5, 20)
+        Traceback (most recent call last):
+        ...
+        ValueError: second input must be odd, 20 is not odd
+    """
+    a, b = _kronecker_int(a), _kronecker_int(b)
+    if b % 2 == 0:
+        raise ValueError("second input must be odd, %s is not odd" % b)
+    return kronecker_symbol(a, b)
 
 
 def crt(a, b, m=None, n=None):
