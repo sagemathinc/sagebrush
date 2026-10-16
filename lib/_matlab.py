@@ -4929,6 +4929,8 @@ def nchoosek_(n, k):
         # class's result past its range, or past the 53 bits Sagebrush's 64-bit integers
         # keep, is refused rather than saturated or rounded)
         cls = class_(n) if class_(n) != "double" else kcls
+        if class_(n) != kcls and "double" not in (class_(n), kcls):
+            raise _err("nchoosek: N and K must be the same class, or one of them double.")
         if cls in _INTS:
             if c > _INTS[cls][2]:
                 raise _err("nchoosek: the result %d is outside %s's range: not supported in Sagebrush." % (c, cls))
@@ -10096,12 +10098,14 @@ def _setfn(nargout, op, a, b, opts):
     # is refused rather than ignored)
     flags = []
     distinct = True
+    missing_opt = False
     o = list(opts)
     i = 0
     while i < len(o):
         if _istext(o[i]):
             t = _text(o[i]).lower()
             if t == "treatmissingasdistinct" and op == "unique" and i + 1 < len(o):
+                missing_opt = True
                 v = o[i + 1]
                 distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
                 i += 2
@@ -10112,6 +10116,9 @@ def _setfn(nargout, op, a, b, opts):
         else:
             raise _err("%s: options must be text; a %s option is not supported." % (op, class_(o[i])))
         i += 1
+    if missing_opt and "legacy" in flags:
+        # (unique's page: TreatMissingAsDistinct is not supported with 'legacy')
+        raise _err("unique: TreatMissingAsDistinct cannot be used with 'legacy'.")
     rows = "rows" in flags
     stable = "stable" in flags
     ka, A = _set_items(a, rows)

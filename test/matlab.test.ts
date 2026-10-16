@@ -2099,3 +2099,16 @@ test("abs of an integer class's minimum saturates, as MATLAB's; int64's is refus
     tryIt("abs(intmin('int64'))"), tryIt("-intmin('int64')"),
   ].join("\n")), ["127 32767 2147483647 5 7", "int8", "uint16", "refused", "refused"]);
 });
+
+test("nchoosek's N and K the same class or one double; unique's TreatMissingAsDistinct refused with 'legacy' (CORR-24A-1, CORR-24A-2)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    tryIt("nchoosek(int8(10), uint8(3))"), tryIt("nchoosek(single(5), int8(2))"),
+    tryIt("nchoosek(int8(10), int8(3))"), tryIt("nchoosek(int8(10), 3)"), tryIt("nchoosek(10, single(3))"),
+    tryIt("unique([1 1], 'legacy', 'TreatMissingAsDistinct', false)"), tryIt("unique([1 1], 'legacy')"),
+    tryIt("unique([1 NaN], 'TreatMissingAsDistinct', false)"),
+  ].join("\n")), ["refused", "refused", "ran", "ran", "ran", "refused", "ran", "ran"]);
+});
