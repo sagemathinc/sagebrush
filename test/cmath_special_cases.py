@@ -68,3 +68,38 @@ for name, z in [('atan', complex(1e308, 0.)), ('atanh', complex(1e308, 0.)), ('a
         print(name, z, pack(getattr(cmath, name)(z)))
     except Exception as e:
         print(name, z, type(e).__name__)
+# rect's and isclose's real arguments as PyFloat_AsDouble: a float, an int,
+# __float__ (which must return a float) or __index__
+
+
+class F:
+    def __float__(self):
+        return 2.0
+
+
+class I:
+    def __index__(self):
+        return 2
+
+
+class Bad:
+    def __float__(self):
+        return 'x'
+
+
+class BigI:
+    def __index__(self):
+        return 10 ** 400
+
+
+class FS(float):
+    pass
+
+
+for c in ("cmath.rect(F(), F())", "cmath.rect(I(), I())", "cmath.isclose(2, 2, rel_tol=F(), abs_tol=I())", "cmath.rect(Bad(), 1)",
+          "cmath.rect('a', 1)", "cmath.rect(10 ** 400, 0)", "cmath.rect(BigI(), 0)", "cmath.isclose(1, 1, rel_tol='x')",
+          "cmath.rect(True, I())", "cmath.rect(FS(1.5), 0)", "cmath.isclose(1, 1.0000001, rel_tol=FS(1e-6))", "cmath.isclose(1, 2, abs_tol=Bad())"):
+    try:
+        print(c, pack(eval(c)) if not isinstance(eval(c), bool) else eval(c))
+    except Exception as e:
+        print(c, type(e).__name__, e)
