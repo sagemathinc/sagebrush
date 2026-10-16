@@ -8505,6 +8505,14 @@ def clear_select(fn, tokens, defined, protected=()):
                 chosen = [w]
             elif w in ("all", "variables", "classes", "java"):
                 chosen = defined + [p for p in protected if p not in defined]
+            elif w == "global":
+                # (clear global: the global variables go, from the global store and from
+                # this workspace; a function's own links to them can't be undone exactly,
+                # so a function that declares a global or persistent is refused)
+                if protected:
+                    raise _err("clear global inside a function that declares global or persistent variables is not supported.")
+                _globals.clear()
+                chosen = []
             else:
                 chosen = []
         elif any(w in _CLEAR_ITEMTYPES for w in words) and not flags:

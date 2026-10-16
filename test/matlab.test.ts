@@ -1622,8 +1622,19 @@ test("clearvars -except and -regexp, and clear with patterns or computed names i
   // (refused, not done wrongly: a function's global or persistent, and options Sagebrush doesn't have)
   assert.deepEqual(run([
     tryIt("g1()"), tryIt("g2()"), tryIt("g3()"), tryIt("clearvars -global x"), tryIt("clear -bogus x"),
+    // (clear global in a function with its own global: refused, in each form)
+    tryIt("g4()"), tryIt("g5()"), tryIt("g6()"),
+    "function g4()\n global G\n G = 7;\n clear global\nend",
+    "function g5()\n global G\n G = 7;\n clear('global')\nend",
+    "function g6()\n global G\n G = 7; n = 'global';\n clear(n)\nend",
     "function g1()\n global G\n G = 7;\n clear G\nend",
     "function g2()\n persistent P\n P = 7;\n clear\nend",
     "function g3()\n global G\n G = 1; ab = 2;\n clear a* G*\nend",
-  ].join("\n")), ["refused", "refused", "refused", "refused", "refused"]);
+  ].join("\n")), Array(8).fill("refused"));
+  // (clear global in a function without globals of its own: the global store is cleared)
+  assert.deepEqual(run([
+    "global H\nH = 7; zap(); disp(readback())",
+    "function zap()\n clear global\nend",
+    "function r = readback()\n global H\n r = isempty(H);\nend",
+  ].join("\n")), ["   1"]);
 });
