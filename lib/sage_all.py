@@ -7,6 +7,12 @@ module supplies Rational and a handful of Sage's number theory functions.
 """
 
 import math as _math
+import sys as _sys_limit
+
+# (as Sage: not CPython's 4300-digit limit on an int's decimal conversions;
+# Magma mode, through this module, the same.  Sagebrush's own ceiling of
+# 4,000,000 digits, src/runtime/format.ts, remains)
+_sys_limit.set_int_max_str_digits(0)
 from fractions import Fraction as _Fraction
 
 __all__ = [

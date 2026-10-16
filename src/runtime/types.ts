@@ -8,7 +8,7 @@ import {
   hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -424,9 +424,19 @@ method(methodType, "__hash__", (m: any) => (O.id(m.$self) / 32) ^ O.id(m.$func))
 const moduleType = objectType("module", [object], new Map(), "builtins");
 T.module = moduleType;
 method(moduleType, "__repr__", (m: any) => `<module '${m.__name__}'>`);
+// (as CPython's module.__dir__: the module's own __dir__() if it defines
+// one, else the names in its __dict__; not the attributes of its type)
+method(moduleType, "__dir__", (m: any) => {
+  if (Object.prototype.hasOwnProperty.call(m, "__dir__")) return callObj(m.__dir__, []);
+  return O.toArray(instanceDict(m));
+});
 method(moduleType, "__init__", (m: any, name: string, doc: any = null) => {
   m.__name__ = name;
   m.__doc__ = doc;
+  // (as CPython's module(): these too, None until an import sets them)
+  m.__package__ = null;
+  m.__loader__ = null;
+  m.__spec__ = null;
   return null;
 });
 export function newModule(name: string): any {
@@ -606,7 +616,32 @@ const RuntimeError = exc("RuntimeError", Exception);
 exc("NotImplementedError", RuntimeError);
 exc("RecursionError", RuntimeError);
 exc("PythonFinalizationError", RuntimeError);
-const SyntaxError = exc("SyntaxError", Exception);
+// (as CPython's: SyntaxError(msg, (filename, lineno, offset, text[,
+// end_lineno, end_offset])) sets those attributes, and str() adds the
+// file's base name and the line when they are known)
+const SyntaxError = exc("SyntaxError", Exception, (c) => {
+  method(c, "__init__", (self: any, ...args: any[]) => {
+    self.args = tuple(args);
+    self.msg = args.length >= 1 ? args[0] : null;
+    for (const k of ["filename", "lineno", "offset", "text", "end_lineno", "end_offset", "print_file_and_line"]) self[k] = null;
+    if (args.length === 2) {
+      const info = O.toArray(args[1]);
+      if (info.length !== 4 && info.length !== 6) raise(T.IndexError, "tuple index out of range");
+      [self.filename, self.lineno, self.offset, self.text] = info;
+      if (info.length === 6) [self.end_lineno, self.end_offset] = info.slice(4);
+    }
+    return null;
+  });
+  method(c, "__str__", (self: any) => {
+    const msg = str(self.msg ?? null);
+    const file = typeof self.filename === "string" ? self.filename.slice(self.filename.lastIndexOf("/") + 1) : null;
+    const line = O.isPyInt(self.lineno) && typeof self.lineno !== "boolean" ? str(self.lineno) : null;
+    if (file !== null && line !== null) return `${msg} (${file}, line ${line})`;
+    if (file !== null) return `${msg} (${file})`;
+    if (line !== null) return `${msg} (line ${line})`;
+    return msg;
+  });
+});
 exc("IndentationError", SyntaxError);
 exc("TabError", (T as any).IndentationError);
 exc("SystemError", Exception);
@@ -641,15 +676,32 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
     }
   } else if (pre in prefixes && prefixes[pre] === base) t = t.slice(2);
   if (t.startsWith("_")) t = t.slice(1);
+  const pow2 = (base & (base - 1)) === 0;
+  // (Sagebrush's own ceiling, before the text is scanned or copied: even
+  // with an underscore between every two digits it has too many)
+  if (!pow2 && t.length > 2 * HARD_MAX_DIGITS) hardLimit("");
   if (!/^[0-9a-zA-Z]+(_[0-9a-zA-Z]+)*$/.test(t)) return undefined;
-  t = t.replace(/_/g, "");
-  let v = 0n;
-  const B = BigInt(base);
-  for (const ch of t.toLowerCase()) {
-    const d = parseInt(ch, 36);
-    if (Number.isNaN(d) || d >= base) return undefined;
-    v = v * B + BigInt(d);
+  t = t.replace(/_/g, "").toLowerCase();
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    const d = c <= 57 ? c - 48 : c - 87;
+    if (d >= base) return undefined;
   }
+  // (CPython's limit on decimal conversions: every base but the powers of 2)
+  const m = intDigits.max;
+  if (m > 0 && !pow2 && t.length > m)
+    raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`);
+  if (!pow2 && t.length > HARD_MAX_DIGITS) hardLimit(t.length);
+  // (powers of 2 natively, in linear time; the others by halves, with Stop
+  // tested between the pieces)
+  let v: bigint;
+  if (base === 16 || base === 8 || base === 2) v = BigInt((base === 16 ? "0x" : base === 8 ? "0o" : "0b") + t);
+  else if (pow2) {
+    const bits = Math.log2(base);
+    let b = "";
+    for (let i = 0; i < t.length; i++) b += parseInt(t[i], base).toString(2).padStart(bits, "0");
+    v = BigInt("0b" + b);
+  } else v = parseDigits(t, base);
   return O.normBig(neg ? -v : v);
 }
 
@@ -660,7 +712,8 @@ export function intCall(x: any = 0, base: any = undefined): any {
     if (b !== 0 && (b < 2 || b > 36)) raise(T.ValueError, "int() base must be >= 2 and <= 36, or 0");
     const s = typeof x === "string" ? x : Buffer.from(x.a.subarray(0, x.n)).toString("latin1");
     const v = parseIntLiteral(s, b);
-    if (v === undefined) raise(T.ValueError, `invalid literal for int() with base ${b}: ${repr(x)}`);
+    // (the repr cut at 200 characters, as CPython's %.200R)
+    if (v === undefined) raise(T.ValueError, `invalid literal for int() with base ${b}: ${repr(x).slice(0, 200)}`);
     return v;
   }
   if (typeof x === "number") {

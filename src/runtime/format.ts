@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout, PrimBox } from "./object";
-import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice } from "./ops";
+import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
 import * as FD from "./fdlibm";
 
 const isInt = Number.isInteger;
@@ -39,8 +39,123 @@ function decompose(x: number): [bigint, number] {
   return [m | (1n << 52n), e - 1075];
 }
 
+// CPython's limit on an int's decimal conversions (sys.set_int_max_str_digits;
+// 0: none).  Python mode keeps CPython's default; Sage, Magma and MATLAB set
+// 0 when their libraries load (lib/sage_all.py, lib/_magma.py, lib/_matlab.py).
+export const intDigits = { max: 4300 };
+
+// Sagebrush's own ceiling on those conversions, which no setting lifts (0
+// included): past it they are refused, so one stays within seconds.  Below
+// it a large conversion runs in pieces, testing for Stop between them
+// (HARD-606-1).
+export const HARD_MAX_DIGITS = 4_000_000;
+
+export function hardLimit(digits: number | string): never {
+  raise(T.ValueError, `Exceeds Sagebrush's limit (${HARD_MAX_DIGITS} digits) for integer string conversion${typeof digits === "number" ? `: value has ${digits} digits` : ""}; no setting raises this limit`);
+}
+
+// powers[b] = [b^k, b^2k, b^4k, ...] for the pieces (k digits each at the
+// bottom), made as needed.  Only the first SHARED levels (up to 16,000
+// digits, a few KB each) are kept between conversions; larger powers are
+// one conversion's own (local), so memory doesn't grow with each large
+// conversion in a new base (HARD-50F-1).
+const PIECE = 1000;
+const SHARED = 5;
+const powers = new Map<number, bigint[]>();
+function powerOf(base: number, level: number, local: bigint[]): bigint {
+  if (level < SHARED) {
+    let a = powers.get(base);
+    if (a === undefined) powers.set(base, (a = [BigInt(base) ** BigInt(PIECE)]));
+    while (a.length <= level) a.push(a[a.length - 1] * a[a.length - 1]);
+    return a[level];
+  }
+  while (local.length <= level - SHARED) {
+    pollInterrupt();
+    const prev = local.length ? local[local.length - 1] : powerOf(base, SHARED - 1, local);
+    local.push(prev * prev);
+  }
+  return local[level - SHARED];
+}
+
+// (for tests: the bytes the kept powers take, about)
+export function sharedPowerBytes(): number {
+  let n = 0;
+  for (const a of powers.values()) for (const p of a) n += p.toString(16).length / 2;
+  return n;
+}
+
+// The decimal digits of 0 <= a < 10^(PIECE * 2^(level+1)), padded to width
+// when it is given: natively when small, else split by 10^(PIECE * 2^level).
+function decimalPieces(a: bigint, level: number, width: number, local: bigint[]): string {
+  if (level < 4) {
+    const s = a.toString();
+    return width ? s.padStart(width, "0") : s;
+  }
+  pollInterrupt();
+  const p = powerOf(10, level, local);
+  const hi = a / p, lo = a - hi * p;
+  const w = PIECE * 2 ** level;
+  if (hi === 0n && !width) return decimalPieces(lo, level - 1, 0, local);
+  return decimalPieces(hi, level - 1, width ? width - w : 0, local) + decimalPieces(lo, level - 1, w, local);
+}
+
+function decimalDigits(abs: bigint): string {
+  // (an upper bound on the digits, from the bits)
+  const digits = abs.toString(16).length * 4 * Math.log10(2) + 1;
+  let level = 0;
+  while (PIECE * 2 ** (level + 1) < digits) level++;
+  return decimalPieces(abs, level, 0, []);
+}
+
+// The int of digits t (lowercase, no sign or underscores) in base, by halves.
+export function parseDigits(t: string, base: number, local: bigint[] = []): bigint {
+  if (t.length <= 4 * PIECE) {
+    if (base === 10) return BigInt(t);
+    let v = 0n;
+    const B = BigInt(base);
+    // (in runs that fit a double, so the loop over BigInts is short)
+    const run = Math.floor(52 / Math.log2(base));
+    for (let i = 0; i < t.length; i += run) {
+      const chunk = t.slice(i, i + run);
+      v = v * B ** BigInt(chunk.length) + BigInt(parseInt(chunk, base));
+    }
+    return v;
+  }
+  pollInterrupt();
+  let level = 0;
+  while (PIECE * 2 ** (level + 1) < t.length / 2) level++;
+  const w = PIECE * 2 ** level;
+  return parseDigits(t.slice(0, t.length - w), base, local) * powerOf(base, level, local) + parseDigits(t.slice(t.length - w), base, local);
+}
+
+// The decimal digits of an int, or CPython's ValueError past the limit, or
+// Sagebrush's past its own.
+export function decimalOf(a: bigint): string {
+  const m = intDigits.max;
+  const abs = a < 0n ? -a : a;
+  // (a lower bound from the hex digits first: a huge value is refused
+  // without being converted)
+  const atLeast = Math.floor((abs.toString(16).length - 1) * Math.log10(16)) + 1;
+  if (m > 0 && atLeast > m) tooManyDigits();
+  if (atLeast > HARD_MAX_DIGITS) hardLimit("");
+  const s = decimalDigits(abs);
+  if (m > 0 && s.length > m) tooManyDigits();
+  if (s.length > HARD_MAX_DIGITS) hardLimit("");
+  return a < 0n ? "-" + s : s;
+}
+
+function tooManyDigits(): never {
+  raise(T.ValueError, `Exceeds the limit (${intDigits.max} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`);
+}
+
 // |x| rounded half-even to `p` digits after the point: [integer digits, fraction digits].
 function fixedDigits(x: number, p: number): [string, string] {
+  // (a double has at most 1074 binary, so as many decimal, fraction digits:
+  // past them they're zeros, so a huge precision costs only the padding)
+  if (p > 1100) {
+    const [i, f] = fixedDigits(x, 1100);
+    return [i, f + "0".repeat(p - 1100)];
+  }
   const [m, e] = decompose(x);
   let q: bigint;
   if (e >= 0) q = (m << BigInt(e)) * 10n ** BigInt(p);
@@ -162,7 +277,7 @@ export function repr(x: any): string {
     case "number":
       return isInt(x) ? String(x) : floatRepr(x);
     case "bigint":
-      return x.toString();
+      return decimalOf(x);
     case "boolean":
       return x ? "True" : "False";
     case "function":
@@ -248,7 +363,7 @@ export function str(x: any): string {
     case "number":
       return isInt(x) ? String(x) : floatRepr(x);
     case "bigint":
-      return x.toString();
+      return decimalOf(x);
     case "boolean":
       return x ? "True" : "False";
   }
@@ -353,7 +468,7 @@ function formatInt(v: bigint, s: Spec): string {
     case "":
     case "d":
     case "n":
-      digits = a.toString();
+      digits = decimalOf(a);
       break;
     default:
       return formatFloat(Number(v), s);
@@ -424,7 +539,7 @@ export function format(v: any, spec: string): string {
   }
   if (typeof v === "boolean" && spec === "") return v ? "True" : "False";
   if (isPyInt(v)) {
-    if (spec === "") return typeof v === "bigint" ? v.toString() : String(+v);
+    if (spec === "") return typeof v === "bigint" ? decimalOf(v) : String(+v);
     return formatInt(typeof v === "bigint" ? v : BigInt(+v), parseSpec(spec));
   }
   if (typeof v === "number" || v instanceof FloatBox) {
@@ -602,7 +717,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         const v = intOf(nextArg(), type, "oxX".includes(type));
         const neg = v < 0n;
         const a = neg ? -v : v;
-        let digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : type === "X" ? a.toString(16).toUpperCase() : a.toString();
+        let digits = type === "o" ? a.toString(8) : type === "x" ? a.toString(16) : type === "X" ? a.toString(16).toUpperCase() : decimalOf(a);
         if (precision > digits.length) digits = "0".repeat(precision - digits.length) + digits;
         const prefix = flags.includes("#") && "oxX".includes(type) ? "0" + type : "";
         body = padW(digits, true, (neg ? "-" : sign) + prefix);
