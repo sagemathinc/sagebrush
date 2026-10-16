@@ -820,8 +820,10 @@ test("polynomial, finite field and real intrinsics refuse arguments as Magma doe
   for (const [src, name, said] of cases)
     assert.ok(out.includes(`Runtime error in '${name}': ${said}\n`), `${src}\n${out}`);
   // (Magma's answers are real or complex numbers, which these don't give: refused in words)
-  assert.ok(out.includes("Runtime error in 'Roots': Roots in a ring other than the integers or the rationals is not supported yet\n"), out);
-  assert.ok(out.includes("Runtime error in 'Sqrt': Sqrt of a negative number (a complex number in Magma) is not supported yet\n"), out);
+  // (long messages wrap at 80 columns, as Magma's do: compared unwrapped)
+  const flat = out.replace(/\s+/g, " ");
+  assert.ok(flat.includes("Runtime error in 'Roots': Roots in a ring other than the integers or the rationals is not supported yet "), out);
+  assert.ok(flat.includes("Runtime error in 'Sqrt': Sqrt of a negative number (a complex number in Magma) is not supported yet "), out);
   assert.doesNotMatch(out, /Error:|Traceback/);
   assert.match(out, /\nend\n$/);
 });
