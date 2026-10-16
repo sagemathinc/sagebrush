@@ -123,8 +123,8 @@ On the channel:
     without a note are left out.
   - `comment`: the text of the Submit bar's comment field, possibly `""`.
 - From the host: `{ sagebrush: "received", version: 1, id }`. The submission
-  `id` was admitted durably as the agent's turn (see Once); the frame shows
-  "Received".
+  `id` was durably delivered to the agent, as guidance or as a turn (see
+  Delivery and Once); the frame shows "Received".
 - From the host: `{ sagebrush: "refused", version: 1, id, message }`. The
   submission `id` was refused; the frame shows `message` and lets the user
   change the answers and submit again.
