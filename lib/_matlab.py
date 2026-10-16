@@ -7813,16 +7813,13 @@ def ws_call(name, ns, args, nargout):
             if names[0] == "global":
                 _globals.clear()
             return NOVAL
-        allv = _ws_vars(ns)
-        for n in names:
-            for v in allv:
-                if _glob_match(n, v):
-                    key = "_k_" + v if v in _PYKW else v
-                    if key in ns:
-                        try:
-                            del ns[key]
-                        except Exception:
-                            ns[key] = Undef(v)
+        for v in _glob_select(names, _ws_vars(ns)):
+            key = "_k_" + v if v in _PYKW else v
+            if key in ns:
+                try:
+                    del ns[key]
+                except Exception:
+                    ns[key] = Undef(v)
         return NOVAL
     if name == "exist":
         n = _text(args[0])
@@ -7850,7 +7847,8 @@ def ws_call(name, ns, args, nargout):
         vs = sorted(_ws_vars(ns))
         want = [_text(a) for a in args if not _text(a).startswith("-")]
         if want:
-            vs = [v for v in vs if any(_glob_match(w, v) for w in want)]
+            chosen = set(_glob_select(want, vs))
+            vs = [v for v in vs if v in chosen]
         if name == "who":
             if nargout >= 1:
                 return Cell([Char(v) for v in vs], (len(vs), 1))
@@ -8477,6 +8475,21 @@ def trapz_n(*args):
     else:
         dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
     return _unmat(np.sum(dx * (Y[1:] + Y[:-1]) / 2, axis=0).reshape((1, -1)))
+
+
+def _glob_select(pats, names):
+    """the names any of the wildcard patterns (* and ?) match, in names' order: exact
+    names by a set lookup and the patterns as one expression, so the cost is about
+    len(pats) + len(names), not their product"""
+    exact = {p for p in pats if "*" not in p and "?" not in p}
+    wild = [p for p in pats if p not in exact]
+    rx = None
+    if wild:
+        # (each pattern is tried for each name: past a few million comparisons, refused)
+        if len(wild) * len(names) > 4000000:
+            raise _err("Too many wildcard patterns for this workspace: use exact names.")
+        rx = _re.compile("|".join("(?:" + "".join(".*" if c == "*" else "." if c == "?" else _re.escape(c) for c in p) + ")" for p in wild))
+    return [v for v in names if v in exact or (rx is not None and rx.fullmatch(v) is not None)]
 
 
 def _glob_match(pat, s):
