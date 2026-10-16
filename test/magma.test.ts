@@ -723,6 +723,23 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("intrinsics taking integers refuse a rational, an integral one too (CORR-765-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const session = (src: string) =>
+    spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8", input: src }).stdout as string;
+  // Magma's words (checked against Magma); their caret is said at the call
+  const one = ["Factorial", "IsEven", "IsOdd", "Factorization", "Divisors", "NextPrime", "Isqrt", "Fibonacci",
+    "PrimeDivisors", "PreviousPrime", "NumberOfDivisors", "PrimesUpTo"];
+  const out = session("a := 12/3;\n" + one.map((f) => `${f}(a);`).join("\n") + "\nBinomial(a, 2);\nGcd(a, 6);\n\"end\";\n");
+  for (const f of one) assert.ok(out.includes(`Runtime error in '${f}': Bad argument types\nArgument types given: FldRatElt\n`), `${f}\n${out}`);
+  assert.ok(out.includes("Runtime error in 'Binomial': Bad argument types\nArgument types given: FldRatElt, RngIntElt\n"), out);
+  assert.ok(out.includes("Runtime error in 'Gcd': Bad argument types\nArgument types given: FldRatElt, FldRatElt\n"), out);
+  assert.match(out, /\nend\n$/);
+  // integers still work
+  assert.equal(session("Factorial(4); IsEven(4); Gcd(4, 6); Binomial(4, 2);\n"), "24\ntrue\n2\n6\n");
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
