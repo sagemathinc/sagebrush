@@ -47,6 +47,7 @@ export function allocator(owner: PyType, f: (cls: any, ...args: any[]) => any, k
     };
   }
   nw.$allocator = owner;
+  nw.$static = true; // (never bound to an instance: (1).__new__ is int.__new__)
   owner.$dict.set("__new__", nw);
   return nw;
 }
@@ -395,6 +396,10 @@ method(noneType, "__repr__", (_n: any) => "None");
 method(noneType, "__bool__", (_n: any) => false);
 method(noneType, "__hash__", (n: any) => O.hashAny(n));
 noneType.$dict.set("__doc__", "The type of the None singleton.");
+allocator(noneType, (_cls: any, ...args: any[]) => {
+  if (args.length) raise(T.TypeError, "NoneType takes no arguments");
+  return null;
+});
 builtinType("NotImplementedType", [object], () => NotImplemented);
 builtinType("ellipsis", [object], () => Ellipsis);
 

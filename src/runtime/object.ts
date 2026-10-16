@@ -438,6 +438,7 @@ export const objectNew = pyfn(function __new__(cls: PyType, ...args: any[]) {
   if (cls.$ctor === null) raise(T.TypeError, `object.__new__(${cls.$name}) is not safe, use ${cls.$name}.__new__()`);
   return new cls.$ctor();
 }, "__new__");
+objectNew.$static = true; // (a builtin __new__ is static: never bound to an instance, as CPython's)
 
 // ------------------------------------------------------------------ attributes
 
@@ -658,7 +659,6 @@ export function unboundFunction(d: any): any {
 
 export function setattr(o: any, name: string, v: any): void {
   if (reservedName(name)) reservedAttr(o, name);
-  if (o === null) raise(T.AttributeError, `'NoneType' object has no attribute '${name}' and no __dict__ for setting new attributes`);
   if (isType(o)) return setTypeAttr(o, name, v);
   const t = typeOf(o);
   if (t.$customSet) {
@@ -673,7 +673,7 @@ export function setattr(o: any, name: string, v: any): void {
 
 export function genericSetattr(o: any, name: string, v: any, t: PyType) {
   if (reservedName(name)) reservedAttr(o, name);
-  if (implField(o, name)) reservedAttr(o, name);
+  if (o !== null && implField(o, name)) reservedAttr(o, name);
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
     const s = lookupType(typeOf(d), "__set__");
@@ -682,6 +682,9 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
       return;
     }
   }
+  // (None has no __dict__: CPython's AttributeError, after a data
+  // descriptor's own answer, such as __class__'s TypeError)
+  if (o === null) raise(T.AttributeError, `'NoneType' object has no attribute '${name}' and no __dict__ for setting new attributes`);
   if (hasInstanceDict(o)) {
     putAttr(o, name, v);
     return;

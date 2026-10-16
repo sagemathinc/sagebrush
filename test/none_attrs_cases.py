@@ -20,3 +20,9 @@ for cls in (Fraction, numbers.Number, numbers.Complex, numbers.Real, numbers.Rat
           issubclass(type(None), cls))
 print(isinstance(None, (int, Fraction)), isinstance(None, type(None)), isinstance(None, object))
 print(t(lambda: None.foo), t(lambda: setattr(None, 'x', 1)), t(lambda: None.__class__.__name__))
+# setattr through object.__setattr__ and None.__setattr__; __class__'s TypeError;
+# __new__ static, NoneType's own (CORR-4CC-1, -2)
+print(t(lambda: None.__setattr__('x', 1)), t(lambda: object.__setattr__(None, 'x', 1)), t(lambda: setattr(None, '__class__', int)),
+      t(lambda: object.__setattr__(None, '__class__', int)))
+print(None.__new__ is type(None).__new__, t(lambda: None.__new__(type(None))), t(lambda: type(None).__new__(type(None))), t(lambda: type(None)()),
+      t(lambda: type(None)(1)), t(lambda: type(None).__new__(int)), (1).__new__ is int.__new__, object().__new__ is object.__new__)
