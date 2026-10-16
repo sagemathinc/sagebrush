@@ -69,6 +69,18 @@ test("board run: each language, as its board runs it", () => {
   assert.match(item(matlab.report, "c").error, /Unrecognized function or variable 'undefined_fn'/);
 });
 
+test("board run: an item in another language than the board's is refused, not run in the board's (astra's CORR-C5A-2)", () => {
+  // (Python's 2^3 is 1, Sage's 8: run here in the board's Python, it would say 1)
+  const r = run(["-"], board([{ id: "s", title: "Sage", mode: "sage", code: "print(2^3)" }]));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /code item 1 "Sage" is in Sage, not the board's Python: the command line runs a board's code in one language only/);
+  // (an item whose mode is the board's own: run as before)
+  const same = json(["-"], board([{ id: "s", mode: "sage", code: "print(2^3)" }], { mode: "sage" }));
+  assert.equal(same.status, 0, JSON.stringify(same.report));
+  assert.equal(item(same.report, "s").stdout, "8\n");
+});
+
 test("board run: the board's seed, as in a browser: the same numbers each time, others with another seed", () => {
   const code = [{ id: "r", code: "import random\nprint(random.random())" }];
   const a = json(["-"], board(code)), b = json(["-"], board(code)), c = json(["-"], board(code, { seed: "ab".repeat(32) }));

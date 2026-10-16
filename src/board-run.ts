@@ -145,6 +145,9 @@ export async function boardRun(argv: string[]): Promise<number> {
     say(`${file}: ${e?.message ?? e}`);
     return 1;
   }
+  // (items in another language than the board's: refused, before anything runs)
+  const other = otherLanguage(doc);
+  if (other) { say(`${file}: ${other}`); return 1; }
   const run = await runBoard(doc, timeout);
   const { mode, items, reports, notes, outputs } = run;
   // (the figures, if asked: in DIR)
@@ -222,10 +225,27 @@ export interface BoardRun {
   workerErr: string[];
 }
 
+const LANGUAGE: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+/** Why the command line doesn't run this board's code: an item in another
+ * language than the board's (item 16).  The board runs each item in its own
+ * language; here every item would run in the board's, so a Sage item's
+ * print(2^3) would say 1, not 8: refused, saying so, rather than answered
+ * wrong (astra's CORR-C5A-2).  null: one language, run as before. */
+export function otherLanguage(doc: BoardDoc): string | null {
+  const mode = doc.mode ?? "python";
+  const order = codeOrder(doc), i = order.findIndex((c) => c.mode !== mode);
+  if (i < 0) return null;
+  const c = order[i], n = codeNotes(pageView(doc, c.page)).get(c.item);
+  return `code item ${i + 1}${n?.title ? ` ${JSON.stringify(n.title)}` : ""} is in ${LANGUAGE[c.mode] ?? c.mode}, not the board's ${LANGUAGE[mode] ?? mode}: the command line runs a board's code in one language only, so it doesn't run this board's (the board itself runs each item in its own language)`;
+}
+
 /** Every code item of a (clean) board run as the board runs it (see the
- * top of this file); `timeout` seconds an item. */
+ * top of this file); `timeout` seconds an item.  A board with items in
+ * another language than its own is refused (otherLanguage). */
 export async function runBoard(doc: BoardDoc, timeout: number): Promise<BoardRun> {
   const mode = doc.mode ?? "python";
+  const other = otherLanguage(doc);
+  if (other) throw new Error(other);
   const seed = typeof doc.seed === "string" && /^[0-9a-f]{64}$/.test(doc.seed) ? doc.seed : BOARD_SEED;
   // the code items, as the board runs them (doc.ts codeOrder): page by page,
   // each page in reading order; one cell for each, `key` (an id items on
