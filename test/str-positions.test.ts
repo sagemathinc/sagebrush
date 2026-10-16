@@ -33,19 +33,23 @@ test("indexing every character of a 2-million-character string, with or without 
 });
 
 // The index of a string's surrogate pairs is sparse and made in place
-// (HARD-AF6-1): a string of ten million astral characters, or of every
-// astral character four times over, is measured, indexed and searched in a
-// 96 MiB heap, where the per-pair table aborted Node.
+// (HARD-AF6-1): a string of ten million astral characters, or of 262,144
+// distinct astral characters sixteen times over, is measured, indexed and
+// searched in a 96 MiB heap, where the per-pair table aborted Node.  (Each
+// half alone takes 56 MiB at most: the index is an eighth of the string's
+// bytes; the rest is the string and V8's flattening of it for find.  The
+// second string is joined from 2^18 one-character strings, not 2^20, whose
+// list alone took most of the heap and once aborted under load.)
 test("a string of millions of astral characters is indexed in a 96 MiB heap (HARD-AF6-1)", () => {
   const code = [
     "s = chr(0x1F600) * 10_000_000",
     "print(len(s), s[5_000_000] == chr(0x1F600), s[-1] == chr(0x1F600), s.find('x'), len(s[9_999_990:]))",
     "s = None",
-    "t = ''.join(map(chr, range(0x10000, 0x110000))) * 4",
-    "print(len(t), t[1_048_576 * 3 + 5] == chr(0x10005), t.index(chr(0x10FFFF)), t.rfind(chr(0x10000)))",
+    "t = ''.join(map(chr, range(0x10000, 0x50000))) * 16",
+    "print(len(t), t[262_144 * 3 + 5] == chr(0x10005), t.index(chr(0x4FFFF)), t.rfind(chr(0x10000)))",
   ].join("\n");
   const out = execFileSync(process.execPath, ["--max-old-space-size=96", CLI, "-c", code], { encoding: "utf8", timeout: 120000 });
-  assert.equal(out, "10000000 True True -1 10\n4194304 True 1048575 3145728\n");
+  assert.equal(out, "10000000 True True -1 10\n4194304 True 262143 3932160\n");
 });
 
 // A JS string cannot keep '\ud83d' + '\ude00' as the two code points CPython
