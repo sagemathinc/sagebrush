@@ -53,9 +53,11 @@ test("sagebrush --search --mode searches that language's index; the default is u
     "print(json.dumps([len(t) <= d.HIT_CHARS + 40, 'more call forms' in t, 'more lines' in t, 'more characters' in t, 'more differs lines' in t,",
     "  len(kept), omitted, len(small) < 50 and n == 50 - len(small), len(json.dumps(small, indent=1)) <= d.JSON_BYTES,",
     "  len(d.search('e', 10**9)), d.clamp_limit(-5), d.clamp_limit('x'),",
-    "  len(d.within(['x' * 1000] * 100)) <= 61 and d.within(['x' * 1000] * 100)[-1].startswith('...[')]))",
+    "  len(d.within(['x' * 1000] * 100)) <= 61 and d.within(['x' * 1000] * 100)[-1].startswith('...['),",
+    "  len('\\n'.join(d.within(['x' * (d.TOTAL_CHARS + 1)]))) <= d.TOTAL_CHARS, len('\\n'.join(d.within(['x' * (d.TOTAL_CHARS + 1), 'y']))) <= d.TOTAL_CHARS,",
+    "  d.within(['x' * (d.TOTAL_CHARS + 1), 'y'])[-1] == '...[1 more hits not shown: narrow the query]', d.within(['a', 'b']) == ['a', 'b']]))",
   ].join("\n");
-  assert.deepEqual(JSON.parse(run("-c", huge).stdout), [true, true, true, true, true, 0, 3, true, true, 50, 1, 20, true]);
+  assert.deepEqual(JSON.parse(run("-c", huge).stdout), [true, true, true, true, true, 0, 3, true, true, 50, 1, 20, true, true, true, true, true]);
   const lots = run("--search", "e", "--mode", "python", "--limit", "100000").stdout;
   assert.ok(lots.split("\n").filter((l) => l && !l.startsWith(" ")).length <= 50 && lots.length <= 61000, "hits: " + lots.length);
   assert.ok(JSON.parse(run("--search", "e", "--mode", "python", "--json").stdout).length <= 10);

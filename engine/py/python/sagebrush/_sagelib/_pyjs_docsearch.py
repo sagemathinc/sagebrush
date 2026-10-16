@@ -284,9 +284,15 @@ def within(texts, budget=TOTAL_CHARS):
     """As many of texts, in order, as fit in budget characters, and a last
     line saying how many did not"""
     out, used = [], 0
+    room = budget - 80  # (for the marker, and a clipped text's own)
     for i, t in enumerate(texts):
-        if used + len(t) > budget and out:
-            out.append("...[%d more hits not shown: narrow the query]" % (len(texts) - i))
+        if used + len(t) > room:
+            if not out:
+                # (a first text longer than the whole budget: clipped, HARD-0E9-1)
+                out.append(_clip(t, max(room, 0)))
+                i += 1
+            if i < len(texts):
+                out.append("...[%d more hits not shown: narrow the query]" % (len(texts) - i))
             break
         out.append(t)
         used += len(t) + 1

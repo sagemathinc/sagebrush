@@ -118,7 +118,7 @@ def search_docs(query, limit=10, full=False, as_json=False):
     out = []
     for _, e in hits:
         if full:
-            head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
+            head = ds._clip(e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()")), 600)
             doc = ds._clip(e["doc"], ds.HIT_CHARS * 2)
             out.append(head + ("  [open problem]" if e["open_problem"] else "") + "\n    " + doc.replace("\n", "\n    "))
         else:
