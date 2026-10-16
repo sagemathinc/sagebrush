@@ -2489,6 +2489,25 @@ def continued_fraction(x, nterms=20):
 _CF_MAX_INDEX = 100000
 _CF_MAX_PERIOD = 100000
 _CF_MAX_DIGITS = 100000
+# sizes, not just counts (daybreak2's HARD-58E-1): a convergent's numerator
+# or denominator, all the convergents of a slice together, and a quadratic
+# irrational's discriminant (its period states and quotients grow with it)
+_CF_MAX_BITS = 10**6
+_CF_MAX_TOTAL_BITS = 10**7
+_CF_MAX_DISC_BITS = 20000
+# total work: the bits of every numerator and denominator computed along
+# the way (sqrt(2).convergent(n) does about 0.64 n^2 bit operations)
+_CF_MAX_WORK = 10**9
+# an exact expression longer than this (about 2300 bits of integers) is
+# not given to AA, whose own work grows steeply with it: sqrt(2^2000 + 1)
+# takes 0.9 s there, sqrt(2^6000 + 1) more than 90 s, before any budget
+# here applies
+_CF_MAX_EXPR_CHARS = 700
+
+
+def _cf_bits(h, k, what):
+    if max(abs(h).bit_length(), abs(k).bit_length()) > _CF_MAX_BITS:
+        raise NotImplementedError("%s of more than %d bits" % (what, _CF_MAX_BITS))
 
 
 def _cf_admit(n, what):
@@ -2686,9 +2705,14 @@ class _ContinuedFractionReal:
             return _cf_negative_convergent(n, "convergent")
         _cf_admit(n, "convergent")
         h0, h1, k0, k1 = 1, self.quotient(0), 0, 1
+        work = 0
         for i in range(1, n + 1):
             a = self.quotient(i)
             h0, h1, k0, k1 = h1, a * h1 + h0, k1, a * k1 + k0
+            _cf_bits(h1, k1, "a convergent")
+            work += h1.bit_length() + k1.bit_length() + a.bit_length()
+            if work > _CF_MAX_WORK:
+                raise NotImplementedError("convergent %d: more than %d bit operations" % (n, _CF_MAX_WORK))
         return _q(_Fraction(h1, k1))
 
     def convergents(self):
@@ -2720,6 +2744,8 @@ class _ContinuedFractionReal:
     def _algebraic(self):
         # (the number in AA, its minimal polynomial's coefficients), or None
         if not hasattr(self, "_aa"):
+            if len(str(self._x)) > _CF_MAX_EXPR_CHARS:
+                raise NotImplementedError("the continued fraction of an expression of more than %d characters" % _CF_MAX_EXPR_CHARS)
             try:
                 a = AA(self._x)
                 self._aa = (a, [_Fraction(c) for c in a.minpoly().list()])
@@ -2754,6 +2780,7 @@ class _LazyConvergents:
         while True:
             a = self._cf.quotient(n)
             h0, h1, k0, k1 = h1, a * h1 + h0, k1, a * k1 + k0
+            _cf_bits(h1, k1, "a convergent")
             yield _q(_Fraction(h1, k1))
             n += 1
 
@@ -2763,11 +2790,18 @@ class _LazyConvergents:
                 raise NotImplementedError("only finite slices of an infinite list")
             _cf_admit(_cf_int(i.stop), "a slice to index")
             want = set(range(*i.indices(_cf_int(i.stop))))
-            out = []
+            out, total, work = [], 0, 0
             for k, v in enumerate(self):  # one pass, not each from the start
                 if k >= _cf_int(i.stop):
                     break
+                b = v.numerator().bit_length() + v.denominator().bit_length()
+                work += b
+                if work > _CF_MAX_WORK:
+                    raise NotImplementedError("a slice of convergents: more than %d bit operations" % _CF_MAX_WORK)
                 if k in want:
+                    total += b
+                    if total > _CF_MAX_TOTAL_BITS:
+                        raise NotImplementedError("a slice of convergents of more than %d bits in all" % _CF_MAX_TOTAL_BITS)
                     out.append(v)
             return out if (i.step or 1) > 0 else out[::-1]
         return self._cf.convergent(_cf_int(i))
@@ -2791,15 +2825,21 @@ def _cf_quadratic(a, m):
         den = den * c.denominator // _math.gcd(den, c.denominator)
     C, B, A = (int(c * den) for c in m)
     D = B * B - 4 * A * C
+    if D.bit_length() > _CF_MAX_DISC_BITS:
+        raise NotImplementedError("a quadratic irrational whose discriminant has more than %d bits" % _CF_MAX_DISC_BITS)
     # which root: a is above the midpoint -B/(2A) exactly when it is the
     # (-B + sqrt(D))/(2A) root with A > 0, or the other one with A < 0
     above = a > AA(_q(_Fraction(-B, 2 * A)))
     P, Q = (-B, 2 * A) if above == (A > 0) else (B, -2 * A)
     r = _math.isqrt(D)
     seen, qs = {}, []
+    held = 0
     while (P, Q) not in seen:
         if len(qs) >= _CF_MAX_PERIOD:
             raise NotImplementedError("a quadratic irrational whose period is longer than %d" % _CF_MAX_PERIOD)
+        held += P.bit_length() + Q.bit_length() + 2
+        if held > _CF_MAX_TOTAL_BITS:
+            raise NotImplementedError("a quadratic irrational whose period states exceed %d bits" % _CF_MAX_TOTAL_BITS)
         seen[(P, Q)] = len(qs)
         k = (P + r) // Q if Q > 0 else -((P + r) // -Q + 1)
         qs.append(k)
