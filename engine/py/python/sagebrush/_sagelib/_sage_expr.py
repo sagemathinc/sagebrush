@@ -1043,6 +1043,192 @@ class Expression:
 
     trig_simplify = simplify_trig
 
+    def expand_trig(self, full=False, half_angles=False, plus=True, times=True):
+        """sin, cos, tan (and sinh, cosh, tanh) of sums and of integer
+        multiples by the addition and multiple-angle formulas (also
+        trig_expand).  One level, as Sage; full=True repeats it.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: sin(2*x).expand_trig(), cos(x + y).expand_trig()
+            (2*cos(x)*sin(x), cos(x)*cos(y) - sin(x)*sin(y))
+            sage: sin(2*x + y).expand_trig()
+            cos(y)*sin(2*x) + cos(2*x)*sin(y)
+            sage: sin(2*x + y).expand_trig(full=True)
+            2*cos(x)*cos(y)*sin(x) + (cos(x)^2 - sin(x)^2)*sin(y)
+        """
+        if half_angles or not plus or not times:
+            raise NotImplementedError("expand_trig with half_angles, plus=False or times=False is not implemented in sagebrush yet")
+        r = _one("expand_trig", self._s)
+        if full:
+            for _ in range(50):
+                s = _one("expand_trig", r._s)
+                if s._s == r._s:
+                    break
+                r = s
+        return r
+
+    trig_expand = expand_trig
+
+    def reduce_trig(self, var=None):
+        """Products and powers of sin and cos (and sinh, cosh) as sums of
+        sines and cosines of combined arguments (also trig_reduce).
+
+        EXAMPLES::
+
+            sage: (sin(x)^2).reduce_trig(), (cos(x)^2).reduce_trig()
+            (-1/2*cos(2*x) + 1/2, 1/2*cos(2*x) + 1/2)
+            sage: (sin(x)^2 + cos(x)^2).reduce_trig(), (sin(x)*cos(x)).trig_reduce()
+            (1, 1/2*sin(2*x))
+        """
+        if var is not None:
+            raise NotImplementedError("reduce_trig(var) is not implemented in sagebrush yet")
+        return _one("reduce_trig", self._s)
+
+    trig_reduce = reduce_trig
+
+    def expand_log(self, algorithm="products"):
+        """log of a product as a sum of logs and log(b^p) as p*log(b)
+        (algorithm='powers': only the latter; also log_expand).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: log(x*y).expand_log(), log(x^10).expand_log(), log(x/y).log_expand()
+            (log(x) + log(y), 10*log(x), log(x) - log(y))
+            sage: log(x^2*y).expand_log(algorithm='powers')
+            log(x^2*y)
+        """
+        if algorithm == "nothing":
+            return self
+        if algorithm not in ("products", "powers", "all"):
+            raise ValueError("algorithm must be 'nothing', 'powers', 'products' or 'all'")
+        return _one("expand_log", self._s, "powers" if algorithm == "powers" else "products")
+
+    log_expand = expand_log
+
+    def simplify_log(self, algorithm=None):
+        """Sums of logs with integer coefficients as one log (also
+        log_simplify).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: (log(x) + log(y)).simplify_log(), (log(x) - 2*log(y)).log_simplify()
+            (log(x*y), log(x/y^2))
+            sage: (3*log(2)).simplify_log(), (2*log(x)).simplify_log()
+            (3*log(2), log(x^2))
+        """
+        if algorithm not in (None, "one"):
+            raise NotImplementedError("simplify_log(algorithm=%r) is not implemented in sagebrush yet" % (algorithm,))
+        return _one("simplify_log", self._s)
+
+    log_simplify = simplify_log
+
+    def canonicalize_radical(self):
+        """Radicals and logs in one canonical form, choosing branches as
+        Sage does (sqrt(x^2) is x: not right for every x).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: sqrt(x^2*y^2).canonicalize_radical(), sqrt(8*x^3).canonicalize_radical()
+            (x*y, 2*sqrt(2)*x^(3/2))
+            sage: sqrt(x^2 + 2*x + 1).canonicalize_radical(), log(x*y).canonicalize_radical()
+            (x + 1, log(x) + log(y))
+        """
+        return _one("canonicalize_radical", self._s)
+
+    def simplify_factorial(self):
+        """Factorials and gammas whose arguments differ by integers combined
+        (also factorial_simplify).
+
+        EXAMPLES::
+
+            sage: var('n')
+            n
+            sage: (factorial(n + 1)/factorial(n)).simplify_factorial()
+            n + 1
+            sage: (gamma(n + 1)/gamma(n)).factorial_simplify()
+            n
+        """
+        return _one("simplify_factorial", self._s)
+
+    factorial_simplify = simplify_factorial
+
+    def partial_fraction(self, var=None):
+        """The partial fraction decomposition in var, a rational function
+        with rational coefficients.
+
+        EXAMPLES::
+
+            sage: (1/(x^2 - 1)).partial_fraction()
+            -1/2/(x + 1) + 1/2/(x - 1)
+            sage: (1/(x^2 + 1)).partial_fraction(x)
+            1/(x^2 + 1)
+        """
+        name = self._default_var() if var is None else _expr(var)._names()[0] if not isinstance(var, str) else var
+        return _one("partial_fraction", self._s, name)
+
+    def collect(self, s):
+        """The expanded expression with its terms grouped by the power of s.
+
+        EXAMPLES::
+
+            sage: var('a b')
+            (a, b)
+            sage: (x^2 + a*x^2 + b*x + x + 1).collect(x)
+            (a + 1)*x^2 + (b + 1)*x + 1
+            sage: (a*sin(x) + b*sin(x)).collect(sin(x))
+            (a + b)*sin(x)
+        """
+        s = _expr(s)
+        if not s.is_symbol():
+            # a subexpression: through a fresh symbol
+            names = set(self._names()) | set(s._names())
+            k = 0
+            while "_collect%d" % k in names:
+                k += 1
+            t = Expression(_sym_s("_collect%d" % k))
+            return self.subs({s: t}).collect(t).subs({t: s})
+        e = self.expand()
+        terms = e.operands() if e._op()[0] == "add" else [e]
+        groups, order = {}, []
+        for t in terms:
+            # the term's factor s^k (k an integer, else 0); the rest is its
+            # coefficient, whatever else it contains (x*sin(x): sin(x))
+            fs = t.operands() if t._op()[0] == "mul" else [t]
+            k, cs = 0, []
+            for f in fs:
+                if f._s == s._s:
+                    k += 1
+                    continue
+                if f._op()[0] == "pow":
+                    b, p = f.operands()
+                    if b._s == s._s and p.is_integer():
+                        k += int(p)
+                        continue
+                cs.append(f)
+            c = Expression("n1/1;")
+            for f in cs:
+                c = c * f
+            if k not in groups:
+                groups[k] = []
+                order.append(k)
+            groups[k].append(c)
+        r = Expression("n0/1;")
+        for k in order:
+            c = Expression("n0/1;")
+            for u in groups[k]:
+                c = c + u
+            r = r + c * s ** k
+        return r
+
     def combine(self):
         """Combine the terms of a sum that have the same denominator (Sage's
         combine(); together() puts everything over one denominator).
