@@ -389,6 +389,14 @@ export function mul(a: any, b: any): any {
   return mulSlow(a, b);
 }
 function repeatCount(n: any): number | undefined {
+  // (an int subclass that keeps int's __mul__ and __rmul__ repeats by its
+  // own value, as CPython's sequence repetition: [0] * J(2) is [0, 0])
+  // (int's own: int's, or the unboxing proxy's wrapper of it, types.ts)
+  const intsOwn = (t: any, name: string) => {
+    const m = lookupType(t, name);
+    return m === lookupType(T.int, name) || m?.$unboxing === true;
+  };
+  if (n instanceof PrimBox && typeOf(n).$mro.includes(T.int) && shimName(n, "int") === null && intsOwn(typeOf(n), "__mul__") && intsOwn(typeOf(n), "__rmul__")) n = n.$v;
   if (!isPyInt(n)) return undefined;
   const k = Number(n);
   return k < 0 ? 0 : k;
@@ -754,7 +762,9 @@ export function isub(a: any, b: any): any {
 }
 export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
-  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) {
+  // (a list subclass's own __mul__ too: CPython's in-place multiply tries
+  // the subclass's __mul__ before repeating, CORR-970-1)
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && !overrides(a, "__mul__") && repeatCount(b) !== undefined) {
     const r = repeatArray(a, repeatCount(b)!);
     a.length = 0;
     for (const v of r) a.push(v);
@@ -1652,6 +1662,9 @@ export function index(x: any): number | bigint {
   if (typeof x === "number" && isInt(x)) return x;
   if (typeof x === "bigint") return x;
   if (typeof x === "boolean") return +x;
+  // (an int subclass is its own value, its __index__ not called, as
+  // CPython's PyNumber_Index; numpy's shims, no int subclasses there, are not)
+  if (x instanceof PrimBox && typeOf(x).$mro.includes(T.int) && shimName(x, "int") === null) return x.$v;
   const f = special(x, "__index__");
   if (f !== undefined) return intResult("__index__", f(x));
   raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
@@ -1665,17 +1678,20 @@ export function index(x: any): number | bigint {
 // NumPy's are not, but for float64, a float subclass there too: a shim's
 // result is refused, as CPython refuses NumPy's, and named as CPython names
 // it, "numpy.int64")
-function shimName(r: any, base: string): string | null {
+export function shimName(r: any, base: string): string | null {
   for (const c of typeOf(r).$mro) {
     if (c.$module !== "numpy") continue;
-    if (base === "float" && c.$name === "float64") return null;
+    if ((base === "float" && c.$name === "float64") || (base === "complex" && c.$name === "complex128")) return null;
     return c === typeOf(r) ? `numpy.${c.$name}` : typeName(r);
   }
   return null;
 }
 const resultTypeName = (r: any) => (typeOf(r).$module === "numpy" ? `numpy.${typeName(r)}` : typeName(r));
-function deprecatedSubclass(what: string, r: any, base: string): void {
-  callObj(getattr(hooks.importModule("warnings"), "warn"), [`${what} returned non-${base} (type ${resultTypeName(r)}).  The ability to return an instance of a strict subclass of ${base} is deprecated, and may be removed in a future version of Python.`, T.DeprecationWarning, 2]);
+export function deprecationWarning(msg: string): void {
+  callObj(getattr(hooks.importModule("warnings"), "warn"), [msg, T.DeprecationWarning, 2]);
+}
+export function deprecatedSubclass(what: string, r: any, base: string): void {
+  deprecationWarning(`${what} returned non-${base} (type ${resultTypeName(r)}).  The ability to return an instance of a strict subclass of ${base} is deprecated, and may be removed in a future version of Python.`);
 }
 export function intResult(what: string, r: any): number | bigint {
   if ((typeof r === "number" && isInt(r)) || typeof r === "bigint") return r;
@@ -1721,7 +1737,11 @@ export function seqIndex(i: any, len: number, what: string): number {
   if (typeof i === "number" && isInt(i)) j = i;
   else if (typeof i === "boolean") j = +i;
   else if (typeof i === "bigint") j = i < 0n ? -Infinity : Infinity;
-  else {
+  else if (i instanceof PrimBox && typeOf(i).$mro.includes(T.int) && shimName(i, "int") === null) {
+    // (an int subclass: its own value, as O.index)
+    const v = i.$v;
+    j = typeof v === "bigint" ? (v < 0n ? -Infinity : Infinity) : v;
+  } else {
     const f = special(i, "__index__");
     if (f === undefined) raise(T.TypeError, `${what} indices must be integers or slices, not ${typeName(i)}`);
     const r = intResult("__index__", f(i));
