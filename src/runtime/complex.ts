@@ -194,7 +194,10 @@ function parseF(s: string): number {
 // __complex__'s result: a complex; a strict subclass's value with CPython's
 // DeprecationWarning; else TypeError
 function complexResult(r: any): [number, number] {
-  if (!(r instanceof PyComplex)) raise(T.TypeError, `__complex__ returned non-complex (type ${typeName(r)})`);
+  // (numpy's complex64 is no complex subclass in NumPy, complex128 is:
+  // as int's and float's results, CORR-970-3)
+  const shim = r instanceof PyComplex ? O.shimName(r, "complex") : null;
+  if (!(r instanceof PyComplex) || shim !== null) raise(T.TypeError, `__complex__ returned non-complex (type ${shim ?? typeName(r)})`);
   if (typeOf(r) !== complexType) O.deprecatedSubclass("__complex__", r, "complex");
   return [r.re, r.im];
 }
@@ -214,15 +217,29 @@ function complexCall(real: any = undefined, imag: any = undefined): PyComplex {
   }
   if (typeof imag === "string") raise(T.TypeError, "complex() second arg can't be a string");
   if (real instanceof PyComplex && imag === undefined && real.constructor === PyComplex) return real;
-  // (a complex subclass's __complex__, which it may override, as CPython's
-  // complex_new; its value when it does not)
-  if (real instanceof PyComplex && typeOf(real) !== complexType && imag === undefined) return new PyComplex(...complexResult(O.lookupSpecial(real, "__complex__")(real)));
-  // As CPython: components are only combined when an argument is complex,
-  // so complex(0.0, -0.0) keeps its signed zero.
-  const [ar, ai] = real === undefined ? [0, 0] : asComplex(real, "first argument");
+  // As CPython's complex_new: real is converted by __complex__ when it is not
+  // exactly a complex (a complex subclass's override too, with or without
+  // imag), and is complex when that or it is; imag is a complex's value (a
+  // subclass's too, no __complex__) or a real number. The components are
+  // combined only when an argument is complex, so complex(0.0, -0.0) keeps
+  // its signed zero.
+  let ar = 0, ai = 0, realIsC = false;
+  if (real !== undefined) {
+    if (real instanceof PyComplex && real.constructor === PyComplex) [ar, ai, realIsC] = [real.re, real.im, true];
+    else if (real instanceof PyComplex || (toC(real) === undefined && lookupType(typeOf(real), "__complex__") !== undefined)) {
+      [ar, ai] = complexResult(O.lookupSpecial(real, "__complex__")(real));
+      realIsC = true;
+    } else [ar, ai] = asComplex(real, "first argument");
+  }
   if (imag === undefined) return new PyComplex(ar, ai);
-  const [br, bi] = asComplex(imag, "second argument");
-  const realIsC = unbox(real) instanceof PyComplex, imagIsC = unbox(imag) instanceof PyComplex;
+  let br: number, bi = 0;
+  const imagIsC = imag instanceof PyComplex;
+  if (imagIsC) [br, bi] = [imag.re, imag.im];
+  else {
+    const v = toC(imag)?.[0] ?? Ty.floatCallSafe(imag);
+    if (v === undefined) raise(T.TypeError, `complex() argument 'imag' must be a real number, not ${typeName(imag)}`);
+    br = v;
+  }
   return new PyComplex(imagIsC ? ar - bi : ar, realIsC ? ai + br : br);
 }
 
