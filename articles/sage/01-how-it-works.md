@@ -243,7 +243,10 @@ block and random matrices and basis matrices. `matrix(R, r, c, f)`, with
 a function `f` of `(i, j)`, checks the shape against the size limits
 before the first call, and over $\mathbb{Z}$ and $\mathbb{Q}$ converts
 each value strictly as it is returned, so a value that does not convert
-raises its error at once. Matrices over number fields are not available yet.
+raises its error at once. Matrices over a number field $K$ use exact
+Gaussian elimination over $K$, and scalars meet them by Sage's coercion;
+matrices over a ring of integers (an order) are refused before any entry
+is read.
 Matrices over finite fields use Gaussian elimination over the field,
 with echelon forms, kernels, inverses, solving, characteristic polynomials
 and multiplicative orders. Over $\mathbb{Z}/n\mathbb{Z}$ with $n$
