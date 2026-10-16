@@ -311,10 +311,13 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // SHELL is what the service worker precaches when it installs: what the
 // notebook needs to start and run offline.  LAZY is kept once it is used
 // online (fetched under the service worker, verified by its digest like the
-// shell): the engine (only some code needs it) and the documentation
-// indexes (only the search box does), not every visitor's download
-const SHELL = ["./", "sagebrush-worker.js", `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
-const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`];
+// shell): the engine (only some code needs it), the documentation
+// indexes (only the search box does), and the precompiled library: the
+// worker fetches it as it starts, and the install fetched and decoded its
+// 15 MB a second time (from the HTTP cache) in the same first visit.
+// Without it, offline, modules compile from source (src/compile.ts)
+const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + precompiledHash);
