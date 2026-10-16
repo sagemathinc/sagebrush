@@ -43,6 +43,7 @@ export function defn(impl: any, name: string, qualname: string, module: string, 
       return impl(...bindArgs(f.__name__, sig, a, [], []));
     };
     f.$kw = (pos: any[], names: string[], values: any[]) => impl(...bindArgs(f.__name__, sig, pos, names, values));
+    f.$kwPos = true; // (bindArgs checks the count and makes *args one tuple: BIG_CALL)
     impl.$public = f;
   }
   f.$pyfn = true;

@@ -1,7 +1,7 @@
 // The struct module: pack/unpack of C structs via DataView, with CPython's
 // native ('@') sizes and alignment for a 64-bit little-endian platform.
 
-import { T, PyBytes, PyByteArray, raise, typeName, tuple, objectType, isinstance, callObj, table } from "./object";
+import { T, PyBytes, PyByteArray, raise, typeName, tuple, objectType, isinstance, callObj, table, positionalArray, checkArity } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { newBuiltinModule } from "./modules";
@@ -219,6 +219,9 @@ function buffer(b: any): Uint8Array {
 }
 
 function pack(fmt: any, ...args: any[]): PyBytes {
+  return packArgs(fmt, args);
+}
+function packArgs(fmt: any, args: any[]): PyBytes {
   const L = layout(fmt);
   const a = new Uint8Array(L.size);
   packInto(L, new DataView(a.buffer), 0, args);
@@ -231,6 +234,9 @@ function unpack(fmt: any, b: any): any {
   return tuple(unpackFrom(L, a, 0));
 }
 function unpackFromImpl(fmt: any, b: any, offset: any = 0): any {
+  // (required arguments first, before any decoding: CORR-D6E-1)
+  if (fmt === undefined) raise(T.TypeError, "unpack_from() missing required argument 'format' (pos 1)");
+  if (b === undefined) raise(T.TypeError, "unpack_from() missing required argument 'buffer' (pos 2)");
   const L = layout(fmt);
   const a = buffer(b);
   let off = Number(offset);
@@ -239,6 +245,9 @@ function unpackFromImpl(fmt: any, b: any, offset: any = 0): any {
   return tuple(unpackFrom(L, a, off));
 }
 function packIntoImpl(fmt: any, b: any, offset: any, ...args: any[]): any {
+  return packIntoArgs(fmt, b, offset, args);
+}
+function packIntoArgs(fmt: any, b: any, offset: any, args: any[]): any {
   const L = layout(fmt);
   if (!(b instanceof PyByteArray)) raise(T.TypeError, `argument must be read-write bytes-like object, not ${typeName(b)}`);
   let off = Number(offset);
@@ -260,16 +269,22 @@ function iterUnpack(fmt: any, b: any): any {
 newBuiltinModule("struct", (m) => {
   StructError = objectType("error", [T.Exception], new Map(), "struct");
   m.error = StructError;
+  // (each with its argument count checked: struct.unpack_from(fmt, b, 0, 1)
+  // was taken as unpack_from(fmt, b, 0))
   const fn = (name: string, f: any) => {
+    f = checkArity(f, name, false);
     f.__name__ = name;
     m[name] = f;
   };
   fn("calcsize", (fmt: any) => layout(fmt).size);
-  fn("pack", pack);
+  // (struct.pack(fmt, *xs) of any length: BIG_CALL)
+  fn("pack", positionalArray(pack, (a) => packArgs(a[0], a.slice(1))));
   fn("unpack", unpack);
   fn("unpack_from", unpackFromImpl);
-  m.unpack_from.$kw = (pos: any[], names: string[], values: any[]) => unpackFromImpl(pos[0], pos[1], names[0] === "offset" ? values[0] : pos[2] ?? 0);
-  fn("pack_into", packIntoImpl);
+  // (keywords bound by CPython's signature, unpack_from(format, /, buffer,
+  // offset=0): counts, duplicates and unknown names checked, CORR-A78-1)
+  m.unpack_from.$sig = { args: ["format", "buffer", "offset"], posonly: 1, vararg: null, kwonly: [], kwarg: null };
+  fn("pack_into", positionalArray(packIntoImpl, (a) => packIntoArgs(a[0], a[1], a[2], a.slice(3))));
   fn("iter_unpack", iterUnpack);
   const Struct = objectType("Struct", [T.object], new Map(), "struct");
   Ty.method(Struct, "__init__", (self: any, fmt: any) => {
@@ -278,10 +293,10 @@ newBuiltinModule("struct", (m) => {
     self.size = layout(fmt).size;
     return null;
   });
-  Ty.method(Struct, "pack", (self: any, ...a: any[]) => pack(self.format, ...a));
+  positionalArray(Ty.method(Struct, "pack", (self: any, ...a: any[]) => packArgs(self.format, a)), (a) => packArgs(a[0].format, a.slice(1)));
   Ty.method(Struct, "unpack", (self: any, b: any) => unpack(self.format, b));
   Ty.method(Struct, "unpack_from", (self: any, b: any, off: any = 0) => unpackFromImpl(self.format, b, off));
-  Ty.method(Struct, "pack_into", (self: any, b: any, off: any, ...a: any[]) => packIntoImpl(self.format, b, off, ...a));
+  positionalArray(Ty.method(Struct, "pack_into", (self: any, b: any, off: any, ...a: any[]) => packIntoArgs(self.format, b, off, a)), (a) => packIntoArgs(a[0].format, a[1], a[2], a.slice(3)));
   Ty.method(Struct, "iter_unpack", (self: any, b: any) => iterUnpack(self.format, b));
   m.Struct = Struct;
   void isinstance;
