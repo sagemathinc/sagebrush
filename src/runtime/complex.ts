@@ -448,21 +448,23 @@ newBuiltinModule("cmath", (m) => {
   // (CPython's cmath_isclose_impl: equal values are close, an infinity is
   // close only to itself, tolerances must be non-negative; the keywords bound
   // by its signature, isclose(a, b, *, rel_tol, abs_tol))
-  const isclose = (a: any, b: any, rel: number, abs: number) => {
+  // (the operands converted first, then the tolerances checked, as CPython's
+  // argument parsing; CORR-71C-3)
+  const isclose = (x: number[], y: number[], rel: number, abs: number) => {
     if (rel < 0 || abs < 0) raise(T.ValueError, "tolerances must be non-negative");
-    const x = arg(a), y = arg(b);
     if (x[0] === y[0] && x[1] === y[1]) return true;
     if ([x[0], x[1], y[0], y[1]].some((v) => Math.abs(v) === Infinity)) return false;
     const d = CR.hypot(x[0] - y[0], x[1] - y[1]);
     return d <= rel * CR.hypot(y[0], y[1]) || d <= rel * CR.hypot(x[0], x[1]) || d <= abs;
   };
-  fn("isclose", (a: any, b: any) => isclose(a, b, 1e-9, 0));
+  fn("isclose", (a: any, b: any) => isclose(arg(a), arg(b), 1e-9, 0));
   m.isclose.$kw = (pos: any[], names: string[], values: any[]) => {
     const [a, b, rel, abs] = bindArgs("isclose", sig(["a", "b"], { kwonly: ["rel_tol", "abs_tol"] }), pos, names, values);
     if (a === undefined) raise(T.TypeError, "isclose() missing required argument 'a' (pos 1)");
     if (b === undefined) raise(T.TypeError, "isclose() missing required argument 'b' (pos 2)");
     const fl = (v: any) => { const r = O.fv(v); if (r === undefined) raise(T.TypeError, `must be real number, not ${typeName(v)}`); return r; };
-    return isclose(a, b, rel === undefined ? 1e-9 : fl(rel), abs === undefined ? 0 : fl(abs));
+    const x = arg(a), y = arg(b);
+    return isclose(x, y, rel === undefined ? 1e-9 : fl(rel), abs === undefined ? 0 : fl(abs));
   };
 });
 import { builtins } from "./builtins";

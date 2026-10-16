@@ -42,3 +42,20 @@ for label, f in [
     ('pow unknown', lambda: pow(2, 3, modulus=5)),
 ]:
     print(label, '|', t(f))
+# a missing pow argument; zip's keywords checked first; isclose's operands converted first (CORR-71C-1..3)
+class Loud:
+    def __bool__(self):
+        print('strict.__bool__ ran')
+        return True
+class A:
+    def __complex__(self):
+        print('A.__complex__ ran')
+        raise ArithmeticError('from A')
+for label, f in [
+    ('pow base only', lambda: pow(base=2)),
+    ('pow exp only', lambda: pow(exp=2)),
+    ('zip strict then unknown', lambda: list(zip([1], strict=Loud(), foo=1))),
+    ('cmath.isclose operand first', lambda: cmath.isclose(A(), 1, rel_tol=-1)),
+    ('cmath.isclose bad tolerance type', lambda: cmath.isclose(1, 1, rel_tol='x')),
+]:
+    print(label, '|', t(f))
