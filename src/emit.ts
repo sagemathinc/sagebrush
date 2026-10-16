@@ -187,8 +187,11 @@ export class Emitter {
         if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : (${t} = $B${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
         return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
       }
-      case "class":
-        return `($ns.has(${q(id)}) ? $ns.get(${q(id)}) : ${this.loadRes(r.outer, id, true)})`;
+      case "class": {
+        // (one read of the namespace: a prepared one's __getitem__ once)
+        const t = this.temp();
+        return `((${t} = $ns.get(${q(id)})) !== undefined ? ${t} : ${this.loadRes(r.outer, id, true)})`;
+      }
       case "classcell":
         return `classCellGet(${this.cellOf(r.scope)})`;
     }
@@ -480,7 +483,7 @@ export class Emitter {
     const scope = this.fn.scope;
     const localsExpr = (): string => {
       if (scope.kind === "module") return "R.moduleLocals($g)";
-      if (scope.kind === "class") return "R.localsDict([...$ns.keys()], [...$ns.values()])";
+      if (scope.kind === "class") return "R.classLocals($ns)";
       const ls = [...scope.bound].filter((x) => !scope.globals.has(x));
       return `R.localsDict(${JSON.stringify(ls)}, [${ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x))).join(", ")}])`;
     };
@@ -1020,9 +1023,12 @@ export class Emitter {
     this.w(`${bc} = R.buildClassOf($B);`);
     const b = this.temp();
     this.w(`${b} = ${bases};`);
+    // (the keywords before the body, as __build_class__'s arguments)
+    const kv = this.temp();
+    this.w(`${kv} = [${kwValues.join(", ")}];`);
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
-      this.w(`$ns.set("__module__", R.classModule($G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
+      this.w(`$ns.set("__module__", R.classModuleIn($ns, $G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
       if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(body[0].value.value.v)});`);
       for (const s of body) this.stmt(s);
     });
@@ -1032,14 +1038,14 @@ export class Emitter {
     this.indent++;
     // the class cell, when its functions use __class__ or super()
     const cell = scope.cellName;
-    this.w(`const $ns = new Map();${cell ? ` const ${cell} = newCell();` : ""}`);
+    this.w(`const $ns = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});${cell ? ` const ${cell} = newCell();` : ""}`);
     if (decls.length) this.w(`let ${decls.join(", ")};`);
     this.indent--;
     this.splice(lines);
     this.line = st.line;
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
-    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], [${kwValues.join(", ")}], ${cell ?? "undefined"}, ${bc});`);
+    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc});`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
