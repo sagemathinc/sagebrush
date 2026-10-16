@@ -304,8 +304,9 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
 
 def sage_eval(source, locals=None, cmds="", preparse=True):
     """The value of the Sage expression source (a string), with the names
-    in locals; cmds (statements) run first.  A tuple or list source is
-    statements followed by the expression.
+    in locals; cmds (statements) run first, and their assignments update
+    locals.  A tuple source is (cmds, expression) or (cmds, expression,
+    locals).
 
     EXAMPLES::
 
@@ -313,14 +314,20 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
         (1024, 1/2, [1, 2, 3, 4, 5])
         sage: sage_eval('x^2 + 1', locals={'x': 3}), sage_eval('t^2', locals={'t': x + 1})
         (10, (x + 1)^2)
-        sage: sage_eval(('y = 3', 'y^2'))
-        9
+        sage: sage_eval(('y = 3', 'y^2')), sage_eval(('a = 2', 'a + b', {'b': 3}), locals={'b': 7})
+        (9, 5)
+        sage: d = {'x': 2}; sage_eval('x', locals=d, cmds='x = 3'), d['x']
+        (3, 3)
     """
     import builtins as _b
     if isinstance(source, (tuple, list)):
-        cmds = "\n".join([str(cmds)] + [str(c) for c in source[:-1]])
-        source = source[-1]
-    source = str(source)
+        if len(source) == 3:
+            cmds, source, locals = source
+        elif len(source) == 2:
+            cmds, source = source
+        else:
+            raise ValueError("a tuple source is (cmds, expression) or (cmds, expression, locals)")
+    source, cmds = str(source), str(cmds)
 
     def comp(code, mode):
         if not preparse:
@@ -330,11 +337,17 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
         from sagebrush.preparse import preparse as _preparse
         return compile(_preparse(code).strip(), "<sage_eval>", mode)
 
-    ns = dict(globals())
-    if locals:
+    base = globals()
+    ns = dict(base)
+    if locals is not None:
         ns.update(locals)
     if cmds.strip():
         exec(comp(cmds, "exec"), ns)
+        if locals is not None:
+            # the commands' assignments go to the caller's locals, as Sage
+            for k, v in ns.items():
+                if k != "__builtins__" and (k in locals or k not in base or base[k] is not v):
+                    locals[k] = v
     return eval(comp(source, "eval"), ns)
 
 

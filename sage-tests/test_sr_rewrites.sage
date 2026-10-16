@@ -60,3 +60,8 @@ for i, e in enumerate([1/(x^2-1), 1/(x*(x+1)), (x+2)/(x^2+3*x+2), x^3/(x^2-1), 1
 print("== simplify_factorial")
 for i, e in enumerate([factorial(n+1)/factorial(n), factorial(n)/factorial(n-1), factorial(n+2)/factorial(n), binomial(n, 2), binomial(n, 3), factorial(2*n)/factorial(n), gamma(n+1)/gamma(n), factorial(n+1)*factorial(n-1)/factorial(n)^2]):
     t("simplify_factorial[%d]" % i, lambda: e.simplify_factorial())
+t("sage_eval 3-tuple", lambda: sage_eval(("a=2", "a+b", {"b": 3}), locals={"b": 7}))
+_d = {"x": 2}
+t("sage_eval cmds update locals", lambda: (sage_eval("x", locals=_d, cmds="x=3"), _d["x"]))
+_e = {}
+t("sage_eval cmds update empty locals", lambda: (sage_eval("z+1", locals=_e, cmds="z=4"), _e["z"]))
