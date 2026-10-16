@@ -1,6 +1,6 @@
 // repr(), str(), format() and `str % args`.
 
-import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout, PrimBox } from "./object";
+import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -302,7 +302,8 @@ export function repr(x: any): string {
   if (x instanceof FloatBox) return floatRepr(x.v);
   if (x instanceof PyBytes) {
     const r = bytesRepr(x.a.subarray(0, x.n));
-    return typeOf(x) === T.bytearray ? `bytearray(${r})` : r;
+    // (a bytearray subclass's repr has its own name, as CPython's: B(b'xy'))
+    return x instanceof PyByteArray ? `${typeOf(x).$name}(${r})` : r;
   }
   if (x === Ellipsis) return "Ellipsis";
   if (x === NotImplemented) return "NotImplemented";
