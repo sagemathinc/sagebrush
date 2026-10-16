@@ -4657,6 +4657,10 @@ def FieldIdeal(R):
     return R.ideal([x ** q - x for x in R.gens()])
 
 
+# The most sum quotients R/(I + J) a quotient ring keeps for reuse
+_PUSHOUT_CACHE = 8
+
+
 class QuotientRing_:
     """R/I for a multivariate polynomial ring R over a field and an ideal I:
     an element is its normal form modulo I. Division and inverses are not
@@ -4724,6 +4728,9 @@ class QuotientRing_:
             return Q
         if tuple(self._show._names) != tuple(Q._show._names):
             return None
+        # (a small cache on self only: at most _PUSHOUT_CACHE pairs, oldest
+        # dropped first; an unbounded one on both parents kept every peer
+        # and every pushout alive, daybreak2's HARD-ACE-1)
         cache = self.__dict__.setdefault("_pushouts", {})
         hit = cache.get(id(Q))
         if hit is not None and hit[0] is Q:
@@ -4740,8 +4747,9 @@ class QuotientRing_:
             # (with the names both quotients share: R/(x^2) and R/(y^2) named
             # u, v meet in R/(x^2, y^2) named u, v, astra's CORR-3D3-1)
             P = QuotientRing_(R, J, list(self._show._names))
+        while len(cache) >= _PUSHOUT_CACHE:
+            del cache[next(iter(cache))]
         cache[id(Q)] = (Q, P)
-        Q.__dict__.setdefault("_pushouts", {})[id(self)] = (self, P)
         return P
 
     def _image(self, a):
