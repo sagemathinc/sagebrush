@@ -43,7 +43,7 @@ test("board: a board command it doesn't have is said so (agent-UX R0-3); a progr
   const r = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "nonsense"], { encoding: "utf8", cwd: dir });
   rmSync(dir, { recursive: true, force: true });
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /^sagebrush board: unknown board command "nonsense": this sagebrush \(dev\) has render, run, check, answers\n/);
+  assert.match(r.stderr, /^sagebrush board: unknown board command "nonsense": this sagebrush \(dev\) has render, run, check, answers, try\n/);
 });
 
 test("board render: a page that is not there, a file that is not there, no file", () => {

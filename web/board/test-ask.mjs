@@ -22,10 +22,11 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = [];
+let n = 0; const waiting = new Map(); const errors = []; const logs = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.method === "Runtime.consoleAPICalled" && (m.params.type === "error" || m.params.type === "warning")) logs.push(m.params.type + ": " + m.params.args.map((x) => x.value ?? x.description ?? "").join(" ").slice(0, 300));
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -203,6 +204,69 @@ try {
   await ev("document.querySelector('[data-sbb=ttclose]').click(), 1");
   await sleep(500);
   check(await ev("[...document.querySelectorAll('.board-ask[data-ask=\"w\"] input')].every((x) => !x.disabled)"), "TimeTravel closed: the controls answer again");
+  // ---- checks, hints and next (stream 5): run in the board's interpreter, with the board's names
+  await ev(`${B}.load(${JSON.stringify({ title: "Checked", layout: "grid", columns: 3, nodes: [
+    { id: "c0", code: "G = 12" },
+    { id: "k", kind: "ask", input: "number", text: "A divisor of $G$ other than 1",
+      check: "G % answer == 0 and answer != 1 or (f'{answer} leaves {G % answer}' if G % answer else False)",
+      hints: ["Try a small one.", { code: "f'{G} = 2 * 2 * 3, and {answer} is not one of those'" }], next: { right: "good", wrong: "help" } },
+    { id: "good", title: "Well done" },
+    { id: "help", title: "Divisors" },
+    { id: "slow", kind: "ask", input: "text", text: "Wait", check: "while True: pass", checkMs: 500 },
+    { id: "nocheck", kind: "ask", input: "text", text: "Plain" },
+  ] })}).then(() => 1)`);
+  const K = (sel = "") => `.board-ask[data-ask="k"] ${sel}`;
+  const q$ = (sel, then = "") => `document.querySelector(${JSON.stringify(sel)})${then}`;
+  await until(q$(K(".board-ask-check"), " !== null"), 20000);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  check(await ev(q$('.board-ask[data-ask="nocheck"] .board-ask-check', " === null")), "a question with no check: no Check button");
+  // (Check with nothing answered: said, nothing run, nothing kept)
+  await press(K(".board-ask-check"));
+  check(/Answer first/.test(await ev(q$(K(".board-ask-checked .board-ask-why"), ".textContent"))) && (await node("k")).attempts === undefined, "Check with no answer: said, not counted");
+  // (a wrong answer, typed and not yet saved: checked as it is; the check's words, the first hint, the wrong way on)
+  await press(K("input[type=number]"));
+  await type("5");
+  await press(K(".board-ask-check"));
+  await until("window.sagebrush.board.snapshot().doc.nodes[1].result !== undefined", 30000);
+  await sleep(300);
+  let q = await node("k");
+  check(q.answer === 5 && q.result === "wrong" && q.attempts === 1, "a wrong answer: kept, counted, wrong: " + JSON.stringify(q));
+  const kText = () => ev(q$(K(), ".textContent"));
+  let t = await kText();
+  check(/Not yet/.test(t) && /5 leaves 2/.test(t) && /Try a small one/.test(t) && !/Hint 2/.test(t), "wrong: the verdict, the check's words, one hint: " + t.slice(0, 300));
+  check((await ev(q$(K("a.board-ref"), "?.getAttribute('href')"))) === "#help", "wrong: sent on to `next.wrong`");
+  const setK = (v, change = false) => ev(`(() => { const n = ${q$(K("input[type=number]"))}; n.value = ${JSON.stringify(v)}; ${change ? "n.dispatchEvent(new Event('change'));" : ""} return 1; })()`);
+  // (wrong again: the computed hint, computed with this answer)
+  await setK("7");
+  await press(K(".board-ask-check"));
+  await until("window.sagebrush.board.snapshot().doc.nodes[1].attempts === 2", 30000);
+  await sleep(300);
+  t = await kText();
+  check(/Hint 2/.test(t) && /7 is not one of those/.test(t), "wrong twice: the computed hint, with this answer: " + t.slice(0, 300));
+  // (right: the verdict, sent on to next.right)
+  await setK("4");
+  await press(K(".board-ask-check"));
+  await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'right'", 30000);
+  await sleep(300);
+  q = await node("k");
+  check(q.answer === 4 && q.attempts === 3 && /Right/.test(await kText()) && (await ev(q$(K("a.board-ref"), "?.getAttribute('href')"))) === "#good", "right: kept, counted, sent on to `next.right`: " + JSON.stringify([q.answer, q.attempts, q.result]) + " " + (await kText()).slice(0, 300));
+  // (another answer: the verdict was the last one's, so it goes)
+  await setK("6", true);
+  await sleep(400);
+  q = await node("k");
+  check(q.answer === 6 && q.result === undefined && q.attempts === 3, "an answer changed: its verdict gone, attempts kept: " + JSON.stringify(q));
+  // (a check past its deadline: could not decide, not counted; checks run again after)
+  await press('.board-ask[data-ask="slow"] .board-ask-text');
+  await type("x");
+  await press('.board-ask[data-ask="slow"] .board-ask-check');
+  await until("window.sagebrush.board.snapshot().doc.nodes[4].result !== undefined", 30000);
+  await sleep(300);
+  q = await node("slow");
+  check(q.result === "error" && q.attempts === undefined && /out of time/.test(await ev(q$('.board-ask[data-ask="slow"]', ".textContent"))), "a check past its deadline: could not decide, not counted: " + JSON.stringify([q.answer, q.attempts, q.result]) + " " + (await ev(q$('.board-ask[data-ask="slow"]', ".textContent"))).slice(0, 300));
+  await setK("3");
+  await press(K(".board-ask-check"));
+  check(await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'right'", 30000), "after a check out of time: checks run again");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
@@ -213,4 +277,5 @@ try {
 }
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);
+if (fails.length) for (const l of logs.slice(-40)) console.log("console", l);
 process.exit(fails.length ? 1 : 0);

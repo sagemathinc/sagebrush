@@ -115,7 +115,7 @@ export class WorkerKernel {
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
     };
     // (a worker that failed may never answer: what waits on it is told, and a
@@ -186,6 +186,34 @@ export class WorkerKernel {
     // notebook keeps changing its own values object)
     this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
     this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) });
+  }
+
+  /**
+   * A board question's check, or a computed hint (src/notebook-session.ts
+   * `evaluate`): `code` run in a copy of the board's names with `answer`
+   * bound; resolves to its verdict ({ok, value | error, timedOut?}).  Within
+   * `ms` (else interrupted: out of time).  Not a run of the notebook's: not
+   * in the journal.
+   */
+  evaluate(code, answer, mode, ms) {
+    return new Promise((resolve) => {
+      if (!this.worker) return resolve({ ok: false, error: "the interpreter is not running" });
+      const id = this.nextId++;
+      let timer = null, over = false;
+      const finish = (r) => { clearTimeout(timer); resolve(r); };
+      const nothing = () => {};
+      this.pending.set(id, {
+        // (its deadline from when it starts: not while the board's own code still runs before it)
+        start: () => { if (ms > 0 && !timer) timer = setTimeout(() => { over = true; this.interrupt(); }, ms); },
+        out: nothing, display: nothing, interact: nothing, clear: nothing,
+        done: (_ms, x) => {
+          if (over) return finish({ ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true });
+          try { finish(x?.evaluated ? JSON.parse(x.evaluated) : { ok: false, error: "it could not run" }); } catch { finish({ ok: false, error: "it could not run" }); }
+        },
+        stopped: () => finish(over ? { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true } : { ok: false, error: "the interpreter stopped" }),
+      });
+      this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" });
+    });
   }
 
   /** Send the worker anything else (files). */

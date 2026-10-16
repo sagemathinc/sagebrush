@@ -358,3 +358,12 @@
 .board-ask-clear { border: none; background: none; color: #2a6f2f; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
 .board-ask :disabled { cursor: default; }
 .board-ask-preview { font-size: 0.95em; padding: 2px 6px; border-left: 3px solid #2a6f2f33; }
+.board-ask-checked { display: flex; flex-direction: column; gap: 4px; }
+.board-ask-check { align-self: flex-start; padding: 3px 12px; border: 1px solid #2a6f2f; border-radius: 6px; background: #2a6f2f; color: #fff; font: inherit; cursor: pointer; }
+.board-ask-check:disabled { opacity: 0.6; }
+.board-ask-result { font-weight: 600; }
+.board-ask-right { color: #2a6f2f; }
+.board-ask-wrong { color: #a33; }
+.board-ask-error { color: #a60; }
+.board-ask-hint { font-size: 0.95em; padding: 2px 8px; border-left: 3px solid #e0c060; background: #fffbea; }
+.board-ask-message { font-size: 0.95em; }

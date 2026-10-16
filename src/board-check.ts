@@ -18,7 +18,7 @@
 
 import { closeSync, openSync, readSync } from "fs";
 import { basename } from "path";
-import { cleanDoc, formatError, isBoard, oneEmoji, VERSION } from "../web/board/doc";
+import { cleanDoc, formatError, isBoard, oneEmoji, VERSION, type DocAsk } from "../web/board/doc";
 import { cleanPreview } from "../web/board/preview";
 import { askProblems } from "../web/board/ask";
 import { BOARD_SCHEMA } from "../web/board/format-schema";
@@ -140,7 +140,10 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
         else if (n.kind === "ask") {
           // (a question the board keeps as one: its options, bounds and answer, past the schema)
           const q = cleanDoc({ nodes: [n] }).nodes?.[0];
-          if (q?.kind === "ask") for (const x of askProblems(q)) (x.level === "error" ? err : warn)(x.field ? step(p, x.field) : p, x.message);
+          if (q?.kind === "ask") {
+            for (const x of askProblems(q, typeof d.mode === "string" ? d.mode : "python")) (x.level === "error" ? err : warn)(x.field ? step(p, x.field) : p, x.message);
+            if (q.next) asks.push([q, p]);
+          }
         }
         else if (n.kind === "sticker") { if (typeof n.emoji === "string" && !oneEmoji(n.emoji)) err(step(p, "emoji"), `${show(n.emoji)} is not one emoji: a sticker shows one (a single character such as 🌵), else it is left out`); }
         else if (n.kind !== "ink") {
@@ -150,7 +153,13 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
         }
       });
     };
+    const asks: [DocAsk, string][] = [];
     walk(page.nodes, step(path, "nodes"));
+    // (where a checked answer sends the reader: an item of its page)
+    for (const [q, p] of asks) for (const k of ["right", "wrong"] as const) {
+      const to = q.next?.[k];
+      if (to !== undefined && !ids.has(to)) err(step(step(p, "next"), k), `no item ${show(to)} on this page${near(to, [...ids.keys()])}: \`next\` names the item the reader is sent to`);
+    }
     const bg = page.background;
     if (isObj(bg) && typeof bg.image === "string") {
       if (!used.has(bg.image)) used.set(bg.image, step(step(path, "background"), "image"));

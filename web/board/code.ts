@@ -507,6 +507,14 @@ export class BoardCode {
     return out;
   }
 
+  /** A board question's check, or a computed hint, in this interpreter,
+   * after what was asked to run (WorkerKernel.evaluate): its verdict. */
+  async evaluate(code: string, answer: unknown, ms: number): Promise<{ ok: boolean; value?: unknown; error?: string; timedOut?: boolean }> {
+    if (!(await this.ready) || !this.kernel) return { ok: false, error: "the interpreter is not running" };
+    await this.last;
+    return this.kernel.evaluate(code, answer, this.mode, ms);
+  }
+
   /** Run these code items, then what depends on them (resolves to the reactive notebook's report). */
   run(ids: string[]): Promise<any> {
     return this.queued(async () => {

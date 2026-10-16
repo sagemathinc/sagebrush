@@ -171,6 +171,11 @@ export class BoardCodes {
   interrupt() {
     for (const e of this.engines.values()) e.interrupt();
   }
+  /** A board question's check, or a computed hint, in the language's interpreter (made if there is none yet). */
+  evaluate(mode: BoardMode, code: string, answer: unknown, ms: number) {
+    const e = this.engine(mode);
+    return e ? e.evaluate(code, answer, ms) : Promise.resolve({ ok: false, error: this.error ?? "no interpreter for this language" });
+  }
   close() {
     for (const e of this.engines.values()) e.close();
     this.engines.clear();
