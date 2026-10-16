@@ -466,6 +466,13 @@ def _quantile_impl(x, p, rest, scale, fname):
         col = F[:, c]
         S = np.sort(col[~np.isnan(col)])  # (NaN: missing)
         out[:, c] = _quantiles(S, P)
+    d = _m._dims(x)
+    if dim is None and len(d) == 2 and min(d) <= 1 and P.size > 1:
+        # (a vector A, no dim: Q has p's orientation, as the page says, a vector "with the
+        # same length as p"; only generated code follows A's)
+        pd = _m._dims(p)
+        Q = out[:, 0]
+        return _out(Q.reshape((1, -1)) if pd[0] == 1 else Q.reshape((-1, 1)), _cls(x))
     return _out(_from_front(out, how), _cls(x))
 
 
@@ -532,12 +539,22 @@ def _mov_args(args, fname, takes_w):
 def _moving(A, kb, kf, stat, w, omit, ends):
     """stat over each window [i-kb, i+kf] down axis 0 of A (L-by-R)"""
     L, R = A.shape
+    fill = ends == "fill" or not isinstance(ends, str)
+    if fill:
+        # (Endpoints "fill" or a value: the nonexisting elements are NaN or that value, as
+        # movmean's page says, so they take part in the statistic, its count and its
+        # variance's denominator; with "omitnan" the filled NaNs are left out. Each
+        # window's positions outside the data read as the value, so the work is the
+        # same as 'shrink''s, L times the window, with no padded copy)
+        v = _math.nan if ends == "fill" else ends
+        A = A.astype(np.result_type(A.dtype, np.float64, np.asarray(v).dtype))
     offs = range(-kb, kf + 1)
 
     def shifted(o):
-        """A[i+o] at each i, with whether it is in range"""
-        S = np.zeros(A.shape, dtype=A.dtype)
-        ok = np.zeros(A.shape, dtype=bool)
+        """A[i+o] at each i, with whether it is in range (with a fill, every position is:
+        the fill value outside the data)"""
+        S = np.full(A.shape, v, dtype=A.dtype) if fill else np.zeros(A.shape, dtype=A.dtype)
+        ok = np.full(A.shape, fill, dtype=bool)
         lo, hi = max(0, -o), min(L, L - o)
         if hi > lo:
             S[lo:hi] = A[lo + o:hi + o]
@@ -607,8 +624,6 @@ def _moving(A, kb, kf, stat, w, omit, ends):
     complete = (i - kb >= 0) & (i + kf <= L - 1)
     if ends == "discard":
         return res[np.nonzero(complete)[0]]
-    if ends == "fill" or not isinstance(ends, str):
-        res = np.where(complete.reshape((-1, 1)), res, _math.nan if ends == "fill" else ends)
     return res
 
 

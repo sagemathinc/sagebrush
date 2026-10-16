@@ -4703,6 +4703,23 @@ def mean_(x, *args):
     return _reduce(x, args, m, "mean", out_cls="single" if cls == "single" else "double")
 
 
+def _csort(A, ax):
+    """complex A sorted along ax as MATLAB's sort orders complex numbers: by magnitude, then by
+    phase angle in (-pi, pi]; NaN last"""
+    import cmath as _cm
+    B = np.moveaxis(A, ax, -1)
+    shp = B.shape
+    flat = B.reshape((-1, shp[-1]))
+
+    def key(z):
+        if z != z:
+            return (1, 0.0, 0.0)
+        ph = _cm.phase(z)
+        return (0, abs(z), _math.pi if ph == -_math.pi else ph)
+    out = np.array([sorted((complex(z) for z in row), key=key) for row in flat], dtype=np.complex128).reshape(shp)
+    return np.moveaxis(out, -1, ax)
+
+
 @_bs("median")
 def median_(x, *args):
     if _dims(x) == (0, 0) and not args:
@@ -4717,13 +4734,14 @@ def median_(x, *args):
         if omit:
             # (each slice's own count of numbers; the NaN sort last)
             m = np.sum(~np.isnan(A), axis=ax, keepdims=True)
-            S = np.sort(np.where(np.isnan(A), np.inf, A), axis=ax)
+            # (complex numbers in sort's order, by magnitude: median's middle values)
+            S = _csort(A, ax) if A.dtype.kind == "c" else np.sort(np.where(np.isnan(A), np.inf, A), axis=ax)
             hi = _take_along(S, np.maximum(m // 2, 0), ax)
             lo = _take_along(S, np.maximum((m - 1) // 2, 0), ax)
             with np.errstate(invalid="ignore"):
                 r = np.where(m % 2 == 0, lo + (hi - lo) / 2, lo)
             return np.squeeze(np.where(m == 0, _math.nan, r), axis=ax)
-        S = np.sort(A, axis=ax)
+        S = _csort(A, ax) if A.dtype.kind == "c" else np.sort(A, axis=ax)
         lo = np.take(S, (n - 1) // 2, axis=ax)
         hi = np.take(S, n // 2, axis=ax)
         r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
