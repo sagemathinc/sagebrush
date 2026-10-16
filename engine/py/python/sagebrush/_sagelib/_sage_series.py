@@ -1046,12 +1046,16 @@ class Series:
         """
         R = self._R
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            if not args[0]:
+                return self  # no variables: no differentiation, as Sage (CORR-EC3-1)
             args = tuple(args[0])
         # the number of differentiations: the series variable, each
         # optionally followed by a count (derivative(w, 2) was the first
         # derivative: its count was ignored)
         n, have = 0, False
         for a in args:
+            if not isinstance(a, (int, Series)) and str(a) != R._name and "/" in str(a) and str(a).replace("/", "").lstrip("-").isdigit():
+                raise ValueError("cannot differentiate with respect to %s" % a)  # a fractional count (CORR-EC3-2)
             if isinstance(a, int) or (not isinstance(a, Series) and str(a).lstrip("-").isdigit()):
                 if not have:
                     raise ValueError("a derivative count needs a variable before it")
@@ -1071,14 +1075,23 @@ class Series:
             return self
         # in closed form: c_e x^e becomes e (e-1) ... (e-n+1) c_e x^(e-n),
         # which is 0 when 0 <= e < n (no loop of n steps: derivative(w, 10^9))
+        # the surviving terms, counted before any work: their falling
+        # factorials have about n log2(|e| + n) bits each, so the total is
+        # bounded before multiplying (one z^-2 term at n = 10^5 took 7 s
+        # and 330 MB: HARD-EC3-1)
+        surv = [i for i, ci in enumerate(self._c)
+                if not (0 <= self._v + i < n) and not _is_zero(ci)]
+        if surv:
+            bits = sum(n * max(1, (abs(self._v + i) + n).bit_length()) for i in surv)
+            if bits > 10**6 or len(surv) * n > 10**6:
+                raise NotImplementedError("the %d-th derivative of this series: its coefficients would have about %d bits" % (n, bits))
+        keep = set(surv)
         c = []
         for i, ci in enumerate(self._c):
-            e = self._v + i
-            if 0 <= e < n or _is_zero(ci):
+            if i not in keep:
                 c.append(R._zero())
                 continue
-            if n > 100000:
-                raise NotImplementedError("the %d-th derivative of a series with a nonzero x^%d term" % (n, e))
+            e = self._v + i
             f = 1
             for j in range(n):
                 f *= e - j

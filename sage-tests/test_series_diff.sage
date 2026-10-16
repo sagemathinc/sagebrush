@@ -18,3 +18,15 @@ t("L O(z^-1)", lambda: (z^-3 + O(z^-1)).derivative())
 P.<u> = PowerSeriesRing(QQ)
 t("P", lambda: (1 + u + u^2 + O(u^4)).derivative())
 t("P O", lambda: O(u^3).derivative())
+# review follow-ups (CORR-EC3-1..3): another variable differentiates the
+# coefficients with (x - y) held fixed; counts must be integers; [] is none
+s5 = exp(x).series(x == y, 3)
+t("x==y d/dy", lambda: s5.derivative(y))
+t("x==y d/dx", lambda: s5.derivative(x))
+t("sin(x)*y^2 d/dy", lambda: (sin(x)*y^2).series(x == y, 3).derivative(y))
+t("frac count", lambda: exp(x).series(x, 3).derivative(x, SR(3)/2))
+R2.<w2> = QQ[[]]
+f2 = 1 + w2 + w2^2 + O(w2^4)
+t("ps []", lambda: f2.derivative([]))
+t("ps 3/2", lambda: f2.derivative(w2, 3/2))
+t("sym []", lambda: exp(x).series(x, 3).derivative([]))
