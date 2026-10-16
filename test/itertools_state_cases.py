@@ -1,0 +1,448 @@
+# Wrong answers astra's stateful hunt found at e4a9ce94 (PY-STATE-1..3):
+# islice's consumption of its source, groupby's key equality, and the
+# iterators that survive an exception from their source. astra's minimal
+# program, then the 328 confirmed cases, each in a fresh namespace.
+import itertools
+it=iter(range(6))
+print('islice empty output',list(itertools.islice(it,3,1)))
+print('islice empty next',next(it,None))
+it=iter(range(7))
+print('islice step output',list(itertools.islice(it,0,5,3)))
+print('islice step next',next(it,None))
+nan=float('nan')
+print('groupby shared nan',[len(list(g)) for _,g in itertools.groupby([nan,nan])])
+class Equal:
+    def __eq__(self,o):return True
+    def __ne__(self,o):return True
+print('groupby positive equality',[len(list(g)) for _,g in itertools.groupby([Equal(),Equal()])])
+class Bumpy:
+    def __init__(self):self.i=0
+    def __iter__(self):return self
+    def __next__(self):
+        i=self.i;self.i+=1
+        if i==1:raise ValueError('bump')
+        if i>=4:raise StopIteration
+        return i
+it=itertools.chain(Bumpy(),[8])
+print('chain first',next(it))
+try:next(it)
+except ValueError:pass
+print('chain remaining',list(it))
+
+CASES = [
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,1,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,2,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,5,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,10,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,10,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(1))\na=list(itertools.islice(it,12,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,0,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,0,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,0,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,0,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,0,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,1,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,2,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,5,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,10,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,10,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(3))\na=list(itertools.islice(it,12,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,0,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,1,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,2,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,5,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,10,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,10,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(6))\na=list(itertools.islice(it,12,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,10,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,0,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,1,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,10,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,2,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,5,10,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,0,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,0,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,0,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,0,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,1,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,1,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,1,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,1,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,2,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,2,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,2,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,2,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,4,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,4,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,4,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,4,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,5,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,5,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,5,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,5,5))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,10,1))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,10,2))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,10,3))', '(a,list(it))'),
+    ('import itertools\nit=iter(range(10))\na=list(itertools.islice(it,12,10,5))', '(a,list(it))'),
+    ("import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[float('nan')]*2", '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K()]*2', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K() for _ in range(2)]', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ("import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[float('nan')]*3", '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K()]*3', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K() for _ in range(3)]', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ("import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[float('nan')]*4", '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K()]*4', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K() for _ in range(4)]', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ("import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[float('nan')]*5", '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K()]*5', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K() for _ in range(5)]', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ("import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[float('nan')]*6", '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K()]*6', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ('import itertools\nclass K:\n    def __eq__(self,o):return True\n    def __ne__(self,o):return True\n\nitems=[K() for _ in range(6)]', '[len(list(g)) for k,g in itertools.groupby(items)]'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.chain(Bumpy(),[8])\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.accumulate(Bumpy())\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.cycle(Bumpy())\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.compress(Bumpy(),[True]*10)\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.dropwhile(lambda x:False,Bumpy())\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.takewhile(lambda x:True,Bumpy())\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.starmap(lambda x:x,zip(Bumpy()))\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+    ("import itertools\nclass Bumpy:\n    def __init__(self):self.i=0\n    def __iter__(self):return self\n    def __next__(self):\n        i=self.i;self.i+=1\n        if i==1:raise ValueError('bump')\n        if i>=4:raise StopIteration\n        return i\n\na=itertools.tee(Bumpy())[0]\nout=[]\nfor i in range(7):\n    try:out.append(next(a))\n    except Exception as e:out.append(type(e).__name__)", 'out'),
+]
+for setup, expr in CASES:
+    ns = {}
+    try:
+        exec(setup, ns)
+        r = repr(eval(expr, ns))
+    except Exception as x:
+        r = type(x).__name__ + ': ' + str(x)
+    print(expr, '->', r)
+
+# Each other iterator over a source, after a ValueError from it, and the
+# argument checks and eager inputs around them.
+import itertools as I
+class Bump:
+    def __init__(self, n=5):
+        self.i, self.n = 0, n
+    def __iter__(self):
+        return self
+    def __next__(self):
+        i = self.i
+        self.i += 1
+        if i == 1:
+            raise ValueError('bump')
+        if i >= self.n:
+            raise StopIteration
+        return i
+def resume(name, make):
+    it = make()
+    got = []
+    for _ in range(12):
+        try:
+            got.append(next(it))
+        except ValueError:
+            got.append('E')
+        except StopIteration:
+            got.append('S')
+            break
+    print(name, got)
+resume('islice', lambda: I.islice(Bump(), 0, None, 2))
+resume('islice stop', lambda: I.islice(Bump(), 1, 4))
+resume('filterfalse', lambda: I.filterfalse(None, Bump()))
+resume('pairwise', lambda: I.pairwise(Bump()))
+resume('zip_longest', lambda: I.zip_longest(Bump(), 'xy', fillvalue='-'))
+resume('batched', lambda: I.batched(Bump(8), 2))
+resume('groupby', lambda: (k for k, g in I.groupby(Bump())))
+resume('accumulate initial', lambda: I.accumulate(Bump(), initial=100))
+resume('cycle', lambda: I.cycle(Bump(4)))
+resume('dropwhile', lambda: I.dropwhile(lambda x: x < 3, Bump(6)))
+resume('takewhile', lambda: I.takewhile(lambda x: x < 3, Bump(6)))
+resume('starmap', lambda: I.starmap(lambda x: -x, ((v,) for v in [1, 2, 3])))
+a, b = I.tee(Bump())
+resume('tee a', lambda: a)
+resume('tee b', lambda: b)
+c, = I.tee(a, 1)
+print('tee of a tee', list(c), I.tee('ab', 0))
+for args in [(), (1, 2, 3, 4), (-1,), (1, -1), (0, 5, 0), (None, None, None), (1.5,), ('a',)]:
+    try:
+        print('islice', args, list(I.islice(range(10), *args)))
+    except (TypeError, ValueError) as e:
+        print('islice', args, type(e).__name__, e)
+for f, a in [(I.permutations, ('ab', -1)), (I.combinations, ('ab', -1)), (I.combinations_with_replacement, ('ab', -1)), (I.product, ('ab',))]:
+    try:
+        print(f.__name__, list(f(*a)) if f is not I.product else list(f(*a, repeat=-1)))
+    except ValueError as e:
+        print(f.__name__, e)
+src = iter(range(5))
+p = I.product(src, repeat=1)
+print('product reads its input when called', next(src, None), list(p))
+src = iter('abc')
+q = I.combinations(src, 2)
+print('combinations too', next(src, None), list(q))
+try:
+    list(I.batched('abcde', 2, strict=True))
+except ValueError as e:
+    print('batched strict', e)
+print(list(I.batched('abcd', 2, strict=True)))
+nan = float('nan')
+# (a shared NaN is one group; separately made NaNs are not tested: pyjs's
+# `is` cannot tell two NaN floats apart)
+print([(k is nan, len(list(g))) for k, g in I.groupby([nan, nan, 1, 1.0, True])])
+g = I.groupby('aabb')
+k1, g1 = next(g)
+k2, g2 = next(g)
+print(k1, list(g1), k2, list(g2), list(g))
+
+# every public name of CPython's itertools, and repeat (which zip_longest uses)
+print(sorted(n for n in dir(I) if not n.startswith('_')))
+print(list(I.repeat(7, 3)), list(I.islice(I.repeat('x'), 2)), list(I.zip_longest('abc', 'x', fillvalue=0)))
