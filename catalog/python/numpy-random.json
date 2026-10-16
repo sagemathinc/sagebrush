@@ -1,0 +1,244 @@
+[
+  {
+    "name": "numpy.random.default_rng",
+    "kind": "function",
+    "signature": "(seed=None)",
+    "summary": "A random Generator (PCG64), NumPy's recommended source of random numbers.",
+    "examples": [
+      {
+        "code": "rng = np.random.default_rng(42)\nrng.integers(0, 10, size=5)",
+        "expected": "array([0, 7, 6, 4, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.random",
+    "kind": "method",
+    "signature": "(size=None)",
+    "summary": "Uniform floats in [0, 1).",
+    "examples": [
+      {
+        "code": "np.random.default_rng(0).random(3)",
+        "expected": "array([0.63696169, 0.26978671, 0.04097352])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.integers",
+    "kind": "method",
+    "signature": "(low, high=None, size=None, endpoint=False)",
+    "summary": "Random integers in [low, high).",
+    "examples": [
+      {
+        "code": "np.random.default_rng(1).integers(1, 7, size=6)",
+        "expected": "array([3, 4, 5, 6, 1, 1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.normal",
+    "kind": "method",
+    "signature": "(loc=0.0, scale=1.0, size=None)",
+    "summary": "Samples of a normal (Gaussian) distribution.",
+    "examples": [
+      {
+        "code": "np.random.default_rng(2).normal(10, 2, size=3)",
+        "expected": "array([10.37810676,  8.95450312,  9.17387291])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.uniform",
+    "kind": "method",
+    "signature": "(low=0.0, high=1.0, size=None)",
+    "summary": "Samples of a uniform distribution on [low, high).",
+    "examples": [
+      {
+        "code": "np.random.default_rng(3).uniform(-1, 1, size=2)",
+        "expected": "array([-0.82870167, -0.52637899])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.choice",
+    "kind": "method",
+    "signature": "(a, size=None, replace=True, p=None)",
+    "summary": "A random sample of the elements of a.",
+    "examples": [
+      {
+        "code": "np.random.default_rng(4).choice([10, 20, 30], size=4, p=[0.5, 0.25, 0.25])",
+        "expected": "array([30, 20, 30, 10])\n"
+      },
+      {
+        "code": "np.random.default_rng(4).choice(10, size=3, replace=False)",
+        "expected": "array([5, 9, 8])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.permutation",
+    "kind": "method",
+    "signature": "(x)",
+    "summary": "A randomly permuted copy, or a permutation of range(x).",
+    "examples": [
+      {
+        "code": "np.random.default_rng(5).permutation(5)",
+        "expected": "array([4, 3, 1, 2, 0])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.shuffle",
+    "kind": "method",
+    "signature": "(x)",
+    "summary": "Shuffles an array in place.",
+    "examples": [
+      {
+        "code": "a = np.arange(5)\nnp.random.default_rng(6).shuffle(a)\na",
+        "expected": "array([2, 4, 0, 3, 1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.exponential",
+    "kind": "method",
+    "signature": "(scale=1.0, size=None)",
+    "summary": "Samples of an exponential distribution.",
+    "examples": [
+      {
+        "code": "np.random.default_rng(7).exponential(2.0, size=2)",
+        "expected": "array([1.41505851, 2.0504067 ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.Generator.poisson",
+    "kind": "method",
+    "signature": "(lam=1.0, size=None)",
+    "summary": "Samples of a Poisson distribution.",
+    "examples": [
+      {
+        "code": "np.random.default_rng(8).poisson(3, size=5)",
+        "expected": "array([5, 2, 2, 1, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.seed",
+    "kind": "function",
+    "signature": "(seed=None)",
+    "summary": "Seeds the legacy global generator (MT19937), for np.random.rand and friends.",
+    "examples": [
+      {
+        "code": "np.random.seed(0)\nnp.random.rand(2)",
+        "expected": "array([0.5488135 , 0.71518937])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.rand",
+    "kind": "function",
+    "signature": "(*shape)",
+    "summary": "Uniform floats in [0, 1) of the given shape (legacy).",
+    "examples": [
+      {
+        "code": "np.random.seed(1)\nnp.random.rand(2, 2)",
+        "expected": "array([[4.17022005e-01, 7.20324493e-01],\n       [1.14374817e-04, 3.02332573e-01]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.randn",
+    "kind": "function",
+    "signature": "(*shape)",
+    "summary": "Standard normal samples of the given shape (legacy).",
+    "examples": [
+      {
+        "code": "np.random.seed(2)\nnp.random.randn(3)",
+        "expected": "array([-0.41675785, -0.05626683, -2.1361961 ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.random.randint",
+    "kind": "function",
+    "signature": "(low, high=None, size=None)",
+    "summary": "Random integers in [low, high) (legacy).",
+    "examples": [
+      {
+        "code": "np.random.seed(3)\nnp.random.randint(0, 100, 4)",
+        "expected": "array([24,  3, 56, 72])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  }
+]

@@ -1,0 +1,953 @@
+[
+  {
+    "name": "math.acos",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The inverse cosine, in radians.",
+    "examples": [
+      {
+        "code": "round(math.acos(0.5), 6)",
+        "expected": "1.047198\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.acosh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The inverse hyperbolic cosine.",
+    "examples": [
+      {
+        "code": "round(math.acosh(2), 6)",
+        "expected": "1.316958\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.asin",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The inverse sine, in radians.",
+    "examples": [
+      {
+        "code": "round(math.asin(0.5), 6)",
+        "expected": "0.523599\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.asinh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The inverse hyperbolic sine.",
+    "examples": [
+      {
+        "code": "round(math.asinh(2), 6)",
+        "expected": "1.443635\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.atan",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The inverse tangent, in radians.",
+    "examples": [
+      {
+        "code": "round(math.atan(2), 6)",
+        "expected": "1.107149\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.atanh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The inverse hyperbolic tangent.",
+    "examples": [
+      {
+        "code": "round(math.atanh(0.5), 6)",
+        "expected": "0.549306\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.cosh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The hyperbolic cosine.",
+    "examples": [
+      {
+        "code": "round(math.cosh(1), 6)",
+        "expected": "1.543081\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.erfc",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The complementary error function.",
+    "examples": [
+      {
+        "code": "round(math.erfc(1), 6)",
+        "expected": "0.157299\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.expm1",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "exp(x) minus one, accurate for small x.",
+    "examples": [
+      {
+        "code": "round(math.expm1(0.001), 6)",
+        "expected": "0.001001\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.log1p",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "log(1+x), accurate for small x.",
+    "examples": [
+      {
+        "code": "round(math.log1p(0.001), 6)",
+        "expected": "0.001\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.sinh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The hyperbolic sine.",
+    "examples": [
+      {
+        "code": "round(math.sinh(1), 6)",
+        "expected": "1.175201\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.tanh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The hyperbolic tangent.",
+    "examples": [
+      {
+        "code": "round(math.tanh(1), 6)",
+        "expected": "0.761594\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.cbrt",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The real cube root, including negative inputs.",
+    "examples": [
+      {
+        "code": "math.cbrt(-8)",
+        "expected": "-2.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.exp2",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Two raised to the power x.",
+    "examples": [
+      {
+        "code": "math.exp2(5)",
+        "expected": "32.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.isfinite",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Whether x is neither infinite nor NaN.",
+    "examples": [
+      {
+        "code": "[math.isfinite(x) for x in (1.5, math.inf, math.nan)]",
+        "expected": "[True, False, False]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.sqrt",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The square root of x.",
+    "examples": [
+      {
+        "code": "math.sqrt(2)",
+        "expected": "1.4142135623730951\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.isqrt",
+    "kind": "function",
+    "signature": "(n)",
+    "summary": "The integer square root of a non-negative integer.",
+    "examples": [
+      {
+        "code": "math.isqrt(10**20 + 1)",
+        "expected": "10000000000\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.exp",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "e raised to the power x.",
+    "examples": [
+      {
+        "code": "math.exp(1)",
+        "expected": "2.718281828459045\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.log",
+    "kind": "function",
+    "signature": "(x, base=e)",
+    "summary": "The logarithm of x, natural or to a base.",
+    "examples": [
+      {
+        "code": "math.log(100, 10)",
+        "expected": "2.0\n"
+      },
+      {
+        "code": "math.log(math.e)",
+        "expected": "1.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.log10",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The base-10 logarithm.",
+    "examples": [
+      {
+        "code": "math.log10(0.001)",
+        "expected": "-3.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.log2",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The base-2 logarithm.",
+    "examples": [
+      {
+        "code": "math.log2(1024)",
+        "expected": "10.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.pow",
+    "kind": "function",
+    "signature": "(x, y)",
+    "summary": "x raised to the power y, as floats.",
+    "examples": [
+      {
+        "code": "math.pow(2, 0.5)",
+        "expected": "1.4142135623730951\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.sin",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The sine of x (radians).",
+    "examples": [
+      {
+        "code": "math.sin(math.pi / 6)",
+        "expected": "0.49999999999999994\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.cos",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The cosine of x (radians).",
+    "examples": [
+      {
+        "code": "math.cos(math.pi / 3)",
+        "expected": "0.5000000000000001\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.tan",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The tangent of x (radians).",
+    "examples": [
+      {
+        "code": "math.tan(math.pi / 4)",
+        "expected": "0.9999999999999999\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.atan2",
+    "kind": "function",
+    "signature": "(y, x)",
+    "summary": "The angle of the point (x, y), in radians.",
+    "examples": [
+      {
+        "code": "math.atan2(1, -1)",
+        "expected": "2.356194490192345\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.hypot",
+    "kind": "function",
+    "signature": "(*coordinates)",
+    "summary": "The Euclidean norm, sqrt(sum of squares).",
+    "examples": [
+      {
+        "code": "math.hypot(3, 4, 12)",
+        "expected": "13.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.dist",
+    "kind": "function",
+    "signature": "(p, q)",
+    "summary": "The Euclidean distance between two points.",
+    "examples": [
+      {
+        "code": "math.dist((0, 0), (3, 4))",
+        "expected": "5.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.degrees",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Radians converted to degrees.",
+    "examples": [
+      {
+        "code": "math.degrees(math.pi / 2)",
+        "expected": "90.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.radians",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Degrees converted to radians.",
+    "examples": [
+      {
+        "code": "math.radians(180)",
+        "expected": "3.141592653589793\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.floor",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The largest integer <= x.",
+    "examples": [
+      {
+        "code": "math.floor(-2.5)",
+        "expected": "-3\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.ceil",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The smallest integer >= x.",
+    "examples": [
+      {
+        "code": "math.ceil(2.1)",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.trunc",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "x truncated toward zero, as an integer.",
+    "examples": [
+      {
+        "code": "math.trunc(-2.7)",
+        "expected": "-2\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.fabs",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The absolute value, as a float.",
+    "examples": [
+      {
+        "code": "math.fabs(-3)",
+        "expected": "3.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.factorial",
+    "kind": "function",
+    "signature": "(n)",
+    "summary": "n! (exact).",
+    "examples": [
+      {
+        "code": "math.factorial(20)",
+        "expected": "2432902008176640000\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.comb",
+    "kind": "function",
+    "signature": "(n, k)",
+    "summary": "The number of ways to choose k items from n.",
+    "examples": [
+      {
+        "code": "math.comb(10, 3)",
+        "expected": "120\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.perm",
+    "kind": "function",
+    "signature": "(n, k=None)",
+    "summary": "The number of ordered ways to choose k items from n.",
+    "examples": [
+      {
+        "code": "math.perm(5, 2)",
+        "expected": "20\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.gcd",
+    "kind": "function",
+    "signature": "(*integers)",
+    "summary": "The greatest common divisor.",
+    "examples": [
+      {
+        "code": "math.gcd(84, 36, 60)",
+        "expected": "12\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.lcm",
+    "kind": "function",
+    "signature": "(*integers)",
+    "summary": "The least common multiple.",
+    "examples": [
+      {
+        "code": "math.lcm(4, 6, 10)",
+        "expected": "60\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.fsum",
+    "kind": "function",
+    "signature": "(iterable)",
+    "summary": "An accurate floating-point sum.",
+    "examples": [
+      {
+        "code": "math.fsum([0.1] * 10)",
+        "expected": "1.0\n"
+      },
+      {
+        "code": "sum([0.1] * 10)",
+        "expected": "1.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.prod",
+    "kind": "function",
+    "signature": "(iterable, start=1)",
+    "summary": "The product of the elements.",
+    "examples": [
+      {
+        "code": "math.prod([1, 2, 3, 4])",
+        "expected": "24\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.isclose",
+    "kind": "function",
+    "signature": "(a, b, rel_tol=1e-09, abs_tol=0.0)",
+    "summary": "Whether two values are close.",
+    "examples": [
+      {
+        "code": "math.isclose(0.1 + 0.2, 0.3)",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.isnan",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Whether x is nan.",
+    "examples": [
+      {
+        "code": "math.isnan(float('nan'))",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.isinf",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Whether x is infinite.",
+    "examples": [
+      {
+        "code": "math.isinf(-math.inf)",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.copysign",
+    "kind": "function",
+    "signature": "(x, y)",
+    "summary": "The magnitude of x with the sign of y.",
+    "examples": [
+      {
+        "code": "math.copysign(3, -0.0)",
+        "expected": "-3.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.fmod",
+    "kind": "function",
+    "signature": "(x, y)",
+    "summary": "The remainder of x / y with the sign of x (C's fmod).",
+    "examples": [
+      {
+        "code": "math.fmod(-7, 3)",
+        "expected": "-1.0\n"
+      },
+      {
+        "code": "-7 % 3",
+        "expected": "2\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.remainder",
+    "kind": "function",
+    "signature": "(x, y)",
+    "summary": "The IEEE 754 remainder of x by y: x - n*y with n the integer nearest x / y (ties to even).",
+    "examples": [
+      {
+        "code": "math.remainder(7, 3)",
+        "expected": "1.0\n"
+      },
+      {
+        "code": "math.remainder(7.5, 2)",
+        "expected": "-0.5\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.modf",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The fractional and integer parts of x.",
+    "examples": [
+      {
+        "code": "math.modf(3.75)",
+        "expected": "(0.75, 3.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.frexp",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The mantissa and exponent of x: x = m * 2**e.",
+    "examples": [
+      {
+        "code": "math.frexp(40.0)",
+        "expected": "(0.625, 6)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.ldexp",
+    "kind": "function",
+    "signature": "(x, i)",
+    "summary": "x * 2**i.",
+    "examples": [
+      {
+        "code": "math.ldexp(0.625, 6)",
+        "expected": "40.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.erf",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The error function.",
+    "examples": [
+      {
+        "code": "math.erf(1)",
+        "expected": "0.8427007929497149\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.gamma",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The Gamma function.",
+    "examples": [
+      {
+        "code": "math.gamma(5.5)",
+        "expected": "52.34277778455352\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.lgamma",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The natural log of the absolute value of the Gamma function.",
+    "examples": [
+      {
+        "code": "math.lgamma(100)",
+        "expected": "359.1342053695754\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.nextafter",
+    "kind": "function",
+    "signature": "(x, y)",
+    "summary": "The next float after x toward y.",
+    "examples": [
+      {
+        "code": "math.nextafter(1.0, 2.0)",
+        "expected": "1.0000000000000002\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.ulp",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The value of the least significant bit of x.",
+    "examples": [
+      {
+        "code": "math.ulp(1.0)",
+        "expected": "2.220446049250313e-16\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "name": "numpy.polynomial.Polynomial",
+    "kind": "class",
+    "signature": "(coef)",
+    "summary": "A polynomial in the power basis (lowest power first), with fit, roots, deriv and integ.",
+    "examples": [
+      {
+        "code": "P = np.polynomial.Polynomial([1, 2, 3])\nP(2)",
+        "expected": "np.float64(17.0)\n"
+      },
+      {
+        "code": "np.polynomial.Polynomial([-1, 0, 1]).roots()",
+        "expected": "array([-1.,  1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  }
+]

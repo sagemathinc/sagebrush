@@ -1,0 +1,36 @@
+[
+  {
+    "name": "scipy.io.loadmat",
+    "kind": "function",
+    "signature": "(file_name, mdict=None, squeeze_me=False)",
+    "summary": "The variables of a MATLAB .mat file, as a dict of arrays.",
+    "examples": [
+      {
+        "code": "import scipy.io\nscipy.io.savemat('m.mat', {'a': np.arange(3.0)})\nscipy.io.loadmat('m.mat')['a']",
+        "expected": "array([[0., 1., 2.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.io.savemat",
+    "kind": "function",
+    "signature": "(file_name, mdict, oned_as='row')",
+    "summary": "Writes a dict of arrays to a MATLAB .mat file.",
+    "examples": [
+      {
+        "code": "import scipy.io\nscipy.io.savemat('m.mat', {'a': np.arange(3.0)})\nsorted(k for k in scipy.io.loadmat('m.mat') if not k.startswith('__'))",
+        "expected": "['a']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  }
+]

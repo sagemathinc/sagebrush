@@ -1,0 +1,155 @@
+[
+  {
+    "name": "collections.ChainMap",
+    "kind": "class",
+    "signature": "(*maps)",
+    "summary": "Search mappings in order; write new values to the first mapping.",
+    "examples": [
+      {
+        "code": "defaults = {'color': 'blue', 'size': 2}\noptions = collections.ChainMap({'color': 'red'}, defaults)\noptions['size'] = 3\n(options['color'], options['size'], defaults['size'])",
+        "expected": "('red', 3, 2)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.UserDict",
+    "kind": "class",
+    "signature": "(dict=None, **kwargs)",
+    "summary": "A dictionary wrapper whose underlying mapping is available as data.",
+    "examples": [
+      {
+        "code": "original = {'a': 1}\nd = collections.UserDict(original)\nd['b'] = 2\n(d.data, original)",
+        "expected": "({'a': 1, 'b': 2}, {'a': 1})\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.UserList",
+    "kind": "class",
+    "signature": "(initlist=None)",
+    "summary": "A list wrapper whose underlying list is available as data.",
+    "examples": [
+      {
+        "code": "items = collections.UserList([3, 1])\nitems.append(2)\nitems.sort()\nitems.data",
+        "expected": "[1, 2, 3]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.UserString",
+    "kind": "class",
+    "signature": "(seq)",
+    "summary": "A string wrapper whose contents are available as data.",
+    "examples": [
+      {
+        "code": "label = collections.UserString('cat')\nlabel.data = 'kitten'\n(str(label), len(label))",
+        "expected": "('kitten', 6)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.Counter",
+    "kind": "class",
+    "signature": "(iterable=None)",
+    "summary": "Counts of hashable items, a dict subclass.",
+    "examples": [
+      {
+        "code": "collections.Counter('mississippi').most_common(2)",
+        "expected": "[('i', 4), ('s', 4)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.defaultdict",
+    "kind": "function",
+    "signature": "(default_factory)",
+    "summary": "A dict that creates missing values with a factory.",
+    "examples": [
+      {
+        "code": "d = collections.defaultdict(list)\nd['a'].append(1)\ndict(d)",
+        "expected": "{'a': [1]}\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.deque",
+    "kind": "function",
+    "signature": "(iterable=(), maxlen=None)",
+    "summary": "A double-ended queue.",
+    "examples": [
+      {
+        "code": "d = collections.deque([1, 2, 3], maxlen=3)\nd.append(4)\nd",
+        "expected": "deque([2, 3, 4], maxlen=3)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.namedtuple",
+    "kind": "function",
+    "signature": "(typename, field_names)",
+    "summary": "A tuple subclass with named fields.",
+    "examples": [
+      {
+        "code": "P = collections.namedtuple('P', 'x y')\nP(1, 2)._replace(y=5)",
+        "expected": "P(x=1, y=5)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "collections.OrderedDict",
+    "kind": "class",
+    "signature": "(items)",
+    "summary": "A dict that remembers insertion order, with move_to_end.",
+    "examples": [
+      {
+        "code": "d = collections.OrderedDict(a=1, b=2)\nd.move_to_end('a')\nlist(d)",
+        "expected": "['b', 'a']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

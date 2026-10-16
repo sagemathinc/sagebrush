@@ -1,0 +1,125 @@
+[
+  {
+    "name": "scipy.integrate.quad",
+    "kind": "function",
+    "signature": "(func, a, b, args=(), epsabs=1.49e-08, epsrel=1.49e-08, limit=50)",
+    "summary": "The integral of func from a to b (QUADPACK's adaptive rules), and an error estimate.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import quad\nquad(lambda x: x ** 2, 0, 3)",
+        "expected": "(9.000000000000002, 9.992007221626411e-14)\n"
+      },
+      {
+        "code": "from scipy.integrate import quad\nquad(lambda x: np.exp(-x), 0, np.inf)[0]",
+        "expected": "1.0000000000000002\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.odeint",
+    "kind": "function",
+    "signature": "(func, y0, t, args=(), rtol=None, atol=None, tfirst=False)",
+    "summary": "The solution of dy/dt = func(y, t) at the times t (LSODA).",
+    "examples": [
+      {
+        "code": "from scipy.integrate import odeint\nt = np.linspace(0, 1, 3)\nnp.round(odeint(lambda y, t: -y, 1.0, t)[:, 0], 6)",
+        "expected": "array([1.      , 0.606531, 0.367879])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.solve_ivp",
+    "kind": "function",
+    "signature": "(fun, t_span, y0, method='RK45', t_eval=None, dense_output=False, events=None, rtol=1e-3, atol=1e-6)",
+    "summary": "The solution of an initial value problem dy/dt = fun(t, y) (RK45, RK23, DOP853, Radau, BDF, LSODA).",
+    "examples": [
+      {
+        "code": "from scipy.integrate import solve_ivp\nsol = solve_ivp(lambda t, y: -2 * y, [0, 1], [1.0], t_eval=[0, 0.5, 1], rtol=1e-8)\nnp.round(sol.y[0], 6)",
+        "expected": "array([1.      , 0.36788 , 0.135335])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.trapezoid",
+    "kind": "function",
+    "signature": "(y, x=None, dx=1.0, axis=-1)",
+    "summary": "The integral of samples by the trapezoid rule.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import trapezoid\ntrapezoid([0, 1, 4, 9], dx=1.0)",
+        "expected": "np.float64(9.5)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.simpson",
+    "kind": "function",
+    "signature": "(y, x=None, dx=1.0, axis=-1)",
+    "summary": "The integral of samples by Simpson's rule.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import simpson\nx = np.linspace(0, 2, 5)\nsimpson(x ** 3, x=x)",
+        "expected": "np.float64(4.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.cumulative_trapezoid",
+    "kind": "function",
+    "signature": "(y, x=None, dx=1.0, axis=-1, initial=None)",
+    "summary": "The running integral of samples by the trapezoid rule.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import cumulative_trapezoid\ncumulative_trapezoid([1, 2, 3, 4], initial=0)",
+        "expected": "array([0. , 1.5, 4. , 7.5])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.dblquad",
+    "kind": "function",
+    "signature": "(func, a, b, gfun, hfun)",
+    "summary": "The double integral of func(y, x), x from a to b, y from gfun(x) to hfun(x).",
+    "examples": [
+      {
+        "code": "from scipy.integrate import dblquad\ndblquad(lambda y, x: x * y, 0, 1, 0, 2)[0]",
+        "expected": "0.9999999999999999\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  }
+]

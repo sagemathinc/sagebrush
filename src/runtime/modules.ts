@@ -328,6 +328,10 @@ newBuiltinModule("sys", (m) => {
   // budgets that must scale with it (a matrix over a field is refused
   // before it is built, not by the heap running out): heapLimit()
   m._sagebrush_heap_limit = heapLimit();
+  // the function catalog the CLI bundle carries (scripts/build-cli.mjs,
+  // catalog.gen.js: JSON text), for lib/_catalog.py away from a source tree;
+  // None in the browser, whose search reads the built indexes
+  m._sagebrush_catalog = (globalThis as any).__SAGEBRUSH_CATALOG__ ?? null;
   sysRef.m = m;
   m.stdout = stdout;
   m.stderr = stderr;

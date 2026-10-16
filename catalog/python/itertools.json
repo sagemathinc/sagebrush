@@ -1,0 +1,346 @@
+[
+  {
+    "name": "itertools.batched",
+    "kind": "function",
+    "signature": "(iterable, n)",
+    "summary": "Group input into tuples of at most n items.",
+    "examples": [
+      {
+        "code": "list(itertools.batched('ABCDEFG', 3))",
+        "expected": "[('A', 'B', 'C'), ('D', 'E', 'F'), ('G',)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.compress",
+    "kind": "function",
+    "signature": "(data, selectors)",
+    "summary": "Keep data items whose corresponding selector is true.",
+    "examples": [
+      {
+        "code": "list(itertools.compress('ABCDE', [1, 0, 1, 0, 1]))",
+        "expected": "['A', 'C', 'E']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.dropwhile",
+    "kind": "function",
+    "signature": "(predicate, iterable)",
+    "summary": "Skip the initial items satisfying a predicate, then yield everything left.",
+    "examples": [
+      {
+        "code": "list(itertools.dropwhile(lambda x: x < 5, [1, 3, 6, 2]))",
+        "expected": "[6, 2]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.filterfalse",
+    "kind": "function",
+    "signature": "(predicate, iterable)",
+    "summary": "Keep items for which a predicate is false; None tests the items themselves.",
+    "examples": [
+      {
+        "code": "list(itertools.filterfalse(lambda x: x % 2, range(6)))",
+        "expected": "[0, 2, 4]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.tee",
+    "kind": "function",
+    "signature": "(iterable, n=2)",
+    "summary": "Make independently advancing iterators over one input.",
+    "examples": [
+      {
+        "code": "a, b = itertools.tee(iter([1, 2, 3]))\nfirst = next(a)\n(first, list(b), list(a))",
+        "expected": "(1, [1, 2, 3], [2, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.product",
+    "kind": "function",
+    "signature": "(*iterables, repeat=1)",
+    "summary": "The Cartesian product, as tuples.",
+    "examples": [
+      {
+        "code": "list(itertools.product('ab', [1, 2]))",
+        "expected": "[('a', 1), ('a', 2), ('b', 1), ('b', 2)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.permutations",
+    "kind": "function",
+    "signature": "(iterable, r=None)",
+    "summary": "The orderings of r elements.",
+    "examples": [
+      {
+        "code": "list(itertools.permutations([1, 2, 3], 2))",
+        "expected": "[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.combinations",
+    "kind": "function",
+    "signature": "(iterable, r)",
+    "summary": "The subsets of r elements, in order.",
+    "examples": [
+      {
+        "code": "list(itertools.combinations('abcd', 2))",
+        "expected": "[('a', 'b'), ('a', 'c'), ('a', 'd'), ('b', 'c'), ('b', 'd'), ('c', 'd')]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.combinations_with_replacement",
+    "kind": "function",
+    "signature": "(iterable, r)",
+    "summary": "Combinations in which an element may repeat.",
+    "examples": [
+      {
+        "code": "list(itertools.combinations_with_replacement('ab', 2))",
+        "expected": "[('a', 'a'), ('a', 'b'), ('b', 'b')]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.accumulate",
+    "kind": "function",
+    "signature": "(iterable, func=operator.add, initial=None)",
+    "summary": "Running totals (or of another function).",
+    "examples": [
+      {
+        "code": "list(itertools.accumulate([1, 2, 3, 4]))",
+        "expected": "[1, 3, 6, 10]\n"
+      },
+      {
+        "code": "list(itertools.accumulate([3, 1, 4, 1, 5], max))",
+        "expected": "[3, 3, 4, 4, 5]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.chain",
+    "kind": "function",
+    "signature": "(*iterables)",
+    "summary": "The elements of each iterable in turn.",
+    "examples": [
+      {
+        "code": "list(itertools.chain([1, 2], 'ab'))",
+        "expected": "[1, 2, 'a', 'b']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.count",
+    "kind": "function",
+    "signature": "(start=0, step=1)",
+    "summary": "Numbers counting up forever.",
+    "examples": [
+      {
+        "code": "list(itertools.islice(itertools.count(10, 5), 4))",
+        "expected": "[10, 15, 20, 25]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.cycle",
+    "kind": "function",
+    "signature": "(iterable)",
+    "summary": "The elements repeated forever.",
+    "examples": [
+      {
+        "code": "list(itertools.islice(itertools.cycle('ab'), 5))",
+        "expected": "['a', 'b', 'a', 'b', 'a']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.repeat",
+    "kind": "function",
+    "signature": "(object, times=None)",
+    "summary": "An object over and over.",
+    "examples": [
+      {
+        "code": "list(itertools.repeat(7, 3))",
+        "expected": "[7, 7, 7]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.islice",
+    "kind": "function",
+    "signature": "(iterable, stop) or (iterable, start, stop, step=1)",
+    "summary": "A slice of an iterator.",
+    "examples": [
+      {
+        "code": "list(itertools.islice(range(100), 2, 10, 3))",
+        "expected": "[2, 5, 8]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.groupby",
+    "kind": "function",
+    "signature": "(iterable, key=None)",
+    "summary": "Runs of consecutive equal (or equal-key) elements.",
+    "examples": [
+      {
+        "code": "[(k, len(list(g))) for k, g in itertools.groupby('aaabccdd')]",
+        "expected": "[('a', 3), ('b', 1), ('c', 2), ('d', 2)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.pairwise",
+    "kind": "function",
+    "signature": "(iterable)",
+    "summary": "Consecutive overlapping pairs.",
+    "examples": [
+      {
+        "code": "list(itertools.pairwise([1, 4, 9, 16]))",
+        "expected": "[(1, 4), (4, 9), (9, 16)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.zip_longest",
+    "kind": "function",
+    "signature": "(*iterables, fillvalue=None)",
+    "summary": "zip, continuing to the longest input.",
+    "examples": [
+      {
+        "code": "list(itertools.zip_longest([1, 2, 3], 'ab', fillvalue='-'))",
+        "expected": "[(1, 'a'), (2, 'b'), (3, '-')]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.starmap",
+    "kind": "function",
+    "signature": "(function, iterable)",
+    "summary": "function applied to each tuple of arguments.",
+    "examples": [
+      {
+        "code": "list(itertools.starmap(pow, [(2, 3), (3, 2)]))",
+        "expected": "[8, 9]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "itertools.takewhile",
+    "kind": "function",
+    "signature": "(predicate, iterable)",
+    "summary": "Elements while a condition holds.",
+    "examples": [
+      {
+        "code": "list(itertools.takewhile(lambda x: x < 5, [1, 3, 6, 2]))",
+        "expected": "[1, 3]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]
