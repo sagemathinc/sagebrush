@@ -29,13 +29,16 @@ const CASES = [
 test("a matrix over a field too big for a 96 MiB heap is refused before it is built", () => {
   const src = CASES.map((c) => `try:\n r = ${c}\n print('built', r.dimensions())\nexcept NotImplementedError as e:\n print('refused', str(e)[:60])\n`).join("") +
     "V = VectorSpace(RDF, 512)\ntry:\n V.subspace([[1.0] * 512] * 512)\nexcept NotImplementedError as e:\n print('refused', str(e)[:30])\n" +
+    // (an endless row iterator: stopped at the budget for the rows read
+    // and their conversion, daybreak2's HARD-5B6-1)
+    "import itertools\ntry:\n matrix(RDF, ([0.0] * 512 for i in itertools.count()))\nexcept NotImplementedError as e:\n print('refused', str(e)[:30])\n" +
     "print(sys._sagebrush_heap_limit > 0)\n";
   const r = run(["--max-old-space-size=96"], "import sys\n" + src);
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
-  assert.equal(lines.length, CASES.length + 2, r.stdout);
+  assert.equal(lines.length, CASES.length + 3, r.stdout);
   for (const l of lines.slice(0, -1)) assert.match(l, /^refused a /, l);
-  assert.equal(lines[CASES.length + 1], "True");
+  assert.equal(lines[CASES.length + 2], "True");
 });
 
 test("the same matrices are built in the default heap", () => {
@@ -55,5 +58,20 @@ test("Sage's errors for a malformed matrix come before the heap budget, in eithe
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout, "TypeError nonzero scalar matrix must be square\nValueError entries has the wrong length\n" +
       `ValueError the rows of a matrix must all have ${n + 1} entries\n`);
+  }
+});
+
+test("matrix(R, m, n, rows) has exactly m rows of n entries (astra's CORR-5B6-1)", () => {
+  // (the rows were taken as given: matrix(GF(7), 1, 1, [[1], [2]]) was a 2 x 1
+  // matrix, and too few rows were accepted; Sage raises ValueError)
+  const cases = ["1, 1, [[1], [2]]", "0, 2, [[1, 2]]", "1, 0, [[], []]", "1, 2, [[1, 2], [3, 4]]", "0, 0, [[]]", "2, 2, [[1, 2]]", "3, 1, [[1], [2]]"];
+  for (const heap of [["--max-old-space-size=96"], []]) {
+    for (const R of ["GF(7)", "AA"]) {
+      const src = cases.map((c) => `try:\n print(matrix(${R}, ${c}).dimensions())\nexcept ValueError:\n print('ValueError')\n`).join("") +
+        `print(matrix(${R}, 2, 2, [[1, 2], [3, 4]]).list())\n`;
+      const r = run(heap, src);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stdout, "ValueError\n".repeat(cases.length) + "[1, 2, 3, 4]\n");
+    }
   }
 });

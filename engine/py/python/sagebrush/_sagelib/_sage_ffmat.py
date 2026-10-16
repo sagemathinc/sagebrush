@@ -128,17 +128,37 @@ def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
         if len(rows) * n <= _MAX_ENTRIES:
             _admit_size(base, len(rows), n)
         return reader(rows)
-    cap = _heap_limit() // _HEAP_SHARE // _entry_cost(base)
+    # (the rows as read and the matrix converted from them live together:
+    # factor 2.  The readers above take up to limit rows before counting
+    # their entries, so 83887 rows of 512 floats were read for a budget of
+    # 83886 entries and ran V8 out of memory: daybreak2's HARD-5B6-1.  Here
+    # each row is counted as it is read, an empty row as one entry.)
+    cap = _heap_limit() // _HEAP_SHARE // (2 * _entry_cost(base))
     if cap >= _MAX_ENTRIES:
         return reader(rows)
-    try:
-        return reader(rows, cap)
-    except ValueError as e:
-        if not str(e).startswith("more than %d " % cap):
-            raise
-    mib, limit = 1 << 20, _heap_limit()
-    raise NotImplementedError("a matrix over %r of more than %d entries needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
-        base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+    from _sage_matrix import _bounded_list
+    if isinstance(rows, (str, bytes)):
+        raise TypeError("%r is not a list of rows" % (rows,))
+    out, used = [], 0
+    for r in iter(rows):
+        if loose and not (isinstance(r, (list, tuple)) or (hasattr(r, "__iter__") and not isinstance(r, str)) or type(r).__name__ in ("Vector", "FFVector")):
+            r = [r]
+        elif isinstance(r, str):
+            raise TypeError("a row of a matrix must be a list, not a string")
+        else:
+            try:
+                r = _bounded_list(r, cap - used, total=cap)
+            except ValueError as e:
+                if not str(e).startswith("more than %d " % cap):
+                    raise
+                used = cap + 1
+        used += len(r) or 1
+        if used > cap:
+            mib, limit = 1 << 20, _heap_limit()
+            raise NotImplementedError("a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+                base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+        out.append(r)
+    return out
 
 
 # ------------------------------------------------------------------ vectors
@@ -1463,6 +1483,11 @@ def matrix(base, *args, **kwds):
         # count or ragged rows come before the heap budget, astra's
         # CORR-21A-1)
         if type(entries) is not range and entries and isinstance(entries[0], (list, tuple)):
+            # (as many rows as declared, each of n entries: matrix(GF(7), 1,
+            # 1, [[1], [2]]) was a 2 x 1 matrix, astra's CORR-5B6-1, and
+            # too few rows were accepted before)
+            if len(entries) != m:
+                raise ValueError("entries do not fill a matrix with %d rows" % m)
             return FFMatrix(base, _admitted_rows(base, entries, n, loose=True), n)
         if len(entries) != m * n:
             raise ValueError("entries has the wrong length")
@@ -1470,6 +1495,8 @@ def matrix(base, *args, **kwds):
         _admit_size(base, m, n)
         e = _bounded_list(entries, max(m * n, m))
         if e and isinstance(e[0], (list, tuple)):
+            if len(e) != m:
+                raise ValueError("entries do not fill a matrix with %d rows" % m)
             return FFMatrix(base, _bounded_rows(e, max(m * n, m)), n)
         if len(e) != m * n:
             raise ValueError("entries has the wrong length")
