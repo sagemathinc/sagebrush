@@ -699,3 +699,42 @@ assert _os.sep + "_sagelib" + _os.sep in _sys.modules["_pyjs_docsearch"].__file_
 assert "_python_docsearch" not in _sys.modules
 assert "magma" in raises(ValueError, _search_doc, "x", mode="magma")
 print("Python mode's search index ok")
+
+
+# SR-INT-CAP: roots of large integers in symbolic expressions are exact
+# (and quick: 2^1000000 is stripped in about 20 divisions); an integer past
+# the symbolic ring's limit (2^21 bits) is refused with its size, however
+# it enters (conversion, functions, relations, arithmetic, parsing) or is
+# made inside the engine (powers, factorial, binomial)
+import math as _math
+from sagebrush.sage import SR as _SR, sqrt as _sqrt, var as _var
+_x = _var("x")
+assert bool(_sqrt(_SR(2**1000000)) == _SR(2**500000))
+assert bool(_SR(3**600000) ** (_SR(1) / 2) == _SR(3**300000))
+_p = 2**521 - 1
+assert bool(_sqrt(_SR(_p**2 * 12)) == 2 * _p * _sqrt(_SR(3)))
+_q = 2**127 - 1
+assert bool(_SR(_q**3 * 7) ** (_SR(1) / 3) == _q * _SR(7) ** (_SR(1) / 3))
+assert bool(_SR(_q**5 * 3**7) ** (_SR(1) / 5) == 3 * _q * _SR(3) ** (_SR(2) / 5))
+_n = 2**1000000 + 1
+assert bool(_sqrt(_SR(_n)) ** 2 == _SR(_n))
+assert bool(_SR(_n) ** (_SR(1) / 3) == _SR(_n) ** (_SR(1) / 3))
+_big = 2**(1 << 21)
+_msg = "2097153 bits in a symbolic expression"
+for _f in [lambda: _SR(_big), lambda: _sqrt(_big + 1), lambda: _x == _big,
+           lambda: _x + _big, lambda: _SR(Fraction(1, _big)),
+           lambda: _SR(str(_big)), lambda: _SR(2) ** (1 << 21)]:
+    assert _msg in raises(NotImplementedError, _f), raises(NotImplementedError, _f)
+assert "at least" in raises(NotImplementedError, lambda: _SR(3) ** (10**9))
+from sagebrush.sage import factorial as _fact, binomial as _binom
+assert "at least" in raises(NotImplementedError, lambda: _fact(_x).subs(x=10**6))
+assert "at least" in raises(NotImplementedError, lambda: _binom(_x, 2 * 10**6).subs(x=4 * 10**6))
+assert bool(_fact(_x).subs(x=1000) == _SR(_math.factorial(1000)))
+assert bool(_binom(_x, 990).subs(x=1000) == _SR(_math.comb(1000, 10)))
+assert bool(_binom(_x, 3).subs(x=10**100) == _SR(_math.comb(10**100, 3)))
+assert bool(_fact(_x).subs(x=100000) == _SR(_math.factorial(100000)))
+assert bool(_binom(_x, 500000).subs(x=10**6) == _SR(_math.comb(10**6, 500000)))
+assert "at most 2097152 bits" in raises(NotImplementedError, lambda: _SR(2**200000) * _SR(2**1990000))
+assert bool(_SR(2) ** ((1 << 21) - 1) == _SR(2**((1 << 21) - 1)))
+assert bool(_SR(3) ** 1000 == _SR(3**1000))
+print("symbolic integer limit ok")
