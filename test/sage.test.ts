@@ -140,3 +140,13 @@ test("matrix() keeps callable row iterables as rows, and takes an entry function
   assert.equal(cli("--sage", "-c", src),
     "(2, 2) [1, 2, 3, 4]\n(2, 2) [0, 1, 1, 2]\n(2, 2) [0, -1, 1, 0]\n(2, 3) [0, 1, 2, 10, 11, 12]\n");
 });
+
+test("matrix() converts each entry function value as it is returned (CORR-C12-1)", () => {
+  // (the values were converted after all the calls: a callback returning one
+  // mutable object gave [2, 2, 2, 2], and a ZZ callback ran past its first
+  // non-integral value; values and call logs as Sage 10.10's)
+  const src = "from fractions import Fraction\nclass Value(Fraction):\n @property\n def numerator(self): return self.n\n @property\n def denominator(self): return 1\n" +
+    "v = Value(0)\nv.n = 0\ndef f(i, j):\n v.n = int(i + j)\n return v\nprint(matrix(ZZ, 2, 2, f).list())\n" +
+    "calls = []\ndef g(i, j):\n calls.append((int(i), int(j)))\n return QQ(i - j)/2\ntry:\n matrix(ZZ, 2, 3, g)\nexcept TypeError:\n print(calls)\n";
+  assert.equal(cli("--sage", "-c", src), "[0, 1, 1, 2]\n[(0, 0), (0, 1)]\n");
+});

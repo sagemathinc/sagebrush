@@ -2657,8 +2657,19 @@ def matrix(*args, **kwds):
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
         elif callable(ent) and not hasattr(ent, "__iter__") and not hasattr(ent, "__len__") and not hasattr(ent, "__getitem__"):
             # matrix(QQ, 2, 2, lambda i, j: i + j): the entries f(i, j), as
-            # Sage (the shape is checked above, before any call)
-            rows = [[ent(i, j) for j in range(c)] for i in range(r)]
+            # Sage (the shape is checked above, before any call).  Each value
+            # is converted as soon as it is returned, so a callback that
+            # returns one mutable object keeps each value, and the first
+            # value the base refuses stops the calls (astra's CORR-C12-1)
+            rows = []
+            for i in range(r):
+                row = []
+                for j in range(c):
+                    x = _norm(ent(i, j))
+                    if base is sa.ZZ and not isinstance(x, int):
+                        raise TypeError("matrix entries are not all integers")
+                    row.append(x)
+                rows.append(row)
         else:
             # at most r c + 1 entries are read (r rows of a list of rows)
             ent = _bounded_list(ent, max(r * c, r))
