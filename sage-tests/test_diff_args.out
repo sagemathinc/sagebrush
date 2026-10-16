@@ -1,0 +1,10 @@
+list empty :: x^2
+tuple empty :: TypeError
+method empty :: x^2
+list x x :: 2*y
+list x y :: 2*x
+empty then x :: TypeError
+two vars empty :: x*y
+derivative empty :: x^2
+callable empty :: x |--> x^3
+series :: 1*x + 1*x^2 + Order(x^4)

@@ -736,7 +736,19 @@ class Expression:
 
             sage: (x^3).diff(x), sin(x^2).diff(x), (x^4).diff(x, 2), (x^2*x).derivative(x)
             (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
+            sage: y = var('y'); (x^2*y).diff([x, y]), (x^2).diff([])
+            (2*x, x^2)
         """
+        # a list alone is the list of variables, and an empty one means no
+        # differentiation, as in Sage (diff(x^2, []) was 2*x); a tuple, or a
+        # list among other arguments, is Sage's TypeError
+        if len(args) == 1 and isinstance(args[0], list):
+            if not args[0]:
+                return self
+            args = tuple(args[0])
+        for a in args:
+            if isinstance(a, (list, tuple)):
+                raise TypeError("no canonical coercion from %s to Symbolic Ring" % type(a))
         if not args:
             names = self._names()
             if len(names) != 1:
@@ -750,9 +762,6 @@ class Expression:
                 if a > 1:
                     r = _one("diff", r._s, last, str(a - 1))
                 last = None
-                continue
-            if isinstance(a, (list, tuple)):
-                r = r.diff(*a)
                 continue
             last = _var_name(a)
             r = _one("diff", r._s, last, "1")
@@ -1455,6 +1464,8 @@ class _SeriesExpr(Expression):
 
     def diff(self, *args):
         """The derivative: one order less in the series variable."""
+        if len(args) == 1 and isinstance(args[0], list) and not args[0]:
+            return self  # (no variables: no differentiation, as Sage)
         v = args[0] if args else self._var
         n = int(args[1]) if len(args) > 1 else 1
         body = Expression(self._s).diff(v, n) if len(args) > 1 else Expression(self._s).diff(v)
