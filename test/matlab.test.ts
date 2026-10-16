@@ -1811,3 +1811,18 @@ test("factorial's integer limits exact; unique's NaN rows and stable order; scal
     "[NaN 2 1]", "[1 2 4]", "[1 2 1 3]", "[NaN 2 NaN 1]", "[1 2 NaN NaN]",
     "int8", "120", "single", "int16", "refused", "refused", "refused", "ran"]);
 });
+
+test("asec, acsc, acot, asech, acsch and acoth: the base inverse function of 1./X, as their pages define them", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    "fprintf('%.4f ', [asec(2) acsc(2) acot(1) acot(0) asech(0.5) acsch(1) acoth(2)]); fprintf('\\n')",
+    // (outside the real domain the result is the base function's: complex, with its conventions)
+    "disp(mat2str([isequal(asec(0.5), acos(2)) isequal(acsc(-0.5), asin(-2)) isequal(asech(2), acosh(0.5)) isequal(acoth(-0.5), atanh(-2)) isequal(acoth(0.5), atanh(2))]))",
+    "disp(mat2str([isequal(asec([2 -4; 0.5 1]), acos(1 ./ [2 -4; 0.5 1])) isequal(acot(1+2i), atan(1 / (1+2i)))]))",
+    "disp(class(asec(single(2)))); disp(mat2str(size(acot(zeros(2, 3)))))",
+    tryIt("asec(int8(2))"), tryIt("acot({1})"),
+  ].join("\n")), ["1.0472 0.5236 0.7854 1.5708 1.3170 0.8814 0.5493", "[true true true true true]", "[true true]", "single", "[2 3]", "refused", "refused"]);
+});
