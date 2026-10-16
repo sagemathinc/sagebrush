@@ -154,10 +154,14 @@ def _compile_error(line, col, msg):
         raise SystemExit(1)
 
 
-def _syntax_error(line, col, detail):
+def _syntax_error(line, col, detail, unsupported=False):
     """A syntax error at (line, col) (line 0: at the end of the input), in
-    Magma's words on stdout; the parser's reason goes to stderr."""
-    if line:
+    Magma's words on stdout; the parser's reason goes to stderr.  A
+    construct of Magma's that Sagebrush doesn't have yet (unsupported) is
+    said so on stdout, not called bad syntax."""
+    if line and unsupported:
+        _sys.stdout.write("%sUser error: %s\n" % (_where(line, col), detail))
+    elif line:
         _sys.stdout.write("%sUser error: bad syntax\n" % _where(line, col))
     else:
         _sys.stdout.write("\nUser error: syntax error at end of input\n")

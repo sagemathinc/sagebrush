@@ -138,6 +138,47 @@ test("printf's precision on a real: Magma's digits where they are sure, else ref
   assert.match(run('printf "%O\\n", 5, "Maximal";\n'), /printing in the level Maximal \(%O\) is not supported yet/);
 });
 
+test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (coverage run: 254 Handbook programs)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const cases: [string, string][] = [
+    ["x := 5; x; $1;", "$1 (the values printed last)"],
+    ["f := func< n | n le 2 select 1 else $$(n-1) + $$(n-2) >;", "$$ in func< >"],
+    ["P<[X]> := PolynomialRing(Rationals(), 2);", "P<[...]> (generator names in a sequence)"],
+    ["S := {1}; S join:= {2};", "join:= (an assignment with join)"],
+    ["for x, y in [1, 2] do x; end for;", "for x, y in S (several loop variables)"],
+    ["exists(t){ x : x in [1..5] | x gt 3 };", "exists(t){ ... } (with a witness)"],
+    ["M := {* 1^^4, 2^^5 *};", "a^^n (a multiplicity in a multiset)"],
+    ["x := 255; x: Hex;", "x: Hex (a printing level)"],
+    ["y := x where x is 10;", "where x is ... (a definition after an expression)"],
+    ["x := eval \"1+1\";", "eval"],
+    ["try x := 1; catch e x := 2; end try;", "try ... catch"],
+    ["f := function(x, ...) return x; end function;", "... (a function with a variable number of arguments)"],
+    ["z := case< 1 | 1: 2, default: 3 >;", "case< ... >"],
+    ["G := [1, 2]; i := 2; G.i;", "G.i (a generator by a variable's index)"],
+    ["y := Integers()!!3;", "!! (a coercion that may change the structure)"],
+    ["C := [1, 2]; forall{ <c, d> : c, d in C | c + d gt 1 };", "forall{ ... }"],
+    ["load galpols;", "load (Magma's library files)"],
+    ["for i in [1..3], j in [i+1..4] do i; end for;", "for i in S, j in T (several loops in one for)"],
+    ["G := 1; G.-1;", "G.-1 (a generator's inverse by its index)"],
+    ["B := 1; B.<3,1>;", "B.<...> (an element by its indices)"],
+    ["x := 2; r := x = 3;", "= (an equation, as in a relation)"],
+    ["F<x, y>, f := FPGroup(G);", "F<...>, ... := (generator names with other values)"],
+  ];
+  for (const [src, name] of cases) {
+    const out = spawnSync(process.execPath, [cli, "--magma"], { input: src + "\n", encoding: "utf8" }).stdout;
+    assert.match(out.replace(/\s+/g, " "), new RegExp(`User error: ${name.replace(/[$^.*+?()[\]{}|\\]/g, "\\$&")} is not supported yet`), src + "\n" + out);
+    assert.doesNotMatch(out, /bad syntax/, src);
+  }
+  // the session goes on with the next line, as after a syntax error
+  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "S := {1}; S join:= {2};\n7;\n", encoding: "utf8" }).stdout;
+  assert.match(next, /join:= \(an assignment with join\) is not supported yet\n7\n$/);
+  // a cell (no recovery: the kernel's) says it too
+  const { magmaToPython, MagmaSyntaxError } = require("../src/magma");
+  assert.throws(() => magmaToPython("y := x where x is 10;\n", "<cell>"), (e: any) => e instanceof MagmaSyntaxError && /where x is \.\.\. \(a definition after an expression\) is not supported yet/.test(e.message));
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
