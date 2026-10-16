@@ -10,4 +10,7 @@ E := Matrix(Rationals(), 3, 3, [1/2, 0, 1, 2, 3, 0, 0, 1, 4]); F := E^-1; F[1,1]
 A[1,1] := 7; A; A[2][2] := 1/2; A; G := A; A[1,2] := -1; G; A;
 C[1,3] := 9; C; C[2][1] := -4; C;
 for i in [1..2] do C[i,i] := 0; end for; C;
+// compound assignments, A[i, j] as A[i][j]; a sequence's S[i, j] is S[i][j]
+A[1,2] +:= 10; A; A[2,1] /:= 3; A; C[2,1] -:= 1; C; C[1][2] *:= 5; C;
+S := [[1, 2], [3, 4]]; S[2,1] := 7; S; S[1,2] +:= 5; S;
 "end";
