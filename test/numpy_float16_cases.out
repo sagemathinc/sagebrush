@@ -9,3 +9,71 @@ float32 [5.0] float32 float64 float64 float32 float64 float32
 [2.0, -3.0] float32 float64 [7.0] float64 [1.5] [-128]
 [1.4142135623730951] [1.4142135623730951] float64 [200] float32
 200 float32 [1.0, 3.0, 3.0] float32 float32 [1, 2, 4, 8] 0.6666666666666666
+hypot [2.23606797749979] float64 [2.23606797749979] float64 [2.23606797749979] float64
+arctan2 [0.4636476090008061] float64 [1.1071487177940904] float64 [0.4636476090008061] float64
+copysign [1.0] float64 [2.0] float64 [1.0] float64
+logaddexp [2.313261687518223] float64 [2.313261687518223] float64 [2.313261687518223] float64
+np.greater([2], [1], dtype=bool) -> [True] bool
+np.equal([2], [1], dtype=bool) -> [False] bool
+np.less([2], [1], dtype='?') -> [False] bool
+np.greater(1, 2, dtype=bool) -> False bool
+np.greater([2], [1], dtype=int) -> TypeError: No loop matching the specified signature and casting was found for ufunc greater
+np.isnan([2.0], dtype=bool) -> [False] bool
+np.isnan([2.0], dtype=float) -> TypeError: No loop matching the specified signature and casting was found for ufunc isnan
+np.logical_and([2], [1], dtype=bool) -> [True] bool
+np.logical_and([2], [0], dtype=int) -> TypeError: No loop matching the specified signature and casting was found for ufunc logical_and
+np.add([1.9], [1.0], dtype=np.int8) -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('float64') to dtype('int8') with casting rule 'same_kind'
+np.add([1.9], [1.0], dtype=np.int8, casting='unsafe') -> [2] int8
+np.add([1], 1.5, dtype=np.int8) -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('float64') to dtype('int8') with casting rule 'same_kind'
+np.add([1], 300, dtype=np.int8) -> OverflowError: Python integer 300 out of bounds for int8
+np.add(1, 2, dtype=np.int8) -> 3 int8
+np.add([1], [2], dtype=float) -> [3.0] float64
+np.add([1+1j], [2], dtype=float) -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('complex128') to dtype('float64') with casting rule 'same_kind'
+np.add([1], [2], dtype=bool) -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('int64') to dtype('bool') with casting rule 'same_kind'
+np.add([True], [True], dtype=np.int8) -> [2] int8
+np.add([True], True, dtype=bool) -> [True] bool
+np.add([True], 1, dtype=bool) -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('int64') to dtype('bool') with casting rule 'same_kind'
+np.sqrt([4], dtype=np.int8) -> TypeError: No loop matching the specified signature and casting was found for ufunc sqrt
+np.sqrt([4], dtype=np.float32) -> [2.0] float32
+np.negative([1.5], dtype=np.int8) -> TypeError: Cannot cast ufunc 'negative' input from dtype('float64') to dtype('int8') with casting rule 'same_kind'
+np.add([1], [2], dtype=np.uint8) -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('int64') to dtype('uint8') with casting rule 'same_kind'
+np.add(np.array([1], np.int64), [2], dtype=np.int8) -> [3] int8
+np.add(np.array([1], np.uint8), 1, dtype=np.uint8) -> [2] uint8
+np.add(np.array([1], np.uint8), -1, dtype=np.uint8) -> OverflowError: Python integer -1 out of bounds for uint8
+np.add([1], np.float32(2), dtype=np.int8) -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('float32') to dtype('int8') with casting rule 'same_kind'
+np.add([1], 2j, dtype=float) -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('complex128') to dtype('float64') with casting rule 'same_kind'
+np.add(np.array([1], np.int8), [1], dtype=np.int16, casting='safe') -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('int64') to dtype('int16') with casting rule 'safe'
+np.add(np.array([1], np.int16), np.array([1], np.int16), dtype=np.int8, casting='no') -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('int16') to dtype('int8') with casting rule 'no'
+np.add([1], [2], casting='bogus') -> ValueError: casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got 'bogus')
+np.invert([1], dtype=float) -> TypeError: No loop matching the specified signature and casting was found for ufunc invert
+np.invert([1], dtype=bool) -> TypeError: Cannot cast ufunc 'invert' input from dtype('int64') to dtype('bool') with casting rule 'same_kind'
+np.left_shift([1], [1], dtype=bool) -> TypeError: No loop matching the specified signature and casting was found for ufunc left_shift
+np.bitwise_and([1], [1], dtype=float) -> TypeError: No loop matching the specified signature and casting was found for ufunc bitwise_and
+np.floor_divide([1], [1], dtype=complex) -> TypeError: No loop matching the specified signature and casting was found for ufunc floor_divide
+np.rint([4.0], dtype=np.int64) -> TypeError: No loop matching the specified signature and casting was found for ufunc rint
+np.floor([4.0], dtype=np.int64) -> TypeError: Cannot cast ufunc 'floor' input from dtype('float64') to dtype('int64') with casting rule 'same_kind'
+np.absolute([1+1j], dtype=float) -> [1.4142135623730951] float64
+np.absolute([3+4j], dtype=np.float32) -> TypeError: Cannot cast ufunc 'absolute' input from dtype('complex128') to dtype('float32') with casting rule 'same_kind'
+np.sign([1+1j], dtype=float) -> TypeError: Cannot cast ufunc 'sign' input from dtype('complex128') to dtype('float64') with casting rule 'same_kind'
+np.add.reduce([120, 120], dtype=np.int8) -> -16 int8
+np.multiply.reduce([20, 20], dtype=np.int8) -> -112 int8
+np.add.reduce([1, 2], dtype=bool) -> True bool
+np.multiply.reduce([3] * 40, dtype=np.uint8) -> 33 uint8
+np.multiply.reduce([[3] * 40, [5] * 40], axis=1, dtype=np.int16, keepdims=True) -> [[-6111], [-2719]] int16
+np.hypot.reduce([3, 4], dtype=np.int16) -> TypeError: No loop matching the specified signature and casting was found for ufunc hypot
+np.add.reduce([1.5, 2], dtype=np.int8) -> 3 int8
+np.maximum.reduce([1.5, 2], dtype=np.int8) -> 2 int8
+np.add.reduce([[1, 2], [3, 4]], axis=0, dtype=np.int8) -> [4, 6] int8
+np.add.reduce([[1, 2], [3, 4]], axis=None, dtype=float) -> 10.0 float64
+np.multiply.reduce([True, False], dtype=bool) -> False bool
+np.logical_and.reduce([1, 2], dtype=bool) -> True bool
+np.logical_and.reduce([1, 2], dtype=int) -> TypeError: No loop matching the specified signature and casting was found for ufunc logical_and
+np.add.reduce([1, 2], dtype=np.int8, initial=5) -> 8 int8
+np.hypot.reduce([3.0, 4.0], dtype=np.float32) -> 5.0 float32
+np.subtract.reduce([1, 2], dtype=np.int8) -> -1 int8
+np.add.accumulate([1.5, 2], dtype=np.int8) -> [1, 3] int8
+np.multiply.accumulate([3] * 40, dtype=np.uint8)[-3:] -> [89, 11, 33] uint8
+np.hypot.accumulate([3, 4], dtype=np.int16) -> TypeError: No loop matching the specified signature and casting was found for ufunc hypot
+np.equal.reduce([1, 1], dtype=bool) -> True bool
+str(np.result_type(1, 'i1')) -> 'int8' str
+np.result_type('abc') -> TypeError: data type 'abc' not understood
