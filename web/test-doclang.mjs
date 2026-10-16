@@ -39,14 +39,24 @@ const ev = async (expression) => {
   if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
   return r?.result?.value;
 };
-const until = async (e, ms = 20000) => { const t = Date.now(); for (;;) { const v = await ev(e).catch(() => null); if (v) return v; if (Date.now() - t > ms) return null; await sleep(100); } };
-// (the language chosen in the menu, as a person chooses it)
-const choose = (m) => ev(`(() => { const s = document.querySelector("#mode"); s.value = ${JSON.stringify(m)}; s.dispatchEvent(new Event("change")); return 1; })()`);
-// (the search box's results for a query)
+// (60 s: the crowd runs of CI load the machine, and the Sage index is large)
+const until = async (e, ms = 60000) => { const t = Date.now(); for (;;) { const v = await ev(e).catch(() => null); if (v) return v; if (Date.now() - t > ms) return null; await sleep(100); } };
+// (the language chosen in the menu, as a person chooses it; when it is to
+// change, waited for, as the notebook may load the language's library first)
+const choose = async (m, changes = true) => {
+  await ev(`(() => { const s = document.querySelector("#mode"); s.value = ${JSON.stringify(m)}; s.dispatchEvent(new Event("change")); return 1; })()`);
+  if (changes) await until(`window.sagebrush.notebook.mode === ${JSON.stringify(m)}`);
+};
+// (a condition of the test's own state, waited for)
+const waitFor = async (f, ms = 20000) => { const t = Date.now(); while (!f() && Date.now() - t < ms) await sleep(100); };
+// (the search box's results for a query: the box is emptied first, which
+// hides the list, so that the list shown after typing is this query's, not
+// the last one's still there while the language's index loads)
 const search = async (q) => {
-  await ev(`(() => { const i = document.querySelector("#docsearch"); i.focus(); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event("input")); return 1; })()`);
+  await ev(`(() => { const i = document.querySelector("#docsearch"); i.focus(); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
+  await until(`document.querySelector("#docresults").hidden`);
+  await ev(`(() => { const i = document.querySelector("#docsearch"); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event("input")); return 1; })()`);
   await until(`!document.querySelector("#docresults").hidden && document.querySelector("#docresults").children.length > 0`);
-  await sleep(300);
   return ev(`[...document.querySelectorAll("#docresults li")].map((li) => li.textContent)`);
 };
 const mode = () => ev("window.sagebrush.notebook.mode");
@@ -59,7 +69,8 @@ try {
   await sleep(500);
   // (an empty Python notebook to begin with: the page opens on its welcome notebook)
   await ev(`(window.sagebrush.notebook.load({ mode: "python", cells: [] }), 1)`);
-  await sleep(300);
+  // (until the welcome notebook has gone: with its code still there, a change of language asks)
+  await until(`window.sagebrush.notebook.mode === "python" && window.sagebrush.notebook.cells().every((c) => c.ta.value.trim() === "")`);
   // an empty notebook: its language changes without a question
   answer = false;
   await choose("matlab");
@@ -84,16 +95,19 @@ try {
   // a function's examples: inserted only into a notebook of its language, which never changes
   await choose("sage");
   await search("galois_group");
-  await ev(`document.querySelector("#docresults li[role=option]").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  const listed = await until(`!!document.querySelector("#docresults li[role=option]")`);
+  check(!!listed, "a Sage function is listed to open");
+  if (listed) await ev(`document.querySelector("#docresults li[role=option]").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
   await until(`document.querySelector("#docdlg").open`);
   check(await ev(`!document.querySelector("#docinsert").hidden`), "a Sage function's examples can be inserted into a Sage notebook");
   await ev(`document.querySelector("#docinsert").click()`);
-  await sleep(500);
+  await until(`window.sagebrush.notebook.cells().some((c) => c.ta.value.includes("galois_group"))`);
   check(await mode() === "sage" && await ev(`window.sagebrush.notebook.cells().some((c) => c.ta.value.includes("galois_group"))`), "inserted, the notebook stays Sage");
 
   // a notebook with code: choosing another language asks, and No keeps it
   answer = false;
-  await choose("matlab");
+  await choose("matlab", false);
+  await waitFor(() => dialogs.length > 0);
   await sleep(300);
   check(dialogs.length === 1 && /from Sage to MATLAB/.test(dialogs[0]), "with code, choosing another language asks first: " + JSON.stringify(dialogs[0]?.slice(0, 70)));
   check(await mode() === "sage" && await ev(`document.querySelector("#mode").value`) === "sage", "No keeps the notebook's language, and the menu shows it");
