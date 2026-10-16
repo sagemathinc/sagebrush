@@ -71,3 +71,8 @@ for mode in ('error', 'record'):
             warnings.simplefilter(mode if mode == 'error' else 'always')
             out = show(c)
         print(mode, c, '->', out, [str(x.message)[:60] for x in w])
+for c in ("bytes([RX()])", "bytearray(RXS())", "(1, 2)[RXS()]"):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        out = show(c)
+    print(c, '->', out, [str(x.message)[:40] for x in w])
