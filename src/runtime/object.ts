@@ -1542,7 +1542,9 @@ export const NS_LOCALS = Symbol("locals of a layered namespace");
 // The globals behind a module's namespace: a layered one's (exec and eval
 // with separate locals), else the namespace itself
 export function realGlobals(g: any): any {
-  return g[NS_GLOBALS] ?? g;
+  // (every layer: exec's inside exec's, CORR-C0F-3)
+  while (g[NS_GLOBALS] !== undefined) g = g[NS_GLOBALS];
+  return g;
 }
 // locals() at a module's top level: the module's dict, or, in exec/eval with
 // separate locals, the locals mapping

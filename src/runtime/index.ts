@@ -287,7 +287,9 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
     return locals !== undefined && locals !== null && locals !== globals ? layered(Obj.namespaceOf(locals), ns) : ns;
   }
   if (g === null || g === undefined) g = Obj.dictGet(M.sysModules, "__main__") ?? Ty.newModule("__main__");
-  if (locals !== undefined && locals !== null) return layered(Obj.namespaceOf(locals), g);
+  // (explicit locals over the real globals: an exec inside exec's top level
+  // reads its locals, then the globals, never the outer locals, CORR-C0F-3)
+  if (locals !== undefined && locals !== null) return layered(Obj.namespaceOf(locals), Obj.realGlobals(g));
   if (callerLocals !== null && callerLocals !== undefined) return layered(Obj.namespaceOf(callerLocals), g);
   return g;
 }
