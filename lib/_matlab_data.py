@@ -466,6 +466,13 @@ def _quantile_impl(x, p, rest, scale, fname):
         col = F[:, c]
         S = np.sort(col[~np.isnan(col)])  # (NaN: missing)
         out[:, c] = _quantiles(S, P)
+    d = _m._dims(x)
+    if dim is None and len(d) == 2 and min(d) <= 1 and P.size > 1:
+        # (a vector A, no dim: Q has p's orientation, as the page says, a vector "with the
+        # same length as p"; only generated code follows A's)
+        pd = _m._dims(p)
+        Q = out[:, 0]
+        return _out(Q.reshape((1, -1)) if pd[0] == 1 else Q.reshape((-1, 1)), _cls(x))
     return _out(_from_front(out, how), _cls(x))
 
 
@@ -532,6 +539,14 @@ def _mov_args(args, fname, takes_w):
 def _moving(A, kb, kf, stat, w, omit, ends):
     """stat over each window [i-kb, i+kf] down axis 0 of A (L-by-R)"""
     L, R = A.shape
+    if ends == "fill" or not isinstance(ends, str):
+        # (Endpoints "fill" or a value: the nonexisting elements are NaN or that value, as
+        # movmean's page says, so they take part in the statistic, its count and its
+        # variance's denominator; with "omitnan" the filled NaNs are left out)
+        v = _math.nan if ends == "fill" else ends
+        dt = np.result_type(A.dtype, np.float64, np.asarray(v).dtype)
+        P = np.concatenate([np.full((kb, R), v, dtype=dt), A.astype(dt), np.full((kf, R), v, dtype=dt)])
+        return _moving(P, kb, kf, stat, w, omit, "shrink")[kb:kb + L]
     offs = range(-kb, kf + 1)
 
     def shifted(o):
@@ -607,8 +622,6 @@ def _moving(A, kb, kf, stat, w, omit, ends):
     complete = (i - kb >= 0) & (i + kf <= L - 1)
     if ends == "discard":
         return res[np.nonzero(complete)[0]]
-    if ends == "fill" or not isinstance(ends, str):
-        res = np.where(complete.reshape((-1, 1)), res, _math.nan if ends == "fill" else ends)
     return res
 
 
