@@ -3754,6 +3754,9 @@ def GF(q, n=None):
     if n is not None:
         # GF(p, n): a prime, and a degree of at least 1 (CORR-581-1)
         n = _coerce_int(n)
+        # (the base's size first: no primality test of a huge one (HARD-E6A-1))
+        if q.bit_length() > _FF_BITS:
+            raise MagmaError("GF of a field of more than %d bits is not supported yet" % _FF_BITS, "'GF'")
         if not _sa.is_prime(q):
             raise MagmaError("Argument 1 (%d) should be prime" % q, "'GF'")
         if n < 1:
