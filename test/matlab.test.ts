@@ -1982,3 +1982,22 @@ test("sqrt(-0) is +0; 1.^NaN and NaN.^0 are NaN; log1p, log10 and log2 with a po
     "double",
   ]);
 });
+
+test("regexp with a cell array of expressions, strrep with cell arrays of OLD or NEW, as the pages describe; other forms refused", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (one text, two expressions: a cell of the expressions' shape)
+    "m = regexp('oak elm', {'o.k', 'e.m'}, 'match'); disp(mat2str(size(m))); disp([m{1}{1} ' ' m{2}{1}])",
+    "s = regexp('oak elm', {'o'; 'm'}, 'start'); disp(mat2str(size(s))); disp(mat2str([s{1} s{2}]))",
+    // (two texts, two expressions: pairwise)
+    "m = regexp({'ab12', 'cd34'}, {'\\d+', '[a-z]+'}, 'match', 'once'); disp([m{1} ' ' m{2}])",
+    tryIt("regexp({'ab', 'cd'}, {'a'; 'c'}, 'match')"), tryIt("regexp(\"oak\", {'o'}, 'match')"),
+    // (strrep: each element with the corresponding OLD and NEW; a scalar goes with every element)
+    "c = strrep({'v=?'; 'w=?'}, '?', {'3'; '8'}); disp(mat2str(size(c))); disp([c{1} ' ' c{2}])",
+    "c = strrep('a-b', {'-', 'a'}, {'+', 'A'}); disp([c{1} ' ' c{2}])",
+    tryIt("strrep({'a', 'b'}, '?', {'1'; '2'})"), tryIt("strrep(\"x?\", '?', {'1'})"),
+  ].join("\n")), ["[1 2]", "oak elm", "[2 1]", "[1 7]", "12 cd", "refused", "refused", "[2 1]", "v=3 w=8", "a+b A-b", "refused", "refused"]);
+});

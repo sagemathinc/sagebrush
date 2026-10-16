@@ -7682,9 +7682,44 @@ def _strrep_text(t, o, nw):
 
 @_bs("strrep")
 def strrep_(s, old, new):
-    o = _text(old)
-    nw = _text(new)
-    return _textlike_map(s, lambda t: _strrep_text(t, o, nw))
+    if type(old) is not Cell and type(new) is not Cell and type(old) is not StrArr and type(new) is not StrArr:
+        o = _text(old)
+        nw = _text(new)
+        return _textlike_map(s, lambda t: _strrep_text(t, o, nw))
+    # (OLD or NEW an array: each element of STR with the corresponding OLD and NEW, a
+    # scalar going with every element; the page asks for "compatible sizes" without
+    # saying more, so only scalars and equal sizes are taken, and only cells of
+    # character vectors, the form its example shows)
+    args = (s, old, new)
+    if any(type(a) is StrArr or type(a) is Str for a in args):
+        raise _err("strrep: string arrays with array-valued OLD or NEW are not supported.")
+    if any(type(a) is Char and _dims(a)[0] > 1 for a in args):
+        raise _err("strrep: character matrices with array-valued OLD or NEW are not supported.")
+    arrays = [a for a in args if type(a) is Cell and len(a.a) != 1]
+    shape = arrays[0].shape if arrays else next(a.shape for a in args if type(a) is Cell)
+    if any(_text_size_key(a.shape) != _text_size_key(shape) for a in arrays):
+        raise _err("strrep: STR, OLD and NEW must be the same size or scalars.")
+    n = _prod(shape)
+    def item(a, k):
+        if type(a) is Cell:
+            e = a.a[k if len(a.a) != 1 else 0]
+            if type(e) is not Char or _dims(e)[0] > 1:
+                raise _err("strrep: cell arrays must contain character vectors.")
+            return e.text()
+        return _text(a)
+    out = []
+    for k in range(n):
+        t, o, nw = item(s, k), item(old, k), item(new, k)
+        out.append(Char(t.replace(o, nw) if o else t))
+    return Cell(out, shape)
+
+
+def _text_size_key(d):
+    """a size without trailing singleton dimensions past the second, to compare sizes"""
+    d = [int(x) for x in d]
+    while len(d) > 2 and d[-1] == 1:
+        d.pop()
+    return tuple(d)
 
 
 @_bs("strfind")
@@ -7846,6 +7881,24 @@ def regexpi_(nargout, s, pat, *opts):
 
 
 def _regexp(nargout, s, pat, opts, flags):
+    if type(pat) is StrArr or (type(pat) is Cell and (type(s) is StrArr or type(s) is Str)):
+        # (string arrays of expressions give string outputs whose exact forms the page
+        # doesn't spell out: refused rather than guessed)
+        raise _err("regexp: string arrays of expressions are not supported; use a cell array of character vectors.")
+    if type(pat) is Cell:
+        # (a cell array of expressions: each with STR, or with STR's corresponding
+        # element when both are cell arrays, which must then have the same dimensions)
+        pats = [Char(_text(e)) for e in pat.a]
+        if type(s) is Cell:
+            if _text_size_key(s.shape) != _text_size_key(pat.shape):
+                raise _err("regexp: STR and EXPRESSION must have the same dimensions when both are arrays.")
+            strs = [Char(_text(e)) for e in s.a]
+        else:
+            strs = [s] * len(pats)
+        per = [_regexp(max(1, nargout), t, p, opts, flags) for t, p in zip(strs, pats)]
+        if nargout <= 1:
+            return Cell(per, pat.shape)
+        return [Cell([q[k] for q in per], pat.shape) for k in range(nargout)]
     if type(s) is Cell or type(s) is StrArr:
         # (each element: a cell of results)
         per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
