@@ -56,6 +56,8 @@ def raw():
     assert rpc(p, 14, "nonexistent/method")["error"]["code"] == -32601
     t = text(rpc(p, 15, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent"}}))
     assert t.startswith("EllipticCurve_rational_field.two_descent("), t
+    j = json.loads(text(rpc(p, 16, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent", "json": True}})))
+    assert j[0]["name"] == "EllipticCurve_rational_field.two_descent" and "summary" in j[0], j[:1]
     p.stdin.close()
     p.wait(10)
     print("raw protocol: ok")

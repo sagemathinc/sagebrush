@@ -49,22 +49,7 @@ def _summary(obj):
     return _cleandoc(doc).split("\n\n")[0].replace("\n", " ")
 
 
-def _prompted(code):
-    """code as typed at a Python prompt: >>> before each statement, ... before
-    the lines of a block (and a decorator's def), and a ... line ending it"""
-    out, block = [], False
-    for line in code.split("\n"):
-        indented = line.startswith((" ", "\t"))
-        if block and not indented and not out[-1].lstrip(". >").startswith("@"):
-            out.append("...")
-            block = False
-        cont = block and (indented or out[-1].lstrip(". >").startswith("@"))
-        out.append(("... " if cont else ">>> ") + line)
-        if line.startswith("@") or line.rstrip().endswith(":") or cont:
-            block = True
-    if block:
-        out.append("...")
-    return "\n".join(out)
+from _pyjs_docsearch import prompted as _prompted
 
 
 def _examples_text(exs):
