@@ -112,6 +112,23 @@ double 2x1 [2;3]
 double 1x1 5
 double 1x1 32
 double 1x3 [0 0 1]
+double 1x4 [1 0 -7 6]
+double 1x3 [6 -6 0]
+double 1x4 [2 -2 3 7]
+double 1x3 [1 2 -1]
+double 1x4 [0 0 0 4]
+double 2x2 [4 -2;0 6]
+double 3x3 [1 -1 1;4 2 1;9 3 1]
+struct {form=char 1x2 ['pp'], breaks=double 1x3 [0 2 5], coefs=double 2x2 [3 1;-2 7], pieces=double 1x1 2, order=double 1x1 2, dim=double 1x1 1}
+double 1x5 [1 4 7 3 1]
+double 1x3 [0 2 5]
+double 2x2 [3 1;-2 7]
+double 1x1 2
+double 1x1 2
+double 1x1 1
+double 1x2 [0.3125 2.1875]
+double 1x3 [0.25 0.25 2.25]
+double 1x3 [1.5 3 4.5]
 double 1x1 11
 double 2x1 [2;1]
 double 1x3 [1 0 -1]
