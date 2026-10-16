@@ -1624,13 +1624,15 @@ test("clearvars -except and -regexp, and clear with patterns or computed names i
     tryIt("g1()"), tryIt("g2()"), tryIt("g3()"), tryIt("clearvars -global x"), tryIt("clear -bogus x"),
     // (clear global in a function with its own global: refused, in each form)
     tryIt("g4()"), tryIt("g5()"), tryIt("g6()"),
+    // (a -regexp that could backtrack exponentially, here on a 31-character name, is refused, not run)
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab = 1;", tryIt("clear -regexp ^(a+)+$"), tryIt("clearvars -except -regexp (a|aa)*b"),
     "function g4()\n global G\n G = 7;\n clear global\nend",
     "function g5()\n global G\n G = 7;\n clear('global')\nend",
     "function g6()\n global G\n G = 7; n = 'global';\n clear(n)\nend",
     "function g1()\n global G\n G = 7;\n clear G\nend",
     "function g2()\n persistent P\n P = 7;\n clear\nend",
     "function g3()\n global G\n G = 1; ab = 2;\n clear a* G*\nend",
-  ].join("\n")), Array(8).fill("refused"));
+  ].join("\n")), Array(10).fill("refused"));
   // (clear global in a function without globals of its own: the global store is cleared)
   assert.deepEqual(run([
     "global H\nH = 7; zap(); disp(readback())",
