@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr } from "./object";
+import { globalsDict, hooks, setattr, putAttr, lookupType, isType } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
@@ -669,6 +669,18 @@ newBuiltinModule("math", (m) => {
 });
 
 // ------------------------------------------------------------------ __future__
+
+// A type's attribute as CPython's _PyType_Lookup finds it: from the type's
+// own MRO and dicts, raw, with no descriptor, metaclass property or
+// __getattribute__ consulted (lib/io.py's special-method lookup).
+newBuiltinModule("_pyjs_types", (m) => {
+  // (found, value): (False, None) when no class in the MRO has it
+  m.lookup = builtin((tp: any, name: any) => {
+    if (typeof name !== "string" || !isType(tp)) raise(T.TypeError, "lookup(type, str)");
+    const v = lookupType(tp, name);
+    return tuple(v === undefined ? [false, null] : [true, v]);
+  }, "lookup");
+});
 
 newBuiltinModule("types", (m) => {
   m.FunctionType = m.LambdaType = T.function;

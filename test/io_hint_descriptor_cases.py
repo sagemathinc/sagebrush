@@ -98,3 +98,40 @@ for cls in [DictHint,MroHint,DescrHint,StaticHint,ClassHint,NoneHint]:
     try: result=repr(f.readlines(cls()))
     except Exception as e:result=type(e).__name__+('' if cls is StaticHint else ': '+str(e))
     print(cls.__name__,result,repr(f.read()))
+
+# Metaclass properties for __dict__ and __mro__, on the hint's type and on the
+# descriptor's, are not consulted either (astra's meta_properties probe,
+# CORR-5E8-1): the MRO and the class dicts are read raw.
+import io as _io2
+
+class Fake2:
+    def __index__(self): return 100
+
+class DictMeta(type):
+    @property
+    def __dict__(cls): return {'__index__': lambda self: 100}
+
+class MroMeta(type):
+    @property
+    def __mro__(cls): return (Fake2,)
+
+class DictHint(metaclass=DictMeta):
+    def __index__(self): return 1
+
+class MroHint(metaclass=MroMeta):
+    def __index__(self): return 1
+
+class DescrMeta(type):
+    @property
+    def __dict__(cls): return {'__get__': lambda a, obj, tp: lambda: 100}
+
+class Descriptor2(metaclass=DescrMeta):
+    def __get__(self, obj, tp): return lambda: 1
+
+class DescrHint2:
+    __index__ = Descriptor2()
+
+for hint in [DictHint(), MroHint(), DescrHint2()]:
+    f = _io2.StringIO('aa\nbb\ncc\n')
+    try: print(type(hint).__name__, f.readlines(hint), f.read())
+    except Exception as e: print(type(hint).__name__, type(e).__name__, str(e), f.read())
