@@ -2001,3 +2001,24 @@ test("regexp with a cell array of expressions, strrep with cell arrays of OLD or
     tryIt("strrep({'a', 'b'}, '?', {'1'; '2'})"), tryIt("strrep(\"x?\", '?', {'1'})"),
   ].join("\n")), ["[1 2]", "oak elm", "[2 1]", "[1 7]", "12 cd", "refused", "refused", "[2 1]", "v=3 w=8", "a+b A-b", "refused", "refused"]);
 });
+
+test("strrep's cell forms count overlapping matches; regexp's cell forms give every match's names; character matrices refused there (CORR-6CE-1, -2, -3)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (every place OLD starts gives one NEW, overlaps included, as for a character vector)
+    "c = strrep('aaaa', {'aa'}, 'X'); disp(c{1})",
+    "c = strrep('ababa', {'aba'}, 'X'); disp(c{1})",
+    "c = strrep({'aaaa'; 'ababa'}, {'aa'; 'aba'}, {'X'; 'Y'}); disp([c{1} ' ' c{2}])",
+    "c = strrep('aaa', {'aa'}, {'aa'}); disp(c{1})",
+    // (names: a 1-by-n structure array per expression, in regexpi and as the sixth output too)
+    "n = regexp('ABC', {'(?<letter>[A-Z])'}, 'names'); disp(mat2str(size(n{1}))); disp([n{1}.letter])",
+    "n = regexpi('abc', {'(?<l>[A-Z])'}, 'names'); disp(mat2str(size(n{1}))); disp([n{1}.l])",
+    "[s, e, te, m, t, nm] = regexp('ABC', {'(?<letter>[A-Z])'}); disp(mat2str(size(nm{1}))); disp(mat2str(s{1}))",
+    "n = regexp('ABC', {'(?<letter>[A-Z])'}, 'names', 'once'); disp(n{1}.letter)",
+    // (a character matrix as a text or an expression: refused, not its rows joined)
+    tryIt("regexp({char('ab', 'cd')}, {'bc'})"), tryIt("regexp(char('AB', 'CD'), {'BC'})"), tryIt("regexp('ABCD', {char('AB', 'CD')})"),
+  ].join("\n")), ["XXX", "XX", "XXX YY", "aaaa", "[1 3]", "ABC", "[1 3]", "abc", "[1 3]", "[1 2 3]", "A", "refused", "refused", "refused"]);
+});
