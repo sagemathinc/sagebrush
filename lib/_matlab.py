@@ -4469,8 +4469,9 @@ def _sincosd(A):
 
 def _tand(A):
     """tand: tan of the angle reduced exactly to [-90, 90] (fmod by 180, then the nearest
-    multiple of 180), 0 and ±Inf exactly at the multiples of 90 (tand(60) is tan(60*pi/180),
-    as Octave's; near 180 the reduced angle keeps its digits)"""
+    multiple of 180), within 15 degrees of a pole by the reciprocal of its exact complement;
+    0 and ±Inf exactly at the multiples of 90 (tand(60) is tan(60*pi/180), as Octave's;
+    near 180 and near 90 the angle's distance keeps its digits)"""
     if A.dtype.kind == "c":
         raise _err("Complex arguments to sind, cosd and the other degree functions are not supported in Sagebrush.")
     r = np.array(A, dtype=np.float64)
@@ -4480,6 +4481,12 @@ def _tand(A):
         r.flat[idx] = [_math.fmod(float(r.flat[i]), 180.0) for i in idx]
     t = r - 180.0 * np.round(r / 180.0)
     out = np.tan(t * (_math.pi / 180))
+    # (near a pole, |t| > 75: the complement 90 - |t|, exact in degrees, so the distance to
+    # the pole keeps its digits: tand(90 - eps(90)) is 1/tan of eps(90) degrees)
+    near = np.abs(t) > 75
+    if np.any(near):
+        with np.errstate(divide="ignore"):
+            out = np.where(near, np.sign(t) / np.tan((90.0 - np.abs(t)) * (_math.pi / 180)), out)
     out = np.where(t == 0, 0.0, out)
     out = np.where(t == 90, _math.inf, out)
     return np.where(t == -90, -_math.inf, out)
