@@ -2554,8 +2554,14 @@ def _plain_base(base):
 
 
 def _is_parent(R):
-    """Whether R is a ring or other parent rather than a list of rows."""
-    return callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows")
+    """Whether R is a ring or other parent rather than a list of rows.  A
+    parent is also anything callable (K(3)) without a length, as row data
+    has one: NumberField(t^2 - 2, 'a') has none of the methods above, and
+    matrix(K, 0, 0, []) iterated K[0], K[1], ... until the heap ran out
+    (astra's HARD-541-1)."""
+    if callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows"):
+        return True
+    return callable(R) and not hasattr(R, "__len__") and not hasattr(R, "nrows") and not isinstance(R, type)
 
 
 def _int_dims(args):
