@@ -322,6 +322,20 @@ test("checkSubmission: a host's check, against the board posted on the channel; 
   assert.match(no({ ...m, page: { number: 2, a: { b: { c: { d: 1 } } } } }).message, /4 deep/);
   const cyc: any = { ...m }; cyc.self = cyc;
   assert.match(no(cyc).message, /more than 10000 values|4 deep/);
+  // (wide or long: refused as found, before its values are taken: daybreak2's HARD-A6E-1)
+  const wide = new Proxy(new Array(20_000).fill("a"), { get: (t, k) => { if (typeof k === "string" && /^\d+$/.test(k) && Number(k) > 10) throw new Error("read past the budget"); return (t as any)[k]; } });
+  assert.match(no({ ...m, answers: { plan: wide } }).message, /more than 10000 values/);
+  const many: Record<string, string> = {};
+  for (let i = 0; i < 12_000; i++) many["k" + i] = "x";
+  assert.match(no({ ...m, notes: many }).message, /more than 10000 values/);
+  assert.match(no({ ...m, comment: "x".repeat(70_000) }).message, /at most 64 KiB/);
+  assert.match(no({ ...m, notes: Object.fromEntries(Array.from({ length: 40 }, (_, i) => ["n" + i, "y".repeat(2000)])) }).message, /at most 64 KiB/);
+  // (the posted object's text changed: its board read again, HARD-A6E-2)
+  const p2 = { text: JSON.stringify({ nodes: [{ id: "plan", kind: "ask", text: "Q", input: "radio", options: ["a"] }] }), name: "d.board.json", revision: "r7" };
+  const m1 = { ...m, page: { number: 1 }, answers: { plan: "a" }, notes: {} };
+  assert.equal(checkSubmission(p2, m1).ok, true);
+  p2.text = JSON.stringify({ nodes: [{ id: "plan", kind: "ask", text: "Q", input: "radio", options: ["b"] }] });
+  assert.match((checkSubmission(p2, m1) as any).message, /not one of its options/);
   // (a board that isn't JSON, or two items with one id: no answers to it)
   assert.match((checkSubmission({ text: "graph TD; a-->b", name: "d.board.json", revision: "r7" }, m) as any).message, /has no questions/);
 });
