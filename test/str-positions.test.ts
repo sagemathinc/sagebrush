@@ -148,3 +148,38 @@ test("adopting an equal string keeps one body of it alive, not two", () => {
   // (one body is 2N bytes, two-byte for the pair; two would be 4N)
   assert.ok(r.one < 1.5 * r.body, `kept ${r.one} bytes for a ${r.body}-byte string`);
 });
+
+// ... and that full comparison is the only one: where the string was found
+// says which references hold it, so they are assigned, not compared again
+// (HARD-3F4-2).  Each new equal object, found as the string last indexed, as
+// the big entry or in the cache, is compared once; and, timed, indexing a new
+// equal 20-million-unit string costs about one comparison of two of them.
+test("a new equal string is compared in full once, wherever it is found", () => {
+  const code = [
+    `const sp = require(${JSON.stringify(__dirname + "/../src/runtime/strpos.js")});`,
+    // (a new flat object equal to the last one made of length N)
+    "const make = (N) => ('y' + 'x'.repeat(N - 1) + '\\u{1F600}').replace('y', 'x');",
+    "const other = 'z'.repeat(1000) + '\\u{1F600}';",
+    "const counts = {};",
+    "const count = (k, s) => { const n = sp.equalCompares.n; sp.pairs(s); (counts[k] ??= []).push(sp.equalCompares.n - n); };",
+    "for (const [k, N] of [['big', 2_000_000], ['cached', 300_000]]) {",
+    "  count(k + ' new', make(N));",
+    "  for (let i = 0; i < 3; i++) count(k + ' last', make(N));",
+    "  for (let i = 0; i < 3; i++) { sp.pairs(other); count(k + ' found', make(N)); count(k + ' last', make(N)); }",
+    "}",
+    "const N = 20_000_000, t = [], u = [];",
+    "for (let i = 0; i < 7; i++) {",
+    "  const a = make(N), b = make(N);",
+    "  let t0 = process.hrtime.bigint(); if (a !== b) throw new Error('not equal'); t.push(Number(process.hrtime.bigint() - t0));",
+    "  sp.pairs(a);",
+    "  t0 = process.hrtime.bigint(); sp.pairs(b); u.push(Number(process.hrtime.bigint() - t0));",
+    "}",
+    "console.log(JSON.stringify({ counts, compare: Math.min(...t), pairs: Math.min(...u.slice(1)) }));",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 120000 }).trim());
+  assert.deepEqual(r.counts, {
+    "big new": [0], "big last": [1, 1, 1, 1, 1, 1], "big found": [1, 1, 1],
+    "cached new": [0], "cached last": [1, 1, 1, 1, 1, 1], "cached found": [1, 1, 1],
+  });
+  assert.ok(r.pairs < 2 * r.compare, `indexing a new equal string took ${r.pairs} ns, one comparison ${r.compare} ns`);
+});
