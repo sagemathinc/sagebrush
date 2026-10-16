@@ -56,19 +56,29 @@ class Vector(list):
 
     __str__ = __repr__
 
-    # vector arithmetic, as in Sage (a list would concatenate)
+    # vector arithmetic, as in Sage (a list would concatenate); with a
+    # vector over another field (an FFVector), in the ring where the two
+    # meet (_sage_ffmat._vector_op); over QQ when either vector is over QQ
     def __add__(self, other):
+        if _is_ffvector(other):
+            return _ffmat()._vector_op(self, other, "+")
         if len(other) != len(self):
-            raise ArithmeticError("vectors of different lengths")
-        return Vector(_norm(a + b) for a, b in zip(self, other))
+            _different_degrees(self, other, "+")
+        return _over_qq(Vector(_norm(a + b) for a, b in zip(self, other)), self, other)
 
     def __sub__(self, other):
-        return self + (-Vector(other))
+        if _is_ffvector(other):
+            return _ffmat()._vector_op(self, other, "-")
+        if len(other) != len(self):
+            _different_degrees(self, other, "-")
+        return _over_qq(self + (-Vector(other)), self, other)
 
     def __neg__(self):
-        return Vector(-a for a in self)
+        return _over_qq(Vector(-a for a in self), self)
 
     def __mul__(self, other):
+        if _is_ffvector(other):
+            return _ffmat()._vector_op(self, other, "*")
         if isinstance(other, Matrix):
             # the vector-matrix product
             if len(self) != other.nrows():
@@ -77,12 +87,12 @@ class Vector(list):
         if isinstance(other, (list, tuple)):
             # the dot product
             if len(other) != len(self):
-                raise ArithmeticError("vectors of different lengths")
-            return _norm(sum(a * b for a, b in zip(self, other)))
-        return Vector(_norm(a * other) for a in self)
+                _different_degrees(self, other, "*")
+            return _qq_scalar(_norm(sum(a * b for a, b in zip(self, other))), self, other)
+        return _over_qq(Vector(_norm(a * other) for a in self), self, other)
 
     def __rmul__(self, other):
-        return Vector(_norm(other * a) for a in self)
+        return _over_qq(Vector(_norm(other * a) for a in self), self, other)
 
     def __truediv__(self, other):
         try:
@@ -207,10 +217,14 @@ class Vector(list):
             sage: vector([1, 0, 0]).cross_product(vector([0, 1, 0]))
             (0, 0, 1)
         """
-        a, b = list(self), _bounded_list(other, 3)
-        if len(a) != 3 or len(b) != 3:
-            raise TypeError("the cross product is defined for vectors of length 3")
-        return Vector(_norm(x) for x in (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]))
+        if _is_ffvector(other):
+            return _ffmat()._vector_op(self, other, "cross")
+        # (a list or vector is in memory already, its length checked before
+        # it is read; another iterable is read boundedly)
+        a, b = self, other if isinstance(other, (list, tuple)) else _bounded_list(other, 7)
+        if not (len(a) == len(b) and len(a) in (3, 7)):
+            raise TypeError("Cross product only defined for vectors of length three or seven, not (%d and %d)" % (len(a), len(b)))
+        return _over_qq(Vector(_norm(x) for x in _ffmat()._cross(a, b)), self, other)
 
     def base_ring(self):
         """ZZ, QQ or QQbar, from the entries.
@@ -281,16 +295,35 @@ class Vector(list):
             sage: vector([1, 2, 3]).dot_product(vector([4, 5, 6]))
             32
         """
+        if _is_ffvector(other):
+            return _ffmat()._vector_op(self, other, "dot")
+        if len(other) != len(self):
+            raise ArithmeticError("degrees (%d and %d) must be the same" % (len(self), len(other)))
         return self * Vector(other)
 
-    def norm(self):
-        """The Euclidean norm (exact, as sqrt of the sum of squares).
+    def norm(self, p=2):
+        """The p-norm: for p = 2 the Euclidean norm, exact (in QQ when it is
+        rational, else symbolic); over ZZ and QQ also p = Infinity (the
+        largest absolute value) and any integer p >= 1 whose norm is
+        rational.
 
         EXAMPLES::
 
-            sage: vector([3, 4]).norm()
-            5
+            sage: vector([3, 4]).norm(), vector([3, 4]).norm().parent()
+            (5, Rational Field)
+            sage: vector([3, -4]).norm(1), vector([3, -4]).norm(Infinity)
+            (7, 4)
+            sage: vector([3, 4]).norm(3)  # sagebrush only (Sage: 91^(1/3))
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: the 3-norm of this vector is not rational: symbolic roots other than square roots are not available in sagebrush yet
+            sage: vector([3, 4]).norm(10^9)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: the 1000000000-norm of this vector has p-th powers of more than 4194304 bits: not available in sagebrush yet
         """
+        if p != 2 or not self._is_symbolic():
+            return self._rational_norm(p)
         if self._is_symbolic():
             # Sage's norm over SR: sqrt(sum |a|^2)
             sa = _sa()
@@ -298,6 +331,96 @@ class Vector(list):
             return sa.sqrt(sum(_norm(abs(_expr(a))) ** 2 for a in self)).simplify_rational() if False else \
                 _sqrt_content(sum(abs(_expr(a)) ** 2 for a in self))
         return _sa().sqrt(sum(a * a for a in self))
+
+    def _rational_norm(self, p):
+        """The p-norm of a vector over ZZ or QQ, as Sage: the largest
+        absolute value, in the vector's ring, for p = Infinity; else in QQ
+        when it is rational (the p-th root of the sum of the p-th powers),
+        sqrt(sum) for p = 2; NotImplementedError otherwise."""
+        sa = _sa()
+        R = self.base_ring()
+        ff = _ffmat()
+        if (R is not sa.ZZ and R is not sa.QQ) or not all(isinstance(a, int) or type(a).__name__ == "Rational" for a in self):
+            if p == 2:
+                return sa.sqrt(sum(a * a for a in self))
+            raise NotImplementedError("the %s-norm of a vector over %r is not available in sagebrush yet" % (p, R))
+
+        def root(s, q):
+            if not (isinstance(q, int) or type(q).__name__ == "Integer"):
+                raise NotImplementedError("the %s-norm of a vector over %r is not available in sagebrush yet" % (q, R))
+            f, q = _F(s), int(q)
+            a, b = _exact_root(f.numerator, q), _exact_root(f.denominator, q)
+            if a is not None and b is not None:
+                return sa.QQ(_F(a, b))
+            if q == 2:
+                return sa.sqrt(_norm(f))
+            raise NotImplementedError("the %d-norm of this vector is not rational: symbolic roots other than square roots are not available in sagebrush yet" % q)
+        vals = [abs(a) for a in self]
+        if ff._inf_sign(p) > 0:
+            m = max(vals)
+            return sa.QQ(m) if R is sa.QQ else sa.Integer(m)
+
+        def check(vals, q):
+            # (the p-th powers' size, from bit lengths, before any is made)
+            if isinstance(q, int) or type(q).__name__ == "Integer":
+                bits = max(_F(a).numerator.bit_length() + _F(a).denominator.bit_length() for a in vals)
+                if int(q) * bits > ff._EXACT_NORM_BITS:
+                    raise NotImplementedError("the %d-norm of this vector has p-th powers of more than %d bits: not available in sagebrush yet" % (int(q), ff._EXACT_NORM_BITS))
+        return ff._p_norm(vals, p, root, check)
+
+
+def _exact_root(n, k):
+    """The integer r >= 0 with r^k = n >= 0, else None."""
+    if n < 2:
+        return n
+    r = 1 << -(-n.bit_length() // k)  # >= the root
+    while True:
+        t = ((k - 1) * r + n // r ** (k - 1)) // k
+        if t >= r:
+            break
+        r = t
+    return r if r ** k == n else None
+
+
+def _different_degrees(u, v, op):
+    """Sage's error for vectors of different degrees: TypeError naming
+    their parents (ArithmeticError, as before, with a list)."""
+    if isinstance(v, Vector) and not isinstance(v, SeriesVector) and not isinstance(u, SeriesVector):
+        raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, u.parent(), v.parent()))
+    raise ArithmeticError("vectors of different lengths")
+
+
+def _is_ffvector(v):
+    return type(v).__name__ == "FFVector"
+
+
+def _ffmat():
+    import _sage_ffmat
+    return _sage_ffmat
+
+
+def _over_qq(r, *operands):
+    """The vector r, with QQ as its ring when an operand is a vector over
+    QQ or a rational number and r's entries are rational (Sage keeps QQ:
+    vector(QQ, [1, 2]) + vector(QQ, [1, 2]) is over QQ, not ZZ)."""
+    sa = _sa()
+    if any(_qq_operand(o) for o in operands) and all(isinstance(x, int) or type(x).__name__ == "Rational" for x in r):
+        r._ring = sa.QQ
+    return r
+
+
+def _qq_operand(o):
+    sa = _sa()
+    if isinstance(o, Vector):
+        return not isinstance(o, SeriesVector) and o.base_ring() is sa.QQ
+    return isinstance(o, _F) or type(o).__name__ == "Rational"
+
+
+def _qq_scalar(x, *operands):
+    """x, in QQ when it is rational and either vector is over QQ."""
+    if (isinstance(x, int) or type(x).__name__ == "Rational") and any(_qq_operand(o) for o in operands if isinstance(o, Vector)):
+        return _sa().QQ(x)
+    return x
 
 
 def _sqrt_content(e):
@@ -3251,8 +3374,17 @@ class ComplexField_:
 
             sage: CC(1/2), CC(1, -1)
             (0.500000000000000, 1.00000000000000 - 1.00000000000000*I)
+            sage: CC('1e400')  # sagebrush only (Sage: 1.00000000000000e400)
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: CC('1e400'): complex numbers beyond the range of doubles are not available in sagebrush yet
         """
-        return ComplexNumber(complex(re) + complex(im) * 1j)
+        z = complex(re) + complex(im) * 1j
+        # (CC's numbers are doubles: CC('1e400') was +infinity, CC('1e-400') 0)
+        for x in (re, im):
+            if _beyond_doubles(x):
+                raise NotImplementedError("CC(%r): complex numbers beyond the range of doubles are not available in sagebrush yet" % (x,))
+        return ComplexNumber(z)
 
     def gen(self, i=0):
         """The imaginary unit I.
@@ -3266,6 +3398,30 @@ class ComplexField_:
 
 
 CC = ComplexField_()
+
+
+def _beyond_doubles(x):
+    """Whether x (a string, a real or complex number of more range than a
+    double, a rational) has a finite nonzero part that is infinite or 0 as
+    a double."""
+    if type(x) in (int, bool, float, complex) or x is None:
+        return False  # (RR's numbers past the doubles are float subclasses)
+    if type(x).__name__.startswith("Complex") and callable(getattr(x, "real", None)):
+        return _beyond_doubles(x.real()) or _beyond_doubles(x.imag())
+    try:
+        f = float(x)
+    except OverflowError:
+        return True
+    except (TypeError, ValueError):
+        return False
+    if f != 0 and f == f and abs(f) != float("inf"):
+        return False
+    try:
+        r = _sa().RR(x)
+    except Exception:
+        return False
+    s = repr(r)
+    return r != 0 and s not in ("+infinity", "-infinity", "NaN")
 
 
 def _numeric_field_kind(ring):

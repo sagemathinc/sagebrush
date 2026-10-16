@@ -1807,16 +1807,26 @@ def QuadraticField(D, name="a", names=None, **kwds):
         Number Field in a with defining polynomial x^2 + 5 with a = 2.236067977499790?*I
         sage: a^2, K.class_number()
         (-5, 2)
+        sage: QuadraticField(-1, 'b')
+        Number Field in b with defining polynomial x^2 + 1 with b = 1*I
+        sage: QuadraticField(5/2)  # sagebrush only (Sage: Q(sqrt(5/2)))
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: QuadraticField(5/2) is not available in sagebrush yet: only integers
     """
     if names is not None:
         name = names[0] if isinstance(names, (list, tuple)) else names
+    if isinstance(D, str) or _F(D).denominator != 1:
+        # (int(5/2) made QuadraticField(5/2) Q(sqrt(2)))
+        raise NotImplementedError("QuadraticField(%s) is not available in sagebrush yet: only integers" % (D,))
     D = int(D)
     if D == 1 or _sa().is_square(D):
         raise ValueError("D must not be a square")
     import math
-    v = math.sqrt(abs(D))
-    # Sage prints the double nearest sqrt|D| to 16 significant digits
-    root = _interval_repr_sqrt(abs(D))
+    # Sage prints the double nearest sqrt|D| to 16 significant digits, and
+    # an exact root as it is (QuadraticField(-1): b = 1*I)
+    r = math.isqrt(abs(D))
+    root = str(r) if r * r == abs(D) else _interval_repr_sqrt(abs(D))
     emb = root if D > 0 else root + "*I"
     return _unique(NumberField_absolute([-D, 0, 1], str(name), emb))
 
