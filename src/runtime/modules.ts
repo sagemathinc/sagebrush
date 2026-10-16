@@ -46,7 +46,8 @@ function fn(m: any, name: string, f: any) {
 export const ARITY: Record<string, Record<string, [number, number]>> = {
   // (os's functions are written (...a) to pass their errors through oserr)
   os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1] },
-  sys: { audit: [1, Infinity] },
+  sys: { audit: [1, Infinity], getsizeof: [1, 2] },
+  gc: { set_threshold: [1, 3] },
 };
 
 function checkModuleArity(m: any) {

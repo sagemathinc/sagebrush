@@ -48,3 +48,12 @@ print(binascii.b2a_base64(b'x'), binascii.b2a_base64(b'x', newline=False))
 print(zlib.crc32(b'a'), zlib.crc32(b'a', 5), sys.getrecursionlimit() > 0, gc.collect() >= 0)
 print(os.getcwd() == os.getcwd(), sorted(os.listdir('.')) == sorted(os.listdir()), type(time.time()).__name__)
 print(math.sqrt is math.sqrt, os.remove is os.unlink or os.remove.__name__)
+
+# functions whose signature inspect cannot read (CORR-440-1, -2), and b2a_base64's newline by truth
+print(kind(lambda: sys.getsizeof(object(), 99)), kind(lambda: sys.getsizeof()), kind(lambda: sys.getsizeof(1, 2, 3)))
+print(kind(lambda: gc.set_threshold()), kind(lambda: gc.set_threshold(700, 10, 10, 10)), kind(lambda: gc.set_threshold(*gc.get_threshold())))
+class Falsy:
+    def __bool__(self): return False
+class Bad:
+    def __bool__(self): raise ValueError('no')
+print(binascii.b2a_base64(b'a', newline=[]), binascii.b2a_base64(b'a', newline=Falsy()), binascii.b2a_base64(b'a', newline=[1]), kind(lambda: binascii.b2a_base64(b'a', newline=Bad())))
