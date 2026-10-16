@@ -1537,3 +1537,63 @@ test("a newline in a struct's text field or a string array's element is displaye
     "    a: <missing>",
   ]);
 });
+
+test("clear: a cleared variable's name is the function again at the top level; in a function, clear undefines the names", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "upper = 7; clear; disp(upper('abc'))",
+    "lower = 3; clear lower; disp(lower('XY'))",
+    "max = [5 9 2]; disp(max(2)); clearvars max; disp(max([5 9 2]))",
+    "try, clear; disp(nosuchthing), catch e, disp(e.message), end",
+    "disp(f1()); disp(f2()); disp(f3())",
+    "try, f4(), catch e, disp(e.message), end",
+    // (an anonymous function's parameters are its own, even where a workspace variable has the name)
+    "x = 5; g = @(x) x + 1; h = @(v) v(2); disp(g(2)); disp(h([4 5])); clear x; disp(g(3))",
+    "function r = f1()\n a = 1; b = 2;\n clear a\n a = 10;\n r = a + b;\nend",
+    "function r = f2()\n a = 5;\n clear\n r = exist('a', 'var');\nend",
+    "function r = f3()\n abc = 1; xyz = 3;\n clear ab*\n r = xyz;\nend",
+    "function f4()\n upper = 7;\n clear upper\n upper('fn')\nend",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((l: string) => l.trim()), [
+    "ABC", "xy", "9", "9", "Unrecognized function or variable 'nosuchthing'.", "12", "0", "3",
+    // (static resolution in a function: once cleared, upper is an undefined variable, not 7)
+    "Unrecognized function or variable 'upper'.",
+    "3", "5", "4",
+  ]);
+});
+
+test("clear in a function: a variable named like an ItemType is the one cleared; clearvars' arguments are always names (CORR-8398-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "disp(mat2str([f5() f6() f7() f8() f9() f10()]))",
+    "function r = f5()\n a = 5; all = 9;\n clear all\n r = [exist('a', 'var') exist('all', 'var')];\nend",
+    "function r = f6()\n a = 5;\n clear all\n r = exist('a', 'var');\nend",
+    "function r = f7()\n a = 5;\n clearvars all\n r = exist('a', 'var');\nend",
+    "function r = f8()\n a = 5; variables = 1;\n clear variables\n r = [exist('a', 'var') exist('variables', 'var')];\nend",
+    "function r = f9()\n a = 5;\n clear functions\n r = exist('a', 'var');\nend",
+    // (all is assigned only on a path not taken: at the clear it doesn't exist, so the keyword)
+    "function r = f10()\n a = 5;\n if false, all = 1; end\n clear all\n r = exist('a', 'var');\nend",
+  ].join("\n")], { encoding: "utf8" });
+  assert.equal(out.trim(), "[1 0 0 1 1 0 1 0]");
+});
+
+test("clear and clearvars at the top level look exact names up directly: 3000 names against 3000 variables is quick (HARD-282-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const code = [
+    // (3000 variables v1 .. v3000, through a MAT-file: a structure's fields saved as variables, then loaded)
+    "names = arrayfun(@(k) sprintf('v%d', k), 1:3000, 'UniformOutput', false);",
+    "S = cell2struct(num2cell(1:3000), names, 2); f = [tempname '.mat']; save(f, '-struct', 'S'); clear S; load(f); delete(f)",
+    "missing = arrayfun(@(k) sprintf('w%d', k), 1:3000, 'UniformOutput', false);",
+    "keep1 = 1; v_keep = 2;",
+    "clearvars(names{1:1500}); clear(names{1501:end}, missing{:})",
+    "disp([exist('v1', 'var') exist('v3000', 'var') exist('keep1', 'var') exist('v_keep', 'var')])",
+    "clear v_k* keep?",
+    "disp([exist('keep1', 'var') exist('v_keep', 'var')])",
+  ].join("\n");
+  const t0 = Date.now();
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code], { encoding: "utf8", timeout: 60000 });
+  const ms = Date.now() - t0;
+  assert.deepEqual(out.trim().split("\n").map((l: string) => l.trim().split(/\s+/).join(" ")), ["0 0 1 1", "0 0"]);
+  // (before: 3000 names took over 30 s; the eval loop that makes the variables is most of this)
+  assert.ok(ms < 20000, `${ms} ms`);
+});
