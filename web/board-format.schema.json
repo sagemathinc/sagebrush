@@ -622,7 +622,7 @@
   },
   "DocAsk": {
    "type": "object",
-   "description": "A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`. (For now the board shows a question, its options and its answer read-only; a host's submission, or `sagebrush board answers --apply`, writes the answer.)",
+   "description": "A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`: given on the board with its controls, or written by a host's submission or `sagebrush board answers --apply`.",
    "properties": {
     "id": {
      "type": "string",

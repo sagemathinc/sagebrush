@@ -483,6 +483,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const node = (n: any): any => (n.kind === "group" ? { ...n, children: n.children.map(node) } : flipped.has(n.id) && n.code !== undefined ? { ...n, hideCode: !n.hideCode } : n);
     return { ...v, nodes: (v.nodes ?? []).map(node) };
   }
+  // (a question answered with its controls: kept in the document, as any
+  // change; not in a version being looked at, which is not the document)
+  board.onAnswer = (id, patch) => {
+    if (viewing) return;
+    editor.answer(id, patch).catch(fail);
+  };
   board.onToggleCode = (id) => {
     if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
     if (!flipped.delete(id)) flipped.add(id);
