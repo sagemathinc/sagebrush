@@ -41,19 +41,29 @@ def _ssize(v):
     return v
 
 
+def _type_lookup(tp, name):
+    """name in tp's MRO, as CPython's _PyType_Lookup: the raw attribute (no
+    binding, no metaclass __getattribute__), or _MISSING"""
+    for k in type.__getattribute__(tp, "__mro__"):
+        d = type.__getattribute__(k, "__dict__")
+        if name in d:
+            return d[name]
+    return _MISSING
+
+
 def _special(obj, name):
     """obj's special method name, as CPython's _PyObject_LookupSpecial: found
-    in its type's MRO, not the instance, and bound by the attribute's own
-    __get__ if it has one; _MISSING if there is none (an attribute set to
-    None is None, which the caller then fails to call, as CPython's)"""
+    in its type's MRO, not the instance, and bound by the raw __get__ of the
+    attribute's type (called as __get__(a, obj, type), as CPython's
+    slot_tp_descr_get) if it has one; _MISSING if there is none (an
+    attribute, or a __get__, set to None is None, which then fails to be
+    called, as CPython's)"""
     tp = type(obj)
-    for k in tp.__mro__:
-        d = k.__dict__
-        if name in d:
-            a = d[name]
-            get = getattr(type(a), "__get__", None)
-            return a if get is None else get(a, obj, tp)
-    return _MISSING
+    a = _type_lookup(tp, name)
+    if a is _MISSING:
+        return a
+    get = _type_lookup(type(a), "__get__")
+    return a if get is _MISSING else get(a, obj, tp)
 
 
 _MISSING = object()
