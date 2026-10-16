@@ -4392,8 +4392,15 @@ def cellstr_(x):
 # ---- elementwise math
 
 
-def _unary(name, f, complex_if=None, keep_int=False):
-    """a math function on every element; complex_if(A): where the result is complex"""
+_REAL_FIX = {}  # (name: real_fix, for _complex_fallback too)
+
+
+def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
+    """a math function on every element; complex_if(A): where the result is complex;
+    real_fix(A, r): the result r adjusted for a real A made complex (MATLAB's own
+    convention for real arguments outside the real domain)"""
+    if real_fix is not None:
+        _REAL_FIX[name] = real_fix
     def g(nargout, x):
         if type(x) is float and (complex_if is None or not complex_if(np.array([x]))[0]):
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
@@ -4402,10 +4409,14 @@ def _unary(name, f, complex_if=None, keep_int=False):
         if cls in ("cell", "struct", "string", "function_handle"):
             raise _err("Undefined function '%s' for input arguments of type '%s'." % (name, cls), "MATLAB:UndefinedFunction")
         A = _farr(x, name)
+        A0 = None
         if complex_if is not None and A.dtype.kind != "c" and A.size and np.any(complex_if(A)):
+            A0 = A
             A = A.astype(np.complex128)
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             r = f(A)
+            if A0 is not None and real_fix is not None:
+                r = real_fix(A0, r)
         if cls in _INTS:
             if keep_int:
                 return _finish(r, cls)
@@ -4454,7 +4465,9 @@ _unary("cosh", np.cosh)
 _unary("tanh", np.tanh)
 _unary("asinh", np.arcsinh)
 _unary("acosh", np.arccosh, lambda A: A < 1)
-_unary("atanh", np.arctanh, lambda A: np.abs(A) > 1)
+# (for real x outside [-1, 1], MATLAB's atanh is odd: atanh(-3) = -0.3466 - 1.5708i, the
+# conjugate of what the complex -3 + 0i gives)
+_unary("atanh", np.arctanh, lambda A: np.abs(A) > 1, real_fix=lambda A, r: np.where(A < -1, np.conj(r), r))
 _unary("sec", lambda A: 1 / np.cos(A))
 _unary("csc", lambda A: 1 / np.sin(A))
 _unary("cot", lambda A: 1 / np.tan(A))
@@ -8985,8 +8998,11 @@ def _complex_fallback(name):
         except (TypeError, ValueError, NotImplementedError) as e:
             if "complex" not in str(e):
                 raise
-            A = _farr(x).astype(np.complex128)
+            A0 = _farr(x)
+            A = A0.astype(np.complex128)
             out = np.array([f(complex(z)) for z in A.reshape(-1)], dtype=np.complex128).reshape(A.shape)
+            if A0.dtype.kind != "c" and name in _REAL_FIX:
+                out = _REAL_FIX[name](A0, out)
             return _finish(out, "single" if class_(x) == "single" else "double")
     _B[name] = Builtin(g, name)
 
