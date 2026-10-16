@@ -566,7 +566,13 @@ define("round", roundImpl, [1, 2]);
 for (const t of [T.int, T.float]) Ty.method(t, "__round__", (x: any, nd: any = null) => roundImpl(unbox(x), nd));
 define("divmod", O.divmod, [2, 2]);
 define("pow", powImpl, [2, 3]);
-builtins.pow.$sig = sig(["base", "exp", "mod"]); // (pow(2, 3, mod=5), as CPython's)
+// (pow(2, 3, mod=5), as CPython's; a missing base or exp is its TypeError, CORR-71C-1)
+builtins.pow.$kw = (pos: any[], names: string[], values: any[]) => {
+  const [b, e, m] = bindArgs("pow", sig(["base", "exp", "mod"]), pos, names, values);
+  if (b === undefined) raise(T.TypeError, "pow() missing required argument 'base' (pos 1)");
+  if (e === undefined) raise(T.TypeError, "pow() missing required argument 'exp' (pos 2)");
+  return powImpl(b, e, m === undefined ? null : m);
+};
 define("hash", hashImpl);
 define("id", O.id, [1, 1]);
 define("isinstance", isinstanceImpl);

@@ -2147,11 +2147,10 @@ export class Zip {
 const zip = iteratorType("zip", Zip, (...xs: any[]) => new Zip(xs.map(O.iter), false));
 // (strict wherever it is given; any other keyword refused, as CPython's)
 zip.$kw = (pos, names, values) => {
+  // (every keyword checked before strict's truth is taken, CORR-71C-2)
+  for (const n of names) if (n !== "strict") raise(T.TypeError, `zip() got an unexpected keyword argument '${n}'`);
   let strict = false;
-  names.forEach((n, i) => {
-    if (n !== "strict") raise(T.TypeError, `zip() got an unexpected keyword argument '${n}'`);
-    strict = O.truth(values[i]);
-  });
+  names.forEach((_n, i) => (strict = O.truth(values[i])));
   return new Zip(pos.map(O.iter), strict);
 };
 (zip as any).$kwPos = true; // (zip(*rows) of any length: BIG_CALL)
