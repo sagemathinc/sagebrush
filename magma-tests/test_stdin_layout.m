@@ -1,0 +1,30 @@
+// a tuple holding a part printed over several lines, records, and both in
+// Sprint and printf (no indentation there), as Magma lays them out
+F := recformat< a, b >;
+r := rec< F | a := 3, b := [1, 2] >; r;
+s := rec< F | a := r, b := "x" >; s;
+t := rec< F | a := [i : i in [1..30]], b := 2 >; t;
+<[[5,6],[7,8]], 9>;
+<1, [[2]], 3>;
+u := <[i : i in [1..30]], [[1],[2]]>; u;
+Sprint(r);
+Sprint(s);
+Sprint(<[[5,6],[7,8]], 9>);
+printf "%o\n", [[1],[2]];
+printf "%o\n", <[[5,6],[7,8]], 9>;
+printf "%o\n", r;
+[<[[1],[2]], 3>, <[[4]], 5>];
+<[[1],[2]], [[3]]>;
+<<[[1],[2]]>, 4>;
+r := rec< F | a := <[[1],[2]], 3>, b := 2 >; r;
+<rec< F | a := 1, b := 2 >, 5>;
+<[i : i in [1..30]], [[1],[2]], [i : i in [1..30]]>;
+<"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", [[1],[2]], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb">;
+[[<[[1]], 2>]];
+<[], [[1]]>;
+<[[]], 1>;
+Sprint(r);
+Sprint(<<[[1],[2]]>, 4>);
+printf "%o|\n", r;
+printf "%o\n", [i : i in [1..40]];
+printf "%o\n", <[i : i in [1..30]], [[1],[2]]>;
