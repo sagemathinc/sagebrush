@@ -120,14 +120,16 @@ def _report(e, line, col):
         if _is_intrinsic_name(name):
             # one of Magma's intrinsics that Sagebrush doesn't have: said so,
             # not as an undeclared name (Magma has it)
+            # (Sagebrush's own message, which Magma doesn't print: one line)
             _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush\n" % (_where(line, col), name))
         else:
-            _sys.stdout.write("%sUser error: Identifier '%s' has not been declared or assigned\n" % (_where(line, col), name))
+            # (wrapped at 80 columns, as Magma wraps it)
+            _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: Identifier '%s' has not been declared or assigned" % name, 0, 0)))
         if _src[2] is None:
             raise SystemExit(1)  # no recovery: a cell stops, as before
         return
     if isinstance(e, _UserError):
-        _sys.stdout.write("Runtime error: %s\n" % e)
+        _sys.stdout.write("%s\n" % _wrap("Runtime error: %s" % e, 0, 0))
     else:
         um = _re.search(r"local variable '([A-Za-z_][A-Za-z0-9_]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
         if um:
@@ -731,25 +733,76 @@ def _frange(a, b, c):
     return out
 
 
-def _own(v, name=None):
+# a container nested deeper than this is refused when it is copied (value
+# semantics), below the host's recursion limit (HARD-133-1)
+_NEST_MAX = 100
+# and a copy that would make more containers than this (a value sharing
+# its parts, x := [x, x], copies to a tree of them) is refused before it
+# starts
+_OWN_CONTAINERS_MAX = 10 ** 5
+_OWN_RECORD_WEIGHT = 8
+
+
+def _is_copied(x):
+    """Whether _own copies x part by part (records too: HARD-319-1)."""
+    return isinstance(x, (MSeq, MSet, MTuple, MRec))
+
+
+def _copied_parts(v):
+    return v.items if isinstance(v, MSet) else v.vals.values() if isinstance(v, MRec) else v
+
+
+def _own_size(v, memo, depth=0):
+    """How many containers a copy of v makes, counted once per shared
+    part (memo, by identity), capped just past _OWN_CONTAINERS_MAX; one
+    nested past _NEST_MAX counts as too many."""
+    if not _is_copied(v):
+        return 0
+    if depth >= _NEST_MAX:
+        return 1  # (_own refuses it for its depth)
+    got = memo.get(id(v))
+    if got is not None:
+        return got[1]
+    memo[id(v)] = (v, _OWN_CONTAINERS_MAX + 1)  # (in progress: a cycle is too many)
+    # (a record, with its fields' dictionary, costs several times a small
+    # sequence: it counts as _OWN_RECORD_WEIGHT, so that a refused copy
+    # still fits a 96 MB heap)
+    n = _OWN_RECORD_WEIGHT if isinstance(v, MRec) else 1
+    for x in _copied_parts(v):
+        if _is_copied(x):
+            n += _own_size(x, memo, depth + 1)
+            if n > _OWN_CONTAINERS_MAX:
+                break
+    n = min(n, _OWN_CONTAINERS_MAX + 1)
+    memo[id(v)] = (v, n)
+    return n
+
+
+def _own(v, name=None, depth=0):
     """Value semantics: an assigned (or passed) container is a copy.  The
     name of the variable assigned lets some structures print it (2*C.1 = 0)."""
     if v is _UNDECLARED:
         v._fail()
     if name is not None and hasattr(v, "_magma_assigned"):
         v._magma_assigned(name)
+    if _is_copied(v) and depth >= _NEST_MAX:
+        raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
+    if depth == 0 and _is_copied(v) and any(_is_copied(x) for x in _copied_parts(v)):
+        # (a value with containers in it: the size of its copy first)
+        if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
+            raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
     if isinstance(v, MSeq):
-        return MSeq((_own(x) for x in v), v.universe, getattr(v, "sample", None))
+        return MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
-        s.items = [_own(x) for x in v.items]
+        s.items = [_own(x, None, depth + 1) for x in v.items]
         s.keys = {k: (list(val) if v.kind == "multi" else val) for k, val in v.keys.items()}
         s.range = v.range
         return s
     if isinstance(v, MTuple):
-        return MTuple(_own(x) for x in v)
+        return MTuple([_own(x, None, depth + 1) for x in v])
     if isinstance(v, MRec):
-        return v._copy()
+        return v._copy(depth)
     return v
 
 
@@ -1026,8 +1079,9 @@ class MRec:
             raise MagmaError("RHS value invalid for field '%s'" % name, ":=", False, pos)
         self.vals[name] = w
 
-    def _copy(self):
-        return MRec(self.fmt, {k: _own(v) for k, v in self.vals.items()})
+    def _copy(self, depth=0):
+        # (its fields one level deeper, for _own's depth bound: HARD-319-1)
+        return MRec(self.fmt, {k: _own(v, None, depth + 1) for k, v in self.vals.items()})
 
     def _str(self, indent):
         head = "rec<%s | " % _format_name(self.fmt)
@@ -2585,16 +2639,48 @@ def RealField(prec=30):
 
 # ------------------------------------------------------------------ printing
 
+# Printing descends into nested values; a value nested deeper than this is
+# refused before the host's recursion limit, in Magma's form (HARD-133-1)
+_PRINT_DEPTH_MAX = 100
+_print_depth = [0]
+_print_at = [None]  # the container the depth was last charged for
+
+
+def _nested(v, f, *args):
+    """f(*args) one level deeper into the container v being printed (only
+    containers come here, so a long flat sequence pays nothing).  Each
+    container is charged once: _str, _inline and _atomic on the same v
+    are one level (CORR-90E-1)."""
+    if v is _print_at[0]:
+        return f(*args)
+    d, at = _print_depth[0], _print_at[0]
+    if d >= _PRINT_DEPTH_MAX:
+        raise MagmaError("printing a value nested more than %d deep is not supported yet" % _PRINT_DEPTH_MAX)
+    _print_depth[0], _print_at[0] = d + 1, v
+    try:
+        return f(*args)
+    finally:
+        _print_depth[0], _print_at[0] = d, at
+
+
+def _container(v):
+    return isinstance(v, (MTuple, MSeq, MSet, MRec)) or type(v).__name__ == "MList"
+
+
 def _atomic(v):
     if isinstance(v, (bool, int, str, _Fraction, MReal)) or _is_ff(v):
         return True
     if isinstance(v, MTuple):
-        return all(_atomic(x) for x in v)
+        return _nested(v, lambda: all(_atomic(x) for x in v))
     return False
 
 
 def _inline(v, in_tuple=False):
     """v on one line (as inside a tuple)."""
+    return _nested(v, _inline1, v, in_tuple) if _container(v) else _inline1(v, in_tuple)
+
+
+def _inline1(v, in_tuple):
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, str):
@@ -2639,9 +2725,16 @@ def _items(v):
     return ["undef" if x is _UNDEF else _inline(x) for x in items]
 
 
-def _str(v, indent=0, col=None):
+def _str(v, indent=0, col=None, tail=""):
     """Magma's printing of v (possibly over several lines), starting at
-    column `col` (default: the indentation)."""
+    column `col` (default: the indentation), followed by `tail` (the comma
+    after an element of a sequence printed one element a line), which is
+    laid out with v's last chunk, as Magma's printer does."""
+    s, used = _nested(v, _str1, v, indent, col, tail) if _container(v) else _str1(v, indent, col, tail)
+    return s if used else s + tail
+
+
+def _str1(v, indent, col, tail):
     col = indent if col is None else col
     if isinstance(v, _smat.MatrixSpace_):
         # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
@@ -2651,49 +2744,47 @@ def _str(v, indent=0, col=None):
         if name is None:
             raise MagmaError("printing this matrix space is not supported yet")
         if v.nrows() == v.ncols():
-            return "Full Matrix Algebra of degree %d over %s" % (v.nrows(), name)
-        return "Full %sMatrixSpace of %d by %d matrices over %s" % ("R" if R == _sp.ZZ else "K", v.nrows(), v.ncols(), name)
+            return "Full Matrix Algebra of degree %d over %s" % (v.nrows(), name), False
+        return "Full %sMatrixSpace of %d by %d matrices over %s" % ("R" if R == _sp.ZZ else "K", v.nrows(), v.ncols(), name), False
     if type(v).__name__ == "MList":
         if not v:
-            return "[* *]"
+            return "[* *]", False
         if all(_atomic(x) for x in v):
-            return _wrap("[* " + ", ".join(_inline(x) for x in v) + " *]", indent, indent)
+            return _wrap("[* " + ", ".join(_inline(x) for x in v) + " *]", indent, indent), False
         if all(type(x).__name__ == "MList" for x in v):
-            return "[* " + ", ".join(_str(x, indent) for x in v) + " *]"
+            return "[* " + ", ".join(_str(x, indent) for x in v) + " *]", False
         pad = " " * (indent + 4)
-        return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]"
+        return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]", False
     if isinstance(v, MRange):
-        return _range_str(v)
+        return _range_str(v), False
     if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
         lo, hi, step = v.range
-        return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step)
+        return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step), False
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
         if not raw:
-            return o.strip() + c.strip()
+            return o.strip() + c.strip(), False
         if all(_atomic(x) or x is _UNDEF for x in raw):
             items = _items(v)
-            # wrapped at WIDTH: an item fits when the line (from the column
-            # it starts at), it and ", " do
-            lines, line = [], o
+            # the opening bracket, each item with its comma, and the closing
+            # bracket, laid out as Magma's printer does (_flow)
+            # (an item with spaces, such as a tuple or a string, breaks at
+            # them too, its comma on its last word)
+            chunks = [(o.strip(), True)]
             for k, it in enumerate(items):
-                piece = it + (", " if k < len(items) - 1 else c)
-                start = col if not lines else indent
-                if line.strip() and start + len(line) + len(it) + 2 > WIDTH:
-                    lines.append(line)
-                    line = ""
-                line += piece
-            lines.append(line)
-            return "\n".join(l if i == 0 else " " * indent + l for i, l in enumerate(lines))
+                words = (it + ("," if k < len(items) - 1 else "")).split(" ")
+                chunks += [(w, True) for w in words]
+            chunks.append((c.strip() + tail, False))
+            return _flow(chunks, col, indent), True
         pad = " " * (indent + 4)
-        inner = [pad + _str(x, indent + 4) for x in raw]
-        return o.strip() + "\n" + ",\n".join(inner) + "\n" + " " * indent + c.strip()
+        inner = [pad + _str(x, indent + 4, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
+        return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
-        return v._str(indent)
+        return v._str(indent), False
     if getattr(v, "_magma_nowrap", False):
-        return _inline(v)
-    return _wrap(_inline(v), col, indent + _extra(v), indent)
+        return _inline(v), False
+    return _wrap(_inline(v) + tail, col, indent + _extra(v), indent), True
 
 
 def _extra(v):
@@ -2706,29 +2797,57 @@ def _extra(v):
     return 0
 
 
+def _flow(chunks, first_col, cont, indent=None):
+    """Magma's layout of chunks (text, space after it) on lines of WIDTH
+    columns, the first starting at first_col (its text already written),
+    the others at cont.  A chunk that doesn't fit within WIDTH starts a new
+    line when it would start past the middle of the line counted from the
+    structure's indentation (column c with c - indent > (WIDTH - indent)/2)
+    and moving it gains more than the indentation (c - indent > indent), or
+    when only column 80 is left; otherwise (and on a new line) it is written
+    up to column 79 and continued on the next line after a backslash in
+    column 80 (thresholds measured at indentations 0 to 48).  A space is written only where
+    the line has room.  Measured against Magma 2.18 as a black box
+    (integers, rationals, strings, reals and polynomials of any length, in
+    sequences, nested sequences, tuples and print lines)."""
+    indent = cont if indent is None else indent
+    out, c = [], first_col
+    for text, space in chunks:
+        if text:
+            if (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
+                if c + len(text) <= WIDTH:
+                    out.append(text)
+                    c += len(text)
+                    text = ""
+                else:
+                    out.append("\n" + " " * cont)
+                    c = cont
+            # (by offsets: no copy of the rest of a long chunk for each line)
+            i, n = 0, len(text)
+            while i < n and c + n - i > WIDTH - 1:
+                k = max(1, WIDTH - 1 - c)
+                out.append(text[i:i + k] + "\\\n" + " " * cont)
+                i, c = i + k, cont
+            out.append(text[i:])
+            c += n - i
+        if space and c < WIDTH:
+            out.append(" ")
+            c += 1
+    return "".join(out)
+
+
 def _wrap(text, first_col, cont, indent=0):
-    """Magma's line breaking at WIDTH columns, at spaces: a word fits when it
-    does (the space after it only if there is room); continuation lines
-    start at column `cont`.  The first line starts at `first_col` (its
-    indentation already written)."""
+    """Magma's line breaking at WIDTH columns, at spaces, a word that is too
+    long split with a backslash (_flow); continuation lines start at column
+    `cont`.  The first line starts at `first_col` (its indentation already
+    written)."""
     if "\n" in text:
         lines = text.split("\n")
         return "\n".join(_wrap(l, first_col if k == 0 else 0, cont if k == 0 else 0) for k, l in enumerate(lines))
-    if first_col + len(text) <= WIDTH or " " not in text:
+    if first_col + len(text) < WIDTH:
         return text
     words = text.split(" ")
-    lines, line = [], ""
-    for k, w in enumerate(words):
-        start = first_col if not lines else cont
-        if line and start + len(line) + len(w) > WIDTH:
-            lines.append(line)
-            line = ""
-            start = cont
-        line += w
-        if k < len(words) - 1 and start + len(line) + 1 <= WIDTH:
-            line += " "
-    lines.append(line)
-    return lines[0] + "".join("\n" + " " * cont + l for l in lines[1:])
+    return _flow([(w, k < len(words) - 1) for k, w in enumerate(words)], first_col, cont, indent)
 
 
 def _print_line(vals):
