@@ -205,7 +205,7 @@ export interface DocAsk {
   hints?: AskHint[];
   /** where to go after an attempt: the id of a note on this page, for `right` and for `wrong` */
   next?: AskNext;
-  /** an answer to try its check with (`sagebrush board check` runs it) */
+  /** an answer to try its check with (`sagebrush board try` runs it) */
   example?: AskAnswer;
   /** how many times its answer was checked (written by Sagebrush) */
   attempts?: number;

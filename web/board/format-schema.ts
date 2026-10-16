@@ -778,7 +778,7 @@ export const BOARD_SCHEMA = {
        }
       }
      ],
-     "description": "an answer to try its check with (`sagebrush board check` runs it)"
+     "description": "an answer to try its check with (`sagebrush board try` runs it)"
     },
     "attempts": {
      "type": "integer",

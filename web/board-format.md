@@ -407,7 +407,7 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `checkMs` | number | the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) |
 | `hints` | [string \| computed hint] | hints, one more shown after each wrong attempt: Markdown, or `{ "code": ... }`, run as the check is, its value a string (Markdown) |
 | `next` | next | where to go after an attempt: the id of a note on this page, for `right` and for `wrong` |
-| `example` | string \| number \| boolean \| [string] | an answer to try its check with (`sagebrush board check` runs it) |
+| `example` | string \| number \| boolean \| [string] | an answer to try its check with (`sagebrush board try` runs it) |
 | `attempts` | number | how many times its answer was checked (written by Sagebrush) |
 | `result` | `"right"` \| `"wrong"` \| `"error"` | the last check's verdict: `right`, `wrong` or `error` (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
