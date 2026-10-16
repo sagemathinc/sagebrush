@@ -193,6 +193,8 @@ export interface DocAsk {
   high?: string;
   /** `text`: how many lines its field shows (default 1) */
   lines?: number;
+  /** the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered */
+  note?: string;
   /** the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number */
   answer?: AskAnswer;
   /** Markdown shown only when zoomed in */
@@ -527,7 +529,7 @@ export function cleanDoc(d: any): BoardDoc {
     if (n.kind === "ask" && one(n.input, ASK_INPUTS)) {
       const options = Array.isArray(n.options) ? n.options.map(askOption).filter((o: AskOption | undefined): o is AskOption => o !== undefined) : undefined;
       return strip({ id: String(n.id), kind: "ask" as const, title: str(n.title), text: str(n.text), input: n.input as AskInput, options, required: n.required === true ? true : undefined,
-        min: num(n.min), max: num(n.max), step: num(n.step), low: str(n.low), high: str(n.high), lines: num(n.lines), answer: askAnswer(n.answer), detail: str(n.detail),
+        min: num(n.min), max: num(n.max), step: num(n.step), low: str(n.low), high: str(n.high), lines: num(n.lines), answer: askAnswer(n.answer), note: typeof n.note === "string" ? n.note : undefined, detail: str(n.detail),
         color: safeColor(n.color), x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
     }
     // (kind "code": the code items of documents before every note could have code)
@@ -772,11 +774,12 @@ export const askOptions = (a: DocAsk): { value: string; label: string }[] => (a.
  */
 export function askMarkdown(a: DocAsk): string {
   const out: string[] = a.text ? [a.text, ""] : [];
-  const ans = a.answer, none = "_(not answered yet)_";
+  // (answered in words only: answered, nothing said to be missing)
+  const words = a.note?.trim() ? a.note : undefined, ans = a.answer, none = words ? "" : "_(not answered yet)_";
   const code = (s: string) => "`" + s.replace(/`/g, "'").replace(/\s+/g, " ") + "`";
   if (a.input === "check" || a.input === "radio" || a.input === "choice") {
     const opts = askOptions(a);
-    if (a.input === "check" && !opts.length) out.push(ans === true ? "☑ yes" : ans === false ? "☐ no" : `☐ ${none}`);
+    if (a.input === "check" && !opts.length) out.push(ans === true ? "☑ yes" : ans === false ? "☐ no" : `☐ ${none}`.trimEnd());
     else {
       const chosen = new Set(Array.isArray(ans) ? ans : typeof ans === "string" ? [ans] : []);
       const [on, off] = a.input === "check" ? ["☑", "☐"] : ["◉", "○"];
@@ -788,11 +791,16 @@ export function askMarkdown(a: DocAsk): string {
       while (out.at(-1) === "") out.pop();
     }
   } else if (a.input === "text") {
-    out.push(typeof ans !== "string" ? none : ans.trim() ? ans.split("\n").map((l) => "> " + l).join("\n") : "_(answered: left empty)_");
+    const said = typeof ans !== "string" ? none : ans.trim() ? ans.split("\n").map((l) => "> " + l).join("\n") : "_(answered: left empty)_";
+    if (said) out.push(said);
   } else {
     const lo = a.min ?? (a.input === "scale" ? 1 : undefined), hi = a.max ?? (a.input === "scale" ? 5 : undefined);
     const range = lo !== undefined && hi !== undefined ? `from ${a.low ? `${lo} (${a.low})` : lo} to ${a.high ? `${hi} (${a.high})` : hi}` : lo !== undefined ? `at least ${lo}` : hi !== undefined ? `at most ${hi}` : "";
-    out.push(`${typeof ans === "number" ? `**${ans}**` : none}${range ? ` · ${range}` : ""}`);
+    out.push([typeof ans === "number" ? `**${ans}**` : none, range].filter((x) => x).join(" · "));
+  }
+  if (words) {
+    while (out.at(-1) === "") out.pop();
+    out.push(...(out.length ? [""] : []), "_In the reader's words:_", "", words.split("\n").map((l) => "> " + l).join("\n"));
   }
   if (a.required) out.push("", "_required_");
   return out.join("\n");

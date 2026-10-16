@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { askMarkdown, cleanDoc, layout, type DocAsk } from "../web/board/doc";
-import { answerProblem, askProblems, asksOf, answerText, stepProblem } from "../web/board/ask";
+import { answered, answerProblem, askProblems, asksOf, answerText, checkSubmission, stepProblem } from "../web/board/ask";
 import { checkText } from "../src/board-check";
 import { submissionProblem } from "../src/board-answers";
 
@@ -179,7 +179,7 @@ test("board answers: the questions and their answers; --json for a program", () 
   r = run(["board", "answers", "--json", f]);
   const j = JSON.parse(r.stdout);
   assert.deepEqual([j.answered, j.complete, j.missing], [1, false, [{ page: 2, id: "plan" }]]);
-  assert.deepEqual(j.questions[0], { page: 2, pageId: "decide", pageTitle: "Decisions", id: "plan", input: "radio", text: "Which plan?", required: true, options: [{ value: "a", label: "Plan A" }, { value: "b", label: "Plan **B**" }], answer: null });
+  assert.deepEqual(j.questions[0], { page: 2, pageId: "decide", pageTitle: "Decisions", id: "plan", input: "radio", text: "Which plan?", required: true, options: [{ value: "a", label: "Plan A" }, { value: "b", label: "Plan **B**" }], answer: null, note: null });
   assert.equal(run(["board", "answers", join(dir, "none.json")]).status, 1);
   assert.equal(run(["board", "answers"]).status, 2);
 });
@@ -271,4 +271,57 @@ test("board answers --apply writes the board whole: a new file of a random name,
   assert.equal(r.status, 1);
   assert.match(r.stderr, /adir: /);
   assert.deepEqual(readdirSync(sub2).sort(), ["adir", "m.board.json"]);
+});
+
+test("every question can be answered in words: a note, kept, shown, counted as an answer, applied and reported (William's rule)", () => {
+  // (kept by the loader; a note only of spaces is no answer)
+  const d = cleanDoc({ nodes: [{ id: "q", kind: "ask", text: "Q?", input: "radio", options: ["a"], note: "neither" }, { id: "r", kind: "ask", input: "text", note: 5 }] });
+  assert.deepEqual(d.nodes, [{ id: "q", kind: "ask", text: "Q?", input: "radio", options: ["a"], note: "neither" }, { id: "r", kind: "ask", input: "text" }]);
+  assert.equal(answered(ask({ input: "radio", note: "neither" })), true);
+  assert.equal(answered(ask({ input: "radio", note: "  " })), false);
+  // (shown: in place of "not answered yet", or beside the answer)
+  assert.equal(askMarkdown(ask({ input: "radio", options: ["a"], note: "neither\nreally" })), "Q?\n\n- ○ a\n\n_In the reader's words:_\n\n> neither\n> really");
+  assert.equal(askMarkdown(ask({ input: "number", min: 0, answer: 3, note: "about" })), "Q?\n\n**3** · at least 0\n\n_In the reader's words:_\n\n> about");
+  assert.equal(askMarkdown(ask({ input: "text", note: "x" })), "Q?\n\n_In the reader's words:_\n\n> x");
+  assert.deepEqual(askProblems(ask({ input: "text", note: "x".repeat(10_001) })).map((x) => x.field), ["note"]);
+  // (applied: a required question answered in words; notes checked as answers are; reported)
+  const f = file("notes.board.json", BOARD), before = readFileSync(f, "utf8");
+  const sub = (answers: unknown, notes: unknown) => file(`n-${Math.random().toString(36).slice(2)}.json`, { sagebrush: "answers", version: 1, page: { number: 2 }, answers, notes });
+  for (const [s, why] of [[sub({}, { plan: "  " }), 'the required question "plan" is not answered'], [sub({}, { plan: 5 }), 'the note to "plan" is not a string of at most 10000 characters'],
+    [sub({}, { nope: "x" }), 'a note to "nope", which is no question on page 2'], [sub({}, ["x"]), "its notes are not an object"]] as [string, string][]) {
+    const r = run(["board", "answers", f, "--apply", s]);
+    assert.equal(r.status, 1, why);
+    assert.ok(r.stderr.includes(why), r.stderr);
+    assert.equal(readFileSync(f, "utf8"), before);
+  }
+  let r = run(["board", "answers", f, "--apply", sub({ sure: 4 }, { plan: "Neither: do C", sure: "fairly" })]);
+  assert.equal(r.status, 0, r.stderr);
+  const nodes = JSON.parse(readFileSync(f, "utf8")).pages[1].nodes;
+  assert.deepEqual([nodes[0].answer, nodes[0].note, nodes[2].answer, nodes[2].note, "note" in nodes[3]], [undefined, "Neither: do C", 4, "fairly", false]);
+  assert.match(r.stdout, /4 questions, 2 answered\n/);
+  assert.match(r.stdout, /  plan \[radio, required\] Which plan\?\n    in words: "Neither: do C"\n/);
+  assert.match(r.stdout, /  sure \[scale\] How sure\?\n    4\n    in words: "fairly"\n/);
+  const j = JSON.parse(run(["board", "answers", "--json", f]).stdout);
+  assert.deepEqual([j.questions[0].note, j.questions[0].answer, j.complete], ["Neither: do C", null, true]);
+});
+
+test("checkSubmission: a host's check, against the board posted on the channel; only the known fields back", () => {
+  const text = JSON.stringify(BOARD), posted = { text, name: "d.board.json", revision: "r7" }, id = "8c6f0a5e-4d43-4b8e-9b0e-2f3c1a7d9e10";
+  const m = { sagebrush: "answers", version: 1, id, name: "d.board.json", revision: "r7", page: { number: 2, id: "decide", title: "Decisions", x: 1 }, answers: { plan: "a" }, notes: { why: "more" }, comment: "c", extra: { y: 1 } };
+  assert.deepEqual(checkSubmission(posted, m), { ok: true, submission: { id, name: "d.board.json", revision: "r7", page: { number: 2, id: "decide", title: "Decisions" }, answers: { plan: "a" }, notes: { why: "more" }, comment: "c" } });
+  const no = (x: unknown) => { const r = checkSubmission(posted, x); assert.equal(r.ok, false); return r as { ok: false; id?: string; message: string }; };
+  assert.deepEqual(no({ ...m, answers: { plan: "z" } }), { ok: false, id, message: `the answer to "plan": "z" is not one of its options' values ("a", "b")` });
+  assert.equal(no({ ...m, id: "nope" }).id, undefined);
+  assert.match(no({ ...m, revision: "r6" }).message, /name and revision/);
+  assert.match(no({ ...m, page: { number: 2, id: "intro" } }).message, /page id/);
+  assert.match(no({ ...m, page: { number: 2, title: "Other" } }).message, /page title/);
+  assert.match(no({ ...m, comment: "x".repeat(70_000) }).message, /at most 64 KiB/);
+  assert.match(no({ ...m, answers: { plan: new Date() } }).message, /plain JSON/);
+  assert.match(no({ ...m, answers: new Map() }).message, /plain JSON/);
+  assert.match(no({ ...m, answers: { plan: NaN } }).message, /finite/);
+  assert.match(no({ ...m, page: { number: 2, a: { b: { c: { d: 1 } } } } }).message, /4 deep/);
+  const cyc: any = { ...m }; cyc.self = cyc;
+  assert.match(no(cyc).message, /more than 10000 values|4 deep/);
+  // (a board that isn't JSON, or two items with one id: no answers to it)
+  assert.match((checkSubmission({ text: "graph TD; a-->b", name: "d.board.json", revision: "r7" }, m) as any).message, /has no questions/);
 });

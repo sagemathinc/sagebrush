@@ -10,8 +10,8 @@
 import { closeSync, fsyncSync, openSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { randomBytes } from "crypto";
 import { basename, dirname, join } from "path";
-import { cleanDoc, formatError, isBoard, pageCount, type BoardDoc, type DocAsk } from "../web/board/doc";
-import { answerProblem, answerText, askProblems, asksOf, ASK_LIMITS, type PageAsk } from "../web/board/ask";
+import { cleanDoc, formatError, isBoard, pageCount, type BoardDoc } from "../web/board/doc";
+import { answered, answerProblem, answerText, asksOf, ASK_LIMITS, submissionProblem, type PageAsk } from "../web/board/ask";
 import { FILE_MAX, readBounded } from "./board-check";
 import { CLI_READER } from "./board-cli";
 import { oneLine } from "./terminal-text";
@@ -35,39 +35,12 @@ const USAGE = `usage: sagebrush board answers FILE [--json] [--apply SUBMISSION]
 const say = (msg: string) => process.stderr.write(`sagebrush board answers: ${oneLine(msg)}\n`);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 
-/** Why a submission can't be applied to a board (as cleanDoc leaves it),
- * or null.  `m` is JSON data (parsed from text). */
-export function submissionProblem(d: BoardDoc, m: any): string | null {
-  if (!isObj(m) || m.sagebrush !== "answers" || m.version !== 1) return 'not a submission: a host\'s "answers" message, {"sagebrush": "answers", "version": 1, "page": {"number": N}, "answers": {...}, ...}';
-  const n = m.page?.number;
-  if (!Number.isInteger(n) || n < 1 || n > pageCount(d)) return `its page.number is not a page of the board (from 1 to ${pageCount(d)})`;
-  if (!isObj(m.answers)) return "its answers are not an object (a question's id to its answer)";
-  if (m.comment !== undefined && (typeof m.comment !== "string" || m.comment.length > ASK_LIMITS.comment)) return `its comment is not a string of at most ${ASK_LIMITS.comment} characters`;
-  const keys = Object.keys(m.answers);
-  if (keys.length > ASK_LIMITS.asks) return `more than ${ASK_LIMITS.asks} answers`;
-  // (each question of the page once, and as the board can ask it: else
-  // which question an answer is to, and what it may be, is not clear;
-  // cleanDoc's caller has refused ids twice on a page, CORR-02C-1)
-  const asks = new Map<string, DocAsk>();
-  for (const { ask: a } of asksOf(d).filter((q) => q.page === n)) {
-    if (asks.has(a.id)) return `two questions on page ${n} have the id ${JSON.stringify(a.id.slice(0, 60))}`;
-    asks.set(a.id, a);
-    const bad = askProblems(a).find((x) => x.level === "error" && x.field !== "answer");
-    if (bad) return `the question ${JSON.stringify(a.id.slice(0, 60))} can't be answered as written (${bad.field || "it"}: ${bad.message}): sagebrush board check says what to fix`;
-  }
-  for (const k of keys) {
-    const a = asks.get(k);
-    if (!a) return `an answer to ${JSON.stringify(k.slice(0, 60))}, which is no question on page ${n}`;
-    const why = answerProblem(a, m.answers[k]);
-    if (why) return `the answer to ${JSON.stringify(k.slice(0, 60))}: ${why}`;
-  }
-  for (const a of asks.values()) if (a.required && !keys.includes(a.id)) return `the required question ${JSON.stringify(a.id.slice(0, 60))} is not answered`;
-  return null;
-}
+// (the check of a submission, the hosts' too: web/board/ask.ts)
+export { submissionProblem };
 
 /** The board's raw JSON with a (checked) submission's answers on its page:
- * every question there has the submission's answer, or none.  The rest of
- * the file is as it was. */
+ * every question there has the submission's answer and note, or none.  The
+ * rest of the file is as it was. */
 export function applySubmission(raw: any, m: any): any {
   const nodes = Array.isArray(raw.pages) ? raw.pages[m.page.number - 1]?.nodes : raw.nodes;
   const walk = (ns: unknown) => {
@@ -76,8 +49,11 @@ export function applySubmission(raw: any, m: any): any {
       if (!isObj(n)) continue;
       if (n.kind === "group") walk(n.children);
       else if (n.kind === "ask" && n.id != null) {
-        if (Object.prototype.hasOwnProperty.call(m.answers, String(n.id))) n.answer = m.answers[String(n.id)];
+        const id = String(n.id), notes = isObj(m.notes) ? m.notes : {};
+        if (Object.prototype.hasOwnProperty.call(m.answers, id)) n.answer = m.answers[id];
         else delete n.answer;
+        if (Object.prototype.hasOwnProperty.call(notes, id)) n.note = notes[id];
+        else delete n.note;
       }
     }
   };
@@ -154,7 +130,7 @@ export async function boardAnswers(argv: string[]): Promise<number> {
     const why2 = writeWhole(out ?? file, JSON.stringify(raw, null, 2) + "\n");
     if (why2) { say(why2); return 1; }
   }
-  const qs = asksOf(doc), done = qs.filter((q) => q.ask.answer !== undefined), missing = qs.filter((q) => q.ask.required && q.ask.answer === undefined);
+  const qs = asksOf(doc), done = qs.filter((q) => answered(q.ask)), missing = qs.filter((q) => q.ask.required && !answered(q.ask));
   const applied = sub ? { page: sub.page.number, id: typeof sub.id === "string" ? sub.id : null, name: sub.name ?? null, revision: sub.revision ?? null, comment: typeof sub.comment === "string" ? sub.comment : "" } : undefined;
   if (json) {
     process.stdout.write(JSON.stringify({
@@ -162,7 +138,7 @@ export async function boardAnswers(argv: string[]): Promise<number> {
         const why = q.ask.answer !== undefined ? answerProblem(q.ask, q.ask.answer) : null;
         return { page: q.page, ...(q.pageId ? { pageId: q.pageId } : {}), ...(q.pageTitle ? { pageTitle: q.pageTitle } : {}), id: q.ask.id, input: q.ask.input, ...(q.ask.title ? { title: q.ask.title } : {}), ...(q.ask.text ? { text: q.ask.text } : {}),
           required: !!q.ask.required, ...(q.ask.options ? { options: q.ask.options.map((o) => (typeof o === "string" ? { value: o, label: o } : { value: o.value, label: o.label ?? o.value })) } : {}),
-          answer: q.ask.answer ?? null, ...(why ? { problem: why } : {}) };
+          answer: q.ask.answer ?? null, note: q.ask.note ?? null, ...(why ? { problem: why } : {}) };
       }),
       answered: done.length, missing: missing.map((q) => ({ page: q.page, id: q.ask.id })), complete: missing.length === 0, ...(applied ? { applied } : {}),
     }, null, 2) + "\n");
@@ -176,7 +152,11 @@ export async function boardAnswers(argv: string[]): Promise<number> {
     if (q.page !== page && pageCount(doc) > 1) w.write(`page ${q.page}${q.pageTitle ? ` (${oneLine(q.pageTitle)})` : ""}:\n`);
     page = q.page;
     const why = q.ask.answer !== undefined ? answerProblem(q.ask, q.ask.answer) : null;
-    w.write(`  ${oneLine(q.ask.id)} [${q.ask.input}${q.ask.required ? ", required" : ""}] ${oneLine(said(q))}\n    ${oneLine(answerText(q.ask))}${why ? `  (not an answer it takes: ${oneLine(why)})` : ""}\n`);
+    // (its answer, and the reader's words: either, or both)
+    const words = q.ask.note?.trim() ? q.ask.note : undefined, lines: string[] = [];
+    if (q.ask.answer !== undefined || !words) lines.push(`${oneLine(answerText(q.ask))}${why ? `  (not an answer it takes: ${oneLine(why)})` : ""}`);
+    if (words) lines.push(`in words: ${oneLine(JSON.stringify(words.length > 200 ? words.slice(0, 197) + "..." : words))}`);
+    w.write(`  ${oneLine(q.ask.id)} [${q.ask.input}${q.ask.required ? ", required" : ""}] ${oneLine(said(q))}\n${lines.map((l) => "    " + l + "\n").join("")}`);
   }
   return 0;
 }
