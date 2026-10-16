@@ -2246,3 +2246,24 @@ test("end inside a function call within an index is the enclosing indexed variab
     "'end' cannot be used with a function call.", "2", "ran",
     "5"]);
 });
+
+test("an index's computed base is made once when an end refers to it: s(tick()).a(min(end, 5)), c{tick()}(min(end, 5)) and s(tick()).a(end) call tick once", () => {
+  const { execFileSync } = require("node:child_process");
+  const code = [
+    "global calls",
+    "calls = 0; s(1).a = 10:10:80; s(2).a = [1 2]; disp(s(tick()).a(min(end, 5))); disp(calls)",
+    "calls = 0; c = {10:10:80, [1 2]}; disp(c{tick()}(min(end, 5))); disp(calls)",
+    "calls = 0; y = [1 2 3]; disp(c{tick()}(y(end))); disp(calls)",
+    "calls = 0; disp(s(tick()).a(end)); disp(calls)",
+    "calls = 0; disp(c{tick()}(end)); disp(calls)",
+    "f = @(k) s(k).a(min(end, 2)); disp(f(2))",
+    "function r = tick()",
+    "  global calls",
+    "  calls = calls + 1;",
+    "  r = calls;",
+    "end",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code], { encoding: "utf8" })
+    .split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  assert.deepEqual(out, ["50", "1", "50", "1", "30", "1", "80", "1", "80", "1", "2"]);
+});
