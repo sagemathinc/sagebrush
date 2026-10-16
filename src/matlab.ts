@@ -1389,9 +1389,10 @@ class Emitter {
     }
     // the path, outermost first; `end` in an index refers to the part so far
     const parts: string[] = [];
-    if (!scope.globals.has(lv.name) && lv.path.some((p) => p.k === "index" && p.frame.used)) {
+    if (lv.path.some((p) => p.k === "index" && p.frame.used)) {
       // (an end in the path: the parts are made once, in order, into a list the ends read,
-      // so a computed subscript, s(tick()).a(min(end, 5)) = v, is evaluated once)
+      // so a computed subscript, s(tick()).a(min(end, 5)) = v, is evaluated once; a global
+      // keeps its order, the path and the value first, then the registry's value as base)
       const tp = this.fresh("_p");
       this.emit(`${tp} = []`);
       for (const p of lv.path) {
@@ -1402,7 +1403,13 @@ class Emitter {
           this.emit(`${tp}.append((${p.brace ? '"b"' : '"p"'}, ${this.argList(p.args, scope)}))`);
         }
       }
-      this.emit(`${name} = _m.assign(${base}, ${tp}, ${value})`);
+      if (scope.globals.has(lv.name)) {
+        const tv = this.fresh();
+        this.emit(`${tv} = ${value}`);
+        this.emit(`${name} = _m.assign(${base}, ${tp}, ${tv})`);
+      } else {
+        this.emit(`${name} = _m.assign(${base}, ${tp}, ${value})`);
+      }
       scope.vars.add(lv.name);
       this.afterAssign(lv.name, scope);
       return;
