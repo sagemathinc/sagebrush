@@ -63,6 +63,8 @@
 :where(.sbb, .sbb-layer) .menu[hidden] { display: none; }
 :where(.sbb, .sbb-layer) .menu button { border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; background: none; }
 :where(.sbb, .sbb-layer) .menu button:hover { background: #eef2ea; }
+/* (which Sagebrush runs the board's code, at the ⋯ menu's foot: round 0's 17) */
+:where(.sbb, .sbb-layer) .menu .ver { border-top: 1px solid rgba(0, 0, 0, .08); margin-top: 4px; padding: 6px 10px 2px; font-size: 11px; color: #6a7365; }
 :where(.sbb, .sbb-layer) .menu button[hidden] { display: none; }
 [data-sbb=lang] { display: flex; align-items: center; gap: 4px; padding: 4px 10px; color: #556; }
 [data-sbb=lang] button { padding: 3px 9px; border: 1px solid rgba(0, 0, 0, .15); border-radius: 5px; }
