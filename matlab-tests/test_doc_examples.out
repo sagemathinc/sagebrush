@@ -118,6 +118,24 @@ double 1x3 [1 0 -1]
 double 1x2 [2 1]
 double 1x2 [15 25]
 double 1x1 4
+int16 1x4 [-32768 -3 3 32767]
+int64 1x3 [-3 0 3]
+uint16 1x3 [0 13 65535]
+uint32 1x3 [0 3 4294967295]
+uint64 1x3 [0 3 20]
+logical 1x1 true
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x4 [true false false true]
+logical 1x1 true
+logical 1x1 true
 char 1x4 ['int8']
 double 1x1 -1.5
 uint8 1x3 [0 100 255]
