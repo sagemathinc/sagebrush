@@ -576,6 +576,9 @@ def _key(x):
         return ("bool", x)
     if isinstance(x, _smat.Matrix):
         return ("mat", x.nrows(), x.ncols(), tuple(_m_num(v) for v in x.list()))
+    if isinstance(x, (_MFFPoly, _MFFPolyRing)):
+        # (Magma lists a set of them in an order of its own, not modelled)
+        raise MagmaError("a set of polynomials over a finite field (or of their rings) is not supported yet")
     return x
 
 
@@ -646,6 +649,15 @@ def _into_universe(items, universe, kind):
     universes keep their items as before."""
     if isinstance(universe, _MResRing) or (universe is None and any(isinstance(x, _MResElt) for x in items)):
         return _res_items(items, universe, kind)
+    if isinstance(universe, _MFFPolyRing):
+        # (a polynomial ring over a finite field: each item coerced, as R!x)
+        out = []
+        for k, x in enumerate(items):
+            try:
+                out.append(x if x is _UNDEF else universe._magma_coerce(x))
+            except MagmaError:
+                raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
+        return out
     ff = isinstance(universe, _MFinField)
     if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
         # (the rationals' elements are rationals, the integral ones too)
@@ -700,6 +712,8 @@ def _seq(items, universe=None):
         items = _res_items(items, None, "seq")
     if universe is None:
         _ff_universe(items, "[ ... ]")
+        if any(isinstance(x, _MFFPoly) for x in items):
+            items = _ffp_items(items)
     else:
         items = _into_universe(items, universe, "seq")
     inf = _infer_from(items) if universe is None else None
@@ -1131,7 +1145,7 @@ def _coerce_struct(x, u):
     if isinstance(u, _MFinField):
         y = _ff_into(u, x)
         return _NOCOERCE if y is None else y
-    if isinstance(u, _MResRing):
+    if isinstance(u, (_MResRing, _MFFPolyRing)):
         try:
             return u._magma_coerce(x)
         except MagmaError:
@@ -1152,6 +1166,8 @@ def _elt_into(x, c):
     where Sagebrush doesn't know how Magma coerces into it."""
     if _is_ff(c):
         return _coerce_struct(x, _ffwrap(c.parent()))
+    if isinstance(c, _MFFPoly):
+        return _coerce_struct(x, c.R)
     d = _desc(c)
     if d is not None and d[0] != "elt":
         if (d[0] == "Z" or d[0] == "Q") and _is_ff(x):
@@ -2152,6 +2168,8 @@ def _arith_rule(op, a, b, pos):
     by pair (test/magma-compare.test.ts).  What Magma computes but Sagebrush
     doesn't model is refused ("not supported yet")."""
     o = op[:-2] if op.endswith(":=") else op
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_check(op, a, b, pos)
     if _ff_check(op, a, b, pos):
         return
     A, B = _ak(a), _ak(b)
@@ -2376,6 +2394,8 @@ def _add(a, b, pos=None, op="+"):
     if type(a) is int and type(b) is int:
         return a + b
     _arith(op, (a, b), pos)
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_op("+", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
         return a + b
@@ -2387,6 +2407,8 @@ def _sub(a, b, pos=None, op="-"):
     if type(a) is int and type(b) is int:
         return a - b
     _arith(op, (a, b), pos)
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_op("-", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
         return a - b
@@ -2400,6 +2422,8 @@ def _mul(a, b, pos=None, op="*"):
     if type(a) is str and type(b) is str:
         return a + b  # Magma's * joins strings
     _arith(op, (a, b), pos)
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_op("*", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
         return a * b
@@ -2428,6 +2452,8 @@ def _div(a, b, pos=None, op="/"):
     if _int(a) and _int(b):
         return _intdiv(a, b)
     _arith(op, (a, b), pos)
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_op("/", a, b, pos)
     if isinstance(a, _sp.Polynomial) and _num(b) and b not in (1, -1) and a.parent().base_ring() == _sp.ZZ:
         # over the integers a number divides only if it is a unit
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
@@ -2445,6 +2471,8 @@ def _idiv(a, b, pos=None):
         return a // b
     _no_rationals("div", a, b, pos)
     _arith("div", (a, b), pos)
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_op("div", a, b, pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[0]
     return a // b
@@ -2457,6 +2485,8 @@ def _mod(a, b, pos=None):
         return a % b
     _no_rationals("mod", a, b, pos)
     _arith("mod", (a, b), pos)
+    if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
+        return _ffpoly_op("mod", a, b, pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[1]
     return a % b
@@ -2473,6 +2503,8 @@ def _pow(a, b, pos=None, op="^"):
             raise MagmaError("Argument 2 (%d) should be >= 0" % b, "'%s'" % op, True, pos)
         return a * b
     _arith(op, (a, b), pos)
+    if isinstance(a, _MFFPoly):
+        return _ffpoly_op("^", a, b, pos)
     if _num(a) and isinstance(b, _Fraction):
         return _rat_pow(a, b, op, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
@@ -2743,6 +2775,8 @@ def _struct_eq(a, b, op, pos):
 
 
 def _eq(a, b, pos=None, op="eq"):
+    if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
+        return _ffpoly_eq(a, b, op, pos)
     for x, y in ((a, b), (b, a)):
         if isinstance(x, (_MVector, _MPerm)):
             return x._magma_eq(y, op)
@@ -2797,6 +2831,8 @@ def _order(a, b, op, pos):
     numbers, strings, booleans, sequences lexicographically, tuples of one
     length, Integers() with itself); Magma's error where it has none.  The
     orders Magma has on polynomials and matrices are not modelled: refused."""
+    if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
+        raise MagmaError("ordering of polynomials and matrices is not supported yet", "'%s'" % op, True, pos)
     if isinstance(a, _MResElt):
         return a._magma_cmp(b, op)
     if isinstance(b, _MResElt):
@@ -3800,7 +3836,7 @@ def _tuple_str(v, indent, col, tail, cont=None):
 def _extra(v):
     """Continuation indent of a wrapped value: polynomials (and tuples
     holding one) indent 4 more, as Magma's polynomial printer does."""
-    if isinstance(v, _sp.Polynomial):
+    if isinstance(v, (_sp.Polynomial, _MFFPoly)):
         return 4
     if isinstance(v, MTuple):
         return max([_extra(x) for x in v] + [0])
@@ -4362,6 +4398,10 @@ def _type_name(x):
         return "ModTupFldElt" if x._base is _sa.QQ else "ModTupRngElt"
     if isinstance(x, _MResElt):
         return "RngIntResElt"
+    if isinstance(x, _MFFPoly):
+        return "RngUPolElt"
+    if isinstance(x, _MFFPolyRing):
+        return "RngUPol"
     if isinstance(x, _MPerm):
         return "GrpPermElt"
     if isinstance(x, _MSymGroup):
@@ -4423,6 +4463,10 @@ def _ext_type(x):
         return "%s[%s]" % (_type(x), _elt_type(x))
     if isinstance(x, _sp.Polynomial):
         return "RngUPolElt[%s]" % _ring_cat(x.parent().base_ring())
+    if isinstance(x, _MFFPoly):
+        return "RngUPolElt[FldFin]"
+    if isinstance(x, _MFFPolyRing):
+        return "RngUPol[FldFin]"
     if isinstance(x, _MVector):
         return "%s[%s]" % (_type_name(x), _ring_cat(x._base))
     if isinstance(x, _smat.Matrix):
@@ -4583,12 +4627,11 @@ def PolynomialRing(R, n=1):
     # (one variable only: PolynomialRing(Q, 3) is not a univariate ring)
     if n != 1 or isinstance(n, bool):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
+    if isinstance(R, _MFinField):
+        return _MFFPolyRing(R)
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
-        # (a refusal in words: finite fields' users reach it, PolynomialRing(GF(p)))
-        alt = ("; instead: Sage mode, R.<x> = GF(5)[], where factor, roots, gcd and is_irreducible work over finite fields"
-               if isinstance(R, _MFinField) else "")
-        raise MagmaError("PolynomialRing over a %s (not the integers or the rationals) is not supported yet%s" % (_type_of(R), alt), "'PolynomialRing'")
+        raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
     return _sp.PolynomialRing_(base, "$.1")
 
 
@@ -4619,6 +4662,8 @@ def _nonzero_poly(name, f):
 
 
 def Coefficients(f):
+    if isinstance(f, _MFFPoly):
+        return MSeq(f.p._c)
     # (the zero polynomial's are [], as Magma's)
     return MSeq(_m_num(c) for c in ([] if f.is_zero() else f.list()))
 
@@ -4626,16 +4671,24 @@ def Coefficients(f):
 def Coefficient(f, i):
     if i < 0:
         raise _arg_error("Coefficient", "Argument 2 (%d) should be >= 0" % i)
+    if isinstance(f, _MFFPoly):
+        return f.p._c[i] if i < len(f.p._c) else f.R.F.K(0)
     l = f.list()
     return _m_num(l[i]) if i < len(l) else 0
 
 
 def LeadingCoefficient(f):
+    if isinstance(f, _MFFPoly):
+        if not f.p._c:
+            raise _arg_error("LeadingCoefficient", "Argument 1 is not non-zero")
+        return f.p._c[-1]
     _nonzero_poly("LeadingCoefficient", f)
     return _m_num(f.leading_coefficient()) if isinstance(f, _sp.Polynomial) else f
 
 
 def Evaluate(f, x):
+    if isinstance(f, _MFFPoly):
+        return _ffp_eval(f, x, "'Evaluate'")
     return f(x)
 
 
@@ -4645,6 +4698,8 @@ def Derivative(f, k=1):
         raise _bad_types("Derivative", [f, k])
     if k < 0:
         raise _arg_error("Derivative", "Argument 2 (%d) should be >= 0" % k)
+    if isinstance(f, _MFFPoly):
+        return _ffp_derivative(f, k)
     for _ in range(k):
         if f.is_zero():
             break  # (the rest are 0 too: a huge k costs the degree)
@@ -4665,6 +4720,8 @@ def Resultant(f, g):
 
 
 def IsIrreducible(f):
+    if isinstance(f, _MFFPoly):
+        return _ffp_is_irreducible(f)
     _nonzero_poly("IsIrreducible", f)
     if isinstance(f, _sp.Polynomial) and f.degree() < 1:
         return False  # (a constant polynomial is not, as Magma has it)
@@ -4678,6 +4735,8 @@ def _m_num(c):
 
 
 def Roots(f, R=None):
+    if isinstance(f, _MFFPoly):
+        return _ffp_roots(f, R)
     if not isinstance(f, _sp.Polynomial):
         raise MagmaError("Roots: bad argument")
     _nonzero_poly("Roots", f)
@@ -4696,6 +4755,8 @@ def Roots(f, R=None):
 
 
 def _factorization(n):
+    if isinstance(n, _MFFPoly):
+        return _ffp_factorization(n)
     if isinstance(n, _sp.Polynomial):
         _nonzero_poly("Factorization", n)
         F = n.factor()
@@ -4725,6 +4786,461 @@ def _factorization(n):
 
 
 Factorization = Factorisation = _factorization
+
+
+# ------------------------------------------------------------------ polynomials over finite fields
+
+# The work one operation on polynomials over a finite field may take, in
+# products of coefficients (one over an extension field counting as
+# _FFPOLY_EXT of them), admitted before it starts: a product's degrees
+# multiplied, a power's result degree squared (over 2), a division's
+# quotient and divisor degrees multiplied.
+_FFPOLY_WORK = 10 ** 6
+_FFPOLY_EXT = 8
+# Factorization, Roots and IsIrreducible: through the engine's
+# factorization (a prime field of p < 2^32) a degree of at most this; else
+# (Python's Cantor-Zassenhaus and Rabin's test, powering x^q modulo f)
+# degree^3 times the bits of q at most _FFPOLY_WORK.
+_FFPOLY_FACTOR_DEG = 1000
+
+
+def _gf_name(F):
+    """A finite field as Magma names it inside a structure's name."""
+    return "GF(%d)" % F.p if F.n == 1 else "GF(%d^%d)" % (F.p, F.n)
+
+
+class _MFFPolyRing:
+    """PolynomialRing(GF(q)) in Magma mode: Magma's names, printing and
+    coercions over the polynomials of lib/_sage_ff.py, which do the
+    arithmetic.  From Magma's documentation (Univariate Polynomial Rings)
+    and checked against Magma 2.18."""
+
+    def __init__(self, F):
+        self.F = F
+        self.P = _sff.PolynomialRing_ff(F.K, "x")
+        self.name = None
+
+    def _var(self):
+        if self.name is not None:
+            return self.name
+        v = _global_name(self)
+        return "%s.1" % v if v is not None else "$.1"
+
+    def __repr__(self):
+        if self.name is None:
+            return "Univariate Polynomial Ring over %s" % _gf_name(self.F)
+        return "Univariate Polynomial Ring in %s over %s" % (self.name, _gf_name(self.F))
+
+    def _magma_names(self, names):
+        if names:
+            self.name = names[0]
+
+    def _magma_gen(self, i):
+        if i != 1:
+            raise MagmaError("Value for name index (%d) should be in the range [1..1]" % i, "'.'", True)
+        return _MFFPoly(self, self.P.gen())
+
+    def _magma_card(self):
+        raise MagmaError("Cardinality is infinite or not feasibly computable", "'#'", True)
+
+    def _magma_eq(self, o, op):
+        if isinstance(o, _MFFPolyRing):
+            # (two rings over one field are equal, as Magma has it)
+            return o.F is self.F
+        raise MagmaError("comparison of a polynomial ring over a finite field with this is not supported yet", "'%s'" % op, True)
+
+    def _const(self, x):
+        """x as an element of the coefficient field, or None: an integer,
+        an element of the field or of its prime field, a rational whose
+        denominator is prime to p."""
+        F = self.F
+        if isinstance(x, bool):
+            return None
+        if isinstance(x, int):
+            return F.K(x)
+        if isinstance(x, _Fraction):
+            return None if x.denominator % F.p == 0 else F._magma_coerce(x)
+        if _is_ff(x):
+            Kx = _ffwrap(x.parent())
+            if x.parent() is F.K:
+                return x
+            if Kx.n == 1 and Kx.p == F.p:
+                return F.K(int(x))
+        return None
+
+    def _lift(self, x):
+        """x as a polynomial of lib/_sage_ff.py over the field, or None."""
+        if isinstance(x, _MFFPoly):
+            return x.p if x.R is self else None
+        c = self._const(x)
+        return None if c is None else self.P([c])
+
+    def _magma_contains(self, x):
+        # (checked against Magma: an integer, the field's elements and the
+        # ring's polynomials are in it; a rational, another field's element
+        # is "Bad argument types")
+        if isinstance(x, _MFFPoly):
+            if x.R is self:
+                return True
+            raise MagmaError("membership of a polynomial of another ring is not supported yet", "'in'")
+        if not isinstance(x, _Fraction) and self._const(x) is not None:
+            return True
+        if isinstance(x, (bool, str, MReal, _Fraction)) or _is_ff(x):
+            raise MagmaError("Bad argument types", "'in'", True)
+        raise MagmaError("membership of a %s in a polynomial ring over a finite field is not supported yet" % _type_of(x), "'in'")
+
+    def _magma_coerce(self, x):
+        if isinstance(x, (MSeq, MRange)):
+            # R ! [c0, c1, ...]: each coefficient coerced into the field
+            v = list(x)
+            cs = []
+            for k, c in enumerate(v):
+                try:
+                    cs.append(self.F._magma_coerce(c))
+                except MagmaError:
+                    raise MagmaError("Cannot coerce sequence element %d into the coefficient ring" % (k + 1), "'!'", True)
+            return _MFFPoly(self, self.P(cs))
+        if isinstance(x, _MFFPoly) and x.R is not self:
+            raise MagmaError("coercion of a polynomial of another ring is not supported yet", "'!'")
+        p = self._lift(x)
+        if p is None:
+            raise MagmaError("Illegal coercion", "'!'")
+        return _MFFPoly(self, p)
+
+
+def _ffp_ext(R):
+    return 1 if R.F.n == 1 else _FFPOLY_EXT
+
+
+def _ffp_admit(work, R, what, op):
+    if work * _ffp_ext(R) > _FFPOLY_WORK:
+        raise MagmaError("%s of polynomials over a finite field of more than %d coefficient products is not supported yet"
+                         % (what, _FFPOLY_WORK), "'%s'" % op, True)
+
+
+class _MFFPoly:
+    """An element of PolynomialRing(GF(q)): Magma's printing and rules over
+    a polynomial of lib/_sage_ff.py (_ffpoly_check decides what meets it)."""
+
+    __slots__ = ("R", "p")
+
+    def __init__(self, R, p):
+        self.R, self.p = R, p
+
+    def _magma_parent(self):
+        return self.R
+
+    def _magma_degree(self):
+        return self.p.degree()
+
+    def __repr__(self):
+        c = self.p._c
+        if not c:
+            return "0"
+        F, v = self.R.F, self.R._var()
+        terms = []
+        for i in range(len(c) - 1, -1, -1):
+            if not c[i]:
+                continue
+            s = _ff_str(c[i])
+            mon = v if i == 1 else "%s^%d" % (v, i)
+            if i == 0:
+                terms.append(s)
+            elif s == "1":
+                terms.append(mon)
+            else:
+                # (a coefficient that is a sum, in a large extension field:
+                # in parentheses, as Magma prints it)
+                terms.append(("(%s)" % s if " + " in s else s) + "*" + mon)
+        return " + ".join(terms)
+
+    def __neg__(self):
+        return _MFFPoly(self.R, -self.p)
+
+    def __eq__(self, o):
+        q = self.R._lift(o)
+        return q is not None and q._c == self.p._c
+
+    def __ne__(self, o):
+        return not self == o
+
+    __hash__ = None
+
+    def __call__(self, x):
+        # (f(x) is Magma's map application: a polynomial isn't a map, for
+        # any x; Evaluate(f, x) evaluates)
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_ext_type(x), _ext_type(self)), "'@'", True)
+
+    def quo_rem(self, b):
+        return _ffpoly_op("div", self, b, None), _ffpoly_op("mod", self, b, None)
+
+
+def _ffp_items(items):
+    """The elements of a sequence holding polynomials over a finite field:
+    all in their ring (integers and the field's elements coerced into it,
+    as Magma's universe takes them); another ring's are refused."""
+    R = next(x.R for x in items if isinstance(x, _MFFPoly))
+    out = []
+    for x in items:
+        if x is _UNDEF or (isinstance(x, _MFFPoly) and x.R is R):
+            out.append(x)
+            continue
+        p = None if isinstance(x, _MFFPoly) else R._lift(x)
+        if p is None:
+            raise MagmaError("a sequence of polynomials over a finite field and a %s is not supported yet" % _type_of(x), "[ ... ]")
+        out.append(_MFFPoly(R, p))
+    return out
+
+
+def _ffp_ring(a, b):
+    return a.R if isinstance(a, _MFFPoly) else b.R
+
+
+def _ffpoly_check(op, a, b, pos):
+    """Magma's rules for a polynomial over a finite field with another value
+    (in an operation), checked against Magma 2.18: nothing if they meet, else
+    Magma's error, or "not supported yet" for what Magma computes but
+    Sagebrush doesn't.  The same ring's polynomials, integers, the field's
+    elements (and its prime field's), and rationals whose denominators are
+    prime to p meet; another characteristic's polynomials are "not
+    compatible", its elements and reals "Bad argument types"."""
+    o = op[:-2] if op.endswith(":=") else op
+    left = isinstance(a, _MFFPoly)
+    x, y = (a, b) if left else (b, a)
+    R, F = x.R, x.R.F
+    unsupported = lambda what: MagmaError("%s is not supported yet" % what, "'%s'" % o, True, pos)
+    if o == "^":
+        if not left:
+            # (2^x: Magma coerces 2 into the ring first, then has no power)
+            if R._lift(y) is not None:
+                raise MagmaError("Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]", "'%s'" % o, True, pos)
+            raise _bad_types(op, (a, b), pos)
+        if _int(y):
+            if y < 0:
+                raise MagmaError("Argument 2 (%d) should be >= 0" % y, "'%s'" % o, True, pos)
+            return
+        if isinstance(y, _Fraction):
+            # (Magma names the exponent a polynomial: it coerced it first)
+            raise MagmaError("Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]", "'%s'" % o, True, pos)
+        raise _bad_types(op, (a, b), pos)
+    if isinstance(y, _MFFPoly):
+        if y.R is R:
+            if o == "/":
+                raise unsupported("dividing polynomials over a finite field (rational functions)")
+            return
+        if y.R.F.p != F.p:
+            raise _incompatible("C", o, a, b, pos)
+        raise unsupported("arithmetic of polynomials of two polynomial rings over finite fields")
+    if o == "/" and not left:
+        raise unsupported("dividing by a polynomial over a finite field (rational functions)")
+    if _int(y):
+        return
+    if isinstance(y, _Fraction):
+        if y.denominator % F.p == 0:
+            raise _bad_types(op, (a, b), pos)
+        if o in ("div", "mod"):
+            raise unsupported("div and mod of a polynomial over a finite field and a rational")
+        return
+    if _is_ff(y):
+        Ky = _ffwrap(y.parent())
+        if y.parent() is F.K or (Ky.n == 1 and Ky.p == F.p):
+            return
+        if Ky.p != F.p:
+            raise _bad_types(op, (a, b), pos)
+        raise unsupported("arithmetic of a polynomial over a finite field and an element of another field")
+    if isinstance(y, (bool, str, MReal)):
+        raise _bad_types(op, (a, b), pos)
+    raise unsupported("arithmetic of a polynomial over a finite field and a %s" % _type_of(y))
+
+
+def _ffpoly_op(o, a, b, pos):
+    """a o b (o one of + - * / div mod ^), one of them a polynomial over a
+    finite field, once _ffpoly_check has let them meet."""
+    R = _ffp_ring(a, b)
+    if o == "^":
+        f, e = a.p, b
+        if f.degree() < 1:
+            return _MFFPoly(R, R.P([f._c[0] ** e]) if f._c else (R.P([R.F.K(1)]) if e == 0 else f))
+        d = f.degree() * e
+        if d > _COLLECT_MAX:
+            raise MagmaError("a polynomial of degree more than %d is not supported yet" % _COLLECT_MAX, "'^'", True, pos)
+        if not any(f._c[:-1]):
+            # (a monomial c*x^k: c^e x^(k e), made directly)
+            z = R.F.K(0)
+            return _MFFPoly(R, R.P([z] * d + [f._c[-1] ** e]))
+        _ffp_admit(d * d // 2, R, "a power", "^")
+        return _MFFPoly(R, f ** e)
+    f, g = R._lift(a), R._lift(b)
+    if o == "+":
+        return _MFFPoly(R, f + g)
+    if o == "-":
+        return _MFFPoly(R, f - g)
+    if o == "*":
+        _ffp_admit(max(f.degree(), 0) * max(g.degree(), 0), R, "a product", "*")
+        return _MFFPoly(R, f * g)
+    if not g._c:
+        if o == "/":
+            raise MagmaError("Argument 2 is not a unit", "'/'", True, pos)
+        raise MagmaError("Division by zero", "'%s'" % o, True, pos)
+    if o == "/":
+        # (by a scalar only: _ffpoly_check refuses rational functions)
+        return _MFFPoly(R, f * R.P([1 / g._c[0]]))
+    _ffp_admit(max(f.degree() - g.degree() + 1, 0) * max(g.degree(), 1), R, "a division", o)
+    q, r = f.quo_rem(g)
+    return _MFFPoly(R, q if o == "div" else r)
+
+
+def _ffpoly_eq(a, b, op, pos):
+    """a eq b, one of them a polynomial over a finite field or its ring."""
+    if isinstance(a, _MFFPolyRing) or isinstance(b, _MFFPolyRing):
+        x, y = (a, b) if isinstance(a, _MFFPolyRing) else (b, a)
+        return x._magma_eq(y, op)
+    x, y = (a, b) if isinstance(a, _MFFPoly) else (b, a)
+    if isinstance(y, _MFFPoly) and y.R is not x.R:
+        if y.R.F.p != x.R.F.p:
+            raise _incompatible("C", op, a, b, pos)
+        raise MagmaError("comparison of polynomials of two polynomial rings over finite fields is not supported yet", "'%s'" % op, True, pos)
+    q = x.R._lift(y)
+    if q is not None:
+        return q._c == x.p._c
+    if isinstance(y, (bool, str, MReal)) or isinstance(y, _Fraction) or _is_ff(y):
+        raise _bad_types(op, (a, b), pos)
+    raise MagmaError("comparison of a polynomial over a finite field with a %s is not supported yet" % _type_of(y), "'%s'" % op, True, pos)
+
+
+def _ffp_eval(f, x, where):
+    """Evaluate(f, x): x an integer, an element of f's field (or its prime
+    field), or a polynomial of f's ring (f composed with it); a rational or
+    another field's element is Magma's "Incompatible rings"."""
+    R = f.R
+    if isinstance(x, _MFFPoly):
+        if x.R is not R:
+            raise MagmaError("composition of polynomials of two polynomial rings is not supported yet", where, True)
+        d = max(f.p.degree(), 0) * max(x.p.degree(), 0)
+        if d > _COLLECT_MAX:
+            raise MagmaError("a polynomial of degree more than %d is not supported yet" % _COLLECT_MAX, where, True)
+        _ffp_admit(d * d // 2, R, "a composition", "Evaluate")
+        return _MFFPoly(R, f.p(x.p))
+    c = None if isinstance(x, _Fraction) else R._const(x)
+    if c is None:
+        if _is_ff(x) or isinstance(x, _Fraction):
+            raise MagmaError("Incompatible rings", where, True)
+        if isinstance(x, (bool, str, MReal)):
+            raise _bad_types("Evaluate", (f, x))
+        raise MagmaError("evaluating a polynomial over a finite field at a %s is not supported yet" % _type_of(x), where, True)
+    return f.p(c)
+
+
+def _ff_key(c):
+    """Magma's order of a finite field's elements (as Factorization and
+    Roots list them, checked against Magma 2.18): a prime field's as
+    integers; an extension field's 0 first, then by the power of the
+    generator.  None where not known (fields of more than 2^20 elements)."""
+    F = _ffwrap(c.parent())
+    if F.n == 1:
+        return int(c)
+    if not c:
+        return -1
+    if F.q > _FF_POWERS_MAX:
+        return None
+    return int(c.log(F.K.gen()))
+
+
+def _ffp_sorted(items, key, what):
+    keys = [key(t) for t in items]
+    if len(items) > 1 and any(k is None for k in keys):
+        raise MagmaError("%s over a finite field of more than %d elements is not supported yet" % (what, _FF_POWERS_MAX), "'%s'" % what)
+    return [t for _, t in sorted(zip(keys, items), key=lambda kt: kt[0])] if len(items) > 1 else items
+
+
+def _ffp_factor(f, what):
+    """The factorization of the nonzero polynomial f (monic irreducibles,
+    with exponents), admitted first."""
+    R, n = f.R, f.p.degree()
+    engine = R.F.n == 1 and R.F.p < 2 ** 32
+    if engine:
+        if n > _FFPOLY_FACTOR_DEG:
+            raise MagmaError("%s of a polynomial over a finite field of degree more than %d is not supported yet"
+                             % (what, _FFPOLY_FACTOR_DEG), "'%s'" % what)
+    elif n ** 3 * R.F.q.bit_length() > _FFPOLY_WORK:
+        raise MagmaError("%s of a polynomial of degree %d over this finite field is not supported yet" % (what, n), "'%s'" % what)
+    return [] if n < 1 else list(f.p.factor())
+
+
+def _ffp_factorization(f):
+    if not f.p._c:
+        raise _arg_error("Factorization", "Argument 1 is not non-zero")
+    items = [(g, e) for g, e in _ffp_factor(f, "Factorization")]
+    # (by degree, then the coefficients from the top, in Magma's order of
+    # the field's elements)
+    def key(t):
+        ks = [_ff_key(c) for c in reversed(t[0]._c)]
+        return None if None in ks else (t[0].degree(), ks)
+    items = _ffp_sorted(items, key, "Factorization")
+    return _multi([MSeq(MTuple([_MFFPoly(f.R, g), e]) for g, e in items), f.p._c[-1]], show=1)
+
+
+def _ffp_roots(f, R=None):
+    if R is not None and R is not f.R.F:
+        raise MagmaError("Roots in a ring other than the coefficient field is not supported yet", "'Roots'")
+    if not f.p._c:
+        raise _arg_error("Roots", "Argument 1 is not non-zero")
+    rs = [(-g._c[0] / g._c[1], e) for g, e in _ffp_factor(f, "Roots") if g.degree() == 1]
+    rs = _ffp_sorted(rs, lambda t: _ff_key(t[0]), "Roots")
+    return MSeq(MTuple([r, e]) for r, e in rs)
+
+
+def _ffp_is_irreducible(f):
+    if not f.p._c:
+        raise _arg_error("IsIrreducible", "Argument 1 is not non-zero")
+    if f.p.degree() < 1:
+        return False
+    F = _ffp_factor(f, "IsIrreducible")
+    return len(F) == 1 and F[0][1] == 1
+
+
+def _ffp_gcd(args, lcm=False):
+    """Gcd (or Lcm) of polynomials of one ring over a finite field (integers
+    and the field's elements among them): monic, as Magma's."""
+    R = next(a.R for a in args if isinstance(a, _MFFPoly))
+    name = "Lcm" if lcm else "Gcd"
+    ps = []
+    for a in args:
+        p = R._lift(a)
+        if p is None:
+            raise _bad_types(name, args)
+        ps.append(p)
+    g = ps[0]
+    for p in ps[1:]:
+        _ffp_admit(max(g.degree(), 1) * max(p.degree(), 1) * (2 if lcm else 1), R, "a %s" % name, name)
+        if lcm:
+            if not g._c or not p._c:
+                g = R.P([])
+                continue
+            g = (g * p).quo_rem(g.gcd(p))[0]
+        else:
+            g = g.gcd(p)
+    return _MFFPoly(R, g.monic() if g._c else g)
+
+
+def _ffp_derivative(f, k):
+    n = max(f.p.degree(), 0)
+    _ffp_admit(n * min(k, n), f.R, "a derivative", "Derivative")
+    p = f.p
+    for _ in range(k):
+        if not p._c:
+            break
+        p = p.derivative()
+    return _MFFPoly(f.R, p)
+
+
+# The intrinsics taught polynomials over a finite field (and their rings):
+# any other refuses them in words (_guarded), never a wrong answer.
+_FFPOLY_TAUGHT = frozenset(
+    "Degree Coefficients Coefficient LeadingCoefficient Evaluate Derivative IsIrreducible Roots Factorization "
+    "Factorisation Gcd GCD GreatestCommonDivisor Lcm LCM LeastCommonMultiple Quotrem IsZero IsOne Parent Type ISA "
+    "Sprint Sprintf Append Include Exclude Insert Index Position Reverse AssignNames Characteristic BaseRing "
+    "CoefficientRing".split())
 
 
 # ------------------------------------------------------------------ integers
@@ -4861,6 +5377,8 @@ def Gcd(*args):
         _no_rationals("Gcd", *args)
     if len(args) == 1:
         args = tuple(args[0])
+    if any(isinstance(a, _MFFPoly) for a in args):
+        return _ffp_gcd(args)
     if any(isinstance(a, _sp.Polynomial) for a in args):
         g = args[0]
         for a in args[1:]:
@@ -4877,6 +5395,8 @@ def Lcm(*args):
         raise _bad_types("Lcm", args)
     if len(args) == 1:
         args = tuple(args[0])
+    if any(isinstance(a, _MFFPoly) for a in args):
+        return _ffp_gcd(args, lcm=True)
     return _sa.lcm(*args)
 
 
@@ -5528,6 +6048,8 @@ def Characteristic(F):
         return F.p
     if isinstance(F, _MResRing):
         return F.m
+    if isinstance(F, _MFFPolyRing):
+        return F.F.p
     if F is _ZZ or F is _QQ:
         return 0
     raise MagmaError("Bad argument types", "'Characteristic'")
@@ -5634,7 +6156,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
     Insert (the declared universe, else that of an element); Magma's
     errors if not."""
     w = _universe(s, True)
-    if isinstance(getattr(s, "universe", None), _MFinField):
+    if isinstance(getattr(s, "universe", None), (_MFinField, _MFFPolyRing)):
         w = ("struct", s.universe)  # (declared, and known to _coerce_struct)
     if w is None:
         return x
@@ -5656,7 +6178,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
                 raise MagmaError("No equality algorithm for sequence elements", "'%s'" % name)
             return x
         de = _desc(e)
-        if _is_ff(e) or (_is_ff(x) and de in (("Z",), ("Q",))):
+        if _is_ff(e) or isinstance(e, _MFFPoly) or (_is_ff(x) and de in (("Z",), ("Q",))):
             # (a finite field's elements: Magma's coercion, CORR-9348-1)
             y = _elt_into(x, e)
             if y is None:
@@ -7129,6 +7651,8 @@ def _guarded(name, f):
     ints = _INT_ARGS.get(name, ())
 
     def intrinsic(*args, **kw):
+        if name not in _FFPOLY_TAUGHT and any(isinstance(a, (_MFFPoly, _MFFPolyRing)) for a in args):
+            raise MagmaError("%s of a polynomial over a finite field (or its ring) is not supported yet" % name, "'%s'" % name)
         for i, a in enumerate(args):
             if i in ints and isinstance(a, _Fraction):
                 raise _bad_types(name, args)

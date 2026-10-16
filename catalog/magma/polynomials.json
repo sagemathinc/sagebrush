@@ -8,10 +8,14 @@
       {
         "code": "P<x> := PolynomialRing(Integers()); P;",
         "expected": "Univariate Polynomial Ring in x over Integer Ring\n"
+      },
+      {
+        "code": "R<y> := PolynomialRing(GF(9)); R; y^3 + R.1;",
+        "expected": "Univariate Polynomial Ring in y over GF(3^2)\ny^3 + y\n"
       }
     ],
     "differs": [
-      "Polynomial rings over the integers and the rationals only: over other rings, PolynomialRing is refused."
+      "Polynomial rings over the integers, the rationals and finite fields only: over other rings, PolynomialRing is refused."
     ],
     "status": "partial",
     "see_also": [
@@ -32,10 +36,15 @@
       {
         "code": "P<x> := PolynomialRing(Integers()); Roots((x - 1)^2*(x + 2));",
         "expected": "[ <-2, 1>, <1, 2> ]\n"
+      },
+      {
+        "code": "R<x> := PolynomialRing(GF(7)); Roots(x^3 - 1);",
+        "expected": "[ <1, 1>, <2, 1>, <4, 1> ]\n"
       }
     ],
     "differs": [
-      "Polynomial rings over the integers and the rationals only: over other rings, PolynomialRing is refused."
+      "Polynomial rings over the integers, the rationals and finite fields only: over other rings, PolynomialRing is refused.",
+      "Over a finite field: a degree of at most 1000 (prime fields below 2^32), and smaller degrees in other fields (degree^3 times the bits of q at most 10^6), are factored; larger ones are refused."
     ],
     "status": "partial",
     "see_also": [
@@ -58,7 +67,7 @@
       }
     ],
     "differs": [
-      "R must be the integers or the rationals: roots in a real or complex field, a finite field or a number field are refused."
+      "R must be the integers or the rationals (for a polynomial over a finite field, its own field): roots in a real or complex field, another finite field or a number field are refused."
     ],
     "status": "partial",
     "upstream_version": "Magma 2.18",
@@ -208,8 +217,10 @@
         "expected": "-4\n4\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "Refused for a polynomial over a finite field."
+    ],
+    "status": "partial",
     "upstream_version": "Magma 2.18",
     "tags": [
       "polynomials"
@@ -226,8 +237,10 @@
         "expected": "1\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "Refused for polynomials over a finite field."
+    ],
+    "status": "partial",
     "upstream_version": "Magma 2.18",
     "tags": [
       "polynomials"
@@ -242,10 +255,16 @@
       {
         "code": "P<x> := PolynomialRing(Integers()); IsIrreducible(x^2 + 1); IsIrreducible(x^2 - 1); IsIrreducible(2*x + 4);",
         "expected": "true\nfalse\nfalse\n"
+      },
+      {
+        "code": "R<x> := PolynomialRing(GF(7)); IsIrreducible(x^2 + 1); IsIrreducible(x^2 + 3);",
+        "expected": "true\nfalse\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "Over a finite field: a degree of at most 1000 (prime fields below 2^32), and smaller degrees in other fields (degree^3 times the bits of q at most 10^6), are factored; larger ones are refused."
+    ],
+    "status": "partial",
     "upstream_version": "Magma 2.18",
     "tags": [
       "polynomials"
@@ -264,10 +283,15 @@
       {
         "code": "Q<t> := PolynomialRing(Rationals()); Factorization(2*t^2 - 1/2);",
         "expected": "[\n    <t - 1/2, 1>,\n    <t + 1/2, 1>\n]\n"
+      },
+      {
+        "code": "K<w> := GF(4); R<y> := PolynomialRing(K); Factorization(y^4 - y);",
+        "expected": "[\n    <y, 1>,\n    <y + 1, 1>,\n    <y + w, 1>,\n    <y + w^2, 1>\n]\n"
       }
     ],
     "differs": [
-      "Polynomial rings over the integers and the rationals only: over other rings, PolynomialRing is refused."
+      "Polynomial rings over the integers, the rationals and finite fields only: over other rings, PolynomialRing is refused.",
+      "Over a finite field: a degree of at most 1000 (prime fields below 2^32), and smaller degrees in other fields (degree^3 times the bits of q at most 10^6), are factored; larger ones are refused."
     ],
     "status": "partial",
     "see_also": [
