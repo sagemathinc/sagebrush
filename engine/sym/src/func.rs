@@ -397,6 +397,12 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if x.is_minus_one() {
                 return Some(mul2(&i(), &pi()));
             }
+            // log(I) = I*pi/2, log(-I) = -I*pi/2
+            if let Some(Num::Exact(re, im)) = x.as_num() {
+                if re.is_zero() && (im.is_one() || (-im).is_one()) {
+                    return Some(mul(vec![qnum(im.clone() / Q::from_integer(BigInt::from(2))), i(), pi()]));
+                }
+            }
             if let Kind::Pow(b, e) = &x.kind {
                 if b.is_const(Const::E) && e.is_num() && e.as_num().unwrap().is_real() {
                     return Some(e.clone());
@@ -507,6 +513,27 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             None
         }
         Fun::Binomial => {
+            // binomial(x, 0) = 1 and binomial(x, 1) = x for any x, as Sage
+            if let Some(k) = a[1].as_int() {
+                if k.is_zero() {
+                    return Some(one());
+                }
+                if k.is_one() {
+                    return Some(a[0].clone());
+                }
+                // binomial(a, k) = a (a-1) ... (a-k+1) / k! for an integer
+                // k >= 0 when a is not an integer (Sage: binomial(x, 2) =
+                // 1/2*(x - 1)*x), and 0 for k < 0
+                if a[0].as_int().is_none() {
+                    if k.is_negative() {
+                        return Some(zero());
+                    }
+                    let k = k.to_u64().filter(|&k| k <= 1000)?;
+                    let mut fs: Vec<Expr> = (0..k).map(|j| sub(&a[0], &int(j as i64))).collect();
+                    fs.push(qnum(Q::new(BigInt::one(), falling(&BigInt::from(k), 0, k))));
+                    return Some(mul(fs));
+                }
+            }
             let (n, k) = (a[0].as_int()?, a[1].as_int()?);
             if k.is_negative() || n.is_negative() || k > n {
                 return if !n.is_negative() { Some(zero()) } else { None };

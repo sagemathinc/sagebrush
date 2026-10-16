@@ -758,3 +758,11 @@ assert "at most 2097152 bits" in raises(NotImplementedError, lambda: _SR(2**2000
 assert bool(_SR(2) ** ((1 << 21) - 1) == _SR(2**((1 << 21) - 1)))
 assert bool(_SR(3) ** 1000 == _SR(3**1000))
 print("symbolic integer limit ok")
+
+
+# SR-HUNT-1: the units to an integer power past i64 (I^(10^20 + 3) = -I)
+from sagebrush.sage import SR as _SR1, I as _I1
+assert str(_SR1(_I1) ** (10**20 + 3)) == "-I"
+assert str(_SR1(-1) ** (10**30 + 1)) == "-1"
+assert str((-_SR1(_I1)) ** (-(10**20) - 2)) == "-1"
+print("symbolic unit powers ok")

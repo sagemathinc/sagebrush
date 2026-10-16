@@ -453,6 +453,13 @@ fn growth(e: &Expr, x: &str) -> Option<(Expr, Key)> {
             r = add2(&r, &k);
             continue;
         }
+        // b^k = e^(k log b) for a constant b certified positive (2^x: its
+        // limits went through the expansion of 2^(1/t) at t = 0, seconds
+        // per step of L'Hopital's rule)
+        if !depends(&b, x) && depends(&k, x) && crate::domain::real_const(&b) && const_sign(&b) == Some(1) {
+            r = add2(&r, &mul2(&k, &log(&b)));
+            continue;
+        }
         if depends(&k, x) || !crate::domain::real_const(&k) {
             return None;
         }
