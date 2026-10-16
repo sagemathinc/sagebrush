@@ -1739,7 +1739,7 @@ test("command syntax: a comma or semicolon inside a word's brackets is refused, 
   assert.doesNotThrow(() => matlabToPython("disp 'a{0,31}'"));
 });
 
-test("coverage wrongs: exact int64 literals, std/var flags, integer classes kept, strfind's [], NaN in ismember and unique, c{:} displayed", () => {
+test("exact int64 literals, std/var flags, integer classes kept, strfind's [], NaN in ismember and unique, atanh's branch, c{:} displayed", () => {
   const { execFileSync } = require("node:child_process");
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");

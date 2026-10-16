@@ -10168,7 +10168,7 @@ def _exact_int(v):
     """v, if Sagebrush's 64-bit integers hold it exactly (they keep 53 bits, as doubles
     do); a value they would round is refused, not changed"""
     if float(v) != v:
-        raise _err("Integers beyond 2^53 in magnitude (here %d) are not represented exactly in Sagebrush." % v)
+        raise _err("Integers beyond 2^53 in magnitude (here %d) are not supported: Sagebrush's 64-bit integers are not exact there." % v)
     return v
 
 
