@@ -512,7 +512,11 @@ export function atan2(y: number, x: number): number {
   const e = ilogb(Math.max(ay, ax));
   const sy = scale(ay, -e), sx = scale(ax, -e);
   let r: number;
-  if (sy < sx * 8.673617379884035e-19) r = x > 0 ? ay / ax : PI[0]; // (|y/x| < 2^-60: atan(y/x) rounds to y/x, pi - y/x to pi)
+  if (sy < sx * 8.673617379884035e-19) {
+    // (|y/x| < 2^-60: atan(y/x) rounds as y/x does, but for a subnormal midpoint; pi - y/x to pi)
+    r = x > 0 ? ay / ax : PI[0];
+    if (x > 0 && r <= 2.2250738585072014e-308) r = atanTinyRatio(ay, ax, r);
+  }
   else if (sx < sy * 8.673617379884035e-19) r = PIO2[0];
   else {
     gAtan2Pos(sy, 0, sx, 0);
@@ -640,25 +644,28 @@ export function log2(x: number): number {
   return f === f ? f : cr((w) => div(logWith(w, dd(x)), LN2));
 }
 
-// sqrt(x^2 + y^2): the squares exactly, scaled so neither overflows nor underflows
+// sqrt(x^2 + y^2): the squares exactly, scaled so neither overflows nor underflows; when
+// the double-double root cannot decide the rounding (near a midpoint, or a subnormal
+// result), the exact way below decides it
 export function hypot(x: number, y: number): number {
   if (x === Infinity || x === -Infinity || y === Infinity || y === -Infinity) return Infinity;
   if (x !== x || y !== y) return NaN;
   let a = Math.abs(x), b = Math.abs(y);
   if (a < b) [a, b] = [b, a];
   if (b === 0) return a;
-  if (b < a * 8.673617379884035e-19) return a; // (b/a < 2^-60: a is the nearest)
+  if (b < a * 8.673617379884035e-19) return a; // (b/a < 2^-60: a(1 + 2^-121) is nowhere near a midpoint)
   const e = ilogb(a);
   const as = scale(a, -e), bs = scale(b, -e); // (as in [1, 2); bs exact unless it underflows, then negligible)
   const r = sqrt(add(twoProd(as, as), twoProd(bs, bs)));
-  return roundScaled(r, e);
+  return normDecided(r, e) ?? normExact([a, b]);
 }
 // the Euclidean norm of any number of coordinates (math.hypot): the same way, the
-// squares summed exactly enough in double-double after scaling by the largest
+// squares summed in double-double after scaling by the largest (relative error about
+// n 2^-104, far inside EPS for any array that fits in memory)
 export function hypotN(xs: number[]): number {
   if (xs.length === 2) return hypot(xs[0], xs[1]);
   let max = 0, nan = false;
-  // (Stop polled every 1024 coordinates in both passes)
+  // (Stop polled every 1024 coordinates in every pass)
   for (let i = 0; i < xs.length; i++) {
     const a = Math.abs(xs[i]);
     if ((i & 1023) === 1023) pollInterrupt();
@@ -675,18 +682,76 @@ export function hypotN(xs: number[]): number {
     s = add(s, twoProd(v, v));
     if ((i & 1023) === 1023) pollInterrupt();
   }
-  return roundScaled(sqrt(s), e);
+  return normDecided(sqrt(s), e) ?? normExact(xs);
 }
-// (hi + lo) * 2^e rounded once, also where the result is subnormal (where hi * 2^e would
-// round a second time)
-function roundScaled(r: DD, e: number): number {
-  if (e >= -1022) return scale(r[0] + r[1], e);
-  // (the result's last place is 2^-1074: round r to a multiple of 2^(-1074 - e) first)
-  const q = pow2(-1074 - e);
-  const k = Math.floor(r[0] / q);
-  const rem = add(r, dd(-k * q));
-  let n = k;
-  const half = q / 2;
-  if (rem[0] > half || (rem[0] === half && rem[1] > 0) || (rem[0] === half && rem[1] === 0 && (k & 1))) n = k + 1;
-  return n * 5e-324;
+// r * 2^e for a root r >= 1 of a scaled square sum, when its rounding is decided and the
+// result is normal (then scaling is exact); else null
+function normDecided(r: DD, e: number): number | null {
+  if (e < -1022) return null;
+  const f = decided(r[0], r[1]);
+  return f === f ? scale(f, e) : null;
+}
+
+// ------------------------------------------------------------ exact decisions (BigInt)
+// x = m 2^k with m an integer below 2^53 (x finite, positive)
+function split(x: number): [bigint, number] {
+  const e = ilogb(x);
+  return e >= -1022 ? [BigInt(scale(x, 52 - e)), e - 52] : [BigInt(scale(x, 1074)), -1074];
+}
+function bitLength(n: bigint): number {
+  return n === 0n ? 0 : n.toString(2).length;
+}
+function isqrt(n: bigint): bigint {
+  if (n < 2n) return n;
+  let x = 1n << BigInt((bitLength(n) + 1) >> 1); // (above the root: Newton's steps descend to it)
+  for (;;) {
+    const y = (x + n / x) >> 1n;
+    if (y >= x) return x;
+    x = y;
+  }
+}
+// the double nearest sqrt(sum xs_i^2), from the exact sum of squares: in units 2^k (k the
+// least exponent of the coordinates) S is an integer, the result's last place is 2^(k+sh),
+// n = floor(sqrt(S / 4^sh)), and 4S against (2n + 1)^2 4^sh says which side of the
+// midpoint the root is on (a tie goes to the even n)
+function normExact(xs: number[]): number {
+  const ms: bigint[] = [], ks: number[] = [];
+  let k = Infinity;
+  for (let i = 0; i < xs.length; i++) {
+    if ((i & 1023) === 1023) pollInterrupt();
+    const a = Math.abs(xs[i]);
+    if (a === 0) continue;
+    const [m, ki] = split(a);
+    ms.push(m);
+    ks.push(ki);
+    if (ki < k) k = ki;
+  }
+  let S = 0n;
+  for (let i = 0; i < ms.length; i++) {
+    if ((i & 1023) === 1023) pollInterrupt();
+    const v = ms[i] << BigInt(ks[i] - k);
+    S += v * v;
+  }
+  const b = bitLength(isqrt(S)); // (the root's integer part has b bits: the result is near 2^(k + b - 1))
+  const sh = Math.max(0, k + b - 1 >= -1022 ? b - 53 : -1074 - k);
+  const s2 = BigInt(2 * sh);
+  let n = isqrt(S >> s2);
+  const c = (S << 2n) - (((2n * n + 1n) * (2n * n + 1n)) << s2);
+  if (c > 0n || (c === 0n && (n & 1n) === 1n)) n += 1n;
+  return Number(n) * pow2(k + sh); // (n <= 2^53: exact, or the overflow to Infinity that rounding gives)
+}
+// atan(y/x) for y/x below the least normal (|y| < |x| 2^-60): atan t = t - t^3/3 + ...
+// rounds as t does, unless t is exactly a midpoint m of the subnormal grid (t is a ratio
+// of doubles: an inexact t is at least 2^-1128 from any m, while t^3/3 < 2^-3066); at a
+// midpoint atan t is just below m, so the lower neighbour, where the division's tie went
+// to the even one
+function atanTinyRatio(ay: number, ax: number, q: number): number {
+  const [Y, ey] = split(ay), [X, ex] = split(ax);
+  const sh = ey - ex + 1075; // t 2^1075 = Y 2^sh / X: an odd integer at a midpoint
+  let num = Y, den = X;
+  if (sh >= 0) num <<= BigInt(sh);
+  else den <<= BigInt(-sh);
+  if (num % den !== 0n) return q;
+  const K = num / den;
+  return (K & 1n) === 1n ? Number((K - 1n) >> 1n) * 5e-324 : q;
 }
