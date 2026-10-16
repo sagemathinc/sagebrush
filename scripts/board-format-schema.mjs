@@ -98,7 +98,7 @@ bound(DOC, "if (!emoji && !icon) return null;");
 bound(DOC, "if (!t || t.length > 16 || /[A-Za-z]|\\p{Cc}/u.test(t)) return undefined;");
 bound(DOC, "hideCode: code !== undefined && n.hideCode === true");
 bound(DOC, "preview: code !== undefined ? cleanPreview(n.preview) : undefined");
-bound(DOC, "const cols = Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)));");
+bound(DOC, "Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)))");
 bound(DOC, "if (d?.version > VERSION)");
 const positive = { exclusiveMinimum: 0 };
 const FIELD_RULES = {
