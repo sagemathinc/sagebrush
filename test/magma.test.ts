@@ -370,6 +370,16 @@ test("a selection's inferred universe is found once per source, not per selectio
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("Append into a fixed universe refuses what doesn't go in, a range's too (CORR-D689-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: "I := [2,5]; Append(~I, 1/2);\nI;\nR := [1..3]; Append(~R, 1/2);\nR;\n", encoding: "utf8", timeout: 60000 });
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.equal((flat.match(/Runtime error in 'Append': Cannot coerce element into the universe/g) ?? []).length, 2, r.stdout);
+  assert.match(r.stdout, /\[ 2, 5 \]\n[\s\S]*\[ 1 \.\. 3 \]\n$/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)

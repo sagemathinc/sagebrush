@@ -77,3 +77,15 @@ C := [2,5]; Universe(C[[]]); Universe(C[[1]]);
 Q := [1..2]; Universe(Q[[]]); Universe(Q[[1]]);
 Universe(R[1..0]);
 G := {@ 2/3, 1 @}; Universe(G[[]]);
+// a universe is fixed when made: what doesn't go in is refused, never widened
+I := [2,5]; I[1] := 1/3;
+I;
+T := [2,5][[]]; T[1] := "x";
+K := [2/3,5]; K[1] := 4; Universe(K); Universe(K[[]]); K := Append(K, 1/2); K;
+J := [Integers() | 2, 5]; J[2] := 1/2;
+R := [1..3]; R[1] := 1/2;
+Universe(Reverse([2/3, 1]));
+Universe(Reverse([Rationals() | 1, 2]));
+L := [2/3, 1]; L := Exclude(L, 2/3); Universe(L);
+M := [Rationals() | 1]; M := Include(M, 3); Universe(M);
+E := []; E := Append(E, 1/2); E[1] := 4; Universe(E);
