@@ -2330,25 +2330,10 @@ def _part(z, name):
 
 
 def _float_of(z):
-    """float(z) for a float subclass, as CPython's float(): the type's
-    __float__ bound to z as an instance attribute (static, class and
-    other descriptors included), its result an exact float.  (Called
-    explicitly: the browser runtime's float() skips an override on a float
-    subclass.)"""
-    t = type(z)
-    for k in t.__mro__:
-        if "__float__" in k.__dict__:
-            hook = k.__dict__["__float__"]
-            break
-    get = getattr(type(hook), "__get__", None)
-    if get is not None:
-        hook = get(hook, z, t)
-    r = hook()
-    if not isinstance(r, float):
-        raise TypeError("%s.__float__ returned non-float (type %s)" % (t.__name__, type(r).__name__))
-    # an exact float (float.__mul__ keeps -0.0 and nan, and calls no hook
-    # of a float subclass)
-    return float.__mul__(r, 1.0)
+    """float(z), as Sage takes a float subclass's parts: CPython's float()
+    (its __float__ bound as on an instance, the result checked to be a
+    float and made exact)."""
+    return float(z)
 
 
 def _plain_float_subclass(z):

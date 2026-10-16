@@ -97,3 +97,12 @@ class _G3(float):
 class _N3(float):
     def __float__(self): return float(-0.0)
 t("__float__ bound as on an instance, its result an exact float", lambda: (conjugate(_S3(2)), real(_C3(2)), conjugate(_E3(2)), real(_E3(2)), imag(_E3(2)), conjugate(_G3(2)) + 1, real(_G3(2)) + 1, real_part(_G3(2)) + 1, conjugate(_N3(2))))
+import numpy as _np3
+class _P3(float):
+    def __float__(self): return _np3.float32(9)
+def _err3(f):
+    try:
+        return f()
+    except TypeError:
+        return "TypeError"
+t("a __float__ returning np.float32 is refused", lambda: (_err3(lambda: conjugate(_P3(2))), _err3(lambda: real(_P3(2))), _err3(lambda: imag(_P3(2)))))
