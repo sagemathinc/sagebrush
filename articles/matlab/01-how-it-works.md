@@ -1,6 +1,16 @@
 <!-- description: How Sagebrush runs MATLAB: a hand-written parser and a translator to Python on numpy, MATLAB's value semantics and display reproduced, graphics as MATLAB objects, and tests against GNU Octave and published examples. -->
 # How the MATLAB implementation works
 
+:::disclaimer
+**Sagebrush is not MATLAB, and has nothing to do with MathWorks.**
+
+On these pages, "MATLAB" means the programming language only. Sagebrush is an independent implementation of that language, written from public documentation and tested against GNU Octave. It contains no code from MathWorks' MATLAB product and is not connected with it.
+
+Sagebrush is not a product of The MathWorks, Inc., and is not affiliated with, sponsored by or endorsed by MathWorks in any way.
+
+MATLAB is a registered trademark of The MathWorks, Inc.
+:::
+
 *Code: `src/matlab.ts` (the translator), `lib/_matlab.py` (the runtime),
 `lib/_matlab_plot.py` (graphics), `lib/_matlab_mat.py` (`.mat` files).
 Design notes: `design/matlab.md`. About 13,700 lines in all.*
