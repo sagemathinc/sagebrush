@@ -61,3 +61,18 @@ test("--matlab FILE.m and a .m file still run as MATLAB; a syntax error in a fil
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a program on stdin past 8 MiB is refused before it is kept, in each mode, under a 96 MiB heap", () => {
+  // (9 MiB of statements: the reader stops at the chunk that crosses 8 MiB, so the rest of
+  // the input may be left unread, and writing it can fail with EPIPE)
+  const big = "x = 1;\n".repeat(Math.ceil((9 << 20) / 7));
+  for (const args of [["--matlab"], ["--matlab", "-"], ["--magma"], ["--sage"], []]) {
+    const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, ...args], { input: big, encoding: "utf8", timeout: 60000 });
+    assert.equal(r.status, 1, `${args.join(" ") || "(no flag)"}: ${r.stderr}`);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /the program on stdin is more than 8 MiB: not supported/);
+  }
+  // (one under the limit still runs, under the same heap)
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--matlab"], { input: "x = 1;\n".repeat(2000) + "disp(x)\n", encoding: "utf8", timeout: 60000 });
+  assert.deepEqual([r.status, r.stdout], [0, "     1\n"], `signal ${r.signal}; ${r.stderr.slice(0, 300)}`);
+});
