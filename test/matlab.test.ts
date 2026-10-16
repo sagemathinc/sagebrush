@@ -2134,6 +2134,6 @@ test("nchoosek refuses mixed classes and results past their class's range before
     "refused: nchoosek: the result, at", "refused: nchoosek: the result, at", "refused: nchoosek: the result, ab",
     "refused: nchoosek: the result, ab", "refused: nchoosek: the result, at", "refused: nchoosek: K must be an i", "refused: nchoosek: K must be an i",
     "refused: nchoosek: the result, at", "refused: nchoosek: the result, at", "refused: nchoosek: the result, at",
-    "int64 9007199254740991", "uint64 9007199254740991", "int64 9007199254740991", "1 1 1",
+    "int64 9007199254740991", "uint64 9007199254740991", "int64 9007199254740991", "1  1  1",
     "155117520", "120", "1.0000e+09"]);
 });
