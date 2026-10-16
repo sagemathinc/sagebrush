@@ -1784,3 +1784,30 @@ test("exact int64 literals, std/var flags, integer classes kept, strfind's [], N
     "     7",
   ]);
 });
+
+test("factorial's integer limits exact; unique's NaN rows and stable order; scalar nchoosek's class; set options checked (CORR-3E7-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (factorial: exact up to the class's limit; a 64-bit limit Sagebrush can't hold is refused)
+    "v = factorial(int64(20)); disp(class(v)); fprintf('%d\\n', v)",
+    "v = factorial(int8(6)); disp(class(v)); fprintf('%d\\n', v)",
+    tryIt("factorial(int64(21))"), tryIt("factorial(uint64(21))"), tryIt("factorial(-1)"), tryIt("factorial(2.5)"),
+    // (unique: NaN after every number; equal when TreatMissingAsDistinct is false, rows matching on the rest)
+    "[C, ia] = unique([NaN 1; NaN 2; NaN 1], 'rows', 'TreatMissingAsDistinct', false); disp(mat2str(C)); disp(mat2str(ia'))",
+    "disp(mat2str(unique([NaN 1; NaN 2; NaN 1], 'rows'))); disp(mat2str(unique([2 0; 1 NaN], 'rows')))",
+    "[C, ia, ic] = unique([NaN 2 NaN 1], 'stable', 'TreatMissingAsDistinct', false); disp(mat2str(C)); disp(mat2str(ia')); disp(mat2str(ic'))",
+    "disp(mat2str(unique([NaN 2 NaN 1], 'stable'))); disp(mat2str(unique([NaN 2 NaN 1])))",
+    // (scalar nchoosek: an integer or single n or k gives that class; past an integer class's range, refused)
+    "v = nchoosek(int8(10), 3); disp(class(v)); fprintf('%d\\n', v)",
+    "disp(class(nchoosek(single(5), 2))); disp(class(nchoosek(5, int16(2))))",
+    tryIt("nchoosek(int8(11), 5)"),
+    // (set options: text only; 'first' and 'last' are unique's)
+    tryIt("unique([1 2], 5)"), tryIt("union(1, 2, 'first')"), tryIt("unique([1 1], 'first')"),
+  ].join("\n")), ["int64", "2432902008176640000", "int8", "127", "refused", "refused", "refused", "refused",
+    "[NaN 1;NaN 2]", "[1 2]", "[NaN 1;NaN 1;NaN 2]", "[1 NaN;2 0]",
+    "[NaN 2 1]", "[1 2 4]", "[1 2 1 3]", "[NaN 2 NaN 1]", "[1 2 NaN NaN]",
+    "int8", "120", "single", "int16", "refused", "refused", "refused", "ran"]);
+});
