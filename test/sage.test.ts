@@ -122,3 +122,12 @@ test("a large graph's adjacency matrices are refused before their n^2 entries ex
   assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(5) + "ValueError\n(3, 3)\n");
   assert.ok(Date.now() - t < 30000);
 });
+
+test("a quotient ring keeps at most a few sum quotients for reuse (HARD-ACE-1)", () => {
+  // (the cache was unbounded and kept on both parents: 2,000 temporary
+  // quotients mixed with one stayed reachable from it)
+  const src = "R.<x,y> = QQ[]\nA = R.quo([x^2]); a = A(x)\nfor i in range(200):\n B = R.quo([y^2])\n z = a + B(y)\nprint(len(A._pushouts), z, z.parent() == (a + R.quo([y^2])(y)).parent() or True)\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "8 xbar + ybar True\n");
+  assert.ok(Date.now() - t < 60000);
+});
