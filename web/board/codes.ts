@@ -38,6 +38,8 @@ export class BoardCodes {
   set cacheId(id: string | null) { this.cacheIdSet = id; for (const e of this.engines.values()) e.cacheId = id; }
   private engines = new Map<BoardMode, BoardCode>();
   private modeOf = new Map<string, BoardMode>();
+  // (the document the last sync was of: its cache id)
+  private syncedDoc: string | null | undefined = undefined;
   private pictures: unknown = null;
   private previewMsSet: number | null = null;
   private cacheMsSet: number | null = null;
@@ -98,7 +100,16 @@ export class BoardCodes {
    */
   async sync(items: Item[], mode: BoardMode = "python", seed?: string): Promise<string[]> {
     const parts = new Map<BoardMode, Item[]>();
-    for (const it of items) { const m = it.mode ?? mode; (parts.get(m) ?? parts.set(m, []).get(m)!).push(it); }
+    // (an item whose language changed, in the same document: its stored
+    // preview is the other language's output, so it is not shown as this
+    // one's, held unrun: it runs.  Another document's ids are not its own.)
+    const was = this.syncedDoc === this.cacheIdSet ? new Map(this.modeOf) : new Map<string, BoardMode>();
+    this.syncedDoc = this.cacheIdSet;
+    for (const it of items) {
+      const m = it.mode ?? mode, before = was.get(it.id);
+      const item = before !== undefined && before !== m && it.preview ? (({ preview: _, ...rest }) => rest)(it) : it;
+      (parts.get(m) ?? parts.set(m, []).get(m)!).push(item);
+    }
     this.modeOf.clear();
     this.refused.clear();
     const used = [...parts.keys()];

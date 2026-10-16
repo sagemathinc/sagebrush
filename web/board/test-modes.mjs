@@ -68,8 +68,9 @@ try {
   check(o.s3?.state === "failed" && /NameError|not defined/.test(o.s3.output), "a Python name in a Sage item: Sage's undefined name, nothing shared: " + JSON.stringify(o.s3));
   check((await engines()) === 3, "three languages: three interpreters: " + (await engines()));
   // the badge: only on the items in a language not the board's
-  const badges = await ev("Object.fromEntries([...document.querySelectorAll('.board-lang')].map((b) => [[...window.board.cache].find(([, e]) => e.contains(b))?.[0], b.textContent]))");
-  check(JSON.stringify(badges) === JSON.stringify({ s1: "Sage", s2: "Sage", s3: "Sage", m1: "MATLAB" }), "a language badge on the Sage and MATLAB items only: " + JSON.stringify(badges));
+  // (in id order: the order they are drawn in is the board's, not this test's)
+  const badges = await ev("Object.fromEntries([...document.querySelectorAll('.board-lang')].map((b) => [[...window.board.cache].find(([, e]) => e.contains(b))?.[0], b.textContent]).sort(([x], [y]) => (x < y ? -1 : 1)))");
+  check(JSON.stringify(badges) === JSON.stringify({ m1: "MATLAB", s1: "Sage", s2: "Sage", s3: "Sage" }), "a language badge on the Sage and MATLAB items only: " + JSON.stringify(badges));
   // a change in one language reruns its dependents there only
   await ev(`${B}.edit((d) => { d.nodes.find((n) => n.id === "s1").code = "y = factor(30)"; }).then(() => 1)`);
   check(await until(`${B}.outputs().then((os) => os.find((x) => x.id === 's2')?.output.trim() === '2 * 3 * 5')`, 60000), "an edit to a Sage item reruns what reads it in Sage: " + JSON.stringify((await outputs()).s2));
@@ -86,6 +87,14 @@ try {
   // a mode that is not a language: left out (the board's)
   const cleaned = await ev(`(() => { ${B}.load({ nodes: [{ id: "q", code: "1", mode: "cobol" }, { id: "r", text: "no code", mode: "sage" }] }); const d = ${B}.snapshot().doc; return [d.nodes[0].mode ?? null, d.nodes[1].mode ?? null]; })()`);
   check(JSON.stringify(cleaned) === "[null,null]", "a mode not a language, or on a note without code, is left out: " + JSON.stringify(cleaned));
+
+  // an item moved to another language: its stored preview (the other
+  // language's output) is not shown held as this one's; it runs there (astra)
+  const PV = { title: "Preview", nodes: [{ id: "pv", code: "print(2^3)", preview: { at: "2026-10-15T10:00:00Z", ms: 12000, total: 12000, outputs: [{ output_type: "stream", name: "stdout", text: "STALE 1\n" }] } }] };
+  await ev(`${B}.load(${JSON.stringify(PV)}).then(() => 1)`);
+  check(await until(`${B}.outputs().then((os) => /STALE/.test(os.find((x) => x.id === 'pv')?.output ?? ''))`, 30000), "(an item with a stored preview: shown, held: " + JSON.stringify(await outputs()) + ")");
+  await ev(`${B}.edit((d) => { d.nodes[0].mode = "sage"; }).then(() => 1)`);
+  check(await until(`${B}.outputs().then((os) => { const o = os.find((x) => x.id === 'pv'); return o?.state === '' && o.output.trim() === '8'; })`, 90000), "moved to Sage: run there (2^3 is 8), not its Python preview held: " + JSON.stringify((await outputs()).pv));
 
   check(!errors.length, "no errors: " + errors.join(" | "));
 } catch (e) {
