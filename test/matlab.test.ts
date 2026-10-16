@@ -1886,6 +1886,9 @@ test("asind, acosd, atand, asecd, acscd, acotd, secd, cscd and cotd: the radian 
     "fprintf('%.4e ', cotd([180-eps(180) 180 180+eps(180)])); fprintf('\\n')",
     "fprintf('%.4f ', [secd(1e10) cscd(1e10) cotd(1e10) sind(1e10) sind(30) cosd(60)]); fprintf('\\n')",
     "disp(mat2str([sind(30) cosd(60) tand(45) sind(180) cosd(90) tand(-90)]))",
+    // (tand near a pole, against 50-digit values: the complement keeps the distance; tand(60) as Octave's)
+    "fprintf('%.15e ', [tand(90-eps(90)) tand(270-eps(270)) tand(90-1e-10) tand(89) tand(80)]); fprintf('\\n')",
+    "fprintf('%.17g ', [tand(60) tand(-45) tand(0)]); fprintf('\\n')",
   ].join("\n")), [
     "30.0000 60.0000 45.0000 60.0000 30.0000 45.0000 2.0000 2.0000 1.0000",
     "[90 180 90 90 Inf Inf 0 Inf]",
@@ -1895,5 +1898,7 @@ test("asind, acosd, atand, asecd, acscd, acotd, secd, cscd and cotd: the radian 
     "-2.0159e+15 -Inf 2.0159e+15",
     "5.7588 -1.0154 -0.1763 -0.9848 0.5000 0.5000",
     "[0.5 0.5 1 0 0 -Inf]",
+    "4.031832051015932e+15 1.007958012753983e+15 5.729475701315806e+11 5.728996163075943e+01 5.671281819617709e+00",
+    "1.7320508075688767 -0.99999999999999989 0",
   ]);
 });
