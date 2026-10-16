@@ -59,3 +59,4 @@ None
 NameError: name 'len' is not defined
 NameError: name 'x' is not defined
 NameError: name 'y' is not defined
+('<string>', None, False)

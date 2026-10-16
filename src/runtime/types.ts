@@ -422,7 +422,8 @@ const fnCodeType = builtinTypeFor("code", FnCode, "builtins", () => raise(T.Type
   const sigOf = (c: FnCode) => c.f.$sig ?? { args: [], posonly: 0, vararg: null, kwonly: [], kwarg: null };
   getset(fnCodeType, "co_name", (c) => c.f.__name__);
   getset(fnCodeType, "co_qualname", (c) => c.f.__qualname__);
-  getset(fnCodeType, "co_filename", (c) => c.f.$globals?.__file__ ?? "<string>");
+  // (the globals', never exec's locals mapping's)
+  getset(fnCodeType, "co_filename", (c) => (c.f.$globals === undefined ? undefined : c.f.$globals[NS_GLOBALS] ?? c.f.$globals)?.__file__ ?? "<string>");
   getset(fnCodeType, "co_argcount", (c) => sigOf(c).args.length);
   getset(fnCodeType, "co_posonlyargcount", (c) => sigOf(c).posonly);
   getset(fnCodeType, "co_kwonlyargcount", (c) => sigOf(c).kwonly.length);
