@@ -7658,17 +7658,42 @@ def strncmpi_(a, b, n):
     return _cmp_text(a, b, lambda x, y: x[:k].lower() == y[:k].lower())
 
 
-def _strrep_text(t, o, nw):
+# (the characters text functions may build in one call, their outputs together: past it,
+# refused before anything is built)
+_TEXT_MAX = 10_000_000
+
+
+def _text_admit(n, what):
+    if n > _TEXT_MAX:
+        raise _err("%s would build %d characters, beyond Sagebrush's limit of %d." % (what, n, _TEXT_MAX))
+
+
+def _strrep_text(t, o, nw, budget=None):
     """strrep's replacement, which counts overlapping matches, as its page shows: every place
     where old starts gives one copy of new, and the characters of a match are dropped (strrep of
-    '222' with '22' -> '*' is '**', where replace and regexprep give '*2')"""
+    '222' with '22' -> '*' is '**', where replace and regexprep give '*2'). The result's length
+    is counted against budget (a one-element list of characters left) before it is built"""
     if not o:
         return t
+    budget = budget if budget is not None else [_TEXT_MAX]
+    # (a quick lower bound first: the non-overlapping matches alone, each giving a copy of new)
+    if t.count(o) * len(nw) > budget[0]:
+        _text_admit(_TEXT_MAX - budget[0] + t.count(o) * len(nw), "strrep")
     starts = set()
     k = t.find(o)
     while k >= 0:
         starts.add(k)
         k = t.find(o, k + 1)
+    if starts:
+        # (its exact length: a copy of new per start, and the characters no match covers)
+        kept, covered = 0, -1
+        for i in sorted(starts):
+            kept += max(0, i - covered - 1)
+            covered = max(covered, i + len(o) - 1)
+        size = len(starts) * len(nw) + kept + (len(t) - covered - 1)
+        if size > budget[0]:
+            _text_admit(_TEXT_MAX - budget[0] + size, "strrep")
+        budget[0] -= size
     out = []
     covered = -1
     for i, c in enumerate(t):
@@ -7682,9 +7707,49 @@ def _strrep_text(t, o, nw):
 
 @_bs("strrep")
 def strrep_(s, old, new):
-    o = _text(old)
-    nw = _text(new)
-    return _textlike_map(s, lambda t: _strrep_text(t, o, nw))
+    if type(old) is not Cell and type(new) is not Cell and type(old) is not StrArr and type(new) is not StrArr:
+        o = _text(old)
+        nw = _text(new)
+        return _textlike_map(s, lambda t: _strrep_text(t, o, nw))
+    # (OLD or NEW an array: each element of STR with the corresponding OLD and NEW, a
+    # scalar going with every element; the page asks for "compatible sizes" without
+    # saying more, so only scalars and equal sizes are taken, and only cells of
+    # character vectors, the form its example shows)
+    args = (s, old, new)
+    if any(type(a) is StrArr or type(a) is Str for a in args):
+        raise _err("strrep: string arrays with array-valued OLD or NEW are not supported.")
+    if any(type(a) is Char and _dims(a)[0] > 1 for a in args):
+        raise _err("strrep: character matrices with array-valued OLD or NEW are not supported.")
+    arrays = [a for a in args if type(a) is Cell and len(a.a) != 1]
+    shape = arrays[0].shape if arrays else next(a.shape for a in args if type(a) is Cell)
+    if any(_text_size_key(a.shape) != _text_size_key(shape) for a in arrays):
+        raise _err("strrep: STR, OLD and NEW must be the same size or scalars.")
+    n = _prod(shape)
+    # (the texts read, all elements together, admitted from their sizes before any is
+    # converted; then the results, each counted before it is built, against one budget)
+    _text_admit(_numel(s) * n if type(s) is not Cell else sum(_numel(e) for e in s.a) * (n if len(s.a) == 1 else 1), "strrep")
+    fixed = {id(a): _text(a) for a in args if type(a) is not Cell}  # (a scalar text, converted once)
+    def item(a, k):
+        if type(a) is Cell:
+            e = a.a[k if len(a.a) != 1 else 0]
+            if type(e) is not Char or _dims(e)[0] > 1:
+                raise _err("strrep: cell arrays must contain character vectors.")
+            return e.text()
+        return fixed[id(a)]
+    budget = [_TEXT_MAX]
+    out = []
+    for k in range(n):
+        t, o, nw = item(s, k), item(old, k), item(new, k)
+        out.append(Char(_strrep_text(t, o, nw, budget)))
+    return Cell(out, shape)
+
+
+def _text_size_key(d):
+    """a size without trailing singleton dimensions past the second, to compare sizes"""
+    d = [int(x) for x in d]
+    while len(d) > 2 and d[-1] == 1:
+        d.pop()
+    return tuple(d)
 
 
 @_bs("strfind")
@@ -7845,7 +7910,39 @@ def regexpi_(nargout, s, pat, *opts):
     return _regexp(nargout, s, pat, opts, _re.IGNORECASE)
 
 
+def _regexp_row(e):
+    """a text or expression of regexp's cell forms as a character vector; a character matrix
+    is outside its page's character-vector inputs, so it is refused rather than its rows joined"""
+    if type(e) is Char and _dims(e)[0] > 1:
+        raise _err("regexp: character matrices are not supported; use a cell array of character vectors.")
+    return Char(_text(e))
+
+
 def _regexp(nargout, s, pat, opts, flags):
+    if type(pat) is StrArr or (type(pat) is Cell and (type(s) is StrArr or type(s) is Str)):
+        # (string arrays of expressions give string outputs whose exact forms the page
+        # doesn't spell out: refused rather than guessed)
+        raise _err("regexp: string arrays of expressions are not supported; use a cell array of character vectors.")
+    if type(pat) is Cell:
+        # (a cell array of expressions: each with STR, or with STR's corresponding
+        # element when both are cell arrays, which must then have the same dimensions)
+        # (each expression searches its text: the texts searched, together, admitted from their
+        # sizes before any is converted)
+        if type(s) is Cell:
+            if _text_size_key(s.shape) != _text_size_key(pat.shape):
+                raise _err("regexp: STR and EXPRESSION must have the same dimensions when both are arrays.")
+            _text_admit(sum(_numel(e) for e in s.a), "regexp with a cell array of expressions (the texts searched)")
+        else:
+            _text_admit(_numel(s) * len(pat.a), "regexp with a cell array of expressions (the texts searched)")
+        pats = [_regexp_row(e) for e in pat.a]
+        if type(s) is Cell:
+            strs = [_regexp_row(e) for e in s.a]
+        else:
+            strs = [_regexp_row(s)] * len(pats)
+        per = [_regexp(max(1, nargout), t, p, opts, flags) for t, p in zip(strs, pats)]
+        if nargout <= 1:
+            return Cell(per, pat.shape)
+        return [Cell([q[k] for q in per], pat.shape) for k in range(nargout)]
     if type(s) is Cell or type(s) is StrArr:
         # (each element: a cell of results)
         per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
