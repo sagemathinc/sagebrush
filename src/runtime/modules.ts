@@ -803,6 +803,9 @@ newBuiltinModule("_pyjs_types", (m) => {
     const v = lookupType(tp, name);
     return tuple(v === undefined ? [false, null] : [true, v]);
   }, "lookup");
+  // (a hook's int result checked as everywhere else, O.intResult: an int; a
+  // strict subclass's value with the DeprecationWarning; else TypeError)
+  m.int_result = builtin((what: any, r: any) => O.intResult(String(what), r), "int_result");
 });
 
 newBuiltinModule("types", (m) => {
