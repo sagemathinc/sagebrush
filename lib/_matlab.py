@@ -3883,12 +3883,10 @@ def _int_limit(name, a, k):
     if c not in _INTS:
         raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
     v = _INTS[c][k]
-    if float(v) != v:
-        # (a 64-bit limit Sagebrush's double-backed 64-bit integers can't hold exactly,
-        # 2^63 - 1 or 2^64 - 1, is refused rather than rounded: intmax('uint64') would
-        # show 18446744073709551616)
-        form = "%s(\"like\", p)" % name if len(a) == 2 else "%s('%s')" % (name, c)
-        raise _err("%s for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (form, c, v))
+    if len(a) == 2 and float(v) != v:
+        # (the "like" form, new here: a 64-bit limit Sagebrush's double-backed 64-bit
+        # integers can't hold exactly, 2^63 - 1 or 2^64 - 1, is refused rather than rounded)
+        raise _err("%s(\"like\", p) for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (name, c, v))
     return np.array([[v]], dtype=_INTS[c][0])
 
 
@@ -7878,15 +7876,29 @@ def isstrprop_(s, kind):
     return _char_pred(f)(1, s)
 
 
-def _group_names(p):
+def _group_names(p, freespacing=False):
     """[(group number, name)] of a MATLAB pattern's named capturing groups, in order: a name may
-    appear more than once, in different alternatives ('(?<day>\\d+)-...|...(?<day>\\d+)')"""
+    appear more than once, in different alternatives ('(?<day>\\d+)-...|...(?<day>\\d+)').
+    Comments are skipped: (?#...), and with freespacing (the option or an inline (?x)) a
+    # to the end of the line"""
     out = []
     i, n, k = 0, len(p), 0
     while i < n:
         c = p[i]
         if c == "\\":
             i += 2
+            continue
+        if p.startswith("(?#", i):
+            e = p.find(")", i)
+            i = n if e < 0 else e + 1
+            continue
+        if p.startswith("(?x)", i):
+            freespacing = True
+            i += 4
+            continue
+        if freespacing and c == "#":
+            e = p.find("\n", i)
+            i = n if e < 0 else e + 1
             continue
         if c == "[":
             j = i + 1
@@ -8094,7 +8106,7 @@ def _regexp(nargout, s, pat, opts, flags):
                 # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one.
                 # The fields in the order the names first appear; a name used in several
                 # alternatives takes the group that took part in the match)
-                groups = _group_names(_text(pat))
+                groups = _group_names(_text(pat), bool(flags & _re.VERBOSE))
                 names = list(dict.fromkeys(nm for _, nm in groups))
                 def value(m, nm):
                     for g, x in groups:

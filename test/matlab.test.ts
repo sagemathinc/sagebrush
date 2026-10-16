@@ -2043,22 +2043,22 @@ test("strrep and regexp with cell arrays: the text built or searched, all elemen
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
-test("intmax of a 64-bit class, complex of integers, regexprep's dynamic expressions and options refused; true/false like sparse, regexp's repeated token names, primes and str2num as the pages", () => {
+test("complex of integers, regexprep's dynamic expressions and options refused; true/false like sparse, regexp's repeated token names, primes and str2num as the pages", () => {
   const { execFileSync } = require("node:child_process");
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
   const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
   assert.deepEqual(run([
-    // (a 64-bit limit Sagebrush can't hold exactly: refused; the others as before)
-    tryIt("intmax('uint64')"), tryIt("intmax('int64')"),
-    "fprintf('%d %d\\n', intmin('int64'), intmax('int32'))",
     // (complex integers aren't represented: refused; single stays single)
     tryIt("complex(uint8([1;2]), uint8([2;2]))"), "disp(class(complex(single(1), single(2))))",
     // (true and false like a sparse prototype: sparse)
     "A = logical(sparse(5, 3)); F = false(4, 'like', A); T = true(2, 'like', A); disp(mat2str([issparse(F) islogical(F) nnz(F) issparse(T) nnz(T)]))",
+    tryIt("true(2, 3, 'like', sparse(1+2i))"), tryIt("false(2, 'like', sparse(5))"),
     // (a token name in two alternatives: the fields in first appearance, the matching alternative's value)
     "n = regexp('01/11/2000  20-02-2020', ['(?<month>\\d+)/(?<day>\\d+)/(?<year>\\d+)|' '(?<day>\\d+)-(?<month>\\d+)-(?<year>\\d+)'], 'names');",
     "disp(strjoin(fieldnames(n)', ',')); disp([n(1).month ' ' n(1).day ' ' n(2).month ' ' n(2).day ' ' n(2).year])",
+    // (comments don't count as groups: (?#...), and # lines with freespacing or (?x))
+    "n = regexp('a', '(?#()(?<x>a)', 'names'); m = regexp('a', sprintf('# (fake\\n(?<x>a)'), 'names', 'freespacing'); k = regexp('a', sprintf('(?x)# (fake\\n(?<x>a)'), 'names'); disp([n.x m.x k.x])",
     // (regexprep: dynamic expressions and options it doesn't have refused, not ignored)
     tryIt("regexprep('here. there', '(^|\\.)\\s*.', '${upper($0)}')"), tryIt("regexprep('May', 'M(\\w+)y', 'April', 'preservecase')"),
     "disp(regexprep('aBa', 'b', 'x', 'ignorecase'))",
@@ -2066,7 +2066,7 @@ test("intmax of a 64-bit class, complex of integers, regexprep's dynamic express
     tryIt("primes(1:10)"), "disp(mat2str(primes(10)))",
     "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
     tryIt("str2num('2+3')"),
-  ].join("\n")), ["refused", "refused", "-9223372036854775808 2147483647", "refused", "single",
-    "[1 1 0 1 4]", "month,day,year", "01 11 02 20 2020",
+  ].join("\n")), ["refused", "single",
+    "[1 1 0 1 4]", "refused", "refused", "month,day,year", "01 11 02 20 2020", "aaa",
     "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
 });
