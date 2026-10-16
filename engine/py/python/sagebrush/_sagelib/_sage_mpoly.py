@@ -663,6 +663,9 @@ class MPolynomialRing_:
             I = self.ideal(list(I))
         else:
             I = self.ideal(I)
+        if all(not g._d for g in I._gens):
+            # (R/(0) is R itself, as Sage returns it, whatever the names)
+            return self
         return QuotientRing_(self, I, names)
 
     quotient = quo
@@ -1437,11 +1440,19 @@ class MPolynomial:
         out = []
         for e, c in self._terms():
             mono = " ".join(names[i] + ("^{%d}" % k if k > 1 else "") for i, k in enumerate(e) if k)
-            neg = dom._is_negative(c)
-            a = dom._neg(c) if neg else c
+            if dom.p is not None:
+                # (Sage's LaTeX over GF(p) writes the residues 0..p-1, but
+                # -1 before a monomial as a minus sign: -u - v + 6 over GF(7))
+                r = int(c) % dom.p
+                neg = bool(mono) and dom.p > 2 and r == dom.p - 1
+                a = dom.one if neg else r
+                cs = str(r)
+            else:
+                neg = dom._is_negative(c)
+                a = dom._neg(c) if neg else c
             if isinstance(a, _F) and a.denominator != 1:
                 cs = "\\frac{%d}{%d}" % (a.numerator, a.denominator)
-            else:
+            elif dom.p is None:
                 cs = dom._repr(a)
             t = cs if not mono else mono if a == dom.one else cs + " " + mono
             out.append((neg, t))
@@ -4671,8 +4682,72 @@ class QuotientRing_:
         if isinstance(x, QuotientRingElement):
             if x._Q is self:
                 return x
+            # (an explicit conversion lifts the representative, as Sage's
+            # A(b) does; arithmetic goes through _common instead)
             x = x._f
         return QuotientRingElement(self, self._I.reduce(self._R(x)))
+
+    def _cover_compatible(self, Q):
+        """Whether elements of this quotient and of Q (both quotients of
+        polynomial rings) can meet: the same base ring and the same
+        variables in the same order (the term orders may differ; the
+        exponent tuples mean the same monomials).  Variables in another
+        order are refused rather than matched up."""
+        R, S = self._R, Q._R
+        if not (R._base == S._base and R._n == S._n):
+            return False
+        if tuple(R._names) != tuple(S._names):
+            if sorted(R._names) == sorted(S._names):
+                raise NotImplementedError("quotients of polynomial rings with their variables in different orders do not mix in sagebrush yet")
+            return False
+        return True
+
+    def _maps_to(self, Q):
+        """Whether the canonical map R/I -> R/J exists: I inside J."""
+        J = Q._I
+        return all(not J.reduce(MPolynomial(Q._R, g._d))._d for g in self._I._gens)
+
+    def _common(self, Q):
+        """The parent where an element of self and one of Q meet, through
+        the canonical quotient maps, or None, as Sage: the quotient by the
+        larger ideal when one contains the other (self's when they are
+        equal: Sage picks the left operand's); otherwise, for quotients
+        with the same variable names, the quotient by the sum I + J, unless
+        that is the unit ideal (the zero ring)."""
+        if Q is self:
+            return self
+        if not self._cover_compatible(Q):
+            return None
+        if Q._maps_to(self):
+            return self
+        if self._maps_to(Q):
+            return Q
+        if tuple(self._show._names) != tuple(Q._show._names):
+            return None
+        cache = self.__dict__.setdefault("_pushouts", {})
+        hit = cache.get(id(Q))
+        if hit is not None and hit[0] is Q:
+            return hit[1]
+        R = self._R
+        gens = list(self._I._gens) + [MPolynomial(R, g._d) for g in Q._I._gens]
+        # (Sage lists the sum's generators largest first: by degree, then
+        # the last variable most significant)
+        key = lambda g: max((sum(e), tuple(reversed(e))) for e in g._d) if g._d else (-1, ())
+        J = MPolynomialIdeal(R, sorted(gens, key=key, reverse=True))
+        if not J.reduce(R(1))._d:
+            P = None
+        else:
+            P = QuotientRing_(R, J)
+        cache[id(Q)] = (Q, P)
+        Q.__dict__.setdefault("_pushouts", {})[id(self)] = (self, P)
+        return P
+
+    def _image(self, a):
+        """The image of a (an element of a quotient that maps to this
+        one) under the canonical map."""
+        if a._Q is self:
+            return a
+        return QuotientRingElement(self, self._I.reduce(MPolynomial(self._R, a._f._d)))
 
     def gens(self):
         return tuple(self(g) for g in self._R.gens())
@@ -4726,23 +4801,36 @@ class QuotientRingElement:
         except (TypeError, ValueError):
             return None
 
-    def __add__(self, o):
+    def _pair(self, o, op):
+        """(parent, a, b): self and o in a common parent.  An element of
+        another quotient meets self through the canonical quotient map
+        (astra's CORR-3E3-1: it was converted into self's parent, so
+        a + b and b + a differed); with no such map, Sage's TypeError."""
+        if isinstance(o, QuotientRingElement) and o._Q is not self._Q:
+            P = self._Q._common(o._Q)
+            if P is None:
+                raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self._Q, o._Q))
+            return P, P._image(self), P._image(o)
         o = self._other(o)
-        return NotImplemented if o is None else self._Q(self._f + o._f)
+        return None if o is None else (self._Q, self, o)
+
+    def __add__(self, o):
+        t = self._pair(o, "+")
+        return NotImplemented if t is None else t[0](t[1]._f + t[2]._f)
 
     __radd__ = __add__
 
     def __sub__(self, o):
-        o = self._other(o)
-        return NotImplemented if o is None else self._Q(self._f - o._f)
+        t = self._pair(o, "-")
+        return NotImplemented if t is None else t[0](t[1]._f - t[2]._f)
 
     def __rsub__(self, o):
-        o = self._other(o)
-        return NotImplemented if o is None else self._Q(o._f - self._f)
+        t = self._pair(o, "-")
+        return NotImplemented if t is None else t[0](t[2]._f - t[1]._f)
 
     def __mul__(self, o):
-        o = self._other(o)
-        return NotImplemented if o is None else self._Q(self._f * o._f)
+        t = self._pair(o, "*")
+        return NotImplemented if t is None else t[0](t[1]._f * t[2]._f)
 
     __rmul__ = __mul__
 
@@ -4771,8 +4859,13 @@ class QuotientRingElement:
     __rtruediv__ = __truediv__
 
     def __eq__(self, o):
-        o = self._other(o)
-        return o is not None and not (self._f - o._f)._d
+        # (symmetric: through the canonical map when there is one, and
+        # never equal when the quotients do not meet, as Sage)
+        try:
+            t = self._pair(o, "==")
+        except TypeError:
+            return False
+        return t is not None and not (t[1]._f - t[2]._f)._d
 
     def __ne__(self, o):
         return not self == o

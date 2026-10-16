@@ -1,0 +1,40 @@
+A is R.quo again :: False
+A is quo by ideal :: False
+eq ab ba :: (True, True, False, False)
+add :: (2, True, 2, True)
+mul sub :: (1, 1, 0, 0)
+incompatible eq :: (False, False, False, False)
+incompatible add :: TypeError unsupported operand parent(s) for +: 'Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x)' and 'Quotient of Multivar
+incompatible mul :: TypeError unsupported operand parent(s) for *: 'Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x - 1)' and 'Quotient of Mult
+D to A :: (xbar, True, True)
+conv B(a) :: (1, True)
+conv A(b) :: 1
+conv C(b) :: 1
+names :: 2*u
+names eq :: True
+other order :: (True, True)
+other order add :: 2*xbar
+other base add :: TypeError unsupported operand parent(s) for +: 'Quotient of Multivariate Polynomial Ring in x, y over Finite Field of size 5 by the ideal (x^2 - 1)' and 'Quotie
+other base eq :: (False, False)
+with poly :: (xbar + ybar, xbar + ybar, True, True)
+with int :: (xbar + 1, xbar + 1, False, 2*xbar)
+push eq :: (True, True, True, True)
+push add :: (2, 2)
+push parent :: (Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x*y, x - 1), Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x*y, x - 1))
+push parent gens :: [x*y, x - 1]
+push names :: TypeError unsupported operand parent(s) for +: 'Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x - 1)' and 'Quotient of Mult
+push mul :: (0, 0)
+push unit :: TypeError unsupported operand parent(s) for +: 'Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x)' and 'Quotient of Multivar
+push three :: TypeError unsupported operand parent(s) for +: 'Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x*y, x - 1)' and 'Quotient of
+push lift :: 2
+gf7 latex :: (3 u^{2} v - v + 2, 2 v^{3} + u^{2} + 4 u v + 6, -u - v + 6, 5 u + 6, -u + 6, 6, 4, -u)
+gf2 latex :: (s + t + 1, s)
+gf3 latex :: (-p - q + 2, -p q + 2, -p^{2} q)
+names contain :: (2, 2, True)
+names contain rev :: (2, 2)
+names eq :: (True, True, False, False)
+push order :: (Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (y^2, x*y), Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (y^2, x*y))
+push order2 :: (Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (y^3 - x, x^2 + y), Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (y^3 - x, x^2 + y))
+push order3 :: Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (y^2 + 1, x - 1)
+zero ideal :: [True, True, True, True, True]
+zero ideal mix :: (2, True)
