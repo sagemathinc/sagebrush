@@ -361,6 +361,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
    * being looked at in TimeTravel, which is not the document and does not
    * run).  False if it was overtaken (another document loaded, the board
    * destroyed) and drew nothing. */
+  // (the board's language, as the toolbar's Code says it)
+  let codeMode = "python";
   async function show(d: BoardDoc, view = false): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
     if (over()) return false;
@@ -421,8 +423,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
-    // (the toolbar's Code, and its row in the toolbar's menu: the board's language)
-    for (const el of root.querySelectorAll<HTMLElement>("[data-tool=code][title]")) el.title = codeTitle(d.mode ?? "python");
+    // (the toolbar's Code: the board's language; its tool's title reads it
+    // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
+    // the button and an open menu's row (on document.body), is told now)
+    codeMode = d.mode ?? "python";
+    for (const el of [...root.querySelectorAll<HTMLElement>("[data-tool=code][title]"), ...document.querySelectorAll<HTMLElement>(".board-toolbar-panel [data-tool=code][title]")]) el.title = codeTitle(codeMode);
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
     // (code items' heights were for these two layouts, the page's and its template's: PERF-F2A-1)
@@ -928,7 +933,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const toolbar = new Toolbar(root, [
     { id: "select", label: "Select", icon: "↖", title: "Select: drag on the background to select what the rectangle holds (Space-drag pans); Esc to stop", toggle: editor.selecting },
     { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y, true); } },
-    { id: "code", label: "Code", icon: "{ }", title: codeTitle("python"), run: () => { const c = center(); editor.addCode(c.x, c.y, true); } },
+    { id: "code", label: "Code", icon: "{ }", get title() { return codeTitle(codeMode); }, run: () => { const c = center(); editor.addCode(c.x, c.y, true); } },
     { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
     { id: "sticker", label: "Sticker", icon: "☺", title: "Add a sticker: an emoji (double-click one to change it)", run: () => editor.pickSticker({ at: center(), under: toolbar.el }) },
     { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y, true); } },
