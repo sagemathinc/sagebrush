@@ -523,9 +523,17 @@ export function createNotebook(root, opts = {}) {
   // An output is stale when this interpreter did not produce it: after a
   // restart, or loaded from storage, or from another tab (opts.staleOnLoad).
   // It stays visible, dimmed, until the cell runs again.
+  const stoppedText = (ms) => `stopped after ${secs(ms)}; the interpreter restarted`;
+  const STOPPED_TITLE = "It did not stop when interrupted, so the interpreter was restarted: run the cells you need again";
   function markStale(cell) {
     if (cell.type !== "code" || (!cell.out.childNodes.length && !/\d/.test(cell.n.textContent))) return;
     cell.el.classList.add("stale");
+    // (the cell the restart stopped keeps saying so, UI-D1D-1)
+    if (cell.stoppedAfter != null) {
+      cell.time.textContent = stoppedText(cell.stoppedAfter);
+      cell.time.title = STOPPED_TITLE;
+      return;
+    }
     cell.time.textContent = "stale";
     cell.time.title = "Not computed by the current interpreter: run the cell to update it";
   }
@@ -707,6 +715,7 @@ export function createNotebook(root, opts = {}) {
     forgetInteracts(cell.out);
     cell.out.textContent = "";
     cell.time.textContent = "";
+    cell.stoppedAfter = null;
     freshen(cell);
     cell.el.classList.remove("cancelled", "error");
     if (!kernel) { appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true); return Promise.resolve({ ok: false, ms: 0, stopped: true }); }
@@ -718,7 +727,7 @@ export function createNotebook(root, opts = {}) {
     return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}) }, {
       start() {
         cell.el.classList.replace("queued", "running");
-        const t0 = performance.now();
+        const t0 = (cell.t0 = performance.now());
         cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 250);
       },
       ...areaSink(cell.out),
@@ -747,9 +756,14 @@ export function createNotebook(root, opts = {}) {
         resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
       },
       stopped(message) {
+        // (a running cell whose interpreter was ended, Stop's last resort:
+        // how long it ran, and why it stopped, rather than no time at all)
+        const ran = cell.el.classList.contains("running") && cell.t0 != null ? performance.now() - cell.t0 : null;
         settle(cell);
         cell.n.textContent = "[ ]";
-        cell.time.textContent = "";
+        cell.stoppedAfter = ran;
+        cell.time.textContent = ran != null ? stoppedText(ran) : "";
+        if (ran != null) cell.time.title = STOPPED_TITLE;
         if (message) appendText(cell.out, message, true);
         resolve({ ok: false, ms: 0, stopped: true });
       },
@@ -860,9 +874,14 @@ export function createNotebook(root, opts = {}) {
       const why = { budget: `not rerun automatically${ms ? ` (it takes about ${secs(ms)})` : ""}`, manual: "a manual cell: run it yourself", ancestor: "a cell it depends on is stale", interrupted: "interrupted", loaded: "not computed in this session", restart: "the interpreter restarted" }[st.why] ?? "";
       cls.add("stale");
       // (with how long it took last time, if known)
-      const est = ms != null && st.why !== "budget" ? ` (~${secs(ms)})` : "";
+      const est = ms != null && ms > 0 && st.why !== "budget" ? ` (~${secs(ms)})` : "";
       cell.time.textContent = "stale" + (st.why === "budget" || st.why === "manual" ? ": " + why : "") + est;
       cell.time.title = `Stale: ${why}. Run the cell to update it.`;
+      // (the cell the restart stopped says so, not merely stale)
+      if (cell.stoppedAfter != null) {
+        cell.time.textContent = stoppedText(cell.stoppedAfter);
+        cell.time.title = STOPPED_TITLE;
+      }
       if (cell.n.textContent === "[*]") cell.n.textContent = "[ ]";
       return;
     }
