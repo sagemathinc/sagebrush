@@ -2567,6 +2567,10 @@ def matrix(*args, **kwds):
         [0 1 0]
         [1 0 1]
         [0 1 0]
+        sage: matrix(Graph([(0, 1)]), 2)
+        Traceback (most recent call last):
+        ...
+        TypeError: too many arguments in matrix constructor
     """
     ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
@@ -2575,14 +2579,28 @@ def matrix(*args, **kwds):
     # over Qp the column count became the scalar entry)
     args = _int_dims(args)
     base = None
-    if args and any(c.__name__ == "GenericGraph" for c in type(args[-1]).__mro__):
-        # matrix(G) and matrix(R, G): the graph's adjacency matrix, as Sage
-        # (matrix(Graph([(0, 1)])) was the 1 x 2 row [0 1]: astra's hunt)
-        if len(args) > 2 or kwds:
-            raise NotImplementedError("matrix(..., graph, ...) with these arguments is not available in sagebrush yet")
+    is_graph = lambda a: any(c.__name__ == "GenericGraph" for c in type(a).__mro__)
+    if any(is_graph(a) for a in args):
+        # matrix(G), matrix(R, G), with dimensions before G if wanted: the
+        # graph's adjacency matrix, as Sage (matrix(Graph([(0, 1)])) was the
+        # 1 x 2 row [0 1]: astra's hunt). A graph before other arguments
+        # (matrix(G, 2), matrix(ZZ, G, 2)) is Sage's TypeError; it was
+        # iterated as a list of entries (astra's CORR-EA6-1).
+        if not is_graph(args[-1]) or any(is_graph(a) for a in args[:-1]):
+            raise TypeError("too many arguments in matrix constructor")
+        if set(kwds) - {"sparse"}:
+            raise NotImplementedError("matrix(..., graph, %s) is not available in sagebrush yet" % ", ".join(sorted(kwds)))
+        rest = list(args[:-1])
+        ring = rest.pop(0) if rest and not isinstance(rest[0], int) else None
+        if len(rest) > 2 or not all(isinstance(d, int) and not isinstance(d, bool) for d in rest):
+            raise TypeError("too many arguments in matrix constructor")
         A = args[-1].adjacency_matrix()
-        rows = [list(r) for r in A.rows()]
-        return matrix(args[0], rows) if len(args) == 2 else A
+        n = A.nrows()
+        if rest and (rest[0] != n or rest[-1] != n):
+            raise ValueError("the dimensions %s do not match the graph's %d vertices" % (" x ".join(map(str, rest)), n))
+        if ring is None:
+            return A
+        return matrix(ring, [list(r) for r in A.rows()])
     import _sage_ffmat
     if args and _sage_ffmat._is_ff(args[0]):
         return _sage_ffmat.matrix(*args, **kwds)
