@@ -68,3 +68,9 @@ for c in ("np.add(1, 1, dtype=np.float32, casting='no')", "np.add(1, 1, dtype=np
           "np.multiply.reduce(np.zeros((2, 0), np.uint8), axis=None, dtype=np.uint8, keepdims=True)", "np.multiply.accumulate(np.zeros((0, 2), np.int8), dtype=np.int8).shape",
           "np.multiply.reduce([], dtype=np.int8, initial=3)", "np.multiply.reduce(np.array([], np.uint32), dtype=np.uint32)"):
     print(c, "->", tr(lambda: eval(c)))
+# a unary ufunc's Python scalar is its default dtype (CORR-7A1-1)
+for c in ("np.absolute(1, dtype=np.float32, casting='no')", "np.sqrt(1, dtype=np.float32, casting='safe')", "np.sqrt(1, dtype=np.float32)",
+          "np.negative(1, dtype=np.int8)", "np.negative(300, dtype=np.int8)", "np.negative(1, dtype=np.int8, casting='safe')",
+          "np.negative(1.5, dtype=np.float32, casting='safe')", "np.negative(1.5, dtype=np.float32)", "np.negative(True, dtype=np.int8, casting='safe')",
+          "np.sqrt(1j, dtype=np.complex64, casting='safe')", "np.negative(-1, dtype=np.uint8)", "np.absolute(-2, dtype=np.float64, casting='safe')"):
+    print(c, "->", tr(lambda: eval(c)))
