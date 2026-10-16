@@ -5,7 +5,7 @@ import {
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
@@ -1715,9 +1715,21 @@ Object.defineProperty(O.PySet.prototype, "$cls", {
 const asSet = (x: any) => (x instanceof O.PySet ? x : O.newSet(x));
 const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "copy", (s: O.PySet) => O.setOp(s, O.newSet(), "or"));
-  method(cls, "union", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "or"), O.setOp(s, O.newSet(), "or")));
-  method(cls, "intersection", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "and"), O.setOp(s, O.newSet(), "or")));
-  method(cls, "difference", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "sub"), O.setOp(s, O.newSet(), "or")));
+  // (each also as an array of its arguments, for s.union(*xs) of any length: BIG_CALL)
+  // (union and difference work on one copy: a copy per argument was quadratic)
+  const fold = (op: "or" | "and" | "sub") => (a: any[]) => {
+    let r = O.setOp(a[0], O.newSet(), "or");
+    for (let i = 1; i < a.length; i++) {
+      if (op === "or") O.forEach(a[i], (v) => O.setAdd(r, v));
+      else if (op === "sub") O.forEach(a[i], (v) => void dictDelete(r.$d, v));
+      else r = O.setOp(r, asSet(a[i]), "and");
+    }
+    return r;
+  };
+  for (const [name, op] of [["union", "or"], ["intersection", "and"], ["difference", "sub"]] as const) {
+    const f = fold(op);
+    positionalArray(method(cls, name, (s: O.PySet, ...others: any[]) => f([s, ...others])), f);
+  }
   method(cls, "symmetric_difference", (s: O.PySet, o: any) => O.setOp(s, asSet(o), "xor"));
   method(cls, "issubset", (s: O.PySet, o: any) => O.setSubset(s, asSet(o)));
   method(cls, "issuperset", (s: O.PySet, o: any) => O.setSubset(asSet(o), s));
@@ -1757,15 +1769,20 @@ const setMethods = (cls: PyType, mutable: boolean) => {
     return k;
   });
   method(cls, "clear", (s: O.PySet) => (dictClear(s.$d), null));
-  method(cls, "update", (s: O.PySet, ...others: any[]) => {
-    for (const o of others) O.forEach(o, (v) => O.setAdd(s, v));
+  const update = (a: any[]) => {
+    const s: O.PySet = a[0];
+    for (let i = 1; i < a.length; i++) O.forEach(a[i], (v) => O.setAdd(s, v));
     return null;
-  });
-  for (const [name, f] of [["intersection_update", "and"], ["difference_update", "sub"], ["symmetric_difference_update", "xor"]] as const) {
-    method(cls, name, (s: O.PySet, ...os: any[]) => {
-      for (const o of os) s.$d = O.setOp(s, asSet(o), f).$d;
+  };
+  positionalArray(method(cls, "update", (s: O.PySet, ...others: any[]) => update([s, ...others])), update);
+  method(cls, "symmetric_difference_update", (s: O.PySet, o: any) => ((s.$d = O.setOp(s, asSet(o), "xor").$d), null));
+  for (const [name, f] of [["intersection_update", "and"], ["difference_update", "sub"]] as const) {
+    const g = (a: any[]) => {
+      const s: O.PySet = a[0];
+      for (let i = 1; i < a.length; i++) s.$d = O.setOp(s, asSet(a[i]), f).$d;
       return null;
-    });
+    };
+    positionalArray(method(cls, name, (s: O.PySet, ...os: any[]) => g([s, ...os])), g);
   }
 };
 setMethods(set, true);
@@ -2077,6 +2094,7 @@ export class Zip {
 }
 const zip = iteratorType("zip", Zip, (...xs: any[]) => new Zip(xs.map(O.iter), false));
 zip.$kw = (pos, names, values) => new Zip(pos.map(O.iter), names[0] === "strict" && O.truth(values[0]));
+(zip as any).$kwPos = true; // (zip(*rows) of any length: BIG_CALL)
 
 export class MapIter {
   constructor(public f: any, public its: any[]) {}
