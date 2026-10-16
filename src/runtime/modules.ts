@@ -401,8 +401,16 @@ newBuiltinModule("math", (m) => {
     return O.mkfloat(r);
   });
   fn(m, "atan2", (y: any, x: any) => O.mkfloat(CR.atan2(F(y), F(x))));
-  // (also as an array of its arguments, for hypot(*xs) of any length: BIG_CALL)
-  const hypotN = (xs: any[]) => O.mkfloat(CR.hypotN(xs.map(F)));
+  // (also as an array of its arguments, for hypot(*xs) of any length:
+  // BIG_CALL; the call's own temporary array, converted in place with Stop
+  // polled, no second array, HARD-592-1)
+  const hypotN = (xs: any[]) => {
+    for (let i = 0; i < xs.length; i++) {
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      xs[i] = F(xs[i]);
+    }
+    return O.mkfloat(CR.hypotN(xs));
+  };
   fn(m, "hypot", positionalArray((...xs: any[]) => hypotN(xs), hypotN));
   fn(m, "copysign", (x: any, y: any) => {
     // (through the bits: y's sign bit, a NaN's too, on x's magnitude)
