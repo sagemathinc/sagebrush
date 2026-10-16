@@ -1844,6 +1844,8 @@ test("asin, acos, atanh and the reciprocal inverses on the real axis outside the
     // (a complex zero as a real zero: acsch's numeric example, and each reciprocal inverse at complex(0, 0))
     z("acsch([-2i 0 2i/sqrt(3) 1/2 1i 3])"),
     z("[acsch(complex(0, 0)) acot(complex(0, 0)) acoth(complex(0, 0)) asech(complex(0, 0))]"),
+    // (atan of a complex array with an infinite entry, so acot with a zero one: pi/2, as for a scalar)
+    z("atan([Inf 1i])"), z("acot([0 1i])"), z("acot(single([0 1+2i]))"),
   ].join("\n")), [
     "0.0000+1.3170i 3.1416-1.7627i 1.1437-1.5286i",
     "1.5708-1.3170i -1.5708+1.7627i 0.4271+1.5286i",
@@ -1858,5 +1860,8 @@ test("asin, acos, atanh and the reciprocal inverses on the real axis outside the
     "0.0000+Infi 0.0000-Infi 0.0000-Infi",
     "0.0000+0.5236i Inf+0.0000i 0.0000-1.0472i 1.4436+0.0000i 0.0000-1.5708i 0.3275+0.0000i",
     "Inf+0.0000i 1.5708+0.0000i 0.0000+1.5708i Inf+0.0000i",
+    "1.5708+0.0000i 0.0000+Infi",
+    "1.5708+0.0000i 0.0000-Infi",
+    "1.5708+0.0000i 0.2318-0.4024i",
   ]);
 });
