@@ -1,6 +1,7 @@
 """In-memory streams and the io class hierarchy."""
 
 import sys as _sys
+import _pyjs_types
 
 SEEK_SET = 0
 SEEK_CUR = 1
@@ -43,12 +44,10 @@ def _ssize(v):
 
 def _type_lookup(tp, name):
     """name in tp's MRO, as CPython's _PyType_Lookup: the raw attribute (no
-    binding, no metaclass __getattribute__), or _MISSING"""
-    for k in type.__getattribute__(tp, "__mro__"):
-        d = type.__getattribute__(k, "__dict__")
-        if name in d:
-            return d[name]
-    return _MISSING
+    binding; no metaclass __getattribute__, __mro__ or __dict__ consulted),
+    or _MISSING"""
+    found, v = _pyjs_types.lookup(tp, name)
+    return v if found else _MISSING
 
 
 def _special(obj, name):
