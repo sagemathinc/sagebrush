@@ -1035,6 +1035,14 @@ export function toPyExc(e: any): any {
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return r;
   }
+  // An allocation JS can't make (a string or array past its maximum
+  // length, an ArrayBuffer it can't allocate): MemoryError, as CPython's
+  // when memory runs out, not an internal error (HARD-978-2).
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length/.test(e.message)) {
+    const r = T.MemoryError();
+    Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
+    return r;
+  }
   if (e instanceof RangeError && /call stack/.test(e.message)) {
     const r = T.RecursionError("maximum recursion depth exceeded");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });

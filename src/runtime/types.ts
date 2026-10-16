@@ -1181,9 +1181,15 @@ method(S, "zfill", (s: string, w: any) => {
 // str.translate and str.maketrans, as CPython's (their messages included);
 // they take int and str subclasses' instances (not float's, nor __index__)
 const intOrStr = (x: any): any => (x instanceof IntLayout || x instanceof StrLayout ? x.$v : x);
+// (the longest string JS makes: past it, translate's output is a MemoryError
+// before it is built, HARD-978-2)
+const MAX_STR = 2 ** 29 - 24;
 method(S, "translate", (s: string, table: any) => {
   const out: string[] = [];
+  let size = 0, n = 0;
   for (const ch of s) {
+    // (Stop, every 4096 characters: the table's __getitem__ may be a builtin)
+    if ((++n & 4095) === 0) O.pollInterrupt();
     let r: any;
     try {
       r = O.getitem(table, ch.codePointAt(0)!);
@@ -1196,11 +1202,16 @@ method(S, "translate", (s: string, table: any) => {
     }
     if (r === null) continue;
     r = intOrStr(r);
-    if (typeof r === "string") out.push(r);
-    else if (O.isPyInt(r)) {
-      const n = Number(r);
-      if (!(n >= 0 && n < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
-      out.push(String.fromCodePoint(n));
+    if (typeof r === "string") {
+      size += r.length;
+      if (size > MAX_STR) raise(T.MemoryError);
+      out.push(r);
+    } else if (O.isPyInt(r)) {
+      const c = Number(r);
+      if (!(c >= 0 && c < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
+      size += c > 0xffff ? 2 : 1;
+      if (size > MAX_STR) raise(T.MemoryError);
+      out.push(String.fromCodePoint(c));
     } else raise(T.TypeError, "character mapping must return integer, None or str");
   }
   return out.join("");
@@ -1211,7 +1222,9 @@ S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
   const d = new PyDict();
   if (a.length === 1) {
     if (!(a[0] instanceof PyDict)) raise(T.TypeError, "if you give only one argument to maketrans it must be a dict");
+    let n = 0;
     for (const k of O.toArray(a[0])) {
+      if ((++n & 4095) === 0) O.pollInterrupt();
       const v = O.getitem(a[0], k);
       const kk = intOrStr(k);
       if (typeof kk === "string") {
@@ -1231,8 +1244,17 @@ S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
   a[0] = intOrStr(a[0]);
   const x = [...a[0]], y = [...a[1]];
   if (x.length !== y.length) raise(T.ValueError, "the first two maketrans arguments must have equal length");
-  x.forEach((c, i) => dictSet(d, c.codePointAt(0)!, y[i].codePointAt(0)!));
-  if (a.length === 3) for (const c of a[2]) dictSet(d, c.codePointAt(0)!, null);
+  x.forEach((c, i) => {
+    if ((i & 4095) === 4095) O.pollInterrupt();
+    dictSet(d, c.codePointAt(0)!, y[i].codePointAt(0)!);
+  });
+  if (a.length === 3) {
+    let n = 0;
+    for (const c of a[2]) {
+      if ((++n & 4095) === 0) O.pollInterrupt();
+      dictSet(d, c.codePointAt(0)!, null);
+    }
+  }
   return d;
 }, "maketrans")));
 method(S, "partition", (s: string, sep: string) => {

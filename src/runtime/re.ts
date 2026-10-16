@@ -352,6 +352,8 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
   rx.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((n === 0 || k < n) && (m = rx.exec(s)) !== null) {
+    // (Stop, every 1024 matches: a long string has millions, HARD-978-1)
+    if ((k & 1023) === 1023) O.pollInterrupt();
     const pm = new PyMatch(p, string, s, m, 0, s.length);
     out += s.slice(last, m.index);
     if (tmpl !== null) out += expandTemplate(p, tmpl, pm);
@@ -377,6 +379,7 @@ function allMatches(p: PyPattern, string: any, pos: any = 0, endpos: any = null)
   rx.lastIndex = ps;
   let m: RegExpExecArray | null;
   while ((m = rx.exec(s)) !== null) {
+    if ((out.length & 1023) === 1023) O.pollInterrupt();
     out.push(new PyMatch(p, string, s0, m, ps, e));
     if (m[0].length === 0) rx.lastIndex = advance(s, m.index);
   }
