@@ -324,9 +324,23 @@ function arg(x: any): [number, number] {
   if (c !== undefined) return c;
   return asComplex(x, "argument");
 }
+// (a real number as CPython's PyFloat_AsDouble, as the math module's: a
+// float, an int, or an object's __float__ or __index__)
 function realArg(x: any): number {
   const v = O.fv(x);
-  return v === undefined ? raise(T.TypeError, `must be real number, not ${typeName(x)}`) : v;
+  if (v !== undefined) return v;
+  const f = lookupType(typeOf(x), "__float__");
+  if (f !== undefined) {
+    const r = f(x);
+    if (!typeOf(r).$mro.includes(T.float)) raise(T.TypeError, `${typeName(x)}.__float__ returned non-float (type ${typeName(r)})`);
+    return O.fv(r)!;
+  }
+  if (lookupType(typeOf(x), "__index__") !== undefined) {
+    const d = Number(O.index(x));
+    if (!Number.isFinite(d)) raise(T.OverflowError, "int too large to convert to float");
+    return d;
+  }
+  return raise(T.TypeError, `must be real number, not ${typeName(x)}`);
 }
 const EDOM = 1, ERANGE = 2;
 let errno = 0;
@@ -865,9 +879,8 @@ newBuiltinModule("cmath", (m) => {
     const [a, b, rel, abs] = bindArgs("isclose", sig(["a", "b"], { kwonly: ["rel_tol", "abs_tol"] }), pos, names, values);
     if (a === undefined) raise(T.TypeError, "isclose() missing required argument 'a' (pos 1)");
     if (b === undefined) raise(T.TypeError, "isclose() missing required argument 'b' (pos 2)");
-    const fl = (v: any) => { const r = O.fv(v); if (r === undefined) raise(T.TypeError, `must be real number, not ${typeName(v)}`); return r; };
     const x = arg(a), y = arg(b);
-    return isclose(x, y, rel === undefined ? 1e-9 : fl(rel), abs === undefined ? 0 : fl(abs));
+    return isclose(x, y, rel === undefined ? 1e-9 : realArg(rel), abs === undefined ? 0 : realArg(abs));
   };
 });
 import { builtins } from "./builtins";

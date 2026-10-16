@@ -2418,3 +2418,15 @@ exp (1000+1j) OverflowError
 acos (1e+308-1e+308j) 0x1.921fb54442d18p-1 0x1.631e32ef5c834p+9
 acosh (-1e+308+3j) 0x1.62f1d6695e8ecp+9 0x1.921fb54442d18p+1
 asinh (-1e+308-0j) -0x1.62f1d6695e8ecp+9 -0x0.0p+0
+cmath.rect(F(), F()) -0x1.aa22657537205p-1 0x1.d18f6ead1b446p+0
+cmath.rect(I(), I()) -0x1.aa22657537205p-1 0x1.d18f6ead1b446p+0
+cmath.isclose(2, 2, rel_tol=F(), abs_tol=I()) True
+cmath.rect(Bad(), 1) TypeError Bad.__float__ returned non-float (type str)
+cmath.rect('a', 1) TypeError must be real number, not str
+cmath.rect(10 ** 400, 0) OverflowError int too large to convert to float
+cmath.rect(BigI(), 0) OverflowError int too large to convert to float
+cmath.isclose(1, 1, rel_tol='x') TypeError must be real number, not str
+cmath.rect(True, I()) -0x1.aa22657537205p-2 0x1.d18f6ead1b446p-1
+cmath.rect(FS(1.5), 0) 0x1.8000000000000p+0 0x0.0p+0
+cmath.isclose(1, 1.0000001, rel_tol=FS(1e-6)) True
+cmath.isclose(1, 2, abs_tol=Bad()) TypeError Bad.__float__ returned non-float (type str)
