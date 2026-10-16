@@ -211,8 +211,6 @@ class Parser {
       if (a.t === "id" && b.v === "<" && c.v === "[") return found(`${a.v}<[...]> (generator names in a sequence)`);
       if (a.t === "kw" && ["join", "meet", "cat", "diff", "sdiff", "div", "mod", "and", "or", "xor"].includes(a.v) && b.v === ":=") return found(`${a.v}:= (an assignment with ${a.v})`);
       if (a.v === "for" && b.t === "id" && c.v === ",") return found("for x, y in S (several loop variables)");
-      if ((a.v === "exists" || a.v === "forall") && a.t === "id" && b.v === "(") return found(`${a.v}(t){ ... } (with a witness)`);
-      if ((a.v === "exists" || a.v === "forall") && a.t === "id" && b.v === "{") return found(`${a.v}{ ... }`);
       if (a.v === "load" && a.t === "id" && k === from) return found("load (Magma's library files)");
       if (a.v === "for" && b.t === "id" && c.v === "in") {
         // for i in S, j in T do: several loops in one
@@ -799,6 +797,8 @@ class Parser {
   }
 
   assign(lhs: Target[]) {
+    // (the := just read: where Magma puts a multiple assignment's error)
+    const op = this.toks[this.i - 1];
     // R<x> := PolynomialRing(...)
     if (lhs.length === 1 && lhs[0].kind === "gens") {
       const g = lhs[0];
@@ -817,7 +817,7 @@ class Parser {
       return;
     }
     const tmp = this.fresh();
-    this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length})`);
+    this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length}, (${op.line}, ${op.col}))`);
     lhs.forEach((t, k) => {
       if (t.py === "_m_discard") return;
       if (t.kind !== "name") return this.store(t, `_m._present(${tmp}[${k}])`);
@@ -1340,6 +1340,7 @@ class Parser {
     if (t.t === "num") { this.next(); return t.v; }
     if (t.t === "real") { this.next(); return `_m._real(${JSON.stringify(t.v)})`; }
     if (t.t === "str") { this.next(); return JSON.stringify(t.v); }
+    if (t.t === "id" && (t.v === "exists" || t.v === "forall") && this.quantifierAhead()) return this.quantifier();
     if (t.t === "id" && this.at("<", 1)) return this.ctorExpr();
     if (t.t === "id") {
       this.next();
@@ -1566,6 +1567,86 @@ class Parser {
     return this.selectExpr();
   }
 
+  /** A comprehension's clauses after its ":" (x in S, y, z in T | cond) up
+   * to `close`: its loops as Python's (the last clause the outermost: the
+   * first variable varies fastest), and its condition.  h0: where the
+   * head's uses begin (its loop variables are bound there). */
+  comprehension(h0: number, close: string): { loops: string; cond: string | null } {
+    const h1 = this.uses.length;
+    const loops: string[] = [];
+    const bound: string[] = [];
+    const sets: { vars: string[]; from: number; to: number }[] = [];
+    do {
+      const vars = [pyName(this.ident())];
+      while (this.eat(",")) vars.push(pyName(this.ident()));
+      bound.push(...vars);
+      this.expect("in");
+      const from = this.uses.length;
+      const set = this.expr();
+      // x, y in S: each over S (evaluated once), x the outer loop, as
+      // Magma does ([ <a, b> : a, b in [1..2] ] is <1,1>, <1,2>, <2,1>, <2,2>)
+      if (vars.length === 1) loops.push(`for ${vars[0]} in _m._iter(${set})`);
+      else {
+        const t = this.fresh();
+        loops.push([`for ${t} in (${set},)`, ...vars.map((v) => `for ${v} in _m._iter(${t})`)].join(" "));
+      }
+      sets.push({ vars, from, to: this.uses.length });
+    } while (this.eat(","));
+    const c0 = this.uses.length;
+    const cond = this.eat("|") ? this.expr() : null;
+    // the loop variables are bound in the head and the condition; a set
+    // sees the variables of the loops after it (they are the outer
+    // loops), not its own or those before it
+    this.bindUses(h0, h1, bound);
+    this.bindUses(c0, this.uses.length, bound);
+    sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
+    this.expect(close);
+    return { loops: loops.reverse().join(" "), cond };
+  }
+
+  /** exists{ ... } or forall{ ... }, or with witnesses, exists(t){ ... }
+   * (not a call exists(t) of a function of that name). */
+  quantifierAhead(): boolean {
+    if (this.at("{", 1)) return true;
+    if (!this.at("(", 1)) return false;
+    let k = this.i + 2;
+    while (this.toks[k]?.t === "id" && this.toks[k + 1]?.v === ",") k += 2;
+    return this.toks[k]?.t === "id" && this.toks[k + 1]?.v === ")" && this.toks[k + 2]?.v === "{";
+  }
+
+  /** exists{ e : x in S | P }: whether some x satisfies P; forall{ ... }:
+   * whether all do (true for none).  exists(t){ ... } also assigns the
+   * first e that does to t, and forall(t){ ... } the first that doesn't;
+   * exists(u, v){ <a, b> : ... } assigns the tuple's parts.  With none, the
+   * witnesses aren't assigned.  As Magma 2.18 does. */
+  quantifier(): string {
+    const kw = this.next().v;
+    const wit: Tok[] = [];
+    if (this.eat("(")) {
+      do {
+        const w = this.peek();
+        this.ident();
+        wit.push(w);
+      } while (this.eat(","));
+      this.expect(")");
+    }
+    this.expect("{");
+    const h0 = this.uses.length;
+    const head = this.expr();
+    this.expect(":");
+    const { loops, cond } = this.comprehension(h0, "}");
+    const test = cond ? `_m._bool(${cond})` : "True";
+    if (!wit.length) return `${kw === "exists" ? "any" : "all"}(${test} ${loops})`;
+    // the first witness (in a 1-tuple, so that any value is one), assigned
+    // with := in the expression, only when there is one
+    const t = this.fresh();
+    const found = `(${t} := _m._witness(((${head},) ${loops} if ${kw === "exists" ? test : `not ${test}`})))`;
+    const names = wit.map((w) => pyName(w.v));
+    names.forEach((n, k) => this.declareGlobal(n, wit[k]));
+    const assign = names.map((n, k) => `(${n} := ${names.length === 1 ? `${t}[0]` : `_m._index(${t}[0], ${k + 1})`})`).join(", ");
+    return kw === "exists" ? `(${found} is not None and (${assign}, True)[-1])` : `(${found} is None or (${assign}, False)[-1])`;
+  }
+
   /** [ ... ], { ... }: elements, a range a..b [by c], or a comprehension. */
   collection(open: string, close: string, ctor: string): string {
     const ot = this.peek();
@@ -1595,38 +1676,8 @@ class Parser {
     }
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]
-      const h1 = this.uses.length;
-      const loops: string[] = [];
-      const bound: string[] = [];
-      const sets: { vars: string[]; from: number; to: number }[] = [];
-      do {
-        const vars = [pyName(this.ident())];
-        while (this.eat(",")) vars.push(pyName(this.ident()));
-        bound.push(...vars);
-        this.expect("in");
-        const from = this.uses.length;
-        const set = this.expr();
-        // x, y in S: each over S (evaluated once), x the outer loop, as
-        // Magma does ([ <a, b> : a, b in [1..2] ] is <1,1>, <1,2>, <2,1>, <2,2>)
-        if (vars.length === 1) loops.push(`for ${vars[0]} in _m._iter(${set})`);
-        else {
-          const t = this.fresh();
-          loops.push([`for ${t} in (${set},)`, ...vars.map((v) => `for ${v} in _m._iter(${t})`)].join(" "));
-        }
-        sets.push({ vars, from, to: this.uses.length });
-      } while (this.eat(","));
-      const c0 = this.uses.length;
-      const cond = this.eat("|") ? this.expr() : null;
-      // the loop variables are bound in the head and the condition; a set
-      // sees the variables of the loops after it (they are the outer
-      // loops), not its own or those before it
-      this.bindUses(h0, h1, bound);
-      this.bindUses(c0, this.uses.length, bound);
-      sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
-      this.expect(close);
-      // the first variable varies fastest: the last loop is the outermost
-      const gen = `${first} ${loops.reverse().join(" ")}${cond ? ` if _m._bool(${cond})` : ""}`;
-      return `${ctor}([${gen}], universe=${universe})`;
+      const { loops, cond } = this.comprehension(h0, close);
+      return `${ctor}([${first} ${loops}${cond ? ` if _m._bool(${cond})` : ""}], universe=${universe})`;
     }
     // x -> y: an arrow pair, as in a map's graph [ 1 -> 30, 2 -> 20 ]
     const arrow = (e: string) => (this.eat("->") ? `_m.MTuple([${e}, ${this.expr()}])` : e);

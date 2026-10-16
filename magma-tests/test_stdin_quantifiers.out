@@ -1,0 +1,27 @@
+true
+false
+true
+true
+true
+true
+4
+false
+3
+true
+<2, 3>
+true
+3 4
+false
+false
+true false
+{ 4, 6, 8, 9, 10 }
+true false
+true
+
+>> b, w := exists{ x : x in [1..5] | x gt 3 };
+        ^
+Runtime error in :=: Expected to assign 2 value(s) but only computed 1 value(s)
+
+>> a, b, c := g();
+           ^
+Runtime error in :=: Expected to assign 3 value(s) but only computed 2 value(s)
