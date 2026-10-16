@@ -18,21 +18,24 @@ export const scaleRange = (a: DocAsk): [number, number] => [a.min ?? 1, a.max ??
 // (a value in a message: short, quoted)
 const show = (v: unknown) => { const s = JSON.stringify(typeof v === "string" && v.length > 40 ? v.slice(0, 37) + "..." : v); return s === undefined ? String(v) : s; };
 
+/** A finite number as the decimal it is written as (its shortest form,
+ * String(v)): n * 10^e, exactly. */
+export function decimalOf(v: number): { n: bigint; e: number } {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(v));
+  if (!m) throw new Error(`not a finite number: ${v}`);
+  const frac = m[3] ?? "";
+  return { n: BigInt(m[1] + m[2] + frac), e: Number(m[4] ?? 0) - frac.length };
+}
+
 /** Why v is not from + k * step for a whole k, or null if it is
- * (CORR-738-1).  Whole numbers (a whole step from a whole start, v and the
- * start safe integers): exactly.  Else the nearest such value, within a
- * few units in the last place of the larger of the two (a step of 0.1 is
- * not exact in binary), but only where that is under a thousandth of a
- * step: past that a value can't be told from its neighbours on the step,
- * and is refused as too large to check. */
+ * (CORR-738-1).  Exactly, with each number taken as the decimal it is
+ * written as, as a reader means a step of 0.1: no rounding, at any size.
+ * (Past 2^53 that is the shortest decimal that reads back as the number:
+ * 2^60 is 1152921504606847000.) */
 export function stepProblem(v: number, from: number, step: number): string | null {
-  const off = `its answer ${v} is not on its step, ${step}${from ? ` from ${from}` : ""}`;
-  if (Number.isInteger(step) && Number.isSafeInteger(from) && Number.isFinite(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER)
-    return Number.isInteger(v) && (BigInt(v) - BigInt(from)) % BigInt(step) === 0n ? null : off;
-  const k = Math.round((v - from) / step), near = from + k * step;
-  const ulps = 8 * Number.EPSILON * Math.max(Math.abs(v), Math.abs(near));
-  if (!Number.isFinite(k) || !Number.isFinite(near) || ulps >= step / 1000) return `its answer ${v} is too large to check against its step, ${step}`;
-  return Math.abs(v - near) <= ulps ? null : off;
+  const [x, f, s] = [v, from, step].map(decimalOf), e = Math.min(x.e, f.e, s.e);
+  const at = (d: { n: bigint; e: number }) => d.n * 10n ** BigInt(d.e - e);
+  return (at(x) - at(f)) % at(s) === 0n ? null : `its answer ${v} is not on its step, ${step}${from ? ` from ${from}` : ""}`;
 }
 
 /** Why `ans` is not an answer the question takes, or null if it is one. */

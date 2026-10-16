@@ -102,19 +102,31 @@ test("an answer each input takes, and why not", () => {
   // (off its step however many steps away; decimal steps still taken; steps that can't be counted refused: astra's CORR-738-1)
   assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 1000000000.5), "its answer 1000000000.5 is not on its step, 1");
   assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 100000000.1), "its answer 100000000.1 is not on its step, 1");
-  // (whole numbers exactly, however large; else within a thousandth of a step, or refused as too large to check: astra's bd46e6df)
+  // (exactly, each number the decimal it is written as, at any size: astra's bd46e6df and 5d768676)
   const ok = (v: number, from: number, step: number) => stepProblem(v, from, step);
-  for (const [v, from, step] of [[1e9, 0, 1], [2 ** 53 - 1, 0, 1], [2 ** 53 - 2, 0, 2], [-(2 ** 53 - 1), 2 ** 53 - 1, 1], [9007199254740990, 10, 5], [0.3, 0, 0.1], [12345.7, 0, 0.1], [0.75, 0, 0.25], [-0.2, -1, 0.1], [0, 0, 0.1], [1.5, 0.5, 1]] as [number, number, number][])
+  for (const [v, from, step] of [[1e9, 0, 1], [2 ** 53 - 1, 0, 1], [2 ** 53 - 2, 0, 2], [-(2 ** 53 - 1), 2 ** 53 - 1, 1], [9007199254740990, 10, 5], [0.3, 0, 0.1], [12345.7, 0, 0.1], [0.75, 0, 0.25],
+    [-0.2, -1, 0.1], [0, 0, 0.1], [1.5, 0.5, 1], [2 ** 53 + 2, 0, 1], [2 ** 50 + 0.5, 0, 0.5], [1e308, -1e308, 1e300], [5, 0, 1e-320], [0, -1.2e18, 3e17]] as [number, number, number][])
     assert.equal(ok(v, from, step), null, JSON.stringify([v, from, step]));
-  assert.equal(ok(2 ** 50 + 0.5, 0, 1), "its answer 1125899906842624.5 is not on its step, 1");
-  assert.equal(ok(1000000000000000.5, 0, 1), "its answer 1000000000000000.5 is not on its step, 1");
-  assert.equal(ok(0.35, 0, 0.1), "its answer 0.35 is not on its step, 0.1");
-  assert.equal(ok(7, 1, 2), null);
-  assert.equal(ok(8, 1, 2), "its answer 8 is not on its step, 2 from 1");
-  assert.equal(ok(2 ** 53 + 2, 0, 1), "its answer 9007199254740994 is too large to check against its step, 1");
-  assert.equal(ok(2 ** 50 + 0.5, 0, 0.5), "its answer 1125899906842624.5 is too large to check against its step, 0.5");
-  assert.equal(ok(1e308, -1e308, 1e-300), "its answer 1e+308 is too large to check against its step, 1e-300");
-  assert.equal(ok(5, 0, 1e-320), "its answer 5 is too large to check against its step, 1e-320");
+  for (const [v, from, step] of [[2 ** 50 + 0.5, 0, 1], [1000000000000000.5, 0, 1], [0.35, 0, 0.1], [8, 1, 2], [0, -(2 ** 60), 0.75], [1e308, -1e308, 3e-300], [5, 0, 3e-320]] as [number, number, number][])
+    assert.match(ok(v, from, step) ?? "", /is not on its step/, JSON.stringify([v, from, step]));
+  // (2^60 is the decimal it is written as, 1152921504606847000, which 2^58's, 288230376151711740, doesn't divide: as a reader reads them)
+  assert.match(ok(0, -(2 ** 60), 2 ** 58) ?? "", /is not on its step/);
+  // (random starts, steps and counts at many sizes, against exact decimal arithmetic done apart: on the step accepted, half a step off refused)
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed / 2 ** 31; };
+  const dec = (digits: number, exp: number) => { const n = BigInt(Math.floor(rnd() * 10 ** digits)) + 1n; return { n: rnd() < 0.5 ? -n : n, e: exp }; };
+  const text = (d: { n: bigint; e: number }) => { const neg = d.n < 0n, s = (neg ? -d.n : d.n).toString(); return (neg ? "-" : "") + (d.e >= 0 ? s + "0".repeat(d.e) : (s.length > -d.e ? s.slice(0, d.e) + "." + s.slice(d.e) : "0." + "0".repeat(-d.e - s.length) + s)); };
+  for (let i = 0; i < 2000; i++) {
+    const e = Math.floor(rnd() * 40) - 20, f = dec(6, e + Math.floor(rnd() * 6)), st = { n: BigInt(Math.floor(rnd() * 999) + 1), e }, k = BigInt(Math.floor(rnd() * 10 ** 6)) - 500000n;
+    const lo = Math.min(f.e, st.e), scale = (d: { n: bigint; e: number }) => d.n * 10n ** BigInt(d.e - lo);
+    const on = { n: scale(f) + k * scale(st), e: lo }, half = { n: (scale(f) + k * scale(st)) * 2n + scale(st), e: lo };
+    const [F, S, V] = [text(f), text(st), text(on)].map(Number);
+    // (only numbers whose shortest form is that decimal: at most 15 significant digits)
+    if ((on.n < 0n ? -on.n : on.n).toString().length > 15) continue;
+    assert.equal(ok(V, F, S), null, JSON.stringify([text(on), text(f), text(st)]));
+    const H = Number(text({ n: half.n * 5n, e: lo - 1 }));
+    if ((half.n * 5n < 0n ? -half.n * 5n : half.n * 5n).toString().replace(/0+$/, "").length <= 15) assert.match(ok(H, F, S) ?? "", /not on its step/, JSON.stringify([H, F, S]));
+  }
   assert.equal(answerProblem(ask({ input: "check", options: Array.from({ length: 101 }, (_, i) => String(i)) }), Array.from({ length: 101 }, (_, i) => String(i))), "its answer lists more than 100 values");
   assert.equal(answerText(ask({ input: "radio", options: opts, answer: "y" })), '"y" (Y)');
   assert.equal(answerText(ask({ input: "check", options: opts, answer: [] })), "(none chosen)");
