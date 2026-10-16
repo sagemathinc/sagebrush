@@ -338,15 +338,19 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
         from sagebrush.preparse import preparse as _preparse
         return compile(_preparse(code).strip(), "<sage_eval>", mode)
 
-    # as Sage: the commands and the expression run with the globals and
-    # the caller's locals as separate namespaces, so assignments, del and
-    # := act on locals itself (also when a command raises)
+    # as Sage: the commands and the assignment of the expression's value
+    # run as one block (so a global statement in cmds governs the
+    # expression too), with the globals and the caller's locals as separate
+    # namespaces: assignments, del and := act on locals itself (also when
+    # a command raises), and the value is locals['_sage_eval_returnval_']
+    # (without cmds, the expression alone, leaving locals as it is)
     g = dict(globals())
     if locals is None:
         locals = {}
-    if cmds.strip():
-        exec(comp(cmds, "exec"), g, locals)
-    return eval(comp(source, "eval"), g, locals)
+    if not cmds.strip():
+        return eval(comp(source, "eval"), g, locals)
+    exec(comp(cmds + "\n_sage_eval_returnval_ = " + source, "exec"), g, locals)
+    return locals["_sage_eval_returnval_"]
 
 
 __all__.append("sage_eval")

@@ -183,3 +183,5 @@ sage_eval global in cmds governs the expression = ((5, 2), (5, 2))
 sage_eval function in cmds reads globals = (5, 5)
 sage_eval without cmds leaves locals = (2, ['x'])
 sage_eval with cmds: locals' keys = (3, ['_sage_eval_returnval_', 'x', 'y'])
+sage_eval lambda in cmds sees only globals = NameError
+sage_eval global statement writes globals = False

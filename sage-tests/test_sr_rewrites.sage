@@ -95,3 +95,15 @@ t("sage_eval global in cmds governs the expression", lambda: (_se_global(False),
 t("sage_eval function in cmds reads globals", _se_fglobal)
 t("sage_eval without cmds leaves locals", _se_nocmds)
 t("sage_eval with cmds: locals' keys", _se_cmds_keys)
+def _se_lambda():
+    d = {'c': 1}
+    try:
+        return sage_eval('h()', locals=d, cmds='h = lambda: c', preparse=False)
+    except NameError:
+        return "NameError"
+def _se_global_b():
+    d = {}
+    sage_eval('1', locals=d, cmds='global b\nb = 5', preparse=False)
+    return 'b' in d
+t("sage_eval lambda in cmds sees only globals", _se_lambda)
+t("sage_eval global statement writes globals", _se_global_b)
