@@ -47,9 +47,13 @@ Copyright (c) 2001 Python Software Foundation. See
   async generator and of a frame's locals, which Sagebrush does not have, are
   placeholder classes. `lib/collections/__init__.py` makes it
   `collections.abc`, as CPython's does, and its `ChainMap`, `UserDict`,
-  `UserList` and `UserString` are CPython 3.14's.
+  `UserList` and `UserString` are CPython 3.14's (`UserString.maketrans` a
+  `staticmethod`).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
+- `lib/textwrap.py`: CPython 3.14's `Lib/textwrap.py`, changed: `wrap()`
+  (and so `fill()` and `shorten()`) refuses text with characters beyond
+  U+FFFF, which Sagebrush's strings count as two.
 - `pyparse/`: the Python 3.14 parser, generated from CPython's
   `Grammar/python.gram`, `Grammar/Tokens` and `Parser/Python.asdl`
   (vendored in `pyparse/vendor/cpython`), with TypeScript ports of parts of

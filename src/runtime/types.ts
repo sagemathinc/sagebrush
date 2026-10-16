@@ -130,9 +130,17 @@ for (const n of ["keys", "values", "items", "copy"]) method(mappingproxy, n, via
 method(mappingproxy, "get", (p: MappingProxy, k: any, dflt: any = null) => callObj(getattr(p.m, "get"), [k, dflt]));
 method(mappingproxy, "__repr__", (p: MappingProxy) => `mappingproxy(${repr(p.m)})`);
 method(mappingproxy, "__str__", (p: MappingProxy) => str(p.m));
+// (comparisons and | are the mapping's, with a proxy operand unwrapped)
 method(mappingproxy, "__eq__", (p: MappingProxy, o: any) => O.eq(p.m, o));
-method(mappingproxy, "__or__", (p: MappingProxy, o: any) => O.or(callObj(getattr(p.m, "copy"), []), o));
-method(mappingproxy, "__ror__", (p: MappingProxy, o: any) => O.or(o, callObj(getattr(p.m, "copy"), [])));
+method(mappingproxy, "__ne__", (p: MappingProxy, o: any) => O.ne(p.m, o));
+method(mappingproxy, "__lt__", (p: MappingProxy, o: any) => O.lt(p.m, o));
+method(mappingproxy, "__le__", (p: MappingProxy, o: any) => O.le(p.m, o));
+method(mappingproxy, "__gt__", (p: MappingProxy, o: any) => O.gt(p.m, o));
+method(mappingproxy, "__ge__", (p: MappingProxy, o: any) => O.ge(p.m, o));
+const unproxy = (o: any) => (o instanceof MappingProxy ? o.m : o);
+method(mappingproxy, "__or__", (p: MappingProxy, o: any) => O.or(p.m, unproxy(o)));
+method(mappingproxy, "__ror__", (p: MappingProxy, o: any) => O.or(unproxy(o), p.m));
+method(mappingproxy, "__ior__", (p: MappingProxy, o: any) => raise(T.TypeError, "'|=' is not supported by mappingproxy; use '|' instead"));
 method(mappingproxy, "__hash__", (p: MappingProxy) => O.hashExact(p.m)); // (as CPython's: the mapping's hash)
 
 getset(type, "__dict__", (c) => {
@@ -1170,7 +1178,9 @@ method(S, "zfill", (s: string, w: any) => {
   const n = Number(w) - s.length;
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
-// str.translate and str.maketrans, as CPython's (their messages included)
+// str.translate and str.maketrans, as CPython's (their messages included);
+// they take int and str subclasses' instances (not float's, nor __index__)
+const intOrStr = (x: any): any => (x instanceof IntLayout || x instanceof StrLayout ? x.$v : x);
 method(S, "translate", (s: string, table: any) => {
   const out: string[] = [];
   for (const ch of s) {
@@ -1185,8 +1195,9 @@ method(S, "translate", (s: string, table: any) => {
       throw e;
     }
     if (r === null) continue;
+    r = intOrStr(r);
     if (typeof r === "string") out.push(r);
-    else if (O.isPyInt(r) && typeof r !== "boolean") {
+    else if (O.isPyInt(r)) {
       const n = Number(r);
       if (!(n >= 0 && n < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
       out.push(String.fromCodePoint(n));
@@ -1202,15 +1213,22 @@ S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
     if (!(a[0] instanceof PyDict)) raise(T.TypeError, "if you give only one argument to maketrans it must be a dict");
     for (const k of O.toArray(a[0])) {
       const v = O.getitem(a[0], k);
-      if (typeof k === "string") {
-        if ([...k].length !== 1) raise(T.ValueError, "string keys in translatetable must be of length 1");
-        dictSet(d, k.codePointAt(0)!, v);
-      } else if (O.isPyInt(k)) dictSet(d, k, v);
+      const kk = intOrStr(k);
+      if (typeof kk === "string") {
+        if ([...kk].length !== 1) raise(T.ValueError, "string keys in translatetable must be of length 1");
+        dictSet(d, kk.codePointAt(0)!, v);
+      } else if (O.isPyInt(kk)) dictSet(d, k, v);
       else raise(T.TypeError, "keys in translate table mustbe strings or integers");
     }
     return d;
   }
-  for (let i = 0; i < a.length; i++) if (typeof a[i] !== "string") raise(T.TypeError, `maketrans() argument ${i + 1} must be str, not ${typeName(a[i])}`);
+  // (the second and third are checked first, as CPython's argument parsing)
+  for (let i = 1; i < a.length; i++) {
+    if (typeof intOrStr(a[i]) !== "string") raise(T.TypeError, `maketrans() argument ${i + 1} must be str, not ${typeName(a[i])}`);
+    a[i] = intOrStr(a[i]);
+  }
+  if (typeof intOrStr(a[0]) !== "string") raise(T.TypeError, "first maketrans argument must be a string if there is a second argument");
+  a[0] = intOrStr(a[0]);
   const x = [...a[0]], y = [...a[1]];
   if (x.length !== y.length) raise(T.ValueError, "the first two maketrans arguments must have equal length");
   x.forEach((c, i) => dictSet(d, c.codePointAt(0)!, y[i].codePointAt(0)!));

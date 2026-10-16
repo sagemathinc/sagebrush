@@ -1,4 +1,5 @@
-# Copied unchanged from CPython 3.14 Lib/textwrap.py (PSF License; see cdn/LICENSE-CPython.txt).
+# CPython 3.14's Lib/textwrap.py (PSF License; see cdn/LICENSE-CPython.txt), changed
+# (NOTICE.md): wrap() refuses text with characters beyond U+FFFF.
 """Text wrapping and filling.
 """
 
@@ -354,6 +355,12 @@ class TextWrapper:
         and all other whitespace characters (including newline) are
         converted to space.
         """
+        # Sagebrush's strings count such a character as two, so the widths
+        # would be wrong and a long word could be cut inside one.
+        for _c in text:
+            if ord(_c) > 0xFFFF:
+                raise NotImplementedError("textwrap: text with characters beyond U+FFFF (such as %r) "
+                                          "is not supported in Sagebrush yet" % _c)
         chunks = self._split_chunks(text)
         if self.fix_sentence_endings:
             self._fix_sentence_endings(chunks)

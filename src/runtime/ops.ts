@@ -29,6 +29,11 @@ export function layoutPlain(t: any): boolean {
   return t.$lp;
 }
 export const plainDict = (o: any): boolean => o.$cls === T.dict;
+// Sets and frozensets themselves: a subclass's operators may be its own.
+const exactSet = (o: any): boolean => o instanceof PySet && (o.$cls === T.set || o.$cls === T.frozenset);
+const exactSets = (a: any, b: any): boolean => exactSet(a) && exactSet(b);
+// (and in place only into a set: a frozenset's |= makes a new one)
+const inplaceSets = (a: any, b: any): boolean => a instanceof PySet && a.$cls === T.set && exactSet(b);
 
 export const normBig = (r: bigint): number | bigint => (r >= MINB && r <= MAXB ? Number(r) : r);
 export const mkfloat = (r: number): any => (isInt(r) ? new FloatBox(r) : r);
@@ -370,7 +375,7 @@ function subSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) - big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x - y);
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "sub");
+  if (exactSets(a, b)) return setOp(a, b, "sub");
   return binaryDunder(a, b, "sub");
 }
 
@@ -700,15 +705,15 @@ export function and(a: any, b: any): any {
   if (I32(a) && I32(b)) return a & b;
   if (typeof a === "boolean" && typeof b === "boolean") return a && b;
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) & big(b));
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "and");
+  if (exactSets(a, b)) return setOp(a, b, "and");
   return binaryDunder(a, b, "and");
 }
 export function or(a: any, b: any): any {
   if (I32(a) && I32(b)) return a | b;
   if (typeof a === "boolean" && typeof b === "boolean") return a || b;
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) | big(b));
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "or");
-  if (a instanceof PyDict && b instanceof PyDict) {
+  if (exactSets(a, b)) return setOp(a, b, "or");
+  if (a instanceof PyDict && b instanceof PyDict && plainDict(a) && plainDict(b)) {
     const r = dictCopy(a);
     dictUpdate(r, b);
     return r;
@@ -719,7 +724,7 @@ export function xor(a: any, b: any): any {
   if (I32(a) && I32(b)) return a ^ b;
   if (typeof a === "boolean" && typeof b === "boolean") return a !== b;
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) ^ big(b));
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "xor");
+  if (exactSets(a, b)) return setOp(a, b, "xor");
   return binaryDunder(a, b, "xor");
 }
 export function matmul(a: any, b: any): any {
@@ -743,7 +748,7 @@ export function iadd(a: any, b: any): any {
 }
 export function isub(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return sub(a, b);
-  if (a instanceof PySet && b instanceof PySet) return setInplace(a, b, "sub");
+  if (inplaceSets(a, b)) return setInplace(a, b, "sub");
   return inplace(a, b, "sub", "__isub__");
 }
 export function imul(a: any, b: any): any {
@@ -763,11 +768,11 @@ export const ipow = (a: any, b: any) => inplace(a, b, "pow", "__ipow__");
 export const ilshift = (a: any, b: any) => inplace(a, b, "lshift", "__ilshift__");
 export const irshift = (a: any, b: any) => inplace(a, b, "rshift", "__irshift__");
 export const imatmul = (a: any, b: any) => inplace(a, b, "matmul", "__imatmul__");
-export const iand = (a: any, b: any) => (a instanceof PySet && b instanceof PySet ? setInplace(a, b, "and") : inplace(a, b, "and", "__iand__"));
-export const ixor = (a: any, b: any) => (a instanceof PySet && b instanceof PySet ? setInplace(a, b, "xor") : inplace(a, b, "xor", "__ixor__"));
+export const iand = (a: any, b: any) => (inplaceSets(a, b) ? setInplace(a, b, "and") : inplace(a, b, "and", "__iand__"));
+export const ixor = (a: any, b: any) => (inplaceSets(a, b) ? setInplace(a, b, "xor") : inplace(a, b, "xor", "__ixor__"));
 export const ior = (a: any, b: any) => {
-  if (a instanceof PySet && b instanceof PySet) return setInplace(a, b, "or");
-  if (a instanceof PyDict) {
+  if (inplaceSets(a, b)) return setInplace(a, b, "or");
+  if (a instanceof PyDict && plainDict(a)) {
     dictUpdate(a, b);
     return a;
   }

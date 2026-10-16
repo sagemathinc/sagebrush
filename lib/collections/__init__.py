@@ -1119,7 +1119,8 @@ class UserString(_collections_abc.Sequence):
     def lstrip(self, chars=None):
         return self.__class__(self.data.lstrip(chars))
 
-    maketrans = str.maketrans
+    # (a staticmethod: Sagebrush's builtins would bind an instance)
+    maketrans = staticmethod(str.maketrans)
 
     def partition(self, sep):
         return self.data.partition(sep)
