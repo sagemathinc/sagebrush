@@ -1348,6 +1348,9 @@ def _assign_path(obj, path, val):
         return val if val is _DELETE else _own(val)
     kind, i = path[0][:2]
     pos = path[0][2] if len(path[0]) > 2 else None
+    if kind == "midx" and not isinstance(obj, _smat.Matrix):
+        # S[i, j] := v is S[i][j] := v (a matrix takes the indices together)
+        return _assign_path(obj, [("idx", j, pos) for j in i] + list(path[1:]), val)
     if kind == "attr":
         if isinstance(obj, MRec):
             if len(path) == 1:
@@ -1370,7 +1373,7 @@ def _assign_path(obj, path, val):
             new = val if val is _DELETE else _own(_admit_element(obj, val, pos))
         else:
             child = obj[i - 1] if i <= len(obj) else _UNDEF
-            if child is _UNDEF and path[1][0] == "idx":
+            if child is _UNDEF and path[1][0] != "attr":
                 # (an index into an element that isn't there: Magma's words)
                 empty = not len(obj) and obj.universe is None
                 raise MagmaError("Sequence mutation failed" if empty else "Bad indexed assign", ":=", False, pos)
@@ -1398,15 +1401,28 @@ def _assign_path(obj, path, val):
 def _matrix_assign(M, path, val, pos):
     """A[i, j] := v and A[i][j] := v: a new matrix (value semantics) with v
     coerced into A's ring, as Magma's ("RHS cannot be coerced into the
-    coefficient ring" otherwise)."""
-    i = path[0][1]
-    if isinstance(i, MTuple) and len(path) == 1:
+    coefficient ring" otherwise).  Checked before anything changes, in
+    Magma's words (checked against Magma): A[<1, 2>] := v is "Bad matrix
+    row index type", A[3, 1] := v "Matrix row index is not in the range
+    [1 .. 2]", A[1, 2, 3] := v "Illegal number of indices"."""
+    kind, i = path[0][:2]
+    if kind == "midx" and len(path) == 1:
         idx = list(i)
-    elif len(path) == 2 and path[1][0] == "idx" and not isinstance(i, MTuple) and not isinstance(path[1][1], MTuple):
+        if len(idx) != 2:
+            raise MagmaError("Illegal number of indices", ":=", False, pos)
+    elif kind == "idx" and len(path) == 2 and path[1][0] == "idx":
         idx = [i, path[1][1]]
+    elif kind == "idx" and len(path) == 1 and _int_index(i):
+        raise MagmaError("assigning a row of a matrix is not supported yet", ":=", False, pos)
+    elif kind == "idx" and not _int_index(i):
+        raise MagmaError("Bad matrix row index type", ":=", False, pos)
     else:
         raise MagmaError("assigning a row or a block of a matrix is not supported yet", ":=", False, pos)
-    _matrix_entry(M, idx, pos)  # (the indices, checked as a read checks them)
+    for v, n, what in zip(idx, (M.nrows(), M.ncols()), ("row", "column")):
+        if not _int_index(v):
+            raise MagmaError("Bad matrix %s index type" % what, ":=", False, pos)
+        if not 1 <= v <= n:
+            raise MagmaError("Matrix %s index is not in the range [1 .. %d]" % (what, n), ":=", False, pos)
     if isinstance(val, bool) or not isinstance(val, (int, _Fraction)) or \
             (M._base is _sa.ZZ and _Fraction(val).denominator != 1):
         raise MagmaError("RHS cannot be coerced into the coefficient ring", ":=", False, pos)

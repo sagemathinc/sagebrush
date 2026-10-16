@@ -787,14 +787,16 @@ class Parser {
       const idx = [this.expr()];
       while (this.eat(",")) idx.push(this.expr());
       this.expect("]");
-      path.push({ kind: "idx", code: idx.length === 1 ? idx[0] : `_m.MTuple([${idx.join(", ")}])`, tok: lb });
+      // (A[i, j]: its indices together, never a tuple: A[<i, j>] is another
+      // index, CORR-67F-1)
+      path.push({ kind: "idx", code: idx.length === 1 ? idx[0] : `[${idx.join(", ")}]`, multi: idx.length > 1, tok: lb });
     }
     if (path.length) target = { kind: "path", py: target.py, path, read: this.readPath(target.py, path), tok: t };
     return target;
   }
 
   readPath(base: string, path: PathEl[]) {
-    return path.reduce((acc, p) => (p.kind === "attr" ? `_m._getattr(${acc}, ${p.code}, (${p.line}, ${p.col}))` : `_m._index(${acc}, ${p.code})`), base);
+    return path.reduce((acc, p) => (p.kind === "attr" ? `_m._getattr(${acc}, ${p.code}, (${p.line}, ${p.col}))` : p.multi ? `_m._index_multi(${acc}, ${p.code})` : `_m._index(${acc}, ${p.code})`), base);
   }
 
   /** `name or ``expr (the field name as a string), at the backtick. */
@@ -816,7 +818,7 @@ class Parser {
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
       const path = t.path!;
       // (an index's "[": where an assignment Magma refuses is said, CORR-D689-1)
-      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code}, (${p.tok.line}, ${p.tok.col}))`)).join(", ");
+      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("${p.multi ? "midx" : "idx"}", ${p.code}, (${p.tok.line}, ${p.tok.col}))`)).join(", ");
       this.emit(`${t.py} = _m._assign_path(${t.py}, [${enc}], ${val})`);
     }
   }
@@ -1742,7 +1744,7 @@ class Parser {
 const MAX_CHAIN = 64;
 
 /** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
-type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok };
+type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok; multi?: boolean };
 
 interface Target {
   kind: "name" | "path" | "gens";
