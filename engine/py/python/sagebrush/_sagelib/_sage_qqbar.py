@@ -824,6 +824,23 @@ class AlgebraicNumber:
         """
         return QQbar
 
+    def _gaussian_coords(self):
+        """[a, b] with this number a + b*I when its field is Q(sqrt(-c)) for a
+        rational square c, a Gaussian rational that Sage prints exactly
+        (I + 1, 1/2*I + 1/3); else None.  sqrt(-1) and sqrt(-1/4) printed
+        1*I and 0.50000000000000000?*I."""
+        g = self._gen.g
+        if len(g) != 3 or g[1] != 0 or g[0] * g[2] <= 0:
+            return None
+        c = _F(g[0], g[2])
+        rn, rd = math.isqrt(c.numerator), math.isqrt(c.denominator)
+        if rn * rn != c.numerator or rd * rd != c.denominator:
+            return None
+        s = _F(rn, rd) if self._gen.z[1] > 0 else -_F(rn, rd)
+        a = self._c[0] if self._c else _F(0)
+        b = self._c[1] if len(self._c) > 1 else _F(0)
+        return [a, b * s]
+
     def _new(self, gen, c, civ, gauss=False):
         return type(self)(gen, c, civ, gauss)
 
@@ -845,6 +862,9 @@ class AlgebraicNumber:
             return _str_civ(self._civ)
         if self._gauss:
             return _str_gaussian(self._c)
+        gc = self._gaussian_coords()
+        if gc is not None:
+            return _str_gaussian(gc)
         return _str_civ(self._civ)
 
     __str__ = __repr__

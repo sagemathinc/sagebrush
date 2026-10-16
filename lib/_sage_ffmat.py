@@ -588,10 +588,11 @@ class FFMatrix:
         if not self._rows:
             return "%d x %d dense matrix over %r" % (0, self._ncols, self._base)
         cells = [[repr(x) for x in r] for r in self._rows]
-        w = [max(len(cells[i][j]) for i in range(len(cells))) for j in range(self._ncols)]
-        if getattr(self._base, "_is_generic_field", False):
-            w = [max(w)] * len(w)  # QQbar: one width for every entry, as Sage
-        return "\n".join("[" + " ".join(c.rjust(w[j]) for j, c in enumerate(r)) + "]" for r in cells)
+        # (one width for every entry, the widest, as Sage over every field:
+        # matrix(GF(101), [[1, 100], [2, 3]]) printed its columns at their
+        # own widths, [1 100] for Sage's [  1 100])
+        w = max((len(c) for r in cells for c in r), default=0)
+        return "\n".join("[" + " ".join(c.rjust(w) for c in r) + "]" for r in cells)
 
     def _latex_(self):
         import _sage_expr
