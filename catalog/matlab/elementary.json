@@ -1,0 +1,217 @@
+[
+  {
+    "name": "abs",
+    "kind": "function",
+    "signature": "Y = abs(X)",
+    "summary": "The absolute value of each element, or the magnitude of a complex one.",
+    "doc": "Keeps the input's class. An integer class's minimum saturates to its maximum: `abs(int8(-128))` is 127.",
+    "examples": [
+      {
+        "code": "abs([-3 2 -1.5])",
+        "expected": "\nans =\n\n    3.0000    2.0000    1.5000\n\n"
+      },
+      {
+        "code": "abs(-2 + 1i)",
+        "expected": "\nans =\n\n    2.2361\n\n"
+      },
+      {
+        "code": "abs(3 + 4i)",
+        "expected": "\nans =\n\n     5\n\n"
+      }
+    ],
+    "differs": [
+      "abs of int64's minimum is refused: Sagebrush's 64-bit integers are exact only below 2^53."
+    ],
+    "status": "full",
+    "see_also": [
+      "sign",
+      "angle"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "exp",
+    "kind": "function",
+    "signature": "Y = exp(X)",
+    "summary": "The exponential $e^x$ of each element, real or complex.",
+    "doc": "Overflows to Inf past about 709.78.",
+    "examples": [
+      {
+        "code": "exp([0 1])",
+        "expected": "\nans =\n\n    1.0000    2.7183\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "log",
+      "expm1"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "floor",
+    "kind": "function",
+    "signature": "Y = floor(X)",
+    "summary": "Each element rounded down, toward negative infinity.",
+    "doc": "Complex values round their real and imaginary parts. Integer classes are unchanged.",
+    "examples": [
+      {
+        "code": "floor([-2.5 2.5])",
+        "expected": "\nans =\n\n    -3     2\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "ceil",
+      "round",
+      "fix"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "log",
+    "kind": "function",
+    "signature": "Y = log(X)",
+    "summary": "The natural logarithm of each element; a negative or complex element gives a complex result.",
+    "doc": "`log(0)` is -Inf and `log(-1)` is $\\pi i$.",
+    "examples": [
+      {
+        "code": "log([1 10])",
+        "expected": "\nans =\n\n         0    2.3026\n\n"
+      },
+      {
+        "code": "log(-1)",
+        "expected": "\nans =\n\n   0.0000 + 3.1416i\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "exp",
+      "log10",
+      "log2",
+      "log1p"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "mod",
+    "kind": "function",
+    "signature": "b = mod(a, m)",
+    "summary": "The remainder after division, with the sign of the divisor: a - m*floor(a/m).",
+    "doc": "`mod(a, 0)` is a. Integer classes and doubles mix as in arithmetic.",
+    "examples": [
+      {
+        "code": "mod([7 -7], 3)",
+        "expected": "\nans =\n\n     1     2\n\n"
+      },
+      {
+        "code": "mod(7, -3)",
+        "expected": "\nans =\n\n    -2\n\n"
+      }
+    ],
+    "differs": [
+      "Complex arguments give an unclear error rather than MATLAB's message."
+    ],
+    "status": "full",
+    "see_also": [
+      "rem",
+      "floor"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "rem",
+    "kind": "function",
+    "signature": "r = rem(a, b)",
+    "summary": "The remainder after division, with the sign of the dividend: a - b*fix(a/b).",
+    "doc": "`rem(a, 0)` is a.",
+    "examples": [
+      {
+        "code": "rem([7 -7], 3)",
+        "expected": "\nans =\n\n     1    -1\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "mod",
+      "fix"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "round",
+    "kind": "function",
+    "signature": "Y = round(X)\nY = round(X, n)\nY = round(X, n, type)",
+    "summary": "Each element rounded to the nearest integer, halves away from zero, or to n decimal places or n significant digits.",
+    "doc": "`n` > 0 rounds to n digits after the point, `n` < 0 to the left of it. `type` is `'decimals'` (the default) or `'significant'`. Complex values round their real and imaginary parts.",
+    "examples": [
+      {
+        "code": "round([2.5 -1.4 3.75])",
+        "expected": "\nans =\n\n     3    -1     4\n\n"
+      },
+      {
+        "code": "round(pi, 2)",
+        "expected": "\nans =\n\n    3.1400\n\n"
+      },
+      {
+        "code": "round(pi, 3, 'significant')",
+        "expected": "\nans =\n\n    3.1400\n\n"
+      }
+    ],
+    "differs": [
+      "The 'TieBreaker' option is refused (with an unclear message)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "floor",
+      "ceil",
+      "fix"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "sqrt",
+    "kind": "function",
+    "signature": "B = sqrt(X)",
+    "summary": "The square root of each element; a negative element gives a complex result.",
+    "doc": "Works for double and single; `sqrt(-4)` is `0 + 2i`.",
+    "examples": [
+      {
+        "code": "sqrt([4 9 2])",
+        "expected": "\nans =\n\n    2.0000    3.0000    1.4142\n\n"
+      },
+      {
+        "code": "sqrt(-4)",
+        "expected": "\nans =\n\n   0.0000 + 2.0000i\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "nthroot",
+      "realsqrt",
+      "power"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  }
+]

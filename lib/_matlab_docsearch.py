@@ -20,22 +20,49 @@ def _clean(doc):
     return _cleandoc(doc or "")
 
 
-def build_index():
-    """[{name, module, kind, signature, summary, doc, examples, open_problem}]
-    for MATLAB's built-ins, by name"""
+def _builtins():
     import _matlab
     for modname in MODULES:
         try:
             __import__(modname)
         except Exception:
             pass
+    return _matlab._B
+
+
+def public_names():
+    """Every built-in function MATLAB code can call (the catalog gate: each has
+    an entry or is in catalog/matlab/missing.txt)"""
+    return sorted(n for n in _builtins() if not n.startswith("_"))
+
+
+def build_index():
+    """[{name, module, kind, signature, summary, doc, examples, open_problem,
+    ...}] for MATLAB's built-ins: the catalog's entries first (all their
+    fields, `doc` ending with the examples after the prompt >>), then the
+    other built-ins, by name"""
+    import _catalog
+    out = []
+    seen = set()
+    for e in _catalog.index("matlab"):
+        seen.add(e["name"])
+        e = dict(e, module="matlab")
+        e["doc"] = (e.get("doc") or e["summary"]) + _examples_text([(x["code"], x["expected"]) for x in e["examples"]])
+        out.append(e)
+    return out + _rest(seen)
+
+
+def _rest(seen):
+    """The index's entries for the built-ins not in seen: their docstrings, and
+    the examples lib/_matlab_examples.py still holds"""
+    B = _builtins()
     from _matlab_examples import examples
     ex = examples()
     out = []
-    for name in sorted(_matlab._B):
-        if name.startswith("_"):
+    for name in sorted(B):
+        if name.startswith("_") or name in seen:
             continue
-        clean = _clean(getattr(_matlab._B[name].f, "__doc__", None))
+        clean = _clean(getattr(B[name].f, "__doc__", None))
         doc = clean + _examples_text(ex.get(name, []))
         out.append({
             "name": name,

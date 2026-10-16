@@ -1,0 +1,272 @@
+[
+  {
+    "name": "cat",
+    "kind": "function",
+    "signature": "C = cat(dim, A1, A2, ..., An)",
+    "summary": "Arrays joined along a dimension: 1 stacks them vertically, 2 side by side, 3 or more into new pages.",
+    "doc": "The arrays' sizes must agree except along `dim`. `cat(1, ...)` is `[A; B]` and `cat(2, ...)` is `[A, B]`. Cell arrays join into a cell array, and char arrays into a char array.",
+    "examples": [
+      {
+        "code": "cat(1, [1 2], [3 4])",
+        "expected": "\nans =\n\n     1     2\n     3     4\n\n"
+      },
+      {
+        "code": "size(cat(3, [1 2], [3 4]))",
+        "expected": "\nans =\n\n     1     2     2\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "horzcat",
+      "vertcat"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "eye",
+    "kind": "function",
+    "signature": "I = eye(n)\nI = eye(m, n)\nI = eye(sz)\nI = eye(___, typename)\nI = eye(___, 'like', p)",
+    "summary": "An identity matrix: ones on the main diagonal and zeros elsewhere, square or m-by-n.",
+    "doc": "Only two dimensions: `eye(2, 2, 2)` is an error, as in MATLAB. `typename` and `'like'` work as for `zeros`; `'like'` a sparse matrix gives a sparse identity.",
+    "examples": [
+      {
+        "code": "eye(3)",
+        "expected": "\nans =\n\n     1     0     0\n     0     1     0\n     0     0     1\n\n"
+      },
+      {
+        "code": "eye(2, 3)",
+        "expected": "\nans =\n\n     1     0     0\n     0     1     0\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "zeros",
+      "diag"
+    ],
+    "tags": [
+      "arrays",
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "length",
+    "kind": "function",
+    "signature": "L = length(X)",
+    "summary": "The length of an array's largest dimension, or 0 for an empty array.",
+    "doc": "`length(X)` is `max(size(X))` when X isn't empty, and 0 when it is.",
+    "examples": [
+      {
+        "code": "length(zeros(3, 7))",
+        "expected": "\nans =\n\n     7\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "size",
+      "numel"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "linspace",
+    "kind": "function",
+    "signature": "y = linspace(x1, x2)\ny = linspace(x1, x2, n)",
+    "summary": "A row of n evenly spaced points from x1 to x2, both included; 100 points by default.",
+    "doc": "The spacing is $(x_2 - x_1)/(n - 1)$ and the last point is x2 itself. `n` = 1 gives x2; `n` of 0 or less gives a 1-by-0 row; a non-integer `n` is rounded down. Complex and single endpoints work, the result being single when either endpoint is.",
+    "examples": [
+      {
+        "code": "linspace(0, 1, 5)",
+        "expected": "\nans =\n\n         0    0.2500    0.5000    0.7500    1.0000\n\n"
+      }
+    ],
+    "differs": [
+      "Integer-class endpoints (linspace(int8(0), int8(10), 3)) are refused rather than given a guessed class.",
+      "Endpoints must be scalars: the vector form linspace([0 1], [1 2], n) is refused.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "colon",
+      "logspace"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "numel",
+    "kind": "function",
+    "signature": "n = numel(A)",
+    "summary": "The number of elements of an array: the product of its dimensions.",
+    "doc": "Counts every element, for numeric, logical and char arrays, cell arrays and struct arrays alike. A string scalar has one element.",
+    "examples": [
+      {
+        "code": "numel(magic(4))",
+        "expected": "\nans =\n\n    16\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "size",
+      "length"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "ones",
+    "kind": "function",
+    "signature": "X = ones(n)\nX = ones(sz1, ..., szN)\nX = ones(sz)\nX = ones(___, typename)\nX = ones(___, 'like', p)",
+    "summary": "An array of ones of a given size, double by default, or of a named class or the class, complexity and sparsity of a prototype.",
+    "doc": "Takes the same size and class arguments as `zeros`.",
+    "examples": [
+      {
+        "code": "ones(2, 3)",
+        "expected": "\nans =\n\n     1     1     1\n     1     1     1\n\n"
+      },
+      {
+        "code": "ones(1, 2, 'like', int16(1))",
+        "expected": "\nans =\n\n  1×2 int16 row vector\n\n   1   1\n\n"
+      },
+      {
+        "code": "ones(2)",
+        "expected": "\nans =\n\n     1     1\n     1     1\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "zeros",
+      "eye"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "repmat",
+    "kind": "function",
+    "signature": "B = repmat(A, n)\nB = repmat(A, r1, ..., rN)\nB = repmat(A, r)",
+    "summary": "An array repeated as tiles: n copies along each of the first two dimensions, or a given count along each dimension.",
+    "doc": "Works for numeric, logical and char arrays, cell arrays and struct arrays.",
+    "examples": [
+      {
+        "code": "repmat([1 2], 2, 2)",
+        "expected": "\nans =\n\n     1     2     1     2\n     1     2     1     2\n\n"
+      }
+    ],
+    "differs": [
+      "A count of 0 (repmat([1 2], 0, 1)) is an error, where MATLAB gives an empty array."
+    ],
+    "status": "partial",
+    "see_also": [
+      "reshape",
+      "cat"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "reshape",
+    "kind": "function",
+    "signature": "B = reshape(A, sz1, ..., szN)\nB = reshape(A, sz)",
+    "summary": "The elements of an array, in their column-major order, rearranged into new dimensions with the same number of elements.",
+    "doc": "One size may be `[]`, computed from the others. The number of elements must not change. Works for numeric, logical and char arrays and cell arrays.",
+    "examples": [
+      {
+        "code": "reshape(1:6, 2, 3)",
+        "expected": "\nans =\n\n     1     3     5\n     2     4     6\n\n"
+      },
+      {
+        "code": "reshape(1:6, 2, [])",
+        "expected": "\nans =\n\n     1     3     5\n     2     4     6\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "repmat",
+      "permute",
+      "squeeze"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "size",
+    "kind": "function",
+    "signature": "sz = size(A)\nszdim = size(A, dim)\nszdim = size(A, dim1, ..., dimN)\nszdim = size(A, vecdim)\n[sz1, ..., szN] = size(___)",
+    "summary": "The lengths of an array's dimensions, as a row vector, for chosen dimensions, or as separate outputs.",
+    "doc": "With several outputs, the last one is the product of the remaining dimensions, and outputs past the array's dimensions are 1. A dimension past the array's is 1.",
+    "examples": [
+      {
+        "code": "size(zeros(2, 5))",
+        "expected": "\nans =\n\n     2     5\n\n"
+      },
+      {
+        "code": "[r, c] = size(zeros(2, 5, 3))",
+        "expected": "\nr =\n\n     2\n\n\nc =\n\n    15\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "numel",
+      "length",
+      "ndims"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "zeros",
+    "kind": "function",
+    "signature": "X = zeros(n)\nX = zeros(sz1, ..., szN)\nX = zeros(sz)\nX = zeros(___, typename)\nX = zeros(___, 'like', p)",
+    "summary": "An array of zeros of a given size, double by default, or of a named class or the class, complexity and sparsity of a prototype.",
+    "doc": "`zeros(n)` is n-by-n; `zeros(m, n, ...)` and `zeros([m n ...])` give each dimension. A size of 0 or less gives an empty dimension; a size that isn't an integer is an error. `typename` is a numeric class name or `'logical'`; `'like', p` takes p's class, complexity and sparsity.",
+    "examples": [
+      {
+        "code": "zeros(2, 3)",
+        "expected": "\nans =\n\n     0     0     0\n     0     0     0\n\n"
+      },
+      {
+        "code": "zeros(2, 'int8')",
+        "expected": "\nans =\n\n  2×2 int8 matrix\n\n   0   0\n   0   0\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "ones",
+      "eye",
+      "cell"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  }
+]

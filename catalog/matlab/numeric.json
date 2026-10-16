@@ -1,0 +1,183 @@
+[
+  {
+    "name": "fzero",
+    "kind": "function",
+    "signature": "x = fzero(fun, x0)\nx = fzero(fun, x0, options)\n[x, fval, exitflag, output] = fzero(___)",
+    "summary": "A root of a function of one variable, near a starting point or within an interval where the function changes sign.",
+    "doc": "With a scalar x0, fzero first searches for an interval around it with a sign change. `options` from `optimset` take 'TolX' and 'Display'. A function name in a character vector works too.",
+    "examples": [
+      {
+        "code": "fzero(@(x) x^2 - 2, 1)",
+        "expected": "\nans =\n\n    1.4142\n\n"
+      },
+      {
+        "code": "fzero(@(x) cos(x) - x, [0 1])",
+        "expected": "\nans =\n\n    0.7391\n\n"
+      }
+    ],
+    "differs": [
+      "Its last iterate can differ from MATLAB's in the final digits."
+    ],
+    "status": "full",
+    "see_also": [
+      "fminbnd",
+      "roots",
+      "optimset"
+    ],
+    "tags": [
+      "optimization",
+      "roots"
+    ]
+  },
+  {
+    "name": "integral",
+    "kind": "function",
+    "signature": "q = integral(fun, xmin, xmax)\nq = integral(fun, xmin, xmax, Name, Value)",
+    "summary": "The definite integral of a function from xmin to xmax by adaptive quadrature, with infinite or complex limits allowed.",
+    "doc": "`fun` must accept a vector and return a vector of the same size (use .^ and ./), unless 'ArrayValued' is true. Options: 'AbsTol', 'RelTol', 'ArrayValued' and 'Waypoints'. Integrable singularities at an endpoint are handled.",
+    "examples": [
+      {
+        "code": "integral(@(x) x.^2, 0, 1)",
+        "expected": "\nans =\n\n    0.3333\n\n"
+      },
+      {
+        "code": "integral(@(x) exp(-x.^2), -Inf, Inf)",
+        "expected": "\nans =\n\n    1.7725\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "integral2",
+      "quadgk",
+      "trapz"
+    ],
+    "tags": [
+      "integration"
+    ]
+  },
+  {
+    "name": "interp1",
+    "kind": "function",
+    "signature": "vq = interp1(x, v, xq)\nvq = interp1(x, v, xq, method)\nvq = interp1(x, v, xq, method, extrapolation)\nvq = interp1(v, xq)",
+    "summary": "One-dimensional interpolation of sample values at query points: linear by default, or nearest, next, previous, pchip or spline.",
+    "doc": "x must be distinct and is sorted if it isn't. `v` may be a matrix, a column of values per column. Outside x the result is NaN, except for 'pchip' and 'spline', which extrapolate; `extrapolation` is 'extrap' or a value to use. 'cubic' is 'pchip'.",
+    "examples": [
+      {
+        "code": "interp1([1 2 3], [10 20 30], 2.5)",
+        "expected": "\nans =\n\n    25\n\n"
+      },
+      {
+        "code": "interp1([1 2 3], [10 20 30], 4, 'linear', 'extrap')",
+        "expected": "\nans =\n\n    40\n\n"
+      },
+      {
+        "code": "interp1([1 2 3], [10 20 30], [1.5 2.5])",
+        "expected": "\nans =\n\n    15    25\n\n"
+      }
+    ],
+    "differs": [
+      "The 'makima' method is refused.",
+      "The piecewise polynomial form, pp = interp1(x, v, method, 'pp'), is refused.",
+      "Repeated or NaN sample points, and an unknown method, are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "interp2",
+      "spline",
+      "pchip"
+    ],
+    "tags": [
+      "interpolation"
+    ]
+  },
+  {
+    "name": "ode45",
+    "kind": "function",
+    "signature": "[t, y] = ode45(odefun, tspan, y0)\n[t, y] = ode45(odefun, tspan, y0, options)\n[t, y, te, ye, ie] = ode45(odefun, tspan, y0, options)\nsol = ode45(___)",
+    "summary": "Solves a nonstiff system of ordinary differential equations y' = f(t, y) by an explicit Runge-Kutta (4,5) method.",
+    "doc": "With a two-element `tspan` the solver's own steps are returned; with more, the solution at those times. `options` from `odeset` take 'RelTol', 'AbsTol', 'Events' and others; `sol` with `deval` evaluates the solution anywhere. Without outputs it plots the solution.",
+    "examples": [
+      {
+        "code": "[t, y] = ode45(@(t, y) -y, [0 0.5 1], 1); [t y]",
+        "expected": "\nans =\n\n         0    1.0000\n    0.5000    0.6065\n    1.0000    0.3679\n\n"
+      }
+    ],
+    "differs": [
+      "The solver's own step points can differ from MATLAB's, so outputs with a two-element tspan differ in their times, though not in accuracy."
+    ],
+    "status": "full",
+    "see_also": [
+      "ode23",
+      "ode15s",
+      "odeset",
+      "deval"
+    ],
+    "tags": [
+      "differential equations"
+    ]
+  },
+  {
+    "name": "polyfit",
+    "kind": "function",
+    "signature": "p = polyfit(x, y, n)\n[p, S] = polyfit(x, y, n)\n[p, S, mu] = polyfit(x, y, n)",
+    "summary": "The coefficients, highest power first, of the degree-n polynomial that fits data in the least-squares sense.",
+    "doc": "`S` holds the triangular factor R, the degrees of freedom df and the norm of the residuals normr. With `mu`, x is centered and scaled first, $\\hat{x} = (x - \\mu_1)/\\mu_2$.",
+    "examples": [
+      {
+        "code": "p = polyfit(1:5, [2.1 3.9 6.2 7.8 10.1], 1)",
+        "expected": "\np =\n\n    1.9900    0.0500\n\n"
+      },
+      {
+        "code": "p = polyfit([-1 0 1 2], [5 1 1 5], 2)",
+        "expected": "\np =\n\n    2.0000   -2.0000    1.0000\n\n"
+      },
+      {
+        "code": "p = polyfit([0 1 2], [1 3 5], 1)",
+        "expected": "\np =\n\n    2.0000    1.0000\n\n"
+      }
+    ],
+    "differs": [
+      "Coefficients that are zero in exact arithmetic can show round-off (-0.0000).",
+      "Fewer points than coefficients, and mismatched lengths, give unclear errors rather than MATLAB's warning and message."
+    ],
+    "status": "partial",
+    "see_also": [
+      "polyval",
+      "roots"
+    ],
+    "tags": [
+      "polynomials",
+      "curve fitting"
+    ]
+  },
+  {
+    "name": "polyval",
+    "kind": "function",
+    "signature": "y = polyval(p, x)\n[y, delta] = polyval(p, x, S)\ny = polyval(p, x, [], mu)",
+    "summary": "A polynomial's values at points, its coefficients given highest power first.",
+    "doc": "With `mu` from polyfit, x is centered and scaled as polyfit did. `polyval([], x)` is 0.",
+    "examples": [
+      {
+        "code": "polyval([1 2 3], 2)",
+        "expected": "\nans =\n\n    11\n\n"
+      },
+      {
+        "code": "polyval([1 0 -1], [1 2; 3 4])",
+        "expected": "\nans =\n\n     0     3\n     8    15\n\n"
+      }
+    ],
+    "differs": [
+      "The error estimate delta ([y, delta] = polyval(p, x, S)) is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "polyfit",
+      "roots",
+      "polyvalm"
+    ],
+    "tags": [
+      "polynomials"
+    ]
+  }
+]

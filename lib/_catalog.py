@@ -37,7 +37,7 @@ CODE_CHARS, EXPECTED_CHARS = 4000, 8000
 # how a mode runs one example's code: "module:function", which returns what
 # the mode's prompt prints (catalog/SCHEMA.md, Examples); a mode without one
 # cannot have examples run yet
-RUNNERS = {"python": "_python_examples:run"}
+RUNNERS = {"python": "_python_examples:run", "matlab": "_matlab_examples:run"}
 
 # what a mode's examples may use without importing it, "module:NAME" (a
 # string of import lines); the built index gives each example the lines it
@@ -51,7 +51,7 @@ REPO = "https://github.com/sagemathinc/sagebrush"
 
 # the public names of a mode, "module:function" returning them: each must have
 # an entry or be in catalog/<mode>/missing.txt (gate 2)
-PUBLIC = {"python": "_python_docsearch:public_names", "magma": "_magma_docsearch:bound_names"}
+PUBLIC = {"python": "_python_docsearch:public_names", "magma": "_magma_docsearch:bound_names", "matlab": "_matlab_docsearch:public_names"}
 # (Magma mode's examples run through the CLI, which translates Magma code:
 # test/magma-catalog.test.ts)
 

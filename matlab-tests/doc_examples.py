@@ -1,5 +1,5 @@
-"""The search box's MATLAB examples (lib/_matlab_examples.py): their outputs,
-and their check against GNU Octave.
+"""The search box's MATLAB examples (lib/_matlab_examples.py, and the catalog's,
+catalog/matlab): their outputs, and their check against GNU Octave.
 
     python3 matlab-tests/doc_examples.py --update   # run every example in Sagebrush, write its output into the module
     python3 matlab-tests/doc_examples.py --octave   # write test_doc_examples.m, their values for run.py to compare
@@ -23,6 +23,10 @@ MARK = "@@example %d@@"
 
 # (Octave has no such function, or prints rather than returns)
 OCTAVE_SKIP = {
+    "rand": "Octave's generator streams differ from MATLAB's",
+    "randn": "Octave's generator streams differ from MATLAB's",
+    "randi": "Octave's generator streams differ from MATLAB's",
+    "rng": "Octave has no rng settings structure like MATLAB's",
     "contains": "not in Octave 11",
     "disp": "prints: MATLAB's and Octave's displays differ",
     "fprintf": "prints",
@@ -35,14 +39,35 @@ OCTAVE_SKIP = {
     "replace": "not in Octave 11",
     "qr": "Octave 8's one-output qr includes Householder vectors below the diagonal; MATLAB R2022a+ returns only R (https://www.mathworks.com/help/matlab/ref/qr.html)",
 }
+# (examples whose call form Octave lacks: left out of the check, by code)
+OCTAVE_SKIP_CODE = {
+    "round(pi, 2)": "Octave's round has no digits argument",
+    "round(pi, 3, 'significant')": "Octave's round has no digits argument",
+    "cumsum([1 2 3], 'reverse')": "Octave's cumsum has no direction argument",
+    "prod([1 2 3 4], 'all')": "Octave's prod has no 'all'",
+    "sum([1 NaN 3], 'omitnan')": "Octave's sum has no nanflag",
+    "integral(@(x) exp(-x.^2), -Inf, Inf)": "adaptive quadrature: the two agree to the tolerance, not in the last digits",
+}
 # (compared to 12 significant digits: Octave's and Sagebrush's last bits differ)
-OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma", "gammainc", "besselj"}
+OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma", "gammainc", "besselj", "fzero"}
 
 
 def codes():
     ns = {}
     exec(open(MODULE).read(), ns)
     return ns["CODES"]
+
+
+def catalog_codes():
+    """(name, code) of the MATLAB catalog's examples (catalog/matlab/*.json), for the Octave
+    check: an example of one statement (one with ; or a line break is left out of it)"""
+    d = os.path.join(ROOT, "catalog", "matlab")
+    out = []
+    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if f.endswith(".json"):
+            for e in json.load(open(os.path.join(d, f), encoding="utf-8")):
+                out.extend((e["name"], x["code"]) for x in e.get("examples", []) if ";" not in x["code"] and "\n" not in x["code"])
+    return out
 
 
 def program(cs):
@@ -86,7 +111,7 @@ def value_program(cs):
     out = ["% The values the search box's MATLAB examples make (lib/_matlab_examples.py),",
            "% compared with GNU Octave's (made by matlab-tests/doc_examples.py --octave)."]
     for name, code in cs:
-        if name in OCTAVE_SKIP:
+        if name in OCTAVE_SKIP or code in OCTAVE_SKIP_CODE:
             continue
         m = re.match(r"^\[(.*)\]\s*=(?!=)\s*(.*)$", code)
         n = re.match(r"^(\w+)\s*=(?!=)\s*(.*)$", code)
@@ -106,7 +131,7 @@ if __name__ == "__main__":
     if "--update" in sys.argv:
         update()
     elif "--octave" in sys.argv:
-        open(os.path.join(HERE, "test_doc_examples.m"), "w").write(value_program(codes()))
+        open(os.path.join(HERE, "test_doc_examples.m"), "w").write(value_program(codes() + catalog_codes()))
         print("wrote matlab-tests/test_doc_examples.m")
     else:
         sys.exit(__doc__)
