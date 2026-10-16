@@ -1,4 +1,4 @@
-# The function catalog: entry schema (draft 4)
+# The function catalog: entry schema (draft 6)
 
 Every function, class, method or constant an agent can use in a Sagebrush
 mode has one **entry**. The entries are what `sb --search`, the MCP
@@ -47,15 +47,17 @@ two-space indentation, and keys are in the order below, so diffs stay small.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `name` | yes | The full public name as code in the mode spells it: `numpy.linalg.solve`, `EllipticCurve`, `EllipticCurve_rational_field.rank`, `ClassGroup`, `cumsum`. A method is `Class.method`. |
-| `kind` | yes | `function`, `procedure` (a Magma call that changes its `~x` arguments), `class`, `method`, `attribute`, `constant`, `module`, `operator` or `keyword`. |
+| `name` | yes | The full public name as code in the mode spells it: `numpy.linalg.solve`, `EllipticCurve`, `ClassGroup`, `cumsum`. A method is `Receiver.method`, the receiver named as code makes it: the public constructor where there is one (`EllipticCurve.rank`, `matrix.det`, `NumberField.class_group`, not the class that happens to implement it), else the type as `type(x).__name__` prints it (`Integer.factor`, `Expression.reduce_trig`). The implementing class's name may go in `aliases` (`EllipticCurve_rational_field.rank`), and the full upstream path in `upstream`. |
+| `aliases` | no | Other names of the same thing, which the entry covers whole: `["derivative"]` for `diff`, `["numpy.amax"]` for `numpy.max`, or the global form of a method (`["factor"]` for `Integer.factor`). Search finds the entry by them, and gate 2 counts them as covered. An alias is no other entry's name in the mode. |
+| `kind` | yes | A parent or other value bound to a name (Sage's `QQ`, `ZZ`, `pi`) is a `constant`; a constructor (`GF`, `PolynomialRing`, `matrix`) is a `function`; a class an agent subclasses or tests with `isinstance` is a `class`. Otherwise: `function`, `procedure` (a Magma call that changes its `~x` arguments), `class`, `method`, `attribute`, `constant`, `module`, `operator` or `keyword`. |
 | `signature` | yes | The call form in the mode's own syntax. Python: `(a, b, axis=None)`. Sage: `(E, p)`. MATLAB: `[y1,...] = f(x)`. Magma: `(<MtrxS> a) -> RngElt`, or `(<RngIntElt> n : Proof := true) -> BoolElt` with parameters after `:`; the argument types tell the entries of one name apart, and the return type is optional. Optional parts go in `[ ]`. Several call forms of one function with one meaning go one per line (`"M = max(A)\nM = max(A, [], dim)\n[M, I] = max(___)"`); a form with a meaning of its own is an entry of its own. Use `""` for a constant, module or keyword. |
 | `summary` | yes | One sentence, at most 150 characters, in our own words. This is what search results show. |
 | `doc` | no | Markdown, in our own words (clean room: never copied from upstream documentation). It covers arguments, return value, errors and edge cases. Math goes between `$...$`. |
 | `examples` | yes: at least one, except for `absent` | Each is `{"code", "expected"}`, run as described below. |
 | `differs` | yes (may be `[]`) | One line per known difference from upstream: arguments not accepted, output format, precision, missing options, exotic semantics. An empty list claims none is known. |
 | `status` | yes | `full`, `partial`, `stub-error` or `absent` (below). |
-| `alternative` | for `absent` (required) and `stub-error` (recommended) | What to use instead in Sagebrush, for example `"use numpy.roots"`. Name a cataloged entry where possible. |
+| `alternative` | for `absent` (required) and `stub-error` (recommended) | What to use instead in Sagebrush: a name (`"numpy.roots"`) or a sentence (`"compute it over QQ, then map to the extension"`). Name a cataloged entry where possible. |
+| `domains` | no | Where `status` holds, in the mode's own words: Sage's base rings and fields (`"ZZ"`, `"QQ"`, `"GF(q)"`, `"Zmod(n)"`, `"number fields"`, `"AA"`, `"QQbar"`, `"RDF/CDF"`, `"RealField(p)"`), or dtypes, or argument classes. `differs` names what happens elsewhere. Search can filter on it. |
 | `see_also` | no | Names of related entries in the same mode. |
 | `upstream` | no | The upstream name, when it differs from `name`: for example `"sage.rings.integer.Integer.factor"`, or for a MATLAB function the toolbox it belongs to. |
 | `upstream_version` | no | The upstream release `differs` and `status` were judged against: `"NumPy 2.3"`, `"SciPy 1.16"`, `"Python 3.14"`, `"Sage 10.10"`, `"Magma 2.28"`, `"MATLAB R2025b"`. |
@@ -79,7 +81,7 @@ example that shows a result. What the code prints before an error comes first,
 then the error:
 
 - **python**: the output of the code, then the `repr` of the last line when that line is an expression whose value isn't None, as `>>>` shows it. The session already has `import numpy as np`, `import math, cmath, itertools, functools, collections, random, bisect, heapq` and `from fractions import Fraction` (`lib/_python_examples.py` PRELUDE).
-- **sage**: as `sage:` prints, after Sage's preparser (`2^3` and `1/2` mean what they mean in Sage).
+- **sage**: as a `sage:` prompt prints, after Sage's preparser (`2^3` and `1/2` mean what they mean in Sage): the value of each top-level expression statement, as a doctest block shows it. Most examples end with one expression.
 - **magma**: what Magma code prints (`print`, or a statement ending without `;` showing its value, as Magma's REPL does).
 - **matlab**: what the MATLAB command window shows, `ans = ...` included, with the mode's display format.
 
@@ -126,6 +128,6 @@ the MCP `search_docs` tool and `web/docsearch.ts` read it.
 ## Gates (CI)
 
 1. Every file validates against `catalog/schema.json`, and a (name, signature) pair occurs once per mode.
-2. Every public name of a mode has an entry or is in `missing.txt` (each mode lists its own public names, as `lib/_python_docsearch.py` does for Python). A new public name without an entry fails. A name in `missing.txt` that has gained an entry must be removed from it.
+2. Every public name of a mode has an entry (as its name or an alias) or is in `missing.txt`. Each mode lists its own public names, as `lib/_python_docsearch.py` does for Python; Sage's are the `sage_all` globals, and methods get entries as their owners choose. A new public name without an entry fails. A name in `missing.txt` that has gained an entry must be removed from it.
 3. Every example runs on every runtime of its mode, and its output must equal `expected`. A changed output fails until the entry is updated in the same commit.
 4. Coverage per mode is reported: entries, entries with examples, each status, and the `missing.txt` count.

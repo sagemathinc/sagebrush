@@ -25,6 +25,14 @@
           "minLength": 1,
           "pattern": "^\\S+$"
         },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S+$"
+          }
+        },
         "kind": {
           "enum": [
             "function",
@@ -73,6 +81,13 @@
         "alternative": {
           "type": "string",
           "minLength": 1
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "see_also": {
           "type": "array",
