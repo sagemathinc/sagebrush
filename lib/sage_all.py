@@ -302,6 +302,45 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
             break
 
 
+def sage_eval(source, locals=None, cmds="", preparse=True):
+    """The value of the Sage expression source (a string), with the names
+    in locals; cmds (statements) run first.  A tuple or list source is
+    statements followed by the expression.
+
+    EXAMPLES::
+
+        sage: sage_eval('2^10'), sage_eval('1/3 + 1/6'), sage_eval('[1..5]')
+        (1024, 1/2, [1, 2, 3, 4, 5])
+        sage: sage_eval('x^2 + 1', locals={'x': 3}), sage_eval('t^2', locals={'t': x + 1})
+        (10, (x + 1)^2)
+        sage: sage_eval(('y = 3', 'y^2'))
+        9
+    """
+    import builtins as _b
+    if isinstance(source, (tuple, list)):
+        cmds = "\n".join([str(cmds)] + [str(c) for c in source[:-1]])
+        source = source[-1]
+    source = str(source)
+
+    def comp(code, mode):
+        if not preparse:
+            return compile(code, "<sage_eval>", mode)
+        if hasattr(_b, "__pyjs_compile_sage__"):
+            return _b.__pyjs_compile_sage__(code, "<sage_eval>", mode)
+        from sagebrush.preparse import preparse as _preparse
+        return compile(_preparse(code).strip(), "<sage_eval>", mode)
+
+    ns = dict(globals())
+    if locals:
+        ns.update(locals)
+    if cmds.strip():
+        exec(comp(cmds, "exec"), ns)
+    return eval(comp(source, "eval"), ns)
+
+
+__all__.append("sage_eval")
+
+
 def VectorSpace(base, n):
     """The vector space base^n (over a finite field, so far).
 
