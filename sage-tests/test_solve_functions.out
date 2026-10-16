@@ -5,3 +5,5 @@ values :: [True, True]
 substituted :: [True, 0]
 plots :: Graphics object consisting of 10 graphics primitives
 values at 1 :: ['0.18111487', '5.52135791']
+big content :: [[x == -1610612736*sqrt(a + b), x == 1610612736*sqrt(a + b)], [x == -2*sqrt(2*a + 2*b), x == 2*sqrt(2*a + 2*b)]]
+requested name :: [[ff(x) == 2, _solve_fn0 == r1]]

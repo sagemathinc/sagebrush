@@ -25,3 +25,8 @@ for j in [0, 1]:
         P += plot(f, x, -3, 3)
 T('plots', lambda: P)
 T('values at 1', lambda: ['%.8f' % float(solve(ed, y)[j].substitute(c == 2).rhs().subs(x=1)) for j in [0, 1]])
+# a square content past 2^63 (s*s wrapped as an i64: the roots were lost),
+# and a requested variable named like the temporary symbol
+T('big content', lambda: [solve(x^2 == (9*2^58)*(a + b), x), solve(x^2 == 8*(a + b), x)])
+var('_solve_fn0'); ff = function('ff')
+T('requested name', lambda: [list(s) for s in solve([ff(x) == 2], ff(x), _solve_fn0)])

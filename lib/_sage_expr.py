@@ -4065,12 +4065,16 @@ def solve(f, *args, **kw):
     # variable"): solved for a new symbol in its place, then put back
     fns = [v for v in vs if isinstance(v, Expression) and not v.is_symbol() and v._op()[0].startswith("fun:")]
     if fns:
+        # (not a name of the equations nor of a requested variable:
+        # solve([f(x) == 2], f(x), _solve_fn0) took the user's _solve_fn0)
         taken = set(n for g in eqs for n in g._names())
+        taken |= set(n for v in vs for n in (_expr(v)._names() if not isinstance(v, str) else [v]))
         new = {}
         for k, v in enumerate(fns):
             name = "_solve_fn%d" % k
             while name in taken:
                 name += "_"
+            taken.add(name)
             new[str(v)] = Expression(_sym_s(name))
         put = {fv: new[str(fv)] for fv in fns}
         eqs2 = [g.subs(put) for g in eqs]
