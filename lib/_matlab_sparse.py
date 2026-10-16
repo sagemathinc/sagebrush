@@ -1124,15 +1124,19 @@ def blkdiag_b(nargout, *args):
 
 
 def _fft_sizes_first(name):
-    """fft2, ifft2, fftn and ifftn of a sparse X: the full transform, the sizes (every
-    numeric argument after X) checked before X is made full"""
+    """fft2, ifft2, fftn and ifftn of a sparse X: the full transform, every argument after X
+    checked as sizes before X is made full (only the inverses' text flags, such as
+    'symmetric', are left to the full function), so a bad size of any class is refused at once"""
     f = _FULL[name]
 
     def g(nargout, *args):
         if _has_sparse(args):
             for a in args[1:]:
-                if _m._isnumlike(a):
-                    _m._fft_sizes(a)
+                if name in ("ifft2", "ifftn") and _m._istext(a):
+                    continue
+                if type(a) is Sparse and a.m * a.n > 64:
+                    raise _err("%s: a sparse size argument with %d elements is not supported." % (name, a.m * a.n))
+                _m._fft_sizes(full(a) if type(a) is Sparse else a)
             args = [full(a) if type(a) is Sparse else a for a in args]
         return f(nargout, *args)
     return g
