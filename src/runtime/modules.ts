@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity } from "./object";
+import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
@@ -487,15 +487,13 @@ newBuiltinModule("math", (m) => {
     return diff <= Math.abs(relTol * b) || diff <= Math.abs(relTol * a) || diff <= absTol;
   };
   fn(m, "isclose", (a: any, b: any) => isclose(F(a), F(b)));
+  // (keywords bound by CPython's signature, isclose(a, b, *, rel_tol, abs_tol):
+  // a= and b= too, a duplicate or an unknown name refused)
   m.isclose.$kw = (pos: any[], names: string[], values: any[]) => {
-    if (pos.length !== 2) raise(T.TypeError, `isclose() takes exactly 2 positional arguments (${pos.length} given)`);
-    let relTol = 1e-9, absTol = 0.0;
-    names.forEach((n, i) => {
-      if (n === "rel_tol") relTol = F(values[i]);
-      else if (n === "abs_tol") absTol = F(values[i]);
-      else raise(T.TypeError, `isclose() got an unexpected keyword argument '${n}'`);
-    });
-    return isclose(F(pos[0]), F(pos[1]), relTol, absTol);
+    const [a, b, rel, abs] = bindArgs("isclose", sig(["a", "b"], { kwonly: ["rel_tol", "abs_tol"] }), pos, names, values);
+    if (a === undefined) raise(T.TypeError, "isclose() missing required argument 'a' (pos 1)");
+    if (b === undefined) raise(T.TypeError, "isclose() missing required argument 'b' (pos 2)");
+    return isclose(F(a), F(b), rel === undefined ? 1e-9 : F(rel), abs === undefined ? 0.0 : F(abs));
   };
   // (CPython's math_modf_impl: the parts keep x's sign, an infinity's
   // fractional part is a signed zero)
