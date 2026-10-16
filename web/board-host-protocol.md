@@ -106,7 +106,7 @@ On the window (`postMessage` to `window.parent`, or to the frame's
 
 On the channel:
 
-- From the frame: `{ sagebrush: "answers", version: 1, id, name, revision, page, answers, comment }`.
+- From the frame: `{ sagebrush: "answers", version: 1, id, name, revision, page, answers, notes, comment }`.
   - `id`: `crypto.randomUUID()`, made when the user presses Submit with
     answers not sent before. A press that sends again (see Once) reuses it.
   - `name`, `revision`: as posted in `board`, or `null`.
@@ -116,6 +116,11 @@ On the channel:
     has an answer to its answer, in the shape of the item's input
     (web/board-format.md). Unanswered items are left out. Submit can't be
     pressed while a `required` item is unanswered.
+  - `notes`: an object. It maps the id of each ask item on that page that
+    the user answered in their own words to those words. Every question
+    offers this, beside its controls or in place of them. A question with a
+    note and no answer counts as answered: `required` is met. Questions
+    without a note are left out.
   - `comment`: the text of the Submit bar's comment field, possibly `""`.
 - From the host: `{ sagebrush: "received", version: 1, id }`. The submission
   `id` was admitted durably as the agent's turn (see Once); the frame shows
@@ -152,10 +157,10 @@ checked against the board it was made from, never the current one.
 | `id` | a UUID (36 characters, `8-4-4-4-12` hexadecimal) |
 | `name`, `revision` | equal to what was posted on this channel (`null` if nothing was) |
 | `page.number` | a whole number, a page of that board; `page.id` and `page.title` that page's, if given |
-| `answers` | at most 200 keys, each the id of an ask item on that page |
+| `answers`, `notes` | each at most 200 keys, each the id of an ask item on that page |
 | each answer | the item's shape: `check` a list of at most 100 distinct values of its options (`true` or `false` without options); `radio` and `choice` one value of its options; `text` a string; `number` a number within its `min`/`max` and on its `step`; `scale` a whole number from its `min` to its `max` |
-| a text answer, `comment` | strings of at most 10,000 characters |
-| required items | each has an answer |
+| a text answer, a note, `comment` | strings of at most 10,000 characters |
+| required items | each has an answer, or a note that is not only spaces |
 
 - Fields other than these are dropped, not passed on.
 
