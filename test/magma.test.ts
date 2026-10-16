@@ -651,6 +651,8 @@ test("a value added to a collection is made like its elements, all the way down 
     // a child emptied of its elements keeps its universe (CORR-9348-FU1)
     ["Z := [[\"q\"]]; Remove(~Z[1], 1); Append(~Z, [3]);", "Runtime error in 'Append': Cannot coerce element into the universe"],
     ["K := GF(11); Af := [K|4,6]; Append(~Af, 1/11);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    // an empty selection keeps the universe of what it was selected from
+    ["Ss := [<2/3,\"q\">]; Ss[1] := <4,\"r\">; W := Ss[[]]; Append(~W, <5,6>);", "Runtime error in 'Append': Cannot coerce element into the universe"],
   ];
   // (each refusal is an error, and the session goes on to the next one;
   // a refused Append changes nothing)

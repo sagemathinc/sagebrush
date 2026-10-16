@@ -842,6 +842,16 @@ def _keep_inf(t, v, first):
         t._wit = wit
 
 
+def _keep_wit(t, s):
+    """t, a selection from s, keeping the element that stands for s's
+    universe (CORR-765-2: S[1..1] after S[1] := <4,"r"> in a sequence of
+    <rational, string> tuples still takes <1/3,"s">)."""
+    wit = getattr(s, "_wit", None)
+    if wit is not None:
+        t._wit = wit
+    return t
+
+
 def _iter(s):
     if isinstance(s, (MSeq, MRange, MTuple, list, tuple)):
         return iter(s)
@@ -1156,7 +1166,7 @@ def _index(s, i, pos=None):
             universe = _selection_universe(s, s) if isinstance(s, (MSeq, MRange)) else None
             if n == 0:
                 if (i.size() if isinstance(i, MRange) else len(i)) == 0:
-                    return MSeq([], universe)
+                    return _keep_wit(MSeq([], universe), s)
                 if getattr(s, "universe", None) is None and isinstance(s, MSeq):
                     # (only an untyped empty sequence: for an empty range or
                     # an empty sequence with a universe, the selection is
@@ -1173,7 +1183,7 @@ def _index(s, i, pos=None):
                 out.append(s[j - 1])
             while out and out[-1] is _UNDEF:
                 out.pop()
-            return MSeq(out, universe)
+            return _keep_wit(MSeq(out, universe), s)
         # (any index of an untyped empty sequence is "not defined"; a typed
         # one's is out of its range)
         _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, isinstance(s, (MSeq, list)) and getattr(s, "universe", None) is None)
@@ -2614,6 +2624,8 @@ def _universe(s, fixed=False):
         if y is not None:
             return ("elt", y)
     sample = getattr(s, "sample", None)
+    if sample is None:
+        sample = getattr(s, "_wit", None)  # (an empty selection's, CORR-765-2)
     return ("elt", sample) if sample is not None else None
 
 
