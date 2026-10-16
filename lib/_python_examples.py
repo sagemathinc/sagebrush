@@ -361,6 +361,21 @@ ENTRIES = [
     ("scipy.io.loadmat", "(file_name, mdict=None, squeeze_me=False)", "The variables of a MATLAB .mat file, as a dict of arrays.", []),
     ("scipy.io.savemat", "(file_name, mdict, oned_as='row')", "Writes a dict of arrays to a MATLAB .mat file.", []),
     # ---------------------------------------------------------------- math
+    ('math.acos', '(x)', 'The inverse cosine, in radians.', ['round(math.acos(0.5), 6)']),
+    ('math.acosh', '(x)', 'The inverse hyperbolic cosine.', ['round(math.acosh(2), 6)']),
+    ('math.asin', '(x)', 'The inverse sine, in radians.', ['round(math.asin(0.5), 6)']),
+    ('math.asinh', '(x)', 'The inverse hyperbolic sine.', ['round(math.asinh(2), 6)']),
+    ('math.atan', '(x)', 'The inverse tangent, in radians.', ['round(math.atan(2), 6)']),
+    ('math.atanh', '(x)', 'The inverse hyperbolic tangent.', ['round(math.atanh(0.5), 6)']),
+    ('math.cosh', '(x)', 'The hyperbolic cosine.', ['round(math.cosh(1), 6)']),
+    ('math.erfc', '(x)', 'The complementary error function.', ['round(math.erfc(1), 6)']),
+    ('math.expm1', '(x)', 'exp(x) minus one, accurate for small x.', ['round(math.expm1(0.001), 6)']),
+    ('math.log1p', '(x)', 'log(1+x), accurate for small x.', ['round(math.log1p(0.001), 6)']),
+    ('math.sinh', '(x)', 'The hyperbolic sine.', ['round(math.sinh(1), 6)']),
+    ('math.tanh', '(x)', 'The hyperbolic tangent.', ['round(math.tanh(1), 6)']),
+    ('math.cbrt', '(x)', 'The real cube root, including negative inputs.', ['math.cbrt(-8)']),
+    ('math.exp2', '(x)', 'Two raised to the power x.', ['math.exp2(5)']),
+    ('math.isfinite', '(x)', 'Whether x is neither infinite nor NaN.', ['[math.isfinite(x) for x in (1.5, math.inf, math.nan)]']),
     ("math.sqrt", "(x)", "The square root of x.", ["math.sqrt(2)"]),
     ("math.isqrt", "(n)", "The integer square root of a non-negative integer.", ["math.isqrt(10**20 + 1)"]),
     ("math.exp", "(x)", "e raised to the power x.", ["math.exp(1)"]),
@@ -403,6 +418,22 @@ ENTRIES = [
     ("math.nextafter", "(x, y)", "The next float after x toward y.", ["math.nextafter(1.0, 2.0)"]),
     ("math.ulp", "(x)", "The value of the least significant bit of x.", ["math.ulp(1.0)"]),
     # ---------------------------------------------------------------- cmath
+    ('cmath.acos', '(z)', 'The complex inverse cosine.', ['z = cmath.acos(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.acosh', '(z)', 'The complex inverse hyperbolic cosine.', ['z = cmath.acosh(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.asin', '(z)', 'The complex inverse sine.', ['z = cmath.asin(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.asinh', '(z)', 'The complex inverse hyperbolic sine.', ['z = cmath.asinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.atan', '(z)', 'The complex inverse tangent.', ['z = cmath.atan(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.atanh', '(z)', 'The complex inverse hyperbolic tangent.', ['z = cmath.atanh(0.5+0.5j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.cos', '(z)', 'The complex cosine.', ['z = cmath.cos(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.cosh', '(z)', 'The complex hyperbolic cosine.', ['z = cmath.cosh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.log10', '(z)', 'The complex base-ten logarithm.', ['z = cmath.log10(10j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.sin', '(z)', 'The complex sine.', ['z = cmath.sin(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.sinh', '(z)', 'The complex hyperbolic sine.', ['z = cmath.sinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.tan', '(z)', 'The complex tangent.', ['z = cmath.tan(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.tanh', '(z)', 'The complex hyperbolic tangent.', ['z = cmath.tanh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.isfinite', '(z)', 'Whether both components of z are finite.', ['[cmath.isfinite(z) for z in (1+2j, complex(math.inf, 0), complex(0, math.nan))]']),
+    ('cmath.isinf', '(z)', 'Whether either component of z is infinite.', ['[cmath.isinf(z) for z in (1+2j, complex(0, math.inf))]']),
+    ('cmath.isnan', '(z)', 'Whether either component of z is NaN.', ['[cmath.isnan(z) for z in (1+2j, complex(math.nan, 0))]']),
     ("cmath.sqrt", "(z)", "The complex square root.", ["cmath.sqrt(-4)"]),
     ("cmath.exp", "(z)", "The complex exponential.", ["cmath.exp(1j * math.pi)"]),
     ("cmath.log", "(z, base=e)", "The complex logarithm.", ["cmath.log(-1)"]),
@@ -416,6 +447,11 @@ ENTRIES = [
     ("fractions.Fraction.limit_denominator", "(max_denominator=1000000)", "The closest fraction with a denominator at most max_denominator.",
      ["Fraction(math.pi).limit_denominator(100)"]),
     # ---------------------------------------------------------------- itertools
+    ('itertools.batched', '(iterable, n)', 'Group input into tuples of at most n items.', ["list(itertools.batched('ABCDEFG', 3))"]),
+    ('itertools.compress', '(data, selectors)', 'Keep data items whose corresponding selector is true.', ["list(itertools.compress('ABCDE', [1, 0, 1, 0, 1]))"]),
+    ('itertools.dropwhile', '(predicate, iterable)', 'Skip the initial items satisfying a predicate, then yield everything left.', ['list(itertools.dropwhile(lambda x: x < 5, [1, 3, 6, 2]))']),
+    ('itertools.filterfalse', '(predicate, iterable)', 'Keep items for which a predicate is false; None tests the items themselves.', ['list(itertools.filterfalse(lambda x: x % 2, range(6)))']),
+    ('itertools.tee', '(iterable, n=2)', 'Make independently advancing iterators over one input.', ['a, b = itertools.tee(iter([1, 2, 3]))\nfirst = next(a)\n(first, list(b), list(a))']),
     ("itertools.product", "(*iterables, repeat=1)", "The Cartesian product, as tuples.", ["list(itertools.product('ab', [1, 2]))"]),
     ("itertools.permutations", "(iterable, r=None)", "The orderings of r elements.", ["list(itertools.permutations([1, 2, 3], 2))"]),
     ("itertools.combinations", "(iterable, r)", "The subsets of r elements, in order.", ["list(itertools.combinations('abcd', 2))"]),
@@ -433,6 +469,14 @@ ENTRIES = [
     ("itertools.starmap", "(function, iterable)", "function applied to each tuple of arguments.", ["list(itertools.starmap(pow, [(2, 3), (3, 2)]))"]),
     ("itertools.takewhile", "(predicate, iterable)", "Elements while a condition holds.", ["list(itertools.takewhile(lambda x: x < 5, [1, 3, 6, 2]))"]),
     # ---------------------------------------------------------------- functools
+    ('functools.cached_property', '(func)', 'Compute an attribute on first access and cache it on the instance.', ['class Batch:\n    def __init__(self): self.calls = 0\n    @functools.cached_property\n    def total(self):\n        self.calls += 1\n        return sum([2, 3, 5])\nb = Batch()\n(b.total, b.total, b.calls)']),
+    ('functools.cmp_to_key', '(mycmp)', 'Turn a two-argument comparison into a sorting key.', ["sorted(['pear', 'fig', 'plum'], key=functools.cmp_to_key(lambda a, b: len(a) - len(b)))"]),
+    ('functools.partialmethod', '(func, /, *args, **keywords)', 'Define a method with some arguments fixed, preserving instance binding.', ['class Switch:\n    def set(self, value): self.value = value\n    on = functools.partialmethod(set, True)\ns = Switch()\ns.on()\ns.value']),
+    ('functools.singledispatch', '(func)', 'Dispatch a function on the type of its first argument.', ["@functools.singledispatch\ndef describe(x): return 'object'\n@describe.register(int)\ndef _(x): return 'integer'\n[describe(3), describe('hi')]"]),
+    ('functools.singledispatchmethod', '(func)', 'Dispatch a method on the first argument after self or cls.', ["class Describe:\n    @functools.singledispatchmethod\n    def kind(self, x): return 'object'\n    @kind.register(int)\n    def _(self, x): return 'integer'\nd = Describe()\n[d.kind(3), d.kind('hi')]"]),
+    ('functools.total_ordering', '(cls)', 'Fill in ordering methods from equality and one ordering comparison.', ['@functools.total_ordering\nclass Score:\n    def __init__(self, n): self.n = n\n    def __eq__(self, other): return self.n == other.n\n    def __lt__(self, other): return self.n < other.n\n(Score(2) <= Score(2), Score(3) > Score(2), Score(1) >= Score(2))']),
+    ('functools.update_wrapper', '(wrapper, wrapped, assigned=WRAPPER_ASSIGNMENTS, updated=WRAPPER_UPDATES)', "Copy a wrapped function's metadata and retain it in __wrapped__.", ['def double(x): return 2 * x\ndef wrapper(x): return double(x)\nfunctools.update_wrapper(wrapper, double)\n(wrapper.__name__, wrapper(3), wrapper.__wrapped__ is double)']),
+    ('functools.wraps', '(wrapped, assigned=WRAPPER_ASSIGNMENTS, updated=WRAPPER_UPDATES)', "Decorate a wrapper so it preserves the wrapped function's metadata.", ['def double(x): return 2 * x\n@functools.wraps(double)\ndef wrapper(x): return double(x)\n(wrapper.__name__, wrapper(4), wrapper.__wrapped__ is double)']),
     ("functools.reduce", "(function, iterable[, initial])", "A sequence folded into one value by a two-argument function.", ["functools.reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])"]),
     ("functools.partial", "(func, *args, **keywords)", "A function with some arguments fixed.", ["int2 = functools.partial(int, base=2)\nint2('1011')"]),
     ("functools.lru_cache", "(maxsize=128)", "A decorator that remembers a function's results.",
@@ -440,6 +484,10 @@ ENTRIES = [
     ("functools.cache", "(user_function)", "A decorator that remembers all of a function's results.",
      ["@functools.cache\ndef f(n):\n    return n * n\n[f(3), f(3), f.cache_info().hits]"]),
     # ---------------------------------------------------------------- collections
+    ('collections.ChainMap', '(*maps)', 'Search mappings in order; write new values to the first mapping.', ["defaults = {'color': 'blue', 'size': 2}\noptions = collections.ChainMap({'color': 'red'}, defaults)\noptions['size'] = 3\n(options['color'], options['size'], defaults['size'])"]),
+    ('collections.UserDict', '(dict=None, **kwargs)', 'A dictionary wrapper whose underlying mapping is available as data.', ["original = {'a': 1}\nd = collections.UserDict(original)\nd['b'] = 2\n(d.data, original)"]),
+    ('collections.UserList', '(initlist=None)', 'A list wrapper whose underlying list is available as data.', ['items = collections.UserList([3, 1])\nitems.append(2)\nitems.sort()\nitems.data']),
+    ('collections.UserString', '(seq)', 'A string wrapper whose contents are available as data.', ["label = collections.UserString('cat')\nlabel.data = 'kitten'\n(str(label), len(label))"]),
     ("collections.Counter", "(iterable=None)", "Counts of hashable items, a dict subclass.", ["collections.Counter('mississippi').most_common(2)"]),
     ("collections.defaultdict", "(default_factory)", "A dict that creates missing values with a factory.",
      ["d = collections.defaultdict(list)\nd['a'].append(1)\ndict(d)"]),
@@ -453,9 +501,23 @@ ENTRIES = [
     ("random.choice", "(seq)", "A random element of a sequence.", ["random.seed(3)\nrandom.choice('abcdef')"]),
     ("random.shuffle", "(x)", "Shuffles a list in place.", ["random.seed(4)\nx = list(range(6))\nrandom.shuffle(x)\nx"]),
     ("random.uniform", "(a, b)", "A random float between a and b.", ["random.seed(5)\nrandom.uniform(10, 20)"]),
+    ('bisect.bisect', '(a, x, lo=0, hi=len(a), *, key=None)', 'The insertion index to the right of existing equal values.', ['bisect.bisect([1, 2, 2, 4], 2)']),
+    ('bisect.bisect_right', '(a, x, lo=0, hi=len(a), *, key=None)', 'The insertion index to the right of existing equal values.', ['bisect.bisect_right([1, 2, 2, 4], 2)']),
+    ('bisect.insort_left', '(a, x, lo=0, hi=len(a), *, key=None)', 'Insert x into a sorted list, before equal keys.', ['rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_left(rows, (2, "new"), key=lambda row: row[0])\nrows']),
+    ('bisect.insort_right', '(a, x, lo=0, hi=len(a), *, key=None)', 'Insert x into a sorted list, after equal keys.', ['rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_right(rows, (2, "new"), key=lambda row: row[0])\nrows']),
     ("bisect.bisect_left", "(a, x)", "Where x would be inserted to keep the sorted list a sorted (before equal elements).",
      ["bisect.bisect_left([1, 2, 4, 4, 8], 4)"]),
     ("bisect.insort", "(a, x)", "x inserted into a sorted list, keeping it sorted.", ["a = [1, 3, 5]\nbisect.insort(a, 4)\na"]),
+    ('heapq.heapify', '(x)', 'Rearrange a list in place into a minimum heap.', ['h = [3, 1, 4, 2]\nheapq.heapify(h)\nh[0]']),
+    ('heapq.heappop', '(heap)', 'Remove and return the minimum item.', ['h = [3, 1, 4, 2]\nheapq.heapify(h)\n[heapq.heappop(h) for _ in range(4)]']),
+    ('heapq.heappushpop', '(heap, item)', 'Push an item, then remove and return the minimum.', ['h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heappushpop(h, 3), sorted(h))']),
+    ('heapq.heapreplace', '(heap, item)', 'Remove the minimum item, then insert the new item.', ['h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heapreplace(h, 5), sorted(h))']),
+    ('heapq.heapify_max', '(x)', 'Rearrange a list in place into a maximum heap.', ['h = [3, 1, 4, 2]\nheapq.heapify_max(h)\nh[0]']),
+    ('heapq.heappop_max', '(heap)', 'Remove and return the maximum item.', ['h = [3, 1, 4, 2]\nheapq.heapify_max(h)\n[heapq.heappop_max(h) for _ in range(4)]']),
+    ('heapq.heappushpop_max', '(heap, item)', 'Push an item, then remove and return the maximum.', ['h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heappushpop_max(h, 3), sorted(h))']),
+    ('heapq.heapreplace_max', '(heap, item)', 'Remove the maximum item, then insert the new item.', ['h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heapreplace_max(h, 5), sorted(h))']),
+    ('heapq.heappush_max', '(heap, item)', 'Push an item while preserving the max-heap order.', ['h = [3, 1, 2]\nheapq.heapify_max(h)\nheapq.heappush_max(h, 5)\nh[0]']),
+    ('heapq.merge', '(*iterables, key=None, reverse=False)', 'Merge already sorted iterables into one sorted iterator.', ['list(heapq.merge([1, 4, 7], [2, 4, 6]))']),
     ("heapq.heappush", "(heap, item)", "An item pushed onto a heap (a list with the smallest first).",
      ["h = []\nfor x in [5, 1, 4, 2]:\n    heapq.heappush(h, x)\n[heapq.heappop(h) for _ in range(4)]"]),
     ("heapq.nlargest", "(n, iterable, key=None)", "The n largest elements.", ["heapq.nlargest(2, [5, 1, 8, 3])"]),
@@ -464,6 +526,106 @@ ENTRIES = [
 
 # The other public functions and classes: a summary each (no example)
 SUMMARIES = {
+    # matplotlib: pyplot (on the current figure and axes), Axes and Figure
+    "matplotlib.axes.Axes.annotate": "A text annotation at a point, with an optional arrow to it from the text's position.",
+    "matplotlib.axes.Axes.axhline": "A horizontal line across the axes at height y.",
+    "matplotlib.axes.Axes.axis": "Sets the limits from [xmin, xmax, ymin, ymax]; 'off' hides the axes, and 'equal', 'scaled' or 'square' give equal units. Returns None, where matplotlib returns the limits.",
+    "matplotlib.axes.Axes.axvline": "A vertical line across the axes at x.",
+    "matplotlib.axes.Axes.bar": "A bar chart: bars at x with the given heights (width, bottom, color, label).",
+    "matplotlib.axes.Axes.barh": "A horizontal bar chart: bars at y with the given widths.",
+    "matplotlib.axes.Axes.cla": "Clear the axes: their plots, limits and labels.",
+    "matplotlib.axes.Axes.clear": "Clear the axes: their plots, limits and labels.",
+    "matplotlib.axes.Axes.contourf": "Filled contours of a 2D array Z over a grid (levels, cmap).",
+    "matplotlib.axes.Axes.errorbar": "Points with error bars (yerr, xerr), optionally joined by lines.",
+    "matplotlib.axes.Axes.fill_between": "Fill the region between two curves y1 and y2 (y2 = 0 by default) over x.",
+    "matplotlib.axes.Axes.get_position": "The axes' position in the figure, as fractions (left, bottom, width, height).",
+    "matplotlib.axes.Axes.get_xlim": "The x axis's limits (left, right).",
+    "matplotlib.axes.Axes.get_ylim": "The y axis's limits (bottom, top).",
+    "matplotlib.axes.Axes.get_yticks": "The positions of the y axis's ticks.",
+    "matplotlib.axes.Axes.grid": "Show or hide the grid lines.",
+    "matplotlib.axes.Axes.hist": "A histogram of the data: counts in bins (bins, range, density, cumulative, histtype); returns (n, bins, patches).",
+    "matplotlib.axes.Axes.imshow": "An image of a 2D array (through a colormap) or an RGB(A) array.",
+    "matplotlib.axes.Axes.legend": "A legend of the labelled lines, markers and patches (loc).",
+    "matplotlib.axes.Axes.pie": "A pie chart of the values (labels, colors, autopct, startangle).",
+    "matplotlib.axes.Axes.plot": "Lines and/or markers through the points: plot(y), plot(x, y), with a format string such as 'r--o'.",
+    "matplotlib.axes.Axes.scatter": "Markers at the points (x, y), with sizes s and colors c (through a colormap when numbers).",
+    "matplotlib.axes.Axes.set": "Set several properties at once: set(xlabel=..., ylim=..., title=...) calls set_xlabel, set_ylim, set_title.",
+    "matplotlib.axes.Axes.set_aspect": "The ratio of a unit of y to a unit of x on screen ('equal' for 1, or 'auto').",
+    "matplotlib.axes.Axes.set_rasterization_zorder": "Accepted and does nothing in Sagebrush (its filled contours are drawn as pictures already).",
+    "matplotlib.axes.Axes.set_title": "The axes' title.",
+    "matplotlib.axes.Axes.set_xlabel": "The x axis's label.",
+    "matplotlib.axes.Axes.set_xlim": "The x axis's limits: set_xlim(left, right), or one of them; left > right inverts the axis.",
+    "matplotlib.axes.Axes.set_xscale": "The x axis's scale: 'linear' or 'log'.",
+    "matplotlib.axes.Axes.set_xticklabels": "The labels of the x axis's ticks.",
+    "matplotlib.axes.Axes.set_xticks": "The positions of the x axis's ticks (and their labels).",
+    "matplotlib.axes.Axes.set_ylabel": "The y axis's label.",
+    "matplotlib.axes.Axes.set_ylim": "The y axis's limits: set_ylim(bottom, top), or one of them; bottom > top inverts the axis.",
+    "matplotlib.axes.Axes.set_yscale": "The y axis's scale: 'linear' or 'log'.",
+    "matplotlib.axes.Axes.set_yticklabels": "The labels of the y axis's ticks.",
+    "matplotlib.axes.Axes.set_yticks": "The positions of the y axis's ticks (and their labels).",
+    "matplotlib.axes.Axes.stem": "A stem plot: a vertical line from the baseline to each point, with a marker on top.",
+    "matplotlib.axes.Axes.step": "A step plot: a staircase through the points (where='pre', 'post' or 'mid').",
+    "matplotlib.axes.Axes.text": "Text at the point (x, y) in data coordinates.",
+    "matplotlib.axes.Axes.tick_params": "The tick labels' size (labelsize); Sagebrush applies no other option.",
+    "matplotlib.figure.Figure.add_gridspec": "A GridSpec of rows and columns in this figure, for placing subplots.",
+    "matplotlib.figure.Figure.add_subplot": "Axes at one place of a grid: add_subplot(nrows, ncols, index) or add_subplot(111).",
+    "matplotlib.figure.Figure.clear": "Remove the figure's axes.",
+    "matplotlib.figure.Figure.clf": "Remove the figure's axes.",
+    "matplotlib.figure.Figure.colorbar": "A colorbar for an image, contour set or scatter (mappable) beside its axes.",
+    "matplotlib.figure.Figure.description": "A text description of the figure as drawn (Sagebrush's: its axes, plots and labels).",
+    "matplotlib.figure.Figure.gca": "The figure's current axes (made if there are none).",
+    "matplotlib.figure.Figure.set_size_inches": "The figure's size in inches: set_size_inches(w, h).",
+    "matplotlib.figure.Figure.show": "Show the figure in the notebook or board now.",
+    "matplotlib.figure.Figure.suptitle": "A title above all the figure's axes.",
+    "matplotlib.figure.Figure.tight_layout": "Accepted: Sagebrush lays out the axes' labels without overlap already.",
+    "matplotlib.pyplot.Axes": "A set of axes in a figure: what subplots and gca return, with the plotting methods.",
+    "matplotlib.pyplot.Figure": "A figure: the axes in it, its size, and savefig.",
+    "matplotlib.pyplot.GridSpec": "A grid of rows and columns for placing subplots (spans by slicing).",
+    "matplotlib.pyplot.Line2D": "A line drawn by plot: its data, color, style and label.",
+    "matplotlib.pyplot.annotate": "A text annotation at a point, with an optional arrow to it from the text's position.",
+    "matplotlib.pyplot.axhline": "A horizontal line across the axes at height y.",
+    "matplotlib.pyplot.axis": "Sets the limits from [xmin, xmax, ymin, ymax]; 'off' hides the axes, and 'equal', 'scaled' or 'square' give equal units. Returns None, where matplotlib returns the limits.",
+    "matplotlib.pyplot.axvline": "A vertical line across the axes at x.",
+    "matplotlib.pyplot.bar": "A bar chart: bars at x with the given heights (width, bottom, color, label).",
+    "matplotlib.pyplot.barh": "A horizontal bar chart: bars at y with the given widths.",
+    "matplotlib.pyplot.cla": "Clear the current axes.",
+    "matplotlib.pyplot.clf": "Clear the current figure: remove its axes.",
+    "matplotlib.pyplot.close": "Close a figure (or the current one, or 'all').",
+    "matplotlib.pyplot.colorbar": "A colorbar for an image, contour set or scatter (mappable) beside its axes.",
+    "matplotlib.pyplot.contourf": "Filled contours of a 2D array Z over a grid (levels, cmap).",
+    "matplotlib.pyplot.errorbar": "Points with error bars (yerr, xerr), optionally joined by lines.",
+    "matplotlib.pyplot.figure": "A new figure (figsize, dpi), made the current one.",
+    "matplotlib.pyplot.fill_between": "Fill the region between two curves y1 and y2 (y2 = 0 by default) over x.",
+    "matplotlib.pyplot.gca": "The current axes (made if there are none).",
+    "matplotlib.pyplot.gcf": "The current figure (made if there is none).",
+    "matplotlib.pyplot.grid": "Show or hide the grid lines.",
+    "matplotlib.pyplot.hist": "A histogram of the data: counts in bins (bins, range, density, cumulative, histtype); returns (n, bins, patches).",
+    "matplotlib.pyplot.imshow": "An image of a 2D array (through a colormap) or an RGB(A) array.",
+    "matplotlib.pyplot.ioff": "Accepted for compatibility: Sagebrush shows figures when the cell ends.",
+    "matplotlib.pyplot.ion": "Accepted for compatibility: Sagebrush shows figures when the cell ends.",
+    "matplotlib.pyplot.legend": "A legend of the labelled lines, markers and patches (loc).",
+    "matplotlib.pyplot.pie": "A pie chart of the values (labels, colors, autopct, startangle).",
+    "matplotlib.pyplot.plot": "Lines and/or markers through the points: plot(y), plot(x, y), with a format string such as 'r--o'.",
+    "matplotlib.pyplot.rc_context": "A with-block in which the given rcParams apply, restored after it.",
+    "matplotlib.pyplot.rcdefaults": "Restore the default rcParams.",
+    "matplotlib.pyplot.savefig": "Save the current figure to a file: SVG, or PNG (dpi, transparent, facecolor).",
+    "matplotlib.pyplot.scatter": "Markers at the points (x, y), with sizes s and colors c (through a colormap when numbers).",
+    "matplotlib.pyplot.stem": "A stem plot: a vertical line from the baseline to each point, with a marker on top.",
+    "matplotlib.pyplot.step": "A step plot: a staircase through the points (where='pre', 'post' or 'mid').",
+    "matplotlib.pyplot.subplot": "Axes at one place of a grid of rows and columns: subplot(nrows, ncols, index) or subplot(221).",
+    "matplotlib.pyplot.subplots": "A figure and a grid of axes: fig, ax = subplots(), or fig, axs = subplots(nrows, ncols).",
+    "matplotlib.pyplot.suptitle": "A title above all the figure's axes.",
+    "matplotlib.pyplot.text": "Text at the point (x, y) in data coordinates.",
+    "matplotlib.pyplot.tight_layout": "Accepted: Sagebrush lays out the axes' labels without overlap already.",
+    "matplotlib.pyplot.title": "The current axes' title.",
+    "matplotlib.pyplot.xlabel": "The current axes' x label.",
+    "matplotlib.pyplot.xlim": "Get, or set, the current axes' x limits: xlim(), xlim(left, right).",
+    "matplotlib.pyplot.xscale": "The current axes' x scale: 'linear' or 'log'.",
+    "matplotlib.pyplot.xticks": "Get, or set, the current axes' x tick positions (and labels).",
+    "matplotlib.pyplot.ylabel": "The current axes' y label.",
+    "matplotlib.pyplot.ylim": "Get, or set, the current axes' y limits: ylim(), ylim(bottom, top).",
+    "matplotlib.pyplot.yscale": "The current axes' y scale: 'linear' or 'log'.",
+    "matplotlib.pyplot.yticks": "Get, or set, the current axes' y tick positions (and labels).",
     # numpy: math, comparison and bits
     "numpy.absolute": "Elementwise absolute value (abs).",
     "numpy.arccosh": "Elementwise inverse hyperbolic cosine.",
@@ -1187,6 +1349,36 @@ OUTPUTS = {
         'array([0. , 1.5, 4. , 7.5])\n',
     'from scipy.integrate import dblquad\ndblquad(lambda y, x: x * y, 0, 1, 0, 2)[0]':
         '0.9999999999999999\n',
+    'round(math.acos(0.5), 6)':
+        '1.047198\n',
+    'round(math.acosh(2), 6)':
+        '1.316958\n',
+    'round(math.asin(0.5), 6)':
+        '0.523599\n',
+    'round(math.asinh(2), 6)':
+        '1.443635\n',
+    'round(math.atan(2), 6)':
+        '1.107149\n',
+    'round(math.atanh(0.5), 6)':
+        '0.549306\n',
+    'round(math.cosh(1), 6)':
+        '1.543081\n',
+    'round(math.erfc(1), 6)':
+        '0.157299\n',
+    'round(math.expm1(0.001), 6)':
+        '0.001001\n',
+    'round(math.log1p(0.001), 6)':
+        '0.001\n',
+    'round(math.sinh(1), 6)':
+        '1.175201\n',
+    'round(math.tanh(1), 6)':
+        '0.761594\n',
+    'math.cbrt(-8)':
+        '-2.0\n',
+    'math.exp2(5)':
+        '32.0\n',
+    '[math.isfinite(x) for x in (1.5, math.inf, math.nan)]':
+        '[True, False, False]\n',
     'math.sqrt(2)':
         '1.4142135623730951\n',
     'math.isqrt(10**20 + 1)':
@@ -1275,6 +1467,38 @@ OUTPUTS = {
         '1.0000000000000002\n',
     'math.ulp(1.0)':
         '2.220446049250313e-16\n',
+    'z = cmath.acos(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.570796, -0.881374)\n',
+    'z = cmath.acosh(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.881374, 1.570796)\n',
+    'z = cmath.asin(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.0, 0.881374)\n',
+    'z = cmath.asinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.061275, 0.666239)\n',
+    'z = cmath.atan(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.017222, 0.402359)\n',
+    'z = cmath.atanh(0.5+0.5j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.402359, 0.553574)\n',
+    'z = cmath.cos(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.543081, -0.0)\n',
+    'z = cmath.cosh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.83373, 0.988898)\n',
+    'z = cmath.log10(10j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.0, 0.682188)\n',
+    'z = cmath.sin(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.0, 1.175201)\n',
+    'z = cmath.sinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.634964, 1.298458)\n',
+    'z = cmath.tan(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.0, 0.761594)\n',
+    'z = cmath.tanh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.083923, 0.271753)\n',
+    '[cmath.isfinite(z) for z in (1+2j, complex(math.inf, 0), complex(0, math.nan))]':
+        '[True, False, False]\n',
+    '[cmath.isinf(z) for z in (1+2j, complex(0, math.inf))]':
+        '[False, True]\n',
+    '[cmath.isnan(z) for z in (1+2j, complex(math.nan, 0))]':
+        '[False, True]\n',
     'cmath.sqrt(-4)':
         '2j\n',
     'cmath.exp(1j * math.pi)':
@@ -1297,6 +1521,16 @@ OUTPUTS = {
         'Fraction(3602879701896397, 36028797018963968)\n',
     'Fraction(math.pi).limit_denominator(100)':
         'Fraction(311, 99)\n',
+    "list(itertools.batched('ABCDEFG', 3))":
+        "[('A', 'B', 'C'), ('D', 'E', 'F'), ('G',)]\n",
+    "list(itertools.compress('ABCDE', [1, 0, 1, 0, 1]))":
+        "['A', 'C', 'E']\n",
+    'list(itertools.dropwhile(lambda x: x < 5, [1, 3, 6, 2]))':
+        '[6, 2]\n',
+    'list(itertools.filterfalse(lambda x: x % 2, range(6)))':
+        '[0, 2, 4]\n',
+    'a, b = itertools.tee(iter([1, 2, 3]))\nfirst = next(a)\n(first, list(b), list(a))':
+        '(1, [1, 2, 3], [2, 3])\n',
     "list(itertools.product('ab', [1, 2]))":
         "[('a', 1), ('a', 2), ('b', 1), ('b', 2)]\n",
     'list(itertools.permutations([1, 2, 3], 2))':
@@ -1329,6 +1563,22 @@ OUTPUTS = {
         '[8, 9]\n',
     'list(itertools.takewhile(lambda x: x < 5, [1, 3, 6, 2]))':
         '[1, 3]\n',
+    'class Batch:\n    def __init__(self): self.calls = 0\n    @functools.cached_property\n    def total(self):\n        self.calls += 1\n        return sum([2, 3, 5])\nb = Batch()\n(b.total, b.total, b.calls)':
+        '(10, 10, 1)\n',
+    "sorted(['pear', 'fig', 'plum'], key=functools.cmp_to_key(lambda a, b: len(a) - len(b)))":
+        "['fig', 'pear', 'plum']\n",
+    'class Switch:\n    def set(self, value): self.value = value\n    on = functools.partialmethod(set, True)\ns = Switch()\ns.on()\ns.value':
+        'True\n',
+    "@functools.singledispatch\ndef describe(x): return 'object'\n@describe.register(int)\ndef _(x): return 'integer'\n[describe(3), describe('hi')]":
+        "['integer', 'object']\n",
+    "class Describe:\n    @functools.singledispatchmethod\n    def kind(self, x): return 'object'\n    @kind.register(int)\n    def _(self, x): return 'integer'\nd = Describe()\n[d.kind(3), d.kind('hi')]":
+        "['integer', 'object']\n",
+    '@functools.total_ordering\nclass Score:\n    def __init__(self, n): self.n = n\n    def __eq__(self, other): return self.n == other.n\n    def __lt__(self, other): return self.n < other.n\n(Score(2) <= Score(2), Score(3) > Score(2), Score(1) >= Score(2))':
+        '(True, True, False)\n',
+    'def double(x): return 2 * x\ndef wrapper(x): return double(x)\nfunctools.update_wrapper(wrapper, double)\n(wrapper.__name__, wrapper(3), wrapper.__wrapped__ is double)':
+        "('double', 6, True)\n",
+    'def double(x): return 2 * x\n@functools.wraps(double)\ndef wrapper(x): return double(x)\n(wrapper.__name__, wrapper(4), wrapper.__wrapped__ is double)':
+        "('double', 8, True)\n",
     'functools.reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])':
         '120\n',
     "int2 = functools.partial(int, base=2)\nint2('1011')":
@@ -1337,6 +1587,14 @@ OUTPUTS = {
         '23416728348467685\n',
     '@functools.cache\ndef f(n):\n    return n * n\n[f(3), f(3), f.cache_info().hits]':
         '[9, 9, 1]\n',
+    "defaults = {'color': 'blue', 'size': 2}\noptions = collections.ChainMap({'color': 'red'}, defaults)\noptions['size'] = 3\n(options['color'], options['size'], defaults['size'])":
+        "('red', 3, 2)\n",
+    "original = {'a': 1}\nd = collections.UserDict(original)\nd['b'] = 2\n(d.data, original)":
+        "({'a': 1, 'b': 2}, {'a': 1})\n",
+    'items = collections.UserList([3, 1])\nitems.append(2)\nitems.sort()\nitems.data':
+        '[1, 2, 3]\n',
+    "label = collections.UserString('cat')\nlabel.data = 'kitten'\n(str(label), len(label))":
+        "('kitten', 6)\n",
     "collections.Counter('mississippi').most_common(2)":
         "[('i', 4), ('s', 4)]\n",
     "d = collections.defaultdict(list)\nd['a'].append(1)\ndict(d)":
@@ -1357,10 +1615,38 @@ OUTPUTS = {
         '[3, 5, 4, 0, 2, 1]\n',
     'random.seed(5)\nrandom.uniform(10, 20)':
         '16.22901694889702\n',
+    'bisect.bisect([1, 2, 2, 4], 2)':
+        '3\n',
+    'bisect.bisect_right([1, 2, 2, 4], 2)':
+        '3\n',
+    'rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_left(rows, (2, "new"), key=lambda row: row[0])\nrows':
+        "[(1, 'a'), (2, 'new'), (2, 'b'), (2, 'c')]\n",
+    'rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_right(rows, (2, "new"), key=lambda row: row[0])\nrows':
+        "[(1, 'a'), (2, 'b'), (2, 'c'), (2, 'new')]\n",
     'bisect.bisect_left([1, 2, 4, 4, 8], 4)':
         '2\n',
     'a = [1, 3, 5]\nbisect.insort(a, 4)\na':
         '[1, 3, 4, 5]\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify(h)\nh[0]':
+        '1\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify(h)\n[heapq.heappop(h) for _ in range(4)]':
+        '[1, 2, 3, 4]\n',
+    'h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heappushpop(h, 3), sorted(h))':
+        '(2, [3, 4, 6])\n',
+    'h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heapreplace(h, 5), sorted(h))':
+        '(2, [4, 5, 6])\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify_max(h)\nh[0]':
+        '4\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify_max(h)\n[heapq.heappop_max(h) for _ in range(4)]':
+        '[4, 3, 2, 1]\n',
+    'h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heappushpop_max(h, 3), sorted(h))':
+        '(6, [2, 3, 4])\n',
+    'h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heapreplace_max(h, 5), sorted(h))':
+        '(6, [2, 4, 5])\n',
+    'h = [3, 1, 2]\nheapq.heapify_max(h)\nheapq.heappush_max(h, 5)\nh[0]':
+        '5\n',
+    'list(heapq.merge([1, 4, 7], [2, 4, 6]))':
+        '[1, 2, 4, 4, 6, 7]\n',
     'h = []\nfor x in [5, 1, 4, 2]:\n    heapq.heappush(h, x)\n[heapq.heappop(h) for _ in range(4)]':
         '[1, 2, 4, 5]\n',
     'heapq.nlargest(2, [5, 1, 8, 3])':

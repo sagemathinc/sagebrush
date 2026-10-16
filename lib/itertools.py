@@ -1,4 +1,8 @@
-"""itertools, following the pure-Python equivalents in CPython's docs."""
+"""itertools, following the pure-Python equivalents in CPython's docs, with
+CPython's own behaviour where they differ: the iterators that go on after an
+exception from their source (cycle, accumulate, chain, compress, dropwhile,
+takewhile, filterfalse, starmap, tee) are objects whose state survives it;
+the others end, as generators do."""
 
 
 def count(start=0, step=1):
@@ -6,16 +10,6 @@ def count(start=0, step=1):
     while True:
         yield n
         n += step
-
-
-def cycle(iterable):
-    saved = []
-    for element in iterable:
-        yield element
-        saved.append(element)
-    while saved:
-        for element in saved:
-            yield element
 
 
 def repeat(obj, times=None):
@@ -27,74 +21,181 @@ def repeat(obj, times=None):
             yield obj
 
 
-def accumulate(iterable, func=None, *, initial=None):
-    it = iter(iterable)
-    total = initial
-    if initial is None:
-        try:
-            total = next(it)
-        except StopIteration:
-            return
-    yield total
-    for element in it:
-        total = total + element if func is None else func(total, element)
-        yield total
+import operator as _operator
+
+_NULL = object()
+
+
+def _index(x, msg):
+    # (as CPython's islice: any failure of the index protocol, a result out
+    # of 0..sys.maxsize included, is this ValueError)
+    if x is None:
+        return None
+    try:
+        v = _operator.index(x)
+    except Exception:
+        raise ValueError(msg) from None
+    if v < 0 or v > 9223372036854775807:
+        raise ValueError(msg)
+    return v
+
+
+# The iterators over a source are objects, as CPython's: an exception from
+# the source (or a function) reaches the caller and leaves the iterator as it
+# was, so a caller that handles it can go on; only the end of the source ends
+# them.
+
+
+class cycle:
+    def __init__(self, iterable):
+        self._it = iter(iterable)
+        self._saved = []
+        self._index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._it is not None:
+            try:
+                item = next(self._it)
+            except StopIteration:
+                self._it = None
+            else:
+                self._saved.append(item)
+                return item
+        if not self._saved:
+            raise StopIteration
+        item = self._saved[self._index]
+        self._index = (self._index + 1) % len(self._saved)
+        return item
+
+
+class accumulate:
+    def __init__(self, iterable, func=None, *, initial=None):
+        self._it = iter(iterable)
+        self._func = func
+        self._total = _NULL
+        self._initial = initial
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._initial is not None:
+            self._total, self._initial = self._initial, None
+            return self._total
+        value = next(self._it)
+        if self._total is _NULL:
+            self._total = value
+        elif self._func is None:
+            self._total = self._total + value
+        else:
+            self._total = self._func(self._total, value)
+        return self._total
 
 
 class chain:
     def __init__(self, *iterables):
-        self._gen = self._run(iterables)
-
-    @staticmethod
-    def _run(iterables):
-        for it in iterables:
-            for element in it:
-                yield element
+        self._source = iter(iterables)
+        self._active = None
 
     @classmethod
     def from_iterable(cls, iterables):
         c = cls()
-        c._gen = cls._run(iterables)
+        c._source = iter(iterables)
         return c
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        return next(self._gen)
+        while self._source is not None:
+            if self._active is None:
+                # (an exception while getting the next iterable, or its
+                # iterator, ends the chain, as CPython's; one from the
+                # active iterator does not)
+                try:
+                    self._active = iter(next(self._source))
+                except BaseException:
+                    self._source = None
+                    raise
+            try:
+                return next(self._active)
+            except StopIteration:
+                self._active = None
+        raise StopIteration
 
 
-def compress(data, selectors):
-    return (d for d, s in zip(data, selectors) if s)
+class compress:
+    def __init__(self, data, selectors):
+        self._data = iter(data)
+        self._selectors = iter(selectors)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            datum = next(self._data)
+            if next(self._selectors):
+                return datum
 
 
-def dropwhile(predicate, iterable):
-    it = iter(iterable)
-    for x in it:
-        if not predicate(x):
-            yield x
-            break
-    for x in it:
-        yield x
+class dropwhile:
+    def __init__(self, predicate, iterable):
+        self._predicate = predicate
+        self._it = iter(iterable)
+        self._dropping = True
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            item = next(self._it)
+            if not self._dropping or not self._predicate(item):
+                self._dropping = False
+                return item
 
 
-def takewhile(predicate, iterable):
-    for x in iterable:
-        if predicate(x):
-            yield x
-        else:
-            break
+class takewhile:
+    def __init__(self, predicate, iterable):
+        self._predicate = predicate
+        self._it = iter(iterable)
+        self._stopped = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._stopped:
+            raise StopIteration
+        item = next(self._it)
+        if self._predicate(item):
+            return item
+        self._stopped = True
+        raise StopIteration
 
 
-def filterfalse(predicate, iterable):
-    if predicate is None:
-        predicate = bool
-    for x in iterable:
-        if not predicate(x):
-            yield x
+class filterfalse:
+    def __init__(self, predicate, iterable):
+        self._predicate = predicate
+        self._it = iter(iterable)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            item = next(self._it)
+            if not (item if self._predicate is None else self._predicate(item)):
+                return item
 
 
 def groupby(iterable, key=None):
+    # (keys compare by identity, then ==, as CPython's PyObject_RichCompareBool:
+    # a shared NaN is one group)
     keyfunc = (lambda x: x) if key is None else key
     it = iter(iterable)
     exhausted = False
@@ -109,7 +210,7 @@ def groupby(iterable, key=None):
         yield curr_value
         for curr_value in it:
             curr_key = keyfunc(curr_value)
-            if curr_key != target_key:
+            if not (target_key is curr_key or target_key == curr_key):
                 return
             yield curr_value
         exhausted = True
@@ -118,51 +219,107 @@ def groupby(iterable, key=None):
         target_key = curr_key
         curr_group = grouper(target_key)
         yield curr_key, curr_group
-        if curr_key == target_key:
+        if target_key is curr_key or target_key == curr_key:
             for _ in curr_group:
                 pass
 
 
 def islice(iterable, *args):
-    s = slice(*args)
-    start, stop, step = s.start or 0, s.stop, s.step or 1
-    if start < 0 or (stop is not None and stop < 0) or step <= 0:
-        raise ValueError("Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
-    it = iter(iterable)
-    i = 0
-    nexti = start
-    while stop is None or nexti < stop:
+    # (the source is read up to max(start, stop) whatever the step, as
+    # CPython's: past the last item taken, the skipped ones are read too; any
+    # exception from it ends the islice, as a generator's does)
+    if not args:
+        raise TypeError("islice expected at least 2 arguments, got 1")
+    if len(args) > 3:
+        raise TypeError("islice expected at most 4 arguments, got %d" % (len(args) + 1))
+    start, step = 0, 1
+    if len(args) == 1:
+        stop = args[0]
+    else:
+        start, stop = args[0], args[1]
+        if len(args) == 3:
+            step = args[2]
+    stop = _index(stop, "Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
+    start = _index(start, "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
+    if step is not None:
         try:
-            v = next(it)
+            step = _operator.index(step)
+        except Exception:
+            step = 0
+        if step < 1 or step > 9223372036854775807:
+            raise ValueError("Step for islice() must be a positive integer or None.")
+    return _islice(iter(iterable), 0 if start is None else start, stop, 1 if step is None else step)
+
+
+def _islice(it, nexti, stop, step):
+    i = 0
+    while True:
+        try:
+            while i < nexti:
+                next(it)
+                i += 1
+            if stop is not None and i >= stop:
+                return
+            item = next(it)
         except StopIteration:
             return
-        if i == nexti:
-            yield v
-            nexti += step
         i += 1
+        yield item
+        nexti += step
+        if stop is not None and nexti > stop:
+            nexti = stop
 
 
-def starmap(function, iterable):
-    for args in iterable:
-        yield function(*args)
+class starmap:
+    def __init__(self, function, iterable):
+        self._function = function
+        self._it = iter(iterable)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self._function(*next(self._it))
+
+
+class _tee_link:
+    __slots__ = ("value", "next")
+
+    def __init__(self, value):
+        self.value = value
+        self.next = None
+
+
+class _tee:
+    # (the tees of one source share a linked list of the values read, so a
+    # value is read from the source once, and is freed once every tee has it)
+    def __init__(self, it, link):
+        self._source = it
+        self._link = link
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        link = self._link.next
+        if link is None:
+            link = _tee_link(next(self._source[0]))
+            self._link.next = link
+        self._link = link
+        return link.value
+
+    def __copy__(self):
+        return _tee(self._source, self._link)
 
 
 def tee(iterable, n=2):
+    if n < 0:
+        raise ValueError("n must be >= 0")
+    if n == 0:
+        return ()
     it = iter(iterable)
-    buffers = [[] for _ in range(n)]
-
-    def gen(mybuf):
-        while True:
-            if not mybuf:
-                try:
-                    v = next(it)
-                except StopIteration:
-                    return
-                for b in buffers:
-                    b.append(v)
-            yield mybuf.pop(0)
-
-    return tuple(gen(b) for b in buffers)
+    first = it if type(it) is _tee else _tee([it], _tee_link(None))
+    return (first,) + tuple(first.__copy__() for _ in range(n - 1))
 
 
 def zip_longest(*args, fillvalue=None):
@@ -185,8 +342,26 @@ def zip_longest(*args, fillvalue=None):
         yield tuple(values)
 
 
+# (product, permutations and the combinations read their input when called,
+# as CPython's)
+def _ssize(x):
+    # (an argument CPython takes as a Py_ssize_t: an index, in its range)
+    x = _operator.index(x)
+    if not -9223372036854775808 <= x <= 9223372036854775807:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return x
+
+
 def product(*args, repeat=1):
-    pools = [tuple(pool) for pool in args] * repeat
+    # (repeat is a Py_ssize_t, as CPython's: an index, converted before
+    # anything is read; then 0 reads nothing)
+    repeat = _ssize(repeat)
+    if repeat < 0:
+        raise ValueError("repeat argument cannot be negative")
+    return _product([tuple(pool) for pool in args] * repeat if repeat != 0 else [])
+
+
+def _product(pools):
     result = [[]]
     for pool in pools:
         result = [x + [y] for x in result for y in pool]
@@ -196,8 +371,18 @@ def product(*args, repeat=1):
 
 def permutations(iterable, r=None):
     pool = tuple(iterable)
+    if r is not None:
+        # (an int itself, not an index, as CPython's)
+        if not isinstance(r, int):
+            raise TypeError("Expected int as r")
+        r = _ssize(int.__index__(r))
+    if r is not None and r < 0:
+        raise ValueError("r must be non-negative")
+    return _permutations(pool, len(pool) if r is None else r)
+
+
+def _permutations(pool, r):
     n = len(pool)
-    r = n if r is None else r
     if r > n:
         return
     indices = list(range(n))
@@ -219,7 +404,16 @@ def permutations(iterable, r=None):
 
 
 def combinations(iterable, r):
+    # (r is converted before the pool is read, as CPython's arguments are;
+    # its sign is checked after, CORR-DBB-1)
+    r = _ssize(r)
     pool = tuple(iterable)
+    if r < 0:
+        raise ValueError("r must be non-negative")
+    return _combinations(pool, r)
+
+
+def _combinations(pool, r):
     n = len(pool)
     if r > n:
         return
@@ -238,7 +432,16 @@ def combinations(iterable, r):
 
 
 def combinations_with_replacement(iterable, r):
+    # (r is converted before the pool is read, as CPython's arguments are;
+    # its sign is checked after, CORR-DBB-1)
+    r = _ssize(r)
     pool = tuple(iterable)
+    if r < 0:
+        raise ValueError("r must be non-negative")
+    return _combinations_with_replacement(pool, r)
+
+
+def _combinations_with_replacement(pool, r):
     n = len(pool)
     if not n and r:
         return
@@ -265,12 +468,18 @@ def pairwise(iterable):
         a = b
 
 
-def batched(iterable, n):
+def batched(iterable, n, *, strict=False):
+    n = _ssize(n)
     if n < 1:
         raise ValueError("n must be at least one")
-    it = iter(iterable)
+    return _batched(iter(iterable), n, strict)
+
+
+def _batched(it, n, strict):
     while True:
         batch = tuple(islice(it, n))
         if not batch:
             return
+        if strict and len(batch) != n:
+            raise ValueError("batched(): incomplete batch")
         yield batch

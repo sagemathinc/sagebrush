@@ -55,16 +55,20 @@ export interface DocNote {
   code?: string;
   /** `true`: show only the code's output, not the code */
   hideCode?: boolean;
+  /** a code item's language, when it is not the board's (`"python"`, `"sage"`, `"magma"` or `"matlab"`; default: the board's `mode`). Each language runs in its own interpreter: languages share no values, so copy data from one to another as literals */
+  // (William's item 16, option A: one interpreter for each language a board
+  // uses, started when its first item runs; names shared within a language)
+  mode?: BoardMode;
   /** a slow code item's output, kept to show before it runs (written by Sagebrush) */
   // (preview.ts, design/outputs.md; last in the file)
   preview?: Preview;
   /** Markdown shown only when zoomed in */
   detail?: string;
-  /** a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` */
+  /** a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)` */
   ref?: string;
   /** a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) */
   color?: string;
-  /** its outline (a flowchart's); its text is then centered */
+  /** its outline (a flowchart's); its text is then centered. `diamond` (a decision) is pointed at its left and right and flat at its top and bottom, so that its text fits a note's width, not a true rhombus (which would need twice its text's width and height); `hexagon` is the same, less pointed */
   shape?: NoteShape;
   /** `true`: as wide as its text needs, up to `w` */
   fit?: boolean;
@@ -241,7 +245,7 @@ export const VERSION = 1;
 
 /** a board's language (BoardDoc.mode) */
 export type BoardMode = "python" | "sage" | "magma" | "matlab";
-const MODES = ["sage", "magma", "matlab"] as const;
+const MODES = ["sage", "magma", "matlab"] as const, ITEM_MODES = ["python", "sage", "magma", "matlab"] as const;
 
 /** A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`). */
 export interface BoardDoc {
@@ -323,12 +327,43 @@ export function lookOf(d: BoardDoc, i: number): { slide?: SlideRect; background?
   return { slide: p.slide ?? q?.slide, background: p.background ?? q?.background };
 }
 
+/** Where a link on the board goes (`#p2`, `#p2-3`, `#3`, `#page-id`,
+ * `#item-id`, `#page-id/item-id`; round 0's 15), from page `from`: a page
+ * (0-based), a step of its tour (-1: its start) and an item; null if it
+ * names nothing on the board. */
+export function boardLink(d: BoardDoc, from: number, href: string): { page: number; step: number; item?: string } | null {
+  if (!href.startsWith("#")) return null;
+  let h = href.slice(1);
+  try { h = decodeURIComponent(h); } catch {}
+  const n = pageCount(d), steps = (p: number) => pageView(d, p).steps?.length ?? 0;
+  const has = (p: number, id: string) => { const find = (ns: DocNode[]): boolean => ns.some((x) => x.id === id || (x.kind === "group" && find(x.children))); return find(pageView(d, p).nodes ?? []); };
+  let m = /^p(\d+)(?:-(\d+))?$/.exec(h);
+  if (m) { const p = Number(m[1]) - 1, k = m[2] ? Number(m[2]) - 1 : -1; return p >= 0 && p < n && k < steps(p) ? { page: p, step: k } : null; }
+  if ((m = /^(\d+)$/.exec(h))) { const k = Number(m[1]) - 1; return k >= 0 && k < steps(from) ? { page: from, step: k } : null; }
+  const pageNamed = (id: string) => (d.pages?.length ? d.pages.findIndex((p) => p.id === id) : -1);
+  const slash = h.indexOf("/");
+  if (slash > 0) { const p = pageNamed(h.slice(0, slash)), id = h.slice(slash + 1); return p >= 0 && has(p, id) ? { page: p, step: -1, item: id } : null; }
+  const p = pageNamed(h);
+  if (p >= 0) return { page: p, step: -1 };
+  if (has(from, h)) return { page: from, step: -1, item: h };
+  for (let q = 0; q < n; q++) if (has(q, h)) return { page: q, step: -1, item: h };
+  return null;
+}
+
+/** A link's words as a note shows them: a GitHub file's path in its
+ * repository, else its address without the scheme; decoded where it can be
+ * (round 0's 10: every note read "https://github.com/sagemathinc/sag…"). */
+export function refLabel(ref: string): string {
+  const s = ref.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\//, "").replace(/^https?:\/\//, "");
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 /** Page i as a one-page document, for layout() (the document's title, refBase and pictures; and
  * on the first page, without an intro of its own, the document's: friction 7). */
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  return { title: d.title, mode: d.mode, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */
@@ -422,7 +457,7 @@ export function cleanDoc(d: any): BoardDoc {
     }
     // (kind "code": the code items of documents before every note could have code)
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
-    return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
+    return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, mode: code !== undefined ? one(n.mode, ITEM_MODES) : undefined, detail: str(n.detail), ref: str(n.ref),
       color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
       x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h), preview: code !== undefined ? cleanPreview(n.preview) : undefined });
   };
@@ -611,7 +646,7 @@ export function codeOrder(d: BoardDoc): CodeCell[] {
     const kids = new Map<string | undefined, Item[]>();
     for (const it of items) if (it.kind === "note" || it.kind === "group") (kids.get(it.parent) ?? kids.set(it.parent, []).get(it.parent)!).push(it);
     const visit = (parent: string | undefined): Item[] => rows(kids.get(parent) ?? []).flatMap((it) => (it.kind === "group" ? visit(it.id) : [it]));
-    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code, page: i, item: it.id });
+    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code, page: i, item: it.id, mode: (it.mode as BoardMode | undefined) ?? d.mode ?? "python" });
   }
   // (an id is one item's on its page, and may be another's on another
   // page: on one interpreter, those cells are told apart by their page,
@@ -634,7 +669,7 @@ export function codeOrder(d: BoardDoc): CodeCell[] {
  * item's id, or, for an id that items on several pages have, `id@pN`, N
  * its page from 1, `~2`, `~3`, ... after it should that be an item's id);
  * `page` (from 0) and `item`, the item's on its page. */
-export interface CodeCell { id: string; code: string; page: number; item: string }
+export interface CodeCell { id: string; code: string; page: number; item: string; mode: BoardMode }
 
 // Boxes in rows (a box whose top is above the middle of the row's shortest
 // box so far joins it), top to bottom, each row left to right.
@@ -670,7 +705,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   };
   for (const n of roots) walk(n, null);
   // links: absolute, or paths under the document's refBase
-  const refOf = (n: DocNote) => n.ref && doc.refBase && !/^[a-z]+:/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
+  const refOf = (n: DocNote) => n.ref && doc.refBase && !/^([a-z]+:|#)/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
   // (a note's picture: its name and size, and where its bytes are when not in this browser)
   const imgOf = (n: DocNote) => { const i = n.image ? doc.images?.[n.image] : undefined; return i ? { key: n.image!, ...i } : undefined; };
   const edges = (doc.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
@@ -758,7 +793,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: outlineOf(n), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
     } else {
       const img = imgOf(n);
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}), ...(n.mode ? { mode: n.mode } : {}), ...((n.mode ?? doc.mode ?? "python") !== (doc.mode ?? "python") ? { lang: n.mode } : {}) } : {}) });
     }
   };
   for (const n of roots) {
@@ -863,16 +898,9 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
       at += (kind === "row" ? n.w : n.h) + GAP;
     }
   } else if (kind === "grid") {
-    // (columns as wide as the widest box; each row as tall as its own tallest,
-    // so one tall box, a plot, leaves no gaps in the other rows)
-    const cols = Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)));
-    const cw = Math.max(...nodes.map((n) => n.w), 0), rows: number[] = [];
-    nodes.forEach((n, i) => { const r = Math.floor(i / cols); rows[r] = Math.max(rows[r] ?? 0, n.h); });
-    const top = [0];
-    for (const h of rows) top.push(top[top.length - 1] + h + GAP);
-    nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: top[Math.floor(i / cols)] }));
+    for (const [id, p] of grid(nodes, Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length))))) out.set(id, p);
   } else {
-    for (const [id, p] of layered(nodes, links, dir)) out.set(id, p);
+    for (const [id, p] of graph(nodes, links, dir)) out.set(id, p);
   }
   // (placed beside the positioned ones, when there are both: not beside a
   // pen stroke, which would move them all when one is drawn, B1)
@@ -883,6 +911,63 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
   }
   for (const n of all) if (n.fixed) out.set(n.id, n.fixed);
   for (const n of all) if (n.ink && !n.fixed) out.set(n.id, { x: 0, y: 0 });
+  return out;
+}
+
+// A grid of `cols` columns, in order: columns as wide as the widest box;
+// each row as tall as its own tallest, so one tall box, a plot, leaves no
+// gaps in the other rows.
+function grid(nodes: Node[], cols: number): Map<string, { x: number; y: number }> {
+  const out = new Map<string, { x: number; y: number }>();
+  const cw = Math.max(...nodes.map((n) => n.w), 0), rows: number[] = [];
+  nodes.forEach((n, i) => { const r = Math.floor(i / cols); rows[r] = Math.max(rows[r] ?? 0, n.h); });
+  const top = [0];
+  for (const h of rows) top.push(top[top.length - 1] + h + GAP);
+  nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: top[Math.floor(i / cols)] }));
+  return out;
+}
+
+// A graph: one layered layout when its items are all linked, one part (or
+// up to four items with no edges, a row, as ever).  Else (friction 5: two
+// dozen items, a few of them linked, came out as one row many screens wide,
+// every part's first layer and every lone item side by side): each linked
+// part laid out on its own, the items with no edges as one grid, and the
+// parts, in reading order, packed in rows (top to bottom; with "LR", in
+// columns) that wrap, about half again as wide as tall.
+function graph(nodes: Node[], links: Link[], dir: "TB" | "LR"): Map<string, { x: number; y: number }> {
+  const root = new Map(nodes.map((n) => [n.id, n.id]));
+  const find = (v: string): string => { while (root.get(v) !== v) { root.set(v, root.get(root.get(v)!)!); v = root.get(v)!; } return v; };
+  const linked = new Set<string>();
+  for (const [a, b] of links) if (a !== b) { linked.add(a); linked.add(b); root.set(find(a), find(b)); }
+  const parts = new Map<string, Node[]>(), alone: Node[] = [];
+  for (const n of nodes) {
+    if (!linked.has(n.id)) alone.push(n);
+    else { const r = find(n.id); (parts.get(r) ?? parts.set(r, []).get(r)!).push(n); }
+  }
+  if ((parts.size === 1 && !alone.length) || (!parts.size && alone.length <= 4)) return layered(nodes, links, dir);
+  // the blocks, in the order of their first items
+  type Block = { first: number; pos: Map<string, { x: number; y: number }>; w: number; h: number };
+  const order = new Map(nodes.map((n, i) => [n.id, i]));
+  const block = (ns: Node[], pos: Map<string, { x: number; y: number }>): Block => ({
+    first: Math.min(...ns.map((n) => order.get(n.id)!)), pos,
+    w: Math.max(...ns.map((n) => pos.get(n.id)!.x + n.w)), h: Math.max(...ns.map((n) => pos.get(n.id)!.y + n.h)),
+  });
+  const blocks: Block[] = [...parts.values()].map((ns) => { const ids = new Set(ns.map((n) => n.id)); return block(ns, layered(ns, links.filter(([a]) => ids.has(a)), dir)); });
+  if (alone.length) blocks.push(block(alone, grid(alone, alone.length <= 4 ? alone.length : Math.ceil(Math.sqrt(alone.length * 1.5)))));
+  blocks.sort((a, b) => a.first - b.first);
+  // packed: along rows (TB) or columns (LR) as long as the longest block or
+  // the square root of their area, half again as wide as tall
+  const tb = dir === "TB", area = blocks.reduce((s, b) => s + (b.w + 2 * GAP) * (b.h + 2 * GAP), 0);
+  const limit = tb ? Math.max(...blocks.map((b) => b.w), Math.sqrt(area * 1.5)) : Math.max(...blocks.map((b) => b.h), Math.sqrt(area / 1.5));
+  const out = new Map<string, { x: number; y: number }>();
+  let u = 0, v = 0, depth = 0; // along the row, the row's start across, its depth
+  for (const b of blocks) {
+    const len = tb ? b.w : b.h, deep = tb ? b.h : b.w;
+    if (u > 0 && u + len > limit) { v += depth + 2 * GAP; u = 0; depth = 0; }
+    for (const [id, p] of b.pos) out.set(id, tb ? { x: u + p.x, y: v + p.y } : { x: v + p.x, y: u + p.y });
+    u += len + 2 * GAP;
+    depth = Math.max(depth, deep);
+  }
   return out;
 }
 

@@ -43,6 +43,7 @@ export function defn(impl: any, name: string, qualname: string, module: string, 
       return impl(...bindArgs(f.__name__, sig, a, [], []));
     };
     f.$kw = (pos: any[], names: string[], values: any[]) => impl(...bindArgs(f.__name__, sig, pos, names, values));
+    f.$kwPos = true; // (bindArgs checks the count and makes *args one tuple: BIG_CALL)
     impl.$public = f;
   }
   f.$pyfn = true;
@@ -71,18 +72,17 @@ export function markCoro(impl: any): any {
 export function awaitIter(x: any): any {
   if (x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator") {
     if (x.$cls === T.coroutine || x.$awaitable === true) {
-      if (x.$awaiting === true) raise(T.RuntimeError, "coroutine is being awaited already");
-      return x;
+      return O.delegateTo(x);
     }
     raise(T.TypeError, "'generator' object can't be awaited");
   }
   const f = Ty.lookupDunder(x, "__await__");
   if (f === undefined) raise(T.TypeError, `'${typeName(x)}' object can't be awaited`);
   const it = f(x);
-  if (it instanceof Ty.CoroWrapper) return it.g;
+  if (it instanceof Ty.CoroWrapper) return O.delegateTo(it.g);
   if (it !== null && typeof it === "object" && it[Symbol.toStringTag] === "Generator") {
     if (it.$cls === T.coroutine) raise(T.TypeError, "__await__() returned a coroutine");
-    return it;
+    return O.delegateTo(it);
   }
   if (Ty.lookupDunder(it, "__next__") === undefined && !(it !== null && typeof it === "object" && typeof it.$next === "function")) raise(T.TypeError, `__await__() returned non-iterator of type '${typeName(it)}'`);
   return yieldFrom(it);
@@ -178,7 +178,7 @@ export function dictOf(...kv: any[]): Obj.PyDict {
 export function yieldFrom(x: any): any {
   if (Array.isArray(x) && (x as any).$cls === undefined) return x;
   const it = O.iter(x);
-  if (it instanceof O.GenIter) return it.g;
+  if (it instanceof O.GenIter) return O.delegateTo(it.g);
   const target = it instanceof O.ProtoIter ? it.o : it;
   const stop = (e: any) => ({ done: true, value: e.args?.length ? e.args[0] : null });
   const step = (f: () => any) => {
@@ -255,8 +255,10 @@ export function withExit(m: any): (t: any, v: any, tb: any) => any {
   return (t, v, tb) => f(m, t, v, tb);
 }
 
+// A bare `raise` outside any except clause of its own function: the
+// exception being handled, as in CPython, if a caller is handling one.
 export function reraise(): any {
-  return Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
+  return Obj.currentExc() ?? Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
 }
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
@@ -279,7 +281,8 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
   if (locals !== undefined && locals !== null && !(locals instanceof Obj.PyDict) && Ty.lookupDunder(locals, "__getitem__") === undefined) raise(T.TypeError, `locals must be a mapping or None, not ${typeName(locals)}`);
   if (globals !== undefined && globals !== null) {
     if (!(globals instanceof Obj.PyDict)) raise(T.TypeError, `globals must be a dict, not ${typeName(globals)}`);
-    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", B.builtins);
+    // (as CPython's exec/eval: the builtins module's dict, not the module)
+    if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", Obj.instanceDict(B.builtins));
     const ns = Obj.namespaceOf(globals);
     return locals !== undefined && locals !== null && locals !== globals ? layered(Obj.namespaceOf(locals), ns) : ns;
   }
@@ -291,7 +294,7 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
 // Reads see `front` then `back`; writes go to `front`.
 function layered(front: any, back: any): any {
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k in front && front[k] !== undefined ? front[k] : back[k]),
+    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === Obj.NS_DICT ? undefined : k in front && front[k] !== undefined ? front[k] : back[k]),
     set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
     has: (_t, k) => k in front || k in back,
     deleteProperty: (_t, k) => (delete front[k], true),
@@ -303,8 +306,9 @@ function layered(front: any, back: any): any {
   });
 }
 
+// sage: Sage source, which exec and eval compile in Sage mode
 export class CodeObject {
-  constructor(public src: string, public filename: string, public mode: string) {}
+  constructor(public src: string, public filename: string, public mode: string, public sage = false) {}
 }
 const codeType = Ty.builtinTypeFor("code", CodeObject, "builtins", () => raise(T.TypeError, "cannot create 'code' objects"));
 Ty.getset(codeType, "co_filename", (c) => c.filename);
@@ -321,22 +325,30 @@ function sourceOf(src: any, fn: string): [string, string] {
 
 export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   const [text, filename] = sourceOf(src, "exec");
-  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename);
+  const sage = src instanceof CodeObject && src.sage;
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, { sage });
   return null;
 }
 export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals);
   const [text, filename] = sourceOf(src, "eval");
-  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename);
+  const sage = src instanceof CodeObject && src.sage;
+  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename, { sage });
 }
-function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
+function compileSource(src: any, filename: any, mode: any, sage: boolean): CodeObject {
   const [text] = sourceOf(src, "compile");
   if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
-  M.loader.exec(text, null, mode === "eval" ? "check-eval" : "check", String(filename));
-  return new CodeObject(text, String(filename), mode);
+  M.loader.exec(text, null, mode === "eval" ? "check-eval" : mode === "single" ? "check-single" : "check", String(filename), { sage });
+  return new CodeObject(text, String(filename), mode, sage);
+}
+function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
+  return compileSource(src, filename, mode, false);
 }
 Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
+// compile() for Sage source (lib/sage_all.py's timeit): 2^3 is a power and
+// 1/2 exact when the code object runs
+B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => compileSource(src, filename, mode, true), "__pyjs_compile_sage__");
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
 B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
 // help(obj), and obj? / obj?? in interactive input: lib/_pyjs_help.py
@@ -556,7 +568,8 @@ function formatOne(e: any): string {
   const t = Obj.typeOf(e);
   let msg: string;
   try {
-    msg = F.str(e);
+    // (a SyntaxError's line shows its message: the location is above it)
+    msg = Obj.isinstance(e, T.SyntaxError) && typeof e.msg === "string" ? e.msg : F.str(e);
   } catch {
     msg = "<exception str() failed>";
   }
@@ -652,6 +665,7 @@ export const R: any = {
   PyRange: Ty.PyRange,
   defn,
   globalsDict: Obj.globalsDict,
+  moduleLocals: Obj.moduleLocals,
   localsDict,
   sortedKeys,
   execIn,
@@ -665,6 +679,8 @@ export const R: any = {
   withEnter,
   withExit,
   reraise,
+  excEnter: Obj.excEnter,
+  excLeave: Obj.excLeave,
   PyBytes: Obj.PyBytes,
   dflt,
   kwdflt,

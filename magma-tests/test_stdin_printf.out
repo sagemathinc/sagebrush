@@ -48,3 +48,69 @@ Runtime error in printf: Argument 2 for * is not a small integer
 >> printf 5;
    ^
 Runtime error in printf: Argument 1 should be a format string
+334
+0
+0
+153
+0
+124
+[
+[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+23, 24, 25, 26, 27, 28, 29, 30 ],
+[ 2 ]
+]
+153
+0
+129
+0
+104
+0
+118
+0
+[
+<1, [ 2, 3 ]>,
+<4, [ 5 ]>
+]
+[
+[
+[ 1 ]
+],
+[
+[ 2 ]
+]
+]
+x[
+[ 1 ],
+[ 2 ]
+]
+95
+0
+  [ 1, 2 ]|5     |
+<81, true, 0>
+<80, true, 0>
+<81, true, 0>
+<86, true, 0>
+<2710, true, 0>
+<94, true, 0>
+<97, true, 0>
+<11, true, 0>
+<117, true, 0>
+<169, true, 0>
+<171, true, 0>
+<171, true, 0>
+<169, true, 0>
+<11, true, 0>
+<161, true, 2>
+<102, true, 0>
+<22, true, 2>
+<189, true, 0>
+<112, true, 0>
+<16, true, 2>
+<10, true, 6>
+<22, true, 0>
+<192, true, 2>
+0
+<257, true, 2>
+<91, true, 2>
+<101, true, 2>
+<103, true, 0>

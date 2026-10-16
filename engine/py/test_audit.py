@@ -574,7 +574,11 @@ _x = polygen(QQ, "x"); _K = NumberField(_x**2 - 2, "a"); _M = QuadraticField(2, 
 assert _K != _M and not (_K.gen() == _M.gen()) and _K(1) == _L(1) and _K(QQ(2) / 3) == _L(QQ(2) / 3) and len({_K(1), _L(1), 1}) == 1  # R2-NFD-F3
 print("nf parents ok")
 _R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _x, _y = _R.gens(); _sy, _sx = _S.gens(); _f = 2 * _x * _x * _y + 3 * _x * _x + _x * _y
-assert _f.coefficient(_sx**2) == 2 * _y + 3 and _f.monomial_coefficient(_sx**2 * _sy) == 2  # R2-MUL-F6
+assert _f.coefficient(_sx**2) == 2 * _y + 3; raises(TypeError, _f.monomial_coefficient, _sx**2 * _sy)  # R2-MUL-F6; monomial_coefficient as Sage
+_D = PolynomialRing(QQ, names=("x", "x")); _da, _db = _D.gens(); _g = 7 * _x**5 + 11 * _x**3
+raises(TypeError, _g.coefficient, _da**2 * _db**3); raises(TypeError, _g.monomial_coefficient, _da**2 * _db**3)  # CORR-F61-1
+_h = 2 * _x**2 * _y + 3 * _x**2 + 5; raises(ValueError, _h.monomial_coefficient, _R(0))  # as Sage: mon must not be equal to 0
+assert (_h.monomial_coefficient(_R(1)), _h.monomial_coefficient(2 * _x**2), _h.monomial_coefficient(_x**2 * _y), _R(0).monomial_coefficient(_x)) == (5, 3, 2, 0)
 print("mpoly coefficient ok")
 from sagebrush.sage import CyclotomicField
 for _n in (3, 4, 5):
@@ -614,7 +618,7 @@ print("solve review ok")
 assert str(solve(sin(_xs) == cos(_xs), _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
 assert str(solve(cos(2 * _xs) == cos(_xs), _xs)) == "[x == 2/3*pi*n1 for integer n1]"
 assert str(solve(sin(_xs) * cos(_xs) == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/12*pi for integer n1, x == pi*n2 + 5/12*pi for integer n2]"
-assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/6*pi for integer n1, x == pi*n2 - 1/6*pi for integer n2]"
+assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 - 1/6*pi for integer n1, x == pi*n2 + 1/6*pi for integer n2]"
 assert str(solve(tan(_xs) == sin(_xs), _xs)) == "[x == pi*n1 for integer n1]" and len(solve(sin(_xs) + sin(2 * _xs) + sin(3 * _xs) == 0, _xs)) == 3
 assert str(solve(log(_xs)**2 == 2, _xs)) == "[x == e^(-sqrt(2)), x == e^sqrt(2)]"
 print("solve trig ok")

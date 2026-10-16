@@ -270,6 +270,11 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
     rank is short (Octave: the minimum-norm solution). Its norms are
     scaled, as LAPACK's are, so entries near 1e154 or 1e-308 neither
     overflow nor underflow. A NaN or Inf in A gives NaN throughout.
+    Column norms within $10^{-12}$ relative of the largest count as tied,
+    and the first is the pivot (LAPACK's first maximum), so columns of
+    equal norm, such as `magic(8)`'s fifth and sixth after two steps, are
+    not told apart by rounding: the published basic solution
+    `[3 4 0 0 1 0]` does not depend on the last bits of `hypot`.
   - the warnings are the same whether A, b or both are complex.
   - `inv` of a singular matrix is Inf throughout, with the warning.
 

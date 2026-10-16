@@ -1,21 +1,22 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr } from "./object";
+import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
+import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
+import * as CR from "./crmath";
 import * as PG from "./pygamma";
-import { floatRepr } from "./format";
+import { floatRepr, intDigits } from "./format";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
 
 // Set by the driver: find and execute a Python source module, or return
 // null; compile and run source text for exec/eval/compile.
-export const loader: { load: (name: string) => any | null; exec: (src: string, g: any, mode: string, filename: string) => any } = {
+export const loader: { load: (name: string) => any | null; exec: (src: string, g: any, mode: string, filename: string, opts?: { sage?: boolean }) => any } = {
   load: () => null,
   exec: () => null,
 };
@@ -32,6 +33,38 @@ function fn(m: any, name: string, f: any) {
   builtin(f, name);
   f.__module__ = m.__name__; // (as CPython's: math.isclose.__module__ is 'math')
   m[name] = f;
+}
+
+// A builtin module's functions take the positional arguments CPython's do,
+// and a call with more or fewer is a TypeError: a JS function ignores extra
+// arguments, so math.sqrt(4, 5) was 2.0.  Once a public module is filled,
+// each of its plain functions not already checked is wrapped by checkArity,
+// with the count from its JS parameters or, where those differ from
+// CPython's signature, from ARITY.  (test/module-arity.test.ts compares every
+// one with CPython's inspect.signature.)  Modules whose names start with _
+// are the runtime's own, called only by its Python-written modules.
+export const ARITY: Record<string, Record<string, [number, number]>> = {
+  // (os's functions are written (...a) to pass their errors through oserr)
+  os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1] },
+  sys: { audit: [1, Infinity], getsizeof: [1, 2] },
+  gc: { set_threshold: [1, 3] },
+};
+
+function checkModuleArity(m: any) {
+  const mod: string = m.__name__;
+  if (mod.startsWith("_")) return;
+  const table = ARITY[mod];
+  const wrapped = new Map<any, any>(); // (an alias stays the same object)
+  for (const k of Object.keys(m)) {
+    const f = m[k];
+    if (typeof f !== "function" || isType(f) || f.$argRange !== undefined) continue;
+    let w = wrapped.get(f);
+    if (w === undefined) {
+      w = checkArity(f, f.__name__ ?? k, false, table?.[k]);
+      wrapped.set(f, w);
+    }
+    m[k] = w;
+  }
 }
 
 export function importModule(name: string): any {
@@ -73,6 +106,7 @@ export function importModule(name: string): any {
     m = Ty.newModule(name);
     dictSet(sysModules, name, m);
     f(m);
+    checkModuleArity(m);
   } else {
     m = loader.load(name);
     if (m === null) {
@@ -223,6 +257,26 @@ newBuiltinModule("sys", (m) => {
   m.meta_path = [];
   m.flags = Ty.newModule("flags");
   m.flags.optimize = 0;
+  m.flags.int_max_str_digits = intDigits.max;
+  fn(m, "get_int_max_str_digits", () => intDigits.max);
+  // (as CPython's: the exact integer, in C int range, checked before
+  // anything is changed, CORR-606-2)
+  const setDigits = (maxdigits: any) => {
+    const i = O.index(maxdigits);
+    const b = typeof i === "bigint" ? i : BigInt(i);
+    if (b > 2147483647n || b < -2147483648n) raise(T.OverflowError, "Python int too large to convert to C int");
+    const n = Number(b);
+    if (n !== 0 && n < 640) raise(T.ValueError, "maxdigits must be >= 640 or 0 for unlimited");
+    intDigits.max = n;
+    m.flags.int_max_str_digits = n;
+    return null;
+  };
+  fn(m, "set_int_max_str_digits", setDigits);
+  m.set_int_max_str_digits.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (names.length !== 1 || names[0] !== "maxdigits" || pos.length !== 0)
+      raise(T.TypeError, names.find((k) => k !== "maxdigits") !== undefined ? `set_int_max_str_digits() got an unexpected keyword argument '${names.find((k) => k !== "maxdigits")}'` : "set_int_max_str_digits() takes exactly one argument");
+    return setDigits(values[0]);
+  };
   let limit = 1000;
   fn(m, "getrecursionlimit", () => limit);
   fn(m, "setrecursionlimit", (n: any) => ((limit = Number(n)), null));
@@ -233,7 +287,13 @@ newBuiltinModule("sys", (m) => {
   fn(m, "audit", (..._a: any[]) => null);
   fn(m, "addaudithook", (_f: any) => null);
   fn(m, "getsizeof", (_x: any) => 64);
-  fn(m, "exc_info", () => tuple([null, null, null]));
+  // (the exception being handled, innermost; None outside any)
+  const handled = currentExc;
+  fn(m, "exception", () => handled());
+  fn(m, "exc_info", () => {
+    const e = handled();
+    return e === null ? tuple([null, null, null]) : tuple([typeOf(e), e, e.__traceback__ ?? null]);
+  });
   m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
 });
 dictSet(sysModules, "builtins", builtins);
@@ -273,13 +333,21 @@ newBuiltinModule("math", (m) => {
   };
   const domain = () => raise(T.ValueError, "math domain error");
   const range = () => raise(T.OverflowError, "math range error");
-  const unary = (name: string, f: (x: number) => number, ok: (x: number) => boolean = () => true) =>
+  // CPython 3.14's math_1: a NaN from a non-NaN, or (unless the function can
+  // overflow) an infinity from a finite input, is a domain error, in the
+  // function's own words when it has them (msg, with the input's repr)
+  const OVERFLOWS = new Set(["exp", "exp2", "expm1", "sinh", "cosh"]);
+  const unary = (name: string, f: (x: number) => number, ok: (x: number) => boolean = () => true, msg: string | null = null) =>
     fn(m, name, (x: any) => {
       const v = F(x);
-      if (!ok(v)) domain();
+      const bad = () => (msg === null ? domain() : raise(T.ValueError, msg.replace("%s", floatRepr(v))));
+      if (!ok(v)) bad();
       const r = f(v);
-      if (r !== r && v === v) domain();
-      if (!Number.isFinite(r) && Number.isFinite(v)) range();
+      if (r !== r && v === v) bad();
+      if (!Number.isFinite(r) && Number.isFinite(v)) {
+        if (OVERFLOWS.has(name)) range();
+        bad();
+      }
       return O.mkfloat(r);
     });
   m.pi = Math.PI;
@@ -287,62 +355,96 @@ newBuiltinModule("math", (m) => {
   m.tau = 2 * Math.PI;
   m.inf = new FloatBox(Infinity);
   m.nan = NaN;
-  unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x);
+  unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x, "expected a nonnegative input, got %s");
   unary("exp", glibcExp);
   unary("expm1", FD.expm1);
-  unary("sin", FD.sin, (x) => Number.isFinite(x) || x !== x);
-  unary("cos", FD.cos, (x) => Number.isFinite(x) || x !== x);
-  unary("tan", FD.tan, (x) => Number.isFinite(x) || x !== x);
-  unary("asin", FD.asin, (x) => (x >= -1 && x <= 1) || x !== x);
-  unary("acos", FD.acos, (x) => (x >= -1 && x <= 1) || x !== x);
-  unary("atan", FD.atan);
+  unary("sin", CR.sin, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("cos", CR.cos, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("tan", CR.tan, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("asin", CR.asin, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
+  unary("acos", CR.acos, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
+  unary("atan", CR.atan);
   unary("sinh", FD.sinh);
   unary("cosh", FD.cosh);
   unary("tanh", FD.tanh);
-  unary("asinh", FD.asinh);
-  unary("acosh", FD.acosh, (x) => x >= 1 || x !== x);
-  unary("atanh", FD.atanh, (x) => (x > -1 && x < 1) || x !== x);
+  unary("asinh", CR.asinh);
+  unary("acosh", CR.acosh, (x) => x >= 1 || x !== x, "expected argument value not less than 1, got %s");
+  unary("atanh", CR.atanh, (x) => (x > -1 && x < 1) || x !== x, "expected a number between -1 and 1, got %s");
   unary("fabs", Math.abs);
-  unary("log2", FD.log2, (x) => x > 0 || x !== x);
-  unary("log10", FD.log10, (x) => x > 0 || x !== x);
-  unary("log1p", glibcLog1p, (x) => x > -1 || x !== x);
-  unary("degrees", (x) => (x * 180) / Math.PI);
-  unary("radians", (x) => (x * Math.PI) / 180);
+  unary("log1p", glibcLog1p, (x) => x > -1 || x !== x, "expected argument value > -1, got %s");
+  // (x times CPython's constants, so no intermediate overflows, CORR-447-4;
+  // an infinite result is CPython's too)
+  const radToDeg = 180 / Math.PI, degToRad = Math.PI / 180;
+  fn(m, "degrees", (x: any) => O.mkfloat(F(x) * radToDeg));
+  fn(m, "radians", (x: any) => O.mkfloat(F(x) * degToRad));
   unary("cbrt", FD.cbrt);
-  fn(m, "log", (x: any, base: any = undefined) => {
-    const ln = (v: any) => {
-      if (typeof v === "bigint") {
-        if (v <= 0n) domain();
-        const d = Number(v);
-        if (d !== Infinity) return glibcLog(d);
-        // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
-        const s = v.toString(2).length;
-        let top = v >> BigInt(s - 64);
-        if (top << BigInt(s - 64) !== v) top |= 1n; // sticky bit for correct rounding
-        let x = Number(top) / 18446744073709551616, e = s;
-        if (x === 1) {
-          x = 0.5;
-          e += 1;
-        }
-        return glibcLog(x) + e * Math.LN2;
+  // CPython's loghelper: an int (huge ones too) by its own path, refused
+  // without its value; anything else as a float, refused with it
+  const LOG_MAX_BITS = 2 ** 27;
+  const logOf = (v: any, f: (x: number) => number, ln2: number): number => {
+    if (typeof v === "bigint" || typeof v === "boolean" || (typeof v === "number" && Number.isInteger(v)) || O.isPyInt(v)) {
+      const b = BigInt(typeof v === "boolean" ? +v : O.index(v));
+      if (b <= 0n) raise(T.ValueError, "expected a positive input");
+      const d = Number(b);
+      if (d !== Infinity) return f(d);
+      // Sagebrush's own bound, where CPython has none: its bit length takes
+      // copies of b, so past 2^27 bits (16 MiB) it is refused, which
+      // asUintN finds with a copy of at most that size (HARD-315-1)
+      if (BigInt.asUintN(LOG_MAX_BITS, b) !== b) {
+        raise(T.OverflowError, `int too large: Sagebrush takes the logarithm of an int of at most ${LOG_MAX_BITS} bits`);
       }
-      const f = F(v);
-      if (f <= 0) domain();
-      return glibcLog(f);
-    };
-    const r = base === undefined ? ln(x) : ln(x) / ln(base);
-    return O.mkfloat(r);
+      // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
+      const s = O.bitLength(b, LOG_MAX_BITS); // (not b.toString(2): HARD-909-1)
+      let top = b >> BigInt(s - 64);
+      // the sticky bit, for correct rounding: it matters only when the 11
+      // bits below the 53 kept are exactly half, so only then is the rest
+      // of b examined (a copy)
+      if ((top & 0x7ffn) === 0x400n && BigInt.asUintN(s - 64, b) !== 0n) top |= 1n;
+      let x = Number(top) / 18446744073709551616, e = s;
+      if (x === 1) {
+        x = 0.5;
+        e += 1;
+      }
+      return f(x) + e * ln2;
+    }
+    const x = F(v);
+    if (x <= 0) raise(T.ValueError, `expected a positive input, got ${floatRepr(x)}`);
+    return f(x);
+  };
+  fn(m, "log", (x: any, base: any = undefined) => {
+    const num = logOf(x, glibcLog, Math.LN2);
+    if (base === undefined) return O.mkfloat(num);
+    const den = logOf(base, glibcLog, Math.LN2);
+    // (a base of 1: float division by zero, CORR-447-2)
+    if (den === 0) raise(T.ZeroDivisionError, "division by zero");
+    return O.mkfloat(num / den);
   });
+  fn(m, "log2", (x: any) => O.mkfloat(logOf(x, CR.log2, 1)));
+  fn(m, "log10", (x: any) => O.mkfloat(logOf(x, FD.log10, Math.log10(2))));
   fn(m, "pow", (x: any, y: any) => {
     const a = F(x), b = F(y);
-    if (a === 0 && b < 0) domain();
-    if (a < 0 && !Number.isInteger(b) && Number.isFinite(b)) domain();
+    // (errors only for finite arguments, as CPython's: 0 to a negative finite power is a pole,
+    // pow(0, -inf) is inf (CORR-447-5), pow(-inf, 0.5) inf)
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      if (a === 0 && b < 0) domain();
+      if (a < 0 && !Number.isInteger(b)) domain();
+    }
     const r = glibcPow(a, b);
     if (!Number.isFinite(r) && Number.isFinite(a) && Number.isFinite(b)) range();
     return O.mkfloat(r);
   });
-  fn(m, "atan2", (y: any, x: any) => O.mkfloat(FD.atan2(F(y), F(x))));
-  fn(m, "hypot", (...xs: any[]) => O.mkfloat(FD.v8hypot(...xs.map(F))));
+  fn(m, "atan2", (y: any, x: any) => O.mkfloat(CR.atan2(F(y), F(x))));
+  // (also as an array of its arguments, for hypot(*xs) of any length:
+  // BIG_CALL; the call's own temporary array, converted in place with Stop
+  // polled, no second array, HARD-592-1)
+  const hypotN = (xs: any[]) => {
+    for (let i = 0; i < xs.length; i++) {
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      xs[i] = F(xs[i]);
+    }
+    return O.mkfloat(CR.hypotN(xs));
+  };
+  fn(m, "hypot", positionalArray((...xs: any[]) => hypotN(xs), hypotN));
   fn(m, "copysign", (x: any, y: any) => {
     // (through the bits: y's sign bit, a NaN's too, on x's magnitude)
     const dv = new DataView(new ArrayBuffer(16));
@@ -385,15 +487,13 @@ newBuiltinModule("math", (m) => {
     return diff <= Math.abs(relTol * b) || diff <= Math.abs(relTol * a) || diff <= absTol;
   };
   fn(m, "isclose", (a: any, b: any) => isclose(F(a), F(b)));
+  // (keywords bound by CPython's signature, isclose(a, b, *, rel_tol, abs_tol):
+  // a= and b= too, a duplicate or an unknown name refused)
   m.isclose.$kw = (pos: any[], names: string[], values: any[]) => {
-    if (pos.length !== 2) raise(T.TypeError, `isclose() takes exactly 2 positional arguments (${pos.length} given)`);
-    let relTol = 1e-9, absTol = 0.0;
-    names.forEach((n, i) => {
-      if (n === "rel_tol") relTol = F(values[i]);
-      else if (n === "abs_tol") absTol = F(values[i]);
-      else raise(T.TypeError, `isclose() got an unexpected keyword argument '${n}'`);
-    });
-    return isclose(F(pos[0]), F(pos[1]), relTol, absTol);
+    const [a, b, rel, abs] = bindArgs("isclose", sig(["a", "b"], { kwonly: ["rel_tol", "abs_tol"] }), pos, names, values);
+    if (a === undefined) raise(T.TypeError, "isclose() missing required argument 'a' (pos 1)");
+    if (b === undefined) raise(T.TypeError, "isclose() missing required argument 'b' (pos 2)");
+    return isclose(F(a), F(b), rel === undefined ? 1e-9 : F(rel), abs === undefined ? 0.0 : F(abs));
   };
   // (CPython's math_modf_impl: the parts keep x's sign, an infinity's
   // fractional part is a signed zero)
@@ -482,8 +582,27 @@ newBuiltinModule("math", (m) => {
     while (b) [a, b] = [b, a % b];
     return a;
   };
-  fn(m, "gcd", (...xs: any[]) => O.normBig(xs.map(bigOf).reduce(gcd2, 0n)));
-  fn(m, "lcm", (...xs: any[]) => O.normBig(xs.map(bigOf).reduce((a, b) => (a === 0n || b === 0n ? 0n : ((a * b < 0n ? -(a * b) : a * b) / gcd2(a, b))), 1n)));
+  // (each also as an array of its arguments, for gcd(*xs) of any length: BIG_CALL)
+  // (streamed, no mapped copy, and Stop polled over a long list)
+  const gcdN = (xs: any[]) => {
+    let g = 0n;
+    for (let i = 0; i < xs.length; i++) {
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      g = gcd2(g, bigOf(xs[i]));
+    }
+    return O.normBig(g);
+  };
+  const lcmN = (xs: any[]) => {
+    let l = 1n;
+    for (let i = 0; i < xs.length; i++) {
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      const b = bigOf(xs[i]);
+      l = l === 0n || b === 0n ? 0n : ((l * b < 0n ? -(l * b) : l * b) / gcd2(l, b));
+    }
+    return O.normBig(l);
+  };
+  fn(m, "gcd", positionalArray((...xs: any[]) => gcdN(xs), gcdN));
+  fn(m, "lcm", positionalArray((...xs: any[]) => lcmN(xs), lcmN));
   fn(m, "isqrt", (x: any) => {
     const n = bigOf(x);
     if (n < 0n) raise(T.ValueError, "isqrt() argument must be nonnegative");
@@ -506,7 +625,8 @@ newBuiltinModule("math", (m) => {
   fn(m, "comb", (nn: any, kk: any) => {
     const n = bigOf(nn);
     let k = bigOf(kk);
-    if (n < 0n || k < 0n) raise(T.ValueError, "n and k must be non-negative integers");
+    if (n < 0n) raise(T.ValueError, "n must be a non-negative integer");
+    if (k < 0n) raise(T.ValueError, "k must be a non-negative integer");
     if (k > n) return 0;
     if (k > n - k) k = n - k;
     let r = 1n;
@@ -515,7 +635,11 @@ newBuiltinModule("math", (m) => {
   });
   fn(m, "perm", (nn: any, kk: any = null) => {
     const n = bigOf(nn);
+    // (a negative k was 1; CPython 3.14's checks and messages)
+    if (kk === null && n < 0n) raise(T.ValueError, "factorial() not defined for negative values");
     const k = kk === null ? n : bigOf(kk);
+    if (n < 0n) raise(T.ValueError, "n must be a non-negative integer");
+    if (k < 0n) raise(T.ValueError, "k must be a non-negative integer");
     if (k > n) return 0;
     let r = 1n;
     for (let i = n - k + 1n; i <= n; i++) r *= i;
@@ -616,8 +740,10 @@ newBuiltinModule("math", (m) => {
     return bitsF[0];
   };
   const nextafter = (a: number, b: number, steps = 1n): number => {
+    // (no steps: x itself, its zero's sign too, even toward a NaN, CORR-447-3)
+    if (steps === 0n) return a;
     if (a !== a || b !== b) return a !== a ? a : b;
-    if (a === b || steps === 0n) return a === b ? b : a;
+    if (a === b) return b;
     const ka = toOrd(a), kb = toOrd(b);
     const r = kb > ka ? (kb - ka <= steps ? kb : ka + steps) : (ka - kb <= steps ? kb : ka - steps);
     if (r === kb) return b;
@@ -644,11 +770,24 @@ newBuiltinModule("math", (m) => {
   });
   fn(m, "dist", (p: any, q: any) => {
     const a = O.toArray(p).map(F), b = O.toArray(q).map(F);
-    return O.mkfloat(FD.v8hypot(...a.map((v, i) => v - b[i])));
+    if (a.length !== b.length) raise(T.ValueError, "both points must have the same number of dimensions");
+    return O.mkfloat(CR.hypotN(a.map((v, i) => v - b[i])));
   });
 });
 
 // ------------------------------------------------------------------ __future__
+
+// A type's attribute as CPython's _PyType_Lookup finds it: from the type's
+// own MRO and dicts, raw, with no descriptor, metaclass property or
+// __getattribute__ consulted (lib/io.py's special-method lookup).
+newBuiltinModule("_pyjs_types", (m) => {
+  // (found, value): (False, None) when no class in the MRO has it
+  m.lookup = builtin((tp: any, name: any) => {
+    if (typeof name !== "string" || !isType(tp)) raise(T.TypeError, "lookup(type, str)");
+    const v = lookupType(tp, name);
+    return tuple(v === undefined ? [false, null] : [true, v]);
+  }, "lookup");
+});
 
 newBuiltinModule("types", (m) => {
   m.FunctionType = m.LambdaType = T.function;
@@ -663,7 +802,7 @@ newBuiltinModule("types", (m) => {
   m.SimpleNamespace = Ty.SimpleNamespace;
   m.UnionType = Ty.unionType;
   m.CodeType = T.code;
-  m.MappingProxyType = T.dict;
+  m.MappingProxyType = Ty.mappingproxy;
   m.GetSetDescriptorType = T.getset_descriptor;
   m.CellType = typeOf(Ty.newCell());
   for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "GenericAlias", "CapsuleType"]) {
@@ -682,10 +821,6 @@ newBuiltinModule("types", (m) => {
     for (const k of ["__name__", "__qualname__", "__module__", "__doc__"]) w[k] = f[k] ?? null;
     return w;
   });
-});
-
-newBuiltinModule("__future__", (m) => {
-  for (const f of ["annotations", "division", "absolute_import", "print_function", "unicode_literals", "generator_stop", "nested_scopes", "generators", "with_statement", "barry_as_FLUFL"]) m[f] = true;
 });
 
 // ------------------------------------------------------------------ _random: MT19937 exactly as CPython

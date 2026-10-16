@@ -1,0 +1,206 @@
+GF7 int2 == :: (False, False, True, True)
+GF7 int2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [6, 0, 0, 6], [1, 0, 0, 1], Finite Field of size 7)
+GF7 ZZ2 == :: (False, False, True, True)
+GF7 ZZ2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [6, 0, 0, 6], [1, 0, 0, 1], Finite Field of size 7)
+GF7 half == :: (False, False, True, True)
+GF7 half + :: TypeError
+GF7 float1 == :: (False, False, True, True)
+GF7 float1 + :: TypeError
+GF7 float1.5 == :: (False, False, True, True)
+GF7 float1.5 + :: TypeError
+GF7 RR1 == :: (False, False, True, True)
+GF7 RR1 + :: TypeError
+GF7 RR1.5 == :: (False, False, True, True)
+GF7 RR1.5 + :: TypeError
+GF7 CC_i == :: (False, False, True, True)
+GF7 CC_i + :: TypeError
+GF7 GF5_1 == :: (False, False, True, True)
+GF7 GF5_1 + :: TypeError
+GF7 GF7_3 == :: (False, False, True, True)
+GF7 GF7_3 + :: ([4, 0, 0, 4], [4, 0, 0, 4], [5, 0, 0, 5], [2, 0, 0, 2], Finite Field of size 7)
+GF7 K_a == :: (False, False, True, True)
+GF7 K_a + :: TypeError
+GF7 L_b == :: (False, False, True, True)
+GF7 L_b + :: TypeError
+GF7 QQbar_sqrt2 == :: (False, False, True, True)
+GF7 QQbar_sqrt2 + :: TypeError
+GF7 AA_1 == :: (False, False, True, True)
+GF7 AA_1 + :: TypeError
+GF7 QQbar_I == :: (False, False, True, True)
+GF7 QQbar_I + :: TypeError
+GF7 rect 0 :: ([1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [6, 0, 0, 0, 6, 0], False, False, True, True)
+GF7 rect 1 :: TypeError
+GF9 int2 == :: (False, False, True, True)
+GF9 int2 + :: ([0, 0, 0, 0], [0, 0, 0, 0], [2, 0, 0, 2], [1, 0, 0, 1], Finite Field in z of size 3^2)
+GF9 ZZ2 == :: (False, False, True, True)
+GF9 ZZ2 + :: ([0, 0, 0, 0], [0, 0, 0, 0], [2, 0, 0, 2], [1, 0, 0, 1], Finite Field in z of size 3^2)
+GF9 half == :: (False, False, True, True)
+GF9 half + :: TypeError
+GF9 float1 == :: (False, False, True, True)
+GF9 float1 + :: TypeError
+GF9 float1.5 == :: (False, False, True, True)
+GF9 float1.5 + :: TypeError
+GF9 RR1 == :: (False, False, True, True)
+GF9 RR1 + :: TypeError
+GF9 RR1.5 == :: (False, False, True, True)
+GF9 RR1.5 + :: TypeError
+GF9 CC_i == :: (False, False, True, True)
+GF9 CC_i + :: TypeError
+GF9 GF5_1 == :: (False, False, True, True)
+GF9 GF5_1 + :: TypeError
+GF9 GF7_3 == :: (False, False, True, True)
+GF9 GF7_3 + :: TypeError
+GF9 K_a == :: (False, False, True, True)
+GF9 K_a + :: TypeError
+GF9 L_b == :: (False, False, True, True)
+GF9 L_b + :: TypeError
+GF9 QQbar_sqrt2 == :: (False, False, True, True)
+GF9 QQbar_sqrt2 + :: TypeError
+GF9 AA_1 == :: (False, False, True, True)
+GF9 AA_1 + :: TypeError
+GF9 QQbar_I == :: (False, False, True, True)
+GF9 QQbar_I + :: TypeError
+GF9 rect 0 :: ([1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [2, 0, 0, 0, 2, 0], False, False, True, True)
+GF9 rect 1 :: TypeError
+K int2 == :: (False, False, True, True)
+K int2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [-1, 0, 0, -1], [1, 0, 0, 1], Number Field in a with defining polynomial t^2 - 2)
+K ZZ2 == :: (False, False, True, True)
+K ZZ2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [-1, 0, 0, -1], [1, 0, 0, 1], Number Field in a with defining polynomial t^2 - 2)
+K half == :: (False, False, True, True)
+K half + :: ([3/2, 0, 0, 3/2], [3/2, 0, 0, 3/2], [1/2, 0, 0, 1/2], [-1/2, 0, 0, -1/2], Number Field in a with defining polynomial t^2 - 2)
+K float1 == :: (False, False, True, True)
+K float1 + :: TypeError
+K float1.5 == :: (False, False, True, True)
+K float1.5 + :: TypeError
+K RR1 == :: (False, False, True, True)
+K RR1 + :: TypeError
+K RR1.5 == :: (False, False, True, True)
+K RR1.5 + :: TypeError
+K CC_i == :: (False, False, True, True)
+K CC_i + :: TypeError
+K GF5_1 == :: (False, False, True, True)
+K GF5_1 + :: TypeError
+K GF7_3 == :: (False, False, True, True)
+K GF7_3 + :: TypeError
+K K_a == :: (False, False, True, True)
+K K_a + :: ([a + 1, 0, 0, a + 1], [a + 1, 0, 0, a + 1], [-a + 1, 0, 0, -a + 1], [a - 1, 0, 0, a - 1], Number Field in a with defining polynomial t^2 - 2)
+K L_b == :: (False, False, True, True)
+K L_b + :: TypeError
+K QQbar_sqrt2 == :: (False, False, True, True)
+K QQbar_sqrt2 + :: TypeError
+K AA_1 == :: (False, False, True, True)
+K AA_1 + :: TypeError
+K QQbar_I == :: (False, False, True, True)
+K QQbar_I + :: TypeError
+K rect 0 :: ([1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [-1, 0, 0, 0, -1, 0], False, False, True, True)
+K rect 1 :: TypeError
+QQbar int2 == :: (False, False, True, True)
+QQbar int2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [-1, 0, 0, -1], [1, 0, 0, 1], Algebraic Field)
+QQbar ZZ2 == :: (False, False, True, True)
+QQbar ZZ2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [-1, 0, 0, -1], [1, 0, 0, 1], Algebraic Field)
+QQbar half == :: (False, False, True, True)
+QQbar half + :: ([3/2, 0, 0, 3/2], [3/2, 0, 0, 3/2], [1/2, 0, 0, 1/2], [-1/2, 0, 0, -1/2], Algebraic Field)
+QQbar float1 == :: (True, True, False, False)
+QQbar float1 + :: ([2.0, 0.0, 0.0, 2.0], [2.0, 0.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], Complex Double Field)
+QQbar float1.5 == :: (False, False, True, True)
+QQbar float1.5 + :: ([2.5, 0.0, 0.0, 2.5], [2.5, 0.0, 0.0, 2.5], [-0.5, 0.0, 0.0, -0.5], [0.5, 0.0, 0.0, 0.5], Complex Double Field)
+QQbar RR1 == :: (True, True, False, False)
+QQbar RR1 + :: ([2.00000000000000, 0.000000000000000, 0.000000000000000, 2.00000000000000], [2.00000000000000, 0.000000000000000, 0.000000000000000, 2.00000000000000], [0.000000000000000, 0.000000000000000, 0.000000000000000, 0.000000000000000], [0.000000000000000, 0.000000000000000, 0.000000000000000, 0.000000000000000], Complex Field with 53 bits of precision)
+QQbar RR1.5 == :: (False, False, True, True)
+QQbar RR1.5 + :: ([2.50000000000000, 0.000000000000000, 0.000000000000000, 2.50000000000000], [2.50000000000000, 0.000000000000000, 0.000000000000000, 2.50000000000000], [-0.500000000000000, 0.000000000000000, 0.000000000000000, -0.500000000000000], [0.500000000000000, 0.000000000000000, 0.000000000000000, 0.500000000000000], Complex Field with 53 bits of precision)
+QQbar CC_i == :: (False, False, True, True)
+QQbar CC_i + :: ([1.00000000000000 + 1.00000000000000*I, 0.000000000000000, 0.000000000000000, 1.00000000000000 + 1.00000000000000*I], [1.00000000000000 + 1.00000000000000*I, 0.000000000000000, 0.000000000000000, 1.00000000000000 + 1.00000000000000*I], [1.00000000000000 - 1.00000000000000*I, 0.000000000000000, 0.000000000000000, 1.00000000000000 - 1.00000000000000*I], [-1.00000000000000 + 1.00000000000000*I, 0.000000000000000, 0.000000000000000, -1.00000000000000 + 1.00000000000000*I], Complex Field with 53 bits of precision)
+QQbar GF5_1 == :: (False, False, True, True)
+QQbar GF5_1 + :: TypeError
+QQbar GF7_3 == :: (False, False, True, True)
+QQbar GF7_3 + :: TypeError
+QQbar K_a == :: (False, False, True, True)
+QQbar K_a + :: TypeError
+QQbar L_b == :: (False, False, True, True)
+QQbar L_b + :: TypeError
+QQbar QQbar_sqrt2 == :: (False, False, True, True)
+QQbar QQbar_sqrt2 + :: ([2.414213562373095?, 0, 0, 2.414213562373095?], [2.414213562373095?, 0, 0, 2.414213562373095?], [-0.4142135623730951?, 0, 0, -0.4142135623730951?], [0.4142135623730951?, 0, 0, 0.4142135623730951?], Algebraic Field)
+QQbar AA_1 == :: (True, True, False, False)
+QQbar AA_1 + :: ([2, 0, 0, 2], [2, 0, 0, 2], [0, 0, 0, 0], [0, 0, 0, 0], Algebraic Field)
+QQbar QQbar_I == :: (False, False, True, True)
+QQbar QQbar_I + :: ([I + 1, 0, 0, I + 1], [I + 1, 0, 0, I + 1], [-I + 1, 0, 0, -I + 1], [I - 1, 0, 0, I - 1], Algebraic Field)
+QQbar rect 0 :: ([1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [-1, 0, 0, 0, -1, 0], False, False, True, True)
+QQbar rect 1 :: TypeError
+AA int2 == :: (False, False, True, True)
+AA int2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [-1, 0, 0, -1], [1, 0, 0, 1], Algebraic Real Field)
+AA ZZ2 == :: (False, False, True, True)
+AA ZZ2 + :: ([3, 0, 0, 3], [3, 0, 0, 3], [-1, 0, 0, -1], [1, 0, 0, 1], Algebraic Real Field)
+AA half == :: (False, False, True, True)
+AA half + :: ([3/2, 0, 0, 3/2], [3/2, 0, 0, 3/2], [1/2, 0, 0, 1/2], [-1/2, 0, 0, -1/2], Algebraic Real Field)
+AA float1 == :: (True, True, False, False)
+AA float1 + :: ([2.0, 0.0, 0.0, 2.0], [2.0, 0.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], Real Double Field)
+AA float1.5 == :: (False, False, True, True)
+AA float1.5 + :: ([2.5, 0.0, 0.0, 2.5], [2.5, 0.0, 0.0, 2.5], [-0.5, 0.0, 0.0, -0.5], [0.5, 0.0, 0.0, 0.5], Real Double Field)
+AA RR1 == :: (True, True, False, False)
+AA RR1 + :: ([2.00000000000000, 0.000000000000000, 0.000000000000000, 2.00000000000000], [2.00000000000000, 0.000000000000000, 0.000000000000000, 2.00000000000000], [0.000000000000000, 0.000000000000000, 0.000000000000000, 0.000000000000000], [0.000000000000000, 0.000000000000000, 0.000000000000000, 0.000000000000000], Real Field with 53 bits of precision)
+AA RR1.5 == :: (False, False, True, True)
+AA RR1.5 + :: ([2.50000000000000, 0.000000000000000, 0.000000000000000, 2.50000000000000], [2.50000000000000, 0.000000000000000, 0.000000000000000, 2.50000000000000], [-0.500000000000000, 0.000000000000000, 0.000000000000000, -0.500000000000000], [0.500000000000000, 0.000000000000000, 0.000000000000000, 0.500000000000000], Real Field with 53 bits of precision)
+AA CC_i == :: (False, False, True, True)
+AA CC_i + :: ([1.00000000000000 + 1.00000000000000*I, 0.000000000000000, 0.000000000000000, 1.00000000000000 + 1.00000000000000*I], [1.00000000000000 + 1.00000000000000*I, 0.000000000000000, 0.000000000000000, 1.00000000000000 + 1.00000000000000*I], [1.00000000000000 - 1.00000000000000*I, 0.000000000000000, 0.000000000000000, 1.00000000000000 - 1.00000000000000*I], [-1.00000000000000 + 1.00000000000000*I, 0.000000000000000, 0.000000000000000, -1.00000000000000 + 1.00000000000000*I], Complex Field with 53 bits of precision)
+AA GF5_1 == :: (False, False, True, True)
+AA GF5_1 + :: TypeError
+AA GF7_3 == :: (False, False, True, True)
+AA GF7_3 + :: TypeError
+AA K_a == :: (False, False, True, True)
+AA K_a + :: TypeError
+AA L_b == :: (False, False, True, True)
+AA L_b + :: TypeError
+AA QQbar_sqrt2 == :: (False, False, True, True)
+AA QQbar_sqrt2 + :: ([2.414213562373095?, 0, 0, 2.414213562373095?], [2.414213562373095?, 0, 0, 2.414213562373095?], [-0.4142135623730951?, 0, 0, -0.4142135623730951?], [0.4142135623730951?, 0, 0, 0.4142135623730951?], Algebraic Field)
+AA AA_1 == :: (True, True, False, False)
+AA AA_1 + :: ([2, 0, 0, 2], [2, 0, 0, 2], [0, 0, 0, 0], [0, 0, 0, 0], Algebraic Real Field)
+AA QQbar_I == :: (False, False, True, True)
+AA QQbar_I + :: ([I + 1, 0, 0, I + 1], [I + 1, 0, 0, I + 1], [-I + 1, 0, 0, -I + 1], [I - 1, 0, 0, I - 1], Algebraic Field)
+AA rect 0 :: ([1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [1, 0, 0, 0, 1, 0], [-1, 0, 0, 0, -1, 0], False, False, True, True)
+AA rect 1 :: TypeError
+K diag a :: (True, True, False, False)
+K diag a + :: ([2*a, 0, 0, 2*a], [2*a, 0, 0, 2*a], [0, 0, 0, 0], [0, 0, 0, 0])
+GF7 diag :: ([1, 0, 0, 2], Finite Field of size 7)
+QQbar diag :: ([I, 0, 0, 2], Algebraic Field)
+GF7 Complex Double Field == :: (False, False, True, True)
+GF7 Complex Double Field / * :: TypeError
+GF7 Complex Field with 200 bits of precision == :: (False, False, True, True)
+GF7 Complex Field with 200 bits of precision / * :: TypeError
+GF7 Real Field with 200 bits of precision == :: (False, False, True, True)
+GF7 Real Field with 200 bits of precision / * :: TypeError
+GF7 None :: (False, False, True, True)
+GF9 Complex Double Field == :: (False, False, True, True)
+GF9 Complex Double Field / * :: TypeError
+GF9 Complex Field with 200 bits of precision == :: (False, False, True, True)
+GF9 Complex Field with 200 bits of precision / * :: TypeError
+GF9 Real Field with 200 bits of precision == :: (False, False, True, True)
+GF9 Real Field with 200 bits of precision / * :: TypeError
+GF9 None :: (False, False, True, True)
+K Complex Double Field == :: (False, False, True, True)
+K Complex Double Field / * :: TypeError
+K Complex Field with 200 bits of precision == :: (False, False, True, True)
+K Complex Field with 200 bits of precision / * :: TypeError
+K Real Field with 200 bits of precision == :: (False, False, True, True)
+K Real Field with 200 bits of precision / * :: TypeError
+K None :: (False, False, True, True)
+QQbar Complex Double Field == :: (True, True, False, False)
+QQbar Complex Double Field / * :: ([1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0])
+QQbar Complex Field with 200 bits of precision == :: (True, True, False, False)
+QQbar Complex Field with 200 bits of precision / * :: ([1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000])
+QQbar Real Field with 200 bits of precision == :: (True, True, False, False)
+QQbar Real Field with 200 bits of precision / * :: ([1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000])
+QQbar None :: (False, False, True, True)
+AA Complex Double Field == :: (True, True, False, False)
+AA Complex Double Field / * :: ([1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0])
+AA Complex Field with 200 bits of precision == :: (True, True, False, False)
+AA Complex Field with 200 bits of precision / * :: ([1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000])
+AA Real Field with 200 bits of precision == :: (True, True, False, False)
+AA Real Field with 200 bits of precision / * :: ([1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000], [1.0000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 0.00000000000000000000000000000000000000000000000000000000000, 1.0000000000000000000000000000000000000000000000000000000000])
+AA None :: (False, False, True, True)
+Zmod6 Complex Double Field == :: (False, False, True, True)
+Zmod6 Complex Double Field / * :: TypeError
+Zmod6 Complex Field with 200 bits of precision == :: (False, False, True, True)
+Zmod6 Complex Field with 200 bits of precision / * :: TypeError
+Zmod6 Real Field with 200 bits of precision == :: (False, False, True, True)
+Zmod6 Real Field with 200 bits of precision / * :: TypeError
+Zmod6 None :: (False, False, True, True)

@@ -1,0 +1,23 @@
+[1.0, 2.0] float64 float64 float32 complex128
+[False, True, False, True] [False, True, True]
+24 [3, 8]
+2.68 [2.0, 2.0, -0.0]
+[[1, 2], [3, 4]]
+4.0 6.5 1.25
+int64 bool complex128 float64
+[False, True, True, False] (4,)
+True [1.2, 2.5, -0.8]
+float into int out: TypeError [0, 0]
+[3.0, 4.0] float64
+shape | ValueError: invalid output shape
+i32 to u8 | TypeError
+int, negative decimals, to int | TypeError
+i64 to i32 | [155] int32
+i32 to i64 | [155] int64
+int to f64 | [155.0] float64
+int, negative decimals, to f64 | [160.0] float64
+f32 to f64 | [125.1] float64
+c128 to f64 | TypeError
+bool to bool | TypeError
+0-d | 2.0 float64
+list out | TypeError

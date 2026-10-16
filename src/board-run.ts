@@ -24,7 +24,7 @@
 //
 // Loaded only for `board run` (src/cli.ts), so nothing else starts slower.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { createHash } from "crypto";
@@ -38,14 +38,18 @@ import { analyzeCell, ImportStarError } from "./dataflow";
 import { renameRedefinitions } from "./rename";
 import { oneLine, textLines } from "./terminal-text";
 import { CLI_READER, pictureWarning } from "./board-cli";
+import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 
-const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--store-previews [-o OUT] [--preview-ms MS]]
+const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--figures DIR] [--store-previews [-o OUT] [--preview-ms MS]]
   run every code item of a board as the board runs it in a browser (its
   language, its reactive order and its seeds), and report each item's
   output, or its error; the exit status is 1 if an item failed, has an
   error, was not run or ran out of time
   --json            the report as JSON
   --timeout S       the seconds an item may run (default 60); longer is an error
+  --figures DIR     save each item's figures (plots, pictures) in DIR, as
+                    ITEM-1.svg and so on (never over a file that is there);
+                    the report says each figure's size and what it shows
   --store-previews  write the board with its slow items' outputs as their
                     previews, so it shows them at once: to OUT, else to
                     NAME.previews.board.json beside FILE (not over a file
@@ -69,8 +73,16 @@ interface ItemReport {
   ms?: number;
   stdout: string;
   stderr: string;
-  outputs: { type: string; text?: string; bytes?: number }[];
+  outputs: { type: string; text?: string; bytes?: number; figure?: Figure }[];
   error?: string;
+}
+/** A figure an item shows (a plot's SVG, a picture): its size in pixels,
+ * what it shows (an SVG plot's title), and where --figures saved it. */
+export interface Figure {
+  w?: number;
+  h?: number;
+  title?: string;
+  path?: string;
 }
 
 // ---- the worker thread: the board's interpreter
@@ -79,6 +91,7 @@ export function boardRunWorker(data: { dir: string }) {
   const port = parentPort!;
   const session = notebookSession((m: any) => port.postMessage(m), {
     captureStreams: true,
+    limit: { item: ITEM_OUTPUT_MAX, run: RUN_OUTPUT_MAX, displays: ITEM_DISPLAYS_MAX },
     init: (R: any) => R.importModule("os").chdir(data.dir),
   });
   port.on("message", (m: any) => session.handle(m));
@@ -94,7 +107,7 @@ const say = (msg: string) => process.stderr.write(`sagebrush board run: ${oneLin
 /** The `board run` command; returns the exit code. */
 export async function boardRun(argv: string[]): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) { process.stdout.write(USAGE); return 0; }
-  let file: string | null = null, out: string | null = null, json = false, store = false, timeout = 60, previewMs = PREVIEW_MS;
+  let file: string | null = null, out: string | null = null, json = false, store = false, timeout = 60, previewMs = PREVIEW_MS, figures: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") json = true;
@@ -102,6 +115,7 @@ export async function boardRun(argv: string[]): Promise<number> {
     else if (a === "-o" || a === "--output") out = argv[++i] ?? null;
     else if (a === "--timeout") timeout = Number(argv[++i]);
     else if (a === "--preview-ms") previewMs = Number(argv[++i]);
+    else if (a === "--figures") { figures = argv[++i] ?? null; if (figures === null) { say("--figures takes a directory"); return 2; } }
     else if (a.startsWith("-") && a !== "-") { say(`unknown option ${a}`); process.stderr.write(USAGE); return 2; }
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
@@ -131,7 +145,107 @@ export async function boardRun(argv: string[]): Promise<number> {
     say(`${file}: ${e?.message ?? e}`);
     return 1;
   }
+  // (items in another language than the board's: refused, before anything runs)
+  const other = otherLanguage(doc);
+  if (other) { say(`${file}: ${other}`); return 1; }
+  const run = await runBoard(doc, timeout);
+  const { mode, items, reports, notes, outputs } = run;
+  // (the figures, if asked: in DIR)
+  if (figures !== null) {
+    const why = saveFigures(run, figures);
+    if (why) { say(why); return 1; }
+  }
+  // the board with its previews, if asked
+  let wrote: string | null = null;
+  if (store && target) {
+    const at = new Date().toISOString(), kept = new Map<string, Preview>();
+    for (const { key: id, id: item } of items) {
+      const r = reports.get(id)!, n = notes.get(id);
+      if (!n) continue;
+      // (a cell by its page keeps no preview, as the board's: its cell, and seed, change as pages come and go)
+      if (id !== item) { delete n.preview; continue; }
+      if (r.status !== "ok" && r.status !== "failed") continue;
+      const total = run.fromRoot(id);
+      const p = total > previewMs || previewMs === 0 ? await makePreview(previewable(outputs.get(id) ?? []), { at, ms: run.times.get(id) ?? 0, total }, keepRaster) : null;
+      if (p) n.preview = p;
+      else delete n.preview;
+    }
+    for (const [id, n] of notes) if (n.preview) kept.set(id, n.preview);
+    for (const id of overCap(kept)) delete notes.get(id)!.preview;
+    // (a file named with -o is written over; else it is made, and only if
+    // it is still not there: the board's code, or anyone, may have made
+    // it meanwhile, or put a link there, HARD-CD6-2)
+    try {
+      writeFileSync(target, canonical(doc), { flag: out !== null ? "w" : "wx" });
+    } catch (e: any) {
+      say(e?.code === "EEXIST" ? `${target} is there now (made while the board ran): not written over; name it with -o to write over it` : `could not write ${target}: ${e?.code ?? e?.message ?? e}`);
+      return 1;
+    }
+    wrote = target;
+  }
+
+  // the report
+  const list = run.list;
+  const count = (s: Status) => list.filter((r) => r.status === s).length;
+  const allOk = list.every((r) => r.status === "ok");
+  if (json) {
+    process.stdout.write(JSON.stringify({ file, title: doc.title ?? null, mode, ok: allOk, items: list, ...(wrote ? { wrote } : {}) }, null, 2) + "\n");
+  } else {
+    const w = process.stdout;
+    if (!list.length) w.write(`${oneLine(file)}: no code items\n`);
+    for (const r of list) {
+      const head = `${String(r.n).padStart(3)}  ${r.status.toUpperCase().padEnd(8)} ${r.title ? oneLine(JSON.stringify(r.title)) + " " : ""}(${oneLine(JSON.stringify(r.id))}${r.page ? `, page ${r.page}` : ""})${r.ms !== undefined ? `  ${r.ms} ms` : ""}`;
+      w.write(head + "\n");
+      // (a picture as what it is and its size, not its text: a figure's text says little)
+      const body = r.status === "ok" ? [r.stdout, ...r.outputs.map(outputLine)].filter(Boolean).join("\n") : r.error ?? "";
+      if (body.trim()) w.write(indent(cutLines(textLines(body.replace(/\n+$/, "")), 40)) + "\n");
+    }
+    const parts = (["ok", "failed", "error", "timeout", "not run"] as Status[]).filter((s) => count(s)).map((s) => `${count(s)} ${s}`);
+    if (list.length) w.write(`${oneLine(file)}: ${parts.join(", ")} (of ${list.length} code item${list.length === 1 ? "" : "s"}, ${mode})\n`);
+    if (wrote) w.write(`wrote ${oneLine(wrote)}, with ${[...notes.values()].filter((n) => n.preview).length} preview(s)\n`);
+    if (run.dead && run.workerErr.length) process.stderr.write(textLines(run.workerErr.join("")).slice(0, 4000));
+  }
+  return allOk ? 0 : 1;
+}
+
+/** What running a board's code items gave: each item's report, in the
+ * board's reading order, and what --store-previews needs. */
+export interface BoardRun {
+  mode: string;
+  list: ItemReport[];
+  items: { key: string; id: string; code: string; page: number }[];
+  reports: Map<string, ItemReport>;
+  notes: Map<string, DocNote>;
+  outputs: Map<string, any[]>;
+  /** an item's time from the board's root (ms): its own and what it reads */
+  fromRoot: (key: string) => number;
+  times: Map<string, number>;
+  /** why the interpreter stopped, if it did */
+  dead: string | null;
+  workerErr: string[];
+}
+
+const LANGUAGE: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+/** Why the command line doesn't run this board's code: an item in another
+ * language than the board's (item 16).  The board runs each item in its own
+ * language; here every item would run in the board's, so a Sage item's
+ * print(2^3) would say 1, not 8: refused, saying so, rather than answered
+ * wrong (astra's CORR-C5A-2).  null: one language, run as before. */
+export function otherLanguage(doc: BoardDoc): string | null {
   const mode = doc.mode ?? "python";
+  const order = codeOrder(doc), i = order.findIndex((c) => c.mode !== mode);
+  if (i < 0) return null;
+  const c = order[i], n = codeNotes(pageView(doc, c.page)).get(c.item);
+  return `code item ${i + 1}${n?.title ? ` ${JSON.stringify(n.title)}` : ""} is in ${LANGUAGE[c.mode] ?? c.mode}, not the board's ${LANGUAGE[mode] ?? mode}: the command line runs a board's code in one language only, so it doesn't run this board's (the board itself runs each item in its own language)`;
+}
+
+/** Every code item of a (clean) board run as the board runs it (see the
+ * top of this file); `timeout` seconds an item.  A board with items in
+ * another language than its own is refused (otherLanguage). */
+export async function runBoard(doc: BoardDoc, timeout: number): Promise<BoardRun> {
+  const mode = doc.mode ?? "python";
+  const other = otherLanguage(doc);
+  if (other) throw new Error(other);
   const seed = typeof doc.seed === "string" && /^[0-9a-f]{64}$/.test(doc.seed) ? doc.seed : BOARD_SEED;
   // the code items, as the board runs them (doc.ts codeOrder): page by page,
   // each page in reading order; one cell for each, `key` (an id items on
@@ -152,6 +266,7 @@ export async function boardRun(argv: string[]): Promise<number> {
   // the interpreter, and what each run sends back
   const dir = mkdtempSync(join(tmpdir(), "sagebrush-board-"));
   const outputs = new Map<string, any[]>(); // (Jupyter's outputs, as the notebook saves them)
+  const kept = { run: 0 }; // (the bytes of output kept in all: collect)
   let ran = 0, worker: Worker | null = null, intr: Int32Array | null = null, dead: string | null = null;
   const sinks = new Map<number, (m: any) => void>();
   let nextId = 1;
@@ -207,7 +322,7 @@ export async function boardRun(argv: string[]): Promise<number> {
       async execute(id, code, forget, scoped) {
         const list: any[] = [];
         outputs.set(id, list);
-        const r = await send({ cell: id, code, opts: { forget, mangle: id.replace(/[^A-Za-z0-9]/g, ""), seed: seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => collect(list, m), timeout * 1000);
+        const r = await send({ cell: id, code, opts: { forget, mangle: id.replace(/[^A-Za-z0-9]/g, ""), seed: seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => collect(list, m, kept), timeout * 1000);
         ran++;
         if (r.timedOut) timedOut.add(id);
         return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}) };
@@ -245,7 +360,7 @@ export async function boardRun(argv: string[]): Promise<number> {
         const errs = reactive.errors.get(id);
         if (!errs?.length || !errs.every((e) => e.kind === "syntax") || dead) continue;
         const list: any[] = [];
-        await send({ cell: id, code, opts: { mangle: id.replace(/[^A-Za-z0-9]/g, ""), seed: seedOf(id) } }, (m) => collect(list, m), timeout * 1000);
+        await send({ cell: id, code, opts: { mangle: id.replace(/[^A-Za-z0-9]/g, ""), seed: seedOf(id) } }, (m) => collect(list, m, kept), timeout * 1000);
         const said = summary(list).stderr.trim();
         if (said) syntax.set(id, said);
       }
@@ -271,74 +386,132 @@ export async function boardRun(argv: string[]): Promise<number> {
       }
     }
 
-    // the board with its previews, if asked
-    let wrote: string | null = null;
-    if (store && target) {
-      const at = new Date().toISOString(), kept = new Map<string, Preview>();
-      for (const { key: id, id: item } of items) {
-        const r = reports.get(id)!, n = notes.get(id);
-        if (!n) continue;
-        // (a cell by its page keeps no preview, as the board's: its cell, and seed, change as pages come and go)
-        if (id !== item) { delete n.preview; continue; }
-        if (r.status !== "ok" && r.status !== "failed") continue;
-        const total = reactive.fromRoot(id).ms;
-        const p = total > previewMs || previewMs === 0 ? await makePreview(previewable(outputs.get(id) ?? []), { at, ms: reactive.times.get(id) ?? 0, total }, keepRaster) : null;
-        if (p) n.preview = p;
-        else delete n.preview;
-      }
-      for (const [id, n] of notes) if (n.preview) kept.set(id, n.preview);
-      for (const id of overCap(kept)) delete notes.get(id)!.preview;
-      // (a file named with -o is written over; else it is made, and only if
-      // it is still not there: the board's code, or anyone, may have made
-      // it meanwhile, or put a link there, HARD-CD6-2)
-      try {
-        writeFileSync(target, canonical(doc), { flag: out !== null ? "w" : "wx" });
-      } catch (e: any) {
-        say(e?.code === "EEXIST" ? `${target} is there now (made while the board ran): not written over; name it with -o to write over it` : `could not write ${target}: ${e?.code ?? e?.message ?? e}`);
-        return 1;
-      }
-      wrote = target;
-    }
-
-    // the report
-    const list = items.map(({ key }) => reports.get(key)!);
-    const count = (s: Status) => list.filter((r) => r.status === s).length;
-    const allOk = list.every((r) => r.status === "ok");
-    if (json) {
-      process.stdout.write(JSON.stringify({ file, title: doc.title ?? null, mode, ok: allOk, items: list, ...(wrote ? { wrote } : {}) }, null, 2) + "\n");
-    } else {
-      const w = process.stdout;
-      if (!list.length) w.write(`${oneLine(file)}: no code items\n`);
-      for (const r of list) {
-        const head = `${String(r.n).padStart(3)}  ${r.status.toUpperCase().padEnd(8)} ${r.title ? oneLine(JSON.stringify(r.title)) + " " : ""}(${oneLine(JSON.stringify(r.id))}${r.page ? `, page ${r.page}` : ""})${r.ms !== undefined ? `  ${r.ms} ms` : ""}`;
-        w.write(head + "\n");
-        // (a picture as what it is and its size, not its text: a figure's text says little)
-        const body = r.status === "ok" ? [r.stdout, ...r.outputs.map((o) => (o.bytes ? `[${o.type}, ${Math.max(1, Math.round(o.bytes / 1024))} kB]` : o.text ?? ""))].filter(Boolean).join("\n") : r.error ?? "";
-        if (body.trim()) w.write(indent(cutLines(textLines(body.replace(/\n+$/, "")), 40)) + "\n");
-      }
-      const parts = (["ok", "failed", "error", "timeout", "not run"] as Status[]).filter((s) => count(s)).map((s) => `${count(s)} ${s}`);
-      if (list.length) w.write(`${oneLine(file)}: ${parts.join(", ")} (of ${list.length} code item${list.length === 1 ? "" : "s"}, ${mode})\n`);
-      if (wrote) w.write(`wrote ${oneLine(wrote)}, with ${[...notes.values()].filter((n) => n.preview).length} preview(s)\n`);
-      if (dead && workerErr.length) process.stderr.write(textLines(workerErr.join("")).slice(0, 4000));
-    }
-    return allOk ? 0 : 1;
+    return {
+      mode, list: items.map(({ key }) => reports.get(key)!), items, reports, notes, outputs,
+      fromRoot: (key) => reactive.fromRoot(key).ms, times: reactive.times, dead, workerErr,
+    };
   } finally {
     await worker?.terminate();
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
+// The output kept: an item's at most ITEM_OUTPUT_MAX bytes, the run's at
+// most RUN_OUTPUT_MAX; past them the rest is dropped as it comes, never
+// kept, and said once (a loop printing faster than the item's timeout
+// would otherwise fill the memory of the whole command, HARD-5DF-3).
+export const ITEM_OUTPUT_MAX = 4 * 2 ** 20, RUN_OUTPUT_MAX = 32 * 2 ** 20;
+// (and at most this many displays an item, each charged its envelope too:
+// notebook-session.ts displayCost, HARD-58F-1)
+export const ITEM_DISPLAYS_MAX = 10000;
+const sizes = new WeakMap<any[], { used: number; cut: boolean; displays: number }>();
+
+const CUT_WHY = { item: `${ITEM_OUTPUT_MAX / 2 ** 20} MB for this item`, run: `${RUN_OUTPUT_MAX / 2 ** 20} MB for the whole board`, displays: `${ITEM_DISPLAYS_MAX} displays for this item` };
+const cutNote = (why: keyof typeof CUT_WHY) => ({ output_type: "stream", name: "stderr", text: `\n[output cut: past ${CUT_WHY[why]}; the rest was not kept]\n` });
+
 // a run's messages, as the notebook keeps them (Jupyter's outputs): streams
 // joined, displays as display_data, clear_output() as it says
-function collect(list: any[], m: any) {
+function collect(list: any[], m: any, kept: { run: number }) {
   if (m.target != null) return; // (an @interact's own output area: shown when it is moved)
-  if (m.clear) { list.length = 0; return; }
+  const size = sizes.get(list) ?? { used: 0, cut: false, displays: 0 };
+  sizes.set(list, size);
+  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; return; }
+  // (the worker cut the rest where it was written)
+  if (m.cut) {
+    if (!size.cut) list.push(cutNote(m.cut in CUT_WHY ? m.cut : "item"));
+    size.cut = true;
+    return;
+  }
+  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
+  if ((m.display || m.interact) && !size.cut && ++size.displays > ITEM_DISPLAYS_MAX) {
+    size.cut = true;
+    list.push(cutNote("displays"));
+    return;
+  }
+  if (size.cut) return;
+  if (size.used + bytes > ITEM_OUTPUT_MAX || kept.run + bytes > RUN_OUTPUT_MAX) {
+    size.cut = true;
+    list.push(cutNote(size.used + bytes > ITEM_OUTPUT_MAX ? "item" : "run"));
+    return;
+  }
+  size.used += bytes;
+  kept.run += bytes;
   if (m.stream) {
     const last = list[list.length - 1];
     if (last?.output_type === "stream" && last.name === m.stream) last.text += m.text;
     else list.push({ output_type: "stream", name: m.stream, text: m.text });
   } else if (m.display) list.push({ output_type: "display_data", data: m.display, metadata: {} });
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
+}
+
+/** An output in a report's words: a figure as its size and what it shows
+ * (and where it was saved); a picture of no known size as its kind and bytes. */
+export function outputLine(o: ItemReport["outputs"][number]): string {
+  const f = o.figure;
+  if (f) {
+    const size = f.w && f.h ? ` ${f.w}×${f.h}` : "";
+    const title = f.title ? `: ${f.title.length > 200 ? f.title.slice(0, 200) + "…" : f.title}` : "";
+    return `figure${size}${title}${f.path ? ` (saved ${oneLine(f.path)})` : ""}`;
+  }
+  return o.bytes ? `[${o.type}, ${Math.max(1, Math.round(o.bytes / 1024))} kB]` : o.text ?? "";
+}
+
+// A display's picture as a figure: an SVG's size (its width and height, or
+// its viewBox) and title; a raster picture's size (image-size.ts).
+const unescape = (s: string) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+function figureOf(type: string, data: string): Figure | null {
+  if (type === "image/svg+xml") {
+    const root = /<svg\b[^>]*>/.exec(data)?.[0] ?? "";
+    const num = (name: string) => { const m = new RegExp(`\\b${name}="([\\d.]+)(px)?"`).exec(root); return m ? Math.round(Number(m[1])) : undefined; };
+    let w = num("width"), h = num("height");
+    const vb = /viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"/.exec(root);
+    if ((w === undefined || h === undefined) && vb) { w = Math.round(Number(vb[1])); h = Math.round(Number(vb[2])); }
+    const t = /<title>([^<]*)<\/title>/.exec(data);
+    return { ...(w && h ? { w, h } : {}), ...(t ? { title: unescape(t[1]) } : {}) };
+  }
+  if (/^image\/(png|jpeg|gif|webp)$/.test(type)) {
+    const size = imageSize(type, data);
+    return size ? { w: size.w, h: size.h } : {};
+  }
+  return null;
+}
+const EXT: Record<string, string> = { "image/svg+xml": "svg", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+
+/** Each item's figures written to dir (made if it isn't there), as
+ * ITEM-1.svg and so on, never over a file that is there; each figure's
+ * report then says where.  Why not, if it can't. */
+export function saveFigures(run: BoardRun, dir: string): string | null {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (e: any) {
+    return `--figures: can't make ${oneLine(dir)}: ${oneLine(String(e?.code ?? e?.message ?? e))}`;
+  }
+  try {
+    saveEach(run, dir);
+  } catch (e: any) {
+    return String(e?.message ?? e);
+  }
+  return null;
+}
+function saveEach(run: BoardRun, dir: string) {
+  for (const { key } of run.items) {
+    const r = run.reports.get(key)!;
+    const pictures = (run.outputs.get(key) ?? []).filter((o: any) => o.output_type === "display_data").map((o: any) => Object.keys(o.data ?? {}).find((t) => t in EXT) ? o.data : null).filter(Boolean);
+    const figs = r.outputs.filter((o) => o.figure);
+    // (an item's id as a file's name: letters, digits, _ and -, and its page's mark)
+    const base = key.replace(/[^\w-]+/g, "_").slice(0, 60) || "item";
+    pictures.forEach((data: any, k: number) => {
+      const type = Object.keys(data).find((t) => t in EXT)!, text = String(data[type]);
+      let path: string, n = k + 1;
+      do path = join(dir, `${base}-${n++}.${EXT[type]}`); while (existsSync(path));
+      try {
+        writeFileSync(path, type === "image/svg+xml" ? text : Buffer.from(text, "base64"), { flag: "wx" });
+        if (figs[k]?.figure) figs[k].figure!.path = path;
+      } catch (e: any) {
+        throw new Error(`--figures: can't write ${oneLine(path)}: ${oneLine(String(e?.code ?? e?.message ?? e))}`);
+      }
+    });
+  }
 }
 
 // stdout, stderr, and each display's text (or its kind and size)
@@ -350,7 +523,8 @@ function summary(list: any[]): Pick<ItemReport, "stdout" | "stderr" | "outputs">
     else {
       const d = o.data ?? {}, text = d["text/plain"] ?? d["text/markdown"] ?? d["text/latex"];
       const other = Object.keys(d).find((t) => !t.startsWith("text/"));
-      if (other && !/^text\/plain$/.test(other)) outputs.push({ type: other, bytes: String(d[other]).length, ...(typeof text === "string" ? { text } : {}) });
+      const figure = other ? figureOf(other, String(d[other])) : null;
+      if (other && !/^text\/plain$/.test(other)) outputs.push({ type: other, bytes: String(d[other]).length, ...(typeof text === "string" ? { text } : {}), ...(figure ? { figure } : {}) });
       else if (typeof text === "string") outputs.push({ type: d["text/plain"] !== undefined ? "text/plain" : Object.keys(d)[0], text });
     }
   }

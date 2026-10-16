@@ -49,9 +49,10 @@ check(longest < 150, `each of the routes' first steps is short (under 150 ms): $
   check(routed === E && took < 15000 && longestStep < 200, `every edge routed (pen strokes crossed, not avoided), in under 15 s, each step under 200 ms: ${routed} of ${E}, ${took.toFixed(0)} ms, ${longestStep.toFixed(0)} ms`);
   // (the router made quicker without a route changing: the 500 routes, and
   // their labels' places, as they were; a change meant to move routes
-  // updates this)
+  // updates this: the last, a straight edge keeping the middle of the sides
+  // it shares, friction 14)
   const routes = createHash("sha256").update(JSON.stringify(l.edges.map((e) => [e.id, e.points, e.lx, e.ly]))).digest("hex").slice(0, 16);
-  check(routes === "ecf14b1ec4074c9f", "the large board's routes are the same as before the router was made quicker: " + routes);
+  check(routes === "aead9deccf0c47b9", "the large board's routes are the same as before the router was made quicker: " + routes);
   // (a stroke across an edge's straight path: the edge goes straight through it)
   const small = layout({ nodes: [{ id: "a", title: "A", x: 0, y: 0, w: 200 }, { id: "b", title: "B", x: 600, y: 0, w: 200 }, { id: "s", kind: "ink", x: 350, y: -100, points: [0, 0, 0.5, 0, 300, 0.5], size: 40 }], edges: [{ from: "a", to: "b" }] });
   const p = small.edges[0].points ?? [];

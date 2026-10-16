@@ -13,6 +13,8 @@ function interruptAfter(code: string, ms: number): Promise<string> {
     const { parentPort, workerData } = require("node:worker_threads");
     const c = require(workerData.dist + "/src/compile.js");
     Promise.resolve(c.initParser && c.initParser()).then(() => {
+      // (lib on the path, as the CLI has it, for numpy)
+      c.R.importModule("sys").path.push(c.libDir());
       parentPort.postMessage({ intr: c.R.INTR.buffer });
       try {
         c.execModule(workerData.code, "<test>", "__main__");
@@ -64,4 +66,13 @@ test("an iterator stopped by Stop loses no item: every item taken was used (CORR
   assert.ok(m, last);
   assert.ok(Number(m![1]) > 1024, last);
   assert.equal(m![1], m![2]);
+});
+
+test("Stop interrupts a numpy ufunc over a large array, contiguous or strided (HARD-343-1)", async () => {
+  // (huge arguments take the slow correctly rounded reduction: 10**7 of them
+  // run for seconds without Stop polls)
+  const big = "import numpy as np\nx = np.full(10**7, 1e300)\n";
+  assert.equal(await interruptAfter(big + "np.sin(x)", 300), "KeyboardInterrupt");
+  assert.equal(await interruptAfter(big + "np.sin(x[::2])", 300), "KeyboardInterrupt");
+  assert.equal(await interruptAfter(big + "np.sin(x.reshape(1000, -1).T)", 300), "KeyboardInterrupt");
 });

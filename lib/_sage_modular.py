@@ -3374,7 +3374,11 @@ def EllipticCurve(x, y=None):
         sage: EllipticCurve('99999a1')  # sagebrush only
         Traceback (most recent call last):
         ...
-        ValueError: unknown Cremona label '99999a1' (sagebrush knows conductors < 1000)
+        NotImplementedError: Cremona label '99999a1': sagebrush's table has the curves of conductor < 1000; this one is not available in sagebrush yet
+        sage: EllipticCurve('11z1')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: unknown Cremona label '11z1'
     """
     if y is not None:
         x = [x, y]
@@ -3384,10 +3388,19 @@ def EllipticCurve(x, y=None):
             lab += "1"
         by_label = _cremona()[0]
         if lab not in by_label:
-            raise ValueError("unknown Cremona label %r (sagebrush knows conductors < 1000)" % x)
+            m = _re.fullmatch(r"(\d+)[a-z]+\d*", lab)
+            if m and int(m.group(1)) >= 1000:
+                # a curve Sage has (its database goes much further): a
+                # refusal, not an error
+                raise NotImplementedError("Cremona label %r: sagebrush's table has the curves of conductor < 1000; this one is not available in sagebrush yet" % x)
+            raise ValueError("unknown Cremona label %r" % x)
         return EllipticCurve_rational_field(by_label[lab][0], lab)
     # integral models only: a coefficient 1/2 became 0 (the systematic
     # review's EC-F1)
+    import _sage_expr
+    if any(isinstance(t, _sage_expr.Expression) and t._s in ("c+", "c-") for t in x):
+        # (Sage's curve arithmetic meets oo*0 or oo - oo)
+        raise _sage_expr.SignError("cannot multiply infinity by zero")
     a = [_exact_int(t, "a coefficient (rational coefficients are not supported yet)") for t in x]
     if len(a) == 2:
         a = [0, 0, 0, a[0], a[1]]

@@ -18,6 +18,16 @@ double 1x1 0.99999999999999989
 double 1x2 [0.78539816339744828 -2.3561944901923448]
 double 1x2 [0.49999999999999994 1]
 double 1x4 [1 0 -1 0]
+double 1x3 [-0.99999999999999989 0 1.7320508075688767]
+double 1x3 [-1.1071487177940904 0 1.1071487177940904]
+double 1x2 [1 1.4142135623730949]
+double 1x2 [2.0000000000000004 1]
+double 1x2 [2.4142135623730949 1.0000000000000002]
+double 1x3 [-0.52109530549374738 0 0.52109530549374738]
+double 1x3 [1 1.1276259652063807 1.5430806348152437]
+double 1x3 [-0.9640275800758169 0 0.9640275800758169]
+double 1x3 [-1.4436354751788103 0 1.4436354751788103]
+double 1x3 [-9.999999950000001e-09 0 1.0000000050000001e-08]
 double 1x2 [6 120]
 double 1x1 15
 double 1x1 6
@@ -30,6 +40,21 @@ double 1x1 -4
 double 1x1 3+4i
 double 1x1 1.5707963267948966
 double 1x1 2+5i
+double 1x4 [0.01 0.10000000000000001 1 10]
+double 2x3 [1 5 2;9 4 7]
+double 3x2x2 [1 2 7 8;3 4 9 10;5 6 11 12]
+double 2x3 [1 3 5;2 4 6]
+double 1x6 [3 -2 -2 -2 5 5]
+double 1x5 [8 3 3 2 2]
+double 1x5 [2 5 5 7 7]
+double 1x2 [-3 1]
+double 1x2 [7 9]
+logical 2x3 [true true true;true true true]
+logical 3x1 [false;false;false]
+double 1x3 [NaN NaN NaN]
+double 2x1 [NaN;NaN]
+double 1x2 [Inf Inf]
+double 2x1 [Inf;Inf]
 double 2x3 [0 0 0;0 0 0]
 double 2x2 [1 1;1 1]
 double 3x3 [1 0 0;0 1 0;0 0 1]
@@ -73,11 +98,42 @@ logical 1x3 [true false true]
 double 1x2 [3 4]
 double 1x3 [1 2 3]
 double 1x2 [1 3]
+double 1x5 [2 4 4.333333333333333 7 6.5]
+double 1x5 [2 3 4 8 6.5]
+double 1x5 [1 1 1 4 4]
+double 1x5 [3 8 8 9 9]
+double 1x5 [4 12 13 21 13]
+double 1x5 [3 24 32 288 36]
+double 1x4 [2 4 4 2]
+double 1x4 [1.4142135623730951 2 2 1.4142135623730951]
+double 2x2 [4 8;8 16]
+double 2x2 [1 -1;-1 1]
+double 1x3 [2 5 8]
+double 1x3 [2 5 8]
 double 1x1 5
 double 1x1 2.5
 double 1x1 3
 double 1x1 2.1380899352993952
 double 1x1 1.6666666666666667
+double 1x1 1
+double 1x1 1
+double 3x3 [1 2 0;3 4 0;0 0 -2]
+double 3x3 [2 4 6;4 6 8;6 8 10]
+double 3x3 [2 -1 -3;5 2 -1;7 5 2]
+double 2x2 [1 0.5;0.5 0.33333333333333331]
+double 3x3 [9 -36 30;-36 192 -180;30 -180 180]
+double 5x5 [1 1 1 1 1;1 2 3 4 5;1 3 6 10 15;1 4 10 20 35;1 5 15 35 70]
+double 5x5 [2 1 0 0 0;1 1 1 0 0;0 1 0 1 0;0 0 1 1 1;0 0 0 1 2]
+double 1x1 0.25
+double 1x1 5
+double 3x1 [0;0;1]
+double 2x2 [3 0;0 4]
+double 2x2 [0 0;0 2]
+double 2x2 [0 7;-3 0]
+double 2x1 [-2;5]
+double 2x2 [0 1;1 0]
+double 2x3 [1 0 0;0 1 0]
+double 2x2 [0 9;4 0]
 double 1x1 -2
 double 2x2 [-2 1;1.5 -0.5]
 double 1x1 3
@@ -87,12 +143,47 @@ double 2x1 [2;3]
 double 1x1 5
 double 1x1 32
 double 1x3 [0 0 1]
+double 1x4 [1 0 -7 6]
+double 1x3 [6 -6 0]
+double 1x4 [2 -2 3 7]
+double 1x3 [1 2 -1]
+double 1x4 [0 0 0 4]
+double 2x2 [4 -2;0 6]
+double 3x3 [1 -1 1;4 2 1;9 3 1]
+struct {form=char 1x2 ['pp'], breaks=double 1x3 [0 2 5], coefs=double 2x2 [3 1;-2 7], pieces=double 1x1 2, order=double 1x1 2, dim=double 1x1 1}
+double 1x5 [1 4 7 3 1]
+double 1x3 [0 2 5]
+double 2x2 [3 1;-2 7]
+double 1x1 2
+double 1x1 2
+double 1x1 1
+double 1x2 [0.3125 2.1875]
+double 1x3 [0.25 0.25 2.25]
+double 1x3 [1.5 3 4.5]
 double 1x1 11
 double 2x1 [2;1]
 double 1x3 [1 0 -1]
 double 1x2 [2 1]
 double 1x2 [15 25]
 double 1x1 4
+int16 1x4 [-32768 -3 3 32767]
+int64 1x3 [-3 0 3]
+uint16 1x3 [0 13 65535]
+uint32 1x3 [0 3 4294967295]
+uint64 1x3 [0 3 20]
+logical 1x1 true
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x4 [true false false true]
+logical 1x1 true
+logical 1x1 true
 char 1x4 ['int8']
 double 1x1 -1.5
 uint8 1x3 [0 100 255]
@@ -101,6 +192,9 @@ logical 1x3 [true false true]
 logical 1x3 [false true false]
 logical 1x3 [false true true]
 logical 1x1 true
+logical 1x1 true
+cell 1x3 {char 1x3 ['aB7'], char 1x3 ['Ab8'], char 1x3 ['ab9']}
+double 1x1 10
 char 1x5 ['3.142']
 double 1x1 6.5
 char 1x3 ['3-4']
@@ -114,6 +208,17 @@ char 1x3 ['abc']
 char 1x2 ['hi']
 logical 1x1 true
 char 1x6 ['abc###']
+cell 2x1 {double 0x0 [], double 0x0 []}
+cell 2x1 {char 1x3 ['oak'], char 1x3 ['elm']}
+cell 2x1 {double 1x1 4, double 1x1 7}
+struct {y=double 1x1 9}
+struct {a=double 1x1 7, z=double 1x1 4}
+double 1x1 12
+struct {count=double 1x1 15}
+double 2x1 [3;2]
+double 1x1 12
+char 1x5 ['hypot']
+double 1x1 13
 double 1x3 [2 3 0]
 double 1x4 [1 4 9 16]
 double 2x2 [1 2;3 4]
@@ -146,7 +251,6 @@ double 2x2 [1 0;0.33333333333333331 1]
 double 2x2 [3 4;0 0.66666666666666674]
 double 2x2 [0 1;1 0]
 double 2x2 [2 1;0 1.4142135623730951]
-double 2x2 [5 2.2000000000000002;0 0.39999999999999991]
 double 2x1 [4;3]
 double 2x2 [0.03999999999999998 0.079999999999999974;0.07999999999999996 0.15999999999999995]
 double 2x2 [1 1;0 1]

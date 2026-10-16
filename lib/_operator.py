@@ -2,6 +2,8 @@
 (copied unchanged from CPython) takes them in place of its pure-Python ones."""
 __all__ = ["index"]
 
+import _pyjs_types
+
 
 def index(a):
     "Same as a.__index__()"
@@ -13,10 +15,14 @@ def index(a):
     not_index = getattr(type(a), "_pyjs_not_an_index", None)
     if isinstance(a, int) and not not_index:
         return int.__pos__(a)
-    m = getattr(type(a), "__index__", None)
-    if m is None or not_index:
+    # (the special method as CPython's _PyObject_LookupSpecial: the raw
+    # attribute of the type's MRO, bound by its own type's raw __get__, so
+    # staticmethod, classmethod, property and other descriptors work)
+    found, m = _pyjs_types.lookup(type(a), "__index__")
+    if not found or not_index:
         raise TypeError("'%s' object cannot be interpreted as an integer" % (not_index or type(a).__name__))
-    r = m(a)
+    has_get, get = _pyjs_types.lookup(type(m), "__get__")
+    r = (get(m, a, type(a)) if has_get else m)()
     if type(r) is int:
         return r
     not_int = getattr(type(r), "_pyjs_not_an_index", None)

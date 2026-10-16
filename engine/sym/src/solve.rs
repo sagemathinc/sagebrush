@@ -178,6 +178,44 @@ fn roots_of(n: &Expr, x: &str) -> Vec<Expr> {
     invert(&f, x)
 }
 
+/// sqrt(d) with the square part of a sum's integer content taken out, as
+/// Sage writes it: sqrt(8*a - 8*cos(b)) is 2*sqrt(2*a - 2*cos(b)) (the
+/// engine's sqrt does this for numbers only).
+fn sqrt_content(d: &Expr) -> Expr {
+    use num_integer::Integer;
+    use num_traits::{One, Signed, ToPrimitive, Zero};
+    let Kind::Add(terms) = &d.kind else { return sqrt(d) };
+    let mut g = sagebrush_bigint::BigInt::zero();
+    for t in terms {
+        match split_coeff(t).0.as_rat() {
+            Some(q) if q.denom().is_one() => g = g.gcd(q.numer()),
+            _ => return sqrt(d),
+        }
+    }
+    // the largest square dividing g, by small primes (the content of a
+    // discriminant is small; a large prime factor stays inside)
+    let Some(mut rest) = g.abs().to_u64() else { return sqrt(d) };
+    let mut s: u64 = 1;
+    let mut p: u64 = 2;
+    while p <= 1000 && p * p <= rest {
+        while rest % (p * p) == 0 {
+            rest /= p * p;
+            s *= p;
+        }
+        while rest % p == 0 {
+            rest /= p;
+        }
+        p += 1;
+    }
+    if s == 1 {
+        return sqrt(d);
+    }
+    // (big integers: s*s cast to i64 wrapped for 9*2^58, and the roots were lost)
+    let sb = sagebrush_bigint::BigInt::from(s);
+    let s2 = big(&sb * &sb);
+    mul2(&big(sb), &sqrt(&crate::expand::expand(&div(d, &s2))))
+}
+
 fn poly_roots(c: &[Expr]) -> Vec<Expr> {
     match c.len() {
         0 | 1 => vec![],
@@ -185,7 +223,7 @@ fn poly_roots(c: &[Expr]) -> Vec<Expr> {
         3 => {
             let (a, b, cc) = (&c[2], &c[1], &c[0]);
             let disc = simplify_rational(&sub(&pow(b, &int(2)), &mul(vec![int(4), a.clone(), cc.clone()])));
-            let sq = sqrt(&disc);
+            let sq = sqrt_content(&disc);
             let two_a = mul2(&int(2), a);
             vec![
                 crate::expand::expand(&div(&sub(&neg(b), &sq), &two_a)),
@@ -1938,6 +1976,31 @@ fn renumber_params(out: &mut [(Expr, Vec<Expr>, Vec<String>)], z: &Expr, x: &str
 /// simplest form: p with a positive coefficient (n -> -n), a family inside
 /// another dropped, and c + p Z, c + p/2 + p Z merged into c + p/2 Z
 /// (sin(x)^2 == 1/4 had four families, x == +-pi/6 + pi n are two).
+/// Two symbolic roots c - s and c + s (or e^(c - s) and e^(c + s)), whose
+/// difference is a single term: the one with the minus first, as Sage lists
+/// them (x^2 == a: -sqrt(a), sqrt(a); (x - 1)^2 == a: -sqrt(a) + 1 first),
+/// whatever order factoring produced; others keep their order.
+fn opposite_order(a: &Expr, b: &Expr) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let exponent = |e: &Expr| match &e.kind {
+        Kind::Pow(b, u) if b.is_const(Const::E) => Some(u.clone()),
+        _ => None,
+    };
+    let (p, q) = match (exponent(a), exponent(b)) {
+        (Some(u), Some(w)) => (u, w),
+        _ => (a.clone(), b.clone()),
+    };
+    let d = crate::expand::expand(&sub(&p, &q));
+    if d.is_zero() || d.is_num() || matches!(d.kind, Kind::Add(_)) {
+        return Ordering::Equal;
+    }
+    if crate::to_string(&d).starts_with('-') {
+        Ordering::Less
+    } else {
+        Ordering::Greater
+    }
+}
+
 fn merge_families(out: &mut Vec<(Expr, Vec<Expr>, Vec<String>)>, x: &str) {
     let parts = |e: &(Expr, Vec<Expr>, Vec<String>)| -> Option<(Expr, Expr)> {
         if !e.1.is_empty() || e.2.len() != 1 {
@@ -2201,6 +2264,22 @@ pub fn solve1_full(e: &Expr, x: &str) -> Vec<(Expr, Vec<Expr>, Vec<String>)> {
             }
         })
     });
+    // an opposite pair of symbolic roots with the negative one first, as
+    // Sage (x^2 == a: -sqrt(a), sqrt(a)), whatever order factoring gave
+    // (a post-pass: as a sort key it would not be a total order)
+    for i in 0..out.len() {
+        for j in i + 1..out.len() {
+            if out[i].1.is_empty() == out[j].1.is_empty() {
+                let rhs = |r: &Expr| match &r.kind {
+                    Kind::Rel(_, _, v) => v.clone(),
+                    _ => r.clone(),
+                };
+                if opposite_order(&rhs(&out[i].0), &rhs(&out[j].0)) == std::cmp::Ordering::Greater {
+                    out.swap(i, j);
+                }
+            }
+        }
+    }
     // (numbered in the order shown)
     renumber_params(&mut out, &z, x);
     // an unresolved piece that is a factor of the numerator stands for

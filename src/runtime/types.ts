@@ -1,14 +1,15 @@
 // Builtin types and their methods.
 
+import * as SP from "./strpos";
 import {
-  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
+  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray,
 } from "./object";
 import * as O from "./ops";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -108,6 +109,41 @@ getset(type, "__module__", (c) => c.$dict.get("__module__") ?? c.$module, (c, v)
 getset(type, "__mro__", (c) => tuple(c.$mro.slice()));
 getset(type, "__bases__", (c) => tuple(c.$bases.slice()));
 getset(type, "__base__", (c) => c.$bases[0] ?? null);
+// types.MappingProxyType: a read-only view of a mapping, as CPython's (what
+// a class's __dict__ is)
+export class MappingProxy {
+  constructor(public m: any) {}
+}
+const isMappingLike = (m: any) =>
+  m instanceof PyDict || (!isinstance(m, T.list) && !isinstance(m, T.tuple) && lookupType(typeOf(m), "__getitem__") !== undefined && lookupType(typeOf(m), "keys") !== undefined);
+export const mappingproxy = builtinType("mappingproxy", [object], (m: any) => {
+  if (!isMappingLike(m)) raise(T.TypeError, `mappingproxy() argument must be a mapping, not ${typeName(m)}`);
+  return new MappingProxy(m);
+});
+bindClass(MappingProxy, mappingproxy);
+const viaMapping = (name: string) => (p: MappingProxy, ...a: any[]) => callObj(getattr(p.m, name), a);
+method(mappingproxy, "__getitem__", (p: MappingProxy, k: any) => O.getitem(p.m, k));
+method(mappingproxy, "__contains__", (p: MappingProxy, k: any) => O.contains(p.m, k));
+method(mappingproxy, "__iter__", (p: MappingProxy) => O.iter(p.m));
+method(mappingproxy, "__len__", (p: MappingProxy) => O.len(p.m));
+method(mappingproxy, "__reversed__", (p: MappingProxy) => callObj(getattr(p.m, "__reversed__"), []));
+for (const n of ["keys", "values", "items", "copy"]) method(mappingproxy, n, viaMapping(n));
+method(mappingproxy, "get", (p: MappingProxy, k: any, dflt: any = null) => callObj(getattr(p.m, "get"), [k, dflt]));
+method(mappingproxy, "__repr__", (p: MappingProxy) => `mappingproxy(${repr(p.m)})`);
+method(mappingproxy, "__str__", (p: MappingProxy) => str(p.m));
+// (comparisons and | are the mapping's, with a proxy operand unwrapped)
+method(mappingproxy, "__eq__", (p: MappingProxy, o: any) => O.eq(p.m, o));
+method(mappingproxy, "__ne__", (p: MappingProxy, o: any) => O.ne(p.m, o));
+method(mappingproxy, "__lt__", (p: MappingProxy, o: any) => O.lt(p.m, o));
+method(mappingproxy, "__le__", (p: MappingProxy, o: any) => O.le(p.m, o));
+method(mappingproxy, "__gt__", (p: MappingProxy, o: any) => O.gt(p.m, o));
+method(mappingproxy, "__ge__", (p: MappingProxy, o: any) => O.ge(p.m, o));
+const unproxy = (o: any) => (o instanceof MappingProxy ? o.m : o);
+method(mappingproxy, "__or__", (p: MappingProxy, o: any) => O.or(p.m, unproxy(o)));
+method(mappingproxy, "__ror__", (p: MappingProxy, o: any) => O.or(unproxy(o), p.m));
+method(mappingproxy, "__ior__", (p: MappingProxy, o: any) => raise(T.TypeError, "'|=' is not supported by mappingproxy; use '|' instead"));
+method(mappingproxy, "__hash__", (p: MappingProxy) => O.hashExact(p.m)); // (as CPython's: the mapping's hash)
+
 getset(type, "__dict__", (c) => {
   const d = new PyDict();
   // (a builtin method leaves the type's dict as its receiver-checking form, so
@@ -117,7 +153,8 @@ getset(type, "__dict__", (c) => {
   if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
     dictSet(d, "__dict__", object.$dict.get("__dict__"));
   }
-  return d;
+  // (read-only, as CPython's: a class's attributes are set with setattr)
+  return new MappingProxy(d);
 });
 getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.$dict.set("__doc__", v));
 method(type, "__repr__", (c: any) => repr(c));
@@ -401,13 +438,19 @@ getset(fnType, "__dict__", (f) => {
 });
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
 method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
-method(fnType, "__call__", (f: any, ...a: any[]) => f(...a));
+// (f.__call__(...), and the same for builtins, bound methods and types:
+// their arguments as an array, keywords and BIG_CALL included, HARD-A78-1)
+const callSlot = (m: any) => {
+  m.$kw = (pos: any[], names: string[], values: any[]) => callKw(pos[0], pos.slice(1), names, values);
+  return m;
+};
+callSlot(method(fnType, "__call__", (f: any, ...a: any[]) => f(...a)));
 
 const bfType = builtinType("builtin_function_or_method", [object], () => raise(T.TypeError, "cannot create 'builtin_function_or_method' instances"));
 getset(bfType, "__name__", (f) => f.__name__ ?? f.name);
 getset(bfType, "__qualname__", (f) => f.__qualname__ ?? f.name);
 getset(bfType, "__module__", (f) => f.__module__ ?? null); // (a module's functions: its name, as CPython's)
-method(bfType, "__call__", (f: any, ...a: any[]) => f(...a));
+callSlot(method(bfType, "__call__", (f: any, ...a: any[]) => f(...a)));
 
 const methodType = builtinType("method", [object], (f: any, self: any) => bindMethod(f, self));
 getset(methodType, "__self__", (m) => m.$self);
@@ -415,7 +458,7 @@ getset(methodType, "__func__", (m) => m.$func);
 getset(methodType, "__name__", (m) => m.$func.__name__);
 getset(methodType, "__qualname__", (m) => m.$func.__qualname__);
 getset(methodType, "__doc__", (m) => m.$func.__doc__ ?? null);
-method(methodType, "__call__", (m: any, ...a: any[]) => m(...a));
+callSlot(method(methodType, "__call__", (m: any, ...a: any[]) => m(...a)));
 // Other attributes of a bound method are those of its function.
 method(methodType, "__getattr__", (m: any, name: string) => getattr(m.$func, name));
 method(methodType, "__eq__", (m: any, o: any) => (typeof o === "function" && o.$self !== undefined ? m.$func === o.$func && m.$self === o.$self : NotImplemented));
@@ -424,9 +467,19 @@ method(methodType, "__hash__", (m: any) => (O.id(m.$self) / 32) ^ O.id(m.$func))
 const moduleType = objectType("module", [object], new Map(), "builtins");
 T.module = moduleType;
 method(moduleType, "__repr__", (m: any) => `<module '${m.__name__}'>`);
+// (as CPython's module.__dir__: the module's own __dir__() if it defines
+// one, else the names in its __dict__; not the attributes of its type)
+method(moduleType, "__dir__", (m: any) => {
+  if (Object.prototype.hasOwnProperty.call(m, "__dir__")) return callObj(m.__dir__, []);
+  return O.toArray(instanceDict(m));
+});
 method(moduleType, "__init__", (m: any, name: string, doc: any = null) => {
   m.__name__ = name;
   m.__doc__ = doc;
+  // (as CPython's module(): these too, None until an import sets them)
+  m.__package__ = null;
+  m.__loader__ = null;
+  m.__spec__ = null;
   return null;
 });
 export function newModule(name: string): any {
@@ -606,7 +659,32 @@ const RuntimeError = exc("RuntimeError", Exception);
 exc("NotImplementedError", RuntimeError);
 exc("RecursionError", RuntimeError);
 exc("PythonFinalizationError", RuntimeError);
-const SyntaxError = exc("SyntaxError", Exception);
+// (as CPython's: SyntaxError(msg, (filename, lineno, offset, text[,
+// end_lineno, end_offset])) sets those attributes, and str() adds the
+// file's base name and the line when they are known)
+const SyntaxError = exc("SyntaxError", Exception, (c) => {
+  method(c, "__init__", (self: any, ...args: any[]) => {
+    self.args = tuple(args);
+    self.msg = args.length >= 1 ? args[0] : null;
+    for (const k of ["filename", "lineno", "offset", "text", "end_lineno", "end_offset", "print_file_and_line"]) self[k] = null;
+    if (args.length === 2) {
+      const info = O.toArray(args[1]);
+      if (info.length !== 4 && info.length !== 6) raise(T.IndexError, "tuple index out of range");
+      [self.filename, self.lineno, self.offset, self.text] = info;
+      if (info.length === 6) [self.end_lineno, self.end_offset] = info.slice(4);
+    }
+    return null;
+  });
+  method(c, "__str__", (self: any) => {
+    const msg = str(self.msg ?? null);
+    const file = typeof self.filename === "string" ? self.filename.slice(self.filename.lastIndexOf("/") + 1) : null;
+    const line = O.isPyInt(self.lineno) && typeof self.lineno !== "boolean" ? str(self.lineno) : null;
+    if (file !== null && line !== null) return `${msg} (${file}, line ${line})`;
+    if (file !== null) return `${msg} (${file})`;
+    if (line !== null) return `${msg} (line ${line})`;
+    return msg;
+  });
+});
 exc("IndentationError", SyntaxError);
 exc("TabError", (T as any).IndentationError);
 exc("SystemError", Exception);
@@ -641,15 +719,32 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
     }
   } else if (pre in prefixes && prefixes[pre] === base) t = t.slice(2);
   if (t.startsWith("_")) t = t.slice(1);
+  const pow2 = (base & (base - 1)) === 0;
+  // (Sagebrush's own ceiling, before the text is scanned or copied: even
+  // with an underscore between every two digits it has too many)
+  if (!pow2 && t.length > 2 * HARD_MAX_DIGITS) hardLimit("");
   if (!/^[0-9a-zA-Z]+(_[0-9a-zA-Z]+)*$/.test(t)) return undefined;
-  t = t.replace(/_/g, "");
-  let v = 0n;
-  const B = BigInt(base);
-  for (const ch of t.toLowerCase()) {
-    const d = parseInt(ch, 36);
-    if (Number.isNaN(d) || d >= base) return undefined;
-    v = v * B + BigInt(d);
+  t = t.replace(/_/g, "").toLowerCase();
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    const d = c <= 57 ? c - 48 : c - 87;
+    if (d >= base) return undefined;
   }
+  // (CPython's limit on decimal conversions: every base but the powers of 2)
+  const m = intDigits.max;
+  if (m > 0 && !pow2 && t.length > m)
+    raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`);
+  if (!pow2 && t.length > HARD_MAX_DIGITS) hardLimit(t.length);
+  // (powers of 2 natively, in linear time; the others by halves, with Stop
+  // tested between the pieces)
+  let v: bigint;
+  if (base === 16 || base === 8 || base === 2) v = BigInt((base === 16 ? "0x" : base === 8 ? "0o" : "0b") + t);
+  else if (pow2) {
+    const bits = Math.log2(base);
+    let b = "";
+    for (let i = 0; i < t.length; i++) b += parseInt(t[i], base).toString(2).padStart(bits, "0");
+    v = BigInt("0b" + b);
+  } else v = parseDigits(t, base);
   return O.normBig(neg ? -v : v);
 }
 
@@ -660,7 +755,8 @@ export function intCall(x: any = 0, base: any = undefined): any {
     if (b !== 0 && (b < 2 || b > 36)) raise(T.ValueError, "int() base must be >= 2 and <= 36, or 0");
     const s = typeof x === "string" ? x : Buffer.from(x.a.subarray(0, x.n)).toString("latin1");
     const v = parseIntLiteral(s, b);
-    if (v === undefined) raise(T.ValueError, `invalid literal for int() with base ${b}: ${repr(x)}`);
+    // (the repr cut at 200 characters, as CPython's %.200R)
+    if (v === undefined) raise(T.ValueError, `invalid literal for int() with base ${b}: ${repr(x).slice(0, 200)}`);
     return v;
   }
   if (typeof x === "number") {
@@ -938,13 +1034,18 @@ function rsplitWhitespace(s: string, maxsplit: number): string[] {
   }
   return out.reverse();
 }
+// start and end as UTF-16 offsets, from code-point positions (a start past
+// the end stays past it)
 function clampRange(s: string, start: any, end: any): [number, number] {
-  const n = s.length;
+  const p = SP.pairs(s);
+  const n = p === null ? s.length : s.length - p.n;
   let a = start === undefined || start === null ? 0 : Number(start);
   let b = end === undefined || end === null ? n : Number(end);
   if (a < 0) a = Math.max(0, a + n);
   if (b < 0) b = Math.max(0, b + n);
-  return [a, Math.min(b, n)];
+  b = Math.min(b, n);
+  if (p === null) return [a, b];
+  return [a > n ? s.length + 1 : SP.unitOf(p, a), SP.unitOf(p, Math.max(b, 0))];
 }
 method(S, "join", (sep: string, items: any) => {
   const parts = Array.isArray(items) ? items : O.toArray(items);
@@ -955,14 +1056,14 @@ method(S, "join", (sep: string, items: any) => {
     if (parts[i] instanceof PrimBox && typeof parts[i].$v === "string") { if (out === parts) out = parts.slice(); out[i] = parts[i].$v; continue; }
     raise(T.TypeError, `sequence item ${i}: expected str instance, ${typeName(parts[i])} found`);
   }
-  return out.join(sep);
+  return SP.joinChecked(out, sep);
 });
 method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
   const m = Number(maxsplit);
   if (sep === null) return splitWhitespace(s, m);
   if (typeof sep !== "string") raise(T.TypeError, `must be str or None, not ${typeName(sep)}`);
   if (sep === "") raise(T.ValueError, "empty separator");
-  const parts = s.split(sep);
+  const parts = SP.split(s, sep);
   if (m >= 0 && parts.length > m + 1) return [...parts.slice(0, m), parts.slice(m).join(sep)];
   return parts;
 }, sig(["self", "sep", "maxsplit"]));
@@ -971,7 +1072,7 @@ method(S, "rsplit", (s: string, sep: any = null, maxsplit: any = -1) => {
   if (sep === null) return m < 0 ? splitWhitespace(s, -1) : rsplitWhitespace(s, m);
   needStr(sep);
   if (sep === "") raise(T.ValueError, "empty separator");
-  const parts = s.split(sep);
+  const parts = SP.split(s, sep);
   if (m >= 0 && parts.length > m + 1) return [parts.slice(0, parts.length - m).join(sep), ...parts.slice(parts.length - m)];
   return parts;
 }, sig(["self", "sep", "maxsplit"]));
@@ -995,28 +1096,37 @@ method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
   needStr(a, "replace() argument 1 must be str");
   needStr(b, "replace() argument 2 must be str");
   let c = Number(count);
-  if (c < 0 && a !== "") return s.split(a).join(b);
+  // (matches on code-point boundaries, and no lone surrogates joined: SP)
+  if (c < 0 && a !== "") return SP.joinChecked(SP.split(s, a), b);
   if (c < 0) c = Infinity;
-  let out = "", i = 0, k = 0;
+  const out: string[] = [];
+  let i = 0, k = 0;
   if (a === "") {
-    for (const ch of s) out += k++ < c ? b + ch : ch;
-    return k < c ? out + b : out;
+    for (const ch of s) {
+      if (k++ < c) out.push(b);
+      out.push(ch);
+    }
+    if (k < c) out.push(b);
+    return SP.joinChecked(out, "");
   }
   while (k < c) {
-    const j = s.indexOf(a, i);
+    const j = SP.indexOf(s, a, i);
     if (j < 0) break;
-    out += s.slice(i, j) + b;
+    out.push(s.slice(i, j), b);
     i = j + a.length;
     k++;
   }
-  return out + s.slice(i);
+  out.push(s.slice(i));
+  return SP.joinChecked(out, "");
 });
 function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): number {
   needStr(sub);
   const [a, b] = clampRange(s, start, end);
   if (b - a < sub.length || a > s.length) return -1;
-  const j = rev ? s.lastIndexOf(sub, b - sub.length) : s.indexOf(sub, a);
-  return j < a || j + sub.length > b ? -1 : j;
+  const j = rev ? SP.lastIndexOf(s, sub, b - sub.length) : SP.indexOf(s, sub, a);
+  if (j < a || j + sub.length > b) return -1;
+  const p = SP.pairs(s);
+  return p === null ? j : SP.cpOf(p, j);
 }
 method(S, "find", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, false));
 method(S, "rfind", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, true));
@@ -1035,7 +1145,7 @@ method(S, "count", (s: string, sub: string, start: any = undefined, end: any = u
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return 0;
   const t = s.slice(a, b);
-  return sub === "" ? t.length + 1 : t.split(sub).length - 1;
+  return sub === "" ? SP.cpLen(t) + 1 : SP.split(t, sub).length - 1;
 });
 function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean {
   if (Array.isArray(x)) return x.some((p) => affix(s, p, start, end, ends));
@@ -1043,7 +1153,7 @@ function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean 
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return false;
   const t = s.slice(a, b);
-  return ends ? t.endsWith(x) : t.startsWith(x);
+  return ends ? t.endsWith(x) && SP.onBoundaries(t, t.length - x.length, x.length) : t.startsWith(x) && SP.onBoundaries(t, 0, x.length);
 }
 method(S, "startswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, false));
 method(S, "endswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, true));
@@ -1076,38 +1186,173 @@ method(S, "istitle", (s: string) => /\p{L}/u.test(s) && s === S.$dict.get("title
 function padTo(s: string, w: any, fill: string, where: string): string {
   const n = Number(w) - [...s].length;
   if (n <= 0) return s;
-  if (where === "l") return s + fill.repeat(n);
-  if (where === "r") return fill.repeat(n) + s;
+  // (the fill meets s: no lone surrogates joined, SP.glue)
+  if (where === "l") return SP.glue(s, fill.repeat(n));
+  if (where === "r") return SP.glue(fill.repeat(n), s);
   const left = Math.floor(n / 2) + (n & Number(w) & 1);
-  return fill.repeat(left) + s + fill.repeat(n - left);
+  return SP.glue(SP.glue(fill.repeat(left), s), fill.repeat(n - left));
 }
 method(S, "center", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "c"));
 method(S, "ljust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "l"));
 method(S, "rjust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "r"));
 method(S, "zfill", (s: string, w: any) => {
   const sign = s[0] === "-" || s[0] === "+" ? s[0] : "";
-  const n = Number(w) - s.length;
+  const n = Number(w) - SP.cpLen(s);
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
+// str.translate and str.maketrans, as CPython's (their messages included);
+// they take int and str subclasses' instances (not float's, nor __index__)
+const intOrStr = (x: any): any => (x instanceof IntLayout || x instanceof StrLayout ? x.$v : x);
+// (the longest string JS makes: past it, translate's output is a MemoryError
+// before it is built, HARD-978-2)
+const MAX_STR = 2 ** 29 - 24;
+method(S, "translate", (s: string, table: any) => {
+  // The output in blocks: unchanged runs are sliced, the pieces joined every
+  // 4096 and the blocks appended, so memory goes with the output, not with a
+  // JS entry per input character (HARD-C56-1).  A plain dict is read
+  // directly for each character, without a KeyError per unmapped one: every
+  // lookup is made, as CPython's (a key's __eq__ may count them, CORR-8E6-1),
+  // and nothing is kept per code point (HARD-72C-1).
+  const plain = table instanceof PyDict && (table as any).$cls === T.dict;
+  const NONE = {}; // (a key that is not in the table: kept as is)
+  let out = "";
+  let pieces: string[] = [];
+  let size = 0, n = 0, run = 0;
+  // (every piece goes through put: a deleted or mapped character must not
+  // leave a lone high surrogate before a lone low one, CORR-C4D-1)
+  let high = false;
+  const put = (piece: string) => {
+    if (piece.length === 0) return;
+    if (high && (piece.charCodeAt(0) & 0xfc00) === 0xdc00) SP.refuseMerge();
+    high = (piece.charCodeAt(piece.length - 1) & 0xfc00) === 0xd800;
+    pieces.push(piece);
+  };
+  const flush = (upto: number) => {
+    if (upto > run) put(s.slice(run, upto));
+    if (pieces.length >= 4096) {
+      out += pieces.join("");
+      pieces = [];
+    }
+  };
+  for (let i = 0; i < s.length; ) {
+    // (Stop, every 4096 characters: the table's __getitem__ may be a builtin)
+    if ((++n & 4095) === 0) O.pollInterrupt();
+    const cp = s.codePointAt(i)!;
+    const w = cp > 0xffff ? 2 : 1;
+    let r: any;
+    if (plain) {
+      // (each lookup made, as CPython's, but no KeyError raised for a miss)
+      const v = dictGet(table, cp);
+      r = v === undefined ? NONE : v;
+    } else {
+      try {
+        r = O.getitem(table, cp);
+      } catch (e: any) {
+        if (!isinstance(toPyExc(e), T.LookupError)) throw e;
+        r = NONE;
+      }
+    }
+    if (r === NONE) {
+      size += w;
+      i += w;
+      continue;
+    }
+    flush(i);
+    i += w;
+    run = i;
+    if (r === null) continue;
+    r = intOrStr(r);
+    if (typeof r === "string") {
+      size += r.length;
+      if (size > MAX_STR) raise(T.MemoryError);
+      put(r);
+    } else if (O.isPyInt(r)) {
+      const c = Number(r);
+      if (!(c >= 0 && c < 0x110000)) raise(T.ValueError, "character mapping must be in range(0x110000)");
+      size += c > 0xffff ? 2 : 1;
+      if (size > MAX_STR) raise(T.MemoryError);
+      put(String.fromCodePoint(c));
+    } else raise(T.TypeError, "character mapping must return integer, None or str");
+  }
+  flush(s.length);
+  return out + pieces.join("");
+});
+S.$dict.set("maketrans", new PyStaticMethod(pyfn((...a: any[]) => {
+  if (a.length === 0) raise(T.TypeError, "maketrans expected at least 1 argument, got 0");
+  if (a.length > 3) raise(T.TypeError, `maketrans expected at most 3 arguments, got ${a.length}`);
+  const d = new PyDict();
+  if (a.length === 1) {
+    if (!(a[0] instanceof PyDict)) raise(T.TypeError, "if you give only one argument to maketrans it must be a dict");
+    let n = 0;
+    for (const k of O.toArray(a[0])) {
+      if ((++n & 4095) === 0) O.pollInterrupt();
+      const v = O.getitem(a[0], k);
+      const kk = intOrStr(k);
+      if (typeof kk === "string") {
+        if ([...kk].length !== 1) raise(T.ValueError, "string keys in translatetable must be of length 1");
+        dictSet(d, kk.codePointAt(0)!, v);
+      } else if (O.isPyInt(kk)) dictSet(d, k, v);
+      else raise(T.TypeError, "keys in translate table mustbe strings or integers");
+    }
+    return d;
+  }
+  // (the second and third are checked first, as CPython's argument parsing)
+  for (let i = 1; i < a.length; i++) {
+    if (typeof intOrStr(a[i]) !== "string") raise(T.TypeError, `maketrans() argument ${i + 1} must be str, not ${typeName(a[i])}`);
+    a[i] = intOrStr(a[i]);
+  }
+  if (typeof intOrStr(a[0]) !== "string") raise(T.TypeError, "first maketrans argument must be a string if there is a second argument");
+  a[0] = intOrStr(a[0]);
+  // (by code points, both strings in step: no array of either, HARD-C56-1;
+  // the dict has at most one entry per code point)
+  const x: string = a[0], y: string = a[1];
+  const count = (t: string) => {
+    let k = 0;
+    for (let i = 0; i < t.length; i += t.codePointAt(i)! > 0xffff ? 2 : 1) {
+      if ((++k & 65535) === 0) O.pollInterrupt();
+    }
+    return k;
+  };
+  if (count(x) !== count(y)) raise(T.ValueError, "the first two maketrans arguments must have equal length");
+  for (let i = 0, j = 0, n = 0; i < x.length; n++) {
+    if ((n & 4095) === 4095) O.pollInterrupt();
+    const c = x.codePointAt(i)!, e = y.codePointAt(j)!;
+    dictSet(d, c, e);
+    i += c > 0xffff ? 2 : 1;
+    j += e > 0xffff ? 2 : 1;
+  }
+  if (a.length === 3) {
+    const z: string = a[2];
+    for (let i = 0, n = 0; i < z.length; n++) {
+      if ((n & 4095) === 4095) O.pollInterrupt();
+      const c = z.codePointAt(i)!;
+      dictSet(d, c, null);
+      i += c > 0xffff ? 2 : 1;
+    }
+  }
+  return d;
+}, "maketrans")));
 method(S, "partition", (s: string, sep: string) => {
   if (needStr(sep) === "") raise(T.ValueError, "empty separator");
-  const i = s.indexOf(sep);
+  const i = SP.indexOf(s, sep, 0);
   return i < 0 ? tuple([s, "", ""]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
 method(S, "rpartition", (s: string, sep: string) => {
   if (needStr(sep) === "") raise(T.ValueError, "empty separator");
-  const i = s.lastIndexOf(sep);
+  const i = SP.lastIndexOf(s, sep, s.length);
   return i < 0 ? tuple(["", "", s]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
-method(S, "removeprefix", (s: string, p: string) => (s.startsWith(p) ? s.slice(p.length) : s));
-method(S, "removesuffix", (s: string, p: string) => (p && s.endsWith(p) ? s.slice(0, -p.length) : s));
+method(S, "removeprefix", (s: string, p: string) => (s.startsWith(p) && SP.onBoundaries(s, 0, p.length) ? s.slice(p.length) : s));
+method(S, "removesuffix", (s: string, p: string) => (p && s.endsWith(p) && SP.onBoundaries(s, s.length - p.length, p.length) ? s.slice(0, -p.length) : s));
 method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict") => encode(s, encoding, errors), sig(["self", "encoding", "errors"]));
 method(S, "expandtabs", (s: string, ts: any = 8) => {
   let out = "", col = 0;
   const n = Number(ts);
+  const seams: number[] = []; // (a tab expanded to nothing joins its neighbours: SP.checkSeams)
   for (const c of s) {
     if (c === "\t") {
       const k = n > 0 ? n - (col % n) : 0;
+      if (k === 0) seams.push(out.length);
       out += " ".repeat(k);
       col += k;
     } else {
@@ -1115,16 +1360,16 @@ method(S, "expandtabs", (s: string, ts: any = 8) => {
       col = c === "\n" || c === "\r" ? 0 : col + 1;
     }
   }
-  return out;
+  return SP.checkSeams(out, seams);
 });
 method(S, "format", (s: string, ...args: any[]) => strFormat(s, args, new Map()));
 S.$dict.get("format").$kw = (pos: any[], names: string[], values: any[]) => strFormat(pos[0], pos.slice(1), new Map(names.map((n, i) => [n, values[i]])));
 method(S, "format_map", (s: string, m: any) => strFormat(s, [], m));
-method(S, "__len__", (s: string) => s.length);
+method(S, "__len__", (s: string) => SP.cpLen(s));
 method(S, "__contains__", (s: string, x: any) => O.contains(s, x));
 method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
-method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s + x : NotImplemented));
-method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? s.repeat(Math.max(0, Number(x))) : NotImplemented));
+method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? SP.glue(s, x) : NotImplemented));
+method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? SP.repeatChecked(s, Math.max(0, Number(x))) : NotImplemented));
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
@@ -1175,6 +1420,7 @@ export function strFormat(s: string, args: any[], kw: any): string {
   };
   const expand = (t: string, depth: number): string => {
     let r = "";
+    const seams: number[] = [];
     let i = 0;
     while (i < t.length) {
       const c = t[i];
@@ -1201,7 +1447,10 @@ export function strFormat(s: string, args: any[], kw: any): string {
         }
         if (m[2] === "r" || m[2] === "a") v = repr(v);
         else if (m[2] === "s") v = str(v);
+        // (a field's ends are seams: no lone surrogates joined)
+        seams.push(r.length);
         r += format(v, spec);
+        seams.push(r.length);
         i = j;
       } else if (c === "}") {
         if (t[i + 1] !== "}") raise(T.ValueError, "Single '}' encountered in format string");
@@ -1212,7 +1461,7 @@ export function strFormat(s: string, args: any[], kw: any): string {
         i++;
       }
     }
-    return r;
+    return SP.checkSeams(r, seams);
   };
   out = expand(s, 0);
   return out;
@@ -1359,6 +1608,7 @@ method(dict, "__init__", (d: PyDict, x: any = undefined) => {
 });
 dict.$dict.get("__init__").$kw = (pos: any[], names: string[], values: any[]) => {
   const d = pos[0];
+  if (pos.length > 2) raise(T.TypeError, `dict expected at most 1 argument, got ${pos.length - 1}`);
   if (pos.length > 1) O.dictUpdate(d, pos[1]);
   names.forEach((n, i) => dictSet(d, n, values[i]));
   return null;
@@ -1432,6 +1682,7 @@ method(dict, "update", (d: PyDict, other: any = undefined) => {
 });
 dict.$dict.get("update").$kw = (pos: any[], names: string[], values: any[]) => {
   const d = pos[0];
+  if (pos.length > 2) raise(T.TypeError, `update expected at most 1 argument, got ${pos.length - 1}`);
   if (pos.length > 1) O.dictUpdate(d, pos[1]);
   names.forEach((n, i) => dictSet(d, n, values[i]));
   return null;
@@ -1503,9 +1754,22 @@ Object.defineProperty(O.PySet.prototype, "$cls", {
 const asSet = (x: any) => (x instanceof O.PySet ? x : O.newSet(x));
 const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "copy", (s: O.PySet) => O.setOp(s, O.newSet(), "or"));
-  method(cls, "union", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "or"), O.setOp(s, O.newSet(), "or")));
-  method(cls, "intersection", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "and"), O.setOp(s, O.newSet(), "or")));
-  method(cls, "difference", (s: O.PySet, ...others: any[]) => others.reduce((acc, o) => O.setOp(acc, asSet(o), "sub"), O.setOp(s, O.newSet(), "or")));
+  // (each also as an array of its arguments, for s.union(*xs) of any length: BIG_CALL)
+  // (union and difference work on one copy: a copy per argument was quadratic)
+  const fold = (op: "or" | "and" | "sub") => (a: any[]) => {
+    let r = O.setOp(a[0], O.newSet(), "or");
+    for (let i = 1; i < a.length; i++) {
+      if ((i & 1023) === 0) O.pollInterrupt(); // (Stop reaches a long argument list)
+      if (op === "or") O.forEach(a[i], (v) => O.setAdd(r, v));
+      else if (op === "sub") O.forEach(a[i], (v) => void dictDelete(r.$d, v));
+      else r = O.setOp(r, asSet(a[i]), "and");
+    }
+    return r;
+  };
+  for (const [name, op] of [["union", "or"], ["intersection", "and"], ["difference", "sub"]] as const) {
+    const f = fold(op);
+    positionalArray(method(cls, name, (s: O.PySet, ...others: any[]) => f([s, ...others])), f);
+  }
   method(cls, "symmetric_difference", (s: O.PySet, o: any) => O.setOp(s, asSet(o), "xor"));
   method(cls, "issubset", (s: O.PySet, o: any) => O.setSubset(s, asSet(o)));
   method(cls, "issuperset", (s: O.PySet, o: any) => O.setSubset(asSet(o), s));
@@ -1515,8 +1779,12 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "__iter__", (s: O.PySet) => new O.DictIter(s.$d, 0));
   method(cls, "__repr__", (s: O.PySet) => setRepr(s));
   method(cls, "__eq__", (s: O.PySet, o: any) => (o instanceof O.PySet ? O.eq(s, o) : NotImplemented));
+  // (the binary operators, reflected too, and for a set the in-place ones,
+  // as CPython's slots: what a subclass inherits, CORR-A2B-1, -2)
   for (const [op, f] of [["__and__", "and"], ["__or__", "or"], ["__sub__", "sub"], ["__xor__", "xor"]] as const) {
     method(cls, op, (s: O.PySet, o: any) => (o instanceof O.PySet ? O.setOp(s, o, f) : NotImplemented));
+    method(cls, "__r" + op.slice(2), (s: O.PySet, o: any) => (o instanceof O.PySet ? O.setOp(o, s, f) : NotImplemented));
+    if (mutable) method(cls, "__i" + op.slice(2), (s: O.PySet, o: any) => (o instanceof O.PySet ? O.setInplace(s, o, f) : NotImplemented));
   }
   method(cls, "__le__", (s: O.PySet, o: any) => (o instanceof O.PySet ? cls.$dict.get("issubset")(s, o) : NotImplemented));
   method(cls, "__ge__", (s: O.PySet, o: any) => (o instanceof O.PySet ? cls.$dict.get("issuperset")(s, o) : NotImplemented));
@@ -1541,15 +1809,26 @@ const setMethods = (cls: PyType, mutable: boolean) => {
     return k;
   });
   method(cls, "clear", (s: O.PySet) => (dictClear(s.$d), null));
-  method(cls, "update", (s: O.PySet, ...others: any[]) => {
-    for (const o of others) O.forEach(o, (v) => O.setAdd(s, v));
+  const update = (a: any[]) => {
+    const s: O.PySet = a[0];
+    for (let i = 1; i < a.length; i++) {
+      if ((i & 1023) === 0) O.pollInterrupt();
+      O.forEach(a[i], (v) => O.setAdd(s, v));
+    }
     return null;
-  });
-  for (const [name, f] of [["intersection_update", "and"], ["difference_update", "sub"], ["symmetric_difference_update", "xor"]] as const) {
-    method(cls, name, (s: O.PySet, ...os: any[]) => {
-      for (const o of os) s.$d = O.setOp(s, asSet(o), f).$d;
+  };
+  positionalArray(method(cls, "update", (s: O.PySet, ...others: any[]) => update([s, ...others])), update);
+  method(cls, "symmetric_difference_update", (s: O.PySet, o: any) => ((s.$d = O.setOp(s, asSet(o), "xor").$d), null));
+  for (const [name, f] of [["intersection_update", "and"], ["difference_update", "sub"]] as const) {
+    const g = (a: any[]) => {
+      const s: O.PySet = a[0];
+      for (let i = 1; i < a.length; i++) {
+        if ((i & 1023) === 0) O.pollInterrupt();
+        s.$d = O.setOp(s, asSet(a[i]), f).$d;
+      }
       return null;
-    });
+    };
+    positionalArray(method(cls, name, (s: O.PySet, ...os: any[]) => g([s, ...os])), g);
   }
 };
 setMethods(set, true);
@@ -1689,7 +1968,7 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 // ------------------------------------------------------------------ bytes, bytearray
 
 const Ty_lookup = (x: any, name: string) => lookupType(typeOf(x), name);
-function toBytes(x: any, encoding: any = undefined, errors: any = undefined): Uint8Array {
+function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
   if (x === undefined) return new Uint8Array(0);
   if (typeof x === "string") {
     if (encoding === undefined) raise(T.TypeError, "string argument without an encoding");
@@ -1708,14 +1987,48 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined): Ui
     if (!(r instanceof PyBytes)) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
     return r.a.slice(0, r.n);
   }
-  return Uint8Array.from(O.toArray(x).map((v) => {
-    if (!O.isPyInt(v)) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
-    if (v < 0 || v > 255) raise(T.ValueError, "bytes must be in range(0, 256)");
-    return Number(v);
-  }));
+  // an object with __index__ is a count, and so is each item, as in CPython:
+  // the special method resolved as any other (a staticmethod or classmethod
+  // too), each item converted as it is fetched (bytes of Sage's Rational 4/2
+  // was "not iterable")
+  const index = (v: any): any => {
+    if (O.isPyInt(v)) return typeof v === "boolean" ? +v : v;
+    if (typeof v !== "object" || v === null) return undefined;
+    const f = O.lookupSpecial(v, "__index__");
+    if (f === undefined) return undefined;
+    const r = f(v);
+    if (O.isPyInt(r)) return typeof r === "boolean" ? +r : r;
+    if (r instanceof PrimBox && isinstance(r, int)) return unbox(r);
+    return { bad: r };
+  };
+  if (typeof x === "object" && x !== null && O.lookupSpecial(x, "__index__") !== undefined) {
+    // (a TypeError from __index__ is "cannot convert", as in CPython)
+    let n: any;
+    try {
+      n = index(x);
+    } catch (e: any) {
+      if (isinstance(e, T.TypeError)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
+      throw e;
+    }
+    if (n === undefined || (typeof n === "object" && "bad" in n)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
+    return toBytes(n, undefined, undefined, array);
+  }
+  const it = O.iter(x);
+  const out: number[] = [];
+  const END = {};
+  for (;;) {
+    const v = O.next(it, END);
+    if (v === END) break;
+    const n = index(v);
+    if (n === undefined) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
+    if (typeof n === "object") raise(T.TypeError, `__index__ returned non-int (type ${typeName(n.bad)})`);
+    if (n < 0 || n > 255) raise(T.ValueError, array ? "byte must be in range(0, 256)" : "bytes must be in range(0, 256)");
+    out.push(Number(n));
+  }
+  return Uint8Array.from(out);
 }
 const bytesType = builtinType("bytes", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyBytes(toBytes(x, enc, errors)));
-const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyByteArray(toBytes(x, enc, errors)));
+const bytearray = builtinType("bytearray", [object], (x: any = undefined, enc: any = undefined, errors: any = undefined) => new PyByteArray(toBytes(x, enc, errors, true)));
 bindClass(PyBytes, bytesType);
 bindClass(PyByteArray, bytearray);
 for (const bt of [bytesType, bytearray]) {
@@ -1746,12 +2059,22 @@ const grow = (b: PyByteArray, extra: number) => {
 method(bytearray, "append", (b: PyByteArray, x: any) => {
   if (!O.isPyInt(x)) raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
   if (x < 0 || x > 255) raise(T.ValueError, "byte must be in range(0, 256)");
+  checkResizable(b);
   grow(b, 1);
   b.a[b.n++] = Number(x);
   return null;
 });
 method(bytearray, "extend", (b: PyByteArray, x: any) => {
-  const add = toBytes(x);
+  // an iterable of bytes, never a count (extend(5) added five zero bytes)
+  if (O.isPyInt(x) || (typeof x === "object" && x !== null && O.bufferOf(x) === undefined
+      && lookupDunder(x, "__iter__") === undefined && lookupDunder(x, "__getitem__") === undefined)) {
+    raise(T.TypeError, `can't extend bytearray with ${typeName(x)}`);
+  }
+  const add = toBytes(x, undefined, undefined, true);
+  // (only a real re-size is refused while exported: extending by nothing
+  // is not one, CORR-185-1)
+  if (add.length === 0) return null;
+  checkResizable(b);
   grow(b, add.length);
   b.a.set(add, b.n);
   b.n += add.length;
@@ -1759,6 +2082,7 @@ method(bytearray, "extend", (b: PyByteArray, x: any) => {
 });
 method(bytearray, "pop", (b: PyByteArray) => {
   if (b.n === 0) raise(T.IndexError, "pop from empty bytearray");
+  checkResizable(b);
   return b.a[--b.n];
 });
 
@@ -1779,6 +2103,8 @@ function iteratorType(name: string, jsClass: any, call?: (...a: any[]) => any): 
 }
 iteratorType("list_iterator", O.ListIter);
 iteratorType("range_iterator", O.RangeIter);
+// (a range too long for doubles: CPython's type of its iterator, not object)
+iteratorType("longrange_iterator", BigRangeIter);
 iteratorType("str_ascii_iterator", O.StrIter);
 iteratorType("dict_keyiterator", O.DictIter);
 iteratorType("bytes_iterator", O.BytesIter);
@@ -1819,7 +2145,15 @@ export class Zip {
   }
 }
 const zip = iteratorType("zip", Zip, (...xs: any[]) => new Zip(xs.map(O.iter), false));
-zip.$kw = (pos, names, values) => new Zip(pos.map(O.iter), names[0] === "strict" && O.truth(values[0]));
+// (strict wherever it is given; any other keyword refused, as CPython's)
+zip.$kw = (pos, names, values) => {
+  // (every keyword checked before strict's truth is taken, CORR-71C-2)
+  for (const n of names) if (n !== "strict") raise(T.TypeError, `zip() got an unexpected keyword argument '${n}'`);
+  let strict = false;
+  names.forEach((_n, i) => (strict = O.truth(values[i])));
+  return new Zip(pos.map(O.iter), strict);
+};
+(zip as any).$kwPos = true; // (zip(*rows) of any length: BIG_CALL)
 
 export class MapIter {
   constructor(public f: any, public its: any[]) {}
@@ -2117,7 +2451,7 @@ getset(object, "__dict__", (o) => {
   method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) <= 0 : NotImplemented));
   method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) > 0 : NotImplemented));
   method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) >= 0 : NotImplemented));
-  method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? s.repeat(Math.max(0, Number(unbox(x)))) : NotImplemented));
+  method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? SP.repeatChecked(s, Math.max(0, Number(unbox(x)))) : NotImplemented));
 }
 
 // int, float, str: the subclass instance boxes the value.

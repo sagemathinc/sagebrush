@@ -38,9 +38,12 @@ test("board render: a note whose text is cut to its box is said, its id quoted (
   assert.ok(r.stderr.includes(JSON.stringify("a\u001b[31m")) && !r.stderr.includes("\u001b"), r.stderr);
 });
 
-test("board: only `board render` is the board's command (else a program named board, as before)", () => {
-  const r = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "nonsense"], { encoding: "utf8" });
-  assert.doesNotMatch(r.stderr + r.stdout, /usage: sagebrush board render/);
+test("board: a board command it doesn't have is said so (agent-UX R0-3); a program named board still runs when there is one (test/board-check.test.ts)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-board-cmd-"));
+  const r = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "nonsense"], { encoding: "utf8", cwd: dir });
+  rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /^sagebrush board: unknown board command "nonsense": this sagebrush \(dev\) has render, run, check\n/);
 });
 
 test("board render: a page that is not there, a file that is not there, no file", () => {

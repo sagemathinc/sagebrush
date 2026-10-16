@@ -212,6 +212,23 @@ function remPio2(x: number): void {
     RY1 = ty[1];
   }
 }
+// x - n pi/2 as three doubles (fdlibm's 113-bit precision), and n mod 8, for a finite
+// |x| >= 2^20 (crmath.ts: correctly rounded sin, cos and tan of large arguments)
+export function remPio2Wide(x: number): [number, number, number, number] {
+  const h = hiw(x), ix = h & 0x7fffffff;
+  let z = words((ix & 0x000fffff) | ((0x3ff + 23) << 20), low(x));
+  const tx = [0, 0, 0];
+  for (let i = 0; i < 2; i++) {
+    tx[i] = trunc(z);
+    z = (z - tx[i]) * 16777216;
+  }
+  tx[2] = z;
+  let i = 2;
+  while (i !== 0 && tx[i] === 0) i--;
+  const ty = [0, 0, 0];
+  const n = remPio2Large(tx.slice(0, i + 1), ty, (ix >>> 20) - (0x3ff + 23), 3);
+  return h >>> 31 ? [-n, -ty[0], -ty[1], -ty[2]] : [n, ty[0], ty[1], ty[2]];
+}
 // 2/pi in 24-bit chunks (the table of the 32-bit build, which the WebAssembly build uses)
 const IPIO2 = [
   0xa2f983, 0x6e4e44, 0x1529fc, 0x2757d1, 0xf534dd, 0xc0db62, 0x95993c, 0x439041, 0xfe5163, 0xabdebb, 0xc561b7,
@@ -340,6 +357,25 @@ function remPio2Large(x: number[], y: number[], e0: number, prec: number): numbe
     fw = 0;
     for (let k = 0; k <= jp && k <= jz - i; k++) fw += PIO2[k] * q[i + k];
     fq[jz - i] = fw;
+  }
+  if (prec === 3) {
+    // compress fq[] into y[] (prec 3: three terms, fdlibm's "painful" case)
+    for (let i = jz; i > 0; i--) {
+      fw = fq[i - 1] + fq[i];
+      fq[i] += fq[i - 1] - fw;
+      fq[i - 1] = fw;
+    }
+    for (let i = jz; i > 1; i--) {
+      fw = fq[i - 1] + fq[i];
+      fq[i] += fq[i - 1] - fw;
+      fq[i - 1] = fw;
+    }
+    fw = 0;
+    for (let i = jz; i >= 2; i--) fw += fq[i];
+    y[0] = ih === 0 ? fq[0] : -fq[0];
+    y[1] = ih === 0 ? fq[1] : -fq[1];
+    y[2] = ih === 0 ? fw : -fw;
+    return n & 7;
   }
   // compress fq[] into y[] (prec 1: two terms)
   fw = 0;
