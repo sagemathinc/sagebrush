@@ -1,0 +1,100 @@
+UnboundLocalError: cannot access local variable 'x' where it is not associated with a value
+2
+NameError: cannot access free variable 'x' where it is not associated with a value in enclosing scope
+NameError: cannot access free variable 'x' where it is not associated with a value in enclosing scope
+set f
+get print
+get f
+get x
+get len
+(42, 2)
+set fh
+get fh
+get h
+NameError: name 'h' is not defined
+set g
+get print
+get g
+get y
+5
+get x
+1 42
+get print
+get x
+42
+get print
+get range
+get x
+[42]
+set C
+get print
+get C
+1
+set f
+get f
+get missing
+NameError: name 'missing' is not defined
+NameError: name 'print' is not defined
+L L
+ImportError: __import__ not found
+ImportError: __import__ not found
+imp P [('os', None, 0), ('os', ('path',), 0)]
+2
+bget len
+bget len
+2 3
+NameError: __build_class__ not found
+BN
+dict
+S
+AssertionError: 
+NameError: name 'ValueError' is not defined
+None
+NameError: name '__import__' is not defined
+TypeError: 'NoneType' object is not subscriptable
+TypeError: 'int' object is not subscriptable
+'MA'
+NameError: name 'len' is not defined
+range ['custom', 'custom']
+sum ['custom']
+tuple ['custom']
+sorted ['custom']
+any ['custom']
+NameError: name 'len' is not defined
+{} eval NameError name 'a' is not defined None 2
+{} exec NameError name 'a' is not defined None 2
+{'a': 10} eval (10, [0, 1], 1) 1 2
+{'a': 10} exec (10, [0, 1], 1) 1 2
+'a = 5\nr = [(a:=i) for i in range(2)]\nb = a' None 1 [('a', 2), ('b', 1), ('r', [0, 1])]
+'del a\nr = [(a:=i) for i in range(2)]' None 1 [('a', 2), ('r', [0, 1])]
+'r = [[a for j in range(1)] for i in range(1)]\nq = [(a:=i) for i in range(1)]' None 0 [('a', 2), ('q', [0]), ('r', [[2]])]
+'r = [(a, [a for j in range(1)]) for i in range(1) if (a:=7)]' None 7 [('a', 2), ('r', [(7, [2])])]
+'def f(): return a\nr = f()\nq = [(a:=i) for i in range(1)]\ns = (lambda: a)()' None 0 [('a', 2), ('q', [0]), ('r', 1), ('s', 0)]
+'class C:\n    b = a\nq = [(a:=i) for i in range(1)]\nr = C.b' None 0 [('a', 2), ('q', [0]), ('r', 1)]
+'r = [a for i in range(1)]\nq = [(a:=i) for i in range(1)]' None 0 [('a', 2), ('q', [0]), ('r', [2])]
+'r = list(a for i in range(1))\nq = [(a:=i) for i in range(1)]' None 0 [('a', 2), ('q', [0]), ('r', [1])]
+'for a in range(3): pass\nq = [(a:=i) for i in range(1)]' None 0 [('a', 2), ('q', [0])]
+'b0 = a\nr = list((a:=i) for i in range(2))\nb = a' None 1 [('a', 2), ('b', 1), ('b0', 1), ('r', [0, 1])]
+'b0 = a\nr = [[(a:=j) for j in range(2)] for i in range(1)]\nb = a' None 1 [('a', 2), ('b', 1), ('b0', 1), ('r', [[0, 1]])]
+['bases', 'kw', ('prepare', 'C', ('flag',)), ('get', '__name__'), ('set', '__module__'), ('set', '__qualname__'), ('set', '__firstlineno__'), ('get', 'log'), 'body', ('get', 'pre'), ('set', 'b'), ('set', 'f'), ('del', 'f'), ('new', 'LM', 'PREP', True, True)]
+PREP 1
+TypeError: metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases
+TypeError: BadP.__prepare__() must return a mapping, not int
+PN 3 ['__firstlineno__', '__module__', '__name__', '__qualname__', 'w', 'z']
+NM
+NM ['__firstlineno__', '__module__', '__qualname__', 'g', 'q']
+1 __main__ NameError: name 'q' is not defined
+NameError: name 'nothere' is not defined
+builtin retry NameError name 'len' is not defined
+builtin calls 1
+frame import ok None
+import log ['old']
+nested builtins 99
+prepared eval/exec ok (42, 30)
+prepared nondict ok 7
+prepared cleanup NameError name 'e' is not defined
+['lookup', 'body']
+NameError: name 'builtins' is not defined [('old', 'anything', None), ('old', 'other', ('len',))]
+None True 98
+TypeError: 'NoneType' object is not callable
+TypeError: 'NoneType' object is not callable
