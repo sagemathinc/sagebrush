@@ -16,6 +16,18 @@ import sys as _sys
 PRELUDE = "import numpy as np\nimport math, cmath, itertools, functools, collections, random, bisect, heapq\nfrom fractions import Fraction"
 
 
+# the most an example may print (catalog/SCHEMA.md: examples are short); past
+# it the example fails, rather than holding all it prints
+LIMIT = 1 << 20
+
+
+class _Capped(_io.StringIO):
+    def write(self, s):
+        if self.tell() + len(s) > LIMIT:
+            raise RuntimeError("the example printed more than %d characters" % LIMIT)
+        return super().write(s)
+
+
 def run(code, ns=None):
     """What the example prints at a Python prompt: its output, then the repr
     of its last line when that is an expression (and not None)."""
@@ -30,7 +42,7 @@ def run(code, ns=None):
     except SyntaxError:
         is_expr = False
     body = "\n".join(lines[:-1] if is_expr else lines)
-    buf = _io.StringIO()
+    buf = _Capped()
     old = _sys.stdout
     _sys.stdout = buf
     try:

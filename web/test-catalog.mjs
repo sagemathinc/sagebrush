@@ -30,14 +30,20 @@ for (const mode of readdirSync(join(root, "catalog"))) {
 let ws;
 const waiting = new Map();
 let n = 0;
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-const ev = async (expression) => {
-  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+// (every request has a deadline, and a closed socket fails what waits on it:
+// a stalled Chrome fails the test rather than hanging CI)
+const send = (method, params = {}, ms = 30000) => new Promise((resolve, reject) => {
+  const id = ++n;
+  const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms} ms`)); }, ms);
+  waiting.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
+  ws.send(JSON.stringify({ id, method, params }));
+});
+const ev = async (expression, ms = 30000) => {
+  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms);
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
   return r.result?.value;
 };
-// (each evaluation has its own deadline: a page that stops answering fails the test)
-const evWithin = (expression, ms) => Promise.race([ev(expression), sleep(ms).then(() => { throw new Error("no answer within " + ms + " ms"); })]);
+const evWithin = (expression, ms) => ev(expression, ms);
 const until = async (expr, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (await evWithin(expr, 10000).catch(() => false)) return true; await sleep(200); } throw new Error("timeout: " + expr.slice(0, 80)); };
 const LAST = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
 async function run(code, ms) {
@@ -51,11 +57,13 @@ try {
   if (!cdpPort) cdpPort = await devtoolsPort(profile);
   let targets;
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
+  if (!targets) throw new Error("Chrome's DevTools did not answer");
   ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+  await Promise.race([new Promise((r) => (ws.onopen = r)), sleep(30000).then(() => { throw new Error("DevTools socket: not open within 30 s"); })]);
+  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id).resolve(m.result ?? m.error); waiting.delete(m.id); } };
+  ws.onclose = () => { for (const w of waiting.values()) w.reject(new Error("DevTools socket closed")); waiting.clear(); };
   await send("Runtime.enable");
-  await send("Page.navigate", { url: new URL("./", base).href });
+  await send("Page.navigate", { url: new URL("./", base).href }, 60000);
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
   for (const [mode, es] of Object.entries(entries)) {
     if (!es.length) continue;
@@ -78,16 +86,25 @@ try {
     const got = JSON.parse(m[1]);
     const want = new Map();
     for (const e of es) e.examples.forEach((x, i) => { if (!x.runtimes || x.runtimes.includes("browser")) want.set(`${e.name} ${e.signature} #${i + 1}`, [x.code, x.expected]); });
+    // (exactly one result per example: a missing, extra or repeated one fails)
     let bad = 0;
+    const seen = new Set();
     for (const r of got) {
       const key = `${r.name} ${r.signature} #${r.index + 1}`;
-      const [code, expected] = want.get(key) ?? ["?", undefined];
+      if (seen.has(key) || !want.has(key)) {
+        bad++;
+        console.log(`--- ${mode} ${key}: ${seen.has(key) ? "a second result" : "a result for no such example"}`);
+        continue;
+      }
+      seen.add(key);
+      const [code, expected] = want.get(key);
       if (r.got !== expected) {
         bad++;
         console.log(`--- ${mode} ${r.name} example ${r.index + 1}\n    code:     ${code.replace(/\n/g, "; ")}\n    expected: ${JSON.stringify(expected)}\n    got:      ${JSON.stringify(r.got)}`);
       }
     }
-    ok(bad === 0 && got.length === want.size, `${mode} in the browser: ${got.length} examples, ${bad} differ`);
+    for (const key of want.keys()) if (!seen.has(key)) { bad++; console.log(`--- ${mode} ${key}: no result`); }
+    ok(bad === 0, `${mode} in the browser: ${got.length} results for ${want.size} examples, ${bad} problems`);
   }
 } catch (e) {
   failures++;

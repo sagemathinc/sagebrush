@@ -66,21 +66,30 @@ def files(mode, base=None):
     return sorted(f for f in _os.listdir(d) if f.endswith(".json"))
 
 
-def load(mode, base=None):
-    """[(group, entry)] for the mode, in file order: from the source tree's
-    catalog/, else from the one the CLI bundle carries"""
+def _read(mode, base=None):
+    """[(group, the file's JSON, or None and the reason it is unreadable)]"""
     base = base or root()
-    out = []
     if base is None:
         groups = _embedded().get(mode, {}).get("groups", {})
-        for g in sorted(groups):
-            out.extend((g, e) for e in groups[g])
-        return out
+        return [(g, groups[g], None) for g in sorted(groups)]
+    out = []
     for f in files(mode, base):
-        with open(_os.path.join(base, mode, f), encoding="utf-8") as fh:
-            data = _json.load(fh)
-        for e in data if isinstance(data, list) else [data]:
-            out.append((f[:-len(".json")], e))
+        try:
+            with open(_os.path.join(base, mode, f), encoding="utf-8") as fh:
+                out.append((f[:-len(".json")], _json.load(fh), None))
+        except ValueError as err:
+            out.append((f[:-len(".json")], None, "not JSON: %s" % err))
+    return out
+
+
+def load(mode, base=None):
+    """[(group, entry)] for the mode, in file order: from the source tree's
+    catalog/, else from the one the CLI bundle carries (a file that is no
+    JSON array has none: check() reports it)"""
+    out = []
+    for group, data, _ in _read(mode, base):
+        if isinstance(data, list):
+            out.extend((group, e) for e in data)
     return out
 
 
@@ -166,6 +175,10 @@ def check(modes=None, base=None):
     """Every problem of the catalog's files: ["mode/group: name: problem"]"""
     out = []
     for mode in modes or MODES:
+        # (a file is one JSON array of entries, as catalog/schema.json says)
+        for group, data, why in _read(mode, base):
+            if why is not None or not isinstance(data, list):
+                out.append("%s/%s.json: %s" % (mode, group, why or "the file must be a JSON array of entries"))
         seen = {}
         for group, e in load(mode, base):
             where = "%s/%s: %s" % (mode, group, e.get("name", "?") if isinstance(e, dict) else "?")
@@ -277,6 +290,36 @@ def run_all(mode, entries, runtime):
                 continue
             out.append({"name": e["name"], "signature": e["signature"], "index": i, "got": run_example(mode, ex["code"])})
     return out
+
+
+def compare(entries, results, runtime):
+    """The problems of a runtime's results for entries: each example that
+    runs on runtime (None: every example) needs exactly one result, equal to
+    its expected output (a missing, extra or repeated result is a problem
+    too)"""
+    want = {}
+    for e in entries:
+        for i, ex in enumerate(e.get("examples", [])):
+            if runtime is None or "runtimes" not in ex or runtime in ex["runtimes"]:
+                want[(e["name"], e["signature"], i)] = ex
+    probs = []
+    seen = set()
+    for r in results:
+        key = (r.get("name"), r.get("signature"), r.get("index"))
+        label = "%s example %s" % (key[0], key[2] + 1 if isinstance(key[2], int) else "?")
+        if key in seen:
+            probs.append("%s: a second result" % label)
+            continue
+        seen.add(key)
+        ex = want.get(key)
+        if ex is None:
+            probs.append("%s: a result for no such example" % label)
+        elif r.get("got") != ex["expected"]:
+            probs.append("%s\n    code:     %s\n    expected: %r\n    got:      %r" % (label, ex["code"].replace("\n", "; "), ex["expected"], r.get("got")))
+    for key in want:
+        if key not in seen:
+            probs.append("%s example %d: no result" % (key[0], key[2] + 1))
+    return probs
 
 
 def main(argv):

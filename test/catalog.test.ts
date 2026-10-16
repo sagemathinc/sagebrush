@@ -52,12 +52,9 @@ for (const mode of runnerModes) {
     // (in a directory of its own: examples write files)
     const dir = mkdtempSync(join(tmpdir(), "sagebrush-catalog-"));
     try {
-      const got = JSON.parse(cli(["-m", "_catalog", "--run", "--mode", mode], dir).trim().split("\n").pop()!);
-      const entries = JSON.parse(cli(["-c", `import json, _catalog as c\nprint(json.dumps([e for _, e in c.load(${JSON.stringify(mode)})]))`]));
-      const want = new Map<string, string>();
-      for (const e of entries) e.examples.forEach((x: any, i: number) => { if (!x.runtimes || x.runtimes.includes("node")) want.set(`${e.name} ${e.signature} #${i + 1}`, x.expected); });
-      assert.equal(got.length, want.size);
-      for (const r of got) assert.equal(r.got, want.get(`${r.name} ${r.signature} #${r.index + 1}`), `${r.name} example ${r.index + 1}`);
+      // (lib/_catalog.py compare: exactly one result per example, each its expected)
+      const code = `import json, _catalog as c\nes = [e for _, e in c.load(${JSON.stringify(mode)})]\nprint(json.dumps(c.compare(es, c.run_all(${JSON.stringify(mode)}, es, 'node'), 'node')))`;
+      assert.deepEqual(JSON.parse(cli(["-c", code], dir).trim().split("\n").pop()!), []);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -66,6 +63,42 @@ for (const mode of runnerModes) {
 
 test("Python mode runs its examples and lists its public names", () => {
   assert.ok(publicModes.includes("python") && runnerModes.includes("python"));
+});
+
+test("catalog gate 3 refuses a missing, an extra or a repeated result, as a wrong one", () => {
+  const code = [
+    "import json, _catalog as c",
+    "es = [{'name': 'f', 'signature': '', 'examples': [{'code': 'a', 'expected': '1\\n'}, {'code': 'b', 'expected': '2\\n'}, {'code': 'c', 'expected': '', 'runtimes': ['deno']}]}]",
+    "r = lambda i, got: {'name': 'f', 'signature': '', 'index': i, 'got': got}",
+    "good = [r(0, '1\\n'), r(1, '2\\n')]",
+    "print(json.dumps([c.compare(es, good, 'node'), [len(c.compare(es, x, 'node')) for x in",
+    "  ([], good[:1], good + [r(1, '2\\n')], good + [r(2, '')], [r(0, '1\\n'), r(1, '3\\n')])], len(c.compare(es, good, 'deno'))]))",
+  ].join("\n");
+  const [ok, counts, deno] = JSON.parse(cli(["-c", code]));
+  assert.deepEqual(ok, []);
+  assert.deepEqual(counts, [2, 1, 1, 1, 1]);
+  assert.equal(deno, 1);
+});
+
+test("catalog gate 1: a file must be a JSON array of entries", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sagebrush-catalog-"));
+  try {
+    const code = [
+      "import json, os, sys, _catalog as c",
+      "d = sys.argv[1]",
+      "os.makedirs(d + '/python')",
+      "open(d + '/schema.json', 'w').write('{}')",
+      "open(d + '/python/one.json', 'w').write(json.dumps({'name': 'f'}))",
+      "open(d + '/python/two.json', 'w').write('[1,')",
+      "print(json.dumps(c.check(['python'], d)))",
+    ].join("\n");
+    const probs = JSON.parse(cli(["-c", code, dir]));
+    assert.deepEqual(probs.map((p: string) => p.split(":")[0]), ["python/one.json", "python/two.json"]);
+    assert.match(probs[0], /must be a JSON array/);
+    assert.match(probs[1], /not JSON/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("catalog coverage is reported per mode", () => {
