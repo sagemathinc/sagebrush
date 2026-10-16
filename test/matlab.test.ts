@@ -1677,3 +1677,11 @@ test("moving statistics with a fill take the window's outside positions as the f
   assert.equal(out.trim(), "9.99900009999e-05 2 0 1");
   assert.ok(ms < 15000, `${ms} ms`);
 });
+
+test("command syntax: a comma or semicolon inside a word's brackets is refused, pointing to function syntax; brackets without one stay text", () => {
+  for (const code of ["clear -regexp a{0,31}", "clear -regexp ^x(1,2)$", "clear -regexp a[;]b"]) {
+    assert.throws(() => matlabToPython(code), (e: any) => e instanceof MatlabSyntaxError && /use function syntax/.test(e.message), code);
+  }
+  assert.doesNotThrow(() => matlabToPython("clear -regexp a{2}b ^x(1)$, y = 1;"));
+  assert.doesNotThrow(() => matlabToPython("disp 'a{0,31}'"));
+});
