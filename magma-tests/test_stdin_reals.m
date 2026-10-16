@@ -30,3 +30,12 @@ Exp(1.0); Log(10.0); Sqrt(10.0);
 0.999^123456;
 (1.0 + 2^(-60))^(2^29);
 (1.0 + 2^(-60))^(2^30);
+// two reals meet at the lower precision (CORR-0C6-1)
+A := RealField(2)!(2/7); B := RealField(10)!(2/7); B/A; A/B; B - A; A - B; A eq B; B eq A; A lt B; B gt A; Parent(B*A);
+A := RealField(10)!(2/7); B := RealField(30)!(2/7); B/A; A/B; B - A; A - B; A eq B; B eq A; A lt B; B gt A; Parent(B*A);
+A := RealField(30)!(2/7); B := RealField(50)!(2/7); B/A; A/B; B - A; A - B; A eq B; B eq A; A lt B; B gt A; Parent(B*A);
+A := RealField(50)!(2/7); B := RealField(80)!(2/7); B/A; A/B; B - A; A - B; A eq B; B eq A; A lt B; B gt A; Parent(B*A);
+// a decimal tie prints to even (CORR-0C6-2)
+RealField(2)!(5/4); RealField(2)!(9/4); RealField(2)!(11/4); RealField(2)!(13/4); RealField(3)!(1125/1000); RealField(2)!(249999/200000);
+// a square root at its own scale (CORR-0C6-3)
+Sqrt(RealField(10)!(1/10^30)); Sqrt(RealField(10)!(4/10^40)); Sqrt(RealField(50)!(1/10^120)); Sqrt(RealField(30)!(9*10^60)); Sqrt(RealField(30)!(2/10^50)); Sqrt(RealField(30)!2^-301);
