@@ -391,6 +391,54 @@ show(v);
 clear
 v = setdiff([1 2 3 4], [2 4]);
 show(v);
+% movmean
+clear
+v = movmean([3 1 8 4 9], 3);
+show(v);
+% movmedian
+clear
+v = movmedian([3 1 8 4 9], 3);
+show(v);
+% movmin
+clear
+v = movmin([3 1 8 4 9], 3);
+show(v);
+% movmax
+clear
+v = movmax([3 1 8 4 9], 3);
+show(v);
+% movsum
+clear
+v = movsum([3 1 8 4 9], 3);
+show(v);
+% movprod
+clear
+v = movprod([3 1 8 4 9], 3);
+show(v);
+% movvar
+clear
+v = movvar([1 3 5 7], 3);
+show(v);
+% movstd
+clear
+v = movstd([1 3 5 7], 3);
+show(v);
+% cov
+clear
+v = cov([0 0; 2 4; 4 8]);
+show(v);
+% corrcoef
+clear
+v = corrcoef([0 3; 2 1; 4 -1]);
+show(v);
+% quantile
+clear
+v = quantile([1 3 7 9], [0.25 0.5 0.75]);
+show(v);
+% prctile
+clear
+v = prctile([1 3 7 9], [25 50 75]);
+show(v);
 % mean
 clear
 v = mean([2 4 9]);
