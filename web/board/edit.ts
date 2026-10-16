@@ -9,7 +9,7 @@
 
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
-import { inkNode, isNote, STICKER_SIZE, GROUP_PAD, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { inkNode, isNote, STICKER_SIZE, GROUP_PAD, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
@@ -958,6 +958,22 @@ export class Editor {
     const id = "c" + Math.random().toString(36).slice(2, 8);
     const at = clear ? this.clearSpot(x, y, 440, 80) : { x: Math.round(x - 220), y: Math.round(y - 40) };
     return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, code: "", ...at }); }).then(() => this.open(id, true));
+  }
+
+  /** A question's answer, or its note (the reader's own words), as the
+   * reader gave it with its controls (null: removed); one step to undo, in
+   * Edit or not: answering is not editing the board's design. */
+  answer(id: string, patch: { answer?: AskAnswer | null; note?: string | null }) {
+    return this.commit((d) => {
+      const n = find(this.pg(d), id)?.node;
+      if (n?.kind !== "ask") return;
+      for (const k of ["answer", "note"] as const) {
+        if (!(k in patch)) continue;
+        const v = patch[k];
+        if (v === null || v === undefined) delete n[k];
+        else (n as any)[k] = v;
+      }
+    });
   }
 
   /** Show or hide a code item's code (its output stays). */

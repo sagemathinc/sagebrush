@@ -165,7 +165,7 @@ export interface DocSticker {
 // A question for the board's reader (web/board-host-protocol.md): its
 // answer is kept on it.  A reader that doesn't know the kind shows its
 // title and text as a note's, so the question is in them.
-/** A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`. (For now the board shows a question, its options and its answer read-only; a host's submission, or `sagebrush board answers --apply`, writes the answer.) */
+/** A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`: given on the board with its controls, or written by a host's submission or `sagebrush board answers --apply`. */
 export interface DocAsk {
   /** required: unique on its page (an answer names it) */
   id: string;
@@ -806,9 +806,11 @@ export function askMarkdown(a: DocAsk): string {
   return out.join("\n");
 }
 
-/** A question as the note a reader without controls shows. */
-export function askNote(a: DocAsk): DocNote {
-  return strip({ id: a.id, title: a.title, text: askMarkdown(a), detail: a.detail, color: a.color, x: a.x, y: a.y, w: a.w ?? 320, h: a.h });
+/** A question as a note: its text the Markdown a reader without controls
+ * shows (`sagebrush board render`), and the question itself with it, `ask`,
+ * for a reader that has controls (the board: board.ts). */
+export function askNote(a: DocAsk): DocNote & { ask: DocAsk } {
+  return { ...strip({ id: a.id, title: a.title, text: askMarkdown(a), detail: a.detail, color: a.color, x: a.x, y: a.y, w: a.w ?? 320, h: a.h }), ask: a };
 }
 
 /**
@@ -920,7 +922,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: outlineOf(n), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
     } else {
       const img = imgOf(n);
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}), ...(n.mode ? { mode: n.mode } : {}), ...((n.mode ?? doc.mode ?? "python") !== (doc.mode ?? "python") ? { lang: n.mode } : {}) } : {}) });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), ...((n as { ask?: DocAsk }).ask ? { ask: (n as { ask?: DocAsk }).ask } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}), ...(n.mode ? { mode: n.mode } : {}), ...((n.mode ?? doc.mode ?? "python") !== (doc.mode ?? "python") ? { lang: n.mode } : {}) } : {}) });
     }
   };
   for (const n of roots) {
