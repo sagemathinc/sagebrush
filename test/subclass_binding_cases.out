@@ -1,0 +1,32 @@
+float float __float__ static 9.0 float
+float float __float__ class 9.0 float
+float float __float__ property 9.0 float
+float float __float__ descriptor 9.0 float
+float object __float__ static 9.0 float
+float object __float__ class 9.0 float
+float object __float__ property 9.0 float
+float object __float__ descriptor 9.0 float
+int int __int__ static 5 int
+int int __int__ class 5 int
+int int __int__ property 5 int
+int int __int__ descriptor 5 int
+int object __index__ static 5 int
+int object __index__ class 5 int
+int object __index__ property 5 int
+int object __index__ descriptor 5 int
+complex complex __complex__ static 5j complex
+complex complex __complex__ class 5j complex
+complex complex __complex__ property 5j complex
+complex complex __complex__ descriptor 5j complex
+complex object __complex__ static 5j complex
+complex object __complex__ class 5j complex
+complex object __complex__ property 5j complex
+complex object __complex__ descriptor 5j complex
+float object __float__ subclass result 2.5 float 1
+float float __float__ subclass result 2.5 float 1
+int object __int__ subclass result 3 int 1
+int int __int__ subclass result 3 int 1
+int object __index__ subclass result 4 int 1
+int int __index__ subclass result 1 int 0
+complex object __complex__ subclass result 1j complex 1
+complex complex __complex__ subclass result 1j complex 1
