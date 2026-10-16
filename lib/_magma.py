@@ -457,7 +457,6 @@ class MSet:
             self.add(x)
 
     def add(self, x):
-        _widen(self, x)
         k = _key(x)
         if self.kind == "multi":
             if k in self.keys:
@@ -913,16 +912,24 @@ def _infer_from(items):
     return _QQ if frac else u
 
 
-def _widen(s, x):
-    """A known inferred universe of s as x joins it: Magma's never narrows,
-    and a rational widens the integers (a new kind makes it unknown)."""
-    u = getattr(s, "_inf", None)
-    if u is None or u is _NOINF or x is _UNDEF:
-        return
-    if isinstance(x, _Fraction) and not isinstance(x, bool):
-        s._inf = _QQ
-    elif isinstance(x, bool) or not isinstance(x, int):
-        s._inf = _NOINF
+def _settle(s):
+    """s just became nonempty without a known universe (an empty sequence
+    appended to): its universe is now fixed, from its elements, as Magma
+    fixes it.  A known universe never changes: Magma doesn't widen it, it
+    refuses what doesn't go in (CORR-D689-1)."""
+    if getattr(s, "_inf", None) is None:
+        items = s.items if isinstance(s, MSet) else s
+        if len(items) == 1:
+            s._inf = _infer_from(items)
+
+
+def _as_seq(s):
+    """A sequence copy of s, keeping its declared universe, sample and fixed
+    universe (a range's being the integers), for the intrinsics that make a
+    new sequence from an old one (CORR-D689-2)."""
+    t = MSeq(s, getattr(s, "universe", None), getattr(s, "sample", None))
+    t._inf = _ZZ if isinstance(s, MRange) else getattr(s, "_inf", None)
+    return t
 
 
 def _inferred(s, items):
@@ -1066,7 +1073,7 @@ def _assign_path(obj, path, val):
             return obj
         raise _no_attributes(i, pos)
     if isinstance(obj, MRange):
-        obj = MSeq(obj)
+        obj = _as_seq(obj)
     if obj is None:
         obj = MSeq()
     if isinstance(obj, MSeq):
@@ -1074,8 +1081,18 @@ def _assign_path(obj, path, val):
             raise MagmaError("Index %s should be positive" % _str(i))
         while len(obj) < i:
             obj.append(_UNDEF)
+        if len(path) == 1 and val is not _DELETE:
+            # (an element: coerced into the sequence's fixed universe, or
+            # refused before anything is written, CORR-D689-1)
+            w = _universe(obj, True)
+            d = _udesc(w[1]) if w is not None and w[0] == "struct" else None
+            if d is not None:
+                y = _into(val, d, w[1])
+                if y is _NOCOERCE:
+                    raise MagmaError("Sequence mutation failed", ":=", False, pos)
+                val = y
         obj[i - 1] = _assign_path(obj[i - 1] if obj[i - 1] is not _UNDEF else None, path[1:], val)
-        _widen(obj, obj[i - 1])  # (its inferred universe widens, never narrows)
+        _settle(obj)
         return obj
     if isinstance(obj, MTuple):
         l = list(obj)
@@ -2387,7 +2404,7 @@ def _cmpne(a, b):
 _NOCOERCE = object()
 
 
-def _universe(s):
+def _universe(s, fixed=False):
     """What decides the universe of the sequence or set s: ("struct", u)
     for one made with a structure ([ Integers() | ]), ("elt", y) for a
     first element y, None when empty.  One element is looked at, not the
@@ -2395,8 +2412,14 @@ def _universe(s):
     u = getattr(s, "universe", None)
     if u is not None and _is_struct(u):
         return ("struct", u)
+    # (fixed: for what goes into s, the universe fixed when it was made,
+    # the integers or the rationals: what Magma coerces into, not the first
+    # element's, CORR-D689-2)
+    inf = getattr(s, "_inf", None)
+    if fixed and u is None and (inf is _ZZ or inf is _QQ):
+        return ("struct", inf)
     if isinstance(s, MRange):
-        return ("elt", s.a) if len(s) else None
+        return ("struct", _ZZ) if fixed else (("elt", s.a) if len(s) else None)
     if isinstance(s, MSet):
         return ("elt", s.items[0]) if s.items else None
     if len(s):
@@ -4240,9 +4263,9 @@ def IsPrimitive(x):
 
 def Append(s, x):
     x = _lift("Append", s, x, "Cannot coerce element into the universe")
-    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
+    s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
     s.append(x)
-    _widen(s, x)
+    _settle(s)
     return s
 
 
@@ -4302,7 +4325,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
     """x converted into the universe of s, for Include, Exclude, Append and
     Insert (the declared universe, else that of an element); Magma's
     errors if not."""
-    w = _universe(s)
+    w = _universe(s, True)
     if w is None:
         return x
     if w[0] == "struct":
@@ -4358,11 +4381,12 @@ def Include(s, x):
     if isinstance(s, MSet):
         t = _own(s)
         t.add(x)
+        _settle(t)
         return t
-    s = _own(MSeq(s))
+    s = _own(_as_seq(s))
     if not any(_cmpeq(x, y) for y in s):
         s.append(x)
-        _widen(s, x)
+        _settle(s)
     return s
 
 
@@ -4372,7 +4396,7 @@ def Exclude(s, x):
         t = _own(s)
         t.remove(x)
         return t
-    s = _own(MSeq(s))
+    s = _own(_as_seq(s))
     for k, y in enumerate(s):
         if _cmpeq(x, y):
             del s[k]
@@ -4389,16 +4413,18 @@ def Remove(s, i):
 
 def Insert(s, i, x):
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
-    s = _own(s) if isinstance(s, MSeq) else MSeq(s)
+    s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
     s.insert(i - 1, x)
-    _widen(s, x)
+    _settle(s)
     return s
 
 
 def Reverse(s):
     if isinstance(s, str):
         return s[::-1]
-    return MSeq(reversed(list(s)), getattr(s, "universe", None), getattr(s, "sample", None))
+    t = _as_seq(s)
+    t.reverse()
+    return t
 
 
 class Perm(tuple):
@@ -4489,6 +4515,9 @@ def Universe(s):
     u = getattr(s, "universe", None)
     if u is not None:
         return u
+    inf = getattr(s, "_inf", None)
+    if inf is _ZZ or inf is _QQ:
+        return inf
     items = list(_iter(s))
     if not items:
         if isinstance(s, (MSeq, MRange)):

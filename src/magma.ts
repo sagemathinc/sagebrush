@@ -815,7 +815,8 @@ class Parser {
       this.declareGlobal(t.py, p0.kind === "idx" ? p0.tok : ({ line: p0.line, col: p0.col } as Tok), "p");
       // x[i][j] := v: rebuild along the path (sequences have value semantics)
       const path = t.path!;
-      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code})`)).join(", ");
+      // (an index's "[": where an assignment Magma refuses is said, CORR-D689-1)
+      const enc = path.map((p) => (p.kind === "attr" ? `("attr", ${p.code}, (${p.line}, ${p.col}))` : `("idx", ${p.code}, (${p.tok.line}, ${p.tok.col}))`)).join(", ");
       this.emit(`${t.py} = _m._assign_path(${t.py}, [${enc}], ${val})`);
     }
   }
