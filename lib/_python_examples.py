@@ -447,6 +447,11 @@ ENTRIES = [
     ("fractions.Fraction.limit_denominator", "(max_denominator=1000000)", "The closest fraction with a denominator at most max_denominator.",
      ["Fraction(math.pi).limit_denominator(100)"]),
     # ---------------------------------------------------------------- itertools
+    ('itertools.batched', '(iterable, n)', 'Group input into tuples of at most n items.', ["list(itertools.batched('ABCDEFG', 3))"]),
+    ('itertools.compress', '(data, selectors)', 'Keep data items whose corresponding selector is true.', ["list(itertools.compress('ABCDE', [1, 0, 1, 0, 1]))"]),
+    ('itertools.dropwhile', '(predicate, iterable)', 'Skip the initial items satisfying a predicate, then yield everything left.', ['list(itertools.dropwhile(lambda x: x < 5, [1, 3, 6, 2]))']),
+    ('itertools.filterfalse', '(predicate, iterable)', 'Keep items for which a predicate is false; None tests the items themselves.', ['list(itertools.filterfalse(lambda x: x % 2, range(6)))']),
+    ('itertools.tee', '(iterable, n=2)', 'Make independently advancing iterators over one input.', ['a, b = itertools.tee(iter([1, 2, 3]))\nfirst = next(a)\n(first, list(b), list(a))']),
     ("itertools.product", "(*iterables, repeat=1)", "The Cartesian product, as tuples.", ["list(itertools.product('ab', [1, 2]))"]),
     ("itertools.permutations", "(iterable, r=None)", "The orderings of r elements.", ["list(itertools.permutations([1, 2, 3], 2))"]),
     ("itertools.combinations", "(iterable, r)", "The subsets of r elements, in order.", ["list(itertools.combinations('abcd', 2))"]),
@@ -464,6 +469,14 @@ ENTRIES = [
     ("itertools.starmap", "(function, iterable)", "function applied to each tuple of arguments.", ["list(itertools.starmap(pow, [(2, 3), (3, 2)]))"]),
     ("itertools.takewhile", "(predicate, iterable)", "Elements while a condition holds.", ["list(itertools.takewhile(lambda x: x < 5, [1, 3, 6, 2]))"]),
     # ---------------------------------------------------------------- functools
+    ('functools.cached_property', '(func)', 'Compute an attribute on first access and cache it on the instance.', ['class Batch:\n    def __init__(self): self.calls = 0\n    @functools.cached_property\n    def total(self):\n        self.calls += 1\n        return sum([2, 3, 5])\nb = Batch()\n(b.total, b.total, b.calls)']),
+    ('functools.cmp_to_key', '(mycmp)', 'Turn a two-argument comparison into a sorting key.', ["sorted(['pear', 'fig', 'plum'], key=functools.cmp_to_key(lambda a, b: len(a) - len(b)))"]),
+    ('functools.partialmethod', '(func, /, *args, **keywords)', 'Define a method with some arguments fixed, preserving instance binding.', ['class Switch:\n    def set(self, value): self.value = value\n    on = functools.partialmethod(set, True)\ns = Switch()\ns.on()\ns.value']),
+    ('functools.singledispatch', '(func)', 'Dispatch a function on the type of its first argument.', ["@functools.singledispatch\ndef describe(x): return 'object'\n@describe.register(int)\ndef _(x): return 'integer'\n[describe(3), describe('hi')]"]),
+    ('functools.singledispatchmethod', '(func)', 'Dispatch a method on the first argument after self or cls.', ["class Describe:\n    @functools.singledispatchmethod\n    def kind(self, x): return 'object'\n    @kind.register(int)\n    def _(self, x): return 'integer'\nd = Describe()\n[d.kind(3), d.kind('hi')]"]),
+    ('functools.total_ordering', '(cls)', 'Fill in ordering methods from equality and one ordering comparison.', ['@functools.total_ordering\nclass Score:\n    def __init__(self, n): self.n = n\n    def __eq__(self, other): return self.n == other.n\n    def __lt__(self, other): return self.n < other.n\n(Score(2) <= Score(2), Score(3) > Score(2), Score(1) >= Score(2))']),
+    ('functools.update_wrapper', '(wrapper, wrapped, assigned=WRAPPER_ASSIGNMENTS, updated=WRAPPER_UPDATES)', "Copy a wrapped function's metadata and retain it in __wrapped__.", ['def double(x): return 2 * x\ndef wrapper(x): return double(x)\nfunctools.update_wrapper(wrapper, double)\n(wrapper.__name__, wrapper(3), wrapper.__wrapped__ is double)']),
+    ('functools.wraps', '(wrapped, assigned=WRAPPER_ASSIGNMENTS, updated=WRAPPER_UPDATES)', "Decorate a wrapper so it preserves the wrapped function's metadata.", ['def double(x): return 2 * x\n@functools.wraps(double)\ndef wrapper(x): return double(x)\n(wrapper.__name__, wrapper(4), wrapper.__wrapped__ is double)']),
     ("functools.reduce", "(function, iterable[, initial])", "A sequence folded into one value by a two-argument function.", ["functools.reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])"]),
     ("functools.partial", "(func, *args, **keywords)", "A function with some arguments fixed.", ["int2 = functools.partial(int, base=2)\nint2('1011')"]),
     ("functools.lru_cache", "(maxsize=128)", "A decorator that remembers a function's results.",
@@ -471,6 +484,10 @@ ENTRIES = [
     ("functools.cache", "(user_function)", "A decorator that remembers all of a function's results.",
      ["@functools.cache\ndef f(n):\n    return n * n\n[f(3), f(3), f.cache_info().hits]"]),
     # ---------------------------------------------------------------- collections
+    ('collections.ChainMap', '(*maps)', 'Search mappings in order; write new values to the first mapping.', ["defaults = {'color': 'blue', 'size': 2}\noptions = collections.ChainMap({'color': 'red'}, defaults)\noptions['size'] = 3\n(options['color'], options['size'], defaults['size'])"]),
+    ('collections.UserDict', '(dict=None, **kwargs)', 'A dictionary wrapper whose underlying mapping is available as data.', ["original = {'a': 1}\nd = collections.UserDict(original)\nd['b'] = 2\n(d.data, original)"]),
+    ('collections.UserList', '(initlist=None)', 'A list wrapper whose underlying list is available as data.', ['items = collections.UserList([3, 1])\nitems.append(2)\nitems.sort()\nitems.data']),
+    ('collections.UserString', '(seq)', 'A string wrapper whose contents are available as data.', ["label = collections.UserString('cat')\nlabel.data = 'kitten'\n(str(label), len(label))"]),
     ("collections.Counter", "(iterable=None)", "Counts of hashable items, a dict subclass.", ["collections.Counter('mississippi').most_common(2)"]),
     ("collections.defaultdict", "(default_factory)", "A dict that creates missing values with a factory.",
      ["d = collections.defaultdict(list)\nd['a'].append(1)\ndict(d)"]),
@@ -1504,6 +1521,16 @@ OUTPUTS = {
         'Fraction(3602879701896397, 36028797018963968)\n',
     'Fraction(math.pi).limit_denominator(100)':
         'Fraction(311, 99)\n',
+    "list(itertools.batched('ABCDEFG', 3))":
+        "[('A', 'B', 'C'), ('D', 'E', 'F'), ('G',)]\n",
+    "list(itertools.compress('ABCDE', [1, 0, 1, 0, 1]))":
+        "['A', 'C', 'E']\n",
+    'list(itertools.dropwhile(lambda x: x < 5, [1, 3, 6, 2]))':
+        '[6, 2]\n',
+    'list(itertools.filterfalse(lambda x: x % 2, range(6)))':
+        '[0, 2, 4]\n',
+    'a, b = itertools.tee(iter([1, 2, 3]))\nfirst = next(a)\n(first, list(b), list(a))':
+        '(1, [1, 2, 3], [2, 3])\n',
     "list(itertools.product('ab', [1, 2]))":
         "[('a', 1), ('a', 2), ('b', 1), ('b', 2)]\n",
     'list(itertools.permutations([1, 2, 3], 2))':
@@ -1536,6 +1563,22 @@ OUTPUTS = {
         '[8, 9]\n',
     'list(itertools.takewhile(lambda x: x < 5, [1, 3, 6, 2]))':
         '[1, 3]\n',
+    'class Batch:\n    def __init__(self): self.calls = 0\n    @functools.cached_property\n    def total(self):\n        self.calls += 1\n        return sum([2, 3, 5])\nb = Batch()\n(b.total, b.total, b.calls)':
+        '(10, 10, 1)\n',
+    "sorted(['pear', 'fig', 'plum'], key=functools.cmp_to_key(lambda a, b: len(a) - len(b)))":
+        "['fig', 'pear', 'plum']\n",
+    'class Switch:\n    def set(self, value): self.value = value\n    on = functools.partialmethod(set, True)\ns = Switch()\ns.on()\ns.value':
+        'True\n',
+    "@functools.singledispatch\ndef describe(x): return 'object'\n@describe.register(int)\ndef _(x): return 'integer'\n[describe(3), describe('hi')]":
+        "['integer', 'object']\n",
+    "class Describe:\n    @functools.singledispatchmethod\n    def kind(self, x): return 'object'\n    @kind.register(int)\n    def _(self, x): return 'integer'\nd = Describe()\n[d.kind(3), d.kind('hi')]":
+        "['integer', 'object']\n",
+    '@functools.total_ordering\nclass Score:\n    def __init__(self, n): self.n = n\n    def __eq__(self, other): return self.n == other.n\n    def __lt__(self, other): return self.n < other.n\n(Score(2) <= Score(2), Score(3) > Score(2), Score(1) >= Score(2))':
+        '(True, True, False)\n',
+    'def double(x): return 2 * x\ndef wrapper(x): return double(x)\nfunctools.update_wrapper(wrapper, double)\n(wrapper.__name__, wrapper(3), wrapper.__wrapped__ is double)':
+        "('double', 6, True)\n",
+    'def double(x): return 2 * x\n@functools.wraps(double)\ndef wrapper(x): return double(x)\n(wrapper.__name__, wrapper(4), wrapper.__wrapped__ is double)':
+        "('double', 8, True)\n",
     'functools.reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])':
         '120\n',
     "int2 = functools.partial(int, base=2)\nint2('1011')":
@@ -1544,6 +1587,14 @@ OUTPUTS = {
         '23416728348467685\n',
     '@functools.cache\ndef f(n):\n    return n * n\n[f(3), f(3), f.cache_info().hits]':
         '[9, 9, 1]\n',
+    "defaults = {'color': 'blue', 'size': 2}\noptions = collections.ChainMap({'color': 'red'}, defaults)\noptions['size'] = 3\n(options['color'], options['size'], defaults['size'])":
+        "('red', 3, 2)\n",
+    "original = {'a': 1}\nd = collections.UserDict(original)\nd['b'] = 2\n(d.data, original)":
+        "({'a': 1, 'b': 2}, {'a': 1})\n",
+    'items = collections.UserList([3, 1])\nitems.append(2)\nitems.sort()\nitems.data':
+        '[1, 2, 3]\n',
+    "label = collections.UserString('cat')\nlabel.data = 'kitten'\n(str(label), len(label))":
+        "('kitten', 6)\n",
     "collections.Counter('mississippi').most_common(2)":
         "[('i', 4), ('s', 4)]\n",
     "d = collections.defaultdict(list)\nd['a'].append(1)\ndict(d)":
