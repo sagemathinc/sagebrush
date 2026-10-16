@@ -103,6 +103,25 @@ double 1x1 2.5
 double 1x1 3
 double 1x1 2.1380899352993952
 double 1x1 1.6666666666666667
+double 1x1 1
+double 1x1 1
+double 3x3 [1 2 0;3 4 0;0 0 -2]
+double 3x3 [2 4 6;4 6 8;6 8 10]
+double 3x3 [2 -1 -3;5 2 -1;7 5 2]
+double 2x2 [1 0.5;0.5 0.33333333333333331]
+double 3x3 [9 -36 30;-36 192 -180;30 -180 180]
+double 5x5 [1 1 1 1 1;1 2 3 4 5;1 3 6 10 15;1 4 10 20 35;1 5 15 35 70]
+double 5x5 [2 1 0 0 0;1 1 1 0 0;0 1 0 1 0;0 0 1 1 1;0 0 0 1 2]
+double 1x1 0.25
+double 1x1 5
+double 3x1 [0;0;1]
+double 2x2 [3 0;0 4]
+double 2x2 [0 0;0 2]
+double 2x2 [0 7;-3 0]
+double 2x1 [-2;5]
+double 2x2 [0 1;1 0]
+double 2x3 [1 0 0;0 1 0]
+double 2x2 [0 9;4 0]
 double 1x1 -2
 double 2x2 [-2 1;1.5 -0.5]
 double 1x1 3
