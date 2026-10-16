@@ -148,7 +148,7 @@
  "lib/_sage_ffmat.py: FFVector.__eq__ :: call :: zip(self._e, o)": 1,
  "lib/_sage_ffmat.py: FFVector.__eq__ :: comprehension :: zip(self._e, o)": 1,
  "lib/_sage_ffmat.py: FFVector.__hash__ :: call :: tuple(self._e)": 1,
- "lib/_sage_ffmat.py: FFVector.__init__ :: comprehension :: _bounded_list(entries)": 1,
+ "lib/_sage_ffmat.py: FFVector.__init__ :: comprehension :: _admitted_entries(base, entries)": 1,
  "lib/_sage_ffmat.py: FFVector.__iter__ :: call :: iter(self._e)": 1,
  "lib/_sage_ffmat.py: FFVector.__mul__ :: comprehension :: self._e": 1,
  "lib/_sage_ffmat.py: FFVector.__neg__ :: comprehension :: self._e": 1,

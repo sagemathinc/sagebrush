@@ -140,6 +140,46 @@ class _AlgCharge:
         return r
 
 
+def _admit_vector(base, n, factor=1):
+    """n, after checking that a vector of n entries over base (times factor
+    for its working space) fits this process's budget for one matrix:
+    NotImplementedError, before anything is built, if not."""
+    from _sage_matrix import _vector_dim
+    n = _vector_dim(n)
+    need = n * factor * _entry_cost(base)
+    limit = _heap_limit()
+    if need > limit // _HEAP_SHARE:
+        mib = 1 << 20
+        raise NotImplementedError("a vector of %d entries over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)" % (
+            n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+    return n
+
+
+def _admitted_entries(base, entries):
+    """The entries of a vector over base, as a list, read no further than
+    the budget allows: a list, tuple, range or vector is admitted by its
+    length before it is read; other entries (an iterator) are read with
+    the budget as the limit (the entries as read and the vector converted
+    from them live together: factor 2), so that an iterator cannot make
+    more than the budget first."""
+    from _sage_matrix import _bounded_list, _MAX_ENTRIES
+    if type(entries) in (list, tuple, range) or isinstance(entries, FFVector):
+        if len(entries) <= _MAX_ENTRIES:
+            _admit_vector(base, len(entries))
+        return _bounded_list(entries)
+    cap = _heap_limit() // _HEAP_SHARE // (2 * _entry_cost(base))
+    if cap >= _MAX_ENTRIES:
+        return _bounded_list(entries)
+    try:
+        return _bounded_list(entries, cap)
+    except ValueError as e:
+        if not str(e).startswith("more than %d " % cap):
+            raise
+    mib, limit = 1 << 20, _heap_limit()
+    raise NotImplementedError("a vector over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)" % (
+        base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+
+
 def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
     """The rows of a matrix over base, each a list (_read_rows; loose:
     _bounded_rows, whose rows may be vectors or single entries), read no
@@ -633,9 +673,10 @@ class FFVector:
     __slots__ = ("_base", "_e")
 
     def __init__(self, base, entries):
-        from _sage_matrix import _bounded_list
         self._base = base
-        self._e = [base(x) for x in _bounded_list(entries)]
+        # (read within the heap budget, and admitted, before converting:
+        # a vector had only the 4M-entry ceiling)
+        self._e = [base(x) for x in _admitted_entries(base, entries)]
 
     def __repr__(self):
         return "(" + ", ".join(repr(x) for x in self._e) + ")"
@@ -2048,8 +2089,16 @@ class FFVectorSpace:
             (1, 2)
         """
         if x == 0 and not isinstance(x, (list, tuple, FFVector)):
+            _admit_vector(self._base, self._n)
             return FFVector(self._base, [0] * self._n)
         from _sage_matrix import _bounded_list
+        if type(x) in (list, tuple) or isinstance(x, FFVector):
+            # (the length is known: Sage's error for a wrong one first)
+            if len(x) != self._n:
+                raise TypeError("entries must be a list of length %d" % self._n)
+            _admit_vector(self._base, self._n)
+        else:
+            _admit_vector(self._base, self._n, 2)
         v = FFVector(self._base, _bounded_list(x, self._n))
         if len(v) != self._n:
             raise TypeError("entries must be a list of length %d" % self._n)
@@ -2114,6 +2163,7 @@ class FFVectorSpace:
             sage: VectorSpace(GF(3), 2).zero()
             (0, 0)
         """
+        _admit_vector(self._base, self._n)
         return FFVector(self._base, [0] * self._n)
 
     def subspace(self, gens):
@@ -2140,6 +2190,7 @@ class FFVectorSpace:
             sage: VectorSpace(GF(5), 3).random_element() in VectorSpace(GF(5), 3)
             True
         """
+        _admit_vector(self._base, self._n)
         return FFVector(self._base, [self._base.random_element() for _ in range(self._n)])
 
     def __contains__(self, v):
@@ -2342,5 +2393,5 @@ def vector(base, entries):
         sage: vector(GF(5), [1, 2, 3]).parent()
         Vector space of dimension 3 over Finite Field of size 5
     """
-    from _sage_matrix import _bounded_list
-    return FFVector(base, _bounded_list(entries))
+    # (FFVector reads the entries within the heap budget)
+    return FFVector(base, entries)
