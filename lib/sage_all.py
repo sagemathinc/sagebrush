@@ -740,7 +740,9 @@ class Rational(_Fraction):
             P = str(a.parent())
             raise TypeError("unsupported operand parent(s) for %%: '%s' and '%s'" % (P, P))
         if isinstance(a, (int, _Fraction)) or kind == "float":
-            A = _real_qq(a) if kind == "float" else QQ(a)
+            # (a float as Sage takes it: the simplest rational rounding to
+            # it, so float(0.1) % 3 is (1/10) % 3)
+            A = _simplest_rational(a) if kind == "float" else QQ(a)
             if self._denominator != 1:
                 raise TypeError("no conversion of this rational to integer")
             if self._numerator == 0:
@@ -1197,24 +1199,38 @@ _SIMPLEST_MAX_PREC = 1 << 14
 
 def _simplest_rational(x):
     """The simplest rational that rounds to x in x's field (RR,
-    RealField(p), RDF, or a float's 53 bits), as Sage converts such a
-    number to QQ for divmod:
-    QQ(RR(0.1)) is 1/10. The rounding interval is half an ulp each side
-    (a quarter below a power of 2), its ends included when the
-    significand is even (ties to even)."""
+    RealField(p) in any rounding mode, RDF, or a float's 53 bits), as Sage
+    converts such a number to QQ (in divmod, and for x % q): QQ(RR(0.1)) is
+    1/10. The interval is the field's own: to nearest, half an ulp each side
+    (a quarter below a power of 2), the ends included when the significand
+    is even; toward zero in magnitude (RNDZ, RNDD above 0, RNDU below), from
+    |x| up to the next value, |x| included; away from zero (RNDA, RNDU above
+    0, RNDD below), from the previous value up to |x|, |x| included. An
+    integral value is itself. The precision is checked first, before x is
+    converted or any value returned (daybreak2's HARD-F2B-1).
+
+    EXAMPLES::
+
+        sage: divmod(1/1, RR(0.1)), divmod(1/1, RealField(3, rnd='RNDU')(5/12))
+        ((10, 0), (5/2, 0))
+    """
+    if _real_kind(x) == "rr":
+        P = x.parent()
+        p, rnd = int(P.prec()), str(getattr(P, "_rnd", "RNDN"))
+    else:
+        p, rnd = 53, "RNDN"
+    if p > _SIMPLEST_MAX_PREC:
+        raise NotImplementedError("divmod with a real number of more than %d bits of precision is not implemented" % _SIMPLEST_MAX_PREC)
     X = _real_qq(x)
     if X.denominator == 1:
         # an integral value is itself, as in Sage (1e300 is that integer)
         return X
-    if X < 0:
-        return -_simplest_rational(-x)
-    p = int(x.parent().prec()) if _real_kind(x) == "rr" else 53
-    if p > _SIMPLEST_MAX_PREC:
-        raise NotImplementedError("divmod with a real number of more than %d bits of precision is not implemented" % _SIMPLEST_MAX_PREC)
-    # X = m * 2^e with 2^(p-1) <= m < 2^p
-    e = X.numerator.bit_length() - X.denominator.bit_length() - p
+    neg = X < 0
+    A = -X if neg else X
+    # A = m * 2^e with 2^(p-1) <= m < 2^p
+    e = A.numerator.bit_length() - A.denominator.bit_length() - p
     while True:
-        m = X / QQ(2) ** e
+        m = A / QQ(2) ** e
         if m < 2 ** (p - 1):
             e -= 1
         elif m >= 2 ** p:
@@ -1222,10 +1238,18 @@ def _simplest_rational(x):
         else:
             break
     m = int(m)
-    half = QQ(2) ** e / 2
-    lo = X - (half / 2 if m == 2 ** (p - 1) else half)
-    closed = m % 2 == 0
-    return _simplest_in(lo, X + half, closed, closed)
+    ulp = QQ(2) ** e
+    below = ulp / 2 if m == 2 ** (p - 1) else ulp  # the gap under A
+    if rnd == "RNDN":
+        closed = m % 2 == 0
+        r = _simplest_in(A - below / 2, A + ulp / 2, closed, closed)
+    elif rnd == "RNDZ" or (rnd == "RNDD" and not neg) or (rnd == "RNDU" and neg):
+        # toward zero in magnitude: [A, A + ulp)
+        r = _simplest_in(A, A + ulp, True, False)
+    else:
+        # away from zero in magnitude: (A - below, A]
+        r = _simplest_in(A - below, A, False, True)
+    return -r if neg else r
 
 
 def _to_qq(x):

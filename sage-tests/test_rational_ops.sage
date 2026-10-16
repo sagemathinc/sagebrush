@@ -237,3 +237,18 @@ mixed('divmod(7/2, SR(2))', lambda: divmod(7/2, SR(2)))
 # that rounds to it (1/10 for RR(0.1)); a float exactly
 for xn, x in [('RR(0.1)', RR(0.1)), ('RDF(0.1)', RDF(0.1)), ('RealField(100)(0.1)', RealField(100)(0.1)), ('RealField(20)(0.1)', RealField(20)(0.1)), ('RR(pi)', RR(pi)), ('RDF(exp(1))', RDF(exp(1))), ('RR(1e300)', RR(1e300)), ('RealField(20)(2^53 + 1)', RealField(20)(2^53 + 1)), ('RR(-1/3)', RR(-1/3)), ('float(0.1)', float(0.1)), ('float(1/3)', float(1/3))]:
     mixed('divmod(1/1, %s)' % xn, lambda: divmod(1/1, x))
+# a real number in divmod is the simplest rational in its field's own
+# rounding interval, for every rounding mode and both signs (astra's
+# CORR-F2B-2); a float in x % q is taken the same way (CORR-F2B-1)
+for rnd in ['RNDN', 'RNDD', 'RNDU', 'RNDZ', 'RNDA']:
+    for prec in [2, 3, 10]:
+        R = RealField(prec, rnd=rnd)
+        out = []
+        for v in [5/12, 7/12, 1/10, 7/10, 1/3, 22/7]:
+            for s in [1, -1]:
+                out.append(divmod(1/1, R(s*v))[0])
+        print(rnd, prec, out)
+for xn, x in [('float(0.1)', float(0.1)), ('float(0.2)', float(0.2)), ('float(-0.1)', float(-0.1)), ('float(2.5)', float(2.5)), ('float(1.1)', float(1.1))]:
+    for q in [3, 5, 7]:
+        mixed('%s %% %s' % (xn, q), lambda: x % (q/1))
+        mixed('divmod(%s, %s)' % (xn, q), lambda: divmod(x, q/1))
