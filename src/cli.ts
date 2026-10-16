@@ -7,7 +7,7 @@
 //   pyjs -i program.py        run, then stay interactive
 //   pyjs --emit program.py    print the generated JavaScript
 
-import { readFileSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
+import { readFileSync, readSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
 import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
@@ -59,6 +59,33 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
 // None is 0; an integer (bool and int subclasses too) is its value, its low
 // byte as the system keeps it, or -1 (255) if it does not fit a long long;
 // anything else is written to stderr, and is 1.
+/** All of stdin, as text.  readFileSync(0) throws EAGAIN when stdin is a
+ * non-blocking pipe whose writer hasn't written yet: under load a fresh
+ * `sagebrush --magma` session died that way, printing nothing (the flaky
+ * Magma examples test).  So: read to the end of input, waiting a little
+ * whenever there is nothing to read yet. */
+function readStdin(): string {
+  const chunks: Buffer[] = [];
+  const buf = Buffer.alloc(1 << 16);
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    let n: number;
+    try {
+      n = readSync(0, buf, 0, buf.length, null);
+    } catch (e: any) {
+      if (e?.code === "EAGAIN") {
+        Atomics.wait(pause, 0, 0, 5);
+        continue;
+      }
+      if (e?.code === "EOF") break;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function exitCode(c: any): number {
   if (c === null || c === undefined) return 0;
   let int = false;
@@ -528,11 +555,11 @@ async function main() {
   } else if (!interactive && isMagma(null)) {
     // Magma on stdin: a session, as `magma < file` is
     main = mainModule("<stdin>");
-    const py = magmaSource(readFileSync(0, "utf8"), "<stdin>", "session");
+    const py = magmaSource(readStdin(), "<stdin>", "session");
     if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive) {
     // program on stdin
-    const source = readFileSync(0, "utf8");
+    const source = readStdin();
     main = mainModule("<stdin>");
     code = guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }
