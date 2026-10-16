@@ -65,3 +65,8 @@ U := {@ Rationals() | 2, 5 @}; V := U[[1]]; Universe(V);
 W := U[1..0]; Universe(W);
 X := [Rationals() | 2, 5]; Universe(X[[1]]); Universe(X[1..0]);
 Y := [Rationals() | ]; Y[1];
+// an inferred universe kept; an empty range selected from
+A := {@ 2, 5/2 @}; Universe(A[[1]]); Universe(A[1..0]);
+B := [ 2, 5/2 ]; Universe(B[[1]]); Universe(B[1..0]);
+R := [1..0]; R[[1]];
+R[1..1];

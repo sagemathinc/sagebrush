@@ -876,6 +876,18 @@ def _admit_selection(i, n, pos, outside):
             raise MagmaError("a selection of more than %d elements is not supported yet" % _COLLECT_MAX, "'[]'", True, pos)
 
 
+def _selection_universe(s, items):
+    """The universe a selection from s keeps: s's declared one, or the one
+    Magma infers for s, the rationals for integers and rationals together
+    (CORR-451-1; Universe of {@ 2, 5/2 @}[[1]] is the Rational Field)."""
+    u = getattr(s, "universe", None)
+    if u is not None:
+        return u
+    if items and all(isinstance(x, (int, _Fraction)) and not isinstance(x, bool) for x in items) and any(isinstance(x, _Fraction) for x in items):
+        return _QQ
+    return None
+
+
 def _index(s, i, pos=None):
     """s[i], with Magma's rules and words for each kind of s (checked
     against Magma): an integer index; a sequence of them (a range too)
@@ -891,12 +903,14 @@ def _index(s, i, pos=None):
             if isinstance(s, MTuple):
                 raise bad()
             n = s.size() if isinstance(s, MRange) else len(s)
-            universe = getattr(s, "universe", None) if isinstance(s, MSeq) else None
+            universe = _selection_universe(s, s) if isinstance(s, MSeq) else None
             if n == 0:
                 if (i.size() if isinstance(i, MRange) else len(i)) == 0:
                     return MSeq([], universe)
-                if universe is None:
-                    # (an empty sequence with a universe: an index outside it)
+                if universe is None and isinstance(s, MSeq):
+                    # (only an untyped empty sequence: for an empty range or
+                    # an empty sequence with a universe, the selection is
+                    # outside it, CORR-451-2)
                     raise MagmaError("Illegal null sequence", "'[]'", True, pos)
             _admit_selection(i, n, pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
             holes = isinstance(i, MRange) and i.c == 1
@@ -943,7 +957,7 @@ def _index(s, i, pos=None):
                 if not 1 <= j <= len(s.items):
                     raise MagmaError("Sequence element not defined", "'[]'", True, pos)
                 out.append(s.items[j - 1])
-            return MSet(out, "indexed", s.universe)
+            return MSet(out, "indexed", _selection_universe(s, s.items))
         if not _int_index(i):
             raise bad()
         if not s.items and s.universe is None:
