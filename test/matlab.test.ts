@@ -485,44 +485,32 @@ test("normest, Higham's power method for the 2-norm with MATLAB's documented sto
   assert.deepEqual(out.trim().split("\n"), ["7.10633520177595 1", "6.0000", "5.0000", "500.4856", "5.305935 2.0000 0.0000"]);
 });
 
-test("histcounts' automatic edges follow Sagebrush's own stated rules (Scott's width to Heckbert's nice numbers; a given count; BinLimits, BinWidth and the documented BinMethods)", () => {
+test("histcounts, histogram and discretize take only edges that are fully determined; automatic edges are refused", () => {
   const { execFileSync } = require("node:child_process");
-  const { mkdtempSync, writeFileSync } = require("node:fs");
-  const { join } = require("node:path");
-  const { tmpdir } = require("node:os");
-  const dir = mkdtempSync(join(tmpdir(), "hist-"));
-  writeFileSync(join(dir, "t.m"), [
-    "rng default; [N, e] = histcounts(randn(100,1)); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts([2 3 5 7 11 13 17 19 23 29], 6); disp(mat2str(N)); disp(mat2str(e, 4));",
-    "[N, e] = histcounts(primes(100)); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts([5 5 5]); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts([5 5 5], 4); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30]); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts(primes(100), 'BinWidth', 7); disp(mat2str(e));",
-    "[~, e] = histcounts(primes(100), 'BinMethod', 'sturges'); disp(mat2str(e));",
-    "[~, e] = histcounts(primes(100), 'BinMethod', 'sqrt'); disp(mat2str(e));",
-    "[~, e] = histcounts(primes(100), 'BinMethod', 'fd'); disp(mat2str(e));",
-    "[~, e] = histcounts([-3 1 2 7], 'BinMethod', 'integers'); disp(mat2str(e));"
-  ].join("\n") + "\n");
-  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
-  assert.deepEqual(out.trim().split("\n"), [
-    "[2 17 28 32 16 3 2]",
-    "[-3 -2 -1 0 1 2 3 4]",
-    "[3 1 2 2 1 1]",
-    "[2 6.5 11 15.5 20 24.5 29]",
-    "[15 10]",
-    "[0 50 100]",
-    "3",
-    "[4.5 5.5]",
-    "[0 0 3 0]",
-    "[4.5 4.75 5 5.25 5.5]",
-    "[4 4 2]",
-    "[0 10 20 30]",
-    "[0 7 14 21 28 35 42 49 56 63 70 77 84 91 98]",
-    "[0 20 40 60 80 100]",
-    "[0 20 40 60 80 100]",
-    "[0 50 100]",
-    "[-3.5 -2.5 -1.5 -0.5 0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5]"
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  // (MATLAB documents what its automatic bins do but not how it chooses their edges, and
+  // other edges give other counts)
+  assert.deepEqual(run([
+    tryIt("histcounts(primes(100))"), tryIt("histcounts([2 3 5 7 11 13], 6)"), tryIt("histcounts(primes(100), 'BinWidth', 7)"),
+    tryIt("histcounts(primes(100), 'BinLimits', [0 30])"), tryIt("histcounts(primes(100), 'BinMethod', 'sturges')"),
+    tryIt("histcounts(primes(100), 'BinLimits', [0 30], 'BinWidth', 7)"), tryIt("histogram([1 2 3])"), tryIt("discretize([1 2 3], 2)"),
+    "try, histcounts([1 2 3]), catch e, disp(e.message), end",
+    // (edges given, or fixed by BinLimits with NumBins or a BinWidth that divides them, or the integer rule)
+    "[N, e] = histcounts(primes(100), [0 10 20 30]); disp(mat2str([N; e(1:3)]))",
+    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30], 'NumBins', 3); disp(mat2str(N)); disp(mat2str(e))",
+    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30], 'BinWidth', 10); disp(mat2str(N)); disp(mat2str(e))",
+    "[N, e] = histcounts([-3 1 2 7], 'BinMethod', 'integers'); disp(mat2str(N)); disp(mat2str(e))",
+    "[~, e] = histcounts([0.6 2.4], 'BinMethod', 'integers'); disp(mat2str(e))",
+  ].join("\n")), [
+    ...Array(8).fill("refused"),
+    "histcounts: automatic bin edges are not supported; pass explicit edges, e.g. histcounts(X, linspace(min(X), max(X), n+1))",
+    "[4 4 2;0 10 20]",
+    "[4 4 2]", "[0 10 20 30]",
+    "[4 4 2]", "[0 10 20 30]",
+    "[1 0 0 0 1 1 0 0 0 0 1]", "[-3.5 -2.5 -1.5 -0.5 0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5]",
+    "[0.5 1.5 2.5]",
   ]);
 });
 
@@ -1749,4 +1737,77 @@ test("command syntax: a comma or semicolon inside a word's brackets is refused, 
   }
   assert.doesNotThrow(() => matlabToPython("clear -regexp a{2}b ^x(1)$, y = 1;"));
   assert.doesNotThrow(() => matlabToPython("disp 'a{0,31}'"));
+});
+
+test("exact int64 literals, std/var flags, integer classes kept, strfind's [], NaN in ismember and unique, atanh's branch, c{:} displayed", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (int64/uint64 of an integer literal: its exact value, not the nearest double's; 2^53 + 1 is odd)
+    // (an integer literal's exact value up to 2^53, where Sagebrush's 64-bit integers stop
+    // being exact: beyond it, refused rather than rounded, decimal or hex)
+    "fprintf('%d %d\\n', int64(9007199254740992) == 2^53, mod(int64(-9007199254740991), int64(2)))",
+    tryIt("int64(9007199254740993)"), tryIt("uint64(18446744073709551615)"), tryIt("x = 0x20000000000001s64"),
+    // (std and var with only a flag: the flag is not the weight)
+    "fprintf('%.4f ', std([2 NaN; NaN 3; 4 5], 'omitmissing'), std([7; NaN], 'omitnan'), var([NaN 1 3], 'omitnan')); fprintf('\\n')",
+    // (median, factorial, nchoosek and primes keep an integer class)
+    "m = median(int16([10 20 31 40])); fprintf('%s %d\\n', class(m), m); m = median(uint8([1 2])); fprintf('%s %d\\n', class(m), m)",
+    "f = factorial(uint8([3 6])); fprintf('%s %d %d\\n', class(f), f)",
+    "c = nchoosek(uint8([4 7 9]), 2); fprintf('%s %s\\n', class(c), mat2str(double(c)))",
+    "p = primes(int32(10)); fprintf('%s %s\\n', class(p), mat2str(double(p)))",
+    // (strfind with no match: [])
+    "disp(mat2str(size(strfind('abc', 'z')))); disp(strfind('abc', 'b'))",
+    // (NaN is never a member; unique keeps each NaN unless TreatMissingAsDistinct is false)
+    "[tf, loc] = ismember([NaN 2 NaN], [2 NaN]); disp(mat2str(tf)); disp(mat2str(loc))",
+    "disp(mat2str(unique([3 NaN 1 NaN]))); [u, ia, ic] = unique([3 NaN 1 NaN], 'TreatMissingAsDistinct', false); disp(mat2str(u)); disp(mat2str(ia')); disp(mat2str(ic'))",
+    tryIt("unique([1 2], 'bogus')"),
+    // (atanh of a real x < -1: the conjugate branch, so atanh is odd on the reals)
+    "z = atanh([5 -5]); fprintf('%.4f %.4f %.4f %.4f\\n', real(z(1)), imag(z(1)), real(z(2)), imag(z(2)))",
+    // (c{:} alone: each element displayed as ans)
+    "c = {7, 'two'}; c{:}",
+    "c{2:-1:1};", "disp(ans)",
+  ].join("\n")), [
+    "1 1", "refused", "refused", "refused",
+    "1.4142 1.4142 0.0000 2.0000",
+    "int16 26", "uint8 2",
+    "uint8 6 255",
+    "uint8 [4 7;4 9;7 9]",
+    "int32 [2 3 5 7]",
+    "[0 0]", "     2",
+    "[false true false]", "[0 1 0]",
+    "[1 3 NaN NaN]", "[1 3 NaN]", "[3 1 2]", "[2 3 1 3]",
+    "refused",
+    "0.2027 1.5708 -0.2027 -1.5708",
+    "ans =", "     7", "ans =", "    'two'",
+    "     7",
+  ]);
+});
+
+test("factorial's integer limits exact; unique's NaN rows and stable order; scalar nchoosek's class; set options checked (CORR-3E7-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (factorial: exact up to the class's limit; a 64-bit limit Sagebrush can't hold is refused)
+    "v = factorial(int64(20)); disp(class(v)); fprintf('%d\\n', v)",
+    "v = factorial(int8(6)); disp(class(v)); fprintf('%d\\n', v)",
+    tryIt("factorial(int64(21))"), tryIt("factorial(uint64(21))"), tryIt("factorial(-1)"), tryIt("factorial(2.5)"),
+    // (unique: NaN after every number; equal when TreatMissingAsDistinct is false, rows matching on the rest)
+    "[C, ia] = unique([NaN 1; NaN 2; NaN 1], 'rows', 'TreatMissingAsDistinct', false); disp(mat2str(C)); disp(mat2str(ia'))",
+    "disp(mat2str(unique([NaN 1; NaN 2; NaN 1], 'rows'))); disp(mat2str(unique([2 0; 1 NaN], 'rows')))",
+    "[C, ia, ic] = unique([NaN 2 NaN 1], 'stable', 'TreatMissingAsDistinct', false); disp(mat2str(C)); disp(mat2str(ia')); disp(mat2str(ic'))",
+    "disp(mat2str(unique([NaN 2 NaN 1], 'stable'))); disp(mat2str(unique([NaN 2 NaN 1])))",
+    // (scalar nchoosek: an integer or single n or k gives that class; past an integer class's range, refused)
+    "v = nchoosek(int8(10), 3); disp(class(v)); fprintf('%d\\n', v)",
+    "disp(class(nchoosek(single(5), 2))); disp(class(nchoosek(5, int16(2))))",
+    tryIt("nchoosek(int8(11), 5)"),
+    // (set options: text only; 'first' and 'last' are unique's)
+    tryIt("unique([1 2], 5)"), tryIt("union(1, 2, 'first')"), tryIt("unique([1 1], 'first')"),
+  ].join("\n")), ["int64", "2432902008176640000", "int8", "127", "refused", "refused", "refused", "refused",
+    "[NaN 1;NaN 2]", "[1 2]", "[NaN 1;NaN 1;NaN 2]", "[1 NaN;2 0]",
+    "[NaN 2 1]", "[1 2 4]", "[1 2 1 3]", "[NaN 2 NaN 1]", "[1 2 NaN NaN]",
+    "int8", "120", "single", "int16", "refused", "refused", "refused", "ran"]);
 });

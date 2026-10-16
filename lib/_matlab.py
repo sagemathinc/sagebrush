@@ -4392,8 +4392,15 @@ def cellstr_(x):
 # ---- elementwise math
 
 
-def _unary(name, f, complex_if=None, keep_int=False):
-    """a math function on every element; complex_if(A): where the result is complex"""
+_REAL_FIX = {}  # (name: real_fix, for _complex_fallback too)
+
+
+def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
+    """a math function on every element; complex_if(A): where the result is complex;
+    real_fix(A, r): the result r adjusted for a real A made complex (MATLAB's own
+    convention for real arguments outside the real domain)"""
+    if real_fix is not None:
+        _REAL_FIX[name] = real_fix
     def g(nargout, x):
         if type(x) is float and (complex_if is None or not complex_if(np.array([x]))[0]):
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
@@ -4402,10 +4409,14 @@ def _unary(name, f, complex_if=None, keep_int=False):
         if cls in ("cell", "struct", "string", "function_handle"):
             raise _err("Undefined function '%s' for input arguments of type '%s'." % (name, cls), "MATLAB:UndefinedFunction")
         A = _farr(x, name)
+        A0 = None
         if complex_if is not None and A.dtype.kind != "c" and A.size and np.any(complex_if(A)):
+            A0 = A
             A = A.astype(np.complex128)
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             r = f(A)
+            if A0 is not None and real_fix is not None:
+                r = real_fix(A0, r)
         if cls in _INTS:
             if keep_int:
                 return _finish(r, cls)
@@ -4454,7 +4465,9 @@ _unary("cosh", np.cosh)
 _unary("tanh", np.tanh)
 _unary("asinh", np.arcsinh)
 _unary("acosh", np.arccosh, lambda A: A < 1)
-_unary("atanh", np.arctanh, lambda A: np.abs(A) > 1)
+# (for real x outside [-1, 1], MATLAB's atanh is odd: atanh(-3) = -0.3466 - 1.5708i, the
+# conjugate of what the complex -3 + 0i gives)
+_unary("atanh", np.arctanh, lambda A: np.abs(A) > 1, real_fix=lambda A, r: np.where(A < -1, np.conj(r), r))
 _unary("sec", lambda A: 1 / np.cos(A))
 _unary("csc", lambda A: 1 / np.sin(A))
 _unary("cot", lambda A: 1 / np.tan(A))
@@ -4730,15 +4743,40 @@ def lcm_(a, b):
 @_bs("factorial")
 def factorial_(n):
     A = _farr(n)
-    out = np.array([float(_math.factorial(int(x))) if x <= 170 else _math.inf for x in A.reshape(-1)]).reshape(A.shape)
-    return _box(out)
+    cls = class_(n)
+    flat = A.reshape(-1)
+    if np.any(np.isnan(flat)):
+        raise _err("factorial of NaN is not supported in Sagebrush.")
+    if np.any((flat < 0) | ((flat != np.floor(flat)) & np.isfinite(flat))):
+        raise _err("N must be a matrix of non-negative integers.", "MATLAB:factorial:NNegativeInt")
+    if cls in _INTS:
+        # (an integer class: exact, saturating at its largest value, the class's exact limit;
+        # 21! passes every class's, so larger N are not multiplied out. Sagebrush's 64-bit
+        # integers hold 53 bits, as doubles do: a result they would round is refused)
+        hi = _INTS[cls][2]
+        vals = [min(_math.factorial(int(x)), hi) if x <= 20 else hi for x in flat]
+        if cls in ("int64", "uint64"):
+            vals = [_exact_int(v) for v in vals]
+        return _canon(np.array(vals, dtype=_INTS[cls][0]).reshape(A.shape))
+    out = np.array([float(_math.factorial(int(x))) if x <= 170 else _math.inf for x in flat]).reshape(A.shape)
+    return _finish(out, cls) if cls == "single" else _box(out)
 
 
 @_bs("nchoosek")
 def nchoosek_(n, k):
+    kcls = class_(k)
     k = _int_arg(k)
     if _numel(n) == 1:
-        return float(_math.comb(_int_arg(n), k))
+        c = _math.comb(_int_arg(n), k)
+        # (a single or integer n or k gives that class, as nchoosek's page says; an integer
+        # class's result past its range, or past the 53 bits Sagebrush's 64-bit integers
+        # keep, is refused rather than saturated or rounded)
+        cls = class_(n) if class_(n) != "double" else kcls
+        if cls in _INTS:
+            if c > _INTS[cls][2]:
+                raise _err("nchoosek: the result %d is outside %s's range: not supported in Sagebrush." % (c, cls))
+            return _canon(np.array([[_exact_int(c) if cls in ("int64", "uint64") else c]], dtype=_INTS[cls][0]))
+        return _finish(np.array([[float(c)]]), "single") if cls == "single" else float(c)
     v = list(_arr(n).reshape(-1))
     import itertools
     combos = list(itertools.combinations(range(len(v)), k))
@@ -5042,9 +5080,9 @@ def mode_(nargout, x, *args):
 
 def _var_impl(x, args, sq):
     w = 0
-    rest = []
-    if args:
-        if _numel(args[0]) > 0 and not _istext(args[0]):
+    rest = list(args)
+    if args and not _istext(args[0]):
+        if _numel(args[0]) > 0:
             a0 = args[0]
             # (w is 0 or 1, the normalization, or a vector of weights, which
             # Sagebrush does not compute: refused, not read as a scalar)
@@ -5241,8 +5279,10 @@ def _fft_sizes(sizes):
         raise _err("Invalid number of FFT data points: a text size is not supported.")
     sz = [float(v) for v in _arr(sizes).reshape(-1)]
     for v in sz:
-        if not (v == v and v >= 1 and v == _math.floor(v) and v != _math.inf):
-            shown = int(v) if v == v and abs(v) != _math.inf and v == _math.floor(v) else v
+        # (finiteness first: floor(Inf) has no integer)
+        if not (v == v and abs(v) != _math.inf and v >= 1 and v == _math.floor(v)):
+            shown = ("NaN" if v != v else "Inf" if v > 0 else "-Inf") if v != v or abs(v) == _math.inf \
+                else int(v) if v == _math.floor(v) else v
             raise _err("Invalid number of FFT data points (%s) specified." % shown)
     return [int(v) for v in sz]
 
@@ -8979,8 +9019,11 @@ def _complex_fallback(name):
         except (TypeError, ValueError, NotImplementedError) as e:
             if "complex" not in str(e):
                 raise
-            A = _farr(x).astype(np.complex128)
+            A0 = _farr(x)
+            A = A0.astype(np.complex128)
             out = np.array([f(complex(z)) for z in A.reshape(-1)], dtype=np.complex128).reshape(A.shape)
+            if A0.dtype.kind != "c" and name in _REAL_FIX:
+                out = _REAL_FIX[name](A0, out)
             return _finish(out, "single" if class_(x) == "single" else "double")
     _B[name] = Builtin(g, name)
 
@@ -9613,16 +9656,26 @@ def _colvec(vals):
 
 
 def _setfn(nargout, op, a, b, opts):
-    # (TreatMissingAsDistinct=false: unique's NaNs are one value)
-    opts = list(opts)
+    # (the options these functions take; another word, or a name=value they don't have,
+    # is refused rather than ignored)
+    flags = []
     distinct = True
-    for k in range(len(opts) - 1):
-        if _istext(opts[k]) and _text(opts[k]).lower() == "treatmissingasdistinct":
-            v = opts[k + 1]
-            distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
-            del opts[k:k + 2]
-            break
-    flags = [_text(o).lower() for o in opts if _istext(o)]
+    o = list(opts)
+    i = 0
+    while i < len(o):
+        if _istext(o[i]):
+            t = _text(o[i]).lower()
+            if t == "treatmissingasdistinct" and op == "unique" and i + 1 < len(o):
+                v = o[i + 1]
+                distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
+                i += 2
+                continue
+            if t not in ("rows", "stable", "sorted", "legacy") + (("first", "last") if op == "unique" else ()):
+                raise _err("%s: unsupported option '%s'." % (op, _text(o[i])))
+            flags.append(t)
+        else:
+            raise _err("%s: options must be text; a %s option is not supported." % (op, class_(o[i])))
+        i += 1
     rows = "rows" in flags
     stable = "stable" in flags
     ka, A = _set_items(a, rows)
@@ -9685,22 +9738,43 @@ def _setfn(nargout, op, a, b, opts):
         row = _set_isrow(a)
     else:  # unique
         last = "last" in flags
-        keys = [k for k in dict.fromkeys(A) if not _is_nan_key(k)]
-        order = keys if stable else _sort_keys(keys)
-        pick = last_a if (last or legacy) else first_a
-        if nans_a and not distinct:
-            nans_a = [nans_a[-1] if (last or legacy) else nans_a[0]]
-        ia = [pick[k] for k in order] + nans_a
-        pos = {k: j for j, k in enumerate(order)}
-        ic = []
-        nk = 0
-        for k in A:
-            if _is_nan_key(k):
-                ic.append(len(order) + (nk if distinct else 0))
-                nk += 1
-            else:
-                ic.append(pos[k])
-        order = order + [A[i] for i in nans_a]
+        if kind in ("num", "rows") and not (A and type(A[0]) is complex):
+            # (each element or row a key in which NaN sorts after every number, as sort and
+            # sortrows place it; with TreatMissingAsDistinct false the NaNs are equal, so rows
+            # match on their other entries, else each NaN is its own key, in place when stable)
+            def ukey(i, k):
+                base = tuple((1, 0.0) if x != x else (0, x) for x in (k if type(k) is tuple else (k,)))
+                return base + ((i,),) if distinct and _is_nan_key(k) else base
+            cks = [ukey(i, k) for i, k in enumerate(A)]
+            first_c, last_c = {}, {}
+            for i, c in enumerate(cks):
+                first_c.setdefault(c, i)
+                last_c[c] = i
+            order_c = list(dict.fromkeys(cks))
+            if not stable:
+                order_c.sort()
+            pick = last_c if (last or legacy) else first_c
+            ia = [pick[c] for c in order_c]
+            pos = {c: j for j, c in enumerate(order_c)}
+            ic = [pos[c] for c in cks]
+            order = [A[i] for i in ia]
+        else:
+            keys = [k for k in dict.fromkeys(A) if not _is_nan_key(k)]
+            order = keys if stable else _sort_keys(keys)
+            pick = last_a if (last or legacy) else first_a
+            if nans_a and not distinct:
+                nans_a = [nans_a[-1] if (last or legacy) else nans_a[0]]
+            ia = [pick[k] for k in order] + nans_a
+            pos = {k: j for j, k in enumerate(order)}
+            ic = []
+            nk = 0
+            for k in A:
+                if _is_nan_key(k):
+                    ic.append(len(order) + (nk if distinct else 0))
+                    nk += 1
+                else:
+                    ic.append(pos[k])
+            order = order + [A[i] for i in nans_a]
         outs = [order, ia, ic]
         d = _dims(a)
         row = len(d) == 2 and d[0] == 1 and not rows
@@ -9785,10 +9859,11 @@ def ismember_s(nargout, a, s, *opts):
         else:
             pos.setdefault(k, i + 1)
     keys = [complex(v) if A.dtype.kind == "c" else float(v) for v in A.reshape(-1)]
-    tf = _box(np.array([k in pos for k in keys], dtype=bool).reshape(A.shape))
+    # (NaN equals nothing, so it is never a member: ismember([5 NaN], [5 NaN]) is [1 0])
+    tf = _box(np.array([k == k and k in pos for k in keys], dtype=bool).reshape(A.shape))
     if nargout <= 1:
         return tf
-    return [tf, _box(np.array([float(pos.get(k, 0)) for k in keys]).reshape(A.shape))]
+    return [tf, _box(np.array([float(pos.get(k, 0)) if k == k else 0.0 for k in keys]).reshape(A.shape))]
 
 
 # ------------------------------------------------------------------ accumarray, bitshift, interp1, cond, ... (from the documentation's examples)
@@ -10130,7 +10205,22 @@ def intlit(digits, radix, cls):
         w = int(cls[3:])
         if v >= 1 << (w - 1):
             v -= 1 << w
-    return np.array([[v]], dtype=_INTS[cls][0])
+    return np.array([[_exact_int(v)]], dtype=_INTS[cls][0])
+
+
+def _exact_int(v):
+    """v, if Sagebrush's 64-bit integers hold it exactly (they keep 53 bits, as doubles
+    do); a value they would round is refused, not changed"""
+    if float(v) != v:
+        raise _err("Integers beyond 2^53 in magnitude (here %d) are not supported: Sagebrush's 64-bit integers are not exact there." % v)
+    return v
+
+
+def declit(text, cls):
+    """int64 or uint64 of a decimal integer literal: its exact value (saturated), not the
+    nearest double's"""
+    lo, hi = (-(1 << 63), (1 << 63) - 1) if cls == "int64" else (0, (1 << 64) - 1)
+    return np.array([[_exact_int(min(max(int(text), lo), hi))]], dtype=_INTS[cls][0])
 
 
 _BYTES = {"double": 8, "single": 4, "logical": 1, "char": 2, "int8": 1, "uint8": 1, "int16": 2, "uint16": 2,

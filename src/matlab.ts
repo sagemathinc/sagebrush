@@ -1260,6 +1260,16 @@ class Emitter {
       this.emit(`${t} = _m.call(${this.lookup(e.name, scope)}, [], 0)`);
     } else if (e.k === "index" && !e.brace) {
       this.emit(`${t} = ${this.indexExpr(e, scope, "0")}`);
+    } else if (e.k === "index" && e.brace) {
+      // (c{:} and the like, a comma-separated list: each value is ans in turn, and
+      // displayed so, as MATLAB shows idx{:})
+      this.emit(`for ${t} in ${this.csList(e, scope)}:`);
+      this.indent(() => {
+        scope.vars.add("ans");
+        this.emit(`ans = ${t}`);
+        if (print) this.emit(`_m.display("ans", ans)`);
+      });
+      return;
     } else {
       this.emit(`${t} = ${this.expr(e, scope)}`);
     }
@@ -1486,6 +1496,16 @@ class Emitter {
     let base: string;
     const f = e.e;
     if (f.k === "id" && !this.isVar(f.name, scope)) {
+      // (int64 or uint64 of an integer literal: its exact value, as MATLAB converts it
+      // without going through a double: int64(-72057594035891654))
+      if ((f.name === "int64" || f.name === "uint64") && !this.fnNames.has(f.name) && e.args.length === 1) {
+        let a = e.args[0], neg = false;
+        if (a.k === "un" && a.op === "-") { neg = true; a = a.e; }
+        if (a.k === "num" && /^\d+$/.test(a.v)) {
+          e.frame.code = "_m.UNDEF";
+          return `_m.declit(${JSON.stringify((neg ? "-" : "") + a.v)}, ${JSON.stringify(f.name)})`;
+        }
+      }
       // a function call (or a workspace variable, at the top level)
       if (WORKSPACE_FNS.has(f.name) && !this.fnNames.has(f.name)) {
         // (clear inside a function: a function's variables are Python locals, which
