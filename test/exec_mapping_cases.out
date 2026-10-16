@@ -1,0 +1,36 @@
+M M
+{'z': 6} [('set', 'x'), ('get', 'x'), ('get', 'y'), ('set', 'z'), ('get', 'print'), ('get', 'type'), ('get', 'locals'), ('get', 'type'), ('get', 'vars'), ('del', 'x')]
+['y']
+NameError: name 'y' is not defined [('del', 'y')]
+NameError: name 'q' is not defined
+['C', 'f', 'i', 'mm', 'r', 'x', 'z'] 5 5 1 [('set', 'x'), ('get', 'x'), ('set', 'x'), ('get', 'range'), ('set', 'i'), ('set', 'i'), ('set', 'mm'), ('set', 'C'), ('set', 'f'), ('get', 'f'), ('set', 'r')]
+[5, 6] ['C', 'f', 'i', 'mm', 'r', 'x', 'z']
+True
+50 False
+ValueError: boom
+43 <built-in function len> 7
+TypeError: 'Dflt' object does not support item assignment
+[0, 1]
+None
+None
+{'w': 3, 'v': 6}
+'miss' 'miss'
+set x
+get x
+{'x': 1}
+<built-in function len>
+NameError: name 'q' is not defined
+("name 'q' is not defined", None)
+N AttributeError: 'N' object has no attribute 'keys'
+K2 TypeError: K2.keys() returned a non-iterable (type int)
+K3 ['a', 'b', 'c']
+K4 ['b', 'z']
+TypeError: list indices must be integers or slices, not str
+TypeError: 'tuple' object does not support item assignment
+TypeError: locals must be a mapping or None, not int
+NameError: name 'y' is not defined
+NameError: name 'len' is not defined
+NameError: name 'len' is not defined
+1
+None
+NameError: name 'zz' is not defined

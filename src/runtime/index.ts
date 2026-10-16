@@ -263,8 +263,14 @@ export function reraise(): any {
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
 
-export function sortedKeys(d: Obj.PyDict): string[] {
-  return O.toArray(d).sort();
+export function sortedKeys(d: any): any[] {
+  if (Obj.typeOf(d) === T.dict) return O.toArray(d).sort();
+  // (dir() over exec's locals mapping: its keys(), as CPython's PyMapping_Keys)
+  const ks = Obj.callObj(Obj.getattr(d, "keys"), []);
+  if (Ty.lookupDunder(ks, "__iter__") === undefined && Ty.lookupDunder(ks, "__getitem__") === undefined) raise(T.TypeError, `${typeName(d)}.keys() returned a non-iterable (type ${typeName(ks)})`);
+  const a = O.toArray(ks);
+  Ty.sortList(a, null, false);
+  return a;
 }
 
 export function localsDict(names: string[], values: any[]): Obj.PyDict {
@@ -284,28 +290,85 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
     // (as CPython's exec/eval: the builtins module's dict, not the module)
     if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", Obj.instanceDict(B.builtins));
     const ns = Obj.namespaceOf(globals);
-    return locals !== undefined && locals !== null && locals !== globals ? layered(Obj.namespaceOf(locals), ns) : ns;
+    return locals !== undefined && locals !== null && locals !== globals ? layered(localsNamespace(locals), ns) : ns;
   }
   if (g === null || g === undefined) g = Obj.dictGet(M.sysModules, "__main__") ?? Ty.newModule("__main__");
   // (explicit locals over the real globals: an exec inside exec's top level
   // reads its locals, then the globals, never the outer locals, CORR-C0F-3)
-  if (locals !== undefined && locals !== null) return layered(Obj.namespaceOf(locals), Obj.realGlobals(g));
+  if (locals !== undefined && locals !== null) return layered(localsNamespace(locals), Obj.realGlobals(g));
   if (callerLocals !== null && callerLocals !== undefined) return layered(Obj.namespaceOf(callerLocals), g);
   return g;
 }
-// Reads see `front` then `back`; writes go to `front`.
-function layered(front: any, back: any): any {
+// exec/eval's locals: an exact dict's storage, else the mapping itself,
+// which CPython's LOAD_NAME, STORE_NAME and DELETE_NAME use through
+// __getitem__, __setitem__ and __delitem__ (a dict subclass's too)
+function localsNamespace(m: any): any {
+  return Obj.typeOf(m) === T.dict ? Obj.namespaceOf(m) : mappingNamespace(m);
+}
+const NS_MAPPING = Symbol("a namespace over a mapping");
+function mappingNamespace(m: any): any {
+  const get = (k: string): any => {
+    try {
+      return O.getitem(m, k);
+    } catch (e) {
+      // (a KeyError, or a subclass's, means unbound here: the globals next)
+      if (Obj.isinstance(e, T.KeyError)) return undefined;
+      throw e;
+    }
+  };
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === Obj.NS_DICT ? undefined : k in front && front[k] !== undefined ? front[k] : back[k]),
-    set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
-    has: (_t, k) => k in front || k in back,
-    deleteProperty: (_t, k) => (delete front[k], true),
-    ownKeys: () => [...new Set([...Reflect.ownKeys(front), ...Reflect.ownKeys(back)])],
+    get: (_t, k) => (typeof k === "string" ? get(k) : k === NS_MAPPING ? true : k === Obj.NS_DICT ? m : undefined),
+    set: (_t, k, v) => (typeof k === "string" && O.setitem(m, k, v), true),
+    has: (_t, k) => typeof k === "string" && get(k) !== undefined,
+    deleteProperty: (_t, k) => {
+      if (typeof k !== "string") return true;
+      // (any failure, as DELETE_NAME's, is the name's NameError)
+      try {
+        O.delitem(m, k);
+      } catch {
+        raise(T.NameError, `name '${k}' is not defined`);
+      }
+      return true;
+    },
+    ownKeys: () => [...new Set(sortedKeys(m).filter((k: any) => typeof k === "string"))],
     getOwnPropertyDescriptor: (_t, k) => {
-      const v = k in front && front[k] !== undefined ? front[k] : back[k];
+      const v = typeof k === "string" ? get(k) : undefined;
       return v === undefined ? undefined : { value: v, writable: true, enumerable: true, configurable: true };
     },
   });
+}
+// Reads see `front` then `back`; writes go to `front`.
+function layered(front: any, back: any): any {
+  // (a mapping's binding: one __getitem__, not one for `in` and another)
+  const own = front[NS_MAPPING] === true ? (k: any) => front[k] : (k: any) => (k in front ? front[k] : undefined);
+  const read = (k: any) => {
+    const v = own(k);
+    return v !== undefined ? v : back[k];
+  };
+  return new Proxy(Object.create(null), {
+    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === Obj.NS_DICT ? undefined : read(k)),
+    set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
+    has: (_t, k) => k in front || k in back,
+    // (del deletes from the locals only: unbound there, the NameError even
+    // when the globals bind it, as DELETE_NAME)
+    deleteProperty: (_t, k) => {
+      if (typeof k === "string" && front[NS_MAPPING] !== true && own(k) === undefined) raise(T.NameError, `name '${k}' is not defined`);
+      delete front[k];
+      return true;
+    },
+    ownKeys: () => [...new Set([...Reflect.ownKeys(front), ...Reflect.ownKeys(back)])],
+    getOwnPropertyDescriptor: (_t, k) => {
+      const v = read(k);
+      return v === undefined ? undefined : { value: v, writable: true, enumerable: true, configurable: true };
+    },
+  });
+}
+// `del name` at a module's top level, or of a name declared global
+export function delName(ns: any, k: string): void {
+  // (a layered namespace checks its locals itself; elsewhere a builtin's
+  // name is unbound too, unlike a load's, CPython's DELETE_NAME/GLOBAL)
+  if (ns[Obj.NS_GLOBALS] === undefined && ns[k] === undefined) raise(T.NameError, `name '${k}' is not defined`);
+  delete ns[k];
 }
 
 // sage: Sage source, which exec and eval compile in Sage mode
@@ -671,6 +734,7 @@ export const R: any = {
   realGlobals: Obj.realGlobals,
   localsDict,
   sortedKeys,
+  delName,
   execIn,
   evalIn,
   callEx,

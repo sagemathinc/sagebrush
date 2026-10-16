@@ -16,6 +16,13 @@ test("exec and eval with separate globals and locals scope names as CPython", ()
   const got = execFileSync(process.execPath, [CLI, TEST + "exec_namespaces_cases.py"], { encoding: "utf8" });
   assert.equal(got, readFileSync(TEST + "exec_namespaces_cases.out", "utf8"));
 });
+// (test/exec_mapping_cases.py, its .out CPython 3.14's): locals that
+// aren't an exact dict are read, written and deleted through their own
+// __getitem__, __setitem__ and __delitem__; a KeyError means unbound there
+test("exec and eval with a locals mapping use its methods as CPython", () => {
+  const got = execFileSync(process.execPath, [CLI, TEST + "exec_mapping_cases.py"], { encoding: "utf8" });
+  assert.equal(got, readFileSync(TEST + "exec_mapping_cases.out", "utf8"));
+});
 test("Sage's RR, RDF and CC elements are no float or complex as hook results", () => {
   const src = [
     "def t(f):",
