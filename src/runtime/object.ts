@@ -481,9 +481,19 @@ export function hasInstanceDict(o: any): boolean {
   return o !== null && typeof o === "object" && o.$cls !== undefined && o.$cls.$ctor !== null;
 }
 
+// d, found on t for the instance o.  (None is JS null, which a
+// descriptor's __get__ reads as access on the class: for the instance None,
+// as on its type NoneType, a method is bound and a get/set descriptor gives
+// its value, as CPython's lookup does; None.__class__ was the descriptor
+// itself, and so isinstance(None, an ABC) a TypeError)
 function descrGet(d: any, o: any, t: PyType): any {
-  if (typeof d === "function") return d.$pyfn === true && o !== null && d.$static !== true ? bindMethod(d, o) : d;
+  const none = o === null && t === T.NoneType;
+  if (typeof d === "function") return d.$pyfn === true && (o !== null || none) && d.$static !== true ? bindMethod(d, o) : d;
   if (d !== null && typeof d === "object") {
+    if (none && typeOf(d) === T.getset_descriptor) {
+      if (!isinstance(o, d.owner)) raise(T.TypeError, `descriptor '${d.name}' for '${d.owner.$name}' objects doesn't apply to a 'NoneType' object`);
+      return d.get(o);
+    }
     const g = lookupType(typeOf(d), "__get__");
     if (g !== undefined) return g(d, o, t);
   }
@@ -648,6 +658,7 @@ export function unboundFunction(d: any): any {
 
 export function setattr(o: any, name: string, v: any): void {
   if (reservedName(name)) reservedAttr(o, name);
+  if (o === null) raise(T.AttributeError, `'NoneType' object has no attribute '${name}' and no __dict__ for setting new attributes`);
   if (isType(o)) return setTypeAttr(o, name, v);
   const t = typeOf(o);
   if (t.$customSet) {

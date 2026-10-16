@@ -388,7 +388,13 @@ export function superNoArgs(): never {
 
 // ------------------------------------------------------------------ simple types
 
-builtinType("NoneType", [object], () => null);
+const noneType = builtinType("NoneType", [object], () => null);
+// (None's own methods, as CPython's: reached through None.__repr__() and
+// type(None).__repr__(None) as well as repr(None))
+method(noneType, "__repr__", (_n: any) => "None");
+method(noneType, "__bool__", (_n: any) => false);
+method(noneType, "__hash__", (n: any) => O.hashAny(n));
+noneType.$dict.set("__doc__", "The type of the None singleton.");
 builtinType("NotImplementedType", [object], () => NotImplemented);
 builtinType("ellipsis", [object], () => Ellipsis);
 
