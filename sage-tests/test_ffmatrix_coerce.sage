@@ -23,3 +23,11 @@ T('K diag a', lambda: (A == a, a == A, A != a, a != A))
 T('K diag a +', lambda: ((A + a).list(), (a + A).list(), (A - a).list(), (a - A).list()))
 T('GF7 diag', lambda: (diagonal_matrix(GF(7), [1, 9]).list(), diagonal_matrix(GF(7), [1, 9]).base_ring()))
 T('QQbar diag', lambda: (diagonal_matrix(QQbar, [I, 2]).list(), diagonal_matrix(QQbar, [I, 2]).base_ring()))
+# numeric complex scalars on the left defer to the matrix (CDF(1) == I2 was False over QQbar and AA); None is no scalar (A == None raised)
+for bn, R in bases + [('Zmod6', Zmod(6))]:
+    I2 = identity_matrix(R, 2)
+    for C in (CDF, ComplexField(200), RealField(200)):
+        c = C(1)
+        T('%s %s ==' % (bn, C), lambda: (I2 == c, c == I2, I2 != c, c != I2))
+        T('%s %s / *' % (bn, C), lambda: ((I2 / c).list(), (I2 * c).list(), (c * I2).list()))
+    T('%s None' % bn, lambda: (I2 == None, None == I2, I2 != None, None != I2))

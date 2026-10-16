@@ -3154,6 +3154,10 @@ class ComplexNumberMP:
     def _c(self, o):
         if isinstance(o, ComplexNumberMP):
             return o
+        if getattr(o, "_is_ffmatrix", False):
+            # (a matrix answers for itself: converting it into the field
+            # recursed, so A / ComplexField(200)(1) was a RecursionError)
+            return None
         if isinstance(o, RealNumberMP):
             return ComplexNumberMP(self._C, self._C._R(o), self._C._R(0))
         try:
@@ -3203,14 +3207,18 @@ class ComplexNumberMP:
         return ComplexNumberMP(self._C, R((a * c + b * d) / n), R((b * c - a * d) / n))
 
     def __rtruediv__(self, o):
-        return self._c(o) / self
+        c = self._c(o)
+        return NotImplemented if c is None else c / self
 
     def __eq__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: c == A as A == c)
         o = self._c(o)
         return o is not None and self._re == o._re and self._im == o._im
 
     def __ne__(self, o):
-        return not self == o
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
 
     def __bool__(self):
         return not (self._re.is_zero() and self._im.is_zero())
