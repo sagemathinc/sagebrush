@@ -16,7 +16,7 @@
       }
     ],
     "differs": [
-      "At most 4,000,000 elements are made (9 elements' permutations; 10 are refused).",
+      "Its result is limited to 8 MiB: the permutations of 8 elements of a double vector, or 9 of a char or 8-bit one; more are refused.",
       "Cell and string arrays are refused; permute an index vector instead."
     ],
     "status": "partial",
