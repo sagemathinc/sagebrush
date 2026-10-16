@@ -76,3 +76,24 @@ class _H2(float):
     def conjugate(self): raise ValueError("no")
 t("float subclasses' parts are float()'s", lambda: (conjugate(_F2(2)), real(_F2(2)), imag(_F2(2)), conjugate(_G2(2)), real(_G2(2)), imag(_G2(2)), conjugate(_H2(2))))
 t("RDF parts", lambda: (conjugate(RDF(2)), conjugate(RDF(2)).parent(), real(RDF(2)).parent(), imag(RDF(2)), imag(RDF(2)).parent()))
+import warnings as _warnings
+_warnings.simplefilter('ignore', DeprecationWarning)
+class _S3(float):
+    @staticmethod
+    def __float__(): return float(5)
+class _C3(float):
+    @classmethod
+    def __float__(cls): return float(6)
+class _D3:
+    def __get__(self, obj, typ):
+        return (lambda: float(9)) if obj is not None else (lambda *a: float(17))
+class _E3(float):
+    __float__ = _D3()
+class _R3(float):
+    __add__ = lambda self, o: 999
+    __radd__ = lambda self, o: 999
+class _G3(float):
+    def __float__(self): return _R3(9)
+class _N3(float):
+    def __float__(self): return float(-0.0)
+t("__float__ bound as on an instance, its result an exact float", lambda: (conjugate(_S3(2)), real(_C3(2)), conjugate(_E3(2)), real(_E3(2)), imag(_E3(2)), conjugate(_G3(2)) + 1, real(_G3(2)) + 1, real_part(_G3(2)) + 1, conjugate(_N3(2))))
