@@ -26,7 +26,8 @@ export type Positions = Map<string, { x: number; y: number }>;
 export const MAX_NODES = 1500;
 export const MAX_EDGES = 20000;
 /** Pair evaluations allowed in one layout: iterations x k^2 summed over the
- * parts (an iteration evaluates k(k-1)), the final overlap sweeps (k(k-1)/2
+ * parts (an iteration evaluates k(k-1) pairs and its links' forces, and is
+ * charged k^2 + PART_COST + its links), the final overlap sweeps (k(k-1)/2
  * each), the shelf and the check (n(n-1)/2 each). The iterations leave
  * (FINAL_SWEEPS + 3) n^2 of it; the sweeps are counted against what is left
  * and stop when the next would not fit, the shelf then taking what is still
@@ -118,7 +119,7 @@ class Part {
       B[i].y += dy[i] * s;
     }
     separate(B, gap);
-    springWork.pairs += pairsOf(n);
+    springWork.pairs += pairsOf(n) + this.links.length;
     this.done++;
   }
 }
@@ -174,7 +175,8 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
   const n = nodes.length;
   // (and the shelf and the final check: 3 n^2 more)
   const budget = WORK - (FINAL_SWEEPS + 3) * n * n;
-  const sq = [...groups.values()].reduce((s, g) => s + (g.length > 1 ? g.length * g.length + PART_COST : 0), 0);
+  // (and each link's force per iteration, HARD-7C9-1: every link is in a part of two or more)
+  const sq = [...groups.values()].reduce((s, g) => s + (g.length > 1 ? g.length * g.length + PART_COST : 0), 0) + links.length;
   if (budget < MIN_ITERATIONS * sq) return null;
   const asked = Math.min(Math.max(Math.floor(opts.iterations ?? DEFAULT_ITERATIONS), 1), MAX_ITERATIONS);
   const iterations = Math.max(MIN_ITERATIONS, Math.min(asked, Math.floor(budget / Math.max(sq, 1))));
@@ -199,7 +201,7 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
     parts.push(part);
   }
   // (what the iterations leave, less the shelf and the check)
-  const used = parts.reduce((s, pt) => s + pt.iterations * (pt.bodies.length * pt.bodies.length + PART_COST), 0);
+  const used = parts.reduce((s, pt) => s + pt.iterations * (pt.bodies.length * pt.bodies.length + PART_COST + pt.links.length), 0);
   return { parts, all, gap, left: WORK - used - 2 * n * n };
 }
 
