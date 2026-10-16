@@ -3,6 +3,7 @@
 import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout, PrimBox } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
 import * as FD from "./fdlibm";
+import * as SP from "./strpos";
 
 const isInt = Number.isInteger;
 
@@ -435,17 +436,19 @@ function pad(body: string, sign: string, s: Spec, defaultAlign: string): string 
   const len = [...body].length + sign.length;
   if (len >= s.width) return sign + body;
   const fill = s.fill.repeat(s.width - len);
+  // (the fill meets the body: no lone surrogates joined, SP.glue)
+  const G = SP.glue;
   switch (align) {
     case "<":
-      return sign + body + fill;
+      return G(sign + body, fill);
     case "^": {
       const half = Math.floor((s.width - len) / 2);
-      return s.fill.repeat(half) + sign + body + s.fill.repeat(s.width - len - half);
+      return G(G(s.fill.repeat(half), sign + body), s.fill.repeat(s.width - len - half));
     }
     case "=":
-      return sign + fill + body;
+      return G(G(sign, fill), body);
     default:
-      return fill + sign + body;
+      return G(fill, sign + body);
   }
 }
 
@@ -558,6 +561,11 @@ export function format(v: any, spec: string): string {
 }
 
 // f"{x!r:>10}"
+// An f-string's pieces, joined without joining lone surrogates (CORR-C4D-1).
+export function fcat(...parts: string[]): string {
+  return SP.joinChecked(parts, "");
+}
+
 export function fmt(v: any, conv: string | null, spec: string): string {
   if (conv === "r") v = repr(v);
   else if (conv === "s") v = str(v);
@@ -607,6 +615,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     raise(T.TypeError, `%${type} format: ${needIndex ? "an integer" : "a real number"} is required, not ${typeOf(v).$name}`);
   };
   let out = "";
+  const seams: number[] = []; // (a field's ends: no lone surrogates joined, SP.checkSeams)
   const n = fmtStr.length;
   let i = 0;
   while (i < n) {
@@ -741,10 +750,12 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
       default:
         raise(T.ValueError, `unsupported format character '${type}' (0x${type.charCodeAt(0).toString(16)}) at index ${i - 1}`);
     }
+    seams.push(out.length);
     out += body;
+    seams.push(out.length);
   }
   if (argidx < arglen && dict === null) raise(T.TypeError, "not all arguments converted during string formatting");
-  return out;
+  return SP.checkSeams(out, seams);
 }
 
 function getitemMapping(m: any, k: string): any {
