@@ -22,6 +22,25 @@ def _sorted(vs):
         return sorted(vs, key=repr)
 
 
+
+def _edge_spec(e, single):
+    """(u, v, label) from an edge given as a pair or a triple; other lengths
+    are Sage's errors (its messages differ between delete_edge and
+    delete_edges)."""
+    n = len(e)  # (TypeError "object of type 'int' has no len()")
+    if n == 3:
+        # unpacked, not tuple(e): an object may claim a length of 3 and
+        # yield millions of items, or never stop; unpacking asks for a 4th
+        # at most (daybreak2's HARD-658-1)
+        u, v, label = e
+        return u, v, label
+    if n == 2:
+        u, v = e
+        return u, v, None
+    if n > 3:
+        raise ValueError("too many values to unpack (expected 2, got %d)" % n if single else "too many values to unpack (expected 2)")
+    raise ValueError("need more than %d value%s to unpack" % (n, "" if n == 1 else "s"))
+
 class GenericGraph:
     """Common code of Graph and DiGraph.
 
@@ -150,29 +169,95 @@ class GenericGraph:
             self.add_edge(*e) if isinstance(e, tuple) and len(e) in (2, 3) else self.add_edge(e)
 
     def delete_edge(self, u, v=None, label=None):
-        """Remove an edge.
+        """Remove an edge (u, v), given as two vertices or as one pair or
+        (u, v, label) triple; an edge or a vertex that is not in the graph
+        is ignored, as in Sage.
 
         EXAMPLES::
 
-            sage: G = graphs.CycleGraph(4); G.delete_edge(0, 1); G.size()
-            3
+            sage: G = graphs.CycleGraph(4); G.delete_edge(0, 1); G.delete_edge((1, 2, None)); G.size()
+            2
+            sage: G.delete_edge(0, 2); G.delete_edge(7, 8); G.size()
+            2
+            sage: g = Graph([(0, 1, 'red')]); g.delete_edge(0, 1, 'blue'); g.delete_edges([(0, 1, 'blue')]); g.size()
+            1
+            sage: g.delete_edges([(0, 1, 'red', 'extra')])
+            Traceback (most recent call last):
+            ...
+            ValueError: too many values to unpack (expected 2)
+            sage: g.delete_edges([(0, 1, 'red')]); g.size()
+            0
         """
         if v is None:
-            u, v = u[0], u[1]
-        self._adj[u].pop(v, None)
+            u, v, label = _edge_spec(u, True)
+        nbrs = self._adj.get(u, {})
+        if v not in nbrs or (label is not None and not (nbrs[v] == label)):
+            # a missing edge, or one with another label (a label of None
+            # matches any edge), is left alone, as in Sage
+            return
+        nbrs.pop(v)
         if self._directed:
-            self._in[v].pop(u, None)
+            self._in.get(v, {}).pop(u, None)
         else:
-            self._adj[v].pop(u, None)
+            self._adj.get(v, {}).pop(u, None)
+
+    def delete_edges(self, edges):
+        """Remove several edges: pairs or (u, v, label) triples, from any
+        iterable; those not in the graph are ignored.
+
+        EXAMPLES::
+
+            sage: g = Graph(); g.add_edges([(1, 5), (9, 2), (2, 5), (1, 9)])
+            sage: g.delete_edges([(1, 5), (2, 5, None), (1, 2)]); g.edges(sort=True)
+            [(1, 9, None), (2, 9, None)]
+        """
+        for e in edges:
+            self.delete_edge(*_edge_spec(e, False))
+
+    def delete_vertices(self, vertices):
+        """Remove several vertices and their edges; if one is not in the
+        graph, a ValueError and nothing removed.
+
+        EXAMPLES::
+
+            sage: G = graphs.CycleGraph(5); G.delete_vertices([0, 1]); G.order(), G.size()
+            (3, 2)
+            sage: G.delete_vertices([2, 42])
+            Traceback (most recent call last):
+            ...
+            ValueError: vertex (42) not in the graph
+        """
+        vs = list(vertices)
+        for v in vs:
+            if not self._has(v):
+                raise ValueError("vertex (%s) not in the graph" % (v,))
+        for v in vs:
+            if v in self._adj:
+                self.delete_vertex(v)
+
+    def _has(self, v):
+        # (an unhashable vertex is not in the graph: Sage's ValueError, not
+        # a TypeError)
+        try:
+            return v in self._adj
+        except TypeError:
+            return False
 
     def delete_vertex(self, v):
-        """Remove a vertex and its edges.
+        """Remove a vertex and its edges (a ValueError if it is not in the
+        graph).
 
         EXAMPLES::
 
             sage: G = graphs.CycleGraph(4); G.delete_vertex(0); G.order(), G.size()
             (3, 2)
+            sage: G.delete_vertex(42)
+            Traceback (most recent call last):
+            ...
+            ValueError: vertex (42) not in the graph
         """
+        if not self._has(v):
+            raise ValueError("vertex (%s) not in the graph" % (v,))
         for w in list(self._adj[v]):
             self.delete_edge(v, w)
         for u in list(self._in.get(v, {})):
