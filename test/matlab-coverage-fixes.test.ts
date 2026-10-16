@@ -222,12 +222,15 @@ test("fft2, ifft2, fftn and ifftn refuse a transform size that is not a positive
     ...["fft2(ones(2),-1,2)", "ifft2(ones(2),2,-1)", "fftn(ones(2),[-1 2])", "ifftn(ones(2),[2 -1])", "fft2(ones(2),1.5,2)", "fftn(ones(2),[0 2])"]
       .map((c) => `try, x = ${c}; disp('ran'), catch e, disp(e.message), end`),
     "disp(mat2str(size(fft2(ones(2), 3, 1))))",
+    // (the sizes are checked before X is made dense: a large sparse X is refused at once)
+    "S = sparse(100000, 100000); S(1, 1) = 1; try, x = fft2(S, -1, 2); disp('ran'), catch e, disp(e.message), end",
   ].join("\n")));
   assert.deepEqual(out, [
     "Invalid number of FFT data points (-1) specified.", "Invalid number of FFT data points (-1) specified.",
     "Invalid number of FFT data points (-1) specified.", "Invalid number of FFT data points (-1) specified.",
     "Invalid number of FFT data points (1.5) specified.", "Invalid number of FFT data points (0) specified.",
     "[3 1]",
+    "Invalid number of FFT data points (-1) specified.",
   ]);
 });
 
