@@ -244,7 +244,10 @@ class IntegerModRing_:
                 i = int(x)
             except (ValueError, OverflowError):
                 raise TypeError("unable to convert %r to an element of %r" % (x, self))
-            if i != x:
+            # (compared on the real's side: int == RR is not symmetric past
+            # the doubles, and RR("1e400") was taken as non-integral, astra's
+            # CORR-ADD-1)
+            if not (x == i):
                 if type(x).__name__ in ("RealNumber", "RealNumberMP", "RealLiteral"):
                     raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
                 raise TypeError("cannot convert non-integral float to integer")

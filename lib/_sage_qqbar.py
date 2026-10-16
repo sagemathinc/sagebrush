@@ -550,6 +550,8 @@ class _AlgebraicField:
             sage: QQbar(1/2), QQbar(I), QQbar(sqrt(2) + 1)
             (1/2, I, 2.414213562373095?)
         """
+        if self._real and type(x) is AlgebraicReal:
+            return x  # (an element of AA itself, not a copy, as QQbar's)
         a = _convert(x)
         if self._real:
             if not a._is_real():
@@ -1422,15 +1424,19 @@ def _heap_units(x, seen):
     root of its own 2290 (degree 2) to 3250 (degrees 3 to 6), and one of a
     field _combine made for numbers of different fields 8250 (degree 4) to
     9300 (degree 6)."""
-    u = 340 + 550 * max(1, len(x._c))
+    # (twice the measured figures: they are where a 96 MiB heap was already
+    # spending most of its time in garbage collection, and a build refused
+    # at 1/4 of a 64 MiB heap by them still ran it out once, astra's report
+    # on addca792; the runtime's own memory does not shrink with the heap)
+    u = 680 + 1100 * max(1, len(x._c))
     g = x._gen
     if g is not None and id(g) not in seen:
         seen.add(id(g))
         d = len(g.g) - 1
         if g.combined:
-            u += max(8000, 1400 * d)
+            u += max(16000, 2800 * d)
         else:
-            u += 850 if d <= 2 else 1810 + 150 * max(0, d - 6)
+            u += 1700 if d <= 2 else 3620 + 300 * max(0, d - 6)
     return u
 
 
