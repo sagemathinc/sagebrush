@@ -935,16 +935,56 @@ def _admit_element(obj, val, pos):
     refuse = lambda: MagmaError("Sequence mutation failed", ":=", False, pos)
     _settle(obj)  # (one made elsewhere: its universe fixed from what it holds)
     w = _universe(obj, True)
-    d = _udesc(w[1]) if w is not None and w[0] == "struct" else None
-    if d is not None:
-        y = _into(val, d, w[1])
+    # (the universe fixed for it: declared, a finite field too, or inferred)
+    u = w[1] if w is not None and w[0] == "struct" else obj.universe
+    if u is not None:
+        y = _coerce_struct(val, u)
         if y is _NOCOERCE:
             raise refuse()
-        return y
+        if y is not None:
+            return y
     # (its first defined element says what its elements are: Magma fixed
     # them all in one universe)
     c = _first_defined(obj)
+    if c is None and u is not None:
+        raise MagmaError("an element of a sequence over %s is not supported yet" % _str(u))
     return val if c is None else _like(c, val, refuse)
+
+
+def _coerce_struct(x, u):
+    """x coerced into the structure u, as Magma coerces into a fixed
+    universe: _NOCOERCE where it can't, None where Sagebrush doesn't know
+    u's elements (the caller then refuses, CORR-9348-1).  A finite field
+    takes integers, rationals prime to p and its subfields' elements
+    (_ff_into); the integers take a prime field's elements, the rationals
+    none (as Magma does, CORR-A6D-1)."""
+    if isinstance(u, _MFinField):
+        y = _ff_into(u, x)
+        return _NOCOERCE if y is None else y
+    if (u is _ZZ or u is _QQ) and _is_ff(x):
+        W = _ffwrap(x.parent())
+        if u is _ZZ and W.n == 1:
+            return int(x)
+        if u is _ZZ and x ** W.p == x:
+            return int(x.list()[0])
+        return _NOCOERCE
+    d = _udesc(u)
+    return None if d is None else _into(x, d, u)
+
+
+def _elt_into(x, c):
+    """x as an element of the parent of the element c, or _NOCOERCE; None
+    where Sagebrush doesn't know how Magma coerces into it."""
+    if _is_ff(c):
+        return _coerce_struct(x, _ffwrap(c.parent()))
+    d = _desc(c)
+    if d is not None and d[0] != "elt":
+        if (d[0] == "Z" or d[0] == "Q") and _is_ff(x):
+            return _coerce_struct(x, _ZZ if d[0] == "Z" else _QQ)
+        return _into(x, d, c.parent() if isinstance(c, _sp.Polynomial) else None)
+    if type(x) is type(c) and (not hasattr(c, "parent") or x.parent() is c.parent()):
+        return x
+    return None
 
 
 def _first_defined(s):
@@ -998,14 +1038,20 @@ def _like(c, val, refuse, depth=2):
             # (a range becomes a sequence of its elements: bounded first)
             raise MagmaError("a sequence of more than %d elements is not supported yet" % _COLLECT_MAX)
         u = _fixed_universe(c)
-        du = _udesc(u) if u is not None else None
-        inner = None if du is not None else next((x for x in (c if isinstance(c, MSeq) else c.items) if x is not _UNDEF), None)
+        known = u is not None and (_udesc(u) is not None or isinstance(u, _MFinField))
+        # (else the elements are made like c's first defined element; an
+        # emptied c keeps its sample, CORR-9348-FU1)
+        inner = None
+        if not known:
+            inner = _first_defined(c) if isinstance(c, MSeq) else next(iter(c.items), None)
+            if inner is None and isinstance(c, MSeq):
+                inner = c.sample
         out = []
         for x in list(val):  # (a multiset's elements as often as they occur)
             if x is _UNDEF:
                 out.append(x)
-            elif du is not None:
-                y = _into(x, du, u)
+            elif known:
+                y = _coerce_struct(x, u)
                 if y is _NOCOERCE:
                     raise refuse()
                 out.append(y)
@@ -1027,14 +1073,11 @@ def _like(c, val, refuse, depth=2):
         return MTuple([_like(p, q, refuse, depth + 1) for p, q in zip(c, val)])
     if isinstance(val, (MSeq, MSet, MTuple, MRange)):
         raise refuse()
-    d = _desc(c)
-    if d is not None:
-        y = _into(val, d, c.parent() if isinstance(c, _sp.Polynomial) else None)
-        if y is _NOCOERCE:
-            raise refuse()
+    y = _elt_into(val, c)
+    if y is _NOCOERCE:
+        raise refuse()
+    if y is not None:
         return y
-    if type(val) is type(c):
-        return val
     raise MagmaError("putting a %s among elements of type %s is not supported yet" % (_ext_type(val), _ext_type(c)))
 
 
@@ -4455,10 +4498,14 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
     Insert (the declared universe, else that of an element); Magma's
     errors if not."""
     w = _universe(s, True)
+    if isinstance(getattr(s, "universe", None), _MFinField):
+        w = ("struct", s.universe)  # (declared, and known to _coerce_struct)
     if w is None:
         return x
     if w[0] == "struct":
-        y = _into(x, _udesc(w[1]) or ("?",), w[1])
+        y = _coerce_struct(x, w[1])
+        if y is None:
+            y = _into(x, ("?",), w[1])
     else:
         e = w[1]
         if isinstance(e, MRec):
@@ -4473,7 +4520,12 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
                 raise MagmaError("No equality algorithm for sequence elements", "'%s'" % name)
             return x
         de = _desc(e)
-        if de is not None:
+        if _is_ff(e) or (_is_ff(x) and de in (("Z",), ("Q",))):
+            # (a finite field's elements: Magma's coercion, CORR-9348-1)
+            y = _elt_into(x, e)
+            if y is None:
+                y = _NOCOERCE
+        elif de is not None:
             y = _into(x, de, e.parent() if hasattr(e, "parent") and isinstance(e, _sp.Polynomial) else None)
         else:
             kx, ke = _eq_kind(x), _eq_kind(e)
