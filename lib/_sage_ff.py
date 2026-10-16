@@ -608,6 +608,9 @@ class IntegerMod:
     def __pow__(self, e, mod=None):
         if isinstance(e, IntegerMod):
             e = e._v
+        if isinstance(e, _F) and e.denominator != 1:
+            # (int() truncated it: pow(GF(5)(2), 3/2, 5) was 2), as Sage
+            raise TypeError("no conversion of this rational to integer")
         e = int(e)
         n = self._parent._n
         if e < 0:
