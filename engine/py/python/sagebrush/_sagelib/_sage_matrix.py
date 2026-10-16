@@ -2661,13 +2661,21 @@ def matrix(*args, **kwds):
             # is converted as soon as it is returned, so a callback that
             # returns one mutable object keeps each value, and the first
             # value the base refuses stops the calls (astra's CORR-C12-1)
+            # (over ZZ and QQ strictly: a value that does not convert raises
+            # its own error then, rather than being kept for a later
+            # conversion, astra's CORR-798-1)
             rows = []
             for i in range(r):
                 row = []
                 for j in range(c):
-                    x = _norm(ent(i, j))
-                    if base is sa.ZZ and not isinstance(x, int):
-                        raise TypeError("matrix entries are not all integers")
+                    v = ent(i, j)
+                    if base is sa.ZZ or base is sa.QQ:
+                        q = _F(v)
+                        if base is sa.ZZ and q.denominator != 1:
+                            raise TypeError("matrix entries are not all integers")
+                        x = _norm(q)
+                    else:
+                        x = _norm(v)
                     row.append(x)
                 rows.append(row)
         else:
