@@ -61,14 +61,30 @@ def("float32", "f", 4, "f", Float32Array, 3);
 def("float64", "f", 8, "d", Float64Array, 4);
 def("complex64", "c", 8, "F", Float32Array, 3);
 def("complex128", "c", 16, "D", Float64Array, 4);
+// float16 is not implemented: NumPy stores and computes it in binary16,
+// and float32 in its place gave other values (np.array([1.234],
+// dtype=np.float16) was 1.2339999675750732, not 1.234375), so it is refused,
+// as is any float ufunc NumPy computes in float16 (of bool, int8 and uint8).
+function refuseF16(what: string): never {
+  return raise(T.NotImplementedError, `${what}: float16 (half precision) is not supported yet`) as never;
+}
+// The float type NumPy gives a float ufunc of ints or bools: float16 for
+// bool and 8-bit ints (refused), float32 for 16-bit, float64 above (true
+// division: always float64)
+function floatFor(op: string, dt: DType): DType {
+  if (op === "true_divide") return D.float64;
+  if (dt.kind === "b" || dt.itemsize === 1) refuseF16(`np.${op} of ${dt.name} (NumPy computes it in float16)`);
+  return dt.itemsize === 2 ? D.float32 : D.float64;
+}
 const ALIASES: Record<string, string> = Obj.table({
   bool: "bool", bool_: "bool", "?": "bool", b1: "bool",
   int8: "int8", i1: "int8", byte: "int8", int16: "int16", i2: "int16", short: "int16", int32: "int32", i4: "int32", intc: "int32",
   int64: "int64", i8: "int64", int: "int64", int_: "int64", intp: "int64", long: "int64", longlong: "int64", l: "int64", q: "int64",
   uint8: "uint8", u1: "uint8", ubyte: "uint8", B: "uint8", uint16: "uint16", u2: "uint16", uint32: "uint32", u4: "uint32", uint: "uint64",
-  uint64: "uint64", u8: "uint64", uintp: "uint64", float16: "float32", half: "float32", f2: "float32",
+  uint64: "uint64", u8: "uint64", uintp: "uint64", float16: "float16", half: "float16", f2: "float16", e: "float16",
   float32: "float32", f4: "float32", single: "float32", f: "float32", float64: "float64", f8: "float64", float: "float64", double: "float64", d: "float64",
-  float_: "float64", longdouble: "float64", complex64: "complex64", c8: "complex64", F: "complex64", csingle: "complex64",
+  float_: "float64", longdouble: "longdouble", float128: "longdouble", g: "longdouble", clongdouble: "clongdouble", complex256: "clongdouble",
+  G: "clongdouble", complex64: "complex64", c8: "complex64", F: "complex64", csingle: "complex64",
   complex128: "complex128", c16: "complex128", complex: "complex128", D: "complex128", cdouble: "complex128", complex_: "complex128",
 });
 const RANGE: Record<string, [number, number]> = Obj.table({
@@ -88,11 +104,15 @@ export function toDtype(x: any, dflt: DType | null = null): DType {
   if (typeof x === "string") {
     const s = x.replace(/^[<>=|]/, "");
     const n = ALIASES[s];
+    if (n === "float16") refuseF16(`dtype '${x}'`);
+    // (NumPy's longdouble is x87 extended precision, 80 bits: not float64)
+    if (n === "longdouble" || n === "clongdouble") return raise(T.NotImplementedError, `dtype '${x}': ${n} (extended precision) is not supported yet`) as never;
     if (n) return D[n];
     raise(T.TypeError, `data type '${x}' not understood`);
   }
   const t = typeDtypes.get(x);
   if (t) return t;
+  if (Obj.getattr(x, "__name__", null) === "float16" && Obj.getattr(x, "__module__", null) === "numpy") refuseF16("dtype np.float16");
   if (x === T.float) return D.float64;
   if (x === T.int) return D.int64;
   if (x === T.bool) return D.bool;
@@ -972,7 +992,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
     if (ct.kind === "f" || ct.kind === "c") raise(T.TypeError, `ufunc '${op}' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''`);
   }
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkPyInt(ct, w.v);
-  if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = D.float64;
+  if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatFor(op, ct);
   if (op === "power" && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
   const a = A.arr, b = B.arr;
@@ -1203,10 +1223,9 @@ export function unary(op: string, x: any): any {
   let rt: DType;
   if (spec.out === "bool") rt = D.bool;
   else if (a.dt.cplx) rt = a.dt;
-  else if (spec.float && (a.dt.isInt || a.dt.kind === "b")) rt = a.dt.itemsize <= 2 && a.dt.kind !== "b" ? D.float32 : a.dt.kind === "b" ? D.float32 : D.float64;
+  else if (spec.float && (a.dt.isInt || a.dt.kind === "b")) rt = floatFor(op, a.dt);
   else if (op === "reciprocal" && a.dt.kind === "b") rt = D.int8;
   else rt = a.dt;
-  if (spec.float && a.dt.kind === "b") rt = D.float32; // NumPy: sin(bool) is float16; the nearest we have
   if (spec.float && (a.dt === D.int64 || a.dt === D.uint64 || a.dt === D.int32 || a.dt === D.uint32)) rt = D.float64;
   const out = empty(a.shape, rt);
   const od = out.data, ad = a.data;
@@ -2526,7 +2545,7 @@ newBuiltinModule("_numpy", (m) => {
         let ct = resultType(A, B);
         if (ct.kind === "f" || (ct.isInt && ct.ctor === Float64Array && op !== "power" && op !== "multiply" && op !== "left_shift")) {
           for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkPyInt(ct, w.v);
-          if (spec.out === "float" && ct.isInt) ct = D.float64;
+          if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatFor(op, ct);
           const rt = spec.out === "bool" ? D.bool : ct;
           const f = ct.isInt ? (spec.int ?? spec.f) : spec.f;
           const v = castNum(rt, f(wa.v, wb.v));

@@ -165,7 +165,14 @@ class float32(float, floating):
         return _np.format_f32(float(self))
 
 
-float16 = half = float32
+class float16(floating):
+    """Half precision: not supported yet (NumPy stores it in binary16)."""
+
+    def __new__(cls, *args, **kwargs):
+        raise NotImplementedError("np.float16: float16 (half precision) is not supported yet")
+
+
+half = float16
 
 
 def _intrepr(name):
