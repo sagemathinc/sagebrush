@@ -231,6 +231,8 @@
  "lib/_sage_ffmat.py: _vector_op :: call :: zip(a, b)": 3,
  "lib/_sage_ffmat.py: _vector_op :: comprehension :: zip(a, b)": 2,
  "lib/_sage_ffmat.py: _vector_op :: loop :: zip(a, b)": 1,
+ "lib/_sage_ffmat.py: _vector_pushout :: call :: any(c == \"nf\" and not getattr(X, \"_emb\", None) for c, X in ((a, R), (b, S)))": 1,
+ "lib/_sage_ffmat.py: _vector_pushout :: comprehension :: ((a, R), (b, S))": 1,
  "lib/_sage_ffmat.py: matrix :: call :: max(m * n, m)": 2,
  "lib/_sage_ffmat.py: matrix :: call :: range(m)": 3,
  "lib/_sage_ffmat.py: matrix :: call :: range(n)": 2,

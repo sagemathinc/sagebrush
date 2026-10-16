@@ -930,3 +930,21 @@ SR empty norm 2 :: 0 @ Rational Field
 SR empty norm 1 :: 0 @ Rational Field
 SR empty norm +Infinity :: ValueError : max() iterable argument is empty
 SR empty norm 3 :: 0 @ Rational Field
+K1 + Number Field in d with defining polynomial t^2 - 3 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Number Field in d with defining polynomial t^2 - 3'
+Number Field in d with defining polynomial t^2 - 3 * K1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Number Field in d with defining polynomial t^2 - 3' and 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2'
+K1 + Algebraic Real Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Algebraic Real Field'
+Algebraic Real Field * K1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2'
+K1 + Algebraic Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Algebraic Field'
+Algebraic Field * K1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2'
+K1 + Real Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Real Double Field'
+Real Double Field * K1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2'
+K1 + Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision * K1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2'
+K1 + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Finite Field of size 7'
+Finite Field of size 7 * K1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2'
+K1 + Rational Field :: (c + 1, 3) @ Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2
+Rational Field * K1 :: c + 2 @ Number Field in c with defining polynomial t^2 - 2
+K1 + Number Field in c with defining polynomial t^2 - 2 :: (c + 1, 3) @ Vector space of dimension 2 over Number Field in c with defining polynomial t^2 - 2
+Number Field in c with defining polynomial t^2 - 2 * K1 :: c + 2 @ Number Field in c with defining polynomial t^2 - 2
+K1 mat L1 vec :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in c with defining polynomial t^2 - 2' and 'Vector space of dimension 2 over Number Field in d with defining polynomial t^2 - 3'
+L1 vec K1 mat :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Number Field in d with defining polynomial t^2 - 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in c with defining polynomial t^2 - 2'

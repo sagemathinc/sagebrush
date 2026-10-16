@@ -106,3 +106,12 @@ for s in ['1_0e-400j', '1e-4_00j', '1e4_00j', '1_0e400j', '1_0', '2_5j']:
     T('CC(%s)' % s, lambda: CC(s))
 for p in [2, 1, Infinity, 3]:
     T('SR empty norm %s' % p, lambda: vector(SR, []).norm(p))
+# number fields without an embedding meet only ZZ, QQ and themselves (Sage's TypeError otherwise)
+P.<t> = QQ[]
+K1.<c> = NumberField(t^2 - 2)
+L1.<d> = NumberField(t^2 - 3)
+for w in [vector(L1, [1, 2]), vector(AA, [1, 2]), vector(QQbar, [1, 2]), vector(RDF, [1, 2]), vector(RR, [1, 2]), vector(GF(7), [1, 2]), vector(QQ, [1, 2]), vector(K1, [1, 2])]:
+    T('K1 + %s' % w.base_ring(), lambda: vector(K1, [c, 1]) + w)
+    T('%s * K1' % w.base_ring(), lambda: w * vector(K1, [c, 1]))
+T('K1 mat L1 vec', lambda: matrix(K1, [[1, 0], [0, 1]]) * vector(L1, [1, 2]))
+T('L1 vec K1 mat', lambda: vector(L1, [1, 2]) * matrix(K1, [[1, 0], [0, 1]]))
