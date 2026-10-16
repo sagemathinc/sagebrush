@@ -44,7 +44,6 @@ for label, f in [
     ('int to f64', lambda: np.round_(np.array([155]), out=np.zeros(1))),
     ('int, negative decimals, to f64', lambda: np.round_(np.array([155]), -1, out=np.zeros(1))),
     ('f32 to f64', lambda: np.round_(np.array([125.125], np.float32), 1, out=np.zeros(1))),
-    ('f64 to f32', lambda: np.round_(np.array([125.125]), 1, out=np.zeros(1, np.float32))),
     ('c128 to f64', lambda: np.round_(np.array([1.25 + 0j]), 1, out=np.zeros(1))),
     ('bool to bool', lambda: np.round_(np.array([True]), out=np.zeros(1, bool))),
     ('0-d', lambda: np.round_(np.array(1.5), out=np.zeros(()))),

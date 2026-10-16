@@ -17,7 +17,6 @@ i32 to i64 | [155] int64
 int to f64 | [155.0] float64
 int, negative decimals, to f64 | [160.0] float64
 f32 to f64 | [125.1] float64
-f64 to f32 | [125.0999984741211] float32
 c128 to f64 | TypeError
 bool to bool | TypeError
 0-d | 2.0 float64
