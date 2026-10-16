@@ -108,6 +108,39 @@ def _admit_size(base, m, n, factor=1):
     return m, n
 
 
+def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
+    """The rows of a matrix over base, each a list (_read_rows; loose:
+    _bounded_rows, whose rows may be vectors or single entries), read no
+    further than the budget for one matrix allows.  When the rows are
+    lists or tuples their lengths are known without reading anything, so
+    Sage's structural error for ragged rows comes before the budget (astra's
+    CORR-21A-1); other rows (an iterator, vectors) are counted as they are
+    read, so that an iterator cannot make more than the budget first
+    (daybreak2's HARD-21A-1).  structural=False: always counted as read,
+    with no check of the lengths (a subspace's generators)."""
+    from _sage_matrix import _read_rows, _bounded_rows, _MAX_ENTRIES
+    reader = _bounded_rows if loose else _read_rows
+    if structural and type(rows) in (list, tuple) and len(rows) <= _MAX_ENTRIES and all(type(r) in (list, tuple) for r in rows):
+        n = ncols if ncols is not None else (len(rows[0]) if rows else 0)
+        for r in rows:
+            if len(r) != n:
+                raise ValueError("the rows of a matrix must all have %d entries" % n)
+        if len(rows) * n <= _MAX_ENTRIES:
+            _admit_size(base, len(rows), n)
+        return reader(rows)
+    cap = _heap_limit() // _HEAP_SHARE // _entry_cost(base)
+    if cap >= _MAX_ENTRIES:
+        return reader(rows)
+    try:
+        return reader(rows, cap)
+    except ValueError as e:
+        if not str(e).startswith("more than %d " % cap):
+            raise
+    mib, limit = 1 << 20, _heap_limit()
+    raise NotImplementedError("a matrix over %r of more than %d entries needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+        base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+
+
 # ------------------------------------------------------------------ vectors
 
 def _strict_base(B):
@@ -451,15 +484,13 @@ class FFMatrix:
     __slots__ = ("_base", "_rows", "_ncols")
 
     def __init__(self, base, rows, ncols=None):
-        from _sage_matrix import _read_rows
-        # read boundedly and check the shape before converting anything
-        rows = _read_rows(rows)
+        # read boundedly, within the heap budget, and check the shape and
+        # the heap its entries take before converting anything
+        rows = _admitted_rows(base, rows, ncols)
         ncols = ncols if ncols is not None else (len(rows[0]) if rows else 0)
-        # (the size, and the heap its entries take, before converting
-        # anything)
-        _admit_size(base, len(rows), ncols)
         if any(len(r) != ncols for r in rows):
             raise ValueError("the rows of a matrix must all have %d entries" % ncols)
+        _admit_size(base, len(rows), ncols)
         self._base = base
         self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols
@@ -1413,19 +1444,30 @@ def matrix(base, *args, **kwds):
         rows = args[0]
         if isinstance(rows, FFMatrix):
             return FFMatrix(base, rows._rows, rows.ncols())
-        rows = _bounded_rows(rows)
+        rows = _admitted_rows(base, rows, loose=True)
         return FFMatrix(base, rows, len(rows[0]) if rows else 0)
     if len(args) == 2 and isinstance(args[1], (list, tuple)) and args[1] and isinstance(args[1][0], (list, tuple)):
         m = _dim(args[0])
-        rows = _bounded_rows(args[1])
+        if type(args[1]) in (list, tuple) and len(args[1]) != m:
+            raise ValueError("entries do not fill a matrix with %d rows" % m)
+        rows = _admitted_rows(base, args[1], loose=True)
         if len(rows) != m:
             raise ValueError("entries do not fill a matrix with %d rows" % m)
         return FFMatrix(base, rows, len(rows[0]))
     m = _dim(args[0])
     n = _dim(args[1], "columns") if len(args) > 1 and not isinstance(args[1], (list, tuple, range)) else m
-    m, n = _admit_size(base, m, n)
+    m, n = _shape(m, n)
     entries = args[2] if len(args) > 2 else (args[1] if len(args) == 2 and isinstance(args[1], (list, tuple, range)) else 0)
+    if type(entries) in (list, tuple, range):
+        # (the length is known without reading: Sage's errors for a wrong
+        # count or ragged rows come before the heap budget, astra's
+        # CORR-21A-1)
+        if type(entries) is not range and entries and isinstance(entries[0], (list, tuple)):
+            return FFMatrix(base, _admitted_rows(base, entries, n, loose=True), n)
+        if len(entries) != m * n:
+            raise ValueError("entries has the wrong length")
     if isinstance(entries, (list, tuple, range)):
+        _admit_size(base, m, n)
         e = _bounded_list(entries, max(m * n, m))
         if e and isinstance(e[0], (list, tuple)):
             return FFMatrix(base, _bounded_rows(e, max(m * n, m)), n)
@@ -1437,6 +1479,7 @@ def matrix(base, *args, **kwds):
     if c != zero and m != n:
         # (matrix(GF(5), 2, 3, 1) was a 2 x 3 "diagonal" matrix)
         raise TypeError("nonzero scalar matrix must be square")
+    _admit_size(base, m, n)
     return FFMatrix(base, [[c if i == j else zero for j in range(n)] for i in range(m)], n)
 
 
@@ -1572,8 +1615,7 @@ class FFVectorSpace:
             [1 0 0 0 0 1 1 0]
             [0 1 0 0 0 1 1 0]
         """
-        from _sage_matrix import _bounded_rows
-        return FFSubspace(self._base, self._n, _bounded_rows(gens))
+        return FFSubspace(self._base, self._n, _admitted_rows(self._base, gens, loose=True, structural=False))
 
     span = subspace
 
@@ -1659,6 +1701,9 @@ class FFSubspace(FFVectorSpace):
     def __init__(self, base, n, gens):
         self._base, self._n = base, n
         if gens:
+            # (the generators converted, and their echelon form, before
+            # either is built: daybreak2's HARD-21A-1)
+            _admit_size(base, len(gens), n, 2)
             m, piv, d = _echelon([[base(x) for x in g] for g in gens], base, n)
             self._basis = [r for r in m if any(r)]
         else:
