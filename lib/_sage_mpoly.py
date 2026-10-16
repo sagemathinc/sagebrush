@@ -4048,10 +4048,22 @@ class MPolynomialIdeal:
             sage: R.<x,y> = QQ[]; J = ideal([x^7 - (100*x - 1)^2, y - x^7 + 1])
             sage: J.variety(RealField(51))
             [{y: -0.999999999999990, x: 0.00999999900000035}, {y: -0.999999999999990, x: 0.0100000010000003}, {y: 396340.890166545, x: 6.30556899864138}]
+
+        Over a number field other than QQ, a refusal (not the empty list)::
+
+            sage: R.<x,y> = QQ[]; R.ideal([x^2 - 2, y - x]).variety(QuadraticField(2, 'a'))
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: variety over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? is not available in sagebrush yet (over QQbar or AA, the points are exact)
         """
         R = self._ring
         if self.dimension() != 0:
             raise ValueError("The dimension of the ideal is %d, but it should be 0" % self.dimension())
+        if ring is not None and any("NumberField" in c.__name__ for c in type(ring).__mro__):
+            # (the roots of each univariate step in a number field were not
+            # found, so J.variety(QuadraticField(2)) was [], a wrong answer;
+            # astra's hunt at e4a9ce94)
+            raise NotImplementedError("variety over %s is not available in sagebrush yet (over QQbar or AA, the points are exact)" % (ring,))
         if ring is not None and _algebraic_target(ring):
             # (numerical fields gave wrong points: the floating values of one
             # variable substituted and intersected as sets, so J.variety(RR)
