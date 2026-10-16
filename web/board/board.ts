@@ -64,16 +64,21 @@ export interface Item {
   order?: number;
   /** code items: only the code's output shows */
   hideCode?: boolean;
+  /** code items: its own language (doc.ts DocNote.mode), and the one it runs in when it is not the board's (shown, item 16) */
+  mode?: string;
+  lang?: string;
   /** notes: a picture (its name, size, and its address when not in this browser) */
   image?: { key: string; w: number; h: number; src?: string };
 }
 
+const LANG_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image" | "inert" | "emoji" | "icon" | "color">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "lang" | "image" | "inert" | "emoji" | "icon" | "color">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
-  highlight(src: string): string;
+  /** a code item's code, highlighted in its language (its id says which) */
+  highlight(src: string, id: string): string;
   /** the live output element (a copy for measuring and printing) */
   output(id: string, copy: boolean): HTMLElement | null;
   /** "" (up to date), or queued, running, stale, error, failed, cancelled, interrupted (code.ts's CodeState) */
@@ -619,6 +624,14 @@ export class Board {
         head.append(run);
       }
       if (it.title) head.append(titleEl(it.title));
+      // (a language not the board's: said, so that a reader isn't misled, item 16)
+      if (it.lang) {
+        const b = document.createElement("span"), name = LANG_NAMES[it.lang] ?? it.lang;
+        b.className = "board-lang";
+        b.textContent = name;
+        b.title = `This item's code is ${name}, not the board's language; it shares no names with the board's other languages`;
+        head.append(b);
+      }
       if (this.onToggleCode && it.id) {
         const id = it.id, t = document.createElement("button");
         t.className = "board-code-toggle" + (it.hideCode ? " off" : "");
@@ -657,7 +670,7 @@ export class Board {
       if (!it.hideCode) {
         const pre = document.createElement("pre");
         pre.className = "sbnb board-code-src"; // (the notebook's colors for code)
-        if (this.code) pre.innerHTML = this.code.highlight(it.code);
+        if (this.code) pre.innerHTML = this.code.highlight(it.code, it.id ?? "");
         else pre.textContent = it.code;
         el.append(pre);
       }
@@ -1495,7 +1508,7 @@ const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px
 // (a note that is only a picture: shown as the picture alone; as doc.ts's onlyImage)
 const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref;
 // What an element shows (kept when this is unchanged).
-const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image, it.emoji, it.icon, it.kind === "sticker" ? it.color : undefined, it.inert]);
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.lang, it.image, it.emoji, it.icon, it.kind === "sticker" ? it.color : undefined, it.inert]);
 // (a double-click in the item being edited selects a word, as in any field)
 const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
 // A code item's output, in the box that gives it the notebook's styles.

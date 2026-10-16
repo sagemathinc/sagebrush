@@ -42,9 +42,13 @@ authoritative.
   layers top to bottom, or left to right with `"direction": "LR"`; or `row`,
   `column`, or `grid`, as square as can be unless `columns` says). An item keeps
   `x`/`y` only once a person moves it.
-- **One language per board.** `"mode"` is `"python"` (the default), `"sage"`,
-  `"magma"` or `"matlab"`. Every code item uses it. See "Languages" in
-  https://sagebrush.space/llms.txt.
+- **One language per board, usually.** `"mode"` is `"python"` (the default),
+  `"sage"`, `"magma"` or `"matlab"`, and every code item uses it, unless the
+  item sets its own `"mode"`. Each language runs in its own interpreter, so
+  **languages share no values**: a name defined in a Python item is
+  undefined in a Sage item. To use data from one language in another, copy
+  it in as a literal. Run order and reruns work within each language. See
+  "Languages" in https://sagebrush.space/llms.txt.
 - **Code is reactive.** A note with `code` is a code item. Its output is shown
   under it, and items that use a name it defines rerun when it changes, as in
   a reactive notebook. Code runs in the reader's browser, in a sandbox with no
@@ -192,6 +196,7 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `text` | string | Markdown with math (`$...$`), shown at every zoom |
 | `code` | string | code in the board's language (`mode`), run in the reader's browser, its output under it; it makes the note a code item |
 | `hideCode` | boolean | `true`: show only the code's output, not the code |
+| `mode` | `"python"` \| `"sage"` \| `"magma"` \| `"matlab"` | a code item's language, when it is not the board's (`"python"`, `"sage"`, `"magma"` or `"matlab"`; default: the board's `mode`). Each language runs in its own interpreter: languages share no values, so copy data from one to another as literals |
 | `preview` | object | a slow code item's output, kept to show before it runs (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
 | `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)` |

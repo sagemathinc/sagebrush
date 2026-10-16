@@ -89,7 +89,7 @@ export class Editor {
   /** Run a code item (its code is as it was: a changed one runs as the board is laid out again) */
   onRun: ((id: string) => void) | null = null;
   /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
-  highlight: (() => ((src: string) => string) | null) | null = null;
+  highlight: ((id: string) => ((src: string) => string) | null) | null = null;
   /** where pictures are kept (images.ts) */
   images: ImageStore | null = null;
   /** choose pictures to add (mount.ts): "Picture…" in the sticker picker, a note that is only a picture */
@@ -1000,7 +1000,7 @@ export class Editor {
       commit: (f, merge) => this.commit(f, merge),
       remove: (d, id) => remove(this.pg(d), id),
       run: (id) => this.onRun?.(id),
-      highlight: () => this.highlight?.() ?? null,
+      highlight: (id) => this.highlight?.(id) ?? null,
       get images() { return ed.images; },
     };
   }
