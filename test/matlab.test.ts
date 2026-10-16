@@ -2113,7 +2113,7 @@ test("nchoosek's N and K the same class or one double; unique's TreatMissingAsDi
   ].join("\n")), ["refused", "refused", "ran", "ran", "ran", "refused", "ran", "ran"]);
 });
 
-test("nchoosek refuses mixed classes and results past their class's range before computing the binomial, under a 96 MiB heap", () => {
+test("nchoosek refuses mixed classes and results past their class's range before computing the binomial, under a 96 MiB heap, and keeps exact results near the limits", () => {
   const { spawnSync } = require("node:child_process");
   const tryIt = (e: string) => `try, x = ${e}; disp(class(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 24))]), end`;
   const code = [
@@ -2121,6 +2121,9 @@ test("nchoosek refuses mixed classes and results past their class's range before
     tryIt("nchoosek(int32(2000000000), int32(1000000000))"), tryIt("nchoosek(1e9, 5e8)"), tryIt("nchoosek(2000, 1000)"),
     tryIt("nchoosek(1030, 515)"), tryIt("nchoosek(single(300), 150)"), tryIt("nchoosek(5, 7)"), tryIt("nchoosek(5, -1)"),
     tryIt("nchoosek(1e307, 5e306)"), tryIt("nchoosek(realmax, floor(realmax / 2))"), tryIt("nchoosek(1e300, 2)"),
+    "x = nchoosek(int64(2^53 - 1), 1); disp([class(x) ' ' sprintf('%d', x)])", "x = nchoosek(uint64(2^53 - 1), 1); disp([class(x) ' ' sprintf('%d', x)])",
+    "x = nchoosek(int64(2^53 - 1), int64(2^53 - 2)); disp([class(x) ' ' sprintf('%d', x)])",
+    "disp(num2str([nchoosek(realmax, 1) == realmax, nchoosek(2^1020, 1) == 2^1020, nchoosek(1e307, 1) == 1e307]))",
     "disp(nchoosek(30, 15)), disp(nchoosek(int8(10), 3)), disp(nchoosek(1e9, 1))",
   ].join("\n");
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
@@ -2128,8 +2131,9 @@ test("nchoosek refuses mixed classes and results past their class's range before
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
     "refused: nchoosek: N and K must b", "refused: nchoosek: N and K must b",
-    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab",
-    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: K must be an i", "refused: nchoosek: K must be an i",
-    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab",
+    "refused: nchoosek: the result, at", "refused: nchoosek: the result, at", "refused: nchoosek: the result, ab",
+    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, at", "refused: nchoosek: K must be an i", "refused: nchoosek: K must be an i",
+    "refused: nchoosek: the result, at", "refused: nchoosek: the result, at", "refused: nchoosek: the result, at",
+    "int64 9007199254740991", "uint64 9007199254740991", "int64 9007199254740991", "1 1 1",
     "155117520", "120", "1.0000e+09"]);
 });
