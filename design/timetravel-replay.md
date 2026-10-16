@@ -168,7 +168,8 @@ JavaScript define exactly:
 | `pow` | ARM's, as glibc ships it | identical to glibc on $2 \times 10^6$ inputs; Chrome's `Math.pow` differed on 88, and it is the platform's, so it varies by OS |
 | `cosh`, `log10` | fdlibm's originals over glibc's `exp`/`log` | identical to glibc |
 | `sinh`, `tanh`, `expm1` | fdlibm's, with GCC's fused multiply-adds | closer to glibc than V8 |
-| `hypot` | V8's own algorithm (Chrome's bits) | as the linear-algebra kernels already did |
+| `hypot` in the linear-algebra kernels | V8's own algorithm (Chrome's bits) | — |
+| `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `asinh`, `acosh`, `atanh`, `log2`, `hypot` of `math`, `cmath` and numpy | [crmath.ts](../src/runtime/crmath.ts): correctly rounded, in double-double arithmetic (a fast table-based pass, and an accurate one where the fast pass cannot decide the rounding) | [test/crmath.test.ts](../test/crmath.test.ts) against mpmath; [scripts/libm-sweep.py](../scripts/libm-sweep.py) against CPython |
 | the rest | the Rust `libm` crate (musl, fdlibm, CORE-MATH's `cbrt`), ported line by line | bit for bit against that crate compiled to WebAssembly ([bench/libm-oracle](../bench/libm-oracle)) |
 
 [test/fdlibm.test.ts](../test/fdlibm.test.ts) checks two things in CI:
@@ -185,6 +186,26 @@ The suites comparing against NumPy, Sage, mpmath and CPython all pass.
 - `1.0 ** nan` and `(-1.0) ** inf` are now `1.0`, as in CPython.
   `Math.pow` gave NaN.
 - `pow` costs about 110 ns against `Math.pow`'s 19 ns.
+
+**Agreement with CPython (Oct 2026).** fdlibm's and musl's `sin` … `atan2`
+are within an ulp but differed from CPython's (glibc's, correctly rounded
+almost everywhere) on 2-17% of inputs, `asinh` and `acosh` on about 1%, and
+V8's `hypot` by up to 2 ulps. `scripts/libm-sweep.py` (300000 inputs per
+function, every difference refereed by mpmath) measured it. These twelve are
+now correctly rounded, so they give glibc's bits wherever glibc is correctly
+rounded, and the correct ones where it is not. The fast pass alone decides all but
+about one input in $2^{17}$. It costs 8-18 times fdlibm's time in V8 (2-8 in
+JavaScriptCore), which does not inline its double-double helpers there; inlining
+them by hand is the next step. `cbrt`
+(CORE-MATH's) was already correctly rounded, where glibc's is not on about half
+of the inputs. One consequence: glibc's own `asinh`, `acosh` and `atanh` are
+not correctly rounded on 6-17% of inputs (an ulp, two for `atanh`), so there
+Sagebrush now differs from CPython more often than musl's ports did (about 1%),
+but is the right one each time; fdlibm's formulas over glibc's `log` and
+`log1p` do not reproduce glibc's bits either (16-18% differ). `exp`, `log`,
+`log1p`, `log10`, `cosh` and `sqrt` agree with
+CPython on every input of the sweep; `expm1`, `sinh` and `tanh` differ on about
+one input in $10^4$, glibc being the one off as often as Sagebrush.
 
 **What remains engine-dependent:** a NaN's sign and payload bits. Python
 sees them only through `struct.pack`.
