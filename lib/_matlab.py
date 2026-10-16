@@ -7675,6 +7675,10 @@ def _strrep_text(t, o, nw, budget=None):
     is counted against budget (a one-element list of characters left) before it is built"""
     if not o:
         return t
+    budget = budget if budget is not None else [_TEXT_MAX]
+    # (a quick lower bound first: the non-overlapping matches alone, each giving a copy of new)
+    if t.count(o) * len(nw) > budget[0]:
+        _text_admit(_TEXT_MAX - budget[0] + t.count(o) * len(nw), "strrep")
     starts = set()
     k = t.find(o)
     while k >= 0:
@@ -7687,7 +7691,6 @@ def _strrep_text(t, o, nw, budget=None):
             kept += max(0, i - covered - 1)
             covered = max(covered, i + len(o) - 1)
         size = len(starts) * len(nw) + kept + (len(t) - covered - 1)
-        budget = budget if budget is not None else [_TEXT_MAX]
         if size > budget[0]:
             _text_admit(_TEXT_MAX - budget[0] + size, "strrep")
         budget[0] -= size
@@ -7722,15 +7725,17 @@ def strrep_(s, old, new):
     if any(_text_size_key(a.shape) != _text_size_key(shape) for a in arrays):
         raise _err("strrep: STR, OLD and NEW must be the same size or scalars.")
     n = _prod(shape)
+    # (the texts read, all elements together, admitted from their sizes before any is
+    # converted; then the results, each counted before it is built, against one budget)
+    _text_admit(_numel(s) * n if type(s) is not Cell else sum(_numel(e) for e in s.a) * (n if len(s.a) == 1 else 1), "strrep")
+    fixed = {id(a): _text(a) for a in args if type(a) is not Cell}  # (a scalar text, converted once)
     def item(a, k):
         if type(a) is Cell:
             e = a.a[k if len(a.a) != 1 else 0]
             if type(e) is not Char or _dims(e)[0] > 1:
                 raise _err("strrep: cell arrays must contain character vectors.")
             return e.text()
-        return _text(a)
-    # (the texts read and the results built, all elements together, admitted against one limit)
-    _text_admit(len(_text(s)) * n if type(s) is not Cell else sum(len(_text(e)) for e in s.a) * (n if len(s.a) == 1 else 1), "strrep")
+        return fixed[id(a)]
     budget = [_TEXT_MAX]
     out = []
     for k in range(n):
@@ -7921,15 +7926,19 @@ def _regexp(nargout, s, pat, opts, flags):
     if type(pat) is Cell:
         # (a cell array of expressions: each with STR, or with STR's corresponding
         # element when both are cell arrays, which must then have the same dimensions)
-        pats = [_regexp_row(e) for e in pat.a]
+        # (each expression searches its text: the texts searched, together, admitted from their
+        # sizes before any is converted)
         if type(s) is Cell:
             if _text_size_key(s.shape) != _text_size_key(pat.shape):
                 raise _err("regexp: STR and EXPRESSION must have the same dimensions when both are arrays.")
+            _text_admit(sum(_numel(e) for e in s.a), "regexp with a cell array of expressions (the texts searched)")
+        else:
+            _text_admit(_numel(s) * len(pat.a), "regexp with a cell array of expressions (the texts searched)")
+        pats = [_regexp_row(e) for e in pat.a]
+        if type(s) is Cell:
             strs = [_regexp_row(e) for e in s.a]
         else:
             strs = [_regexp_row(s)] * len(pats)
-        # (each expression searches its text: the texts searched, together, admitted first)
-        _text_admit(sum(len(_text(t)) for t in strs), "regexp with a cell array of expressions")
         per = [_regexp(max(1, nargout), t, p, opts, flags) for t, p in zip(strs, pats)]
         if nargout <= 1:
             return Cell(per, pat.shape)
