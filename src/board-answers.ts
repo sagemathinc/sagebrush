@@ -7,10 +7,11 @@
 //
 // Loaded only for `board answers` (src/board-cli.ts).
 
-import { renameSync, writeFileSync } from "fs";
+import { closeSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "fs";
+import { randomBytes } from "crypto";
 import { basename, dirname, join } from "path";
-import { cleanDoc, formatError, isBoard, pageCount, type BoardDoc } from "../web/board/doc";
-import { answerProblem, answerText, asksOf, ASK_LIMITS, type PageAsk } from "../web/board/ask";
+import { cleanDoc, formatError, isBoard, pageCount, type BoardDoc, type DocAsk } from "../web/board/doc";
+import { answerProblem, answerText, askProblems, asksOf, ASK_LIMITS, type PageAsk } from "../web/board/ask";
 import { FILE_MAX, readBounded } from "./board-check";
 import { CLI_READER } from "./board-cli";
 import { oneLine } from "./terminal-text";
@@ -44,7 +45,16 @@ export function submissionProblem(d: BoardDoc, m: any): string | null {
   if (m.comment !== undefined && (typeof m.comment !== "string" || m.comment.length > ASK_LIMITS.comment)) return `its comment is not a string of at most ${ASK_LIMITS.comment} characters`;
   const keys = Object.keys(m.answers);
   if (keys.length > ASK_LIMITS.asks) return `more than ${ASK_LIMITS.asks} answers`;
-  const asks = new Map(asksOf(d).filter((q) => q.page === n).map((q) => [q.ask.id, q.ask]));
+  // (each question of the page once, and as the board can ask it: else
+  // which question an answer is to, and what it may be, is not clear;
+  // cleanDoc's caller has refused ids twice on a page, CORR-02C-1)
+  const asks = new Map<string, DocAsk>();
+  for (const { ask: a } of asksOf(d).filter((q) => q.page === n)) {
+    if (asks.has(a.id)) return `two questions on page ${n} have the id ${JSON.stringify(a.id.slice(0, 60))}`;
+    asks.set(a.id, a);
+    const bad = askProblems(a).find((x) => x.level === "error" && x.field !== "answer");
+    if (bad) return `the question ${JSON.stringify(a.id.slice(0, 60))} can't be answered as written (${bad.field || "it"}: ${bad.message}): sagebrush board check says what to fix`;
+  }
   for (const k of keys) {
     const a = asks.get(k);
     if (!a) return `an answer to ${JSON.stringify(k.slice(0, 60))}, which is no question on page ${n}`;
@@ -73,6 +83,28 @@ export function applySubmission(raw: any, m: any): any {
   };
   walk(nodes);
   return raw;
+}
+
+/** Write a file whole, then put it in place (never half a board): a new
+ * file of a random name beside it, created only if no file or link has
+ * that name (SEC-02C-2), with the mode of the file it replaces; removed if
+ * anything fails.  The reason it failed, or null. */
+export function writeWhole(to: string, text: string): string | null {
+  const tmp = join(dirname(to), `.${basename(to)}.${randomBytes(8).toString("hex")}.tmp`);
+  let mode = 0o666, made = false, done = false;
+  try { mode = statSync(to).mode & 0o777; } catch {}
+  try {
+    const fd = openSync(tmp, "wx", mode);
+    made = true;
+    try { writeSync(fd, text); } finally { closeSync(fd); }
+    renameSync(tmp, to);
+    done = true;
+    return null;
+  } catch (e: any) {
+    return `${to}: ${e?.code === "EISDIR" ? "a directory" : e?.message ?? e}`;
+  } finally {
+    if (made && !done) try { unlinkSync(tmp); } catch {}
+  }
 }
 
 // (the first line of a question, short)
@@ -117,16 +149,8 @@ export async function boardAnswers(argv: string[]): Promise<number> {
     if (why) { say(`${apply === "-" ? "(standard input)" : apply}: refused, nothing written: ${why}`); return 1; }
     raw = applySubmission(raw, sub);
     doc = cleanDoc(raw);
-    const to = out ?? file;
-    // (written whole, then put in place: never half a board)
-    const tmp = join(dirname(to), `.${basename(to)}.${process.pid}.tmp`);
-    try {
-      writeFileSync(tmp, JSON.stringify(raw, null, 2) + "\n");
-      renameSync(tmp, to);
-    } catch (e: any) {
-      say(`${to}: ${e?.message ?? e}`);
-      return 1;
-    }
+    const why2 = writeWhole(out ?? file, JSON.stringify(raw, null, 2) + "\n");
+    if (why2) { say(why2); return 1; }
   }
   const qs = asksOf(doc), done = qs.filter((q) => q.ask.answer !== undefined), missing = qs.filter((q) => q.ask.required && q.ask.answer === undefined);
   const applied = sub ? { page: sub.page.number, id: typeof sub.id === "string" ? sub.id : null, name: sub.name ?? null, revision: sub.revision ?? null, comment: typeof sub.comment === "string" ? sub.comment : "" } : undefined;
