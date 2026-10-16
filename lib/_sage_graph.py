@@ -41,6 +41,15 @@ def _edge_spec(e, single):
         raise ValueError("too many values to unpack (expected 2, got %d)" % n if single else "too many values to unpack (expected 2)")
     raise ValueError("need more than %d value%s to unpack" % (n, "" if n == 1 else "s"))
 
+
+def _sq_shape(n):
+    """An n x n matrix within the matrix entry cap, checked before its rows
+    are allocated (daybreak2's HARD-6B4-1: Graph(10000).adjacency_matrix()
+    allocated 10^8 entries first)."""
+    from _sage_matrix import _shape
+    _shape(n, n)
+
+
 class GenericGraph:
     """Common code of Graph and DiGraph.
 
@@ -521,6 +530,7 @@ class GenericGraph:
         vs = vertices if vertices is not None else self.vertices(sort=True)
         idx = {v: i for i, v in enumerate(vs)}
         n = len(vs)
+        _sq_shape(n)
         rows = [[0] * n for _ in range(n)]
         for u in vs:
             for v in self._adj[u]:
@@ -542,6 +552,7 @@ class GenericGraph:
         vs = vertices if vertices is not None else self.vertices(sort=True)
         idx = {v: i for i, v in enumerate(vs)}
         n = len(vs)
+        _sq_shape(n)
         rows = [[0] * n for _ in range(n)]
         for u in vs:
             for v, l in self._adj[u].items():

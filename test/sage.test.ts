@@ -114,3 +114,11 @@ test("variety refuses large point counts and precisions before the work (HARD-11
   assert.equal(cli("--sage", "-c", src), "refused\nrefused\nrefused\n100\n");
   assert.ok(Date.now() - t < 60000);
 });
+
+test("a large graph's adjacency matrices are refused before their n^2 entries exist (HARD-6B4-1)", () => {
+  // (matrix(Graph(10000)) reached 1 GB before the 4194304-entry cap)
+  const src = "G = Graph(10000)\nfor f in (G.adjacency_matrix, G.weighted_adjacency_matrix, G.laplacian_matrix, lambda: matrix(G), lambda: matrix(QQ, G), lambda: matrix(1, 1, G)):\n try:\n  f()\n except (NotImplementedError, ValueError) as err:\n  print(type(err).__name__)\nprint(matrix(Graph(3)).dimensions())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(5) + "ValueError\n(3, 3)\n");
+  assert.ok(Date.now() - t < 30000);
+});
