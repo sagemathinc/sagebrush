@@ -97,6 +97,16 @@ test("a good board: no problems, its code run; a failing item is an error at its
   assert.equal(r.status, 0);
 });
 
+test("an item in another language than the board's: an error, its code not run in the board's language (astra's CORR-C5A-2)", () => {
+  const mixed = { format: "sagebrush-board", version: 1, title: "Mixed", nodes: [{ id: "s", mode: "sage", code: "print(2^3)" }] };
+  const r = run(["board", "check", "--json", file("mixed.board.json", mixed)]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const rep = JSON.parse(r.stdout);
+  assert.equal(rep.ok, false);
+  assert.ok(rep.problems.some((p: any) => p.level === "error" && /is in Sage, not the board's Python/.test(p.message)), JSON.stringify(rep.problems));
+  assert.ok(!JSON.stringify(rep).includes('"1\\n"'), "no wrong result reported: " + JSON.stringify(rep.code));
+});
+
 test("every example board has no problems", () => {
   const ex = join(repo, "web", "board", "examples");
   for (const f of readdirSync(ex).filter((f) => f.endsWith(".board.json"))) assert.deepEqual(lines(readFileSync(join(ex, f), "utf8")), [], f);

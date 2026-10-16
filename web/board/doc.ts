@@ -55,6 +55,10 @@ export interface DocNote {
   code?: string;
   /** `true`: show only the code's output, not the code */
   hideCode?: boolean;
+  /** a code item's language, when it is not the board's (`"python"`, `"sage"`, `"magma"` or `"matlab"`; default: the board's `mode`). Each language runs in its own interpreter: languages share no values, so copy data from one to another as literals */
+  // (William's item 16, option A: one interpreter for each language a board
+  // uses, started when its first item runs; names shared within a language)
+  mode?: BoardMode;
   /** a slow code item's output, kept to show before it runs (written by Sagebrush) */
   // (preview.ts, design/outputs.md; last in the file)
   preview?: Preview;
@@ -241,7 +245,7 @@ export const VERSION = 1;
 
 /** a board's language (BoardDoc.mode) */
 export type BoardMode = "python" | "sage" | "magma" | "matlab";
-const MODES = ["sage", "magma", "matlab"] as const;
+const MODES = ["sage", "magma", "matlab"] as const, ITEM_MODES = ["python", "sage", "magma", "matlab"] as const;
 
 /** A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`). */
 export interface BoardDoc {
@@ -359,7 +363,7 @@ export function refLabel(ref: string): string {
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  return { title: d.title, mode: d.mode, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */
@@ -453,7 +457,7 @@ export function cleanDoc(d: any): BoardDoc {
     }
     // (kind "code": the code items of documents before every note could have code)
     const code = n.kind === "code" ? (str(n.code) ?? "") : str(n.code);
-    return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, detail: str(n.detail), ref: str(n.ref),
+    return strip({ id: String(n.id), title: str(n.title), image: typeof n.image === "string" && IMAGE_NAME.test(n.image) ? n.image : undefined, text: str(n.text), code, hideCode: code !== undefined && n.hideCode === true ? true : undefined, mode: code !== undefined ? one(n.mode, ITEM_MODES) : undefined, detail: str(n.detail), ref: str(n.ref),
       color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
       x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h), preview: code !== undefined ? cleanPreview(n.preview) : undefined });
   };
@@ -642,7 +646,7 @@ export function codeOrder(d: BoardDoc): CodeCell[] {
     const kids = new Map<string | undefined, Item[]>();
     for (const it of items) if (it.kind === "note" || it.kind === "group") (kids.get(it.parent) ?? kids.set(it.parent, []).get(it.parent)!).push(it);
     const visit = (parent: string | undefined): Item[] => rows(kids.get(parent) ?? []).flatMap((it) => (it.kind === "group" ? visit(it.id) : [it]));
-    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code, page: i, item: it.id });
+    for (const it of visit(undefined)) if (it.code !== undefined) out.push({ id: it.id, code: it.code, page: i, item: it.id, mode: (it.mode as BoardMode | undefined) ?? d.mode ?? "python" });
   }
   // (an id is one item's on its page, and may be another's on another
   // page: on one interpreter, those cells are told apart by their page,
@@ -665,7 +669,7 @@ export function codeOrder(d: BoardDoc): CodeCell[] {
  * item's id, or, for an id that items on several pages have, `id@pN`, N
  * its page from 1, `~2`, `~3`, ... after it should that be an item's id);
  * `page` (from 0) and `item`, the item's on its page. */
-export interface CodeCell { id: string; code: string; page: number; item: string }
+export interface CodeCell { id: string; code: string; page: number; item: string; mode: BoardMode }
 
 // Boxes in rows (a box whose top is above the middle of the row's shortest
 // box so far joins it), top to bottom, each row left to right.
@@ -789,7 +793,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       items.push({ id: n.id, kind: "ink", x, y, w: b.w, h: b.h, outline: outlineOf(n), width: n.size ?? INK_SIZE, color: n.color, depth, parent, ...(n.opacity !== undefined ? { opacity: n.opacity } : {}) });
     } else {
       const img = imgOf(n);
-      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}) } : {}) });
+      items.push({ id: n.id, kind: "note", x, y, w: b.w, h: b.h, title: n.title, ...(img ? { image: img } : {}), text: n.text, detail: n.detail, ref: refOf(n), color: n.color, depth, parent, ...(n.shape ? { shape: n.shape } : {}), ...(n.code !== undefined ? { code: n.code, ...(n.hideCode ? { hideCode: true } : {}), ...(n.mode ? { mode: n.mode } : {}), ...((n.mode ?? doc.mode ?? "python") !== (doc.mode ?? "python") ? { lang: n.mode } : {}) } : {}) });
     }
   };
   for (const n of roots) {
