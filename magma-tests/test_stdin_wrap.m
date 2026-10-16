@@ -48,3 +48,8 @@ Zx<x> := PolynomialRing(Integers()); (10^100)*x^2 + 1;
 error "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 error 10^65;
 missingvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv;
+// each container counts once toward the printing depth: 99 and 100 deep print (CORR-90E-1)
+v := 3; for i in [1..99] do v := <v>; end for; v;
+v := 3; for i in [1..100] do v := <v>; end for; v;
+Sprintf("%o", v) eq Sprint(v);
+m := <[6], {7}>; for i in [1..98] do m := <m>; end for; m;
