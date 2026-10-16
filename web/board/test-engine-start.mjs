@@ -6,7 +6,8 @@
 // code can't run here, and outputs() settles rather than waiting.  The
 // deadline is lowered for the test (window.__sbEngineStartMs), and the
 // first k Workers the page makes are made dead: never loading, never
-// answering.  Serve web/dist first (python3 web/serve.py 8765), then
+// answering.  Closed while its start is waited for: settled at once,
+// nothing started again.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-engine-start.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -46,8 +47,9 @@ async function open(dead, ms) {
   if (script) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script });
   ({ identifier: script } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
     window.__sbEngineStartMs = ${ms};
-    const W = window.Worker; let left = ${dead}; window.__deadMade = 0;
+    const W = window.Worker; let left = ${dead}; window.__deadMade = 0; window.__made = 0;
     window.Worker = function (url, opts) {
+      window.__made++;
       if (left-- > 0) { window.__deadMade++; return { postMessage() {}, terminate() {}, addEventListener() {}, removeEventListener() {}, onmessage: null, onerror: null }; }
       return new W(url, opts);
     };
@@ -76,6 +78,32 @@ try {
   check(await until("/can't run here/.test(document.querySelector('[data-sbb=say]').textContent) && /did not start/.test(document.querySelector('[data-sbb=say]').textContent)", 30000), "no worker ever starts: the board says the code can't run here, and why: " + (await ev("document.querySelector('[data-sbb=say]').textContent")).slice(0, 200));
   const settled = await ev(`Promise.race([${B}.outputs().then(() => 'settled'), new Promise((r) => setTimeout(() => r('pending'), 10000))])`, 20000);
   check(settled === "settled", "...and outputs() settles, not waiting for good: " + settled);
+  // closed while its start is waited for (daybreak2's HARD-9BB-1): what
+  // waits on it settles at once, nothing is started again after its deadline
+  // (no new worker), and a board mounted afterwards runs as any other
+  await open(1, 4000);
+  await sleep(300);
+  check(await ev(`(async () => {
+    const pending = ${B}.outputs().then(() => 'settled');
+    await new Promise((r) => setTimeout(r, 1000));
+    const m = await import(new URL('board.js', location.href).href);
+    const t = performance.now();
+    await m.mounted.destroy();
+    const r = await Promise.race([pending, new Promise((r) => setTimeout(() => r('pending'), 1500))]);
+    return r === 'settled' && performance.now() - t < 1500;
+  })()`, 20000), "closed while its start is waited for: outputs() settles at once");
+  const madeAtClose = await ev("window.__made");
+  await sleep(9000); // (past the old board's deadlines: 4 s, and 4 more)
+  check((await ev("window.__made")) === madeAtClose, "...and nothing started again after the deadline: workers made " + madeAtClose + " then " + (await ev("window.__made")));
+  check(await ev(`(async () => {
+    const m = await import(new URL('board.js', location.href).href), el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0'; document.body.append(el);
+    const b = m.mountBoard(el, m.host);
+    await b.agent.load(${JSON.stringify(BOARD)});
+    const t = Date.now();
+    while (Date.now() - t < 30000) { const os = await b.agent.outputs(); if (os.find((o) => o.id === 'b')?.output.trim() === '42') return true; await new Promise((r) => setTimeout(r, 200)); }
+    return false;
+  })()`, 45000), "...and a board mounted afterwards runs its code");
   check(!errors.length, "no errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

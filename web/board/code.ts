@@ -48,12 +48,16 @@ export const BOARD_SEED = "0".repeat(64);
 /** How long an interpreter may take to start, or its analyzer to answer,
  * before it is started (asked) again, once (40 s; a test may set less). */
 const startMs = () => Number((globalThis as any).__sbEngineStartMs) || 40_000;
-/** Whether the kernel is ready within `ms`. */
-function started(kernel: any, ms: number): Promise<boolean> {
+/** Whether the kernel is ready within `ms`; `waits` holds its cancel
+ * (false at once, its listener and timer gone), for close(), HARD-9BB-1. */
+function started(kernel: any, ms: number, waits: Set<() => void>): Promise<boolean> {
   if (kernel.ready) return Promise.resolve(true);
   return new Promise((resolve) => {
-    const off = kernel.on("ready", () => { clearTimeout(t); off(); resolve(true); });
-    const t = setTimeout(() => { off(); resolve(!!kernel.ready); }, ms);
+    const done = (ok: boolean) => { clearTimeout(t); off(); waits.delete(cancel); resolve(ok); };
+    const cancel = () => done(false);
+    const off = kernel.on("ready", () => done(true));
+    const t = setTimeout(() => done(!!kernel.ready), ms);
+    waits.add(cancel);
   });
 }
 
@@ -90,7 +94,8 @@ export class BoardCode {
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
     let next = 0;
-    const waiting = new Map<number, (m: any) => void>();
+    // (each question: who settles it, and the worker it was asked of)
+    const waiting = this.asks;
     // (an analyzer that doesn't answer in time: its worker never started, or
     // hung: a new one is asked again, once; then the cell says so, rather
     // than the board waiting for good)
@@ -98,13 +103,13 @@ export class BoardCode {
       if (this.closed) return Promise.resolve({ error: { kind: "analyzer", message: "closed" }, sources: null });
       if (!this.analyzer) {
         const worker = (this.analyzer = this.parts.analyzer());
-        worker.onmessage = (ev) => { const f = waiting.get(ev.data.id); waiting.delete(ev.data.id); f?.(ev.data); };
+        // (a worker answers, or fails, only its own questions: one replaced
+        // after a deadline can't settle its successor's, HARD-9BB-1)
+        worker.onmessage = (ev) => { const q = waiting.get(ev.data?.id); if (!q || q.w !== worker) return; waiting.delete(ev.data.id); q.settle(ev.data); };
         worker.onerror = (e) => {
           worker.terminate();
           if (this.analyzer === worker) this.analyzer = null;
-          const ws = [...waiting.values()];
-          waiting.clear();
-          for (const f of ws) f({ error: { kind: "analyzer", message: e?.message || "the analyzer failed" }, sources: null });
+          for (const [id, q] of [...waiting]) if (q.w === worker) { waiting.delete(id); q.settle({ error: { kind: "analyzer", message: e?.message || "the analyzer failed" }, sources: null }); }
         };
       }
       return new Promise<any>((resolve) => {
@@ -114,7 +119,7 @@ export class BoardCode {
           if (this.analyzer === w) { w.terminate(); this.analyzer = null; }
           resolve(again || this.closed ? { error: { kind: "analyzer", message: `the analyzer did not answer in ${startMs() / 1000} s` }, sources: null } : ask(msg, true));
         }, startMs());
-        waiting.set(id, (d) => { clearTimeout(timer); resolve(d); });
+        waiting.set(id, { w, settle: (d) => { clearTimeout(timer); resolve(d); } });
         w.postMessage({ id, ...msg });
       });
     };
@@ -139,9 +144,14 @@ export class BoardCode {
     // still not ready, it can't run here, and says so, rather than every
     // run, idle() and outputs() waiting for good: its worker's script was
     // seen never to load, test-export on a busy VM)
-    if (!(await started(kernel, startMs())) && !this.closed) {
+    // (closed meanwhile: not ready, and nothing started again, HARD-9BB-1)
+    const ok = await started(kernel, startMs(), this.waits);
+    if (this.closed) throw new Error("closed");
+    if (!ok) {
       kernel.restart("\nThe interpreter did not start, and was started again.\n");
-      if (!(await started(kernel, startMs())) && !this.closed) throw new Error(`the interpreter did not start in ${(2 * startMs()) / 1000} s`);
+      const again = await started(kernel, startMs(), this.waits);
+      if (this.closed) throw new Error("closed");
+      if (!again) throw new Error(`the interpreter did not start in ${(2 * startMs()) / 1000} s`);
     }
   }
 
@@ -531,6 +541,11 @@ export class BoardCode {
    * element kept out of sight. */
   close() {
     this.closed = true;
+    // (a start waited for, and the analyzer's questions: settled now, their
+    // timers gone, rather than at their deadlines, HARD-9BB-1)
+    for (const cancel of [...this.waits]) cancel();
+    for (const q of [...this.asks.values()]) q.settle({ error: { kind: "analyzer", message: "closed" }, sources: null });
+    this.asks.clear();
     clearTimeout(this.pending);
     this.pending = 0;
     this.observer?.disconnect();
@@ -545,6 +560,9 @@ export class BoardCode {
     this.root = null;
   }
   private closed = false;
+  // (the start waited for: their cancels; the analyzer's questions not yet answered)
+  private waits = new Set<() => void>();
+  private asks = new Map<number, { w: Worker; settle: (d: any) => void }>();
   private kernel: any = null;
   private analyzer: Worker | null = null;
   private root: HTMLElement | null = null;
