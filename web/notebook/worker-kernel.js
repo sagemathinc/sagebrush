@@ -8,7 +8,7 @@
 //   kernel.on("status", (text) => ...);
 //   kernel.start();
 
-const STOPPED = "\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n";
+const STOPPED = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
 
 // A fast 53-bit hash of a run's output messages (cyrb53, fed incrementally),
 // for TimeTravel replay to check that a replayed run printed the same.

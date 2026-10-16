@@ -85,6 +85,14 @@ ok(out.includes("KeyboardInterrupt"), "Stop interrupts a loop: " + JSON.stringif
 // (the reactive notebook: a cell reading the interrupted cell's variables waits for it; the interpreter kept them)
 out = await runCode("print(globals()['keep'] + 1)");
 ok(out.includes("42"), "...and the variables are kept: " + JSON.stringify(out));
+// a call that never checks the flag (a backtracking re match): the server's
+// worker is ended and a new one started; the next cell runs
+const t0 = Date.now();
+out = await runAndStop("import re\nre.match('(a+)+$', 'a' * 40 + 'b')", 1500);
+ok(/did not stop when interrupted/.test(out) && Date.now() - t0 - 1500 < 4000, `Stop ends a catastrophic re.match (${Date.now() - t0 - 1500} ms): ` + JSON.stringify(out.slice(-120)));
+await ready();
+out = await runCode("print(6 * 7)");
+ok(out.includes("42"), "...and the next cell runs: " + JSON.stringify(out));
 await runCode("icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()");
 ok(await ev("!!document.querySelector('figure.plot3d svg')"), "3D graphics show");
 await sleep(1500);
