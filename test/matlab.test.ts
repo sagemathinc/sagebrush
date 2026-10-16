@@ -2242,6 +2242,8 @@ test("a MATLAB function Sagebrush lacks is refused with the catalog's alternativ
     "disp(mat2str(xcorr([1 2 3], 'unbiased'), 5))", "r = xcorr([1i 2], [1 1i]); disp(mat2str([real(r); imag(r)]))", "[r, l] = xcorr([1 2], 3); disp(mat2str([r; l]))",
     "r = xcorr([1 2 3]', [1 1 1]'); disp(mat2str(size(r)))", msg("xcorr([1 2; 3 4])"), msg("xcorr([1 2 3], [1 2], 'biased')"), msg("xcorr(int8([1 2]))"), msg("xcorr([1 2], 1e9)"), msg("xcorr([], [], 5)"),
     "[n, d] = rat(pi); disp([n d])", "[n, d] = rat([0.75 -0.5 Inf NaN 2]); disp(mat2str([n; d]))", "[n, d] = rat(0.333, 0.01); disp([n d])", msg("rat(0.5)"),
+    msg("[n, d] = rat(pi, [1 2])"), msg("[n, d] = rat(pi, -1)"), "try, [n, d] = rat(pi, 0); disp('ran'), catch err, disp(err.message(1:31)), end", "[n, d] = rat(0.5, 0); disp([n d])",
+    "disp(mat2str(xcorr(1e80 * [1 2 3], 'normalized') * 14, 12))", "disp(mat2str(xcorr(1e-100 * [1 2 3], 'normalized') * 14, 12))", msg("xcorr([0 0], 'normalized')"),
   ].join("\n")), [
     "double [6 4 2;6 2 4;4 6 2;4 2 6;2 6 4;2 4 6]", "int8 [2 1;1 2]", "double [40320 8]", "double [362880 9]",
     "perms of 9 elements is not supported in Sagebrush: its result is limited to 8388608 bytes (8 elements of a double vector); loop over the permutations instead.",
@@ -2252,7 +2254,9 @@ test("a MATLAB function Sagebrush lacks is refused with the catalog's alternativ
     "xcorr: with scaleopt 'biased', x and y must have the same length.", "xcorr of int8 input is not supported; it takes double or single vectors.",
     "xcorr at 2000000001 lags is not supported in Sagebrush: at most 1000000.", "xcorr of empty vectors is not supported in Sagebrush.",
     "355   113", "[3 -1 1 0 2;4 2 0 0 1]", "1     3",
-    "rat with one output (the continued fraction as text) is not supported in Sagebrush; use [N, D] = rat(X), which gives X as N./D."]);
+    "rat with one output (the continued fraction as text) is not supported in Sagebrush; use [N, D] = rat(X), which gives X as N./D.",
+    "rat: tol must be a real nonnegative scalar.", "rat: tol must be a real nonnegative scalar.", "rat: the tolerance 0 cannot be", "1     2",
+    "[3 8 14 8 3]", "[3 8 14 8 3]", "xcorr: 'normalized' needs vectors that are finite and not all zero."]);
 });
 
 test("perms and xcorr are made within their limits, and refused past them, under a 96 MiB heap", () => {

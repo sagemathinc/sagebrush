@@ -5039,7 +5039,9 @@ def rat_(nargout, x, tol=None):
         raise _err("rat of complex values is not supported in Sagebrush.")
     flat = A.reshape(-1)
     fin = flat[np.isfinite(flat)]
-    t = 1e-6 * float(np.sum(np.abs(fin))) if tol is None else _scalar(tol)
+    if tol is not None and (_istext(tol) or _numel(tol) != 1 or not isreal_(tol) or not _scalar(tol) >= 0):
+        raise _err("rat: tol must be a real nonnegative scalar.")
+    t = 1e-6 * float(np.sum(np.abs(fin))) if tol is None else float(_scalar(tol))
     N = np.zeros(flat.size)
     D = np.zeros(flat.size)
     for i, v in enumerate(flat):
@@ -5062,6 +5064,9 @@ def rat_(nargout, x, tol=None):
             k += 1
         if d < 0:
             n, d = -n, -d
+        # (a tolerance the expansion can't reach, such as 0 for pi: refused, not missed)
+        if abs(v - n / d) > t:
+            raise _err("rat: the tolerance %g cannot be reached for %.17g (the closest ratio found is %.17g/%.17g)." % (t, v, n, d))
         N[i], D[i] = n, d
     shape = A.shape
     return [_finish(N.reshape(shape), cls), _finish(D.reshape(shape), cls)] + [NOVAL] * (nargout - 2)
@@ -6962,6 +6967,15 @@ def xcorr_(nargout, x, *args):
         raise _err("xcorr of vectors of %d elements is not supported in Sagebrush: too much work." % N)
     Xp = np.concatenate([X, np.zeros(N - X.size, dtype=X.dtype)])
     Yp = np.concatenate([Y, np.zeros(N - Y.size, dtype=Y.dtype)])
+    if scale == "normalized":
+        # (normalized: x and y each scaled by its largest magnitude first, so that the
+        # scale cancels exactly and the energies can't overflow or underflow)
+        sx = float(np.max(np.abs(Xp)))
+        sy = float(np.max(np.abs(Yp)))
+        if sx == 0 or sy == 0 or not (_math.isfinite(sx) and _math.isfinite(sy)):
+            raise _err("xcorr: 'normalized' needs vectors that are finite and not all zero.")
+        Xp = Xp / sx
+        Yp = Yp / sy
     cplx = Xp.dtype.kind == "c" or Yp.dtype.kind == "c"
     out = np.zeros(2 * L + 1, dtype=np.complex128 if cplx else np.float64)
     for j, m in enumerate(range(-L, L + 1)):
