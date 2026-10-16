@@ -13,6 +13,7 @@
 //
 // IdbOutputCache is this browser's (IndexedDB); a host may give another (in
 // CoCalc, a file beside the board's).
+import { openDb } from "./idb-open";
 
 export interface CachedOutputs {
   key: string;
@@ -158,16 +159,17 @@ export class IdbOutputCache implements OutputCache {
   /** @param engine the id of the engine computing what is put (recorded with each entry) */
   constructor(readonly engine?: string, readonly name = "sagebrush-outputs", readonly caps = { doc: DOC_CAP, all: ALL_CAP }) {}
   private open(): Promise<IDBDatabase> {
-    return (this.db ??= new Promise((res, rej) => {
-      const r = indexedDB.open(this.name, 1);
-      r.onupgradeneeded = () => {
-        const db = r.result;
+    // (bounded, web/board/idb-open.ts: an open that never answers fails, and
+    // the next operation tries again, as one closed for another page's upgrade does)
+    if (!this.db) {
+      const p: Promise<IDBDatabase> = openDb(this.name, 1, (db) => {
         db.createObjectStore("entries", { keyPath: ["doc", "key"] }).createIndex("doc", "doc");
         db.createObjectStore("docs", { keyPath: "doc" });
-      };
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    }));
+      }, () => { if (this.db === p) this.db = null; });
+      this.db = p;
+      p.catch(() => { if (this.db === p) this.db = null; });
+    }
+    return this.db;
   }
   get(doc: string, keys: string[]): Promise<Map<string, CachedOutputs>> {
     return this.inOrder(() => this.getNow(doc, keys));
