@@ -1,0 +1,44 @@
+[
+  {
+    "name": "fractions.Fraction",
+    "kind": "class",
+    "signature": "(numerator=0, denominator=None)",
+    "summary": "An exact rational number, from integers, a string or a float.",
+    "examples": [
+      {
+        "code": "Fraction(3, 4) + Fraction(1, 6)",
+        "expected": "Fraction(11, 12)\n"
+      },
+      {
+        "code": "Fraction('1.25')",
+        "expected": "Fraction(5, 4)\n"
+      },
+      {
+        "code": "Fraction(0.1)",
+        "expected": "Fraction(3602879701896397, 36028797018963968)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "fractions.Fraction.limit_denominator",
+    "kind": "method",
+    "signature": "(max_denominator=1000000)",
+    "summary": "The closest fraction with a denominator at most max_denominator.",
+    "examples": [
+      {
+        "code": "Fraction(math.pi).limit_denominator(100)",
+        "expected": "Fraction(311, 99)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

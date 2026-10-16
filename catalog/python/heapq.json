@@ -1,0 +1,223 @@
+[
+  {
+    "name": "heapq.heapify",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Rearrange a list in place into a minimum heap.",
+    "examples": [
+      {
+        "code": "h = [3, 1, 4, 2]\nheapq.heapify(h)\nh[0]",
+        "expected": "1\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heappop",
+    "kind": "function",
+    "signature": "(heap)",
+    "summary": "Remove and return the minimum item.",
+    "examples": [
+      {
+        "code": "h = [3, 1, 4, 2]\nheapq.heapify(h)\n[heapq.heappop(h) for _ in range(4)]",
+        "expected": "[1, 2, 3, 4]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heappushpop",
+    "kind": "function",
+    "signature": "(heap, item)",
+    "summary": "Push an item, then remove and return the minimum.",
+    "examples": [
+      {
+        "code": "h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heappushpop(h, 3), sorted(h))",
+        "expected": "(2, [3, 4, 6])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heapreplace",
+    "kind": "function",
+    "signature": "(heap, item)",
+    "summary": "Remove the minimum item, then insert the new item.",
+    "examples": [
+      {
+        "code": "h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heapreplace(h, 5), sorted(h))",
+        "expected": "(2, [4, 5, 6])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heapify_max",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Rearrange a list in place into a maximum heap.",
+    "examples": [
+      {
+        "code": "h = [3, 1, 4, 2]\nheapq.heapify_max(h)\nh[0]",
+        "expected": "4\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heappop_max",
+    "kind": "function",
+    "signature": "(heap)",
+    "summary": "Remove and return the maximum item.",
+    "examples": [
+      {
+        "code": "h = [3, 1, 4, 2]\nheapq.heapify_max(h)\n[heapq.heappop_max(h) for _ in range(4)]",
+        "expected": "[4, 3, 2, 1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heappushpop_max",
+    "kind": "function",
+    "signature": "(heap, item)",
+    "summary": "Push an item, then remove and return the maximum.",
+    "examples": [
+      {
+        "code": "h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heappushpop_max(h, 3), sorted(h))",
+        "expected": "(6, [2, 3, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heapreplace_max",
+    "kind": "function",
+    "signature": "(heap, item)",
+    "summary": "Remove the maximum item, then insert the new item.",
+    "examples": [
+      {
+        "code": "h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heapreplace_max(h, 5), sorted(h))",
+        "expected": "(6, [2, 4, 5])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heappush_max",
+    "kind": "function",
+    "signature": "(heap, item)",
+    "summary": "Push an item while preserving the max-heap order.",
+    "examples": [
+      {
+        "code": "h = [3, 1, 2]\nheapq.heapify_max(h)\nheapq.heappush_max(h, 5)\nh[0]",
+        "expected": "5\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.merge",
+    "kind": "function",
+    "signature": "(*iterables, key=None, reverse=False)",
+    "summary": "Merge already sorted iterables into one sorted iterator.",
+    "examples": [
+      {
+        "code": "list(heapq.merge([1, 4, 7], [2, 4, 6]))",
+        "expected": "[1, 2, 4, 4, 6, 7]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.heappush",
+    "kind": "function",
+    "signature": "(heap, item)",
+    "summary": "An item pushed onto a heap (a list with the smallest first).",
+    "examples": [
+      {
+        "code": "h = []\nfor x in [5, 1, 4, 2]:\n    heapq.heappush(h, x)\n[heapq.heappop(h) for _ in range(4)]",
+        "expected": "[1, 2, 4, 5]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.nlargest",
+    "kind": "function",
+    "signature": "(n, iterable, key=None)",
+    "summary": "The n largest elements.",
+    "examples": [
+      {
+        "code": "heapq.nlargest(2, [5, 1, 8, 3])",
+        "expected": "[8, 5]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "heapq.nsmallest",
+    "kind": "function",
+    "signature": "(n, iterable, key=None)",
+    "summary": "The n smallest elements.",
+    "examples": [
+      {
+        "code": "heapq.nsmallest(2, [5, 1, 8, 3])",
+        "expected": "[1, 3]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

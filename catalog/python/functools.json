@@ -1,0 +1,206 @@
+[
+  {
+    "name": "functools.cached_property",
+    "kind": "function",
+    "signature": "(func)",
+    "summary": "Compute an attribute on first access and cache it on the instance.",
+    "examples": [
+      {
+        "code": "class Batch:\n    def __init__(self): self.calls = 0\n    @functools.cached_property\n    def total(self):\n        self.calls += 1\n        return sum([2, 3, 5])\nb = Batch()\n(b.total, b.total, b.calls)",
+        "expected": "(10, 10, 1)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.cmp_to_key",
+    "kind": "function",
+    "signature": "(mycmp)",
+    "summary": "Turn a two-argument comparison into a sorting key.",
+    "examples": [
+      {
+        "code": "sorted(['pear', 'fig', 'plum'], key=functools.cmp_to_key(lambda a, b: len(a) - len(b)))",
+        "expected": "['fig', 'pear', 'plum']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.partialmethod",
+    "kind": "function",
+    "signature": "(func, /, *args, **keywords)",
+    "summary": "Define a method with some arguments fixed, preserving instance binding.",
+    "examples": [
+      {
+        "code": "class Switch:\n    def set(self, value): self.value = value\n    on = functools.partialmethod(set, True)\ns = Switch()\ns.on()\ns.value",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.singledispatch",
+    "kind": "function",
+    "signature": "(func)",
+    "summary": "Dispatch a function on the type of its first argument.",
+    "examples": [
+      {
+        "code": "@functools.singledispatch\ndef describe(x): return 'object'\n@describe.register(int)\ndef _(x): return 'integer'\n[describe(3), describe('hi')]",
+        "expected": "['integer', 'object']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.singledispatchmethod",
+    "kind": "function",
+    "signature": "(func)",
+    "summary": "Dispatch a method on the first argument after self or cls.",
+    "examples": [
+      {
+        "code": "class Describe:\n    @functools.singledispatchmethod\n    def kind(self, x): return 'object'\n    @kind.register(int)\n    def _(self, x): return 'integer'\nd = Describe()\n[d.kind(3), d.kind('hi')]",
+        "expected": "['integer', 'object']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.total_ordering",
+    "kind": "function",
+    "signature": "(cls)",
+    "summary": "Fill in ordering methods from equality and one ordering comparison.",
+    "examples": [
+      {
+        "code": "@functools.total_ordering\nclass Score:\n    def __init__(self, n): self.n = n\n    def __eq__(self, other): return self.n == other.n\n    def __lt__(self, other): return self.n < other.n\n(Score(2) <= Score(2), Score(3) > Score(2), Score(1) >= Score(2))",
+        "expected": "(True, True, False)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.update_wrapper",
+    "kind": "function",
+    "signature": "(wrapper, wrapped, assigned=WRAPPER_ASSIGNMENTS, updated=WRAPPER_UPDATES)",
+    "summary": "Copy a wrapped function's metadata and retain it in __wrapped__.",
+    "examples": [
+      {
+        "code": "def double(x): return 2 * x\ndef wrapper(x): return double(x)\nfunctools.update_wrapper(wrapper, double)\n(wrapper.__name__, wrapper(3), wrapper.__wrapped__ is double)",
+        "expected": "('double', 6, True)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.wraps",
+    "kind": "function",
+    "signature": "(wrapped, assigned=WRAPPER_ASSIGNMENTS, updated=WRAPPER_UPDATES)",
+    "summary": "Decorate a wrapper so it preserves the wrapped function's metadata.",
+    "examples": [
+      {
+        "code": "def double(x): return 2 * x\n@functools.wraps(double)\ndef wrapper(x): return double(x)\n(wrapper.__name__, wrapper(4), wrapper.__wrapped__ is double)",
+        "expected": "('double', 8, True)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.reduce",
+    "kind": "function",
+    "signature": "(function, iterable[, initial])",
+    "summary": "A sequence folded into one value by a two-argument function.",
+    "examples": [
+      {
+        "code": "functools.reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])",
+        "expected": "120\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.partial",
+    "kind": "function",
+    "signature": "(func, *args, **keywords)",
+    "summary": "A function with some arguments fixed.",
+    "examples": [
+      {
+        "code": "int2 = functools.partial(int, base=2)\nint2('1011')",
+        "expected": "11\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.lru_cache",
+    "kind": "function",
+    "signature": "(maxsize=128)",
+    "summary": "A decorator that remembers a function's results.",
+    "examples": [
+      {
+        "code": "@functools.lru_cache(maxsize=None)\ndef fib(n):\n    return n if n < 2 else fib(n - 1) + fib(n - 2)\nfib(80)",
+        "expected": "23416728348467685\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "functools.cache",
+    "kind": "function",
+    "signature": "(user_function)",
+    "summary": "A decorator that remembers all of a function's results.",
+    "examples": [
+      {
+        "code": "@functools.cache\ndef f(n):\n    return n * n\n[f(3), f(3), f.cache_info().hits]",
+        "expected": "[9, 9, 1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  }
+]

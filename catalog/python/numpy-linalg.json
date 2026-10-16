@@ -1,0 +1,295 @@
+[
+  {
+    "name": "numpy.linalg.solve",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The solution x of the linear system a x = b.",
+    "examples": [
+      {
+        "code": "np.linalg.solve([[3, 1], [1, 2]], [9, 8])",
+        "expected": "array([2., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.inv",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The inverse of a matrix.",
+    "examples": [
+      {
+        "code": "np.linalg.inv([[1.0, 2.0], [3.0, 4.0]])",
+        "expected": "array([[-2. ,  1. ],\n       [ 1.5, -0.5]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.det",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The determinant.",
+    "examples": [
+      {
+        "code": "round(np.linalg.det([[1, 2], [3, 4]]), 10)",
+        "expected": "np.float64(-2.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.eig",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "Eigenvalues and right eigenvectors.",
+    "examples": [
+      {
+        "code": "w, v = np.linalg.eig([[2.0, 0.0], [0.0, 3.0]])\nw",
+        "expected": "array([2.+0.j, 3.+0.j])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.eigh",
+    "kind": "function",
+    "signature": "(a, UPLO='L')",
+    "summary": "Eigenvalues (ascending) and eigenvectors of a symmetric or Hermitian matrix.",
+    "examples": [
+      {
+        "code": "w, v = np.linalg.eigh([[2.0, 1.0], [1.0, 2.0]])\nw",
+        "expected": "array([1., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.eigvals",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The eigenvalues of a matrix.",
+    "examples": [
+      {
+        "code": "np.linalg.eigvals([[0.0, 1.0], [-2.0, -3.0]])",
+        "expected": "array([-1.+0.j, -2.+0.j])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.svd",
+    "kind": "function",
+    "signature": "(a, full_matrices=True, compute_uv=True)",
+    "summary": "The singular value decomposition u s vh.",
+    "examples": [
+      {
+        "code": "np.linalg.svd([[3.0, 0.0], [0.0, 4.0]], compute_uv=False)",
+        "expected": "array([4., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.qr",
+    "kind": "function",
+    "signature": "(a, mode='reduced')",
+    "summary": "The QR decomposition.",
+    "examples": [
+      {
+        "code": "q, r = np.linalg.qr([[3.0, 1.0], [4.0, 2.0]])\nnp.round(abs(r), 6)",
+        "expected": "array([[5. , 2.2],\n       [0. , 0.4]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.cholesky",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The lower-triangular Cholesky factor L, a = L L^H.",
+    "examples": [
+      {
+        "code": "np.linalg.cholesky([[4.0, 2.0], [2.0, 3.0]])",
+        "expected": "array([[2.        , 0.        ],\n       [1.        , 1.41421356]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.norm",
+    "kind": "function",
+    "signature": "(x, ord=None, axis=None)",
+    "summary": "A vector or matrix norm.",
+    "examples": [
+      {
+        "code": "np.linalg.norm([3, 4])",
+        "expected": "np.float64(5.0)\n"
+      },
+      {
+        "code": "np.linalg.norm([[1, 2], [3, 4]], 'fro')",
+        "expected": "np.float64(5.477225575051661)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.matrix_rank",
+    "kind": "function",
+    "signature": "(A, tol=None)",
+    "summary": "The rank of a matrix.",
+    "examples": [
+      {
+        "code": "np.linalg.matrix_rank([[1, 2], [2, 4]])",
+        "expected": "np.int64(1)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.matrix_power",
+    "kind": "function",
+    "signature": "(a, n)",
+    "summary": "A matrix raised to an integer power.",
+    "examples": [
+      {
+        "code": "np.linalg.matrix_power([[1, 1], [1, 0]], 10)",
+        "expected": "array([[89, 55],\n       [55, 34]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.lstsq",
+    "kind": "function",
+    "signature": "(a, b, rcond=None)",
+    "summary": "The least-squares solution of a x = b.",
+    "examples": [
+      {
+        "code": "x, res, rank, sv = np.linalg.lstsq([[1, 0], [1, 1], [1, 2]], [1, 2, 4])\nx",
+        "expected": "array([0.83333333, 1.5       ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.pinv",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The Moore-Penrose pseudo-inverse.",
+    "examples": [
+      {
+        "code": "np.linalg.pinv([[1.0, 2.0], [2.0, 4.0]])",
+        "expected": "array([[0.04, 0.08],\n       [0.08, 0.16]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.cond",
+    "kind": "function",
+    "signature": "(x, p=None)",
+    "summary": "The condition number of a matrix.",
+    "examples": [
+      {
+        "code": "np.linalg.cond([[1, 0], [0, 4]])",
+        "expected": "np.float64(4.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.slogdet",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The sign and the log of the absolute value of the determinant.",
+    "examples": [
+      {
+        "code": "np.linalg.slogdet([[2.0, 0.0], [0.0, 3.0]])",
+        "expected": "SlogdetResult(sign=np.float64(1.0), logabsdet=np.float64(1.791759469228055))\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linalg.multi_dot",
+    "kind": "function",
+    "signature": "(arrays)",
+    "summary": "The product of several matrices, in the cheapest order.",
+    "examples": [
+      {
+        "code": "np.linalg.multi_dot([[[1, 2]], [[3], [4]], [[5]]])",
+        "expected": "array([[55]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  }
+]

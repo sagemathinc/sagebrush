@@ -91,6 +91,13 @@ try {
   check(!hits.some((t) => /galois/i.test(t)), "in a Python notebook, the search has no Sage functions: " + JSON.stringify(hits[0]?.slice(0, 80)));
   hits = await search("linspace");
   check(hits.some((t) => t.startsWith("numpy.linspace")), "and finds NumPy's: " + JSON.stringify(hits[0]?.slice(0, 60)));
+  // (the catalog's entries list their examples, catalog/SCHEMA.md: counted
+  // as the older indexes' counts, and none for a name with no entry)
+  const lin = hits.find((t) => t.startsWith("numpy.linspace("));
+  check(/1 example(?!s)/.test(lin ?? "") && !/object/.test(lin ?? ""), "a catalog entry shows its examples' count: " + JSON.stringify(lin?.slice(0, 120)));
+  hits = await search("amax");
+  const amax = hits.find((t) => t.startsWith("numpy.amax"));
+  check(!!amax && !/example/.test(amax), "a public name with no catalog entry shows none: " + JSON.stringify(amax?.slice(0, 120)));
 
   // a function's examples: inserted only into a notebook of its language, which never changes
   await choose("sage");
