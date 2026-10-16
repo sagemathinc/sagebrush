@@ -370,6 +370,8 @@ def issubdtype(arg1, arg2):
 
 
 def result_type(*arrays_and_dtypes):
+    if not arrays_and_dtypes:
+        raise ValueError("at least one array or dtype is required")
     return _np.result_type(*arrays_and_dtypes)
 
 
@@ -1518,9 +1520,17 @@ def ediff1d(ary, to_end=None, to_begin=None):
 def gradient(f, *varargs, axis=None, edge_order=1):
     f = asarray(f, float64)
     axes = list(range(f.ndim)) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
-    spacing = list(varargs) if varargs else [1.0] * len(axes)
-    if len(spacing) == 1 and len(axes) > 1:
-        spacing = spacing * len(axes)
+    # (NumPy's rule: no spacing, one scalar for every axis, or one per
+    # axis; any other count is a TypeError, not a truncated zip)
+    n = len(varargs)
+    if n == 0:
+        spacing = [1.0] * len(axes)
+    elif n == 1 and ndim(varargs[0]) == 0:
+        spacing = list(varargs) * len(axes)
+    elif n == len(axes):
+        spacing = list(varargs)
+    else:
+        raise TypeError("invalid number of arguments")
     res = []
     for ax, h in zip(axes, spacing):
         fm = moveaxis(f, ax, 0)

@@ -81,3 +81,13 @@ test("calls with the wrong count raise TypeError, and the right ones (defaults, 
   const w = want.split("\n"), g = got.split("\n");
   for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], `line ${i + 1}`);
 });
+
+// numpy (lib/numpy, Python functions that bind their own arguments): a probe
+// of every public callable with 12 and with 0 arguments against NumPy 2.5.1
+// found gradient and result_type answering; their expected output is NumPy
+// 2.5.1's (test/numpy_arity_cases.out: the VMs' python3 has an older NumPy).
+test("numpy's gradient and result_type refuse wrong argument counts, as NumPy 2.5.1's", () => {
+  const want = require("node:fs").readFileSync(TEST + "numpy_arity_cases.out", "utf8");
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", TEST + "numpy_arity_cases.py"], { encoding: "utf8" });
+  assert.equal(got, want);
+});
