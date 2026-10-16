@@ -16,6 +16,32 @@ test("exec and eval with separate globals and locals scope names as CPython", ()
   const got = execFileSync(process.execPath, [CLI, TEST + "exec_namespaces_cases.py"], { encoding: "utf8" });
   assert.equal(got, readFileSync(TEST + "exec_namespaces_cases.out", "utf8"));
 });
+// (test/exec_mapping_cases.py, its .out CPython 3.14's): locals that
+// aren't an exact dict are read, written and deleted through their own
+// __getitem__, __setitem__ and __delitem__; a KeyError means unbound there
+test("exec and eval with a locals mapping use its methods as CPython", () => {
+  const got = execFileSync(process.execPath, [CLI, TEST + "exec_mapping_cases.py"], { encoding: "utf8" });
+  assert.equal(got, readFileSync(TEST + "exec_mapping_cases.out", "utf8"));
+});
+// (HARD-5F6-1) dir() over a mapping whose keys() never ends, or repeats one
+// key forever: a MemoryError at a budget of the heap, never V8's abort
+test("dir() over a locals mapping refuses an endless keys()", () => {
+  const src = [
+    "import itertools",
+    "def t(keys):",
+    "    M = type('M', (), {'__getitem__': lambda self, k: (_ for _ in ()).throw(KeyError(k)), 'keys': lambda self: keys})",
+    "    try:",
+    "        return eval('dir()', {}, M())",
+    "    except MemoryError as e:",
+    "        return 'MemoryError: ' + str(e)",
+    "print(t(itertools.repeat('x')))",
+    "print(t(map(str, itertools.count())))",
+    "print(t(('b', 'a', 'b')))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", CLI, "-c", src], { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "MemoryError: M.keys() is too long to list\nMemoryError: M.keys() is too long to list\n['a', 'b', 'b']\n");
+});
 test("Sage's RR, RDF and CC elements are no float or complex as hook results", () => {
   const src = [
     "def t(f):",
