@@ -168,6 +168,63 @@ show(v);
 clear
 v = complex(2, 5);
 show(v);
+% logspace
+clear
+v = logspace(-2, 1, 4);
+show(v);
+% flip
+clear
+v = flip([2 5 1; 7 4 9], 2);
+show(v);
+% permute
+clear
+v = permute(reshape(1:12, 2, 3, 2), [2 1 3]);
+show(v);
+% squeeze
+clear
+v = squeeze(reshape(1:6, 1, 2, 3));
+show(v);
+% repelem
+clear
+v = repelem([3 -2 5], [1 3 2]);
+show(v);
+% cummin
+clear
+v = cummin([8 3 5 2 6]);
+show(v);
+% cummax
+clear
+v = cummax([2 5 1 7 4]);
+show(v);
+% bounds
+clear
+[lo, hi] = bounds([2 9; -3 4; 7 1]);
+show(lo);
+show(hi);
+% true
+clear
+v = true(2, 3);
+show(v);
+% false
+clear
+v = false(3, 1);
+show(v);
+% nan
+clear
+v = nan(1, 3);
+show(v);
+% NaN
+clear
+v = NaN(2, 1);
+show(v);
+% inf
+clear
+v = inf(1, 2);
+show(v);
+% Inf
+clear
+v = Inf(2, 1);
+show(v);
 % zeros
 clear
 v = zeros(2, 3);
