@@ -1775,6 +1775,8 @@ test("coverage wrongs: exact int64 literals, std/var flags, integer classes kept
     "[tf, loc] = ismember([NaN 2 NaN], [2 NaN]); disp(mat2str(tf)); disp(mat2str(loc))",
     "disp(mat2str(unique([3 NaN 1 NaN]))); [u, ia, ic] = unique([3 NaN 1 NaN], 'TreatMissingAsDistinct', false); disp(mat2str(u)); disp(mat2str(ia')); disp(mat2str(ic'))",
     tryIt("unique([1 2], 'bogus')"),
+    // (atanh of a real x < -1: the conjugate branch, so atanh is odd on the reals)
+    "z = atanh([5 -5]); fprintf('%.4f %.4f %.4f %.4f\\n', real(z(1)), imag(z(1)), real(z(2)), imag(z(2)))",
     // (c{:} alone: each element displayed as ans)
     "c = {7, 'two'}; c{:}",
     "c{2:-1:1};", "disp(ans)",
@@ -1789,6 +1791,7 @@ test("coverage wrongs: exact int64 literals, std/var flags, integer classes kept
     "[false true false]", "[0 1 0]",
     "[1 3 NaN NaN]", "[1 3 NaN]", "[3 1 2]", "[2 3 1 3]",
     "refused",
+    "0.2027 1.5708 -0.2027 -1.5708",
     "ans =", "     7", "ans =", "    'two'",
     "     7",
   ]);
