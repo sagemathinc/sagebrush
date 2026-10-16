@@ -6,7 +6,8 @@ the others end, as generators do."""
 
 
 def count(start=0, step=1):
-    n = start
+    # (a bool start counts from its int, as Python's: count(False) is 0, 1, ...)
+    n = int(start) if type(start) is bool else start
     while True:
         yield n
         n += step
@@ -313,8 +314,19 @@ class _tee:
 
 
 def tee(iterable, n=2):
+    import sys
+    if not isinstance(n, int):
+        if not hasattr(type(n), "__index__"):
+            raise TypeError("'%s' object cannot be interpreted as an integer" % type(n).__name__)
+        n = n.__index__()
     if n < 0:
         raise ValueError("n must be >= 0")
+    if n > sys.maxsize:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    # (n copies are n objects: past what the heap holds, a MemoryError, never
+    # the heap running out)
+    if n * 256 > getattr(sys, "_sagebrush_heap_limit", 1 << 30) // 4:
+        raise MemoryError("tee: %d copies are more than this heap holds" % n)
     if n == 0:
         return ()
     it = iter(iterable)

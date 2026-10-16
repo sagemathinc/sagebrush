@@ -15,7 +15,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+      "Accepts every argument of SciPy 1.18.0's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against SciPy 1.18.0 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
@@ -32,7 +33,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+      "Accepts every argument of SciPy 1.18.0's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against SciPy 1.18.0 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
@@ -66,7 +68,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+      "Accepts every argument of SciPy 1.18.0's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against SciPy 1.18.0 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
@@ -83,7 +86,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+      "Accepts every argument of SciPy 1.18.0's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against SciPy 1.18.0 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
@@ -100,7 +104,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+      "Accepts every argument of SciPy 1.18.0's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against SciPy 1.18.0 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
@@ -117,7 +122,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against SciPy 1.18.0: the signature shown and the examples are what is tested."
+      "Accepts every argument of SciPy 1.18.0's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against SciPy 1.18.0 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"

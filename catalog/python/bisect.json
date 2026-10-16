@@ -11,7 +11,10 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. bisect([3, 1, 2], 2, -(2 ** 70)).",
+      "On some values it raises ValueError where Python 3.14 raises TypeError, e.g. bisect([3, 1, 2], 2, -float('inf')).",
+      "It accepts some values Python 3.14 refuses (OverflowError): bisect([3, 1, 2], 2, 2 ** 70) gives 1180591620717411303424.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"
@@ -28,7 +31,10 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. bisect_right([3, 1, 2], 2, -(2 ** 70)).",
+      "On some values it raises ValueError where Python 3.14 raises TypeError, e.g. bisect_right([3, 1, 2], 2, -float('inf')).",
+      "It accepts some values Python 3.14 refuses (OverflowError): bisect_right([3, 1, 2], 2, 2 ** 70) gives 1180591620717411303424.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"
@@ -45,7 +51,10 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. insort_left([3, 1, 2], 2, -(2 ** 70)).",
+      "On some values it raises ValueError where Python 3.14 raises TypeError, e.g. insort_left([3, 1, 2], 2, -float('inf')).",
+      "It accepts some values Python 3.14 refuses (OverflowError): insort_left([3, 1, 2], 2, 2 ** 70) gives None.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"
@@ -62,7 +71,10 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. insort_right([3, 1, 2], 2, -(2 ** 70)).",
+      "On some values it raises ValueError where Python 3.14 raises TypeError, e.g. insort_right([3, 1, 2], 2, -float('inf')).",
+      "It accepts some values Python 3.14 refuses (OverflowError): insort_right([3, 1, 2], 2, 2 ** 70) gives None.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"
@@ -79,7 +91,10 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. bisect_left([3, 1, 2], 2, -(2 ** 70)).",
+      "On some values it raises ValueError where Python 3.14 raises TypeError, e.g. bisect_left([3, 1, 2], 2, -float('inf')).",
+      "It accepts some values Python 3.14 refuses (OverflowError): bisect_left([3, 1, 2], 2, 2 ** 70) gives 1180591620717411303424.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"
@@ -96,7 +111,10 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against Python 3.14: the signature shown and the examples are what is tested."
+      "On some values it raises ValueError where Python 3.14 raises OverflowError, e.g. insort([3, 1, 2], 2, -(2 ** 70)).",
+      "On some values it raises ValueError where Python 3.14 raises TypeError, e.g. insort([3, 1, 2], 2, -float('inf')).",
+      "It accepts some values Python 3.14 refuses (OverflowError): insort([3, 1, 2], 2, 2 ** 70) gives None.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"

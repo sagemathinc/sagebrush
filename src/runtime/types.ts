@@ -1,6 +1,7 @@
 // Builtin types and their methods.
 
 import * as SP from "./strpos";
+import { CASEFOLD } from "./casefold-data";
 import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
@@ -444,9 +445,14 @@ getset(fnType, "__kwdefaults__", (f) => f.__kwdefaults__ ?? null, (f, v) => {
   f.__kwdefaults__ = v;
 });
 getset(fnType, "__dict__", (f) => {
-  const d = new PyDict();
-  if (f.$attrs) for (const [k, v] of f.$attrs) dictSet(d, k, v);
-  return d;
+  // (a live view of the function's attributes, as CPython's: what is set in
+  // it is an attribute, functools.update_wrapper's update too, CORR-D1C-2)
+  if (f.$dictView === undefined) {
+    const d = new PyDict();
+    d.$m = f.$attrs ??= new Map();
+    Object.defineProperty(f, "$dictView", { value: d, enumerable: false });
+  }
+  return f.$dictView;
 });
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
 method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
@@ -462,6 +468,9 @@ const bfType = builtinType("builtin_function_or_method", [object], () => raise(T
 getset(bfType, "__name__", (f) => f.__name__ ?? f.name);
 getset(bfType, "__qualname__", (f) => f.__qualname__ ?? f.name);
 getset(bfType, "__module__", (f) => f.__module__ ?? null); // (a module's functions: its name, as CPython's)
+// (its docstring where it has one; None, not an AttributeError, where not:
+// functools.cached_property and wraps read it)
+getset(bfType, "__doc__", (f) => f.__doc__ ?? null);
 callSlot(method(bfType, "__call__", (f: any, ...a: any[]) => f(...a)));
 
 const methodType = builtinType("method", [object], (f: any, self: any) => bindMethod(f, self));
@@ -1256,7 +1265,24 @@ method(S, "startswith", (s: string, p: any, start: any = undefined, end: any = u
 method(S, "endswith", (s: string, p: any, start: any = undefined, end: any = undefined) => affix(s, p, start, end, true));
 method(S, "upper", (s: string) => s.toUpperCase());
 method(S, "lower", (s: string) => s.toLowerCase());
-method(S, "casefold", (s: string) => s.toLowerCase());
+// str.casefold: full case folding, per code point (no context, unlike
+// lower()): Python 3.14's table (casefold-data.ts), read at the first use
+// past ASCII; "Straße" is "strasse" (CORR-D1C-1)
+let FOLD: Map<number, string> | null = null;
+function casefold(s: string): string {
+  if (/^[\x00-\x7f]*$/.test(s)) return s.toLowerCase();
+  if (FOLD === null) {
+    FOLD = new Map();
+    for (const e of CASEFOLD.split(";")) {
+      const i = e.indexOf(":");
+      FOLD.set(parseInt(e.slice(0, i), 16), String.fromCodePoint(...e.slice(i + 1).split(",").map((h) => parseInt(h, 16))));
+    }
+  }
+  let out = "";
+  for (const ch of s) out += FOLD.get(ch.codePointAt(0)!) ?? ch;
+  return out;
+}
+method(S, "casefold", (s: string) => casefold(s));
 method(S, "swapcase", (s: string) => [...s].map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join(""));
 method(S, "capitalize", (s: string) => (s.length ? s[0].toUpperCase() + s.slice(1).toLowerCase() : s));
 method(S, "title", (s: string) => {

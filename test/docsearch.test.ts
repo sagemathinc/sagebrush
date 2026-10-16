@@ -23,7 +23,7 @@ test("sagebrush --search --mode searches that language's index; the default is u
   assert.match(sage.stdout, /^EllipticCurve_rational_field\.selmer_rank\(\)\n/);
   // (a catalog entry, for agents: call form and status, summary, first example, differs: catalog/SCHEMA.md)
   const py = run("--search", "linear", "system", "--mode", "python").stdout;
-  assert.match(py, /^numpy\.linalg\.solve\(a, b\)    \[python\]    \[partial\]\n    The solution x of the linear system a x = b\.\n    >>> import numpy as np\n    >>> np\.linalg\.solve\(\[\[3, 1\], \[1, 2\]\], \[9, 8\]\)\n    array\(\[2\., 3\.\]\)\n    differs: Not yet reviewed/);
+  assert.match(py, /^numpy\.linalg\.solve\(a, b\)    \[python\]    \[partial\]\n    The solution x of the linear system a x = b\.\n    >>> import numpy as np\n    >>> np\.linalg\.solve\(\[\[3, 1\], \[1, 2\]\], \[9, 8\]\)\n    array\(\[2\., 3\.\]\)\n    differs: Accepts every argument of NumPy 2\.5\.1/);
   const pyj = JSON.parse(run("--search", "linear", "system", "--mode", "python", "--json").stdout);
   assert.equal(pyj[0].name, "numpy.linalg.solve");
   // (each example with the prelude lines it needs, CORR-012-1)
