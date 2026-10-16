@@ -2,6 +2,7 @@
 // Fast paths come first and only perform JS operations on already-checked
 // types, so their V8 feedback stays clean when inlined into compiled code.
 
+import * as SP from "./strpos";
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table, handledExceptions,
@@ -1039,7 +1040,7 @@ function truthSlow(x: any): boolean {
 }
 
 export function len(x: any): number {
-  if (typeof x === "string") return x.length;
+  if (typeof x === "string") return SP.cpLen(x);
   if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return x.length;
   if (x instanceof PyDict && (x.$cls === T.dict || layoutPlain(x.$cls))) return x.$m.size;
   if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return x.$d.$m.size;
@@ -1693,6 +1694,15 @@ export function seqIndex(i: any, len: number, what: string): number {
   return j;
 }
 
+function strGetitemPairs(o: string, p: Int32Array, k: any): string {
+  const len = o.length - p.length;
+  if (!(k instanceof PySlice)) return SP.charAt(o, p, seqIndex(k, len, "string"));
+  const [start, step, n] = sliceIndices(k, len);
+  if (step === 1) return o.slice(SP.unitOf(p, start), SP.unitOf(p, start + n));
+  let r = "";
+  for (let i = 0, j = start; i < n; i++, j += step) r += SP.charAt(o, p, j);
+  return r;
+}
 export function getitem(o: any, k: any): any {
   if (Array.isArray(o) && (o as any).$cls === undefined) {
     if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) return o[k];
@@ -1764,6 +1774,9 @@ function getitemSlow(o: any, k: any): any {
     return o.a[seqIndex(k, o.n, "index")];
   }
   if (typeof o === "string") {
+    // (positions are code points: a string with surrogate pairs converts)
+    const p = SP.pairs(o);
+    if (p !== null) return strGetitemPairs(o, p, k);
     if (k instanceof PySlice) {
       const [start, step, n] = sliceIndices(k, o.length);
       if (step === 1) return o.slice(start, start + n);

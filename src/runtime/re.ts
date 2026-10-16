@@ -2,6 +2,7 @@
 // (named groups, \A \Z, Python's `$`, Unicode \w \d, verbose mode, ...).
 // Indices are UTF-16 code units, like the rest of the runtime's strings.
 
+import * as SP from "./strpos";
 import { T, PyBytes, PyDict, raise, typeName, tuple, objectType, callObj, dictSet, isinstance, sig } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
@@ -48,12 +49,14 @@ function translate(p: string, flags: number): { src: string; flags: number } {
       if (d === undefined) raise(ReError, "bad escape (end of pattern)");
       i += 2;
       switch (d) {
+        // (the JS regex never has the m flag, so ^ and $ are the input's
+        // ends; V8 misplaces (?![\s\S]) beside a surrogate pair in u mode)
         case "A":
-          out += inClass ? "" : "(?<![\\s\\S])";
+          out += inClass ? "" : "^";
           continue;
         case "Z":
         case "z":
-          out += inClass ? "" : "(?![\\s\\S])";
+          out += inClass ? "" : "$";
           continue;
         case "w":
           out += inClass ? W : `[${W}]`;
@@ -157,7 +160,11 @@ function translate(p: string, flags: number): { src: string; flags: number } {
         }
         continue;
       case "$":
-        out += flags & M ? "$" : "(?=\\n?(?![\\s\\S]))";
+        out += flags & M ? "(?=\\n|$)" : "(?=\\n?$)";
+        i++;
+        continue;
+      case "^":
+        out += flags & M ? "(?:^|(?<=\\n))" : "^";
         i++;
         continue;
       case "{": {
@@ -235,12 +242,11 @@ export class PyPattern {
     this.flags = t.flags | (isBytes ? 0 : U);
     let jf = "dgu";
     if (t.flags & I) jf += "i";
-    if (t.flags & M) jf += "m";
     if (t.flags & S) jf += "s";
     try {
       this.rx = new RegExp(t.src, jf);
       this.sticky = new RegExp(t.src, jf.replace("g", "y"));
-      this.full = new RegExp(`(?:${t.src})(?![\\s\\S])`, jf.replace("g", "y"));
+      this.full = new RegExp(`(?:${t.src})$`, jf.replace("g", "y"));
     } catch (e: any) {
       raise(ReError, String(e.message).replace(/^Invalid regular expression: /, ""));
     }
@@ -268,7 +274,7 @@ export class PyPattern {
   }
   exec(kind: "search" | "match" | "full", string: any, pos: any = 0, endpos: any = null): PyMatch | null {
     const s0 = this.str(string);
-    let [p, e] = bounds(s0.length, pos, endpos);
+    let [p, e] = bounds(s0, pos, endpos);
     const s = e < s0.length ? s0.slice(0, e) : s0;
     const rx = kind === "search" ? this.rx : kind === "match" ? this.sticky : this.full;
     rx.lastIndex = p;
@@ -277,13 +283,17 @@ export class PyPattern {
   }
 }
 
-function bounds(n: number, pos: any, endpos: any): [number, number] {
+// pos and endpos, given in code points, as UTF-16 offsets into s
+function bounds(s: string, pos: any, endpos: any): [number, number] {
+  const sp = SP.pairs(s);
+  const n = sp === null ? s.length : s.length - sp.length;
   let p = Number(pos ?? 0), e = endpos === null || endpos === undefined ? n : Number(endpos);
   if (p < 0) p = 0;
   if (p > n) p = n;
   if (e < 0) e = 0;
   if (e > n) e = n;
-  return [p, Math.max(p, e)];
+  e = Math.max(p, e);
+  return sp === null ? [p, e] : [SP.unitOf(sp, p), SP.unitOf(sp, e)];
 }
 
 export class PyMatch {
@@ -304,6 +314,16 @@ export class PyMatch {
   span(k: number): [number, number] {
     const ix = (this.m as any).indices[k];
     return ix === undefined ? [-1, -1] : ix;
+  }
+  // span, pos and endpos as Python's: code points, not UTF-16 units
+  cpSpan(k: number): [number, number] {
+    const sp = this.span(k);
+    const p = SP.pairs(this.s);
+    return p === null || sp[0] < 0 ? sp : [SP.cpOf(p, sp[0]), SP.cpOf(p, sp[1])];
+  }
+  cp(u: number): number {
+    const p = SP.pairs(this.s);
+    return p === null ? u : SP.cpOf(p, u);
   }
 }
 
@@ -372,7 +392,7 @@ const advance = (s: string, i: number) => (i < s.length && s.charCodeAt(i) >= 0x
 
 function allMatches(p: PyPattern, string: any, pos: any = 0, endpos: any = null): PyMatch[] {
   const s0 = p.str(string);
-  const [ps, e] = bounds(s0.length, pos, endpos);
+  const [ps, e] = bounds(s0, pos, endpos);
   const s = s0.slice(0, e);
   const out: PyMatch[] = [];
   const rx = p.rx;
@@ -482,16 +502,16 @@ newBuiltinModule("re", (mod) => {
     m.re.names.forEach((n, k) => n && dictSet(d, n, m.m[k] === undefined ? dflt : m.group(k)));
     return d;
   });
-  Mm("start", (m: PyMatch, g: any = 0) => m.span(m.index(g))[0]);
-  Mm("end", (m: PyMatch, g: any = 0) => m.span(m.index(g))[1]);
-  Mm("span", (m: PyMatch, g: any = 0) => tuple(m.span(m.index(g))));
+  Mm("start", (m: PyMatch, g: any = 0) => m.cpSpan(m.index(g))[0]);
+  Mm("end", (m: PyMatch, g: any = 0) => m.cpSpan(m.index(g))[1]);
+  Mm("span", (m: PyMatch, g: any = 0) => tuple(m.cpSpan(m.index(g))));
   Mm("expand", (m: PyMatch, t: any) => m.re.out(expandTemplate(m.re, m.re.isBytes ? Ty.decode(t, "latin1") : t, m)));
-  Mm("__repr__", (m: PyMatch) => `<re.Match object; span=(${m.span(0).join(", ")}), match=${repr(m.group(0))}>`);
+  Mm("__repr__", (m: PyMatch) => `<re.Match object; span=(${m.cpSpan(0).join(", ")}), match=${repr(m.group(0))}>`);
   Mm("__bool__", (_m: PyMatch) => true);
   Ty.getset(Match, "string", (m: PyMatch) => m.string);
   Ty.getset(Match, "re", (m: PyMatch) => m.re);
-  Ty.getset(Match, "pos", (m: PyMatch) => m.pos);
-  Ty.getset(Match, "endpos", (m: PyMatch) => m.endpos);
+  Ty.getset(Match, "pos", (m: PyMatch) => m.cp(m.pos));
+  Ty.getset(Match, "endpos", (m: PyMatch) => m.cp(m.endpos));
   Ty.getset(Match, "lastindex", (m: PyMatch) => {
     let best: number | null = null, end = -1;
     for (let k = 1; k <= m.re.groups; k++) {
