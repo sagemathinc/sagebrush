@@ -60,3 +60,6 @@ T('push order3', lambda: ((R.quo([x - 1])(x) + R.quo([y^2 + 1])(y)).parent()))
 R.<x,y> = QQ[]
 T('zero ideal', lambda: [R.quo(I) is R for I in ([0], [], R.ideal(0), [0, 0])] + [R.quo([0], names='u,v') is R])
 T('zero ideal mix', lambda: (R.quo([0])(x) + R.quo([x - 1])(x), R.quo([x - 1])(x) == R.quo([0])(x)))
+A3 = R.quo([x^2], names=('u','v')); B3 = R.quo([y^2], names=('u','v')); C3 = R.quo([x*y], names=('u','v'))
+a3, b3, c3 = A3(x), B3(y), C3(x + y)
+T('names pushout', lambda: (a3 + b3, (a3 + b3) == c3, c3 == (a3 + b3), ((a3 + b3) + C3(x)).lift(), (C3(x) + (a3 + b3)).lift()))

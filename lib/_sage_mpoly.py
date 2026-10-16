@@ -4737,7 +4737,9 @@ class QuotientRing_:
         if not J.reduce(R(1))._d:
             P = None
         else:
-            P = QuotientRing_(R, J)
+            # (with the names both quotients share: R/(x^2) and R/(y^2) named
+            # u, v meet in R/(x^2, y^2) named u, v, astra's CORR-3D3-1)
+            P = QuotientRing_(R, J, list(self._show._names))
         cache[id(Q)] = (Q, P)
         Q.__dict__.setdefault("_pushouts", {})[id(self)] = (self, P)
         return P
