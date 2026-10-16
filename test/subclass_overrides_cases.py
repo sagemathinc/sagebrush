@@ -49,3 +49,11 @@ for c in ["float(G(2))", "math.sqrt(G(4))", "cmath.sqrt(G(4))", "int(G(2.5))", "
 with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter('always')
     print('complex(CS(1)) ->', t(lambda: complex(CS(1))), [str(x.message)[:50] for x in w])
+
+
+class JM(int):
+    def __rmul__(self, other):
+        return 'JM.__rmul__'
+
+
+print([0] * JI(2), 'ab' * JI(2), b'a' * JI(2), (1,) * JI(2), JI(2) * [1], [0] * JM(2))
