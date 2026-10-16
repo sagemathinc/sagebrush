@@ -411,6 +411,79 @@ show(v);
 clear
 v = var([1 2 3 4]);
 show(v);
+% bandwidth
+clear
+[lb, ub] = bandwidth([1 2 0; 3 4 5; 0 0 6]);
+show(lb);
+show(ub);
+% blkdiag
+clear
+v = blkdiag([1 2; 3 4], -2);
+show(v);
+% hankel
+clear
+v = hankel([2 4 6], [6 8 10]);
+show(v);
+% toeplitz
+clear
+v = toeplitz([2 5 7], [2 -1 -3]);
+show(v);
+% hilb
+clear
+v = hilb(2);
+show(v);
+% invhilb
+clear
+v = invhilb(3);
+show(v);
+% pascal
+clear
+v = pascal(5);
+show(v);
+% wilkinson
+clear
+v = wilkinson(5);
+show(v);
+% rcond
+clear
+v = rcond(diag([2 8]));
+show(v);
+% normest
+clear
+v = normest([3 0; 4 0]);
+show(v);
+% null
+clear
+v = null([1 0 0; 0 2 0]);
+show(v);
+% sqrtm
+clear
+v = sqrtm([9 0; 0 16]);
+show(v);
+% logm
+clear
+v = logm(diag([1 exp(2)]));
+show(v);
+% full
+clear
+v = full(sparse([1 2], [2 1], [7 -3], 2, 2));
+show(v);
+% nonzeros
+clear
+v = nonzeros([0 5; -2 0]);
+show(v);
+% spones
+clear
+v = full(spones(sparse([0 5; -2 0])));
+show(v);
+% speye
+clear
+v = full(speye(2, 3));
+show(v);
+% spfun
+clear
+v = full(spfun(@(x) x.^2, sparse([0 -3; 2 0])));
+show(v);
 % det
 clear
 v = det([1 2; 3 4]);
