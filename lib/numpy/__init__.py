@@ -784,6 +784,10 @@ def _around_out(a, decimals, out):
         # division's rounding; not implemented: refused, not answered)
         raise NotImplementedError("np.round of a real array into a complex out is not supported")
     wide = result_type(a.dtype, out.dtype)
+    if wide != out.dtype:
+        # (into a narrower out NumPy casts between its stages, so a near tie
+        # rounds by out's precision; not implemented: refused, CORR-90C-3)
+        raise NotImplementedError(f"np.round of a {a.dtype} array into a narrower {out.dtype} out is not supported")
     out[...] = _round_float(a.astype(wide), decimals)
     return out
 
