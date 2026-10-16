@@ -822,7 +822,7 @@ export class Emitter {
         const r = resolve(this.fn.scope, t.id);
         if (r.kind === "global") {
           const ns = this.gns(t.id);
-          return this.w(`if (${ns}${prop(t.id)} === undefined) gname(${q(t.id)}); delete ${ns}${prop(t.id)};`);
+          return this.w(`R.delName(${ns}, ${q(t.id)});`);
         }
         if (r.kind === "class") return this.w(`if (!$ns.delete(${q(t.id)})) gname(${q(t.id)});`);
         if (r.kind === "classcell") return this.w(`classCellGet(${this.cellOf(r.scope)}); ${this.cellOf(r.scope)}.v = undefined;`);
