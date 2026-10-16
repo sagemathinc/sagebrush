@@ -979,7 +979,8 @@ export class Editor {
     // (a sticker: its picker)
     if (this.board.item(id)?.kind === "sticker") return this.pickSticker({ id });
     // (a question: shown as a note saying it, not written in place as one)
-    if (find(this.pg(this.doc()), id)?.node.kind === "ask") return;
+    const d = this.doc();
+    if (d && find(this.pg(d), id)?.node.kind === "ask") return;
     // (already being written: a touch's tap on it selected and its double tap both say so)
     if (this.inplace?.id === id && this.inplace.active) return;
     this.close();
