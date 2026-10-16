@@ -127,3 +127,13 @@ print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))", {'__name__': No
 print(t(lambda: exec("class C:\n    del len")))
 print(t(lambda: exec("class C:\n    x = 1\n    del x\n    del x")))
 print(t(lambda: exec("y = 1\nclass C:\n    del y")))
+
+# a function made there reads its globals, never the mapping, for its code's
+# filename and its module
+class Sink:
+    def __init__(self): self.d = {}
+    def __getitem__(self, k): raise ValueError('boom ' + k)
+    def __setitem__(self, k, v): self.d[k] = v
+sk = Sink()
+exec("def f(): pass", {}, sk)
+print(t(lambda: (sk.d['f'].__code__.co_filename, sk.d['f'].__module__, sk.d['f'].__globals__ is sk)))
