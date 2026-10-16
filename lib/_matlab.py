@@ -522,7 +522,12 @@ def _pow(A, B):
         if np.any((A < 0) & (B != np.floor(B))):
             A = A.astype(np.complex128)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        return A ** B
+        r = A ** B
+    # (1.^NaN and NaN.^0 are NaN in MATLAB, as power's IEEE table says, not IEEE's 1)
+    odd = ((A == 1) & np.isnan(B)) | (np.isnan(A) & (B == 0))
+    if np.any(odd):
+        r = np.where(odd, np.nan, r)
+    return r
 
 
 def _scalar_div(a, b):
@@ -575,6 +580,8 @@ def ldivide(a, b):
 
 def power(a, b):
     if type(a) is float and type(b) is float:
+        if (a == 1 and b != b) or (a != a and b == 0):
+            return _math.nan
         try:
             r = a ** b
         except ZeroDivisionError:
@@ -4500,10 +4507,12 @@ def _cosd(A):
     return _sincosd(A)[1]
 
 
-_unary("sqrt", np.sqrt, lambda A: A < 0)
+# (+ 0.0: sqrt(-0) is +0 in MATLAB, as its page says, not IEEE's -0)
+_unary("sqrt", lambda A: np.sqrt(A) + 0.0, lambda A: A < 0)
 _unary("exp", np.exp)
 _unary("log", np.log, lambda A: A < 0)
-_unary("log2", lambda A: np.log(A) / _math.log(2) if A.dtype.kind == "c" else np.log2(A), lambda A: A < 0)
+# (a complex log divided part by part: log2 of a complex 0 or Inf keeps a zero imaginary part)
+_unary("log2", lambda A: _div(np.log(A), np.float64(_math.log(2))) if A.dtype.kind == "c" else np.log2(A), lambda A: A < 0)
 _unary("log10", np.log10, lambda A: A < 0)
 _unary("log1p", np.log1p, lambda A: A < -1)
 _unary("expm1", np.expm1)
@@ -9119,7 +9128,9 @@ def _cmath_log(f):
 
 for _n in ("log", "log10", "log2"):
     _CMATH[_n] = _cmath_log(_CMATH[_n])
-_CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else _cmath.log(1 + z)
+# (a real entry > -1 of a complex array by the real log1p, which keeps a small x's digits)
+_CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else \
+    complex(_math.log1p(z.real), 0.0) if z.imag == 0 and z.real > -1 else _cmath.log(1 + z)
 # (the poles, where cmath raises: atanh(±1) = ±Inf, atan(±1i) = ±Inf i, as MATLAB gives)
 _CMATH["atanh"] = lambda z: complex(_math.copysign(_math.inf, z.real), 0.0) if z.imag == 0 and abs(z.real) == 1 else _cmath.atanh(z)
 _CMATH["atan"] = lambda z: complex(0.0, _math.copysign(_math.inf, z.imag)) if z.real == 0 and abs(z.imag) == 1 else _cmath.atan(z)
