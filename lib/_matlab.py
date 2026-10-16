@@ -425,24 +425,28 @@ def _int_round(r, cls):
     if r.dtype.kind in "iu":
         # (the bounds inside the source class's own range, which clip needs)
         _, slo, shi = _INTS[_dtclass(r.dtype)]
-        return _int64_exact(np.clip(r, max(lo, slo), min(hi, shi)).astype(dt), cls)
+        # (an integer source holding -2^63 holds it exactly: intmin, or saturation to it)
+        return _int64_exact(np.clip(r, max(lo, slo), min(hi, shi)).astype(dt), cls, True)
     r = np.where(np.isnan(r), 0.0, r)
     # (a double of magnitude 2^52 or more is already an integer: adding 0.5 there would round
     # it up, uint64(2^53 - 1) becoming 2^53)
     r = np.where(np.abs(r) >= 2.0 ** 52, r, np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5)))
-    return _int64_exact(np.clip(r, float(lo), float(hi)).astype(dt), cls)
+    # (-2^63 from a double is exact only when it saturates a value strictly below it: a
+    # double equal to -2^63 may be a rounded -2^63 + k, intmin('int64') + 1 among them)
+    low = r < -(2.0 ** 63)
+    return _int64_exact(np.clip(r, float(lo), float(hi)).astype(dt), cls, low)
 
 
-def _int64_exact(a, cls):
+def _int64_exact(a, cls, exact_low=False):
     """a, if an int64 or uint64 result Sagebrush holds exactly: its 64-bit integers keep 53
     bits, as doubles do, so a value of 2^53 or more in magnitude (int64(2)^62, uint64(2^53) + 1,
-    computed as 2^53, a saturated limit) is refused rather than shown rounded; -2^63, exact,
-    is kept"""
+    computed as 2^53, a saturated limit) is refused rather than shown rounded; -2^63 is kept
+    where exact_low says it is exact (saturation from below, or an integer source)"""
     if cls in ("int64", "uint64") and a.size:
         m = np.abs(a.astype(np.float64))
         # (2^53 itself too: a double result there may be a rounded 2^53 + 1, while one below
         # it is exact for integer operands)
-        bad = (m >= 2.0 ** 53) & (a.astype(np.float64) != -(2.0 ** 63))
+        bad = (m >= 2.0 ** 53) & ~((a.astype(np.float64) == -(2.0 ** 63)) & exact_low)
         if np.any(bad):
             v = float(a.reshape(-1)[np.flatnonzero(bad)[0]])
             raise _err("%s values of 2^53 or more in magnitude (here about %.17g) are not supported: Sagebrush's 64-bit integers are not exact there." % (cls, v))
