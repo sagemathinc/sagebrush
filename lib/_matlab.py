@@ -6023,6 +6023,12 @@ def permute_(x, order):
     return Char(r) if type(x) is Char else _box(r)
 
 
+# (the most elements repmat makes: numeric, logical and char arrays; cell, struct and
+# string arrays, whose elements are Python objects and cost more)
+_REPMAT_NUMERIC_MAX = 4_000_000
+_REPMAT_OBJECT_MAX = 200_000
+
+
 @_bs("repmat")
 def repmat_(x, *args):
     # (the replication factors: integers, a negative one counting as 0, as repmat's page says)
@@ -6045,6 +6051,13 @@ def repmat_(x, *args):
     d = d + [1] * (nd - len(d))
     r = r + [1] * (nd - len(r))
     reps = tuple(reversed(r))
+    # (the result's size from the factors, admitted before anything is made)
+    total = 1
+    for a, b in zip(d, r):
+        total *= a * b
+    cap = _REPMAT_OBJECT_MAX if t in (Cell, Struct, StrArr) else _REPMAT_NUMERIC_MAX
+    if total > cap:
+        raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for %s." % (total, cap, "a " + class_(x) + " array" if t in (Cell, Struct, StrArr) else "numeric, logical and char arrays"))
     if 0 in r or 0 in d:
         # (an empty result, of the input's kind and the product of the sizes)
         out_d = tuple(a * b for a, b in zip(d, r))
