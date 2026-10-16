@@ -1,0 +1,148 @@
+[
+  {
+    "name": "arrayfun",
+    "kind": "function",
+    "signature": "B = arrayfun(func, A)\nB = arrayfun(func, A1, ..., An)\nB = arrayfun(___, 'UniformOutput', false)\nB = arrayfun(___, 'ErrorHandler', errorFunc)\n[B1, ..., Bm] = arrayfun(___)",
+    "summary": "A function applied to each element of one or more arrays (struct arrays too), the results in an array or a cell array.",
+    "doc": "Takes the same options as `cellfun`.",
+    "examples": [
+      {
+        "code": "arrayfun(@(x) x^2, [1 2 3])",
+        "expected": "\nans =\n\n     1     4     9\n\n"
+      },
+      {
+        "code": "arrayfun(@(x) 1:x, 1:3, 'UniformOutput', false)",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {[1]}    {[1 2]}    {[1 2 3]}\n\n"
+      },
+      {
+        "code": "arrayfun(@(x) x^2, 1:4)",
+        "expected": "\nans =\n\n     1     4     9    16\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "cellfun"
+    ],
+    "tags": [
+      "arrays"
+    ]
+  },
+  {
+    "name": "cell",
+    "kind": "function",
+    "signature": "C = cell(n)\nC = cell(sz1, ..., szN)\nC = cell(sz)",
+    "summary": "A cell array of empty double arrays, of a given size.",
+    "doc": "Takes the same size arguments as `zeros`.",
+    "examples": [
+      {
+        "code": "c = cell(2)",
+        "expected": "\nc =\n\n  2×2 cell array\n\n    {0×0 double}    {0×0 double}\n    {0×0 double}    {0×0 double}\n\n"
+      },
+      {
+        "code": "size(cell(2, 3))",
+        "expected": "\nans =\n\n     2     3\n\n"
+      },
+      {
+        "code": "cell(2, 1)",
+        "expected": "\nans =\n\n  2×1 cell array\n\n    {0×0 double}\n    {0×0 double}\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "cellfun",
+      "num2cell",
+      "iscell"
+    ],
+    "tags": [
+      "cell arrays"
+    ]
+  },
+  {
+    "name": "cellfun",
+    "kind": "function",
+    "signature": "A = cellfun(func, C)\nA = cellfun(func, C1, ..., Cn)\nA = cellfun(___, 'UniformOutput', false)\nA = cellfun(___, 'ErrorHandler', errorFunc)\n[A1, ..., Am] = cellfun(___)",
+    "summary": "A function applied to each cell of one or more cell arrays, the results in an array, or in a cell array with 'UniformOutput' false.",
+    "doc": "With uniform output each call must return a scalar; the results' class is theirs. `func` may also be one of the legacy names such as 'isempty' or 'length'.",
+    "examples": [
+      {
+        "code": "cellfun(@length, {'ab', 'c', ''})",
+        "expected": "\nans =\n\n     2     1     0\n\n"
+      },
+      {
+        "code": "cellfun(@(x) x * 2, {1, [1 2]}, 'UniformOutput', false)",
+        "expected": "\nans =\n\n  1×2 cell array\n\n    {[2]}    {[2 4]}\n\n"
+      },
+      {
+        "code": "cellfun(@numel, {'ab', 'cde', ''})",
+        "expected": "\nans =\n\n     2     3     0\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "arrayfun",
+      "structfun"
+    ],
+    "tags": [
+      "cell arrays"
+    ]
+  },
+  {
+    "name": "isfield",
+    "kind": "function",
+    "signature": "TF = isfield(S, field)",
+    "summary": "Whether a structure has a field, or which of several names are fields, as logical values.",
+    "doc": "With a cell array of names, the result has one element per name. A non-structure gives false.",
+    "examples": [
+      {
+        "code": "isfield(struct('a', 1), 'a')",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      },
+      {
+        "code": "isfield(struct('a', 1), {'a', 'b'})",
+        "expected": "\nans =\n\n  1×2 logical array\n\n   1   0\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "fieldnames",
+      "isstruct"
+    ],
+    "tags": [
+      "structures"
+    ]
+  },
+  {
+    "name": "struct",
+    "kind": "function",
+    "signature": "s = struct\ns = struct(field, value)\ns = struct(field1, value1, ..., fieldN, valueN)\ns = struct([])",
+    "summary": "A structure, or a struct array when values are cell arrays: one element per cell, a scalar or one-cell value repeated.",
+    "doc": "To store a cell array in a field, wrap it in another cell: `struct('a', {{1, 2}})`. `struct('a', {})` is an empty struct array with field a.",
+    "examples": [
+      {
+        "code": "s = struct('a', 1, 'b', 'text')",
+        "expected": "\ns = \n\n  struct with fields:\n\n    a: 1\n    b: 'text'\n\n"
+      },
+      {
+        "code": "s = struct('a', {1, 2}); size(s)",
+        "expected": "\nans =\n\n     1     2\n\n"
+      }
+    ],
+    "differs": [
+      "struct([]) is refused (MATLAB gives a 0-by-0 struct with no fields).",
+      "Converting an object to a structure (struct(obj)) is not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fieldnames",
+      "isfield",
+      "cell2struct"
+    ],
+    "tags": [
+      "structures"
+    ]
+  }
+]

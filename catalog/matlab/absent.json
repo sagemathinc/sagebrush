@@ -1,0 +1,850 @@
+[
+  {
+    "name": "assignin",
+    "kind": "function",
+    "signature": "assignin(workspace, var, val)",
+    "summary": "Sets a variable in the caller's or the base workspace.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Return the value as an output, or keep named values in a struct."
+  },
+  {
+    "name": "audioread",
+    "kind": "function",
+    "signature": "[y, Fs] = audioread(filename)",
+    "summary": "Reads an audio file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No audio files.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "categorical",
+    "kind": "function",
+    "signature": "B = categorical(A)",
+    "summary": "An array of values from a finite set of categories.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "A cell array of character vectors with unique: [cats, ~, idx] = unique(labels) gives the categories and each element's index.",
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "compose",
+    "kind": "function",
+    "signature": "str = compose(formatSpec, A)",
+    "summary": "Formatted text for each element or row of an array, as a string array.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "sprintf for one text, or arrayfun(@(x) sprintf(formatSpec, x), A, 'UniformOutput', false) for one per element.",
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "containers.Map",
+    "kind": "class",
+    "signature": "M = containers.Map(keys, values)",
+    "summary": "A map from character or numeric keys to values.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "A struct with dynamic field names: s.(key) = value, isfield(s, key), fieldnames(s); keys must be valid field names.",
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "csvread",
+    "kind": "function",
+    "signature": "M = csvread(filename)",
+    "summary": "Reads a comma-separated file of numbers into a matrix.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load('data.csv') reads a comma-separated numeric file.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "csvwrite",
+    "kind": "function",
+    "signature": "csvwrite(filename, M)",
+    "summary": "Writes a matrix to a comma-separated file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fopen and fprintf: fprintf(f, '%g,%g\\n', M.').",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "cumtrapz",
+    "kind": "function",
+    "signature": "Q = cumtrapz(x, y)",
+    "summary": "The cumulative integral of sampled data by the trapezoidal rule.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "[0, cumsum(diff(x) .* (y(1:end-1) + y(2:end)) / 2)] for row vectors; trapz for the whole integral.",
+    "tags": [
+      "integration"
+    ]
+  },
+  {
+    "name": "datenum",
+    "kind": "function",
+    "signature": "n = datenum(Y, M, D)",
+    "summary": "A date as a serial day number.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No serial dates; clock gives the current date and time as a vector.",
+    "tags": [
+      "dates and times"
+    ]
+  },
+  {
+    "name": "datestr",
+    "kind": "function",
+    "signature": "s = datestr(t)",
+    "summary": "A date number or vector as text.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "sprintf of clock's fields: c = clock; sprintf('%04d-%02d-%02d', c(1), c(2), c(3)).",
+    "tags": [
+      "dates and times"
+    ]
+  },
+  {
+    "name": "datetime",
+    "kind": "function",
+    "signature": "t = datetime('now')\nt = datetime(Y, M, D)",
+    "summary": "Dates and times as an array type, with arithmetic, formats and time zones.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "clock gives the date and time as [year month day hour minute seconds]; tic and toc time an interval.",
+    "tags": [
+      "dates and times"
+    ]
+  },
+  {
+    "name": "digraph",
+    "kind": "class",
+    "signature": "G = digraph(s, t, weights)",
+    "summary": "A directed graph object, with nodes, weighted edges and graph algorithms.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No directed graphs in any mode's graph library. In MATLAB mode, an adjacency matrix with loops: shortest paths by Dijkstra's algorithm (nonnegative weights) or Floyd's (no negative cycles), in a few lines.",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
+    "name": "dlmread",
+    "kind": "function",
+    "signature": "M = dlmread(filename)",
+    "summary": "Reads a delimited file of numbers into a matrix.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load reads whitespace- or comma-separated numeric files.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "duration",
+    "kind": "function",
+    "signature": "d = duration(H, MI, S)",
+    "summary": "Lengths of time as an array type.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Plain numbers of seconds (tic and toc give seconds).",
+    "tags": [
+      "dates and times"
+    ]
+  },
+  {
+    "name": "eval",
+    "kind": "function",
+    "signature": "eval(expression)",
+    "summary": "Runs MATLAB code given as text.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Function handles and feval (feval('cos', 0)), str2func for a function named by text, and struct fields (s.(name)) for values named by text."
+  },
+  {
+    "name": "evalin",
+    "kind": "function",
+    "signature": "evalin(workspace, expression)",
+    "summary": "Runs text as code in the caller's or the base workspace.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Pass values as arguments and return them as outputs."
+  },
+  {
+    "name": "extractAfter",
+    "kind": "function",
+    "signature": "newStr = extractAfter(str, pat)",
+    "summary": "The text after a pattern or position.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "k = strfind(str, pat); str(k(1)+numel(pat):end) for a character vector.",
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "extractBefore",
+    "kind": "function",
+    "signature": "newStr = extractBefore(str, pat)",
+    "summary": "The text before a pattern or position.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "k = strfind(str, pat); str(1:k(1)-1) for a character vector.",
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "fillmissing",
+    "kind": "function",
+    "signature": "F = fillmissing(A, method)",
+    "summary": "Fills missing values (NaN) by a method such as a constant, the previous value or interpolation.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "isnan with indexing: A(isnan(A)) = v for a constant; interp1 over the non-NaN points for interpolation.",
+    "tags": [
+      "data cleaning"
+    ]
+  },
+  {
+    "name": "fmincon",
+    "kind": "function",
+    "signature": "x = fmincon(fun, x0, A, b)",
+    "summary": "Minimizes a function subject to constraints (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fminsearch for an unconstrained minimum, fminbnd for one variable on an interval, lsqnonneg for nonnegative least squares. General constraints have no solver in Sagebrush (a penalty term only approximates them, and can return an infeasible point).",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "fminunc",
+    "kind": "function",
+    "signature": "x = fminunc(fun, x0)",
+    "summary": "Finds an unconstrained minimum by a gradient method (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fminsearch (Nelder-Mead, without gradients).",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "fscanf",
+    "kind": "function",
+    "signature": "A = fscanf(fileID, formatSpec)",
+    "summary": "Reads formatted numbers from a text file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load for a numeric file; fgetl with str2double(strsplit(line)) for others.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "fsolve",
+    "kind": "function",
+    "signature": "x = fsolve(fun, x0)",
+    "summary": "Solves a system of nonlinear equations (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fzero for one equation in one unknown; for a system, fminsearch on the sum of the squared residuals (a local minimum of 0 is a solution).",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "gpuArray",
+    "kind": "function",
+    "signature": "G = gpuArray(X)",
+    "summary": "An array stored on a GPU (Parallel Computing Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Ordinary arrays: there is no GPU, and none is needed.",
+    "tags": [
+      "parallel"
+    ]
+  },
+  {
+    "name": "graph",
+    "kind": "class",
+    "signature": "G = graph(s, t, weights)",
+    "summary": "An undirected graph object, with nodes, weighted edges and graph algorithms.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's Graph, for undirected graphs: shortest_path(u, v, by_weight=True), distance, connected_components, degree and adjacency_matrix (no minimum spanning tree there). In MATLAB mode, an adjacency matrix or an edge list with loops: for a minimum spanning tree, sortrows of the edges by weight and add each one that joins two components (Kruskal).",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
+    "name": "importdata",
+    "kind": "function",
+    "signature": "A = importdata(filename)",
+    "summary": "Reads data from a file, guessing its format.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "imread",
+    "kind": "function",
+    "signature": "A = imread(filename)",
+    "summary": "Reads an image file into an array.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No image file reading.",
+    "tags": [
+      "files",
+      "images"
+    ]
+  },
+  {
+    "name": "imwrite",
+    "kind": "function",
+    "signature": "imwrite(A, filename)",
+    "summary": "Writes an array to an image file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No image file writing; plots are saved as figures.",
+    "tags": [
+      "files",
+      "images"
+    ]
+  },
+  {
+    "name": "input",
+    "kind": "function",
+    "signature": "x = input(prompt)",
+    "summary": "Asks the user for a value at the command window.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No interactive input: set the value in the code, or pass it to a function."
+  },
+  {
+    "name": "inputParser",
+    "kind": "class",
+    "signature": "p = inputParser",
+    "summary": "An object that parses and validates a function's name-value arguments.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Check the arguments in code: nargin, isnumeric, ischar and error with a message; validatestring is not available either."
+  },
+  {
+    "name": "intlinprog",
+    "kind": "function",
+    "signature": "x = intlinprog(f, intcon, A, b)",
+    "summary": "Solves a mixed-integer linear program (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's MixedIntegerLinearProgram.",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "ismissing",
+    "kind": "function",
+    "signature": "TF = ismissing(A)",
+    "summary": "Which elements are missing (NaN, NaT, empty text and so on).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "isnan for numeric arrays; cellfun(@isempty, C) for cell arrays of text.",
+    "tags": [
+      "data cleaning"
+    ]
+  },
+  {
+    "name": "issorted",
+    "kind": "function",
+    "signature": "tf = issorted(A)",
+    "summary": "Whether an array's elements are in sorted order.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "all(diff(x) >= 0) for a numeric vector, or isequal(x, sort(x)).",
+    "tags": [
+      "sorting"
+    ]
+  },
+  {
+    "name": "jsondecode",
+    "kind": "function",
+    "signature": "value = jsondecode(txt)",
+    "summary": "Parses JSON text into MATLAB values.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Python mode's json.loads.",
+    "tags": [
+      "text",
+      "files"
+    ]
+  },
+  {
+    "name": "jsonencode",
+    "kind": "function",
+    "signature": "txt = jsonencode(value)",
+    "summary": "Encodes MATLAB values as JSON text.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Python mode's json.dumps.",
+    "tags": [
+      "text",
+      "files"
+    ]
+  },
+  {
+    "name": "linprog",
+    "kind": "function",
+    "signature": "x = linprog(f, A, b)",
+    "summary": "Solves a linear program (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's MixedIntegerLinearProgram, which solves linear and mixed-integer programs.",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "lsqcurvefit",
+    "kind": "function",
+    "signature": "x = lsqcurvefit(fun, x0, xdata, ydata)",
+    "summary": "Fits a nonlinear model to data by least squares (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "polyfit for a polynomial; mldivide for a model linear in its parameters; fminsearch on the sum of squared residuals otherwise.",
+    "tags": [
+      "optimization",
+      "curve fitting"
+    ]
+  },
+  {
+    "name": "minspantree",
+    "kind": "function",
+    "signature": "T = minspantree(G)",
+    "summary": "A minimum spanning tree of a graph.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No graph objects in MATLAB mode, and Sage mode's Graph has no minimum spanning tree: sortrows of the edge list [s t w] by weight, then add each edge that joins two components (Kruskal), tracking components in a vector.",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
+    "name": "normalize",
+    "kind": "function",
+    "signature": "N = normalize(A)",
+    "summary": "Data scaled to have mean 0 and standard deviation 1, or by another method.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "(A - mean(A, 'omitnan')) ./ std(A, 'omitnan') for a vector, or the columns of a matrix: normalize computes the statistics without NaN elements, which stay NaN.",
+    "tags": [
+      "statistics"
+    ]
+  },
+  {
+    "name": "now",
+    "kind": "function",
+    "signature": "t = now",
+    "summary": "The current date and time as a serial date number.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "clock for the date and time as a vector; tic and toc for elapsed time.",
+    "tags": [
+      "dates and times"
+    ]
+  },
+  {
+    "name": "ode15s",
+    "kind": "function",
+    "signature": "[t, y] = ode15s(odefun, tspan, y0)",
+    "summary": "Solves a stiff system of ordinary differential equations by an implicit method.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No implicit (stiff) solver in any mode: ode45 or ode23 handle mildly stiff problems with small steps.",
+    "tags": [
+      "differential equations"
+    ]
+  },
+  {
+    "name": "ode23s",
+    "kind": "function",
+    "signature": "[t, y] = ode23s(odefun, tspan, y0)",
+    "summary": "Solves a stiff system of ordinary differential equations (Rosenbrock method).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No implicit (stiff) solver in any mode: ode45 or ode23 for mildly stiff problems.",
+    "tags": [
+      "differential equations"
+    ]
+  },
+  {
+    "name": "parpool",
+    "kind": "function",
+    "signature": "parpool",
+    "summary": "Starts a pool of parallel workers (Parallel Computing Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Not needed: parfor runs as a for loop.",
+    "tags": [
+      "parallel"
+    ]
+  },
+  {
+    "name": "quadprog",
+    "kind": "function",
+    "signature": "x = quadprog(H, f, A, b)",
+    "summary": "Solves a quadratic program (Optimization Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Without constraints and with H positive definite (the problem then has a unique minimum), x = -H \\ f. Constrained quadratic programs have no solver in Sagebrush; a penalty term with fminsearch only approximates them and can return an infeasible point.",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "rats",
+    "kind": "function",
+    "signature": "S = rats(X)",
+    "summary": "Numbers as text in the form of ratios of integers.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "[N, D] = rat(X), then sprintf('%d/%d', N, D) for each element.",
+    "tags": [
+      "numbers"
+    ]
+  },
+  {
+    "name": "readcell",
+    "kind": "function",
+    "signature": "C = readcell(filename)",
+    "summary": "Reads a file into a cell array, one cell per field.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fopen and fgetl line by line, with strsplit for the fields.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "readmatrix",
+    "kind": "function",
+    "signature": "A = readmatrix(filename)",
+    "summary": "Reads a numeric matrix from a delimited text or spreadsheet file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "readtable",
+    "kind": "function",
+    "signature": "T = readtable(filename)",
+    "summary": "Reads a delimited text or spreadsheet file into a table.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "rescale",
+    "kind": "function",
+    "signature": "R = rescale(A)",
+    "summary": "Data scaled linearly to the interval [0, 1], or another interval.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "(A - min(A(:))) ./ (max(A(:)) - min(A(:))) for an array that isn't constant (rescale scales by the extrema of the whole array; for [1 10; 3 20] that is [0 9/19; 2/19 1]).",
+    "tags": [
+      "statistics"
+    ]
+  },
+  {
+    "name": "rmmissing",
+    "kind": "function",
+    "signature": "R = rmmissing(A)",
+    "summary": "Removes missing values (NaN), or rows containing them.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "A(~isnan(A)) for a vector; A(~any(isnan(A), 2), :) for rows of a matrix.",
+    "tags": [
+      "data cleaning"
+    ]
+  },
+  {
+    "name": "shortestpath",
+    "kind": "function",
+    "signature": "P = shortestpath(G, s, t)",
+    "summary": "A shortest path between two nodes of a graph.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's Graph(...).shortest_path(s, t, by_weight=True) for an undirected graph; in MATLAB mode, Dijkstra's algorithm on an adjacency matrix (nonnegative weights), taking the min over the unvisited nodes.",
+    "tags": [
+      "graphs"
+    ]
+  },
+  {
+    "name": "smoothdata",
+    "kind": "function",
+    "signature": "B = smoothdata(A)",
+    "summary": "Smooths noisy data by a moving average or another method.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "movmean or movmedian with a window length: movmean(A, 5).",
+    "tags": [
+      "data cleaning",
+      "statistics"
+    ]
+  },
+  {
+    "name": "solve",
+    "kind": "function",
+    "signature": "S = solve(eqn, var)",
+    "summary": "Solves equations symbolically (Symbolic Math Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's solve. Numerically in MATLAB mode: roots for a polynomial, fzero for one equation in one unknown, mldivide for a linear system.",
+    "tags": [
+      "symbolic",
+      "roots"
+    ]
+  },
+  {
+    "name": "sscanf",
+    "kind": "function",
+    "signature": "A = sscanf(str, formatSpec)",
+    "summary": "Reads formatted numbers from text.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "str2double(strsplit(str)) for numbers separated by spaces or another delimiter; regexp with 'tokens' for other layouts.",
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "strtok",
+    "kind": "function",
+    "signature": "[token, remain] = strtok(str, delimiters)",
+    "summary": "Splits text at the first delimiter into a token and the rest.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "strsplit, or regexp(str, '^\\s*(\\S+)(.*)$', 'tokens', 'once'); for one delimiter, k = strfind(str, d) and indexing.",
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "sym",
+    "kind": "function",
+    "signature": "x = sym('x')",
+    "summary": "A symbolic variable or number (Symbolic Math Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode for symbolic and exact rational work: x = var('x'); solve(x^2 - 2 == 0, x); QQ(1/4) + QQ(2/5). In MATLAB mode, [N, D] = rat(X) gives a rational approximation of X as N./D (exact for ratios of small integers); roots for polynomials and fzero for one equation.",
+    "tags": [
+      "symbolic"
+    ]
+  },
+  {
+    "name": "syms",
+    "kind": "function",
+    "signature": "syms x y",
+    "summary": "Creates symbolic variables (Symbolic Math Toolbox).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode: var('x y').",
+    "tags": [
+      "symbolic"
+    ]
+  },
+  {
+    "name": "table",
+    "kind": "function",
+    "signature": "T = table(var1, ..., varN)",
+    "summary": "A table: columns of possibly different types with names, rows indexed by number or name.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "A struct of equal-length column vectors (s.x, s.y), or a struct array with one element per row; sortrows and unique work on numeric matrices.",
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "textread",
+    "kind": "function",
+    "signature": "[A, ...] = textread(filename, format)",
+    "summary": "Reads formatted data from a text file (older function).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "textscan",
+    "kind": "function",
+    "signature": "C = textscan(fileID, formatSpec)",
+    "summary": "Reads formatted fields from a text file or string into a cell array.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fgetl line by line with strsplit and str2double, or regexp with 'tokens'.",
+    "tags": [
+      "files",
+      "text"
+    ]
+  },
+  {
+    "name": "typecast",
+    "kind": "function",
+    "signature": "Y = typecast(X, type)",
+    "summary": "Reinterprets the bytes of numeric data as another type.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No byte reinterpretation in Sagebrush.",
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "validateattributes",
+    "kind": "function",
+    "signature": "validateattributes(A, classes, attributes)",
+    "summary": "Checks that an array has a given class and attributes, erroring otherwise.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "isa, size, isreal and the is* functions, with error and a message."
+  },
+  {
+    "name": "webread",
+    "kind": "function",
+    "signature": "data = webread(url)",
+    "summary": "Reads content from a web service.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No web access from MATLAB mode.",
+    "tags": [
+      "web"
+    ]
+  },
+  {
+    "name": "writematrix",
+    "kind": "function",
+    "signature": "writematrix(A, filename)",
+    "summary": "Writes a matrix to a delimited text or spreadsheet file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fopen and fprintf, one format per row: fprintf(f, '%g,%g\\n', M.').",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "writetable",
+    "kind": "function",
+    "signature": "writetable(T, filename)",
+    "summary": "Writes a table to a delimited text or spreadsheet file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "fopen and fprintf: f = fopen('out.csv', 'w'); fprintf(f, '%g,%g\\n', M.'); fclose(f).",
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "xlsread",
+    "kind": "function",
+    "signature": "num = xlsread(filename)",
+    "summary": "Reads a spreadsheet file.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "No spreadsheet files: save the sheet as CSV and read it with load (numbers) or fopen and fgetl (text).",
+    "tags": [
+      "files"
+    ]
+  }
+]
