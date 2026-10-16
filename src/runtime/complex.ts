@@ -8,6 +8,7 @@ import * as Ty from "./types";
 import { floatRepr, format } from "./format";
 import { newBuiltinModule } from "./modules";
 import * as FD from "./fdlibm";
+import * as CR from "./crmath";
 import { glibcExp, glibcLog, glibcLog1p, glibcPow } from "./libm";
 
 export class PyComplex {
@@ -40,15 +41,15 @@ function cpow(a: [number, number], b: [number, number]): PyComplex {
     if (br < 0) return cdiv([1, 0], [rr, ri]);
     return new PyComplex(rr, ri);
   }
-  const vabs = FD.v8hypot(ar, ai);
+  const vabs = CR.hypot(ar, ai);
   let len = glibcPow(vabs, br);
-  const at = FD.atan2(ai, ar);
+  const at = CR.atan2(ai, ar);
   let phase = at * br;
   if (bi !== 0) {
     len /= glibcExp(at * bi);
     phase += bi * glibcLog(vabs);
   }
-  const r = new PyComplex(len * FD.cos(phase), len * FD.sin(phase));
+  const r = new PyComplex(len * CR.cos(phase), len * CR.sin(phase));
   if (!Number.isFinite(r.re) && Number.isFinite(ar) && Number.isFinite(ai) && Number.isFinite(br) && Number.isFinite(bi)) raise(T.OverflowError, "complex exponentiation");
   return r;
 }
@@ -170,7 +171,7 @@ Ty.subclassable(complexType, PyComplex, ["re", "im"]);
   M("__pos__", (a: any) => new PyComplex(...toC(a)!));
   M("__abs__", (a: any) => {
     const [r, i] = toC(a)!;
-    const v = FD.v8hypot(r, i);
+    const v = CR.hypot(r, i);
     if (!Number.isFinite(v) && Number.isFinite(r) && Number.isFinite(i)) raise(T.OverflowError, "absolute value too large");
     return O.mkfloat(v);
   });
@@ -234,10 +235,10 @@ function csqrt(re: number, im: number): PyComplex {
   let ax = Math.abs(re), ay = Math.abs(im), sr: number, d: number;
   if (ax < 2.2250738585072014e-308 && ay < 2.2250738585072014e-308) {
     ax = ax * 2 ** 53;
-    sr = Math.sqrt((ax + FD.v8hypot(ax, ay * 2 ** 53)) / 2) * 2 ** -26.5;
+    sr = Math.sqrt((ax + CR.hypot(ax, ay * 2 ** 53)) / 2) * 2 ** -26.5;
   } else {
     ax /= 8;
-    sr = 2 * Math.sqrt(ax + FD.v8hypot(ax, ay / 8));
+    sr = 2 * Math.sqrt(ax + CR.hypot(ax, ay / 8));
   }
   d = ay / (2 * sr);
   const sgn = (v: number) => (im < 0 || Object.is(im, -0) ? -v : v);
@@ -246,24 +247,24 @@ function csqrt(re: number, im: number): PyComplex {
 function cexp(re: number, im: number): PyComplex {
   const e = glibcExp(re);
   if (im === 0) return C(e, im);
-  return C(e * FD.cos(im), e * FD.sin(im));
+  return C(e * CR.cos(im), e * CR.sin(im));
 }
 function clog(re: number, im: number): PyComplex {
   const ax = Math.abs(re), ay = Math.abs(im);
   if (ax === 0 && ay === 0) raise(T.ValueError, "math domain error");
-  const h = FD.v8hypot(ax, ay);
+  const h = CR.hypot(ax, ay);
   let lr: number;
   if (0.71 <= h && h <= 1.73) {
     const am = Math.max(ax, ay), an = Math.min(ax, ay);
     lr = glibcLog1p((am - 1) * (am + 1) + an * an) / 2;
   } else lr = glibcLog(h);
-  return C(lr, FD.atan2(im, re));
+  return C(lr, CR.atan2(im, re));
 }
 const mul = (a: PyComplex, b: PyComplex) => C(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
 const div = (a: PyComplex, b: PyComplex) => cdiv([a.re, a.im], [b.re, b.im]);
 function casinh(z: PyComplex): PyComplex {
   const s1 = csqrt(1 + z.im, -z.re), s2 = csqrt(1 - z.im, z.re);
-  return C(FD.asinh(s1.re * s2.im - s2.re * s1.im), FD.atan2(z.im, s1.re * s2.re - s1.im * s2.im));
+  return C(CR.asinh(s1.re * s2.im - s2.re * s1.im), CR.atan2(z.im, s1.re * s2.re - s1.im * s2.im));
 }
 function casin(z: PyComplex): PyComplex {
   const s = casinh(C(-z.im, z.re));
@@ -271,11 +272,11 @@ function casin(z: PyComplex): PyComplex {
 }
 function cacos(z: PyComplex): PyComplex {
   const s1 = csqrt(1 - z.re, -z.im), s2 = csqrt(1 + z.re, z.im);
-  return C(2 * FD.atan2(s1.re, s2.re), FD.asinh(s2.re * s1.im - s2.im * s1.re));
+  return C(2 * CR.atan2(s1.re, s2.re), CR.asinh(s2.re * s1.im - s2.im * s1.re));
 }
 function cacosh(z: PyComplex): PyComplex {
   const s1 = csqrt(z.re - 1, z.im), s2 = csqrt(z.re + 1, z.im);
-  return C(FD.asinh(s1.re * s2.re + s1.im * s2.im), 2 * FD.atan2(s1.im, s2.re));
+  return C(CR.asinh(s1.re * s2.re + s1.im * s2.im), 2 * CR.atan2(s1.im, s2.re));
 }
 function catanh(z: PyComplex): PyComplex {
   if (z.re < 0) {
@@ -285,9 +286,9 @@ function catanh(z: PyComplex): PyComplex {
   const ay = Math.abs(z.im);
   if (z.re === 1 && ay < 1.4916681462400413e-154) {
     if (ay === 0) raise(T.ValueError, "math domain error");
-    return C(-glibcLog(Math.sqrt(ay) / Math.sqrt(FD.v8hypot(ay, 2))), (z.im < 0 ? -1 : 1) * FD.atan2(2, -ay) / 2);
+    return C(-glibcLog(Math.sqrt(ay) / Math.sqrt(CR.hypot(ay, 2))), (z.im < 0 ? -1 : 1) * CR.atan2(2, -ay) / 2);
   }
-  return C(glibcLog1p((4 * z.re) / ((1 - z.re) * (1 - z.re) + ay * ay)) / 4, -FD.atan2(-2 * z.im, (1 - z.re) * (1 + z.re) - ay * ay) / 2);
+  return C(glibcLog1p((4 * z.re) / ((1 - z.re) * (1 - z.re) + ay * ay)) / 4, -CR.atan2(-2 * z.im, (1 - z.re) * (1 + z.re) - ay * ay) / 2);
 }
 function catan(z: PyComplex): PyComplex {
   const s = catanh(C(-z.im, z.re));
@@ -324,42 +325,42 @@ newBuiltinModule("cmath", (m) => {
     const l = clog(z.re, z.im);
     return C(l.re / Math.LN10, l.im / Math.LN10);
   });
-  unary("sin", (z) => C(FD.sin(z.re) * FD.cosh(z.im), FD.cos(z.re) * FD.sinh(z.im)));
-  unary("cos", (z) => C(FD.cos(z.re) * FD.cosh(z.im), -FD.sin(z.re) * FD.sinh(z.im)));
-  unary("tan", (z) => div(C(FD.sin(z.re) * FD.cosh(z.im), FD.cos(z.re) * FD.sinh(z.im)), C(FD.cos(z.re) * FD.cosh(z.im), -FD.sin(z.re) * FD.sinh(z.im))));
-  unary("sinh", (z) => C(FD.sinh(z.re) * FD.cos(z.im), FD.cosh(z.re) * FD.sin(z.im)));
-  unary("cosh", (z) => C(FD.cosh(z.re) * FD.cos(z.im), FD.sinh(z.re) * FD.sin(z.im)));
-  unary("tanh", (z) => div(C(FD.sinh(z.re) * FD.cos(z.im), FD.cosh(z.re) * FD.sin(z.im)), C(FD.cosh(z.re) * FD.cos(z.im), FD.sinh(z.re) * FD.sin(z.im))));
+  unary("sin", (z) => C(CR.sin(z.re) * FD.cosh(z.im), CR.cos(z.re) * FD.sinh(z.im)));
+  unary("cos", (z) => C(CR.cos(z.re) * FD.cosh(z.im), -CR.sin(z.re) * FD.sinh(z.im)));
+  unary("tan", (z) => div(C(CR.sin(z.re) * FD.cosh(z.im), CR.cos(z.re) * FD.sinh(z.im)), C(CR.cos(z.re) * FD.cosh(z.im), -CR.sin(z.re) * FD.sinh(z.im))));
+  unary("sinh", (z) => C(FD.sinh(z.re) * CR.cos(z.im), FD.cosh(z.re) * CR.sin(z.im)));
+  unary("cosh", (z) => C(FD.cosh(z.re) * CR.cos(z.im), FD.sinh(z.re) * CR.sin(z.im)));
+  unary("tanh", (z) => div(C(FD.sinh(z.re) * CR.cos(z.im), FD.cosh(z.re) * CR.sin(z.im)), C(FD.cosh(z.re) * CR.cos(z.im), FD.sinh(z.re) * CR.sin(z.im))));
   unary("asin", casin);
   unary("acos", cacos);
   unary("atan", catan);
   unary("asinh", casinh);
   unary("acosh", cacosh);
   unary("atanh", catanh);
-  fn("phase", (x: any) => O.mkfloat(FD.atan2(arg(x)[1], arg(x)[0])));
+  fn("phase", (x: any) => O.mkfloat(CR.atan2(arg(x)[1], arg(x)[0])));
   fn("polar", (x: any) => {
     const [r, i] = arg(x);
-    return tuple([O.mkfloat(FD.v8hypot(r, i)), O.mkfloat(FD.atan2(i, r))]);
+    return tuple([O.mkfloat(CR.hypot(r, i)), O.mkfloat(CR.atan2(i, r))]);
   });
   fn("rect", (r: any, phi: any) => {
     const a = O.fv(r)!, p = O.fv(phi)!;
-    return C(a * FD.cos(p), a * FD.sin(p));
+    return C(a * CR.cos(p), a * CR.sin(p));
   });
   fn("isfinite", (x: any) => arg(x).every(Number.isFinite));
   fn("isinf", (x: any) => arg(x).some((v) => Math.abs(v) === Infinity));
   fn("isnan", (x: any) => arg(x).some((v) => v !== v));
   fn("isclose", (a: any, b: any) => {
     const x = arg(a), y = arg(b);
-    const d = FD.v8hypot(x[0] - y[0], x[1] - y[1]);
-    return d <= Math.max(1e-9 * Math.max(FD.v8hypot(...x), FD.v8hypot(...y)), 0);
+    const d = CR.hypot(x[0] - y[0], x[1] - y[1]);
+    return d <= Math.max(1e-9 * Math.max(CR.hypot(...x), CR.hypot(...y)), 0);
   });
   m.isclose.$kw = (pos: any[], names: string[], values: any[]) => {
     const kw: any = { rel_tol: 1e-9, abs_tol: 0 };
     names.forEach((n, i) => (kw[n] = O.fv(values[i])));
     const x = arg(pos[0]), y = arg(pos[1]);
     if (x[0] === y[0] && x[1] === y[1]) return true;
-    const d = FD.v8hypot(x[0] - y[0], x[1] - y[1]);
-    return d <= Math.max(kw.rel_tol * Math.max(FD.v8hypot(...x), FD.v8hypot(...y)), kw.abs_tol);
+    const d = CR.hypot(x[0] - y[0], x[1] - y[1]);
+    return d <= Math.max(kw.rel_tol * Math.max(CR.hypot(...x), CR.hypot(...y)), kw.abs_tol);
   };
 });
 import { builtins } from "./builtins";
