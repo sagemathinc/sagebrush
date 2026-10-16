@@ -3971,6 +3971,18 @@ for _name in ("__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__
         setattr(Solution, _name, _keep_conditions(_name))
 
 
+def _put_back(r, back):
+    """r (a solution, a list of them, or a dict) with each symbol of back
+    replaced by its function value."""
+    if isinstance(r, (list, tuple)):
+        return type(r)(_put_back(t, back) for t in r)
+    if isinstance(r, dict):
+        return type(r)((back.get(k, k), _put_back(v, back)) for k, v in r.items())
+    if isinstance(r, Expression):
+        return r.subs(back)
+    return r
+
+
 def solve(f, *args, **kw):
     """solve(x^2 == 4, x) -> [x == -2, x == 2]; solve([eqs], x, y) ->
     [[x == ..., y == ...], ...]; solution_dict=True for dictionaries.
@@ -4020,6 +4032,8 @@ def solve(f, *args, **kw):
 
         sage: solve(x^2 == 4, x)
         [x == -2, x == 2]
+        sage: g = function('g')(x); solve(g^2 == 4, g), solve((x - 1)^2 == 8, x)
+        ([g(x) == -2, g(x) == 2], [x == -2*sqrt(2) + 1, x == 2*sqrt(2) + 1])
         sage: var('y')
         y
         sage: solve([x + y == 3, x - y == 1], x, y)
@@ -4062,6 +4076,31 @@ def solve(f, *args, **kw):
     if not vs:
         names = sorted(set(n for g in eqs for n in g._names()))
         vs = names
+    # a function value as the unknown (solve(ed, y) with y = function('y')(x),
+    # Sage's way with an ODE's solution: it was "y(x) is not a valid
+    # variable"): solved for a new symbol in its place, then put back
+    fns = [v for v in vs if isinstance(v, Expression) and not v.is_symbol() and v._op()[0].startswith("fun:")]
+    if fns:
+        # (not a name of the equations nor of a requested variable:
+        # solve([f(x) == 2], f(x), _solve_fn0) took the user's _solve_fn0)
+        taken = set(n for g in eqs for n in g._names())
+        taken |= set(n for v in vs for n in (_expr(v)._names() if not isinstance(v, str) else [v]))
+        # and not a name in the active assumptions (assume(_solve_fn0 > 0)
+        # made solve(ff(x) == -2, ff(x)) return [], the review's CORR-9E5-1)
+        for r in _ASSUMPTIONS:
+            taken |= set(r._names()) if isinstance(r, Expression) else {str(r._v)}
+        new = {}
+        for k, v in enumerate(fns):
+            name = "_solve_fn%d" % k
+            while name in taken:
+                name += "_"
+            taken.add(name)
+            new[str(v)] = Expression(_sym_s(name))
+        put = {fv: new[str(fv)] for fv in fns}
+        eqs2 = [g.subs(put) for g in eqs]
+        vs2 = [new[str(v)] if str(v) in new else v for v in vs]
+        r = solve(eqs2 if many else eqs2[0], *vs2, **kw)
+        return _put_back(r, {new[str(fv)]: fv for fv in fns})
     names = [_var_name(v) for v in vs]
     eqs = [g if g.is_relational() else g == 0 for g in eqs]
     # inequalities are conditions on the solutions of the equations (Sage's
