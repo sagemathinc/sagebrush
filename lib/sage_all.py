@@ -322,7 +322,8 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
     import builtins as _b
     if isinstance(source, (tuple, list)):
         if len(source) == 3:
-            cmds, source, locals = source
+            # (a copy of the tuple's locals, as Sage)
+            cmds, source, locals = source[0], source[1], dict(source[2])
         elif len(source) == 2:
             cmds, source = source
         else:
@@ -337,18 +338,15 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
         from sagebrush.preparse import preparse as _preparse
         return compile(_preparse(code).strip(), "<sage_eval>", mode)
 
-    base = globals()
-    ns = dict(base)
-    if locals is not None:
-        ns.update(locals)
+    # as Sage: the commands and the expression run with the globals and
+    # the caller's locals as separate namespaces, so assignments, del and
+    # := act on locals itself (also when a command raises)
+    g = dict(globals())
+    if locals is None:
+        locals = {}
     if cmds.strip():
-        exec(comp(cmds, "exec"), ns)
-        if locals is not None:
-            # the commands' assignments go to the caller's locals, as Sage
-            for k, v in ns.items():
-                if k != "__builtins__" and (k in locals or k not in base or base[k] is not v):
-                    locals[k] = v
-    return eval(comp(source, "eval"), ns)
+        exec(comp(cmds, "exec"), g, locals)
+    return eval(comp(source, "eval"), g, locals)
 
 
 __all__.append("sage_eval")

@@ -65,3 +65,21 @@ _d = {"x": 2}
 t("sage_eval cmds update locals", lambda: (sage_eval("x", locals=_d, cmds="x=3"), _d["x"]))
 _e = {}
 t("sage_eval cmds update empty locals", lambda: (sage_eval("z+1", locals=_e, cmds="z=4"), _e["z"]))
+def _se_del():
+    d = {'x': 2}; sage_eval('1', locals=d, cmds='del x'); return 'x' in d
+def _se_raise():
+    d = {'x': 2}
+    try:
+        sage_eval('1', locals=d, cmds="x=3; raise ValueError('oops')")
+    except ValueError:
+        pass
+    return d['x']
+def _se_walrus():
+    d = {'x': 2}; return (sage_eval('(x := 4)', locals=d), d['x'])
+def _se_tuple_copy():
+    d = {'b': 3}; return (sage_eval(('a=2', 'a+b', d)), sorted(d))
+t("sage_eval del in cmds", _se_del)
+t("sage_eval cmds raising", _se_raise)
+t("sage_eval walrus", _se_walrus)
+t("sage_eval tuple locals copied", _se_tuple_copy)
+t("sage_eval comprehension", lambda: sage_eval('[t*i for i in range(3)]', locals={'t': 2}))
