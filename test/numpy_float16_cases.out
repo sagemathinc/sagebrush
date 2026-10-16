@@ -78,3 +78,23 @@ np.equal.reduce([1, 1], dtype=bool) -> True bool
 str(np.result_type(1, 'i1')) -> 'int8' str
 np.result_type('abc') -> TypeError: data type 'abc' not understood
 ['int8', 'int8', 'float32', 'uint8', 'float64', 'bool', 'complex64', 'int64', 'float64', 'int64']
+np.add(1, 1, dtype=np.float32, casting='no') -> 2.0 float32
+np.add(1, 1, dtype=np.float32, casting='safe') -> 2.0 float32
+np.multiply(2, 3, dtype=np.complex64, casting='no') -> (6+0j) complex64
+np.add(1.5, 1, dtype=np.float32, casting='no') -> 2.5 float32
+np.add(1.5, 1, dtype=np.int8, casting='no') -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('float64') to dtype('int8') with casting rule 'no'
+np.add(1.5, 1, dtype=np.int8, casting='unsafe') -> 2 int8
+np.add(True, 1, dtype=np.int8, casting='no') -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('bool') to dtype('int8') with casting rule 'no'
+np.add(1, [1], dtype=np.int8, casting='no') -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('int64') to dtype('int8') with casting rule 'no'
+np.add(1, np.array([1], np.int8), dtype=np.int8, casting='no') -> [2] int8
+np.add(1, np.array([1], np.int8), dtype=np.int16, casting='no') -> TypeError: Cannot cast ufunc 'add' input 1 from dtype('int8') to dtype('int16') with casting rule 'no'
+np.add(1, True, dtype=bool) -> TypeError: Cannot cast ufunc 'add' input 0 from dtype('int64') to dtype('bool') with casting rule 'same_kind'
+np.add(1, 1, dtype=bool, casting='unsafe') -> True bool
+np.multiply.reduce(np.array([], np.int8), dtype=np.int8) -> 1 int8
+np.multiply.accumulate(np.array([], np.int8), dtype=np.int8) -> [] int8
+np.multiply.reduce(np.zeros((2, 0), np.int16), axis=1, dtype=np.int16, keepdims=True) -> [[1], [1]] int16
+np.multiply.reduce(np.zeros((0, 2), np.int16), axis=0, dtype=np.int16) -> [1, 1] int16
+np.multiply.reduce(np.zeros((2, 0), np.uint8), axis=None, dtype=np.uint8, keepdims=True) -> [[1]] uint8
+np.multiply.accumulate(np.zeros((0, 2), np.int8), dtype=np.int8).shape -> (0, 2) tuple
+np.multiply.reduce([], dtype=np.int8, initial=3) -> 3 int8
+np.multiply.reduce(np.array([], np.uint32), dtype=np.uint32) -> 1 uint32
