@@ -222,11 +222,13 @@ export interface Submission {
   comment: string;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// (a board's questions, read once for each text posted)
-const boards = new WeakMap<Posted, BoardDoc | string>();
+// (a board's questions, read once for each text posted: kept with that
+// text, and read again if the posted object now has another, HARD-A6E-2)
+const boards = new WeakMap<Posted, { text: string; d: BoardDoc | string }>();
 function boardOf(posted: Posted): BoardDoc | string {
-  let d = boards.get(posted);
-  if (d !== undefined) return d;
+  const kept = boards.get(posted);
+  if (kept && kept.text === posted.text) return kept.d;
+  let d: BoardDoc | string;
   try {
     const raw = JSON.parse(posted.text);
     const bad = raw && typeof raw === "object" && !Array.isArray(raw) ? formatError(raw) : "not a board";
@@ -234,7 +236,7 @@ function boardOf(posted: Posted): BoardDoc | string {
   } catch {
     d = "the board posted has no questions (it is not a board's JSON)";
   }
-  boards.set(posted, d);
+  boards.set(posted, { text: posted.text, d });
   return d;
 }
 
@@ -249,17 +251,34 @@ function boardOf(posted: Posted): BoardDoc | string {
 export function checkSubmission(posted: Posted, m: unknown): Checked {
   const id = isObj(m) && typeof m.id === "string" && UUID.test(m.id) ? m.id : undefined;
   const no = (message: string): Checked => ({ ok: false, ...(id ? { id } : {}), message });
-  // (plain JSON, walked without recursion before anything reads it: structured clone carries cycles and other types)
+  // (plain JSON, walked without recursion before anything reads it:
+  // structured clone carries cycles and other types.  Values counted as
+  // they are found, before a container's are taken, and its characters as
+  // a lower bound of its size: a wide or long one refused before anything
+  // the size of it is made, HARD-A6E-1)
+  const MAX = 10_000, tooMany = "a submission has more than 10000 values", tooBig = `a submission is at most ${ASK_LIMITS.bytes / 1024} KiB`;
   const stack: [unknown, number][] = [[m, 1]];
-  for (let seen = 0; stack.length; ) {
+  let found = 1, chars = 0;
+  while (stack.length) {
     const [v, depth] = stack.pop()!;
-    if (++seen > 10_000) return no("a submission has more than 10000 values");
-    if (v === null || typeof v === "string" || typeof v === "boolean") continue;
+    if (typeof v === "string") { if ((chars += v.length) > ASK_LIMITS.bytes) return no(tooBig); continue; }
+    if (v === null || typeof v === "boolean") continue;
     if (typeof v === "number") { if (!Number.isFinite(v)) return no("a submission's numbers are finite"); continue; }
     if (depth > 4) return no("a submission nests at most 4 deep");
-    if (Array.isArray(v)) { if (Object.getPrototypeOf(v) !== Array.prototype) return no("a submission is plain JSON data"); for (const x of v) stack.push([x, depth + 1]); continue; }
+    if (Array.isArray(v)) {
+      if (Object.getPrototypeOf(v) !== Array.prototype) return no("a submission is plain JSON data");
+      if ((found += v.length) > MAX) return no(tooMany);
+      for (let i = 0; i < v.length; i++) stack.push([v[i], depth + 1]);
+      continue;
+    }
     if (typeof v !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(v))) return no("a submission is plain JSON data");
-    for (const k of Object.keys(v as object)) stack.push([(v as any)[k], depth + 1]);
+    // (its own keys one at a time, never a list of them all: its prototype is Object's or none)
+    for (const k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (++found > MAX) return no(tooMany);
+      if ((chars += k.length) > ASK_LIMITS.bytes) return no(tooBig);
+      stack.push([(v as any)[k], depth + 1]);
+    }
   }
   let bytes: number;
   try { bytes = new TextEncoder().encode(JSON.stringify(m)).length; } catch { return no("a submission is plain JSON data"); }
