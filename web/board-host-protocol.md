@@ -160,6 +160,11 @@ message, so that every host checks the same way. It goes in the
     is the idempotency key of the turn it starts, at the service and not
     only in the page, so that a submission sent again after a reload or
     from another tab can't start a second turn.
+  - Each channel has its own board, pending ids and taken ids. A handler
+    still running when a new board replaces its channel sees and changes
+    only its own; its reply goes to its closed port and is lost.
+  - A `refused` message is the host's own words, at most 500 characters:
+    never an exception's text as it is.
   - The host keeps at most 100 ids per channel and refuses submissions
     past that. The ids go when the channel is closed; the service's keys
     last as long as its own idempotency window.
@@ -180,15 +185,14 @@ in, so nothing in a submission is hidden from it.
 
 ```js
 const f = document.querySelector("iframe"); // src: https://sagebrush.space/frame/board/
-let port = null, posted = null, taken = null, pending = null;
+let port = null; // (the current channel's, only to close it)
 function show(text, name, revision) {
   port?.close();
-  const ch = new MessageChannel();
-  port = ch.port1;
-  posted = { text, name, revision };
-  taken = new Set();
-  pending = new Set();
-  const p = port, say = (sagebrush, id, message) => p.postMessage({ sagebrush, version: 1, id, ...(message ? { message } : {}) });
+  const ch = new MessageChannel(), p = ch.port1;
+  port = p;
+  // (this channel's own: a handler still running for an earlier channel never sees or changes them)
+  const posted = { text, name, revision }, taken = new Set(), pending = new Set();
+  const say = (sagebrush, id, message) => p.postMessage({ sagebrush, version: 1, id, ...(message ? { message } : {}) });
   p.onmessage = async (e) => {
     const m = e.data;
     // (checkSubmission: Sagebrush's check, against the board posted on this channel)
@@ -206,7 +210,8 @@ function show(text, name, revision) {
       taken.add(m.id);
       say("received", m.id);
     } catch (err) {
-      say("refused", m.id, "not sent: " + err.message);
+      // (a message of the host's own words, short: never an exception's text as it is)
+      say("refused", m.id, "not sent: " + shortReason(err));
     } finally {
       pending.delete(m.id);
     }
