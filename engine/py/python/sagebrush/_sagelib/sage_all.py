@@ -610,31 +610,59 @@ class Rational(_Fraction):
             raise TypeError("unable to convert rational %s to an integer" % self)
         return int(self._numerator)
 
+    @staticmethod
+    def _shift_count(n):
+        """A shift count as Sage takes it: an integer, or an integral
+        rational (ValueError otherwise); None for anything else (a residue
+        or an object with only __index__ is not one: TypeError)."""
+        if isinstance(n, Rational):
+            if n._denominator != 1:
+                raise ValueError("denominator must be 1")
+            return int(n._numerator)
+        if isinstance(n, int):
+            return int(n)
+        return None
+
     def __lshift__(self, n):
-        """self * 2^n, a Rational, as in Sage (and >>, self / 2^n).
+        """self * 2^n, a Rational, as in Sage (and >>, self / 2^n); an
+        integer (Integer) or bool on the left of a rational count.
 
         EXAMPLES::
 
-            sage: (6/3) << 1, (5/2) << 1, (8/2) >> 1, (5/2) >> 1, 1 << (4/2), 16 >> (4/2)
-            (4, 5, 2, 5/4, 4, 4)
+            sage: (6/3) << 1, (5/2) << 1, (8/2) >> 1, (5/2) >> 1, 1 << (4/2), 16 >> (4/2), True >> (2/1)
+            (4, 5, 2, 5/4, 4, 4, 1/4)
+            sage: (3/2) << GF(5)(2)
+            Traceback (most recent call last):
+            ...
+            TypeError: unsupported operand type(s) for <<: 'Rational' and 'IntegerMod'
         """
-        import operator
-        n = operator.index(n)
+        n = Rational._shift_count(n)
+        if n is None:
+            return NotImplemented
         return self * Integer(2) ** n if n >= 0 else self / Integer(2) ** -n
 
     def __rshift__(self, n):
-        import operator
-        n = operator.index(n)
+        n = Rational._shift_count(n)
+        if n is None:
+            return NotImplemented
         return self / Integer(2) ** n if n >= 0 else self * Integer(2) ** -n
 
     def __rlshift__(self, a):
+        if isinstance(a, bool):
+            # (a bool is not an Integer: True >> (2/1) is 1/4 in Sage)
+            return Rational._from_coprime_ints(int(a), 1) << self
         if isinstance(a, int):
-            return Integer(a) << self.__index__()
+            # (a negative count shifts the other way, as Sage's Integer)
+            n = self.__index__()
+            return Integer(a << n if n >= 0 else a >> -n)
         return NotImplemented
 
     def __rrshift__(self, a):
+        if isinstance(a, bool):
+            return Rational._from_coprime_ints(int(a), 1) >> self
         if isinstance(a, int):
-            return Integer(a) >> self.__index__()
+            n = self.__index__()
+            return Integer(a >> n if n >= 0 else a << -n)
         return NotImplemented
 
     def is_zero(self):
@@ -713,11 +741,12 @@ class Rational(_Fraction):
             (Rational Field, (2/3, 0))
             sage: (2/1).sqrt(prec=30), (4/1).sqrt(all=True), (2/1).sqrt(all=True, extend=False)
             (1.4142136, [2, -2], [])
+            sage: (2^-1200).sqrt(prec=53), (-4/1).sqrt(prec=53), (-4/1).sqrt(prec=53).parent()
+            (2.40991986510288e-181, 2.00000000000000*I, Complex Field with 53 bits of precision)
         """
         n, d = self._numerator, self._denominator
         if prec is not None:
-            r = RealField(prec)(self).sqrt()
-            return ([r, -r] if n else [r]) if all else r
+            return self._sqrt_prec(prec, all)
         if n >= 0 and _math.isqrt(n) ** 2 == n and _math.isqrt(d) ** 2 == d:
             r = Rational._from_coprime_ints(_math.isqrt(n), _math.isqrt(d))
         elif not extend:
@@ -727,6 +756,30 @@ class Rational(_Fraction):
         else:
             r = _expr(self) ** _Fraction(1, 2)
         return ([r, -r] if n else [r]) if all else r
+
+    def _sqrt_prec(self, prec, all=False):
+        """The square root with prec bits, correctly rounded from the exact
+        rational (converting first lost 2^-1200 to 0 in the double-backed
+        RR), in ComplexField(prec) for a negative rational (it was a Python
+        complex); refused where the 53-bit field cannot hold the root."""
+        R = RealField(prec)
+        n, d = self._numerator, self._denominator
+        if n == 0:
+            r = R(0)
+            return [r] if all else r
+        a = abs(n)
+        # sqrt(a/d) = s / 2^k to prec + 20 bits, with a sticky bit
+        k = max(0, prec + 21 - (a.bit_length() - d.bit_length()) // 2)
+        N, rem = divmod(a << (2 * k), d)
+        s = _math.isqrt(N)
+        m = 2 * s + (0 if s * s == N and rem == 0 else 1)
+        e = m.bit_length() - (k + 1)
+        if type(R).__name__ == "_RealField" and not -1021 <= e <= 1023:
+            raise NotImplementedError("the square root of %s is outside the range of %s in sagebrush yet" % (self, R))
+        r = R(_intdiv(m, 1 << (k + 1)))
+        if n < 0:
+            r = ComplexField(prec)(0, r)
+        return [r, -r] if all else r
 
     def squarefree_part(self):
         """The squarefree part of numerator times denominator (the same
@@ -854,14 +907,17 @@ class Rational(_Fraction):
 
 
 def pow(base, exp, mod=None):
-    """Python's pow, with integral rationals taken as integers by the
-    three-argument form, as in Sage (pow(3, 4/2, 5) failed once 4/2 was a
-    Rational: the builtin wants exact ints).
+    """Python's pow; with a modulus and an Integer base, as Sage's Integer:
+    integral rational exponent and modulus taken as integers (pow(3, 4/2, 5)
+    failed once 4/2 was a Rational), the residue in [0, |m|), and m = 0 no
+    reduction.  Any other base gets the arguments as they are.
 
     EXAMPLES::
 
-        sage: pow(3, 4/2, 5), pow(2, 10)
-        (4, 1024)
+        sage: pow(3, 4/2, 5), pow(2, 10), pow(3, 2, -5), pow(3, -1, -5), pow(3, 2, 0)
+        (4, 1024, 4, 2, 9)
+        sage: pow(GF(5)(2), 2, 3/2)
+        4
         sage: pow(2/1, 3, 7)
         Traceback (most recent call last):
         ...
@@ -870,9 +926,14 @@ def pow(base, exp, mod=None):
     import builtins
     if mod is None:
         return builtins.pow(base, exp)
-    if isinstance(base, Rational):
+    if isinstance(base, Rational) or (isinstance(base, bool) and (isinstance(exp, Rational) or isinstance(mod, Rational))):
         raise TypeError("the 3-argument version of pow() is not supported")
-    base, exp, mod = (a.__index__() if isinstance(a, Rational) else a for a in (base, exp, mod))
+    if isinstance(base, int) and not isinstance(base, bool):
+        e, m = (a.__index__() if isinstance(a, Rational) else a for a in (exp, mod))
+        if isinstance(e, int) and isinstance(m, int) and not isinstance(e, bool) and not isinstance(m, bool):
+            if m == 0:
+                return Integer(base) ** e
+            return Integer(builtins.pow(int(base), int(e), abs(int(m))))
     return builtins.pow(base, exp, mod)
 
 

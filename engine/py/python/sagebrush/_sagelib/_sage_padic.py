@@ -1727,8 +1727,9 @@ def padic_matrix(base, *args):
     are read boundedly (at most m n + 1 entries when the shape is given);
     entries are converted into K (integers, rationals, p-adic numbers of
     the same prime, as Sage converts them)."""
-    from _sage_matrix import _bounded_list, _bounded_rows
-    args = list(args)
+    from _sage_matrix import _bounded_list, _bounded_rows, _int_dims
+    # (an integral Rational dimension became the scalar entry: CORR-87F-1)
+    args = list(_int_dims(args))
     _int = lambda v: isinstance(v, int) or type(v).__name__ == "Integer"
     lim = _PADIC_MATRIX_MAX_ENTRIES
     if not args:
