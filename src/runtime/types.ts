@@ -2008,6 +2008,9 @@ method(bytearray, "extend", (b: PyByteArray, x: any) => {
     raise(T.TypeError, `can't extend bytearray with ${typeName(x)}`);
   }
   const add = toBytes(x, undefined, undefined, true);
+  // (only a real re-size is refused while exported: extending by nothing
+  // is not one, CORR-185-1)
+  if (add.length === 0) return null;
   checkResizable(b);
   grow(b, add.length);
   b.a.set(add, b.n);
