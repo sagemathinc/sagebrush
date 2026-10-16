@@ -269,13 +269,19 @@ export function lex(src: string): Tok[] {
 
 // ------------------------------------------------------------------ syntax tree
 
-interface Frame { code: string; n: number; cur: number } // what `end` in an index refers to (cur: the argument being parsed)
+// what `end` in an index refers to (cur: the argument being parsed; fn: its base is a name that
+// may be a function, known only when the code runs)
+interface Frame { code: string; n: number; cur: number; fn?: boolean; used?: boolean }
+// (used: an end refers to it, so a computed base is made once, into a temporary, and the
+// index and its ends read that one value)
 
 type Expr =
   | { k: "num"; v: string }
   | { k: "str"; v: string; dq: boolean }
   | { k: "id"; name: string; line: number; col: number }
-  | { k: "end"; frame: Frame; pos: number }
+  // (outer: the enclosing indexes, innermost first, each with the argument end is in: an
+  // end inside a function call's arguments is the enclosing indexed variable's, as in MATLAB)
+  | { k: "end"; frame: Frame; pos: number; outer: { frame: Frame; pos: number }[] }
   | { k: "colon" } // a bare `:` index
   | { k: "bin"; op: string; l: Expr; r: Expr }
   | { k: "un"; op: string; e: Expr }
@@ -809,7 +815,10 @@ class Parser {
     if (t.t === "kw" && t.v === "end" && this.frames.length) {
       this.next();
       const frame = this.frames[this.frames.length - 1];
-      return { k: "end", frame, pos: frame.cur };
+      const outer = this.frames.slice(0, -1).reverse().map((f) => ({ frame: f, pos: f.cur }));
+      frame.used = true;
+      for (const o of outer) o.frame.used = true;
+      return { k: "end", frame, pos: frame.cur, outer };
     }
     if (this.at("(")) {
       this.next();
@@ -1380,6 +1389,31 @@ class Emitter {
     }
     // the path, outermost first; `end` in an index refers to the part so far
     const parts: string[] = [];
+    if (lv.path.some((p) => p.k === "index" && p.frame.used)) {
+      // (an end in the path: the parts are made once, in order, into a list the ends read,
+      // so a computed subscript, s(tick()).a(min(end, 5)) = v, is evaluated once; a global
+      // keeps its order, the path and the value first, then the registry's value as base)
+      const tp = this.fresh("_p");
+      this.emit(`${tp} = []`);
+      for (const p of lv.path) {
+        if (p.k === "field") this.emit(`${tp}.append(("f", ${JSON.stringify(p.name)}))`);
+        else if (p.k === "dynfield") this.emit(`${tp}.append(("f", _m.fieldname(${this.expr(p.name, scope)})))`);
+        else if (p.k === "index") {
+          p.frame.code = `_m.peek(${base}, ${tp})`;
+          this.emit(`${tp}.append((${p.brace ? '"b"' : '"p"'}, ${this.argList(p.args, scope)}))`);
+        }
+      }
+      if (scope.globals.has(lv.name)) {
+        const tv = this.fresh();
+        this.emit(`${tv} = ${value}`);
+        this.emit(`${name} = _m.assign(${base}, ${tp}, ${tv})`);
+      } else {
+        this.emit(`${name} = _m.assign(${base}, ${tp}, ${value})`);
+      }
+      scope.vars.add(lv.name);
+      this.afterAssign(lv.name, scope);
+      return;
+    }
     for (const p of lv.path) {
       if (p.k === "field") parts.push(`("f", ${JSON.stringify(p.name)})`);
       else if (p.k === "dynfield") parts.push(`("f", _m.fieldname(${this.expr(p.name, scope)}))`);
@@ -1441,7 +1475,19 @@ class Emitter {
         if (WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
         return `_m.val(${this.lookup(e.name, scope)})`;
       }
-      case "end": return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
+      case "end": {
+        // (an end whose index may be a function call: the enclosing indexes, tried in turn
+        // when the code runs, up to the first whose base is surely a value)
+        if (!e.frame.fn || !e.outer.length) return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
+        const rest: string[] = [];
+        for (const o of e.outer) {
+          if (!o.frame.code) break;
+          rest.push(`lambda: ${o.frame.code}, ${o.pos}, ${o.frame.n}`);
+          if (!o.frame.fn) break;
+        }
+        if (!rest.length) return `_m.end(${e.frame.code}, ${e.pos}, ${e.frame.n})`;
+        return `_m.end_chain(${e.frame.code}, ${e.pos}, ${e.frame.n}, ${rest.join(", ")})`;
+      }
       case "colon": return "_m.COLON";
       case "bin": {
         if (e.op === "&&") return `(_m.sc(${this.expr(e.l, scope)}) and _m.sc(${this.expr(e.r, scope)}))`;
@@ -1458,8 +1504,7 @@ class Emitter {
       case "range": return e.step ? `_m.colon(${this.expr(e.a, scope)}, ${this.expr(e.step, scope)}, ${this.expr(e.b, scope)})` : `_m.colon(${this.expr(e.a, scope)}, ${this.expr(e.b, scope)})`;
       case "index":
         if (e.brace) {
-          const base = this.expr(e.e, scope);
-          e.frame.code = base;
+          const base = this.onceBase(e.frame, this.expr(e.e, scope));
           return `_m.brace(${base}, ${this.argList(e.args, scope)})`;
         }
         return this.indexExpr(e, scope, "1");
@@ -1555,13 +1600,33 @@ class Emitter {
         return `_m.ws_call(${JSON.stringify(f.name)}, ${ns}, ${this.argList(e.args, scope)}, ${nargout})`;
       }
       base = this.lookup(f.name, scope);
-    } else if (f.k === "id" && scope.caps?.has(f.name)) base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
+      e.frame.fn = true;
+    } else if (f.k === "id" && scope.caps?.has(f.name)) {
+      base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
+      e.frame.fn = true;
+    }
     // (at the top level, x(args) after clear x is the function x again)
-    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) base = this.lookup(f.name, scope);
+    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) {
+      base = this.lookup(f.name, scope);
+      e.frame.fn = true;
+    }
     else if (f.k === "field" && f.e.k === "id" && !this.isVar(f.e.name, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
     else base = this.expr(f, scope);
-    e.frame.code = base;
+    base = this.onceBase(e.frame, base);
     return `_m.paren(${base}, ${this.argList(e.args, scope)}, ${nargout})`;
+  }
+
+  /** an index's base as the code that makes it: when an end refers to the index and the
+   * base is computed (s(k).a, c{k}), it is made once, into a temporary, before the
+   * arguments, which read the temporary (s(tick()).a(min(end, 5)) calls tick once) */
+  onceBase(frame: Frame, base: string): string {
+    if (!frame.used || /^[A-Za-z_][A-Za-z0-9_]*$/.test(base)) {
+      frame.code = base;
+      return base;
+    }
+    const t = this.fresh("_b");
+    frame.code = t;
+    return `(${t} := ${base})`;
   }
 
   /** arguments (or elements): c{:} and s.f expand to their values */
@@ -1576,8 +1641,7 @@ class Emitter {
   /** the values of c{...} or s.f as a list (a comma-separated list) */
   csList(a: Expr, scope: Scope): string {
     if (a.k === "index" && a.brace) {
-      const base = this.expr(a.e, scope);
-      a.frame.code = base;
+      const base = this.onceBase(a.frame, this.expr(a.e, scope));
       return `_m.brace_cs(${base}, ${this.argList(a.args, scope)})`;
     }
     if (a.k === "field") return `_m.field_cs(${this.fieldBase(a.e, scope)}, ${JSON.stringify(a.name)})`;

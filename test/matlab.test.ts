@@ -2273,3 +2273,59 @@ test("perms and xcorr are made within their limits, and refused past them, under
     "[40320 8]", "[362880 9]", "refused: perms of 9 elements is n", "refused: perms of 9 elements is n", "refused: perms of 1000000 element",
     "[1 999999]", "refused: xcorr at 1000001 lags is", "refused: xcorr of empty vectors i", "[1 5999]", "refused: xcorr of vectors of 4000"]);
 });
+
+test("end inside a function call within an index is the enclosing indexed variable's: x(min(end, 5)), A(end, min(end, 2)), and y's in x(y(end))", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
+  assert.deepEqual(run([
+    "x = 10:10:80; disp(mat2str(x(min(end, 5))))", "x = 10:10:30; disp(mat2str(x(1:min(end, 5))))", "x = 10:10:80; disp(mat2str(x(end-1:end)))",
+    "x = 10:10:80; y = [1 2 3]; disp(mat2str(x(y(end))))", "A = magic(4); disp(mat2str(A(end, min(end, 2))))", "A = magic(4); disp(mat2str(A(min(end, 3), end)))",
+    "x = 1:10; disp(mat2str(x(max(1, end-2):end)))", "x = 1:10; disp(mat2str(x(round(end / 2))))", "x = 1:10; disp(mat2str(x(numel(x(1:min(end, 4))))))",
+    "s = 'hello'; disp(s(1:min(end, 3)))", "c = {1, 2, 3}; disp(mat2str(c{min(end, 2)}))", "x = 1:10; x(min(end, 3)) = 0; disp(mat2str(x(1:4)))",
+    "f = @(v) v(min(end, 2)); disp(f([7 8 9]))",
+    tryIt("disp(min(end, 5))"), tryIt("x = 1:3; disp(x(min(abs(end), 2)))"),
+    "function r = g(v)\nr = v(min(end, 2));\nend",
+  ].join("\n").replace("function r = g(v)", "disp(g([4 5 6]))\nfunction r = g(v)")), [
+    "50", "[10 20 30]", "[70 80]",
+    "30", "14", "12",
+    "[8 9 10]", "5", "4",
+    "hel", "2", "[1 2 0 4]",
+    "8",
+    "'end' cannot be used with a function call.", "2", "ran",
+    "5"]);
+});
+
+test("an index's computed base is made once when an end refers to it: s(tick()).a(min(end, 5)), c{tick()}{min(end, 3)} and the assignment s(tick()).a(min(end, 5)) = v call tick once", () => {
+  const { execFileSync } = require("node:child_process");
+  const code = [
+    "global calls",
+    "calls = 0; s(1).a = 10:10:80; s(2).a = [1 2]; disp(s(tick()).a(min(end, 5))); disp(calls)",
+    "calls = 0; c = {10:10:80, [1 2]}; disp(c{tick()}(min(end, 5))); disp(calls)",
+    "calls = 0; y = [1 2 3]; disp(c{tick()}(y(end))); disp(calls)",
+    "calls = 0; disp(s(tick()).a(end)); disp(calls)",
+    "calls = 0; disp(c{tick()}(end)); disp(calls)",
+    "f = @(k) s(k).a(min(end, 2)); disp(f(2))",
+    "calls = 0; d = {{10, 20, 30}, {1, 2}}; disp(d{tick()}{min(end, 3)}); disp(calls)",
+    "calls = 0; disp([d{tick()}{min(end, 3)}]); disp(calls)",
+    "calls = 0; s(tick()).a(min(end, 5)) = 99; disp(mat2str(s(1).a)); disp(mat2str(s(2).a)); disp(calls)",
+    "calls = 0; s(tick()).a(end) = 7; disp(mat2str(s(1).a)); disp(calls)",
+    "g_test()",
+    "function g_test()",
+    "  global calls gs gc",
+    "  calls = 0; gs(1).a = 10:10:80; gs(2).a = [1 2]; gs(tick()).a(min(end, 5)) = 99; disp(mat2str(gs(1).a)); disp(calls)",
+    "  calls = 0; gc = {10:10:80, [1 2]}; gc{tick()}(min(end, 5)) = 99; disp(mat2str(gc{1})); disp(calls)",
+    "end",
+    "function r = tick()",
+    "  global calls",
+    "  calls = calls + 1;",
+    "  r = calls;",
+    "end",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code], { encoding: "utf8" })
+    .split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  assert.deepEqual(out, ["50", "1", "50", "1", "30", "1", "80", "1", "80", "1", "2",
+    "30", "1", "30", "1", "[10 20 30 40 99 60 70 80]", "[1 2]", "1", "[10 20 30 40 99 60 70 7]", "1",
+    "[10 20 30 40 99 60 70 80]", "1", "[10 20 30 40 99 60 70 80]", "1"]);
+});
