@@ -3026,7 +3026,8 @@ def PolynomialRing(R, n=1):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
-        raise MagmaError("PolynomialRing: only over Integers() and Rationals() so far")
+        # (a refusal in words: finite fields' users reach it, PolynomialRing(GF(p)))
+        raise MagmaError("PolynomialRing over a %s (not the integers or the rationals) is not supported yet" % _type_of(R), "'PolynomialRing'")
     return _sp.PolynomialRing_(base, "$.1")
 
 
