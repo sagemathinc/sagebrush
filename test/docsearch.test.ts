@@ -21,10 +21,46 @@ test("sagebrush --search --mode searches that language's index; the default is u
   assert.match(matlab.stdout, /^linsolve\(\)    \[matlab\]/);
   const sage = run("--search", "selmer", "rank");
   assert.match(sage.stdout, /^EllipticCurve_rational_field\.selmer_rank\(\)\n/);
-  assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve\(a, b\)    \[python\]\n/);
+  // (a catalog entry, for agents: call form and status, summary, first example, differs: catalog/SCHEMA.md)
+  const py = run("--search", "linear", "system", "--mode", "python").stdout;
+  assert.match(py, /^numpy\.linalg\.solve\(a, b\)    \[python\]    \[partial\]\n    The solution x of the linear system a x = b\.\n    >>> import numpy as np\n    >>> np\.linalg\.solve\(\[\[3, 1\], \[1, 2\]\], \[9, 8\]\)\n    array\(\[2\., 3\.\]\)\n    differs: Not yet reviewed/);
+  const pyj = JSON.parse(run("--search", "linear", "system", "--mode", "python", "--json").stdout);
+  assert.equal(pyj[0].name, "numpy.linalg.solve");
+  // (each example with the prelude lines it needs, CORR-012-1)
+  assert.equal(pyj[0].examples[0].setup, "import numpy as np");
+  const setups = run("-c", "import _catalog as c\nP = 'import numpy as np\\nimport math, cmath, itertools\\nfrom fractions import Fraction'\nfor code in ['math.pi', 'Fraction(1, 3) + cmath.sqrt(-1)', 'len([1])', 'npx = 1']: print(repr(c.setup(P, code)))").stdout;
+  assert.equal(setups, "'import math'\n'import cmath\\nfrom fractions import Fraction'\n''\n''\n");
+  // (a whole call form, MATLAB's, is shown as written; "(...)" follows the name, CORR-012-2)
+  const forms = run("-c", "import _pyjs_docsearch as d\nprint(d.describe({'name': 'max', 'kind': 'function', 'signature': 'M = max(A)\\n[M, I] = max(___)', 'summary': 'S.', 'doc': ''}, 'matlab'))").stdout;
+  assert.match(forms, /^M = max\(A\)    \[matlab\]\n    also: \[M, I\] = max\(___\)\n    S\.\n$/);
+  for (const k of ["signature", "summary", "examples", "differs", "status", "upstream_version"]) assert.ok(k in pyj[0], k);
+  // (a block's code at the prompt, its continuation lines after ...)
+  assert.match(run("--search", "lru_cache", "--mode", "python").stdout, /\n    >>> @functools\.lru_cache\(maxsize=None\)\n    \.\.\. def fib\(n\):\n/);
   const json = JSON.parse(run("--search", "unit", "group", "--mode", "magma", "--json").stdout);
   assert.equal(json[0].name, "UnitGroup");
   assert.equal(json[0].language, "magma");
+  // (an alias is a name of its entry: found and ranked by it, catalog/SCHEMA.md)
+  const alias = run("-c", "import _pyjs_docsearch as d\ne = {'name': 'diff', 'aliases': ['derivative'], 'summary': 'S.', 'doc': '', 'open_problem': False}\nprint(d.score(e, ['derivative'], 'derivative'), d.score(dict(e, aliases=[]), ['derivative'], 'derivative'))").stdout.trim();
+  assert.equal(alias, "30 0");
+  // (what a search hands an agent is bounded: HARD-012-1)
+  const huge = [
+    "import json, _pyjs_docsearch as d",
+    "e = {'name': 'f', 'kind': 'function', 'signature': '(x)' + ''.join('\\nf(%d)' % i for i in range(50)), 'summary': 'S.', 'doc': 'D' * 10**6,",
+    "     'examples': [{'code': 'x = 1\\n' * 5000, 'expected': 'y' * 10**6 + '\\n'}], 'differs': ['z' * 5000] * 100, 'alternative': 'w' * 10**5}",
+    "t = d.describe(e, 'python')",
+    "kept, omitted = d.bounded_entries([e] * 3)",
+    "small, n = d.bounded_entries([dict(e, doc='D' * 6000, examples=[], differs=[], alternative='a')] * 50)",
+    "print(json.dumps([len(t) <= d.HIT_CHARS + 40, 'more call forms' in t, 'more lines' in t, 'more characters' in t, 'more differs lines' in t,",
+    "  len(kept), omitted, len(small) < 50 and n == 50 - len(small), len(json.dumps(small, indent=1)) <= d.JSON_BYTES,",
+    "  len(d.search('e', 10**9)), d.clamp_limit(-5), d.clamp_limit('x'),",
+    "  len(d.within(['x' * 1000] * 100)) <= 61 and d.within(['x' * 1000] * 100)[-1].startswith('...['),",
+    "  len('\\n'.join(d.within(['x' * (d.TOTAL_CHARS + 1)]))) <= d.TOTAL_CHARS, len('\\n'.join(d.within(['x' * (d.TOTAL_CHARS + 1), 'y']))) <= d.TOTAL_CHARS,",
+    "  d.within(['x' * (d.TOTAL_CHARS + 1), 'y'])[-1] == '...[1 more hits not shown: narrow the query]', d.within(['a', 'b']) == ['a', 'b']]))",
+  ].join("\n");
+  assert.deepEqual(JSON.parse(run("-c", huge).stdout), [true, true, true, true, true, 0, 3, true, true, 50, 1, 20, true, true, true, true, true]);
+  const lots = run("--search", "e", "--mode", "python", "--limit", "100000").stdout;
+  assert.ok(lots.split("\n").filter((l) => l && !l.startsWith(" ")).length <= 50 && lots.length <= 61000, "hits: " + lots.length);
+  assert.ok(JSON.parse(run("--search", "e", "--mode", "python", "--json").stdout).length <= 10);
   const bad = run("--search", "x", "--mode", "fortran");
   assert.equal(bad.status, 2);
   assert.match(bad.stdout, /--mode must be one of sage, python, magma, matlab/);
