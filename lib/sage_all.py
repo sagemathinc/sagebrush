@@ -47,7 +47,7 @@ __all__ = [
     "sin", "cos", "tan", "cot", "sec", "csc", "asin", "acos", "atan", "arcsin", "arccos", "arctan",
     "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
     "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
-    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside",
+    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside", "real", "imag", "real_part", "imag_part", "conjugate",
     "psi", "log_gamma", "zetaderiv", "hurwitz_zeta", "beta", "erfc", "erfi", "erfinv", "exp_integral_e1", "Ei",
     "exp_integral_ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec", "legendre_P", "gen_legendre_P",
     "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
@@ -2300,10 +2300,99 @@ def factorial(n):
         sage: var('n'); factorial(n)
         n
         factorial(n)
+        sage: factorial(SR(20)), factorial(SR(100)) / factorial(SR(98))
+        (2432902008176640000, 9900)
     """
-    if _symbolic(n):
+    from _sage_expr import Expression
+    if _symbolic(n) or isinstance(n, Expression):
+        # (a constant expression too: factorial(SR(20)) is the symbolic 20!)
         return _symbolic_fun("factorial", n)
     return _math.factorial(n)
+
+
+def _part(z, name):
+    from _sage_matrix import ComplexNumber
+    if isinstance(z, ComplexNumber):
+        # (an element of CC: its parts are RR's)
+        from _sage_lang import RealNumber
+        return RealNumber(getattr(complex(z), name))
+    from _sage_lang import RealNumber
+    if isinstance(z, RealNumber):
+        # an element of RR: itself, and the exact 0
+        return z if name == "real" else Integer(0)
+    if _plain_float_subclass(z):
+        # as Sage: the parts of float(z) (__float__ honoured), not the
+        # subclass's own real/imag
+        f = _float_of(z)
+        return f if name == "real" else 0.0
+    p = getattr(z, name)
+    return p() if callable(p) else p
+
+
+def _float_of(z):
+    """float(z), as Sage takes a float subclass's parts: CPython's float()
+    (its __float__ bound as on an instance, the result checked to be a
+    float and made exact), but without float()'s DeprecationWarning for a
+    strict float subclass result, which Sage does not give (only that
+    warning: the hook's own warnings go to the caller's filters)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*The ability to return an instance of a strict subclass of float is deprecated", category=DeprecationWarning)
+        return float(z)
+
+
+def _plain_float_subclass(z):
+    """A float subclass other than RR's and RDF's elements."""
+    from _sage_rdf import RealDoubleElement
+    return isinstance(z, float) and type(z) is not float and not isinstance(z, RealDoubleElement)
+
+
+def real_part(z):
+    """The real part of z (also called real).
+
+    EXAMPLES::
+
+        sage: real(3 + 4*I), real_part(SR(-2)), real(2.5), real(7)
+        (3, -2, 2.50000000000000, 7)
+        sage: real(RealField(100)(1/3)), real(CC(1, 2))
+        (0.33333333333333333333333333333, 1.00000000000000)
+    """
+    return _part(z, "real")
+
+
+def imag_part(z):
+    """The imaginary part of z (also called imag).
+
+    EXAMPLES::
+
+        sage: imag(3 + 4*I), imag_part(SR(-2)), imag(7), imag(2.5), imag(CC(1, 2)), imag(CC(1, 0))
+        (4, 0, 0, 0, 2.00000000000000, 0.000000000000000)
+    """
+    return _part(z, "imag")
+
+
+real = real_part
+imag = imag_part
+
+
+def conjugate(z):
+    """The complex conjugate of z.
+
+    EXAMPLES::
+
+        sage: conjugate(3 + 4*I), conjugate(7)
+        (-4*I + 3, 7)
+        sage: conjugate(RR(2)), conjugate(RR(2)).parent(), conjugate(RR(2)).sqrt()
+        (2.00000000000000, Real Field with 53 bits of precision, 1.41421356237310)
+    """
+    from _sage_lang import RealNumber
+    if isinstance(z, RealNumber):
+        # an element of RR: itself, not float's conjugate (a plain float)
+        return z
+    if _plain_float_subclass(z):
+        # other float subclasses: float(z), as Sage (not their conjugate)
+        return _float_of(z)
+    return z.conjugate()
 
 
 def fibonacci(n):

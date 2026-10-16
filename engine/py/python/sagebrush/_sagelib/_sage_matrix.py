@@ -3184,6 +3184,18 @@ class ComplexNumber(complex):
         (-3.00000000000000 + 4.00000000000000*I, 2.23606797749979, 1.00000000000000, 2.00000000000000)
     """
 
+    def conjugate(self):
+        """The complex conjugate, an element of CC (complex's own gave a
+        Python complex).
+
+        EXAMPLES::
+
+            sage: CC(1, 2).conjugate()
+            1.00000000000000 - 2.00000000000000*I
+        """
+        z = complex(self)
+        return ComplexNumber(z.real, -z.imag)
+
     @property
     def real(self):
         """The real part (callable, as in Sage: z.real()).
