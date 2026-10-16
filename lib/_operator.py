@@ -25,11 +25,6 @@ def index(a):
     r = (get(m, a, type(a)) if has_get else m)()
     if type(r) is int:
         return r
-    not_int = getattr(type(r), "_pyjs_not_an_index", None)
-    if not isinstance(r, int) or not_int:
-        raise TypeError("__index__ returned non-int (type %s)" % (not_int or type(r).__name__))
-    import warnings
-    warnings.warn("__index__ returned non-int (type %s).  The ability to return an instance of a strict subclass of int "
-                  "is deprecated, and may be removed in a future version of Python." % type(r).__name__,
-                  DeprecationWarning, stacklevel=2)
-    return int.__pos__(r)
+    # (checked as every other __index__ result: numpy's scalar shims refused
+    # as CPython refuses NumPy's, a strict subclass with a DeprecationWarning)
+    return _pyjs_types.int_result("__index__", r)

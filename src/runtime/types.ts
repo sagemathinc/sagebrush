@@ -785,6 +785,7 @@ export function intCall(x: any = 0, base: any = undefined): any {
   for (const name of ["__int__", "__index__", "__trunc__"]) {
     const f = lookupType(typeOf(x), name);
     if (f !== undefined) {
+      if (name !== "__trunc__") return O.intResult(name, O.lookupSpecial(x, name)(x));
       const r = f(x);
       if (!O.isPyInt(r) && !(r instanceof PrimBox && isinstance(r, int))) raise(T.TypeError, `${name}() returned non-int (type ${typeName(r)})`);
       return typeof r === "boolean" ? +r : unbox(r);
@@ -856,19 +857,19 @@ export function floatCall(x: any = 0): any {
     if (v === undefined) raise(T.ValueError, `could not convert string to float: ${repr(x)}`);
     return O.mkfloat(v);
   }
-  const v = O.fv(x);
+  // (as CPython's PyNumber_Float: an int or float as it is; else __float__,
+  // its result checked, which an int or float subclass may override; else
+  // __index__)
+  if (typeof x === "number" || typeof x === "bigint" || typeof x === "boolean" || x instanceof FloatBox) return O.mkfloat(O.fv(x)!);
+  const v = floatCallSafe(x) ?? O.fv(x);
   if (v !== undefined) return O.mkfloat(v);
-  for (const name of ["__float__", "__index__"]) {
-    const f = lookupType(typeOf(x), name);
-    if (f !== undefined) return O.mkfloat(O.fv(f(x))!);
-  }
   raise(T.TypeError, `float() argument must be a string or a real number, not '${typeName(x)}'`);
 }
 const float = builtinType("float", [object], floatCall);
 bindClass(FloatBox, float);
 method(float, "is_integer", (x: any) => isInt(O.fv(x)!));
 method(float, "conjugate", (x: any) => x);
-method(float, "__float__", (x: any) => x);
+method(float, "__float__", (x: any) => (typeof x === "number" || x instanceof FloatBox ? x : O.mkfloat(O.fv(x)!))); // (a subclass's value as a float)
 method(float, "__getnewargs__", (x: any) => tuple([O.mkfloat(O.fv(unbox(x))!)]));
 method(float, "__int__", (x: any) => intCall(x));
 method(float, "__trunc__", (x: any) => intCall(x));
@@ -2029,8 +2030,9 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
     const f = O.lookupSpecial(v, "__index__");
     if (f === undefined) return undefined;
     const r = f(v);
-    if (O.isPyInt(r)) return typeof r === "boolean" ? +r : r;
-    if (r instanceof PrimBox && isinstance(r, int)) return unbox(r);
+    // (a strict int subclass, bool among them: with CPython's DeprecationWarning)
+    if (typeof r === "boolean" || (r instanceof PrimBox && isinstance(r, int))) return O.intResult("__index__", r);
+    if (O.isPyInt(r)) return r;
     return { bad: r };
   };
   if (typeof x === "object" && x !== null && O.lookupSpecial(x, "__index__") !== undefined) {
@@ -2334,13 +2336,24 @@ export function lookupDunder(x: any, name: string): any {
   const f = lookupType(typeOf(x), name);
   return f !== null && typeof f === "object" && f.asDunder !== undefined ? f.asDunder() : f;
 }
-// float(x) for objects with __float__/__index__, or undefined.
+// float(x) for objects with __float__/__index__, or undefined: the hooks
+// dispatched as special methods, their results checked (a strict subclass's
+// with a DeprecationWarning), as CPython's
 export function floatCallSafe(x: any): number | undefined {
-  for (const name of ["__float__", "__index__"]) {
-    const f = lookupType(typeOf(x), name);
-    if (f !== undefined) return O.fv(f(x));
+  const t = typeOf(x);
+  if (lookupType(t, "__float__") !== undefined) return O.floatResult(x, O.lookupSpecial(x, "__float__")(x));
+  if (lookupType(t, "__index__") !== undefined) {
+    const n = O.intResult("__index__", O.lookupSpecial(x, "__index__")(x));
+    return typeof n === "bigint" ? O.bigToFloat(n) : n;
   }
   return undefined;
+}
+// PyFloat_AsDouble: a float (a subclass's value too) or an exact int or bool
+// as it is; else __float__ (an int subclass's override), else __index__;
+// else undefined
+export function asDouble(x: any): number | undefined {
+  if (typeof x === "number" || typeof x === "bigint" || typeof x === "boolean" || x instanceof FloatBox || typeOf(x).$mro.includes(float)) return O.fv(x);
+  return floatCallSafe(x);
 }
 
 // A builtin type for a runtime JS class, created by a builtin module.
