@@ -535,3 +535,22 @@ for f, args in [(I.combinations, ('abc', 2.0)), (I.combinations, ('abc', Twice(2
         print(f.__name__, len(list(f(*args))))
     except Exception as e:
         print(f.__name__, type(e).__name__, e)
+
+# combinations' r is converted before the pool is read; its sign after (CORR-DBB-1)
+def type_of(thunk):
+    try:
+        thunk()
+    except Exception as e:
+        return type(e).__name__
+    return 'ok'
+for f in (I.combinations, I.combinations_with_replacement):
+    pool = [1, 2]
+    class Grow:
+        def __index__(self):
+            pool.append(3)
+            return 1
+    print(f.__name__, 'r grows the pool', list(f(pool, Grow())))
+    src = iter([1, 2])
+    print(f.__name__, 'bad r', type_of(lambda: f(src, 1.5)), list(src))
+    src = iter([1, 2])
+    print(f.__name__, 'negative r', type_of(lambda: f(src, -1)), list(src))
