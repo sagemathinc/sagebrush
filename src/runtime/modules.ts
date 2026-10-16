@@ -2,7 +2,7 @@
 
 import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
+import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
@@ -339,14 +339,10 @@ newBuiltinModule("time", (m) => {
 // ------------------------------------------------------------------ math
 
 newBuiltinModule("math", (m) => {
+  // (PyFloat_AsDouble, Ty.asDouble: an int subclass's __float__ too)
   const F = (x: any): number => {
-    const v = O.fv(x);
-    if (v === undefined) {
-      const f = Ty.floatCallSafe(x);
-      if (f === undefined) raise(T.TypeError, `must be real number, not ${typeName(x)}`);
-      return f;
-    }
-    return v;
+    const v = Ty.asDouble(x);
+    return v === undefined ? raise(T.TypeError, `must be real number, not ${typeName(x)}`) : v;
   };
   const domain = () => raise(T.ValueError, "math domain error");
   const range = () => raise(T.OverflowError, "math range error");
@@ -399,8 +395,10 @@ newBuiltinModule("math", (m) => {
   // without its value; anything else as a float, refused with it
   const LOG_MAX_BITS = 2 ** 27;
   const logOf = (v: any, f: (x: number) => number, ln2: number): number => {
-    if (typeof v === "bigint" || typeof v === "boolean" || (typeof v === "number" && Number.isInteger(v)) || O.isPyInt(v)) {
-      const b = BigInt(typeof v === "boolean" ? +v : O.index(v));
+    // (an int subclass too, as CPython's: its int value, not its __float__,
+    // CORR-CA8-1)
+    if (typeof v === "bigint" || typeof v === "boolean" || (typeof v === "number" && Number.isInteger(v)) || O.isPyInt(v) || (v instanceof PrimBox && typeOf(v).$mro.includes(T.int))) {
+      const b = BigInt(typeof v === "boolean" ? +v : v instanceof PrimBox ? unbox(v) : O.index(v));
       if (b <= 0n) raise(T.ValueError, "expected a positive input");
       const d = Number(b);
       if (d !== Infinity) return f(d);
@@ -487,6 +485,7 @@ newBuiltinModule("math", (m) => {
     if (O.isPyInt(x)) return typeof x === "boolean" ? +x : x;
     const d = Ty.lookupDunder(x, name);
     if (d !== undefined) return d(x);
+    if (x instanceof PrimBox && typeOf(x).$mro.includes(T.int)) return unbox(x); // (an int subclass's value, not its __float__)
     return toInt(f(F(x)));
   };
   fn(m, "floor", intOr("__floor__", Math.floor));
@@ -804,6 +803,9 @@ newBuiltinModule("_pyjs_types", (m) => {
     const v = lookupType(tp, name);
     return tuple(v === undefined ? [false, null] : [true, v]);
   }, "lookup");
+  // (a hook's int result checked as everywhere else, O.intResult: an int; a
+  // strict subclass's value with the DeprecationWarning; else TypeError)
+  m.int_result = builtin((what: any, r: any) => O.intResult(String(what), r), "int_result");
 });
 
 newBuiltinModule("types", (m) => {

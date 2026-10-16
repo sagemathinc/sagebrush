@@ -1653,8 +1653,45 @@ export function index(x: any): number | bigint {
   if (typeof x === "bigint") return x;
   if (typeof x === "boolean") return +x;
   const f = special(x, "__index__");
-  if (f !== undefined) return f(x);
+  if (f !== undefined) return intResult("__index__", f(x));
   raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
+}
+
+// A conversion hook's result, as CPython checks it: an int (for __index__
+// and __int__) or a float (__float__); an instance of a strict subclass
+// (bool among them) with a DeprecationWarning, as CPython 3.14's; anything
+// else a TypeError
+// (numpy's scalar types are shims here, Python subclasses of int and float;
+// NumPy's are not, but for float64, a float subclass there too: a shim's
+// result is refused, as CPython refuses NumPy's, and named as CPython names
+// it, "numpy.int64")
+function shimName(r: any, base: string): string | null {
+  for (const c of typeOf(r).$mro) {
+    if (c.$module !== "numpy") continue;
+    if (base === "float" && c.$name === "float64") return null;
+    return c === typeOf(r) ? `numpy.${c.$name}` : typeName(r);
+  }
+  return null;
+}
+const resultTypeName = (r: any) => (typeOf(r).$module === "numpy" ? `numpy.${typeName(r)}` : typeName(r));
+function deprecatedSubclass(what: string, r: any, base: string): void {
+  callObj(getattr(hooks.importModule("warnings"), "warn"), [`${what} returned non-${base} (type ${resultTypeName(r)}).  The ability to return an instance of a strict subclass of ${base} is deprecated, and may be removed in a future version of Python.`, T.DeprecationWarning, 2]);
+}
+export function intResult(what: string, r: any): number | bigint {
+  if ((typeof r === "number" && isInt(r)) || typeof r === "bigint") return r;
+  if (typeof r === "boolean" || (r instanceof PrimBox && typeOf(r).$mro.includes(T.int) && shimName(r, "int") === null)) {
+    deprecatedSubclass(what, r, "int");
+    return typeof r === "boolean" ? +r : r.$v;
+  }
+  return raise(T.TypeError, `${what} returned non-int (type ${shimName(r, "int") ?? typeName(r)})`);
+}
+export function floatResult(x: any, r: any): number {
+  if ((typeof r === "number" && !isInt(r)) || r instanceof FloatBox) return fv(r)!;
+  if (r instanceof PrimBox && typeOf(r).$mro.includes(T.float) && shimName(r, "float") === null) {
+    deprecatedSubclass(`${typeName(x)}.__float__`, r, "float");
+    return fv(r)!;
+  }
+  return raise(T.TypeError, `${typeName(x)}.__float__ returned non-float (type ${shimName(r, "float") ?? typeName(r)})`);
 }
 
 // CPython's PySlice_GetIndicesEx: [start, step, count].
@@ -1687,7 +1724,8 @@ export function seqIndex(i: any, len: number, what: string): number {
   else {
     const f = special(i, "__index__");
     if (f === undefined) raise(T.TypeError, `${what} indices must be integers or slices, not ${typeName(i)}`);
-    j = Number(f(i));
+    const r = intResult("__index__", f(i));
+    j = typeof r === "bigint" ? (r < 0n ? -Infinity : Infinity) : r;
   }
   if (j < 0) j += len;
   if (j < 0 || j >= len) raise(T.IndexError, `${what} index out of range`);
