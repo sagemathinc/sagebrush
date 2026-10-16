@@ -1361,6 +1361,8 @@ class MPolynomial:
         # coefficient() reads one by variable name: R2-MUL-F6)
         if mon._ring != self._ring:
             raise TypeError("mon must have same parent as self.")
+        if not mon._d:
+            raise ValueError("mon must not be equal to 0")
         return dom._out(self._d.get(mon._leading()[0], dom.zero))
 
     # ---- printing
