@@ -730,7 +730,7 @@ test("intrinsics taking integers refuse a rational, an integral one too (CORR-76
     spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8", input: src }).stdout as string;
   // Magma's words (checked against Magma); their caret is said at the call
   const one = ["Factorial", "IsEven", "IsOdd", "Factorization", "Divisors", "NextPrime", "Isqrt", "Fibonacci",
-    "PrimeDivisors", "PreviousPrime", "NumberOfDivisors", "PrimesUpTo"];
+    "PrimeDivisors", "PreviousPrime", "NumberOfDivisors", "PrimesUpTo", "IsProbablePrime"];
   const out = session("a := 12/3;\n" + one.map((f) => `${f}(a);`).join("\n") + "\nBinomial(a, 2);\nGcd(a, 6);\n\"end\";\n");
   for (const f of one) assert.ok(out.includes(`Runtime error in '${f}': Bad argument types\nArgument types given: FldRatElt\n`), `${f}\n${out}`);
   assert.ok(out.includes("Runtime error in 'Binomial': Bad argument types\nArgument types given: FldRatElt, RngIntElt\n"), out);

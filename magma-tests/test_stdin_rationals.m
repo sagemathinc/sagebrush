@@ -32,6 +32,7 @@ a div 1;
 7 div a;
 a mod 3;
 S[a];
+IsPrime(a); IsPrime(7/1); IsPrime(7/2); IsPrime(Rationals()!5);
 // (the intrinsics' refusals are in test/magma.test.ts: their caret is at
 // the call)
 // a rational power is a real

@@ -4059,6 +4059,8 @@ Factorization = Factorisation = _factorization
 # not proven as Magma's default would promise: the systematic review's
 # ASR-F1)
 def IsPrime(n, *, Proof=None):
+    if isinstance(n, _Fraction):
+        return False  # (a rational, an integral one too: as Magma, no warning)
     return _sa.is_prime(n, proof=Proof)
 
 
@@ -5814,7 +5816,7 @@ _STR_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None, "Ind
 # (checked against Magma, CORR-765-1).
 _INT_ARGS = {"Factorial": {0}, "Binomial": {0, 1}, "IsEven": {0}, "IsOdd": {0}, "Factorization": {0},
              "Divisors": {0}, "PrimeDivisors": {0}, "NumberOfDivisors": {0}, "NextPrime": {0},
-             "PreviousPrime": {0}, "Isqrt": {0}, "Fibonacci": {0}, "PrimesUpTo": {0}}
+             "PreviousPrime": {0}, "IsProbablePrime": {0}, "Isqrt": {0}, "Fibonacci": {0}, "PrimesUpTo": {0}}
 _BOOL_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None,
               "Append": {1}, "Include": {1}, "Exclude": {1}, "Insert": {2}, "Index": {1}, "Position": {1}}
 
