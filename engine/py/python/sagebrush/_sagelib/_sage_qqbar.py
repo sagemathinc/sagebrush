@@ -676,6 +676,11 @@ AA = _AlgebraicRealField()
 
 # ------------------------------------------------------------------ elements
 
+# The most digits _rounded asks for: nf.complex_roots refuses more than
+# 100000, and _roots asks it for 5 more
+_ROUND_MAX_DIGITS = 99995
+
+
 class AlgebraicNumber:
     """An algebraic number: c(z) for z a root of an irreducible integer
     polynomial (gen None: a rational number c[0]).
@@ -761,8 +766,53 @@ class AlgebraicNumber:
         return (re, im, err)
 
     def _complex(self):
-        re, im = self._approx(20)
+        re, im = self._rounded(float, 53)
         return complex(float(re), float(im))
+
+    def _rounded(self, rnd, p):
+        """(re, im): rationals that rnd (a rounding to nearest at p bits, such
+        as float or RealField(p)) maps to the correctly rounded real and
+        imaginary parts.  Ziv's test on certified balls: a part is accepted
+        when both ends of its ball round alike, otherwise the digits are
+        doubled.  A part that is rational (0 included) is found exactly, so
+        a midpoint or a 0 never loops.  (A fixed 20 or p + 10 digits gave
+        wrong digits, 0, or the wrong sign after cancellation:
+        RealField(100)(sqrt(2) - q) for q the 60-digit truncation was
+        -4.3e-50.)"""
+        if self._gen is None:
+            q = self._q()
+            return (q, _F(0))
+        real = self._is_real()
+        exact = [None, _F(0) if real else None]
+        tried = [False, real]
+        d0 = d = int(p * 0.30103) + 10
+        while True:
+            # (checked before _ball(d) asks the root engine for d digits:
+            # its own maximum is 100000, and RealField(10^7)(sqrt(2)) leaked
+            # its ValueError, daybreak2's HARD-883-1)
+            if d > _ROUND_MAX_DIGITS:
+                raise ArithmeticError("the approximation did not converge within %d digits" % _ROUND_MAX_DIGITS)
+            re, im, err = self._ball(d)
+            ok = True
+            for i, v in ((0, re), (1, im)):
+                if exact[i] is not None:
+                    continue
+                if abs(v) > err and rnd(v - err) == rnd(v + err):
+                    continue
+                if not tried[i] and d >= 4 * d0:
+                    tried[i] = True
+                    w = self.real() if i == 0 else self.imag()
+                    m = w._minpoly_coeffs()
+                    if len(m) == 2:
+                        exact[i] = _F(-m[0], m[1])
+                        continue
+                ok = False
+            if ok:
+                break
+            if d >= _ROUND_MAX_DIGITS:
+                raise ArithmeticError("the approximation did not converge within %d digits" % _ROUND_MAX_DIGITS)
+            d = min(2 * d, _ROUND_MAX_DIGITS)
+        return (re if exact[0] is None else exact[0], im if exact[1] is None else exact[1])
 
     def parent(self):
         """QQbar (AA for algebraic reals).
@@ -952,7 +1002,7 @@ class AlgebraicNumber:
     def __float__(self):
         if not self._is_real():
             raise TypeError("unable to convert to float: the number is not real")
-        return float(self._approx(20)[0])
+        return float(self._rounded(float, 53)[0])
 
     def __complex__(self):
         return self._complex()
@@ -963,58 +1013,36 @@ class AlgebraicNumber:
         raise TypeError("not an integer")
 
     def n(self, prec=None, digits=None):
-        """A numerical approximation (53 bits by default).
+        """A numerical approximation (53 bits by default), correctly rounded.
+        (Sage 10.10 prints 1.41421356237309 here: its 53-bit value of sqrt(2)
+        is one ulp below the nearest double, which RR(2).sqrt() gives.)
 
         EXAMPLES::
 
             sage: QQbar(2).sqrt().n(), QQbar(-2).sqrt().n()
-            (1.41421356237309, 1.41421356237309*I)
+            (1.41421356237310, 1.41421356237310*I)
         """
         sa = _sa()
-
-        def mid(iv):
-            # the centre of the 53-bit display interval, as Sage's n()
-            lo, hi = _rnd(iv.lo, False, 53), _rnd(iv.hi, True, 53)
-            return float((lo + hi) / 2)
+        # each part correctly rounded to p bits (53 by default), from
+        # certified balls (_rounded); a part is 0 only exactly.  (A fixed
+        # number of digits lost small parts: (sqrt(2)/10^100).n(prec=100)
+        # was 0, the systematic review's ROOT-F3; and n() read the centre of
+        # the display interval, a 60-digit approximation, so sqrt(2) - q for
+        # q its 19-digit truncation gave 0 and for 15 digits 4.8789e-17,
+        # not 4.88017e-17)
         if prec is not None or digits is not None:
-            # both parts, from an approximation with the precision asked for
-            # and 10 more digits (the real part of a 60-digit approximation
-            # was returned: QQbar(I).n(prec=100) was 0, the systematic
-            # review's ROOT-F2)
-            # each nonzero part to p significant bits, from a certified ball
-            # (a fixed number of digits lost them after scaling or
-            # cancellation: (sqrt(2)/10^100).n(prec=100) was 0, the
-            # systematic review's ROOT-F3); a part is 0 only exactly
             import _sage_real
             p = _sage_real.digits_to_prec(digits) if digits is not None else int(prec)
-            real = self._is_real()
-            d0 = d = int(p * 0.30103) + 10
-            zero = [None, True if real else None]
-            while True:
-                re, im, err = self._ball(d)
-                ok = True
-                for i, v in ((0, re), (1, im)):
-                    if zero[i] or err * 2 ** (p + 2) <= abs(v):
-                        continue
-                    if d >= 4 * d0 and zero[i] is None:
-                        zero[i] = (self.real() if i == 0 else self.imag()) == 0
-                        if zero[i]:
-                            continue
-                    ok = False
-                if ok:
-                    break
-                if d > 200000:
-                    raise ArithmeticError("n(): the approximation did not converge")
-                d *= 2
-            if zero[0]:
-                re = _F(0)
-            if real or zero[1]:
-                return sa.RealField(p)(re)
+            R = sa.RealField(p)
+            re, im = self._rounded(R, p)
+            if self._is_real() or im == 0:
+                return R(re)
             return sa.ComplexField(p)(re, im)
+        re, im = self._rounded(float, 53)
         if self._is_real():
-            return sa.RealNumber(mid(self._civ.re))
+            return sa.RealNumber(float(re))
         import _sage_matrix
-        return _sage_matrix.ComplexNumber(complex(mid(self._civ.re), mid(self._civ.im)))
+        return _sage_matrix.ComplexNumber(complex(float(re), float(im)))
 
     numerical_approx = N = n
 
