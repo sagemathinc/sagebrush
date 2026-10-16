@@ -558,8 +558,9 @@ fn combine_factorials(fs: &[Expr]) -> Option<Expr> {
         for &k in &members {
             let (c, m) = (facts[k].1, &facts[k].2);
             total += m;
-            for t in (lo + 1)..=c {
-                out.push(pow(&add2(&s, &int(t)), &big(m.clone())));
+            // (offsets from lo, at most 1000: lo + 1 may not exist in i64)
+            for off in 1..=(c - lo) {
+                out.push(pow(&add2(&s, &int(lo + off)), &big(m.clone())));
             }
         }
         if !total.is_zero() {

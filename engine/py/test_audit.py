@@ -780,3 +780,8 @@ _r = (_fact2(_n2 + 2**63 - 1) / _fact2(_n2 - 2)).simplify_factorial()
 assert "factorial" in str(_r), str(_r)
 assert str(_sin2(-(2**63) * _var2("x")).expand_trig()) == str(_sin2(-(2**63) * _var2("x"))), "no multiple-angle expansion past 1000"
 print("simplify_factorial exponents ok")
+# equal shifts at the end of i64 (lo + 1 does not exist): no wrap, no hang
+from sagebrush.sage import gamma as _gamma2
+_r = (_fact2(_n2 + 2**63 - 1) * _gamma2(_n2 + 2**63)).simplify_factorial()
+assert str(_r) == "factorial(n + 9223372036854775807)^2", str(_r)
+print("simplify_factorial shift bound ok")
