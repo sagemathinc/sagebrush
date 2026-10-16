@@ -4284,16 +4284,25 @@ def Degree(f):
     raise MagmaError("Degree: bad argument")
 
 
+def _nonzero_poly(name, f):
+    if isinstance(f, _sp.Polynomial) and f.is_zero():
+        raise _arg_error(name, "Argument 1 is not non-zero")
+
+
 def Coefficients(f):
-    return MSeq(_m_num(c) for c in f.list())
+    # (the zero polynomial's are [], as Magma's)
+    return MSeq(_m_num(c) for c in ([] if f.is_zero() else f.list()))
 
 
 def Coefficient(f, i):
+    if i < 0:
+        raise _arg_error("Coefficient", "Argument 2 (%d) should be >= 0" % i)
     l = f.list()
     return _m_num(l[i]) if i < len(l) else 0
 
 
 def LeadingCoefficient(f):
+    _nonzero_poly("LeadingCoefficient", f)
     return _m_num(f.leading_coefficient()) if isinstance(f, _sp.Polynomial) else f
 
 
@@ -4301,13 +4310,24 @@ def Evaluate(f, x):
     return f(x)
 
 
-def Derivative(f):
-    return f.derivative()
+def Derivative(f, k=1):
+    """The k-th derivative of a polynomial (the first by default)."""
+    if not isinstance(k, int) or isinstance(k, bool):
+        raise _bad_types("Derivative", [f, k])
+    if k < 0:
+        raise _arg_error("Derivative", "Argument 2 (%d) should be >= 0" % k)
+    for _ in range(k):
+        if f.is_zero():
+            break  # (the rest are 0 too: a huge k costs the degree)
+        f = f.derivative()
+    return f
 
 
 def Discriminant(f):
     if hasattr(f, "_magma_discriminant"):
         return f._magma_discriminant()
+    if isinstance(f, _sp.Polynomial) and f.degree() < 1:
+        raise _arg_error("Discriminant", "Degree of argument is less than 1")
     return _m_num(f.discriminant())
 
 
@@ -4316,6 +4336,9 @@ def Resultant(f, g):
 
 
 def IsIrreducible(f):
+    _nonzero_poly("IsIrreducible", f)
+    if isinstance(f, _sp.Polynomial) and f.degree() < 1:
+        return False  # (a constant polynomial is not, as Magma has it)
     return f.is_irreducible()
 
 
@@ -4328,12 +4351,24 @@ def _m_num(c):
 def Roots(f, R=None):
     if not isinstance(f, _sp.Polynomial):
         raise MagmaError("Roots: bad argument")
-    rs = f.roots()
+    _nonzero_poly("Roots", f)
+    # (in the coefficient ring, or in R: the integers or the rationals;
+    # roots in another ring are refused, never the rational ones given)
+    base = _ZZ if f._ring._base is _sp.ZZ else _QQ
+    R = base if R is None else R
+    if R is not _ZZ and R is not _QQ:
+        raise MagmaError("Roots in a ring other than the integers or the rationals is not supported yet", "'Roots'")
+    if R is _ZZ and base is _QQ and any(_Fraction(c).denominator != 1 for c in f.list()):
+        raise _arg_error("Roots", "Argument 1 cannot be coerced to be over argument 2")
+    if base is _ZZ and R is _QQ:
+        f = _sp.PolynomialRing_(_sp.QQ, "$.1")(f.list())
+    rs = [(r, m) for r, m in f.roots() if R is _QQ or _Fraction(r).denominator == 1]
     return MSeq(sorted((MTuple([_m_num(r), m]) for r, m in rs), key=lambda t: t[0]))
 
 
 def _factorization(n):
     if isinstance(n, _sp.Polynomial):
+        _nonzero_poly("Factorization", n)
         F = n.factor()
         R = n._ring
         consts, out = [], []
@@ -4625,7 +4660,8 @@ def Sqrt(x):
 
 def _rsqrt(x):
     if x.m < 0:
-        raise MagmaError("Sqrt of a negative real")
+        # (a complex number in Magma, which Sagebrush doesn't have)
+        raise MagmaError("Sqrt of a negative number (a complex number in Magma) is not supported yet", "'Sqrt'")
     if x.m == 0:
         return MReal(0, 0, x.prec)
     # sqrt(m * 2^e), scaled to its own magnitude (CORR-0C6-3): s =
@@ -4677,12 +4713,26 @@ def Log(x, b=None):
         except ValueError:
             return -1  # as Magma: Log(w^2, w) is -1 in GF(9)
     if b is not None:
-        return Log(x) / Log(b)
+        # Log(b, x): the logarithm of x to the base b (Magma's order), with
+        # guard digits before the one rounding
+        base, y = MReal.of(x), MReal.of(b)
+        if base.m <= 0:
+            raise _arg_error("Log", "Argument 1 is not positive")
+        if y.m <= 0:
+            raise _arg_error("Log", "Argument 2 is not positive")
+        if base.frac() == 1:
+            raise _arg_error("Log", "Base for logarithm should not be 1")
+        # (two reals of different precisions meet in the default field, as
+        # Magma's Log(b, x) does: Log(RealField(10)!2, RealField(40)!32) has
+        # 30 digits)
+        p = base.prec if base.prec == y.prec else 30
+        g = p + min(10, _REAL_PREC_MAX - p)
+        return MReal.of(Log(MReal.of(y, g)) / Log(MReal.of(base, g)), p)
     x = MReal.of(x)
     p = x.prec
     f = x.frac()
     if f <= 0:
-        raise MagmaError("Log of a nonpositive number")
+        raise _arg_error("Log", "Argument 1 is not positive")
     # log f = 2 atanh((f-1)/(f+1)), after scaling f by powers of 2
     k = 0
     while f > 2:
@@ -5059,6 +5109,8 @@ def GF(q, n=None):
     """GF(q) or GF(p, n): the finite field with q = p^n elements, defined
     (as in Magma) by the Conway polynomial."""
     q = _coerce_int(q)
+    if n is None and q < 2:
+        raise _arg_error("GF", "Argument 1 (%d) should be >= 2" % q)
     if n is not None:
         # GF(p, n): a prime, and a degree of at least 1 (CORR-581-1)
         n = _coerce_int(n)
@@ -5138,7 +5190,7 @@ def Order(x):
     """The multiplicative order of a nonzero finite field element."""
     if _is_ff(x):
         if not x:
-            raise MagmaError("Argument 1 must be non-zero", "'Order'")
+            raise _arg_error("Order", "Can not take order of zero element")
         return int(x.multiplicative_order())
     raise MagmaError("Order of this argument is not supported yet", "'Order'")
 

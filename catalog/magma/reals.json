@@ -1,0 +1,311 @@
+[
+  {
+    "name": "RealField",
+    "kind": "function",
+    "signature": "(<RngIntElt> k) -> FldRe",
+    "summary": "The real numbers to k significant decimal digits (30 by default, RealField()).",
+    "examples": [
+      {
+        "code": "R := RealField(10); R; R!(1/3);",
+        "expected": "Real field of precision 10\n0.3333333333\n"
+      }
+    ],
+    "differs": [
+      "A precision above 1000 digits is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Pi",
+      "Sqrt"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Floor",
+    "kind": "function",
+    "signature": "(<FldRatElt> x) -> RngIntElt",
+    "summary": "The greatest integer at most the rational x.",
+    "examples": [
+      {
+        "code": "Floor(7/2); Floor(-7/2);",
+        "expected": "3\n-4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Floor",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> RngIntElt",
+    "summary": "The greatest integer at most the real x.",
+    "examples": [
+      {
+        "code": "Floor(2.5); Floor(-2.5);",
+        "expected": "2\n-3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Ceiling",
+    "kind": "function",
+    "signature": "(<FldRatElt> x) -> RngIntElt",
+    "summary": "The least integer at least the rational x.",
+    "examples": [
+      {
+        "code": "Ceiling(7/2); Ceiling(-7/2);",
+        "expected": "4\n-3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Ceiling",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> RngIntElt",
+    "summary": "The least integer at least the real x.",
+    "examples": [
+      {
+        "code": "Ceiling(2.1);",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Round",
+    "kind": "function",
+    "signature": "(<FldRatElt> x) -> RngIntElt",
+    "summary": "The nearest integer to the rational x (a half away from zero).",
+    "examples": [
+      {
+        "code": "Round(7/2); Round(-7/2); Round(5/2);",
+        "expected": "4\n-4\n3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Round",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> RngIntElt",
+    "summary": "The nearest integer to the real x (a half away from zero).",
+    "examples": [
+      {
+        "code": "Round(2.5); Round(-2.5); Round(1.49);",
+        "expected": "3\n-3\n1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Truncate",
+    "kind": "function",
+    "signature": "(<FldRatElt> x) -> RngIntElt",
+    "summary": "The integer part of the rational x, towards zero.",
+    "examples": [
+      {
+        "code": "Truncate(-7/2);",
+        "expected": "-3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Truncate",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> RngIntElt",
+    "summary": "The integer part of the real x, towards zero.",
+    "examples": [
+      {
+        "code": "Truncate(2.9); Truncate(-2.9);",
+        "expected": "2\n-2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Sqrt",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> FldReElt",
+    "summary": "The square root of a non-negative real, in its field.",
+    "examples": [
+      {
+        "code": "Sqrt(2.0);",
+        "expected": "1.41421356237309504880168872421\n"
+      }
+    ],
+    "differs": [
+      "Sqrt of a negative number is a complex number in Magma; Sagebrush refuses it."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Sqrt",
+    "kind": "function",
+    "signature": "(<RngIntElt> x) -> FldReElt",
+    "summary": "The square root of a non-negative integer, as a real.",
+    "examples": [
+      {
+        "code": "Sqrt(16); Sqrt(2);",
+        "expected": "4.00000000000000000000000000000\n1.41421356237309504880168872421\n"
+      }
+    ],
+    "differs": [
+      "Sqrt of a negative number is a complex number in Magma; Sagebrush refuses it."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Sqrt",
+    "kind": "function",
+    "signature": "(<FldRatElt> x) -> FldReElt",
+    "summary": "The square root of a non-negative rational, as a real.",
+    "examples": [
+      {
+        "code": "Sqrt(9/4);",
+        "expected": "1.50000000000000000000000000000\n"
+      }
+    ],
+    "differs": [
+      "Sqrt of a negative number is a complex number in Magma; Sagebrush refuses it."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Pi",
+    "kind": "function",
+    "signature": "(<FldRe> R) -> FldReElt",
+    "summary": "Pi in the real field R.",
+    "examples": [
+      {
+        "code": "Pi(RealField(20));",
+        "expected": "3.1415926535897932385\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "RealField"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Exp",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> FldReElt",
+    "summary": "The exponential of a real.",
+    "examples": [
+      {
+        "code": "Exp(1.0); Exp(RealField(10)!2);",
+        "expected": "2.71828182845904523536028747135\n7.389056099\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Log"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Log",
+    "kind": "function",
+    "signature": "(<FldReElt> x) -> FldReElt",
+    "summary": "The natural logarithm of a positive real.",
+    "examples": [
+      {
+        "code": "Log(2.0);",
+        "expected": "0.693147180559945309417232121458\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Exp"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Log",
+    "kind": "function",
+    "signature": "(<FldReElt> b, <FldReElt> x) -> FldReElt",
+    "summary": "The logarithm of the positive real x to the base b (b positive, not 1).",
+    "examples": [
+      {
+        "code": "Log(10.0, 1000.0); Log(2.0, 8.0);",
+        "expected": "3.00000000000000000000000000000\n3.00000000000000000000000000000\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "rationals and reals"
+    ]
+  }
+]

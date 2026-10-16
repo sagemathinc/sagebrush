@@ -1,0 +1,126 @@
+[
+  {
+    "name": "GF",
+    "aliases": [
+      "FiniteField",
+      "GaloisField"
+    ],
+    "kind": "function",
+    "signature": "(<RngIntElt> q) -> FldFin",
+    "summary": "The finite field with q elements, for a prime power q; F<a> := GF(q) names its generator a.",
+    "examples": [
+      {
+        "code": "F<a> := GF(16); F; a^4;",
+        "expected": "Finite field of size 2^4\na^4\n"
+      }
+    ],
+    "differs": [
+      "Fields of more than a bounded size (in bits) are refused rather than built."
+    ],
+    "status": "partial",
+    "see_also": [
+      "PrimitiveElement",
+      "Characteristic"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "GF",
+    "kind": "function",
+    "signature": "(<RngIntElt> p, <RngIntElt> n) -> FldFin",
+    "summary": "The finite field with p^n elements, for a prime p.",
+    "examples": [
+      {
+        "code": "GF(2, 3);",
+        "expected": "Finite field of size 2^3\n"
+      }
+    ],
+    "differs": [
+      "Fields of more than a bounded size (in bits) are refused rather than built."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Characteristic",
+    "kind": "function",
+    "signature": "(<Rng> R) -> RngIntElt",
+    "summary": "The characteristic of a ring or field (0 for the integers and the rationals).",
+    "examples": [
+      {
+        "code": "Characteristic(GF(49)); Characteristic(Rationals());",
+        "expected": "7\n0\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "PrimitiveElement",
+    "kind": "function",
+    "signature": "(<FldFin> F) -> FldFinElt",
+    "summary": "A generator of the multiplicative group of the finite field F.",
+    "examples": [
+      {
+        "code": "PrimitiveElement(GF(7));",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Order",
+      "IsPrimitive"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Order",
+    "kind": "function",
+    "signature": "(<FldFinElt> x) -> RngIntElt",
+    "summary": "The multiplicative order of a nonzero finite field element.",
+    "examples": [
+      {
+        "code": "F<a> := GF(16); Order(a); Order(a^5); Order(F!1);",
+        "expected": "15\n3\n1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Degree",
+    "kind": "function",
+    "signature": "(<FldFin> F) -> RngIntElt",
+    "summary": "The degree of the finite field F over its prime field.",
+    "examples": [
+      {
+        "code": "Degree(GF(81));",
+        "expected": "4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  }
+]
