@@ -3,7 +3,7 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, MAX_NODES, MAX_EDGES } from "./spring.ts";
+import { springLayout, springSteps, MAX_NODES, MAX_EDGES, MAX_FRAMES } from "./spring.ts";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,6 +91,25 @@ check(springLayout(pts(10), Array.from({ length: MAX_EDGES + 1 }, () => ["v0", "
   console.log(`  ${MAX_NODES} nodes in ${ms} ms`);
 }
 check(springLayout([], [], { seed: 1 }).size === 0, "no nodes: an empty layout");
+// huge iterations, many parts: bounded (HARD-828-1)
+{
+  let t = Date.now();
+  check(springLayout(pts(1, 10, 10), [], { seed: 1, iterations: 1e12 }).size === 1, "one node, iterations 1e12: laid out");
+  check(Date.now() - t < 2000, `one node, iterations 1e12: at once (${Date.now() - t} ms)`);
+  t = Date.now();
+  const lone = springLayout(pts(MAX_NODES, 8, 8), [], { seed: 1, iterations: 1e12 });
+  check(lone !== null && lone.size === MAX_NODES && overlap(pts(MAX_NODES, 8, 8), lone) === null, "MAX_NODES lone nodes: packed, no overlap");
+  check(Date.now() - t < 30000, `MAX_NODES lone nodes: bounded (${Date.now() - t} ms)`);
+  const [nodes, edges] = GRAPHS.cycle;
+  t = Date.now();
+  const frames = [...springSteps(nodes, edges, { seed: 1, iterations: 1e12 }, 1)];
+  check(frames.length <= MAX_FRAMES + 1, `springSteps yields at most MAX_FRAMES + 1 snapshots (${frames.length})`);
+  check(Date.now() - t < 10000, `springSteps with iterations 1e12: bounded (${Date.now() - t} ms)`);
+  const pairs = pts(400, 4, 4), pe = Array.from({ length: 200 }, (_, i) => ["v" + 2 * i, "v" + (2 * i + 1)]);
+  t = Date.now();
+  check(springLayout(pairs, pe, { seed: 1, iterations: 1e12 }) !== null, "200 two-node parts, iterations 1e12: laid out");
+  check(Date.now() - t < 30000, `200 two-node parts: bounded (${Date.now() - t} ms)`);
+}
 check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }).size === 1, "a loop and an unknown end are ignored");
 
 // the same on Node and Deno as here (Bun)
@@ -122,6 +141,7 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
   const fixedCase = pts(12, 40, 30);
   fixedCase[0].fixed = { x: 100, y: 50 };
   cases.push(["fixed", fixedCase, Array.from({ length: 11 }, (_, i) => ["v" + i, "v" + (i + 1)])]);
+  cases.push(["lone", pts(6, 10, 10), [["v0", "v1"]]]);
   const want = cases.map(([, nodes, edges]) => Object.fromEntries([...springLayout(nodes, edges, { seed: 5 })].map(([k, v]) => [k, [v.x, v.y]])));
   const py = [
     "import json, sys",

@@ -30,6 +30,14 @@ export const MAX_EDGES = 20000;
  * have MIN_ITERATIONS within it is refused. */
 export const WORK = 3e8;
 export const MIN_ITERATIONS = 50;
+/** At most this many iterations, whatever is asked; at most MAX_FRAMES
+ * snapshots from springSteps (its `every` widened to fit); and each part's
+ * iteration charged PART_COST pair evaluations beyond its k^2, so that many
+ * small parts are bounded too (HARD-828-1). A part of one node has no
+ * forces: it is not iterated. */
+export const MAX_ITERATIONS = 1000;
+export const MAX_FRAMES = 300;
+export const PART_COST = 64;
 const DEFAULT_ITERATIONS = 300;
 const FINAL_SWEEPS = 60;
 
@@ -64,7 +72,7 @@ class Part {
   }
   step(gap: number): void {
     const B = this.bodies, n = B.length, L = this.L;
-    const t = this.t0 * (1 - this.done / this.iterations) + 1e-3;
+    const t = this.t0 * (1 - this.done / Math.max(this.iterations, 1)) + 1e-3;
     const dx = new Float64Array(n), dy = new Float64Array(n);
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
@@ -151,9 +159,10 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
   // (the work: each part's iterations x k^2, and the final sweeps over all)
   const n = nodes.length;
   const budget = WORK - FINAL_SWEEPS * n * n;
-  const sq = [...groups.values()].reduce((s, g) => s + g.length * g.length, 0);
+  const sq = [...groups.values()].reduce((s, g) => s + (g.length > 1 ? g.length * g.length + PART_COST : 0), 0);
   if (budget < MIN_ITERATIONS * sq) return null;
-  const iterations = Math.max(MIN_ITERATIONS, Math.min(opts.iterations ?? DEFAULT_ITERATIONS, Math.floor(budget / Math.max(sq, 1))));
+  const asked = Math.min(Math.max(Math.floor(opts.iterations ?? DEFAULT_ITERATIONS), 1), MAX_ITERATIONS);
+  const iterations = Math.max(MIN_ITERATIONS, Math.min(asked, Math.floor(budget / Math.max(sq, 1))));
   const random = rng(opts.seed);
   const all: Body[] = nodes.map((nd) => {
     const w = Math.max(0, nd.w), h = Math.max(0, nd.h);
@@ -169,7 +178,7 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
     partLinks.get(r)!.push([where.get(a)!, where.get(b)!]);
   }
   for (const [r, g] of groups) {
-    const part = new Part(g.map((i) => all[i]), partLinks.get(r) ?? [], iterations, gap);
+    const part = new Part(g.map((i) => all[i]), partLinks.get(r) ?? [], g.length > 1 ? iterations : 0, gap);
     const side = part.L * Math.sqrt(g.length);
     for (const b of part.bodies) if (!b.fixed) { b.x = random() * side; b.y = random() * side; }
     parts.push(part);
@@ -229,9 +238,10 @@ export function* springSteps(nodes: SpringNode[], edges: [string, string][], opt
   const p = plan(nodes, edges, opts);
   if (p === null) return;
   const most = Math.max(0, ...p.parts.map((pt) => pt.iterations));
+  const k0 = Math.max(1, Math.floor(every), Math.ceil(most / MAX_FRAMES));
   for (let k = 0; k < most; k++) {
     for (const part of p.parts) if (part.done < part.iterations) part.step(p.gap);
-    if ((k + 1) % Math.max(1, every) === 0) yield snapshot(p.all);
+    if ((k + 1) % k0 === 0) yield snapshot(p.all);
   }
   finish(p);
   yield snapshot(p.all);

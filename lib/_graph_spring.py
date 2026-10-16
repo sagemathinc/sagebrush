@@ -20,6 +20,8 @@ MAX_NODES = 1500
 MAX_EDGES = 20000
 WORK = 3e8
 MIN_ITERATIONS = 50
+MAX_ITERATIONS = 1000
+PART_COST = 64
 DEFAULT_ITERATIONS = 300
 FINAL_SWEEPS = 60
 _M = 0xFFFFFFFF
@@ -101,7 +103,7 @@ class _Part:
 
     def step(self, gap):
         B, n, L = self.bodies, len(self.bodies), self.L
-        t = self.t0 * (1 - self.done / self.iterations) + 1e-3
+        t = self.t0 * (1 - self.done / max(self.iterations, 1)) + 1e-3
         dx = [0.0] * n
         dy = [0.0] * n
         for i in range(n):
@@ -182,11 +184,12 @@ def _plan(nodes, edges, seed, iterations, gap):
         groups[r].append(i)
     n = len(nodes)
     budget = WORK - FINAL_SWEEPS * n * n
-    sq = sum(len(groups[r]) ** 2 for r in order)
+    sq = sum(len(groups[r]) ** 2 + PART_COST for r in order if len(groups[r]) > 1)
     if budget < MIN_ITERATIONS * sq:
         return None
     want = DEFAULT_ITERATIONS if iterations is None else iterations
-    iters = max(MIN_ITERATIONS, min(want, math.floor(budget / max(sq, 1))))
+    asked = min(max(math.floor(want), 1), MAX_ITERATIONS)
+    iters = max(MIN_ITERATIONS, min(asked, math.floor(budget / max(sq, 1))))
     random = _rng(seed)
     all_ = []
     for nid, w, h, fixed in nodes:
@@ -206,7 +209,7 @@ def _plan(nodes, edges, seed, iterations, gap):
         part_links.setdefault(find(a), []).append((where[a], where[b]))
     parts = []
     for r in order:
-        part = _Part([all_[i] for i in groups[r]], part_links.get(r, []), iters, gap)
+        part = _Part([all_[i] for i in groups[r]], part_links.get(r, []), iters if len(groups[r]) > 1 else 0, gap)
         side = part.L * math.sqrt(len(groups[r]))
         for b in part.bodies:
             if not b.fixed:
