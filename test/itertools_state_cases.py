@@ -446,3 +446,73 @@ print(k1, list(g1), k2, list(g2), list(g))
 # every public name of CPython's itertools, and repeat (which zip_longest uses)
 print(sorted(n for n in dir(I) if not n.startswith('_')))
 print(list(I.repeat(7, 3)), list(I.islice(I.repeat('x'), 2)), list(I.zip_longest('abc', 'x', fillvalue=0)))
+
+# astra's edges probe on c58fff1b (CORR-C58-1, -2): chain ends after an error
+# from its outer source or an iterable's iter(); islice's arguments go
+# through the index protocol (descriptors, non-int results, sys.maxsize);
+# product(x, repeat=0) reads nothing
+import itertools as it
+
+def take(x,n=5):
+ out=[]
+ for _ in range(n):
+  try:out.append(next(x))
+  except Exception as e:out.append(type(e).__name__)
+ return out
+class Source:
+ def __init__(self,events):self.events=iter(events)
+ def __iter__(self):return self
+ def __next__(self):
+  x=next(self.events)
+  if isinstance(x,BaseException):raise x
+  return x
+class Broken:
+ def __iter__(self):raise ValueError('broken iter')
+print('chain outer',take(it.chain.from_iterable(Source([[1],ValueError('x'),[2],[3]]))))
+print('chain setup',take(it.chain([1],Broken(),[2])))
+print('chain inner',take(it.chain(Source([1,ValueError('x'),2]),[3])))
+for name,f in [('accumulate',it.accumulate),('compress',lambda x:it.compress(x,[1]*8)),('dropwhile',lambda x:it.dropwhile(lambda a:False,x)),('takewhile',lambda x:it.takewhile(lambda a:True,x)),('filterfalse',lambda x:it.filterfalse(None,x)),('tee',lambda x:it.tee(x)[0])]:
+ print('resurrect',name,take(f(Source([0,StopIteration(),0,2]))))
+x=iter([1,2,3]);p=it.product(x,repeat=0);print('product0',list(p),list(x))
+class Static:
+ __index__=staticmethod(lambda:2)
+class Class:
+ @classmethod
+ def __index__(cls):return 2
+class Prop:
+ @property
+ def __index__(self):return lambda:2
+class BadReturn:
+ def __index__(self):return 2.5
+for C in [Static,Class,Prop,BadReturn]:
+ for pos in range(3):
+  a=[0,6,1];a[pos]=C()
+  try:print('index',C.__name__,pos,list(it.islice(range(10),*a)))
+  except Exception as e:print('index',C.__name__,pos,type(e).__name__)
+for step in [2**63,2**100]:
+ try:print('huge step',step,list(it.islice(range(4),0,3,step)))
+ except Exception as e:print('huge step',step,type(e).__name__)
+
+# operator.index, which islice uses: __index__ by special-method lookup
+# (bound by its descriptor), its result an int
+import operator
+class IxS:
+    __index__ = staticmethod(lambda: 2)
+class IxC:
+    @classmethod
+    def __index__(cls): return 3
+class IxP:
+    @property
+    def __index__(self): return lambda: 4
+class IxN:
+    def __index__(self): return 5
+class IxF:
+    def __index__(self): return 2.5
+class IxNone:
+    __index__ = None
+for c in (IxS, IxC, IxP, IxN, IxF, IxNone):
+    try:
+        print('operator.index', c.__name__, operator.index(c()))
+    except Exception as e:
+        print('operator.index', c.__name__, type(e).__name__, e)
+print(operator.index(True), operator.index(2**70), [10, 20, 30][IxS()], list(range(10))[IxS():IxC()])

@@ -21,15 +21,19 @@ def repeat(obj, times=None):
             yield obj
 
 
+import operator as _operator
+
 _NULL = object()
 
 
 def _index(x, msg):
+    # (as CPython's islice: any failure of the index protocol, a result out
+    # of 0..sys.maxsize included, is this ValueError)
     if x is None:
         return None
     try:
-        v = type(x).__index__(x)
-    except (AttributeError, TypeError):
+        v = _operator.index(x)
+    except Exception:
         raise ValueError(msg) from None
     if v < 0 or v > 9223372036854775807:
         raise ValueError(msg)
@@ -108,12 +112,14 @@ class chain:
     def __next__(self):
         while self._source is not None:
             if self._active is None:
+                # (an exception while getting the next iterable, or its
+                # iterator, ends the chain, as CPython's; one from the
+                # active iterator does not)
                 try:
-                    iterable = next(self._source)
-                except StopIteration:
+                    self._active = iter(next(self._source))
+                except BaseException:
                     self._source = None
-                    break
-                self._active = iter(iterable)
+                    raise
             try:
                 return next(self._active)
             except StopIteration:
@@ -237,10 +243,10 @@ def islice(iterable, *args):
     start = _index(start, "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
     if step is not None:
         try:
-            step = type(step).__index__(step)
-        except (AttributeError, TypeError):
+            step = _operator.index(step)
+        except Exception:
             step = 0
-        if step < 1:
+        if step < 1 or step > 9223372036854775807:
             raise ValueError("Step for islice() must be a positive integer or None.")
     return _islice(iter(iterable), 0 if start is None else start, stop, 1 if step is None else step)
 
@@ -341,7 +347,8 @@ def zip_longest(*args, fillvalue=None):
 def product(*args, repeat=1):
     if repeat < 0:
         raise ValueError("repeat argument cannot be negative")
-    return _product([tuple(pool) for pool in args] * repeat)
+    # (with repeat=0 nothing is read, as CPython's)
+    return _product([tuple(pool) for pool in args] * repeat if repeat else [])
 
 
 def _product(pools):
