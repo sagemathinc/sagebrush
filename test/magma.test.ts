@@ -196,6 +196,25 @@ test("finite fields: GF(p, n)'s arguments and Log's base, in Magma's words (CORR
     assert.ok(out.includes(said), said + "\n" + out);
 });
 
+test("finite fields by bounded work: GF of more than 1024 bits refused before its power; Random and iteration of a large field without all its elements (HARD-581-1, HARD-581-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // under a 96 MB heap, as in the review
+  const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
+  const t0 = Date.now();
+  const big = run("F := GF(2, 1000000000);\nF := GF(2, 1025);\nF := GF(2^1100);\nF := GF(2^1100 + 1);\nF := GF(3, 1000);\n1;\n");
+  assert.equal(big.signal, null);
+  assert.equal((big.stdout.replace(/\s+/g, " ").match(/GF of a field of more than 1024 bits is not supported yet/g) ?? []).length, 5, big.stdout);
+  assert.match(big.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 30000);
+  const r = run("F := GF(1000003);\nx := Random(F);\nx in F, Parent(x) eq F;\nexists(t){ y : y in F | y^2 eq 4 }; t;\nRandom([1..10^30]) le 10^30;\nRandom([]);\nRandom({* 7, 7, 7 *});\n");
+  assert.equal(r.signal, null, r.stderr);
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.match(flat, /true true true 2 /);
+  assert.match(flat, /Runtime error in 'Random': Argument 1 is not non-empty 7 $/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)

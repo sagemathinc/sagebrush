@@ -419,6 +419,10 @@ class MRange:
         self.b = a + (n - 1) * c if n > 0 else a - c
 
     def __len__(self):
+        return self.size()
+
+    def size(self):
+        # (len() of a range of more than 2^63 elements overflows: this doesn't)
         return max(0, (self.b - self.a) // self.c + 1)
 
     def __iter__(self):
@@ -3586,6 +3590,9 @@ _FF = {}  # id(_sage_ff field) -> its _MFinField
 # in it (checked against Magma: GF(2^20) and GF(1021^2) by powers,
 # GF(1031^2) and GF(3^13) by polynomials).
 _FF_POWERS_MAX = 2 ** 20
+# GF(q) and GF(p, n) of more bits are refused before any work on q (its
+# power, its prime-power test, its tables) (HARD-581-1)
+_FF_BITS = 1024
 
 
 class _MFinField:
@@ -3685,7 +3692,8 @@ class _MFinField:
         # Magma's order: 0, 1, ..., p - 1 for a prime field; else 1, w,
         # w^2, ..., w^(q-2) and then 0
         if self.n == 1:
-            return iter([self.K(i) for i in range(self.p)])
+            # (lazily: the first elements without all p (HARD-581-2))
+            return (self.K(i) for i in range(self.p))
         def powers():
             g, x = self.K.gen(), self.K(1)
             for _ in range(self.q - 1):
@@ -3713,7 +3721,13 @@ def GF(q, n=None):
             raise MagmaError("Argument 1 (%d) should be prime" % q, "'GF'")
         if n < 1:
             raise MagmaError("Argument 2 (%d) should be >= 1" % n, "'GF'")
+        # p^n has at least n * (bits of p - 1) + 1 bits: refused before
+        # the power is computed (HARD-581-1)
+        if n > _FF_BITS or n * (q.bit_length() - 1) >= _FF_BITS:
+            raise MagmaError("GF of a field of more than %d bits is not supported yet" % _FF_BITS, "'GF'")
         q = q ** n
+    if q.bit_length() > _FF_BITS:
+        raise MagmaError("GF of a field of more than %d bits is not supported yet" % _FF_BITS, "'GF'")
     if q < 2 or _sff._is_prime_power(q) is None:
         raise MagmaError("Argument 1 (%d) is not a prime power" % q, "'GF'")
     try:
@@ -4061,12 +4075,54 @@ def Universe(s):
 _SEEDED = []
 
 
+# Random(S) of a collection without a known size enumerates at most this
+# many elements (HARD-581-2)
+_RANDOM_ENUM_MAX = 10 ** 6
+
+
+def _random_elt(s, random):
+    """Random(S): an element of S, chosen without enumerating S when its
+    size is known: a finite field by its coefficients, a range by its
+    index (HARD-581-2)."""
+    if isinstance(s, _MFinField):
+        if s.n == 1:
+            return s.K(random.randrange(s.p))
+        g = s.K.gen()
+        return sum((s.K(random.randrange(s.p)) * g ** i for i in range(s.n)), s.K(0))
+    if isinstance(s, MRange):
+        n = s.size()
+        if not n:
+            raise MagmaError("Argument 1 is not non-empty", "'Random'")
+        return s[random.randrange(n)]
+    if isinstance(s, MSet) and s.kind == "multi":
+        # (each element as often as its multiplicity)
+        k = random.randrange(len(s))
+        for x in s.items:
+            k -= s.keys[_key(x)][1]
+            if k < 0:
+                return x
+    if isinstance(s, MSet):
+        v = s.items
+    elif isinstance(s, (MSeq, MTuple, list, tuple)):
+        v = s
+    else:
+        v = []
+        for x in _iter(s):
+            if len(v) == _RANDOM_ENUM_MAX:
+                raise MagmaError("Random of a structure of more than %d elements is not supported yet" % _RANDOM_ENUM_MAX, "'Random'")
+            v.append(x)
+    v = list(v) if not isinstance(v, (list, tuple)) else v
+    if not v:
+        raise MagmaError("Argument 1 is not non-empty", "'Random'")
+    return random.choice(v)
+
+
 def Random(s, b=None):
     import random
     if _SEEDED:
         raise MagmaError("Random after SetSeed or GetSeed is not supported yet: Sagebrush can't reproduce Magma's random numbers", "'Random'")
     if b is None:
-        return random.choice(list(_iter(s)))
+        return _random_elt(s, random)
     # Random(a, b): an integer in [a, b]
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (s, b)):
         raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(s), _type_of(b)), "'Random'")
