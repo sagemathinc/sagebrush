@@ -927,6 +927,7 @@ test("vectors keep their ring, residue collections their universe, permutations 
     ["u eq Vector(Rationals(), [1, 2]);", "'eq'", "Bad argument types\nArgument types given: ModTupRngElt[RngInt], ModTupFldElt[FldRat]"],
     ["u * Matrix(Rationals(), 2, 2, [1, 0, 0, 1]);", "'*'", "Arguments have incompatible coefficient rings"],
     ["(1/2) * u;", "'*'", "Arguments are not compatible\nArgument types given: FldRatElt, ModTupRngElt[RngInt]"],
+    ["u * (1/2);", "'*'", "Arguments are not compatible\nArgument types given: ModTupRngElt[RngInt], FldRatElt"],
     ["Solution(Matrix(Integers(), 2, 2, [2, 0, 0, 2]), Vector(Rationals(), [1, 1]));", "'Solution'", "Arguments have incompatible coefficient rings"],
     ["Sym(1)![true];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [BoolElt]"],
     ["Sym(3)![2/1, 3/1, 1/1];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [FldRatElt]"],
@@ -948,14 +949,17 @@ test("Vector, Subsets and Solution are admitted before they copy or compute (HAR
   const { join } = require("node:path");
   const t0 = Date.now();
   const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
+    // (many small subsets: their sets are charged with their elements)
+    "U := {1..40000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
     "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a vector of more than \d+ entries is not supported yet/g) ?? []).length, 2, r.stdout);
-  assert.equal((out.match(/a set of subsets holding more than \d+ elements in all is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.equal((out.match(/a set of subsets holding more than \d+ elements in all is not supported yet/g) ?? []).length, 3, r.stdout);
   assert.match(out, /Solution of a system of more than 200000 \(rows times columns times the smaller\) steps is not supported yet/);
   assert.match(r.stdout, /\n1\n256\n/);
+  assert.match(r.stdout, /\n1\n300\n/);
   assert.match(r.stdout, /\nend\n$/);
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });

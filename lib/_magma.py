@@ -5760,10 +5760,11 @@ def _subsets(S, k):
     items = S.ordered()
     n = len(items)
     count = 2 ** n if k is None else (_math.comb(n, k) if k <= n else 0)
-    # (and the elements copied into them: n * 2^(n-1) in all subsets,
-    # k * C(n, k) in those of k elements, HARD-DFC-2)
+    # (charged together with the elements copied into them: n * 2^(n-1) in
+    # all subsets, k * C(n, k) in those of k elements; a subset's own set
+    # counts as 4 elements, so many small subsets are bounded too, HARD-DFC-2)
     cells = (n * 2 ** (n - 1) if n else 0) if k is None else k * count
-    if count > _COLLECT_MAX or cells > _COLLECT_MAX:
+    if 4 * count + cells > _COLLECT_MAX:
         raise MagmaError("a set of subsets holding more than %d elements in all is not supported yet" % _COLLECT_MAX, "'Subsets'")
     sizes = range(n + 1) if k is None else [k]
     return MSet(MSet(c) for r in sizes for c in _itertools.combinations(items, r))
@@ -6617,7 +6618,7 @@ class _MVector(list):
     def __neg__(self):
         return _MVector((-a for a in self), self._base)
 
-    def __mul__(self, o):
+    def __mul__(self, o, left=False):
         if isinstance(o, _smat.Matrix):
             # v * A: the row vector times the matrix, over one ring (CORR-DFC-3)
             if o._base is not self._base:
@@ -6629,13 +6630,14 @@ class _MVector(list):
             # (a rational scalar times an integral vector only when it is
             # an integer, as Magma's)
             if self._base is _sa.ZZ and _Fraction(o).denominator != 1:
-                raise MagmaError("Arguments are not compatible\nArgument types given: FldRatElt, %s" % _ext_type(self), "'*'", True)
+                types = ("FldRatElt", _ext_type(self)) if left else (_ext_type(self), "FldRatElt")
+                raise MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % types, "'*'", True)
             return _MVector((a * (int(o) if self._base is _sa.ZZ else o) for a in self), self._base)
         raise _bad_types("*", [self, o])
 
     def __rmul__(self, o):
         if isinstance(o, (int, _Fraction)) and not isinstance(o, bool):
-            return self * o
+            return self.__mul__(o, left=True)  # (o on the left: its words name it first)
         raise _bad_types("*", [o, self])
 
     def __eq__(self, o):
