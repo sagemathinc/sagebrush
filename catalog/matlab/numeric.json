@@ -205,7 +205,8 @@
     "differs": [
       "The one-output form, the continued fraction as text, is refused: use [N, D] = rat(X).",
       "Complex X is refused.",
-      "tol must be a real nonnegative scalar, and a tolerance the expansion can't reach (such as 0 for pi) is refused rather than missed."
+      "tol must be a real nonnegative scalar, and a tolerance the expansion can't reach (such as 0 for pi) is refused rather than missed.",
+      "The default tolerance, 1e-6 times norm(X(:), 1), counts only X's finite elements (Inf and NaN are left out of the norm)."
     ],
     "status": "partial",
     "see_also": [

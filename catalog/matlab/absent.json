@@ -478,7 +478,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "No graph objects in Sagebrush: sortrows of the edge list [s t w] by weight, then add each edge that joins two components (Kruskal), tracking components in a vector.",
+    "alternative": "No graph objects in MATLAB mode, and Sage mode's Graph has no minimum spanning tree: sortrows of the edge list [s t w] by weight, then add each edge that joins two components (Kruskal), tracking components in a vector.",
     "tags": [
       "graphs"
     ]
