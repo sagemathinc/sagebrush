@@ -232,3 +232,13 @@ for xs, got in json.load(open(${JSON.stringify(file)})):
 print(json.dumps([len(bad)] + bad[:5]))`], { encoding: "utf8", maxBuffer: 1 << 26 }));
   assert.deepEqual(bad, [0]);
 });
+
+test("the exact norm streams: two million subnormal coordinates in a 96 MiB heap, correctly rounded (HARD-5B6-1)", () => {
+  // (sqrt(2e6) = 1414.21... in units of 2^-1074: 1414u, as 1414.5^2 = 2000810.25 > 2e6; and
+  // 3 and 4 million (1732.05, 2000) also through the exact path, which a subnormal result takes)
+  const out = execFileSync(process.execPath, ["--max-old-space-size=96", "-e", `
+const CR = require(${JSON.stringify(join(runtime, "crmath.js"))});
+const u = 5e-324;
+console.log([2e6, 3e6, 4e6].map((n) => CR.hypotN(new Array(n).fill(u)) / u).join(" "));`], { encoding: "utf8" });
+  assert.equal(out.trim(), "1414 1732 2000");
+});
