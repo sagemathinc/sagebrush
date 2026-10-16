@@ -996,16 +996,85 @@ test("the intrinsics agents reached for refuse as Magma does, and a missing one 
   assert.doesNotMatch(out, /Error: |Traceback/);
   assert.match(out, /\nend\n$/);
   // Sagebrush's own refusals, in words
-  const own = run("Integers(1);\nSolution(Matrix(Rationals(), 2, 2, [1, 2, 2, 4]), Vector(Rationals(), [1, 2]));\nP<x> := PolynomialRing(GF(5));\n" +
+  const own = run("Integers(1);\nSolution(Matrix(Rationals(), 2, 2, [1, 2, 2, 4]), Vector(Rationals(), [1, 2]));\n" +
     "G := Graph<3 | [ {1, 2} ]>;\nLegendreSymbol(3, 7);\n\"end\";\n");
   // (long messages wrap at 80 columns: compared unwrapped)
   assert.ok(own.replace(/\s+/g, " ").includes("Integers(1), the zero ring, is not supported yet"), own);
   assert.ok(own.replace(/\s+/g, " ").includes("Solution of a system with more than one solution is not supported yet"), own);
   // (a missing function's refusal names what to use instead: agents read refusals)
-  assert.ok(own.replace(/\s+/g, " ").includes("PolynomialRing over a FldFin (not the integers or the rationals) is not supported yet; instead: Sage mode, R.<x> = GF(5)[]"), own);
   assert.ok(own.replace(/\s+/g, " ").includes("Graph< ... > is not supported yet; instead: Sage mode's Graph"), own);
   assert.ok(own.replace(/\s+/g, " ").includes("'LegendreSymbol' is a Magma intrinsic not implemented in Sagebrush; instead: Modexp(n, (m - 1) div 2, m)"), own);
   assert.match(own, /\nend\n$/);
+});
+
+test("polynomials over a finite field refuse what Magma refuses, in its words, and what Sagebrush doesn't do yet, in words", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [statement, where, what Magma says] (checked against Magma 2.18)
+  const cases = [
+    ["x + y;", "'+'", "Arguments are not compatible\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    ["f div 0;", "'div'", "Division by zero"],
+    ["x/0;", "'/'", "Argument 2 is not a unit"],
+    ["Roots(R!0);", "'Roots'", "Argument 1 is not non-zero"],
+    ["Factorization(R!0);", "'Factorization'", "Argument 1 is not non-zero"],
+    ["x + GF(5)!1;", "'+'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldFinElt"],
+    ["x^-1;", "'^'", "Argument 2 (-1) should be >= 0"],
+    ["#R;", "'#'", "Cardinality is infinite or not feasibly computable"],
+    ["x + 0.5;", "'+'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldReElt"],
+    ["x^(1/2);", "'^'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    ["x + 1/7;", "'+'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldRatElt"],
+    ["f(3);", "'@'", "Bad argument types\nArgument types given: RngIntElt, RngUPolElt[FldFin]"],
+    ["Evaluate(f, GF(5)!1);", "'Evaluate'", "Incompatible rings"],
+    ["Evaluate(f, 1/2);", "'Evaluate'", "Incompatible rings"],
+    ["LeadingCoefficient(R!0);", "'LeadingCoefficient'", "Argument 1 is not non-zero"],
+    ["R.2;", "'.'", "Value for name index (2) should be in the range [1..1]"],
+    ["1/2 in R;", "'in'", "Bad argument types"],
+    ["x eq GF(5)!1;", "'eq'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldFinElt"],
+    ["2^x;", "'^'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+  ];
+  // what Sagebrush doesn't do yet: refused in words, never computed wrongly
+  const own = [
+    ["x lt x^2;", "ordering of polynomials and matrices is not supported yet"],
+    ["x/(x+1);", "dividing polynomials over a finite field (rational functions) is not supported yet"],
+    ["x + z;", "arithmetic of a polynomial over a finite field and a RngUPolElt is not supported yet"],
+    ["Discriminant(f);", "Discriminant of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["Resultant(f, x);", "Resultant of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["{x};", "a set of polynomials over a finite field (or of their rings) is not supported yet"],
+    ["S2<t> := PolynomialRing(GF(7)); x + t;", "arithmetic of polynomials of two polynomial rings over finite fields is not supported yet"],
+  ];
+  const src = "R<x> := PolynomialRing(GF(7)); S<y> := PolynomialRing(GF(5)); Z<z> := PolynomialRing(Integers()); f := x^2 + 1;\n" +
+    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (long messages wrap at 80 columns: compared unwrapped)
+  const flat = out.replace(/\s+/g, " ");
+  for (const [stmt, where, said] of cases)
+    assert.ok(flat.includes(`Runtime error in ${where}: ${said.replace(/\s+/g, " ")}`), `${stmt}\n${out}`);
+  for (const [stmt, said] of own)
+    assert.ok(flat.includes(said), `${stmt}\n${out}`);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  assert.match(out, /\nend\n$/);
+});
+
+test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
+    "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
+    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^40000 + x, 39999);\n" +
+    "Degree(x^40000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
+  assert.match(out, /Factorization of a polynomial over a finite field of degree more than 1000 is not supported yet/);
+  assert.match(out, /Factorization of a polynomial of degree 70 over this finite field is not supported yet/);
+  assert.match(out, /IsIrreducible of a polynomial of degree 70 over this finite field is not supported yet/);
+  for (const what of ["a product", "a Gcd", "a derivative"])
+    assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  assert.match(r.stdout, /\n40000\n\d+\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
