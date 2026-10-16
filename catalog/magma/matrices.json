@@ -1,0 +1,89 @@
+[
+  {
+    "name": "Vector",
+    "kind": "function",
+    "signature": "(<SeqEnum> Q) -> ModTupRngElt",
+    "summary": "A row vector of the integers or rationals in Q (over the rationals if any is not an integer).",
+    "examples": [
+      {
+        "code": "v := Vector([3, -1]); v; v + v; 2 * v;",
+        "expected": "( 3 -1)\n( 6 -2)\n( 6 -2)\n"
+      }
+    ],
+    "differs": [
+      "Vectors over rings other than the integers and the rationals are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Solution"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "matrices"
+    ]
+  },
+  {
+    "name": "Vector",
+    "kind": "function",
+    "signature": "(<Rng> R, <SeqEnum> Q) -> ModTupRngElt",
+    "summary": "A row vector over R (the integers or the rationals) of the elements of Q; v * A multiplies it by a matrix.",
+    "examples": [
+      {
+        "code": "v := Vector(Rationals(), [1, 1]); A := Matrix(Rationals(), 2, 2, [1, 2, 3, 4]); v * A; v * A^2;",
+        "expected": "(4 6)\n(22 32)\n"
+      }
+    ],
+    "differs": [
+      "Vectors over rings other than the integers and the rationals are refused."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "matrices"
+    ]
+  },
+  {
+    "name": "Solution",
+    "kind": "function",
+    "signature": "(<MtrxS> A, <ModTupRngElt> w) -> ModTupRngElt",
+    "summary": "The vector v with v * A = w (Magma's row convention), over A's ring; an error when there is none.",
+    "examples": [
+      {
+        "code": "A := Matrix(Rationals(), 2, 2, [1, 2, 3, 4]); Solution(A, Vector(Rationals(), [4, 6])); Solution(Transpose(A), Vector(Rationals(), [5, 11]));",
+        "expected": "(1 1)\n(1 2)\n"
+      }
+    ],
+    "differs": [
+      "A system with more than one solution (a singular A) is refused: Magma returns a particular solution of its own choosing.",
+      "Magma's second return value, the kernel of A, is not returned."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Vector"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "matrices"
+    ]
+  },
+  {
+    "name": "Submatrix",
+    "kind": "function",
+    "signature": "(<Mtrx> A, <RngIntElt> i, <RngIntElt> j, <RngIntElt> p, <RngIntElt> q) -> Mtrx",
+    "summary": "The p by q block of the matrix A whose top left entry is A[i][j].",
+    "examples": [
+      {
+        "code": "C := Matrix(Integers(), 3, 3, [1, 2, 3, 4, 5, 6, 7, 8, 9]); Submatrix(C, 2, 2, 2, 2);",
+        "expected": "[5 6]\n[8 9]\n"
+      }
+    ],
+    "differs": [
+      "A block with no rows or no columns is refused."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "matrices"
+    ]
+  }
+]

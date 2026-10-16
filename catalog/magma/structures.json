@@ -1,0 +1,105 @@
+[
+  {
+    "name": "Integers",
+    "aliases": [
+      "IntegerRing"
+    ],
+    "kind": "function",
+    "signature": "() -> RngInt",
+    "summary": "The ring of integers.",
+    "examples": [
+      {
+        "code": "Integers();",
+        "expected": "Integer Ring\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  },
+  {
+    "name": "Integers",
+    "kind": "function",
+    "signature": "(<RngIntElt> m) -> RngIntRes",
+    "summary": "The ring of integers modulo m (m at least 2); R!x maps an integer, or a rational with a unit denominator, into it.",
+    "examples": [
+      {
+        "code": "R := Integers(12); x := R!5; x * 7; x^-1; Order(x); IsUnit(R!4);",
+        "expected": "11\n5\n2\nfalse\n"
+      }
+    ],
+    "differs": [
+      "Integers(1), the zero ring, is refused.",
+      "Order of a residue modulo an m of more than 128 bits is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Modexp",
+      "Modinv"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures",
+      "integers"
+    ]
+  },
+  {
+    "name": "Sym",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> GrpPerm",
+    "summary": "The symmetric group on 1 .. n; G!(1, 2, 3) or G![2, 3, 1] makes a permutation p, and i^p is the image of i.",
+    "examples": [
+      {
+        "code": "G := Sym(4); p := G!(1, 2, 3, 4); [i^p : i in [1..4]]; Order(p); Sign(p);",
+        "expected": "[ 2, 3, 4, 1 ]\n4\n-1\n"
+      }
+    ],
+    "differs": [
+      "Iterating over Sym(n) gives its permutations in Sagebrush's own (lexicographic) order, not Magma's.",
+      "Only the symmetric groups themselves: their subgroups (sub< G | ... >) and other permutation groups are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Identity"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  },
+  {
+    "name": "Identity",
+    "kind": "function",
+    "signature": "(<GrpPerm> G) -> GrpPermElt",
+    "summary": "The identity element of a symmetric group.",
+    "examples": [
+      {
+        "code": "G := Sym(3); Identity(G);",
+        "expected": "Id(G)\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  },
+  {
+    "name": "Graph",
+    "kind": "function",
+    "signature": "< n | edges >",
+    "summary": "A graph on the vertices 1 .. n with the given edges (a constructor).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Sage mode's Graph, e.g. G = Graph({1: [2, 3], 2: [3]}), with is_connected(), connected_components(), shortest_path(), is_tree() and spanning_trees_count()",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  }
+]
