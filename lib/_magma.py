@@ -3074,26 +3074,33 @@ def _real_ok(o):
     return isinstance(o, (MReal, int, _Fraction, float)) and not isinstance(o, bool)
 
 
-# A real literal longer, or with an exponent larger, than this is made
-# from its digits and exponent rather than through its exact value
-_REAL_LITERAL_PLAIN = 1000
+# A real literal with more significant digits, or a larger exponent once
+# its leading and trailing zeros are folded in, is refused
+_REAL_LITERAL_DIGITS = 10000
+_REAL_LITERAL_EXP = 10000
 
 
 def _real(s):
     """A real literal (1.5, 2., 3e10, 1.5e-3) as a real of the default
-    field, made from its digits and exponent: 1e100000000 is never
-    expanded to its integer (HARD-1CD-1)."""
+    field, converted exactly as Fraction(s) is: its insignificant zeros
+    are folded into the exponent first, and a literal still out of
+    bounds is refused, so 1e100000000 is never expanded (HARD-1CD-1)
+    and no literal is rounded another way (CORR-9FA-1, CORR-54E-1)."""
     m = _re.fullmatch(r"(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?", s)
-    if not m or (len(s) <= _REAL_LITERAL_PLAIN and abs(int(m.group(3) or 0)) <= _REAL_LITERAL_PLAIN):
-        # (an ordinary literal: converted as before, keeping its value
-        # exactly; only an extreme one below avoids its expansion,
-        # CORR-9FA-1)
+    if not m:
         return MReal._frac(_Fraction(s), 30)
-    if len((m.group(3) or "").lstrip("+-")) > 18:
-        raise MagmaError("a real literal with an exponent of more than 18 digits is not supported yet")
-    whole, frac, exp = m.group(1) or "", m.group(2) or "", int(m.group(3) or 0)
+    whole, frac, e = m.group(1) or "", m.group(2) or "", m.group(3) or "0"
     digits = (whole + frac).lstrip("0")
-    return MReal(int(digits) if digits else 0, exp - len(frac), 30)
+    stripped = digits.rstrip("0")
+    if not stripped:
+        return MReal(0, 0, 30)
+    if len(stripped) > _REAL_LITERAL_DIGITS:
+        raise MagmaError("a real literal of more than %d significant digits is not supported yet" % _REAL_LITERAL_DIGITS)
+    big = len(e.lstrip("+-").lstrip("0")) > len(str(_REAL_LITERAL_EXP)) + 1
+    exp = 0 if big else int(e) - len(frac) + len(digits) - len(stripped)
+    if big or abs(exp) > _REAL_LITERAL_EXP:
+        raise MagmaError("a real literal with an exponent of more than %d is not supported yet" % _REAL_LITERAL_EXP)
+    return MReal._frac(_Fraction(int(stripped)) * _Fraction(10) ** exp, 30)
 
 
 class RealField_:

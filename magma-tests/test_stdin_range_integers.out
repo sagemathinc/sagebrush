@@ -84,3 +84,15 @@ Runtime error in [ ... ]: Sequence range does not consist of integers
 
 3.23456789012345678901234567891
 end3
+true
+[ 9 .. 11 ]
+true
+{ 9 .. 10 }
+false
+
+>> y3 eq 2; [y3 .. 5];
+            ^
+Runtime error in [ ... ]: Sequence range does not consist of integers
+
+4.23456789012345678901234567891E1700
+end4
