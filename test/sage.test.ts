@@ -160,3 +160,39 @@ test("a quotient ring keeps at most a few sum quotients for reuse (HARD-ACE-1)",
   assert.equal(cli("--sage", "-c", src), "8 xbar + ybar True\n");
   assert.ok(Date.now() - t < 60000);
 });
+
+test("matrix() over a number field is refused before anything is read (HARD-541-1)", () => {
+  // (matrix(K, 0, 0, []) iterated K[0], K[1], ... until the heap ran out)
+  const src = "P.<t> = QQ[]\nK = NumberField(t^2 - 2, 'a')\nfor f in (lambda: matrix(K, 0, 0, []), lambda: matrix(K, [[K.gen()]]), lambda: matrix(QuadraticField(-3, 'b'), 1, 1, [1])):\n try:\n  f()\n except NotImplementedError as e:\n  print(type(e).__name__)\nprint(matrix(QQbar, 2, 2, [1, 2, 3, 4]).det())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(3) + "-2\n");
+  assert.ok(Date.now() - t < 30000);
+});
+
+test("matrix() keeps callable row iterables as rows, and takes an entry function (CORR-260-1)", () => {
+  // (the HARD-541-1 rule had refused any callable object without a length;
+  // and matrix(QQ, 2, 2, f) was a TypeError; values as Sage 10.10's)
+  const src = "class Rows:\n def __iter__(self): return iter([[1, 2], [3, 4]])\n def __call__(self): return 0\n" +
+    "def f(i, j): return i + j\n" +
+    "for m in (matrix(Rows()), matrix(QQ, 2, 2, f), matrix(QQ, 2, 2, lambda i, j: i - j), matrix(ZZ, 2, 3, lambda i, j: 10*i + j)):\n print(m.dimensions(), m.list())\n";
+  assert.equal(cli("--sage", "-c", src),
+    "(2, 2) [1, 2, 3, 4]\n(2, 2) [0, 1, 1, 2]\n(2, 2) [0, -1, 1, 0]\n(2, 3) [0, 1, 2, 10, 11, 12]\n");
+});
+
+test("matrix() converts each entry function value as it is returned (CORR-C12-1)", () => {
+  // (the values were converted after all the calls: a callback returning one
+  // mutable object gave [2, 2, 2, 2], and a ZZ callback ran past its first
+  // non-integral value; values and call logs as Sage 10.10's)
+  const src = "from fractions import Fraction\nclass Value(Fraction):\n @property\n def numerator(self): return self.n\n @property\n def denominator(self): return 1\n" +
+    "v = Value(0)\nv.n = 0\ndef f(i, j):\n v.n = int(i + j)\n return v\nprint(matrix(ZZ, 2, 2, f).list())\n" +
+    "calls = []\ndef g(i, j):\n calls.append((int(i), int(j)))\n return QQ(i - j)/2\ntry:\n matrix(ZZ, 2, 3, g)\nexcept TypeError:\n print(calls)\n";
+  assert.equal(cli("--sage", "-c", src), "[0, 1, 1, 2]\n[(0, 0), (0, 1)]\n");
+});
+
+test("matrix(QQ, r, c, f) converts each value strictly before the next call (CORR-798-1)", () => {
+  // (a value that failed to convert was kept and changed by later calls:
+  // [2, 1, 1, 2] where Sage 10.10 raises the value's own TypeError after (0, 0))
+  const src = "from fractions import Fraction\nclass V(Fraction):\n @property\n def numerator(self):\n  if self.n == 0: raise TypeError('not rational yet')\n  return self.n\n @property\n def denominator(self): return 1\n" +
+    "v = V(1)\nv.n = 0\ncalls = []\ndef f(i, j):\n calls.append((int(i), int(j)))\n v.n = int(i + j)\n return v\ntry:\n print(matrix(QQ, 2, 2, f).list())\nexcept TypeError as e:\n print('TypeError', e, calls)\n";
+  assert.equal(cli("--sage", "-c", src), "TypeError not rational yet [(0, 0)]\n");
+});

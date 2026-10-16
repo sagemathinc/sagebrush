@@ -1039,8 +1039,8 @@ class Matrix:
             [0.3333333333333333               0.25]
         """
         if getattr(R, "_is_generic_field", False) or _sa_ff_base(R):
-            return matrix(R, [list(r) for r in self._rows])
-        return Matrix(R, self._rows)
+            return matrix(R, self.nrows(), self._nc, [x for r in self._rows for x in r])
+        return Matrix(R, self._rows, self._nc)
 
     # ---- arithmetic
     def _same(self, other):
@@ -1280,7 +1280,7 @@ class Matrix:
             (-4, 9/2)
         """
         is_vec = not isinstance(B, Matrix)
-        Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())]) if is_vec else B
+        Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())], 1) if is_vec else B
         if Bm.nrows() != self.nrows():
             raise ValueError("number of rows of self must equal number of rows of right-hand side")
         from sagebrush import linalg
@@ -1297,7 +1297,7 @@ class Matrix:
                 X[p] = R[i][n:]
         if is_vec:
             return Vector(_norm(r[0]) for r in X)
-        return Matrix(_sa().QQ, X)
+        return Matrix(_sa().QQ, X, Bm.ncols())
 
     def solve_left(self, B):
         """X with X self = B.
@@ -1313,7 +1313,8 @@ class Matrix:
         return self.transpose().solve_right(B)
 
     def echelon_form(self):
-        """Over ZZ the Hermite form; over QQ the reduced row echelon form.
+        """Over ZZ the Hermite form; over QQ the reduced row echelon form
+        (an empty matrix keeps its shape: astra's SAGE-940-2).
 
         EXAMPLES::
 
@@ -1327,9 +1328,22 @@ class Matrix:
         if self._base is _sa().ZZ:
             return self.hermite_form()
         m, _ = self._rref()
-        return Matrix(self._base, m)
+        return Matrix(self._base, m, self._nc)
 
-    rref = echelon_form
+    def rref(self):
+        """The reduced row echelon form over the fraction field: over ZZ
+        that is over QQ, not the Hermite form (astra's SAGE-940-3).
+
+        EXAMPLES::
+
+            sage: B = matrix(ZZ, [[2, 4], [3, 5]]).rref(); B.list(), B.base_ring()
+            ([1, 0, 0, 1], Rational Field)
+            sage: matrix(ZZ, 0, 3, []).rref().dimensions()
+            (0, 3)
+        """
+        if self._base is _sa().ZZ:
+            return Matrix(_sa().QQ, self._rows, self._nc).echelon_form()
+        return self.echelon_form()
 
     def hermite_form(self):
         """The Hermite normal form (rows, zero rows at the bottom).
@@ -1343,7 +1357,7 @@ class Matrix:
         from sagebrush import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
-        return Matrix(_sa().ZZ, h)
+        return Matrix(_sa().ZZ, h, self._nc)
 
     def elementary_divisors(self):
         """The elementary divisors (diagonal of the Smith form).
@@ -1367,7 +1381,7 @@ class Matrix:
             sage: U * matrix(ZZ, [[2, 4], [6, 8]]) * V == D
             True
         """
-        return _smith_uv(self._integer_rows())
+        return _smith_uv(self._integer_rows(), self._nc)
 
     def LLL(self, delta=None, **kwds):
         """The LLL-reduced basis of the lattice spanned by the rows, with
@@ -1394,7 +1408,7 @@ class Matrix:
                 raise ValueError("delta must be in (1/4, 1]")
             if d > Fraction(99, 100):
                 raise NotImplementedError("LLL with delta > 99/100 is not implemented")
-        return Matrix(_sa().ZZ, nf.lll(self._integer_rows()))
+        return Matrix(_sa().ZZ, nf.lll(self._integer_rows()), self._nc)
 
     def kernel_dimension(self):
         """The dimension of the left kernel.
@@ -1690,9 +1704,7 @@ class FreeModule_:
             [   1    0 -1/3]
             [   0    1 -2/3]
         """
-        if not self._basis:
-            return Matrix(self._base, [])
-        return Matrix(self._base, self._basis)
+        return Matrix(self._base, self._basis, self._degree)
 
     def basis(self):
         """The echelonized basis.
@@ -2430,9 +2442,10 @@ def _ff_base_of(entries, _left=None):
     return None
 
 
-def _smith_uv(a):
-    """Smith form with transforms over ZZ: (D, U, V), U a V = D."""
-    m, n = len(a), len(a[0]) if a else 0
+def _smith_uv(a, n=None):
+    """Smith form with transforms over ZZ: (D, U, V), U a V = D (a has n
+    columns)."""
+    m, n = len(a), (len(a[0]) if a else 0) if n is None else n
     # (the transforms are m x m and n x n: a 2^22 x 1 matrix would ask
     # for 2^44 entries)
     _shape(m, m)
@@ -2488,7 +2501,7 @@ def _smith_uv(a):
                 U[t] = [-x for x in U[t]]
             break
     ZZ = _sa().ZZ
-    return Matrix(ZZ, A), Matrix(ZZ, U), Matrix(ZZ, V)
+    return Matrix(ZZ, A, n), Matrix(ZZ, U, m), Matrix(ZZ, V, n)
 
 
 def _is_padic(R):
@@ -2541,8 +2554,15 @@ def _plain_base(base):
 
 
 def _is_parent(R):
-    """Whether R is a ring or other parent rather than a list of rows."""
-    return callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows")
+    """Whether R is a ring or other parent rather than a list of rows.  A
+    number field or an order in one is recognised by its type: it has none
+    of the methods above, and matrix(K, 0, 0, []) iterated K[0], K[1], ...
+    until the heap ran out (astra's HARD-541-1).  (A callable object that
+    iterates rows is row data, as in Sage: astra's CORR-260-1.)"""
+    if callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows"):
+        return True
+    import _sage_nf
+    return isinstance(R, (_sage_nf.NumberField_absolute, _sage_nf.Order))
 
 
 def _int_dims(args):
@@ -2635,6 +2655,29 @@ def matrix(*args, **kwds):
                 # (matrix(QQ, 2, 3, 1) was a 2 x 3 "diagonal" matrix)
                 raise TypeError("nonzero scalar matrix must be square")
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
+        elif callable(ent) and not hasattr(ent, "__iter__") and not hasattr(ent, "__len__") and not hasattr(ent, "__getitem__"):
+            # matrix(QQ, 2, 2, lambda i, j: i + j): the entries f(i, j), as
+            # Sage (the shape is checked above, before any call).  Each value
+            # is converted as soon as it is returned, so a callback that
+            # returns one mutable object keeps each value, and the first
+            # value the base refuses stops the calls (astra's CORR-C12-1)
+            # (over ZZ and QQ strictly: a value that does not convert raises
+            # its own error then, rather than being kept for a later
+            # conversion, astra's CORR-798-1)
+            rows = []
+            for i in range(r):
+                row = []
+                for j in range(c):
+                    v = ent(i, j)
+                    if base is sa.ZZ or base is sa.QQ:
+                        q = _F(v)
+                        if base is sa.ZZ and q.denominator != 1:
+                            raise TypeError("matrix entries are not all integers")
+                        x = _norm(q)
+                    else:
+                        x = _norm(v)
+                    row.append(x)
+                rows.append(row)
         else:
             # at most r c + 1 entries are read (r rows of a list of rows)
             ent = _bounded_list(ent, max(r * c, r))
@@ -2761,7 +2804,7 @@ def block_matrix(*args, **kwds):
         bs = [_block(b, heights[i], widths[j], base) for j, b in enumerate(r)]
         for t in range(heights[i]):
             rows.append([x for b in bs for x in b._rows[t]])
-    m = Matrix(base, rows)
+    m = Matrix(base, rows, sum(widths))
     if subdivide:
         rc, cc, acc = [], [], 0
         for h in heights[:-1]:
@@ -2851,7 +2894,7 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
             if i != j:
                 c = _r.choice([-2, -1, 1, 2])
                 m[i] = [a + c * b for a, b in zip(m[i], m[j])]
-        return Matrix(base, m)
+        return Matrix(base, m, n)
 
     def entry():
         if density is not None and _r.random() >= density:
@@ -2865,7 +2908,7 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
         if y is None and x is not None:
             lo, hi = 0, int(x) - 1
         return _r.randint(lo, hi)
-    return Matrix(base, [[entry() for _ in range(n)] for _ in range(nrows)])
+    return Matrix(base, [[entry() for _ in range(n)] for _ in range(nrows)], n)
 
 
 def _matrix_constructors():
