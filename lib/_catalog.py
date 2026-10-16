@@ -24,8 +24,8 @@ MODES = ["python", "sage", "magma", "matlab"]
 KINDS = ["function", "procedure", "class", "method", "attribute", "constant", "module", "operator", "keyword"]
 STATUSES = ["full", "partial", "stub-error", "absent"]
 RUNTIMES = ["node", "deno", "bun", "browser", "package"]
-FIELDS = ["name", "kind", "signature", "summary", "doc", "examples", "differs", "status", "alternative",
-          "see_also", "upstream", "upstream_version", "tags"]
+FIELDS = ["name", "aliases", "kind", "signature", "summary", "doc", "examples", "differs", "status", "alternative",
+          "domains", "see_also", "upstream", "upstream_version", "tags"]
 REQUIRED = ["name", "kind", "signature", "summary", "examples", "differs", "status"]
 
 # how a mode runs one example's code: "module:function", which returns what
@@ -125,7 +125,9 @@ def validate(entry):
     status = entry.get("status")
     if "status" in entry and status not in STATUSES:
         errs.append("status must be one of %s" % ", ".join(STATUSES))
-    for k in ("differs", "see_also", "tags"):
+    if "aliases" in entry and not (_strs(entry["aliases"]) and not any(any(c.isspace() for c in a) for a in entry["aliases"])):
+        errs.append("aliases must be a list of names without spaces")
+    for k in ("differs", "domains", "see_also", "tags"):
         if k in entry and not _strs(entry[k]):
             errs.append("%s must be a list of non-empty strings" % k)
     for k in ("alternative", "upstream", "upstream_version"):
@@ -174,9 +176,23 @@ def check(modes=None, base=None):
                     out.append("%s: (name, signature) also in %s/%s" % (where, mode, seen[key]))
                 seen.setdefault(key, group)
         names = set(e.get("name") for _, e in load(mode, base) if isinstance(e, dict))
+        for group, e in load(mode, base):
+            for a in (e.get("aliases") or []) if isinstance(e, dict) and isinstance(e.get("aliases"), list) else []:
+                if a in names:
+                    out.append("%s/%s: %s: the alias %s is another entry's name" % (mode, group, e.get("name"), a))
+        names |= _aliases(mode, base)
         for n in missing(mode, base):
             if n in names:
                 out.append("%s/missing.txt: %s has an entry now: remove it from missing.txt" % (mode, n))
+    return out
+
+
+def _aliases(mode, base=None):
+    """The names the mode's entries cover as aliases"""
+    out = set()
+    for _, e in load(mode, base):
+        if isinstance(e, dict) and isinstance(e.get("aliases"), list):
+            out.update(a for a in e["aliases"] if isinstance(a, str))
     return out
 
 
@@ -213,7 +229,7 @@ def uncovered(mode, base=None):
     if public is None:
         return None
     names = set(public())
-    have = set(e.get("name") for _, e in load(mode, base))
+    have = set(e.get("name") for _, e in load(mode, base)) | _aliases(mode, base)
     miss = set(missing(mode, base))
     return sorted(names - have - miss), sorted(miss - names)
 
@@ -285,7 +301,7 @@ def main(argv):
     if "--missing" in argv:
         # (the public names with no entry: what missing.txt should list)
         public = _call(PUBLIC, mode or "python")
-        have = set(e.get("name") for _, e in load(mode or "python"))
+        have = set(e.get("name") for _, e in load(mode or "python")) | _aliases(mode or "python")
         for n in sorted(set(public()) - have):
             print(n)
         return 0

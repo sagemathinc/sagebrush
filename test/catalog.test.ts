@@ -25,9 +25,9 @@ test("catalog gate 1: the validator refuses what catalog/schema.json refuses", (
     "ok = {'name': 'f', 'kind': 'function', 'signature': '(x)', 'summary': 'S.', 'examples': [{'code': 'f(1)', 'expected': '1\\n'}], 'differs': [], 'status': 'full'}",
     "bad = [dict(ok, kind='func'), dict(ok, summary='x' * 151), dict(ok, examples=[]), dict(ok, status='absent'), dict(ok, status='partial'),",
     "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1'}]), dict(ok, extra=1), {k: v for k, v in ok.items() if k != 'differs'},",
-    "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1\\n', 'runtimes': ['jvm']}]), dict(ok, name='two words')]",
+    "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1\\n', 'runtimes': ['jvm']}]), dict(ok, name='two words'), dict(ok, aliases=['a b']), dict(ok, aliases='g')]",
     "print(json.dumps([c.validate(ok), [len(c.validate(b)) > 0 for b in bad],",
-    "  c.validate(dict(ok, status='absent', examples=[], alternative='use g'))]))",
+    "  c.validate(dict(ok, status='absent', examples=[], alternative='use g')) + c.validate(dict(ok, aliases=['g', 'h.k']))]))",
   ].join("\n");
   const [okErrs, refused, absent] = JSON.parse(cli(["-c", code]));
   assert.deepEqual(okErrs, []);
