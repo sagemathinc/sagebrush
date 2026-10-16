@@ -125,3 +125,20 @@ t('dimensions', lambda: [matrix(QQ, 4/2, 4/2, 1), matrix(ZZ, 4/2, 2, [1, 2, 3, 4
 t('shifts', lambda: [(6/3) << 1, (8/2) >> 1, (5/2) << 1, (5/2) >> 1, 1 << (4/2), 16 >> (4/2), parent((6/3) << 1), parent(1 << (4/2))])
 t('pow', lambda: [pow(3, 4/2, 5), pow(2, 10)])
 t('pow rational base', lambda: pow(2/1, 3, 7))
+t('bytes', lambda: [bytes(4/2), bytearray(6/3), bytes([4/2, 65])])
+t('bytes not integral', lambda: bytes(5/2))
+
+# review of the above (CORR-38C-1/2, CORR-87F-1..4)
+F = Rz.fraction_field()
+t('explicit fraction', lambda: [F(px, rz), F(px, rz) == F(rx / rz), px / rz, rz / px])
+t('sqrt prec', lambda: [(2^-1200).sqrt(prec=53), (-(2^-1200)).sqrt(prec=53), (-4/1).sqrt(prec=53), (-4/1).sqrt(prec=53).imag(), (-2/1).sqrt(prec=100), (1/3).sqrt(prec=53), (0/1).sqrt(prec=30), (-4/1).sqrt(prec=30, all=True)])
+t('sqrt prec parents', lambda: [(-4/1).sqrt(prec=53).parent(), (2/1).sqrt(prec=100).parent(), (-2/1).sqrt(prec=100).parent()])
+K5 = Qp(5); q2 = 4/2
+t('p-adic dimensions', lambda: [matrix(K5, q2, 6/2, 0).dimensions(), [a.lift() for a in matrix(K5, q2, q2, 7).list()], [a.lift() for a in zero_matrix(K5, q2).list()], [a.lift() for a in identity_matrix(K5, q2).list()], [a.lift() for a in matrix(K5, q2, 6/2, [1, 2, 3, 4, 5, 6]).list()]])
+t('finite field dimensions', lambda: [matrix(GF(5), q2, q2, 3), zero_matrix(GF(5), q2, 6/2), identity_matrix(GF(5), q2)])
+for f in [lambda: matrix(QQ, 2, 3, 1), lambda: matrix(GF(5), 2, 3, 1), lambda: matrix(K5, q2, 6/2, 1)]:
+    t('non-square scalar', f)
+t('shifts 2', lambda: [True >> (2/1), True << (2/1), (3/2) << True, (3/2) << (2/1), (3/2) << -1, (3/2) >> -1, 5 << (-2/1), 5 >> (-2/1)])
+for f in [lambda: (3/2) << GF(5)(2), lambda: (3/2) >> GF(5)(2), lambda: (3/2) << (1/2), lambda: 1 << (1/2)]:
+    t('shift refused', f)
+t('pow 2', lambda: [pow(3, 2, -5), pow(3, -1, -5), pow(3, 2/1, -5), pow(3, -1/1, -5), pow(3, 2, 0), pow(GF(5)(2), 2, 3/2)])

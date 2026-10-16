@@ -114,3 +114,22 @@ dimensions :: [[1 0]
 shifts :: [4, 2, 5, 5/4, 4, 4, Rational Field, Integer Ring]
 pow :: [4, 1024]
 pow rational base :: TypeError
+bytes :: [b'\x00\x00', bytearray(b'\x00\x00'), b'\x02A']
+bytes not integral :: TypeError
+explicit fraction :: [1, False, x/z, z/x]
+sqrt prec :: [2.40991986510288e-181, 2.40991986510288e-181*I, 2.00000000000000*I, 2.00000000000000, 1.4142135623730950488016887242*I, 0.577350269189626, 0.00000000, [2.0000000*I, -2.0000000*I]]
+sqrt prec parents :: [Complex Field with 53 bits of precision, Real Field with 100 bits of precision, Complex Field with 100 bits of precision]
+p-adic dimensions :: [(2, 3), [7, 0, 0, 7], [0, 0, 0, 0], [1, 0, 0, 1], [1, 2, 3, 4, 5, 6]]
+finite field dimensions :: [[3 0]
+[0 3], [0 0 0]
+[0 0 0], [1 0]
+[0 1]]
+non-square scalar :: TypeError
+non-square scalar :: TypeError
+non-square scalar :: TypeError
+shifts 2 :: [1/4, 4, 3, 6, 3/4, 3, 1, 20]
+shift refused :: TypeError
+shift refused :: TypeError
+shift refused :: ValueError
+shift refused :: TypeError
+pow 2 :: [4, 2, 4, 2, 9, 4]

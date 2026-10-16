@@ -2377,6 +2377,12 @@ def _is_parent(R):
     return callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows")
 
 
+def _int_dims(args):
+    """args with each integral Rational among the first three (a ring and
+    two dimensions) as an int; a scalar entry there keeps its value."""
+    return tuple(int(a) if k < 3 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
+
+
 def matrix(*args, **kwds):
     """matrix([[1, 2], [3, 4]]), matrix(ZZ, rows), matrix(QQ, 2, 2, entries),
     matrix(ZZ, 3, 3, range(9)).
@@ -2392,6 +2398,10 @@ def matrix(*args, **kwds):
     """
     ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
+    # dimensions that are integral rationals, as Sage takes them, before any
+    # dispatch (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational;
+    # over Qp the column count became the scalar entry)
+    args = _int_dims(args)
     base = None
     import _sage_ffmat
     if args and _sage_ffmat._is_ff(args[0]):
@@ -2410,9 +2420,6 @@ def matrix(*args, **kwds):
             return _sage_padic.padic_matrix(pb, args[0])
     if args and args[0] in (sa.ZZ, sa.QQ):
         base, args = args[0], args[1:]
-    # dimensions that are integral rationals, as Sage takes them
-    # (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational)
-    args = tuple(int(a) if k < 2 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
     if base is None and args and not isinstance(args[0], (list, tuple, range)) and _is_parent(args[0]):
         # a ring this function does not know: never iterated (Zp's K[0],
         # K[1], ... would build polynomial rings forever)
@@ -2422,6 +2429,9 @@ def matrix(*args, **kwds):
         ent = args[2] if len(args) > 2 else 0
         ncols = c
         if isinstance(ent, (int, _F)) or type(ent).__name__ == "Rational":
+            if ent != 0 and r != c:
+                # (matrix(QQ, 2, 3, 1) was a 2 x 3 "diagonal" matrix)
+                raise TypeError("nonzero scalar matrix must be square")
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
         else:
             # at most r c + 1 entries are read (r rows of a list of rows)
@@ -2798,6 +2808,16 @@ class ComplexNumber(complex):
         return "%s %s %s" % (repr(RN(re)), "-" if im < 0 else "+", si)
 
     __str__ = __repr__
+
+    def parent(self):
+        """CC, the complex field with 53 bits of precision.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).parent()
+            Complex Field with 53 bits of precision
+        """
+        return CC
 
     def real_part(self):
         """The real part.

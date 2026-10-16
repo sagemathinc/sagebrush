@@ -1171,6 +1171,9 @@ def matrix(base, *args, **kwds):
         return FFMatrix(base, [e[i * n:(i + 1) * n] for i in range(m)], n)
     c = base(entries)
     zero = base.zero()
+    if c != zero and m != n:
+        # (matrix(GF(5), 2, 3, 1) was a 2 x 3 "diagonal" matrix)
+        raise TypeError("nonzero scalar matrix must be square")
     return FFMatrix(base, [[c if i == j else zero for j in range(n)] for i in range(m)], n)
 
 

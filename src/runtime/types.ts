@@ -1702,7 +1702,19 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined): Ui
     if (!(r instanceof PyBytes)) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
     return r.a.slice(0, r.n);
   }
+  // an object with __index__ is a count, and so is each item, as in CPython
+  // (bytes(4/2) for Sage's Rational 2 was "not iterable")
+  const index = (v: any) => {
+    if (O.isPyInt(v) || typeof v !== "object" || v === null) return v;
+    const f = Ty_lookup(v, "__index__");
+    if (f === undefined) return v;
+    const r = f(v);
+    if (!O.isPyInt(r)) raise(T.TypeError, `cannot convert '${typeName(v)}' object to bytes`);
+    return r;
+  };
+  if (typeof x === "object" && x !== null && !O.isPyInt(x) && Ty_lookup(x, "__index__") !== undefined) return toBytes(index(x));
   return Uint8Array.from(O.toArray(x).map((v) => {
+    v = index(v);
     if (!O.isPyInt(v)) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
     if (v < 0 || v > 255) raise(T.ValueError, "bytes must be in range(0, 256)");
     return Number(v);

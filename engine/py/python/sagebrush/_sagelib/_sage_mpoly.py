@@ -3007,10 +3007,13 @@ class _FractionField:
         R = self._R
         if isinstance(num, MFraction) and den is None:
             return num
-        # (a polynomial of another ring was kept as it was, its exponents
-        # read positionally: x/z was 1 for x in ZZ[x, y], z in QQ[z, x])
-        num = _by_name(R, num)
-        den = R.one() if den is None else _by_name(R, den)
+        # an explicit conversion, as R(f): F(x, z) is z/z for x in ZZ[x, y]
+        # and F = Frac(QQ[z, x]), as in Sage (a polynomial of another ring
+        # was kept with its exponents unconverted; arithmetic, x/z, converts
+        # by name before it gets here)
+        conv = lambda f: f if isinstance(f, MPolynomial) and f._ring is R else R(f)
+        num = conv(num)
+        den = R.one() if den is None else conv(den)
         return MFraction(num, den)
 
     def ring(self):

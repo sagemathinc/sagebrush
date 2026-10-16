@@ -603,3 +603,23 @@ _seq.append(RA() + RB())
 _rb.__class__ = RDesc
 _seq.append(_rget("one", lambda: RA() + RB()))
 print(_seq)
+
+
+# bytes() and bytearray() of an object with __index__: a count, and each
+# item of an iterable through __index__ too (bytes of Sage's Rational 4/2
+# was "not iterable")
+class _Idx:
+    def __index__(self):
+        return 3
+
+
+class _BadIdx:
+    def __index__(self):
+        return "x"
+
+
+print(bytes(_Idx()), bytearray(_Idx()), bytes([_Idx(), 65]), bytearray([_Idx()]))
+try:
+    bytes(_BadIdx())
+except TypeError as e:
+    print("TypeError", e)
