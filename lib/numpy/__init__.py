@@ -17,16 +17,16 @@ __version__ = "2.5.1+sagebrush"
 
 
 def _removed_alias(f, name, replacement):
-    # (a name NumPy 2.0 removed: kept, as old scripts use it, with the
-    # DeprecationWarning NumPy 1.x gave, naming what replaces it)
+    # (a deprecated name current NumPy no longer has: kept, as old scripts
+    # use it, with a DeprecationWarning naming what replaces it)
     def alias(*args, **kwargs):
         import warnings
 
-        warnings.warn(f"`np.{name}` was removed in NumPy 2.0; use `{replacement}` instead", DeprecationWarning, stacklevel=2)
+        warnings.warn(f"`np.{name}` is deprecated (current NumPy no longer has it); use `{replacement}` instead", DeprecationWarning, stacklevel=2)
         return f(*args, **kwargs)
 
     alias.__name__ = alias.__qualname__ = name
-    alias.__doc__ = f"Removed in NumPy 2.0 (warns): use {replacement}."
+    alias.__doc__ = f"Deprecated, not in current NumPy (warns): use {replacement}."
     return alias
 
 pi = _math.pi
@@ -411,9 +411,12 @@ def asarray(a, dtype=None, order=None, *, copy=None, like=None):
 asanyarray = asarray
 
 
-def _asfarray(a, dtype=None):
-    # (NumPy 1.x's: an array of an inexact type, float64 unless dtype is one)
-    d = _np_dtype("float64") if dtype is None else _np_dtype(dtype)
+def _asfarray(a, dtype="float64"):
+    # (NumPy 1.26's: float64 unless dtype is an inexact type; an explicit
+    # dtype=None keeps the input's type, CORR-B12-1)
+    if dtype is None:
+        return asarray(a)
+    d = _np_dtype(dtype)
     if d.kind not in "fc":
         d = _np_dtype("float64")
     return asarray(a, dtype=d)
@@ -731,14 +734,26 @@ def isrealobj(x):
 def around(a, decimals=0, out=None):
     a = asarray(a)
     if a.dtype.kind in "iub" and decimals >= 0:
-        return a.copy() if a.ndim else a[()]
-    if decimals == 0:
+        r = a.copy()
+    elif decimals == 0:
         r = rint(a)
     else:
         f = 10.0 ** decimals
         r = rint(a * f) / f
         if a.dtype.kind in "iu":
             r = r.astype(a.dtype)  # (an integer array stays one, as in NumPy)
+    if out is not None:
+        # (the result written into out, which is returned, as NumPy's; it was ignored)
+        if not isinstance(out, ndarray):
+            raise TypeError("return arrays must be of ArrayType")
+        # (NumPy's same_kind casting: no float into an int or bool out, no
+        # complex into a real one)
+        order = "biufc"
+        rk, ok = r.dtype.kind.replace("u", "i"), out.dtype.kind.replace("u", "i")
+        if order.index(rk) > order.index(ok) and not (rk in "iu" and ok in "iu"):
+            raise TypeError(f"Cannot cast ufunc 'rint' output from {r.dtype!r} to {out.dtype!r} with casting rule 'same_kind'")
+        out[...] = r
+        return out
     return r if a.ndim else r[()]
 
 
@@ -1497,7 +1512,12 @@ def isin(element, test_elements, assume_unique=False, invert=False):
     return ~r if invert else r
 
 
-in1d = _removed_alias(isin, "in1d", "np.isin")
+def _in1d(ar1, ar2, assume_unique=False, invert=False):
+    # (NumPy 1.x's: the first argument flattened, a 1-D result)
+    return isin(ravel(ar1), ar2, assume_unique=assume_unique, invert=invert)
+
+
+in1d = _removed_alias(_in1d, "in1d", "np.isin")
 
 
 def intersect1d(a, b, assume_unique=False):
