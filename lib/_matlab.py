@@ -4067,26 +4067,25 @@ def _randn(n):
     return out
 
 
-@_bi("rng")
-def rng_(nargout, *args):
-    if args:
-        a = args[0]
-        if _istext(a):
-            s = _text(a)
-            if s in ("default", "twister"):
-                _rng[0] = np.random.RandomState(5489)
-            elif s == "shuffle":
-                import time
-                _rng[0] = np.random.RandomState(int(time.time() * 1000) % 4294967296)
-        else:
-            seed = _int_arg(a)
-            _rng[0] = np.random.RandomState(seed if seed != 0 else 5489)
-    return NOVAL if nargout == 0 else _struct1({"Type": Char("twister"), "Seed": 0.0})
+def _rand_class(args, fname, classes):
+    """the class rand, randn or randi makes, from a class name or 'like' prototype: one of
+    classes; a complex or sparse prototype is refused (MATLAB makes complex numbers like a
+    complex one, in an order of the stream Sagebrush doesn't reproduce)"""
+    if len(args) >= 2 and _istext(args[-2]) and _text(args[-2]).lower() == "like":
+        p = args[-1]
+        if not isreal_(p):
+            raise _err("%s(..., 'like', p) with a complex p is not supported in Sagebrush." % fname)
+        if type(p).__name__ == "Sparse":
+            raise _err("%s(..., 'like', p) with a sparse p is not supported in Sagebrush." % fname)
+    d, cls = _dimsarg(args, fname)
+    if cls is not None and cls not in classes:
+        raise _err("%s: the class '%s' is not supported; it makes %s values." % (fname, cls, ", ".join(classes)))
+    return d, cls
 
 
 @_bs("rand")
 def rand_(*args):
-    d, cls = _dimsarg(args, "rand")
+    d, cls = _rand_class(args, "rand", ("double", "single"))
     n = _prod(d)
     v = _rng[0].random_sample(n) if n else np.zeros(0)
     return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4094,7 +4093,7 @@ def rand_(*args):
 
 @_bs("randn")
 def randn_(*args):
-    d, cls = _dimsarg(args, "randn")
+    d, cls = _rand_class(args, "randn", ("double", "single"))
     n = _prod(d)
     v = _randn(n) if n else np.zeros(0)
     return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4102,9 +4101,17 @@ def randn_(*args):
 
 @_bs("randi")
 def randi_(r, *args):
-    ra = _arr(r).reshape(-1)
+    ra = _farr(r).reshape(-1)
+    if ra.size not in (1, 2) or not np.all(np.isfinite(ra)) or not np.all(ra == np.floor(ra)):
+        raise _err("randi: the range must be an integer imax, or [imin imax] with integers.")
     lo, hi = (1, int(ra[0])) if ra.size == 1 else (int(ra[0]), int(ra[1]))
-    d, cls = _dimsarg(args, "randi") if args else ((1, 1), None)
+    if hi < lo:
+        raise _err("randi: the range must have imin <= imax (imax >= 1 for randi(imax)).")
+    d, cls = _rand_class(args, "randi", ("double", "single", "int8", "uint8", "int16", "uint16", "int32", "uint32")) if args else ((1, 1), None)
+    # (the range within the class's exactly represented integers, as the page requires)
+    top = {"double": 2.0 ** 53, "single": 2.0 ** 24}.get(cls or "double")
+    if top is not None and (abs(lo) > top or abs(hi) > top) or cls in _INTS and not (_INTS[cls][1] <= lo and hi <= _INTS[cls][2]):
+        raise _err("randi: the range [%d %d] is outside what class '%s' holds." % (lo, hi, cls or "double"))
     n = _prod(d)
     u = _rng[0].random_sample(n) if n else np.zeros(0)
     v = lo + np.floor(u * (hi - lo + 1))
@@ -4127,6 +4134,9 @@ def linspace_(a, b, n=100.0):
     both included, spaced (x2 - x1)/(n - 1), so x1 + k h with the last point
     x2 itself; 100 points by default; for n = 1, x2; for n <= 0 a 1-by-0
     row; a non-integer n rounded down; NaN for n NaN; complex x1 and x2 too"""
+    if class_(a) in _INTS or class_(b) in _INTS:
+        # (the page's endpoints are single or double: an integer class's result is not guessed)
+        raise _err("linspace with integer-class endpoints is not supported in Sagebrush; convert them with double().")
     nv = _scalar(n)
     if nv != nv:
         return _math.nan
@@ -5092,6 +5102,12 @@ def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
     oc = out_cls or ("single" if cls == "single" else "double")
     if "native" in flags and cls in _INTS:
         oc = cls
+    if "native" in flags and cls in ("logical", "char"):
+        # (sum's page: 'native' keeps the input's type, a logical sum being logical; char is
+        # not supported; prod keeps logical too, and mean's logical 'native' is refused)
+        if cls == "char" or name not in ("sum", "prod"):
+            raise _err("%s: 'native' is not supported for %s input." % (name, cls))
+        oc = "logical"
     if "double" in flags:
         oc = "double"
     if not [a for a in args if not _istext(a)] and d == (0, 0) and dim != "all":
@@ -7081,6 +7097,8 @@ def _parse_format(f):
                 segs.append(m)
                 i = m.end()
                 continue
+            # (a % that begins no conversion of the formatting page's: refused, not printed)
+            raise _err("Invalid format: '%s' is not a conversion Sagebrush supports." % f[i:i + 3].rstrip())
         lit.append(c)
         i += 1
     if lit:
@@ -7143,25 +7161,48 @@ def _nonfinite(x, m, width):
     return s
 
 
+def _char_code(x):
+    """the character of an integer code under %s or %c; a value that is no character code is refused"""
+    if not 0 <= x <= 65535:
+        raise _err("A text conversion (%%s or %%c) of %d, which is not a character code, is not supported in Sagebrush." % x)
+    return chr(int(x))
+
+
+def _is_code(item):
+    """whether a format item is a number that %s prints as a character (an integer code)"""
+    if type(item) is str:
+        return False
+    x = float(item)
+    return _math.isfinite(x) and x == _math.floor(x) and 0 <= x <= 65535
+
+
 def _conv(m, item, width, prec):
     conv = m.group("conv")[-1]
+    if conv in "bt":
+        raise _err("The %%b and %%t conversion subtypes are not supported in Sagebrush.")
     if conv in "diuoxXc" and type(item) is str:
         return None  # (expanded by the caller)
     if conv == "s":
         if type(item) is str:
             return _pyspec(m, "s", width, prec) % item
-        # (a number with %s: an integer as itself, else as %e)
+        # (a number with %s, as the formatting page says: a character code as its character,
+        # and a non-integer, which a text conversion doesn't fit, as %e)
         x = float(item)
-        if x == _math.floor(x) and _math.isfinite(x):
-            return _pyspec(m, "s", width, prec) % ("%d" % x)
         if not _math.isfinite(x):
             return _nonfinite(x, m, width)
+        if x == _math.floor(x):
+            return _pyspec(m, "s", width, prec) % _char_code(x)
         return _pyspec(m, "s", width, prec) % ("%e" % x)
     if conv == "c":
         x = item
         if type(x) is str:
             return x
-        return _pyspec(m, "s", width, None) % chr(int(x))
+        x = float(x)
+        if not _math.isfinite(x):
+            return _nonfinite(x, m, width)
+        if x != _math.floor(x):
+            return _pyspec(m, "s", width, None) % ("%e" % x)
+        return _pyspec(m, "s", width, None) % _char_code(x)
     x = item
     if type(x) is int:
         if conv in "di":
@@ -7245,6 +7286,15 @@ def _sprintf(fmt, args):
             if k >= len(items):
                 return "".join(out)
             item = items[k]
+            if s.group("conv") == "s" and _is_code(item):
+                # (one %s prints successive character codes, as long as they are codes)
+                j = k
+                while j < len(items) and _is_code(items[j]):
+                    j += 1
+                out.append(_pyspec(s, "s", width, prec) % "".join(chr(int(float(v))) for v in items[k:j]))
+                k = j
+                consumed = True
+                continue
             r = _conv(s, item, width, prec)
             if r is None:
                 # a string with a numeric conversion: its characters, one by one
@@ -7837,16 +7887,36 @@ def strsplit_(s, *args):
     delims = None
     collapse = True
     rest = list(args)
-    if rest and not (_istext(rest[0]) and _text(rest[0]).lower() == "collapsedelimiters"):
+    regular = False
+    if rest and not (_istext(rest[0]) and _text(rest[0]).lower() in ("collapsedelimiters", "delimitertype")):
         d = rest.pop(0)
-        delims = [_escapes(_text(e)) for e in d.a] if type(d) is Cell else [_escapes(_text(d))]
-    while len(rest) >= 2:
-        k = _text(rest.pop(0)).lower()
+        delims = [_text(e) for e in d.a] if type(d) is Cell else [_text(d)]
+    # (its page's options, CollapseDelimiters and DelimiterType; another is refused)
+    if len(rest) % 2:
+        raise _err("strsplit: options must come in name-value pairs.")
+    while rest:
+        name = rest.pop(0)
+        k = _text(name).lower() if _istext(name) else None
         v = rest.pop(0)
         if k == "collapsedelimiters":
             collapse = bool(cond(v))
+        elif k == "delimitertype" and _istext(v) and _text(v).lower() in ("simple", "regularexpression"):
+            regular = _text(v).lower() == "regularexpression"
+        else:
+            raise _err("strsplit: the option '%s' is not supported." % (k if k is not None else "?"))
     if delims is None:
         delims = [" ", "\f", "\n", "\r", "\t", "\v"]
+    elif regular:
+        if any("(?@" in e or "(??" in e for e in delims):
+            raise _err("strsplit: dynamic expressions are not supported in Sagebrush.")
+    else:
+        delims = [_escapes(e) for e in delims]
+    if regular:
+        # (the delimiters as one expression, split as regexp's 'split' splits)
+        pat = "|".join("(?:%s)" % e for e in delims)
+        if collapse:
+            pat = "(?:%s)+" % pat
+        return _regexp(1, Char(t), Char(pat), (Char("split"),), 0)
     pat = "|".join(_re.escape(d) for d in sorted(delims, key=len, reverse=True))
     if collapse:
         pat = "(?:%s)+" % pat
@@ -9989,6 +10059,23 @@ def clock_n():
 
 
 _rng_states = {}
+_rng_seed = [0.0]
+# (the generator states rng's outputs name, the most recent ones: an older one is forgotten)
+_RNG_STATES_MAX = 1000
+
+
+def _rng_generator(g):
+    """rng's generator argument: Mersenne Twister only; another is refused, not substituted"""
+    t = _text(g).lower() if _istext(g) else None
+    if t not in ("twister", "default"):
+        raise _err("rng: the generator '%s' is not supported in Sagebrush; 'twister' is." % (_text(g) if _istext(g) else class_(g)))
+
+
+def _rng_seed_arg(a):
+    x = _scalar(a) if not _istext(a) and _numel(a) == 1 else None
+    if x is None or x != x or x != _math.floor(x) or not 0 <= x < 4294967296:
+        raise _err("rng: the seed must be a nonnegative integer less than 2^32.")
+    return int(x)
 
 
 @_bi("rng")
@@ -9996,26 +10083,44 @@ def rng_n(nargout, *args):
     prev = None
     if nargout >= 1:
         st = _rng[0].get_state()
-        key = float(len(_rng_states) + 1)
+        key = float(max(_rng_states, default=0.0) + 1)
         _rng_states[key] = st
-        prev = _struct1({"Type": Char("twister"), "Seed": 0.0, "State": key})
+        while len(_rng_states) > _RNG_STATES_MAX:
+            del _rng_states[min(_rng_states)]
+        prev = _struct1({"Type": Char("twister"), "Seed": _rng_seed[0], "State": key})
+    if len(args) > 2:
+        raise _err("rng: too many input arguments.")
     if args:
         a = args[0]
         if type(a) is Struct:
-            key = a.a[0].get("State")
-            if key is not None and _scalar(key) in _rng_states:
-                _rng[0].set_state(_rng_states[_scalar(key)])
+            if len(args) > 1:
+                raise _err("rng: a settings structure takes no other argument.")
+            d = a.a[0] if len(a.a) == 1 else {}
+            key = d.get("State")
+            if key is None or _numel(key) != 1 or _scalar(key) not in _rng_states:
+                raise _err("rng: these generator settings are not ones this session's rng returned, or are too old to restore.")
+            _rng[0].set_state(_rng_states[_scalar(key)])
+            _rng_seed[0] = float(_scalar(d.get("Seed", 0.0)))
             return prev if prev is not None else NOVAL
+        if len(args) > 1:
+            _rng_generator(args[1])
         if _istext(a):
             s = _text(a).lower()
-            if s in ("default", "twister"):
-                _rng[0] = np.random.RandomState(5489)
+            if s == "default":
+                if len(args) > 1:
+                    raise _err("rng: 'default' takes no generator.")
+                seed = 0
             elif s == "shuffle":
                 import time
-                _rng[0] = np.random.RandomState(int(time.time() * 1000) % 4294967296)
+                seed = int(time.time() * 1000) % 4294967296
+            else:
+                # (a generator named alone: twister keeps the seed; another is refused)
+                _rng_generator(a)
+                seed = int(_rng_seed[0])
         else:
-            seed = _int_arg(a)
-            _rng[0] = np.random.RandomState(seed if seed != 0 else 5489)
+            seed = _rng_seed_arg(a)
+        _rng[0] = np.random.RandomState(seed if seed != 0 else 5489)
+        _rng_seed[0] = float(seed)
     return prev if prev is not None else NOVAL
 
 
@@ -10493,16 +10598,27 @@ def interp1_n(*args):
     method = "linear"
     extrap = None
     # (trailing options: a method name, 'extrap' or a value outside the domain)
+    methods = []
     while args and (_istext(args[-1]) or (len(args) >= 4 and not _istext(args[-1]) and _istext(args[-2]))):
         a = args.pop()
         if _istext(a):
             t = _text(a).lower()
             if t == "extrap":
                 extrap = "extrap"
+            elif t == "makima":
+                raise _err("interp1: the 'makima' method is not supported in Sagebrush; 'pchip' and 'spline' are.")
+            elif t == "pp":
+                raise _err("interp1: the piecewise polynomial form, interp1(..., 'pp'), is not supported in Sagebrush.")
+            elif t in ("linear", "nearest", "next", "previous", "pchip", "cubic", "spline", "*linear", "*cubic"):
+                methods.append({"*linear": "linear", "cubic": "pchip", "*cubic": "pchip"}.get(t, t))
             else:
-                method = {"*linear": "linear", "cubic": "pchip", "*cubic": "pchip"}.get(t, t)
+                raise _err("interp1: invalid interpolation method '%s'." % _text(a))
         else:
             extrap = a
+    if len(methods) > 1:
+        raise _err("interp1: only one interpolation method may be given.")
+    if methods:
+        method = methods[0]
     if len(args) == 2:
         v, xq = args
         n = _dims(v)[0] if not _isvec(v) else _numel(v)
@@ -10515,9 +10631,18 @@ def interp1_n(*args):
     V = _mat(v)
     if vec:
         V = V.reshape((-1, 1))
+    # (the sample points: one per value, at least two, distinct and not NaN, as the page requires)
+    if len(X) != V.shape[0]:
+        raise _err("interp1: the sample points and the values must have the same length.")
+    if len(X) < 2:
+        raise _err("interp1: at least two sample points are required.")
+    if any(t != t for t in X):
+        raise _err("interp1: the sample points must not be NaN.")
     order = sorted(range(len(X)), key=lambda k: X[k])
     X = [X[k] for k in order]
     V = V[order]
+    if any(X[k] == X[k + 1] for k in range(len(X) - 1)):
+        raise _err("interp1: the grid vectors must contain unique points.")
     Q = _farr(xq)
     qs = [float(t) for t in Q.reshape(-1)]
     out = np.zeros((len(qs), V.shape[1]), dtype=V.dtype if V.dtype.kind == "c" else np.float64)
