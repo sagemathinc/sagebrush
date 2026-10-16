@@ -566,6 +566,7 @@ define("round", roundImpl, [1, 2]);
 for (const t of [T.int, T.float]) Ty.method(t, "__round__", (x: any, nd: any = null) => roundImpl(unbox(x), nd));
 define("divmod", O.divmod, [2, 2]);
 define("pow", powImpl, [2, 3]);
+builtins.pow.$sig = sig(["base", "exp", "mod"]); // (pow(2, 3, mod=5), as CPython's)
 define("hash", hashImpl);
 define("id", O.id, [1, 1]);
 define("isinstance", isinstanceImpl);
