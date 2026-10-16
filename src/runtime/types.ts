@@ -47,6 +47,7 @@ export function allocator(owner: PyType, f: (cls: any, ...args: any[]) => any, k
     };
   }
   nw.$allocator = owner;
+  nw.$static = true; // (never bound to an instance: (1).__new__ is int.__new__)
   owner.$dict.set("__new__", nw);
   return nw;
 }
@@ -388,7 +389,17 @@ export function superNoArgs(): never {
 
 // ------------------------------------------------------------------ simple types
 
-builtinType("NoneType", [object], () => null);
+const noneType = builtinType("NoneType", [object], () => null);
+// (None's own methods, as CPython's: reached through None.__repr__() and
+// type(None).__repr__(None) as well as repr(None))
+method(noneType, "__repr__", (_n: any) => "None");
+method(noneType, "__bool__", (_n: any) => false);
+method(noneType, "__hash__", (n: any) => O.hashAny(n));
+noneType.$dict.set("__doc__", "The type of the None singleton.");
+allocator(noneType, (_cls: any, ...args: any[]) => {
+  if (args.length) raise(T.TypeError, "NoneType takes no arguments");
+  return null;
+});
 builtinType("NotImplementedType", [object], () => NotImplemented);
 builtinType("ellipsis", [object], () => Ellipsis);
 
@@ -1968,7 +1979,27 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 // ------------------------------------------------------------------ bytes, bytearray
 
 const Ty_lookup = (x: any, name: string) => lookupType(typeOf(x), name);
-function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
+// bytes()'s and bytearray()'s encoding and errors are str, checked before
+// anything else (a bytearray is not emptied), as CPython's argument parsing
+function codecArgs(array: boolean, encoding: any, errors: any): [any, any] {
+  const str = (v: any, what: string) => {
+    if (v === undefined || typeof v === "string") return v;
+    if (isinstance(v, T.str)) return unbox(v);
+    return raise(T.TypeError, `${array ? "bytearray" : "bytes"}() argument '${what}' must be str, not ${v === null ? "None" : typeName(v)}`);
+  };
+  return [str(encoding, "encoding"), str(errors, "errors")];
+}
+// (`reserve`, if given, is told each length the result grows to before it
+// is allocated or extended: bytearray.__init__ under an export refuses there,
+// after one item of an iterable, as CPython's, never materializing it all)
+function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false, reserve?: (n: number) => void): Uint8Array {
+  [encoding, errors] = codecArgs(array, encoding, errors);
+  if (x !== undefined && typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
+  if (typeof x !== "string") {
+    // (with no source too: bytes(encoding='ascii') is TypeError, as CPython's)
+    if (encoding !== undefined) raise(T.TypeError, "encoding without a string argument");
+    if (errors !== undefined) raise(T.TypeError, "errors without a string argument");
+  }
   if (x === undefined) return new Uint8Array(0);
   if (typeof x === "string") {
     if (encoding === undefined) raise(T.TypeError, "string argument without an encoding");
@@ -1978,6 +2009,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
   if (O.isPyInt(x)) {
     if (typeof x === "bigint" || Number(x) > 2 ** 32) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
     if (Number(x) < 0) raise(T.ValueError, "negative count");
+    reserve?.(Number(x));
     return new Uint8Array(Number(x));
   }
   const buf = O.bufferOf(x);
@@ -2011,7 +2043,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
       throw e;
     }
     if (n === undefined || (typeof n === "object" && "bad" in n)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
-    return toBytes(n, undefined, undefined, array);
+    return toBytes(n, undefined, undefined, array, reserve);
   }
   const it = O.iter(x);
   const out: number[] = [];
@@ -2023,6 +2055,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
     if (n === undefined) raise(T.TypeError, `'${typeName(v)}' object cannot be interpreted as an integer`);
     if (typeof n === "object") raise(T.TypeError, `__index__ returned non-int (type ${typeName(n.bad)})`);
     if (n < 0 || n > 255) raise(T.ValueError, array ? "byte must be in range(0, 256)" : "bytes must be in range(0, 256)");
+    reserve?.(out.length + 1);
     out.push(Number(n));
   }
   return Uint8Array.from(out);
@@ -2525,6 +2558,33 @@ export function subclassable(P: PyType, jsClass: any, fields: string[] = []) {
 }
 subclassable(bytesType, PyBytes, ["a", "n"]);
 subclassable(bytearray, PyByteArray, ["a", "n"]);
+// bytearray.__new__ makes an empty one, and __init__ fills it, as CPython's
+// (its __new__ gave the filled bytearray, so __new__(bytearray, b"xy") had 2)
+{
+  const empty = (cls: any) => {
+    const o = new PyByteArray(new Uint8Array(0));
+    if (cls !== bytearray) Object.setPrototypeOf(o, cls.$ctor!.prototype);
+    return o;
+  };
+  allocator(bytearray, (cls: any, ..._args: any[]) => empty(cls), (pos) => empty(pos[0]));
+  method(bytearray, "__init__", (b: PyByteArray, source: any = undefined, encoding: any = undefined, errors: any = undefined) => {
+    // (emptied, then filled, as CPython's: each a re-size, refused while
+    // exported, and a bad source leaves it empty; but bad encoding or
+    // errors types are refused first, leaving it as it was)
+    codecArgs(true, encoding, errors);
+    if (b.n !== 0) checkResizable(b);
+    b.n = 0;
+    // (under an export, refused as soon as it would grow: an exact list or
+    // tuple before its items are converted, another iterable after its
+    // first item, a count before its allocation, as CPython's; HARD-CBE-1)
+    if (b.$exports > 0 && source !== undefined && (typeOf(source) === T.list || typeOf(source) === T.tuple) && source.length > 0) checkResizable(b);
+    const a = toBytes(source, encoding, errors, true, b.$exports > 0 ? (n) => { if (n !== 0) checkResizable(b); } : undefined);
+    if (a.length !== 0) checkResizable(b);
+    b.a = a;
+    b.n = a.length;
+    return null;
+  }, sig(["self", "source", "encoding", "errors"]));
+}
 subclassable(T.map, MapIter, ["f", "its"]);
 subclassable(T.filter, FilterIter, ["f", "it"]);
 subclassable(T.zip, Zip, ["its", "strict"]);
