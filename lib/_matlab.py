@@ -4467,6 +4467,24 @@ def _sincosd(A):
     return np.where(s == 0, 0.0, s), np.where(c == 0, 0.0, c)
 
 
+def _tand(A):
+    """tand: tan of the angle reduced exactly to [-90, 90] (fmod by 180, then the nearest
+    multiple of 180), 0 and ±Inf exactly at the multiples of 90 (tand(60) is tan(60*pi/180),
+    as Octave's; near 180 the reduced angle keeps its digits)"""
+    if A.dtype.kind == "c":
+        raise _err("Complex arguments to sind, cosd and the other degree functions are not supported in Sagebrush.")
+    r = np.array(A, dtype=np.float64)
+    big = (np.abs(r) >= 180) & np.isfinite(r)
+    if np.any(big):
+        idx = np.flatnonzero(big)
+        r.flat[idx] = [_math.fmod(float(r.flat[i]), 180.0) for i in idx]
+    t = r - 180.0 * np.round(r / 180.0)
+    out = np.tan(t * (_math.pi / 180))
+    out = np.where(t == 0, 0.0, out)
+    out = np.where(t == 90, _math.inf, out)
+    return np.where(t == -90, -_math.inf, out)
+
+
 def _sind(A):
     return _sincosd(A)[0]
 
@@ -4504,7 +4522,7 @@ _unary("csc", lambda A: 1 / np.sin(A))
 _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
-_unary("tand", lambda A: np.divide(*_sincosd(A)))
+_unary("tand", lambda A: _tand(A))
 # (from sind and cosd, which are exactly 0 at their zeros: secd(90) and cscd(180) are Inf, cotd(90) 0)
 _unary("secd", lambda A: 1 / _cosd(A))
 _unary("cscd", lambda A: 1 / _sind(A))
