@@ -1646,6 +1646,14 @@ test("clearvars -except and -regexp, and clear with patterns or computed names i
     "clear('-regexp', 'a*a*b', '" + "a?".repeat(16) + "b', '" + "a{0,31}".repeat(3) + "b', '(ab)+c', '^Mon\\d{3}$', '^q$')",
     "disp(mat2str([exist('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'var') exist('q', 'var')]))"].join("\n")), ["[1 0]"]);
   assert.ok(Date.now() - t0 < 10000, `${Date.now() - t0} ms`);
+  // (the expressions' weights times the workspace's names count against 4,000,000, -except's
+  // with the targets': half the expressions run, all of them, or split by -except, are refused)
+  const half = "p = repmat({'a*a*b'}, 1, 200); x1 = 1; x2 = 2;";
+  assert.deepEqual(run([
+    half, tryIt("clearvars('-regexp', p{:})"),
+    half, tryIt("clearvars('-regexp', p{:}, p{:})"),
+    half, tryIt("clearvars('-regexp', p{:}, '-except', '-regexp', p{:})"),
+  ].join("\n")), ["ran", "refused", "refused"]);
   // (clear global in a function without globals of its own: the global store is cleared)
   assert.deepEqual(run([
     "global H\nH = 7; zap(); disp(readback())",
