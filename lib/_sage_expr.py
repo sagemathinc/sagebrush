@@ -3453,6 +3453,8 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         (1/2*n^2 + 1/2*n, 1/3*n^3 + 1/2*n^2 + 1/6*n)
         sage: symbolic_sum((1/3)^k, k, 0, oo), symbolic_sum(binomial(n, k), k, 0, n)
         (3/2, 2^n)
+        sage: y = var('y'); symbolic_sum(binomial(n, k)*x^k*y^(n-k), k, 0, n)
+        (x + y)^n
         sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)
         (1/6*pi^2, e^x)
     """
@@ -3561,11 +3563,25 @@ def _sum_binomial(f, v, a, b):
     vn = _var_name(v)
     if vn not in q._names():
         return (q * 2 ** n)
-    # q = c * x^k
-    r = (q.subs({v: v + 1}) / q).simplify_rational()
+    # q = c * A^k * B^(n-k), the ratio r = A/B: the sum is c*(A + B)^n.
+    # Writing it as q(0)*(r + 1)^n would divide by B, which may vanish
+    # where every term is defined (y = 0 in x^k*y^(n-k)).
+    r = _geom_ratio(q, v)
+    r = (q.subs({v: v + 1}) / q if r is None else r).simplify_rational()
     if vn not in r._names():
-        c = q.subs({v: 0})
-        return c * (r + 1) ** n
+        A, B = r.numerator(), r.denominator()
+        q0 = q.subs({v: 0})
+        if not B._names():
+            return q0 * (r + 1) ** n
+        c = (q0 / B ** n).simplify_rational()
+        if not (set(n._names()) & set(c._names())):
+            return c * (A + B) ** n
+        # B^n is not a factor of q0: keep (r + 1)^n only when the k = 1
+        # term already divides by B (x^k/y^k), so no domain is lost
+        q1 = q.subs({v: 1}).simplify_rational()
+        t = (q1.denominator() / B).simplify_rational()
+        if not t.denominator()._names():
+            return q0 * ((A + B) / B) ** n
     return None
 
 
