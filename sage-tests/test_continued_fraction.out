@@ -73,3 +73,18 @@ ValueError
 [4; 2, 6, 7] [4, 2, 6, 7] 4 415/93 2 [4, 9/2, 58/13, 415/93]
 [1; 2, 3] [2; 5] [0; 7, 7] [0] [-3; 1, 2] [0; 2]
 2 1
+TypeError
+ValueError
+ValueError
+ValueError
+(0, 0, 1, 1, 0)
+ZeroDivisionError
+ValueError
+(0, 1, 0)
+TypeError
+TypeError
+ValueError
+ValueError
+TypeError
+TypeError
+[4; 2, 6, 7] 415/93
