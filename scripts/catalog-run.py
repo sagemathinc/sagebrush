@@ -41,8 +41,19 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
 
-def run_on(runtime, mode, entries):
-    """[{name, signature, index, got}] from the runtime"""
+# Time bounds: examples run in child processes, BATCH examples to a process
+# with a deadline of EXAMPLE_SECONDS for each (at most BATCH_SECONDS); a batch past it is run again one example
+# to a process, each with EXAMPLE_SECONDS (--timeout), and an example past
+# that has the result "TimeoutError: ...", so that every later example still
+# runs and the one that stalled is named.  (Each example's output is bounded
+# by its runner: LIMIT in lib/_python_examples.py and lib/_sage_examples.py.)
+BATCH = 25
+BATCH_SECONDS = 600
+EXAMPLE_SECONDS = 60
+
+
+def _run_child(runtime, mode, entries, timeout):
+    """[{name, signature, index, got}] from one child process, or None past timeout"""
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "entries.json")
         with open(path, "w", encoding="utf-8") as f:
@@ -51,11 +62,43 @@ def run_on(runtime, mode, entries):
         os.mkdir(work)
         env = dict(os.environ, SAGEBRUSH_CATALOG="")
         cmd = COMMANDS[runtime] + ["-m", "_catalog", "--run", "--mode", mode, "--runtime", runtime.split("-")[0], "--entries", path]
-        # (each example's output is bounded by its runner: lib/_python_examples.py LIMIT)
-        r = subprocess.run(cmd, cwd=work, capture_output=True, text=True, env=env, timeout=1800)
+        try:
+            r = subprocess.run(cmd, cwd=work, capture_output=True, text=True, env=env, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
         if r.returncode:
             sys.exit("%s: %s" % (" ".join(cmd), r.stderr[-2000:]))
         return json.loads(r.stdout.strip().split("\n")[-1])
+
+
+def run_on(runtime, mode, entries, example_seconds=EXAMPLE_SECONDS):
+    """[{name, signature, index, got}] from the runtime"""
+    # one (entry, example index) per example, in order, cut into batches
+    items = [(e, i) for e in entries for i in range(len(e.get("examples", [])))]
+    out = []
+    for k in range(0, len(items), BATCH):
+        batch = items[k:k + BATCH]
+        # (each example as an entry of its own: index 0, mapped back below)
+        alone = [dict(e, examples=[e["examples"][i]]) for e, i in batch]
+        res = _run_child(runtime, mode, alone, max(example_seconds, min(BATCH_SECONDS, example_seconds * len(batch))))
+        if res is None:
+            res = []
+            for a in alone:
+                r = _run_child(runtime, mode, [a], example_seconds)
+                if r is None:
+                    r = [{"name": a["name"], "signature": a["signature"], "index": 0,
+                          "got": "TimeoutError: the example ran for more than %d seconds\n" % example_seconds}]
+                res += r
+        # an example a runtime skips (`runtimes`) has no result: match by position
+        it = iter(res)
+        for (e, i), a in zip(batch, alone):
+            if "runtimes" in a["examples"][0] and runtime.split("-")[0] not in a["examples"][0]["runtimes"]:
+                continue
+            r = next(it, None)
+            if r is not None:
+                out.append(dict(r, index=i))
+        out += [dict(r, index=-1) for r in it]
+    return out
 
 
 def compare(mode, entries, results, runtime, label):
@@ -131,7 +174,7 @@ def main():
             print("python: %d of %d examples print the same under CPython %s" % (total - n, total, sys.version.split()[0]))
             bad += n
             continue
-        results = run_on(runtime, mode, entries)
+        results = run_on(runtime, mode, entries, int(arg("--timeout", EXAMPLE_SECONDS)))
         if "--update" in sys.argv:
             update(mode, results)
             continue
