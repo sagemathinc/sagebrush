@@ -736,6 +736,33 @@ def _frange(a, b, c):
 # a container nested deeper than this is refused when it is copied (value
 # semantics), below the host's recursion limit (HARD-133-1)
 _NEST_MAX = 100
+# and a copy that would make more containers than this (a value sharing
+# its parts, x := [x, x], copies to a tree of them) is refused before it
+# starts
+_OWN_CONTAINERS_MAX = 10 ** 5
+
+
+def _own_size(v, memo, depth=0):
+    """How many containers a copy of v makes, counted once per shared
+    part (memo, by identity), capped just past _OWN_CONTAINERS_MAX; one
+    nested past _NEST_MAX counts as too many."""
+    if not isinstance(v, (MSeq, MSet, MTuple)):
+        return 0
+    if depth >= _NEST_MAX:
+        return 1  # (_own refuses it for its depth)
+    got = memo.get(id(v))
+    if got is not None:
+        return got[1]
+    memo[id(v)] = (v, _OWN_CONTAINERS_MAX + 1)  # (in progress: a cycle is too many)
+    n = 1
+    for x in (v.items if isinstance(v, MSet) else v):
+        if isinstance(x, (MSeq, MSet, MTuple)):
+            n += _own_size(x, memo, depth + 1)
+            if n > _OWN_CONTAINERS_MAX:
+                break
+    n = min(n, _OWN_CONTAINERS_MAX + 1)
+    memo[id(v)] = (v, n)
+    return n
 
 
 def _own(v, name=None, depth=0):
@@ -747,6 +774,10 @@ def _own(v, name=None, depth=0):
         v._magma_assigned(name)
     if isinstance(v, (MSeq, MSet, MTuple)) and depth >= _NEST_MAX:
         raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
+    if depth == 0 and isinstance(v, (MSeq, MSet, MTuple)) and any(isinstance(x, (MSeq, MSet, MTuple)) for x in (v.items if isinstance(v, MSet) else v)):
+        # (a value with containers in it: the size of its copy first)
+        if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
+            raise MagmaError("a value of more than %d sequences, sets and tuples is not supported yet" % _OWN_CONTAINERS_MAX)
     if isinstance(v, MSeq):
         return MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
     if isinstance(v, MSet):
