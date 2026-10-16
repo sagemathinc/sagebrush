@@ -8,7 +8,7 @@ import {
   hooks, unbox, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw,
 } from "./object";
 import * as O from "./ops";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -676,19 +676,32 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
     }
   } else if (pre in prefixes && prefixes[pre] === base) t = t.slice(2);
   if (t.startsWith("_")) t = t.slice(1);
+  const pow2 = (base & (base - 1)) === 0;
+  // (Sagebrush's own ceiling, before the text is scanned or copied: even
+  // with an underscore between every two digits it has too many)
+  if (!pow2 && t.length > 2 * HARD_MAX_DIGITS) hardLimit("");
   if (!/^[0-9a-zA-Z]+(_[0-9a-zA-Z]+)*$/.test(t)) return undefined;
   t = t.replace(/_/g, "").toLowerCase();
-  for (const ch of t) {
-    const d = parseInt(ch, 36);
-    if (Number.isNaN(d) || d >= base) return undefined;
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    const d = c <= 57 ? c - 48 : c - 87;
+    if (d >= base) return undefined;
   }
   // (CPython's limit on decimal conversions: every base but the powers of 2)
   const m = intDigits.max;
-  if (m > 0 && (base & (base - 1)) !== 0 && t.length > m)
+  if (m > 0 && !pow2 && t.length > m)
     raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`);
-  let v = 0n;
-  const B = BigInt(base);
-  for (const ch of t) v = v * B + BigInt(parseInt(ch, 36));
+  if (!pow2 && t.length > HARD_MAX_DIGITS) hardLimit(t.length);
+  // (powers of 2 natively, in linear time; the others by halves, with Stop
+  // tested between the pieces)
+  let v: bigint;
+  if (base === 16 || base === 8 || base === 2) v = BigInt((base === 16 ? "0x" : base === 8 ? "0o" : "0b") + t);
+  else if (pow2) {
+    const bits = Math.log2(base);
+    let b = "";
+    for (let i = 0; i < t.length; i++) b += parseInt(t[i], base).toString(2).padStart(bits, "0");
+    v = BigInt("0b" + b);
+  } else v = parseDigits(t, base);
   return O.normBig(neg ? -v : v);
 }
 

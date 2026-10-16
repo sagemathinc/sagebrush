@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, StrLayout, PrimBox } from "./object";
-import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice } from "./ops";
+import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
 import * as FD from "./fdlibm";
 
 const isInt = Number.isInteger;
@@ -44,19 +44,88 @@ function decompose(x: number): [bigint, number] {
 // 0 when their libraries load (lib/sage_all.py, lib/_magma.py, lib/_matlab.py).
 export const intDigits = { max: 4300 };
 
-// The decimal digits of an int, or CPython's ValueError past the limit.
+// Sagebrush's own ceiling on those conversions, which no setting lifts (0
+// included): past it they are refused, so one stays within seconds.  Below
+// it a large conversion runs in pieces, testing for Stop between them
+// (HARD-606-1).
+export const HARD_MAX_DIGITS = 4_000_000;
+
+export function hardLimit(digits: number | string): never {
+  raise(T.ValueError, `Exceeds Sagebrush's limit (${HARD_MAX_DIGITS} digits) for integer string conversion${typeof digits === "number" ? `: value has ${digits} digits` : ""}; no setting raises this limit`);
+}
+
+// powers[b] = [b^k, b^2k, b^4k, ...] for the pieces (k digits each at the
+// bottom), made as needed.
+const PIECE = 1000;
+const powers = new Map<number, bigint[]>();
+function powerOf(base: number, level: number): bigint {
+  let a = powers.get(base);
+  if (a === undefined) powers.set(base, (a = [BigInt(base) ** BigInt(PIECE)]));
+  while (a.length <= level) {
+    pollInterrupt();
+    a.push(a[a.length - 1] * a[a.length - 1]);
+  }
+  return a[level];
+}
+
+// The decimal digits of 0 <= a < 10^(PIECE * 2^(level+1)), padded to width
+// when it is given: natively when small, else split by 10^(PIECE * 2^level).
+function decimalPieces(a: bigint, level: number, width: number): string {
+  if (level < 4) {
+    const s = a.toString();
+    return width ? s.padStart(width, "0") : s;
+  }
+  pollInterrupt();
+  const p = powerOf(10, level);
+  const hi = a / p, lo = a - hi * p;
+  const w = PIECE * 2 ** level;
+  if (hi === 0n && !width) return decimalPieces(lo, level - 1, 0);
+  return decimalPieces(hi, level - 1, width ? width - w : 0) + decimalPieces(lo, level - 1, w);
+}
+
+function decimalDigits(abs: bigint): string {
+  // (an upper bound on the digits, from the bits)
+  const digits = abs.toString(16).length * 4 * Math.log10(2) + 1;
+  let level = 0;
+  while (PIECE * 2 ** (level + 1) < digits) level++;
+  return decimalPieces(abs, level, 0);
+}
+
+// The int of digits t (lowercase, no sign or underscores) in base, by halves.
+export function parseDigits(t: string, base: number): bigint {
+  if (t.length <= 4 * PIECE) {
+    if (base === 10) return BigInt(t);
+    let v = 0n;
+    const B = BigInt(base);
+    // (in runs that fit a double, so the loop over BigInts is short)
+    const run = Math.floor(52 / Math.log2(base));
+    for (let i = 0; i < t.length; i += run) {
+      const chunk = t.slice(i, i + run);
+      v = v * B ** BigInt(chunk.length) + BigInt(parseInt(chunk, base));
+    }
+    return v;
+  }
+  pollInterrupt();
+  let level = 0;
+  while (PIECE * 2 ** (level + 1) < t.length / 2) level++;
+  const w = PIECE * 2 ** level;
+  return parseDigits(t.slice(0, t.length - w), base) * powerOf(base, level) + parseDigits(t.slice(t.length - w), base);
+}
+
+// The decimal digits of an int, or CPython's ValueError past the limit, or
+// Sagebrush's past its own.
 export function decimalOf(a: bigint): string {
   const m = intDigits.max;
-  if (m > 0) {
-    const abs = a < 0n ? -a : a;
-    // (a lower bound from the hex digits first: a huge value is refused
-    // without being converted)
-    if (Math.floor((abs.toString(16).length - 1) * Math.log10(16)) + 1 > m) tooManyDigits();
-    const s = abs.toString();
-    if (s.length > m) tooManyDigits();
-    return a < 0n ? "-" + s : s;
-  }
-  return a.toString();
+  const abs = a < 0n ? -a : a;
+  // (a lower bound from the hex digits first: a huge value is refused
+  // without being converted)
+  const atLeast = Math.floor((abs.toString(16).length - 1) * Math.log10(16)) + 1;
+  if (m > 0 && atLeast > m) tooManyDigits();
+  if (atLeast > HARD_MAX_DIGITS) hardLimit("");
+  const s = decimalDigits(abs);
+  if (m > 0 && s.length > m) tooManyDigits();
+  if (s.length > HARD_MAX_DIGITS) hardLimit("");
+  return a < 0n ? "-" + s : s;
 }
 
 function tooManyDigits(): never {
@@ -65,6 +134,12 @@ function tooManyDigits(): never {
 
 // |x| rounded half-even to `p` digits after the point: [integer digits, fraction digits].
 function fixedDigits(x: number, p: number): [string, string] {
+  // (a double has at most 1074 binary, so as many decimal, fraction digits:
+  // past them they're zeros, so a huge precision costs only the padding)
+  if (p > 1100) {
+    const [i, f] = fixedDigits(x, 1100);
+    return [i, f + "0".repeat(p - 1100)];
+  }
   const [m, e] = decompose(x);
   let q: bigint;
   if (e >= 0) q = (m << BigInt(e)) * 10n ** BigInt(p);

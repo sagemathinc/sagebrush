@@ -25,7 +25,8 @@ assignment may change an array in place.
 import math as _math
 import sys as _sys
 
-# (MATLAB has no limit on an integer's digits: CPython's 4300 is lifted)
+# (MATLAB has no limit on an integer's digits: CPython's 4300 is lifted;
+# Sagebrush's own ceiling of 4,000,000, src/runtime/format.ts, remains)
 _sys.set_int_max_str_digits(0)
 
 import numpy as np
