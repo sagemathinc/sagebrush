@@ -1587,10 +1587,13 @@ class Parser {
   /** A comprehension's clauses after its ":" (x in S, y, z in T | cond) up
    * to `close`: its loops as Python's (the last clause the outermost: the
    * first variable varies fastest), and its condition.  h0: where the
-   * head's uses begin (its loop variables are bound there). */
-  comprehension(h0: number, close: string): { loops: string; cond: string | null } {
+   * head's uses begin (its loop variables are bound there).  collect: it
+   * builds a collection (not a quantifier's test), so that x, y in S
+   * without a condition admits #S^2 elements before iterating
+   * (HARD-FCC-1). */
+  comprehension(h0: number, close: string, collect = false): { loops: string; cond: string | null } {
     const h1 = this.uses.length;
-    const loops: string[] = [];
+    const loops: ((cond: boolean) => string)[] = [];
     const bound: string[] = [];
     const sets: { vars: string[]; from: number; to: number }[] = [];
     do {
@@ -1602,10 +1605,11 @@ class Parser {
       const set = this.expr();
       // x, y in S: each over S (evaluated once), x the outer loop, as
       // Magma does ([ <a, b> : a, b in [1..2] ] is <1,1>, <1,2>, <2,1>, <2,2>)
-      if (vars.length === 1) loops.push(`for ${vars[0]} in _m._iter(${set})`);
+      if (vars.length === 1) loops.push(() => `for ${vars[0]} in _m._iter(${set})`);
       else {
         const t = this.fresh();
-        loops.push([`for ${t} in (${set},)`, ...vars.map((v) => `for ${v} in _m._iter(${t})`)].join(" "));
+        const k = vars.length;
+        loops.push((cond) => [`for ${t} in (${collect && !cond ? `_m._admit_power(${set}, ${k})` : set},)`, ...vars.map((v) => `for ${v} in _m._iter(${t})`)].join(" "));
       }
       sets.push({ vars, from, to: this.uses.length });
     } while (this.eat(","));
@@ -1618,7 +1622,7 @@ class Parser {
     this.bindUses(c0, this.uses.length, bound);
     sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
     this.expect(close);
-    return { loops: loops.reverse().join(" "), cond };
+    return { loops: loops.map((l) => l(cond !== null)).reverse().join(" "), cond };
   }
 
   /** exists{ ... } or forall{ ... }, or with witnesses, exists(t){ ... }
@@ -1697,8 +1701,9 @@ class Parser {
     }
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]
-      const { loops, cond } = this.comprehension(h0, close);
-      return `${ctor}([${first} ${loops}${cond ? ` if _m._bool(${cond})` : ""}], universe=${universe})`;
+      // (its elements through one bounded collector (HARD-FCC-1))
+      const { loops, cond } = this.comprehension(h0, close, true);
+      return `${ctor}(_m._collect((${first} ${loops}${cond ? ` if _m._bool(${cond})` : ""})), universe=${universe})`;
     }
     // x -> y: an arrow pair, as in a map's graph [ 1 -> 30, 2 -> 20 ]
     const arrow = (e: string) => (this.eat("->") ? `_m.MTuple([${e}, ${this.expr()}])` : e);
