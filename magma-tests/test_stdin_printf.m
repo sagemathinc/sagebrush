@@ -44,3 +44,7 @@ P({3..44}); P([[i : i in [1..20]], [i : i in [21..40]]]);
 P(["c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c c", "d"]);
 P([[5,6],[7,8]]); P(<10^90, 10^90, 4>); P([<10^90, "u">, <3, "w">]);
 P([[], [5,6]]); P("three\nfour"); P([false, true, false]);
+// no width layout inside a nested value either (CORR-173-1)
+P([[10^85, 3], [4, 10^85]]); Position(Sprint([[10^85, 3], [4, 10^85]]), "\\");
+P([[i^3 : i in [1..40]], [5]]); P([["r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r r"]]);
+P({ [10^85], [6] }); P([<10^85, 7>, <8, 9>]);
