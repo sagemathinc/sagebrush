@@ -227,7 +227,8 @@ function complexCall(real: any = undefined, imag: any = undefined): PyComplex {
 // CPython's float has not, is no hook)
 const complexHook = (x: any) => {
   const f = lookupType(typeOf(x), "__complex__");
-  return f !== undefined && f.$owner !== T.float; // (float's, or a float subclass's unboxing wrapper of it)
+  // (None is a hook too, one that is not callable: CPython's TypeError)
+  return f !== undefined && (f === null || f.$owner !== T.float); // (not float's, nor a float subclass's unboxing wrapper of it)
 };
 // (a number: an int or float, a complex, or anything with __float__ or __index__)
 const isNumberLike = (x: any) => typeof x === "number" || typeof x === "bigint" || typeof x === "boolean" || x instanceof FloatBox || x instanceof PyComplex
@@ -240,7 +241,7 @@ const isNumberLike = (x: any) => typeof x === "number" || typeof x === "bigint" 
 function complexParts(real: any, imag: any): PyComplex {
   if (typeof real === "string") raise(T.TypeError, "complex() can't take second arg if first is a string");
   if (typeof imag === "string") raise(T.TypeError, "complex() second arg can't be a string");
-  const orig = real ?? 0;
+  const orig = real === undefined ? 0 : real; // (only an omitted real is 0: None is refused, CORR-D5F-1)
   let r = orig;
   if (complexHook(r)) r = new PyComplex(...complexResult(O.lookupSpecial(r, "__complex__")(r)));
   if (!isNumberLike(r)) raise(T.TypeError, `complex() argument 'real' must be a real number, not ${typeName(r)}`);
@@ -249,7 +250,11 @@ function complexParts(real: any, imag: any): PyComplex {
   if (r instanceof PyComplex) {
     cr = [r.re, r.im];
     crIsC = true;
-    if (orig instanceof PyComplex || (lookupType(typeOf(orig), "__float__") === undefined && lookupType(typeOf(orig), "__index__") === undefined)) {
+    // (CPython warns when the argument itself is no real number: its type
+    // has neither nb_float nor nb_index; numpy's scalars have nb_float in
+    // NumPy, which the shims here do not show; CORR-D5F-3)
+    const ot = typeOf(orig);
+    if (lookupType(ot, "__float__") === undefined && lookupType(ot, "__index__") === undefined && !ot.$mro.some((c: any) => c.$module === "numpy")) {
       O.deprecationWarning(`complex() argument 'real' must be a real number, not ${typeName(orig)}`);
     }
   } else cr = [O.fv(Ty.floatCall(r))!, 0];

@@ -57,3 +57,13 @@ complex(1, 2j) -> (-1+0j) ["complex() argument 'imag' must be a real number, not
 complex(C(1+2j), 1) -> 6j ["complex() argument 'real' must be a real number, not C"]
 complex(S(), 1) -> (9+3j) ["complex() argument 'real' must be a real number, not S"]
 complex(2, 3) -> (2+3j) []
+complex(real=CFl(1, 2)) -> (1+2j)
+complex(real=CIx(1, 2)) -> (1+2j)
+complex(real=np.complex64(1j)) -> 1j
+complex(real=np.complex128(1j)) -> 1j
+complex(real=1+2j) -> DeprecationWarning: complex() argument 'real' must be a real number, not complex
+complex(None, 1) -> TypeError: complex() argument 'real' must be a real number, not NoneType
+complex(real=None) -> TypeError: complex() argument 'real' must be a real number, not NoneType
+complex(None) -> TypeError: complex() argument must be a string or a number, not NoneType
+complex(NoneHook()) -> TypeError: 'NoneType' object is not callable
+complex(NoneHook(), 1) -> TypeError: 'NoneType' object is not callable
