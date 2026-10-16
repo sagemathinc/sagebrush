@@ -119,7 +119,7 @@ test("Python mode's search index: the catalog's entries whole, then every other 
   assert.equal(solve.signature, "(a, b)");
   assert.equal(solve.status, "partial");
   assert.ok(solve.differs.length > 0);
-  assert.deepEqual(solve.examples[0], { code: "np.linalg.solve([[3, 1], [1, 2]], [9, 8])", expected: "array([2., 3.])\n" });
+  assert.deepEqual(solve.examples[0], { code: "np.linalg.solve([[3, 1], [1, 2]], [9, 8])", expected: "array([2., 3.])\n", setup: "import numpy as np" });
   assert.match(solve.doc, /\n\nExamples:\n\n>>> np\.linalg\.solve\(\[\[3, 1\], \[1, 2\]\], \[9, 8\]\)\narray\(\[2\., 3\.\]\)$/);
   assert.match(by("functools.lru_cache").doc, />>> @functools\.lru_cache\(maxsize=None\)\n\.\.\. def fib\(n\):\n\.\.\.     return .*\n\.\.\.\n>>> fib\(80\)\n23416728348467685$/);
   assert.equal(by("numpy.amax").summary, "Another name for numpy.max.");

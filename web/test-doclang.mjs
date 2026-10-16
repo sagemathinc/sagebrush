@@ -125,15 +125,23 @@ try {
   await sleep(300);
   check(await mode() === "matlab", "Yes changes it");
 
-  // a catalog entry's examples are its own (catalog/SCHEMA.md), inserted as they are
+  // a catalog entry's examples are its own (catalog/SCHEMA.md), inserted with
+  // the imports they need, and run so in a fresh notebook (CORR-012-1)
   answer = true;
-  await choose("python");
+  await ev(`(window.sagebrush.notebook.load({ mode: "python", cells: [] }), 1)`);
+  await until(`window.sagebrush.notebook.mode === "python" && window.sagebrush.notebook.cells().every((c) => c.ta.value.trim() === "")`);
   await search("linspace");
   await ev(`[...document.querySelectorAll("#docresults li[role=option]")].find((li) => li.textContent.startsWith("numpy.linspace(")).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
   await until(`document.querySelector("#docdlg").open`);
   await ev(`document.querySelector("#docinsert").click()`);
-  await until(`window.sagebrush.notebook.cells().some((c) => c.ta.value === "np.linspace(0, 1, 5)")`).catch(() => {});
-  check(await ev(`window.sagebrush.notebook.cells().some((c) => c.ta.value === "np.linspace(0, 1, 5)")`), "a Python catalog entry's example is inserted into a Python notebook");
+  const want = "import numpy as np\n\nnp.linspace(0, 1, 5)";
+  await until(`window.sagebrush.notebook.cells().some((c) => c.ta.value === ${JSON.stringify(want)})`).catch(() => {});
+  check(await ev(`window.sagebrush.notebook.cells().some((c) => c.ta.value === ${JSON.stringify(want)})`), "a Python catalog entry's example is inserted with its imports");
+  // (run, in this fresh notebook: shift-enter in the inserted cell)
+  await ev(`(() => { const c = window.sagebrush.notebook.cells().find((c) => c.ta.value === ${JSON.stringify(want)}); c.ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true })); return 1; })()`);
+  await until(`[...document.querySelectorAll(".cell .out")].some((o) => /0\\.25/.test(o.textContent) || /Error/.test(o.textContent))`, 60000).catch(() => {});
+  const out = await ev(`[...document.querySelectorAll(".cell .out")].map((o) => o.textContent).join(" | ")`);
+  check(/array\(\[0\.\s+, 0\.25, 0\.5 , 0\.75, 1\.\s+\]\)/.test(out) && !/Error/.test(out), "and it runs there: " + JSON.stringify(out.slice(0, 120)));
   await ev(`(() => { const i = document.querySelector("#docsearch"); i.value = ""; return 1; })()`);
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));
 } finally {
