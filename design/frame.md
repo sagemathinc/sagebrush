@@ -35,7 +35,8 @@ All are objects with `version: 1`.
   `{ sagebrush: "error", version: 1, message }`.  The board shown stays.
 
 A host that also takes the user's answers back (ask items, Submit) follows
-web/board-host-protocol.md, which adds `revision`, `answers` and `received`.
+web/board-host-protocol.md, which adds a channel for them (a transferred
+`MessageChannel` port), `revision`, `answers`, `received` and `refused`.
 
 A later board starts the frame afresh: it reloads, a new page with a new
 interpreter, so that nothing the first board's code did (a module changed,
