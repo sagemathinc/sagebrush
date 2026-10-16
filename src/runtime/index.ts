@@ -305,8 +305,9 @@ function layered(front: any, back: any): any {
   });
 }
 
+// sage: Sage source, which exec and eval compile in Sage mode
 export class CodeObject {
-  constructor(public src: string, public filename: string, public mode: string) {}
+  constructor(public src: string, public filename: string, public mode: string, public sage = false) {}
 }
 const codeType = Ty.builtinTypeFor("code", CodeObject, "builtins", () => raise(T.TypeError, "cannot create 'code' objects"));
 Ty.getset(codeType, "co_filename", (c) => c.filename);
@@ -323,22 +324,30 @@ function sourceOf(src: any, fn: string): [string, string] {
 
 export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   const [text, filename] = sourceOf(src, "exec");
-  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename);
+  const sage = src instanceof CodeObject && src.sage;
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, { sage });
   return null;
 }
 export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any): any {
   if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals);
   const [text, filename] = sourceOf(src, "eval");
-  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename);
+  const sage = src instanceof CodeObject && src.sage;
+  return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals), "eval", filename, { sage });
 }
-function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
+function compileSource(src: any, filename: any, mode: any, sage: boolean): CodeObject {
   const [text] = sourceOf(src, "compile");
   if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
-  M.loader.exec(text, null, mode === "eval" ? "check-eval" : mode === "single" ? "check-single" : "check", String(filename));
-  return new CodeObject(text, String(filename), mode);
+  M.loader.exec(text, null, mode === "eval" ? "check-eval" : mode === "single" ? "check-single" : "check", String(filename), { sage });
+  return new CodeObject(text, String(filename), mode, sage);
+}
+function compileBuiltin(src: any, filename: any, mode: any): CodeObject {
+  return compileSource(src, filename, mode, false);
 }
 Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
+// compile() for Sage source (lib/sage_all.py's timeit): 2^3 is a power and
+// 1/2 exact when the code object runs
+B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => compileSource(src, filename, mode, true), "__pyjs_compile_sage__");
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
 B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
 // help(obj), and obj? / obj?? in interactive input: lib/_pyjs_help.py

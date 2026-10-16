@@ -736,7 +736,19 @@ class Expression:
 
             sage: (x^3).diff(x), sin(x^2).diff(x), (x^4).diff(x, 2), (x^2*x).derivative(x)
             (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
+            sage: y = var('y'); (x^2*y).diff([x, y]), (x^2).diff([])
+            (2*x, x^2)
         """
+        # a list alone is the list of variables, and an empty one means no
+        # differentiation, as in Sage (diff(x^2, []) was 2*x); a tuple, or a
+        # list among other arguments, is Sage's TypeError
+        if len(args) == 1 and isinstance(args[0], list):
+            if not args[0]:
+                return self
+            args = tuple(args[0])
+        for a in args:
+            if isinstance(a, (list, tuple)):
+                raise TypeError("no canonical coercion from %s to Symbolic Ring" % type(a))
         if not args:
             names = self._names()
             if len(names) != 1:
@@ -750,9 +762,6 @@ class Expression:
                 if a > 1:
                     r = _one("diff", r._s, last, str(a - 1))
                 last = None
-                continue
-            if isinstance(a, (list, tuple)):
-                r = r.diff(*a)
                 continue
             last = _var_name(a)
             r = _one("diff", r._s, last, "1")
@@ -1455,6 +1464,8 @@ class _SeriesExpr(Expression):
 
     def diff(self, *args):
         """The derivative: one order less in the series variable."""
+        if len(args) == 1 and isinstance(args[0], list) and not args[0]:
+            return self  # (no variables: no differentiation, as Sage)
         v = args[0] if args else self._var
         n = int(args[1]) if len(args) > 1 else 1
         body = Expression(self._s).diff(v, n) if len(args) > 1 else Expression(self._s).diff(v)
@@ -3442,6 +3453,8 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         (1/2*n^2 + 1/2*n, 1/3*n^3 + 1/2*n^2 + 1/6*n)
         sage: symbolic_sum((1/3)^k, k, 0, oo), symbolic_sum(binomial(n, k), k, 0, n)
         (3/2, 2^n)
+        sage: y = var('y'); symbolic_sum(binomial(n, k)*x^k*y^(n-k), k, 0, n)
+        (x + y)^n
         sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)
         (1/6*pi^2, e^x)
     """
@@ -3550,11 +3563,25 @@ def _sum_binomial(f, v, a, b):
     vn = _var_name(v)
     if vn not in q._names():
         return (q * 2 ** n)
-    # q = c * x^k
-    r = (q.subs({v: v + 1}) / q).simplify_rational()
+    # q = c * A^k * B^(n-k), the ratio r = A/B: the sum is c*(A + B)^n.
+    # Writing it as q(0)*(r + 1)^n would divide by B, which may vanish
+    # where every term is defined (y = 0 in x^k*y^(n-k)).
+    r = _geom_ratio(q, v)
+    r = (q.subs({v: v + 1}) / q if r is None else r).simplify_rational()
     if vn not in r._names():
-        c = q.subs({v: 0})
-        return c * (r + 1) ** n
+        A, B = r.numerator(), r.denominator()
+        q0 = q.subs({v: 0})
+        if not B._names():
+            return q0 * (r + 1) ** n
+        c = (q0 / B ** n).simplify_rational()
+        if not (set(n._names()) & set(c._names())):
+            return c * (A + B) ** n
+        # B^n is not a factor of q0: keep (r + 1)^n only when the k = 1
+        # term already divides by B (x^k/y^k), so no domain is lost
+        q1 = q.subs({v: 1}).simplify_rational()
+        t = (q1.denominator() / B).simplify_rational()
+        if not t.denominator()._names():
+            return q0 * ((A + B) / B) ** n
     return None
 
 
