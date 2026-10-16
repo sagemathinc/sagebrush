@@ -1543,7 +1543,7 @@ export class Board {
       // (links, buttons, controls, 3D views, and the fields of the item being
       // edited, stay theirs, but for the selected item's grip over them; its
       // frame drags it, as any item's does)
-      if (!gripPress && (e.target as Element).closest?.(FORM_CONTROLS + ", .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
+      if (!gripPress && (e.target as Element).closest?.("a, " + FORM_CONTROLS + ", .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
       cancelAnimationFrame(this.flight);
       const touch = e.pointerType === "touch";
       if (e.pointerType === "pen") this.penSeen = true;
@@ -1710,7 +1710,9 @@ const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.
 // (a double-click in the item being edited selects a word, as in any field)
 const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
 // (a form's control, or its label: its presses and taps are its own, never the board's gestures, HARD-448-2)
-const FORM_CONTROLS = "a, button, input, select, textarea, summary, label";
+// (a question's controls, kept from the board's double-click and double tap;
+// a link elsewhere, as a note's reference, is not one: its double-click edits, CORR-6CE-1)
+const FORM_CONTROLS = "button, input, select, textarea, .board-ask summary, .board-ask label, .board-ask-opts a, .board-ask-words a";
 const atControl = (e: Event) => !!(e.target as Element | null)?.closest?.(FORM_CONTROLS);
 // A code item's output, in the box that gives it the notebook's styles.
 function outBox(out: HTMLElement) {
