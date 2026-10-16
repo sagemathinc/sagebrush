@@ -7,7 +7,7 @@
 //
 // Loaded only for `board answers` (src/board-cli.ts).
 
-import { closeSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "fs";
+import { closeSync, openSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { randomBytes } from "crypto";
 import { basename, dirname, join } from "path";
 import { cleanDoc, formatError, isBoard, pageCount, type BoardDoc, type DocAsk } from "../web/board/doc";
@@ -96,7 +96,8 @@ export function writeWhole(to: string, text: string): string | null {
   try {
     const fd = openSync(tmp, "wx", mode);
     made = true;
-    try { writeSync(fd, text); } finally { closeSync(fd); }
+    // (all of it: writeFileSync on a descriptor writes until done, where one writeSync may write part, HARD-738-1)
+    try { writeFileSync(fd, text); } finally { closeSync(fd); }
     renameSync(tmp, to);
     done = true;
     return null;
