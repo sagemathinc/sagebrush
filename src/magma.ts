@@ -1340,12 +1340,13 @@ class Parser {
         if (!(chainAt && this.toks[this.i - 2]?.v === "]")) chainAt = `(${lb.line}, ${lb.col})`;
         const at = chainAt;
         const idx = [this.expr()];
-        if (this.eat("..")) {
-          // L[a..b]: a subsequence
+        if (this.at("..")) {
+          // L[a..b]: a subsequence (a range of non-integers said at the ..)
+          const dd = this.next();
           const b = this.expr();
           const by = this.eat("by") ? this.expr() : "1";
           this.expect("]");
-          e = `_m._index(${e}, _m._range(${idx[0]}, ${b}, ${by}, "["), ${at})`;
+          e = `_m._index(${e}, _m._range(${idx[0]}, ${b}, ${by}, "[", None, (${dd.line}, ${dd.col})), ${at})`;
           continue;
         }
         while (this.eat(",")) idx.push(this.expr());
@@ -1720,7 +1721,7 @@ class Parser {
       const by = this.eat("by") ? this.expr() : "1";
       this.expect(close);
       // ([ U | a..b ]: the universe too, which Magma checks)
-      return `_m._range(${first}, ${b}, ${by}, ${JSON.stringify(open)}${universe !== "None" ? `, ${universe}, (${ot.line}, ${ot.col})` : ""})`;
+      return `_m._range(${first}, ${b}, ${by}, ${JSON.stringify(open)}, ${universe}, (${ot.line}, ${ot.col}))`;
     }
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]

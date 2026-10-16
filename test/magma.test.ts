@@ -705,6 +705,24 @@ test("admitting a value refuses past 100 deep in words, whatever bounds its call
   assert.equal(r.stdout, `98 admitted\n99 ${said}\n5000 ${said}\n`.repeat(2), r.stderr);
 });
 
+test("a range with a huge real endpoint, or a set of a huge range, is refused in words before it is made (HARD-1CD-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], {
+    input: "[1.0 .. 1e100000000];\n[1.0 .. (1e10000)^20];\n{1 .. 100000000};\n{@ 1 .. 100000000 @};\n{* 1 .. 100000000 *};\n[1.0 .. 1e-100000000];\n[1.0 .. (1e-10000)^20];\n#[1 .. 100000000];\n\"end\";\n",
+    encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a real literal with an exponent of more than 10000 is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.match(out, /a range endpoint of more than 100000 digits is not supported yet/);
+  assert.equal((out.match(/a set of more than 1000000 elements is not supported yet/g) ?? []).length, 3, r.stdout);
+  assert.match(out, /Sequence range does not consist of integers/);
+  // (a sequence's range stays lazy: its size is known at once)
+  assert.match(r.stdout, /\n100000000\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
