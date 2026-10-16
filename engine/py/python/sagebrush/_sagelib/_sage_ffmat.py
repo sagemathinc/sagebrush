@@ -539,9 +539,9 @@ class FFMatrix:
         # it was NotImplemented, so A * A.inverse() == 1 was False
         c = self._scalar(o)
         if c is None:
-            p = self._numeric(o)
-            if p is not None:
-                return p[0] == p[1]
+            r = self._numeric_eq(o)
+            if r is not None:
+                return r
         if c is not None:
             zero = self._base.zero()
             if c == zero:
@@ -611,13 +611,49 @@ class FFMatrix:
     def _scalar(self, c):
         return _admit(self._base, c)
 
-    def _numeric(self, o):
-        """(M, c): this matrix and o in the field where they meet when o is
-        not admitted (_pushout), else None."""
+    def _numeric_eq(self, o):
+        """self == o in the field where they meet when o is not admitted
+        (_pushout), else None.  Entry by entry: a converted copy of the
+        matrix ran out of heap for zero_matrix(AA, 512) == 1.0 in 96 MB
+        (daybreak2's HARD-F4E-1)."""
         F = _pushout(self._base, o)
         if F is None:
             return None
-        return FFMatrix(F, [[F(x) for x in r] for r in self._rows], self._ncols), F(o)
+        c, zero = F(o), F.zero()
+        if not c == zero and len(self._rows) != self._ncols:
+            return False
+        for i, r in enumerate(self._rows):
+            for j, x in enumerate(r):
+                if not F(x) == (c if i == j else zero):
+                    return False
+        return True
+
+    def _numeric_op(self, o, op, left=False):
+        """self op o (o op self when left) in the field where they meet when
+        o is not admitted (_pushout), else None: each entry is converted
+        into the result as it is built, with no converted copy of the
+        matrix (HARD-F4E-1).  For + and -, o is o times the identity (0
+        for any shape, as in Sage)."""
+        F = _pushout(self._base, o)
+        if F is None:
+            return None
+        c, zero = F(o), F.zero()
+        n, m = len(self._rows), self._ncols
+        if op in "+-":
+            if n != m and not c == zero:
+                op_parent = o.parent() if callable(getattr(o, "parent", None)) else type(o)
+                pair = (op_parent, self.parent()) if left else (self.parent(), op_parent)
+                raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
+            if op == "+":
+                f = lambda x, d: F(x) + d
+            elif left:
+                f = lambda x, d: d - F(x)
+            else:
+                f = lambda x, d: F(x) - d
+            return FFMatrix(F, [[f(x, c if i == j else zero) for j, x in enumerate(r)] for i, r in enumerate(self._rows)], m)
+        if op == "/":
+            c = 1 / c
+        return FFMatrix(F, [[F(x) * c for x in r] for r in self._rows], m)
 
     def _from_qq(self, o):
         """A QQ matrix o as a matrix over this (QQbar) field."""
@@ -631,8 +667,8 @@ class FFMatrix:
         if not isinstance(o, FFMatrix):
             q = self._scalar_identity(o, "+", False)
             if q is None:
-                p = self._numeric(o)
-                return NotImplemented if p is None else p[0] + p[1]
+                p = self._numeric_op(o, "+")
+                return NotImplemented if p is None else p
             o = q
         if o.dimensions() != self.dimensions():
             return NotImplemented
@@ -642,8 +678,8 @@ class FFMatrix:
         if not isinstance(o, FFMatrix) and self._from_qq(o) is o:
             q = self._scalar_identity(o, "+", True)
             if q is None:
-                p = self._numeric(o)
-                return NotImplemented if p is None else p[0] + p[1]
+                p = self._numeric_op(o, "+", True)
+                return NotImplemented if p is None else p
             o = q
         return self.__add__(o)
 
@@ -655,22 +691,20 @@ class FFMatrix:
         if not isinstance(o, FFMatrix):
             q = self._scalar_identity(o, "-", False)
             if q is None:
-                p = self._numeric(o)
-                return NotImplemented if p is None else p[0] - p[1]
+                p = self._numeric_op(o, "-")
+                return NotImplemented if p is None else p
             o = q
         return self + (-o)
 
     def __rsub__(self, o):
-        # o - A for a scalar o (a QQ matrix o goes through _from_qq); a
-        # numeric o is applied with the matrix on the left (o + M with
-        # o in CC raised in complex(M) before M was asked)
+        # o - A for a scalar o (a QQ matrix o goes through _from_qq)
         q = self._from_qq(o)
         if isinstance(q, FFMatrix):
             return q + (-self)
         q = self._scalar_identity(o, "-", True)
         if q is None:
-            p = self._numeric(o)
-            return NotImplemented if p is None else -p[0] + p[1]
+            p = self._numeric_op(o, "-", True)
+            return NotImplemented if p is None else p
         return q + (-self)
 
     def __mul__(self, o):
@@ -697,15 +731,15 @@ class FFMatrix:
             return FFVector(self._base, [FFVector(self._base, r).dot_product(o) for r in self._rows])
         c = self._scalar(o)
         if c is None:
-            p = self._numeric(o)
-            return NotImplemented if p is None else p[0] * p[1]
+            p = self._numeric_op(o, "*")
+            return NotImplemented if p is None else p
         return FFMatrix(self._base, [[a * c for a in r] for r in self._rows], self._ncols)
 
     def __rmul__(self, o):
         c = self._scalar(o)
         if c is None:
-            p = self._numeric(o)
-            return NotImplemented if p is None else p[0] * p[1]
+            p = self._numeric_op(o, "*")
+            return NotImplemented if p is None else p
         return FFMatrix(self._base, [[c * a for a in r] for r in self._rows], self._ncols)
 
     def _vecmat(self, v):
@@ -962,8 +996,8 @@ class FFMatrix:
     def __truediv__(self, o):
         c = self._scalar(o)
         if c is None:
-            p = self._numeric(o)
-            return NotImplemented if p is None else p[0] / p[1]
+            p = self._numeric_op(o, "/")
+            return NotImplemented if p is None else p
         return self * (1 / c)
 
     def charpoly(self, var="x"):
