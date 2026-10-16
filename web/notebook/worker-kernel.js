@@ -6,6 +6,7 @@
 //
 //   const kernel = new WorkerKernel({ createWorker: () => new Worker("sagebrush-worker.js", { type: "module" }) });
 //   kernel.on("status", (text) => ...);
+//   kernel.on("loading", (what) => ...);  // a mode's library is being fetched ("Sage"), or done (null)
 //   kernel.start();
 
 const STOPPED = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
@@ -55,7 +56,7 @@ export class WorkerKernel {
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
     this.pending = new Map();
-    this.listeners = { status: [], restart: [], ready: [], run: [], execute: [] };
+    this.listeners = { status: [], restart: [], ready: [], run: [], execute: [], loading: [] };
     // TimeTravel's journal: id -> what a run is ({kind, code, ...}), its
     // output hash and timing; reported by the "run" event when it is done
     this.runs = new Map();
@@ -70,6 +71,8 @@ export class WorkerKernel {
 
   start() {
     this.ready = false;
+    clearTimeout(this.libTimer);
+    this.libShown = false;
     this.emit("status", "loading…");
     this.generation++;
     const t0 = performance.now();
@@ -83,8 +86,18 @@ export class WorkerKernel {
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
         this.ready = true;
-        this.emit("status", `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`);
+        this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
+        this.emit("status", this.readyText);
         this.emit("ready");
+        return;
+      }
+      // a mode's library, fetched the first time it runs (web/lib-lazy.ts):
+      // said once it has taken 300 ms, until it is here, in the status and
+      // ("loading" event) on the cells waiting for it
+      if (m.libLoading !== undefined) {
+        clearTimeout(this.libTimer);
+        if (m.libLoading) this.libTimer = setTimeout(() => { this.libShown = true; this.emit("status", `loading ${m.libLoading}…`); this.emit("loading", m.libLoading); }, 300);
+        else if (this.libShown) { this.libShown = false; this.emit("status", this.readyText); this.emit("loading", null); }
         return;
       }
       const p = this.pending.get(m.id);

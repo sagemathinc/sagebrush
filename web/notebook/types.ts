@@ -62,7 +62,7 @@ export interface Kernel {
   interact?(id: number, values: object, sink: OutputSink): void;
   /** Set by the notebook: where output addressed to an @interact goes. */
   targetSink?: (target: number) => Pick<OutputSink, "out" | "display" | "interact" | "clear"> | null;
-  on(event: "status" | "restart" | "ready", f: (...args: any[]) => void): () => void;
+  on(event: "status" | "restart" | "ready" | "loading", f: (...args: any[]) => void): () => void;
 }
 
 export interface Store {

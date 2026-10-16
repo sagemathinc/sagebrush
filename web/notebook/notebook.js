@@ -552,6 +552,12 @@ export function createNotebook(root, opts = {}) {
         k.reactive?.restarted();
         if (k === kernel) for (const c of cells()) markStale(c);
       });
+      // (a mode's library being fetched before its first run, web/lib-lazy.ts:
+      // said where the user is looking, on the cells waiting for it)
+      k.on("loading", (what) => {
+        if (k !== kernel) return;
+        for (const c of cells()) if (c.el.classList.contains("queued")) c.time.textContent = what ? `loading ${what}…` : "";
+      });
     }
   }
   bindKernel(kernel);

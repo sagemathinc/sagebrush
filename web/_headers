@@ -13,8 +13,6 @@
   Access-Control-Allow-Origin: *
 /sagebrush-engine.wasm
   Access-Control-Allow-Origin: *
-/sagebrush-precompiled.json
-  Access-Control-Allow-Origin: *
 # the Python library's chunks (web/lib-chunks.mts): named by their content's
 # hash, so never changed in place
 /lib/*
