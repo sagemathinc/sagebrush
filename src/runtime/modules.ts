@@ -15,7 +15,7 @@ const factories: Record<string, (m: any) => void> = Object.create(null);
 
 // Set by the driver: find and execute a Python source module, or return
 // null; compile and run source text for exec/eval/compile.
-export const loader: { load: (name: string) => any | null; exec: (src: string, g: any, mode: string, filename: string) => any } = {
+export const loader: { load: (name: string) => any | null; exec: (src: string, g: any, mode: string, filename: string, opts?: { sage?: boolean }) => any } = {
   load: () => null,
   exec: () => null,
 };
