@@ -111,3 +111,20 @@ def _ret3(v):
         def __float__(self): return v
     return _Q3(2)
 t("a __float__ returning RR, RDF or CC is refused", lambda: tuple(_err3(lambda: f(_ret3(v))) for v in (RR(9), RDF(9), CC(9)) for f in (conjugate, real, imag)))
+import warnings as _w4
+class _R4(float): pass
+def _mk4(f):
+    class _F4(float):
+        def __float__(self): return f()
+    return _F4(2)
+def _run4(g, x):
+    with _w4.catch_warnings():
+        _w4.simplefilter('error', DeprecationWarning)
+        try:
+            return g(x)
+        except Exception as e:
+            return type(e).__name__ + ":" + str(e)[:30]
+def _hookwarn4():
+    _w4.warn("hook says", DeprecationWarning); return float(9)
+for _n4, _f4 in [("R", lambda: _R4(9)), ("np64", lambda: _np3.float64(9)), ("hookwarn", _hookwarn4)]:
+    t("warnings as errors, __float__ returning %s" % _n4, lambda: [_run4(g, _mk4(_f4)) for g in (conjugate, real, imag, real_part, imag_part)])
