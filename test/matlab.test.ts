@@ -1576,3 +1576,24 @@ test("clear in a function: a variable named like an ItemType is the one cleared;
   ].join("\n")], { encoding: "utf8" });
   assert.equal(out.trim(), "[1 0 0 1 1 0 1 0]");
 });
+
+test("clear and clearvars at the top level look exact names up directly: 3000 names against 3000 variables is quick (HARD-282-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const code = [
+    // (3000 variables v1 .. v3000, through a MAT-file: a structure's fields saved as variables, then loaded)
+    "names = arrayfun(@(k) sprintf('v%d', k), 1:3000, 'UniformOutput', false);",
+    "S = cell2struct(num2cell(1:3000), names, 2); f = [tempname '.mat']; save(f, '-struct', 'S'); clear S; load(f); delete(f)",
+    "missing = arrayfun(@(k) sprintf('w%d', k), 1:3000, 'UniformOutput', false);",
+    "keep1 = 1; v_keep = 2;",
+    "clearvars(names{1:1500}); clear(names{1501:end}, missing{:})",
+    "disp([exist('v1', 'var') exist('v3000', 'var') exist('keep1', 'var') exist('v_keep', 'var')])",
+    "clear v_k* keep?",
+    "disp([exist('keep1', 'var') exist('v_keep', 'var')])",
+  ].join("\n");
+  const t0 = Date.now();
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code], { encoding: "utf8", timeout: 60000 });
+  const ms = Date.now() - t0;
+  assert.deepEqual(out.trim().split("\n").map((l: string) => l.trim().split(/\s+/).join(" ")), ["0 0 1 1", "0 0"]);
+  // (before: 3000 names took over 30 s; the eval loop that makes the variables is most of this)
+  assert.ok(ms < 20000, `${ms} ms`);
+});
