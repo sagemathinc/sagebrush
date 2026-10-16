@@ -2138,7 +2138,7 @@ test("nchoosek refuses mixed classes and results past their class's range before
     "155117520", "120", "1.0000e+09"]);
 });
 
-test("sum and prod 'native' of logical, sprintf's %s of character codes, strsplit's options, interp1's methods and grid, rand's classes and rng's generator and seed", () => {
+test("sum and prod 'native' of logical, sprintf's %s of character codes, strsplit's options refused, interp1's methods and grid, rand's classes and rng's generator and seed", () => {
   const { execFileSync } = require("node:child_process");
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
@@ -2154,12 +2154,12 @@ test("sum and prod 'native' of logical, sprintf's %s of character codes, strspli
     tryIt("sprintf('%s', -1)"), tryIt("sprintf('%a', 1)"), tryIt("sprintf('%bx', 1)"), tryIt("sprintf('%y')"),
   ].join("\n")), ["Hi", "ABC|", "6.550000e+01", "6.550000e+01", "Hi", "Hi and 3.500000e+00", "[    A]", "1 x", "refused", "refused", "refused", "refused"]);
   assert.deepEqual(run([
-    "disp(strjoin(strsplit('a1b22c', '\\d+', 'DelimiterType', 'RegularExpression'), '|'))",
-    "disp(strjoin(strsplit('a1b', '(\\d)', 'DelimiterType', 'RegularExpression'), '|'))",
     "disp(strjoin(strsplit('a,,b', ',', 'DelimiterType', 'Simple'), '|'))",
     "disp(strjoin(strsplit('a,,b', ',', 'CollapseDelimiters', false), '|'))",
+    tryIt("strsplit('a1b22c', '\\d+', 'DelimiterType', 'RegularExpression')"),
+    tryIt("strsplit(repmat('a', 1, 40), '(a+)+$', 'DelimiterType', 'RegularExpression')"),
     tryIt("strsplit('a b', ' ', 'Foo', 1)"), tryIt("strsplit('a b', ' ', 'CollapseDelimiters')"), tryIt("strsplit('a b', ' ', 'DelimiterType', 'glob')"),
-  ].join("\n")), ["a|b|c", "a|b", "a|b", "a||b", "refused", "refused", "refused"]);
+  ].join("\n")), ["a|b", "a||b", "refused", "refused", "refused", "refused", "refused"]);
   assert.deepEqual(run([
     "disp(interp1([1 2 3], [10 20 30], 2.5))", "disp(interp1([1 2 3 4], [1 4 9 16], 2.5, 'cubic') == interp1([1 2 3 4], [1 4 9 16], 2.5, 'pchip'))",
     tryIt("interp1([1 2 3 4], [1 4 9 16], 2.5, 'makima')"), tryIt("interp1([1 2 3], [1 4 9], 'linear', 'pp')"), tryIt("interp1([1 2 3], [1 2 3], 1.5, 'linaer')"),

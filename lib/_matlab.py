@@ -7887,7 +7887,6 @@ def strsplit_(s, *args):
     delims = None
     collapse = True
     rest = list(args)
-    regular = False
     if rest and not (_istext(rest[0]) and _text(rest[0]).lower() in ("collapsedelimiters", "delimitertype")):
         d = rest.pop(0)
         delims = [_text(e) for e in d.a] if type(d) is Cell else [_text(d)]
@@ -7900,23 +7899,18 @@ def strsplit_(s, *args):
         v = rest.pop(0)
         if k == "collapsedelimiters":
             collapse = bool(cond(v))
-        elif k == "delimitertype" and _istext(v) and _text(v).lower() in ("simple", "regularexpression"):
-            regular = _text(v).lower() == "regularexpression"
+        elif k == "delimitertype" and _istext(v) and _text(v).lower() == "simple":
+            pass
+        elif k == "delimitertype" and _istext(v) and _text(v).lower() == "regularexpression":
+            # (a regular expression's matching has no bound on its work in Sagebrush: refused,
+            # with regexp's 'split' for the cases a caller accepts that for)
+            raise _err("strsplit: 'DelimiterType', 'RegularExpression' is not supported in Sagebrush; use regexp(str, expression, 'split').")
         else:
             raise _err("strsplit: the option '%s' is not supported." % (k if k is not None else "?"))
     if delims is None:
         delims = [" ", "\f", "\n", "\r", "\t", "\v"]
-    elif regular:
-        if any("(?@" in e or "(??" in e for e in delims):
-            raise _err("strsplit: dynamic expressions are not supported in Sagebrush.")
     else:
         delims = [_escapes(e) for e in delims]
-    if regular:
-        # (the delimiters as one expression, split as regexp's 'split' splits)
-        pat = "|".join("(?:%s)" % e for e in delims)
-        if collapse:
-            pat = "(?:%s)+" % pat
-        return _regexp(1, Char(t), Char(pat), (Char("split"),), 0)
     pat = "|".join(_re.escape(d) for d in sorted(delims, key=len, reverse=True))
     if collapse:
         pat = "(?:%s)+" % pat
