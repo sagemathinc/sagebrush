@@ -783,6 +783,8 @@ class ufunc:
                 return acc[()]
         else:
             acc = a[0] if initial is None else self(initial, a[0])
+            if a.shape[0] == 1 and isinstance(acc, ndarray):
+                acc = acc.copy()  # (a view of the input otherwise: the result is new, CORR-904-1)
             for i in range(1, a.shape[0]):
                 acc = self(acc, a[i])
         if keepdims:
