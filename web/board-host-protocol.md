@@ -11,9 +11,11 @@ what it is, its sandbox, and showing a board without answers.
 
 1. An agent writes a board. One of its pages asks the user things: items of
    `kind: "ask"` (web/board-format.md).
-2. The host embeds `https://sagebrush.space/frame/board/`. It posts the
-   board to the frame with a `revision` of its own (for example the
-   artifact's version) and one end of a new `MessageChannel`.
+2. The host embeds `https://sagebrush.space/frame/board/` in a new iframe,
+   with a nonce in its address (see The bootstrap). When that frame says
+   `ready` with the nonce, the host posts it the board with a `revision` of
+   its own (for example the artifact's version) and one end of a new
+   `MessageChannel`.
 3. The user answers with the board's controls and presses **Submit**. The
    frame sends the page's answers over that channel.
 4. The host checks the submission against the board it posted on that
@@ -21,8 +23,8 @@ what it is, its sandbox, and showing a board without answers.
    submitted.
 5. The agent records the answers in the file
    (`sb board answers FILE --apply SUBMISSION.json`), updates the board,
-   and publishes it again. The host posts the new board on a new channel,
-   and the user sees it.
+   and publishes it again. The host shows the new board in a new frame, with
+   a new nonce and a new channel, and the user sees it.
 
 ## The channel
 
@@ -36,9 +38,11 @@ one load of the frame:
 - The frame takes a port only with a `board` message from `window.parent`.
   It sends `answers` only on that port, and accepts `received` and
   `refused` only from it.
-- Each later `board` message starts the frame afresh, as design/frame.md
-  says. The old document and its port are gone, and the host closes the
-  old `port1`.
+- Each board has a frame of its own. The host doesn't post a second board
+  to a frame: it shows the new board in a new frame, and closes the old
+  `port1`. (A second `board` message would make the frame reload, as
+  design/frame.md says. The reloaded document has no nonce, so it gets no
+  port.)
 
 The channel is what binds a submission to the frame document the host gave
 the board to. `e.source === iframe.contentWindow` only names a browsing
@@ -46,6 +50,36 @@ context. A `WindowProxy` stays the same when the frame is navigated to
 another document, and that document could post from it, but it never had
 the port. The host still checks the source of every window message it acts
 on (`ready`), but takes answers only from the port.
+
+## The bootstrap: which document gets a port
+
+A `ready` from the frame's window doesn't show which document sent it. A
+document the frame was navigated to sends from the same `WindowProxy`.
+Nor does the origin show it: the frame's page sandboxes itself (its
+Content-Security-Policy, design/frame.md), so its origin is opaque and
+`event.origin` is `"null"`, however it is embedded. So the host grants a
+port only to the document it loaded the frame with, and only once:
+
+- **A nonce in the address.** For each board the host makes a new iframe
+  element and loads `https://sagebrush.space/frame/board/#sb-nonce=N`.
+  `N` is `crypto.randomUUID()` (122 random bits), made for that element
+  and never used again.
+  - A fragment is not sent to the server, nor in a `Referer`.
+  - The frame reads the nonce when it starts, removes it from its address,
+    and sends it in its first `ready`.
+  - A document the frame is navigated to was never given the nonce, and
+    the board's code runs in a nested frame of another origin, which can't
+    read it.
+- **Once per element.** The host answers the first `ready` that has the
+  element's nonce, from that element's window, with the board and a port,
+  and no other `ready` after that.
+- **One load per element.** The host counts the element's `load` events.
+  A second one means another document is in the frame, which the host
+  didn't load. The host then closes the channel and grants nothing more.
+  To go on, it shows the board in a new frame.
+
+A host that gives no nonce gets no Submit: the frame shows the board, and
+the host posts it no port.
 
 A host that posts a board without a port gets the board shown without
 Submit. Showing a board needs no channel.
@@ -59,8 +93,9 @@ it doesn't know.
 On the window (`postMessage` to `window.parent`, or to the frame's
 `contentWindow`):
 
-- From the frame: `{ sagebrush: "ready", version: 1 }`. The frame listens,
-  and says it again after every later board.
+- From the frame: `{ sagebrush: "ready", version: 1, nonce? }`. The frame
+  listens. `nonce` is the one in the address the frame was loaded with (see
+  The bootstrap), in its first `ready` only.
 - From the frame: `{ sagebrush: "error", version: 1, message }`. A posted
   text isn't a board; the board shown stays.
 - From the host: `{ sagebrush: "board", version: 1, text, name?, revision? }`,
@@ -184,14 +219,35 @@ in, so nothing in a submission is hidden from it.
 ## An example host
 
 ```js
-const f = document.querySelector("iframe"); // src: https://sagebrush.space/frame/board/
-let port = null; // (the current channel's, only to close it)
-function show(text, name, revision) {
+const FRAME = "https://sagebrush.space/frame/board/";
+let frame = null, port = null; // (the board's frame now, and its channel: only to close them)
+// Each board in a frame of its own: a new iframe element, given a nonce only it has
+function showBoard(text, name, revision) {
+  frame?.el.remove();
   port?.close();
+  port = null;
+  const el = document.createElement("iframe");
+  const me = { el, nonce: crypto.randomUUID(), granted: false, loads: 0, posted: { text, name, revision } };
+  frame = me;
+  el.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads");
+  // (a second load is another document, which this host didn't load: no more answers from this frame)
+  el.addEventListener("load", () => { if (++me.loads > 1 && frame === me) { me.granted = true; port?.close(); port = null; } });
+  el.src = FRAME + "#sb-nonce=" + me.nonce;
+  container.append(el);
+}
+addEventListener("message", (e) => {
+  const me = frame, m = e.data;
+  if (!me || e.source !== me.el.contentWindow || m?.sagebrush !== "ready" || m.version !== 1) return;
+  // (the document the element was loaded with, once: only it was given the nonce)
+  if (me.granted || me.loads > 1 || m.nonce !== me.nonce) return;
+  me.granted = true;
+  openChannel(me);
+});
+function openChannel(me) {
   const ch = new MessageChannel(), p = ch.port1;
   port = p;
   // (this channel's own: a handler still running for an earlier channel never sees or changes them)
-  const posted = { text, name, revision }, taken = new Set(), pending = new Set();
+  const posted = me.posted, taken = new Set(), pending = new Set();
   const say = (sagebrush, id, message) => p.postMessage({ sagebrush, version: 1, id, ...(message ? { message } : {}) });
   p.onmessage = async (e) => {
     const m = e.data;
@@ -216,17 +272,15 @@ function show(text, name, revision) {
       pending.delete(m.id);
     }
   };
-  f.contentWindow.postMessage({ sagebrush: "board", version: 1, text, name, revision }, "*", [ch.port2]);
+  me.el.contentWindow.postMessage({ sagebrush: "board", version: 1, ...posted }, "*", [ch.port2]);
 }
-addEventListener("message", (e) => {
-  if (e.source === f.contentWindow && e.data?.sagebrush === "ready" && e.data.version === 1) show(currentText(), "decisions.board.json", currentRevision());
-});
 ```
 
 ## Status
 
 - Ask items, `sb board answers` and the controls are built in the order of
   /scratch/sagebrush-reviews/boards-both-ways-plan.md.
-- The channel, `revision`, `answers`, `received`, `refused` and
-  `checkSubmission` are new. Until the frame supports them, it ignores the
+- The nonce, the channel, `revision`, `answers`, `received`, `refused` and
+  `checkSubmission` are new. test/board-host-protocol.test.ts runs the
+  example host above against simulated frames, a navigated one too. Until the frame supports them, it ignores the
   port and `revision`, and shows no Submit.
