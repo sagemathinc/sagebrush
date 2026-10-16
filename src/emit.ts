@@ -119,6 +119,42 @@ export class Emitter {
     if (cls.cellName === null) cls.cellName = `$cc${this.cells++}`;
     return cls.cellName;
   }
+  // The namespace a global name is read, written and deleted in: $g, the
+  // module's namespace, at its top level (an inlined list, set or dict
+  // comprehension's too, as CPython's); $G, its globals, everywhere else
+  // (functions, lambdas, generator expressions, class bodies) and for a
+  // name the top level declares global. They differ only for exec and eval
+  // with separate globals and locals, where $g reads the locals, then the
+  // globals, and writes the locals (CPython's LOAD_NAME and STORE_NAME),
+  // and a function defined there sees only the globals.
+  gns(id: string): string {
+    const cur = this.fn.scope;
+    let s = cur;
+    const comp = s.kind === "comp" && !s.isGenerator;
+    // (a walrus target of a top-level comprehension is the globals' in that
+    // comprehension, reads and writes alike, declared global or not:
+    // CPython's symbol table does not count it as the top level's local,
+    // CORR-756-1; only that comprehension's own targets, not those of one
+    // inside or around it, CORR-7D2-1)
+    const walrus = comp && cur.walrusTargets.has(id);
+    while (s.kind === "comp" && !s.isGenerator && s.parent !== null) s = s.parent;
+    if (s.kind !== "module") return "$G";
+    // (an inlined comprehension at the top level reads the top level's
+    // namespace even for a name declared global there, as CPython's,
+    // CORR-C0F-1; the top level itself uses the globals for a name
+    // declared global there or in any scope inside, CORR-C0F-2)
+    if (comp) return walrus ? "$G" : "$g";
+    return s.globals.has(id) || this.globalAnywhere().has(id) ? "$G" : "$g";
+  }
+  // the names some scope of this module declares global
+  private globalNames: Set<string> | null = null;
+  globalAnywhere(): Set<string> {
+    if (this.globalNames === null) {
+      this.globalNames = new Set();
+      for (const s of allScopes(this.top)) for (const n of s.globals) this.globalNames.add(n);
+    }
+    return this.globalNames;
+  }
   loadRes(r: Resolution, id: string): string {
     switch (r.kind) {
       case "local":
@@ -127,8 +163,8 @@ export class Emitter {
         return `(${js(id)} !== undefined ? ${js(id)} : unboundFree(${q(id)}))`;
       case "global": {
         const t = this.temp();
-        if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = $g${prop(id)}) !== undefined ? ${t} : $B${prop(id)})`;
-        return `((${t} = $g${prop(id)}) !== undefined ? ${t} : gname(${q(id)}))`;
+        if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${this.gns(id)}${prop(id)}) !== undefined ? ${t} : $B${prop(id)})`;
+        return `((${t} = ${this.gns(id)}${prop(id)}) !== undefined ? ${t} : gname(${q(id)}))`;
       }
       case "class":
         return `($ns.has(${q(id)}) ? $ns.get(${q(id)}) : ${this.loadRes(r.outer, id)})`;
@@ -146,7 +182,7 @@ export class Emitter {
       case "free":
         return `${js(id)} = ${value};`;
       case "global":
-        return `$g${prop(id)} = ${value};`;
+        return `${this.gns(id)}${prop(id)} = ${value};`;
       case "class":
         return `$ns.set(${q(id)}, ${value});`;
       case "classcell":
@@ -393,7 +429,8 @@ export class Emitter {
     const args = e.args.map((a) => this.ex(a));
     const callerLocals = n === 1 && scope.kind !== "module" ? localsExpr() : "null";
     const fn = f.id === "eval" ? "R.evalIn" : "R.execIn";
-    return `${fn}(${args[0]}, ${args[1] ?? "undefined"}, ${args[2] ?? "undefined"}, $g, ${callerLocals})`;
+    // (a function's exec and eval run in its globals, $G)
+    return `${fn}(${args[0]}, ${args[1] ?? "undefined"}, ${args[2] ?? "undefined"}, ${scope.kind === "module" ? "$g" : "$G"}, ${callerLocals})`;
   }
 
   // `tuple(x for ...)`, `sum(...)`, `any(...)` etc. on the builtin: run the
@@ -783,7 +820,10 @@ export class Emitter {
     switch (t.k) {
       case "Name": {
         const r = resolve(this.fn.scope, t.id);
-        if (r.kind === "global") return this.w(`if ($g${prop(t.id)} === undefined) gname(${q(t.id)}); delete $g${prop(t.id)};`);
+        if (r.kind === "global") {
+          const ns = this.gns(t.id);
+          return this.w(`if (${ns}${prop(t.id)} === undefined) gname(${q(t.id)}); delete ${ns}${prop(t.id)};`);
+        }
         if (r.kind === "class") return this.w(`if (!$ns.delete(${q(t.id)})) gname(${q(t.id)});`);
         if (r.kind === "classcell") return this.w(`classCellGet(${this.cellOf(r.scope)}); ${this.cellOf(r.scope)}.v = undefined;`);
         this.w(`${this.load(t.id)}; ${js(t.id)} = undefined;`);
@@ -1050,6 +1090,7 @@ export class Emitter {
       '"use strict";',
       `const {${RUNTIME_NAMES.join(", ")}} = R;`,
       "const $B = R.builtins;",
+      "const $G = R.realGlobals($g);",
       ...this.hoisted,
     ];
     if (this.fn.temps.length) head.push(`let ${this.fn.temps.join(", ")};`);
