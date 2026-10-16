@@ -1,0 +1,16 @@
+repr :: Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (x*y + x + y^2 + 1, x^2*y + x*y^2 + 1)
+ch09-150 :: 17/2*ybar^3 - 12*ybar^2 + 4*ybar - 49/2
+ch09-151 :: 5*ybar^2 + 17*xbar + 4*ybar + 1
+gens :: (1/2*ybar^3 - ybar^2 - 3/2, ybar)
+arith :: (1/2*ybar^3 - 2*ybar^2 - 7/2, True, 1/2*ybar^3 + ybar^2 + ybar + 1/2, -1/2*ybar^3 + ybar^2 + 3/2, 1/2*ybar^3 - ybar^2 - ybar - 3/2, ybar^3 - 2*ybar^2 - 5/2, 53*ybar^3 + 44*ybar^2 + 87*ybar + 25)
+lift :: 17/2*y^3 - 12*y^2 + 4*y - 49/2
+zero :: (0, True, True)
+parent :: True
+names :: 1/2*v^3 - v^2 - 3/2
+quotient :: ybar^3 + 3*ybar + 1
+ring :: (Multivariate Polynomial Ring in x, y over Rational Field, Ideal (x*y + x + y^2 + 1, x^2*y + x*y^2 + 1) of Multivariate Polynomial Ring in x, y over Rational Field)
+poly gens :: xbar*ybar
+latex :: \frac{17}{2} \mathit{ybar}^{3} - 12 \mathit{ybar}^{2} + 4 \mathit{ybar} - \frac{49}{2}
+latex poly :: (-z a_{1}^{3} - \frac{1}{2} z^{2} + 3 z \mathit{wbar} - \frac{1}{3}, -\frac{5}{7}, 0)
+latex gf :: 3 u^{2} v - v + 2
+latex zz :: -2 p_{1} q^{10} + 1
