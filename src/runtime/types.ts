@@ -167,6 +167,7 @@ type.$jsBase = TypeLayout;
 // so a metaclass __call__ can delegate to it through super().
 const typeCallM = method(type, "__call__", (c: any, ...args: any[]) => constructPlain(c, args));
 typeCallM.$kw = (pos: any[], names: string[], values: any[]) => constructPlainKw(pos[0], pos.slice(1), names, values);
+typeCallM.$kw = (pos: any[], names: string[], values: any[]) => constructPlainKw(pos[0], pos.slice(1), names, values);
 hooks.typeCall = typeCallM;
 // type.__new__(mcls, name, bases, ns, **kw)
 const typeNew = pyfn(function __new__(mcls: any, ...args: any[]) {
@@ -437,13 +438,19 @@ getset(fnType, "__dict__", (f) => {
 });
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
 method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
-method(fnType, "__call__", (f: any, ...a: any[]) => f(...a));
+// (f.__call__(...), and the same for builtins, bound methods and types:
+// their arguments as an array, keywords and BIG_CALL included, HARD-A78-1)
+const callSlot = (m: any) => {
+  m.$kw = (pos: any[], names: string[], values: any[]) => callKw(pos[0], pos.slice(1), names, values);
+  return m;
+};
+callSlot(method(fnType, "__call__", (f: any, ...a: any[]) => f(...a)));
 
 const bfType = builtinType("builtin_function_or_method", [object], () => raise(T.TypeError, "cannot create 'builtin_function_or_method' instances"));
 getset(bfType, "__name__", (f) => f.__name__ ?? f.name);
 getset(bfType, "__qualname__", (f) => f.__qualname__ ?? f.name);
 getset(bfType, "__module__", (f) => f.__module__ ?? null); // (a module's functions: its name, as CPython's)
-method(bfType, "__call__", (f: any, ...a: any[]) => f(...a));
+callSlot(method(bfType, "__call__", (f: any, ...a: any[]) => f(...a)));
 
 const methodType = builtinType("method", [object], (f: any, self: any) => bindMethod(f, self));
 getset(methodType, "__self__", (m) => m.$self);
@@ -451,7 +458,7 @@ getset(methodType, "__func__", (m) => m.$func);
 getset(methodType, "__name__", (m) => m.$func.__name__);
 getset(methodType, "__qualname__", (m) => m.$func.__qualname__);
 getset(methodType, "__doc__", (m) => m.$func.__doc__ ?? null);
-method(methodType, "__call__", (m: any, ...a: any[]) => m(...a));
+callSlot(method(methodType, "__call__", (m: any, ...a: any[]) => m(...a)));
 // Other attributes of a bound method are those of its function.
 method(methodType, "__getattr__", (m: any, name: string) => getattr(m.$func, name));
 method(methodType, "__eq__", (m: any, o: any) => (typeof o === "function" && o.$self !== undefined ? m.$func === o.$func && m.$self === o.$self : NotImplemented));
@@ -1720,6 +1727,7 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   const fold = (op: "or" | "and" | "sub") => (a: any[]) => {
     let r = O.setOp(a[0], O.newSet(), "or");
     for (let i = 1; i < a.length; i++) {
+      if ((i & 1023) === 0) O.pollInterrupt(); // (Stop reaches a long argument list)
       if (op === "or") O.forEach(a[i], (v) => O.setAdd(r, v));
       else if (op === "sub") O.forEach(a[i], (v) => void dictDelete(r.$d, v));
       else r = O.setOp(r, asSet(a[i]), "and");
@@ -1771,7 +1779,10 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "clear", (s: O.PySet) => (dictClear(s.$d), null));
   const update = (a: any[]) => {
     const s: O.PySet = a[0];
-    for (let i = 1; i < a.length; i++) O.forEach(a[i], (v) => O.setAdd(s, v));
+    for (let i = 1; i < a.length; i++) {
+      if ((i & 1023) === 0) O.pollInterrupt();
+      O.forEach(a[i], (v) => O.setAdd(s, v));
+    }
     return null;
   };
   positionalArray(method(cls, "update", (s: O.PySet, ...others: any[]) => update([s, ...others])), update);
@@ -1779,7 +1790,10 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   for (const [name, f] of [["intersection_update", "and"], ["difference_update", "sub"]] as const) {
     const g = (a: any[]) => {
       const s: O.PySet = a[0];
-      for (let i = 1; i < a.length; i++) s.$d = O.setOp(s, asSet(a[i]), f).$d;
+      for (let i = 1; i < a.length; i++) {
+        if ((i & 1023) === 0) O.pollInterrupt();
+        s.$d = O.setOp(s, asSet(a[i]), f).$d;
+      }
       return null;
     };
     positionalArray(method(cls, name, (s: O.PySet, ...os: any[]) => g([s, ...os])), g);
