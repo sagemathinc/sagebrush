@@ -73,3 +73,14 @@ Runtime error in [ ... ]: Invalid sequence universe
 Runtime error in { ... }: Invalid set universe (no hashing algorithm)
 
 end2
+true
+[ 9 .. 11 ]
+{ 9 .. 10 }
+[ -9 .. -7 ]
+
+>> y2 := 2.000000000000000000000000000004999999; [y2 .. 5];
+                                                 ^
+Runtime error in [ ... ]: Sequence range does not consist of integers
+
+3.23456789012345678901234567891
+end3

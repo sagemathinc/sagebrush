@@ -3074,13 +3074,23 @@ def _real_ok(o):
     return isinstance(o, (MReal, int, _Fraction, float)) and not isinstance(o, bool)
 
 
+# A real literal longer, or with an exponent larger, than this is made
+# from its digits and exponent rather than through its exact value
+_REAL_LITERAL_PLAIN = 1000
+
+
 def _real(s):
     """A real literal (1.5, 2., 3e10, 1.5e-3) as a real of the default
     field, made from its digits and exponent: 1e100000000 is never
     expanded to its integer (HARD-1CD-1)."""
     m = _re.fullmatch(r"(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?", s)
-    if not m:
+    if not m or (len(s) <= _REAL_LITERAL_PLAIN and abs(int(m.group(3) or 0)) <= _REAL_LITERAL_PLAIN):
+        # (an ordinary literal: converted as before, keeping its value
+        # exactly; only an extreme one below avoids its expansion,
+        # CORR-9FA-1)
         return MReal._frac(_Fraction(s), 30)
+    if len((m.group(3) or "").lstrip("+-")) > 18:
+        raise MagmaError("a real literal with an exponent of more than 18 digits is not supported yet")
     whole, frac, exp = m.group(1) or "", m.group(2) or "", int(m.group(3) or 0)
     digits = (whole + frac).lstrip("0")
     return MReal(int(digits) if digits else 0, exp - len(frac), 30)
