@@ -1507,7 +1507,11 @@ class MRec:
             # deeper; a value that wraps (a long sequence or string)
             # continues 8 deeper
             deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet, MTuple)) and _multiline(v))
-            lines.append(pad + start + _str(v, indent + (step if deep else 2 * step), indent + step + len(start)))
+            if isinstance(v, MTuple) and deep:
+                # (its structure 4 deeper, its continuation 8, CORR-4F1-2)
+                lines.append(pad + start + _nested(v, _tuple_str, v, indent + step, indent + step + len(start), "", indent + 2 * step))
+            else:
+                lines.append(pad + start + _str(v, indent + (step if deep else 2 * step), indent + step + len(start)))
         return head + "\n" + ",\n".join(lines) + ">"
 
 
@@ -3110,6 +3114,8 @@ def _inline1(v, in_tuple):
         return "<" + ", ".join(_inline(x, True) for x in v) + ">"
     if isinstance(v, MRange):
         return _range_str(v)
+    if isinstance(v, MRec):
+        return v._str(0)  # (one without fields: rec<F | >)
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         items = _items(v)
@@ -3154,14 +3160,14 @@ def _items(v):
 _SPRINT = [None]
 
 
-def _sprint_str(v, nowidth=True):
+def _sprint_str(v, nowidth=True, col=None):
     """v as Sprint and Sprintf's %o make it a string; nowidth=False: as
     printf's %o writes it, without indentation but laid out on 80 columns
     (checked against Magma 2.18)."""
     old = _SPRINT[0]
     _SPRINT[0] = (v, nowidth)
     try:
-        return _str(v)
+        return _str(v, 0, col)
     finally:
         _SPRINT[0] = old
 
@@ -3258,31 +3264,39 @@ def _multiline(v, depth=0):
     return False
 
 
-def _tuple_str(v, indent, col, tail):
+def _tuple_str(v, indent, col, tail, cont=None):
     """A tuple with a part printed over several lines, as Magma prints it:
-    that part laid out at the tuple's indentation, from where the tuple's
-    line has got to, the other parts on the lines around it, laid out on
-    80 columns from the indentation (checked against Magma 2.18)."""
-    out, c, seg = [], col, "<"
+    its text, and the opening line of that part ("[", "rec<F | "), laid out
+    as chunks on 80 columns (_flow: a chunk that doesn't fit moves to the
+    next line, CORR-4F1-1), continued at `cont` (the indentation, or 8
+    deeper as a record's field, CORR-4F1-2); the rest of that part at the
+    tuple's indentation, `indent` (checked against Magma 2.18)."""
+    cont = indent if cont is None else cont
+    out, c, text = [], col if col is not None else indent, "<"
 
-    def flush(text, c):
-        if not text:
-            return c
-        t = text if _making_string() else _wrap(text, c, indent, indent)
+    def flush(text, opener, c):
+        if _making_string():
+            t = text + opener
+        else:
+            words = text.split(" ")
+            chunks = [(w, k < len(words) - 1) for k, w in enumerate(words)]
+            if opener:
+                chunks.append((opener, False))
+            t = _flow(chunks, c, cont, indent)
         out.append(t)
         return len(t) - t.rfind("\n") - 1 if "\n" in t else c + len(t)
 
     for k, p in enumerate(v):
         sep = ">" + tail if k == len(v) - 1 else ", "
         if _multiline(p):
-            c = flush(seg, c)
-            t = _str(p, indent, c)
-            out.append(t)
-            c = len(t) - t.rfind("\n") - 1 if "\n" in t else c + len(t)
-            seg = sep
+            first, rest = _str(p, indent).split("\n", 1)
+            c = flush(text, first, c)
+            out.append("\n" + rest)
+            c = len(rest) - rest.rfind("\n") - 1 if "\n" in rest else len(rest)
+            text = sep
         else:
-            seg += _inline(p, True) + sep
-    flush(seg, c)
+            text += _inline(p, True) + sep
+    flush(text, "", c)
     return "".join(out)
 
 
@@ -3490,7 +3504,9 @@ def _sprintf(fmt, *args, where="printf", string=False):
         else:
             # (Sprintf makes a string: no session layout; printf writes
             # without indentation, _sprint_str)
-            t = _sprint_str(x, string)
+            # (from the column printf's line has got to, CORR-4F1 follow-up)
+            line = "".join(out)
+            t = _sprint_str(x, string, None if string else len(line) - line.rfind("\n") - 1)
         out.append(t.ljust(-width) if width < 0 else t.rjust(width))
     return "".join(out)
 
