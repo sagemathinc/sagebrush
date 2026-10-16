@@ -676,6 +676,11 @@ AA = _AlgebraicRealField()
 
 # ------------------------------------------------------------------ elements
 
+# The most digits _rounded asks for: nf.complex_roots refuses more than
+# 100000, and _roots asks it for 5 more
+_ROUND_MAX_DIGITS = 99995
+
+
 class AlgebraicNumber:
     """An algebraic number: c(z) for z a root of an irreducible integer
     polynomial (gen None: a rational number c[0]).
@@ -782,6 +787,11 @@ class AlgebraicNumber:
         tried = [False, real]
         d0 = d = int(p * 0.30103) + 10
         while True:
+            # (checked before _ball(d) asks the root engine for d digits:
+            # its own maximum is 100000, and RealField(10^7)(sqrt(2)) leaked
+            # its ValueError, daybreak2's HARD-883-1)
+            if d > _ROUND_MAX_DIGITS:
+                raise ArithmeticError("the approximation did not converge within %d digits" % _ROUND_MAX_DIGITS)
             re, im, err = self._ball(d)
             ok = True
             for i, v in ((0, re), (1, im)):
@@ -799,9 +809,9 @@ class AlgebraicNumber:
                 ok = False
             if ok:
                 break
-            if d > 200000:
-                raise ArithmeticError("the approximation did not converge")
-            d *= 2
+            if d >= _ROUND_MAX_DIGITS:
+                raise ArithmeticError("the approximation did not converge within %d digits" % _ROUND_MAX_DIGITS)
+            d = min(2 * d, _ROUND_MAX_DIGITS)
         return (re if exact[0] is None else exact[0], im if exact[1] is None else exact[1])
 
     def parent(self):
