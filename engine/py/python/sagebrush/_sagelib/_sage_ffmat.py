@@ -973,6 +973,10 @@ def _echelon(rows, base, ncols):
         r += 1
         if r == nrows:
             break
+    if hasattr(one, "_exactified"):
+        # (over QQbar and AA: rational entries exact, as Sage's are after
+        # its elimination's zero tests, so that they print as rationals)
+        m = [[x._exactified() for x in row] for row in m]
     return m, pivots, det
 
 
