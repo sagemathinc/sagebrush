@@ -1310,6 +1310,7 @@ class Parser {
 
   postfix(): string {
     let e = this.primary();
+    let chainAt = ""; // the first "[" of consecutive indexes
     while (true) {
       if (this.at("(")) {
         this.next();
@@ -1326,19 +1327,23 @@ class Parser {
           this.calls.set(e, call);
         }
       } else if (this.at("[")) {
-        this.next();
+        // (its errors are said at the "[", as Magma does: in c[i][j], at
+        // the first one)
+        const lb = this.next();
+        if (!(chainAt && this.toks[this.i - 2]?.v === "]")) chainAt = `(${lb.line}, ${lb.col})`;
+        const at = chainAt;
         const idx = [this.expr()];
         if (this.eat("..")) {
           // L[a..b]: a subsequence
           const b = this.expr();
           const by = this.eat("by") ? this.expr() : "1";
           this.expect("]");
-          e = `_m._index(${e}, _m._range(${idx[0]}, ${b}, ${by}, "["))`;
+          e = `_m._index(${e}, _m._range(${idx[0]}, ${b}, ${by}, "["), ${at})`;
           continue;
         }
         while (this.eat(",")) idx.push(this.expr());
         this.expect("]");
-        e = idx.length === 1 ? `_m._index(${e}, ${idx[0]})` : `_m._index(${e}, _m.MTuple([${idx.join(", ")}]))`;
+        e = idx.length === 1 ? `_m._index(${e}, ${idx[0]}, ${at})` : `_m._index(${e}, _m.MTuple([${idx.join(", ")}]), ${at})`;
       } else if (this.at(".") && this.peek(1).t === "num") {
         this.next();
         e = `_m._gen(${e}, ${this.next().v})`;
