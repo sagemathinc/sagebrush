@@ -1,0 +1,64 @@
+'r = [c for _ in range(1)]' -> ('[1]', [], ['c', 'r'])
+'r = list(c for _ in range(1))' -> NameError: name 'c' is not defined
+'r = {c: 0 for _ in range(1)}' -> ('{1: 0}', [], ['c', 'r'])
+'r = {c for _ in range(1)}' -> ('{1}', [], ['c', 'r'])
+'class A:\n  x = c\nr = A.x' -> NameError: name 'c' is not defined
+'def f(): return c\n' -> NameError: name 'c' is not defined
+'h = lambda: c' -> NameError: name 'c' is not defined
+'global b\nb = 5\nr = b' -> ('5', ['b'], ['c', 'r'])
+'global c\nr = c' -> NameError: name 'c' is not defined
+'def f():\n  global z\n  z = 3\nf()' -> ('3', ['z'], ['c', 'f'])
+'x = 1\ndef f(): return x\n' -> NameError: name 'x' is not defined
+'import math\ndef f(): return math.pi' -> NameError: name 'math' is not defined
+"globals()['a'] = 5\ndef f(): return a" -> ('5', ['a'], ['c', 'f'])
+'class A:\n  def m(self): return c\n' -> NameError: name 'c' is not defined
+'del c' -> ('None', [], [])
+'global c\ndel c' -> NameError: name 'c' is not defined
+'r = (lambda: [c for _ in range(1)])' -> NameError: name 'c' is not defined
+'def f():\n  return [y for y in range(2)]\nr = f()' -> ('[0, 1]', [], ['c', 'f', 'r'])
+'x = 2\nclass B:\n  y = x\nr=B.y' -> NameError: name 'x' is not defined
+'c = 7\nr = c' -> ('7', [], ['c', 'r'])
+'r = len' -> ('1', [], ['c', 'r'])
+'def f(): return len([1, 2])\n' -> ('2', [], ['c', 'f'])
+"def f(): return eval('c')\n" -> NameError: name 'c' is not defined
+"def f(): return eval('1 + 1')\n" -> ('2', [], ['c', 'f'])
+'r = [(lambda: c)() for _ in range(1)]' -> NameError: name 'c' is not defined
+5
+False 5
+NameError name 'c' is not defined
+10 [10] [10]
+3
+'global x\nr=[x for _ in range(1)]' -> ('[20]', {'x': 10}, {'x': 20, 'r': [20]})
+'global x\nr={x for _ in range(1)}' -> ('{20}', {'x': 10}, {'x': 20, 'r': {20}})
+'global x\nr={x: 0 for _ in range(1)}' -> ('{20: 0}', {'x': 10}, {'x': 20})
+'global x\nr=list(x for _ in range(1))' -> ('[10]', {'x': 10}, {'x': 20, 'r': [10]})
+'def f():\n global x\n x=3\nf()\nr=x' -> ('3', {'x': 3}, {'x': 20, 'r': 3})
+'r=x\ndef f():\n global x\n x=1' -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+'x = 5\ndef f():\n global x\nr = x' -> ('5', {'x': 5}, {'x': 20, 'r': 5})
+'def f():\n global x\ndel x' -> ('None', {}, {'x': 20})
+'class C:\n global x\n x = 7\nr = x' -> ('7', {'x': 7}, {'x': 20, 'r': 7})
+'def f():\n global x\nr=[x for _ in range(1)]' -> ('[20]', {'x': 10}, {'x': 20, 'r': [20]})
+"sub = {'x': 40}\nexec('def f(): return x', None, sub)\nr = sub['f']()" -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+"sub = {'x': 40}\nexec('global x\\nx = 50', None, sub)\nr = x" -> ('20', {'x': 50}, {'x': 20, 'r': 20})
+"sub = {'x': 40}\nexec('r2 = x', None, sub)\nr = sub['r2']" -> ('40', {'x': 10}, {'x': 20, 'r': 40})
+"sub = {}\nexec('r2 = x', None, sub)\nr = sub['r2']" -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+"r = eval('x', None, {})" -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+"exec('r = x')" -> ('20', {'x': 10}, {'x': 20, 'r': 20})
+'global x\nr=[(x:=i) for i in range(2)]' -> ('[0, 1]', {'x': 1}, {'x': 20, 'r': [0, 1]})
+'global x\nr={(x:=i) for i in range(2)}' -> ('{0, 1}', {'x': 1}, {'x': 20, 'r': {0, 1}})
+'global x\nr={i: (x:=i) for i in range(2)}' -> ('{0: 0, 1: 1}', {'x': 1}, {'x': 20})
+'global x\nr=[[(x:=j) for j in range(2)] for i in range(2)]' -> ('[[0, 1], [0, 1]]', {'x': 1}, {'x': 20, 'r': [[0, 1], [0, 1]]})
+'global x\nr=[i for i in range(3) if (x:=i) > 0]' -> ('[1, 2]', {'x': 2}, {'x': 20, 'r': [1, 2]})
+'global x\nr=[(x,(x:=i)) for i in range(2)]' -> ('[(10, 0), (0, 1)]', {'x': 1}, {'x': 20, 'r': [(10, 0), (0, 1)]})
+'global x\nr=[(x:=i,(lambda:x)()) for i in range(2)]' -> ('[(0, 0), (1, 1)]', {'x': 1}, {'x': 20, 'r': [(0, 0), (1, 1)]})
+'r=[(x:=i) for i in range(2)]' -> ('[0, 1]', {'x': 1}, {'x': 20, 'r': [0, 1]})
+'r=[(x,(x:=i)) for i in range(2)]' -> ('[(10, 0), (0, 1)]', {'x': 1}, {'x': 20, 'r': [(10, 0), (0, 1)]})
+'global x\nr=list((x:=i) for i in range(2))' -> ('[0, 1]', {'x': 1}, {'x': 20, 'r': [0, 1]})
+'r=[x for _ in range(1)]' -> ('[20]', {'x': 10}, {'x': 20, 'r': [20]})
+'r=[([x for j in range(1)], False and (x:=i)) for i in range(2)]' -> ('[([20], False), ([20], False)]', {'x': 10}, {'x': 20, 'r': [([20], False), ([20], False)]})
+'r=[([x for j in range(1)], [(x:=j) for j in []]) for i in range(2)]' -> ('[([20], []), ([20], [])]', {'x': 10}, {'x': 20, 'r': [([20], []), ([20], [])]})
+'r=[(x:=i,[x for j in range(1)]) for i in range(2)]' -> ('[(0, [20]), (1, [20])]', {'x': 1}, {'x': 20, 'r': [(0, [20]), (1, [20])]})
+'r=[([(x:=j) for j in range(2)], x) for i in range(2)]' -> ('[([0, 1], 20), ([0, 1], 20)]', {'x': 1}, {'x': 20, 'r': [([0, 1], 20), ([0, 1], 20)]})
+'r=[[(x:=j) for j in range(2)] for i in range(2)]' -> ('[[0, 1], [0, 1]]', {'x': 1}, {'x': 20, 'r': [[0, 1], [0, 1]]})
+'r=[(x, [(x:=j) for j in range(2)], x) for i in range(1)]' -> ('[(20, [0, 1], 20)]', {'x': 1}, {'x': 20, 'r': [(20, [0, 1], 20)]})
+'r=[[(x, (x:=j)) for j in range(2)] for i in range(1)]' -> ('[[(10, 0), (0, 1)]]', {'x': 1}, {'x': 20, 'r': [[(10, 0), (0, 1)]]})
