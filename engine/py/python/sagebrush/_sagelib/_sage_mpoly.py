@@ -934,20 +934,24 @@ def _map_vars(f, R, convert=False):
     z, as in Sage; arithmetic and == still match names)."""
     S = f._ring
     _admit_conversion(len(f._d), R, S._n)
-    if convert and not all(n in R._names for n in S._names) and S._n <= R._n:
+    # the target's names by position, once: linear in the two arities (a
+    # list search per name was quadratic: adding zero ideals over rings of
+    # 24000 variables took 11 s, the review's HARD-38C-1)
+    pos = {n: i for i, n in enumerate(R._names)}
+    if convert and not all(n in pos for n in S._names) and S._n <= R._n:
         d = {}
         for e, c in f._d.items():
             t = tuple(e) + (0,) * (R._n - S._n)
             d[t] = R._dom._add(d.get(t, R._dom.zero), R._dom._conv(S._dom._out(c)))
         return MPolynomial(R, _integral(R, d))
     idx = []
-    for name in S._names:
-        if name not in R._names:
-            if any(e[S._names.index(name)] for e in f._d):
+    for k, name in enumerate(S._names):
+        if name not in pos:
+            if any(e[k] for e in f._d):
                 raise TypeError("cannot convert %r into %r: no variable %s" % (f, R, name))
             idx.append(None)
         else:
-            idx.append(R._names.index(name))
+            idx.append(pos[name])
     d = {}
     for e, c in f._d.items():
         t = [0] * R._n

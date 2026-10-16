@@ -43,3 +43,16 @@ test("pickling an int/float/str/bytes/tuple subclass instance keeps its value", 
     "print(pickle.loads(pickle.dumps(b)).tag)";
   assert.equal(cli("-c", src), "1\n");
 });
+
+// limits of the tutorial fixes (daybreak2's HARD-38C-1, HARD-862-1): ideal
+// generators convert by name in time linear in the rings' arities (adding
+// zero ideals over 24000 variables took 11 s), and a rational's square root
+// at a huge precision is refused before the integer square root (prec=10^8
+// ran for minutes in 480 MB)
+test("ideal conversion is linear in the arity; sqrt(prec) is admitted first", () => {
+  const t = Date.now();
+  const src = "import time\nS = PolynomialRing(QQ, 24000, 'x'); T = PolynomialRing(QQ, 24000, 'y')\nt = time.time(); K = S.ideal(S(0)) + T.ideal(T(0)); print(len(K.gens()), time.time() - t < 2)\n" +
+    "try: QQ(2).sqrt(prec=100000000)\nexcept NotImplementedError as e: print('refused', 'limit' in str(e))\nprint((2/1).sqrt(prec=60000) > 1)";
+  assert.equal(cli("--sage", "-c", src), "2 True\nrefused True\nTrue\n");
+  assert.ok(Date.now() - t < 30000, `took ${Date.now() - t} ms`);
+});
