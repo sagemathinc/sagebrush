@@ -34,3 +34,21 @@ test("numpy-only methods over RealField(p) and ComplexField(p), p > 53, are refu
   assert.equal(lines[16], "True False");
   assert.equal(lines[17], "-2.0 -49.0000000000000 2");
 });
+
+test("solve_right and solve_left read a right-hand side boundedly and check the entries actually read", () => {
+  // (astra's CORR-476-1: a list subclass whose len() says 2 but which
+  // iterates ten entries, or one, was solved with the extra entries dropped
+  // or the missing equation ignored; Sage refuses any list with TypeError,
+  // sagebrush refuses these with the ValueError of a wrong-sized vector)
+  const src = "class L(list):\n def __init__(self, n): list.__init__(self, [1, 2]); self.n = n\n def __iter__(self): return iter(range(self.n))\n" +
+    "for F in (RealField(100), GF(7), QQbar):\n A = identity_matrix(F, 2)\n" +
+    " for n in (10, 1, 3, 2):\n  for how in ('right', 'left'):\n" +
+    "   try: print(F, n, how, list(getattr(A, 'solve_' + how)(L(n))))\n" +
+    "   except ValueError as e: print(F, n, how, 'ValueError:', e)\n";
+  const lines = cli(src).trim().split("\n");
+  assert.equal(lines.length, 24);
+  for (const l of lines) {
+    if (/ 2 (right|left) /.test(l)) assert.match(l, / \[0, 1\]$|\[0\.0+, 1\.0+\]$/, l);
+    else assert.match(l, /ValueError: number of (rows|columns) of self must equal degree of right-hand side$/, l);
+  }
+});
