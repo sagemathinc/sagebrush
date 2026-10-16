@@ -437,12 +437,13 @@ const absBig = (x: bigint) => (x < 0n ? -x : x);
 const BIG = 1n << 1024n;
 // The bit length of x, without a string of its digits once it is large:
 // shifts bracket the length, then halve the bracket (each shift's result is
-// no bigger than x, and soon small).
-export function bitLength(x: bigint): number {
+// no bigger than x, and soon small).  With max, a known bound on the length,
+// the bracket starts there, so no shift copies more than half of x.
+export function bitLength(x: bigint, max?: number): number {
   x = absBig(x);
   if (x < BIG) return x === 0n ? 0 : x.toString(2).length;
-  let lo = 1024, hi = 2048; // x >> lo is nonzero, x >> hi is zero
-  while (x >> BigInt(hi) !== 0n) {
+  let lo = 1024, hi = max ?? 2048; // x >> lo is nonzero, x >> hi is zero
+  while (max === undefined && x >> BigInt(hi) !== 0n) {
     lo = hi;
     hi *= 2;
   }

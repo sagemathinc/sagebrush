@@ -32,3 +32,22 @@ test("log, log2 and log10 of a 100-million-bit int are exact and fit a 96 MiB he
       "341.3333333333333\n",
   );
 });
+
+// HARD-315-1: past Sagebrush's bound (2^27 bits) the logarithm is refused,
+// promptly and in a 96 MiB heap, rather than computed from copies of the int.
+test("log, log2 and log10 of an int past 2^27 bits are refused promptly in a 96 MiB heap (HARD-315-1)", () => {
+  const code = [
+    "import math",
+    "x = 1 << 400000000",
+    "for f in (math.log, math.log2, math.log10):",
+    "    try: print(f(x))",
+    "    except OverflowError as e: print(type(e).__name__, e)",
+    "del x",
+    "print(repr(math.log2((1 << 134217727) + 1)), repr(math.log10((1 << 134217727) + (1 << 134217674))))",
+  ].join("\n");
+  const t = Date.now();
+  const got = execFileSync(process.execPath, ["--max-old-space-size=96", __dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 60000 });
+  const msg = "OverflowError int too large: Sagebrush takes the logarithm of an int of at most 134217728 bits\n";
+  assert.equal(got, msg + msg + msg + "134217727.0 40403561.77683941\n");
+  assert.ok(Date.now() - t < 20000);
+});
