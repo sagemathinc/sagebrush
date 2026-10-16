@@ -3,7 +3,8 @@
 A *host* is a page that shows a board to its user and passes what the user
 answers back to whoever made the board. The first host will be CoCalc's
 chat artifact card. It shows a `.board.json` file an agent published, and
-turns the user's answers into the next chat turn. This file is the contract
+gives the user's answers to the agent: as guidance to its turn if one is
+running, else as a new turn (see Delivery). This file is the contract
 between such a host and the board. design/frame.md covers the frame itself:
 what it is, its sandbox, and showing a board without answers.
 
@@ -20,7 +21,8 @@ what it is, its sandbox, and showing a board without answers.
    frame sends the page's answers over that channel.
 4. The host checks the submission against the board it posted on that
    channel. It then gives the submission to the agent as data the user
-   submitted.
+   submitted: as guidance to the agent's running turn, or, if none is
+   running, as a new turn.
 5. The agent records the answers in the file
    (`sb board answers FILE --apply SUBMISSION.json`), updates the board,
    and publishes it again. The host shows the new board in a new frame, with
@@ -161,6 +163,28 @@ Sagebrush provides the check as a function of the board's text and the
 message, so that every host checks the same way. It goes in the
 `sagebrush-board` package, built with the Submit bar.
 
+## Delivery
+
+A submission goes to the agent that published the board, in the thread
+where it published it:
+
+- **A turn of that agent is running** in the thread: the host delivers the
+  submission to it as guidance (in CoCalc, a message steering the running
+  turn). The turn goes on, now with the answers. Turns can be long, and an
+  agent takes guidance well.
+- **No turn is running:** the host starts one, with the submission as its
+  message.
+- **Racing the end of a turn:** if the turn ends while the host is
+  delivering to it, the delivery is as one of the two, never both and
+  never neither. The service decides, under the submission's idempotency
+  key (see Once).
+
+Either way the delivery is the "admission" of Once: `received` means the
+guidance, or the new turn, was saved durably. The submission `id` is the
+idempotency key of that delivery at the service, whichever kind it is. A
+submission sent again therefore can't be delivered twice, as guidance or
+as a turn.
+
 ## The host's duties
 
 - **Whose data.** The user pressed Submit and chose or typed the answers.
@@ -183,8 +207,9 @@ message, so that every host checks the same way. It goes in the
   - The host marks an `id` *pending* synchronously, when the message
     arrives, before any asynchronous step. A repeat of a pending `id` is
     ignored: the first one's outcome answers both.
-  - `received` means the agent's turn was admitted durably (in CoCalc, the
-    chat message saved), not that the message arrived. The host awaits
+  - `received` means the delivery (see Delivery: guidance to a running
+    turn, or a new turn) was admitted durably (in CoCalc, the message
+    saved), not that the message arrived. The host awaits
     that admission, then marks the `id` taken and sends `received`. It
     answers a repeat of a taken `id` with `received` again.
   - When admission definitely fails, the host forgets the pending `id` and
@@ -192,9 +217,9 @@ message, so that every host checks the same way. It goes in the
     `id`.
   - When the outcome is unknown (a timeout, a lost connection), the host
     asks the service with the `id` before it answers. The submission `id`
-    is the idempotency key of the turn it starts, at the service and not
-    only in the page, so that a submission sent again after a reload or
-    from another tab can't start a second turn.
+    is the idempotency key of its delivery, at the service and not only in
+    the page. So a submission sent again after a reload or from another tab
+    can't be delivered a second time, as guidance or as a turn.
   - Each channel has its own board, pending ids and taken ids. A handler
     still running when a new board replaces its channel sees and changes
     only its own; its reply goes to its closed port and is lost.
@@ -258,9 +283,11 @@ function openChannel(me) {
     if (pending.has(m.id)) return; // (the first one's outcome answers)
     if (taken.size + pending.size >= 100) return say("refused", m.id, "too many submissions");
     pending.add(m.id); // (before anything asynchronous)
-    // (admitDurably: resolves once the turn is saved, rejects on a definite
-    // failure; the submission id is the turn's idempotency key at the
-    // service, which it asks again on an unknown outcome)
+    // (admitDurably: delivers it as guidance to the agent's running turn,
+    // else as a new turn (Delivery); resolves once that is saved, rejects
+    // on a definite failure; the submission id is the delivery's
+    // idempotency key at the service, which it asks again on an unknown
+    // outcome)
     try {
       await admitDurably({ idempotencyKey: m.id, from: currentUser, stale: posted.revision !== currentRevision(), submission: r.submission });
       taken.add(m.id);
