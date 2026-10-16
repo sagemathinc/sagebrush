@@ -355,10 +355,13 @@ def _cpow_eval(f, z, bits):
 class _Gen:
     """A root of an irreducible integer polynomial g, located by an
     approximation, with the interval Sage displays for it."""
-    __slots__ = ("g", "z", "digits", "civ", "real", "_cache")
+    __slots__ = ("g", "z", "digits", "civ", "real", "_cache", "combined")
 
     def __init__(self, g, z, digits=40):
         self.g = g
+        # (made by _combine, for an operation on numbers of different
+        # fields: these cost several times a root's memory, _heap_units)
+        self.combined = False
         # (re, im) Fractions, accurate to about 10^-digits, digits enough to
         # identify the root (_identify)
         if len(g) > 2:
@@ -1396,7 +1399,7 @@ def _select(fs, a, values=None):
     raise ArithmeticError("could not identify the minimal polynomial")
 
 
-def _from_root(f, z, T=AlgebraicNumber, civ=None):
+def _from_root(f, z, T=AlgebraicNumber, civ=None, combined=False):
     """The element of type T which is the root of the irreducible f that z
     (an approximation, or a function of a number of digits giving one)
     identifies (_identify)."""
@@ -1405,7 +1408,30 @@ def _from_root(f, z, T=AlgebraicNumber, civ=None):
         return T(None, [q], civ if civ is not None else _civ_rational(q))
     zz, d = _identify(f, z, 40)
     gen = _Gen(f, zz, d)
+    gen.combined = combined
     return T(gen, [0, 1], civ if civ is not None else gen.civ)
+
+
+def _heap_units(x, seen):
+    """The heap the algebraic number x takes in a matrix, in the units of
+    _sage_ffmat's budget (bytes, with an operation's working copies): its
+    own coordinates, and its field's generator when no earlier entry (ids in
+    seen, updated) shares it.  Measured in a 96 MiB heap as the largest n x
+    n matrix whose entries were built and added to themselves (Oct 16 2026):
+    a rational 890, an element of a shared field 1440, an element with a
+    root of its own 2290 (degree 2) to 3250 (degrees 3 to 6), and one of a
+    field _combine made for numbers of different fields 8250 (degree 4) to
+    9300 (degree 6)."""
+    u = 340 + 550 * max(1, len(x._c))
+    g = x._gen
+    if g is not None and id(g) not in seen:
+        seen.add(id(g))
+        d = len(g.g) - 1
+        if g.combined:
+            u += max(8000, 1400 * d)
+        else:
+            u += 850 if d <= 2 else 1810 + 150 * max(0, d - 6)
+    return u
 
 
 def _log_arg(z):
@@ -1491,7 +1517,7 @@ def _combine(a, b, op, T, civ):
     p = _Probe()
     f = fs[0][0] if len(fs) == 1 else _select(fs, p)
     real = T is AlgebraicReal or (a._is_real_gen() and b._is_real_gen())
-    return _from_root(f, lambda d: (lambda z: (z[0], _F(0)) if real else z)(p._approx(d)), T, civ)
+    return _from_root(f, lambda d: (lambda z: (z[0], _F(0)) if real else z)(p._approx(d)), T, civ, combined=True)
 
 
 def _same_root(f, a, b):
