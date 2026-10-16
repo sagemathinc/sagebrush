@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { askMarkdown, cleanDoc, layout, type DocAsk } from "../web/board/doc";
 import { answerProblem, askProblems, asksOf, answerText } from "../web/board/ask";
 import { checkText } from "../src/board-check";
+import { submissionProblem } from "../src/board-answers";
 
 // A board's questions (`kind: "ask"`): kept by the loader, shown as a note
 // by a reader without controls, their answers checked, and read and written
@@ -198,4 +199,43 @@ test("board answers --apply: a host's submission written into the board, checked
   assert.equal(r.status, 1);
   assert.match(r.stderr, /too large for a submission \(at most 64 KiB\)/);
   assert.equal(run(["board", "answers", g, "-o", o]).status, 2);
+});
+
+test("board answers --apply: a page whose questions are ambiguous or can't be answered is refused before anything is written (daybreak2's CORR-02C-1)", () => {
+  const SUB = { sagebrush: "answers", version: 1, page: { number: 1 }, answers: { q: "a" } };
+  // (two questions with one id: the board refuses such a document, and so does --apply; the check itself too)
+  const twice = { format: "sagebrush-board", version: 1, nodes: [{ id: "q", kind: "ask", text: "Q", input: "radio", options: ["a"] }, { id: "g", kind: "group", children: [{ id: "q", kind: "ask", text: "Q", input: "number", required: true }] }] };
+  const f = file("twice.board.json", twice), before = readFileSync(f, "utf8");
+  let r = run(["board", "answers", f, "--apply", file("s1.json", SUB)]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /two items have the id "q"/);
+  assert.equal(readFileSync(f, "utf8"), before);
+  assert.equal(submissionProblem(cleanDoc(twice), SUB), 'two questions on page 1 have the id "q"');
+  // (a question that can't be answered as written: a radio question without options)
+  const bad = { format: "sagebrush-board", version: 1, nodes: [{ id: "q", kind: "ask", text: "Q", input: "radio", options: ["a"] }, { id: "r", kind: "ask", text: "R", input: "radio" }] };
+  const g = file("bad.board.json", bad), was = readFileSync(g, "utf8");
+  r = run(["board", "answers", g, "--apply", file("s2.json", SUB)]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /the question "r" can't be answered as written \(options: a radio question needs `options`/);
+  assert.equal(readFileSync(g, "utf8"), was);
+});
+
+test("board answers --apply writes the board whole: a new file of a random name, its mode kept, nothing left when it fails (daybreak2's SEC-02C-2)", () => {
+  const sub = file("s3.json", { sagebrush: "answers", version: 1, page: { number: 2 }, answers: { plan: "a" } });
+  const sub2 = join(dir, "w");
+  mkdirSync(sub2);
+  const f = join(sub2, "m.board.json");
+  writeFileSync(f, JSON.stringify(BOARD));
+  chmodSync(f, 0o600);
+  let r = run(["board", "answers", f, "--apply", sub]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(f).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(sub2), ["m.board.json"]);
+  // (-o a directory: the rename fails; the new file is removed)
+  const d = join(sub2, "adir");
+  mkdirSync(d);
+  r = run(["board", "answers", f, "--apply", sub, "-o", d]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /adir: /);
+  assert.deepEqual(readdirSync(sub2).sort(), ["adir", "m.board.json"]);
 });
