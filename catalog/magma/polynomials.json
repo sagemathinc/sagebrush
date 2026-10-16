@@ -1,0 +1,298 @@
+[
+  {
+    "name": "PolynomialRing",
+    "kind": "function",
+    "signature": "(<Rng> R) -> RngUPol",
+    "summary": "The ring of polynomials in one variable over R; P<x> := PolynomialRing(R) names its variable x.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); P;",
+        "expected": "Univariate Polynomial Ring in x over Integer Ring\n"
+      }
+    ],
+    "differs": [
+      "Polynomial rings over the integers and the rationals only: over other rings, PolynomialRing is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Roots",
+      "Factorization"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Roots",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> SeqEnum",
+    "summary": "The roots of a nonzero polynomial in its coefficient ring, as [<root, multiplicity>, ...].",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Roots((x - 1)^2*(x + 2));",
+        "expected": "[ <-2, 1>, <1, 2> ]\n"
+      }
+    ],
+    "differs": [
+      "Polynomial rings over the integers and the rationals only: over other rings, PolynomialRing is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Factorization"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Roots",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <Rng> R) -> SeqEnum",
+    "summary": "The roots of a nonzero polynomial in the ring R, with their multiplicities.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Roots(4*x^2 - 1, Rationals());",
+        "expected": "[ <-1/2, 1>, <1/2, 1> ]\n"
+      }
+    ],
+    "differs": [
+      "R must be the integers or the rationals: roots in a real or complex field, a finite field or a number field are refused."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Degree",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> RngIntElt",
+    "summary": "The degree of a polynomial; -1 for the zero polynomial.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Degree(x^3 + 1); Degree(P!0);",
+        "expected": "3\n-1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Coefficients",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> SeqEnum",
+    "summary": "The coefficients of f, constant term first; [] for the zero polynomial.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Coefficients(x^3 - 6*x^2 + 11*x - 6);",
+        "expected": "[ -6, 11, -6, 1 ]\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Coefficient"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Coefficient",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <RngIntElt> i) -> RngElt",
+    "summary": "The coefficient of x^i in f (0 beyond its degree).",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Coefficient(x^3 - 6*x^2 + 11*x - 6, 2);",
+        "expected": "-6\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "LeadingCoefficient",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> RngElt",
+    "summary": "The coefficient of the highest power of a nonzero polynomial.",
+    "examples": [
+      {
+        "code": "Q<t> := PolynomialRing(Rationals()); LeadingCoefficient(3/2*t^2 + 1);",
+        "expected": "3/2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Evaluate",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <RngElt> x) -> RngElt",
+    "summary": "The value of the polynomial f at x.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Evaluate(x^2 - 2, 3); Evaluate(x^2 - 2, 1/2);",
+        "expected": "7\n-7/4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Derivative",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> RngUPolElt",
+    "summary": "The derivative of a polynomial.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Derivative(x^3 - 6*x^2 + 11*x - 6);",
+        "expected": "3*x^2 - 12*x + 11\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Derivative",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <RngIntElt> k) -> RngUPolElt",
+    "summary": "The k-th derivative of a polynomial (k at least 0).",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Derivative(x^5 + x, 3);",
+        "expected": "60*x^2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Discriminant",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> RngElt",
+    "summary": "The discriminant of a polynomial of degree at least 1.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Discriminant(x^2 + 1); Discriminant(x^3 - x);",
+        "expected": "-4\n4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Resultant",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <RngUPolElt> g) -> RngElt",
+    "summary": "The resultant of two polynomials.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Resultant(x^2 - 2, x^2 - 3);",
+        "expected": "1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "IsIrreducible",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> BoolElt",
+    "summary": "Whether a nonzero polynomial is irreducible over its coefficient ring (a constant never is).",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); IsIrreducible(x^2 + 1); IsIrreducible(x^2 - 1); IsIrreducible(2*x + 4);",
+        "expected": "true\nfalse\nfalse\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Factorization",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> SeqEnum, RngElt",
+    "summary": "The factorization of a nonzero polynomial into irreducibles, as [<factor, exponent>, ...], and its leading coefficient.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Factorization(x^4 - 1);",
+        "expected": "[\n    <x - 1, 1>,\n    <x + 1, 1>,\n    <x^2 + 1, 1>\n]\n"
+      },
+      {
+        "code": "Q<t> := PolynomialRing(Rationals()); Factorization(2*t^2 - 1/2);",
+        "expected": "[\n    <t - 1/2, 1>,\n    <t + 1/2, 1>\n]\n"
+      }
+    ],
+    "differs": [
+      "Polynomial rings over the integers and the rationals only: over other rings, PolynomialRing is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Roots",
+      "IsIrreducible"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Gcd",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <RngUPolElt> g) -> RngUPolElt",
+    "summary": "The greatest common divisor of two polynomials (monic over the rationals).",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); Gcd(x^2 - 1, x^2 - 2*x + 1);",
+        "expected": "x - 1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  }
+]
