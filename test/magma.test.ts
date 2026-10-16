@@ -963,6 +963,24 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   assert.match(shown, /true\n$/);
 });
 
+test("a matrix's entry A[i, j] is read and assigned as Magma does, also of a matrix arithmetic made", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8",
+    input: "A := Matrix(Rationals(), 2, 2, [2, 1, 5, 3]); B := A^-1;\nA[3,1];\nA[1,0];\nB[1,3];\nA[1,1,1];\nA[<1,1>];\n" +
+      "C := Matrix(Integers(), 2, 2, [1, 2, 3, 4]); C[1,2] := 1/2;\nC;\nF := Matrix(GF(5), 2, 2, [1, 2, 3, 4]);\nB[2,1];\n\"end\";\n" }).stdout as string;
+  // Magma's words (checked against Magma; its caret is at the "[", which Sagebrush doesn't say yet)
+  for (const said of ["Runtime error in '[]': Index 1 (3) should be in the range [1 .. 2]\n", "Runtime error in '[]': Index 2 (0) should be in the range [1 .. 2]\n",
+    "Runtime error in '[]': Index 2 (3) should be in the range [1 .. 2]\n", "Runtime error in '[]': Bad argument types\n"])
+    assert.ok(out.includes(said), said + out);
+  assert.equal(out.split("Runtime error in '[]': Bad argument types").length - 1, 2, out);
+  assert.ok(out.includes("Runtime error in :=: RHS cannot be coerced into the coefficient ring"), out);
+  assert.ok(out.includes("[1 2]\n[3 4]\n"), out);  // (unchanged by the refused write)
+  assert.ok(out.replace(/\s+/g, " ").includes("Matrix over a finite field is not supported yet; instead: Sage mode"), out);
+  // (an entry is one number: it printed the whole matrix before)
+  assert.match(out, /\n-5\nend\n$/);
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
