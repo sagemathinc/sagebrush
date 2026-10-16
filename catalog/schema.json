@@ -31,7 +31,8 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^\\S+$"
-          }
+          },
+          "maxItems": 20
         },
         "kind": {
           "enum": [
@@ -47,7 +48,8 @@
           ]
         },
         "signature": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 1000
         },
         "summary": {
           "type": "string",
@@ -55,20 +57,24 @@
           "maxLength": 150
         },
         "doc": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 20000
         },
         "examples": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/example"
-          }
+          },
+          "maxItems": 10
         },
         "differs": {
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
-          }
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "maxItems": 20
         },
         "status": {
           "enum": [
@@ -80,21 +86,24 @@
         },
         "alternative": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 500
         },
         "domains": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1
-          }
+          },
+          "maxItems": 20
         },
         "see_also": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1
-          }
+          },
+          "maxItems": 20
         },
         "upstream": {
           "type": "string",
@@ -109,7 +118,8 @@
           "items": {
             "type": "string",
             "minLength": 1
-          }
+          },
+          "maxItems": 20
         }
       },
       "allOf": [
@@ -173,11 +183,13 @@
       "properties": {
         "code": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 4000
         },
         "expected": {
           "type": "string",
-          "pattern": "(^$|\\n$)"
+          "pattern": "(^$|\\n$)",
+          "maxLength": 8000
         },
         "runtimes": {
           "type": "array",

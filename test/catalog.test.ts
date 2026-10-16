@@ -25,7 +25,10 @@ test("catalog gate 1: the validator refuses what catalog/schema.json refuses", (
     "ok = {'name': 'f', 'kind': 'function', 'signature': '(x)', 'summary': 'S.', 'examples': [{'code': 'f(1)', 'expected': '1\\n'}], 'differs': [], 'status': 'full'}",
     "bad = [dict(ok, kind='func'), dict(ok, summary='x' * 151), dict(ok, examples=[]), dict(ok, status='absent'), dict(ok, status='partial'),",
     "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1'}]), dict(ok, extra=1), {k: v for k, v in ok.items() if k != 'differs'},",
-    "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1\\n', 'runtimes': ['jvm']}]), dict(ok, name='two words'), dict(ok, aliases=['a b']), dict(ok, aliases='g')]",
+    "       dict(ok, examples=[{'code': 'f(1)', 'expected': '1\\n', 'runtimes': ['jvm']}]), dict(ok, name='two words'), dict(ok, aliases=['a b']), dict(ok, aliases='g'),",
+    "       dict(ok, differs=['d'] * 21), dict(ok, differs=['d' * 501]), dict(ok, alternative='a' * 501), dict(ok, signature='s' * 1001),",
+    "       dict(ok, examples=[{'code': 'c' * 4001, 'expected': ''}]), dict(ok, examples=[{'code': 'c', 'expected': 'e' * 8001 + '\\n'}]),",
+    "       dict(ok, examples=[{'code': 'c', 'expected': ''}] * 11), dict(ok, doc='d' * 20001)]",
     "print(json.dumps([c.validate(ok), [len(c.validate(b)) > 0 for b in bad],",
     "  c.validate(dict(ok, status='absent', examples=[], alternative='use g')) + c.validate(dict(ok, aliases=['g', 'h.k']))]))",
   ].join("\n");
