@@ -299,7 +299,8 @@ class Vector(list):
             return _ffmat()._vector_op(self, other, "dot")
         if len(other) != len(self):
             raise ArithmeticError("degrees (%d and %d) must be the same" % (len(self), len(other)))
-        return self * Vector(other)
+        # (over QQ when either vector is: Vector(other) drops other's ring)
+        return _qq_scalar(self * Vector(other), self, other)
 
     def norm(self, p=2):
         """The p-norm: for p = 2 the Euclidean norm, exact (in QQ when it is
@@ -342,7 +343,8 @@ class Vector(list):
         ff = _ffmat()
         if (R is not sa.ZZ and R is not sa.QQ) or not all(isinstance(a, int) or type(a).__name__ == "Rational" for a in self):
             if p == 2:
-                return sa.sqrt(sum(a * a for a in self))
+                r = sa.sqrt(sum(a * a for a in self))
+                return sa.SR(r) if R is sa.SR else r
             raise NotImplementedError("the %s-norm of a vector over %r is not available in sagebrush yet" % (p, R))
 
         def root(s, q):
@@ -402,9 +404,12 @@ def _ffmat():
 def _over_qq(r, *operands):
     """The vector r, with QQ as its ring when an operand is a vector over
     QQ or a rational number and r's entries are rational (Sage keeps QQ:
-    vector(QQ, [1, 2]) + vector(QQ, [1, 2]) is over QQ, not ZZ)."""
+    vector(QQ, [1, 2]) + vector(QQ, [1, 2]) is over QQ, not ZZ); with SR
+    when an operand is a vector over SR."""
     sa = _sa()
-    if any(_qq_operand(o) for o in operands) and all(isinstance(x, int) or type(x).__name__ == "Rational" for x in r):
+    if any(_sr_operand(o) for o in operands):
+        r._ring = sa.SR
+    elif any(_qq_operand(o) for o in operands) and all(isinstance(x, int) or type(x).__name__ == "Rational" for x in r):
         r._ring = sa.QQ
     return r
 
@@ -416,8 +421,15 @@ def _qq_operand(o):
     return isinstance(o, _F) or type(o).__name__ == "Rational"
 
 
+def _sr_operand(o):
+    return isinstance(o, Vector) and not isinstance(o, SeriesVector) and getattr(o, "_ring", None) is _sa().SR
+
+
 def _qq_scalar(x, *operands):
-    """x, in QQ when it is rational and either vector is over QQ."""
+    """x, in QQ when it is rational and either vector is over QQ; in SR
+    when either is over SR."""
+    if any(_sr_operand(o) for o in operands):
+        return _sa().SR(x)
     if (isinstance(x, int) or type(x).__name__ == "Rational") and any(_qq_operand(o) for o in operands if isinstance(o, Vector)):
         return _sa().QQ(x)
     return x
@@ -2335,6 +2347,9 @@ def vector(*args):
         if ring is sa.ZZ and any(not isinstance(x, int) for x in v):
             raise TypeError("no conversion of this rational to integer")
         v._ring = ring
+    elif ring is sa.SR:
+        # (vector(SR, [1, 2]) is over SR, not ZZ by its entries)
+        v._ring = ring
     return v
 
 
@@ -3378,6 +3393,10 @@ class ComplexField_:
             Traceback (most recent call last):
             ...
             NotImplementedError: CC('1e400'): complex numbers beyond the range of doubles are not available in sagebrush yet
+            sage: CC('1e-400j')  # sagebrush only (Sage: 1.00000000000000e-400*I)
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: CC('1e-400j'): complex numbers beyond the range of doubles are not available in sagebrush yet
         """
         z = complex(re) + complex(im) * 1j
         # (CC's numbers are doubles: CC('1e400') was +infinity, CC('1e-400') 0)
@@ -3406,6 +3425,14 @@ def _beyond_doubles(x):
     a double."""
     if type(x) in (int, bool, float, complex) or x is None:
         return False  # (RR's numbers past the doubles are float subclasses)
+    if isinstance(x, str):
+        # (every number in the string, so the parts of '1e400+1e-400j' too:
+        # one that is finite and nonzero exactly but 0 or infinite as a double)
+        import re
+        for t in re.findall(r"(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", x):
+            if re.search(r"[1-9]", re.split(r"[eE]", t)[0]) and float(t) in (0.0, float("inf")):
+                return True
+        return False
     if type(x).__name__.startswith("Complex") and callable(getattr(x, "real", None)):
         return _beyond_doubles(x.real()) or _beyond_doubles(x.imag())
     try:

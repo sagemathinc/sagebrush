@@ -67,3 +67,37 @@ T('RDF norm fro', lambda: vector(RDF, [3, 4]).norm('fro'))
 print('Zmod6 parent ::', vector(Zmod(6), [1, 2]).parent())
 for D in [-1, -4, -9, -2, 3]:
     print('QuadraticField(%d) ::' % D, QuadraticField(D, 'b'))
+# astra's CORR-923-1: CDF with a real field below 53 bits meets in ComplexField of that precision, in both orders
+for bits in [24, 52, 53, 54]:
+    F = RealField(bits)
+    a, b = vector(F, [F('1.0000001'), 2, 3]), vector(CDF, [CDF('1.0000002'), 3, 4])
+    T('RF%d + CDF' % bits, lambda: a + b)
+    T('CDF + RF%d' % bits, lambda: b + a)
+    T('RF%d * CDF' % bits, lambda: a * b)
+    T('CDF cross RF%d' % bits, lambda: b.cross_product(a))
+    T('RF%d - CDF empty' % bits, lambda: vector(F, []) - vector(CDF, []))
+# CORR-923-2: the dot product keeps a QQ operand's ring, on either side
+for u, w in [([1, 2], [1, 2]), ([], []), ([0], [0])]:
+    T('ZZ.dot(QQ) %s' % u, lambda: vector(ZZ, u).dot_product(vector(QQ, w)))
+    T('QQ.dot(ZZ) %s' % u, lambda: vector(QQ, u).dot_product(vector(ZZ, w)))
+# CORR-923-3: a real exponent keeps the vector's precision; an empty vector's norm is 0 in the exponent's ring
+for p in [RealField(24)(3), RR(3), RR(2), RealField(200)(3), 3, 7/2]:
+    for V in [vector(RealField(100), [1, 2]), vector(RR, [1, 2]), vector(ComplexField(100), [1, 2]), vector(RR, []), vector(RealField(100), [])]:
+        T('%s norm %s %s' % (V.base_ring(), p, V), lambda: V.norm(p))
+# CORR-923-4: NaN in double norms
+nan = float('nan')
+for R in [RDF, CDF]:
+    for e, p in [([1, 0], nan), ([], nan), ([1, nan], Infinity), ([nan, 1], Infinity), ([1, nan], -Infinity), ([nan, 1], -Infinity), ([1, nan], 2), ([nan], -1)]:
+        T('%s %s norm %s' % (R, e, p), lambda: vector(R, e).norm(p))
+# vectors over SR keep SR; Z/1Z meets Z/nZ
+for w in [vector(SR, [1, 2]), vector(ZZ, [1, 2]), vector(QQ, [1, 2]), vector(RR, [1, 2])]:
+    T('SR + %s' % w.base_ring(), lambda: vector(SR, [3, 4]) + w)
+    T('%s * SR' % w.base_ring(), lambda: w * vector(SR, [3, 4]))
+T('SR + RDF', lambda: vector(SR, [3, 4]) + vector(RDF, [1, 2]))
+T('SR norm', lambda: vector(SR, [3, 4]).norm())
+T('SR norm sqrt', lambda: vector(SR, [1, 2]).norm())
+T('Zmod1 + Zmod6', lambda: vector(Zmod(1), [1, 2]) + vector(Zmod(6), [1, 2]))
+T('Zmod4 + Zmod1', lambda: vector(Zmod(4), [1, 2]) + vector(Zmod(1), [1, 2]))
+T('Zmod1 + GF3', lambda: vector(Zmod(1), [1, 2]) + vector(GF(3), [1, 2]))
+T('GF2 + Zmod1', lambda: vector(GF(2), [1, 2]) + vector(Zmod(1), [1, 2]))
+T('Zmod4 + Zmod9', lambda: vector(Zmod(4), [1, 2]) + vector(Zmod(9), [1, 2]))
