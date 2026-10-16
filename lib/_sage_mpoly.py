@@ -1357,8 +1357,11 @@ class MPolynomial:
         dom = self._ring._dom
         if not isinstance(mon, MPolynomial):
             raise TypeError("Argument 'mon' has incorrect type (expected a multivariate polynomial, got %s)" % type(mon).__name__)
-        e = _exponents_in(self._ring, mon, "mon must have same parent as self.")
-        return dom._out(self._d.get(e, dom.zero))
+        # a monomial of another parent is refused, as in Sage (only
+        # coefficient() reads one by variable name: R2-MUL-F6)
+        if mon._ring != self._ring:
+            raise TypeError("mon must have same parent as self.")
+        return dom._out(self._d.get(mon._leading()[0], dom.zero))
 
     # ---- printing
     def __repr__(self):
