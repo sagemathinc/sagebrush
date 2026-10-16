@@ -120,6 +120,11 @@
             "minLength": 1
           },
           "maxItems": 20
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^https://\\S+$",
+          "maxLength": 300
         }
       },
       "allOf": [

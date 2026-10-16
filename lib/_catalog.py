@@ -25,7 +25,7 @@ KINDS = ["function", "procedure", "class", "method", "attribute", "constant", "m
 STATUSES = ["full", "partial", "stub-error", "absent"]
 RUNTIMES = ["node", "deno", "bun", "browser", "package"]
 FIELDS = ["name", "aliases", "kind", "signature", "summary", "doc", "examples", "differs", "status", "alternative",
-          "domains", "see_also", "upstream", "upstream_version", "tags"]
+          "domains", "see_also", "upstream", "upstream_version", "tags", "source"]
 REQUIRED = ["name", "kind", "signature", "summary", "examples", "differs", "status"]
 # the sizes schema.json allows (what a search hands an agent stays small:
 # lib/_pyjs_docsearch.py budgets, HARD-012-1)
@@ -43,6 +43,11 @@ RUNNERS = {"python": "_python_examples:run"}
 # string of import lines); the built index gives each example the lines it
 # needs, as `setup`, so that it runs where it is copied to (CORR-012-1)
 PRELUDES = {"python": "_python_examples:PRELUDE"}
+
+# how a mode finds the object a name names, "module:function" (None: none),
+# for the entry's link to its source (source_url)
+SOURCES = {"python": "_python_docsearch:resolve"}
+REPO = "https://github.com/sagemathinc/sagebrush"
 
 # the public names of a mode, "module:function" returning them: each must have
 # an entry or be in catalog/<mode>/missing.txt (gate 2)
@@ -189,6 +194,9 @@ def validate(entry):
             errs.append("examples[%d]: code is longer than %d characters" % (i, CODE_CHARS))
         if isinstance(ex, dict) and isinstance(ex.get("expected"), str) and len(ex["expected"]) > EXPECTED_CHARS:
             errs.append("examples[%d]: expected is longer than %d characters" % (i, EXPECTED_CHARS))
+    src = entry.get("source")
+    if "source" in entry and not (isinstance(src, str) and src.startswith("https://") and len(src) <= 300 and not any(c.isspace() for c in src)):
+        errs.append("source must be an https:// URL of at most 300 characters")
     if status == "absent" and "alternative" not in entry:
         errs.append("an absent entry needs an alternative")
     if status in ("full", "partial", "stub-error") and isinstance(exs, list) and not exs:
@@ -264,6 +272,81 @@ def setup(prelude, code):
     return "\n".join(out)
 
 
+def source_ref():
+    """The commit the source links name: $SAGEBRUSH_SOURCE_REF (empty: none),
+    else the one the CLI bundle was built from (sys._sagebrush_commit), else
+    None (no links)"""
+    ref = _os.environ.get("SAGEBRUSH_SOURCE_REF")
+    if ref is not None:
+        return ref or None
+    c = getattr(_sys, "_sagebrush_commit", None)
+    return c if isinstance(c, str) and c else None
+
+
+def _lib_text(rel):
+    """The text of lib/<rel>: the CLI bundle's own copy, else the file"""
+    reader = getattr(_sys, "_sagebrush_lib_file", None)
+    if reader is not None:
+        text = reader(rel)
+        if isinstance(text, str):
+            return text
+    try:
+        with open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), rel), encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _span(lines, first):
+    """The last line of the definition starting at line `first` (1-based):
+    the line before the next one indented no more than it (blank and
+    comment lines aside, trailing ones not counted)"""
+    head = lines[first - 1]
+    indent = len(head) - len(head.lstrip())
+    last = first
+    k = first
+    # (decorators, then the def or class line itself)
+    while k <= len(lines) and lines[k - 1].lstrip().startswith("@"):
+        k += 1
+    for n in range(k + 1, len(lines) + 1):
+        line = lines[n - 1]
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        last = n
+    return max(last, k)
+
+
+def source_url(obj, ref):
+    """The GitHub link to the lines of lib/ that define obj, at the commit
+    ref: .../blob/REF/lib/FILE#Lstart-Lend; None for what is not Python of
+    lib/ (the runtime's own functions, in TypeScript)"""
+    obj = getattr(obj, "__wrapped__", obj)
+    code = getattr(obj, "__code__", None)
+    if code is not None:
+        path, first = getattr(code, "co_filename", None), getattr(code, "co_firstlineno", None)
+    elif isinstance(obj, type):
+        mod = _sys.modules.get(getattr(obj, "__module__", None) or "")
+        path, first = getattr(mod, "__file__", None), obj.__dict__.get("__firstlineno__")
+    else:
+        return None
+    if not isinstance(path, str) or not isinstance(first, int) or first < 1:
+        return None
+    libdir = _os.path.dirname(_os.path.abspath(__file__))
+    if not path.startswith(libdir + "/"):
+        return None
+    rel = path[len(libdir) + 1:]
+    text = _lib_text(rel)
+    if text is None:
+        return None
+    lines = text.split("\n")
+    if first > len(lines):
+        return None
+    return "%s/blob/%s/lib/%s#L%d-L%d" % (REPO, ref, rel, first, _span(lines, first))
+
+
 def _module(name, group):
     return name.rsplit(".", 1)[0] if "." in name else group
 
@@ -273,8 +356,17 @@ def index(mode, base=None):
     `module`, and `open_problem` (False) for the readers of the older index"""
     out = []
     prelude = _prelude(mode)
+    ref = source_ref()
+    resolve = _call(SOURCES, mode) if ref else None
     for group, e in load(mode, base):
         d = {k: e[k] for k in FIELDS if k in e}
+        if "source" not in d and resolve is not None:
+            try:
+                url = source_url(resolve(e["name"]), ref)
+            except Exception:
+                url = None
+            if url:
+                d["source"] = url
         if prelude and isinstance(d.get("examples"), list):
             d["examples"] = [dict(x, setup=setup(prelude, x["code"])) for x in d["examples"]]
         d["mode"] = mode
