@@ -45,6 +45,13 @@ def run(code, ns=None):
     buf = _Capped()
     old = _sys.stdout
     _sys.stdout = buf
+    import builtins
+    # (a figure shown is a line [figure N: ...]: lib/_graphics.py show; the
+    # figures an earlier example left open are not this one's)
+    plt = _sys.modules.get("matplotlib.pyplot")
+    if plt is not None and hasattr(plt, "_flush_figures"):
+        plt.close("all")
+    builtins.__sagebrush_catalog__ = [0]
     try:
         if body.strip():
             exec(compile(body, "<example>", "exec"), ns)
@@ -52,10 +59,15 @@ def run(code, ns=None):
             v = eval(compile(last, "<example>", "eval"), ns)
             if v is not None:
                 print(repr(v))
+        # (and the figures it left open, as the notebook shows them after a cell)
+        plt = _sys.modules.get("matplotlib.pyplot")
+        if plt is not None and hasattr(plt, "_flush_figures"):
+            plt._flush_figures()
     except Exception as err:
         # (what it printed, then the traceback's last line: catalog/SCHEMA.md)
         print("%s: %s" % (type(err).__name__, err))
     finally:
+        del builtins.__sagebrush_catalog__
         _sys.stdout = old
     return buf.getvalue()
 
@@ -122,7 +134,6 @@ SUMMARIES = {
     "matplotlib.pyplot.axhline": "A horizontal line across the axes at height y.",
     "matplotlib.pyplot.axis": "Sets the limits from [xmin, xmax, ymin, ymax]; 'off' hides the axes, and 'equal', 'scaled' or 'square' give equal units. Returns None, where matplotlib returns the limits.",
     "matplotlib.pyplot.axvline": "A vertical line across the axes at x.",
-    "matplotlib.pyplot.bar": "A bar chart: bars at x with the given heights (width, bottom, color, label).",
     "matplotlib.pyplot.barh": "A horizontal bar chart: bars at y with the given widths.",
     "matplotlib.pyplot.cla": "Clear the current axes.",
     "matplotlib.pyplot.clf": "Clear the current figure: remove its axes.",
@@ -135,21 +146,17 @@ SUMMARIES = {
     "matplotlib.pyplot.gca": "The current axes (made if there are none).",
     "matplotlib.pyplot.gcf": "The current figure (made if there is none).",
     "matplotlib.pyplot.grid": "Show or hide the grid lines.",
-    "matplotlib.pyplot.hist": "A histogram of the data: counts in bins (bins, range, density, cumulative, histtype); returns (n, bins, patches).",
     "matplotlib.pyplot.imshow": "An image of a 2D array (through a colormap) or an RGB(A) array.",
     "matplotlib.pyplot.ioff": "Accepted for compatibility: Sagebrush shows figures when the cell ends.",
     "matplotlib.pyplot.ion": "Accepted for compatibility: Sagebrush shows figures when the cell ends.",
     "matplotlib.pyplot.legend": "A legend of the labelled lines, markers and patches (loc).",
     "matplotlib.pyplot.pie": "A pie chart of the values (labels, colors, autopct, startangle).",
-    "matplotlib.pyplot.plot": "Lines and/or markers through the points: plot(y), plot(x, y), with a format string such as 'r--o'.",
     "matplotlib.pyplot.rc_context": "A with-block in which the given rcParams apply, restored after it.",
     "matplotlib.pyplot.rcdefaults": "Restore the default rcParams.",
     "matplotlib.pyplot.savefig": "Save the current figure to a file: SVG, or PNG (dpi, transparent, facecolor).",
-    "matplotlib.pyplot.scatter": "Markers at the points (x, y), with sizes s and colors c (through a colormap when numbers).",
     "matplotlib.pyplot.stem": "A stem plot: a vertical line from the baseline to each point, with a marker on top.",
     "matplotlib.pyplot.step": "A step plot: a staircase through the points (where='pre', 'post' or 'mid').",
     "matplotlib.pyplot.subplot": "Axes at one place of a grid of rows and columns: subplot(nrows, ncols, index) or subplot(221).",
-    "matplotlib.pyplot.subplots": "A figure and a grid of axes: fig, ax = subplots(), or fig, axs = subplots(nrows, ncols).",
     "matplotlib.pyplot.suptitle": "A title above all the figure's axes.",
     "matplotlib.pyplot.text": "Text at the point (x, y) in data coordinates.",
     "matplotlib.pyplot.tight_layout": "Accepted: Sagebrush lays out the axes' labels without overlap already.",
