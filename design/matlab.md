@@ -113,7 +113,11 @@ cases:
   function's variables) undefined again: they are Python locals, which
   `locals()` cannot delete, so the compiler assigns them `Undef`. Using one
   afterwards is "Unrecognized function or variable", as static resolution
-  says; patterns (`clear ab*`) still go through the run-time path.
+  says; patterns (`clear ab*`) still go through the run-time path. `clear`
+  followed by one of its ItemType words (`all`, `variables`, `functions`
+  ...) clears a variable of that name if one holds a value at that point,
+  as MATLAB's clear page says, and is the keyword otherwise; `clearvars`
+  has no such words, so its arguments are always names.
 - **A function named without arguments is called,** as MATLAB does
   (`rand`, `pi`). A handle is a value.
 - **A global variable** is one value shared by every workspace that
