@@ -2522,6 +2522,9 @@ def _real_pair(a, b):
         return a, MReal.of(b, a.prec)
     if isinstance(b, MReal) and not isinstance(a, MReal):
         return MReal.of(a, b.prec), b
+    if isinstance(a, MReal) and isinstance(b, MReal) and a.prec != b.prec:
+        p = min(a.prec, b.prec)  # (two reals meet at the lower precision)
+        return MReal.of(a, p), MReal.of(b, p)
     return a, b
 
 
@@ -3151,22 +3154,30 @@ class MReal:
     def _o(self, o):
         """The other operand's value: an exact one coerced into this real's
         own field first, as Magma does (not at the default precision:
-        RealField(50)!(10^40+1) - (10^40+1) is 0, CORR-C682-1)."""
-        return MReal.of(o, self.prec).frac()
+        RealField(50)!(10^40+1) - (10^40+1) is 0, CORR-C682-1); a real of
+        a higher precision reduced to this one's (CORR-0C6-1)."""
+        return MReal.of(o, min(self.prec, o.prec) if isinstance(o, MReal) else self.prec).frac()
+
+    def _s(self, o):
+        """This real's value, reduced to the other's precision where that
+        is lower: two reals meet in the field of the lower (CORR-0C6-1)."""
+        if isinstance(o, MReal) and o.prec < self.prec:
+            return MReal.of(self, o.prec).frac()
+        return self.frac()
 
     def __add__(self, o):
-        return MReal._frac(self.frac() + self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self._s(o) + self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     __radd__ = __add__
 
     def __sub__(self, o):
-        return MReal._frac(self.frac() - self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self._s(o) - self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     def __rsub__(self, o):
-        return MReal._frac(self._o(o) - self.frac(), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self._o(o) - self._s(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     def __mul__(self, o):
-        return MReal._frac(self.frac() * self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
+        return MReal._frac(self._s(o) * self._o(o), self._p(o)) if _real_ok(o) else NotImplemented
 
     __rmul__ = __mul__
 
@@ -3174,7 +3185,7 @@ class MReal:
         d = self._o(o)
         if d == 0:
             raise MagmaError("Division by zero")
-        return MReal._frac(self.frac() / d, self._p(o))
+        return MReal._frac(self._s(o) / d, self._p(o))
 
     def __rtruediv__(self, o):
         return MReal.of(o, self.prec) / self
@@ -3207,22 +3218,22 @@ class MReal:
         return MReal(abs(self.m), self.e, self.prec)
 
     def __eq__(self, o):
-        return _real_ok(o) and self.frac() == self._o(o)
+        return _real_ok(o) and self._s(o) == self._o(o)
 
     def __hash__(self):
         return hash(self.frac())
 
     def __lt__(self, o):
-        return self.frac() < self._o(o)
+        return self._s(o) < self._o(o)
 
     def __le__(self, o):
-        return self.frac() <= self._o(o)
+        return self._s(o) <= self._o(o)
 
     def __gt__(self, o):
-        return self.frac() > self._o(o)
+        return self._s(o) > self._o(o)
 
     def __ge__(self, o):
-        return self.frac() >= self._o(o)
+        return self._s(o) >= self._o(o)
 
     def _dec(self):
         """The value to prec significant decimal digits: (m, e) with value
@@ -3240,7 +3251,7 @@ class MReal:
                 e -= 1
             else:
                 break
-        if 2 * r >= D:
+        if 2 * r > D or (2 * r == D and q % 2):  # (a tie to even, CORR-0C6-2)
             q += 1
             if q == 10 ** p:
                 q //= 10
@@ -4396,13 +4407,22 @@ def Sqrt(x):
 def _rsqrt(x):
     if x.m < 0:
         raise MagmaError("Sqrt of a negative real")
-    p = x.prec
-    f = x.frac()
-    k = p + 5
-    # floor(sqrt(f) * 10^k)
-    num = f.numerator * 10 ** (2 * k)
-    s = _math.isqrt(num // f.denominator)
-    return MReal._frac(_Fraction(s, 10 ** k), p)
+    if x.m == 0:
+        return MReal(0, 0, x.prec)
+    # sqrt(m * 2^e), scaled to its own magnitude (CORR-0C6-3): s =
+    # floor(sqrt(m * 2^(2k))) with at least bits + 2 bits, and s + 1/2
+    # where the root isn't exact, so that the one rounding is correct
+    bits = _bits(x.prec)
+    m, e = x.m, x.e
+    if e % 2:
+        m, e = m << 1, e - 1
+    k = max(0, bits + 2 - m.bit_length() // 2)
+    N = m << (2 * k)
+    s = _math.isqrt(N)
+    h = e // 2 - k  # value = s * 2^h
+    f = _Fraction(s) if s * s == N else _Fraction(2 * s + 1, 2)
+    f = f * (_Fraction(1 << h) if h >= 0 else _Fraction(1, 1 << -h))
+    return MReal._frac(f, x.prec)
 
 
 def Exp(x):
