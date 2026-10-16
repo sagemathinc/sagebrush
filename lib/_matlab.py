@@ -2098,27 +2098,62 @@ def peek(base, path):
     return cur
 
 
-def _cs_positions(v, subs):
-    """the linear indices (1-based) of the elements [v(subs).f] = ... sets: all of a struct
-    array's, or those subs selects"""
-    n = _numel(v) if type(v) is Struct else 1
+# the most values a comma-separated list on the left of an assignment ([S(i,j).f] = ..., [C{i,j}] = ...)
+# takes: repeated subscripts multiply (S(I,I) with n-element I selects n^2 elements, even of a
+# scalar S), so the count is admitted before the positions or the right side's outputs are made
+_CS_MAX = 100000
+
+
+def _cs_cardinality(dims, args):
+    """how many elements v(args) selects, from the subscripts alone (no positions are built):
+    their product, as _positions forms it"""
+    n = len(args)
+    if n == 0:
+        return _prod(dims)
+    if n == 1:
+        return int(_ivec(args[0], _prod(dims), -1, False)[0].size)
+    d = list(dims)
+    if len(d) < n:
+        d = d + [1] * (n - len(d))
+    elif len(d) > n:
+        d = d[:n - 1] + [_prod(d[n - 1:])]
+    k = 1
+    for j in range(n):
+        k *= int(_ivec(args[j], d[j], j, False)[0].size)
+    return k
+
+
+def _cs_admit(k, what):
+    if k > _CS_MAX:
+        raise _err("%s with %d comma-separated outputs is beyond Sagebrush's limit of %d." % (what, k, _CS_MAX))
+
+
+def cs_positions(v, subs=None):
+    """the linear indices (1-based) of the elements [v.f] = ... or [v(subs).f] = ... sets: all of a
+    struct array's, or those subs selects, their count admitted first; None for a value that is not
+    a struct array (one output). The assignment reuses them."""
+    if type(v) is not Struct:
+        return None
+    n = _numel(v)
     if subs is None:
-        return list(range(1, n + 1)) if type(v) is Struct else [1]
-    lin = _box(np.arange(1, n + 1, dtype=np.float64).reshape(_stored(_dims(v) if type(v) is Struct else (1, 1))))
+        return list(range(1, n + 1))
+    _cs_admit(_cs_cardinality(_dims(v), list(subs)), "[S(...).f] = ...")
+    lin = _box(np.arange(1, n + 1, dtype=np.float64).reshape(_stored(_dims(v))))
     return [int(x) for x in _farr(index(lin, list(subs))).reshape(-1)]
 
 
-def cs_count(v, subs=None):
-    """how many values [v.f] = ... or [v(subs).f] = ... takes"""
-    return max(len(_cs_positions(v, subs)), 1) if type(v) is Struct else 1
+def cs_count(pos):
+    """how many values [v.f] = ... or [v(subs).f] = ... takes, from cs_positions"""
+    return max(len(pos), 1) if pos is not None else 1
 
 
-def set_field_cs(s, f, vals, subs=None):
-    """[s.f] = vals or [s(subs).f] = vals: each selected element's field f set to the next value"""
+def set_field_cs(s, f, vals, subs=None, pos=None):
+    """[s.f] = vals or [s(subs).f] = vals: each selected element's field f set to the next value
+    (pos: cs_positions of s and subs)"""
     vals = list(vals)
-    if type(s) is not Struct or (subs is None and _numel(s) <= 1):
+    if type(s) is not Struct or pos is None or (subs is None and _numel(s) <= 1):
         return assign(s, [("p", list(subs)), ("f", f)] if subs is not None else [("f", f)], cp(vals[0]))
-    for k, v in zip(_cs_positions(s, subs), vals):
+    for k, v in zip(pos, vals):
         s = assign(s, [("p", [float(k)]), ("f", f)], cp(v))
     return s
 
@@ -3553,6 +3588,8 @@ _lastwarn = ["", ""]
 # the warnings' states, as warning's page describes them: "all", then the identifiers set since
 _warn_all = ["on"]
 _warn_ids = {}
+# (and the display modes, their defaults as warning's page gives them)
+_warn_modes = {"backtrace": "on", "verbose": "off"}
 
 
 def _warn_enabled(ident):
@@ -5089,43 +5126,71 @@ def ifft_(x, *args):
 
 
 def _fftn_call(x, sizes, inverse, name, nd=None, symmetric=False):
+    """fft2, fftn and their inverses: the transform over MATLAB's first nd dimensions (all of
+    them for fftn), each page beyond them apart, X padded or cut to sizes first"""
     A = _farr(x, name)
-    r = A
     dims = len(_dims(x)) if nd is None else nd
     sz = None if sizes is None else [int(float(v)) for v in _arr(sizes).reshape(-1)]
-    real = A.dtype.kind != "c"
-    for dim in range(1, dims + 1):
-        if dim > r.ndim:
-            r = r.reshape((1,) + r.shape)
-        ax = r.ndim - dim
-        n = r.shape[ax] if sz is None or dim > len(sz) else sz[dim - 1]
-        if n == 0:
-            shape = list(r.shape)
-            shape[ax] = 0
-            return _canon(np.zeros(tuple(shape)))
-        r = _fft1(r, n, ax, inverse) if real and not inverse else (np.fft.ifft(r, n=n, axis=ax) if inverse else np.fft.fft(r, n=n, axis=ax))
-        real = False
-    if not inverse and A.dtype.kind != "c" and r.size:
-        # (the transform of real data, exactly conjugate-symmetric over all its axes, as MATLAB's is)
-        r = (r + np.conj(_mirror(r))) / 2
-    if inverse and r.dtype.kind == "c" and (symmetric or (sz is None and _conj_symmetric_nd(A))):
-        # (ifft2/ifftn of conjugate-symmetric data, or with 'symmetric', is real, as their pages say)
-        r = np.ascontiguousarray(r.real)
+    while A.ndim < dims:
+        A = A.reshape((1,) + A.shape)
+    axes = [A.ndim - d for d in range(1, dims + 1)]
+    ns = [A.shape[ax] if sz is None or d > len(sz) else sz[d - 1] for d, ax in enumerate(axes, 1)]
+    for ax, n in zip(axes, ns):
+        if n < A.shape[ax]:
+            A = np.take(A, np.arange(n), axis=ax)
+        elif n > A.shape[ax]:
+            pad = [(0, 0)] * A.ndim
+            pad[ax] = (0, n - A.shape[ax])
+            A = np.pad(A, pad)
+    if A.size == 0:
+        return _canon(np.zeros(A.shape))
+    if not inverse:
+        r = np.fft.fftn(A, axes=axes)
+        if A.dtype.kind != "c":
+            # (the transform of real data, exactly conjugate-symmetric, as MATLAB's is)
+            r = _hermitian(r, axes)
+            # (a zero imaginary part is +0, as FFTW's)
+            r = _cplx(r.real, np.where(r.imag == 0, 0.0, r.imag))
+        return _box(_contig(r))
+    if not symmetric:
+        # (ifft2/ifftn of conjugate-symmetric data is real, as their pages say)
+        symmetric = _is_hermitian(A, axes)
+    if symmetric:
+        # ('symmetric': the second half ignored, as if it were the first's conjugate)
+        r = np.ascontiguousarray(np.fft.ifftn(_hermitian(A, axes), axes=axes).real)
+    else:
+        r = np.fft.ifftn(A, axes=axes)
     return _box(_contig(r))
 
 
-def _mirror(A):
-    """A[-k mod n] along every axis at once"""
-    for ax, n in enumerate(A.shape):
-        A = np.take(A, (-np.arange(n)) % n, axis=ax)
+def _mirror(A, axes):
+    """A[-k mod n] along each of the stored axes at once"""
+    for ax in axes:
+        A = np.take(A, (-np.arange(A.shape[ax])) % A.shape[ax], axis=ax)
     return A
 
 
-def _conj_symmetric_nd(A):
-    """A[k] == conj(A[-k mod n]) along every axis at once, exactly"""
-    if A.dtype.kind != "c":
-        return False
-    return bool(np.all(A == np.conj(_mirror(A))))
+def _is_hermitian(A, axes):
+    """A[k] == conj(A[-k mod n]) over the axes, in every page, exactly"""
+    return bool(np.all(A == np.conj(_mirror(A, axes))))
+
+
+def _hermitian(A, axes):
+    """A made exactly conjugate-symmetric over the stored axes, each page apart: an element whose
+    mirror (-k mod n over the axes) comes first in MATLAB's element order is that mirror's
+    conjugate, an element that is its own mirror its real part. The first half is kept as it is,
+    and nothing is computed, so nothing overflows."""
+    T = sorted(axes)
+    lead = A.ndim - len(T)
+    B = np.moveaxis(np.asarray(A, dtype=np.complex128), T, list(range(lead, A.ndim)))
+    tshape = B.shape[lead:]
+    # (the stored order is MATLAB's transposed: C order over the stored axes is MATLAB's order)
+    lin = np.arange(int(np.prod(tshape))).reshape(tshape)
+    mlin = _mirror(lin, range(len(tshape)))
+    mB = np.conj(_mirror(B, range(lead, B.ndim)))
+    out = np.where(mlin < lin, mB, B)
+    out = np.where(mlin == lin, out.real + 0j, out)
+    return np.moveaxis(out, list(range(lead, A.ndim)), T)
 
 
 @_bs("fft2")
@@ -7891,12 +7956,22 @@ def _warn_show():
     _write("\n")
 
 
+def _warn_mode(mode, st):
+    """set a display mode. Sagebrush's warnings have no stack trace, so either backtrace state shows
+    the same text; the verbose mode's extra line is not implemented, so it is refused"""
+    if mode == "verbose" and st == "on":
+        raise _err("warning: the \"verbose\" display mode is not supported in Sagebrush.")
+    _warn_modes[mode] = st
+
+
 def _warn_set(st):
     for e in st.a:
         i, v = _text(e.get("identifier", Char(""))), _text(e.get("state", Char("on"))).lower()
         if i == "all":
             _warn_all[0] = v
             _warn_ids.clear()
+        elif i.lower() in _warn_modes:
+            _warn_mode(i.lower(), v)
         elif i:
             _warn_ids[i] = v
 
@@ -7915,9 +7990,15 @@ def warning_b(nargout, *args):
     if _istext(args[0]) and _text(args[0]).lower() in ("on", "off", "query"):
         st = _text(args[0]).lower()
         ident = _text(args[1]) if len(args) > 1 else "all"
-        if ident.lower() in ("backtrace", "verbose"):
-            # (display modes: accepted; Sagebrush's warnings have no stack trace or extra text)
-            return _warn_struct([(ident.lower(), "on")]) if nargout >= 1 else NOVAL
+        if ident.lower() in _warn_modes:
+            mode = ident.lower()
+            prev = Struct([{"identifier": Char(mode), "state": Char(_warn_modes[mode])}], (1, 1), ["identifier", "state"])
+            if st == "query" and nargout < 1:
+                raise _err("warning: displaying the %s mode's state is not supported in Sagebrush; "
+                           "s = warning('query', '%s') returns it." % (mode, mode))
+            if st != "query":
+                _warn_mode(mode, st)
+            return prev if nargout >= 1 else NOVAL
         prev = _warn_struct(_warn_states() if ident == "all" else [(ident, _warn_ids.get(ident, _warn_all[0]))])
         if st == "query":
             if nargout >= 1:
@@ -8652,7 +8733,8 @@ for _n in _CMATH:
 
 
 def _real_cut(name, fix):
-    """name, except at real x outside [-1, 1], where fix(x) gives the value on the side MATLAB takes
+    """name, except at real x outside [-1, 1], where fix(x) gives the value on the side MATLAB takes,
+    as its real and imaginary parts
     (numpy's and cmath's branch there is the limit from above for both signs of x)"""
     old = _B[name].f
 
@@ -8669,7 +8751,10 @@ def _real_cut(name, fix):
                 m = np.abs(X) > 1
             if np.any(m):
                 R = np.array(_farr(r), dtype=np.complex128)
-                R[m] = fix(X[m])
+                # (real and imaginary parts set apart, so an infinite one leaves the other finite)
+                re, im = fix(X[m])
+                R.real[m] = re
+                R.imag[m] = im
                 return _finish(R, "single" if class_(x) == "single" else "double")
         return r
     _B[name] = Builtin(g, name)
@@ -8678,9 +8763,9 @@ def _real_cut(name, fix):
 # (asin and acos of a real x beyond 1, as Octave gives them: asin(2) = pi/2 - acosh(2) i, odd in x;
 # acos(2) = acosh(2) i and acos(-2) = pi - acosh(2) i; atanh as atanh's page shows: atanh(2) =
 # atanh(1/2) + pi/2 i and atanh(-3) = atanh(-1/3) - pi/2 i, odd in x)
-_real_cut("asin", lambda x: np.sign(x) * (np.pi / 2) - 1j * np.sign(x) * np.arccosh(np.abs(x)))
-_real_cut("acos", lambda x: np.where(x > 0, 0.0, np.pi) + 1j * np.sign(x) * np.arccosh(np.abs(x)))
-_real_cut("atanh", lambda x: np.arctanh(1 / x) + 1j * np.sign(x) * (np.pi / 2))
+_real_cut("asin", lambda x: (np.sign(x) * (np.pi / 2), -np.sign(x) * np.arccosh(np.abs(x))))
+_real_cut("acos", lambda x: (np.where(x > 0, 0.0, np.pi), np.sign(x) * np.arccosh(np.abs(x))))
+_real_cut("atanh", lambda x: (np.arctanh(1 / x), np.sign(x) * (np.pi / 2)))
 
 
 def _bezout(a, b):

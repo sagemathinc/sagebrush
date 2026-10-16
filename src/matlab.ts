@@ -1286,8 +1286,10 @@ class Emitter {
     const csField = (lv: LValue | null): lv is LValue =>
       !!lv && this.isVar(lv.name, scope) && ((lv.path.length === 1 && lv.path[0]!.k === "field") || csIdx(lv));
     const subs: string[] = [];
+    const poss: string[] = [];
     const counts: string[] = s.lhs.map((lv, k) => {
       subs[k] = "None";
+      poss[k] = "None";
       if (!csField(lv)) return "1";
       const c = this.fresh();
       if (csIdx(lv)) {
@@ -1296,7 +1298,10 @@ class Emitter {
         subs[k] = this.fresh();
         this.emit(`${subs[k]} = ${this.argList(p0.args, scope)}`);
       }
-      this.emit(`${c} = _m.cs_count(${this.varRead(lv.name, scope)}, ${subs[k]})`);
+      // (the positions once, their count admitted before they are built, reused by the assignment)
+      poss[k] = this.fresh();
+      this.emit(`${poss[k]} = _m.cs_positions(${this.varRead(lv.name, scope)}, ${subs[k]})`);
+      this.emit(`${c} = _m.cs_count(${poss[k]})`);
       return c;
     });
     const n = counts.every((c) => c === "1") ? String(s.lhs.length) : `(${counts.join(" + ")})`;
@@ -1312,7 +1317,7 @@ class Emitter {
     s.lhs.forEach((lv, k) => {
       if (lv && csField(lv)) {
         const f = (lv.path[lv.path.length - 1] as Extract<Expr, { k: "field" }>).name;
-        this.emit(`${pyName(lv.name)} = _m.set_field_cs(${this.varRead(lv.name, scope)}, ${JSON.stringify(f)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]})`);
+        this.emit(`${pyName(lv.name)} = _m.set_field_cs(${this.varRead(lv.name, scope)}, ${JSON.stringify(f)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
       } else if (lv) this.store(lv, `${t}[${off}]`, scope);
       off = counts[k] === "1" ? (off === "0" ? "1" : `${off} + 1`) : `${off} + ${counts[k]}`;
     });

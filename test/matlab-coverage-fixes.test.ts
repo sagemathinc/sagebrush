@@ -93,6 +93,45 @@ test("numbers: classes kept, branch cuts, transforms, diagonals, 'like' prototyp
   ]);
 });
 
+test("transforms page by page, 'symmetric' ignoring the second half, cuts at infinity, warning modes", () => {
+  const out = run([
+    // (fft2 and ifft2 transform each page apart, as ifft2's page says)
+    "A = zeros(2,2,3); A(1,1,1) = 1; A(1,1,2) = 2; A(1,1,3) = 3; fprintf('%g ', fft2(A)); fprintf('\\n');",
+    "Y = zeros(2,2,3); Y(1,1,2) = 1i; Y(1,1,3) = -1i; fprintf('%g ', imag(ifft2(Y))); fprintf('\\n');",
+    "A = rand(3,4,2,2); B = fft2(A); e = 0; for p = 1:2, for q = 1:2, e = max(e, max(max(abs(B(:,:,p,q) - fft(fft(A(:,:,p,q)).').')))); end, end; " +
+      "C = ifft2(B); F = fftn(A); fprintf('%d %d %d %d\\n', e < 1e-12, isreal(C), isreal(ifftn(F)), isequal(F(2,3,2,1), conj(F(3,3,2,1))));",
+    // ('symmetric': the second half of the spectrum ignored)
+    "Y = [0 1 0 9]; fprintf('%g ', ifft(Y, 'symmetric'), ifft2(Y, 'symmetric'), ifftn(Y, 'symmetric')); fprintf('\\n');",
+    "fprintf('%.15g ', ifft2([0 1 0 1+1e-10], 'symmetric')); fprintf('\\n');",
+    "Y = fft2(magic(4)); Y(4,4) = 99; fprintf('%d\\n', max(max(abs(ifft2(Y, 'symmetric') - magic(4)))) < 1e-12);",
+    "P = ifft2(fft2(magic(3)), 5, 4, 'symmetric'); Q = ifftn(fftn(magic(4)), [2 2], 'symmetric'); fprintf('%d %d %d %d %d\\n', size(P), isreal(P), size(Q, 1), isreal(Q));",
+    "clear Y; Y(:,:,1) = [1e-15*1i 0; 1 0]; Y(:,:,2) = [0 1; 0 1]; fprintf('%g ', ifftn(Y, 'symmetric')); fprintf('\\n');",
+    // (no overflow or underflow making the symmetry exact)
+    "fprintf('%.17g ', fft2(3e307*ones(2)), fftn(3e307*ones(2))); fprintf('%g ', real(fft2([5e-324 0; 0 0]))); fprintf('\\n');",
+    // (Octave's values at infinity: the real part stays 0, pi or pi/2)
+    "fprintf('%g ', real(acos([Inf -Inf])), imag(acos([Inf -Inf])), real(asin([Inf -Inf])), imag(asin([Inf -Inf]))); fprintf('\\n');",
+    "z = acos([Inf 1i]); fprintf('%g %g\\n', real(z(1)), imag(z(1)));",
+    "warning('off', 'backtrace'); s = warning('query', 'backtrace'); t = warning('on', 'backtrace'); warning(t); u = warning('query', 'backtrace'); " +
+      "v = warning('query', 'verbose'); fprintf('%s %s %s %s %s\\n', s.state, t.state, u.state, v.identifier, v.state);",
+    "try, warning('on', 'verbose'), catch e, disp(e.message), end",
+  ].join("\n"));
+  assert.deepEqual(lines(out), [
+    "1 1 1 1 2 2 2 2 3 3 3 3",
+    "0 0 0 0 0.25 0.25 0.25 0.25 -0.25 -0.25 -0.25 -0.25",
+    "1 1 1 1",
+    "0.5 0 -0.5 0 0.5 0 -0.5 0 0.5 0 -0.5 0",
+    "0.5 0 -0.5 0",
+    "1",
+    "5 4 1 2 1",
+    "0.375 -0.125 -0.125 -0.125 -0.125 -0.125 0.375 -0.125",
+    "1.1999999999999999e+308 0 0 0 1.1999999999999999e+308 0 0 0 4.94066e-324 4.94066e-324 4.94066e-324 4.94066e-324",
+    "0 3.14159 Inf -Inf 1.5708 -1.5708 -Inf Inf",
+    "0 Inf",
+    "off off off verbose off",
+    "warning: the \"verbose\" display mode is not supported in Sagebrush.",
+  ]);
+});
+
 test("files, warnings, errors and comma-separated lists", () => {
   const out = run([
     "fid = fopen('out.txt', 'w'); n = fprintf(fid, '%5d %5d %5d %5d\\n', magic(4)); fclose(fid); fprintf('%d %d %d\\n', fid > 2, n, isfile('out.txt'));",
@@ -157,4 +196,22 @@ test("display: struct fields since R2021b, cells of strings, empties, and the do
   assert.equal(doc[0], "Warning: Matrix is singular to working precision.");
   assert.ok(doc.some((x) => x.trim().startsWith("d: [0 0.0635 0.1269") && x.trim().endsWith(" 6.2832]")), doc.join("\n"));
   assert.ok(doc.some((x) => x.includes("{'accidents.mat'}") && x.includes("{'earth.mat'}")), doc.join("\n"));
+});
+
+test("[S(I,J).f] = ...: the comma-separated count admitted from the subscripts, before positions or outputs", () => {
+  const t0 = Date.now();
+  const out = run([
+    "S.a = 0; I = [1 1]; [S(I,I).a] = deal(5); fprintf('%d %d\\n', S.a, numel(S));",
+    "T = struct('a', {1, 2, 3}); [T([3 1]).a] = deal(30, 10); fprintf('%d ', T.a); fprintf('\\n');",
+    // (repeated subscripts into a scalar struct: 400^2 and 10^10 outputs, refused at once)
+    "S.a = 0; I = ones(1, 400); try, [S(I,I).a] = deal(1); catch e, disp(e.message), end",
+    "I = ones(1, 1e5); try, [S(I,I).a] = deal(1); catch e, disp(e.message), end",
+  ].join("\n") + "\n");
+  assert.deepEqual(lines(out), [
+    "5 1",
+    "10 2 30",
+    "[S(...).f] = ... with 160000 comma-separated outputs is beyond Sagebrush's limit of 100000.",
+    "[S(...).f] = ... with 10000000000 comma-separated outputs is beyond Sagebrush's limit of 100000.",
+  ]);
+  assert.ok(Date.now() - t0 < 30000, "the refusals are immediate");
 });
