@@ -144,7 +144,23 @@ export class Emitter {
     // CORR-C0F-1; the top level itself uses the globals for a name
     // declared global there or in any scope inside, CORR-C0F-2)
     if (comp) return walrus ? "$G" : "$g";
-    return s.globals.has(id) || this.globalAnywhere().has(id) ? "$G" : "$g";
+    return s.globals.has(id) || this.globalAnywhere().has(id) || this.moduleWalrus().has(id) ? "$G" : "$g";
+  }
+  // the names a comprehension's walrus binds at the module's top level (in
+  // one there, or nested in one, a generator expression's too): CPython's
+  // symbol table makes them the top level's globals, its loads, stores and
+  // deletes of them the globals' outside comprehensions
+  private walrusNames: Set<string> | null = null;
+  moduleWalrus(): Set<string> {
+    if (this.walrusNames === null) {
+      this.walrusNames = new Set();
+      for (const s of allScopes(this.top)) {
+        let p: Scope | null = s;
+        while (p !== null && p.kind === "comp") p = p.parent;
+        if (p !== s && p !== null && p.kind === "module") for (const n of s.walrusTargets) this.walrusNames.add(n);
+      }
+    }
+    return this.walrusNames;
   }
   // the names some scope of this module declares global
   private globalNames: Set<string> | null = null;

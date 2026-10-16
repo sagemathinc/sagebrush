@@ -131,3 +131,28 @@ try:
     print(t(lambda: exec("len('a')", {})))
 finally:
     builtins.len = old
+
+# a name a comprehension's walrus binds at the top level is the globals'
+# there, outside comprehensions: loads, stores, deletes (astra's probe)
+for initial in [{}, {'a': 10}]:
+    for mode in ['eval', 'exec']:
+        g = dict(initial); d = {'a': 2}
+        try:
+            if mode == 'eval': r = eval('(a, [(a:=i) for i in range(2)], a)', g, d)
+            else:
+                exec('r = (a, [(a:=i) for i in range(2)], a)', g, d); r = d['r']
+            print(initial, mode, r, g.get('a'), d['a'])
+        except Exception as e: print(initial, mode, type(e).__name__, str(e), g.get('a'), d['a'])
+for code in ['a = 5\nr = [(a:=i) for i in range(2)]\nb = a',
+             'del a\nr = [(a:=i) for i in range(2)]',
+             'r = [[a for j in range(1)] for i in range(1)]\nq = [(a:=i) for i in range(1)]',
+             'r = [(a, [a for j in range(1)]) for i in range(1) if (a:=7)]',
+             'def f(): return a\nr = f()\nq = [(a:=i) for i in range(1)]\ns = (lambda: a)()',
+             'class C:\n    b = a\nq = [(a:=i) for i in range(1)]\nr = C.b',
+             'r = [a for i in range(1)]\nq = [(a:=i) for i in range(1)]',
+             'r = list(a for i in range(1))\nq = [(a:=i) for i in range(1)]',
+             'for a in range(3): pass\nq = [(a:=i) for i in range(1)]',
+             'b0 = a\nr = list((a:=i) for i in range(2))\nb = a',
+             'b0 = a\nr = [[(a:=j) for j in range(2)] for i in range(1)]\nb = a']:
+    g = {'a': 1}; d = {'a': 2}
+    print(repr(code), t(lambda: exec(code, g, d)), g.get('a'), sorted((k, v) for k, v in d.items() if not callable(v)))
