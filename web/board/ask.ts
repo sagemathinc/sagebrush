@@ -114,7 +114,7 @@ export function askProblems(a: DocAsk): AskProblem[] {
   } else if (a.step !== undefined) warn("step", `\`step\` is for a number question: a ${a.input} question leaves it aside`);
   if (a.input === "scale") {
     const [lo, hi] = scaleRange(a);
-    if (!Number.isInteger(lo) || !Number.isInteger(hi)) err(Number.isInteger(lo) ? "max" : "min", "a scale's min and max are whole numbers");
+    if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) err(Number.isSafeInteger(lo) ? "max" : "min", "a scale's min and max are whole numbers, at most 2^53 - 1 from 0");
     else if (lo >= hi) err("min", `its min (${lo}) is not less than its max (${hi})`);
     else if (hi - lo + 1 > SCALE_MAX) err("max", `a scale of more than ${SCALE_MAX} values (from ${lo} to ${hi}): a number question takes a range`);
   } else {

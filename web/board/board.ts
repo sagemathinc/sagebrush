@@ -12,7 +12,8 @@
 
 import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
-import { ICON_NAME, GROUP_PAD, GROUP_TITLE, refLabel } from "./doc";
+import { ICON_NAME, GROUP_PAD, GROUP_TITLE, refLabel, askOptions, type AskAnswer, type DocAsk } from "./doc";
+import { answerProblem, scaleRange, ASK_LIMITS } from "./ask";
 
 /** A page's backdrop (doc.ts BoardPage's slide and background). */
 export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
@@ -47,6 +48,8 @@ export interface Item {
   inert?: boolean;
   /** notes: Markdown shown only when zoomed in */
   detail?: string;
+  /** a question (doc.ts DocAsk): its controls, in place of its text */
+  ask?: DocAsk;
   /** notes: a link, shown at the note's foot */
   ref?: string;
   /** groups and notes: how deeply nested (groups are drawn outer first) */
@@ -73,7 +76,7 @@ export interface Item {
 
 const LANG_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "lang" | "image" | "inert" | "emoji" | "icon" | "color">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "lang" | "image" | "inert" | "emoji" | "icon" | "color" | "ask">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
@@ -195,6 +198,10 @@ export class Board {
   code: CodeHost | null = null;
   /** a code item's { } (show or hide its code) was clicked */
   onToggleCode: ((id: string) => void) | null = null;
+  /** a question answered with its controls: its answer, or its note (the
+   * reader's own words); null removes it.  None: questions shown read-only
+   * (a version being looked at, a host that takes no answers). */
+  onAnswer: ((id: string, patch: { answer?: AskAnswer | null; note?: string | null }) => void) | null = null;
   /** a CoCalc icon by its name, as the host draws it (stickers: none, an emoji close to it: stickers.ts) */
   icon: ((name: string) => Element | null) | null = null;
   /** where a picture's bytes are, by its name (images.ts) */
@@ -310,7 +317,7 @@ export class Board {
       else if (el && it.id === this.editingId) {
         el.style.cssText = placement(it) + `height:auto;min-height:${+it.h}px;`;
         this.cache.set(it.id, el);
-      } else if (el && el.dataset.key === this.epoch + contentKey(it)) {
+      } else if (el && el.dataset.key === this.epoch + this.keyOf(it)) {
         el.style.cssText = placement(it);
         this.cache.set(it.id, el);
       }
@@ -536,7 +543,7 @@ export class Board {
   private itemEl(it: Item): HTMLElement {
     const el = this.content(it);
     el.style.cssText = placement(it);
-    el.dataset.key = this.epoch + contentKey(it);
+    el.dataset.key = this.epoch + this.keyOf(it);
     return el;
   }
 
@@ -598,6 +605,190 @@ export class Board {
     }
     if (it.icon) el.title = it.icon;
     return el;
+  }
+
+  // (an item's content as drawn: a question's whole definition, and whether it
+  // can be answered now, CORR-448-1, CORR-448-3)
+  private keyOf(it: Item): string {
+    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify(it.ask) + (this.onAnswer ? "+" : "-") : "");
+  }
+  /** Questions whose "In your own words" is open (kept open as the board is drawn again). */
+  askOpen = new Set<string>();
+  /** Questions grown past their measured height: as tall as their open field, its preview, or a field made taller by hand needs. */
+  askGrown = new Map<string, number>();
+  /** A question's card needs another height: lay out again (mount.ts). */
+  onAskResize: (() => void) | null = null;
+
+  /** A question's controls (doc.ts DocAsk), each answer given at once to
+   * onAnswer: a choice when it is made, a text or a number when it is left
+   * (change); the reader's own words, offered on every question, in a field
+   * of their own.  Without onAnswer, the same controls, disabled. */
+  private askEl(a: DocAsk, id: string): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "board-ask";
+    box.dataset.ask = id;
+    const can = !!this.onAnswer, set = (patch: { answer?: AskAnswer | null; note?: string | null }) => this.onAnswer?.(id, patch);
+    const mdInto = (el: HTMLElement, src: string) => { if (this.markdown) el.innerHTML = this.markdown(src); else el.textContent = src; glueMath(el); };
+    if (a.text) { const q = document.createElement("div"); q.className = "board-text board-ask-q"; mdInto(q, a.text); box.append(q); }
+    // (each control: its events kept from the board, which would take them as a press on the note)
+    const quiet = (el: HTMLElement) => { for (const t of ["pointerdown", "mousedown", "dblclick", "click", "keydown", "wheel"]) el.addEventListener(t, (e) => e.stopPropagation()); return el; };
+    const name = `sbq-${id}-${++askSerial}`, ans = a.answer;
+    // (its card as tall as it now needs: an open field, a preview, a field made taller by hand, UI-448-2)
+    let growing = 0;
+    const grow = () => {
+      cancelAnimationFrame(growing);
+      growing = requestAnimationFrame(() => {
+        const card = box.closest<HTMLElement>(".board-item");
+        if (!card || !card.isConnected) return;
+        const need = card.scrollHeight + (card.offsetHeight - card.clientHeight);
+        if (need > card.offsetHeight + 1) { this.askGrown.set(id, need); this.onAskResize?.(); }
+      });
+    };
+    // (a text with math in it: shown typeset under its field as it is typed,
+    // a moment after the typing stops; past the length an answer may have,
+    // not shown, and said, HARD-448-1)
+    const preview = (f: HTMLInputElement | HTMLTextAreaElement) => {
+      const pv = document.createElement("div");
+      pv.className = "board-ask-preview board-text";
+      let soon = 0;
+      const show = () => {
+        if (f.value.length > ASK_LIMITS.text) { pv.hidden = false; pv.textContent = `Longer than ${ASK_LIMITS.text} characters: not kept`; grow(); return; }
+        pv.hidden = !/\$[^$]+\$/.test(f.value);
+        if (pv.hidden) return;
+        mdInto(pv, f.value);
+        if (pv.isConnected) { this.typeset?.(pv); grow(); }
+      };
+      f.addEventListener("input", () => { clearTimeout(soon); soon = window.setTimeout(show, 200); });
+      f.addEventListener("mouseup", grow);
+      show();
+      return pv;
+    };
+    // (a text kept only within the length an answer may have)
+    const within = (v: string) => v.length <= ASK_LIMITS.text;
+    const row = (control: HTMLInputElement, label: string) => {
+      const l = document.createElement("label");
+      l.className = "board-ask-opt";
+      const t = document.createElement("span");
+      t.className = "board-ask-label";
+      mdInto(t, label);
+      l.append(control, t);
+      return l;
+    };
+    const opts = askOptions(a);
+    if (a.input === "check" || a.input === "radio" || a.input === "choice") {
+      const list = document.createElement("div");
+      list.className = "board-ask-opts" + (a.input === "choice" ? " board-ask-list" : "");
+      list.setAttribute("role", a.input === "check" ? "group" : "radiogroup");
+      if (a.input === "check" && !opts.length) {
+        const c = document.createElement("input");
+        c.type = "checkbox";
+        c.name = name;
+        c.checked = ans === true;
+        c.disabled = !can;
+        c.onchange = () => set({ answer: c.checked });
+        list.append(row(c, "Yes"));
+      } else {
+        const chosen = new Set(Array.isArray(ans) ? ans : typeof ans === "string" ? [ans] : []);
+        const inputs: HTMLInputElement[] = [];
+        for (const o of opts) {
+          const c = document.createElement("input");
+          c.type = a.input === "check" ? "checkbox" : "radio";
+          c.name = name;
+          c.value = o.value;
+          c.checked = chosen.has(o.value);
+          c.disabled = !can;
+          c.onchange = () => set({ answer: a.input === "check" ? inputs.filter((x) => x.checked).map((x) => x.value) : c.value });
+          inputs.push(c);
+          list.append(row(c, o.label));
+        }
+      }
+      box.append(quiet(list));
+    } else if (a.input === "text") {
+      const t = a.lines && a.lines > 1 ? document.createElement("textarea") : document.createElement("input");
+      if (t instanceof HTMLTextAreaElement) t.rows = Math.min(a.lines ?? 1, 50);
+      t.className = "board-ask-text";
+      t.value = typeof ans === "string" ? ans : "";
+      t.disabled = !can;
+      t.placeholder = "Your answer";
+      t.onchange = () => { if (within(t.value)) set({ answer: t.value === "" ? null : t.value }); };
+      box.append(quiet(t), preview(t));
+    } else {
+      const [lo, hi] = a.input === "scale" ? scaleRange(a) : [a.min, a.max];
+      // (buttons for a short scale of safe whole numbers, counted, never stepped by a value that may not advance, CORR-448-4)
+      if (a.input === "scale" && Number.isSafeInteger(lo) && Number.isSafeInteger(hi) && hi! >= lo! && hi! - lo! <= 10) {
+        const bar = document.createElement("div");
+        bar.className = "board-ask-scale";
+        bar.setAttribute("role", "radiogroup");
+        if (a.low) { const s = document.createElement("span"); s.className = "board-ask-end"; s.textContent = a.low; bar.append(s); }
+        for (let k = 0; k <= hi! - lo!; k++) {
+          const v = lo! + k;
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = String(v);
+          b.setAttribute("role", "radio");
+          b.setAttribute("aria-checked", String(ans === v));
+          b.disabled = !can;
+          b.onclick = () => set({ answer: ans === v ? null : v });
+          bar.append(b);
+        }
+        if (a.high) { const s = document.createElement("span"); s.className = "board-ask-end"; s.textContent = a.high; bar.append(s); }
+        box.append(quiet(bar));
+      } else {
+        const n = document.createElement("input");
+        n.type = "number";
+        n.className = "board-ask-number";
+        if (lo !== undefined) n.min = String(lo);
+        if (hi !== undefined) n.max = String(hi);
+        n.step = a.step !== undefined ? String(a.step) : a.input === "scale" ? "1" : "any";
+        n.value = typeof ans === "number" ? String(ans) : "";
+        n.disabled = !can;
+        n.placeholder = lo !== undefined && hi !== undefined ? `${lo} to ${hi}` : "A number";
+        const why = document.createElement("div");
+        why.className = "board-ask-why";
+        why.setAttribute("role", "alert");
+        // (a number it doesn't take: said here, not kept)
+        n.onchange = () => {
+          if (n.value.trim() === "") { why.textContent = ""; set({ answer: null }); return; }
+          const v = Number(n.value), bad = Number.isFinite(v) ? answerProblem(a, v) : "its answer is a finite number";
+          why.textContent = bad ? bad.replace(/^its answer/, "The answer") : "";
+          if (!bad) set({ answer: v });
+        };
+        box.append(quiet(n), why);
+      }
+    }
+    // the reader's own words: on every question, open when there are some
+    const words = document.createElement("details");
+    words.className = "board-ask-words";
+    words.open = !!a.note || this.askOpen.has(id);
+    words.ontoggle = () => {
+      if (words.open) { this.askOpen.add(id); grow(); }
+      else if (this.askOpen.delete(id)) { this.askGrown.delete(id); this.onAskResize?.(); }
+    };
+    const sum = document.createElement("summary");
+    sum.textContent = "In your own words";
+    const w = document.createElement("textarea");
+    w.className = "board-ask-text";
+    w.rows = 2;
+    w.value = a.note ?? "";
+    w.disabled = !can;
+    w.placeholder = "Answer in your own words, if the choices don't fit (or to add something)";
+    w.onchange = () => { if (within(w.value)) set({ note: w.value.trim() === "" ? null : w.value }); };
+    words.append(sum, w, preview(w));
+    box.append(quiet(words));
+    // (its state: required; and a way to take an answer back)
+    const foot = document.createElement("div");
+    foot.className = "board-ask-foot";
+    if (a.required) { const r = document.createElement("span"); r.className = "board-ask-req"; r.textContent = "required"; foot.append(r); }
+    if (can && ans !== undefined) {
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "board-ask-clear";
+      c.textContent = "Clear the answer";
+      c.onclick = () => set({ answer: null });
+      foot.append(quiet(c));
+    }
+    if (foot.childNodes.length) box.append(foot);
+    return box;
   }
 
   /** An item's element, unplaced (also for measuring a note's height at a width: `now`, math typeset at once). */
@@ -663,9 +854,12 @@ export class Board {
       d.className = cls;
       if (this.markdown) d.innerHTML = this.markdown(src);
       else d.textContent = src;
+      glueMath(d);
       el.append(d);
     };
-    if (it.text) md(it.text, "board-text");
+    // (a question: its text, its controls and a field for the reader's own words, in place of its text as Markdown)
+    if (it.ask && it.id) el.append(this.askEl(it.ask, it.id));
+    else if (it.text) md(it.text, "board-text");
     if (it.code !== undefined) {
       if (!it.hideCode) {
         const pre = document.createElement("pre");
@@ -1349,7 +1543,7 @@ export class Board {
       // (links, buttons, controls, 3D views, and the fields of the item being
       // edited, stay theirs, but for the selected item's grip over them; its
       // frame drags it, as any item's does)
-      if (!gripPress && (e.target as Element).closest?.("a, button, input, select, textarea, .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
+      if (!gripPress && (e.target as Element).closest?.("a, " + FORM_CONTROLS + ", .board-code-out canvas, .board-editing :is(.mb, .be-md, .be-codebox, .board-code-out)")) return;
       cancelAnimationFrame(this.flight);
       const touch = e.pointerType === "touch";
       if (e.pointerType === "pen") this.penSeen = true;
@@ -1463,8 +1657,12 @@ export class Board {
     // (a double tap: touch screens' double-click, which not every browser
     // makes into a dblclick; one it does make is then ignored)
     let tap: { t: number; x: number; y: number } | null = null, start: { t: number; x: number; y: number } | null = null, doubled = 0;
-    this.el.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch" && e.isPrimary) start = { t: e.timeStamp, x: e.clientX, y: e.clientY }; }, true);
+    this.el.addEventListener("pointerdown", (e) => {
+      if (atControl(e)) { start = null; tap = null; return; }
+      if (e.pointerType === "touch" && e.isPrimary) start = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+    }, true);
     this.el.addEventListener("pointerup", (e) => {
+      if (atControl(e)) { start = null; tap = null; return; }
       if (e.pointerType !== "touch" || !e.isPrimary || !start) return;
       const quick = e.timeStamp - start.t < 300 && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 10;
       start = null;
@@ -1477,7 +1675,7 @@ export class Board {
     }, true);
     this.el.addEventListener("dblclick", (e) => {
       if (doubled && e.timeStamp - doubled < 600) return;
-      if (!editingAt(e)) this.doubleAt(e.clientX, e.clientY);
+      if (!editingAt(e) && !atControl(e)) this.doubleAt(e.clientX, e.clientY);
     });
   }
 
@@ -1511,6 +1709,11 @@ const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.cod
 const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.lang, it.image, it.emoji, it.icon, it.kind === "sticker" ? it.color : undefined, it.inert]);
 // (a double-click in the item being edited selects a word, as in any field)
 const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
+// (a form's control, or its label: its presses and taps are its own, never the board's gestures, HARD-448-2)
+// (a question's controls, kept from the board's double-click and double tap;
+// a link elsewhere, as a note's reference, is not one: its double-click edits, CORR-6CE-1)
+const FORM_CONTROLS = "button, input, select, textarea, .board-ask summary, .board-ask label, .board-ask-opts a, .board-ask-words a";
+const atControl = (e: Event) => !!(e.target as Element | null)?.closest?.(FORM_CONTROLS);
 // A code item's output, in the box that gives it the notebook's styles.
 function outBox(out: HTMLElement) {
   const box = document.createElement("div");
@@ -1526,6 +1729,27 @@ function showState(el: HTMLElement, state: string) {
 // A title: its text, and its math ($...$, \(...\), as in Markdown) as
 // elements KaTeX typesets; built as text and elements, never from markup.
 const TITLE_MATH = /\$(?!\s)((?:\\.|[^\\$\n])+?)(?<!\s)\$(?!\d)|\\\(([\s\S]+?)\\\)/g;
+// (each question's controls a radio group's name of their own)
+let askSerial = 0;
+
+/** Inline math kept on one line with the punctuation that touches it, as
+ * text is ("$x$." never leaves the "." at the start of the next line, nor
+ * "($x$" the "(" at the end of a line). */
+export function glueMath(root: HTMLElement) {
+  for (const m of [...root.querySelectorAll<HTMLElement>("span.math")]) {
+    const next = m.nextSibling, prev = m.previousSibling;
+    const after = next?.nodeType === 3 ? /^[.,;:!?)\]}%'"\u2019\u201d]+/.exec(next.textContent ?? "")?.[0] : undefined;
+    const before = prev?.nodeType === 3 ? /[(\[{'"\u2018\u201c]+$/.exec(prev.textContent ?? "")?.[0] : undefined;
+    if (!after && !before) continue;
+    const g = document.createElement("span");
+    g.className = "board-nowrap";
+    m.before(g);
+    if (before) { (prev as Text).textContent = prev!.textContent!.slice(0, -before.length); g.append(before); }
+    g.append(m);
+    if (after) { (next as Text).textContent = next!.textContent!.slice(after.length); g.append(after); }
+  }
+}
+
 function titleEl(title: string): HTMLElement {
   const b = document.createElement("b");
   let last = 0;
@@ -1539,6 +1763,7 @@ function titleEl(title: string): HTMLElement {
     last = m.index + m[0].length;
   }
   b.append(title.slice(last));
+  glueMath(b);
   return b;
 }
 /** Text cut to a width with "…", in the canvas's font ("" when not even a letter and "…" fit). */
