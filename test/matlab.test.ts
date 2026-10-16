@@ -2052,6 +2052,8 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     // (64-bit values Sagebrush can't hold exactly, beyond 2^53: refused, the limits and results alike;
     // the exact ones kept, -2^63 among them, and saturation to it; the six other maxima as before)
     tryIt("intmax('uint64')"), tryIt("intmax('int64')"), tryIt("int64(2)^62"), tryIt("uint64(2^53) + 1"), tryIt("int64(1e19)"),
+    // (intmin('int64') + k rounds back to -2^63 in double: refused, not shown as intmin)
+    "m = intmin('int64');", tryIt("m + int64(1)"), tryIt("m + 511"), tryIt("sum([m int64(1)], 'native')"),
     "fprintf('%d %d %d %d\\n', intmin('int64'), int64(-1e30), int64(2)^52, uint64(2^53 - 1))",
     "fprintf('%d ', intmax('int8'), intmax('uint8'), intmax('int16'), intmax('uint16'), intmax('int32'), intmax('uint32')); fprintf('\\n')",
     // (complex integers aren't represented: refused; single stays single)
@@ -2079,7 +2081,7 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     tryIt("primes(1:10)"), "disp(mat2str(primes(10)))",
     "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
     tryIt("str2num('2+3')"),
-  ].join("\n")), ["refused", "refused", "refused", "refused", "refused",
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
     "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740991",
     "127 255 32767 65535 2147483647 4294967295", "refused", "single",
     "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "refused", "20000", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
