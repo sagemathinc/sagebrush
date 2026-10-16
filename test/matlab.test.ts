@@ -2207,17 +2207,19 @@ test("a workspace function giving no value refuses an assignment; exist needs an
     "refused", "refused", "[2 1]"]);
 });
 
-test("repmat refuses a result past its element limits before making it, under a 96 MiB heap", () => {
+test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects) before making it, under a 96 MiB heap, at the boundary for complex and a one-axis repeat", () => {
   const { spawnSync } = require("node:child_process");
   const tryIt = (e: string) => `try, x = ${e}; disp(numel(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 30))]), end`;
   const code = [
     tryIt("repmat(1, 100000, 100000)"), tryIt("repmat(1, 2001, 2000)"), tryIt("repmat('a', 1e9, 1)"), tryIt("repmat(true, [10 10 10 10 10 10 10 10])"),
     tryIt("repmat({1}, 1000, 1000)"), tryIt("repmat(struct('a', 1), 1, 200001)"), tryIt("repmat(\"ab\", 500, 500)"), tryIt("repmat([1 2; 3 4], 1e300, 1e300)"),
     tryIt("repmat(1, 1000, 1000)"), tryIt("repmat({1}, 400, 500)"), tryIt("repmat([1 2], 0, 1e9)"),
+    tryIt("repmat(1i, 1, 524288)"), tryIt("repmat(1i, 1, 524289)"), tryIt("repmat(1, 1, 1048576)"), tryIt("repmat(1, 1048577, 1)"),
   ].join("\n");
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
-    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0"]);
+    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
+    "524288", "refused: repmat: a result of 524289 ele", "1048576", "refused: repmat: a result of 1048577 el"]);
 });
