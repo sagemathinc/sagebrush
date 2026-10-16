@@ -973,6 +973,24 @@ class FFVector:
         return FFVector(self._base, self._e)
 
 
+def _rhs_entries(b, n, what):
+    """The entries of a right-hand side that must have n: read boundedly
+    (at most n + 1), and the number actually read checked, not only the
+    length b declares (a list subclass may iterate more or fewer entries
+    than its len), with Sage's ValueError."""
+    from _sage_matrix import _bounded_list
+    msg = "number of %s of self must equal degree of right-hand side" % what
+    if hasattr(b, "__len__") and len(b) != n:
+        raise ValueError(msg)
+    try:
+        b = _bounded_list(b, n + 1)
+    except ValueError:
+        raise ValueError(msg)
+    if len(b) != n:
+        raise ValueError(msg)
+    return b
+
+
 # ------------------------------------------------------------------ elimination
 
 def _echelon(rows, base, ncols):
@@ -1691,14 +1709,7 @@ class FFMatrix:
             if b.nrows() != self.nrows():
                 raise ValueError("number of rows of self must equal number of rows of right-hand side")
         else:
-            from _sage_matrix import _bounded_list
-            if not hasattr(b, "__len__"):
-                try:
-                    b = _bounded_list(b, self.nrows() + 1)
-                except ValueError:
-                    raise ValueError("number of rows of self must equal degree of right-hand side")
-            if len(b) != self.nrows():
-                raise ValueError("number of rows of self must equal degree of right-hand side")
+            b = _rhs_entries(b, self.nrows(), "rows")
         if _double_field(self._base) and self.is_square():
             import _sage_rdf
             return _sage_rdf._solve_right(self, b)
@@ -1728,9 +1739,7 @@ class FFMatrix:
             if b.ncols() != self.ncols():
                 raise ValueError("number of columns of self must equal number of columns of right-hand side")
             return self.transpose().solve_right(b.transpose()).transpose()
-        if hasattr(b, "__len__") and len(b) != self.ncols():
-            raise ValueError("number of columns of self must equal degree of right-hand side")
-        return self.transpose().solve_right(b)
+        return self.transpose().solve_right(_rhs_entries(b, self.ncols(), "columns"))
 
     def __truediv__(self, o):
         c = self._scalar(o)
