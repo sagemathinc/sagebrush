@@ -308,7 +308,13 @@ const ICONS = readdirSync(join(here, "icons")).map((f) => "icons/" + f);
 mkdirSync(join(here, "dist", "icons"), { recursive: true });
 for (const f of ICONS) copyFileSync(join(here, f), join(here, "dist", f));
 copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.webmanifest"));
-const SHELL = ["./", "sagebrush-worker.js", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+// SHELL is what the service worker precaches when it installs: what the
+// notebook needs to start and run offline.  LAZY is kept once it is used
+// online (fetched under the service worker, verified by its digest like the
+// shell): the engine (only some code needs it) and the documentation
+// indexes (only the search box does), not every visitor's download
+const SHELL = ["./", "sagebrush-worker.js", `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`, "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + precompiledHash);
@@ -317,7 +323,7 @@ shellHash.update(engineHash + precompiledHash);
 // response it makes, with this status and these headers, never the kept
 // response's own; design/security.md, SEC-8D6-1, SEC-522-1)
 const { pagePolicy } = await import("./csp-policy.mts");
-const DIGESTS = Object.fromEntries(SHELL.map((p) => {
+const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   const file = p === "./" ? "index.html" : p.split("?")[0];
   const bytes = readFileSync(join(here, "dist", file));
   const mime = MIME[file.split(".").pop()!];
@@ -327,7 +333,7 @@ const DIGESTS = Object.fromEntries(SHELL.map((p) => {
   if (file.endsWith(".html")) headers["Content-Security-Policy"] = pagePolicy(scriptHashes(bytes.toString("utf8")));
   return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
 }));
-writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
+writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
 mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
