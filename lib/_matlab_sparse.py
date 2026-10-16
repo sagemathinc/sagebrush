@@ -2072,7 +2072,7 @@ def _register():
     for name, f in (("eig", _eig_b), ("svd", _svd_b), ("norm", _norm_b), ("accumarray", _accumarray_b)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = f
-    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False),
+    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("true", True), ("false", True), ("rand", False), ("randn", False), ("randi", False),
                      ("eps", True), ("realmax", True), ("realmin", True), ("flintmax", True)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = _like_fn(name, ok)
