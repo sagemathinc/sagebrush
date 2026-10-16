@@ -45,3 +45,23 @@ N := {@ @}; N[true];
 N[1..0];
 V := [5]; V[4] := 9; V[1..4];
 V[2..3];
+// selections of an empty sequence, explicit lists and steps over undefined
+// elements, an empty indexed set's selections
+E[1..0];
+E[[]];
+V[[1,2]];
+V[[4,1]];
+V[4..1 by -1];
+V[1..4 by 3];
+N[[1]];
+N[[true]];
+N[[]];
+// typed empty collections, and a selection's universe
+S := [Integers()|]; S[[1]];
+S[1..0];
+T := {@ Integers() | @}; T[[1]];
+T[1];
+U := {@ Rationals() | 2, 5 @}; V := U[[1]]; Universe(V);
+W := U[1..0]; Universe(W);
+X := [Rationals() | 2, 5]; Universe(X[[1]]); Universe(X[1..0]);
+Y := [Rationals() | ]; Y[1];

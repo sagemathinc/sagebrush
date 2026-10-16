@@ -167,3 +167,53 @@ Runtime error in '[]': Bad argument types
 {@ @}
 [ 5, undef, undef, 9 ]
 []
+[]
+[]
+
+>> V[[1,2]];
+    ^
+Runtime error in '[]': Sequence element not defined
+
+[ 9, 5 ]
+
+>> V[4..1 by -1];
+    ^
+Runtime error in '[]': Sequence element not defined
+
+[ 5, 9 ]
+
+>> N[[1]];
+    ^
+Runtime error in '[]': Illegal null indexed set
+
+
+>> N[[true]];
+    ^
+Runtime error in '[]': Illegal null indexed set
+
+{@ @}
+
+>> S := [Integers()|]; S[[1]];
+                        ^
+Runtime error in '[]': Sequence element not defined
+
+[]
+
+>> T := {@ Integers() | @}; T[[1]];
+                             ^
+Runtime error in '[]': Sequence element not defined
+
+
+>> T[1];
+    ^
+Runtime error in '[]': Index 1 (1) should be in the range [1 .. 0]
+
+Rational Field
+Rational Field
+Rational Field
+Rational Field
+
+>> Y := [Rationals() | ]; Y[1];
+                           ^
+Runtime error in '[]': Index 1 (1) should be in the range [1 .. 0]
+
