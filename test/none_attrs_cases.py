@@ -26,3 +26,35 @@ print(t(lambda: None.__setattr__('x', 1)), t(lambda: object.__setattr__(None, 'x
       t(lambda: object.__setattr__(None, '__class__', int)))
 print(None.__new__ is type(None).__new__, t(lambda: None.__new__(type(None))), t(lambda: type(None).__new__(type(None))), t(lambda: type(None)()),
       t(lambda: type(None)(1)), t(lambda: type(None).__new__(int)), (1).__new__ is int.__new__, object().__new__ is object.__new__)
+# __new__ with no class is TypeError; a builtin type's __new__ makes only
+# its subtypes; bytearray.__new__ makes an empty one, __init__ fills it
+# (CORR-A24-1..3)
+class C:
+    pass
+
+
+class D(dict):
+    pass
+
+
+class B(bytearray):
+    pass
+
+
+print(t(lambda: object().__new__()), t(lambda: C().__new__()), t(lambda: object.__new__()), t(lambda: dict.__new__()))
+print([t(lambda: f(object)) for f in (dict.__new__, {}.__new__, set.__new__, set().__new__, range.__new__, range(1).__new__,
+                                         frozenset.__new__, list.__new__, bytearray.__new__)], t(lambda: list.__new__(int)))
+print(type(dict.__new__(D)).__name__, len(dict.__new__(D)), type({}.__new__(D)).__name__, D(a=1), t(lambda: C(1)), type(object.__new__(C)).__name__,
+      dict.__new__ is object.__new__, set.__new__ is dict.__new__)
+print(len(bytearray().__new__(bytearray, b'xy')), len(B().__new__(B, b'xy')), type(B.__new__(B, b'xy')).__name__, len(bytearray.__new__(B, b'xy')),
+      B(b'xy'), bytearray(b'xy'), B(source=b'ab'), B('ab', 'ascii'), bytearray.__new__(bytearray))
+b = bytearray(b'abc')
+b.__init__(b'z')
+m = memoryview(b)
+e = bytearray()
+me = memoryview(e)
+e.__init__()
+print(b, t(lambda: b.__init__(b'y')), t(lambda: b.__init__(b'yy')), b, e, t(lambda: e.__init__(b'q')), t(lambda: bytearray.__init__(b'x')))
+m.release()
+b.__init__(3)
+print(b, t(lambda: b.__init__('x')), t(lambda: b.__init__(encoding='ascii')), b)
