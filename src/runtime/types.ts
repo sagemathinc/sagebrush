@@ -1948,6 +1948,11 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 
 const Ty_lookup = (x: any, name: string) => lookupType(typeOf(x), name);
 function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
+  if (typeof x !== "string") {
+    // (with no source too: bytes(encoding='ascii') is TypeError, as CPython's)
+    if (encoding !== undefined) raise(T.TypeError, "encoding without a string argument");
+    if (errors !== undefined) raise(T.TypeError, "errors without a string argument");
+  }
   if (x === undefined) return new Uint8Array(0);
   if (typeof x === "string") {
     if (encoding === undefined) raise(T.TypeError, "string argument without an encoding");

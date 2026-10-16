@@ -55,3 +55,5 @@ e.__init__()
 print(b, e, t(lambda: bytearray.__init__(b'x')))
 b.__init__(3)
 print(b, t(lambda: b.__init__('x')), t(lambda: b.__init__(encoding='ascii')), b)
+print(t(lambda: bytes(encoding='ascii')), t(lambda: bytearray(errors='x')), t(lambda: bytes(errors='x')), t(lambda: bytearray(b'x', errors='x')),
+      t(lambda: bytes(3, errors='x')), t(lambda: bytes('a', 'ascii', 'strict')))
