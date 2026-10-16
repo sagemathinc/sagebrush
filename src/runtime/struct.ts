@@ -234,6 +234,7 @@ function unpack(fmt: any, b: any): any {
   return tuple(unpackFrom(L, a, 0));
 }
 function unpackFromImpl(fmt: any, b: any, offset: any = 0): any {
+  if (b === undefined) raise(T.TypeError, "unpack_from() missing required argument 'buffer' (pos 2)");
   const L = layout(fmt);
   const a = buffer(b);
   let off = Number(offset);
@@ -278,7 +279,9 @@ newBuiltinModule("struct", (m) => {
   fn("pack", positionalArray(pack, (a) => packArgs(a[0], a.slice(1))));
   fn("unpack", unpack);
   fn("unpack_from", unpackFromImpl);
-  m.unpack_from.$kw = (pos: any[], names: string[], values: any[]) => unpackFromImpl(pos[0], pos[1], names[0] === "offset" ? values[0] : pos[2] ?? 0);
+  // (keywords bound by CPython's signature, unpack_from(format, /, buffer,
+  // offset=0): counts, duplicates and unknown names checked, CORR-A78-1)
+  m.unpack_from.$sig = { args: ["format", "buffer", "offset"], posonly: 1, vararg: null, kwonly: [], kwarg: null };
   fn("pack_into", positionalArray(packIntoImpl, (a) => packIntoArgs(a[0], a[1], a[2], a.slice(3))));
   fn("iter_unpack", iterUnpack);
   const Struct = objectType("Struct", [T.object], new Map(), "struct");

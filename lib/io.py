@@ -347,8 +347,11 @@ class BytesIO(BufferedIOBase):
 
 class StringIO(TextIOBase):
     def __init__(self, initial_value="", newline="\n"):
+        if initial_value is not None and not isinstance(initial_value, str):
+            raise TypeError(f"initial_value must be str or None, not {type(initial_value).__name__}")
         self._parts = [initial_value] if initial_value else []
-        self._len = len(initial_value)  # (of the value, kept so a write at the end needn't join the parts)
+        # (the value's length, kept so a write at the end needn't join the parts)
+        self._len = len(initial_value) if initial_value else 0
         self._pos = 0
         self.closed = False
 
