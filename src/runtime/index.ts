@@ -666,6 +666,7 @@ export const R: any = {
   defn,
   globalsDict: Obj.globalsDict,
   moduleLocals: Obj.moduleLocals,
+  realGlobals: Obj.realGlobals,
   localsDict,
   sortedKeys,
   execIn,

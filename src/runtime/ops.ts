@@ -1678,8 +1678,17 @@ export function index(x: any): number | bigint {
 // NumPy's are not, but for float64, a float subclass there too: a shim's
 // result is refused, as CPython refuses NumPy's, and named as CPython names
 // it, "numpy.int64")
+// (Sage's RR, RDF and CC elements, Python float and complex subclasses
+// here, are none in Sage: refused alike, named as Sage's types)
+const SAGE_SHIMS: Record<string, string> = {
+  "_sage_lang.RealNumber": "sage.rings.real_mpfr.RealNumber",
+  "_sage_rdf.RealDoubleElement": "sage.rings.real_double.RealDoubleElement",
+  "_sage_matrix.ComplexNumber": "sage.rings.complex_mpfr.ComplexNumber",
+};
 export function shimName(r: any, base: string): string | null {
   for (const c of typeOf(r).$mro) {
+    const sage = SAGE_SHIMS[`${c.$module}.${c.$name}`];
+    if (sage !== undefined) return c === typeOf(r) ? sage : typeName(r);
     if (c.$module !== "numpy") continue;
     if ((base === "float" && c.$name === "float64") || (base === "complex" && c.$name === "complex128")) return null;
     return c === typeOf(r) ? `numpy.${c.$name}` : typeName(r);

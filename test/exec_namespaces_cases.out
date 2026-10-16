@@ -1,0 +1,30 @@
+'r = [c for _ in range(1)]' -> ('[1]', [], ['c', 'r'])
+'r = list(c for _ in range(1))' -> NameError: name 'c' is not defined
+'r = {c: 0 for _ in range(1)}' -> ('{1: 0}', [], ['c', 'r'])
+'r = {c for _ in range(1)}' -> ('{1}', [], ['c', 'r'])
+'class A:\n  x = c\nr = A.x' -> NameError: name 'c' is not defined
+'def f(): return c\n' -> NameError: name 'c' is not defined
+'h = lambda: c' -> NameError: name 'c' is not defined
+'global b\nb = 5\nr = b' -> ('5', ['b'], ['c', 'r'])
+'global c\nr = c' -> NameError: name 'c' is not defined
+'def f():\n  global z\n  z = 3\nf()' -> ('3', ['z'], ['c', 'f'])
+'x = 1\ndef f(): return x\n' -> NameError: name 'x' is not defined
+'import math\ndef f(): return math.pi' -> NameError: name 'math' is not defined
+"globals()['a'] = 5\ndef f(): return a" -> ('5', ['a'], ['c', 'f'])
+'class A:\n  def m(self): return c\n' -> NameError: name 'c' is not defined
+'del c' -> ('None', [], [])
+'global c\ndel c' -> NameError: name 'c' is not defined
+'r = (lambda: [c for _ in range(1)])' -> NameError: name 'c' is not defined
+'def f():\n  return [y for y in range(2)]\nr = f()' -> ('[0, 1]', [], ['c', 'f', 'r'])
+'x = 2\nclass B:\n  y = x\nr=B.y' -> NameError: name 'x' is not defined
+'c = 7\nr = c' -> ('7', [], ['c', 'r'])
+'r = len' -> ('1', [], ['c', 'r'])
+'def f(): return len([1, 2])\n' -> ('2', [], ['c', 'f'])
+"def f(): return eval('c')\n" -> NameError: name 'c' is not defined
+"def f(): return eval('1 + 1')\n" -> ('2', [], ['c', 'f'])
+'r = [(lambda: c)() for _ in range(1)]' -> NameError: name 'c' is not defined
+5
+False 5
+NameError name 'c' is not defined
+10 [10] [10]
+3

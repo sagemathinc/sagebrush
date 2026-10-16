@@ -1539,6 +1539,11 @@ export const NS_DICT = Symbol("globals dict");
 
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
 export const NS_LOCALS = Symbol("locals of a layered namespace");
+// The globals behind a module's namespace: a layered one's (exec and eval
+// with separate locals), else the namespace itself
+export function realGlobals(g: any): any {
+  return g[NS_GLOBALS] ?? g;
+}
 // locals() at a module's top level: the module's dict, or, in exec/eval with
 // separate locals, the locals mapping
 export function moduleLocals(g: any): PyDict {
