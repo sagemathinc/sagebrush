@@ -4688,18 +4688,29 @@ def round_(nargout, x, n=None, kind=None):
         if cls in _INTS:
             return cp(x)
         return _finish(_round_c(_farr(x)), "single" if cls == "single" else "double")
+    if _istext(n):
+        # (round(x, 'TieBreaker', ...) and other name-value options: not supported)
+        raise _err("round: the option '%s' is not supported in Sagebrush." % _text(n))
     d = _int_arg(n)
+    t = _text(kind).lower() if kind is not None and _istext(kind) else ("decimals" if kind is None else None)
+    if t not in ("decimals", "significant"):
+        raise _err("round: the rounding type must be 'decimals' or 'significant'.")
+    cls = class_(x)
     A = _farr(x)
-    if kind is not None and _text(kind) == "significant":
+    if t == "significant":
         with np.errstate(divide="ignore"):
             e = np.floor(np.log10(np.abs(np.where(A == 0, 1, A)))) + 1
         s = 10.0 ** (d - e)
-        return _box(_round_c(A * s) / s)
-    if d >= 0:
+        r = _round_c(A * s) / s
+    elif d >= 0:
         s = 10.0 ** d
-        return _box(_round_c(A * s) / s)
-    s = 10.0 ** (-d)
-    return _box(_round_c(A / s) * s)
+        r = _round_c(A * s) / s
+    else:
+        s = 10.0 ** (-d)
+        r = _round_c(A / s) * s
+    # (the input's class, as round's page says: single stays single, an integer class
+    # its class)
+    return _finish(r, cls if cls in _INTS or cls == "single" else "double")
 
 
 @_bi("abs")
@@ -4825,6 +4836,8 @@ def mod_(nargout, a, b):
         if r != 0 and (r < 0) != (b < 0):
             r += b
         return r
+    if not isreal_(a) or not isreal_(b):
+        raise _err("mod: complex arguments are not supported; the arguments must be real.")
     return _elementwise(a, b, _mod, "mod")
 
 
@@ -4838,6 +4851,8 @@ def rem_(nargout, a, b):
         if b in (_math.inf, -_math.inf):
             return a
         return _math.fmod(a, b)
+    if not isreal_(a) or not isreal_(b):
+        raise _err("rem: complex arguments are not supported; the arguments must be real.")
     return _elementwise(a, b, _rem, "rem")
 
 
@@ -6010,18 +6025,33 @@ def permute_(x, order):
 
 @_bs("repmat")
 def repmat_(x, *args):
+    # (the replication factors: integers, a negative one counting as 0, as repmat's page says)
     if len(args) == 1:
-        r = [int(v) for v in _arr(args[0]).reshape(-1)]
+        v = _farr(args[0]).reshape(-1)
+        if v.dtype.kind == "c" or not np.all(np.isfinite(v)) or not np.all(v == np.floor(v)):
+            raise _err("Replication factors must be a row vector of integers or integer scalars.")
+        r = [int(k) for k in v]
         if len(r) == 1:
             r = [r[0], r[0]]
     else:
         r = [_int_arg(v) for v in args]
+    r = [max(0, k) for k in r]
+    if type(x) is Str:
+        # (a string scalar as a one-element string array, so it is repeated like one)
+        x = StrArr([x.s], (1, 1))
     t = type(x)
     d = list(_dims(x))
     nd = max(len(d), len(r))
     d = d + [1] * (nd - len(d))
     r = r + [1] * (nd - len(r))
     reps = tuple(reversed(r))
+    if 0 in r or 0 in d:
+        # (an empty result, of the input's kind and the product of the sizes)
+        out_d = tuple(a * b for a, b in zip(d, r))
+        if t is Cell or t is Struct or t is StrArr:
+            return x._like([], out_d)
+        z = np.zeros(tuple(reversed(out_d)), dtype=_arr(x).dtype)
+        return Char(_canon(z)) if t is Char else _box(_canon(z))
     if t is Cell or t is Struct or t is StrArr:
         idx = np.arange(len(x.a), dtype=np.int64).reshape(tuple(reversed(d)))
         big = _canon(np.tile(idx, reps))
@@ -9049,7 +9079,15 @@ def _ws_vars(ns):
 
 
 def ws_call(name, ns, args, nargout):
-    """functions that see the caller's variables"""
+    """functions that see the caller's variables; one that gives no value where one is
+    asked for (x = save) is MATLAB's error"""
+    r = _ws_call(name, ns, args, nargout)
+    if nargout == 1 and r is NOVAL:
+        raise _err("Too many output arguments.", "MATLAB:TooManyOutputs")
+    return r
+
+
+def _ws_call(name, ns, args, nargout):
     if name in ("clear", "clearvars"):
         tokens = [_text(a) for a in args]
         if "__name__" not in ns:
@@ -9071,6 +9109,8 @@ def ws_call(name, ns, args, nargout):
                     ns[key] = Undef(v)
         return NOVAL
     if name == "exist":
+        if not args:
+            raise _err("Not enough input arguments.", "MATLAB:minrhs")
         n = _text(args[0])
         kind = _text(args[1]) if len(args) > 1 else None
         key = "_k_" + n if n in _PYKW else n

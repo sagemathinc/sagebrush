@@ -2183,3 +2183,26 @@ test("sum and prod 'native' of logical, sprintf's %s of character codes, strspli
   assert.deepEqual(run([tryIt("linspace(int8(0), int8(10), 3)"), tryIt("linspace(0, uint8(10), 3)"), "disp(class(linspace(single(0), 1, 3)))"].join("\n")),
     ["refused", "refused", "single"]);
 });
+
+test("a workspace function giving no value refuses an assignment; exist needs an argument; repmat's counts, empty results and strings; round keeps its class and refuses options; mod and rem of complex refused", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const msg = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(size(x))])`;
+  assert.deepEqual(run([
+    msg("x = save"), msg("x = exist"), "y = 5; disp(exist('y'))",
+    show("repmat([1 2], 0, 1)"), show("repmat([1 2], -1, 1)"), show("repmat({1}, 0, 3)"), show("repmat('ab', 0, 1)"), show("repmat(\"ab\", 1, 2)"),
+    tryIt("repmat([1 2], 2.5)"), tryIt("repmat([1 2], [2 NaN])"), "disp(mat2str(repmat([1 2], 2, 1)))",
+    show("round(single(pi), 2)"), "disp(round(single(pi), 2) == single(3.14))", "x = round(int8(5), -1); disp([class(x) ' ' num2str(x)])",
+    "disp(round(pi, 2, 'Significant'))", tryIt("round(2.5, 'TieBreaker', 'even')"), tryIt("round(pi, 2, 'foo')"), "disp(round(123.456, -1))",
+    tryIt("mod(1i, 2)"), tryIt("rem(2, 1i)"), "disp(mat2str(mod([5 7], 3)))",
+  ].join("\n")), [
+    "Too many output arguments.", "Not enough input arguments.", "1",
+    "double [0 2]", "double [0 2]", "cell [0 3]", "char [0 2]", "string [1 2]",
+    "refused", "refused", "[1 2;1 2]",
+    "single [1 1]", "1", "int8 10",
+    "3.1000", "refused", "refused", "120",
+    "refused", "refused", "[2 1]"]);
+});
