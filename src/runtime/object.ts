@@ -103,6 +103,7 @@ export function objectType(name: string, bases: PyType[], dict: Map<string, any>
     return construct(cls, args);
   } as PyType;
   cls.$kw = (pos, names, values) => constructKw(cls, pos, names, values);
+  (cls as any).$kwPos = true;
   // Subclasses of list/tuple/dict/set use a JS subclass of the runtime
   // class (layout); everything else is an attribute-dict object.
   let layout: any = null;
@@ -336,6 +337,7 @@ export function bindMethod(f: any, self: any): any {
   // (__func__: a builtin method's receiver-checking form, never the raw function)
   m.$func = f.$owner !== undefined ? selfChecked(f) : f;
   m.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, [self, ...pos], names, values);
+  m.$kwPos = true;
   return m;
 }
 
@@ -349,16 +351,45 @@ function callSlot(c: any, f: any): any {
   return get !== undefined ? callObj(get, [c, f, typeOf(f)]) : c;
 }
 
+// A call with this many positional arguments or more is never spread into a
+// JS call: V8 puts spread arguments on the stack, so f(*xs) of a few hundred
+// thousand items was a RecursionError where CPython takes it.  It goes
+// through the function's own array forms instead (callKw).
+export const BIG_CALL = 2048;
+
 export function callObj(f: any, args: any[]): any {
+  if (args.length >= BIG_CALL) return callKw(f, args, [], []);
   if (typeof f === "function") return f(...args);
   const c = lookupType(typeOf(f), "__call__");
   if (c !== undefined) return typeof c === "function" ? c(f, ...args) : callObj(callSlot(c, f), args);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
+// Give a builtin that takes only positional arguments, any number of them, an
+// array form for calls too big to spread (BIG_CALL); keywords stay refused.
+export function positionalArray(f: any, impl: (pos: any[]) => any): any {
+  f.$kw = (pos: any[], names: string[], _values: any[]) => {
+    if (names.length) raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
+    return impl(pos);
+  };
+  f.$kwPos = true;
+  return f;
+}
+
 export function callKw(f: any, pos: any[], names: string[], values: any[]): any {
   if (typeof f === "function") {
-    if (names.length === 0) return f(...pos);
+    if (names.length === 0) {
+      if (pos.length < BIG_CALL) return f(...pos);
+      // The arguments as an array: a builtin's count checked first; then a
+      // keyword adapter known to check the positional count itself ($kwPos:
+      // compiled functions, bound methods, classes) or behind that check,
+      // else the signature's binding; anything else is spread as before.
+      if (f.$arity !== undefined) f.$arity(pos.length);
+      if (f.$kw !== undefined) {
+        if (f.$arity !== undefined || f.$kwPos === true) return f.$kw(pos, names, values);
+      } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
+      return f(...pos);
+    }
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
     if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
     raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
@@ -549,10 +580,21 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any
       }
     }
     if (dflt !== undefined) return dflt;
-    raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'`);
+    const own = Object.prototype.hasOwnProperty.call(o, "__sagebrush_missing__") ? o.__sagebrush_missing__ : undefined;
+    raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'${missingHint(own, name)}`);
   }
   if (dflt !== undefined) return dflt;
-  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
+  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'${missingHint(lookupType(t, "__sagebrush_missing__"), name)}`);
+}
+
+// What a library class or module of Sagebrush's adds to the AttributeError
+// for a name it lacks: its __sagebrush_missing__(name), a plain function
+// (lib/matplotlib/pyplot.py: a name of matplotlib's that Sagebrush does not
+// have yet, and where to search for what it has), or "".
+function missingHint(h: any, name: string): string {
+  if (h === undefined || name.startsWith("_")) return "";
+  const r = callObj(h, [name]);
+  return typeof r === "string" ? r : "";
 }
 
 // An AttributeError from a descriptor's __get__ falls back to __getattr__.
@@ -624,6 +666,7 @@ export function selfChecked(f: any): any {
       check(a[0]);
       return (f.$raw ?? f)(...a);
     };
+    c.$kwPos = true;
   }
   c.$selfChecked = c;
   f.$selfChecked = c;
@@ -926,8 +969,55 @@ ${ways}
 
 // Raised Python exceptions are thrown as the exception instance itself.  The
 // JS stack is captured into `$tb` when raised, for tracebacks.
+// The exceptions being handled, innermost last (sys.exception(),
+// sys.exc_info()): an except clause's exception while it is matched and its
+// body runs, a finally's or a with's while an exception passes through it.
+// A generator's entries are its own: genStep moves them off when it pauses
+// and back when it resumes, as CPython keeps them in each frame.
+export const handledExceptions: any[] = [];
+export function excEnter(e: any): void {
+  handledExceptions.push(e);
+}
+// (by identity: a generator resumed outside the frame that ran it may not
+// have its entries on top)
+export function excLeave(e: any): void {
+  const n = handledExceptions.length - 1;
+  if (handledExceptions[n] === e) handledExceptions.length = n;
+  else {
+    const i = handledExceptions.lastIndexOf(e);
+    if (i >= 0) handledExceptions.splice(i, 1);
+  }
+}
+export function currentExc(): any {
+  const n = handledExceptions.length;
+  return n === 0 ? null : handledExceptions[n - 1];
+}
+// What raising e does to its __context__, as CPython's _PyErr_SetObject: the
+// exception being handled becomes it, with any cycle back to e cut.
+export function setContext(e: any): void {
+  const h = currentExc();
+  if (h === null || h === e) return;
+  let o = h, slow = h, step = false;
+  for (;;) {
+    const c = o.__context__;
+    if (c === null || c === undefined) break;
+    if (c === e) {
+      o.__context__ = null;
+      break;
+    }
+    o = c;
+    // (a cycle not through e, made by assigning __context__, would loop)
+    if (o === slow) break;
+    if (step) slow = slow.__context__;
+    step = !step;
+  }
+  e.__context__ = h;
+}
+
 export function raise(cls: PyType, msg?: string): never {
-  throw newException(cls, msg === undefined ? [] : [msg]);
+  const e = newException(cls, msg === undefined ? [] : [msg]);
+  if (handledExceptions.length !== 0) setContext(e);
+  throw e;
 }
 
 export function newException(cls: PyType, args: any[]): any {
@@ -957,6 +1047,7 @@ export function raiseExc(x: any, cause?: any): any {
     e.__cause__ = c;
     e.__suppress_context__ = true;
   }
+  setContext(e);
   captureTraceback(e, true);
   return e;
 }
@@ -973,6 +1064,14 @@ export function toPyExc(e: any): any {
   // PermissionDenied) or Node's permission model (ERR_ACCESS_DENIED).
   if (e instanceof Error && (e.name === "NotCapable" || e.name === "PermissionDenied" || (e as any).code === "ERR_ACCESS_DENIED")) {
     const r = T.PermissionError(e.message.split("\n")[0]);
+    Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
+    return r;
+  }
+  // An allocation JS can't make (a string or array past its maximum
+  // length, an ArrayBuffer it can't allocate): MemoryError, as CPython's
+  // when memory runs out, not an internal error (HARD-978-2).
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length/.test(e.message)) {
+    const r = T.MemoryError();
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return r;
   }
@@ -1243,7 +1342,24 @@ export function dictClear(d: PyDict) {
 export class PyBytes {
   constructor(public a: Uint8Array, public n: number = a.length) {}
 }
-export class PyByteArray extends PyBytes {}
+// A bytearray counts the exports of its buffer (CPython's ob_exports): while
+// one is held it may be written but not re-sized (BufferError).
+export class PyByteArray extends PyBytes {
+  $exports = 0;
+}
+export function checkResizable(b: PyByteArray) {
+  if (b.$exports > 0) raise(T.BufferError, "Existing exports of data: object cannot be re-sized");
+}
+// f() with an export of x's buffer held (a bytearray's), released on every path
+export function withExport<R>(x: any, f: () => R): R {
+  if (!(x instanceof PyByteArray)) return f();
+  x.$exports++;
+  try {
+    return f();
+  } finally {
+    x.$exports--;
+  }
+}
 export function isBytesLike(x: any): x is PyBytes {
   return x instanceof PyBytes;
 }
@@ -1307,6 +1423,11 @@ export function checkArity(f: any, name: string, self: boolean, range?: [number,
   for (const k of Object.keys(f)) w[k] = f[k];
   // Keyword calls bind all parameters and call the unchecked function.
   w.$raw = f;
+  w.$argRange = [min, max]; // (the positional counts it takes: test/module-arity.test.ts)
+  // (the count check, for calls too big to spread: BIG_CALL)
+  w.$arity = (n: number) => {
+    if (n < min || n > max) arityError(name, min, max, n, self);
+  };
   return w;
 }
 
@@ -1355,6 +1476,13 @@ export class ObjMap {
   }
 }
 export function globalsDict(g: any): PyDict {
+  // (exec/eval's namespace over a dict: that dict itself; a property must
+  // not be defined on the proxy, whose get answers from the dict)
+  const own = g[NS_DICT];
+  if (own !== undefined) return own;
+  // (a layered namespace, exec/eval with locals: its globals' dict)
+  const back = g[NS_GLOBALS];
+  if (back !== undefined) return globalsDict(back);
   if (g.$globalsDict === undefined) {
     const d = new PyDict();
     (d as any).$m = new ObjMap(g);
@@ -1365,7 +1493,14 @@ export function globalsDict(g: any): PyDict {
 // The namespace object behind a globals dict, or a proxy over a plain dict
 // (exec/eval with an explicit globals mapping).
 export const NS_DICT = Symbol("globals dict");
+
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
+export const NS_LOCALS = Symbol("locals of a layered namespace");
+// locals() at a module's top level: the module's dict, or, in exec/eval with
+// separate locals, the locals mapping
+export function moduleLocals(g: any): PyDict {
+  return g[NS_LOCALS] ?? globalsDict(g);
+}
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
   return new Proxy(Object.create(null), {

@@ -755,11 +755,14 @@ class ComplexDoubleElement:
         return CDF(b) ** self
 
     def __eq__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: c == A as A == c)
         v = self._c(o)
         return v is not None and v == self._z
 
     def __ne__(self, o):
-        return not self == o
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
 
     def __bool__(self):
         return self._z != 0

@@ -1035,10 +1035,73 @@ class Series:
 
             sage: R.<w> = QQ[[]]; (w + 17/2*w^2 + 15/4*w^4 + O(w^6)).derivative()
             1 + 17*w + 15*w^3 + O(w^5)
+            sage: f = 1 + w + w^2 + w^3 + O(w^5); f.derivative(w, 2), f.derivative([w, w]), f.derivative(w, 0) == f
+            (2 + 6*w + O(w^3), 2 + 6*w + O(w^3), True)
+
+        A pure O-term keeps its uncertainty (Sage 10.10's Laurent series
+        give 0 here, an exact zero)::
+
+            sage: L.<z> = LaurentSeriesRing(QQ); O(z^3).derivative(), (z^-3 + O(z^-1)).derivative()  # sagebrush only
+            (O(z^2), -3*z^-4 + O(z^-2))
         """
         R = self._R
-        c = [self._c[i] * (self._v + i) for i in range(len(self._c))]
-        return Series(R, self._v - 1, c, self._prec - 1 if self._prec is not None else None)
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            if not args[0]:
+                return self  # no variables: no differentiation, as Sage (CORR-EC3-1)
+            args = tuple(args[0])
+        # the number of differentiations: the series variable, each
+        # optionally followed by a count (derivative(w, 2) was the first
+        # derivative: its count was ignored)
+        n, have = 0, False
+        for a in args:
+            if not isinstance(a, (int, Series)) and str(a) != R._name and "/" in str(a) and str(a).replace("/", "").lstrip("-").isdigit():
+                raise ValueError("cannot differentiate with respect to %s" % a)  # a fractional count (CORR-EC3-2)
+            if isinstance(a, int) or (not isinstance(a, Series) and str(a).lstrip("-").isdigit()):
+                if not have:
+                    raise ValueError("a derivative count needs a variable before it")
+                k = int(str(a)) if not isinstance(a, int) else int(a)
+                if k < 0:
+                    raise ValueError("the number of derivatives must be nonnegative")
+                n += k - 1
+                have = False
+            else:
+                if str(a) != R._name:
+                    raise NotImplementedError("the derivative of a series in %s with respect to %s" % (R._name, a))
+                n += 1
+                have = True
+        if not args:
+            n = 1
+        if n == 0:
+            return self
+        # in closed form: c_e x^e becomes e (e-1) ... (e-n+1) c_e x^(e-n),
+        # which is 0 when 0 <= e < n (no loop of n steps: derivative(w, 10^9))
+        # the surviving terms, counted before any work: their falling
+        # factorials have about n log2(|e| + n) bits each, so the total is
+        # bounded before multiplying (one z^-2 term at n = 10^5 took 7 s
+        # and 330 MB: HARD-EC3-1)
+        surv = [i for i, ci in enumerate(self._c)
+                if not (0 <= self._v + i < n) and not _is_zero(ci)]
+        if surv:
+            bits = sum(n * max(1, (abs(self._v + i) + n).bit_length()) for i in surv)
+            if bits > 10**6 or len(surv) * n > 10**6:
+                raise NotImplementedError("the %d-th derivative of this series: its coefficients would have about %d bits" % (n, bits))
+        keep = set(surv)
+        c = []
+        for i, ci in enumerate(self._c):
+            if i not in keep:
+                c.append(R._zero())
+                continue
+            e = self._v + i
+            f = 1
+            for j in range(n):
+                f *= e - j
+            c.append(ci * f)
+        # O(x^p) holds every sum of c_k x^k with k >= p; each derivative
+        # lowers p by one, except that O(1)' is O(1) (the x^0 term's is 0)
+        p = self._prec
+        if p is not None:
+            p = p - n if (p < 0 or p >= n) else 0
+        return Series(R, self._v - n, c, p)
 
     diff = differentiate = derivative
 

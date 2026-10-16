@@ -63,6 +63,8 @@
 :where(.sbb, .sbb-layer) .menu[hidden] { display: none; }
 :where(.sbb, .sbb-layer) .menu button { border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; background: none; }
 :where(.sbb, .sbb-layer) .menu button:hover { background: #eef2ea; }
+/* (which Sagebrush runs the board's code, at the ⋯ menu's foot: round 0's 17) */
+:where(.sbb, .sbb-layer) .menu .ver { border-top: 1px solid rgba(0, 0, 0, .08); margin-top: 4px; padding: 6px 10px 2px; font-size: 11px; color: #6a7365; }
 :where(.sbb, .sbb-layer) .menu button[hidden] { display: none; }
 [data-sbb=lang] { display: flex; align-items: center; gap: 4px; padding: 4px 10px; color: #556; }
 [data-sbb=lang] button { padding: 3px 9px; border: 1px solid rgba(0, 0, 0, .15); border-radius: 5px; }
@@ -92,6 +94,8 @@
 .board-code.code-error, .board-code.code-failed { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
 /* { }: show or hide an item's code (its output stays) */
 .board-code-toggle { margin-left: auto; border: 0; background: none; padding: 0 4px; font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #8a918b; cursor: pointer; border-radius: 4px; line-height: 18px; }
+/* (a code item in a language not the board's: said, item 16) */
+.board-lang { font: 600 10px/1.6 system-ui, sans-serif; color: #5b3d8a; background: #efe9f7; border: 1px solid #d9cdee; border-radius: 4px; padding: 0 5px; margin-left: 6px; white-space: nowrap; letter-spacing: .02em; }
 .board-code-toggle:hover { background: #eef2ea; color: #2a6f2f; }
 .board-code-toggle.off { color: #b8bdb9; text-decoration: line-through; }
 .board-editor [hidden] { display: none !important; }

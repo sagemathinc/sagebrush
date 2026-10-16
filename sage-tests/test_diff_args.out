@@ -1,0 +1,17 @@
+list empty :: x^2
+tuple empty :: TypeError
+method empty :: x^2
+list x x :: 2*y
+list x y :: 2*x
+empty then x :: TypeError
+two vars empty :: x*y
+derivative empty :: x^2
+callable empty :: x |--> x^3
+series :: 1*x + 1*x^2 + Order(x^4)
+K roots :: [(-a, 1), (a, 1)]
+L roots :: [(-b, 1), (b, 1)]
+K nomult :: [-a, a]
+K mult :: [(-a, 2), (1, 1), (a, 2)]
+K none :: []
+ZZ poly :: [(-a, 1), (a, 1)]
+parent :: Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?

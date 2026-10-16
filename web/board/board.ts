@@ -12,7 +12,7 @@
 
 import { InkCapture, inkHit, inkOutline, inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
-import { ICON_NAME, GROUP_PAD, GROUP_TITLE } from "./doc";
+import { ICON_NAME, GROUP_PAD, GROUP_TITLE, refLabel } from "./doc";
 
 /** A page's backdrop (doc.ts BoardPage's slide and background). */
 export interface Backdrop { slide?: { x: number; y: number; w: number; h: number }; color?: string; image?: string }
@@ -64,16 +64,21 @@ export interface Item {
   order?: number;
   /** code items: only the code's output shows */
   hideCode?: boolean;
+  /** code items: its own language (doc.ts DocNote.mode), and the one it runs in when it is not the board's (shown, item 16) */
+  mode?: string;
+  lang?: string;
   /** notes: a picture (its name, size, and its address when not in this browser) */
   image?: { key: string; w: number; h: number; src?: string };
 }
 
+const LANG_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 /** What an item's element shows. */
-export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "image" | "inert" | "emoji" | "icon" | "color">>;
+export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "lang" | "image" | "inert" | "emoji" | "icon" | "color">>;
 
 /** Code items' engine (code.ts, through page.ts): their output, state and running. */
 export interface CodeHost {
-  highlight(src: string): string;
+  /** a code item's code, highlighted in its language (its id says which) */
+  highlight(src: string, id: string): string;
   /** the live output element (a copy for measuring and printing) */
   output(id: string, copy: boolean): HTMLElement | null;
   /** "" (up to date), or queued, running, stale, error, failed, cancelled, interrupted (code.ts's CodeState) */
@@ -106,6 +111,8 @@ export interface Camera {
 
 const CELL = 512; // the spatial grid's cell, in world units
 const FAR = 0.5; // below this zoom: rectangles on the canvas, no DOM (text under 7 px is not read)
+/** The least zoom a board opens at (its notes' 14 px text at 8.4 px): a larger board opens at it, from its start. */
+export const LEGIBLE = 0.6;
 // ...unless few items are in view: then their text shows down to this zoom
 // (6 px: small but still read; few elements cost nothing to show)
 const FEW_FAR = 0.35, FEW = 300;
@@ -200,6 +207,8 @@ export class Board {
   private backImage: { name: string; img: HTMLImageElement } | null = null;
   /** a press on an item (not a link): return true to take it (the board does not pan) */
   onItemDown: ((it: Item, e: PointerEvent) => boolean) | null = null;
+  /** A link to a place on the board (`#…`): the words it shows (its page's or item's title), or null. */
+  linkLabel: ((ref: string) => string | null) | null = null;
   /** Drawing (the Draw tool): the pen's style, asked at each press (null:
    * the press doesn't draw); a stroke drawn, its points as InkCapture keeps them */
   pen: (() => InkStyle | null) | null = null;
@@ -360,6 +369,24 @@ export class Board {
       x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h);
     }
     return x0 <= x1 ? { x0, y0, x1, y1 } : null;
+  }
+
+  /** The board as it opens: all of it, or, when that would make its notes'
+   * text too small to read (a zoom under LEGIBLE), at that zoom, centered
+   * along an axis it fits, else from its start (its left, its top): the rest
+   * a scroll away (friction 6, 12); smoothly unless `now`. */
+  overview(now = false) {
+    const b = this.bounds();
+    if (!b) return;
+    let c = this.cameraFor(b.x0, b.y0, b.x1, b.y1, 1.5);
+    if (c.z < LEGIBLE) {
+      const W = this.canvas.width / this.dpr, H = this.canvas.height / this.dpr, i = this.insets, z = LEGIBLE;
+      const w = Math.max(50, W - i.left - i.right), h = Math.max(50, H - i.top - i.bottom), m = Math.min(32, w / 12);
+      const at = (lo: number, hi: number, start: number, room: number) => ((hi - lo) * z <= room - 2 * m ? (lo + hi) / 2 - (start + room / 2) / z : lo - (start + m) / z);
+      c = { x: at(b.x0, b.x1, i.left, w), y: at(b.y0, b.y1, i.top, h), z };
+    }
+    if (now) this.setCamera(c);
+    else this.flyTo(c);
   }
 
   /** Move the camera to show these items (all when none are given), smoothly unless `now`. */
@@ -597,6 +624,14 @@ export class Board {
         head.append(run);
       }
       if (it.title) head.append(titleEl(it.title));
+      // (a language not the board's: said, so that a reader isn't misled, item 16)
+      if (it.lang) {
+        const b = document.createElement("span"), name = LANG_NAMES[it.lang] ?? it.lang;
+        b.className = "board-lang";
+        b.textContent = name;
+        b.title = `This item's code is ${name}, not the board's language; it shares no names with the board's other languages`;
+        head.append(b);
+      }
       if (this.onToggleCode && it.id) {
         const id = it.id, t = document.createElement("button");
         t.className = "board-code-toggle" + (it.hideCode ? " off" : "");
@@ -635,7 +670,7 @@ export class Board {
       if (!it.hideCode) {
         const pre = document.createElement("pre");
         pre.className = "sbnb board-code-src"; // (the notebook's colors for code)
-        if (this.code) pre.innerHTML = this.code.highlight(it.code);
+        if (this.code) pre.innerHTML = this.code.highlight(it.code, it.id ?? "");
         else pre.textContent = it.code;
         el.append(pre);
       }
@@ -656,13 +691,20 @@ export class Board {
       e.textContent = "Empty note: double-click to write";
       el.append(e);
     }
-    if (it.ref && /^https?:\/\//i.test(it.ref)) {
+    // (a place on the board: its page's or item's title, round 0's 15; the host goes there)
+    if (it.ref?.startsWith("#")) {
+      const a = document.createElement("a");
+      a.className = "board-ref";
+      a.href = it.ref;
+      a.textContent = "→ " + (this.linkLabel?.(it.ref) ?? it.ref.slice(1));
+      el.append(a);
+    } else if (it.ref && /^https?:\/\//i.test(it.ref)) {
       const a = document.createElement("a");
       a.className = "board-ref";
       a.href = it.ref;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.textContent = "↗ " + decodeURIComponent(it.ref.replace(/^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[^/]+\//, "").replace(/^https?:\/\//, ""));
+      a.textContent = "↗ " + refLabel(it.ref);
       el.append(a);
     }
     if (this.typeset && el.querySelector(".math")) {
@@ -864,6 +906,8 @@ export class Board {
   }
 
   private draw(v: { x0: number; y0: number; x1: number; y1: number }, far: boolean) {
+    // (near, no title is drawn on the canvas: none to hover there)
+    if (!far) this.titleRects.clear();
     const ctx = this.ctx, c = this.camera, d = this.dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1161,10 +1205,18 @@ export class Board {
   /** The group whose title is at a point on the page: its band, or where its title is drawn (the innermost). */
   titleAt(cx: number, cy: number): { id: string; title: string } | null {
     const w = this.toWorld(cx, cy);
-    const gs = [...this.boxes.query(w.x - 1, w.y - 200, w.x + 1, w.y + 1, new Set())].filter((g) => g.kind === "group" && g.title).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+    // (a title drawn, far out: where it was drawn, above its group too, the
+    // innermost (drawn last); astra, on ec472da: a title above its group is
+    // outside the group's box, so the box query below can't find it)
+    let drawn: string | null = null;
+    for (const [id, t] of this.titleRects) if (w.x >= t.x0 && w.x <= t.x1 && w.y >= t.y0 && w.y <= t.y1) drawn = id;
+    const dg = drawn ? this.byId.get(drawn) : undefined;
+    if (dg?.title) return { id: dg.id, title: plainTitle(dg.title) };
+    // (else a group's band, the innermost)
+    const gs = [...this.boxes.query(w.x - 1, w.y - 1, w.x + 1, w.y + 1, new Set())].filter((g) => g.kind === "group" && g.title).sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
     for (const g of gs) {
-      const t = this.titleRects.get(g.id), band = g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE;
-      if ((w.x >= g.x && w.x <= g.x + g.w && w.y >= g.y && w.y < band) || (t && w.x >= t.x0 && w.x <= t.x1 && w.y >= t.y0 && w.y <= t.y1)) return { id: g.id, title: plainTitle(g.title!) };
+      const band = g.inner?.y ?? g.y + GROUP_PAD + GROUP_TITLE;
+      if (w.x >= g.x && w.x <= g.x + g.w && w.y >= g.y && w.y < band) return { id: g.id, title: plainTitle(g.title!) };
     }
     return null;
   }
@@ -1456,7 +1508,7 @@ const placement = (it: Item) => `left:${+it.x}px;top:${+it.y}px;width:${+it.w}px
 // (a note that is only a picture: shown as the picture alone; as doc.ts's onlyImage)
 const onlyImage = (it: Content) => !!it.image && !it.title && !it.text && it.code === undefined && !it.detail && !it.ref;
 // What an element shows (kept when this is unchanged).
-const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.image, it.emoji, it.icon, it.kind === "sticker" ? it.color : undefined, it.inert]);
+const contentKey = (it: Item) => JSON.stringify([it.kind, it.title, it.text, it.detail, it.ref, it.shape, it.code, it.order, it.hideCode, it.lang, it.image, it.emoji, it.icon, it.kind === "sticker" ? it.color : undefined, it.inert]);
 // (a double-click in the item being edited selects a word, as in any field)
 const editingAt = (e: Event) => !!(e.target as Element | null)?.closest?.(".board-editing");
 // A code item's output, in the box that gives it the notebook's styles.

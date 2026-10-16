@@ -2,9 +2,10 @@
 // Fast paths come first and only perform JS operations on already-checked
 // types, so their V8 feedback stays clean when inlined into compiled code.
 
+import * as SP from "./strpos";
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table,
+  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
 import { INTR } from "./interrupt";
@@ -29,6 +30,11 @@ export function layoutPlain(t: any): boolean {
   return t.$lp;
 }
 export const plainDict = (o: any): boolean => o.$cls === T.dict;
+// Sets and frozensets themselves: a subclass's operators may be its own.
+const exactSet = (o: any): boolean => o instanceof PySet && (o.$cls === T.set || o.$cls === T.frozenset);
+const exactSets = (a: any, b: any): boolean => exactSet(a) && exactSet(b);
+// (and in place only into a set: a frozenset's |= makes a new one)
+const inplaceSets = (a: any, b: any): boolean => a instanceof PySet && a.$cls === T.set && exactSet(b);
 
 export const normBig = (r: bigint): number | bigint => (r >= MINB && r <= MAXB ? Number(r) : r);
 export const mkfloat = (r: number): any => (isInt(r) ? new FloatBox(r) : r);
@@ -86,6 +92,10 @@ function special(o: any, name: string): any {
   return f;
 }
 const MISSING = {};
+// special() for the runtime's builtin types: the special method of o's type,
+// bound as Python binds one (a descriptor's __get__, a property, a callable
+// object), callable as f(o, ...args)
+export const lookupSpecial = special;
 
 // The special method name of type t, normalized as special() does (for the
 // lookups made on a type rather than on an object).
@@ -322,7 +332,7 @@ export function add(a: any, b: any): any {
     if (isInt(a) && isInt(b)) return isSafe(r) ? r : normBig(BigInt(a) + BigInt(b));
     return isInt(r) ? new FloatBox(r) : r;
   }
-  if (typeof a === "string" && typeof b === "string") return a + b;
+  if (typeof a === "string" && typeof b === "string") return SP.glue(a, b);
   return addSlow(a, b);
 }
 // Does x, an instance of a Python subclass of list or tuple, define its own
@@ -366,7 +376,7 @@ function subSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) - big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x - y);
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "sub");
+  if (exactSets(a, b)) return setOp(a, b, "sub");
   return binaryDunder(a, b, "sub");
 }
 
@@ -387,8 +397,8 @@ function mulSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) * big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x * y);
-  if (typeof a === "string" && repeatCount(b) !== undefined) return a.repeat(repeatCount(b)!);
-  if (typeof b === "string" && repeatCount(a) !== undefined) return b.repeat(repeatCount(a)!);
+  if (typeof a === "string" && repeatCount(b) !== undefined) return SP.repeatChecked(a, repeatCount(b)!);
+  if (typeof b === "string" && repeatCount(a) !== undefined) return SP.repeatChecked(b, repeatCount(a)!);
   if (Array.isArray(a) && !overrides(a, "__mul__") && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
   if (Array.isArray(b) && !overrides(b, "__rmul__") && repeatCount(a) !== undefined) return repeatArray(b, repeatCount(a)!);
   if (a instanceof PyBytes && repeatCount(b) !== undefined) return repeatBytes(a, repeatCount(b)!);
@@ -430,8 +440,25 @@ function truedivSlow(a: any, b: any): any {
 }
 
 const absBig = (x: bigint) => (x < 0n ? -x : x);
-function bitLength(x: bigint): number {
-  return x === 0n ? 0 : absBig(x).toString(2).length;
+const BIG = 1n << 1024n;
+// The bit length of x, without a string of its digits once it is large:
+// shifts bracket the length, then halve the bracket (each shift's result is
+// no bigger than x, and soon small).  With max, a known bound on the length,
+// the bracket starts there, so no shift copies more than half of x.
+export function bitLength(x: bigint, max?: number): number {
+  x = absBig(x);
+  if (x < BIG) return x === 0n ? 0 : x.toString(2).length;
+  let lo = 1024, hi = max ?? 2048; // x >> lo is nonzero, x >> hi is zero
+  while (max === undefined && x >> BigInt(hi) !== 0n) {
+    lo = hi;
+    hi *= 2;
+  }
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (x >> BigInt(mid) !== 0n) lo = mid;
+    else hi = mid;
+  }
+  return hi;
 }
 
 // Correctly rounded int / int, subnormal results included, following the
@@ -679,15 +706,15 @@ export function and(a: any, b: any): any {
   if (I32(a) && I32(b)) return a & b;
   if (typeof a === "boolean" && typeof b === "boolean") return a && b;
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) & big(b));
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "and");
+  if (exactSets(a, b)) return setOp(a, b, "and");
   return binaryDunder(a, b, "and");
 }
 export function or(a: any, b: any): any {
   if (I32(a) && I32(b)) return a | b;
   if (typeof a === "boolean" && typeof b === "boolean") return a || b;
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) | big(b));
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "or");
-  if (a instanceof PyDict && b instanceof PyDict) {
+  if (exactSets(a, b)) return setOp(a, b, "or");
+  if (a instanceof PyDict && b instanceof PyDict && plainDict(a) && plainDict(b)) {
     const r = dictCopy(a);
     dictUpdate(r, b);
     return r;
@@ -698,7 +725,7 @@ export function xor(a: any, b: any): any {
   if (I32(a) && I32(b)) return a ^ b;
   if (typeof a === "boolean" && typeof b === "boolean") return a !== b;
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) ^ big(b));
-  if (a instanceof PySet && b instanceof PySet) return setOp(a, b, "xor");
+  if (exactSets(a, b)) return setOp(a, b, "xor");
   return binaryDunder(a, b, "xor");
 }
 export function matmul(a: any, b: any): any {
@@ -709,7 +736,7 @@ const BIN: Record<string, (a: any, b: any) => any> = { add, sub, mul, truediv, f
 
 export function iadd(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return add(a, b);
-  if (typeof a === "string" && typeof b === "string") return a + b;
+  if (typeof a === "string" && typeof b === "string") return SP.glue(a, b);
   // (a Python subclass of list with its own __iadd__ goes through it)
   if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__iadd__")) {
     if (Array.isArray(b)) {
@@ -722,7 +749,7 @@ export function iadd(a: any, b: any): any {
 }
 export function isub(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return sub(a, b);
-  if (a instanceof PySet && b instanceof PySet) return setInplace(a, b, "sub");
+  if (inplaceSets(a, b)) return setInplace(a, b, "sub");
   return inplace(a, b, "sub", "__isub__");
 }
 export function imul(a: any, b: any): any {
@@ -742,11 +769,11 @@ export const ipow = (a: any, b: any) => inplace(a, b, "pow", "__ipow__");
 export const ilshift = (a: any, b: any) => inplace(a, b, "lshift", "__ilshift__");
 export const irshift = (a: any, b: any) => inplace(a, b, "rshift", "__irshift__");
 export const imatmul = (a: any, b: any) => inplace(a, b, "matmul", "__imatmul__");
-export const iand = (a: any, b: any) => (a instanceof PySet && b instanceof PySet ? setInplace(a, b, "and") : inplace(a, b, "and", "__iand__"));
-export const ixor = (a: any, b: any) => (a instanceof PySet && b instanceof PySet ? setInplace(a, b, "xor") : inplace(a, b, "xor", "__ixor__"));
+export const iand = (a: any, b: any) => (inplaceSets(a, b) ? setInplace(a, b, "and") : inplace(a, b, "and", "__iand__"));
+export const ixor = (a: any, b: any) => (inplaceSets(a, b) ? setInplace(a, b, "xor") : inplace(a, b, "xor", "__ixor__"));
 export const ior = (a: any, b: any) => {
-  if (a instanceof PySet && b instanceof PySet) return setInplace(a, b, "or");
-  if (a instanceof PyDict) {
+  if (inplaceSets(a, b)) return setInplace(a, b, "or");
+  if (a instanceof PyDict && plainDict(a)) {
     dictUpdate(a, b);
     return a;
   }
@@ -963,7 +990,7 @@ export function contains(c: any, x: any): boolean {
   if (Array.isArray(c) && ((c as any).$cls === undefined || layoutPlain((c as any).$cls))) return arrContains(c, x);
   if (typeof c === "string") {
     if (typeof x !== "string") raise(T.TypeError, `'in <string>' requires string as left operand, not ${typeName(x)}`);
-    return c.includes(x);
+    return SP.indexOf(c, x, 0) >= 0;
   }
   if (c instanceof PyDict && c.$cls === T.dict) return dictGet(c, x) !== undefined;
   if (c instanceof PySet && (c.$cls === T.set || c.$cls === T.frozenset)) return dictGet(c.$d, x) !== undefined;
@@ -1013,7 +1040,7 @@ function truthSlow(x: any): boolean {
 }
 
 export function len(x: any): number {
-  if (typeof x === "string") return x.length;
+  if (typeof x === "string") return SP.cpLen(x);
   if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return x.length;
   if (x instanceof PyDict && (x.$cls === T.dict || layoutPlain(x.$cls))) return x.$m.size;
   if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return x.$d.$m.size;
@@ -1282,9 +1309,18 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     if (!isThrow && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
     g.$started = true;
   }
+  // The generator's own handled exceptions go above its caller's while it
+  // runs, and come off with it when it pauses (CPython's per-frame exc_info).
+  const base = handledExceptions.length;
+  if (g.$exc !== undefined) {
+    handledExceptions.push(...g.$exc);
+    g.$exc = undefined;
+  }
+  let paused = false;
   try {
     const r = isThrow ? g.throw(arg) : g.next(arg);
     if (r.done && r.value === undefined) r.value = null;
+    paused = !r.done;
     return r;
   } catch (e: any) {
     if (isExc(e, T.StopIteration)) {
@@ -1294,8 +1330,56 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     }
     if (e instanceof TypeError && /already running|is executing/.test(e.message)) raise(T.ValueError, "generator already executing");
     throw e;
+  } finally {
+    if (handledExceptions.length > base) {
+      const own = handledExceptions.splice(base);
+      if (paused) g.$exc = own;
+    }
   }
 }
+// A generator's return(v) (JS's, when the frame delegating to it is
+// returned from), with its own handled exceptions around it, as genStep.
+export function genReturn(g: any, v: any): IteratorResult<any> {
+  const base = handledExceptions.length;
+  if (g.$exc !== undefined) {
+    handledExceptions.push(...g.$exc);
+    g.$exc = undefined;
+  }
+  let paused = false;
+  try {
+    const r = g.return(v);
+    paused = !r.done;
+    return r;
+  } finally {
+    if (handledExceptions.length > base) {
+      const own = handledExceptions.splice(base);
+      if (paused) g.$exc = own;
+    }
+  }
+}
+
+// What a `yield from` or `await` of a generator or coroutine delegates to
+// (JS's yield*): its every step a step of its own frame, through genStep, so
+// it keeps its own handled exceptions however it is resumed (CORR-B7F-1).
+class Delegate {
+  constructor(public g: any) {}
+  [Symbol.iterator]() {
+    return this;
+  }
+  next(v: any) {
+    return genStep(this.g, false, v);
+  }
+  throw(e: any) {
+    return genStep(this.g, true, e);
+  }
+  return(v: any) {
+    return genReturn(this.g, v);
+  }
+}
+export function delegateTo(g: any): any {
+  return new Delegate(g);
+}
+
 // The StopIteration a ProtoIter swallowed most recently, so wrappers such as
 // enumerate and map can re-raise it with its value.
 export const lastStop: { e: any } = { e: null };
@@ -1409,7 +1493,7 @@ export function forEach(x: any, f: (v: any) => void) {
   }
 }
 
-function pollInterrupt() {
+export function pollInterrupt() {
   if (INTR[0]) {
     INTR[0] = 0;
     raise(T.KeyboardInterrupt);
@@ -1527,7 +1611,7 @@ export function setOp(a: PySet, b: PySet, op: string): PySet {
   }
   return r;
 }
-function setInplace(a: PySet, b: PySet, op: string): PySet {
+export function setInplace(a: PySet, b: PySet, op: string): PySet {
   a.$d = setOp(a, b, op).$d;
   return a;
 }
@@ -1610,6 +1694,16 @@ export function seqIndex(i: any, len: number, what: string): number {
   return j;
 }
 
+function strGetitemPairs(o: string, p: SP.Pos, k: any): string {
+  const len = o.length - p.n;
+  if (!(k instanceof PySlice)) return SP.charAt(o, p, seqIndex(k, len, "string"));
+  const [start, step, n] = sliceIndices(k, len);
+  if (step === 1) return o.slice(SP.unitOf(p, start), SP.unitOf(p, start + n));
+  let r = "";
+  for (let i = 0, j = start; i < n; i++, j += step) r = SP.glue(r, SP.charAt(o, p, j));
+  return r;
+}
+const LONE_PAIR = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
 export function getitem(o: any, k: any): any {
   if (Array.isArray(o) && (o as any).$cls === undefined) {
     if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) return o[k];
@@ -1681,11 +1775,16 @@ function getitemSlow(o: any, k: any): any {
     return o.a[seqIndex(k, o.n, "index")];
   }
   if (typeof o === "string") {
+    // (positions are code points: a string with surrogate pairs converts)
+    const p = SP.pairs(o);
+    if (p !== null) return strGetitemPairs(o, p, k);
     if (k instanceof PySlice) {
       const [start, step, n] = sliceIndices(k, o.length);
       if (step === 1) return o.slice(start, start + n);
       let r = "";
       for (let i = 0, j = start; i < n; i++, j += step) r += o[j];
+      // (o has no pairs, so a pair here is two lone surrogates joined: SP.glue)
+      if (LONE_PAIR.test(r)) SP.refuseMerge();
       return r;
     }
     return o[seqIndex(k, o.length, "string")];
@@ -1720,6 +1819,7 @@ function bytearraySetSlice(o: PyByteArray, k: PySlice, v: any) {
   const src: Uint8Array = bufferOf(v)?.slice() ?? Uint8Array.from(toArray(v).map(byteValue));
   const [start, step, n] = sliceIndices(k, o.n);
   if (step === 1) {
+    if (src.length !== n) checkResizable(o);
     const r = new Uint8Array(o.n - n + src.length);
     r.set(o.a.subarray(0, start), 0);
     r.set(src, start);

@@ -7,10 +7,11 @@
 //   pyjs -i program.py        run, then stay interactive
 //   pyjs --emit program.py    print the generated JavaScript
 
-import { readFileSync, mkdirSync, appendFileSync, writeFileSync } from "fs";
+import { readFileSync, readSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
 import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
+import { oneLine } from "./terminal-text";
 import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
 import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
@@ -34,6 +35,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)
            and run on lib/_matlab.py; implied for other .m files
   -q       no banner on the interactive prompt
+  --figures DIR
+           keep the figures shown (plt.show(), a plot's display) as SVG files
+           in DIR; without it, they are in a directory removed at exit
   --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)
   -V       print the version
   --licenses  the licenses of Sagebrush and of what it contains
@@ -55,6 +59,33 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
 // None is 0; an integer (bool and int subclasses too) is its value, its low
 // byte as the system keeps it, or -1 (255) if it does not fit a long long;
 // anything else is written to stderr, and is 1.
+/** All of stdin, as text.  readFileSync(0) throws EAGAIN when stdin is a
+ * non-blocking pipe whose writer hasn't written yet: under load a fresh
+ * `sagebrush --magma` session died that way, printing nothing (the flaky
+ * Magma examples test).  So: read to the end of input, waiting a little
+ * whenever there is nothing to read yet. */
+function readStdin(): string {
+  const chunks: Buffer[] = [];
+  const buf = Buffer.alloc(1 << 16);
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    let n: number;
+    try {
+      n = readSync(0, buf, 0, buf.length, null);
+    } catch (e: any) {
+      if (e?.code === "EAGAIN") {
+        Atomics.wait(pause, 0, 0, 5);
+        continue;
+      }
+      if (e?.code === "EOF") break;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function exitCode(c: any): number {
   if (c === null || c === undefined) return 0;
   let int = false;
@@ -95,21 +126,107 @@ function guarded(fn: () => void): number | null {
 
 // Rich display on a terminal: a picture (SVG) is written to a file whose
 // path is printed with the picture's description; the rest prints its repr.
-let plotCount = 0;
+// The files go to --figures DIR, and are kept; else to a directory of this
+// run's own, removed when sagebrush exits (runs used to leave a file in
+// /tmp for every figure, agent-UX R0-7).
+// A process ended by a signal emits no "exit" (HARD-191-1): its directory is
+// removed by the next sagebrush that makes one, but only a directory it can
+// tell is one of ours, whose process is gone (sweepFigures, HARD-B98-1); the
+// prompt, which waits for input, removes its own on SIGINT, SIGTERM and
+// SIGHUP too (removeFiguresOnSignal).  A script's signals keep their default
+// action: a handler would wait for the script's computation to end.
+let plotCount = 0, figuresDir: string | null = null, figuresKept = false, figuresHinted = false;
+const removeFigures = () => { if (figuresDir !== null && !figuresKept) try { rmSync(figuresDir, { recursive: true, force: true }); } catch {} };
+const FIGURES_MARK = ".sagebrush-figures", FIGURES_STALE_MS = 3600e3;
+// A directory left by a sagebrush ended by a signal, removed when all of
+// this holds, else left alone: mkdtemp's name, sagebrush-figures-PID-XXXXXX;
+// a directory (not a link), this user's, mode 0700, untouched for an hour (a
+// process in another pid namespace may share the temporary directory); our
+// mark in it, naming that pid; nothing else in it but figure-N.svg files; and
+// no process PID.  Only those files and the mark are removed, then the
+// directory, never anything recursively.
+// (bounds on the sweep's work, so that a plot never waits on it: entries
+// of the temporary directory looked at, entries of one candidate, and
+// candidates removed; what is past them is left for a later run, or for
+// good, HARD-260-1)
+const SWEEP_TMP_MAX = 100000, SWEEP_DIR_MAX = 10000, SWEEP_REMOVE_MAX = 8;
+/** At most `max` entries of a directory, read one at a time (never the
+ * whole listing), or null when it has more. */
+function entriesUpTo(path: string, max: number): Dirent[] | null {
+  const d = opendirSync(path);
+  try {
+    const out: Dirent[] = [];
+    for (let e = d.readSync(); e !== null; e = d.readSync()) {
+      if (out.length === max) return null;
+      out.push(e);
+    }
+    return out;
+  } finally {
+    d.closeSync();
+  }
+}
+function sweepFigures() {
+  const uid = process.getuid?.();
+  let dir;
+  try { dir = opendirSync(tmpdir()); } catch { return; }
+  try {
+    let seen = 0, removed = 0;
+    for (let ent = dir.readSync(); ent !== null && seen < SWEEP_TMP_MAX && removed < SWEEP_REMOVE_MAX; ent = dir.readSync(), seen++) {
+      const f = ent.name;
+      const m = /^sagebrush-figures-([1-9]\d{0,9})-[A-Za-z0-9]{6}$/.exec(f);
+      if (!m || Number(m[1]) === process.pid) continue;
+      try {
+        const p = join(tmpdir(), f), st = lstatSync(p);
+        if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o777) !== 0o700 || Date.now() - st.mtimeMs < FIGURES_STALE_MS) continue;
+        const mark = join(p, FIGURES_MARK), ms = lstatSync(mark);
+        if (!ms.isFile() || ms.size > 100 || readFileSync(mark, "utf8") !== `sagebrush figures ${m[1]}\n`) continue;
+        // (no more entries than a run could have left; each a regular file:
+        // the directory listing's own type, no stat of each)
+        const files = entriesUpTo(p, SWEEP_DIR_MAX);
+        if (files === null || !files.every((g) => g.isFile() && (g.name === FIGURES_MARK || /^figure-\d+\.svg$/.test(g.name)))) continue;
+        try { process.kill(Number(m[1]), 0); continue; } catch (e: any) { if (e?.code !== "ESRCH") continue; }
+        for (const g of files) unlinkSync(join(p, g.name));
+        rmdirSync(p);
+        removed++;
+      } catch {}
+    }
+  } finally {
+    try { dir.closeSync(); } catch {}
+  }
+}
+function removeFiguresOnSignal() {
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
+    if (process.listenerCount(sig) === 0) process.once(sig, () => { removeFigures(); process.kill(process.pid, sig); });
+}
+function figurePath(): string {
+  if (figuresDir === null) {
+    sweepFigures();
+    figuresDir = mkdtempSync(join(tmpdir(), `sagebrush-figures-${process.pid}-`));
+    process.on("exit", removeFigures);
+    writeFileSync(join(figuresDir, FIGURES_MARK), `sagebrush figures ${process.pid}\n`, { flag: "wx" });
+  }
+  // (in a directory of the user's: never over a file that is there)
+  let path: string;
+  do path = join(figuresDir, `figure-${++plotCount}.svg`); while (figuresKept && existsSync(path));
+  return path;
+}
 R.host = {
   display(bundle: Record<string, string>): boolean {
     const svg = bundle["image/svg+xml"];
     if (svg === undefined) return false;
     let path: string;
     try {
-      path = join(tmpdir(), `sagebrush-${process.pid}-${++plotCount}.svg`);
-      writeFileSync(path, svg);
+      path = figurePath();
+      writeFileSync(path, svg, { flag: figuresKept ? "wx" : "w" });
     } catch {
       return false; // e.g. a sandbox without environment or write access
     }
     const m = /<title>([^<]*)<\/title>/.exec(svg);
     const desc = m ? m[1].replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") : "";
-    R.stdout.write(`${bundle["text/plain"] ?? ""}\nSaved ${path}${desc ? ` (${desc.length > 300 ? desc.slice(0, 300) + "…" : desc})` : ""}\n`);
+    const hint = figuresKept || figuresHinted ? "" : "\n(figures are removed when sagebrush exits; sagebrush --figures DIR keeps them)";
+    figuresHinted = true;
+    // (the path as one line: a directory named with a newline or an escape code is shown, not obeyed, HARD-191-2)
+    R.stdout.write(`${bundle["text/plain"] ?? ""}\nSaved ${oneLine(path)}${desc ? ` (${oneLine(desc.length > 300 ? desc.slice(0, 300) + "…" : desc)})` : ""}${hint}\n`);
     return true;
   },
   // (MATLAB function files on the path: lib/_matlab_files.py)
@@ -207,6 +324,7 @@ function historyFile(): string | null {
 }
 
 function repl(main: any, quiet: boolean): Promise<number> {
+  removeFiguresOnSignal();
   if (!quiet) process.stdout.write(`${VERSION}\nType help(obj) for help, exit() or Ctrl-D to leave.\n`);
   const hist = historyFile();
   let history: string[] = [];
@@ -283,8 +401,10 @@ function repl(main: any, quiet: boolean): Promise<number> {
 
 async function main() {
   const argv = process.argv.slice(2);
-  // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2)
-  if (argv[0] === "board" && (argv[1] === "render" || argv[1] === "run")) {
+  // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2;
+  // `board` with a command it doesn't have is said so there, R0-3, unless
+  // there is a script named board here, to run as before)
+  if (argv[0] === "board" && (["render", "run", "check", "-h", "--help"].includes(argv[1]) || !existsSync("board"))) {
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;
@@ -314,7 +434,24 @@ async function main() {
     else if (a === "--sage") sage = true;
     else if (a === "--magma") magma = true;
     else if (a === "--matlab") matlab = true;
-    else if (a === "-V" || a === "--version") {
+    else if (a === "--figures") {
+      // (figures to keep, in DIR: made if it isn't there)
+      argv.shift();
+      if (!argv.length || argv[0].startsWith("-")) {
+        process.stderr.write(`--figures takes a directory\n${USAGE}`);
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        mkdirSync(argv[0], { recursive: true });
+      } catch (e: any) {
+        process.stderr.write(`--figures: can't make ${oneLine(argv[0])}: ${oneLine(String(e?.code ?? e?.message ?? e))}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      figuresDir = argv[0];
+      figuresKept = true;
+    } else if (a === "-V" || a === "--version") {
       process.stdout.write(VERSION + "\n");
       return;
     } else if (a === "--licenses") {
@@ -418,11 +555,11 @@ async function main() {
   } else if (!interactive && isMagma(null)) {
     // Magma on stdin: a session, as `magma < file` is
     main = mainModule("<stdin>");
-    const py = magmaSource(readFileSync(0, "utf8"), "<stdin>", "session");
+    const py = magmaSource(readStdin(), "<stdin>", "session");
     if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive) {
     // program on stdin
-    const source = readFileSync(0, "utf8");
+    const source = readStdin();
     main = mainModule("<stdin>");
     code = guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }

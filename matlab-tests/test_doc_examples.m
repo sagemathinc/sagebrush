@@ -80,6 +80,46 @@ show(v);
 clear
 v = cosd([0 90 180 270]);
 show(v);
+% tand
+clear
+v = tand([-45 0 60]);
+show(v);
+% atan
+clear
+v = atan([-2 0 2]);
+show(v);
+% sec
+clear
+v = sec([0 pi/4]);
+show(v);
+% csc
+clear
+v = csc([pi/6 pi/2]);
+show(v);
+% cot
+clear
+v = cot([pi/8 pi/4]);
+show(v);
+% sinh
+clear
+v = sinh([-0.5 0 0.5]);
+show(v);
+% cosh
+clear
+v = cosh([0 0.5 1]);
+show(v);
+% tanh
+clear
+v = tanh([-2 0 2]);
+show(v);
+% asinh
+clear
+v = asinh([-2 0 2]);
+show(v);
+% expm1
+clear
+v = expm1([-1e-8 0 1e-8]);
+show(v);
 % factorial
 clear
 v = factorial([3 5]);
@@ -127,6 +167,63 @@ show(v);
 % complex
 clear
 v = complex(2, 5);
+show(v);
+% logspace
+clear
+v = logspace(-2, 1, 4);
+show(v);
+% flip
+clear
+v = flip([2 5 1; 7 4 9], 2);
+show(v);
+% permute
+clear
+v = permute(reshape(1:12, 2, 3, 2), [2 1 3]);
+show(v);
+% squeeze
+clear
+v = squeeze(reshape(1:6, 1, 2, 3));
+show(v);
+% repelem
+clear
+v = repelem([3 -2 5], [1 3 2]);
+show(v);
+% cummin
+clear
+v = cummin([8 3 5 2 6]);
+show(v);
+% cummax
+clear
+v = cummax([2 5 1 7 4]);
+show(v);
+% bounds
+clear
+[lo, hi] = bounds([2 9; -3 4; 7 1]);
+show(lo);
+show(hi);
+% true
+clear
+v = true(2, 3);
+show(v);
+% false
+clear
+v = false(3, 1);
+show(v);
+% nan
+clear
+v = nan(1, 3);
+show(v);
+% NaN
+clear
+v = NaN(2, 1);
+show(v);
+% inf
+clear
+v = inf(1, 2);
+show(v);
+% Inf
+clear
+v = Inf(2, 1);
 show(v);
 % zeros
 clear
@@ -294,6 +391,54 @@ show(v);
 clear
 v = setdiff([1 2 3 4], [2 4]);
 show(v);
+% movmean
+clear
+v = movmean([3 1 8 4 9], 3);
+show(v);
+% movmedian
+clear
+v = movmedian([3 1 8 4 9], 3);
+show(v);
+% movmin
+clear
+v = movmin([3 1 8 4 9], 3);
+show(v);
+% movmax
+clear
+v = movmax([3 1 8 4 9], 3);
+show(v);
+% movsum
+clear
+v = movsum([3 1 8 4 9], 3);
+show(v);
+% movprod
+clear
+v = movprod([3 1 8 4 9], 3);
+show(v);
+% movvar
+clear
+v = movvar([1 3 5 7], 3);
+show(v);
+% movstd
+clear
+v = movstd([1 3 5 7], 3);
+show(v);
+% cov
+clear
+v = cov([0 0; 2 4; 4 8]);
+show(v);
+% corrcoef
+clear
+v = corrcoef([0 3; 2 1; 4 -1]);
+show(v);
+% quantile
+clear
+v = quantile([1 3 7 9], [0.25 0.5 0.75]);
+show(v);
+% prctile
+clear
+v = prctile([1 3 7 9], [25 50 75]);
+show(v);
 % mean
 clear
 v = mean([2 4 9]);
@@ -313,6 +458,79 @@ show(v);
 % var
 clear
 v = var([1 2 3 4]);
+show(v);
+% bandwidth
+clear
+[lb, ub] = bandwidth([1 2 0; 3 4 5; 0 0 6]);
+show(lb);
+show(ub);
+% blkdiag
+clear
+v = blkdiag([1 2; 3 4], -2);
+show(v);
+% hankel
+clear
+v = hankel([2 4 6], [6 8 10]);
+show(v);
+% toeplitz
+clear
+v = toeplitz([2 5 7], [2 -1 -3]);
+show(v);
+% hilb
+clear
+v = hilb(2);
+show(v);
+% invhilb
+clear
+v = invhilb(3);
+show(v);
+% pascal
+clear
+v = pascal(5);
+show(v);
+% wilkinson
+clear
+v = wilkinson(5);
+show(v);
+% rcond
+clear
+v = rcond(diag([2 8]));
+show(v);
+% normest
+clear
+v = normest([3 0; 4 0]);
+show(v);
+% null
+clear
+v = null([1 0 0; 0 2 0]);
+show(v);
+% sqrtm
+clear
+v = sqrtm([9 0; 0 16]);
+show(v);
+% logm
+clear
+v = logm(diag([1 exp(2)]));
+show(v);
+% full
+clear
+v = full(sparse([1 2], [2 1], [7 -3], 2, 2));
+show(v);
+% nonzeros
+clear
+v = nonzeros([0 5; -2 0]);
+show(v);
+% spones
+clear
+v = full(spones(sparse([0 5; -2 0])));
+show(v);
+% speye
+clear
+v = full(speye(2, 3));
+show(v);
+% spfun
+clear
+v = full(spfun(@(x) x.^2, sparse([0 -3; 2 0])));
 show(v);
 % det
 clear
@@ -350,6 +568,59 @@ show(v);
 clear
 v = cross([1 0 0], [0 1 0]);
 show(v);
+% poly
+clear
+v = poly([-3 1 2]);
+show(v);
+% polyder
+clear
+v = polyder([2 -3 0 5]);
+show(v);
+% polyint
+clear
+v = polyint([6 -4 3], 7);
+show(v);
+% deconv
+clear
+[q,r] = deconv([1 0 -5 6], [1 -2]);
+show(q);
+show(r);
+% polyvalm
+clear
+v = polyvalm([2 -1 3], [1 2; 0 -1]);
+show(v);
+% vander
+clear
+v = vander([-1 2 3]);
+show(v);
+% mkpp
+clear
+v = mkpp([0 2 5], [3 1; -2 7]);
+show(v);
+% ppval
+clear
+v = ppval(mkpp([0 2 5], [3 1; -2 7]), [0 1 2 4 5]);
+show(v);
+% unmkpp
+clear
+[b,c,l,k,d] = unmkpp(mkpp([0 2 5], [3 1; -2 7]));
+show(b);
+show(c);
+show(l);
+show(k);
+show(d);
+% pchip
+clear
+v = pchip([0 2 4], [0 1 4], [1 3]);
+show(v);
+% spline
+clear
+v = spline([-1 0 1 2], [1 0 1 4], [-0.5 0.5 1.5]);
+show(v);
+% interp2
+clear
+v = interp2([1 3; 2 6], [1 1.5 2], 1.5);
+show(v);
 % polyval
 clear
 v = polyval([1 2 3], 2);
@@ -373,6 +644,78 @@ show(v);
 % trapz
 clear
 v = trapz([1 2 3]);
+show(v);
+% int16
+clear
+v = int16([-40000 -2.5 2.5 40000]);
+show(v);
+% int64
+clear
+v = int64([-2.5 0 2.5]);
+show(v);
+% uint16
+clear
+v = uint16([-1 12.5 70000]);
+show(v);
+% uint32
+clear
+v = uint32([-1 2.5 4294967296]);
+show(v);
+% uint64
+clear
+v = uint64([-1 2.5 20]);
+show(v);
+% isfloat
+clear
+v = isfloat(single([2 5]));
+show(v);
+% isinteger
+clear
+v = isinteger(int16([3 -4]));
+show(v);
+% ismatrix
+clear
+v = ismatrix(ones(2, 1, 3));
+show(v);
+% isdiag
+clear
+v = isdiag([3 0; 0 -2]);
+show(v);
+% ishermitian
+clear
+v = ishermitian([2 3i; -3i 4]);
+show(v);
+% istril
+clear
+v = istril([2 0; 5 -1]);
+show(v);
+% istriu
+clear
+v = istriu([2 5; 0 -1]);
+show(v);
+% isbanded
+clear
+v = isbanded([1 4 0; 2 3 5; 0 6 7], 1, 1);
+show(v);
+% issparse
+clear
+v = issparse(speye(3));
+show(v);
+% iscellstr
+clear
+v = iscellstr({'oak', 'fir'});
+show(v);
+% isletter
+clear
+v = isletter('A7 z');
+show(v);
+% isvarname
+clear
+v = isvarname('unit_7');
+show(v);
+% iskeyword
+clear
+v = iskeyword('while');
 show(v);
 % class
 clear
@@ -405,6 +748,18 @@ show(v);
 % isequal
 clear
 v = isequal([1 2], [1 2]);
+show(v);
+% strncmpi
+clear
+v = strncmpi('Window', 'windmill', 4);
+show(v);
+% regexpi
+clear
+v = regexpi('aB7 Ab8 ab9', 'ab\d', 'match');
+show(v);
+% newline
+clear
+v = double(newline);
 show(v);
 % num2str
 clear
@@ -457,6 +812,50 @@ show(v);
 % regexprep
 clear
 v = regexprep('abc123', '\d', '#');
+show(v);
+% cell
+clear
+v = cell(2, 1);
+show(v);
+% cellstr
+clear
+v = cellstr(['oak '; 'elm ']);
+show(v);
+% struct2cell
+clear
+v = struct2cell(struct('height', 4, 'width', 7));
+show(v);
+% rmfield
+clear
+v = rmfield(struct('x', 5, 'y', 9), 'x');
+show(v);
+% orderfields
+clear
+v = orderfields(struct('z', 4, 'a', 7));
+show(v);
+% getfield
+clear
+v = getfield(struct('count', 12), 'count');
+show(v);
+% setfield
+clear
+v = setfield(struct('count', 12), 'count', 15);
+show(v);
+% structfun
+clear
+v = structfun(@numel, struct('row', [2 4 6], 'column', [5; 9]));
+show(v);
+% feval
+clear
+v = feval(@sum, [2 4 6]);
+show(v);
+% func2str
+clear
+v = func2str(@hypot);
+show(v);
+% str2func
+clear
+v = feval(str2func('hypot'), 5, 12);
 show(v);
 % cellfun
 clear
@@ -579,10 +978,6 @@ show(P);
 % chol
 clear
 v = chol([4 2; 2 3]);
-show(v);
-% qr
-clear
-v = abs(qr([3 1; 4 2]));
 show(v);
 % svd
 clear

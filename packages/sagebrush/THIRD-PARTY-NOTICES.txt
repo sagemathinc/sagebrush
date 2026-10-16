@@ -12,6 +12,22 @@ Copyright (c) 2001 Python Software Foundation. See
 
 - `lib/`: standard-library modules copied unchanged from CPython 3.14, each
   marked "Copied unchanged from CPython 3.14" in its first line.
+- `lib/contextlib.py`: CPython 3.14's `Lib/contextlib.py`, changed (the PSF License's clause 3
+  on derivative works): `_collections_abc._check_methods` is copied into it, and
+  `suppress()` handles exception groups only when the builtins have
+  `BaseExceptionGroup`, which Sagebrush does not yet.
+- `lib/_collections_abc.py`: CPython 3.14's `Lib/_collections_abc.py`,
+  changed (the PSF License's clause 3 on derivative works): the types of an
+  async generator and of a frame's locals, which Sagebrush does not have, are
+  placeholder classes. `lib/collections/__init__.py` makes it
+  `collections.abc`, as CPython's does, and its `ChainMap`, `UserDict`,
+  `UserList` and `UserString` are CPython 3.14's (`UserString.maketrans` a
+  `staticmethod`).
+- `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
+  `dataclasses` module no object is a dataclass.
+- `lib/textwrap.py`: CPython 3.14's `Lib/textwrap.py`, changed: `wrap()`
+  (and so `fill()` and `shorten()`) refuses text with characters beyond
+  U+FFFF, which Sagebrush's strings count as two.
 - `pyparse/`: the Python 3.14 parser, generated from CPython's
   `Grammar/python.gram`, `Grammar/Tokens` and `Parser/Python.asdl`
   (vendored in `pyparse/vendor/cpython`), with TypeScript ports of parts of
@@ -184,6 +200,9 @@ axis at a time, without the locator's other options (`integer`,
 `symmetric`, `prune`, other steps) and without its classic or
 round-numbers modes. The named colors of `lib/matplotlib/colors.py`
 (`CSS4_COLORS`) are the CSS Color Module's, as matplotlib lists them.
+`lib/matplotlib/_names.py` lists the public names of matplotlib 3.11's
+`Axes`, `Figure` and `pyplot` (written by `test/mpl_names_gen.py`), so that
+an AttributeError can say which of them Sagebrush does not have yet.
 
 Copyright (c) 2012- Matplotlib Development Team; All Rights Reserved
 

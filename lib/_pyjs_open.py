@@ -37,9 +37,7 @@ class _Mixin:
             self._dirty = False
         _unwritten.pop(id(self), None)
 
-    def write(self, s):
-        if "r" in self.mode and "+" not in self.mode:
-            raise io.UnsupportedOperation("not writable")
+    def _write(self, s):
         self._dirty = True
         _unwritten[id(self)] = self
         return super().write(s)
@@ -49,11 +47,59 @@ class _Mixin:
             self.flush()
             super().close()
 
-    def readable(self):
+    def _r(self):
         return "r" in self.mode or "+" in self.mode
 
-    def writable(self):
+    def _w(self):
         return "r" not in self.mode or "+" in self.mode
+
+    # (readable() and writable() answer False for what the mode does not
+    # allow, closed or not, and refuse on a closed file otherwise, as CPython's)
+    def readable(self):
+        if not self._r():
+            return False
+        self._closed_check(_PLAIN)
+        return True
+
+    def writable(self):
+        if not self._w():
+            return False
+        self._closed_check(_PLAIN)
+        return True
+
+    def seekable(self):
+        self._closed_check(_PLAIN)
+        return True
+
+    def isatty(self):
+        self._closed_check(_PLAIN)
+        return False
+
+    def _closed_check(self, msg=None):
+        if self.closed:
+            raise ValueError(msg or _DOT)
+
+    def __iter__(self):
+        self._closed_check()
+        return self
+
+    def __enter__(self):
+        self._closed_check()
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def readlines(self, hint=None):
+        # (the hint first, then closed, as CPython's IOBase.readlines)
+        hint = io._index_hint(hint, "argument should be integer or None, not '%s'")
+        self._closed_check()
+        return io._readlines(self, hint, False, isinstance(self, io.TextIOBase))
+
+    def writelines(self, lines):
+        self._closed_check()
+        for line in lines:
+            self.write(line)
 
     def __repr__(self):
         return "<_io.%s name=%r mode=%r>" % ("TextIOWrapper" if isinstance(self, io.TextIOBase) else "BufferedReader", self.name, self.mode)
@@ -62,7 +108,58 @@ class _Mixin:
         pass
 
 
+# What a closed file says (CPython's TextIOWrapper, BufferedReader/Writer):
+# test/closed_io_cases.py
+_DOT = "I/O operation on closed file."
+_PLAIN = "I/O operation on closed file"
+
+
 class TextFile(_Mixin, io.StringIO):
+    # (a text file: closed first, then what the mode allows)
+    def _readcheck(self):
+        self._closed_check()
+        if not self._r():
+            raise io.UnsupportedOperation("not readable")
+
+    def read(self, size=-1):
+        self._readcheck()
+        return super().read(size)
+
+    def readline(self, size=-1):
+        self._readcheck()
+        return super().readline(size)
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def write(self, s):
+        # (the argument first, as CPython's TextIOWrapper)
+        if not isinstance(s, str):
+            raise TypeError("write() argument must be str, not %s" % ("None" if s is None else type(s).__name__))
+        self._closed_check()
+        if not self._w():
+            raise io.UnsupportedOperation("not writable")
+        return self._write(s)
+
+    def seek(self, pos, whence=0):
+        self._closed_check()
+        return super().seek(pos, whence)
+
+    def tell(self):
+        self._closed_check()
+        return super().tell()
+
+    def truncate(self, size=None):
+        self._closed_check()
+        return super().truncate(size)
+
+    def flush(self):
+        self._closed_check()
+        _Mixin.flush(self)
+
     def __init__(self, name, mode, initial, append, encoding):
         io.StringIO.__init__(self, initial)
         self.encoding = encoding or "utf-8"
@@ -77,6 +174,56 @@ class TextFile(_Mixin, io.StringIO):
 
 
 class BinaryFile(_Mixin, io.BytesIO):
+    # (a binary file: what the mode allows first, then closed, in the
+    # buffered classes' own words)
+    def _readcheck(self, what):
+        if not self._r():
+            raise io.UnsupportedOperation("read")
+        self._closed_check(what + " of closed file")
+
+    def read(self, size=-1):
+        self._readcheck("read")
+        return super().read(size)
+
+    read1 = read
+
+    def readinto(self, b):
+        self._readcheck("readinto")
+        return super().readinto(b)
+
+    def readline(self, size=-1):
+        self._readcheck("readline")
+        return super().readline(size)
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def write(self, b):
+        if not self._w():
+            raise io.UnsupportedOperation("write")
+        b = io._bytes_like(b)  # (then closed, as CPython's BufferedWriter)
+        self._closed_check("write to closed file")
+        return self._write(b)
+
+    def seek(self, pos, whence=0):
+        self._closed_check("seek of closed file")
+        return super().seek(pos, whence)
+
+    def tell(self):
+        self._closed_check(_PLAIN)
+        return super().tell()
+
+    def truncate(self, size=None):
+        self._closed_check("truncate of closed file")
+        return super().truncate(size)
+
+    def flush(self):
+        self._closed_check("flush of closed file" if self._w() else None)
+        _Mixin.flush(self)
+
     def __init__(self, name, mode, initial, append):
         io.BytesIO.__init__(self, initial)
         self.encoding = None

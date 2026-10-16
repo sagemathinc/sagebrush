@@ -34,9 +34,10 @@
 // uses, window.sagebrush.board on sagebrush.space: load(doc), focus(ids),
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
-import { Board, type Camera, type Edge, type Item } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
+import { boardLink, layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
+import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 import { PixelBudget } from "../image-size";
@@ -96,7 +97,8 @@ export interface BoardHost {
   /** a CoCalc icon by its name (a converted board's stickers), as the host draws it; none: an emoji close to it (stickers.ts) */
   icon?(name: string): Element | null;
   /** the engine of code items, made the first time a board has code (the document then) */
-  code?: (d: BoardDoc) => BoardCode;
+  /** an interpreter for a language (a board's items may be in several: codes.ts) */
+  code?: (d: BoardDoc, mode: BoardMode) => BoardCode;
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
@@ -111,6 +113,9 @@ export interface BoardHost {
   home?: string;
   /** the example boards (Examples…) */
   examples?: { list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]> };
+  /** which Sagebrush runs this board's code: the site's version, its build (as
+   * `sagebrush --version` says it) and its engine; or only the engine (round 0's 17) */
+  version?: () => Promise<BoardVersion | null>;
   /** where slow code items' outputs are kept between visits (outcache.ts; design/outputs.md) */
   outputs?: OutputCache;
   /** the board as one HTML file (Download as HTML); with `python`, the file
@@ -162,14 +167,17 @@ function addStyle() {
 
 // The parts around the board: the top bar and its ⋯ menu, the tour's
 // caption, TimeTravel's bar, the dialogs.  (Fixed markup, no content.)
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+// (the toolbar's Code: a note with code in the board's language)
+const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
 <h4>Looking</h4><ul>
-<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>0</kbd> or <kbd>Esc</kbd>: the whole board</li>
+<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>Esc</kbd>: the board as it opens; <kbd>0</kbd>: all of it, however small</li>
 <li>Drag the background to move about; <kbd>+</kbd> <kbd>−</kbd>, Ctrl and the wheel, or two fingers to zoom</li>
 <li><kbd>PageDown</kbd> <kbd>PageUp</kbd>: the next and previous page</li>
 <li><kbd>Ctrl</kbd>+<kbd>F</kbd> (<kbd>⌘</kbd><kbd>F</kbd>): find words in the board</li>
@@ -213,6 +221,8 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 
 export type BoardApi = ReturnType<typeof mountBoard>;
 
+/** Which Sagebrush a board's code runs with (/version.json, as `sagebrush --version`). */
+export interface BoardVersion { version?: string; build?: string; engine?: string }
 /** The largest file Open… or a drop reads: well past a board downloaded as
  * HTML with every language's engine in it (about 10 MB) and its pictures
  * (CoCalc shows boards of up to 16 MB). */
@@ -244,9 +254,11 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
 // again, does an item that was one since the board was loaded, until it has
 // run as its own (what it kept may be dropped only after a later sync takes
 // it, CORR-BB9-1): byPage, those items.
+// (code shown as text, its language's highlighter not loaded yet)
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 function withPreviews(d: BoardDoc, order: CodeCell[], byPage: Set<string>) {
   const notes = codeNotes(d);
-  return order.map(({ id, code, item }) => { const p = id === item && !byPage.has(item) ? notes.get(id)?.preview : undefined; return p ? { id, code, preview: p } : { id, code }; });
+  return order.map(({ id, code, item, mode }) => { const p = id === item && !byPage.has(item) ? notes.get(id)?.preview : undefined; return p ? { id, code, mode, preview: p } : { id, code, mode }; });
 }
 
 export function mountBoard(root: HTMLElement, host: BoardHost) {
@@ -349,6 +361,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
    * being looked at in TimeTravel, which is not the document and does not
    * run).  False if it was overtaken (another document loaded, the board
    * destroyed) and drew nothing. */
+  // (the board's language, as the toolbar's Code says it)
+  let codeMode = "python";
   async function show(d: BoardDoc, view = false): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
     if (over()) return false;
@@ -356,6 +370,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // gesture dropped, nothing of it kept in this one, CORR-59E-1; the same
     // one laid out again waits for its release, below)
     const replacing = !view && d !== doc;
+    // (the document shown, drawn again (a relayout, a refit): if another is
+    // shown meanwhile, an edit's while this one awaited its pictures, this
+    // one stands down, or it would put the older document back)
+    const again = !view ? doc : null;
     if (replacing && editor.moving) editor.cancelGesture();
     const bad = formatError(d);
     if (bad) throw new Error(bad);
@@ -366,6 +384,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (over()) return false;
     await images.ensure(Object.keys(d.images ?? {}));
     if (over()) return false;
+    if (!view && !replacing && doc !== again) return false;
     if (!view) doc = d;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
@@ -404,6 +423,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
     if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
+    // (the toolbar's Code: the board's language; its tool's title reads it
+    // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
+    // the button and an open menu's row (on document.body), is told now)
+    codeMode = d.mode ?? "python";
+    for (const el of [...root.querySelectorAll<HTMLElement>("[data-tool=code][title]"), ...document.querySelectorAll<HTMLElement>(".board-toolbar-panel [data-tool=code][title]")]) el.title = codeTitle(codeMode);
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
     // (code items' heights were for these two layouts, the page's and its template's: PERF-F2A-1)
@@ -520,22 +544,25 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
 
   // The engine of code items: the host's (none: the code shows, as text, as in an exported file)
-  let code: BoardCode | null = null;
-  function engine(): BoardCode | null {
+  // (one interpreter for each language its items are in: codes.ts, item 16)
+  let code: BoardCodes | null = null;
+  function engine(): BoardCodes | null {
     if (code || !host.code) return code;
-    const c = (code = host.code(doc!));
+    const c = (code = new BoardCodes((mode) => host.code!(doc!, mode)));
     c.onChange = () => { board.codeStates(); relayout(); };
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
     c.cache = host.outputs ?? null;
     c.cacheId = outputsId;
     c.usePictures(docPixels);
+    // (a language's interpreter could not start: the caption says why, until the next edit)
+    c.onError = (why) => { if (code === c) say(plain("The code can't run here:", why)); };
+    const codeHost: CodeHost = { highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } };
+    // (an interpreter ready later, made as its language's items came: their
+    // code shown again, highlighted now, UI-C5A-1)
+    c.onReady = () => { if (code === c && board.code === codeHost) { board.setCode(codeHost); relayout(); } };
     c.ready.then((ok) => {
-      // (it could not start: the caption says why, until the next edit)
-      if (!ok) {
-        if (code === c && c.error) say(plain("The code can't run here:", c.error));
-        return;
-      }
-      board.setCode({ highlight: (s) => c.highlight!(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
+      if (!ok) return;
+      board.setCode(codeHost);
       relayout();
     });
     return c;
@@ -545,7 +572,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // written only when what it shows changed, and not as a step to undo
   // (each of one run: dropped if its item ran again, or another board was
   // loaded, while its picture was drawn, SEC-14C-1)
-  async function keepPreviews(c: BoardCode, ids: string[]) {
+  async function keepPreviews(c: BoardCodes, ids: string[]) {
     const loaded = loads;
     const got = await c.previews(ids);
     if (!got.size || code !== c || loads !== loaded) return;
@@ -653,6 +680,38 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     $("rmpage").hidden = n < 2;
   }
 
+  // Links to places on the board (`#p2`, `#p2-3`, `#3`, `#page-id`,
+  // `#item-id`, `#page-id/item-id`) in a note's ref, its text, the caption:
+  // a click goes there, a move of the reader's (round 0's 15); one naming
+  // nothing does nothing (the address is the tour's)
+  board.linkLabel = (ref) => {
+    const l = doc && boardLink(doc, pageIx, ref);
+    if (!l) return null;
+    if (l.item) { const it = (function find(ns: DocNode[]): DocNode | undefined { for (const x of ns) { if (x.id === l.item) return x; if (x.kind === "group") { const y = find(x.children); if (y) return y; } } })(pageView(doc!, l.page).nodes ?? []); return plainTitle((it as { title?: string })?.title ?? "") || l.item; }
+    return pageOf(doc!, l.page).title || (pageCount(doc!) > 1 ? `Page ${l.page + 1}` : doc!.title || "the start");
+  };
+  on(root, "click", (e: MouseEvent) => {
+    const a = (e.target as Element | null)?.closest?.("a[href^='#']") as HTMLAnchorElement | null;
+    if (!a || !root.contains(a) || a.closest(".board-editing")) return;
+    e.preventDefault();
+    const l = doc && boardLink(doc, pageIx, a.getAttribute("href") ?? "");
+    if (!l) return;
+    go(async () => {
+      const g = loadGen, other = l.page !== pageIx;
+      if (other) {
+        const p = page(l.page), mine = pageGen;
+        await p;
+        // (the link is retired with its document, or when another page was
+        // asked for meanwhile: nothing of it is done to what is shown now, UI-07E-2)
+        if (destroyed || g !== loadGen || mine !== pageGen || pageIx !== l.page) return;
+      }
+      if (l.item) board.focus([l.item]);
+      // (a page's start on the page shown too: its intro, the tour from the
+      // top, as from another page, UI-07E-1; page() has shown it otherwise)
+      else if (l.step >= 0 || !other) step(l.step);
+    });
+  }, true);
+
   /** The steps of the page shown. */
   const steps = () => (doc ? pageView(doc, pageIx).steps ?? [] : []);
   const hashFor = (i: number) => (pageIx ? `#p${pageIx + 1}${i >= 0 ? "-" + (i + 1) : ""}` : i >= 0 ? `#${i + 1}` : "");
@@ -722,7 +781,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (a slide: its card)
       const s = doc && lookOf(doc, pageIx).slide;
       if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
-      else board.focus(undefined, now);
+      // (the whole board, as legible as it can be: from its start if it is large, friction 6)
+      else board.overview(now);
     } else {
       const s = ss[at];
       board.focus(typeof s.focus === "string" ? [s.focus] : s.focus, now);
@@ -748,7 +808,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (e.key === "ArrowRight" || e.key === " ") go(onward);
     else if (e.key === "ArrowLeft") go(back);
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
-    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") go(() => step(-1));
+    else if (e.key === "Escape" && !editor.escapes) go(() => step(-1));
+    // (0, as the button that says so: everything, out of the tour; Esc, the board as it opens)
+    else if (e.key === "0") go(() => { step(-1); board.focus(); });
     else if (e.key === "?") help();
     else if (e.key === "PageDown") go(() => page(pageIx + 1));
     else if (e.key === "PageUp") go(() => page(pageIx - 1));
@@ -856,7 +918,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
   editor.onRun = (id) => { code?.run([cell(id)]); };
-  editor.highlight = () => code?.highlight ?? null;
+  editor.highlight = (id) => { const c = code; return c && c.highlight("", cell(id)) !== null ? (src: string) => c.highlight(src, cell(id))! : null; };
   editor.images = images;
   const editBtn = $("edit");
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
@@ -871,7 +933,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const toolbar = new Toolbar(root, [
     { id: "select", label: "Select", icon: "↖", title: "Select: drag on the background to select what the rectangle holds (Space-drag pans); Esc to stop", toggle: editor.selecting },
     { id: "note", label: "Note", icon: "¶", title: "Add a note (Markdown, with math)", run: () => { const c = center(); editor.addNote(c.x, c.y, true); } },
-    { id: "code", label: "Code", icon: "{ }", title: "Add a note with Python code (any note can have code: + Code in its editor)", run: () => { const c = center(); editor.addCode(c.x, c.y, true); } },
+    { id: "code", label: "Code", icon: "{ }", get title() { return codeTitle(codeMode); }, run: () => { const c = center(); editor.addCode(c.x, c.y, true); } },
     { id: "image", label: "Image", icon: "▨", title: "Add pictures (or paste one, or drop files on the board)", run: () => pickImages() },
     { id: "sticker", label: "Sticker", icon: "☺", title: "Add a sticker: an emoji (double-click one to change it)", run: () => editor.pickSticker({ at: center(), under: toolbar.el }) },
     { id: "group", label: "Group", icon: "▣", title: "Add a group (drag notes into it)", run: () => { const c = center(); editor.addGroup(c.x, c.y, true); } },
@@ -907,7 +969,20 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       const open = m.hidden;
       for (const [, x] of menus) x.hidden = true;
       m.hidden = !open;
+      if (open && m === $("menu")) showVersion();
     };
+  }
+  // (at the ⋯ menu's foot, which Sagebrush runs this board's code, as text,
+  // asked each time: the engine that runs it may be chosen, or change, after
+  // the first time, CORR-20A-1; round 0's 17, to compare with `sagebrush --version`)
+  const versionOf = () => (host.version ? host.version().catch(() => null) : Promise.resolve(null));
+  function showVersion() {
+    versionOf().then((v) => {
+      const el = $("ver"), parts = v ? [v.version && `Sagebrush ${v.version}`, v.build && `build ${v.build}`, v.engine && `engine ${v.engine.slice(0, 12)}`].filter(Boolean) : [];
+      el.textContent = parts.join(" · ");
+      el.title = v ? "Which Sagebrush runs this board's code (compare `sagebrush --version`)" + (v.engine ? `: engine ${v.engine}` : "") : "";
+      el.hidden = !parts.length;
+    });
   }
   on(window, "click", () => { for (const [, m] of menus) m.hidden = true; });
   // (foo.board.json: the board's file, canonical JSON)
@@ -1792,6 +1867,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     agent: {
       /** Show a board document (see web/board/doc.ts); resolves when it is laid out. */
       load,
+      /** Which Sagebrush runs this board's code: { version, build, engine } (any of them; null when the host does not say). */
+      engine: () => versionOf(),
       /** Fly to these item ids (all items when none). */
       focus: (ids?: string[]) => board.focus(ids),
       /** Go to step n of the tour (0-based; -1 for the whole board). */

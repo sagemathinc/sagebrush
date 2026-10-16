@@ -1,0 +1,25 @@
+gradient 12 TypeError: invalid number of arguments
+gradient 1-D, two spacings TypeError: invalid number of arguments
+gradient 2-D, three spacings TypeError: invalid number of arguments
+gradient 2-D, an array for both axes TypeError: invalid number of arguments
+gradient 1-D array([3., 4., 6., 7.])
+gradient 1-D, scalar array([1.5, 2. , 3. , 3.5])
+gradient 1-D, coordinates array([3.        , 2.83333333, 2.43333333, 2.33333333])
+gradient 2-D, one scalar [[[1.5, 1.5, 1.5], [1.5, 1.5, 1.5]], [[0.5, 0.5, 0.5], [0.5, 0.5, 0.5]]]
+gradient 2-D, two spacings [[[3.0, 3.0, 3.0], [3.0, 3.0, 3.0]], [[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]]]
+result_type none ValueError: at least one array or dtype is required
+result_type dtype('float64')
+coords too short ValueError: when 1d, distances must match the length of the corresponding dimension
+coords too long ValueError: when 1d, distances must match the length of the corresponding dimension
+coords 2-D ValueError: distances must be either scalars or 1d
+axis 1 short ValueError: when 1d, distances must match the length of the corresponding dimension
+axis -1 short ValueError: when 1d, distances must match the length of the corresponding dimension
+axis 1 coords [[1.0, 1.1666666666666665, 3.8333333333333335, 5.0], [9.0, 7.833333333333334, 10.5, 13.0], [17.0, 14.5, 17.166666666666657, 21.0]]
+axis 0 coords [[8.0, 12.0, 16.0, 20.0], [34.666666666666664, 41.333333333333336, 47.999999999999986, 54.66666666666666], [48.0, 56.0, 64.0, 72.0]]
+even coords [2.0, 4.0, 8.0, 10.0]
+edge 2 [0.0, 2.0, 4.0, 6.0]
+edge 2 scalar [0.0, 4.0, 8.0, 12.0]
+edge 2 coords [0.8333333333333334, 1.1666666666666665, 1.5666666666666667, 1.7666666666666662]
+edge 2, 2-D [[[0.0, 8.0, 16.0, 24.0], [32.0, 40.0, 48.0, 56.0], [64.0, 72.0, 80.0, 88.0]], [[0.0, 2.0, 4.0, 6.0], [8.0, 10.0, 12.0, 14.0], [16.0, 18.0, 20.0, 22.0]]]
+edge 3 ValueError: 'edge_order' greater than 2 not supported
+edge 2, too short ValueError: Shape of array too small to calculate a numerical gradient, at least (edge_order + 1) elements are required.

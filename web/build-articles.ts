@@ -25,6 +25,25 @@ function renderer(): Marked {
   m.use({
     extensions: [
       {
+        // a disclaimer box, the same on every page that has one: a fenced block
+        //   :::disclaimer
+        //   **...**
+        //
+        //   ...
+        //   :::
+        // directly under the page's title (page() keeps it before the AI disclosure)
+        name: "disclaimer",
+        level: "block",
+        start: (src: string) => src.match(/^:::disclaimer/m)?.index,
+        tokenizer(src: string) {
+          const r = /^:::disclaimer[ \t]*\n([\s\S]*?)\n:::[ \t]*(?:\n|$)/.exec(src);
+          if (r) return { type: "disclaimer", raw: r[0], tokens: this.lexer.blockTokens(r[1], []) };
+        },
+        renderer(t: any) {
+          return `<aside class="disclaimer" role="note">\n${this.parser.parse(t.tokens)}</aside>\n`;
+        },
+      },
+      {
         name: "mathBlock",
         level: "block",
         start: (src: string) => src.match(/^\$\$/m)?.index,
@@ -67,7 +86,8 @@ function renderer(): Marked {
 function describe(md: string): string {
   const c = md.match(/^<!--\s*description:\s*([\s\S]*?)-->/);
   if (c) return c[1].replace(/\s+/g, " ").trim();
-  const body = md.split("\n").slice(1).join("\n").trim();
+  // (not the disclaimer box: the description is about the page)
+  const body = md.split("\n").slice(1).join("\n").replace(/^:::disclaimer[ \t]*\n[\s\S]*?\n:::[ \t]*$/m, "").trim();
   const para = body.split(/\n\s*\n/).find((p) => p.trim() && !/^\s*(\*Code:|\||```|#|<!--)/.test(p)) ?? "";
   const plain = para
     .replace(/\$\$?([^$]+)\$\$?/g, "$1")
@@ -100,8 +120,8 @@ const INDEPENDENT = `<h2 id="independent">Independent code: what Sagebrush share
 const DISCLOSURE = "Written by Claude Opus 5.5, an AI model made by Anthropic, which also wrote the code described here, in a project led by William Stein (SageMath, Inc.). Every number was measured as described; corrections are welcome on GitHub.";
 
 const CSS = `
-:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #666; --rule: #ddd; --link: #2a6f2f; --code: #f4f4f2; }
-@media (prefers-color-scheme: dark) { :root { --fg: #e8e8e6; --bg: #161616; --muted: #9a9a9a; --rule: #333; --link: #8fd18f; --code: #222; } }
+:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #666; --rule: #ddd; --link: #2a6f2f; --code: #f4f4f2; --warn-rule: #b45309; --warn-bg: #fff4e0; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e8e8e6; --bg: #161616; --muted: #9a9a9a; --rule: #333; --link: #8fd18f; --code: #222; --warn-rule: #f59e0b; --warn-bg: #2b1f0c; } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 header.site, footer.site { max-width: 46rem; margin: 0 auto; padding: 1rem 1.25rem; color: var(--muted); font-size: 0.95rem; }
@@ -119,6 +139,11 @@ table { border-collapse: collapse; margin: 1rem 0; font-size: 0.92rem; display: 
 th, td { border: 1px solid var(--rule); padding: 0.35rem 0.6rem; text-align: left; vertical-align: top; }
 th { background: var(--code); }
 .math-display { overflow-x: auto; margin: 1rem 0; }
+aside.disclaimer { margin: 0 0 1.5rem; padding: 1rem 1.25rem; border: 3px solid var(--warn-rule); border-radius: 6px; background: var(--warn-bg); color: var(--fg); font-size: 1.08rem; font-weight: 600; line-height: 1.5; }
+aside.disclaimer p { margin: 0.6rem 0; }
+aside.disclaimer p:first-child { margin-top: 0; font-size: 1.3rem; line-height: 1.3; }
+aside.disclaimer p:last-child { margin-bottom: 0; }
+aside.disclaimer strong { font-weight: 800; }
 blockquote { margin: 1rem 0; padding-left: 1rem; border-left: 3px solid var(--rule); color: var(--muted); }
 nav.series { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.95rem; }
 nav.series a { text-decoration: none; }
@@ -166,7 +191,7 @@ function page(p: Page): string {
 <body>
 <header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
 <main>
-${p.html.replace("</h1>", `</h1>\n<p class="ai">${esc(p.disclosure ?? DISCLOSURE)}</p>`)}
+${p.html.replace(/<\/h1>\n?(<aside class="disclaimer"[\s\S]*?<\/aside>\n)?/, (_m, box) => `</h1>\n${box ?? ""}<p class="ai">${esc(p.disclosure ?? DISCLOSURE)}</p>\n`)}
 ${p.index ? "" : `<p class="meta">Updated ${p.date} · <a href="${REPO}/${p.source}">source on GitHub</a></p>`}
 ${nav}
 </main>
@@ -182,7 +207,7 @@ const seriesList: { slug: string; title: string; description: string; count: num
 rmSync(join(out, "articles"), { recursive: true, force: true });
 const adir = join(root, "articles");
 // the series in this order, then any others alphabetically
-const ORDER = ["notebook", "matlab", "groebner", "number-theory", "foundations"];
+const ORDER = ["notebook", "sage", "matlab", "groebner", "number-theory", "foundations"];
 const rank = (s: string) => (ORDER.indexOf(s) < 0 ? ORDER.length : ORDER.indexOf(s));
 for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : []) {
   const sdir = join(adir, series);

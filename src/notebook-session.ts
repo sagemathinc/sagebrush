@@ -42,6 +42,7 @@ import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, 
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 import { unbox } from "./runtime/object";
+import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -88,17 +89,48 @@ export function exitStatus(code: unknown): { ok: boolean; text: string | null } 
 
 // post: sends a message to the page.  captureStreams: replace sys.stdout and
 // sys.stderr's writers (the browser's fs shim captures them instead).
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks } = {}): Session {
+//
+// limit (with captureStreams): at most item characters of streams and
+// displays a run, run in all (a clear_output() gives its run's back), cut
+// where they are written, so that no message is bigger; past either, the
+// rest is dropped and {id, cut: "item" | "run" | "displays"} said once a run (board run's
+// command line: a print of 40 MB is not copied to the main thread, HARD-BBE-1).
+// A display costs its envelope too (output-cost.ts displayCost), and at most `displays` of
+// them are posted a run: a million empty displays are not a million messages
+// kept for free (HARD-58F-1).
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number } } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
     if (current !== null && text) post({ id: current, target, stream: fd === 2 ? "stderr" : "stdout", text });
+  };
+  const used = { item: 0, run: 0, cut: false, displays: 0 };
+  const room = () => (opts.limit ? Math.min(opts.limit.item - used.item, opts.limit.run - used.run) : Infinity);
+  const cut = (why?: "displays") => {
+    if (!used.cut && current !== null) post({ id: current, cut: why ?? (opts.limit!.item - used.item <= opts.limit!.run - used.run ? "item" : "run") });
+    used.cut = true;
   };
   if (opts.captureStreams) {
     // at least every 100 ms during a run, as the Jupyter kernel does
     let last = 0;
     for (const [stream, fd] of [[R.stdout, 1], [R.stderr, 2]] as [any, number][]) {
       stream.write = function (s: string) {
+        if (opts.limit && current !== null) {
+          if (used.cut) return;
+          const n = room();
+          if (s.length > n) {
+            if (n > 0) {
+              this.buf.push(s.slice(0, n));
+              used.item += n;
+              used.run += n;
+            }
+            this.flush();
+            cut();
+            return;
+          }
+          used.item += s.length;
+          used.run += s.length;
+        }
         this.buf.push(s);
         this.size += s.length;
         const now = Date.now();
@@ -127,12 +159,34 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
+      if (opts.limit) {
+        if (used.cut) return true;
+        const n = displayCost(bundle);
+        if (n > room() || used.displays >= opts.limit.displays) {
+          cut(n > room() ? undefined : "displays");
+          return true;
+        }
+        used.item += n;
+        used.run += n;
+        used.displays++;
+      }
       post({ id: current, target, display: bundle });
       return true;
     },
     interact(spec: string) {
       if (current === null) return false;
       flush();
+      if (opts.limit) {
+        if (used.cut) return true;
+        const n = DISPLAY_ENVELOPE + spec.length;
+        if (n > room() || used.displays >= opts.limit.displays) {
+          cut(n > room() ? undefined : "displays");
+          return true;
+        }
+        used.item += n;
+        used.run += n;
+        used.displays++;
+      }
       post({ id: current, target, interact: JSON.parse(spec) });
       return true;
     },
@@ -142,6 +196,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     },
     clear_output() {
       flush();
+      used.run -= used.item;
+      used.item = 0;
+      used.cut = false;
+      used.displays = 0;
       if (current !== null) post({ id: current, target, clear: true });
     },
     // global names whose widgets changed (lib/ipywidgets: the reactive notebook)
@@ -239,6 +297,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     R.INTR[0] = 0; // a request that came after the previous run had finished
     current = id;
     target = null;
+    used.item = 0;
+    used.cut = false;
+    used.displays = 0;
     post({ id, start: true });
     // (the run's time, for the reactive notebook's budget: from here, but not
     // counting Sage's one-time load below, which is the interpreter's, not the cell's)

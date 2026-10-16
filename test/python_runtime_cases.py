@@ -603,3 +603,119 @@ _seq.append(RA() + RB())
 _rb.__class__ = RDesc
 _seq.append(_rget("one", lambda: RA() + RB()))
 print(_seq)
+
+
+# bytes() and bytearray() of an object with __index__: a count, and each
+# item of an iterable through __index__ too, converted as it is fetched;
+# __index__ found as any special method, staticmethod and classmethod
+# included (bytes of Sage's Rational 4/2 was "not iterable")
+class _Idx:
+    def __index__(self):
+        return 3
+
+
+class _BadIdx:
+    def __index__(self):
+        return "x"
+
+
+class _StaticIdx:
+    @staticmethod
+    def __index__():
+        return 3
+
+
+class _ClassIdx:
+    @classmethod
+    def __index__(cls):
+        return 4
+
+
+print(bytes(_Idx()), bytearray(_Idx()), bytes([_Idx(), 65]), bytearray([_Idx()]))
+print(bytes(_StaticIdx()), bytes([_StaticIdx()]), bytearray(_ClassIdx()), bytearray([_ClassIdx()]))
+for _f in (lambda: bytes(_BadIdx()), lambda: bytes([_BadIdx()]), lambda: bytes([256]), lambda: bytearray([-1]), lambda: bytes([1.5])):
+    try:
+        _f()
+    except (TypeError, ValueError) as e:
+        print(type(e).__name__, e)
+_current = 0
+
+
+class _StateIdx:
+    def __index__(self):
+        return _current
+
+
+def _state_items():
+    global _current
+    for _current in (65, 66):
+        yield _StateIdx()
+
+
+print(bytes(_state_items()), bytearray(_state_items()))
+_consumed = []
+
+
+class _RaisingIdx:
+    def __index__(self):
+        raise TypeError("bad index")
+
+
+def _consuming():
+    _consumed.append(1)
+    yield _RaisingIdx()
+    _consumed.append(2)
+    yield 1
+
+
+try:
+    bytes(_consuming())
+except TypeError as e:
+    print("TypeError", e, _consumed)
+# bytearray.extend takes an iterable, never a count
+for _f in (lambda: bytearray(b"a").extend(5), lambda: bytearray(b"a").extend(_Idx()), lambda: bytearray(b"a").extend([300])):
+    try:
+        _f()
+    except (TypeError, ValueError) as e:
+        print(type(e).__name__, e)
+_ba = bytearray(b"a")
+_ba.extend([_Idx(), 66])
+_ba.extend(iter([67]))
+print(_ba)
+# __index__ as any descriptor: a custom __get__, a property, a callable object
+class _GetDesc:
+    def __get__(self, obj, cls=None):
+        return lambda: 3
+
+
+class _ViaGet:
+    __index__ = _GetDesc()
+
+
+class _ViaProperty:
+    @property
+    def __index__(self):
+        return lambda: 2
+
+
+class _CallableIdx:
+    def __call__(self):
+        return 4
+
+
+class _RaisingCount:
+    def __index__(self):
+        raise TypeError("no count")
+
+
+class _ViaCallable:
+    __index__ = _CallableIdx()
+
+
+print(bytes(_ViaGet()), bytes([_ViaGet()]), bytearray(_ViaProperty()), bytes([_ViaProperty()]))
+print(bytes(_ViaCallable()), bytes([_ViaCallable()]))
+for _f in (lambda: bytes(_RaisingCount()),):
+    try:
+        print(_f())
+    except TypeError as e:
+        print("TypeError", e)

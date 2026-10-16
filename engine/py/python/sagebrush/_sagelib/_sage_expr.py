@@ -23,6 +23,13 @@ _ERRORS = {"ZeroDivisionError": ZeroDivisionError, "ValueError": ValueError,
            "NotImplementedError": NotImplementedError}
 
 
+
+def _is_symbolic_function(v):
+    """Whether v is a callable expression f(x) = ... (_sage_lang's
+    SymbolicFunction, whose type shows as Sage's Expression)."""
+    import _sage_lang
+    return isinstance(v, _sage_lang.SymbolicFunction)
+
 def _call(op, *args):
     r = _raw(_SEP.join((op,) + args)).split(_SEP)
     if r[0] == "ok":
@@ -93,7 +100,7 @@ def _expr(v):
         return v
     if isinstance(v, str):
         return Expression(_call("parse", v)[0])
-    if type(v).__name__ == "SymbolicFunction" and not v._vec:
+    if _is_symbolic_function(v) and not v._vec:
         return v._expr
     s = _to_s(v)
     if s is None:
@@ -204,7 +211,12 @@ class Expression:
         o = _to_s(other)
         if o is None:
             return NotImplemented
-        return _one(op, o, self._s) if rev else _one(op, self._s, o)
+        r = _one(op, o, self._s) if rev else _one(op, self._s, o)
+        if r._s == "c?" and op in _SIGN_ERRORS and ("c+" in (o, self._s) or "c-" in (o, self._s)):
+            # oo*0, oo - oo: Sage's infinity raises (SignError), where the
+            # engine's arithmetic gives NaN
+            raise SignError(_SIGN_ERRORS[op])
+        return r
 
     def __add__(self, o): return self._bin("add", o)
     def __radd__(self, o): return self._bin("add", o, True)
@@ -214,7 +226,11 @@ class Expression:
     def __rmul__(self, o): return self._bin("mul", o, True)
     def __truediv__(self, o): return self._bin("div", o)
     def __rtruediv__(self, o): return self._bin("div", o, True)
-    def __pow__(self, o, mod=None): return self._bin("pow", o)
+    def __pow__(self, o, mod=None):
+        if mod is not None:
+            # (the modulus was ignored: pow(SR(2), 3/2, 5) was 2*sqrt(2)), as Sage
+            raise TypeError("the 3-argument version of pow() is not supported")
+        return self._bin("pow", o)
     def __rpow__(self, o): return self._bin("pow", o, True)
     def __xor__(self, o): raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
     __rxor__ = __xor__
@@ -720,7 +736,19 @@ class Expression:
 
             sage: (x^3).diff(x), sin(x^2).diff(x), (x^4).diff(x, 2), (x^2*x).derivative(x)
             (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
+            sage: y = var('y'); (x^2*y).diff([x, y]), (x^2).diff([])
+            (2*x, x^2)
         """
+        # a list alone is the list of variables, and an empty one means no
+        # differentiation, as in Sage (diff(x^2, []) was 2*x); a tuple, or a
+        # list among other arguments, is Sage's TypeError
+        if len(args) == 1 and isinstance(args[0], list):
+            if not args[0]:
+                return self
+            args = tuple(args[0])
+        for a in args:
+            if isinstance(a, (list, tuple)):
+                raise TypeError("no canonical coercion from %s to Symbolic Ring" % type(a))
         if not args:
             names = self._names()
             if len(names) != 1:
@@ -734,9 +762,6 @@ class Expression:
                 if a > 1:
                     r = _one("diff", r._s, last, str(a - 1))
                 last = None
-                continue
-            if isinstance(a, (list, tuple)):
-                r = r.diff(*a)
                 continue
             last = _var_name(a)
             r = _one("diff", r._s, last, "1")
@@ -1438,14 +1463,58 @@ class _SeriesExpr(Expression):
         return _expr(o) * (self ** -1) if not isinstance(o, _SeriesExpr) else o * (self ** -1)
 
     def diff(self, *args):
-        """The derivative: one order less in the series variable."""
-        v = args[0] if args else self._var
-        n = int(args[1]) if len(args) > 1 else 1
-        body = Expression(self._s).diff(v, n) if len(args) > 1 else Expression(self._s).diff(v)
-        if str(v) == str(self._var):
-            order = None if self._order is None else self._order - n
-            return self._make(body, order)
-        return self._make(body, self._order)
+        """The derivative: one order less for each differentiation in the
+        series variable (SERIES-0AF-1: diff([x]) kept O(x^5)).
+
+        EXAMPLES::
+
+            sage: s = exp(x).series(x, 5); s.diff(), s.diff([x]), s.diff(x, 2), s.diff(x, x)
+            (1 + 1*x + 1/2*x^2 + 1/6*x^3 + Order(x^4), 1 + 1*x + 1/2*x^2 + 1/6*x^3 + Order(x^4), 1 + 1*x + 1/2*x^2 + Order(x^3), 1 + 1*x + 1/2*x^2 + Order(x^3))
+        """
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            if not args[0]:
+                return self  # (no variables: no differentiation, as Sage)
+            args = tuple(args[0])
+        if not args:
+            args = (self._var,)
+        # (variable, count) pairs: a count after a variable repeats it
+        steps = []
+        for a in args:
+            if isinstance(a, int) or (isinstance(a, Expression) and a.is_numeric() and not a._names()):
+                q = _py_number(_expr(a)._s) if isinstance(a, Expression) else a
+                if not isinstance(q, int) or isinstance(q, bool):
+                    # a fractional count is not a count (it was truncated:
+                    # CORR-EC3-2); Sage's error
+                    raise TypeError("argument symb must be a symbol")
+                if not steps:
+                    raise ValueError("a derivative count needs a variable before it")
+                steps[-1] = (steps[-1][0], steps[-1][1] + q - 1)
+            else:
+                steps.append((a, 1))
+        body, order = Expression(self._s), self._order
+        for v, n in steps:
+            if n < 0:
+                raise ValueError("the number of derivatives must be nonnegative")
+            if not n:
+                continue
+            if str(v) == str(self._var):
+                # one call with the count (the engine's own), not n calls
+                body = body.diff(v, n) if n > 1 else body.diff(v)
+                if order is not None:
+                    order -= n
+            else:
+                # another variable: each coefficient is differentiated, the
+                # coordinate (x - a) held fixed, as Sage does, and the order
+                # kept (the chain rule on x - a gave O((x - a)^3) for a
+                # series known to O((x - a)^2): CORR-EC3-3)
+                body = self._coeff_diff(body, v, n)
+        return self._make(body, order)
+
+    def _coeff_diff(self, body, v, n):
+        var, a = self._var, self._at
+        N, cs = _SeriesExpr(_expr(body), var, a, self._order)._laurent()
+        t = var - a
+        return sum((c.diff(v, n) * t ** (i - N) for i, c in enumerate(cs) if not c.is_trivial_zero()), _expr(0))
 
     derivative = diff
 
@@ -3426,6 +3495,8 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         (1/2*n^2 + 1/2*n, 1/3*n^3 + 1/2*n^2 + 1/6*n)
         sage: symbolic_sum((1/3)^k, k, 0, oo), symbolic_sum(binomial(n, k), k, 0, n)
         (3/2, 2^n)
+        sage: y = var('y'); symbolic_sum(binomial(n, k)*x^k*y^(n-k), k, 0, n)
+        (x + y)^n
         sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)
         (1/6*pi^2, e^x)
     """
@@ -3534,11 +3605,25 @@ def _sum_binomial(f, v, a, b):
     vn = _var_name(v)
     if vn not in q._names():
         return (q * 2 ** n)
-    # q = c * x^k
-    r = (q.subs({v: v + 1}) / q).simplify_rational()
+    # q = c * A^k * B^(n-k), the ratio r = A/B: the sum is c*(A + B)^n.
+    # Writing it as q(0)*(r + 1)^n would divide by B, which may vanish
+    # where every term is defined (y = 0 in x^k*y^(n-k)).
+    r = _geom_ratio(q, v)
+    r = (q.subs({v: v + 1}) / q if r is None else r).simplify_rational()
     if vn not in r._names():
-        c = q.subs({v: 0})
-        return c * (r + 1) ** n
+        A, B = r.numerator(), r.denominator()
+        q0 = q.subs({v: 0})
+        if not B._names():
+            return q0 * (r + 1) ** n
+        c = (q0 / B ** n).simplify_rational()
+        if not (set(n._names()) & set(c._names())):
+            return c * (A + B) ** n
+        # B^n is not a factor of q0: keep (r + 1)^n only when the k = 1
+        # term already divides by B (x^k/y^k), so no domain is lost
+        q1 = q.subs({v: 1}).simplify_rational()
+        t = (q1.denominator() / B).simplify_rational()
+        if not t.denominator()._names():
+            return q0 * ((A + B) / B) ** n
     return None
 
 
@@ -3589,7 +3674,7 @@ def diff(f, *args):
 
 def _callable(f):
     """Whether f is a callable symbolic expression (f(x) = ...)."""
-    return type(f).__name__ == "SymbolicFunction"
+    return _is_symbolic_function(f)
 
 
 derivative = diff
@@ -3955,6 +4040,18 @@ for _name in ("__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__
         setattr(Solution, _name, _keep_conditions(_name))
 
 
+def _put_back(r, back):
+    """r (a solution, a list of them, or a dict) with each symbol of back
+    replaced by its function value."""
+    if isinstance(r, (list, tuple)):
+        return type(r)(_put_back(t, back) for t in r)
+    if isinstance(r, dict):
+        return type(r)((back.get(k, k), _put_back(v, back)) for k, v in r.items())
+    if isinstance(r, Expression):
+        return r.subs(back)
+    return r
+
+
 def solve(f, *args, **kw):
     """solve(x^2 == 4, x) -> [x == -2, x == 2]; solve([eqs], x, y) ->
     [[x == ..., y == ...], ...]; solution_dict=True for dictionaries.
@@ -4004,6 +4101,8 @@ def solve(f, *args, **kw):
 
         sage: solve(x^2 == 4, x)
         [x == -2, x == 2]
+        sage: g = function('g')(x); solve(g^2 == 4, g), solve((x - 1)^2 == 8, x)
+        ([g(x) == -2, g(x) == 2], [x == -2*sqrt(2) + 1, x == 2*sqrt(2) + 1])
         sage: var('y')
         y
         sage: solve([x + y == 3, x - y == 1], x, y)
@@ -4046,6 +4145,31 @@ def solve(f, *args, **kw):
     if not vs:
         names = sorted(set(n for g in eqs for n in g._names()))
         vs = names
+    # a function value as the unknown (solve(ed, y) with y = function('y')(x),
+    # Sage's way with an ODE's solution: it was "y(x) is not a valid
+    # variable"): solved for a new symbol in its place, then put back
+    fns = [v for v in vs if isinstance(v, Expression) and not v.is_symbol() and v._op()[0].startswith("fun:")]
+    if fns:
+        # (not a name of the equations nor of a requested variable:
+        # solve([f(x) == 2], f(x), _solve_fn0) took the user's _solve_fn0)
+        taken = set(n for g in eqs for n in g._names())
+        taken |= set(n for v in vs for n in (_expr(v)._names() if not isinstance(v, str) else [v]))
+        # and not a name in the active assumptions (assume(_solve_fn0 > 0)
+        # made solve(ff(x) == -2, ff(x)) return [], the review's CORR-9E5-1)
+        for r in _ASSUMPTIONS:
+            taken |= set(r._names()) if isinstance(r, Expression) else {str(r._v)}
+        new = {}
+        for k, v in enumerate(fns):
+            name = "_solve_fn%d" % k
+            while name in taken:
+                name += "_"
+            taken.add(name)
+            new[str(v)] = Expression(_sym_s(name))
+        put = {fv: new[str(fv)] for fv in fns}
+        eqs2 = [g.subs(put) for g in eqs]
+        vs2 = [new[str(v)] if str(v) in new else v for v in vs]
+        r = solve(eqs2 if many else eqs2[0], *vs2, **kw)
+        return _put_back(r, {new[str(fv)]: fv for fv in fns})
     names = [_var_name(v) for v in vs]
     eqs = [g if g.is_relational() else g == 0 for g in eqs]
     # inequalities are conditions on the solutions of the equations (Sage's
@@ -5142,22 +5266,168 @@ def _real(v):
     return RealNumber(v)
 
 
-def latex(v):
-    """The LaTeX form of v (a LatexExpr string).
+# Sage's escapes in latex(a string): {\char`\X} for TeX's special characters
+_TEXT_ESC = {c: "{\\char`\\%s}" % c for c in "^_$%{}\\~#&"}
+_TEXT_ESC[" "] = "{ }"
+
+
+def _latex_text(s):
+    """latex() of a string, as Sage writes it: \\text{\\texttt{...}}, one
+    line per row of an array when it has several."""
+    if not s:
+        return ""
+    if "\n" in s:
+        return "\\begin{array}{l}\n" + "\\\\\n".join(_latex_text(l) for l in s.split("\n")) + "\n\\end{array}"
+    return "\\text{\\texttt{%s}}" % "".join(_TEXT_ESC.get(c, c) for c in s)
+
+
+def _delim(d, side):
+    return "\\" + side + d
+
+
+def _latex_matrix(rows, ncols):
+    """A matrix's LaTeX, as Sage writes it (one row per line, the entries'
+    LaTeX, the delimiters of latex.matrix_delimiters())."""
+    if not rows or not ncols:
+        return "()"
+    l, r = latex._matrix_delims
+    body = " \\\\\n".join(" & ".join(latex(x) for x in row) for row in rows)
+    return "%s\\begin{array}{%s}\n%s\n\\end{array}%s" % (_delim(l, "left"), "r" * ncols, body, _delim(r, "right"))
+
+
+def _latex_vector(entries):
+    """A vector's LaTeX, as Sage writes it: \\left(1,\\,2\\right)."""
+    l, r = latex._vector_delims
+    return "%s%s%s" % (_delim(l, "left"), ",\\,".join(latex(x) for x in entries), _delim(r, "right"))
+
+
+class _Latex:
+    """latex(x): the LaTeX form of x (a LatexExpr string), and the settings
+    of Sage's latex object (delimiters, macros, preamble, engine).  The
+    settings change what latex() writes (delimiters) or are recorded for a
+    LaTeX document (macros, preamble): sagebrush typesets with MathJax or
+    KaTeX, not a TeX installation.
 
     EXAMPLES::
 
         sage: latex(x^2/2), latex(sqrt(x)), latex(1/2)
         (\\frac{1}{2} \\, x^{2}, \\sqrt{x}, \\frac{1}{2})
+        sage: latex(QQ), latex('a string'), latex(latex(1/2))
+        (\\Bold{Q}, \\text{\\texttt{a{ }string}}, \\frac{1}{2})
+        sage: latex.matrix_delimiters(left='[', right=']'); latex(matrix(ZZ, 2, 2, range(4)))
+        \\left[\\begin{array}{rr}
+        0 & 1 \\\\
+        2 & 3
+        \\end{array}\\right]
+        sage: latex.matrix_delimiters('(', ')'); latex.matrix_delimiters()
+        ['(', ')']
     """
-    if hasattr(v, "_latex_"):
-        return _LatexExpr(v._latex_())
-    if isinstance(v, _Fraction):
-        return _LatexExpr(_expr(v)._latex_())
-    if isinstance(v, (list, tuple)):
-        inner = ", ".join(latex(t) for t in v)
-        return _LatexExpr(("\\left[%s\\right]" if isinstance(v, list) else "\\left(%s\\right)") % inner)
-    return _LatexExpr(str(v))
+
+    def __init__(self):
+        self._matrix_delims = ["(", ")"]
+        self._vector_delims = ["(", ")"]
+        self._bb = False
+        self._macros = ""
+        self._preamble = ""
+        self._engine = "latex"
+
+    def __call__(self, v):
+        # LaTeX already, and the _latex_ protocol (also of a str subclass),
+        # before a string is escaped as text
+        if isinstance(v, _LatexExpr):
+            return v
+        if hasattr(v, "_latex_"):
+            return _LatexExpr(v._latex_())
+        if isinstance(v, str):
+            return _LatexExpr(_latex_text(v))
+        if isinstance(v, _Fraction):
+            return _LatexExpr(_expr(v)._latex_())
+        if isinstance(v, (list, tuple)):
+            inner = ", ".join(self(t) for t in v)
+            return _LatexExpr(("\\left[%s\\right]" if isinstance(v, list) else "\\left(%s\\right)") % inner)
+        return _LatexExpr(str(v))
+
+    def __repr__(self):
+        return "LaTeX definitions"
+
+    def matrix_delimiters(self, left=None, right=None):
+        """The delimiters of matrices: set them, or (no arguments) get them."""
+        if left is None and right is None:
+            return list(self._matrix_delims)
+        if left is not None:
+            self._matrix_delims[0] = left
+        if right is not None:
+            self._matrix_delims[1] = right
+
+    def vector_delimiters(self, left=None, right=None):
+        """The delimiters of vectors: set them, or (no arguments) get them."""
+        if left is None and right is None:
+            return list(self._vector_delims)
+        if left is not None:
+            self._vector_delims[0] = left
+        if right is not None:
+            self._vector_delims[1] = right
+
+    def blackboard_bold(self, t=None):
+        """Whether \\Bold is blackboard bold (\\mathbb) when typeset; latex()
+        itself writes \\Bold{Q} either way, as Sage's does."""
+        if t is None:
+            return self._bb
+        self._bb = bool(t)
+
+    def add_macro(self, macro):
+        """Add a macro definition (\\newcommand...) to extra_macros()."""
+        if macro not in self._macros:
+            self._macros += macro
+
+    def extra_macros(self, macros=None):
+        """The extra macros (a string): set them, or (no argument) get them."""
+        if macros is None:
+            return self._macros
+        self._macros = macros
+
+    def add_to_preamble(self, s):
+        """Add s to the extra LaTeX preamble."""
+        self._preamble += s
+
+    def extra_preamble(self, s=None):
+        """The extra preamble (a string): set it, or (no argument) get it."""
+        if s is None:
+            return self._preamble
+        self._preamble = s
+
+    def add_package_to_preamble_if_available(self, package):
+        """Adds nothing here: there is no TeX installation to find the
+        package in (Sage, without the package, also adds nothing)."""
+        return None
+
+    def engine(self, e=None):
+        """The TeX engine's name: set it, or (no argument) get it."""
+        if e is None:
+            return self._engine
+        if e not in ("latex", "pdflatex", "xelatex", "lualatex"):
+            raise ValueError("%r is not a supported LaTeX engine. Use latex, pdflatex, xelatex, or lualatex" % (e,))
+        self._engine = e
+
+
+latex = _Latex()
+
+
+class SignError(ArithmeticError):
+    """oo*0, oo - oo: arithmetic of infinity without a value (as Sage's
+    sage.rings.infinity.SignError).
+
+    EXAMPLES::
+
+        sage: oo * 0  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        _sage_expr.SignError: cannot multiply infinity by zero
+    """
+
+
+_SIGN_ERRORS = {"mul": "cannot multiply infinity by zero", "div": "cannot multiply infinity by zero",
+                "add": "cannot add infinity to minus infinity", "sub": "cannot add infinity to minus infinity"}
 
 
 class _LatexExpr(str):

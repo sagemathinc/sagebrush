@@ -147,6 +147,8 @@ class NumberField_absolute:
     """
 
     _element_class = None  # NumberFieldElement (set below; subclasses override)
+    # matrices over K by exact Gaussian elimination, as over QQbar
+    _is_generic_field = True
 
     def __init__(self, f, name, embedding_repr=None):
         self._f, self._var = _int_coeffs(f)
@@ -288,6 +290,84 @@ class NumberField_absolute:
         return "\\Bold{Q}[%s]/(%s)" % (v, s)
 
     # ---- invariants
+    def zero(self):
+        """0 and 1 of K (as the matrices over K, which run Gaussian
+        elimination over the field, ask for them).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 - 2, 'a'); K.zero(), K.one()
+            (0, 1)
+        """
+        return self(0)
+
+    def one(self):
+        """1.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^3 - 2, 'b').one()
+            1
+        """
+        return self(1)
+
+    def characteristic(self):
+        """0.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 + 1, 'i').characteristic()
+            0
+        """
+        return _sa().Integer(0)
+
+    def is_field(self, proof=True):
+        """True.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K = NumberField(x^2 - 2, 'a'); K.is_field(), K.is_exact(), K.is_finite()
+            (True, True, False)
+        """
+        return True
+
+    def is_exact(self):
+        """True.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').is_exact()
+            True
+        """
+        return True
+
+    def is_finite(self):
+        """False.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').is_finite()
+            False
+        """
+        return False
+
+    def order(self):
+        """+Infinity.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: NumberField(x^2 - 2, 'a').order()
+            +Infinity
+        """
+        return _sa().infinity
+
     def degree(self):
         """The degree over QQ.
 
@@ -803,8 +883,11 @@ def _poly_divmod(a, b):
 def _latex_name(K):
     """The generator's name in LaTeX, as Sage writes it."""
     f = K._f
-    if getattr(K, "_emb", None) and len(f) == 3 and f[1] == 0 and f[2] == 1:
-        return "\\sqrt{%d}" % (-f[0])  # QuadraticField(D)
+    emb = getattr(K, "_emb", None)
+    if emb and len(f) == 3 and f[1] == 0 and f[2] == 1 and not str(emb).lstrip().startswith("-"):
+        # QuadraticField(D), embedded at the positive (or upper) root; a
+        # field embedded at -sqrt(D) (QQ[-sqrt(2)], QQ[-I]) keeps its name
+        return "\\sqrt{%d}" % (-f[0])
     from _sage_poly import _latex_variable_name
     return _latex_variable_name(K._name)
 
@@ -892,6 +975,8 @@ class NumberFieldElement:
         return hash(tuple(self._c))
 
     def __eq__(self, other):
+        if getattr(other, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: a == A as A == a)
         # elements of equal fields compare by coordinates; a nonconstant
         # polynomial is not a field element (x^2 == K(2) was True through the
         # conversion K(x^2), with different hashes: the second review's

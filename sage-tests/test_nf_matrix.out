@@ -1,0 +1,36 @@
+repr :: [    a     1]
+[    2 a + 1]
+parent :: Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2
+det :: a
+charpoly :: x^2 + (-2*a - 1)*x + a
+inverse :: [1/2*a + 1    -1/2*a]
+[       -a         1]
+A * A^-1 :: True
+rank rref :: (2, [1 0]
+[0 1])
+B rank :: 2
+B rref :: [1 0 0]
+[0 1 a]
+[0 0 0]
+B kernel :: [     0      1 -1/2*a]
+B left kernel :: Vector space of degree 3 and dimension 1 over Number Field in a with defining polynomial t^2 - 2
+Basis matrix:
+[     1 -1/2*a      0]
+solve :: (1/2*a, 0)
+arith :: ([    2*a       2]
+[      4 2*a + 2], [ 2*a - 2   -a + 2]
+[-2*a + 4        a], [      4 2*a + 1]
+[4*a + 2 2*a + 5], [    a     2]
+[    1 a + 1])
+empty :: ((0, 0), (0, 3), [0 0]
+[0 0])
+identity :: [1 0]
+[0 1]
+L det charpoly :: (-4, x^2 - 2*w*x - 4)
+L inverse :: [-1/4*w    1/4]
+[   1/4 -1/4*w]
+cubic det :: b + 2
+cubic charpoly :: x^3 - 3*b*x^2 + 3*b^2*x - b - 2
+cubic inverse :: (4/7*b^2 - 1/7*b - 2/7, 2/7*b^2 - 4/7*b - 1/7, 1/7*b^2 - 2/7*b + 3/7)
+singular inverse :: ZeroDivisionError input matrix must be nonsingular
+singular solve :: ValueError matrix equation has no solutions

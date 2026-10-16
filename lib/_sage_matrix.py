@@ -8,6 +8,13 @@ Dense; entries are Python ints or Sage Rationals."""
 from fractions import Fraction as _F
 
 
+
+def _is_symbolic_function(v):
+    """Whether v is a callable expression f(x) = ... (_sage_lang's
+    SymbolicFunction, whose type shows as Sage's Expression)."""
+    import _sage_lang
+    return isinstance(v, _sage_lang.SymbolicFunction)
+
 def _sa():
     import sage_all
     return sage_all
@@ -35,6 +42,10 @@ class Vector(list):
         sage: v + v, 2*v, v * v
         ((2, 4, 6), (2, 4, 6), 14)
     """
+
+    def _latex_(self):
+        import _sage_expr
+        return _sage_expr._latex_vector(self)
 
     def __init__(self, entries=()):
         # (read boundedly: a Vector is built from any iterable)
@@ -77,7 +88,7 @@ class Vector(list):
         try:
             return Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
-            if type(other).__name__ == "SymbolicFunction":
+            if _is_symbolic_function(other):
                 return NotImplemented
             return Vector(_norm(a / other) for a in self)
 
@@ -340,9 +351,9 @@ class MatrixSpace_:
         self._base, self._nrows, self._ncols = base, nrows, ncols
 
     def __repr__(self):
-        kind = "Full MatrixSpace" if True else ""
-        ring = "Integer Ring" if self._base is _sa().ZZ else "Symbolic Ring" if self._base is _sa().SR else "Rational Field"
-        return "%s of %d by %d dense matrices over %s" % (kind, self._nrows, self._ncols, ring)
+        # the base ring as it is (every other ring printed as the
+        # Rational Field: MatrixSpace(GF(5)['x'], 3) in the sagebook, p. 98)
+        return "Full MatrixSpace of %d by %d dense matrices over %r" % (self._nrows, self._ncols, self._base)
 
     def __call__(self, entries=0):
         """A matrix of the space from a list of entries (or rows).
@@ -511,6 +522,48 @@ def MatrixSpace(base, nrows, ncols=None, sparse=False):
     return MatrixSpace_(base, nrows, nrows if ncols is None else ncols)
 
 
+def _count(k, n):
+    """How many rows (or columns) of n an index k selects, without checking
+    it: so that a block's shape is bounded before its indices are read."""
+    if isinstance(k, slice):
+        return len(range(n)[k])
+    if isinstance(k, (list, tuple)):
+        return len(k)
+    return 1
+
+
+def _select(k, n, err="matrix index out of range"):
+    """The rows (or columns) of n that an index k selects, and whether k
+    was a single index: an integer (negative from the end), a slice, or a
+    list or tuple of integers."""
+    import operator
+    if isinstance(k, slice):
+        return list(range(n))[k], False
+
+    def one(i):
+        # (a bool is the integer 0 or 1, as in Sage: CORR-552-2)
+        if not isinstance(i, int) and not (hasattr(i, "__index__") and not isinstance(i, float)):
+            raise TypeError("index must be an integer")
+        i = operator.index(i)
+        if i < -n or i >= n:
+            raise IndexError(err)
+        return i % n if n else i
+    if isinstance(k, (list, tuple)):
+        if type(k) in (list, tuple):
+            return [one(i) for i in k], False
+        # a subclass's len() may not be its length: read at most len(k) + 1
+        # items, the length the block's shape was checked with, and refuse
+        # a list that yields more or fewer (daybreak2's HARD-552-1: one that
+        # claimed 1 and yielded 4.3 million indices passed the shape check)
+        import itertools
+        m = len(k)
+        out = [one(i) for i in itertools.islice(iter(k), m + 1)]
+        if len(out) != m:
+            raise ValueError("an index list yielded %s items but has length %d" % ("more" if len(out) > m else len(out), m))
+        return out, False
+    return [one(k)], True
+
+
 class Matrix:
     """A dense matrix over ZZ or QQ.
 
@@ -564,7 +617,7 @@ class Matrix:
         for r in self._rows:
             row = []
             for e in r:
-                if type(e).__name__ == "SymbolicFunction":
+                if _is_symbolic_function(e):
                     row.append(e(*args, **kw))
                 else:
                     ex = _expr(e)
@@ -672,16 +725,134 @@ class Matrix:
         return self.nrows() == self.ncols()
 
     def __getitem__(self, ij):
+        """M[i] (a row, as a vector), M[i, j] (an entry), and submatrices:
+        rows and columns each selected by an index, a slice or a list of
+        indices, as in Sage.
+
+        EXAMPLES::
+
+            sage: A = matrix(QQ, 3, 3, range(9)); A[1], A[1, 2], A[-1, -1]
+            ((3, 4, 5), 5, 8)
+            sage: A[::-1]
+            [6 7 8]
+            [3 4 5]
+            [0 1 2]
+            sage: A[1, :], A[[0, 2], 1:]
+            (
+                        [1 2]
+            [3 4 5],    [7 8]
+            )
+            sage: A[3]
+            Traceback (most recent call last):
+            ...
+            IndexError: matrix index out of range
+            sage: A[[0] * 10^5, [0] * 10^5]
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: a 100000 x 100000 matrix exceeds sagebrush's limit of 4194304 entries (and rows, columns)
+        """
         if isinstance(ij, tuple):
-            i, j = ij
-            return self._rows[i][j]
-        return Vector(self._rows[ij])
+            if len(ij) != 2:
+                raise IndexError("a matrix index is a row and a column")
+            # (lists may repeat indices: the block's shape is checked first)
+            _shape(_count(ij[0], self.nrows()), _count(ij[1], self.ncols()))
+            rs, r1 = _select(ij[0], self.nrows())
+            cs, c1 = _select(ij[1], self.ncols())
+            if r1 and c1:
+                return self._rows[rs[0]][cs[0]]
+            return Matrix(self._base, [[self._rows[i][j] for j in cs] for i in rs], len(cs))
+        _shape(_count(ij, self.nrows()), self.ncols())
+        rs, r1 = _select(ij, self.nrows())
+        if r1:
+            return Vector(self._rows[rs[0]])
+        return Matrix(self._base, [list(self._rows[i]) for i in rs], self.ncols())
 
     def __setitem__(self, ij, v):
+        """M[i, j] = x, M[i] = row, and a block: rows and columns selected
+        as by M[...], given a matrix of the block's shape, a vector for a
+        single row or column, or a scalar for every entry (as in Sage).
+        Entries are converted to the base ring.
+
+        EXAMPLES::
+
+            sage: A = matrix(QQ, 3, 3, range(9)); A[:, 1] = vector([1, 1, 1]); A
+            [0 1 2]
+            [3 1 5]
+            [6 1 8]
+            sage: A[0:2, 0:2] = 0; A[2] = vector([7, 7, 7]); A[0, 2] = 1.5; A
+            [  0   0 3/2]
+            [  0   0   5]
+            [  7   7   7]
+            sage: A[:, 0] = vector([1, 2])
+            Traceback (most recent call last):
+            ...
+            IndexError: value does not have the right number of rows
+        """
         if getattr(self, "_immutable", False):
             raise ValueError("matrix is immutable; please change a copy instead (i.e., use copy(M) to change a copy of M).")
-        i, j = ij
-        self._rows[i][j] = _norm(v)
+        if isinstance(ij, tuple):
+            if len(ij) != 2:
+                raise IndexError("a matrix index is a row and a column")
+            _shape(_count(ij[0], self.nrows()), _count(ij[1], self.ncols()))
+            rs, r1 = _select(ij[0], self.nrows(), "index out of range")
+            cs, c1 = _select(ij[1], self.ncols(), "index out of range")
+        else:
+            _shape(_count(ij, self.nrows()), self.ncols())
+            rs, r1 = _select(ij, self.nrows(), "index out of range")
+            cs, c1 = list(range(self.ncols())), False
+            if r1 and isinstance(v, (list, tuple)):
+                v = Vector(v)
+        if r1 and c1:
+            self._rows[rs[0]][cs[0]] = self._entry(v)
+            return
+        if not rs or not cs:
+            return  # (no entry selected: nothing is converted, as in Sage)
+        if isinstance(v, Matrix):
+            if v.nrows() != len(rs):
+                raise IndexError("value does not have the right number of rows")
+            if v.ncols() != len(cs):
+                raise IndexError("value does not have the right number of columns")
+            vals = [[self._entry(v._rows[a][b]) for b in range(len(cs))] for a in range(len(rs))]
+        elif isinstance(v, Vector) and (r1 or c1 or len(rs) == 1 or len(cs) == 1):
+            # a vector fills a single row or a single column
+            if len(rs) == 1:
+                if len(v) != len(cs):
+                    raise IndexError("value does not have the right number of columns")
+                vals = [[self._entry(x) for x in v]]
+            else:
+                if len(v) != len(rs):
+                    raise IndexError("value does not have the right number of rows")
+                vals = [[self._entry(x)] for x in v]
+        elif isinstance(v, (list, tuple, Vector)):
+            raise TypeError("a block of a matrix takes a matrix, a vector for one row or column, or a scalar")
+        else:
+            x = self._entry(v)
+            vals = [[x] * len(cs) for _ in rs]
+        for a, i in enumerate(rs):
+            row = self._rows[i]
+            for b, j in enumerate(cs):
+                row[j] = vals[a][b]
+
+    def _entry(self, x):
+        """x as an entry: converted to the base ring for ZZ and QQ (1.5
+        is 3/2 in QQ; 'a' or a symbolic x is a TypeError, as in Sage)."""
+        sa = _sa()
+        if self._base is sa.QQ or self._base is sa.ZZ:
+            if any(c.__name__ == "IntegerMod" for c in type(x).__mro__):
+                x = int(x.lift())  # (GF(5)(2) is 2 here, as in Sage)
+            try:
+                if self._base is sa.ZZ and not isinstance(x, int):
+                    # (ZZ(x) truncates a real: float(1.5) became 1, a wrong
+                    # entry; only an integral value is an integer, as in
+                    # Sage: astra's CORR-552-1)
+                    q = sa.QQ(x)
+                    if q.denominator != 1:
+                        raise TypeError
+                    return int(q.numerator)
+                return _norm(self._base(x))
+            except (TypeError, ValueError):
+                raise TypeError("unable to convert %r to %s" % (x, "a rational" if self._base is sa.QQ else "an integer")) from None
+        return _norm(x)
 
     def __eq__(self, other):
         return isinstance(other, Matrix) and other._rows == self._rows
@@ -836,8 +1007,8 @@ class Matrix:
         return m
 
     def _latex_(self):
-        body = r" \\ ".join(" & ".join(repr(x) for x in r) for r in self._rows)
-        return r"\left(\begin{array}{%s}%s\end{array}\right)" % ("r" * self.ncols(), body)
+        import _sage_expr
+        return _sage_expr._latex_matrix(self._rows, self.ncols())
 
     def transpose(self):
         """The transpose (also .T).
@@ -868,8 +1039,8 @@ class Matrix:
             [0.3333333333333333               0.25]
         """
         if getattr(R, "_is_generic_field", False) or _sa_ff_base(R):
-            return matrix(R, [list(r) for r in self._rows])
-        return Matrix(R, self._rows)
+            return matrix(R, self.nrows(), self._nc, [x for r in self._rows for x in r])
+        return Matrix(R, self._rows, self._nc)
 
     # ---- arithmetic
     def _same(self, other):
@@ -1109,7 +1280,7 @@ class Matrix:
             (-4, 9/2)
         """
         is_vec = not isinstance(B, Matrix)
-        Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())]) if is_vec else B
+        Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())], 1) if is_vec else B
         if Bm.nrows() != self.nrows():
             raise ValueError("number of rows of self must equal number of rows of right-hand side")
         from sagebrush import linalg
@@ -1126,7 +1297,7 @@ class Matrix:
                 X[p] = R[i][n:]
         if is_vec:
             return Vector(_norm(r[0]) for r in X)
-        return Matrix(_sa().QQ, X)
+        return Matrix(_sa().QQ, X, Bm.ncols())
 
     def solve_left(self, B):
         """X with X self = B.
@@ -1142,7 +1313,8 @@ class Matrix:
         return self.transpose().solve_right(B)
 
     def echelon_form(self):
-        """Over ZZ the Hermite form; over QQ the reduced row echelon form.
+        """Over ZZ the Hermite form; over QQ the reduced row echelon form
+        (an empty matrix keeps its shape: astra's SAGE-940-2).
 
         EXAMPLES::
 
@@ -1156,9 +1328,22 @@ class Matrix:
         if self._base is _sa().ZZ:
             return self.hermite_form()
         m, _ = self._rref()
-        return Matrix(self._base, m)
+        return Matrix(self._base, m, self._nc)
 
-    rref = echelon_form
+    def rref(self):
+        """The reduced row echelon form over the fraction field: over ZZ
+        that is over QQ, not the Hermite form (astra's SAGE-940-3).
+
+        EXAMPLES::
+
+            sage: B = matrix(ZZ, [[2, 4], [3, 5]]).rref(); B.list(), B.base_ring()
+            ([1, 0, 0, 1], Rational Field)
+            sage: matrix(ZZ, 0, 3, []).rref().dimensions()
+            (0, 3)
+        """
+        if self._base is _sa().ZZ:
+            return Matrix(_sa().QQ, self._rows, self._nc).echelon_form()
+        return self.echelon_form()
 
     def hermite_form(self):
         """The Hermite normal form (rows, zero rows at the bottom).
@@ -1172,7 +1357,7 @@ class Matrix:
         from sagebrush import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
-        return Matrix(_sa().ZZ, h)
+        return Matrix(_sa().ZZ, h, self._nc)
 
     def elementary_divisors(self):
         """The elementary divisors (diagonal of the Smith form).
@@ -1196,7 +1381,7 @@ class Matrix:
             sage: U * matrix(ZZ, [[2, 4], [6, 8]]) * V == D
             True
         """
-        return _smith_uv(self._integer_rows())
+        return _smith_uv(self._integer_rows(), self._nc)
 
     def LLL(self, delta=None, **kwds):
         """The LLL-reduced basis of the lattice spanned by the rows, with
@@ -1223,7 +1408,7 @@ class Matrix:
                 raise ValueError("delta must be in (1/4, 1]")
             if d > Fraction(99, 100):
                 raise NotImplementedError("LLL with delta > 99/100 is not implemented")
-        return Matrix(_sa().ZZ, nf.lll(self._integer_rows()))
+        return Matrix(_sa().ZZ, nf.lll(self._integer_rows()), self._nc)
 
     def kernel_dimension(self):
         """The dimension of the left kernel.
@@ -1519,9 +1704,7 @@ class FreeModule_:
             [   1    0 -1/3]
             [   0    1 -2/3]
         """
-        if not self._basis:
-            return Matrix(self._base, [])
-        return Matrix(self._base, self._basis)
+        return Matrix(self._base, self._basis, self._degree)
 
     def basis(self):
         """The echelonized basis.
@@ -2259,9 +2442,10 @@ def _ff_base_of(entries, _left=None):
     return None
 
 
-def _smith_uv(a):
-    """Smith form with transforms over ZZ: (D, U, V), U a V = D."""
-    m, n = len(a), len(a[0]) if a else 0
+def _smith_uv(a, n=None):
+    """Smith form with transforms over ZZ: (D, U, V), U a V = D (a has n
+    columns)."""
+    m, n = len(a), (len(a[0]) if a else 0) if n is None else n
     # (the transforms are m x m and n x n: a 2^22 x 1 matrix would ask
     # for 2^44 entries)
     _shape(m, m)
@@ -2317,7 +2501,7 @@ def _smith_uv(a):
                 U[t] = [-x for x in U[t]]
             break
     ZZ = _sa().ZZ
-    return Matrix(ZZ, A), Matrix(ZZ, U), Matrix(ZZ, V)
+    return Matrix(ZZ, A, n), Matrix(ZZ, U, m), Matrix(ZZ, V, n)
 
 
 def _is_padic(R):
@@ -2361,9 +2545,30 @@ def _padic_base_of(rows):
     return P
 
 
+def _plain_base(base):
+    """Whether this module's Matrix holds matrices over base: ZZ, QQ and
+    SR (finite fields, generic fields and p-adics have their own
+    modules; other rings are refused)."""
+    sa = _sa()
+    return base is sa.ZZ or base is sa.QQ or base is sa.SR
+
+
 def _is_parent(R):
-    """Whether R is a ring or other parent rather than a list of rows."""
-    return callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows")
+    """Whether R is a ring or other parent rather than a list of rows.  A
+    number field or an order in one is recognised by its type: it has none
+    of the methods above, and matrix(K, 0, 0, []) iterated K[0], K[1], ...
+    until the heap ran out (astra's HARD-541-1).  (A callable object that
+    iterates rows is row data, as in Sage: astra's CORR-260-1.)"""
+    if callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows"):
+        return True
+    import _sage_nf
+    return isinstance(R, (_sage_nf.NumberField_absolute, _sage_nf.Order))
+
+
+def _int_dims(args):
+    """args with each integral Rational among the first three (a ring and
+    two dimensions) as an int; a scalar entry there keeps its value."""
+    return tuple(int(a) if k < 3 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
 
 
 def matrix(*args, **kwds):
@@ -2378,10 +2583,48 @@ def matrix(*args, **kwds):
         sage: matrix(QQ, 2, 3, [1, 2, 3, 4, 5, 6])
         [1 2 3]
         [4 5 6]
+        sage: matrix(Graph([(0, 1), (1, 2)]))
+        [0 1 0]
+        [1 0 1]
+        [0 1 0]
+        sage: matrix(Graph([(0, 1)]), 2)
+        Traceback (most recent call last):
+        ...
+        TypeError: too many arguments in matrix constructor
     """
     ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
+    # dimensions that are integral rationals, as Sage takes them, before any
+    # dispatch (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational;
+    # over Qp the column count became the scalar entry)
+    args = _int_dims(args)
     base = None
+    is_graph = lambda a: any(c.__name__ == "GenericGraph" for c in type(a).__mro__)
+    if any(is_graph(a) for a in args):
+        # matrix(G), matrix(R, G), with dimensions before G if wanted: the
+        # graph's adjacency matrix, as Sage (matrix(Graph([(0, 1)])) was the
+        # 1 x 2 row [0 1]: astra's hunt). A graph before other arguments
+        # (matrix(G, 2), matrix(ZZ, G, 2)) is Sage's TypeError; it was
+        # iterated as a list of entries (astra's CORR-EA6-1).
+        if not is_graph(args[-1]) or any(is_graph(a) for a in args[:-1]):
+            raise TypeError("too many arguments in matrix constructor")
+        if set(kwds) - {"sparse"}:
+            raise NotImplementedError("matrix(..., graph, %s) is not available in sagebrush yet" % ", ".join(sorted(kwds)))
+        rest = list(args[:-1])
+        ring = rest.pop(0) if rest and not isinstance(rest[0], int) else None
+        if len(rest) > 2 or not all(isinstance(d, int) and not isinstance(d, bool) for d in rest):
+            raise TypeError("too many arguments in matrix constructor")
+        # the dimensions and the n x n size are checked before the
+        # adjacency matrix is built (matrix(Graph(10000)) reached 1 GB
+        # before the entry cap: daybreak2's HARD-6B4-1)
+        n = args[-1].order()
+        if rest and (rest[0] != n or rest[-1] != n):
+            raise ValueError("the dimensions %s do not match the graph's %d vertices" % (" x ".join(map(str, rest)), n))
+        _shape(n, n)
+        A = args[-1].adjacency_matrix()
+        if ring is None:
+            return A
+        return matrix(ring, [list(r) for r in A.rows()])
     import _sage_ffmat
     if args and _sage_ffmat._is_ff(args[0]):
         return _sage_ffmat.matrix(*args, **kwds)
@@ -2408,7 +2651,33 @@ def matrix(*args, **kwds):
         ent = args[2] if len(args) > 2 else 0
         ncols = c
         if isinstance(ent, (int, _F)) or type(ent).__name__ == "Rational":
+            if ent != 0 and r != c:
+                # (matrix(QQ, 2, 3, 1) was a 2 x 3 "diagonal" matrix)
+                raise TypeError("nonzero scalar matrix must be square")
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
+        elif callable(ent) and not hasattr(ent, "__iter__") and not hasattr(ent, "__len__") and not hasattr(ent, "__getitem__"):
+            # matrix(QQ, 2, 2, lambda i, j: i + j): the entries f(i, j), as
+            # Sage (the shape is checked above, before any call).  Each value
+            # is converted as soon as it is returned, so a callback that
+            # returns one mutable object keeps each value, and the first
+            # value the base refuses stops the calls (astra's CORR-C12-1)
+            # (over ZZ and QQ strictly: a value that does not convert raises
+            # its own error then, rather than being kept for a later
+            # conversion, astra's CORR-798-1)
+            rows = []
+            for i in range(r):
+                row = []
+                for j in range(c):
+                    v = ent(i, j)
+                    if base is sa.ZZ or base is sa.QQ:
+                        q = _F(v)
+                        if base is sa.ZZ and q.denominator != 1:
+                            raise TypeError("matrix entries are not all integers")
+                        x = _norm(q)
+                    else:
+                        x = _norm(v)
+                    row.append(x)
+                rows.append(row)
         else:
             # at most r c + 1 entries are read (r rows of a list of rows)
             ent = _bounded_list(ent, max(r * c, r))
@@ -2535,7 +2804,7 @@ def block_matrix(*args, **kwds):
         bs = [_block(b, heights[i], widths[j], base) for j, b in enumerate(r)]
         for t in range(heights[i]):
             rows.append([x for b in bs for x in b._rows[t]])
-    m = Matrix(base, rows)
+    m = Matrix(base, rows, sum(widths))
     if subdivide:
         rc, cc, acc = [], [], 0
         for h in heights[:-1]:
@@ -2610,7 +2879,9 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
         sage: random_matrix(QQ, 3, algorithm='unimodular').det()
         1
     """
-    if _is_padic(base):
+    if _is_padic(base) or not _plain_base(base):
+        # (other rings got integer entries labelled with the ring: a
+        # "random matrix over GF(5)[x]" of small integers)
         raise NotImplementedError("random matrices over %r are not available in sagebrush yet" % (base,))
     import random as _r
     sa = _sa()
@@ -2623,7 +2894,7 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
             if i != j:
                 c = _r.choice([-2, -1, 1, 2])
                 m[i] = [a + c * b for a, b in zip(m[i], m[j])]
-        return Matrix(base, m)
+        return Matrix(base, m, n)
 
     def entry():
         if density is not None and _r.random() >= density:
@@ -2637,7 +2908,7 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
         if y is None and x is not None:
             lo, hi = 0, int(x) - 1
         return _r.randint(lo, hi)
-    return Matrix(base, [[entry() for _ in range(n)] for _ in range(nrows)])
+    return Matrix(base, [[entry() for _ in range(n)] for _ in range(nrows)], n)
 
 
 def _matrix_constructors():
@@ -2671,6 +2942,8 @@ def identity_matrix(base, n=None):
     if _is_padic(base):
         import _sage_padic
         return _sage_padic.padic_matrix(base, n, n, 1)
+    if not _plain_base(base):
+        raise NotImplementedError("matrices over %r are not available in sagebrush yet" % (base,))
     n, _ = _shape(n, n)
     return Matrix(base, [[int(i == j) for j in range(n)] for i in range(n)])
 
@@ -2712,12 +2985,22 @@ def diagonal_matrix(*args):
     """
     sa = _sa()
     base = None
-    if args and args[0] in (sa.ZZ, sa.QQ):
+    # any ring first, not only ZZ and QQ: diagonal_matrix(K, [a, a]) read
+    # K itself as the entries (K[0], K[1], ... until the heap ran out),
+    # and diagonal_matrix(GF(7), [1, 2]) had the field's elements on the
+    # diagonal
+    if args and _is_parent(args[0]):
         base, args = args[0], args[1:]
+    if len(args) != 1:
+        raise NotImplementedError("diagonal_matrix with these arguments is not available in sagebrush yet")
     d = _bounded_list(args[0])
     _shape(len(d), len(d))
-    m = matrix([[d[i] if i == j else 0 for j in range(len(d))] for i in range(len(d))])
-    return m if base is None else m.change_ring(base)
+    rows = [[d[i] if i == j else 0 for j in range(len(d))] for i in range(len(d))]
+    if base is None:
+        return matrix(rows)
+    if base is sa.ZZ or base is sa.QQ:
+        return matrix(rows).change_ring(base)
+    return matrix(base, len(d), len(d), rows)
 
 
 def _sa_ff_base(R):
@@ -2799,6 +3082,16 @@ class ComplexNumber(complex):
 
     __str__ = __repr__
 
+    def parent(self):
+        """CC, the complex field with 53 bits of precision.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).parent()
+            Complex Field with 53 bits of precision
+        """
+        return CC
+
     def real_part(self):
         """The real part.
 
@@ -2832,25 +3125,39 @@ class ComplexNumber(complex):
         return _sa().RealNumber(abs(complex(self)))
 
     def __add__(self, o):
+        # (a matrix over a field answers for itself: complex(M) was the
+        # TypeError, so CC(I) + M over QQbar never reached M.__radd__)
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) + _cc(o))
 
     __radd__ = __add__
 
     def __sub__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) - _cc(o))
 
     def __rsub__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(_cc(o) - complex(self))
 
     def __mul__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) * _cc(o))
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(complex(self) / _cc(o))
 
     def __rtruediv__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented
         return ComplexNumber(_cc(o) / complex(self))
 
     def __neg__(self):
@@ -2895,6 +3202,9 @@ class ComplexField_:
 
     def __repr__(self):
         return "Complex Field with 53 bits of precision"
+
+    def _latex_(self):
+        return "\\Bold{C}"
 
     def zero(self):
         """0.
@@ -2956,6 +3266,17 @@ class ComplexField_:
 
 
 CC = ComplexField_()
+
+
+def _numeric_field_kind(ring):
+    """'real' for RR, RealField(p) and RDF, 'complex' for CC,
+    ComplexField(p) and CDF, None otherwise."""
+    name = type(ring).__name__
+    if ring is _sa().RR or name in ("_RealField", "RealField_", "RealDoubleField_"):
+        return "real"
+    if ring is CC or name in ("ComplexField_", "ComplexDoubleField_"):
+        return "complex"
+    return None
 
 
 def numeric_roots(coeffs, ring):

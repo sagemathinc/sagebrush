@@ -1,0 +1,21 @@
+graph matrix :: ((2, 2), [0, 1, 1, 0], Integer Ring)
+QQ :: ([0, 1, 1, 0], Rational Field)
+GF5 :: ([0, 1, 0, 1, 0, 1, 0, 1, 0], Finite Field of size 5)
+digraph :: [0, 1, 0, 0, 0, 1, 0, 0, 0]
+loops :: [1, 1, 1, 0]
+path :: [0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0]
+empty :: (0, 0)
+labelled :: [0, 1, 1, 0]
+G,2 :: TypeError
+ZZ,G,2 :: TypeError
+G,2,2 :: TypeError
+2,G :: [0 1]
+[1 0]
+2,2,G :: [0 1]
+[1 0]
+QQ,2,2,G :: [0 1]
+[1 0]
+G,G :: TypeError
+G :: [0, 1, 1, 0]
+QQ,G :: [0, 1, 1, 0]
+G sparse :: [0, 1, 1, 0]
