@@ -1463,16 +1463,39 @@ class _SeriesExpr(Expression):
         return _expr(o) * (self ** -1) if not isinstance(o, _SeriesExpr) else o * (self ** -1)
 
     def diff(self, *args):
-        """The derivative: one order less in the series variable."""
-        if len(args) == 1 and isinstance(args[0], list) and not args[0]:
-            return self  # (no variables: no differentiation, as Sage)
-        v = args[0] if args else self._var
-        n = int(args[1]) if len(args) > 1 else 1
-        body = Expression(self._s).diff(v, n) if len(args) > 1 else Expression(self._s).diff(v)
-        if str(v) == str(self._var):
-            order = None if self._order is None else self._order - n
-            return self._make(body, order)
-        return self._make(body, self._order)
+        """The derivative: one order less for each differentiation in the
+        series variable (SERIES-0AF-1: diff([x]) kept O(x^5)).
+
+        EXAMPLES::
+
+            sage: s = exp(x).series(x, 5); s.diff(), s.diff([x]), s.diff(x, 2), s.diff(x, x)
+            (1 + 1*x + 1/2*x^2 + 1/6*x^3 + Order(x^4), 1 + 1*x + 1/2*x^2 + 1/6*x^3 + Order(x^4), 1 + 1*x + 1/2*x^2 + Order(x^3), 1 + 1*x + 1/2*x^2 + Order(x^3))
+        """
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            if not args[0]:
+                return self  # (no variables: no differentiation, as Sage)
+            args = tuple(args[0])
+        if not args:
+            args = (self._var,)
+        # (variable, count) pairs: a count after a variable repeats it
+        steps = []
+        for a in args:
+            if isinstance(a, int) or (isinstance(a, Expression) and a.is_numeric() and not a._names()):
+                if not steps:
+                    raise ValueError("a derivative count needs a variable before it")
+                steps[-1] = (steps[-1][0], steps[-1][1] + int(a) - 1)
+            else:
+                steps.append((a, 1))
+        body, order = Expression(self._s), self._order
+        for v, n in steps:
+            if n < 0:
+                raise ValueError("the number of derivatives must be nonnegative")
+            if n:
+                # one call with the count (the engine's own), not n calls
+                body = body.diff(v, n) if n > 1 else body.diff(v)
+            if str(v) == str(self._var) and order is not None:
+                order -= n
+        return self._make(body, order)
 
     derivative = diff
 
