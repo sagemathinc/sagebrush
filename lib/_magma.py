@@ -885,25 +885,34 @@ def _index(s, i, pos=None):
     if isinstance(s, (MSeq, MRange, MTuple, list)):
         if isinstance(i, (MSeq, MRange)):
             # S[[i, j, ...]], S[a..b]: a sequence (not of a tuple); an
-            # index outside S is said without it; undefined elements are
-            # kept, but not at the end (a sequence ends at its last one)
+            # index outside S, or an undefined element, is said without it,
+            # but S[a..b] (step 1) keeps undefined elements, except at the
+            # end (a sequence ends at its last one)
             if isinstance(s, MTuple):
                 raise bad()
             n = s.size() if isinstance(s, MRange) else len(s)
+            universe = getattr(s, "universe", None) if isinstance(s, MSeq) else None
             if n == 0:
-                raise MagmaError("Illegal null sequence", "'[]'", True, pos)
+                if (i.size() if isinstance(i, MRange) else len(i)) == 0:
+                    return MSeq([], universe)
+                if universe is None:
+                    # (an empty sequence with a universe: an index outside it)
+                    raise MagmaError("Illegal null sequence", "'[]'", True, pos)
             _admit_selection(i, n, pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
+            holes = isinstance(i, MRange) and i.c == 1
             out = []
             for j in i:
                 if not _int_index(j):
                     raise bad()
-                if not 1 <= j <= n:
+                if not 1 <= j <= n or (s[j - 1] is _UNDEF and not holes):
                     raise MagmaError("Sequence element not defined", "'[]'", True, pos)
                 out.append(s[j - 1])
             while out and out[-1] is _UNDEF:
                 out.pop()
-            return MSeq(out)
-        _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, not isinstance(s, MTuple))
+            return MSeq(out, universe)
+        # (any index of an untyped empty sequence is "not defined"; a typed
+        # one's is out of its range)
+        _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, isinstance(s, (MSeq, list)) and getattr(s, "universe", None) is None)
         v = s[i - 1]
         if v is _UNDEF:
             raise MagmaError("Sequence element %d not defined" % i, "'[]'", True, pos)
@@ -924,6 +933,8 @@ def _index(s, i, pos=None):
         return s[i - 1]
     if isinstance(s, MSet) and s.kind == "indexed":
         if isinstance(i, (MSeq, MRange)):
+            if not s.items and s.universe is None and (i.size() if isinstance(i, MRange) else len(i)):
+                raise MagmaError("Illegal null indexed set", "'[]'", True, pos)
             _admit_selection(i, len(s.items), pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
             out = []
             for j in i:
@@ -932,10 +943,10 @@ def _index(s, i, pos=None):
                 if not 1 <= j <= len(s.items):
                     raise MagmaError("Sequence element not defined", "'[]'", True, pos)
                 out.append(s.items[j - 1])
-            return MSet(out, "indexed")
+            return MSet(out, "indexed", s.universe)
         if not _int_index(i):
             raise bad()
-        if not s.items:
+        if not s.items and s.universe is None:
             raise MagmaError("Illegal null indexed set", "'[]'", True, pos)
         _read_index(len(s.items), i, pos, False)
         return s.items[i - 1]
