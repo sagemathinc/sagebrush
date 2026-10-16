@@ -2313,6 +2313,8 @@ def fibonacci(n):
 
         sage: [fibonacci(n) for n in range(10)], fibonacci(100)
         ([0, 1, 1, 2, 3, 5, 8, 13, 21, 34], 354224848179261915075)
+        sage: fibonacci(-79), fibonacci(-80), parent(fibonacci(-79))
+        (14472334024676221, -23416728348467685, Integer Ring)
     """
     def fib(k):
         if k == 0:
@@ -2323,7 +2325,10 @@ def fibonacci(n):
         return (d, c + d) if k & 1 else (c, d)
     n = int(n)
     if n < 0:
-        return (-1) ** (n + 1) * fibonacci(-n)
+        # F(-m) = (-1)^(m+1) F(m), by parity (a power of -1 with a negative
+        # exponent is a float)
+        f = fibonacci(-n)
+        return f if n % 2 else -f
     return fib(n)[0]
 
 
