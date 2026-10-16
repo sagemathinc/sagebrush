@@ -86,6 +86,10 @@ function special(o: any, name: string): any {
   return f;
 }
 const MISSING = {};
+// special() for the runtime's builtin types: the special method of o's type,
+// bound as Python binds one (a descriptor's __get__, a property, a callable
+// object), callable as f(o, ...args)
+export const lookupSpecial = special;
 
 // The special method name of type t, normalized as special() does (for the
 // lookups made on a type rather than on an object).
