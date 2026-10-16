@@ -1597,3 +1597,40 @@ test("clear and clearvars at the top level look exact names up directly: 3000 na
   // (before: 3000 names took over 30 s; the eval loop that makes the variables is most of this)
   assert.ok(ms < 20000, `${ms} ms`);
 });
+
+test("cells and structures: orderfields takes only a permutation, cellfun and arrayfun equal sizes, cell2struct keeps the other dimensions, structfun a scalar structure (CSTRUCT-1016-1..4)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const s = "struct('oak',2,'elm',5)";
+  // (orderfields: an order that drops, repeats or invents a field is refused)
+  assert.deepEqual(run([`[1]`, `[1 1]`, `[0 1]`, `[1.5 2]`, `{'elm'}`, `{'elm','elm'}`, `struct('elm',1)`].map((o) => tryIt(`orderfields(${s}, ${o})`)).join("\n")),
+    Array(7).fill("refused"));
+  assert.deepEqual(run(`disp(strjoin(fieldnames(orderfields(${s}, [2 1]))', ' ')); disp(strjoin(fieldnames(orderfields(${s}, {'elm','oak'}))', ' ')); disp(strjoin(fieldnames(orderfields(${s}, struct('elm',0,'oak',0)))', ' '))`),
+    ["elm oak", "elm oak", "elm oak"]);
+  // (cellfun and arrayfun: a row and a column of two are different sizes)
+  assert.deepEqual(run([tryIt("cellfun(@plus, {2,5}, {7;11})"), tryIt("arrayfun(@plus, [2 5], [7;11])"),
+    "disp(mat2str(cellfun(@plus, {2;5}, {7;11}))); disp(mat2str(arrayfun(@plus, [2 5], [7 11])))"].join("\n")),
+    ["refused", "refused", "[9;16]", "[9 16]"]);
+  // (cell2struct: the structure array has the cell array's other dimensions)
+  assert.deepEqual(run([
+    "C = reshape(num2cell(1:12), [2 3 2]);",
+    "S = cell2struct(C, {'oak','elm'}, 1); disp(mat2str(size(S))); disp(mat2str([S(:).oak; S(:).elm]))",
+    "S = cell2struct(C, {'a','b','c'}, 2); disp(mat2str(size(S))); disp(mat2str([S(:).a; S(:).b; S(:).c]))",
+    "S = cell2struct(C, {'p','q'}, 3); disp(mat2str(size(S))); disp(mat2str([S(:).p; S(:).q]))",
+    "S = cell2struct({1 2; 3 4}, {'u','v'}, 2); disp(mat2str(size(S))); disp(mat2str([S.u; S.v]))",
+    tryIt("cell2struct({2 5;7 11}, {'oak','elm'}, 0)"), tryIt("cell2struct({2 5;7 11}, {'oak','elm','ash'}, 1)"),
+  ].join("\n")), [
+    "[3 2]", "[1 3 5 7 9 11;2 4 6 8 10 12]",
+    "[2 2]", "[1 2 7 8;3 4 9 10;5 6 11 12]",
+    "[2 3]", "[1 2 3 4 5 6;7 8 9 10 11 12]",
+    "[2 1]", "[1 3;2 4]",
+    "refused", "refused",
+  ]);
+  // (structfun: a structure array is refused; several outputs, each a structure)
+  assert.deepEqual(run([tryIt("structfun(@numel, struct('x', {2, [7 11]}))"),
+    "[a, b] = structfun(@(x) deal(x, x + 1), struct('oak', 2, 'elm', 5), 'UniformOutput', false); disp(mat2str([a.oak a.elm b.oak b.elm]))",
+    "[m, n] = structfun(@size, struct('p', [1 2 3], 'q', [4; 5])); disp(mat2str([m n]))"].join("\n")),
+    ["refused", "[2 5 3 6]", "[1 3;2 1]"]);
+});
