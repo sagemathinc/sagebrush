@@ -32,6 +32,24 @@ def _field_elements(base):
     return list(base)
 
 
+def _double_field(base):
+    """Whether base is a numerical field of at most 53 bits (RDF, CDF, RR,
+    CC, RealField(p) or ComplexField(p) for p <= 53), whose matrices' linear
+    algebra numpy does in doubles.  A higher precision is done in the
+    field's own arithmetic: numpy's doubles padded to 200 bits were a
+    plausible wrong answer (RealField(200) 4 x 4 determinants, inverses,
+    solutions and eigenvalues)."""
+    if not getattr(base, "_numeric", False):
+        return False
+    prec = getattr(base, "precision", None)
+    return not callable(prec) or int(prec()) <= 53
+
+
+def _mp_field(base):
+    """A numerical field of more than 53 bits (RealField(p), ComplexField(p))."""
+    return getattr(base, "_numeric", False) and not _double_field(base)
+
+
 def _field(base):
     return isinstance(base, _ff.FiniteField_ext) or getattr(base, "_is_generic_field", False) or (isinstance(base, _ff.IntegerModRing_) and base.is_field())
 
@@ -955,6 +973,24 @@ class FFVector:
         return FFVector(self._base, self._e)
 
 
+def _rhs_entries(b, n, what):
+    """The entries of a right-hand side that must have n: read boundedly
+    (at most n + 1), and the number actually read checked, not only the
+    length b declares (a list subclass may iterate more or fewer entries
+    than its len), with Sage's ValueError."""
+    from _sage_matrix import _bounded_list
+    msg = "number of %s of self must equal degree of right-hand side" % what
+    if hasattr(b, "__len__") and len(b) != n:
+        raise ValueError(msg)
+    try:
+        b = _bounded_list(b, n + 1)
+    except ValueError:
+        raise ValueError(msg)
+    if len(b) != n:
+        raise ValueError(msg)
+    return b
+
+
 # ------------------------------------------------------------------ elimination
 
 def _echelon(rows, base, ncols):
@@ -1492,7 +1528,7 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2, 3], [2, 4, 6]]).rank()
             1
         """
-        if getattr(self._base, "_numeric", False):
+        if _double_field(self._base):
             import _sage_rdf
             return _sage_rdf._rank(self)
         return _sa().Integer(len(_echelon(self._rows, self._base, self._ncols)[1]))
@@ -1503,6 +1539,15 @@ class FFMatrix:
         if getattr(base, "_numeric", False):
             import _sage_rdf
             f = _sage_rdf.NUMERIC.get(name)
+            if f is not None and not _double_field(base):
+                if name == "is_symmetric":
+                    # (exactly, in the field: numpy compared doubles)
+                    return lambda tol=0: self.is_square() and all(
+                        (self._rows[i][j] == self._rows[j][i]) if not tol else abs(self._rows[i][j] - self._rows[j][i]) <= tol
+                        for i in range(self.nrows()) for j in range(i))
+                def refuse(*a, **k):
+                    raise NotImplementedError("%s of a matrix over %r is not available in sagebrush yet (numpy works in 53 bits)" % (name, base))
+                return refuse
             if f is not None:
                 return lambda *a, **k: f(self, *a, **k)
         raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
@@ -1525,7 +1570,7 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2], [3, 4]]).det()
             5
         """
-        if getattr(self._base, "_numeric", False):
+        if _double_field(self._base):
             import _sage_rdf
             return _sage_rdf._det(self)
         if not self.is_square():
@@ -1559,7 +1604,7 @@ class FFMatrix:
         n = self.nrows()
         if not self.is_square():
             raise ArithmeticError("self must be a square matrix")
-        if getattr(self._base, "_numeric", False):
+        if _double_field(self._base):
             import _sage_rdf
             return _sage_rdf._inverse(self)
         _admit_size(self._base, n, n, 3)  # ([self | I] and its echelon form, n x 2n)
@@ -1661,15 +1706,21 @@ class FFMatrix:
             sage: A = matrix(GF(7), [[1, 2, 3], [2, 4, 6]]); A.solve_right(vector(GF(7), [1, 2]))
             (1, 0, 0)
         """
-        if getattr(self._base, "_numeric", False) and self.is_square():
+        # (the right-hand side's size first, as Sage: zip dropped equations,
+        # so a short b was solved as if the missing entries did not exist)
+        if isinstance(b, FFMatrix):
+            if b.nrows() != self.nrows():
+                raise ValueError("number of rows of self must equal number of rows of right-hand side")
+        else:
+            b = _rhs_entries(b, self.nrows(), "rows")
+        if _double_field(self._base) and self.is_square():
             import _sage_rdf
             return _sage_rdf._solve_right(self, b)
         if isinstance(b, FFMatrix):
             _admit_size(self._base, self._ncols, b.ncols())
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
-        from _sage_matrix import _bounded_list
-        b = [self._base(x) for x in _bounded_list(b, self.nrows())]
+        b = [self._base(x) for x in b]
         aug = [r + [bi] for r, bi in zip(self._rows, b)]
         m, piv, d = _echelon(aug, self._base, self._ncols + 1)
         if self._ncols in piv:
@@ -1688,8 +1739,10 @@ class FFMatrix:
             (1, 0)
         """
         if isinstance(b, FFMatrix):
+            if b.ncols() != self.ncols():
+                raise ValueError("number of columns of self must equal number of columns of right-hand side")
             return self.transpose().solve_right(b.transpose()).transpose()
-        return self.transpose().solve_right(b)
+        return self.transpose().solve_right(_rhs_entries(b, self.ncols(), "columns"))
 
     def __truediv__(self, o):
         c = self._scalar(o)
