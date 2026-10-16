@@ -1,0 +1,3241 @@
+[
+  {
+    "name": "numpy.array",
+    "kind": "function",
+    "signature": "(object, dtype=None)",
+    "summary": "An array from a list, a nested list, a scalar or another array.",
+    "examples": [
+      {
+        "code": "np.array([[1, 2], [3, 4]])",
+        "expected": "array([[1, 2],\n       [3, 4]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.asarray",
+    "kind": "function",
+    "signature": "(a, dtype=None)",
+    "summary": "a as an array, without copying it if it already is one with that dtype.",
+    "examples": [
+      {
+        "code": "np.asarray([1.5, 2])",
+        "expected": "array([1.5, 2. ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.arange",
+    "kind": "function",
+    "signature": "([start,] stop[, step], dtype=None)",
+    "summary": "Evenly spaced values in the half-open interval [start, stop).",
+    "examples": [
+      {
+        "code": "np.arange(5)",
+        "expected": "array([0, 1, 2, 3, 4])\n"
+      },
+      {
+        "code": "np.arange(1, 2, 0.25)",
+        "expected": "array([1.  , 1.25, 1.5 , 1.75])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.linspace",
+    "kind": "function",
+    "signature": "(start, stop, num=50, endpoint=True, retstep=False, dtype=None)",
+    "summary": "num evenly spaced numbers from start to stop.",
+    "examples": [
+      {
+        "code": "np.linspace(0, 1, 5)",
+        "expected": "array([0.  , 0.25, 0.5 , 0.75, 1.  ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.logspace",
+    "kind": "function",
+    "signature": "(start, stop, num=50, endpoint=True, base=10.0)",
+    "summary": "Numbers spaced evenly on a log scale, from base**start to base**stop.",
+    "examples": [
+      {
+        "code": "np.logspace(0, 3, 4)",
+        "expected": "array([   1.,   10.,  100., 1000.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.geomspace",
+    "kind": "function",
+    "signature": "(start, stop, num=50, endpoint=True)",
+    "summary": "A geometric progression from start to stop.",
+    "examples": [
+      {
+        "code": "np.geomspace(1, 256, 5)",
+        "expected": "array([  1.,   4.,  16.,  64., 256.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.zeros",
+    "kind": "function",
+    "signature": "(shape, dtype=float)",
+    "summary": "An array of zeros.",
+    "examples": [
+      {
+        "code": "np.zeros((2, 3))",
+        "expected": "array([[0., 0., 0.],\n       [0., 0., 0.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.ones",
+    "kind": "function",
+    "signature": "(shape, dtype=float)",
+    "summary": "An array of ones.",
+    "examples": [
+      {
+        "code": "np.ones(3, dtype=int)",
+        "expected": "array([1, 1, 1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.full",
+    "kind": "function",
+    "signature": "(shape, fill_value, dtype=None)",
+    "summary": "An array filled with one value.",
+    "examples": [
+      {
+        "code": "np.full((2, 2), 7)",
+        "expected": "array([[7, 7],\n       [7, 7]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.empty",
+    "kind": "function",
+    "signature": "(shape, dtype=float)",
+    "summary": "An array whose values are not set (here, zeros).",
+    "examples": [
+      {
+        "code": "np.empty((2, 3)).shape",
+        "expected": "(2, 3)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.zeros_like",
+    "kind": "function",
+    "signature": "(a, dtype=None)",
+    "summary": "Zeros with the shape and dtype of a.",
+    "examples": [
+      {
+        "code": "np.zeros_like(np.array([[1, 2], [3, 4]]))",
+        "expected": "array([[0, 0],\n       [0, 0]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.ones_like",
+    "kind": "function",
+    "signature": "(a, dtype=None)",
+    "summary": "Ones with the shape and dtype of a.",
+    "examples": [
+      {
+        "code": "np.ones_like(np.arange(3.0))",
+        "expected": "array([1., 1., 1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.full_like",
+    "kind": "function",
+    "signature": "(a, fill_value, dtype=None)",
+    "summary": "An array like a, filled with one value.",
+    "examples": [
+      {
+        "code": "np.full_like(np.arange(4), 9)",
+        "expected": "array([9, 9, 9, 9])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.eye",
+    "kind": "function",
+    "signature": "(N, M=None, k=0, dtype=float)",
+    "summary": "A 2-D array with ones on a diagonal and zeros elsewhere.",
+    "examples": [
+      {
+        "code": "np.eye(3, k=1)",
+        "expected": "array([[0., 1., 0.],\n       [0., 0., 1.],\n       [0., 0., 0.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.identity",
+    "kind": "function",
+    "signature": "(n, dtype=float)",
+    "summary": "The n x n identity matrix.",
+    "examples": [
+      {
+        "code": "np.identity(2)",
+        "expected": "array([[1., 0.],\n       [0., 1.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.diag",
+    "kind": "function",
+    "signature": "(v, k=0)",
+    "summary": "The diagonal of a 2-D array, or a diagonal matrix from a 1-D one.",
+    "examples": [
+      {
+        "code": "np.diag([1, 2, 3])",
+        "expected": "array([[1, 0, 0],\n       [0, 2, 0],\n       [0, 0, 3]])\n"
+      },
+      {
+        "code": "np.diag(np.arange(9).reshape(3, 3))",
+        "expected": "array([0, 4, 8])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tri",
+    "kind": "function",
+    "signature": "(N, M=None, k=0, dtype=float)",
+    "summary": "Ones at and below a diagonal, zeros above.",
+    "examples": [
+      {
+        "code": "np.tri(3)",
+        "expected": "array([[1., 0., 0.],\n       [1., 1., 0.],\n       [1., 1., 1.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tril",
+    "kind": "function",
+    "signature": "(m, k=0)",
+    "summary": "The lower triangle of an array, zeros above it.",
+    "examples": [
+      {
+        "code": "np.tril(np.arange(1, 10).reshape(3, 3))",
+        "expected": "array([[1, 0, 0],\n       [4, 5, 0],\n       [7, 8, 9]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.triu",
+    "kind": "function",
+    "signature": "(m, k=0)",
+    "summary": "The upper triangle of an array, zeros below it.",
+    "examples": [
+      {
+        "code": "np.triu(np.arange(1, 10).reshape(3, 3), 1)",
+        "expected": "array([[0, 2, 3],\n       [0, 0, 6],\n       [0, 0, 0]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.vander",
+    "kind": "function",
+    "signature": "(x, N=None, increasing=False)",
+    "summary": "The Vandermonde matrix of x: columns are powers of x.",
+    "examples": [
+      {
+        "code": "np.vander([1, 2, 3])",
+        "expected": "array([[1, 1, 1],\n       [4, 2, 1],\n       [9, 3, 1]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.meshgrid",
+    "kind": "function",
+    "signature": "(*xi, indexing='xy')",
+    "summary": "Coordinate matrices from coordinate vectors.",
+    "examples": [
+      {
+        "code": "X, Y = np.meshgrid([1, 2, 3], [10, 20])\nX + Y",
+        "expected": "array([[11, 12, 13],\n       [21, 22, 23]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.indices",
+    "kind": "function",
+    "signature": "(dimensions)",
+    "summary": "An array of the indices of a grid.",
+    "examples": [
+      {
+        "code": "np.indices((2, 3))",
+        "expected": "array([[[0, 0, 0],\n        [1, 1, 1]],\n\n       [[0, 1, 2],\n        [0, 1, 2]]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.fromfunction",
+    "kind": "function",
+    "signature": "(function, shape, dtype=float)",
+    "summary": "An array whose value at each index is function(*index).",
+    "examples": [
+      {
+        "code": "np.fromfunction(lambda i, j: i + 10 * j, (2, 3))",
+        "expected": "array([[ 0., 10., 20.],\n       [ 1., 11., 21.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.fromiter",
+    "kind": "function",
+    "signature": "(iterable, dtype, count=-1)",
+    "summary": "A 1-D array from an iterable.",
+    "examples": [
+      {
+        "code": "np.fromiter((x * x for x in range(5)), dtype=int)",
+        "expected": "array([ 0,  1,  4,  9, 16])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.copy",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "A copy of an array.",
+    "examples": [
+      {
+        "code": "a = np.arange(3)\nb = np.copy(a)\nb[0] = 9\na",
+        "expected": "array([0, 1, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.loadtxt",
+    "kind": "function",
+    "signature": "(fname, dtype=float, delimiter=None, skiprows=0, usecols=None)",
+    "summary": "An array from a text file of numbers.",
+    "examples": [
+      {
+        "code": "with open('table.txt', 'w') as f:\n    f.write('1 2\\n3 4\\n')\nnp.loadtxt('table.txt')",
+        "expected": "array([[1., 2.],\n       [3., 4.]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.savetxt",
+    "kind": "function",
+    "signature": "(fname, X, fmt='%.18e', delimiter=' ', header='')",
+    "summary": "Writes an array to a text file.",
+    "examples": [
+      {
+        "code": "np.savetxt('table.txt', [[1, 2], [3, 4]], fmt='%d')\nprint(open('table.txt').read(), end='')",
+        "expected": "1 2\n3 4\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.reshape",
+    "kind": "function",
+    "signature": "(a, newshape)",
+    "summary": "The same data in another shape (-1 for the dimension that fits).",
+    "examples": [
+      {
+        "code": "np.reshape(np.arange(6), (2, -1))",
+        "expected": "array([[0, 1, 2],\n       [3, 4, 5]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.ravel",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The array flattened to 1-D.",
+    "examples": [
+      {
+        "code": "np.ravel([[1, 2], [3, 4]])",
+        "expected": "array([1, 2, 3, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.transpose",
+    "kind": "function",
+    "signature": "(a, axes=None)",
+    "summary": "The array with its axes reversed or permuted.",
+    "examples": [
+      {
+        "code": "np.transpose(np.arange(6).reshape(2, 3))",
+        "expected": "array([[0, 3],\n       [1, 4],\n       [2, 5]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.swapaxes",
+    "kind": "function",
+    "signature": "(a, axis1, axis2)",
+    "summary": "The array with two axes interchanged.",
+    "examples": [
+      {
+        "code": "np.swapaxes(np.zeros((2, 3, 4)), 0, 2).shape",
+        "expected": "(4, 3, 2)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.moveaxis",
+    "kind": "function",
+    "signature": "(a, source, destination)",
+    "summary": "The array with an axis moved to a new position.",
+    "examples": [
+      {
+        "code": "np.moveaxis(np.zeros((2, 3, 4)), 0, -1).shape",
+        "expected": "(3, 4, 2)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.expand_dims",
+    "kind": "function",
+    "signature": "(a, axis)",
+    "summary": "The array with a new axis of length one.",
+    "examples": [
+      {
+        "code": "np.expand_dims(np.array([1, 2]), 0)",
+        "expected": "array([[1, 2]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.squeeze",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The array without its axes of length one.",
+    "examples": [
+      {
+        "code": "np.squeeze(np.zeros((1, 3, 1))).shape",
+        "expected": "(3,)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.atleast_2d",
+    "kind": "function",
+    "signature": "(*arys)",
+    "summary": "Inputs as arrays of at least two dimensions.",
+    "examples": [
+      {
+        "code": "np.atleast_2d([1, 2])",
+        "expected": "array([[1, 2]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.concatenate",
+    "kind": "function",
+    "signature": "(arrays, axis=0)",
+    "summary": "Arrays joined along an existing axis.",
+    "examples": [
+      {
+        "code": "np.concatenate([[1, 2], [3], [4, 5]])",
+        "expected": "array([1, 2, 3, 4, 5])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.stack",
+    "kind": "function",
+    "signature": "(arrays, axis=0)",
+    "summary": "Arrays joined along a new axis.",
+    "examples": [
+      {
+        "code": "np.stack([[1, 2], [3, 4]], axis=1)",
+        "expected": "array([[1, 3],\n       [2, 4]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.vstack",
+    "kind": "function",
+    "signature": "(tup)",
+    "summary": "Arrays stacked as rows (vertically).",
+    "examples": [
+      {
+        "code": "np.vstack([[1, 2], [3, 4]])",
+        "expected": "array([[1, 2],\n       [3, 4]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.hstack",
+    "kind": "function",
+    "signature": "(tup)",
+    "summary": "Arrays stacked horizontally (along columns).",
+    "examples": [
+      {
+        "code": "np.hstack([[1, 2], [3]])",
+        "expected": "array([1, 2, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.column_stack",
+    "kind": "function",
+    "signature": "(tup)",
+    "summary": "1-D arrays stacked as the columns of a 2-D array.",
+    "examples": [
+      {
+        "code": "np.column_stack([[1, 2], [3, 4]])",
+        "expected": "array([[1, 3],\n       [2, 4]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.split",
+    "kind": "function",
+    "signature": "(ary, indices_or_sections, axis=0)",
+    "summary": "An array split into equal parts, or at the given indices.",
+    "examples": [
+      {
+        "code": "np.split(np.arange(6), 3)",
+        "expected": "[array([0, 1]), array([2, 3]), array([4, 5])]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.array_split",
+    "kind": "function",
+    "signature": "(ary, indices_or_sections, axis=0)",
+    "summary": "An array split into nearly equal parts.",
+    "examples": [
+      {
+        "code": "np.array_split(np.arange(5), 2)",
+        "expected": "[array([0, 1, 2]), array([3, 4])]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tile",
+    "kind": "function",
+    "signature": "(A, reps)",
+    "summary": "An array made by repeating A.",
+    "examples": [
+      {
+        "code": "np.tile([1, 2], 3)",
+        "expected": "array([1, 2, 1, 2, 1, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.repeat",
+    "kind": "function",
+    "signature": "(a, repeats, axis=None)",
+    "summary": "Each element repeated.",
+    "examples": [
+      {
+        "code": "np.repeat([1, 2], [2, 3])",
+        "expected": "array([1, 1, 2, 2, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.flip",
+    "kind": "function",
+    "signature": "(m, axis=None)",
+    "summary": "The array with the order of its elements reversed.",
+    "examples": [
+      {
+        "code": "np.flip(np.arange(4))",
+        "expected": "array([3, 2, 1, 0])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.roll",
+    "kind": "function",
+    "signature": "(a, shift, axis=None)",
+    "summary": "Elements shifted cyclically.",
+    "examples": [
+      {
+        "code": "np.roll(np.arange(5), 2)",
+        "expected": "array([3, 4, 0, 1, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.rot90",
+    "kind": "function",
+    "signature": "(m, k=1, axes=(0, 1))",
+    "summary": "An array rotated by 90 degrees, k times.",
+    "examples": [
+      {
+        "code": "np.rot90([[1, 2], [3, 4]])",
+        "expected": "array([[2, 4],\n       [1, 3]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.pad",
+    "kind": "function",
+    "signature": "(array, pad_width, mode='constant', constant_values=0)",
+    "summary": "An array with values added at its edges.",
+    "examples": [
+      {
+        "code": "np.pad([1, 2, 3], (2, 1))",
+        "expected": "array([0, 0, 1, 2, 3, 0])\n"
+      },
+      {
+        "code": "np.pad([1, 2, 3], 2, mode='edge')",
+        "expected": "array([1, 1, 1, 2, 3, 3, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.insert",
+    "kind": "function",
+    "signature": "(arr, obj, values, axis=None)",
+    "summary": "Values inserted before the given indices.",
+    "examples": [
+      {
+        "code": "np.insert([1, 2, 3], 1, 9)",
+        "expected": "array([1, 9, 2, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.delete",
+    "kind": "function",
+    "signature": "(arr, obj, axis=None)",
+    "summary": "The array without the given elements.",
+    "examples": [
+      {
+        "code": "np.delete(np.arange(6), [0, 2])",
+        "expected": "array([1, 3, 4, 5])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.append",
+    "kind": "function",
+    "signature": "(arr, values, axis=None)",
+    "summary": "Values added at the end of an array.",
+    "examples": [
+      {
+        "code": "np.append([1, 2], [3, 4])",
+        "expected": "array([1, 2, 3, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.broadcast_to",
+    "kind": "function",
+    "signature": "(array, shape)",
+    "summary": "A view of an array broadcast to a shape.",
+    "examples": [
+      {
+        "code": "np.broadcast_to([1, 2, 3], (2, 3))",
+        "expected": "array([[1, 2, 3],\n       [1, 2, 3]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.shape",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The shape of an array.",
+    "examples": [
+      {
+        "code": "np.shape([[1, 2, 3], [4, 5, 6]])",
+        "expected": "(2, 3)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.ndim",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The number of dimensions of an array.",
+    "examples": [
+      {
+        "code": "np.ndim([[1], [2]])",
+        "expected": "2\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.size",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The number of elements of an array.",
+    "examples": [
+      {
+        "code": "np.size(np.zeros((3, 4)))",
+        "expected": "12\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.add",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise sum (the ufunc behind +).",
+    "examples": [
+      {
+        "code": "np.add([1, 2], [10, 20])",
+        "expected": "array([11, 22])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.subtract",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise difference (-).",
+    "examples": [
+      {
+        "code": "np.subtract(5, [1, 2])",
+        "expected": "array([4, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.multiply",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise product (*).",
+    "examples": [
+      {
+        "code": "np.multiply([1, 2, 3], 2)",
+        "expected": "array([2, 4, 6])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.divide",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise true division (/).",
+    "examples": [
+      {
+        "code": "np.divide([1, 2, 3], 4)",
+        "expected": "array([0.25, 0.5 , 0.75])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.floor_divide",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise floor division (//).",
+    "examples": [
+      {
+        "code": "np.floor_divide([7, -7], 2)",
+        "expected": "array([ 3, -4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.mod",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise remainder with the divisor's sign (%).",
+    "examples": [
+      {
+        "code": "np.mod([7, -7], 3)",
+        "expected": "array([1, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.power",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise power (**).",
+    "examples": [
+      {
+        "code": "np.power([2, 3], [3, 2])",
+        "expected": "array([8, 9])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sqrt",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise square root.",
+    "examples": [
+      {
+        "code": "np.sqrt([1, 4, 2])",
+        "expected": "array([1.        , 2.        , 1.41421356])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cbrt",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise cube root.",
+    "examples": [
+      {
+        "code": "np.cbrt([27, -8])",
+        "expected": "array([ 3., -2.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.square",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise square.",
+    "examples": [
+      {
+        "code": "np.square([1, -2, 3])",
+        "expected": "array([1, 4, 9])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.abs",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise absolute value (also of complex numbers).",
+    "examples": [
+      {
+        "code": "np.abs([-1.5, 2, 3 + 4j])",
+        "expected": "array([1.5, 2. , 5. ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sign",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise sign: -1, 0 or 1.",
+    "examples": [
+      {
+        "code": "np.sign([-2, 0, 5])",
+        "expected": "array([-1,  0,  1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.exp",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise e**x.",
+    "examples": [
+      {
+        "code": "np.exp([0, 1])",
+        "expected": "array([1.        , 2.71828183])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.expm1",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise exp(x) - 1, accurate for small x.",
+    "examples": [
+      {
+        "code": "np.expm1(1e-10)",
+        "expected": "np.float64(1.00000000005e-10)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.log",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise natural logarithm.",
+    "examples": [
+      {
+        "code": "np.log([1, np.e])",
+        "expected": "array([0., 1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.log10",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise base-10 logarithm.",
+    "examples": [
+      {
+        "code": "np.log10([10, 1000])",
+        "expected": "array([1., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.log2",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise base-2 logarithm.",
+    "examples": [
+      {
+        "code": "np.log2([8, 0.5])",
+        "expected": "array([ 3., -1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.log1p",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise log(1 + x), accurate for small x.",
+    "examples": [
+      {
+        "code": "np.log1p(1e-10)",
+        "expected": "np.float64(9.999999999500001e-11)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sin",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise sine (radians).",
+    "examples": [
+      {
+        "code": "np.sin([0, np.pi / 2])",
+        "expected": "array([0., 1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cos",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise cosine (radians).",
+    "examples": [
+      {
+        "code": "np.cos([0, np.pi])",
+        "expected": "array([ 1., -1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tan",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise tangent (radians).",
+    "examples": [
+      {
+        "code": "np.tan(np.pi / 4)",
+        "expected": "np.float64(0.9999999999999999)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.arcsin",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise inverse sine.",
+    "examples": [
+      {
+        "code": "np.arcsin([0, 1])",
+        "expected": "array([0.        , 1.57079633])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.arccos",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise inverse cosine.",
+    "examples": [
+      {
+        "code": "np.arccos([1, 0])",
+        "expected": "array([0.        , 1.57079633])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.arctan",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise inverse tangent.",
+    "examples": [
+      {
+        "code": "np.arctan(1)",
+        "expected": "np.float64(0.7853981633974483)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.arctan2",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise angle of the point (x2, x1), in (-pi, pi].",
+    "examples": [
+      {
+        "code": "np.arctan2([1, -1], [-1, -1])",
+        "expected": "array([ 2.35619449, -2.35619449])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.hypot",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise sqrt(x1**2 + x2**2).",
+    "examples": [
+      {
+        "code": "np.hypot(3, [4, 5])",
+        "expected": "array([5.        , 5.83095189])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sinh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise hyperbolic sine.",
+    "examples": [
+      {
+        "code": "np.sinh([0, 1])",
+        "expected": "array([0.        , 1.17520119])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cosh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise hyperbolic cosine.",
+    "examples": [
+      {
+        "code": "np.cosh([0, 1])",
+        "expected": "array([1.        , 1.54308063])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tanh",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise hyperbolic tangent.",
+    "examples": [
+      {
+        "code": "np.tanh([0, 1])",
+        "expected": "array([0.        , 0.76159416])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.degrees",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Radians converted to degrees.",
+    "examples": [
+      {
+        "code": "np.degrees(np.pi)",
+        "expected": "np.float64(180.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.radians",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Degrees converted to radians.",
+    "examples": [
+      {
+        "code": "np.radians([90, 180])",
+        "expected": "array([1.57079633, 3.14159265])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.round",
+    "kind": "function",
+    "signature": "(a, decimals=0)",
+    "summary": "Elements rounded to some decimals (halves to even).",
+    "examples": [
+      {
+        "code": "np.round([1.25, 2.5, -0.5], 1)",
+        "expected": "array([ 1.2,  2.5, -0.5])\n"
+      },
+      {
+        "code": "np.round([2.5, 3.5])",
+        "expected": "array([2., 4.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.floor",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise floor.",
+    "examples": [
+      {
+        "code": "np.floor([-1.5, 1.5])",
+        "expected": "array([-2.,  1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.ceil",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise ceiling.",
+    "examples": [
+      {
+        "code": "np.ceil([-1.5, 1.5])",
+        "expected": "array([-1.,  2.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.trunc",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise truncation toward zero.",
+    "examples": [
+      {
+        "code": "np.trunc([-1.7, 1.7])",
+        "expected": "array([-1.,  1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.rint",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elements rounded to the nearest integer (halves to even).",
+    "examples": [
+      {
+        "code": "np.rint([0.5, 1.5, 2.6])",
+        "expected": "array([0., 2., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.clip",
+    "kind": "function",
+    "signature": "(a, a_min, a_max)",
+    "summary": "Values limited to an interval.",
+    "examples": [
+      {
+        "code": "np.clip(np.arange(6), 1, 4)",
+        "expected": "array([1, 1, 2, 3, 4, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.maximum",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise maximum (nan wins).",
+    "examples": [
+      {
+        "code": "np.maximum([1, 5, 3], [4, 2, 6])",
+        "expected": "array([4, 5, 6])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.minimum",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise minimum (nan wins).",
+    "examples": [
+      {
+        "code": "np.minimum([1, 5, 3], 2)",
+        "expected": "array([1, 2, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.fmax",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise maximum, ignoring nan.",
+    "examples": [
+      {
+        "code": "np.fmax([1, np.nan], [np.nan, 2])",
+        "expected": "array([1., 2.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.gcd",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise greatest common divisor.",
+    "examples": [
+      {
+        "code": "np.gcd([12, 20], 8)",
+        "expected": "array([4, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.lcm",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise least common multiple.",
+    "examples": [
+      {
+        "code": "np.lcm([4, 6], 10)",
+        "expected": "array([20, 30])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.real",
+    "kind": "function",
+    "signature": "(val)",
+    "summary": "The real parts.",
+    "examples": [
+      {
+        "code": "np.real([1 + 2j, 3])",
+        "expected": "array([1., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.imag",
+    "kind": "function",
+    "signature": "(val)",
+    "summary": "The imaginary parts.",
+    "examples": [
+      {
+        "code": "np.imag([1 + 2j, 3])",
+        "expected": "array([2., 0.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.conj",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise complex conjugate.",
+    "examples": [
+      {
+        "code": "np.conj([1 + 2j, 3 - 1j])",
+        "expected": "array([1.-2.j, 3.+1.j])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.angle",
+    "kind": "function",
+    "signature": "(z, deg=False)",
+    "summary": "The angles of complex numbers.",
+    "examples": [
+      {
+        "code": "np.angle([1j, -1], deg=True)",
+        "expected": "array([ 90., 180.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.isnan",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Whether each element is nan.",
+    "examples": [
+      {
+        "code": "np.isnan([1, np.nan])",
+        "expected": "array([False,  True])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.isinf",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Whether each element is infinite.",
+    "examples": [
+      {
+        "code": "np.isinf([np.inf, -np.inf, 1])",
+        "expected": "array([ True,  True, False])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.isfinite",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Whether each element is finite.",
+    "examples": [
+      {
+        "code": "np.isfinite([1, np.nan, np.inf])",
+        "expected": "array([ True, False, False])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.nan_to_num",
+    "kind": "function",
+    "signature": "(x, nan=0.0, posinf=None, neginf=None)",
+    "summary": "nan and infinities replaced by numbers.",
+    "examples": [
+      {
+        "code": "np.nan_to_num([np.nan, 1.5, np.inf])",
+        "expected": "array([0.00000000e+000, 1.50000000e+000, 1.79769313e+308])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.heaviside",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "The Heaviside step function, x2 at 0.",
+    "examples": [
+      {
+        "code": "np.heaviside([-1, 0, 2], 0.5)",
+        "expected": "array([0. , 0.5, 1. ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sinc",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "The normalized sinc function sin(pi x)/(pi x).",
+    "examples": [
+      {
+        "code": "np.sinc([0, 0.5])",
+        "expected": "array([1.        , 0.63661977])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.interp",
+    "kind": "function",
+    "signature": "(x, xp, fp, left=None, right=None)",
+    "summary": "Linear interpolation of the points (xp, fp) at x.",
+    "examples": [
+      {
+        "code": "np.interp([0.5, 1.5], [0, 1, 2], [0, 10, 0])",
+        "expected": "array([5., 5.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.piecewise",
+    "kind": "function",
+    "signature": "(x, condlist, funclist)",
+    "summary": "A function defined piece by piece by conditions.",
+    "examples": [
+      {
+        "code": "x = np.array([-2, -1, 0, 1, 2])\nnp.piecewise(x, [x < 0, x >= 0], [lambda t: -t, lambda t: t ** 2])",
+        "expected": "array([2, 1, 0, 1, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.where",
+    "kind": "function",
+    "signature": "(condition, x, y)",
+    "summary": "Elements from x where the condition holds, from y elsewhere (or the indices where it holds).",
+    "examples": [
+      {
+        "code": "np.where(np.arange(5) > 2, 1, -1)",
+        "expected": "array([-1, -1, -1,  1,  1])\n"
+      },
+      {
+        "code": "np.where([0, 3, 0, 5])",
+        "expected": "(array([1, 3]),)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.select",
+    "kind": "function",
+    "signature": "(condlist, choicelist, default=0)",
+    "summary": "Elements chosen by the first condition that holds.",
+    "examples": [
+      {
+        "code": "x = np.arange(6)\nnp.select([x < 2, x > 3], [x, x ** 2], -1)",
+        "expected": "array([ 0,  1, -1, -1, 16, 25])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.vectorize",
+    "kind": "function",
+    "signature": "(pyfunc)",
+    "summary": "A Python function made to act elementwise on arrays.",
+    "examples": [
+      {
+        "code": "f = np.vectorize(lambda a, b: a if a > b else b)\nf([1, 5, 3], 2)",
+        "expected": "array([2, 5, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sum",
+    "kind": "function",
+    "signature": "(a, axis=None, keepdims=False)",
+    "summary": "The sum of the elements, of all or along an axis.",
+    "examples": [
+      {
+        "code": "np.sum([[1, 2], [3, 4]])",
+        "expected": "np.int64(10)\n"
+      },
+      {
+        "code": "np.sum([[1, 2], [3, 4]], axis=0)",
+        "expected": "array([4, 6])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.prod",
+    "kind": "function",
+    "signature": "(a, axis=None, keepdims=False)",
+    "summary": "The product of the elements.",
+    "examples": [
+      {
+        "code": "np.prod([1, 2, 3, 4])",
+        "expected": "np.int64(24)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cumsum",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "Cumulative sums.",
+    "examples": [
+      {
+        "code": "np.cumsum([1, 2, 3, 4])",
+        "expected": "array([ 1,  3,  6, 10])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cumprod",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "Cumulative products.",
+    "examples": [
+      {
+        "code": "np.cumprod([1, 2, 3, 4])",
+        "expected": "array([ 1,  2,  6, 24])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.diff",
+    "kind": "function",
+    "signature": "(a, n=1, axis=-1)",
+    "summary": "Differences between consecutive elements (n times).",
+    "examples": [
+      {
+        "code": "np.diff([1, 4, 9, 16])",
+        "expected": "array([3, 5, 7])\n"
+      },
+      {
+        "code": "np.diff([1, 4, 9, 16], n=2)",
+        "expected": "array([2, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.gradient",
+    "kind": "function",
+    "signature": "(f, *varargs, axis=None)",
+    "summary": "The gradient by central differences inside, one-sided at the ends.",
+    "examples": [
+      {
+        "code": "np.gradient([1, 4, 9, 16])",
+        "expected": "array([3., 4., 6., 7.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.min",
+    "kind": "function",
+    "signature": "(a, axis=None, keepdims=False)",
+    "summary": "The smallest element (amin).",
+    "examples": [
+      {
+        "code": "np.min([[3, 1], [4, 1]], axis=1)",
+        "expected": "array([1, 1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.max",
+    "kind": "function",
+    "signature": "(a, axis=None, keepdims=False)",
+    "summary": "The largest element (amax).",
+    "examples": [
+      {
+        "code": "np.max([3, 9, 4])",
+        "expected": "np.int64(9)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.argmin",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The index of the smallest element.",
+    "examples": [
+      {
+        "code": "np.argmin([3, 1, 2])",
+        "expected": "np.int64(1)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.argmax",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The index of the largest element.",
+    "examples": [
+      {
+        "code": "np.argmax([[1, 9], [5, 2]], axis=0)",
+        "expected": "array([1, 0])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.ptp",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The range of the values, max - min.",
+    "examples": [
+      {
+        "code": "np.ptp([4, 9, 1])",
+        "expected": "np.int64(8)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.mean",
+    "kind": "function",
+    "signature": "(a, axis=None, keepdims=False)",
+    "summary": "The arithmetic mean.",
+    "examples": [
+      {
+        "code": "np.mean([1, 2, 3, 4])",
+        "expected": "np.float64(2.5)\n"
+      },
+      {
+        "code": "np.mean([[1, 2], [3, 4]], axis=1)",
+        "expected": "array([1.5, 3.5])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.average",
+    "kind": "function",
+    "signature": "(a, axis=None, weights=None)",
+    "summary": "The weighted average.",
+    "examples": [
+      {
+        "code": "np.average([1, 2, 3], weights=[3, 1, 1])",
+        "expected": "np.float64(1.6)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.median",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The median.",
+    "examples": [
+      {
+        "code": "np.median([3, 1, 4, 1, 5])",
+        "expected": "np.float64(3.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.std",
+    "kind": "function",
+    "signature": "(a, axis=None, ddof=0)",
+    "summary": "The standard deviation (ddof=1 for the sample's).",
+    "examples": [
+      {
+        "code": "np.std([2, 4, 4, 4, 5, 5, 7, 9])",
+        "expected": "np.float64(2.0)\n"
+      },
+      {
+        "code": "np.std([1, 2, 3, 4], ddof=1)",
+        "expected": "np.float64(1.2909944487358056)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.var",
+    "kind": "function",
+    "signature": "(a, axis=None, ddof=0)",
+    "summary": "The variance.",
+    "examples": [
+      {
+        "code": "np.var([1, 2, 3, 4])",
+        "expected": "np.float64(1.25)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.percentile",
+    "kind": "function",
+    "signature": "(a, q, axis=None, method='linear')",
+    "summary": "The q-th percentiles.",
+    "examples": [
+      {
+        "code": "np.percentile([1, 2, 3, 4, 5], [25, 50, 90])",
+        "expected": "array([2. , 3. , 4.6])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.quantile",
+    "kind": "function",
+    "signature": "(a, q, axis=None, method='linear')",
+    "summary": "The q-th quantiles, q in [0, 1].",
+    "examples": [
+      {
+        "code": "np.quantile(np.arange(11), 0.35)",
+        "expected": "np.float64(3.5)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.nanmean",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The mean, ignoring nan.",
+    "examples": [
+      {
+        "code": "np.nanmean([1, np.nan, 3])",
+        "expected": "np.float64(2.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.nansum",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The sum, treating nan as zero.",
+    "examples": [
+      {
+        "code": "np.nansum([1, np.nan, 3])",
+        "expected": "np.float64(4.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.nanmax",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "The largest element, ignoring nan.",
+    "examples": [
+      {
+        "code": "np.nanmax([1, np.nan, 3])",
+        "expected": "np.float64(3.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cov",
+    "kind": "function",
+    "signature": "(m, y=None, rowvar=True, ddof=None)",
+    "summary": "The covariance matrix of variables (rows) observed in columns.",
+    "examples": [
+      {
+        "code": "np.cov([[1, 2, 3], [2, 4, 7]])",
+        "expected": "array([[1.        , 2.5       ],\n       [2.5       , 6.33333333]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.corrcoef",
+    "kind": "function",
+    "signature": "(x, y=None, rowvar=True)",
+    "summary": "Pearson correlation coefficients.",
+    "examples": [
+      {
+        "code": "np.corrcoef([1, 2, 3, 4], [2, 4, 5, 9])",
+        "expected": "array([[1.        , 0.96476382],\n       [0.96476382, 1.        ]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.histogram",
+    "kind": "function",
+    "signature": "(a, bins=10, range=None, density=False)",
+    "summary": "Counts of the values in bins, and the bins' edges.",
+    "examples": [
+      {
+        "code": "np.histogram([1, 2, 2, 3, 3, 3], bins=3)",
+        "expected": "(array([1, 2, 3]), array([1.        , 1.66666667, 2.33333333, 3.        ]))\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.bincount",
+    "kind": "function",
+    "signature": "(x, weights=None, minlength=0)",
+    "summary": "How many times each non-negative integer occurs.",
+    "examples": [
+      {
+        "code": "np.bincount([0, 1, 1, 3])",
+        "expected": "array([1, 2, 0, 1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.digitize",
+    "kind": "function",
+    "signature": "(x, bins, right=False)",
+    "summary": "The index of the bin each value falls in.",
+    "examples": [
+      {
+        "code": "np.digitize([0.5, 1.5, 3.2], [0, 1, 2, 3])",
+        "expected": "array([1, 2, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.count_nonzero",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "How many elements are not zero.",
+    "examples": [
+      {
+        "code": "np.count_nonzero([[0, 1], [2, 0]])",
+        "expected": "np.int64(2)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.all",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "Whether every element is true.",
+    "examples": [
+      {
+        "code": "np.all([[True, False], [True, True]], axis=0)",
+        "expected": "array([ True, False])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.any",
+    "kind": "function",
+    "signature": "(a, axis=None)",
+    "summary": "Whether some element is true.",
+    "examples": [
+      {
+        "code": "np.any([0, 0, 3])",
+        "expected": "np.True_\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.trapezoid",
+    "kind": "function",
+    "signature": "(y, x=None, dx=1.0, axis=-1)",
+    "summary": "The integral of sampled values by the trapezoid rule.",
+    "examples": [
+      {
+        "code": "x = np.linspace(0, 1, 101)\nnp.trapezoid(x ** 2, x)",
+        "expected": "np.float64(0.33335000000000004)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.sort",
+    "kind": "function",
+    "signature": "(a, axis=-1)",
+    "summary": "A sorted copy.",
+    "examples": [
+      {
+        "code": "np.sort([3, 1, 2])",
+        "expected": "array([1, 2, 3])\n"
+      },
+      {
+        "code": "np.sort([[3, 1], [0, 2]], axis=0)",
+        "expected": "array([[0, 1],\n       [3, 2]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.argsort",
+    "kind": "function",
+    "signature": "(a, axis=-1)",
+    "summary": "The indices that sort an array.",
+    "examples": [
+      {
+        "code": "np.argsort([30, 10, 20])",
+        "expected": "array([1, 2, 0])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.lexsort",
+    "kind": "function",
+    "signature": "(keys)",
+    "summary": "The indices that sort by several keys (the last key first).",
+    "examples": [
+      {
+        "code": "np.lexsort(([1, 2, 1], [0, 0, 1]))",
+        "expected": "array([0, 1, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.searchsorted",
+    "kind": "function",
+    "signature": "(a, v, side='left')",
+    "summary": "Where values would be inserted to keep a sorted array sorted.",
+    "examples": [
+      {
+        "code": "np.searchsorted([1, 3, 5, 7], [4, 7])",
+        "expected": "array([2, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.nonzero",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The indices of the elements that are not zero.",
+    "examples": [
+      {
+        "code": "np.nonzero([[1, 0], [0, 2]])",
+        "expected": "(array([0, 1]), array([0, 1]))\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.argwhere",
+    "kind": "function",
+    "signature": "(a)",
+    "summary": "The indices of the non-zero elements, one row each.",
+    "examples": [
+      {
+        "code": "np.argwhere(np.arange(6).reshape(2, 3) > 3)",
+        "expected": "array([[1, 1],\n       [1, 2]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.unique",
+    "kind": "function",
+    "signature": "(ar, return_index=False, return_inverse=False, return_counts=False)",
+    "summary": "The sorted distinct elements (and how often each occurs).",
+    "examples": [
+      {
+        "code": "np.unique([3, 1, 3, 2, 1])",
+        "expected": "array([1, 2, 3])\n"
+      },
+      {
+        "code": "np.unique([3, 1, 3, 2, 1], return_counts=True)",
+        "expected": "(array([1, 2, 3]), array([2, 1, 2]))\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.isin",
+    "kind": "function",
+    "signature": "(element, test_elements)",
+    "summary": "Whether each element is among the test elements.",
+    "examples": [
+      {
+        "code": "np.isin([1, 2, 3, 4], [2, 4])",
+        "expected": "array([False,  True, False,  True])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.intersect1d",
+    "kind": "function",
+    "signature": "(ar1, ar2)",
+    "summary": "The sorted common elements.",
+    "examples": [
+      {
+        "code": "np.intersect1d([1, 2, 3, 4], [3, 4, 5])",
+        "expected": "array([3, 4])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.union1d",
+    "kind": "function",
+    "signature": "(ar1, ar2)",
+    "summary": "The sorted elements of either.",
+    "examples": [
+      {
+        "code": "np.union1d([1, 2], [2, 5])",
+        "expected": "array([1, 2, 5])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.setdiff1d",
+    "kind": "function",
+    "signature": "(ar1, ar2)",
+    "summary": "The sorted elements of ar1 not in ar2.",
+    "examples": [
+      {
+        "code": "np.setdiff1d([1, 2, 3, 4], [2, 4])",
+        "expected": "array([1, 3])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.allclose",
+    "kind": "function",
+    "signature": "(a, b, rtol=1e-05, atol=1e-08)",
+    "summary": "Whether two arrays are equal within a tolerance.",
+    "examples": [
+      {
+        "code": "np.allclose([1.0, 2.0], [1.0, 2.0 + 1e-9])",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.isclose",
+    "kind": "function",
+    "signature": "(a, b, rtol=1e-05, atol=1e-08)",
+    "summary": "Elementwise equality within a tolerance.",
+    "examples": [
+      {
+        "code": "np.isclose([1.0, 2.0], [1.0, 2.1])",
+        "expected": "array([ True, False])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.array_equal",
+    "kind": "function",
+    "signature": "(a1, a2)",
+    "summary": "Whether two arrays have the same shape and elements.",
+    "examples": [
+      {
+        "code": "np.array_equal([1, 2], [1, 2])",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.logical_and",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise logical and.",
+    "examples": [
+      {
+        "code": "np.logical_and([True, True, False], [True, False, False])",
+        "expected": "array([ True, False, False])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.logical_not",
+    "kind": "function",
+    "signature": "(x)",
+    "summary": "Elementwise logical not.",
+    "examples": [
+      {
+        "code": "np.logical_not([True, False])",
+        "expected": "array([False,  True])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.dot",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The dot product: of vectors, or matrix products of 2-D arrays.",
+    "examples": [
+      {
+        "code": "np.dot([1, 2, 3], [4, 5, 6])",
+        "expected": "np.int64(32)\n"
+      },
+      {
+        "code": "np.dot([[1, 2], [3, 4]], [1, 1])",
+        "expected": "array([3, 7])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.matmul",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "The matrix product (the @ operator).",
+    "examples": [
+      {
+        "code": "np.array([[1, 2], [3, 4]]) @ np.array([[0, 1], [1, 0]])",
+        "expected": "array([[2, 1],\n       [4, 3]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.inner",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The inner product of vectors.",
+    "examples": [
+      {
+        "code": "np.inner([1, 2], [3, 4])",
+        "expected": "np.int64(11)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.outer",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The outer product of two vectors.",
+    "examples": [
+      {
+        "code": "np.outer([1, 2], [1, 10, 100])",
+        "expected": "array([[  1,  10, 100],\n       [  2,  20, 200]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.cross",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The cross product of 3-vectors.",
+    "examples": [
+      {
+        "code": "np.cross([1, 0, 0], [0, 1, 0])",
+        "expected": "array([0, 0, 1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.vdot",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The dot product, conjugating the first vector.",
+    "examples": [
+      {
+        "code": "np.vdot([1j, 2], [1j, 3])",
+        "expected": "np.complex128(7+0j)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.kron",
+    "kind": "function",
+    "signature": "(a, b)",
+    "summary": "The Kronecker product.",
+    "examples": [
+      {
+        "code": "np.kron([[1, 2], [3, 4]], [[1, 1]])",
+        "expected": "array([[1, 1, 2, 2],\n       [3, 3, 4, 4]])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tensordot",
+    "kind": "function",
+    "signature": "(a, b, axes=2)",
+    "summary": "Sums of products over the given axes.",
+    "examples": [
+      {
+        "code": "np.tensordot(np.arange(6).reshape(2, 3), np.arange(3), axes=1)",
+        "expected": "array([ 5, 14])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.einsum",
+    "kind": "function",
+    "signature": "(subscripts, *operands)",
+    "summary": "Products and sums written in Einstein's summation notation.",
+    "examples": [
+      {
+        "code": "np.einsum('ij,j->i', [[1, 2], [3, 4]], [10, 1])",
+        "expected": "array([12, 34])\n"
+      },
+      {
+        "code": "np.einsum('ij,ij->', [[1, 2], [3, 4]], [[1, 0], [0, 1]])",
+        "expected": "np.int64(5)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.trace",
+    "kind": "function",
+    "signature": "(a, offset=0)",
+    "summary": "The sum along a diagonal.",
+    "examples": [
+      {
+        "code": "np.trace([[1, 2], [3, 4]])",
+        "expected": "np.int64(5)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.convolve",
+    "kind": "function",
+    "signature": "(a, v, mode='full')",
+    "summary": "The discrete convolution of two sequences (polynomial multiplication).",
+    "examples": [
+      {
+        "code": "np.convolve([1, 2], [1, 3, 1])",
+        "expected": "array([1, 5, 7, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.correlate",
+    "kind": "function",
+    "signature": "(a, v, mode='valid')",
+    "summary": "The cross-correlation of two sequences.",
+    "examples": [
+      {
+        "code": "np.correlate([1, 2, 3], [0, 1, 0.5], mode='same')",
+        "expected": "array([2. , 3.5, 3. ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polyval",
+    "kind": "function",
+    "signature": "(p, x)",
+    "summary": "A polynomial (highest power first) evaluated at x.",
+    "examples": [
+      {
+        "code": "np.polyval([1, 0, -2], [0, 1, 2])",
+        "expected": "array([-2, -1,  2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polyfit",
+    "kind": "function",
+    "signature": "(x, y, deg)",
+    "summary": "The least-squares polynomial of degree deg through the points (highest power first).",
+    "examples": [
+      {
+        "code": "np.polyfit([0, 1, 2, 3], [1, 3, 5, 7], 1)",
+        "expected": "array([2., 1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.roots",
+    "kind": "function",
+    "signature": "(p)",
+    "summary": "The roots of a polynomial (highest power first).",
+    "examples": [
+      {
+        "code": "np.roots([1, -3, 2])",
+        "expected": "array([2., 1.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.poly",
+    "kind": "function",
+    "signature": "(seq_of_zeros)",
+    "summary": "The coefficients of the polynomial with the given roots.",
+    "examples": [
+      {
+        "code": "np.poly([1, 2])",
+        "expected": "array([ 1., -3.,  2.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polyder",
+    "kind": "function",
+    "signature": "(p, m=1)",
+    "summary": "The derivative of a polynomial.",
+    "examples": [
+      {
+        "code": "np.polyder([1, 2, 3])",
+        "expected": "array([2, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polyint",
+    "kind": "function",
+    "signature": "(p, m=1, k=None)",
+    "summary": "An antiderivative of a polynomial.",
+    "examples": [
+      {
+        "code": "np.polyint([3, 2, 1])",
+        "expected": "array([1., 1., 1., 0.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polyadd",
+    "kind": "function",
+    "signature": "(a1, a2)",
+    "summary": "The sum of two polynomials.",
+    "examples": [
+      {
+        "code": "np.polyadd([1, 2], [1, 0, 0])",
+        "expected": "array([1, 1, 2])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polymul",
+    "kind": "function",
+    "signature": "(a1, a2)",
+    "summary": "The product of two polynomials.",
+    "examples": [
+      {
+        "code": "np.polymul([1, 1], [1, -1])",
+        "expected": "array([ 1,  0, -1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.polydiv",
+    "kind": "function",
+    "signature": "(u, v)",
+    "summary": "The quotient and remainder of polynomial division.",
+    "examples": [
+      {
+        "code": "np.polydiv([1, 0, -1], [1, 1])",
+        "expected": "(array([ 1., -1.]), array([0.]))\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.poly1d",
+    "kind": "function",
+    "signature": "(c_or_r, r=False)",
+    "summary": "A polynomial object (highest power first), callable.",
+    "examples": [
+      {
+        "code": "p = np.poly1d([1, 0, -2])\np(3)",
+        "expected": "np.int64(7)\n"
+      },
+      {
+        "code": "print(np.poly1d([2, -3, 1]))",
+        "expected": "   2\n2 x - 3 x + 1\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.dtype",
+    "kind": "function",
+    "signature": "(obj)",
+    "summary": "A data type: float64, int64, complex128, bool, ...",
+    "examples": [
+      {
+        "code": "np.dtype('float32')",
+        "expected": "dtype('float32')\n"
+      },
+      {
+        "code": "np.arange(3).dtype",
+        "expected": "dtype('int64')\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.finfo",
+    "kind": "function",
+    "signature": "(dtype)",
+    "summary": "The limits of a floating-point type.",
+    "examples": [
+      {
+        "code": "np.finfo(np.float64).eps",
+        "expected": "np.float64(2.220446049250313e-16)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.iinfo",
+    "kind": "function",
+    "signature": "(dtype)",
+    "summary": "The limits of an integer type.",
+    "examples": [
+      {
+        "code": "np.iinfo(np.int8).max",
+        "expected": "127\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.set_printoptions",
+    "kind": "function",
+    "signature": "(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None, ...)",
+    "summary": "How arrays print: digits, summarizing, line width, ...",
+    "examples": [
+      {
+        "code": "with np.printoptions(precision=3):\n    print(np.array([1 / 3, 2 / 3]))",
+        "expected": "[0.333 0.667]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.format_float_positional",
+    "kind": "function",
+    "signature": "(x, precision=None, unique=True, trim='k', ...)",
+    "summary": "A float in positional notation, as NumPy formats it.",
+    "examples": [
+      {
+        "code": "np.format_float_positional(1 / 3, precision=5)",
+        "expected": "'0.33333'\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.format_float_scientific",
+    "kind": "function",
+    "signature": "(x, precision=None, unique=True, exp_digits=None, ...)",
+    "summary": "A float in scientific notation, as NumPy formats it.",
+    "examples": [
+      {
+        "code": "np.format_float_scientific(12345.678, precision=2)",
+        "expected": "'1.23e+04'\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.errstate",
+    "kind": "function",
+    "signature": "(**kwargs)",
+    "summary": "A context in which floating-point errors are handled as asked.",
+    "examples": [
+      {
+        "code": "with np.errstate(divide='ignore'):\n    print(np.array([1.0]) / 0)",
+        "expected": "[inf]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  }
+]
