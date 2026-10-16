@@ -215,6 +215,30 @@ test("finite fields by bounded work: GF of more than 1024 bits refused before it
   assert.match(flat, /Runtime error in 'Random': Argument 1 is not non-empty 7 $/);
 });
 
+test("comprehensions by bounded work: at most 10^6 elements, x, y in S admitted before iterating (HARD-FCC-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // under a 96 MB heap, as in the review
+  const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 120000 });
+  const refusal = /a comprehension of more than 1000000 elements is not supported yet/g;
+  // above the limit: #S^2 refused at once without a condition (each kind of
+  // collection); with one, or several clauses, by the collector at 10^6 + 1
+  const t0 = Date.now();
+  const above = run(
+    "S := [1..20000];\nT := [ <x,y> : x,y in S ];\nT := { x : x, y in [1..1001] };\nT := {@ x : x, y in {1..1001} @};\nT := {* x : x, y, z in [1..101] *};\n" +
+      "T := [ x : x, y in [1..1001] | true ];\nT := [ x : x in [1..1000], y in [1..1001] ];\n1;\n",
+  );
+  assert.equal(above.signal, null, above.stderr);
+  assert.equal((above.stdout.replace(/\s+/g, " ").match(refusal) ?? []).length, 6, above.stdout);
+  assert.match(above.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 60000);
+  // just at the limit: 10^6 elements are built
+  const at = run("#[ x : x, y in [1..1000] ];\n#[ y : x in [1..1000], y in [1..1000] | true ];\n#{ x*y : x, y in [1..1000] };\n");
+  assert.equal(at.signal, null, at.stderr);
+  assert.match(at.stdout, /^1000000\n1000000\n248083\n$/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)

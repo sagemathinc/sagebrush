@@ -595,6 +595,43 @@ def _still_range(v):
     return len(v.items) == n and all(isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi and (x - lo) % step == 0 for x in v.items)
 
 
+# a comprehension ([ e : x in S ], { ... }, {@ ... @}, {* ... *}) builds at
+# most this many elements (HARD-FCC-1)
+_COLLECT_MAX = 10 ** 6
+
+
+def _collect_refusal():
+    return MagmaError("a comprehension of more than %d elements is not supported yet" % _COLLECT_MAX)
+
+
+def _collect(gen):
+    """A comprehension's elements, refused once there are more than
+    _COLLECT_MAX of them, before the collection is built (HARD-FCC-1)."""
+    v = []
+    for x in gen:
+        if len(v) == _COLLECT_MAX:
+            raise _collect_refusal()
+        v.append(x)
+    return v
+
+
+def _admit_power(s, k):
+    """x1, ..., xk in S in a comprehension without a condition: #S^k
+    elements, refused before any is built when there are too many (S of a
+    known size; otherwise _collect bounds it) (HARD-FCC-1)."""
+    if isinstance(s, MRange):
+        n = s.size()
+    elif isinstance(s, (MSeq, MSet, MTuple, list, tuple)):
+        n = len(s)
+    elif isinstance(s, _MFinField):
+        n = s.q
+    else:
+        return s
+    if n > 1 and (n > _COLLECT_MAX or n ** k > _COLLECT_MAX):
+        raise _collect_refusal()
+    return s
+
+
 def _witness(gen):
     """The first of a generator (exists(t){ ... }'s witness, in a 1-tuple), or None."""
     return next(iter(gen), None)
