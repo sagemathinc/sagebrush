@@ -101,3 +101,8 @@ T('Zmod4 + Zmod1', lambda: vector(Zmod(4), [1, 2]) + vector(Zmod(1), [1, 2]))
 T('Zmod1 + GF3', lambda: vector(Zmod(1), [1, 2]) + vector(GF(3), [1, 2]))
 T('GF2 + Zmod1', lambda: vector(GF(2), [1, 2]) + vector(Zmod(1), [1, 2]))
 T('Zmod4 + Zmod9', lambda: vector(Zmod(4), [1, 2]) + vector(Zmod(9), [1, 2]))
+# astra's CORR-910-1: CC strings with digit separators are rejected; CORR-910-2: an empty symbolic vector's norm is 0 in QQ
+for s in ['1_0e-400j', '1e-4_00j', '1e4_00j', '1_0e400j', '1_0', '2_5j']:
+    T('CC(%s)' % s, lambda: CC(s))
+for p in [2, 1, Infinity, 3]:
+    T('SR empty norm %s' % p, lambda: vector(SR, []).norm(p))

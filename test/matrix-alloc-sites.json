@@ -244,7 +244,7 @@
  "lib/_sage_lang.py: SymbolicFunction.hessian :: constructor :: Matrix(_sa.SR, [[SymbolicFunction(self._expr.diff(a).diff(b), self._args) for b in self._args] for a in self._args])": 1,
  "lib/_sage_lang.py: SymbolicFunction.integral :: constructor :: Vector(integrate(e, *args, **kw) for e in self._expr)": 1,
  "lib/_sage_lang.py: symbolic_expression :: constructor :: Vector(_expr(x) for x in e)": 1,
- "lib/_sage_matrix.py: ComplexField_.__call__ :: loop :: (re, im)": 1,
+ "lib/_sage_matrix.py: ComplexField_.__call__ :: loop :: (re, im)": 2,
  "lib/_sage_matrix.py: FreeModule_.__contains__ :: call :: all(_F(x).denominator == 1 for x in v)": 1,
  "lib/_sage_matrix.py: FreeModule_.__contains__ :: call :: all(x == 0 for x in v)": 1,
  "lib/_sage_matrix.py: FreeModule_.__contains__ :: comprehension :: v": 2,
