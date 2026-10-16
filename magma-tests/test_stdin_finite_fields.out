@@ -64,3 +64,78 @@ Runtime error in '+': Bad argument types
 Argument types given: FldFinElt, FldReElt
 
 [ 1, 17, 9, 5, 11, 16, 7, 4, 6 ]
+Finite field of size 3^2
+
+>> a^(1/2);
+    ^
+Runtime error in '^': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+a^2
+
+>> (P!2) div 2;
+         ^
+Runtime error in 'div': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+
+>> a div a;
+     ^
+Runtime error in 'div': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+
+>> a mod 2;
+     ^
+Runtime error in 'mod': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+
+>> 2 div a;
+     ^
+Runtime error in 'div': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+true
+true
+true
+false
+
+>> (GF(5)!1) in F;
+             ^
+Runtime error in 'in': Arguments have no covering structure
+
+
+>> 1/2 in F;
+       ^
+Runtime error in 'in': Bad argument types
+
+
+>> 2.5 in F;
+       ^
+Runtime error in 'in': Bad argument types
+
+
+>> F![1/2, 2];
+    ^
+Runtime error in '!': Illegal coercion
+LHS: FldFin
+RHS: [FldRatElt]
+
+>> F![a, 0];
+    ^
+Runtime error in '!': Sequence must have length 1 to lift into this finite field
+LHS: FldFin
+RHS: [FldFinElt]
+a^3
+a^3
+a
+
+>> [GF(3)!1, GF(5)!1];
+   ^
+Runtime error in [ ... ]: No valid universe containing all elements
+
+[ 1, a ]
+[ 1, a ]
+0
+-1

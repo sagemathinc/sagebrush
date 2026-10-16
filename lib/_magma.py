@@ -536,13 +536,35 @@ def _sortkey(x):
     raise TypeError
 
 
+def _ff_universe(items, where):
+    """Finite fields' elements in one collection (CORR-581-4): another
+    characteristic has no common universe, as Magma says; two fields of one
+    characteristic, neither the prime field, are refused (Magma finds a
+    field containing both)."""
+    fields = {}
+    for x in items:
+        if _is_ff(x):
+            fields.setdefault(id(x.parent()), _ffwrap(x.parent()))
+    if len(fields) > 1:
+        Ks = list(fields.values())
+        if len({K.p for K in Ks}) > 1:
+            raise MagmaError("No valid universe containing all elements", where)
+        if sum(1 for K in Ks if K.n > 1) > 1:
+            raise MagmaError("a collection of elements of finite fields of characteristic %d, neither the prime field, is not supported yet" % Ks[0].p, where)
+    return items
+
+
 def _seq(items, universe=None):
+    items = list(items)
+    if universe is None:
+        _ff_universe(items, "[ ... ]")
     return MSeq(items, universe)
 
 
 def _set_universe(items):
     """Magma refuses a set of values with no hashing algorithm (records,
     Rationals(), real fields, polynomial rings)."""
+    _ff_universe(items, "{ ... }")
     for x in items:
         if isinstance(x, (MRec, _RationalField, RealField_, _sp.PolynomialRing_)):
             raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }")
@@ -1287,6 +1309,13 @@ def _ff_check(op, a, b, pos):
         return False
     x, y = (a, b) if fa else (b, a)
     o = op[:-2] if op.endswith(":=") else op
+    # (Magma coerces the other operand into the field first, and has no div
+    # or mod there, and no power but by an integer: CORR-581-2)
+    ff2 = lambda: MagmaError("Bad argument types\nArgument types given: FldFinElt, FldFinElt", "'%s'" % o, True, pos)
+    if o in ("div", "mod"):
+        raise ff2()
+    if o == "^" and not (fa and isinstance(b, int) and not isinstance(b, bool)):
+        raise ff2()
     Kx = _ffwrap(x.parent())
     if _is_ff(y):
         Ky = _ffwrap(y.parent())
@@ -2072,7 +2101,12 @@ def _meets(x, s):
 
 def _in(x, s, pos=None, op="in"):
     if hasattr(s, "_magma_contains"):
-        return s._magma_contains(x)
+        try:
+            return s._magma_contains(x)
+        except MagmaError as e:
+            if e.pos is None and e.where == "'in'":
+                e.pos = pos  # (at the in, as Magma shows it)
+            raise
     if isinstance(s, str):
         return x in s
     if isinstance(s, MTuple):
@@ -3327,6 +3361,8 @@ def Log(x, b=None):
     if _is_ff(x):
         # Log(x): to the primitive element; Log(b, x): to the base b
         base, y = (x, b) if b is not None else (PrimitiveElement(_ffwrap(x.parent())), x)
+        if b is not None and not base:
+            raise MagmaError("Base argument 1 must be non-zero", "'Log'")  # (CORR-581-5)
         if not y:
             raise MagmaError("Can not take log of zero element", "'Log'")
         try:
@@ -3588,7 +3624,27 @@ class _MFinField:
         return self.n
 
     def _magma_contains(self, x):
-        return _is_ff(x) and x.parent() is self.K
+        # x in F by value, as Magma (CORR-581-3): an integer; an element of
+        # F, or of its prime field; F's element lying in the prime field P
+        # (x^p = x) for x in P
+        if isinstance(x, bool):
+            raise MagmaError("Bad argument types", "'in'")
+        if isinstance(x, int):
+            return True
+        if _is_ff(x):
+            Kx = _ffwrap(x.parent())
+            if x.parent() is self.K:
+                return True
+            if Kx.p != self.p:
+                raise MagmaError("Arguments have no covering structure", "'in'")
+            if Kx.n == 1:
+                return True
+            if self.n == 1:
+                return x ** self.p == x
+            raise MagmaError("membership between finite fields of characteristic %d, neither the prime field, is not supported yet" % self.p, "'in'")
+        if isinstance(x, (_Fraction, MReal)):
+            raise MagmaError("Bad argument types", "'in'")
+        raise MagmaError("membership of a %s in a finite field is not supported yet" % _type_of(x), "'in'")
 
     def _magma_coerce(self, x):
         if _is_ff(x):
@@ -3605,9 +3661,23 @@ class _MFinField:
             if x.denominator % self.p == 0:
                 raise MagmaError("Illegal coercion")
             return self.K(x.numerator) / self.K(x.denominator)
-        if isinstance(x, MSeq) and self.n > 1 and len(x) == self.n:
-            # from the coefficients on the power basis (Eltseq)
-            return sum((self._magma_coerce(c) * self.K.gen() ** i for i, c in enumerate(x)), self.K(0))
+        if isinstance(x, (MSeq, MRange)):
+            # (CORR-581-4) the coefficients on the power basis (Eltseq):
+            # integers or the prime field's elements; a sequence of F's own
+            # (or other fields') elements lifts only one; Magma's words else
+            v, rhs = list(x), "[%s]" % _elt_type(x)
+            coeff = lambda c: (isinstance(c, int) and not isinstance(c, bool)) or (_is_ff(c) and _ffwrap(c.parent()).n == 1 and _ffwrap(c.parent()).p == self.p)
+            if v and all(coeff(c) for c in v) and (self.n > 1 or len(v) == 1):
+                if len(v) == self.n or self.n == 1:
+                    return sum((self.K(int(c)) * self.K.gen() ** i for i, c in enumerate(v)), self.K(0))
+                raise MagmaError("coercion of a sequence of %d coefficients into a field of degree %d is not supported yet" % (len(v), self.n), "'!'", False)
+            if v and any(_is_ff(c) for c in v) and all(_is_ff(c) or (isinstance(c, int) and not isinstance(c, bool)) for c in v):
+                # (a sequence of finite fields' elements, integers among them:
+                # its universe a finite field)
+                if len(v) != 1:
+                    raise MagmaError("Sequence must have length 1 to lift into this finite field\nLHS: FldFin\nRHS: [FldFinElt]", "'!'", False)
+                return self._magma_coerce(v[0])
+            raise MagmaError("Illegal coercion\nLHS: FldFin\nRHS: %s" % rhs, "'!'", False)
         raise MagmaError("Illegal coercion")
 
     def __iter__(self):
@@ -3636,7 +3706,13 @@ def GF(q, n=None):
     (as in Magma) by the Conway polynomial."""
     q = _coerce_int(q)
     if n is not None:
-        q = q ** _coerce_int(n)
+        # GF(p, n): a prime, and a degree of at least 1 (CORR-581-1)
+        n = _coerce_int(n)
+        if not _sa.is_prime(q):
+            raise MagmaError("Argument 1 (%d) should be prime" % q, "'GF'")
+        if n < 1:
+            raise MagmaError("Argument 2 (%d) should be >= 1" % n, "'GF'")
+        q = q ** n
     if q < 2 or _sff._is_prime_power(q) is None:
         raise MagmaError("Argument 1 (%d) is not a prime power" % q, "'GF'")
     try:
