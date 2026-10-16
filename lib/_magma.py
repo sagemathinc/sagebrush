@@ -831,22 +831,52 @@ def _check_index(n, i):
         raise MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (abs(i), i, n) if i < 1 else "Sequence element %d not defined" % i)
 
 
-def _index(s, i):
+def _read_index(n, i, pos, seq):
+    """s[i]'s checks, in Magma's words at the "[" (checked against Magma):
+    an index outside [1 .. n] is "Index 1 (i) should be in the range
+    [1 .. n]", but any index of an empty sequence is "Sequence element i
+    not defined"."""
+    if not isinstance(i, int) or isinstance(i, bool):
+        raise MagmaError("Bad argument types", "'[]'", True, pos)
+    if i < 1 or i > n:
+        if seq and n == 0:
+            raise MagmaError("Sequence element %d not defined" % i, "'[]'", True, pos)
+        raise MagmaError("Index 1 (%d) should be in the range [1 .. %d]" % (i, n), "'[]'", True, pos)
+
+
+def _index(s, i, pos=None):
     if isinstance(s, (MSeq, MRange, MTuple, list)):
+        seq = not isinstance(s, MTuple)
+        if isinstance(i, (MSeq, MRange)) and seq:
+            # S[[i, j, ...]], S[a..b]: an index out of range is said without it
+            n = s.size() if isinstance(s, MRange) else len(s)
+            out = []
+            for j in i:
+                if isinstance(j, int) and not isinstance(j, bool) and (not 1 <= j <= n or s[j - 1] is _UNDEF):
+                    raise MagmaError("Sequence element not defined", "'[]'", True, pos)
+                out.append(_index(s, j, pos))
+            return MSeq(out)
         if isinstance(i, (MSeq, MRange)):
-            return MSeq(_index(s, j) for j in i)
-        _check_index(len(s), i)
+            return MSeq(_index(s, j, pos) for j in i)
+        if isinstance(i, MTuple) and seq:
+            # S[i, j]: S[i][j]
+            for j in i:
+                s = _index(s, j, pos)
+            return s
+        _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, seq)
         v = s[i - 1]
         if v is _UNDEF:
-            raise MagmaError("Sequence element %d not defined" % i)
+            raise MagmaError("Sequence element %d not defined" % i, "'[]'", True, pos)
         return v
     if isinstance(s, str):
         if isinstance(i, (MSeq, MRange)):
-            return "".join(_index(s, j) for j in i)
-        _check_index(len(s), i)
+            return "".join(_index(s, j, pos) for j in i)
+        _read_index(len(s), i, pos, False)
         return s[i - 1]
     if isinstance(s, MSet) and s.kind == "indexed":
-        _check_index(len(s.items), i)
+        if not s.items:
+            raise MagmaError("Illegal null indexed set", "'[]'", True, pos)
+        _read_index(len(s.items), i, pos, False)
         return s.items[i - 1]
     if hasattr(s, "_magma_index"):
         return s._magma_index(i)
