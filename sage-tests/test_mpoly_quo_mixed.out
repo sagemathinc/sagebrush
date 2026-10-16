@@ -38,3 +38,4 @@ push order2 :: (Quotient of Multivariate Polynomial Ring in x, y over Rational F
 push order3 :: Quotient of Multivariate Polynomial Ring in x, y over Rational Field by the ideal (y^2 + 1, x - 1)
 zero ideal :: [True, True, True, True, True]
 zero ideal mix :: (2, True)
+names pushout :: (u + v, True, True, 2*x + y, 2*x + y)
