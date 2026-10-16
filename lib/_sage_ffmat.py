@@ -95,6 +95,18 @@ def _entry_cost(base):
     return 1500
 
 
+def _common_field(a, b):
+    """The field where matrices over a and b meet, as Sage's coercion has
+    it: a itself when b is the same field, QQbar for AA with QQbar; None
+    otherwise (refused, never computed over one of them)."""
+    if a is b or a == b:
+        return a
+    import _sage_qqbar as qb
+    if (a is qb.AA and b is qb.QQbar) or (a is qb.QQbar and b is qb.AA):
+        return qb.QQbar
+    return None
+
+
 def _admit_size(base, m, n, factor=1):
     """(m, n) after checking that an m x n matrix over base, times factor
     for an operation's larger working matrix, fits this process's budget
@@ -441,8 +453,11 @@ def _vector_pushout(R, S):
     if "nf" in (a, b):
         if a == "QQ" or b == "QQ":
             return S if a == "QQ" else R
-        # (a number field meets AA, QQbar, the numerical fields and other
-        # number fields by its embedding: not modelled)
+        # (a number field without an embedding meets nothing else: Sage's
+        # TypeError; with one, it meets AA, QQbar, the numerical fields and
+        # other number fields by its embedding: not modelled)
+        if "SR" not in (a, b) and any(c == "nf" and not getattr(X, "_emb", None) for c, X in ((a, R), (b, S))):
+            return None
         raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
     if "SR" in (a, b):
         return _sa().SR
@@ -1283,6 +1298,29 @@ class FFMatrix:
             c = 1 / c
         return FFMatrix(F, [[F(x) * c for x in r] for r in self._rows], m)
 
+    def _coerced(self, o, op):
+        """self and the matrix o over their common field, as Sage's
+        coercion has it: the same field, or QQbar for AA with QQbar.  Any
+        other pair is Sage's TypeError, before any entry is read: a zero,
+        non-overlapping or empty product of matrices over QQ(sqrt2) and
+        QQ(sqrt3) was a zero matrix, and AA + QQbar was over AA, the left
+        operand's field (astra's CORR-ABC-1/2)."""
+        F = _common_field(self._base, o._base)
+        if F is None:
+            raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), o.parent()))
+        return (self if self._base is F else FFMatrix(F, self._rows, self._ncols)), (o if o._base is F else FFMatrix(F, o._rows, o._ncols))
+
+    def _join_field(self, other, what):
+        """For augment and stack: nothing when other is over this field;
+        Sage's TypeError when the two fields have no common field (astra's
+        24 cases after CORR-ABC-1); NotImplementedError for a widening
+        sagebrush does not do here (AA with QQbar on the right)."""
+        F = _common_field(self._base, other._base)
+        if F is None:
+            raise TypeError("no common canonical parent for objects with parents: '%r' and '%r'" % (self.parent(), other.parent()))
+        if F is not self._base:
+            raise NotImplementedError("%s a matrix over %r with one over %r is not available in sagebrush yet" % (what, self._base, other._base))
+
     def _from_qq(self, o):
         """A QQ matrix o as a matrix over this (QQbar) field."""
         import _sage_matrix
@@ -1298,9 +1336,10 @@ class FFMatrix:
                 p = self._numeric_op(o, "+")
                 return NotImplemented if p is None else p
             o = q
-        if o.dimensions() != self.dimensions():
+        A, o = self._coerced(o, "+")
+        if o.dimensions() != A.dimensions():
             return NotImplemented
-        return FFMatrix(self._base, [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, o._rows)], self._ncols)
+        return FFMatrix(A._base, [[a + b for a, b in zip(r, s)] for r, s in zip(A._rows, o._rows)], A._ncols)
 
     def __radd__(self, o):
         if not isinstance(o, FFMatrix) and self._from_qq(o) is o:
@@ -1322,7 +1361,10 @@ class FFMatrix:
                 p = self._numeric_op(o, "-")
                 return NotImplemented if p is None else p
             o = q
-        return self + (-o)
+        A, o = self._coerced(o, "-")
+        if o.dimensions() != A.dimensions():
+            return NotImplemented
+        return A + (-o)
 
     def __rsub__(self, o):
         # o - A for a scalar o (a QQ matrix o goes through _from_qq)
@@ -1340,11 +1382,14 @@ class FFMatrix:
         if isinstance(o, FFMatrix):
             if self._ncols != o.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), o.parent()))
-            _admit_size(self._base, self.nrows(), o.ncols())  # (the product's size before it is built)
+            # (the common field first: the entry loop below skips zeros, so
+            # it cannot be what refuses incompatible fields)
+            A, o = self._coerced(o, "*")
+            _admit_size(A._base, A.nrows(), o.ncols())  # (the product's size before it is built)
             cols = o.columns()
-            z = self._base.zero()
+            z = A._base.zero()
             out = []
-            for r in self._rows:
+            for r in A._rows:
                 row = []
                 for c in cols:
                     s = z
@@ -1353,10 +1398,10 @@ class FFMatrix:
                             s = s + a * b
                     row.append(s)
                 out.append(row)
-            return FFMatrix(self._base, out, o.ncols())
+            return FFMatrix(A._base, out, o.ncols())
         if isinstance(o, FFVector):
-            o = self._vector_operand(o, False)
-            return FFVector(self._base, [FFVector(self._base, r)._dot(o._e) for r in self._rows])
+            A, o = self._vector_operand(o, False)
+            return FFVector(A._base, [FFVector(A._base, r)._dot(o._e) for r in A._rows])
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "*")
@@ -1371,21 +1416,26 @@ class FFMatrix:
         return FFMatrix(self._base, [[c * a for a in r] for r in self._rows], self._ncols)
 
     def _vector_operand(self, v, left):
-        """The vector v over this matrix's field, as Sage multiplies them
-        (v * self when left, else self * v): TypeError (unsupported operand
-        parents) when v's entries are not as many as the matrix's rows (or
-        columns) or are over a field this one does not contain."""
+        """(the matrix, the vector v) over their common field, as Sage
+        multiplies them (v * self when left, else self * v): TypeError
+        (unsupported operand parents) when v's entries are not as many as
+        the matrix's rows (or columns) or the two fields do not meet."""
         n = len(self._rows) if left else self._ncols
         P = _vector_pushout(self._base, v._base) if len(v) == n else None
         if P is None:
             raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % ((v.parent(), self.parent()) if left else (self.parent(), v.parent())))
+        A = self
         if P is not self._base:
-            raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, v._base))
-        return v if v._base is P else FFVector(P, _in_ring(P, v, v._base))
+            # (a matrix over AA meets a vector over QQbar in QQbar, as two
+            # matrices do: _common_field; other larger rings are not modelled)
+            if _common_field(self._base, v._base) is not P:
+                raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, v._base))
+            A = FFMatrix(P, self._rows, self._ncols)
+        return A, (v if v._base is P else FFVector(P, _in_ring(P, v, v._base)))
 
     def _vecmat(self, v):
-        v = self._vector_operand(v, True)
-        return FFVector(self._base, [v._dot(c) for c in self.columns()])
+        A, v = self._vector_operand(v, True)
+        return FFVector(A._base, [v._dot(c) for c in A.columns()])
 
     def __pow__(self, e):
         e = int(e)
@@ -1764,6 +1814,8 @@ class FFMatrix:
             other = FFMatrix(self._base, [[x] for x in other])
         if other.nrows() != self.nrows():
             raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), other.nrows()))
+        if isinstance(other, FFMatrix):
+            self._join_field(other, "augmenting")
         _admit_size(self._base, self.nrows(), self._ncols + other.ncols())
         return FFMatrix(self._base, [r + s for r, s in zip(self._rows, other._rows)], self._ncols + other.ncols())
 
@@ -1780,6 +1832,8 @@ class FFMatrix:
             other = FFMatrix(self._base, [other._e])
         if other.ncols() != self._ncols:
             raise TypeError("number of columns must be the same, %d != %d" % (self._ncols, other.ncols()))
+        if isinstance(other, FFMatrix):
+            self._join_field(other, "stacking")
         _admit_size(self._base, self.nrows() + other.nrows(), self._ncols)
         return FFMatrix(self._base, self._rows + other._rows, self._ncols)
 
