@@ -1683,8 +1683,12 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "__iter__", (s: O.PySet) => new O.DictIter(s.$d, 0));
   method(cls, "__repr__", (s: O.PySet) => setRepr(s));
   method(cls, "__eq__", (s: O.PySet, o: any) => (o instanceof O.PySet ? O.eq(s, o) : NotImplemented));
+  // (the binary operators, reflected too, and for a set the in-place ones,
+  // as CPython's slots: what a subclass inherits, CORR-A2B-1, -2)
   for (const [op, f] of [["__and__", "and"], ["__or__", "or"], ["__sub__", "sub"], ["__xor__", "xor"]] as const) {
     method(cls, op, (s: O.PySet, o: any) => (o instanceof O.PySet ? O.setOp(s, o, f) : NotImplemented));
+    method(cls, "__r" + op.slice(2), (s: O.PySet, o: any) => (o instanceof O.PySet ? O.setOp(o, s, f) : NotImplemented));
+    if (mutable) method(cls, "__i" + op.slice(2), (s: O.PySet, o: any) => (o instanceof O.PySet ? O.setInplace(s, o, f) : NotImplemented));
   }
   method(cls, "__le__", (s: O.PySet, o: any) => (o instanceof O.PySet ? cls.$dict.get("issubset")(s, o) : NotImplemented));
   method(cls, "__ge__", (s: O.PySet, o: any) => (o instanceof O.PySet ? cls.$dict.get("issuperset")(s, o) : NotImplemented));

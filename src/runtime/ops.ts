@@ -1610,7 +1610,7 @@ export function setOp(a: PySet, b: PySet, op: string): PySet {
   }
   return r;
 }
-function setInplace(a: PySet, b: PySet, op: string): PySet {
+export function setInplace(a: PySet, b: PySet, op: string): PySet {
   a.$d = setOp(a, b, op).$d;
   return a;
 }

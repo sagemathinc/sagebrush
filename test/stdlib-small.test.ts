@@ -34,3 +34,24 @@ test("textwrap refuses text with characters beyond U+FFFF, which Sagebrush's str
   const msg = (c: string) => `textwrap: text with characters beyond U+FFFF (such as '${c}') is not supported in Sagebrush yet`;
   assert.equal(got, [msg("\u{1F600}"), msg("\u{1F30E}"), msg("\u{1F600}"), "['你好', 'world']", ""].join("\n"));
 });
+
+test("set and frozenset subclasses inherit the reflected and in-place operators, as CPython's slots (CORR-A2B-1, -2)", () => {
+  same("set_slots_cases.py");
+});
+
+test("textwrap's refusal checks the text by str's own iteration, and the indents and placeholder too (CORR-978-4)", () => {
+  const code = [
+    "import textwrap",
+    "class Hidden(str):",
+    "    def __iter__(self): return iter('x')",
+    "for f in (lambda: textwrap.wrap('ab', width=3, initial_indent='\\U0001F600'), lambda: textwrap.wrap('abc de', width=5, subsequent_indent='\\U0001F600'),",
+    "          lambda: textwrap.shorten('aaaa bbbb cccc', width=8, placeholder='\\U0001F600'), lambda: textwrap.wrap(Hidden('\\U0001F600'), width=1)):",
+    "    try:",
+    "        print(f())",
+    "    except NotImplementedError as e:",
+    "        print(e)",
+  ].join("\n");
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
+  const msg = "textwrap: text with characters beyond U+FFFF (such as '\u{1F600}') is not supported in Sagebrush yet";
+  assert.equal(got, [msg, msg, msg, msg, ""].join("\n"));
+});
