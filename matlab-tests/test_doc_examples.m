@@ -447,6 +447,59 @@ show(v);
 clear
 v = cross([1 0 0], [0 1 0]);
 show(v);
+% poly
+clear
+v = poly([-3 1 2]);
+show(v);
+% polyder
+clear
+v = polyder([2 -3 0 5]);
+show(v);
+% polyint
+clear
+v = polyint([6 -4 3], 7);
+show(v);
+% deconv
+clear
+[q,r] = deconv([1 0 -5 6], [1 -2]);
+show(q);
+show(r);
+% polyvalm
+clear
+v = polyvalm([2 -1 3], [1 2; 0 -1]);
+show(v);
+% vander
+clear
+v = vander([-1 2 3]);
+show(v);
+% mkpp
+clear
+v = mkpp([0 2 5], [3 1; -2 7]);
+show(v);
+% ppval
+clear
+v = ppval(mkpp([0 2 5], [3 1; -2 7]), [0 1 2 4 5]);
+show(v);
+% unmkpp
+clear
+[b,c,l,k,d] = unmkpp(mkpp([0 2 5], [3 1; -2 7]));
+show(b);
+show(c);
+show(l);
+show(k);
+show(d);
+% pchip
+clear
+v = pchip([0 2 4], [0 1 4], [1 3]);
+show(v);
+% spline
+clear
+v = spline([-1 0 1 2], [1 0 1 4], [-0.5 0.5 1.5]);
+show(v);
+% interp2
+clear
+v = interp2([1 3; 2 6], [1 1.5 2], 1.5);
+show(v);
 % polyval
 clear
 v = polyval([1 2 3], 2);
