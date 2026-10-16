@@ -1038,7 +1038,7 @@ async function toggleConsole(show = consoleEl.hidden) {
     })),
     more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
     complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
-    interrupt: () => kernel.interrupt("\nKeyboardInterrupt (interpreter restarted; variables are gone).\n"),
+    interrupt: () => kernel.interrupt(),
     sage: isSage,
     version: () => kernel.version,
     announce,
