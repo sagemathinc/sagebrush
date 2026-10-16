@@ -665,10 +665,20 @@ settled more:
 - `A\b` with a diagonal A divides each row by its element, so
   `[1 0; 0 0]\[1; 1]` is `[1; Inf]` with the singular warning;
 - `fft` of real data is exactly conjugate-symmetric, so `ifft` of it is
-  real. `ifft2` and `ifftn` take `'symmetric'`, and are real for exactly
-  symmetric input;
+  real. `fft2` and `ifft2` transform each page beyond the first two
+  dimensions apart, and symmetry is over the transformed dimensions only.
+  The symmetric half is copied, conjugated, never averaged, so it cannot
+  overflow. `ifft2` and `ifftn` are real for exactly symmetric input, and
+  take `'symmetric'`: as their pages say, the second half of the elements
+  is ignored (an element whose mirror comes first in MATLAB's element order
+  is taken as that mirror's conjugate, one that is its own mirror as its
+  real part);
 - `[S.a] = ...` and `[S(i).a] = ...` take one output per selected element,
-  and `c{:}` alone displays each element as `ans`.
+  and `c{:}` alone displays each element as `ans`. The count is computed
+  from the subscripts before any position or output is made, and is at
+  most 100000: repeated subscripts multiply, so `S(I,I)` with an n-element
+  `I` selects $n^2$ elements even of a scalar `S`. The positions are built
+  once, and the assignment reuses them.
 
 They also settled several function rules:
 - set functions return the first occurrence's index (as since R2013a, and
