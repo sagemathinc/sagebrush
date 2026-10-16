@@ -485,44 +485,32 @@ test("normest, Higham's power method for the 2-norm with MATLAB's documented sto
   assert.deepEqual(out.trim().split("\n"), ["7.10633520177595 1", "6.0000", "5.0000", "500.4856", "5.305935 2.0000 0.0000"]);
 });
 
-test("histcounts' automatic edges follow Sagebrush's own stated rules (Scott's width to Heckbert's nice numbers; a given count; BinLimits, BinWidth and the documented BinMethods)", () => {
+test("histcounts, histogram and discretize take only edges that are fully determined; automatic edges are refused", () => {
   const { execFileSync } = require("node:child_process");
-  const { mkdtempSync, writeFileSync } = require("node:fs");
-  const { join } = require("node:path");
-  const { tmpdir } = require("node:os");
-  const dir = mkdtempSync(join(tmpdir(), "hist-"));
-  writeFileSync(join(dir, "t.m"), [
-    "rng default; [N, e] = histcounts(randn(100,1)); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts([2 3 5 7 11 13 17 19 23 29], 6); disp(mat2str(N)); disp(mat2str(e, 4));",
-    "[N, e] = histcounts(primes(100)); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts([5 5 5]); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts([5 5 5], 4); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30]); disp(mat2str(N)); disp(mat2str(e));",
-    "[N, e] = histcounts(primes(100), 'BinWidth', 7); disp(mat2str(e));",
-    "[~, e] = histcounts(primes(100), 'BinMethod', 'sturges'); disp(mat2str(e));",
-    "[~, e] = histcounts(primes(100), 'BinMethod', 'sqrt'); disp(mat2str(e));",
-    "[~, e] = histcounts(primes(100), 'BinMethod', 'fd'); disp(mat2str(e));",
-    "[~, e] = histcounts([-3 1 2 7], 'BinMethod', 'integers'); disp(mat2str(e));"
-  ].join("\n") + "\n");
-  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", join(dir, "t.m")], { encoding: "utf8" });
-  assert.deepEqual(out.trim().split("\n"), [
-    "[2 17 28 32 16 3 2]",
-    "[-3 -2 -1 0 1 2 3 4]",
-    "[3 1 2 2 1 1]",
-    "[2 6.5 11 15.5 20 24.5 29]",
-    "[15 10]",
-    "[0 50 100]",
-    "3",
-    "[4.5 5.5]",
-    "[0 0 3 0]",
-    "[4.5 4.75 5 5.25 5.5]",
-    "[4 4 2]",
-    "[0 10 20 30]",
-    "[0 7 14 21 28 35 42 49 56 63 70 77 84 91 98]",
-    "[0 20 40 60 80 100]",
-    "[0 20 40 60 80 100]",
-    "[0 50 100]",
-    "[-3.5 -2.5 -1.5 -0.5 0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5]"
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  // (MATLAB documents what its automatic bins do but not how it chooses their edges, and
+  // other edges give other counts)
+  assert.deepEqual(run([
+    tryIt("histcounts(primes(100))"), tryIt("histcounts([2 3 5 7 11 13], 6)"), tryIt("histcounts(primes(100), 'BinWidth', 7)"),
+    tryIt("histcounts(primes(100), 'BinLimits', [0 30])"), tryIt("histcounts(primes(100), 'BinMethod', 'sturges')"),
+    tryIt("histcounts(primes(100), 'BinLimits', [0 30], 'BinWidth', 7)"), tryIt("histogram([1 2 3])"), tryIt("discretize([1 2 3], 2)"),
+    "try, histcounts([1 2 3]), catch e, disp(e.message), end",
+    // (edges given, or fixed by BinLimits with NumBins or a BinWidth that divides them, or the integer rule)
+    "[N, e] = histcounts(primes(100), [0 10 20 30]); disp(mat2str([N; e(1:3)]))",
+    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30], 'NumBins', 3); disp(mat2str(N)); disp(mat2str(e))",
+    "[N, e] = histcounts(primes(100), 'BinLimits', [0 30], 'BinWidth', 10); disp(mat2str(N)); disp(mat2str(e))",
+    "[N, e] = histcounts([-3 1 2 7], 'BinMethod', 'integers'); disp(mat2str(N)); disp(mat2str(e))",
+    "[~, e] = histcounts([0.6 2.4], 'BinMethod', 'integers'); disp(mat2str(e))",
+  ].join("\n")), [
+    ...Array(8).fill("refused"),
+    "histcounts: automatic bin edges are not supported; pass explicit edges, e.g. histcounts(X, linspace(min(X), max(X), n+1))",
+    "[4 4 2;0 10 20]",
+    "[4 4 2]", "[0 10 20 30]",
+    "[4 4 2]", "[0 10 20 30]",
+    "[1 0 0 0 1 1 0 0 0 0 1]", "[-3.5 -2.5 -1.5 -0.5 0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5]",
+    "[0.5 1.5 2.5]",
   ]);
 });
 
