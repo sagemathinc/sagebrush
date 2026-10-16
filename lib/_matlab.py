@@ -8550,9 +8550,72 @@ def _clear_match(tokens, names):
         plain, rx = tokens, []
     chosen = set(_glob_select(plain, names)) if plain else set()
     for r in rx:
+        if not _regex_linearish(r):
+            raise _err("The -regexp pattern '%s' repeats a repetition or an alternation (it could take exponential time to match): not supported." % r)
         pat = _re.compile(_regex(r))
         chosen.update(n for n in names if pat.search(n))
     return [n for n in names if n in chosen]
+
+
+def _regex_linearish(p):
+    """False for a pattern that could backtrack exponentially: a repeated group that
+    itself holds a repetition or an alternation ((a+)+, (a|aa)*), or a backreference.
+    The regular expression engine can't be interrupted, so such patterns are refused
+    rather than run; names are at most 63 characters, so anything else is quick"""
+    stack = [[False, False]]  # (per open group: holds a repetition, holds an alternation)
+    i, n = 0, len(p)
+    last_group = None
+    while i < n:
+        c = p[i]
+        quantified = False
+        if c == "\\":
+            if i + 1 < n and p[i + 1].isdigit():
+                return False
+            i += 2
+            last_group = None
+        elif c == "[":
+            j = i + 1
+            if j < n and p[j] == "^":
+                j += 1
+            if j < n and p[j] == "]":
+                j += 1
+            while j < n and p[j] != "]":
+                j += 2 if p[j] == "\\" else 1
+            i = j + 1
+            last_group = None
+        elif c == "(":
+            stack.append([False, False])
+            i += 1
+            last_group = None
+        elif c == ")":
+            last_group = stack.pop() if len(stack) > 1 else [False, False]
+            i += 1
+        elif c == "|":
+            stack[-1][1] = True
+            i += 1
+            last_group = None
+        else:
+            i += 1
+            last_group = None
+        # (a quantifier after this atom)
+        if i < n and p[i] in "*+?{":
+            if p[i] == "{":
+                j = p.find("}", i)
+                if j < 0:
+                    continue
+                i = j + 1
+            else:
+                i += 1
+            if i < n and p[i] in "?+":
+                i += 1
+            quantified = True
+        if quantified:
+            if last_group is not None and (last_group[0] or last_group[1]):
+                return False
+            stack[-1][0] = True
+        elif last_group is not None and last_group[0]:
+            stack[-1][0] = True
+    return True
 
 
 def _glob_select(pats, names):
