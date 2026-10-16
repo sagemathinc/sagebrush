@@ -425,10 +425,23 @@ def _int_round(r, cls):
     if r.dtype.kind in "iu":
         # (the bounds inside the source class's own range, which clip needs)
         _, slo, shi = _INTS[_dtclass(r.dtype)]
-        return np.clip(r, max(lo, slo), min(hi, shi)).astype(dt)
+        return _int64_exact(np.clip(r, max(lo, slo), min(hi, shi)).astype(dt), cls)
     r = np.where(np.isnan(r), 0.0, r)
     r = np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5))
-    return np.clip(r, float(lo), float(hi)).astype(dt)
+    return _int64_exact(np.clip(r, float(lo), float(hi)).astype(dt), cls)
+
+
+def _int64_exact(a, cls):
+    """a, if an int64 or uint64 result Sagebrush holds exactly: its 64-bit integers keep 53
+    bits, as doubles do, so a value beyond 2^53 in magnitude (int64(2)^62, uint64(2^53) + 1,
+    a saturated limit) is refused rather than shown rounded; -2^63, exact, is kept"""
+    if cls in ("int64", "uint64") and a.size:
+        m = np.abs(a.astype(np.float64))
+        bad = (m > 2.0 ** 53) & (a.astype(np.float64) != -(2.0 ** 63))
+        if np.any(bad):
+            v = float(a.reshape(-1)[np.flatnonzero(bad)[0]])
+            raise _err("%s values beyond 2^53 in magnitude (here about %.17g) are not supported: Sagebrush's 64-bit integers are not exact there." % (cls, v))
+    return a
 
 
 def _finish(r, cls):
@@ -3883,10 +3896,12 @@ def _int_limit(name, a, k):
     if c not in _INTS:
         raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
     v = _INTS[c][k]
-    if len(a) == 2 and float(v) != v:
-        # (the "like" form, new here: a 64-bit limit Sagebrush's double-backed 64-bit
-        # integers can't hold exactly, 2^63 - 1 or 2^64 - 1, is refused rather than rounded)
-        raise _err("%s(\"like\", p) for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (name, c, v))
+    if float(v) != v:
+        # (a 64-bit limit Sagebrush's double-backed 64-bit integers can't hold exactly,
+        # 2^63 - 1 or 2^64 - 1, is refused rather than rounded: intmax('uint64') showed
+        # 18446744073709551616; intmin('int64'), -2^63, is exact)
+        form = "%s(\"like\", p)" % name if len(a) == 2 else "%s('%s')" % (name, c)
+        raise _err("%s for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (form, c, v))
     return np.array([[v]], dtype=_INTS[c][0])
 
 

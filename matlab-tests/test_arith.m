@@ -81,13 +81,15 @@ show(nchoosek(5, 2));
 show(gcd(12, 18));
 show(lcm(4, 6));
 % integer to integer conversions saturate, as documented, and cast does the same
+% (the limits of the six classes whose limits Sagebrush holds exactly, into all eight:
+% intmax('int64') and intmax('uint64') are refused there)
 cls = {'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64'};
-for i = 1:numel(cls)
+for i = 1:6
   v = [intmin(cls{i}) -5 0 5 intmax(cls{i})];
   for j = 1:numel(cls)
     show(feval(cls{j}, v));
   end
 end
 show(cast(int8([-5 5]), 'uint8'));
-show(cast(intmax('uint64'), 'int64'));
+show(cast(uint64(2^53), 'int64'));
 show(cast(intmin('int64'), 'uint32'));
