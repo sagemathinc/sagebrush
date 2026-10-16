@@ -1798,7 +1798,7 @@ def _install_int_methods(sa):
         "ceil": lambda n: n,
         "round": lambda n: n,
         "squarefree_part": lambda n: sa.prod([p for p, e in sa.factor(abs(n)) if e % 2]) * (1 if n > 0 else -1),
-        "kronecker": lambda n, b: sa.kronecker(n, b) if hasattr(sa, "kronecker") else None,
+        "kronecker": lambda n, b: sa.kronecker_symbol(n, b),
         "multiplicative_order": None,
     }
     try:
