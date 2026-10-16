@@ -122,3 +122,8 @@ print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))\ndef f(): pass\np
 print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))\ndef f(): pass\nprint(repr(f.__module__))", {'__name__': 'G'}, {'__name__': 'X'})))
 print(t(lambda: exec("class C:\n    del __module__\nprint(repr(C.__module__))", {'__name__': 'G'}, {})))
 print(t(lambda: exec("class C: pass\nprint(repr(C.__module__))", {'__name__': None})))
+
+# a class body's del too: a builtin's name, or one deleted, is unbound there
+print(t(lambda: exec("class C:\n    del len")))
+print(t(lambda: exec("class C:\n    x = 1\n    del x\n    del x")))
+print(t(lambda: exec("y = 1\nclass C:\n    del y")))
