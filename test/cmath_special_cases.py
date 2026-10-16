@@ -103,3 +103,79 @@ for c in ("cmath.rect(F(), F())", "cmath.rect(I(), I())", "cmath.isclose(2, 2, r
         print(c, pack(eval(c)) if not isinstance(eval(c), bool) else eval(c))
     except Exception as e:
         print(c, type(e).__name__, e)
+# the hooks dispatched as special methods (a staticmethod, classmethod or
+# property; None is not callable); __index__ must return an int; an int
+# subclass's own __float__ (CORR-627-1, -2)
+
+
+class FStatic:
+    @staticmethod
+    def __float__():
+        return 2.0
+
+
+class FClass:
+    @classmethod
+    def __float__(cls):
+        return 5.0
+
+
+class FProp:
+    @property
+    def __float__(self):
+        return lambda: 4.0
+
+
+class FNone:
+    __float__ = None
+
+
+class INone:
+    __index__ = None
+
+
+class IStr:
+    def __index__(self):
+        return '2'
+
+
+class IList:
+    def __index__(self):
+        return [2]
+
+
+class IFloat:
+    def __index__(self):
+        return 2.0
+
+
+class IComplex:
+    def __index__(self):
+        return 2 + 0j
+
+
+class IBool:
+    def __index__(self):
+        return True
+
+
+class J(int):
+    def __float__(self):
+        return 3.0
+
+
+class JPlain(int):
+    pass
+
+
+for name in ('FStatic', 'FClass', 'FProp', 'FNone', 'INone', 'IStr', 'IList', 'IFloat', 'IComplex', 'IBool'):
+    for c in ("cmath.rect(%s(), 0)", "cmath.rect(1, %s())", "cmath.isclose(1, 2, rel_tol=%s())", "cmath.isclose(1, 2, abs_tol=%s())"):
+        c = c % name
+        try:
+            r = eval(c)
+            print(c, r if isinstance(r, bool) else pack(r))
+        except Exception as e:
+            print(c, type(e).__name__, e)
+for c in ("cmath.rect(J(2), 0)", "cmath.rect(JPlain(2), 0)", "cmath.isclose(1, 3, abs_tol=J(1))"):
+    r = eval(c)
+    print(c, r if isinstance(r, bool) else pack(r))

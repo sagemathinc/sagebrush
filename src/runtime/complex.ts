@@ -327,16 +327,23 @@ function arg(x: any): [number, number] {
 // (a real number as CPython's PyFloat_AsDouble, as the math module's: a
 // float, an int, or an object's __float__ or __index__)
 function realArg(x: any): number {
-  const v = O.fv(x);
-  if (v !== undefined) return v;
-  const f = lookupType(typeOf(x), "__float__");
+  // (a float, a float subclass's value and an exact int or bool directly; an
+  // int subclass through its __float__, which it may override)
+  const t = typeOf(x);
+  if (typeof x === "number" || typeof x === "bigint" || typeof x === "boolean" || x instanceof FloatBox || t.$mro.includes(T.float)) return O.fv(x)!;
+  // (the hooks dispatched as special methods: a staticmethod, classmethod or
+  // property binds, and None is "not callable", as CPython's)
+  const f = lookupType(t, "__float__") !== undefined ? O.lookupSpecial(x, "__float__") : undefined;
   if (f !== undefined) {
     const r = f(x);
     if (!typeOf(r).$mro.includes(T.float)) raise(T.TypeError, `${typeName(x)}.__float__ returned non-float (type ${typeName(r)})`);
     return O.fv(r)!;
   }
-  if (lookupType(typeOf(x), "__index__") !== undefined) {
-    const d = Number(O.index(x));
+  const g = lookupType(t, "__index__") !== undefined ? O.lookupSpecial(x, "__index__") : undefined;
+  if (g !== undefined) {
+    const r = g(x);
+    if (!typeOf(r).$mro.includes(T.int)) raise(T.TypeError, `__index__ returned non-int (type ${typeName(r)})`);
+    const d = Number(typeof r === "boolean" ? +r : unbox(r));
     if (!Number.isFinite(d)) raise(T.OverflowError, "int too large to convert to float");
     return d;
   }
