@@ -634,13 +634,79 @@ The examples settled several display rules:
 - cells pad inside their braces (`{1×2 cell }`) and show short double rows
   inline (`{[2.6000 4.7000 3.9000]}`);
 - N-D arrays print page by page (`A(:,:,1) =`).
+- a struct's row-vector field shows its elements, each as a scalar shows in
+  format short, as many as fit and then `… ]`, as MATLAB does since R2021b
+  (the struct page's version history). A row of character vectors shows as
+  `{'Jan'  'Feb'  'Mar'}`. MATLAB's exact cut-off is not documented, so
+  Sagebrush's is its own; the documentation layout shows the whole row;
+- a string in a cell is left-aligned in its brackets (`{["lows" ]}`), and a
+  number is right-aligned;
+- numeric empties are `1×0 ... row vector`, `0×1 ... column vector`, and
+  otherwise `matrix`; logical, char and N-D empties are `array`;
+- in the documentation layout, as in the Live Editor and the Command Window,
+  warnings print in line with the output. Elsewhere they go to stderr, as
+  `-batch` writes them. Cell arrays are not split into `Columns`, and a
+  cell's row vectors show their elements.
+
+Running external MATLAB code (the coverage corpora, kept outside this repository)
+settled more:
+- `warning` keeps states: `warning(state)`, `warning(state, id)`,
+  `s = warning`, `warning(s)`, and the display of the states, as warning's
+  page shows. A disabled warning still sets `lastwarn`;
+- `asin` and `acos` of a real x beyond 1 take the side Octave gives:
+  `asin(2)` is $\pi/2 - 1.3170i$, odd in x. `atanh` takes the side its page
+  shows, $\operatorname{atanh}(-3) = -0.3466 - 1.5708i$, odd in x. Both apply
+  to a complex array's elements whose imaginary part is zero;
+- `zeros`, `ones`, `eye`, `eps`, `realmax`, `realmin` and `flintmax` with
+  `"like", p` take p's class, complexity and sparsity. A complex prototype
+  keeps the result complex even with zero imaginary parts;
+- `strrep` counts overlapping matches (`'222'` with `'22'` gives `'**'`),
+  where `replace` and `regexprep` do not;
+- `A\b` with a diagonal A divides each row by its element, so
+  `[1 0; 0 0]\[1; 1]` is `[1; Inf]` with the singular warning;
+- `fft` of real data is exactly conjugate-symmetric, so `ifft` of it is
+  real. `fft2` and `ifft2` transform each page beyond the first two
+  dimensions apart, and symmetry is over the transformed dimensions only.
+  The symmetric half is copied, conjugated, never averaged, so it cannot
+  overflow. `ifft2` and `ifftn` are real for exactly symmetric input, and
+  take `'symmetric'`: as their pages say, the second half of the elements
+  is ignored (an element whose mirror comes first in MATLAB's element order
+  is taken as that mirror's conjugate, one that is its own mirror as its
+  real part);
+- `[S.a] = ...` and `[S(i).a] = ...` take one output per selected element,
+  and `c{:}` alone displays each element as `ans`. The count is computed
+  from the subscripts before any position or output is made, and is at
+  most 100000: repeated subscripts multiply, so `S(I,I)` with an n-element
+  `I` selects $n^2$ elements even of a scalar `S`. The positions are built
+  once, and the assignment reuses them.
 
 They also settled several function rules:
 - set functions return the first occurrence's index (as since R2013a, and
   the last with `'legacy'`), with C oriented as each function's page says;
 - `func2str(@cos)` is `'cos'`;
 - a real times a complex number keeps a zero part zero (`NaN*1i` is
-  $0 + \mathrm{NaN}\,i$).
+  $0 + \mathrm{NaN}\,i$);
+- a builtin given more inputs than its implementation takes is refused
+  ("f with 4 inputs is not supported in Sagebrush"), and one given fewer
+  than it needs raises MATLAB's "Not enough input arguments.", rather than
+  Python's own message about the call;
+- `log`, `log10` and `log2` of 0 are `-Inf` also inside complex arrays;
+- `regexp` takes its documented options (`'dotexceptnewline'`,
+  `'lineanchors'`, `'freespacing'`, `'emptymatch'`, `'forceCellOutput'` and
+  the others) and refuses ones it does not know; `'names'` returns a 1×n
+  struct array when there are several matches;
+- `[C{:}] = ...` and `[C{i}] = ...` take one output per selected cell, the
+  count admitted as for structs (growing C this way is refused);
+- string arrays: `strcat` and `fileparts` work element by element, and
+  `cellfun` passes each element as a character vector, as their pages say;
+  `strjoin` takes one fewer delimiters than C, as literal text;
+- `[F, E] = log2(X)`, `[M, F, C] = mode(A)` (NaN ignored, M in A's class)
+  and `polyfit(..., Normalize=tf)` follow their pages; `polyval`'s error
+  estimate delta, and polyfit's other options, are refused;
+- complex integer arrays are not represented: converting a complex value
+  with a nonzero imaginary part to an integer class is refused (it used
+  to drop the imaginary part);
+- in the documentation's layout, `format rat` headings have no size.
 
 `gamma`, `gammaln`, `erf` and `erfc` use Python's `math` (src/runtime:
 fdlibm's erf and lgamma, musl's tgamma). `gamma` is exact at the integers,

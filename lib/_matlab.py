@@ -417,6 +417,10 @@ def _int_round(r, cls):
     dt, lo, hi = _INTS[cls]
     r = np.asarray(r)
     if r.dtype.kind == "c":
+        # (a complex integer array is not represented: refused rather than its imaginary part dropped;
+        # a zero imaginary part leaves a real array)
+        if np.any(r.imag != 0):
+            raise _err("Complex %s values are not supported in Sagebrush." % cls)
         r = r.real
     if r.dtype.kind in "iu":
         # (the bounds inside the source class's own range, which clip needs)
@@ -711,7 +715,7 @@ def _rcond_warning(A, Ainv=None):
         return
     rc = _rcond_estimate(A)
     if 0 < rc < 2.220446049250313e-16:
-        warning_("Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = %e." % rc)
+        warning_("Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  %e." % rc, "MATLAB:nearlySingularMatrix")
 
 
 def _lu_solve_through(A, B, report=False):
@@ -748,12 +752,23 @@ def _solve(A, B):
     m, n = A.shape
     if B.shape[0] != m:
         raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
+    if m == n and n > 1 and not np.any(A - np.diag(np.diag(A))):
+        # (a diagonal A: each row divided by its diagonal element, singular or not, as mldivide's
+        # page shows: [1 0; 0 0] \ [1; 1] is [1; Inf], where elimination would give NaN for 1)
+        d = np.diag(A).reshape((-1, 1))
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            X = B / d
+        if np.any(d == 0):
+            warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
+        else:
+            _rcond_warning(A)
+        return X
     if m == n:
         if A.dtype.kind == "c" or B.dtype.kind == "c":
             # (numpy.linalg here is real only: this LU takes complex matrices)
             X, singular = _lu_solve_through(A, B, True)
             if singular:
-                warning_("Matrix is singular to working precision.")
+                warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
             elif A.dtype.kind == "c":
                 if n <= 500:
                     _rcond_warning(A, _lu_solve_through(A, np.eye(n)))
@@ -763,7 +778,7 @@ def _solve(A, B):
         try:
             X = np.linalg.solve(A, B)
         except np.linalg.LinAlgError:
-            warning_("Matrix is singular to working precision.")
+            warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
             return _lu_solve_through(A, B)
         _rcond_warning(A)
         return X
@@ -851,7 +866,8 @@ def _qr_solve(A, B):
     tol = max(m, n) * 2.220446049250313e-16 * (float(d[0]) if d.size else 0.0)
     r = int(np.sum(d > tol))
     if r < min(m, n):
-        warning_("Rank deficient, rank = %d, tol = %e." % (r, tol))
+        # (two spaces before tol's value, as the published examples show: tol =  1.332268e-15)
+        warning_("Rank deficient, rank = %d, tol =  %e." % (r, tol))
     Z = np.zeros((n, Y.shape[1]), dtype=dt)
     for i in range(r - 1, -1, -1):
         s_ = Y[i] - (R[i, i + 1:r].reshape((-1, 1)) * Z[i + 1:r]).sum(axis=0) if i + 1 < r else Y[i]
@@ -1499,15 +1515,34 @@ def cp(v):
 # ------------------------------------------------------------------ functions and handles
 
 
+def _arity(f, skip):
+    """(fewest, most) positional arguments of the Python function f, less skip leading ones
+    (nargout); most is None with *args"""
+    try:
+        c = f.__code__
+    except AttributeError:
+        return 0, None
+    n = c.co_argcount - skip
+    nd = len(f.__defaults__ or ())
+    return max(0, n - nd), (None if c.co_flags & 4 else max(0, n))
+
+
 class Builtin:
     """A built-in function: f(nargout, *args)."""
-    __slots__ = ("f", "name")
+    __slots__ = ("f", "name", "lo", "hi")
 
-    def __init__(self, f, name):
+    def __init__(self, f, name, arity=None):
         self.f = f
         self.name = name
+        # (how many inputs its Python function takes: more is a form Sagebrush does not implement,
+        # an explicit refusal rather than Python's TypeError; fewer is MATLAB's own error)
+        self.lo, self.hi = arity if arity is not None else _arity(f, 1)
 
     def call(self, nargout, args):
+        if self.hi is not None and len(args) > self.hi:
+            raise _err("%s with %d inputs is not supported in Sagebrush (it takes at most %d here)." % (self.name, len(args), self.hi))
+        if len(args) < self.lo:
+            raise _err("Not enough input arguments.", "MATLAB:minrhs")
         return self.f(nargout, *args)
 
     def __repr__(self):
@@ -1603,8 +1638,9 @@ def _bs(*names):
             r = f(*args)
             return NOVAL if r is None else r
         g.__doc__ = f.__doc__  # (its documentation: the search box's, _matlab_docsearch)
+        ar = _arity(f, 0)
         for n in names:
-            _B[n] = Builtin(g, n)
+            _B[n] = Builtin(g, n, ar)
         return f
     return deco
 
@@ -2084,6 +2120,90 @@ def peek(base, path):
         except MatlabError:
             return None
     return cur
+
+
+# the most values a comma-separated list on the left of an assignment ([S(i,j).f] = ..., [C{i,j}] = ...)
+# takes: repeated subscripts multiply (S(I,I) with n-element I selects n^2 elements, even of a
+# scalar S), so the count is admitted before the positions or the right side's outputs are made
+_CS_MAX = 100000
+
+
+def _cs_cardinality(dims, args):
+    """how many elements v(args) selects, from the subscripts alone (no positions are built):
+    their product, as _positions forms it"""
+    n = len(args)
+    if n == 0:
+        return _prod(dims)
+    if n == 1:
+        return int(_ivec(args[0], _prod(dims), -1, False)[0].size)
+    d = list(dims)
+    if len(d) < n:
+        d = d + [1] * (n - len(d))
+    elif len(d) > n:
+        d = d[:n - 1] + [_prod(d[n - 1:])]
+    k = 1
+    for j in range(n):
+        k *= int(_ivec(args[j], d[j], j, False)[0].size)
+    return k
+
+
+def _cs_admit(k, what):
+    if k > _CS_MAX:
+        raise _err("%s with %d comma-separated outputs is beyond Sagebrush's limit of %d." % (what, k, _CS_MAX))
+
+
+def cs_positions(v, subs=None):
+    """the linear indices (1-based) of the elements [v.f] = ... or [v(subs).f] = ... sets: all of a
+    struct array's, or those subs selects, their count admitted first; None for a value that is not
+    a struct array (one output). The assignment reuses them."""
+    if type(v) is not Struct:
+        return None
+    n = _numel(v)
+    if subs is None:
+        return list(range(1, n + 1))
+    _cs_admit(_cs_cardinality(_dims(v), list(subs)), "[S(...).f] = ...")
+    lin = _box(np.arange(1, n + 1, dtype=np.float64).reshape(_stored(_dims(v))))
+    return [int(x) for x in _farr(index(lin, list(subs))).reshape(-1)]
+
+
+def cs_count(pos):
+    """how many values [v.f] = ... or [v(subs).f] = ... takes, from cs_positions"""
+    return max(len(pos), 1) if pos is not None else 1
+
+
+def cs_brace_positions(c, subs):
+    """the linear indices (1-based) of the cells [c{subs}] = ... sets, their count admitted first
+    (as cs_positions); None for a value that is not a cell array (one output)"""
+    if type(c) is not Cell:
+        return None
+    try:
+        k = _cs_cardinality(_dims(c), list(subs))
+    except MatlabError:
+        raise _err("[C{...}] = ... beyond the end of C (growing it) is not supported in Sagebrush.")
+    _cs_admit(k, "[C{...}] = ...")
+    lin = _box(np.arange(1, _numel(c) + 1, dtype=np.float64).reshape(_stored(_dims(c))))
+    return [int(x) for x in _farr(index(lin, list(subs))).reshape(-1)]
+
+
+def set_brace_cs(c, vals, subs, pos=None):
+    """[c{subs}] = vals: each selected cell set to the next value (pos: cs_brace_positions)"""
+    vals = list(vals)
+    if type(c) is not Cell or pos is None:
+        return assign(c, [("b", list(subs))], cp(vals[0]))
+    for k, v in zip(pos, vals):
+        c = assign(c, [("b", [float(k)])], cp(v))
+    return c
+
+
+def set_field_cs(s, f, vals, subs=None, pos=None):
+    """[s.f] = vals or [s(subs).f] = vals: each selected element's field f set to the next value
+    (pos: cs_positions of s and subs)"""
+    vals = list(vals)
+    if type(s) is not Struct or pos is None or (subs is None and _numel(s) <= 1):
+        return assign(s, [("p", list(subs)), ("f", f)] if subs is not None else [("f", f)], cp(vals[0]))
+    for k, v in zip(pos, vals):
+        s = assign(s, [("p", [float(k)]), ("f", f)], cp(v))
+    return s
 
 
 def assign(base, path, v):
@@ -2897,7 +3017,11 @@ def _numeric_blocks(v):
     if numel == 0:
         if cls == "double" and d == (0, 0):
             return [], ["     []"]
-        return [], ["  %s empty %s %s" % (_dimstr(d), cls, "matrix" if cls not in ("logical", "char") and len(d) == 2 else "array")]
+        # (a numeric empty: "1×0 ... row vector", "0×1 ... column vector", other 2-D sizes
+        # "matrix", as the documentation's examples show them; logical, char and N-D "array")
+        kind = ("array" if cls in ("logical", "char") or len(d) != 2 else "row vector" if d == (1, 0)
+                else "column vector" if d == (0, 1) else "matrix")
+        return [], ["  %s empty %s %s" % (_dimstr(d), cls, kind)]
     if len(d) > 2:
         pages = _pages(v)
         # (every page in the same format)
@@ -3166,6 +3290,13 @@ def _brief(v, in_cell):
         # (as a table's or cell's element shows a string array: {5×1 string})
         return "%s string" % _dimstr(d) if in_cell else "[%s string]" % _dimstr(d)
     if t is Cell:
+        if (not in_cell and len(d) == 2 and d[0] == 1 and len(v.a) > 1
+                and all(type(e) is Char and len(_dims(e)) == 2 and _dims(e)[0] == 1 for e in v.a)):
+            # (a struct's field holding a row of character vectors: them, as length's page shows
+            # Month: {'Jan'  'Feb'  'Mar'}, when they fit)
+            text = "{%s}" % "  ".join("'%s'" % e.text() for e in v.a)
+            if _doc_layout() or len(text) <= _WIDTH - 12:
+                return text
         if not in_cell and len(v.a) == 1 and _isnumlike(v.a[0]) and _numel(v.a[0]) == 1:
             # (a struct's field holding a 1-by-1 cell of a scalar: its element, b: {[1]})
             return "{%s}" % _brief(v.a[0], True)
@@ -3187,10 +3318,30 @@ def _brief(v, in_cell):
             else:
                 s = _short_scalar(complex(a) if a.dtype.kind == "c" else float(a)) if hasattr(a, "dtype") else _short_scalar(a)
             return "[%s]" % s if in_cell else s
-        if len(d) == 2 and d[0] == 1 and n <= 10 and _arr(v).dtype.kind != "c" and cls not in ("logical",) and not in_cell:
+        if len(d) == 2 and d[0] == 1 and _arr(v).dtype.kind != "c" and not in_cell:
+            # (a struct's row vector field: as much of it as fits, each element as a scalar shows
+            # in format short, then "… ]", as MATLAB shows them since R2021b (the struct page's
+            # version history); the documentation's layout, as wide as the Live Editor, shows all)
             A = _arr(v).reshape(-1)
-            return "[%s]" % " ".join(_g5(float(x)) for x in A)
-        if len(d) == 2 and d[0] == 1 and n <= 10 and in_cell and _arr(v).dtype.kind != "c":
+            if cls == "logical" or cls in _INTS:
+                items = ["%d" % int(x) for x in A]
+            else:
+                items = [_short_scalar(float(x)) for x in A]
+            if _doc_layout():
+                return "[%s]" % " ".join(items)
+            # (the width it may take: about the window's less the field name; MATLAB's exact rule
+            # for where it stops is not documented, the documentation's layout is not cut)
+            budget = _WIDTH - 12
+            out, used = [], 1
+            for k, it in enumerate(items):
+                if used + len(it) + 1 > budget and k > 0:
+                    return "[%s … ]" % " ".join(out)
+                out.append(it)
+                used += len(it) + 1
+            return "[%s]" % " ".join(out)
+        # (a cell's row vector: its elements, up to 10 of them, or any number in the documentation's
+        # layout, as the Live Editor shows {[0 0 0 1 0 0 0 0 0 1 0 0 0]})
+        if len(d) == 2 and d[0] == 1 and (n <= 10 or _doc_layout()) and in_cell and _arr(v).dtype.kind != "c":
             A = _arr(v).reshape(-1)
             if cls == "double" and _format["num"] == "bank":
                 return "[%s]" % " ".join(_alt_scalar(float(x)) for x in A)
@@ -3232,7 +3383,10 @@ def _cell_blocks(v):
             t = texts[j][i]
             x = v.a[j * rows + i]
             pad = widths[j] - len(t)
-            if t.startswith("["):
+            if t.startswith('["') and t.endswith('"]'):
+                # (a string left-aligned in its brackets, as MATLAB shows {["highs"]} over {["lows" ]})
+                col.append("{" + t[:-1] + " " * pad + "]}")
+            elif t.startswith("["):
                 # (numbers right-aligned in their brackets; the rest padded before the brace)
                 col.append("{" + "[" + " " * pad + t[1:] + "}")
             else:
@@ -3245,7 +3399,8 @@ def _cell_blocks(v):
     while j0 < cols:
         j1 = j0
         tot = 0
-        while j1 < cols and (j1 == j0 or tot + per_w[j1] <= _WIDTH - 1):
+        # (in the documentation's layout, as the Live Editor shows it, the columns are not split)
+        while j1 < cols and (j1 == j0 or _doc_layout() or tot + per_w[j1] <= _WIDTH - 1):
             tot += per_w[j1]
             j1 += 1
         lines = ["".join("    " + lines_cols[j][i] for j in range(j0, j1)) for i in range(rows)]
@@ -3406,7 +3561,8 @@ def display(name, v):
         t = type(v)
         if head:
             h = head[0].strip()
-        elif (t is np.ndarray or t is complex) and _numel(v) > 1:
+        elif (t is np.ndarray or t is complex) and _numel(v) > 1 and _format["num"] != "rat":
+            # (with format rat the documentation's heading has no size: beta's, log2's, rat's pages)
             h = _dimstr(_dims(v)) + (" complex" if _arr(v).dtype.kind == "c" else "")
         else:
             h = ""
@@ -3478,9 +3634,29 @@ def _write_err(s):
 _lastwarn = ["", ""]
 
 
-def warning_(msg, ident=""):
+# the warnings' states, as warning's page describes them: "all", then the identifiers set since
+_warn_all = ["on"]
+_warn_ids = {}
+# (and the display modes, their defaults as warning's page gives them)
+_warn_modes = {"backtrace": "on", "verbose": "off"}
+
+
+def _warn_enabled(ident):
+    return _warn_ids.get(ident, _warn_all[0]) == "on" if ident else _warn_all[0] == "on"
+
+
+def warning_(msg, ident="", note=False):
+    if note:
+        # (a note of Sagebrush's own, which MATLAB would not print: on stderr, and not lastwarn's)
+        _write_err("Warning: %s\n" % msg)
+        return
+    # (lastwarn is set even for a disabled warning, as the lastwarn page's example shows)
     _lastwarn[0], _lastwarn[1] = msg, ident
-    _write_err("Warning: %s\n" % msg)
+    if not _warn_enabled(ident):
+        return
+    # (on stderr, as MATLAB's -batch mode writes them; in the documentation's layout
+    # in line with the output, as the Command Window and the documentation show them)
+    (_write if _doc_layout() else _write_err)("Warning: %s\n" % msg)
 
 # ================================================================== built-in functions
 
@@ -3575,16 +3751,39 @@ def _filled(dims, value, cls):
     raise _err("Unknown class '%s'." % cls)
 
 
+def _like_proto(args):
+    """the prototype of a trailing 'like', p: its class comes from _dimsarg, and with this its
+    complexity, as zeros(..., "like", p) and eps("like", p) clone it (its sparsity: _like_fn)"""
+    if len(args) >= 2 and _istext(args[-2]) and _text(args[-2]).lower() == "like":
+        return args[-1]
+    return None
+
+
+def _as_like(r, p):
+    """r made complex as the prototype p is"""
+    if p is None:
+        return r
+    if _isnumlike(p) and _arr(p).dtype.kind == "c":
+        # (complex, even with no imaginary part, as a prototype's complexity is kept: not _box,
+        # which makes such results real as arithmetic does)
+        A = _arr(r)
+        if A.dtype.kind == "f":
+            C = A.astype(np.complex64 if A.dtype == np.float32 else np.complex128)
+            r = complex(C.reshape(-1)[0]) if C.size == 1 and C.dtype == np.complex128 else _canon(_contig(C))
+    # (a sparse prototype is the sparse module's: _like_fn)
+    return r
+
+
 @_bs("zeros")
 def zeros_(*args):
     d, cls = _dimsarg(args, "zeros")
-    return _filled(d, 0, cls)
+    return _as_like(_filled(d, 0, cls), _like_proto(args))
 
 
 @_bs("ones")
 def ones_(*args):
     d, cls = _dimsarg(args, "ones")
-    return _filled(d, 1, cls)
+    return _as_like(_filled(d, 1, cls), _like_proto(args))
 
 
 @_bs("true")
@@ -3628,7 +3827,7 @@ def eps_(*args):
         e = _math.frexp(x)[1]
         return _math.ldexp(1.0, e - 53)
     d, cls = _dimsarg(args, "eps")
-    return _filled(d, 2.220446049250313e-16 if cls != "single" else 1.1920929e-07, cls)
+    return _as_like(_filled(d, 2.220446049250313e-16 if cls != "single" else 1.1920929e-07, cls), _like_proto(args))
 
 
 @_bs("i", "j")
@@ -3636,31 +3835,62 @@ def imag_unit():
     return 1j
 
 
+def _float_limit(name, a, dbl, sgl):
+    """realmax, realmin and flintmax: of double, or of the class named or of 'like', p's class
+    (with p's complexity and sparsity)"""
+    d, cls = _dimsarg(a, name)
+    if cls not in (None, "double", "single"):
+        raise _err("%s: the class must be 'double' or 'single'." % name)
+    return _as_like(_filled(d, sgl if cls == "single" else dbl, cls), _like_proto(a))
+
+
 @_bs("realmax")
 def realmax_(*a):
-    return 1.7976931348623157e308
+    return _float_limit("realmax", a, 1.7976931348623157e308, 3.4028234663852886e38)
 
 
 @_bs("realmin")
 def realmin_(*a):
-    return 2.2250738585072014e-308
+    return _float_limit("realmin", a, 2.2250738585072014e-308, 1.1754943508222875e-38)
 
 
 @_bs("flintmax")
 def flintmax_(*a):
-    return 9007199254740992.0
+    return _float_limit("flintmax", a, 9007199254740992.0, 16777216.0)
+
+
+def _int_limit(name, a, k):
+    """intmax and intmin: of int32, the integer class named, or of "like", p's class"""
+    if len(a) == 2 and _istext(a[0]) and _text(a[0]).lower() == "like":
+        c = class_(a[1])
+        if c not in _INTS:
+            raise _err("%s: the prototype p of \"like\", p must be an integer." % name)
+        if _isnumlike(a[1]) and _arr(a[1]).dtype.kind == "c":
+            raise _err("%s(\"like\", p) for a complex integer p is not supported in Sagebrush." % name)
+    elif len(a) == 1 and _istext(a[0]):
+        c = _text(a[0])
+    elif not a:
+        c = "int32"
+    else:
+        raise _err("%s: specify the name of an integer class, or \"like\", p." % name)
+    if c not in _INTS:
+        raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
+    v = _INTS[c][k]
+    if len(a) == 2 and float(v) != v:
+        # (the "like" form, new here: a 64-bit limit Sagebrush's double-backed 64-bit
+        # integers can't hold exactly, 2^63 - 1 or 2^64 - 1, is refused rather than rounded)
+        raise _err("%s(\"like\", p) for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (name, c, v))
+    return np.array([[v]], dtype=_INTS[c][0])
 
 
 @_bs("intmax")
-def intmax_(cls=None):
-    c = _text(cls) if cls is not None else "int32"
-    return np.array([[_INTS[c][2]]], dtype=_INTS[c][0])
+def intmax_(*a):
+    return _int_limit("intmax", a, 2)
 
 
 @_bs("intmin")
-def intmin_(cls=None):
-    c = _text(cls) if cls is not None else "int32"
-    return np.array([[_INTS[c][1]]], dtype=_INTS[c][0])
+def intmin_(*a):
+    return _int_limit("intmin", a, 1)
 
 
 @_bs("eye")
@@ -3669,7 +3899,7 @@ def eye_(*args):
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
     m = np.eye(d[0], d[1])
-    return _finish(_contig(m.T), cls or "double")
+    return _as_like(_finish(_contig(m.T), cls or "double"), _like_proto(args))
 
 
 # MATLAB's default generator: the Mersenne twister seeded with 5489, its
@@ -4513,11 +4743,18 @@ def nchoosek_(n, k):
     import itertools
     combos = list(itertools.combinations(range(len(v)), k))
     out = np.array([[float(v[i]) for i in c] for c in combos], dtype=np.float64).reshape((len(combos), k))
-    return _unmat(out)
+    # (the combinations of v's elements keep v's class: nchoosek(uint16([10 20 30]), 2) is uint16)
+    cls = class_(n)
+    return _convert(_unmat(out), cls) if cls in _INTS or cls == "single" else _unmat(out)
 
 
 @_bs("primes")
 def primes_(n):
+    # (in the class of n: primes(uint16(12)) is uint16)
+    cls = class_(n)
+    if cls in _INTS or cls == "single":
+        r = primes_(float(_scalar(n)))
+        return _convert(r, cls)
     n = int(_math.floor(_scalar(n)))
     if n < 2:
         return np.zeros((0, 1))
@@ -4746,21 +4983,61 @@ def median_(x, *args):
         hi = np.take(S, n // 2, axis=ax)
         r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
         return np.where(np.any(np.isnan(A), axis=ax), _math.nan, r)
-    return _reduce(x, args, med, "median", out_cls="double")
+    # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
+    # the middle two rounded; logical and char give double)
+    cls = class_(x)
+    return _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
 
 
-@_bs("mode")
-def mode_(x, *args):
-    def md(A, ax):
+@_bi("mode")
+def mode_(nargout, x, *args):
+    """[M, F, C] = mode(A, dim): as mode's page says, NaN is ignored, the smallest of equally
+    frequent values is M, F counts it (double), C holds every value as frequent, sorted, as a
+    column; M keeps A's class"""
+    if _arr(x).dtype.kind == "c":
+        raise _err("mode of complex numbers is not supported in Sagebrush.")
+    store = []
+
+    def slices(A, ax):
         A2 = np.moveaxis(A, ax, -1)
-        shp = A2.shape[:-1]
-        flat = A2.reshape((-1, A2.shape[-1]))
-        out = []
-        for row in flat:
+        res = []
+        for row in A2.reshape((-1, A2.shape[-1])):
+            row = row[~np.isnan(row)]
             vals, counts = np.unique(row, return_counts=True)
-            out.append(float(vals[np.argmax(counts)]) if vals.size else _math.nan)
-        return np.array(out).reshape(shp if shp else (1,))
-    return _reduce(x, args, md, "mode", out_cls="double")
+            if vals.size:
+                top = counts.max()
+                res.append((float(vals[np.argmax(counts)]), float(top), vals[counts == top]))
+            else:
+                res.append((_math.nan, 0.0, None))
+        return A2.shape[:-1] or (1,), res
+
+    def part(k):
+        def f(A, ax):
+            shp, res = slices(A, ax)
+            if k < 2:
+                return np.array([r[k] for r in res]).reshape(shp)
+            out = []
+            for r in res:
+                out.append(len(store))
+                store.append(r[2])
+            return np.array(out, dtype=float).reshape(shp)
+        return f
+    cls = class_(x)
+    # (M keeps A's class: integer, single or logical; F is double)
+    M = _reduce(x, args, part(0), "mode", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls in ("single", "logical") else "double")
+    if nargout < 2:
+        return M
+    F = _reduce(x, args, part(1), "mode", out_cls="double")
+    if nargout < 3:
+        return [M, F]
+    I = _reduce(x, args, part(2), "mode", empty_value=-1.0, out_cls="double")
+    cells = []
+    for i in np.asarray(_arr(I), dtype=float).reshape(-1):
+        v = store[int(i)] if i >= 0 else None
+        if v is None:
+            raise _err("mode: C for values that are all NaN, or for no values, is not supported in Sagebrush.")
+        cells.append(_finish(_contig(np.asarray(v, dtype=float).reshape((1, -1))), class_(M)))
+    return [M, F, Cell(cells, _dims(I))]
 
 
 def _var_impl(x, args, sq):
@@ -4775,7 +5052,10 @@ def _var_impl(x, args, sq):
                 raise _err("%s: Sagebrush computes w = 0 or w = 1 only; weighted %s (a vector of weights) are not supported yet."
                            % ("std" if sq else "var", "standard deviations" if sq else "variances"))
             w = int(_scalar(a0))
-        rest = list(args[1:])
+            rest = list(args[1:])
+        else:
+            # (no weight: var(A, "omitnan") keeps its flag; an empty w, var(A, [], dim), is the default)
+            rest = list(args[1:]) if _numel(args[0]) == 0 and not _istext(args[0]) else list(args)
     if _dims(x) == (0, 0) and not rest:
         return _math.nan
     omit = _nan_flags(rest)
@@ -4920,9 +5200,27 @@ def _fft_call(x, args, inverse, name):
         r = np.fft.irfft(np.take(A, np.arange(min(A.shape[ax], length // 2 + 1)), axis=ax), n=length, axis=ax)
         return _box(_contig(r))
     r = _fft1(A, length, ax, inverse)
+    if not inverse and A.dtype.kind != "c":
+        r = _conj_symmetric(r, ax)
     if class_(x) == "single":
         return _canon(r.astype(np.complex64))
     return _box(_contig(r))
+
+
+def _conj_symmetric(r, ax):
+    """the transform of real data made exactly conjugate-symmetric along ax, its second half the
+    conjugates of its first, as MATLAB's fft of real data is (ifft of it is then real, exactly)"""
+    n = r.shape[ax]
+    if n < 3:
+        return r
+    r = np.array(r, dtype=np.complex128)
+    B = np.moveaxis(r, ax, -1)
+    k = np.arange(n // 2 + 1, n)
+    B[..., k] = np.conj(B[..., n - k])
+    B[..., 0] = B[..., 0].real
+    if n % 2 == 0:
+        B[..., n // 2] = B[..., n // 2].real
+    return np.moveaxis(B, -1, ax)
 
 
 @_bs("fft")
@@ -4935,44 +5233,132 @@ def ifft_(x, *args):
     return _fft_call(x, args, True, "ifft")
 
 
-def _fftn_call(x, sizes, inverse, name, nd=None):
-    A = _farr(x, name)
-    r = A
+def _fft_sizes(sizes):
+    """the transform sizes as ints: each a positive integer, as the pages specify; anything
+    else refused, not truncated or made empty (the sparse fft2 and others check them before
+    making X full, so a large sparse X with a bad size is refused at once)"""
+    if _istext(sizes):
+        raise _err("Invalid number of FFT data points: a text size is not supported.")
+    sz = [float(v) for v in _arr(sizes).reshape(-1)]
+    for v in sz:
+        if not (v == v and v >= 1 and v == _math.floor(v) and v != _math.inf):
+            shown = int(v) if v == v and abs(v) != _math.inf and v == _math.floor(v) else v
+            raise _err("Invalid number of FFT data points (%s) specified." % shown)
+    return [int(v) for v in sz]
+
+
+def _fftn_call(x, sizes, inverse, name, nd=None, symmetric=False):
+    """fft2, fftn and their inverses: the transform over MATLAB's first nd dimensions (all of
+    them for fftn), each page beyond them apart, X padded or cut to sizes first"""
     dims = len(_dims(x)) if nd is None else nd
-    sz = None if sizes is None else [int(float(v)) for v in _arr(sizes).reshape(-1)]
-    real = A.dtype.kind != "c"
-    for dim in range(1, dims + 1):
-        if dim > r.ndim:
-            r = r.reshape((1,) + r.shape)
-        ax = r.ndim - dim
-        n = r.shape[ax] if sz is None or dim > len(sz) else sz[dim - 1]
-        if n == 0:
-            shape = list(r.shape)
-            shape[ax] = 0
-            return _canon(np.zeros(tuple(shape)))
-        r = _fft1(r, n, ax, inverse) if real and not inverse else (np.fft.ifft(r, n=n, axis=ax) if inverse else np.fft.fft(r, n=n, axis=ax))
-        real = False
+    sz = sizes  # (parsed and checked by _fft_parse)
+    # (X made dense only after the sizes are checked: an invalid size is refused at once)
+    A = _farr(x, name)
+    while A.ndim < dims:
+        A = A.reshape((1,) + A.shape)
+    axes = [A.ndim - d for d in range(1, dims + 1)]
+    ns = [A.shape[ax] if sz is None or d > len(sz) else sz[d - 1] for d, ax in enumerate(axes, 1)]
+    for ax, n in zip(axes, ns):
+        if n < A.shape[ax]:
+            A = np.take(A, np.arange(n), axis=ax)
+        elif n > A.shape[ax]:
+            pad = [(0, 0)] * A.ndim
+            pad[ax] = (0, n - A.shape[ax])
+            A = np.pad(A, pad)
+    if A.size == 0:
+        return _canon(np.zeros(A.shape))
+    if not inverse:
+        r = np.fft.fftn(A, axes=axes)
+        if A.dtype.kind != "c":
+            # (the transform of real data, exactly conjugate-symmetric, as MATLAB's is)
+            r = _hermitian(r, axes)
+            # (a zero imaginary part is +0, as FFTW's)
+            r = _cplx(r.real, np.where(r.imag == 0, 0.0, r.imag))
+        return _box(_contig(r))
+    if not symmetric:
+        # (ifft2/ifftn of conjugate-symmetric data is real, as their pages say)
+        symmetric = _is_hermitian(A, axes)
+    if symmetric:
+        # ('symmetric': the second half ignored, as if it were the first's conjugate)
+        r = np.ascontiguousarray(np.fft.ifftn(_hermitian(A, axes), axes=axes).real)
+    else:
+        r = np.fft.ifftn(A, axes=axes)
     return _box(_contig(r))
 
 
-@_bs("fft2")
-def fft2_(x, m=None, n=None):
-    return _fftn_call(x, None if m is None else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None else m), False, "fft2", 2)
+def _mirror(A, axes):
+    """A[-k mod n] along each of the stored axes at once"""
+    for ax in axes:
+        A = np.take(A, (-np.arange(A.shape[ax])) % A.shape[ax], axis=ax)
+    return A
 
 
-@_bs("ifft2")
-def ifft2_(x, m=None, n=None, *flags):
-    return _fftn_call(x, None if m is None or _istext(m) else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None and not _istext(n) else m), True, "ifft2", 2)
+def _is_hermitian(A, axes):
+    """A[k] == conj(A[-k mod n]) over the axes, in every page, exactly"""
+    return bool(np.all(A == np.conj(_mirror(A, axes))))
 
 
-@_bs("fftn")
-def fftn_(x, sizes=None):
-    return _fftn_call(x, sizes, False, "fftn")
+def _hermitian(A, axes):
+    """A made exactly conjugate-symmetric over the stored axes, each page apart: an element whose
+    mirror (-k mod n over the axes) comes first in MATLAB's element order is that mirror's
+    conjugate, an element that is its own mirror its real part. The first half is kept as it is,
+    and nothing is computed, so nothing overflows."""
+    T = sorted(axes)
+    lead = A.ndim - len(T)
+    B = np.moveaxis(np.asarray(A, dtype=np.complex128), T, list(range(lead, A.ndim)))
+    tshape = B.shape[lead:]
+    # (the stored order is MATLAB's transposed: C order over the stored axes is MATLAB's order)
+    lin = np.arange(int(np.prod(tshape))).reshape(tshape)
+    mlin = _mirror(lin, range(len(tshape)))
+    mB = np.conj(_mirror(B, range(lead, B.ndim)))
+    out = np.where(mlin < lin, mB, B)
+    out = np.where(mlin == lin, out.real + 0j, out)
+    return np.moveaxis(out, list(range(lead, A.ndim)), T)
 
 
-@_bs("ifftn")
-def ifftn_(x, sizes=None, *flags):
-    return _fftn_call(x, None if sizes is None or _istext(sizes) else sizes, True, "ifftn")
+def _fft_parse(name, rest):
+    """fft2, ifft2, fftn and ifftn's arguments after X, parsed and checked as a whole: how
+    many sizes (none or two scalars for fft2 and ifft2, none or one vector for fftn and
+    ifftn), each size, and the inverses' flag, 'symmetric' or 'nonsymmetric', only
+    last; any other text is refused rather than ignored. Returns (sizes, symmetric):
+    sizes the transform sizes as ints, or None. The dense functions and the sparse forms
+    both call it first, so a sparse X is made full only for a valid call, and the two
+    can't disagree"""
+    rest = list(rest)
+    sym = False
+    if name in ("ifft2", "ifftn") and rest and _istext(rest[-1]):
+        flag = _text(rest[-1]).lower()
+        if flag not in ("symmetric", "nonsymmetric"):
+            raise _err("%s: the option '%s' is not supported." % (name, _text(rest[-1])))
+        sym = flag == "symmetric"
+        rest.pop()
+    if len(rest) > (2 if name in ("fft2", "ifft2") else 1):
+        raise _err("Too many input arguments.", "MATLAB:TooManyInputs")
+    if not rest:
+        return None, sym
+    if name in ("fft2", "ifft2") and len(rest) == 1:
+        # (the pages' forms are (X) and (X, m, n))
+        raise _err("Not enough input arguments.", "MATLAB:minrhs")
+    if len(rest) == 2:
+        # (fft2(X, m, n): two scalars)
+        m, n = (_fft_sizes(v) for v in rest)
+        if len(m) != 1 or len(n) != 1:
+            raise _err("%s(X, m, n): m and n must be scalars." % name)
+        return m + n, sym
+    return _fft_sizes(rest[0]), sym
+
+
+def _fft_entry(name, inverse, nd):
+    def f(x, *rest):
+        sizes, sym = _fft_parse(name, rest)
+        return _fftn_call(x, sizes, inverse, name, nd, sym)
+    _bs(name)(f)
+
+
+_fft_entry("fft2", False, 2)
+_fft_entry("ifft2", True, 2)
+_fft_entry("fftn", False, None)
+_fft_entry("ifftn", True, None)
 
 
 def _fftshift_call(x, dim, inverse):
@@ -5175,11 +5561,25 @@ def sort_(nargout, x, *args):
         if type(x) is Str:
             return x if nargout <= 1 else [x, 1.0]
         strs = [_text(e) if type(x) is Cell else e for e in x.a]
-        order = sorted(range(len(strs)), key=lambda k: strs[k], reverse=desc)
-        r = x._like([cp(x.a[k]) for k in order], x.shape)
+        d = tuple(x.shape)
+        # (along a dimension, the first non-singleton by default: each column of a string matrix on
+        # its own, as sort's page shows; the elements are in column-major order)
+        sdim = dim if dim is not None else _default_dim(d)
+        if len(d) != 2 or sdim not in (1, 2):
+            raise _err("sort: Sagebrush sorts cell and string arrays of at most 2 dimensions, along dimension 1 or 2.")
+        nr, nc = d
+        lines = [[i + j * nr for i in range(nr)] for j in range(nc)] if sdim == 1 else [[i + j * nr for j in range(nc)] for i in range(nr)]
+        new = [None] * len(strs)
+        pos = [0.0] * len(strs)
+        for line in lines:
+            order = sorted(range(len(line)), key=lambda k: strs[line[k]], reverse=desc)
+            for slot, k in zip(line, order):
+                new[slot] = cp(x.a[line[k]])
+                pos[slot] = float(k + 1)
+        r = x._like(new, x.shape)
         if nargout <= 1:
             return r
-        return [r, _box(np.array([float(k + 1) for k in order]).reshape(_stored(x.shape)))]
+        return [r, _box(np.array(pos).reshape(_stored(x.shape)))]
     d = _dims(x)
     if dim is None:
         dim = _default_dim(d)
@@ -5603,7 +6003,7 @@ def inv_(x):
         Mi = np.linalg.inv(M)
     except np.linalg.LinAlgError:
         # (MATLAB's: Inf throughout)
-        warning_("Matrix is singular to working precision.")
+        warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
         return _unmat(np.full(M.shape, np.inf))
     _rcond_warning(M, Mi)
     return _unmat(Mi)
@@ -5990,10 +6390,19 @@ def expm_(x):
 # ---- polynomials, sets, interpolation
 
 
-@_bs("polyval")
-def polyval_(p, x):
+@_bi("polyval")
+def polyval_(nargout, p, x, S=None, mu=None):
+    """polyval(p, x), and polyval(p, x, [], mu) at (x - mu(1))/mu(2) as its page says; the error
+    estimate delta is not computed"""
+    if nargout >= 2:
+        raise _err("[y, delta] = polyval(...): the error estimate delta is not supported in Sagebrush.")
     c = _farr(p).reshape(-1)
     X = _farr(x)
+    if mu is not None:
+        m = _farr(mu).reshape(-1)
+        if m.size != 2:
+            raise _err("polyval: centerScale must be a two-element vector.")
+        X = (X - m[0]) / m[1]
     y = np.zeros(X.shape, dtype=np.complex128 if X.dtype.kind == "c" or c.dtype.kind == "c" else np.float64)
     for a in c:
         y = y * X + a
@@ -6001,13 +6410,23 @@ def polyval_(p, x):
 
 
 @_bi("polyfit")
-def polyfit_(nargout, x, y, n):
-    """p (highest power first); [p,S]: S.R, S.df, S.normr; [p,S,mu]: fitted on (x - mu(1))/mu(2)"""
+def polyfit_(nargout, x, y, n, *opts):
+    """p (highest power first); [p,S]: S.R, S.df, S.normr; [p,S,mu]: fitted on (x - mu(1))/mu(2),
+    with Normalize=true (the default with three outputs), mu = [0 1] with Normalize=false"""
     xv = _farr(x).reshape(-1)
     yv = _farr(y).reshape(-1)
     n = _int_arg(n)
+    normalize = nargout >= 3
+    if len(opts) % 2:
+        raise _err("polyfit: name-value arguments must come in pairs.")
+    for k in range(0, len(opts), 2):
+        if not (_istext(opts[k]) and _text(opts[k]).lower() == "normalize"):
+            raise _err("polyfit: the option %s is not supported in Sagebrush." % (_text(opts[k]) if _istext(opts[k]) else "given"))
+        normalize = bool(_scalar(opts[k + 1]))
     mu = None
-    if nargout >= 3:
+    if nargout >= 3 and not normalize:
+        mu = (0.0, 1.0)
+    if normalize:
         m = float(np.mean(xv))
         sd = float(np.sqrt(np.sum((xv - m) ** 2) / max(1, xv.size - 1)))
         mu = (m, sd)
@@ -6414,7 +6833,7 @@ def _escapes(s):
     return "".join(out)
 
 
-_SPEC = _re.compile(r"%(?P<flags>[-+ 0#]*)(?P<width>\*|\d+)?(?:\.(?P<prec>\*|\d+))?(?P<conv>[diouxXfFeEgGcsbt]|l[diouxX]|h[diouxX])")
+_SPEC = _re.compile(r"%(?:(?P<pos>[1-9]\d*)\$)?(?P<flags>[-+ 0#]*)(?P<width>\*|\d+)?(?:\.(?P<prec>\*|\d+))?(?P<conv>[diouxXfFeEgGcsbt]|l[diouxX]|h[diouxX])")
 
 
 def _parse_format(f):
@@ -6550,6 +6969,29 @@ def _sprintf(fmt, args):
         return "".join(segs)
     out = []
     k = 0
+    if any(s.group("pos") for s in specs):
+        # (identifiers, n$: each operator formats input argument n, a scalar or a text, once through
+        # the format, as the formatting operators' description gives: ('%3$s %2$s %1$s %2$s','A','B','C')
+        # is 'C B A B')
+        for s in segs:
+            if type(s) is str:
+                out.append(s)
+                continue
+            if not s.group("pos"):
+                raise _err("Invalid format: an operator with an identifier (n$) cannot be mixed with one without.")
+            j = int(s.group("pos")) - 1
+            if j >= len(args):
+                continue
+            if _numel(args[j]) > 1 and not _istext(args[j]):
+                raise _err("Invalid format: with an identifier (n$), the input argument must be a scalar or a text, not an array.")
+            item = _fmt_items([args[j]])
+            if not item:
+                continue
+            r = _conv(s, item[0], None, None)
+            if r is None:
+                r = "".join(_conv(s, float(ord(c)), None, None) for c in item[0])
+            out.append(r)
+        return "".join(out)
     if not items:
         for s in segs:
             if type(s) is str:
@@ -6617,11 +7059,12 @@ def fprintf_(nargout, *args):
     elif fid == 2:
         _write_err(s)
     else:
-        fh = _files.get(fid)
-        if fh is None:
-            raise _err("Invalid file identifier. Use fopen to generate a valid file identifier.")
-        fh.write(s)
-    return float(len(s)) if nargout >= 1 else NOVAL
+        h = _files.get(fid)
+        if h is None:
+            raise _err("Invalid file identifier.  Use fopen to generate a valid file identifier.", "MATLAB:FileIO:InvalidFid")
+        h.fh.write(s)
+    # (the number of bytes written)
+    return float(len(s.encode("utf-8"))) if nargout >= 1 else NOVAL
 
 
 def _num2str_scalar(x, prec=None):
@@ -6930,7 +7373,27 @@ def strcat_(*args):
             out.append(Char(s))
         return Cell(out, shape)
     if any(type(a) is Str or type(a) is StrArr for a in args):
-        return Str("".join(_text(a) for a in args))
+        # (element by element, scalars expanded; a character vector's trailing whitespace removed,
+        # a string's kept, as strcat's page says)
+        parts, shape = [], None
+        for a in args:
+            if type(a) is StrArr:
+                if shape is not None and tuple(a.shape) != shape:
+                    raise _err("strcat: the string arrays must be the same size.")
+                shape = tuple(a.shape)
+                parts.append(list(a.a))
+            elif type(a) is Str:
+                parts.append([a.s])
+            elif type(a) is Char and _dims(a)[0] <= 1:
+                parts.append([a.text().rstrip(" \t\n\r\f\v\x00")])
+            else:
+                raise _err("strcat of a string array and a %s is not supported in Sagebrush." % class_(a))
+        n = _prod(shape) if shape is not None else 1
+        out = []
+        for k in range(n):
+            vs = [p[k] if len(p) > 1 else p[0] for p in parts]
+            out.append(None if None in vs else "".join(vs))
+        return _strarr(out, shape if shape is not None else (1, 1))
     s = ""
     for a in args:
         if type(a) is Char:
@@ -6991,11 +7454,33 @@ def strncmpi_(a, b, n):
     return _cmp_text(a, b, lambda x, y: len(x) >= k and len(y) >= k and x[:k].lower() == y[:k].lower())
 
 
+def _strrep_text(t, o, nw):
+    """strrep's replacement, which counts overlapping matches, as its page shows: every place
+    where old starts gives one copy of new, and the characters of a match are dropped (strrep of
+    '222' with '22' -> '*' is '**', where replace and regexprep give '*2')"""
+    if not o:
+        return t
+    starts = set()
+    k = t.find(o)
+    while k >= 0:
+        starts.add(k)
+        k = t.find(o, k + 1)
+    out = []
+    covered = -1
+    for i, c in enumerate(t):
+        if i in starts:
+            out.append(nw)
+            covered = max(covered, i + len(o) - 1)
+        elif i > covered:
+            out.append(c)
+    return "".join(out)
+
+
 @_bs("strrep")
 def strrep_(s, old, new):
     o = _text(old)
     nw = _text(new)
-    return _textlike_map(s, lambda t: t.replace(o, nw) if o else t)
+    return _textlike_map(s, lambda t: _strrep_text(t, o, nw))
 
 
 @_bs("strfind")
@@ -7009,8 +7494,8 @@ def strfind_(s, pat):
     while k >= 0:
         idx.append(float(k + 1))
         k = t.find(p, k + 1)
-    # (a row: 1-by-0 when there is no match)
-    return _box(np.array(idx).reshape((len(idx), 1))) if idx else np.zeros((0, 1))
+    # (a row; [], 0-by-0, when there is no match, as strfind's page says)
+    return _box(np.array(idx).reshape((len(idx), 1))) if idx else np.zeros((0, 0))
 
 
 @_bs("strsplit")
@@ -7038,8 +7523,25 @@ def strsplit_(s, *args):
 
 @_bs("strjoin")
 def strjoin_(c, delim=None):
-    d = _escapes(_text(delim)) if delim is not None else " "
-    return Char(d.join(_text(e) for e in c.a))
+    """strjoin(C, delimiter), as its page says: a character delimiter with its escape sequences, or
+    one fewer delimiters than C (a cell or string array), as literal text; a string scalar of a
+    string array C"""
+    if type(c) is Cell:
+        items = [_text(e) for e in c.a]
+    elif type(c) in (Str, StrArr):
+        items = _strings_of(c)
+        if None in items:
+            raise _err("strjoin of a string array with missing elements is not supported in Sagebrush.")
+    else:
+        raise _err("strjoin: the first input must be a cell array of character vectors or a string array.")
+    if type(delim) is Cell or type(delim) is StrArr:
+        ds = [_text(e) for e in delim.a] if type(delim) is Cell else list(delim.a)
+        if len(ds) != max(len(items) - 1, 0):
+            raise _err("strjoin: the delimiter must have one fewer element than C.")
+        out = "".join(x + d for x, d in zip(items, ds + [""]))
+    else:
+        out = (_escapes(_text(delim)) if delim is not None else " ").join(items)
+    return Str(out) if type(c) in (Str, StrArr) else Char(out)
 
 
 def _text_pred(name, f):
@@ -7082,6 +7584,9 @@ def isstrprop_(s, kind):
     k = _text(kind)
     f = {"alpha": str.isalpha, "digit": str.isdigit, "wspace": lambda c: c in " \t\n\r\f\v", "upper": str.isupper,
          "lower": str.islower, "alphanum": str.isalnum, "punct": lambda c: c.isprintable() and not c.isalnum() and not c.isspace()}[k]
+    # (numbers are Unicode code points, as isstrprop's page describes: isstrprop([77 65], 'alpha') is true)
+    if type(s) not in (Char, Str, StrArr, Cell) and _isnumlike(s) and not islogical_(s):
+        s = Char(np.array(_farr(s), dtype=np.float64))
     return _char_pred(f)(1, s)
 
 
@@ -7145,19 +7650,48 @@ def _regexp(nargout, s, pat, opts, flags):
         return [Cell([p[k] for p in per], s.shape) for k in range(nargout)]
     t = _text(s)
     once = False
+    force_cell = False
+    empty_ok = False
     wanted = []
+    # (the options of regexp's page: '.' matches newlines by default (dotall), zero-length
+    # matches are left out by default (noemptymatch))
+    flags |= _re.DOTALL
     for o in opts:
         k = _text(o).lower()
         if k == "once":
             once = True
         elif k == "ignorecase":
             flags |= _re.IGNORECASE
-        else:
+        elif k == "matchcase":
+            flags &= ~_re.IGNORECASE
+        elif k == "dotexceptnewline":
+            flags &= ~_re.DOTALL
+        elif k == "dotall":
+            flags |= _re.DOTALL
+        elif k == "lineanchors":
+            flags |= _re.MULTILINE
+        elif k == "stringanchors":
+            flags &= ~_re.MULTILINE
+        elif k == "freespacing":
+            flags |= _re.VERBOSE
+        elif k == "literalspacing":
+            flags &= ~_re.VERBOSE
+        elif k == "emptymatch":
+            empty_ok = True
+        elif k == "noemptymatch":
+            empty_ok = False
+        elif k in ("warnings", "nowarnings"):
+            pass
+        elif k == "forcecelloutput":
+            force_cell = True
+        elif k in ("start", "end", "tokenextents", "match", "tokens", "names", "split"):
             wanted.append(k)
+        else:
+            raise _err("regexp: the option '%s' is not supported in Sagebrush." % _text(o))
     if not wanted:
         wanted = ["start", "end", "tokenextents", "match", "tokens", "names", "split"]
     rx = _re.compile(_regex(_text(pat)), flags)
-    ms = list(rx.finditer(t))
+    ms = [m for m in rx.finditer(t) if empty_ok or m.end() > m.start()]
     if once:
         ms = ms[:1]
 
@@ -7183,8 +7717,10 @@ def _regexp(nargout, s, pat, opts, flags):
             out.append(v[0] if once and v else _box(np.array(v).reshape((len(v), 1))) if v else np.zeros((0, 1)) if not once else np.zeros((0, 0)))
         elif w == "names":
             if ms and rx.groupindex:
-                d = {k: Char(ms[0].group(k) or "") for k in rx.groupindex}
-                out.append(_struct1(d))
+                # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one)
+                names = sorted(rx.groupindex, key=lambda k: rx.groupindex[k])
+                items = [{k: Char(m.group(k) or "") for k in names} for m in ms]
+                out.append(_struct1(items[0]) if once or len(items) == 1 else Struct(items, (1, len(items)), names))
             else:
                 out.append(Struct([{}], (1, 1), []))
         elif w == "split":
@@ -7197,6 +7733,9 @@ def _regexp(nargout, s, pat, opts, flags):
             out.append(row(parts))
         elif w == "tokenextents":
             out.append(row([np.array([float(m.start() + 1), float(m.end())]).reshape((2, 1)) for m in ms]))
+    if force_cell:
+        # ('forceCellOutput': each output a scalar cell)
+        out = [Cell([v], (1, 1)) for v in out]
     if nargout <= 1:
         return out[0]
     return out[:nargout]
@@ -7305,7 +7844,9 @@ def struct2cell_(s):
 
 @_bs("cell2struct")
 def cell2struct_(c, fields, dim=None):
-    names = [_text(e) for e in fields.a] if type(fields) is Cell else [r.rstrip() for r in fields.rows()] if type(fields) is Char and _dims(fields)[0] > 1 else [_text(fields)]
+    # (field names: a cell array of them, a string array, a char matrix's rows, or one name)
+    names = ([_text(e) for e in fields.a] if type(fields) is Cell else [e for e in fields.a] if type(fields) is StrArr
+             else [r.rstrip() for r in fields.rows()] if type(fields) is Char and _dims(fields)[0] > 1 else [_text(fields)])
     if type(c) is not Cell:
         raise _err("cell2struct: CELLARRAY must be a cell array.")
     dm = _int_arg(dim, "dimension") if dim is not None else 1
@@ -7441,9 +7982,19 @@ def _apply_each(nargout, f, arrays, uniform, handler, elems, shape):
     return outs[0] if nargout <= 1 else outs
 
 
+def _str_cells(v):
+    """a string array as a cell array of its elements' character vectors"""
+    items = _strings_of(v)
+    if None in items:
+        raise _err("cellfun of a string array with missing elements is not supported in Sagebrush.")
+    return Cell([Char(x) for x in items], v.shape if type(v) is StrArr else (1, 1))
+
+
 @_bi("cellfun")
 def cellfun_(nargout, f, *args):
     arrays, uniform, handler = _uniform_opts(args)
+    # (a string array: each element as though it were a character vector, as cellfun's page says)
+    arrays = [_str_cells(a) if type(a) in (Str, StrArr) else a for a in arrays]
     if _istext(f):
         name = _text(f)
         legacy = {"isempty": lambda e: _numel(e) == 0, "length": length_, "ndims": ndims_, "prodofsize": lambda e: float(_numel(e)),
@@ -7566,6 +8117,11 @@ def _isequal2(a, b, nan_equal):
             return False
         return all(_isequal2(x[f], y[f], nan_equal) for x, y in zip(a.a, b.a) for f in a.fields)
     if ta in (Str, StrArr) or tb in (Str, StrArr):
+        # (a character vector compares with a string as the string of its text: isequal("foo",'foo') is true)
+        if ta is Char and len(_dims(a)) == 2 and _dims(a)[0] <= 1:
+            a, ta = Str(_text(a)), Str
+        if tb is Char and len(_dims(b)) == 2 and _dims(b)[0] <= 1:
+            b, tb = Str(_text(b)), Str
         try:
             sa = _strings_of(a) if ta is not Cell else None
             sb = _strings_of(b) if tb is not Cell else None
@@ -7625,10 +8181,87 @@ def error_(nargout, *args):
     raise _using(MatlabError(msg, ident))
 
 
+def _warn_struct(items):
+    """the warning states [(identifier, state)] as warning's structure array, n-by-1"""
+    return Struct([{"identifier": Char(i), "state": Char(st)} for i, st in items], (len(items), 1), ["identifier", "state"])
+
+
+def _warn_states():
+    return [("all", _warn_all[0])] + list(_warn_ids.items())
+
+
+def _warn_show():
+    """warning with no arguments: the states, as warning's page shows them"""
+    if not _warn_ids:
+        _write('All warnings have the state "%s".\n' % _warn_all[0])
+        return
+    _write('The default warning state is "%s". Warnings not set to the default are\n\n' % _warn_all[0])
+    _write("State  Warning Identifier\n\n")
+    for i, st in _warn_ids.items():
+        _write("%7s  %s\n" % (st, i))
+    _write("\n")
+
+
+def _warn_mode(mode, st):
+    """set a display mode. Sagebrush's warnings have no stack trace, so either backtrace state shows
+    the same text; the verbose mode's extra line is not implemented, so it is refused"""
+    if mode == "verbose" and st == "on":
+        raise _err("warning: the \"verbose\" display mode is not supported in Sagebrush.")
+    _warn_modes[mode] = st
+
+
+def _warn_set(st):
+    for e in st.a:
+        i, v = _text(e.get("identifier", Char(""))), _text(e.get("state", Char("on"))).lower()
+        if i == "all":
+            _warn_all[0] = v
+            _warn_ids.clear()
+        elif i.lower() in _warn_modes:
+            _warn_mode(i.lower(), v)
+        elif i:
+            _warn_ids[i] = v
+
+
 @_bi("warning")
 def warning_b(nargout, *args):
-    if args and _istext(args[0]) and _text(args[0]).lower() in ("on", "off", "query", "error"):
+    # (warning states: warning(state), warning(state, id), s = warning, warning(s); "error" is not supported)
+    if not args:
+        if nargout >= 1:
+            return _warn_struct(_warn_states())
+        _warn_show()
         return NOVAL
+    if len(args) == 1 and type(args[0]) is Struct:
+        _warn_set(args[0])
+        return NOVAL
+    if _istext(args[0]) and _text(args[0]).lower() in ("on", "off", "query"):
+        st = _text(args[0]).lower()
+        ident = _text(args[1]) if len(args) > 1 else "all"
+        if ident.lower() in _warn_modes:
+            mode = ident.lower()
+            prev = Struct([{"identifier": Char(mode), "state": Char(_warn_modes[mode])}], (1, 1), ["identifier", "state"])
+            if st == "query" and nargout < 1:
+                raise _err("warning: displaying the %s mode's state is not supported in Sagebrush; "
+                           "s = warning('query', '%s') returns it." % (mode, mode))
+            if st != "query":
+                _warn_mode(mode, st)
+            return prev if nargout >= 1 else NOVAL
+        prev = _warn_struct(_warn_states() if ident == "all" else [(ident, _warn_ids.get(ident, _warn_all[0]))])
+        if st == "query":
+            if nargout >= 1:
+                return prev
+            if ident == "all":
+                _warn_show()
+            else:
+                _write('The state of warning \'%s\' is \'%s\'.\n' % (ident, _warn_ids.get(ident, _warn_all[0])))
+            return NOVAL
+        if ident == "all":
+            _warn_all[0] = st
+            _warn_ids.clear()
+        else:
+            _warn_ids[ident] = st
+        return prev if nargout >= 1 else NOVAL
+    if _istext(args[0]) and _text(args[0]).lower() == "error":
+        raise _err("warning: the \"error\" state (warnings as errors) is not supported in Sagebrush.")
     ident, msg = _error_args(args)
     if msg:
         warning_(msg, ident)
@@ -8323,6 +8956,18 @@ _CMATH = {"sqrt": _cmath.sqrt, "exp": _cmath.exp, "log": _cmath.log, "log10": _c
           "atanh": _cmath.atanh, "sec": lambda z: 1 / _cmath.cos(z), "csc": lambda z: 1 / _cmath.sin(z), "cot": lambda z: 1 / _cmath.tan(z)}
 
 
+def _cmath_log(f):
+    """a complex logarithm, -Inf + 0i at 0 (cmath raises there)"""
+    def g(z):
+        return complex(-_math.inf, 0.0) if z == 0 else f(z)
+    return g
+
+
+for _n in ("log", "log10", "log2"):
+    _CMATH[_n] = _cmath_log(_CMATH[_n])
+_CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else _cmath.log(1 + z)
+
+
 def _complex_fallback(name):
     """the elementwise math function for complex arrays numpy here lacks"""
     old = _B[name].f
@@ -8343,6 +8988,66 @@ def _complex_fallback(name):
 for _n in _CMATH:
     if _n in _B:
         _complex_fallback(_n)
+
+
+def _log2_parts():
+    """[F, E] = log2(X): X = F.*2.^E with 0.5 <= abs(F) < 1 (C's frexp); zeros give F = E = 0,
+    Inf and NaN themselves in F with E = 0, as log2's page says; complex X is an error there"""
+    old = _B["log2"].f
+
+    def g(nargout, x):
+        if nargout < 2:
+            return old(nargout, x)
+        A = _arr(x)
+        if A.dtype.kind == "c":
+            raise _err("log2: the two-output syntax does not accept complex input.")
+        if class_(x) != "double":
+            raise _err("[F, E] = log2(X) for a %s X is not supported in Sagebrush." % class_(x))
+        A = _farr(x)
+        fe = [_math.frexp(float(v)) for v in A.reshape(-1)]
+        F = np.array([f for f, _ in fe], dtype=float).reshape(A.shape)
+        E = np.array([float(e) for _, e in fe], dtype=float).reshape(A.shape)
+        return [_box(_contig(F)), _box(_contig(E))]
+    _B["log2"] = Builtin(g, "log2")
+
+
+_log2_parts()
+
+
+def _real_cut(name, fix):
+    """name, except at real x outside [-1, 1], where fix(x) gives the value on the side MATLAB takes,
+    as its real and imaginary parts
+    (numpy's and cmath's branch there is the limit from above for both signs of x)"""
+    old = _B[name].f
+
+    def g(nargout, x):
+        r = old(nargout, x)
+        if _isnumlike(x) and not islogical_(x):
+            # (real x, or elements of a complex array with no imaginary part, as atanh's page
+            # shows for [2 -3 1+2i])
+            X = _farr(x)
+            if X.dtype.kind == "c":
+                m = (X.imag == 0) & (np.abs(X.real) > 1)
+                X = X.real
+            else:
+                m = np.abs(X) > 1
+            if np.any(m):
+                R = np.array(_farr(r), dtype=np.complex128)
+                # (real and imaginary parts set apart, so an infinite one leaves the other finite)
+                re, im = fix(X[m])
+                R.real[m] = re
+                R.imag[m] = im
+                return _finish(R, "single" if class_(x) == "single" else "double")
+        return r
+    _B[name] = Builtin(g, name)
+
+
+# (asin and acos of a real x beyond 1, as Octave gives them: asin(2) = pi/2 - acosh(2) i, odd in x;
+# acos(2) = acosh(2) i and acos(-2) = pi - acosh(2) i; atanh as atanh's page shows: atanh(2) =
+# atanh(1/2) + pi/2 i and atanh(-3) = atanh(-1/3) - pi/2 i, odd in x)
+_real_cut("asin", lambda x: (np.sign(x) * (np.pi / 2), -np.sign(x) * np.arccosh(np.abs(x))))
+_real_cut("acos", lambda x: (np.where(x > 0, 0.0, np.pi), np.sign(x) * np.arccosh(np.abs(x))))
+_real_cut("atanh", lambda x: (np.arctanh(1 / x), np.sign(x) * (np.pi / 2)))
 
 
 def _bezout(a, b):
@@ -8380,7 +9085,21 @@ def histc_n(nargout, x, edges, *rest):
         if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
             n[k] += 1
             ind[i] = k + 1
-    counts = _box(n.reshape(_arr(edges).shape))
+    d = _dims(x)
+    if len(d) == 2 and d[0] > 1 and d[1] > 1:
+        # (a matrix: each column's counts, length(edges)-by-columns, and each element's bin)
+        M = _mat(x)
+        C = np.zeros((E.size, M.shape[1]))
+        I = np.zeros(M.shape)
+        for j in range(M.shape[1]):
+            for i, v in enumerate(M[:, j]):
+                k = int(np.searchsorted(E, v, side="right")) - 1
+                if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
+                    C[k, j] += 1
+                    I[i, j] = k + 1
+        return _unmat(C) if nargout <= 1 else [_unmat(C), _unmat(I)]
+    # (a vector x: the counts in x's orientation, a column for a column x, as the histc page shows)
+    counts = _box(n.reshape((n.size, 1)) if d[0] == 1 else n.reshape((1, n.size)))
     if nargout <= 1:
         return counts
     return [counts, _box(ind.reshape(_arr(x).shape))]
@@ -8523,22 +9242,38 @@ def num2cell_n(x, dims=None):
 
 @_bs("trapz")
 def trapz_n(*args):
-    if len(args) == 1:
-        x, y = None, args[0]
-    else:
-        x, y = args[0], args[1]
-    if _isvec(y):
-        yv = _farr(y).reshape(-1)
-        dx = np.diff(_farr(x).reshape(-1)) if x is not None else np.ones(yv.size - 1)
-        return float(np.sum(dx * (yv[1:] + yv[:-1]) / 2))
-    Y = _mat(y)
+    """trapz(Y), trapz(X, Y), trapz(Y, dim), trapz(X, Y, dim): the trapezoidal rule along dim
+    (the first non-singleton by default), X a scalar spacing or the points along dim"""
+    args = list(args)
+    dim = None
+    if len(args) == 3:
+        dim = _int_arg(args.pop(), "dimension")
+    elif len(args) == 2 and _numel(args[1]) == 1 and _numel(args[0]) > 1:
+        dim = _int_arg(args.pop(), "dimension")
+    x, y = (None, args[0]) if len(args) == 1 else (args[0], args[1])
+    d = _dims(y)
+    if len(d) > 2:
+        raise _err("trapz: Sagebrush integrates arrays of at most 2 dimensions.")
+    if dim is None:
+        dim = _default_dim(d)
+    Y = _mat(y).astype(np.complex128 if _arr(y).dtype.kind == "c" else np.float64)
+    if dim > 2:
+        return _unmat(np.zeros(Y.shape))
+    A = Y if dim == 1 else Y.T
+    n = A.shape[0]
     if x is None:
-        dx = np.ones((Y.shape[0] - 1, 1))
+        dx = np.ones((max(n - 1, 0), 1))
     elif _numel(x) == 1:
-        dx = np.full((Y.shape[0] - 1, 1), _scalar(x))
+        dx = np.full((max(n - 1, 0), 1), _scalar(x))
     else:
-        dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
-    return _unmat(np.sum(dx * (Y[1:] + Y[:-1]) / 2, axis=0).reshape((1, -1)))
+        xv = _farr(x).reshape(-1)
+        if xv.size != n:
+            raise _err("Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension.")
+        dx = np.diff(xv).reshape((-1, 1))
+    q = np.sum(dx * (A[1:] + A[:-1]) / 2, axis=0) if n > 1 else np.zeros(A.shape[1])
+    q = q.reshape((1, -1)) if dim == 1 else q.reshape((-1, 1))
+    r = _unmat(q)
+    return r
 
 
 _CLEAR_ITEMTYPES = ("all", "classes", "functions", "global", "import", "java", "mex", "variables")
@@ -8878,6 +9613,15 @@ def _colvec(vals):
 
 
 def _setfn(nargout, op, a, b, opts):
+    # (TreatMissingAsDistinct=false: unique's NaNs are one value)
+    opts = list(opts)
+    distinct = True
+    for k in range(len(opts) - 1):
+        if _istext(opts[k]) and _text(opts[k]).lower() == "treatmissingasdistinct":
+            v = opts[k + 1]
+            distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
+            del opts[k:k + 2]
+            break
     flags = [_text(o).lower() for o in opts if _istext(o)]
     rows = "rows" in flags
     stable = "stable" in flags
@@ -8912,8 +9656,13 @@ def _setfn(nargout, op, a, b, opts):
             order = keys
         else:
             order = _sort_keys(keys)
-        ia = [pick_a[k] for k in order if k in sa]
-        ib = [pick_b[k] for k in order if k not in sa]
+        if legacy:
+            # (R2012b's union: a value in both comes from B, each at its last occurrence)
+            ia = [pick_a[k] for k in order if k not in sb]
+            ib = [pick_b[k] for k in order if k in sb]
+        else:
+            ia = [pick_a[k] for k in order if k in sa]
+            ib = [pick_b[k] for k in order if k not in sa]
         # NaNs: every one, A's then B's
         order = order + [A[i] for i in nans_a] + [B[i] for i in nans_b]
         ia += nans_a
@@ -8939,13 +9688,15 @@ def _setfn(nargout, op, a, b, opts):
         keys = [k for k in dict.fromkeys(A) if not _is_nan_key(k)]
         order = keys if stable else _sort_keys(keys)
         pick = last_a if (last or legacy) else first_a
+        if nans_a and not distinct:
+            nans_a = [nans_a[-1] if (last or legacy) else nans_a[0]]
         ia = [pick[k] for k in order] + nans_a
         pos = {k: j for j, k in enumerate(order)}
         ic = []
         nk = 0
         for k in A:
             if _is_nan_key(k):
-                ic.append(len(order) + nk)
+                ic.append(len(order) + (nk if distinct else 0))
                 nk += 1
             else:
                 ic.append(pos[k])
@@ -8964,7 +9715,10 @@ def _setfn(nargout, op, a, b, opts):
     if nargout <= 1:
         return C
     if legacy:
-        return [C] + [_box(np.array([float(i + 1) for i in v]).reshape((len(v), 1))) if v else np.zeros((0, 1)) for v in outs[1:nargout]]
+        # (R2012b's index vectors follow the inputs: rows for row vectors, else columns; stored
+        # transposed, as every 2-D array here: a MATLAB row is an (n, 1) array)
+        shp = (lambda n: (n, 1)) if row else (lambda n: (1, n))
+        return [C] + [_box(np.array([float(i + 1) for i in v]).reshape(shp(len(v)))) if v else np.zeros(shp(0)) for v in outs[1:nargout]]
     return [C] + [_colvec([i + 1 for i in v]) for v in outs[1:nargout]]
 
 
@@ -9019,9 +9773,17 @@ def ismember_s(nargout, a, s, *opts):
         loc = _box(np.array([float(pos.get(k, 0)) for k in A]).reshape((1, len(A))))
         return tf if nargout <= 1 else [tf, loc]
     A = _farr(a)
+    # (Locb: the lowest index, or with "legacy" the highest, as R2012b gave; NaN is a member of nothing)
+    legacy = any(_istext(o) and _text(o).lower() == "legacy" for o in opts)
     pos = {}
     for i, v in enumerate(_farr(s).reshape(-1)):
-        pos.setdefault(complex(v) if np.iscomplexobj(v) else float(v), i + 1)
+        k = complex(v) if np.iscomplexobj(v) else float(v)
+        if k != k:
+            continue
+        if legacy:
+            pos[k] = i + 1
+        else:
+            pos.setdefault(k, i + 1)
     keys = [complex(v) if A.dtype.kind == "c" else float(v) for v in A.reshape(-1)]
     tf = _box(np.array([k in pos for k in keys], dtype=bool).reshape(A.shape))
     if nargout <= 1:
@@ -9314,9 +10076,7 @@ def _class_value(name, dbl, sgl):
     _B[name] = Builtin(g, name)
 
 
-_class_value("realmax", 1.7976931348623157e308, 3.4028234663852886e38)
-_class_value("realmin", 2.2250738585072014e-308, 1.1754943508222875e-38)
-_class_value("flintmax", 9007199254740992.0, 16777216.0)
+# (realmax, realmin and flintmax: _float_limit, with the class names and 'like')
 
 _eps_old = _B["eps"].f
 
@@ -9559,11 +10319,19 @@ def fullfile_(*parts):
 
 @_bi("fileparts")
 def fileparts_(nargout, f):
+    if type(f) is StrArr:
+        # (a string array: each element's parts, three string arrays of its size)
+        if None in f.a:
+            raise _err("fileparts of a string array with missing elements is not supported in Sagebrush.")
+        parts = [[_text(x) for x in fileparts_(3, Str(e))] for e in f.a]
+        out = [StrArr([p[k] for p in parts], f.shape) for k in range(3)]
+        return out[0] if nargout <= 1 else out[:nargout]
     t = _text(f)
     d, base = (t.rsplit("/", 1) if "/" in t else ("", t))
     if "/" in t and d == "":
         d = "/"
-    name, ext = (base.rsplit(".", 1) if "." in base[1:] else (base, None))
+    # (the extension starts at the last "."; a dotfile, "/home/jsmith/.cshrc", is all extension, as its page shows)
+    name, ext = (base.rsplit(".", 1) if "." in base else (base, None))
     ext = "." + ext if ext is not None else ""
     mk = (lambda s: Str(s)) if type(f) is Str else (lambda s: Char(s))
     out = [mk(d), mk(name), mk(ext)]
@@ -9604,14 +10372,21 @@ def cd_(nargout, d=None):
     return Char(old) if nargout >= 1 or d is None else NOVAL
 
 
+def _path_test(f, test):
+    """test on a name, or element by element on a string or cell array of names"""
+    if type(f) in (StrArr, Cell):
+        return _box(np.array([test(_text(e) if type(e) is not str else e) for e in f.a], dtype=bool).reshape(_stored(f.shape)))
+    return test(_text(f))
+
+
 @_bs("isfile")
 def isfile_(f):
-    return _os.path.isfile(_text(f))
+    return _path_test(f, _os.path.isfile)
 
 
 @_bs("isfolder")
 def isfolder_(f):
-    return _os.path.isdir(_text(f))
+    return _path_test(f, _os.path.isdir)
 
 
 @_bi("mkdir")
@@ -9624,7 +10399,7 @@ def mkdir_(nargout, *args):
     except OSError:
         ok = False
     if existed and nargout == 0:
-        warning_("Directory already exists.")
+        warning_("Directory already exists.", "MATLAB:MKDIR:DirectoryExists")
     return [ok, Char("Directory already exists." if existed else ""), Char("MATLAB:MKDIR:DirectoryExists" if existed else "")][:nargout] if nargout > 1 else (ok if nargout == 1 else NOVAL)
 
 
@@ -9666,6 +10441,28 @@ def delete_(nargout, *files):
     return NOVAL
 
 
+@_bi("type")
+def type_(nargout, *names):
+    """type filename: the file's contents, as type's page describes it; a name without an extension
+    that does not exist is tried as .m (Sagebrush does not read .mlx and .mlapp files)"""
+    for f in names:
+        t = _text(f)
+        path = t
+        if not _os.path.isfile(path) and not _os.path.splitext(t)[1]:
+            for ext in (".mlx", ".mlapp", ".m"):
+                if _os.path.isfile(t + ext):
+                    path = t + ext
+                    break
+        if _os.path.splitext(path)[1] in (".mlx", ".mlapp") and _os.path.isfile(path):
+            raise _err("type: Sagebrush does not read %s files (Live Scripts and apps) yet." % _os.path.splitext(path)[1])
+        if not _os.path.isfile(path):
+            raise _err("File '%s' not found." % t)
+        with open(path, errors="replace") as fh:
+            text = fh.read()
+        _write(text if text.endswith("\n") or not text else text + "\n")
+    return NOVAL
+
+
 @_bs("fileread")
 def fileread_(f, *opts):
     t = _text(f)
@@ -9685,7 +10482,8 @@ _next_fid = [3]
 
 @_bi("fopen")
 def fopen_(nargout, f, mode=None, *rest):
-    if _isnumlike(f) and _scalar(f) == _math.floor(_scalar(f)):
+    # (fopen(fid): a file's name; a file name, which as a char array is numlike too, opens it)
+    if not _istext(f) and _isnumlike(f) and _scalar(f) == _math.floor(_scalar(f)):
         fid = int(_scalar(f))
         h = _files.get(fid)
         return Char(h.name) if h else Char("")
@@ -9696,8 +10494,9 @@ def fopen_(nargout, f, mode=None, *rest):
     try:
         fh = open(t, pm)
     except OSError as e:
+        # (the system's message, without Python's "[Errno 2]" and file name)
         if nargout >= 2:
-            return [-1.0, Char(str(e))]
+            return [-1.0, Char(e.strerror or "Cannot open file.")]
         return -1.0
     fid = _next_fid[0]
     _next_fid[0] += 1

@@ -1123,6 +1123,25 @@ def blkdiag_b(nargout, *args):
     return r if _has_sparse(args) else full(r)
 
 
+def _fft_sizes_first(name):
+    """fft2, ifft2, fftn and ifftn of a sparse X: the full transform, every argument after X
+    checked as sizes before X is made full (only the inverses' text flags, such as
+    'symmetric', are left to the full function), so a bad size of any class is refused at once"""
+    f = _FULL[name]
+
+    def g(nargout, *args):
+        if _has_sparse(args):
+            rest = list(args[1:])
+            for a in rest:
+                if type(a) is Sparse and a.m * a.n > 64:
+                    raise _err("%s: a sparse size argument with %d elements is not supported." % (name, a.m * a.n))
+            # (the whole signature, as the full function checks it: count, sizes, flag)
+            _m._fft_parse(name, [full(a) if type(a) is Sparse else a for a in rest])
+            args = [full(a) if type(a) is Sparse else a for a in args]
+        return f(nargout, *args)
+    return g
+
+
 _SPECIAL = {
     "sum": _sum_b, "any": _anyall_b(False), "all": _anyall_b(True), "mean": _mean_b, "diag": _diag_b,
     "tril": _tri_b(True), "triu": _tri_b(False), "kron": _kron_b, "repmat": _repmat_b, "reshape": _reshape_b,
@@ -1562,8 +1581,12 @@ def _spdiags_b(nargout, *args):
     else:
         m, n = int(_m._scalar(args[2])), int(_m._scalar(args[3]))
         rows, cols, vals = [], [], []
-    if B.shape[0] == 1 and len(ds) > 1 or B.ndim == 1:
+    if B.ndim == 1:
         B = B.reshape((-1, len(ds)))
+    if B.shape[0] == 1 and B.shape[1] in (1, len(ds)):
+        # (a scalar or a row, one element per diagonal: each diagonal constant, as spdiags's page
+        # allows Bin to be a scalar or vector, only a column or matrix needing min(m, n) rows)
+        B = np.repeat(B, max(m, n), axis=0)
     for c, d in enumerate(ds):
         i, j, b = _diag_index(m, n, d)
         ok = b < B.shape[0]
@@ -2049,7 +2072,8 @@ def _register():
     for name, f in (("eig", _eig_b), ("svd", _svd_b), ("norm", _norm_b), ("accumarray", _accumarray_b)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = f
-    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False)):
+    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False),
+                     ("eps", True), ("realmax", True), ("realmin", True), ("flintmax", True)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = _like_fn(name, ok)
     for name in sorted(_ZERO_KEEPING | _SPARSE_FULL):
@@ -2061,6 +2085,9 @@ def _register():
             _FULL[name] = _m._B[name].f
             _SPARSE_OUT_FN[name] = _sparse_out(name)
             _NATIVE[name] = _SPARSE_OUT_FN[name]
+    for name in ("fft2", "ifft2", "fftn", "ifftn"):
+        _FULL[name] = _m._B[name].f
+        _NATIVE[name] = _fft_sizes_first(name)
     for name, f in _SPECIAL.items():
         if name in _m._B:
             _FULL.setdefault(name, _m._B[name].f)

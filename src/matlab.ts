@@ -1239,6 +1239,20 @@ class Emitter {
       e = { k: "index", e, brace: false, args: [], frame: { code: "", n: 0, cur: 0 } };
     }
     const t = this.fresh();
+    if ((e.k === "index" && e.brace) || e.k === "field" || e.k === "dynfield") {
+      // a comma-separated list, c{:} or s.a of a struct array: each value becomes ans in turn and
+      // is displayed, as MATLAB shows idx{:} (none for an empty list)
+      this.emit(`for ${t} in ${this.csList(e, scope)}:`);
+      this.indent(() => {
+        this.emit(`if ${t} is not _m.NOVAL:`);
+        this.indent(() => {
+          scope.vars.add("ans");
+          this.emit(`ans = ${t}`);
+          if (print) this.emit(`_m.display("ans", ans)`);
+        });
+      });
+      return;
+    }
     if (e.k === "id" && !this.fnNames.has(e.name) && !scope.fn) {
       // a variable of the workspace, or a function called with no arguments
       this.emit(`${t} = _m.bare(${this.lookup(e.name, scope)}, ${JSON.stringify(e.name)}, ${print ? "True" : "False"})`);
@@ -1265,16 +1279,52 @@ class Emitter {
       if (s.print) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
       return;
     }
-    const n = s.lhs.length;
+    // [S.a] = ...: a field of a struct array, a variable already defined, takes one output per
+    // element (MATLAB's comma-separated list on the left, as [S.a] = deal(A1,A2,A3) fills S(1..3).a)
+    // ([S(i).a] = ... too: the elements S(i) selects)
+    const csIdx = (lv: LValue) => lv.path.length === 2 && lv.path[0]!.k === "index" && !(lv.path[0] as Extract<Expr, { k: "index" }>).brace && lv.path[1]!.k === "field";
+    // ([C{i}] = ... and [C{:}] = ...: the cells of a cell array the braces select, one output each)
+    const csBrace = (lv: LValue) => lv.path.length === 1 && lv.path[0]!.k === "index" && (lv.path[0] as Extract<Expr, { k: "index" }>).brace;
+    const csField = (lv: LValue | null): lv is LValue =>
+      !!lv && this.isVar(lv.name, scope) && ((lv.path.length === 1 && lv.path[0]!.k === "field") || csIdx(lv) || csBrace(lv));
+    const subs: string[] = [];
+    const poss: string[] = [];
+    const counts: string[] = s.lhs.map((lv, k) => {
+      subs[k] = "None";
+      poss[k] = "None";
+      if (!csField(lv)) return "1";
+      const c = this.fresh();
+      if (csIdx(lv) || csBrace(lv)) {
+        const p0 = lv.path[0] as Extract<Expr, { k: "index" }>;
+        p0.frame.code = this.varRead(lv.name, scope);
+        subs[k] = this.fresh();
+        this.emit(`${subs[k]} = ${this.argList(p0.args, scope)}`);
+      }
+      // (the positions once, their count admitted before they are built, reused by the assignment)
+      poss[k] = this.fresh();
+      this.emit(`${poss[k]} = _m.${csBrace(lv) ? "cs_brace_positions" : "cs_positions"}(${this.varRead(lv.name, scope)}, ${subs[k]})`);
+      this.emit(`${c} = _m.cs_count(${poss[k]})`);
+      return c;
+    });
+    const n = counts.every((c) => c === "1") ? String(s.lhs.length) : `(${counts.join(" + ")})`;
     const t = this.fresh();
     const r = s.rhs;
     let code: string;
-    if (r.k === "index" && !r.brace) code = this.indexExpr(r, scope, String(n));
+    if (r.k === "index" && !r.brace) code = this.indexExpr(r, scope, n);
     else if (r.k === "id" && !this.isVar(r.name, scope)) code = `_m.call(${this.lookup(r.name, scope)}, [], ${n})`;
     else if ((r.k === "index" && r.brace) || r.k === "field" || r.k === "dynfield") code = this.csList(r, scope);
     else code = this.expr(r, scope);
     this.emit(`${t} = _m.nout(${code}, ${n})`);
-    s.lhs.forEach((lv, k) => { if (lv) this.store(lv, `${t}[${k}]`, scope); });
+    let off = "0";
+    s.lhs.forEach((lv, k) => {
+      if (lv && csField(lv) && csBrace(lv)) {
+        this.emit(`${pyName(lv.name)} = _m.set_brace_cs(${this.varRead(lv.name, scope)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
+      } else if (lv && csField(lv)) {
+        const f = (lv.path[lv.path.length - 1] as Extract<Expr, { k: "field" }>).name;
+        this.emit(`${pyName(lv.name)} = _m.set_field_cs(${this.varRead(lv.name, scope)}, ${JSON.stringify(f)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
+      } else if (lv) this.store(lv, `${t}[${off}]`, scope);
+      off = counts[k] === "1" ? (off === "0" ? "1" : `${off} + 1`) : `${off} + ${counts[k]}`;
+    });
     if (s.print) for (const lv of s.lhs) if (lv) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
   }
 

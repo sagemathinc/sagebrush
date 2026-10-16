@@ -540,8 +540,8 @@ test("rank-deficient least squares: the published examples' tolerances and basic
     "C = [1 0; 2 0; 1 0]; D = [1 2]; lastwarn(''); x = D/C; disp(lastwarn); disp(mat2str(x));",
   ].join(" ")], { encoding: "utf8" });
   assert.deepEqual(out.trim().split("\n"), [
-    "Rank deficient, rank = 3, tol = 1.882938e-13.", "[3 4 0 0 1 0]",
-    "Rank deficient, rank = 1, tol = 1.332268e-15.", "[0 0.5 0]",
+    "Rank deficient, rank = 3, tol =  1.882938e-13.", "[3 4 0 0 1 0]",
+    "Rank deficient, rank = 1, tol =  1.332268e-15.", "[0 0.5 0]",
   ]);
 });
 
@@ -563,7 +563,8 @@ test("the close-to-singular warning prints Higham's estimated RCOND, as the publ
   const { execFileSync } = require("node:child_process");
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c",
     "lastwarn(''); x = magic(4) \\ [34; 34; 34; 34]; disp(lastwarn)"], { encoding: "utf8" });
-  assert.equal(out.trim(), "Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND = 1.306145e-17.");
+  // (two spaces before the value, as every published copy of the warning shows: RCOND =  1.30614...)
+  assert.equal(out.trim(), "Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  1.306145e-17.");
 });
 
 test("deconv as documented: long division, least squares for each shape (the least-norm solution), regularization, orientation and the refusals", () => {
