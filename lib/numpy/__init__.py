@@ -12,6 +12,7 @@ import math as _math
 import builtins as _builtins
 import _numpy as _np
 from _numpy import ndarray, dtype
+_dtype_of = dtype  # (the class, where a parameter is named dtype)
 
 __version__ = "2.5.1+sagebrush"
 
@@ -179,7 +180,14 @@ class float32(float, floating):
         return _np.format_f32(float(self))
 
 
-float16 = half = float32
+class float16(floating):
+    """Half precision: not supported yet (NumPy stores it in binary16)."""
+
+    def __new__(cls, *args, **kwargs):
+        raise NotImplementedError("np.float16: float16 (half precision) is not supported yet")
+
+
+half = float16
 
 
 def _intrepr(name):
@@ -521,7 +529,8 @@ def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
         out[0] = start
         if endpoint and num > 1:
             out[-1] = stop
-    return out
+    # (dtype applied to the result, as NumPy's)
+    return out if dtype is None else out.astype(dtype)
 
 
 def eye(N, M=None, k=0, dtype=float, order="C", *, like=None):
@@ -603,6 +612,53 @@ def fromiter(iterable, dtype, count=-1):
 
 # ------------------------------------------------------------------ ufuncs
 
+_CASTINGS = ("no", "equiv", "safe", "same_kind", "unsafe")
+# (ufuncs whose only output type is bool, a float, or an int or bool)
+_BOOL_OUT = frozenset(["equal", "not_equal", "less", "less_equal", "greater", "greater_equal", "logical_and",
+                       "logical_or", "logical_xor", "isnan", "isinf", "isfinite", "signbit", "logical_not"])
+_FLOAT_OUT = frozenset(["true_divide", "arctan2", "hypot", "copysign", "logaddexp", "sqrt", "cbrt", "exp", "exp2",
+                        "expm1", "log", "log2", "log10", "log1p", "sin", "cos", "tan", "arcsin", "arccos", "arctan",
+                        "sinh", "cosh", "tanh", "arcsinh", "arccosh", "arctanh", "deg2rad", "rad2deg", "rint", "fabs"])
+_BITWISE = frozenset(["bitwise_and", "bitwise_or", "bitwise_xor", "invert", "left_shift", "right_shift"])
+
+
+def _can_cast_rule(a, b, casting):
+    """np.can_cast(a, b, casting) for dtypes a and b"""
+    if casting == "unsafe" or a == b:
+        return True
+    if casting == "same_kind":
+        # (a safe cast, or one to the same kind or a later one)
+        return "buifc".index(a.kind) <= "buifc".index(b.kind)
+    return casting == "safe" and can_cast(a, b)
+
+
+_CAST_BLOCK = 1 << 16  # (elements cast at a time by a ufunc's dtype=)
+
+
+def _blocks(shape, size, prefix=()):
+    """Index tuples splitting an array of shape into blocks of at most size
+    elements (but one element), in C order"""
+    if not shape:
+        yield prefix
+        return
+    inner = 1
+    for d in shape[1:]:
+        inner *= d
+    if inner <= size:
+        step = _builtins.max(1, size // _builtins.max(inner, 1))
+        for k in range(0, shape[0], step):
+            yield prefix + (slice(k, k + step),)
+    else:
+        for k in range(shape[0]):
+            yield from _blocks(shape[1:], size, prefix + (k,))
+
+
+def _wraps_in(op, dt):
+    # (a product in an int dtype narrower than int64 is computed step by
+    # step, wrapping in it: prod's double accumulator loses its low bits)
+    return op == "multiply" and dt.kind in "iu" and dt.itemsize < 8
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -621,12 +677,28 @@ class ufunc:
                 args = args[:-1]
             else:
                 raise TypeError("%s() takes from %d to %d positional arguments but %d were given" % (self.__name__, self.nin, self.nin + 1, len(args)))
-        if self.nin == 1:
-            r = getattr(_np, "u_" + self._op)(args[0])
-        else:
-            r = _np.binary(self._op, args[0], args[1])
+        if casting not in _CASTINGS:
+            raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
+        scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
         if dtype is not None:
-            r = asarray(r).astype(dtype)
+            # (the loop is resolved from dtype before computing, as NumPy's:
+            # the inputs cast to it under the casting rule, then the operation
+            # in it; but a comparison's dtype names only its output, bool)
+            dt = self._loop(dtype)
+            if self._op not in _BOOL_OUT:
+                r = self._apply_cast([self._cast_in(x, i, dt, casting) for i, x in enumerate(args)])
+            else:
+                r = self._apply(args)
+        else:
+            r = self._apply(args)
+        if dtype is not None:
+            r = asarray(r)
+            if r.dtype != dt:
+                if r.dtype.kind in "fc" and dt.kind in "biu":
+                    raise TypeError("ufunc '%s' did not contain a loop with signature matching types" % self.__name__)
+                r = r.astype(dt)
+            if scalars and r.ndim == 0:
+                r = r[()]
         if where is not True:
             r = _np.where3(where, r, out if out is not None else r)
         if out is not None:
@@ -636,30 +708,130 @@ class ufunc:
             return out
         return r
 
+    def _loop(self, dtype):
+        """dtype's loop, or NumPy's TypeError where the ufunc has none (a
+        comparison's output is bool, a float function's a float, a bitwise
+        operation's an int or bool)"""
+        dt = _dtype_of(dtype)
+        op = self._op
+        if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
+                else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
+                else dt.kind == "c" and op in ("floor_divide", "remainder")):
+            raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+        return dt
+
+    def _cast_in(self, x, i, dt, casting):
+        """Input i cast to the loop's dtype, if the casting rule allows it"""
+        if self.nin == 2 and isinstance(x, (_builtins.bool, _builtins.int, _builtins.float, _builtins.complex)) and not isinstance(x, generic):
+            # (a Python scalar is weak in a binary call: an int takes an int
+            # loop's type if it fits, a float a float loop's, a complex a
+            # complex loop's; a unary ufunc's is its default dtype, int64,
+            # float64 or complex128, checked as any input, CORR-7A1-1)
+            k = "b" if isinstance(x, _builtins.bool) else "i" if isinstance(x, _builtins.int) else "f" if isinstance(x, _builtins.float) else "c"
+            if k == "i" and dt.kind in "iu":
+                info = iinfo(dt)
+                if not info.min <= x <= info.max:
+                    raise OverflowError("Python integer %d out of bounds for %s" % (x, dt.name))
+            # (one whose kind fits is the loop's dtype, under any casting
+            # rule: np.add(1, 1, dtype=np.float32, casting='no') is 2.0)
+            if dt.kind in {"b": "b", "i": "uifc", "f": "fc", "c": "c"}[k]:
+                src = dt
+            elif k == "c":
+                src = _dtype_of("complex64" if dt == _dtype_of("float32") else "complex128")
+            else:
+                src = _dtype_of({"b": "bool", "i": "int64", "f": "float64"}[k])
+        else:
+            x = asarray(x)
+            src = x.dtype
+        if self._op == "absolute" and src == _dtype_of("complex128") and dt == _dtype_of("float64"):
+            dt = src  # (its loop of complex128 to float64)
+        if not _can_cast_rule(src, dt, casting):
+            raise TypeError("Cannot cast ufunc '%s' input %sfrom %r to %r with casting rule '%s'"
+                            % (self.__name__, "" if self.nin == 1 else "%d " % i, src, dt, casting))
+        x = asarray(x)
+        # (a Python scalar cast now; an array, if it is not already of dt,
+        # by _apply_cast)
+        return (x, dt) if isinstance(x, ndarray) and x.ndim else (x.astype(dt), dt)
+
+    def _apply(self, args):
+        if self.nin == 1:
+            return getattr(_np, "u_" + self._op)(args[0])
+        return _np.binary(self._op, args[0], args[1])
+
+    def _apply_cast(self, pairs):
+        """The ufunc of (array, dtype) pairs, each array cast to its dtype:
+        one already of its dtype is used as it is, and a cast is made a
+        block at a time, written into one result, so no full-size cast
+        copy is kept (HARD-7A1-1)"""
+        if _builtins.all(x.dtype == t for x, t in pairs):
+            return self._apply([x for x, _ in pairs])
+        shape = broadcast_shapes(*[x.shape for x, _ in pairs])
+        n = 1
+        for d in shape:
+            n *= d
+        if n <= _CAST_BLOCK:
+            return self._apply([x if x.dtype == t else x.astype(t) for x, t in pairs])
+        views = [broadcast_to(x, shape) for x, _ in pairs]
+        res = None
+        for idx in _blocks(shape, _CAST_BLOCK):
+            r = asarray(self._apply([v[idx] if v.dtype == t else v[idx].astype(t) for v, (_, t) in zip(views, pairs)]))
+            if res is None:
+                res = empty(shape, r.dtype)
+            res[idx] = r
+        return res
+
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
         a = asarray(a)
+        if dtype is not None:
+            dt = self._loop(dtype)
+            if a.dtype != dt:
+                a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
-        if self._op in quick and initial is None:
-            return quick[self._op](a, axis=axis, keepdims=keepdims)
+        if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
+            r = quick[self._op](a, axis=axis, keepdims=keepdims)
+            if dtype is not None:
+                # (sum promotes small ints to int64 and bools to int: the
+                # accumulator is dtype, where an int sum wraps as it does
+                # here, and a bool sum is True if any is)
+                r = asarray(r).astype(dt)
+                if r.ndim == 0:
+                    r = r[()]
+            return r
+        nd = a.ndim
         if axis is None:
             a, axis = a.ravel(), 0
         a = moveaxis(a, axis, 0)
         if a.shape[0] == 0:
-            if initial is not None:
-                return full(a.shape[1:], initial)
-            raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
-        acc = a[0] if initial is None else self(initial, a[0])
-        for i in range(1, a.shape[0]):
-            acc = self(acc, a[i])
+            # (the identity, or initial, in dtype, for each of the other axes)
+            ident = initial if initial is not None else {"add": 0, "multiply": 1}.get(self._op)
+            if ident is None:
+                raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
+            acc = full(a.shape[1:], ident, dtype=dt if dtype is not None else None)
+            if acc.ndim == 0 and not keepdims:
+                return acc[()]
+        else:
+            acc = a[0] if initial is None else self(initial, a[0])
+            if a.shape[0] == 1 and isinstance(acc, ndarray):
+                acc = acc.copy()  # (a view of the input otherwise: the result is new, CORR-904-1)
+            for i in range(1, a.shape[0]):
+                acc = self(acc, a[i])
+        if keepdims:
+            acc = asarray(acc).reshape((1,) * nd) if a.ndim == 1 else expand_dims(acc, axis)
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
         a = asarray(a)
+        if dtype is not None:
+            dt = self._loop(dtype)
+            if a.dtype != dt:
+                a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         if self._op == "add":
             return cumsum(a, axis=axis, dtype=dtype)
-        if self._op == "multiply":
+        if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
             return cumprod(a, axis=axis, dtype=dtype)
+        if a.shape[axis] == 0:
+            return a.copy()  # (empty, of its dtype and shape)
         a = moveaxis(a, axis, 0)
         res = []
         acc = None
@@ -670,7 +842,7 @@ class ufunc:
 
     def outer(self, A, B, **kw):
         A, B = asarray(A), asarray(B)
-        return self(A.reshape(A.shape + (1,) * B.ndim), B)
+        return self(A.reshape(A.shape + (1,) * B.ndim), B, **kw)
 
 
 _BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "power",
@@ -689,7 +861,7 @@ for _name in _UNARY:
 divide = true_divide
 mod = remainder
 abs = absolute
-fabs = absolute
+fabs = ufunc("fabs", 1)
 degrees, radians = rad2deg, deg2rad
 bitwise_not = bitwise_invert = invert
 pow = power
