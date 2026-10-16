@@ -327,9 +327,9 @@ newBuiltinModule("math", (m) => {
       const d = Number(b);
       if (d !== Infinity) return f(d);
       // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
-      const s = b.toString(2).length;
+      const s = O.bitLength(b); // (not b.toString(2): HARD-909-1)
       let top = b >> BigInt(s - 64);
-      if (top << BigInt(s - 64) !== b) top |= 1n; // sticky bit for correct rounding
+      if (BigInt.asUintN(s - 64, b) !== 0n) top |= 1n; // sticky bit for correct rounding
       let x = Number(top) / 18446744073709551616, e = s;
       if (x === 1) {
         x = 0.5;
@@ -640,9 +640,9 @@ newBuiltinModule("math", (m) => {
     return bitsF[0];
   };
   const nextafter = (a: number, b: number, steps = 1n): number => {
-    if (a !== a || b !== b) return a !== a ? a : b;
-    // (no steps: x itself, its zero's sign too, CORR-447-3)
+    // (no steps: x itself, its zero's sign too, even toward a NaN, CORR-447-3)
     if (steps === 0n) return a;
+    if (a !== a || b !== b) return a !== a ? a : b;
     if (a === b) return b;
     const ka = toOrd(a), kb = toOrd(b);
     const r = kb > ka ? (kb - ka <= steps ? kb : ka + steps) : (ka - kb <= steps ? kb : ka - steps);

@@ -434,8 +434,24 @@ function truedivSlow(a: any, b: any): any {
 }
 
 const absBig = (x: bigint) => (x < 0n ? -x : x);
-function bitLength(x: bigint): number {
-  return x === 0n ? 0 : absBig(x).toString(2).length;
+const BIG = 1n << 1024n;
+// The bit length of x, without a string of its digits once it is large:
+// shifts bracket the length, then halve the bracket (each shift's result is
+// no bigger than x, and soon small).
+export function bitLength(x: bigint): number {
+  x = absBig(x);
+  if (x < BIG) return x === 0n ? 0 : x.toString(2).length;
+  let lo = 1024, hi = 2048; // x >> lo is nonzero, x >> hi is zero
+  while (x >> BigInt(hi) !== 0n) {
+    lo = hi;
+    hi *= 2;
+  }
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (x >> BigInt(mid) !== 0n) lo = mid;
+    else hi = mid;
+  }
+  return hi;
 }
 
 // Correctly rounded int / int, subnormal results included, following the
