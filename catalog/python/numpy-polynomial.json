@@ -15,7 +15,8 @@
       }
     ],
     "differs": [
-      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
     "upstream_version": "NumPy 2.5.1"
