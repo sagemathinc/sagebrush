@@ -62,6 +62,72 @@ authoritative.
   each entry of `"pages": [...]` instead of the top level. A page with a
   `slide` rectangle (16:9, say) is a slide, and Present shows it.
 
+## Laying out a big board
+
+The board places what you don't. These choices decide whether a page reads
+well.
+
+**Choose each container's `layout` by what links its items.**
+
+- **`graph` (the default).** Use it for items joined by edges: a flow, a
+  derivation, a dependency tree. It puts items in layers along the edges,
+  each edge's `to` in a later layer than its `from`.
+  - **Every edge counts**, dotted, labeled or thick alike. One summary note
+    with an edge to each of five groups puts all five a layer below it,
+    side by side.
+  - **To place without drawing**, use `"hidden": true`: the edge orders the
+    layers but isn't shown.
+  - **To draw without placing**, put the two items in containers that are
+    laid out another way (the dashboard pattern below).
+- **`grid`.** Use it for items with few or no edges between them: cards,
+  releases, pull requests. Set `columns`; the default is as square as
+  can be. Edges between grid items are drawn, but they run through the gaps
+  between columns, so use them sparingly there.
+- **`row` and `column`.** Use them for a sequence read in one direction, and
+  for arranging groups on a page.
+
+**Nest groups to shape a page.** A group lays out its own `children` by its
+own `layout`. The page lays out its top-level items, groups included, by
+the page's `layout`. A page of several areas reads best as a *dashboard*:
+a `column` of `row` groups (a header row, then a row of areas), each area a
+group with the layout its contents need.
+
+```json
+{"format": "sagebrush-board", "version": 1, "title": "A week of work",
+ "layout": "column",
+ "nodes": [
+  {"id": "head", "kind": "group", "layout": "row", "children": [
+    {"id": "sum", "title": "This week", "text": "Three areas, 14 changes."},
+    {"id": "next", "title": "Next week", "text": "What comes after."}]},
+  {"id": "areas", "kind": "group", "layout": "row", "children": [
+    {"id": "nb", "kind": "group", "title": "Notebook (4)", "layout": "grid", "columns": 2, "children": [
+      {"id": "nb1", "title": "#101", "text": "Faster cells."},
+      {"id": "nb2", "title": "#102", "text": "Tab completion."}]},
+    {"id": "bd", "kind": "group", "title": "Boards (3)", "layout": "graph", "children": [
+      {"id": "bd1", "title": "Format", "text": "The header."},
+      {"id": "bd2", "title": "Check", "text": "`board check`."}]}]}],
+ "edges": [{"from": "bd1", "to": "bd2"}]}
+```
+
+**Sizes.**
+
+- A note is 260 wide and a code item 440. Give `w` only to make a note
+  wider (a table, a long formula) or narrower (a label).
+- Its height follows its text, so keep each note to a title and a few
+  lines, and put the rest in `detail`, which the reader zooms in to see.
+- Group titles are one line; a long one is cut with "…", so keep them short
+  (for example "Sensors (6)").
+
+**How much fits on a page.** A page's text stays legible on a laptop
+screen up to about 20 to 30 short notes, 5 or 6 across. Beyond that the
+reader sees the overview and zooms or scrolls to read. For more, use
+`pages`, one theme each with its own `intro`, rather than one page that
+holds everything.
+
+**Check it before you hand it over.** Open it at
+https://sagebrush.space/board/ and look at it as it first opens, fitted to
+the window, before zooming in.
+
 <!-- fields: written by scripts/board-format-fields.mjs from the doc comments of web/board/doc.ts; edit those, not this -->
 ## Fields
 
@@ -128,9 +194,9 @@ A note: the default item. Every part is optional; a note with `code` is a code i
 | `hideCode` | boolean | `true`: show only the code's output, not the code |
 | `preview` | object | a slow code item's output, kept to show before it runs (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
-| `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase` |
+| `ref` | string | a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)` |
 | `color` | string | a color (`#e8f0fb`, a CSS color name, `rgb(...)`, `hsl(...)`) |
-| `shape` | `"rect"` \| `"round"` \| `"stadium"` \| `"circle"` \| `"diamond"` \| `"hexagon"` \| `"cylinder"` \| `"subroutine"` \| `"lean-right"` \| `"lean-left"` \| `"trapezoid"` \| `"inv-trapezoid"` \| `"flag"` | its outline (a flowchart's); its text is then centered |
+| `shape` | `"rect"` \| `"round"` \| `"stadium"` \| `"circle"` \| `"diamond"` \| `"hexagon"` \| `"cylinder"` \| `"subroutine"` \| `"lean-right"` \| `"lean-left"` \| `"trapezoid"` \| `"inv-trapezoid"` \| `"flag"` | its outline (a flowchart's); its text is then centered. `diamond` (a decision) is pointed at its left and right and flat at its top and bottom, so that its text fits a note's width, not a true rhombus (which would need twice its text's width and height); `hexagon` is the same, less pointed |
 | `fit` | boolean | `true`: as wide as its text needs, up to `w` |
 | `x` | number | its position, kept once a person moves it: leave it out, and the board places it |
 | `y` | number | as `x` |

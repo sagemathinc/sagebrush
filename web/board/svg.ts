@@ -13,8 +13,8 @@
 // colors.
 
 import { Lexer, type Token, type Tokens } from "marked";
-import { cleanDoc, layout, lookOf, pageView, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
-import { backShapes, xmlEscape } from "./print";
+import { cleanDoc, layout, lookOf, pageView, refLabel, type BoardDoc, type Measure, type MeasuredNote } from "./doc";
+import { backShapes, edgeLabelBox, xmlEscape } from "./print";
 import { inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
 import type { Item } from "./board";
@@ -142,6 +142,13 @@ function ellipsis(r: Run, size: number, w: number): string {
   while (cs.length && width({ ...r, t: cs.join("") + "…" }, size) > w) cs.pop();
   return cs.join("") + "…";
 }
+// a run's text cut to fit w at its start, with an ellipsis: its end kept
+function ellipsisStart(r: Run, size: number, w: number): string {
+  if (width(r, size) <= w) return r.t;
+  const cs = [...r.t];
+  while (cs.length && width({ ...r, t: "…" + cs.join("") }, size) > w) cs.shift();
+  return "…" + cs.join("");
+}
 const heightOf = (ls: Line[]) => ls.reduce((h, l) => h + l.lh + l.gap, 0);
 const lineWidth = (l: Line) => l.indent + l.runs.reduce((w, r) => w + width(r, l.size), 0);
 
@@ -166,7 +173,8 @@ function content(n: { title?: string; text?: string; code?: string; hideCode?: b
   }
   if (n.code !== undefined) ls.push({ runs: [{ t: "(its output: in the board)", i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" });
   // (a link: one line, cut with an ellipsis, as on the board; text only)
-  if (n.ref) ls.push({ runs: [{ t: ellipsis({ t: n.ref, m: true }, 11, w), m: true }], size: 11, lh: 16, indent: 0, gap: 6, color: "#2a6f2f" });
+  // (its words as on the board, and too long, its start cut, not its end: the file's name is the part a reader wants, round 0's 10)
+  if (n.ref) ls.push({ runs: [{ t: "↗ " + ellipsisStart({ t: refLabel(n.ref), m: true }, 11, w - width({ t: "↗ ", m: true }, 11)), m: true }], size: 11, lh: 16, indent: 0, gap: 6, color: "#2a6f2f" });
   return { ls, pic };
 }
 /** The measure layout() asks for: a note's height at a width, and its natural width. */
@@ -229,6 +237,8 @@ function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean)
 /** A page of a board (the first, by default) as an SVG file; `left`: what
  * it shows only in part; `overflow`: the notes whose text does not fit
  * their box (one of a given size, cut there as on the board). */
+// (an edge's label's plate: its 12 px text as DejaVu Sans sets it, and a margin)
+const labelPlate = (label: string) => width({ t: label }, 12) + 10;
 export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: string; left: string[]; overflow: string[] } {
   const d = cleanDoc(doc), v = pageView(d, o.page ?? 0), left = new Set<string>(), overflow: string[] = [];
   const { items, edges } = layout(v, measure);
@@ -252,6 +262,8 @@ export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: strin
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const it of items) { x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h); }
   for (const e of edges) for (let i = 0; i < (e.points?.length ?? 0); i += 2) { x0 = Math.min(x0, e.points![i]); x1 = Math.max(x1, e.points![i]); y0 = Math.min(y0, e.points![i + 1]); y1 = Math.max(y1, e.points![i + 1]); }
+  // (and the edges' labels' plates, as wide as their text in the font the SVG says: round 0's 13, a label at the page's edge cut off)
+  for (const e of edges) { const b = edgeLabelBox(e, labelPlate); if (b) { x0 = Math.min(x0, b.x0); x1 = Math.max(x1, b.x1); y0 = Math.min(y0, b.y0); y1 = Math.max(y1, b.y1); } }
   if (slide) { x0 = Math.min(x0, slide.x); y0 = Math.min(y0, slide.y); x1 = Math.max(x1, slide.x + slide.w); y1 = Math.max(y1, slide.y + slide.h); }
   if (!items.length && !slide) { x0 = y0 = 0; x1 = y1 = 100; }
   const M = 24;
@@ -263,7 +275,7 @@ export function boardSvg(doc: BoardDoc, o: { page?: number } = {}): { svg: strin
     out.push(`<rect x="${n1(slide.x)}" y="${n1(slide.y)}" width="${n1(slide.w)}" height="${n1(slide.h)}" fill="#fff" stroke="#000" stroke-opacity=".18"/>`);
     if (bg?.color) out.push(`<rect x="${n1(slide.x)}" y="${n1(slide.y)}" width="${n1(slide.w)}" height="${n1(slide.h)}" fill="${esc(bg.color)}"/>`);
   }
-  out.push(backShapes(items, edges, box));
+  out.push(backShapes(items, edges, box, labelPlate));
   const clips: string[] = [];
   // groups' titles and text, outer first
   for (const g of items.filter((it) => it.kind === "group").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0))) {
