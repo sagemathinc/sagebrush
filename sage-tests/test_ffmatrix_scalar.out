@@ -1,0 +1,32 @@
+Number Field in a wi eq :: (False, True, True, True, True, False, False, True, True)
+Number Field in a wi add :: ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+Number Field in a wi nonsq add :: TypeError unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Number Field in a with defining pol
+Number Field in a wi nonsq sub :: TypeError unsupported operand parent(s) for -: 'Integer Ring' and 'Full MatrixSpace of 2 by 3 dense matrices over Number Field in
+Algebraic Field eq :: (False, True, True, True, True, False, False, True, True)
+Algebraic Field add :: ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [ 0 -2]
+[-3 -3])
+Algebraic Field nonsq add :: TypeError unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Algebraic Field' and 'Integer Ring'
+Algebraic Field nonsq sub :: TypeError unsupported operand parent(s) for -: 'Integer Ring' and 'Full MatrixSpace of 2 by 3 dense matrices over Algebraic Field'
+Finite Field of size eq :: (False, True, True, True, True, False, False, True, True)
+Finite Field of size add :: ([2 2]
+[3 5], [2 2]
+[3 5], [0 2]
+[3 3], [0 5]
+[4 4])
+Finite Field of size nonsq add :: TypeError unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Finite Field of size 7' and 'Intege
+Finite Field of size nonsq sub :: TypeError unsupported operand parent(s) for -: 'Integer Ring' and 'Full MatrixSpace of 2 by 3 dense matrices over Finite Field of
+Finite Field in z of eq :: (False, True, True, True, True, False, False, True, True)
+Finite Field in z of add :: ([2 2]
+[0 2], [2 2]
+[0 2], [0 2]
+[0 0], [0 1]
+[0 0])
+Finite Field in z of nonsq add :: TypeError unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Finite Field in z of size 3^2' and
+Finite Field in z of nonsq sub :: TypeError unsupported operand parent(s) for -: 'Integer Ring' and 'Full MatrixSpace of 2 by 3 dense matrices over Finite Field in
