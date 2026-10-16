@@ -292,8 +292,9 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
             // scoped flags: m and s are this translation's own (^, $ and .);
             // i is JS's modifier, and is in force for the class rules too
             // (a, L and x in a scope are not implemented: refused, not ignored;
-            // u is str patterns' default)
-            if (/[aLx]/.test(g[1] + (g[2] ?? "")) || (bytes && g[1].includes("u"))) raise(T.NotImplementedError, `scoped flags (?${g[1]}${g[2] ? "-" + g[2] : ""}:...) are not supported`);
+            // u is a str pattern's default, and refused inside an ASCII one,
+            // CORR-6A0-1)
+            if (/[aLx]/.test(g[1] + (g[2] ?? "")) || (ascii && g[1].includes("u"))) raise(T.NotImplementedError, `scoped flags (?${g[1]}${g[2] ? "-" + g[2] : ""}:...) are not supported`);
             scopes.push(cur);
             for (const f of g[1]) if (f === "i" || f === "m" || f === "s") cur |= { i: I, m: M, s: S }[f]!;
             for (const f of g[2] ?? "") if (f === "i" || f === "m" || f === "s") cur &= ~{ i: I, m: M, s: S }[f]!;
