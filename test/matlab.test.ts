@@ -2112,3 +2112,22 @@ test("nchoosek's N and K the same class or one double; unique's TreatMissingAsDi
     tryIt("unique([1 NaN], 'TreatMissingAsDistinct', false)"),
   ].join("\n")), ["refused", "refused", "ran", "ran", "ran", "refused", "ran", "ran"]);
 });
+
+test("nchoosek refuses mixed classes and results past their class's range before computing the binomial, under a 96 MiB heap", () => {
+  const { spawnSync } = require("node:child_process");
+  const tryIt = (e: string) => `try, x = ${e}; disp(class(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 24))]), end`;
+  const code = [
+    tryIt("nchoosek(int32(2000000000), uint32(1000000000))"), tryIt("nchoosek(single(1e7), int8(100))"),
+    tryIt("nchoosek(int32(2000000000), int32(1000000000))"), tryIt("nchoosek(1e9, 5e8)"), tryIt("nchoosek(2000, 1000)"),
+    tryIt("nchoosek(1030, 515)"), tryIt("nchoosek(single(300), 150)"), tryIt("nchoosek(5, 7)"), tryIt("nchoosek(5, -1)"),
+    "disp(nchoosek(30, 15)), disp(nchoosek(int8(10), 3)), disp(nchoosek(1e9, 1))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
+    "refused: nchoosek: N and K must b", "refused: nchoosek: N and K must b",
+    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab",
+    "refused: nchoosek: the result, ab", "refused: nchoosek: the result, ab", "refused: nchoosek: K must be an i", "refused: nchoosek: K must be an i",
+    "155117520", "120", "1.0000e+09"]);
+});

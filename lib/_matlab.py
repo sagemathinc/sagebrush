@@ -4924,18 +4924,33 @@ def nchoosek_(n, k):
     kcls = class_(k)
     k = _int_arg(k)
     if _numel(n) == 1:
-        c = _math.comb(_int_arg(n), k)
+        ncls = class_(n)
+        # (the classes first: an error that depends on them only comes before any work)
+        if ncls != kcls and "double" not in (ncls, kcls):
+            raise _err("nchoosek: N and K must be the same class, or one of them double.")
+        nn = _int_arg(n)
+        if not 0 <= k <= nn:
+            raise _err("nchoosek: K must be an integer between 0 and N.")
         # (a single or integer n or k gives that class, as nchoosek's page says; an integer
         # class's result past its range, or past the 53 bits Sagebrush's 64-bit integers
         # keep, is refused rather than saturated or rounded)
-        cls = class_(n) if class_(n) != "double" else kcls
-        if class_(n) != kcls and "double" not in (class_(n), kcls):
-            raise _err("nchoosek: N and K must be the same class, or one of them double.")
+        cls = ncls if ncls != "double" else kcls
+        # (the result's size from log-gamma before the exact binomial is computed: one past
+        # its class's range, with some bits to spare for rounding, is refused unbuilt)
+        if 0 < k < nn:
+            bits = (_math.lgamma(nn + 1.0) - _math.lgamma(k + 1.0) - _math.lgamma(nn - k + 1.0)) / _math.log(2)
+            if bits > (64 if cls in _INTS else 128 if cls == "single" else 1024) + 8:
+                raise _err("nchoosek: the result, about 2^%d, is outside %s's range: not supported in Sagebrush." % (int(bits), cls))
+        c = _math.comb(nn, k)
         if cls in _INTS:
             if c > _INTS[cls][2]:
                 raise _err("nchoosek: the result %d is outside %s's range: not supported in Sagebrush." % (c, cls))
             return _canon(np.array([[_exact_int(c) if cls in ("int64", "uint64") else c]], dtype=_INTS[cls][0]))
-        return _finish(np.array([[float(c)]]), "single") if cls == "single" else float(c)
+        try:
+            f = float(c)
+        except OverflowError:
+            raise _err("nchoosek: the result, about 2^%d, is outside %s's range: not supported in Sagebrush." % (c.bit_length() - 1, cls))
+        return _finish(np.array([[f]]), "single") if cls == "single" else f
     v = list(_arr(n).reshape(-1))
     import itertools
     combos = list(itertools.combinations(range(len(v)), k))
