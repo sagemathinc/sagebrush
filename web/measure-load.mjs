@@ -6,8 +6,12 @@
 //   - per request: bytes on the wire and decoded, and who fetched it;
 //   - CPU time per thread kind (main thread, dedicated workers, service
 //     worker): the sum of its top-level tasks;
-// at the cell's first result and once settled (no request for 3 s: what the
-// service worker precaches included).
+// by the cell's first result (only what was done by then: requests finished,
+// those still loading counted apart, CPU time up to it) and once settled
+// (nothing in flight and no network event for 3 s, seen live through the
+// Network domain of the page, its frames, its workers and the service
+// worker, and checked against the trace: what the service worker precaches
+// included).
 //
 // By default the page is web/dist, served by web/serve.py behind a proxy
 // that compresses as a CDN does (brotli quality 5 for the types Cloudflare
@@ -16,7 +20,7 @@
 //
 //   bun web/build.ts && node web/measure-load.mjs [--url URL] [--mode python,sage] [--repeat] [--json out.json]
 //   (--repeat: then a second visit with the same profile, its caches kept)
-//   (CHROME=... for the browser)
+//   (CHROME=... for the browser; --self-test checks the trace analysis)
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
@@ -86,11 +90,34 @@ async function measure(mode, url) {
     const waiting = new Map();
     const events = [];
     let traceDone = null;
+    // Live network activity, for settling: the trace's events arrive only
+    // when it ends (ReportEvents), so they can't say whether the page is
+    // still fetching.  The Network domain of the page, its workers and the
+    // service worker (each attached as it appears) does: requests in flight,
+    // and the time of the last event.
+    // (by request id alone: a worker's script is requested by the page and
+    // finished in the worker's session)
+    const inflight = new Map(); // request id -> [session, url]
+    const watch = async (sessionId) => {
+      await send("Network.enable", {}, sessionId);
+      // (a page's dedicated workers; started without waiting: a worker's first
+      // requests before this may be missed here, never in the trace)
+      await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId);
+    };
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data);
       if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); return; }
-      if (m.method === "Tracing.dataCollected") {
-        for (const x of m.params.value) { events.push(x); if (/^Resource/.test(x.name)) lastNet = Date.now(); }
+      if (m.method === "Tracing.dataCollected") for (const x of m.params.value) events.push(x);
+      if (m.method === "Target.attachedToTarget" && /worker|iframe/.test(m.params.targetInfo.type)) watch(m.params.sessionId);
+      if (m.method === "Target.targetCreated" && m.params.targetInfo.type === "service_worker") send("Target.attachToTarget", { targetId: m.params.targetInfo.targetId, flatten: true });
+      // (a worker gone: its requests with it)
+      if (m.method === "Target.detachedFromTarget") for (const [k, [s]] of inflight) if (s === m.params.sessionId) inflight.delete(k);
+      if (/^Network\./.test(m.method ?? "")) {
+        lastNet = Date.now();
+        const key = m.params?.requestId;
+        // (the page's own requests, as counted below: not data: or blob:)
+        if (m.method === "Network.requestWillBeSent" && /^https?:/.test(m.params.request.url)) inflight.set(key, [m.sessionId, m.params.request.url]);
+        if (m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") inflight.delete(key);
       }
       if (m.method === "Tracing.tracingComplete") traceDone?.();
       // (the new notebook has a cell, so changing its language asks first: yes)
@@ -108,10 +135,13 @@ async function measure(mode, url) {
     const { targetId } = await send("Target.createTarget", { url: "about:blank" });
     const { sessionId: page } = await send("Target.attachToTarget", { targetId, flatten: true });
     await send("Page.enable", {}, page);
+    await watch(page);
+    await send("Target.setDiscoverTargets", { discover: true });
     const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, page))?.result?.value;
     const until = async (expr, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(50); } return false; };
     const visit = async (first) => {
     const t0 = Date.now();
+    inflight.clear();
     await send("Page.navigate", { url }, page);
     const ready = await until("document.querySelector('#status')?.textContent.startsWith('ready')", 120000);
     const tReady = Date.now() - t0;
@@ -125,13 +155,22 @@ async function measure(mode, url) {
     const out = (await ev(`${cell}.querySelector('.out').textContent`)) ?? "";
     // (the trace's clock: a mark at the result, as a console.timeStamp)
     await ev(`console.timeStamp('sb-first-result')`);
+    // settled: nothing in flight and no network event for 3 s (at most 2 min)
     const tSettle = Date.now();
     lastNet = Date.now();
-    while (Date.now() - lastNet < 3000 && Date.now() - tSettle < 120000) await sleep(200);
+    // (a request whose end the live events missed, a worker's script or a
+    // frame's page reported to a target attached a moment too late, would
+    // keep it waiting: after 15 s with no network event at all it stops,
+    // and the trace, complete, says whether each of those had finished)
+    while ((inflight.size > 0 ? Date.now() - lastNet < 15000 : Date.now() - lastNet < 3000) && Date.now() - tSettle < 120000) await sleep(200);
+    const open = [...inflight.values()].map(([, u]) => u), timedOut = Date.now() - tSettle >= 120000;
     await new Promise((r) => { traceDone = r; send("Tracing.end"); });
+    const finished = finishedUrls(events);
+    const stuck = open.filter((u) => !finished.has(u)).slice(0, 10);
+    const settledCleanly = stuck.length === 0 && !timedOut;
     const stats = analyse(events);
     events.length = 0;
-    return { ready, ok: done && out.includes(WANT[mode]), out: out.slice(0, 200), ms: { ready: tReady, firstResult: tResult }, ...stats };
+    return { ready, ok: done && out.includes(WANT[mode]), out: out.slice(0, 200), ms: { ready: tReady, firstResult: tResult, settle: Date.now() - tSettle }, settledCleanly, ...(settledCleanly ? {} : { stuck }), ...stats };
     };
     const cold = await visit(true);
     // --repeat: the same profile visits again (its HTTP cache and service
@@ -150,6 +189,17 @@ async function measure(mode, url) {
     await sleep(300);
     rmSync(profile, { recursive: true, force: true });
   }
+}
+
+// The URLs of the requests the trace saw finish
+function finishedUrls(events) {
+  const url = new Map(), done = new Set();
+  for (const e of events) {
+    const d = e.args?.data;
+    if (e.name === "ResourceSendRequest" && d?.requestId) url.set(d.requestId, d.url);
+    if (e.name === "ResourceFinish" && url.has(d?.requestId)) done.add(url.get(d.requestId));
+  }
+  return done;
 }
 
 // The trace: requests (wire and decoded bytes, by thread) and CPU per
@@ -173,8 +223,14 @@ function analyse(events) {
       if (d.fromCache || d.fromServiceWorker) r.cached = true;
       r.status = d.statusCode;
     }
+    // (the bytes received so far, for one still loading at the mark)
+    if (e.name === "ResourceReceivedData") r.chunks = [...(r.chunks ?? []), [e.ts, d.encodedDataLength ?? 0]];
     if (e.name === "ResourceFinish") { r.wire = d.encodedDataLength ?? 0; r.decoded = d.decodedBodyLength ?? 0; r.done = true; r.end = e.ts; }
   }
+  // Up to `until` only: a task running across it counts the part before it
+  // (its CPU time in proportion), a request only once finished by then
+  // (those still loading are counted apart, with the wire bytes they had
+  // received by then): the review's CORR-FF8-1
   const cpu = (until) => {
     // (the page's threads; the browser process's and Chrome's own others
     // summed as "other")
@@ -182,17 +238,21 @@ function analyse(events) {
     for (const e of events) {
       if (e.ph !== "X" || e.name !== "RunTask" || !e.dur || e.ts > until) continue;
       const k = kind(e);
-      out[k in out ? k : "other"] += (e.tdur ?? e.dur) / 1000;
+      out[k in out ? k : "other"] += ((e.tdur ?? e.dur) * Math.min(1, (until - e.ts) / e.dur)) / 1000;
     }
     for (const k in out) out[k] = Math.round(out[k]);
     return out;
   };
+  const page = (r) => !r.cached && /^https?:/.test(r.url);
   const net = (until) => {
     const files = new Map();
     let wire = 0, decoded = 0, count = 0;
+    // (started by then and not finished: how many, and their wire bytes so far)
+    const loading = [...reqs.values()].filter((r) => page(r) && r.ts <= until && !(r.done && r.end <= until));
+    const inFlight = { requests: loading.length, wireSoFar: loading.reduce((s, r) => s + (r.chunks ?? []).filter(([t]) => t <= until).reduce((a, [, n]) => a + n, 0), 0) };
     for (const r of reqs.values()) {
       // (the page's own requests: not data:, blob: or the browser's chrome:// pages)
-      if (!r.done || r.cached || r.ts > until || !/^https?:/.test(r.url)) continue;
+      if (!r.done || r.end > until || !page(r)) continue;
       count++;
       wire += r.wire;
       decoded += r.decoded;
@@ -204,10 +264,30 @@ function analyse(events) {
       x.by.add(r.by);
       files.set(f, x);
     }
-    const revalidated = [...reqs.values()].filter((r) => r.done && !r.cached && r.ts <= until && r.status === 304 && /^https?:/.test(r.url)).length;
-    return { requests: count, revalidated, wire, decoded, files: [...files.values()].map((x) => ({ ...x, by: [...x.by].join(",") })).sort((a, b) => b.wire - a.wire) };
+    const revalidated = [...reqs.values()].filter((r) => r.done && r.end <= until && page(r) && r.status === 304).length;
+    return { requests: count, revalidated, wire, decoded, inFlight, files: [...files.values()].map((x) => ({ ...x, by: [...x.by].join(",") })).sort((a, b) => b.wire - a.wire) };
   };
   return { atResult: { ...net(mark), cpuMs: cpu(mark) }, settled: { ...net(Infinity), cpuMs: cpu(Infinity) } };
+}
+
+// --self-test: analyse() on a made-up trace (the review's): a request sent at
+// 1 ms, its response from 11 ms, finished at 20 ms (1 MB wire, 4 MB decoded);
+// a task from 8 to 18 ms; the mark at 10 ms
+if (args.includes("--self-test")) {
+  const meta = { ph: "M", name: "thread_name", pid: 1, tid: 1, args: { name: "CrRendererMain" } };
+  const at = (ms, name, data, more = {}) => ({ ph: "I", pid: 1, tid: 1, ts: ms * 1000, name, args: { data }, ...more });
+  const trace = [meta, at(1, "ResourceSendRequest", { requestId: "a", url: "https://x/big" }), at(2, "ResourceSendRequest", { requestId: "b", url: "https://x/small" }),
+    at(3, "ResourceReceiveResponse", { requestId: "b", statusCode: 200 }), at(4, "ResourceFinish", { requestId: "b", encodedDataLength: 100, decodedBodyLength: 300 }),
+    { ph: "X", pid: 1, tid: 1, ts: 8000, dur: 10000, tdur: 10000, name: "RunTask" }, at(10, "TimeStamp", { message: "sb-first-result" }),
+    at(11, "ResourceReceiveResponse", { requestId: "a", statusCode: 200 }), at(12, "ResourceReceivedData", { requestId: "a", encodedDataLength: 500000 }),
+    at(20, "ResourceFinish", { requestId: "a", encodedDataLength: 1e6, decodedBodyLength: 4e6 })];
+  const s = analyse(trace);
+  const want = { at: [1, 100, 300, 1, 0, 2], settled: [2, 1e6 + 100, 4e6 + 300, 0, 0, 10] };
+  const got = { at: [s.atResult.requests, s.atResult.wire, s.atResult.decoded, s.atResult.inFlight.requests, s.atResult.inFlight.wireSoFar, s.atResult.cpuMs.main],
+    settled: [s.settled.requests, s.settled.wire, s.settled.decoded, s.settled.inFlight.requests, s.settled.inFlight.wireSoFar, s.settled.cpuMs.main] };
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  console.log(ok ? "self-test ok" : "self-test FAILED: " + JSON.stringify(got) + " != " + JSON.stringify(want));
+  process.exit(ok ? 0 : 1);
 }
 
 const mb = (x) => (x / 1e6).toFixed(2) + " MB";
@@ -215,9 +295,9 @@ const results = [];
 for (const mode of modes) {
   const r = await measure(mode, opt("--url"));
   results.push(r);
-  console.log(`${mode}: ${r.ok ? "ok" : "FAILED (" + JSON.stringify(r.out) + ")"}, ready ${r.ms.ready} ms, first result ${r.ms.firstResult} ms`);
-  for (const [when, s] of [["at first result", r.atResult], ["settled", r.settled]])
-    console.log(`  ${when}: ${s.requests} requests, ${mb(s.wire)} wire, ${mb(s.decoded)} decoded; CPU ms ${JSON.stringify(s.cpuMs)}`);
+  console.log(`${mode}: ${r.ok ? "ok" : "FAILED (" + JSON.stringify(r.out) + ")"}, ready ${r.ms.ready} ms, first result ${r.ms.firstResult} ms${r.settledCleanly ? "" : " (NOT SETTLED: still in flight " + JSON.stringify(r.stuck) + ")"}`);
+  for (const [when, s] of [["by first result", r.atResult], ["settled", r.settled]])
+    console.log(`  ${when}: ${s.requests} requests finished, ${mb(s.wire)} wire, ${mb(s.decoded)} decoded` + (s.inFlight.requests ? `; ${s.inFlight.requests} still loading (${mb(s.inFlight.wireSoFar)} received)` : "") + `; CPU ms ${JSON.stringify(s.cpuMs)}`);
   if (r.repeat) {
     const p = r.repeat;
     console.log(`  repeat visit: ${p.ok ? "ok" : "FAILED"}, ready ${p.ms.ready} ms, first result ${p.ms.firstResult} ms; ${p.settled.requests} requests to the network (${p.settled.revalidated} revalidated, 304), ${mb(p.settled.wire)} wire, ${mb(p.settled.decoded)} decoded; CPU ms ${JSON.stringify(p.settled.cpuMs)}`);
