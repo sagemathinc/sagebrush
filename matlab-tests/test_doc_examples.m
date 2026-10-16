@@ -701,6 +701,18 @@ show(v);
 clear
 v = isequal([1 2], [1 2]);
 show(v);
+% strncmpi
+clear
+v = strncmpi('Window', 'windmill', 4);
+show(v);
+% regexpi
+clear
+v = regexpi('aB7 Ab8 ab9', 'ab\d', 'match');
+show(v);
+% newline
+clear
+v = double(newline);
+show(v);
 % num2str
 clear
 v = num2str(pi, 4);
@@ -752,6 +764,50 @@ show(v);
 % regexprep
 clear
 v = regexprep('abc123', '\d', '#');
+show(v);
+% cell
+clear
+v = cell(2, 1);
+show(v);
+% cellstr
+clear
+v = cellstr(['oak '; 'elm ']);
+show(v);
+% struct2cell
+clear
+v = struct2cell(struct('height', 4, 'width', 7));
+show(v);
+% rmfield
+clear
+v = rmfield(struct('x', 5, 'y', 9), 'x');
+show(v);
+% orderfields
+clear
+v = orderfields(struct('z', 4, 'a', 7));
+show(v);
+% getfield
+clear
+v = getfield(struct('count', 12), 'count');
+show(v);
+% setfield
+clear
+v = setfield(struct('count', 12), 'count', 15);
+show(v);
+% structfun
+clear
+v = structfun(@numel, struct('row', [2 4 6], 'column', [5; 9]));
+show(v);
+% feval
+clear
+v = feval(@sum, [2 4 6]);
+show(v);
+% func2str
+clear
+v = func2str(@hypot);
+show(v);
+% str2func
+clear
+v = feval(str2func('hypot'), 5, 12);
 show(v);
 % cellfun
 clear

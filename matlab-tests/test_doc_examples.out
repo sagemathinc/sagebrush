@@ -180,6 +180,9 @@ logical 1x3 [true false true]
 logical 1x3 [false true false]
 logical 1x3 [false true true]
 logical 1x1 true
+logical 1x1 true
+cell 1x3 {char 1x3 ['aB7'], char 1x3 ['Ab8'], char 1x3 ['ab9']}
+double 1x1 10
 char 1x5 ['3.142']
 double 1x1 6.5
 char 1x3 ['3-4']
@@ -193,6 +196,17 @@ char 1x3 ['abc']
 char 1x2 ['hi']
 logical 1x1 true
 char 1x6 ['abc###']
+cell 2x1 {double 0x0 [], double 0x0 []}
+cell 2x1 {char 1x3 ['oak'], char 1x3 ['elm']}
+cell 2x1 {double 1x1 4, double 1x1 7}
+struct {y=double 1x1 9}
+struct {a=double 1x1 7, z=double 1x1 4}
+double 1x1 12
+struct {count=double 1x1 15}
+double 2x1 [3;2]
+double 1x1 12
+char 1x5 ['hypot']
+double 1x1 13
 double 1x3 [2 3 0]
 double 1x4 [1 4 9 16]
 double 2x2 [1 2;3 4]
