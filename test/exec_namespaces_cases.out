@@ -28,3 +28,19 @@ False 5
 NameError name 'c' is not defined
 10 [10] [10]
 3
+'global x\nr=[x for _ in range(1)]' -> ('[20]', {'x': 10}, {'x': 20, 'r': [20]})
+'global x\nr={x for _ in range(1)}' -> ('{20}', {'x': 10}, {'x': 20, 'r': {20}})
+'global x\nr={x: 0 for _ in range(1)}' -> ('{20: 0}', {'x': 10}, {'x': 20})
+'global x\nr=list(x for _ in range(1))' -> ('[10]', {'x': 10}, {'x': 20, 'r': [10]})
+'def f():\n global x\n x=3\nf()\nr=x' -> ('3', {'x': 3}, {'x': 20, 'r': 3})
+'r=x\ndef f():\n global x\n x=1' -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+'x = 5\ndef f():\n global x\nr = x' -> ('5', {'x': 5}, {'x': 20, 'r': 5})
+'def f():\n global x\ndel x' -> ('None', {}, {'x': 20})
+'class C:\n global x\n x = 7\nr = x' -> ('7', {'x': 7}, {'x': 20, 'r': 7})
+'def f():\n global x\nr=[x for _ in range(1)]' -> ('[20]', {'x': 10}, {'x': 20, 'r': [20]})
+"sub = {'x': 40}\nexec('def f(): return x', None, sub)\nr = sub['f']()" -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+"sub = {'x': 40}\nexec('global x\\nx = 50', None, sub)\nr = x" -> ('20', {'x': 50}, {'x': 20, 'r': 20})
+"sub = {'x': 40}\nexec('r2 = x', None, sub)\nr = sub['r2']" -> ('40', {'x': 10}, {'x': 20, 'r': 40})
+"sub = {}\nexec('r2 = x', None, sub)\nr = sub['r2']" -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+"r = eval('x', None, {})" -> ('10', {'x': 10}, {'x': 20, 'r': 10})
+"exec('r = x')" -> ('20', {'x': 10}, {'x': 20, 'r': 20})

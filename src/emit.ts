@@ -129,8 +129,24 @@ export class Emitter {
   // and a function defined there sees only the globals.
   gns(id: string): string {
     let s = this.fn.scope;
+    const comp = s.kind === "comp" && !s.isGenerator;
     while (s.kind === "comp" && !s.isGenerator && s.parent !== null) s = s.parent;
-    return s.kind === "module" && !s.globals.has(id) ? "$g" : "$G";
+    if (s.kind !== "module") return "$G";
+    // (an inlined comprehension at the top level reads the top level's
+    // namespace even for a name declared global there, as CPython's,
+    // CORR-C0F-1; the top level itself uses the globals for a name
+    // declared global there or in any scope inside, CORR-C0F-2)
+    if (comp) return "$g";
+    return s.globals.has(id) || this.globalAnywhere().has(id) ? "$G" : "$g";
+  }
+  // the names some scope of this module declares global
+  private globalNames: Set<string> | null = null;
+  globalAnywhere(): Set<string> {
+    if (this.globalNames === null) {
+      this.globalNames = new Set();
+      for (const s of allScopes(this.top)) for (const n of s.globals) this.globalNames.add(n);
+    }
+    return this.globalNames;
   }
   loadRes(r: Resolution, id: string): string {
     switch (r.kind) {

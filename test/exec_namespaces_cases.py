@@ -51,3 +51,28 @@ print(f(), [x for _ in range(1)], list(x for _ in range(1)))
 g4 = {}
 exec("y = 3\ndef k(): return y\nr = k()", g4)
 print(g4['r'])
+# an inlined comprehension at the top level reads the top level's namespace
+# even for a global name; a global declared in any scope makes the top
+# level's name the globals'; exec and eval inside exec layer their locals
+# over the real globals (CORR-C0F-1, -2, -3)
+
+
+def t2(code, ev=None):
+    g = {'x': 10}
+    l = {'x': 20}
+    try:
+        exec(code, g, l)
+        r = eval(ev, g, l) if ev else None
+        return (repr(r), {k: v for k, v in g.items() if k != '__builtins__' and not callable(v)},
+                {k: v for k, v in l.items() if not callable(v) and not isinstance(v, dict)})
+    except Exception as e:
+        return type(e).__name__ + ': ' + str(e)
+
+
+for code, ev in [("global x\nr=[x for _ in range(1)]", "r"), ("global x\nr={x for _ in range(1)}", "r"), ("global x\nr={x: 0 for _ in range(1)}", "r"),
+                 ("global x\nr=list(x for _ in range(1))", "r"), ("def f():\n global x\n x=3\nf()\nr=x", "r"), ("r=x\ndef f():\n global x\n x=1", "r"),
+                 ("x = 5\ndef f():\n global x\nr = x", "r"), ("def f():\n global x\ndel x", None), ("class C:\n global x\n x = 7\nr = x", "r"),
+                 ("def f():\n global x\nr=[x for _ in range(1)]", "r"), ("sub = {'x': 40}\nexec('def f(): return x', None, sub)\nr = sub['f']()", "r"),
+                 ("sub = {'x': 40}\nexec('global x\\nx = 50', None, sub)\nr = x", "r"), ("sub = {'x': 40}\nexec('r2 = x', None, sub)\nr = sub['r2']", "r"),
+                 ("sub = {}\nexec('r2 = x', None, sub)\nr = sub['r2']", "r"), ("r = eval('x', None, {})", "r"), ("exec('r = x')", "r")]:
+    print(repr(code), '->', t2(code, ev))
