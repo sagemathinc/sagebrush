@@ -1428,8 +1428,8 @@ class PadicMatrix:
         return "\n".join("[" + " ".join(c.rjust(w) for c in r) + "]" for r in cells)
 
     def _latex_(self):
-        return "\\left(\\begin{array}{%s}%s\\end{array}\\right)" % (
-            "r" * self._ncols, " \\\\\n".join(" & ".join(x._latex_() for x in r) for r in self._rows))
+        import _sage_expr
+        return _sage_expr._latex_matrix(self._rows, self._ncols)
 
     def _index(self, ij):
         if not (isinstance(ij, tuple) and len(ij) == 2 and all(isinstance(k, int) or type(k).__name__ == "Integer" for k in ij)):
@@ -1727,8 +1727,9 @@ def padic_matrix(base, *args):
     are read boundedly (at most m n + 1 entries when the shape is given);
     entries are converted into K (integers, rationals, p-adic numbers of
     the same prime, as Sage converts them)."""
-    from _sage_matrix import _bounded_list, _bounded_rows
-    args = list(args)
+    from _sage_matrix import _bounded_list, _bounded_rows, _int_dims
+    # (an integral Rational dimension became the scalar entry: CORR-87F-1)
+    args = list(_int_dims(args))
     _int = lambda v: isinstance(v, int) or type(v).__name__ == "Integer"
     lim = _PADIC_MATRIX_MAX_ENTRIES
     if not args:

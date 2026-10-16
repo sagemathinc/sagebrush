@@ -388,7 +388,8 @@ class FFMatrix:
         return "\n".join("[" + " ".join(c.rjust(w[j]) for j, c in enumerate(r)) + "]" for r in cells)
 
     def _latex_(self):
-        return "\\left(\\begin{array}{%s}%s\\end{array}\\right)" % ("r" * self._ncols, " \\\\ ".join(" & ".join(repr(x) for x in r) for r in self._rows))
+        import _sage_expr
+        return _sage_expr._latex_matrix(self._rows, self._ncols)
 
     def __getitem__(self, ij):
         if isinstance(ij, tuple):
@@ -1170,6 +1171,9 @@ def matrix(base, *args, **kwds):
         return FFMatrix(base, [e[i * n:(i + 1) * n] for i in range(m)], n)
     c = base(entries)
     zero = base.zero()
+    if c != zero and m != n:
+        # (matrix(GF(5), 2, 3, 1) was a 2 x 3 "diagonal" matrix)
+        raise TypeError("nonzero scalar matrix must be square")
     return FFMatrix(base, [[c if i == j else zero for j in range(n)] for i in range(m)], n)
 
 
@@ -1354,10 +1358,29 @@ class FFVectorSpace:
 
 class _Basis(list):
     """A basis: a list, whose str (print) has one vector per line, as
-    Sage's sequences of basis vectors."""
+    Sage's sequences of basis vectors, and immutable, as Sage's.
+
+    EXAMPLES::
+
+        sage: B = (QQ^3).basis(); B[0] = B[1]
+        Traceback (most recent call last):
+        ...
+        ValueError: object is immutable; please change a copy instead.
+        sage: C = list(B); C[0] = C[1]; C
+        [(0, 1, 0), (0, 1, 0), (0, 0, 1)]
+    """
 
     def __str__(self):
         return "[\n" + ",\n".join(repr(v) for v in self) + "\n]"
+
+    def _immutable(self, *a, **k):
+        raise ValueError("object is immutable; please change a copy instead.")
+
+    __setitem__ = __delitem__ = __iadd__ = __imul__ = _immutable
+    append = extend = insert = pop = remove = sort = reverse = clear = _immutable
+
+    def is_immutable(self):
+        return True
 
 
 class FFSubspace(FFVectorSpace):

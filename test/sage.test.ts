@@ -51,3 +51,26 @@ test("ellipsis_range with 16,000 ranges is linear", () => {
   const out = cli("--sage", "-c", "import time\na = [0, Ellipsis, -1] + [1, 2, Ellipsis, 1]*16000\nt = time.perf_counter(); v = ellipsis_range(*a); t = time.perf_counter() - t\nprint(v == [1]*16000, len(v), t < 1.0 or t)");
   assert.equal(out, "True 16000 True\n");
 });
+
+// limits of the tutorial fixes (daybreak2's HARD-38C-1, HARD-862-1): ideal
+// generators convert by name in time linear in the rings' arities (adding
+// zero ideals over 24000 variables took 11 s), and a rational's square root
+// at a huge precision is refused before the integer square root (prec=10^8
+// ran for minutes in 480 MB)
+test("ideal conversion is linear in the arity; sqrt(prec) is admitted first", () => {
+  const t = Date.now();
+  const src = "import time\nS = PolynomialRing(QQ, 24000, 'x'); T = PolynomialRing(QQ, 24000, 'y')\nt = time.time(); K = S.ideal(S(0)) + T.ideal(T(0)); print(len(K.gens()), time.time() - t < 2)\n" +
+    "try: QQ(2).sqrt(prec=100000000)\nexcept NotImplementedError as e: print('refused', 'limit' in str(e))\nprint((2/1).sqrt(prec=60000) > 1)";
+  assert.equal(cli("--sage", "-c", src), "2 True\nrefused True\nTrue\n");
+  assert.ok(Date.now() - t < 30000, `took ${Date.now() - t} ms`);
+});
+
+test("divmod with a real number above 16384 bits is refused first, integral or not (HARD-F2B-1)", () => {
+  // (the cap came after the exact conversion and the integral fast path:
+  // divmod(1/1, RealField(2^20)(2)) gave (1/2, 0))
+  const src = "R = RealField(2^20)\nfor x in (R(2), R(1)/3, -R(2)):\n try:\n  print(divmod(1/1, x))\n except NotImplementedError as e:\n  print(e)\n";
+  const t = Date.now();
+  const line = "divmod with a real number of more than 16384 bits of precision is not implemented\n";
+  assert.equal(cli("--sage", "-c", src), line.repeat(3));
+  assert.ok(Date.now() - t < 20000);
+});
