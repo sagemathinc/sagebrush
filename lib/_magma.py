@@ -740,13 +740,23 @@ _NEST_MAX = 100
 # its parts, x := [x, x], copies to a tree of them) is refused before it
 # starts
 _OWN_CONTAINERS_MAX = 10 ** 5
+_OWN_RECORD_WEIGHT = 8
+
+
+def _is_copied(x):
+    """Whether _own copies x part by part (records too: HARD-319-1)."""
+    return isinstance(x, (MSeq, MSet, MTuple, MRec))
+
+
+def _copied_parts(v):
+    return v.items if isinstance(v, MSet) else v.vals.values() if isinstance(v, MRec) else v
 
 
 def _own_size(v, memo, depth=0):
     """How many containers a copy of v makes, counted once per shared
     part (memo, by identity), capped just past _OWN_CONTAINERS_MAX; one
     nested past _NEST_MAX counts as too many."""
-    if not isinstance(v, (MSeq, MSet, MTuple)):
+    if not _is_copied(v):
         return 0
     if depth >= _NEST_MAX:
         return 1  # (_own refuses it for its depth)
@@ -754,9 +764,12 @@ def _own_size(v, memo, depth=0):
     if got is not None:
         return got[1]
     memo[id(v)] = (v, _OWN_CONTAINERS_MAX + 1)  # (in progress: a cycle is too many)
-    n = 1
-    for x in (v.items if isinstance(v, MSet) else v):
-        if isinstance(x, (MSeq, MSet, MTuple)):
+    # (a record, with its fields' dictionary, costs several times a small
+    # sequence: it counts as _OWN_RECORD_WEIGHT, so that a refused copy
+    # still fits a 96 MB heap)
+    n = _OWN_RECORD_WEIGHT if isinstance(v, MRec) else 1
+    for x in _copied_parts(v):
+        if _is_copied(x):
             n += _own_size(x, memo, depth + 1)
             if n > _OWN_CONTAINERS_MAX:
                 break
@@ -772,12 +785,12 @@ def _own(v, name=None, depth=0):
         v._fail()
     if name is not None and hasattr(v, "_magma_assigned"):
         v._magma_assigned(name)
-    if isinstance(v, (MSeq, MSet, MTuple)) and depth >= _NEST_MAX:
+    if _is_copied(v) and depth >= _NEST_MAX:
         raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
-    if depth == 0 and isinstance(v, (MSeq, MSet, MTuple)) and any(isinstance(x, (MSeq, MSet, MTuple)) for x in (v.items if isinstance(v, MSet) else v)):
+    if depth == 0 and _is_copied(v) and any(_is_copied(x) for x in _copied_parts(v)):
         # (a value with containers in it: the size of its copy first)
         if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
-            raise MagmaError("a value of more than %d sequences, sets and tuples is not supported yet" % _OWN_CONTAINERS_MAX)
+            raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
     if isinstance(v, MSeq):
         return MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
     if isinstance(v, MSet):
@@ -789,7 +802,7 @@ def _own(v, name=None, depth=0):
     if isinstance(v, MTuple):
         return MTuple([_own(x, None, depth + 1) for x in v])
     if isinstance(v, MRec):
-        return v._copy()
+        return v._copy(depth)
     return v
 
 
@@ -1066,8 +1079,9 @@ class MRec:
             raise MagmaError("RHS value invalid for field '%s'" % name, ":=", False, pos)
         self.vals[name] = w
 
-    def _copy(self):
-        return MRec(self.fmt, {k: _own(v) for k, v in self.vals.items()})
+    def _copy(self, depth=0):
+        # (its fields one level deeper, for _own's depth bound: HARD-319-1)
+        return MRec(self.fmt, {k: _own(v, None, depth + 1) for k, v in self.vals.items()})
 
     def _str(self, indent):
         head = "rec<%s | " % _format_name(self.fmt)
