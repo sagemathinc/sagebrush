@@ -31,9 +31,11 @@ def _ellipsis(args, step, infinite):
     """Sage's semantics (its doctests are in sage-tests/test_language.sage):
     plain values are kept; at each Ellipsis the segment starts at the value
     before it, which is (1) the previous segment's endpoint, then shared and
-    not repeated if it was hit, or (2) without an explicit step, b in
-    `a, b, ..`, which sets the step to b - a, or (3) a lone start; later
-    segments inherit the step; an empty segment contributes nothing.
+    not repeated if it was hit, or (2) at the first Ellipsis only, without
+    an explicit step, b in `a, b, ..`, which sets the step to b - a, or (3)
+    a lone start; later segments inherit the step (so [1..3, 7, 10..13]
+    continues by 1 after 10, not by 10 - 7); an empty segment contributes
+    nothing.
     Returns (values, (start, step) of an infinite tail, or None)."""
     args = list(args)
     vals = [a for a in args if a is not Ellipsis]
@@ -45,6 +47,7 @@ def _ellipsis(args, step, infinite):
     out = []
     cur = 1 if step is None else step
     hit = False
+    first = True  # no Ellipsis processed yet (constant state: no rescan of the prefix)
     i = 0
     while i < n:
         if args[i] is not Ellipsis:
@@ -59,10 +62,11 @@ def _ellipsis(args, step, infinite):
         else:
             shared = False
             out.pop()  # start was appended as a plain value
-            if step is None and i >= 2 and (i < 3 or args[i - 3] is not Ellipsis):
+            if step is None and i >= 2 and first:
                 a = out.pop()
                 cur = start - a
                 start = a
+        first = False
         if i + 1 >= n:
             if not infinite:
                 raise IndexError("Ellipsis range must have an endpoint, use (n..) for infinite sequence.")
