@@ -1709,15 +1709,22 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
   const index = (v: any): any => {
     if (O.isPyInt(v)) return typeof v === "boolean" ? +v : v;
     if (typeof v !== "object" || v === null) return undefined;
-    const f = lookupDunder(v, "__index__");
+    const f = O.lookupSpecial(v, "__index__");
     if (f === undefined) return undefined;
     const r = f(v);
     if (O.isPyInt(r)) return typeof r === "boolean" ? +r : r;
     if (r instanceof PrimBox && isinstance(r, int)) return unbox(r);
     return { bad: r };
   };
-  if (typeof x === "object" && x !== null && lookupDunder(x, "__index__") !== undefined) {
-    const n = index(x);
+  if (typeof x === "object" && x !== null && O.lookupSpecial(x, "__index__") !== undefined) {
+    // (a TypeError from __index__ is "cannot convert", as in CPython)
+    let n: any;
+    try {
+      n = index(x);
+    } catch (e: any) {
+      if (isinstance(e, T.TypeError)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
+      throw e;
+    }
     if (n === undefined || (typeof n === "object" && "bad" in n)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
     return toBytes(n, undefined, undefined, array);
   }

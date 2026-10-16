@@ -682,3 +682,40 @@ _ba = bytearray(b"a")
 _ba.extend([_Idx(), 66])
 _ba.extend(iter([67]))
 print(_ba)
+# __index__ as any descriptor: a custom __get__, a property, a callable object
+class _GetDesc:
+    def __get__(self, obj, cls=None):
+        return lambda: 3
+
+
+class _ViaGet:
+    __index__ = _GetDesc()
+
+
+class _ViaProperty:
+    @property
+    def __index__(self):
+        return lambda: 2
+
+
+class _CallableIdx:
+    def __call__(self):
+        return 4
+
+
+class _RaisingCount:
+    def __index__(self):
+        raise TypeError("no count")
+
+
+class _ViaCallable:
+    __index__ = _CallableIdx()
+
+
+print(bytes(_ViaGet()), bytes([_ViaGet()]), bytearray(_ViaProperty()), bytes([_ViaProperty()]))
+print(bytes(_ViaCallable()), bytes([_ViaCallable()]))
+for _f in (lambda: bytes(_RaisingCount()),):
+    try:
+        print(_f())
+    except TypeError as e:
+        print("TypeError", e)
