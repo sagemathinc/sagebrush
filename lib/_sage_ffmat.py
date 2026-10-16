@@ -36,6 +36,136 @@ def _field(base):
     return isinstance(base, _ff.FiniteField_ext) or getattr(base, "_is_generic_field", False) or (isinstance(base, _ff.IntegerModRing_) and base.is_field())
 
 
+# ------------------------------------------------------------------ memory
+
+# One matrix may use at most this share of the JavaScript heap the process
+# can grow to (sys._sagebrush_heap_limit, from the host).  The admitted
+# matrix, the operands of the operation that made it and that operation's
+# working copies then fit together: a 512 x 512 matrix over AA ran V8 out
+# of memory in a 96 MiB heap instead of being refused (daybreak2's
+# HARD-F4E-1).  _MAX_ENTRIES stays the absolute ceiling.
+_HEAP_SHARE = 8
+
+
+def _heap_limit():
+    import sys
+    n = getattr(sys, "_sagebrush_heap_limit", None)
+    # (CPython, or a host that cannot say: a nominal 1 GiB)
+    return int(n) if n else 1 << 30
+
+
+def _entry_cost(base):
+    """A conservative estimate of the heap one entry over base takes, in
+    bytes, with its share of the working copies of an elementwise
+    operation: measured in a 96 MiB heap as the largest n for which an n x
+    n matrix of distinct entries and its sum with itself fit."""
+    # (bytes: about 39 * 10^6 / n^2 for the largest such n, so that the
+    # budget admits 0.8 n there; measured on sagebrush-3, Oct 16 2026: GF(p)
+    # 512, GF(4) 314, GF(2^8) 245, RR 362, RealField(1000) 285, CDF 256,
+    # ComplexField(1000) 221, QQ(sqrt2) 232, degree 4 199, degree 8 161,
+    # AA with rational entries 210, with sqrt(2) 167, with 2^(1/5) + sqrt(3)
+    # 162, QQbar 185; GF(2^127 - 1) 484, Zmod(2^400 + 1) 358, GF(2^16) 268,
+    # GF(2^32) 221, GF(1009^6) 275)
+    import _sage_nf
+    import _sage_qqbar as qb
+    import _sage_rdf
+    if isinstance(base, _ff.IntegerModRing_):
+        return 150 + 2 * int(base.order()).bit_length() // 5
+    if isinstance(base, _ff.FiniteField_ext):
+        k = int(base.degree())
+        c = 450 + 12 * k + 2 * int(base.characteristic()).bit_length() * k // 5
+        return c if c > 660 else 660
+    if base is _sage_rdf.RDF:
+        return 300
+    if base is _sage_rdf.CDF:
+        return 610
+    if isinstance(base, _sage_nf.NumberField_absolute):
+        return 470 + 130 * int(base.degree())
+    if base is qb.QQbar or base is qb.AA:
+        return 1500
+    prec = getattr(base, "precision", None)
+    if callable(prec):
+        # (RealField(p) and ComplexField(p), RR and CC among them)
+        bits = int(prec())
+        return (590 + bits // 4) if "Complex" in type(base).__name__ else (290 + bits // 5)
+    # (another field: the costliest above)
+    return 1500
+
+
+def _admit_size(base, m, n, factor=1):
+    """(m, n) after checking that an m x n matrix over base, times factor
+    for an operation's larger working matrix, fits this process's budget
+    for one matrix: NotImplementedError, before anything is built, if
+    not."""
+    from _sage_matrix import _shape
+    m, n = _shape(m, n)
+    need = m * n * factor * _entry_cost(base)
+    limit = _heap_limit()
+    if need > limit // _HEAP_SHARE:
+        mib = 1 << 20
+        raise NotImplementedError("a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+            m, n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+    return m, n
+
+
+def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
+    """The rows of a matrix over base, each a list (_read_rows; loose:
+    _bounded_rows, whose rows may be vectors or single entries), read no
+    further than the budget for one matrix allows.  When the rows are
+    lists or tuples their lengths are known without reading anything, so
+    Sage's structural error for ragged rows comes before the budget (astra's
+    CORR-21A-1); other rows (an iterator, vectors) are counted as they are
+    read, so that an iterator cannot make more than the budget first
+    (daybreak2's HARD-21A-1).  structural=False: always counted as read,
+    with no check of the lengths (a subspace's generators)."""
+    from _sage_matrix import _read_rows, _bounded_rows, _MAX_ENTRIES
+    reader = _bounded_rows if loose else _read_rows
+    if structural and type(rows) in (list, tuple) and len(rows) <= _MAX_ENTRIES and all(type(r) in (list, tuple) for r in rows):
+        n = ncols if ncols is not None else (len(rows[0]) if rows else 0)
+        for r in rows:
+            if len(r) != n:
+                raise ValueError("the rows of a matrix must all have %d entries" % n)
+        if len(rows) * n <= _MAX_ENTRIES:
+            _admit_size(base, len(rows), n)
+        return reader(rows)
+    # (the rows as read and the matrix converted from them live together:
+    # factor 2.  The readers above take up to limit rows before counting
+    # their entries, so 83887 rows of 512 floats were read for a budget of
+    # 83886 entries and ran V8 out of memory: daybreak2's HARD-5B6-1.  Here
+    # each row is counted as it is read, an empty row as one entry.)
+    cap = _heap_limit() // _HEAP_SHARE // (2 * _entry_cost(base))
+    if cap >= _MAX_ENTRIES:
+        return reader(rows)
+    from _sage_matrix import _bounded_list
+    if isinstance(rows, (str, bytes)):
+        raise TypeError("%r is not a list of rows" % (rows,))
+    def refuse():
+        mib, limit = 1 << 20, _heap_limit()
+        return NotImplementedError("a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+            base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+    out, used = [], 0
+    for r in iter(rows):
+        if loose and not (isinstance(r, (list, tuple)) or (hasattr(r, "__iter__") and not isinstance(r, str)) or type(r).__name__ in ("Vector", "FFVector")):
+            r = [r]
+        elif isinstance(r, str):
+            raise TypeError("a row of a matrix must be a list, not a string")
+        else:
+            try:
+                r = _bounded_list(r, cap - used, total=cap)
+            except ValueError as e:
+                # (the row itself is past the budget: refused at once, the
+                # row, a generator perhaps, not touched again: astra's
+                # CORR-03D-1)
+                if str(e).startswith("more than %d " % cap):
+                    raise refuse()
+                raise
+        used += len(r) or 1
+        if used > cap:
+            raise refuse()
+        out.append(r)
+    return out
+
+
 # ------------------------------------------------------------------ vectors
 
 def _strict_base(B):
@@ -379,13 +509,13 @@ class FFMatrix:
     __slots__ = ("_base", "_rows", "_ncols")
 
     def __init__(self, base, rows, ncols=None):
-        from _sage_matrix import _shape, _read_rows
-        # read boundedly and check the shape before converting anything
-        rows = _read_rows(rows)
+        # read boundedly, within the heap budget, and check the shape and
+        # the heap its entries take before converting anything
+        rows = _admitted_rows(base, rows, ncols)
         ncols = ncols if ncols is not None else (len(rows[0]) if rows else 0)
-        _shape(len(rows), ncols)
         if any(len(r) != ncols for r in rows):
             raise ValueError("the rows of a matrix must all have %d entries" % ncols)
+        _admit_size(base, len(rows), ncols)
         self._base = base
         self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols
@@ -639,6 +769,7 @@ class FFMatrix:
             return None
         c, zero = F(o), F.zero()
         n, m = len(self._rows), self._ncols
+        _admit_size(F, n, m)  # (the result is over F, whose entries can cost more)
         if op in "+-":
             if n != m and not c == zero:
                 op_parent = o.parent() if callable(getattr(o, "parent", None)) else type(o)
@@ -712,8 +843,7 @@ class FFMatrix:
         if isinstance(o, FFMatrix):
             if self._ncols != o.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), o.parent()))
-            from _sage_matrix import _shape
-            _shape(self.nrows(), o.ncols())  # (the product's shape before it is built)
+            _admit_size(self._base, self.nrows(), o.ncols())  # (the product's size before it is built)
             cols = o.columns()
             z = self._base.zero()
             out = []
@@ -867,6 +997,7 @@ class FFMatrix:
         if getattr(self._base, "_numeric", False):
             import _sage_rdf
             return _sage_rdf._inverse(self)
+        _admit_size(self._base, n, n, 3)  # ([self | I] and its echelon form, n x 2n)
         one, zero = self._base.one(), self._base.zero()
         aug = [r + [one if i == j else zero for j in range(n)] for i, r in enumerate(self._rows)]
         m, piv, d = _echelon(aug, self._base, 2 * n)
@@ -878,6 +1009,9 @@ class FFMatrix:
         """A basis of {x : self x = 0} (echelonized), as lists."""
         m, piv, d = _echelon(self._rows, self._base, self._ncols)
         free = [j for j in range(self._ncols) if j not in piv]
+        # (a kernel basis can be bigger than the matrix: 1 x n has n - 1
+        # vectors of n entries)
+        _admit_size(self._base, len(free), self._ncols)
         one, zero = self._base.one(), self._base.zero()
         basis = []
         for f in free:
@@ -966,8 +1100,7 @@ class FFMatrix:
             import _sage_rdf
             return _sage_rdf._solve_right(self, b)
         if isinstance(b, FFMatrix):
-            from _sage_matrix import _shape
-            _shape(self._ncols, b.ncols())
+            _admit_size(self._base, self._ncols, b.ncols())
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
         from _sage_matrix import _bounded_list
@@ -1115,12 +1248,11 @@ class FFMatrix:
             sage: matrix(GF(2), [[1, 0]]).augment(matrix(GF(2), [[1]]))
             [1 0 1]
         """
-        from _sage_matrix import _shape
         if isinstance(other, FFVector):
             other = FFMatrix(self._base, [[x] for x in other])
         if other.nrows() != self.nrows():
             raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), other.nrows()))
-        _shape(self.nrows(), self._ncols + other.ncols())
+        _admit_size(self._base, self.nrows(), self._ncols + other.ncols())
         return FFMatrix(self._base, [r + s for r, s in zip(self._rows, other._rows)], self._ncols + other.ncols())
 
     def stack(self, other):
@@ -1132,12 +1264,11 @@ class FFMatrix:
             [1 0]
             [0 1]
         """
-        from _sage_matrix import _shape
         if isinstance(other, FFVector):
             other = FFMatrix(self._base, [other._e])
         if other.ncols() != self._ncols:
             raise TypeError("number of columns must be the same, %d != %d" % (self._ncols, other.ncols()))
-        _shape(self.nrows() + other.nrows(), self._ncols)
+        _admit_size(self._base, self.nrows() + other.nrows(), self._ncols)
         return FFMatrix(self._base, self._rows + other._rows, self._ncols)
 
     def change_ring(self, R):
@@ -1148,6 +1279,8 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 6]]).change_ring(ZZ)
             [1 6]
         """
+        if _is_ff(R):
+            _admit_size(R, len(self._rows), self._ncols)  # (before converting into R)
         return _sa().matrix(R, [[R(x.lift()) if hasattr(x, "lift") and R in (_sa().ZZ, _sa().QQ) else R(x) for x in r] for r in self._rows])
 
     def lift(self):
@@ -1287,6 +1420,7 @@ class FFMatrixSpace:
             sage: MatrixSpace(GF(2), 3, 4).random_element().parent()
             Full MatrixSpace of 3 by 4 dense matrices over Finite Field of size 2
         """
+        _admit_size(self._base, self._nrows, self._ncols)
         return FFMatrix(self._base, [[self._base.random_element() for _ in range(self._ncols)] for _ in range(self._nrows)], self._ncols)
 
     def cardinality(self):
@@ -1335,11 +1469,13 @@ def matrix(base, *args, **kwds):
         rows = args[0]
         if isinstance(rows, FFMatrix):
             return FFMatrix(base, rows._rows, rows.ncols())
-        rows = _bounded_rows(rows)
+        rows = _admitted_rows(base, rows, loose=True)
         return FFMatrix(base, rows, len(rows[0]) if rows else 0)
     if len(args) == 2 and isinstance(args[1], (list, tuple)) and args[1] and isinstance(args[1][0], (list, tuple)):
         m = _dim(args[0])
-        rows = _bounded_rows(args[1])
+        if type(args[1]) in (list, tuple) and len(args[1]) != m:
+            raise ValueError("entries do not fill a matrix with %d rows" % m)
+        rows = _admitted_rows(base, args[1], loose=True)
         if len(rows) != m:
             raise ValueError("entries do not fill a matrix with %d rows" % m)
         return FFMatrix(base, rows, len(rows[0]))
@@ -1347,9 +1483,25 @@ def matrix(base, *args, **kwds):
     n = _dim(args[1], "columns") if len(args) > 1 and not isinstance(args[1], (list, tuple, range)) else m
     m, n = _shape(m, n)
     entries = args[2] if len(args) > 2 else (args[1] if len(args) == 2 and isinstance(args[1], (list, tuple, range)) else 0)
+    if type(entries) in (list, tuple, range):
+        # (the length is known without reading: Sage's errors for a wrong
+        # count or ragged rows come before the heap budget, astra's
+        # CORR-21A-1)
+        if type(entries) is not range and entries and isinstance(entries[0], (list, tuple)):
+            # (as many rows as declared, each of n entries: matrix(GF(7), 1,
+            # 1, [[1], [2]]) was a 2 x 1 matrix, astra's CORR-5B6-1, and
+            # too few rows were accepted before)
+            if len(entries) != m:
+                raise ValueError("entries do not fill a matrix with %d rows" % m)
+            return FFMatrix(base, _admitted_rows(base, entries, n, loose=True), n)
+        if len(entries) != m * n:
+            raise ValueError("entries has the wrong length")
     if isinstance(entries, (list, tuple, range)):
+        _admit_size(base, m, n)
         e = _bounded_list(entries, max(m * n, m))
         if e and isinstance(e[0], (list, tuple)):
+            if len(e) != m:
+                raise ValueError("entries do not fill a matrix with %d rows" % m)
             return FFMatrix(base, _bounded_rows(e, max(m * n, m)), n)
         if len(e) != m * n:
             raise ValueError("entries has the wrong length")
@@ -1359,6 +1511,7 @@ def matrix(base, *args, **kwds):
     if c != zero and m != n:
         # (matrix(GF(5), 2, 3, 1) was a 2 x 3 "diagonal" matrix)
         raise TypeError("nonzero scalar matrix must be square")
+    _admit_size(base, m, n)
     return FFMatrix(base, [[c if i == j else zero for j in range(n)] for i in range(m)], n)
 
 
@@ -1468,8 +1621,7 @@ class FFVectorSpace:
             (0, 1)
             ]
         """
-        from _sage_matrix import _shape
-        _shape(self._n, self._n)  # (VectorSpace(GF(2), 5000).basis(): 2.5 10^7 entries)
+        _admit_size(self._base, self._n, self._n)  # (VectorSpace(GF(2), 5000).basis(): 2.5 10^7 entries)
         one, zero = self._base.one(), self._base.zero()
         return _Basis([FFVector(self._base, [one if i == j else zero for j in range(self._n)]) for i in range(self._n)])
 
@@ -1495,8 +1647,7 @@ class FFVectorSpace:
             [1 0 0 0 0 1 1 0]
             [0 1 0 0 0 1 1 0]
         """
-        from _sage_matrix import _bounded_rows
-        return FFSubspace(self._base, self._n, _bounded_rows(gens))
+        return FFSubspace(self._base, self._n, _admitted_rows(self._base, gens, loose=True, structural=False))
 
     span = subspace
 
@@ -1582,6 +1733,9 @@ class FFSubspace(FFVectorSpace):
     def __init__(self, base, n, gens):
         self._base, self._n = base, n
         if gens:
+            # (the generators converted, and their echelon form, before
+            # either is built: daybreak2's HARD-21A-1)
+            _admit_size(base, len(gens), n, 2)
             m, piv, d = _echelon([[base(x) for x in g] for g in gens], base, n)
             self._basis = [r for r in m if any(r)]
         else:

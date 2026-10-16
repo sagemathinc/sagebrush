@@ -233,6 +233,18 @@ export function importStar(m: any, g: any) {
 
 // ------------------------------------------------------------------ sys
 
+function heapLimit(): number {
+  const g: any = globalThis;
+  try {
+    const n = g.process?.getBuiltinModule?.("node:v8")?.getHeapStatistics?.().heap_size_limit;
+    if (typeof n === "number" && n > 0) return n;
+  } catch {
+    // (no v8 module: not Node)
+  }
+  const b = g.performance?.memory?.jsHeapSizeLimit;
+  return typeof b === "number" && b > 0 ? b : 2 ** 30;
+}
+
 newBuiltinModule("sys", (m) => {
   m.argv = [];
   m.version = "3.14.0 (pyjs-spike)";
@@ -245,6 +257,11 @@ newBuiltinModule("sys", (m) => {
   m.maxunicode = 0x10ffff;
   m.byteorder = "little";
   m.platform = process.platform === "win32" ? "win32" : process.platform;
+  // the JavaScript heap this process can grow to, in bytes, for size
+  // budgets that must scale with it (a matrix over a field is refused
+  // before it is built, not by the heap running out): V8's limit under
+  // Node, Chrome's in a browser, a nominal 1 GiB when the host cannot say
+  m._sagebrush_heap_limit = heapLimit();
   sysRef.m = m;
   m.stdout = stdout;
   m.stderr = stderr;

@@ -939,8 +939,12 @@ def _elt(base, x):
 
 def _from_array(base, a):
     import _sage_ffmat
-    from _sage_matrix import _shape
-    _shape(a.shape[0] if len(a.shape) else 0, a.shape[1] if len(a.shape) > 1 else 0)
+    # (the result's size and heap, over the complex field when the array is
+    # complex, before tolist() or any element is made: daybreak2's
+    # HARD-21A-1)
+    cx = getattr(getattr(a, "dtype", None), "kind", "c") == "c"
+    _sage_ffmat._admit_size(base if _is_complex_base(base) or not cx else (CDF if base is RDF else _sa().CC),
+                            a.shape[0] if len(a.shape) else 0, a.shape[1] if len(a.shape) > 1 else 0)
     rows = [[_elt(base, x) for x in r] for r in a.tolist()]
     b = base
     if not _is_complex_base(base) and any(_is_complex_base(x.parent()) for r in rows for x in r if hasattr(x, "parent")):
