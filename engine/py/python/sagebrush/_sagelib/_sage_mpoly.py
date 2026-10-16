@@ -1331,11 +1331,7 @@ class MPolynomial:
         """
         R = self._ring
         if isinstance(degrees, MPolynomial):
-            # a monomial of another parent is refused, as in Sage (its
-            # exponents were taken positionally: MUL-F6)
-            if degrees._ring != R:
-                raise TypeError("The input degrees must be a dictionary of variables to exponents.")
-            e = degrees._leading()[0]
+            e = _exponents_in(R, degrees, "The input degrees must be a dictionary of variables to exponents.")
             fixed = {i: e[i] for i in range(R._n) if e[i]}
         elif isinstance(degrees, dict):
             fixed = {R._var_index(k): int(v) for k, v in degrees.items()}
@@ -1361,9 +1357,8 @@ class MPolynomial:
         dom = self._ring._dom
         if not isinstance(mon, MPolynomial):
             raise TypeError("Argument 'mon' has incorrect type (expected a multivariate polynomial, got %s)" % type(mon).__name__)
-        if mon._ring != self._ring:
-            raise TypeError("mon must have same parent as self.")  # (MUL-F6)
-        return dom._out(self._d.get(mon._leading()[0], dom.zero))
+        e = _exponents_in(self._ring, mon, "mon must have same parent as self.")
+        return dom._out(self._d.get(e, dom.zero))
 
     # ---- printing
     def __repr__(self):
@@ -2081,6 +2076,32 @@ def _from_bytes(R, b):
     return p
 
 
+def _unique_names(R):
+    return len(set(R._names)) == len(R._names)
+
+
+def _exponents_in(R, m, msg):
+    """The exponent tuple, in R's variables, of m's leading monomial.  A
+    monomial of another ring is read by variable name, never by position
+    (R2-MUL-F6: in QQ['y,x'], x is coordinate 1, but it is R's x); one with
+    a variable R does not have raises TypeError(msg)."""
+    e = m._leading()[0]
+    S = m._ring
+    if S is R or S._names == R._names:
+        return e
+    if not (_unique_names(S) and _unique_names(R)):
+        # a name that occurs twice cannot say which variable it is
+        # (CORR-F61-1: a^2*b^3 in QQ['x,x'] read as x^3)
+        raise TypeError(msg)
+    t = [0] * R._n
+    for i, k in enumerate(e):
+        if k:
+            if S._names[i] not in R._names:
+                raise TypeError(msg)
+            t[R._names.index(S._names[i])] = k
+    return tuple(t)
+
+
 def _var_index(R, v):
     if isinstance(v, MPolynomial):
         if len(v._d) == 1:
@@ -2090,9 +2111,10 @@ def _var_index(R, v):
                 if v._ring is R or v._ring._names == R._names:
                     return i
                 # a variable of another parent: by its name (the second
-                # review's R2-MUL-F6: y, x's x read as R's coordinate 1)
+                # review's R2-MUL-F6: y, x's x read as R's coordinate 1),
+                # unless a name occurs twice in either ring (CORR-F61-1)
                 name = v._ring._names[i]
-                if name in R._names:
+                if name in R._names and _unique_names(R) and _unique_names(v._ring):
                     return R._names.index(name)
                 raise ValueError("%r is not a variable of %r" % (v, R))
         raise ValueError("%r is not a variable" % (v,))
