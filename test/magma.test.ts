@@ -280,12 +280,31 @@ test("a copy of a value that shares its parts is admitted before it is made: x :
   const t0 = Date.now();
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input: "x := 1; for i in [1..40] do x := [x, x]; end for;\n1;\n", encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
-  assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 100000 sequences, sets and tuples is not supported yet/);
+  assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 100000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
   assert.match(r.stdout, /\n1\n$/);
   // (a value of 50000 sequences is copied as before; at the default heap,
   // since each copy of it costs tens of megabytes)
   const c = spawnSync(process.execPath, [cli, "--magma"], { input: "y := [ [i, i^2] : i in [1..50000] ]; z := y; #z;\n", encoding: "utf8", timeout: 60000 });
   assert.equal(c.stdout, "50000\n", c.stderr);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("records nested deep or sharing their parts are bounded when copied too (HARD-319-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], {
+    input: "R := recformat< a, b >;\nx := 1; for i in [1..5000] do x := rec< R | a := x >; end for;\ny := 1; for i in [1..40] do y := rec< R | a := y, b := y >; end for;\nw := rec< R | a := [rec< R | a := 1 >] >; v := w; v`a[1]`a;\n",
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /RecursionError|Traceback/);
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.match(flat, /a value nested more than 100 deep is not supported yet/);
+  assert.match(flat, /a value of more than 100000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
+  assert.match(r.stdout, /\n1\n$/);
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
