@@ -107,3 +107,5 @@ latex((1/3*I + 1/2)/(x^2 + 1)) = \frac{2 i + 3}{6 \, {\left(x^{2} + 1\right)}}
 latex(3/2/(x - y)^2) = \frac{3}{2 \, {\left(x - y\right)}^{2}}
 latex(1/2*I/(x + 1)) = \frac{i}{2 \, {\left(x + 1\right)}}
 parts of a float subclass = (3.0, True, 3.0, 0.0)
+float subclasses' parts are float()'s = (2.0, 2.0, 0.0, 9.0, 9.0, 0.0, 2.0)
+RDF parts = (2.0, Real Double Field, Real Double Field, 0.0, Real Double Field)

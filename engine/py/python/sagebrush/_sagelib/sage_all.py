@@ -2320,8 +2320,26 @@ def _part(z, name):
     if isinstance(z, RealNumber):
         # an element of RR: itself, and the exact 0
         return z if name == "real" else Integer(0)
+    if _plain_float_subclass(z):
+        # as Sage: the parts of float(z) (__float__ honoured), not the
+        # subclass's own real/imag
+        f = _float_of(z)
+        return f if name == "real" else 0.0
     p = getattr(z, name)
     return p() if callable(p) else p
+
+
+def _float_of(z):
+    """float(z) for a float subclass, through its __float__ (called
+    explicitly: the browser runtime's float() skips an override on a float
+    subclass)."""
+    return float.__float__(type(z).__float__(z))
+
+
+def _plain_float_subclass(z):
+    """A float subclass other than RR's and RDF's elements."""
+    from _sage_rdf import RealDoubleElement
+    return isinstance(z, float) and type(z) is not float and not isinstance(z, RealDoubleElement)
 
 
 def real_part(z):
@@ -2364,9 +2382,11 @@ def conjugate(z):
     """
     from _sage_lang import RealNumber
     if isinstance(z, RealNumber):
-        # an element of RR: itself, not float's conjugate (a plain float);
-        # other float subclasses get float's, as Sage
+        # an element of RR: itself, not float's conjugate (a plain float)
         return z
+    if _plain_float_subclass(z):
+        # other float subclasses: float(z), as Sage (not their conjugate)
+        return _float_of(z)
     return z.conjugate()
 
 

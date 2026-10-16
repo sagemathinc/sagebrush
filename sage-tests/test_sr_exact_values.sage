@@ -66,3 +66,13 @@ for e in [(3/2-I/2)/(x+1), 1/2/(x+1), (3/2-I/2)/((x+1)*(y+2)), 1/(2*(x+1)^2), (1
 class _F(float):
     __add__ = lambda self, o: 999
 t("parts of a float subclass", lambda: (conjugate(_F(2)) + 1, type(conjugate(_F(2))) is float, real(_F(2)) + 1, imag(_F(2))))
+class _F2(float):
+    conjugate = lambda self: 17
+    real = property(lambda self: 18)
+    imag = property(lambda self: 19)
+class _G2(float):
+    def __float__(self): return float(9)
+class _H2(float):
+    def conjugate(self): raise ValueError("no")
+t("float subclasses' parts are float()'s", lambda: (conjugate(_F2(2)), real(_F2(2)), imag(_F2(2)), conjugate(_G2(2)), real(_G2(2)), imag(_G2(2)), conjugate(_H2(2))))
+t("RDF parts", lambda: (conjugate(RDF(2)), conjugate(RDF(2)).parent(), real(RDF(2)).parent(), imag(RDF(2)), imag(RDF(2)).parent()))
