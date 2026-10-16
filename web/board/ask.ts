@@ -80,7 +80,7 @@ export function answerProblem(a: DocAsk, ans: unknown): string | null {
 /** Whether a question has an answer (a check question's empty list is one:
  * none chosen), or a note in the reader's own words that is not only spaces
  * (William's rule: any question can be answered in words). */
-export const answered = (a: { answer?: unknown; note?: string }) => a.answer !== undefined || !!a.note?.trim();
+export const answered = (a: { answer?: unknown; note?: unknown }) => a.answer !== undefined || (typeof a.note === "string" && a.note.trim() !== "");
 
 export interface AskProblem {
   level: "error" | "warning";
@@ -204,7 +204,9 @@ export function submissionProblem(d: BoardDoc, m: any): string | null {
     if (typeof notes[k] !== "string" || notes[k].length > ASK_LIMITS.text) return `the note to ${JSON.stringify(k.slice(0, 60))} is not a string of at most ${ASK_LIMITS.text} characters`;
   }
   // (a required question: answered, or said in words)
-  for (const a of asks.values()) if (a.required && !answered({ answer: Object.prototype.hasOwnProperty.call(m.answers, a.id) ? m.answers[a.id] : undefined, note: notes[a.id] })) return `the required question ${JSON.stringify(a.id.slice(0, 60))} is not answered`;
+  // (each its own: a question named constructor or __proto__ reads nothing a plain object inherits, CORR-299-1)
+  const own = (o: object, k: string) => (Object.prototype.hasOwnProperty.call(o, k) ? (o as any)[k] : undefined);
+  for (const a of asks.values()) if (a.required && !answered({ answer: own(m.answers, a.id), note: own(notes, a.id) })) return `the required question ${JSON.stringify(a.id.slice(0, 60))} is not answered`;
   return null;
 }
 
