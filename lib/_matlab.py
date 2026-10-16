@@ -7434,6 +7434,17 @@ def strcat_(*args):
             vs = [p[k] if len(p) > 1 else p[0] for p in parts]
             out.append(None if None in vs else "".join(vs))
         return _strarr(out, shape if shape is not None else (1, 1))
+    if any(type(a) is Char and _dims(a)[0] > 1 for a in args):
+        # (character matrices: each row concatenated with the others' same row; MATLAB
+        # strips trailing whitespace, which would leave rows of different lengths, so a
+        # row ending in whitespace, or a different row count, is refused)
+        rows = [a.rows() if type(a) is Char else None for a in args]
+        if any(r is None for r in rows) or len({len(r) for r in rows}) != 1:
+            raise _err("strcat: character arrays must have the same number of rows.")
+        ws = " \t\n\r\f\v\x00"
+        if any(r and r[-1] in ws for rs in rows for r in rs):
+            raise _err("strcat: rows of a character array that end in whitespace are not supported.")
+        return _pad_rows(["".join(rs[i] for rs in rows) for i in range(len(rows[0]))])
     s = ""
     for a in args:
         if type(a) is Char:
@@ -7451,25 +7462,47 @@ def _cmp_text(a, b, f, same_size=False):
             return list(v.a), v.shape
         if type(v) is Char:
             if _dims(v)[0] > 1:
-                return [None], (1, 1)
+                # (a character matrix against a cell or string array: its rows, as a
+                # column, exactly as stored, padding blanks included, as MATLAB does)
+                rows = v.rows()
+                return rows, (len(rows), 1)
             return [v.text()], None
         if type(v) is Str:
             return [v.s], None
         return [None], None
+    multi = [type(v) is Char and _dims(v)[0] > 1 for v in (a, b)]
+    if any(multi):
+        if type(a) is Char and type(b) is Char:
+            # (two character arrays: compared whole, as before; a prefix of a matrix is refused)
+            if not same_size:
+                raise _err("Comparing the first characters of a character matrix is not supported.")
+            return _dims(a) == _dims(b) and f(a.text(), b.text())
+        other = b if multi[0] else a
+        if type(other) is not Cell and type(other) is not StrArr:
+            raise _err("Comparing a character matrix with this argument is not supported.")
     A, sa = items(a)
     B, sb = items(b)
     if sa is None and sb is None:
         if same_size and type(a) is Char and type(b) is Char and _dims(a) != _dims(b) and not (_numel(a) == 0 and _numel(b) == 0):
             return False
         return A[0] is not None and B[0] is not None and f(A[0], B[0])
-    if sa is None:
-        A = A * len(B)
-        sa = sb
-    if sb is None:
-        B = B * len(A)
-    if len(A) != len(B):
+    # (a text scalar, or a one-element cell or string array, against each element of the
+    # other; else both the same size)
+    def key(d):
+        d = [int(x) for x in d]
+        while len(d) > 2 and d[-1] == 1:
+            d.pop()
+        return tuple(d)
+    one_a, one_b = sa is None or len(A) == 1, sb is None or len(B) == 1
+    if not one_a and not one_b and key(sa) != key(sb):
         raise _err("Inputs must be the same size or either one can be a scalar.")
-    return _box(np.array([x is not None and y is not None and f(x, y) for x, y in zip(A, B)], dtype=bool).reshape(_stored(sa)))
+    if one_a and not one_b:
+        A, shape = A * len(B), sb
+    elif one_b and not one_a:
+        B, shape = B * len(A), sa
+    else:
+        shape = sa if sa is not None else sb
+    return _box(np.array([x is not None and y is not None and f(x, y) for x, y in zip(A, B)], dtype=bool).reshape(_stored(shape)))
 
 
 @_bs("strcmp")
@@ -7484,14 +7517,16 @@ def strcmpi_(a, b):
 
 @_bs("strncmp")
 def strncmp_(a, b, n):
-    k = _int_arg(n)
-    return _cmp_text(a, b, lambda x, y: len(x) >= k and len(y) >= k and x[:k] == y[:k])
+    # (the first n characters, or as many as there are: equal text shorter than n is
+    # equal; a negative n counts as zero, as MATLAB's page says)
+    k = max(0, _int_arg(n))
+    return _cmp_text(a, b, lambda x, y: x[:k] == y[:k])
 
 
 @_bs("strncmpi")
 def strncmpi_(a, b, n):
-    k = _int_arg(n)
-    return _cmp_text(a, b, lambda x, y: len(x) >= k and len(y) >= k and x[:k].lower() == y[:k].lower())
+    k = max(0, _int_arg(n))
+    return _cmp_text(a, b, lambda x, y: x[:k].lower() == y[:k].lower())
 
 
 def _strrep_text(t, o, nw):
@@ -7738,13 +7773,27 @@ def _regexp(nargout, s, pat, opts, flags):
     def row(vals):
         return Cell(vals, (1, len(vals)))
 
+    # (MATLAB's pages don't say what a pattern without capturing groups gives as tokens,
+    # so that is refused rather than guessed; nor where an unmatched group's extent goes)
+    def no_groups(w):
+        if rx.groups == 0:
+            raise _err("regexp: '%s' of a pattern without capturing groups is not supported." % ("tokenExtents" if w == "tokenextents" else w))
+
     def tokens(m):
-        g = m.groups()
-        if not g:
-            return row([Char(m.group(0))])
-        return row([Char(x if x is not None else "") for x in g])
+        return row([Char(x if x is not None else "") for x in m.groups()])
+
+    def extents(m):
+        n = rx.groups
+        e = np.zeros((2, n))
+        for i in range(n):
+            if m.start(i + 1) < 0:
+                raise _err("regexp: 'tokenExtents' of a token that did not match is not supported.")
+            e[0, i], e[1, i] = m.start(i + 1) + 1, m.end(i + 1)
+        return e
     out = []
-    for w in wanted:
+    for w in wanted[:max(1, nargout)]:
+        if w in ("tokens", "tokenextents"):
+            no_groups(w)
         if w == "match":
             out.append(Char(ms[0].group(0)) if once and ms else (Char("") if once else row([Char(m.group(0)) for m in ms])))
         elif w == "tokens":
@@ -7772,7 +7821,7 @@ def _regexp(nargout, s, pat, opts, flags):
             parts.append(Char(t[last:]))
             out.append(row(parts))
         elif w == "tokenextents":
-            out.append(row([np.array([float(m.start() + 1), float(m.end())]).reshape((2, 1)) for m in ms]))
+            out.append((extents(ms[0]) if ms else np.zeros((2, 0))) if once else row([extents(m) for m in ms]))
     if force_cell:
         # ('forceCellOutput': each output a scalar cell)
         out = [Cell([v], (1, 1)) for v in out]
