@@ -733,28 +733,59 @@ def isrealobj(x):
 
 def around(a, decimals=0, out=None):
     a = asarray(a)
-    if a.dtype.kind in "iub" and decimals >= 0:
-        r = a.copy()
-    elif decimals == 0:
-        r = rint(a)
-    else:
-        f = 10.0 ** decimals
-        r = rint(a * f) / f
-        if a.dtype.kind in "iu":
-            r = r.astype(a.dtype)  # (an integer array stays one, as in NumPy)
     if out is not None:
-        # (the result written into out, which is returned, as NumPy's; it was ignored)
-        if not isinstance(out, ndarray):
-            raise TypeError("return arrays must be of ArrayType")
-        # (NumPy's same_kind casting: no float into an int or bool out, no
-        # complex into a real one)
-        order = "biufc"
-        rk, ok = r.dtype.kind.replace("u", "i"), out.dtype.kind.replace("u", "i")
-        if order.index(rk) > order.index(ok) and not (rk in "iu" and ok in "iu"):
-            raise TypeError(f"Cannot cast ufunc 'rint' output from {r.dtype!r} to {out.dtype!r} with casting rule 'same_kind'")
-        out[...] = r
-        return out
+        return _around_out(a, decimals, out)
+    if a.dtype.kind in "iub" and decimals >= 0:
+        return a.copy() if a.ndim else a[()]
+    r = _round_float(a, decimals)
+    if a.dtype.kind in "iu":
+        r = r.astype(a.dtype)  # (an integer array stays one, as in NumPy)
     return r if a.ndim else r[()]
+
+
+def _round_float(a, decimals):
+    if decimals == 0:
+        return rint(a)
+    f = 10.0 ** decimals
+    return rint(a * f) / f
+
+
+def _around_out(a, decimals, out):
+    # (the result written into out, which is returned, as NumPy's, under
+    # its rules: the same shape, same_kind casting, and the rounding done in
+    # the wider of the two types; CORR-90C-1..3)
+    if not isinstance(out, ndarray):
+        raise TypeError("output must be an array")
+    if tuple(out.shape) != tuple(a.shape):
+        raise ValueError("invalid output shape")
+    sk, ok = a.dtype.kind, out.dtype.kind
+
+    def refuse(src):
+        raise TypeError(f"Cannot cast ufunc 'rint' output from {src!r} to {out.dtype!r} with casting rule 'same_kind'")
+
+    if sk == "b" or (sk in "fc" and ok in "iub"):
+        refuse(a.dtype)
+    if sk in "iu":
+        if ok == "b":
+            refuse(a.dtype)
+        if ok in "iu":
+            if decimals < 0:
+                refuse(dtype("float64"))
+            if sk == "i" and ok == "u":
+                raise TypeError(f"Cannot cast array data from {a.dtype!r} to {out.dtype!r} according to the rule 'same_kind'")
+            out[...] = a
+            return out
+        out[...] = a if decimals >= 0 else _round_float(a.astype("float64"), decimals)
+        return out
+    if sk == "c" and ok == "f":
+        raise TypeError("Cannot set imaginary part of non-complex array.")
+    if ok == "c" and sk != "c":
+        # (NumPy rounds such a value as a complex number, with complex
+        # division's rounding; not implemented: refused, not answered)
+        raise NotImplementedError("np.round of a real array into a complex out is not supported")
+    wide = result_type(a.dtype, out.dtype)
+    out[...] = _round_float(a.astype(wide), decimals)
+    return out
 
 
 round = around
