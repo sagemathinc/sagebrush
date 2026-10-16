@@ -257,11 +257,28 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
 
         sage: timeit("2 + 2")  # random
         625 loops, best of 3: 41.3 ns per loop
+
+    The statement is Sage code, as in Sage::
+
+        sage: L = []
+        sage: timeit("L.append(2^3); L.append(1/2)", number=1, repeat=1, globals=globals())  # random
+        1 loop, best of 1: 26.9 μs per loop
+        sage: L
+        [8, 1/2]
     """
     import time as _t
     import sys as _s
     g = globals if globals is not None else _s.modules["__main__"].__dict__
-    code = compile(str(stmt), "<timeit>", "exec")
+    stmt = str(stmt)
+    import builtins as _b
+    if not kwds.get("preparse", True):
+        code = compile(stmt, "<timeit>", "exec")
+    elif hasattr(_b, "__pyjs_compile_sage__"):
+        # as Sage: the statement is Sage code, so 2^3 is 8 and 1/2 exact
+        code = _b.__pyjs_compile_sage__(stmt, "<timeit>", "exec")
+    else:
+        from sagebrush.preparse import preparse as _preparse
+        code = compile(_preparse(stmt), "<timeit>", "exec")
     n = int(number) or 1
     if not number:
         while True:
@@ -280,7 +297,8 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
         best = d if best is None or d < best else best
     for unit, scale in (("s", 1), ("ms", 1e-3), ("\u03bcs", 1e-6), ("ns", 1e-9)):
         if best >= scale or unit == "ns":
-            print("%d loops, best of %d: %.3g %s per loop" % (n, int(repeat), best / scale, unit))
+            print("%d loop%s, best of %d: %.3g %s per loop"
+                  % (n, "" if n == 1 else "s", int(repeat), best / scale, unit))
             break
 
 
@@ -1999,8 +2017,8 @@ def lcm(*args):
 
     EXAMPLES::
 
-        sage: lcm(4, 6), lcm([2, 3, 4, 5])
-        (12, 60)
+        sage: lcm(4, 6), lcm([2, 3, 4, 5]), lcm(2/3, 4/9)
+        (12, 60, 4/3)
     """
     if len(args) == 1:
         args = tuple(args[0])
@@ -2009,7 +2027,46 @@ def lcm(*args):
         for a in args[1:]:
             r = r.lcm(a) if hasattr(r, "lcm") and not isinstance(r, int) else a.lcm(r)
         return r
+    if any(isinstance(a, _Fraction) for a in args):
+        r = QQ(args[0])
+        for a in args[1:]:
+            r = QQ(r).lcm(a)
+        return r
     return _math.lcm(*args)
+
+
+def _sgn(n):
+    return (n > 0) - (n < 0)
+
+
+def _xgcd_int(a, b):
+    """(g, s, t) for integers, with the cofactors Sage's integers give: GMP's
+    documented normalization (|s| < |b|/(2g) and |t| < |a|/(2g), except
+    s = 0, t = sgn(b) when |a| = |b|; s = sgn(a) when b = 0 or |b| = 2g;
+    t = sgn(b) when a = 0 or |a| = 2g)."""
+    if a == 0 and b == 0:
+        return (0, 0, 0)
+    x0, x1, y0, y1 = 1, 0, 0, 1
+    u, v = a, b
+    while v:
+        q = u // v
+        u, v = v, u - q * v
+        x0, x1 = x1, x0 - q * x1
+        y0, y1 = y1, y0 - q * y1
+    g, s = abs(u), (x0 if u > 0 else -x0)
+    if abs(a) == abs(b) or a == 0:
+        return (g, 0, _sgn(b))
+    if b == 0 or abs(b) == 2 * g:
+        s = _sgn(a)
+    elif abs(a) == 2 * g:
+        t = _sgn(b)
+        return (g, (g - t * b) // a, t)
+    else:
+        m = abs(b) // g
+        s %= m
+        if 2 * s > m:
+            s -= m
+    return (g, s, (g - s * a) // b if b else 0)
 
 
 def xgcd(a, b):
@@ -2017,11 +2074,17 @@ def xgcd(a, b):
 
     EXAMPLES::
 
-        sage: xgcd(240, 46)
-        (2, -9, 47)
+        sage: xgcd(240, 46), xgcd(1/3, 2)
+        ((2, -9, 47), (1/3, 1, 0))
     """
     if _poly_like(a) or _poly_like(b):
         return a.xgcd(b) if _poly_like(a) else b.parent()(a).xgcd(b)
+    if isinstance(a, _Fraction) or isinstance(b, _Fraction):
+        # QQ is not Euclidean under // and %: Rational.xgcd scales the
+        # numerators' xgcd (xgcd(1/3, 2) is (1/3, 1, 0))
+        return QQ(a).xgcd(b)
+    if isinstance(a, int) and isinstance(b, int):
+        return _xgcd_int(int(a), int(b))
     x0, x1, y0, y1 = 1, 0, 0, 1
     while b:
         q, a, b = a // b, b, a % b
