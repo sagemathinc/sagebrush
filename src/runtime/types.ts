@@ -1608,6 +1608,7 @@ method(dict, "__init__", (d: PyDict, x: any = undefined) => {
 });
 dict.$dict.get("__init__").$kw = (pos: any[], names: string[], values: any[]) => {
   const d = pos[0];
+  if (pos.length > 2) raise(T.TypeError, `dict expected at most 1 argument, got ${pos.length - 1}`);
   if (pos.length > 1) O.dictUpdate(d, pos[1]);
   names.forEach((n, i) => dictSet(d, n, values[i]));
   return null;
@@ -1681,6 +1682,7 @@ method(dict, "update", (d: PyDict, other: any = undefined) => {
 });
 dict.$dict.get("update").$kw = (pos: any[], names: string[], values: any[]) => {
   const d = pos[0];
+  if (pos.length > 2) raise(T.TypeError, `update expected at most 1 argument, got ${pos.length - 1}`);
   if (pos.length > 1) O.dictUpdate(d, pos[1]);
   names.forEach((n, i) => dictSet(d, n, values[i]));
   return null;
@@ -2143,7 +2145,14 @@ export class Zip {
   }
 }
 const zip = iteratorType("zip", Zip, (...xs: any[]) => new Zip(xs.map(O.iter), false));
-zip.$kw = (pos, names, values) => new Zip(pos.map(O.iter), names[0] === "strict" && O.truth(values[0]));
+// (strict wherever it is given; any other keyword refused, as CPython's)
+zip.$kw = (pos, names, values) => {
+  // (every keyword checked before strict's truth is taken, CORR-71C-2)
+  for (const n of names) if (n !== "strict") raise(T.TypeError, `zip() got an unexpected keyword argument '${n}'`);
+  let strict = false;
+  names.forEach((_n, i) => (strict = O.truth(values[i])));
+  return new Zip(pos.map(O.iter), strict);
+};
 (zip as any).$kwPos = true; // (zip(*rows) of any length: BIG_CALL)
 
 export class MapIter {
