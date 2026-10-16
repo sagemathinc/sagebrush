@@ -5411,6 +5411,12 @@ def _fft_sizes(sizes):
 
 
 def _fftn_call(x, sizes, inverse, name, nd=None, symmetric=False):
+    """the transform in X's class: single stays single (computed in double, then rounded)"""
+    r = _fftn_core(x, sizes, inverse, name, nd, symmetric)
+    return _finish(_farr(r), "single") if class_(x) == "single" else r
+
+
+def _fftn_core(x, sizes, inverse, name, nd=None, symmetric=False):
     """fft2, fftn and their inverses: the transform over MATLAB's first nd dimensions (all of
     them for fftn), each page beyond them apart, X padded or cut to sizes first"""
     dims = len(_dims(x)) if nd is None else nd
