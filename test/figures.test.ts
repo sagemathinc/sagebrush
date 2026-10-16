@@ -83,7 +83,9 @@ test("figures of a process a signal ends: the prompt removes its own; a script's
   // (-i: the prompt after the script, its input from a pipe kept open)
   writeFileSync(join(dir, "plot.py"), PLOT);
   const repl = spawn(process.execPath, [cli, "-i", "plot.py"], { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
-  const m = await waitFor(repl, /Saved (\S+\.svg)/);
+  // (the prompt itself: until it is up this is still the script, whose
+  // signals keep their default action)
+  const m = await waitFor(repl, /Saved (\S+\.svg)[\s\S]*>>> $/);
   assert.ok(existsSync(m[1]));
   const done = exited(repl);
   repl.kill("SIGTERM");
