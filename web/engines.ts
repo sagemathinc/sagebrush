@@ -68,3 +68,38 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   if (req.method === "GET" && cache) ctx.waitUntil(cache.put(key, res.clone()));
   return res;
 }
+
+// The Python library's chunks (web/lib-chunks.mts), GET /lib/<group>.<kind>.<hash>.json,
+// from R2 when the site's own files don't have them: a deploy replaces lib/,
+// and a page opened before it runs the old worker, which may fetch a chunk
+// of the old build long after (the first Sage cell of a tab left open: the
+// review's HARD-813-1).  scripts/publish-engine.mjs puts each engine's
+// chunks at lib/<name> too, one namespace by content that is never
+// cleared, so every chunk a published worker names stays there.  Served
+// only if its bytes have the SHA-256 its name begins (the worker checks the
+// whole hash too), immutable, readable from anywhere.
+const CHUNK = /^\/lib\/([a-z0-9][a-z0-9-]*\.(?:src|pre)\.([0-9a-f]{16})\.json)$/;
+
+/** The response for a library chunk the site's files don't have, or null if the request is not for one. */
+export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response | null> {
+  const url = new URL(req.url);
+  const m = url.pathname.match(CHUNK);
+  if (!m || !env.ENGINES) return null;
+  if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+  const [, name, hash] = m;
+  const cache = (globalThis as any).caches?.default as Cache | undefined;
+  const key = new Request(`${url.origin}/lib/${name}`);
+  if (cache) {
+    const hit = await cache.match(key);
+    if (hit) return req.method === "HEAD" ? new Response(null, { status: hit.status, headers: hit.headers }) : hit;
+  }
+  const none = () => new Response("no such library chunk", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  const o = await env.ENGINES.get(`lib/${name}`);
+  if (!o) return none();
+  const bytes = await new Response(o.body).arrayBuffer();
+  const sum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+  if (!sum.startsWith(hash)) return none();
+  const res = new Response(req.method === "HEAD" ? null : bytes, { headers: { "Content-Type": "application/json", ...COMMON, "Content-Length": String(bytes.byteLength) } });
+  if (req.method === "GET" && cache) ctx.waitUntil(cache.put(key, res.clone()));
+  return res;
+}
