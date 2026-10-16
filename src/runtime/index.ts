@@ -363,6 +363,10 @@ function layered(front: any, back: any): any {
     },
   });
 }
+// `del name` of a name unbound there (a builtin's too)
+export function unboundName(k: string): never {
+  return raise(T.NameError, `name '${k}' is not defined`);
+}
 // A class body's __module__: its __name__, as LOAD_NAME there, the globals'
 // (not exec's locals) and then the builtins'
 export function classModule(g: any): any {
@@ -742,6 +746,7 @@ export const R: any = {
   sortedKeys,
   delName,
   classModule,
+  unboundName,
   execIn,
   evalIn,
   callEx,

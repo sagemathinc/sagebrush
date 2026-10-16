@@ -836,7 +836,7 @@ export class Emitter {
           const ns = this.gns(t.id);
           return this.w(`R.delName(${ns}, ${q(t.id)});`);
         }
-        if (r.kind === "class") return this.w(`if (!$ns.delete(${q(t.id)})) gname(${q(t.id)});`);
+        if (r.kind === "class") return this.w(`if (!$ns.delete(${q(t.id)})) R.unboundName(${q(t.id)});`);
         if (r.kind === "classcell") return this.w(`classCellGet(${this.cellOf(r.scope)}); ${this.cellOf(r.scope)}.v = undefined;`);
         this.w(`${this.load(t.id)}; ${js(t.id)} = undefined;`);
         this.fn.assigned.delete(t.id);
