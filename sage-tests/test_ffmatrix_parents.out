@@ -33,3 +33,8 @@ AA QQbar real sub :: (Algebraic Field, [0])
 AA QQbar empty sub :: Algebraic Field
 AA mat QQbar vec :: (Algebraic Field, [I + 2])
 K mat L vec :: TypeError
+K L augment :: TypeError
+K L stack :: TypeError
+GF7 GF5 augment :: TypeError
+QQbar AA augment :: (Algebraic Field, [I, 2])
+K K stack :: [a, 1]
