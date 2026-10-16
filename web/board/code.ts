@@ -45,6 +45,18 @@ import { CACHE_MS, DOC_CAP, ENTRY_MAX, cachedLabel, sizeOf, type CachedOutputs, 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
 
+/** How long an interpreter may take to start, or its analyzer to answer,
+ * before it is started (asked) again, once (40 s; a test may set less). */
+const startMs = () => Number((globalThis as any).__sbEngineStartMs) || 40_000;
+/** Whether the kernel is ready within `ms`. */
+function started(kernel: any, ms: number): Promise<boolean> {
+  if (kernel.ready) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const off = kernel.on("ready", () => { clearTimeout(t); off(); resolve(true); });
+    const t = setTimeout(() => { off(); resolve(!!kernel.ready); }, ms);
+  });
+}
+
 export class BoardCode {
   /** resolves when the interpreter and the notebook are ready (false: they could not be loaded) */
   readonly ready: Promise<boolean>;
@@ -79,7 +91,10 @@ export class BoardCode {
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
     let next = 0;
     const waiting = new Map<number, (m: any) => void>();
-    const ask = (msg: any) => {
+    // (an analyzer that doesn't answer in time: its worker never started, or
+    // hung: a new one is asked again, once; then the cell says so, rather
+    // than the board waiting for good)
+    const ask = (msg: any, again = false): Promise<any> => {
       if (this.closed) return Promise.resolve({ error: { kind: "analyzer", message: "closed" }, sources: null });
       if (!this.analyzer) {
         const worker = (this.analyzer = this.parts.analyzer());
@@ -92,7 +107,16 @@ export class BoardCode {
           for (const f of ws) f({ error: { kind: "analyzer", message: e?.message || "the analyzer failed" }, sources: null });
         };
       }
-      return new Promise<any>((resolve) => { const id = ++next; waiting.set(id, resolve); this.analyzer!.postMessage({ id, ...msg }); });
+      return new Promise<any>((resolve) => {
+        const id = ++next, w = this.analyzer!;
+        const timer = setTimeout(() => {
+          if (!waiting.delete(id)) return;
+          if (this.analyzer === w) { w.terminate(); this.analyzer = null; }
+          resolve(again || this.closed ? { error: { kind: "analyzer", message: `the analyzer did not answer in ${startMs() / 1000} s` }, sources: null } : ask(msg, true));
+        }, startMs());
+        waiting.set(id, (d) => { clearTimeout(timer); resolve(d); });
+        w.postMessage({ id, ...msg });
+      });
     };
     const analyzer = {
       analyze: (code: string, mode: string) => ask({ code, mode }),
@@ -111,6 +135,14 @@ export class BoardCode {
     // (a cell's state is its element's class: queued, running, stale, error, cancelled)
     this.observer = new MutationObserver(() => this.changed());
     this.observer.observe(root, { attributes: true, attributeFilter: ["class"], subtree: true });
+    // (the interpreter started: else, after startMs(), started again, once;
+    // still not ready, it can't run here, and says so, rather than every
+    // run, idle() and outputs() waiting for good: its worker's script was
+    // seen never to load, test-export on a busy VM)
+    if (!(await started(kernel, startMs())) && !this.closed) {
+      kernel.restart("\nThe interpreter did not start, and was started again.\n");
+      if (!(await started(kernel, startMs())) && !this.closed) throw new Error(`the interpreter did not start in ${(2 * startMs()) / 1000} s`);
+    }
   }
 
   // (several changes at once, and many as output streams in: one layout; and
