@@ -22,7 +22,12 @@ def examples():
     src = open(os.path.join(HERE, "..", "lib", "_magma_docsearch.py")).read()
     g = {}
     exec(src.split("\ndef ")[0], g)
-    return g["EXAMPLES"]
+    # (and each signature's example, as name(types): _magma_docsearch.examples())
+    out = dict(g["EXAMPLES"])
+    for name, sigs in g.get("SIGNATURES", {}).items():
+        for types, (_, example) in sigs.items():
+            out["%s(%s)" % (name, types)] = example
+    return out
 
 
 def inputs(example):

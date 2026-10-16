@@ -26,6 +26,7 @@ TABLE = {
     "RealField": (["rationals and reals"], "The real numbers to a given number of significant digits (30 by default)."),
     "Parent": (["structures"], "The structure an object belongs to."),
     "Type": (["structures"], "The category of an object, such as RngIntElt or SeqEnum."),
+    "ISA": (["structures"], "Whether one type is also another, as a square matrix (AlgMatElt) is a matrix (MtrxS)."),
     "AssignNames": (["structures"], "Gives names to the generators of a structure, for printing."),
     # integers
     "IsPrime": (["integers"], "Whether an integer is prime."),
@@ -176,7 +177,7 @@ TABLE = {
     "UnitRank": (["number fields"], "The rank of the unit group of a number field."),
     "Decomposition": (["number fields"], "How a prime splits in a ring of integers: the primes above it."),
     "Norm": (["number fields"], "The norm of an element of a number field."),
-    "Trace": (["number fields"], "The trace of an element of a number field."),
+    "Trace": (["number fields", "matrices"], "The trace of an element or of a square matrix, by the type of its argument."),
     "MinimalPolynomial": (["number fields"], "The minimal polynomial of an algebraic number."),
     # matrices
     "Matrix": (["matrices"], "A matrix from rows or from a size and entries."),
@@ -204,6 +205,9 @@ TABLE = {
 # test/magma-examples.json, made by scripts/magma-examples-table.py) and
 # lists where the two differ.
 EXAMPLES = {
+    "ISA": """\
+> ISA(AlgMatElt, MtrxS);
+true""",
     "GF": """\
 > F<w> := GF(9);
 > F;
@@ -780,6 +784,25 @@ Rational Field""",
 }
 
 
+# An intrinsic of several signatures (lib/_magma.py's _signature: one name,
+# a function for each type of argument) has an entry for each signature
+# Sagebrush implements: name -> {its types, as "T" or "T1, T2": (summary,
+# example)}, written for Sagebrush.  (Its TABLE summary and EXAMPLES entry
+# are for the name as a whole.)
+SIGNATURES = {
+    "Trace": {
+        "RngIntElt": ("An integer is its own trace.", "> Trace(-7);\n-7"),
+        "FldRatElt": ("A rational number is its own trace.", "> Trace(3/4);\n3/4"),
+        "FldFinElt": ("The absolute trace of a finite field element: the sum of its conjugates, in the prime field.",
+                      "> F<z> := GF(9);\n> Trace(z);\n1"),
+        "FldAlgElt": ("The trace of a number field element: the sum of its conjugates.",
+                      "> K<w> := QuadraticField(7);\n> Trace(3 + w);\n6"),
+        "MtrxS": ("The trace of a square matrix: the sum of its diagonal entries.",
+                  "> Trace(Matrix(Integers(), 2, 2, [1, 2, 3, 4]));\n5"),
+    },
+}
+
+
 # names lib/_magma.py exports that are not Magma intrinsics (its classes
 # and internal aliases)
 INTERNAL = {"MagmaError", "Multi", "Ref1", "RefK", "MSeq", "MRange", "MSet", "MTuple", "MRecFormat", "MRec",
@@ -841,19 +864,99 @@ def bound_names():
     return [n for n in _magma.__all__ if not isinstance(getattr(_magma, n), str) and n not in INTERNAL]
 
 
+def _signatures(name):
+    """name's registered signatures (lib/_magma.py _signature), or []."""
+    import _magma
+    f = getattr(_magma, name, None)
+    return getattr(getattr(f, "__wrapped__", f), "_magma_signatures", [])
+
+
+def _sig_key(name, types):
+    return "%s(%s)" % (name, ", ".join(types))
+
+
+def _sig_text(f, types, ret):
+    """(<RngIntElt> x) -> RngIntElt, as Magma lists a signature: the
+    argument names of Sagebrush's own function, with the signature's types."""
+    names = f.__code__.co_varnames[:f.__code__.co_argcount] if f else ["x%d" % (i + 1) for i in range(len(types))]
+    return "(" + ", ".join("<%s> %s" % (t, n) for n, t in zip(names, types)) + ") -> " + ret
+
+
+def _para(text, indent, width=80):
+    """text as lines of at most `width` columns, each indented."""
+    lines, line = [], ""
+    for w in text.split():
+        if line and len(indent) + len(line) + 1 + len(w) > width:
+            lines.append(indent + line)
+            line = w
+        else:
+            line = (line + " " + w) if line else w
+    return "\n".join(lines + [indent + line])
+
+
+def intrinsic_text(name):
+    """An intrinsic as Magma mode prints it (Trace;): Magma's layout, with
+    the signatures and summaries Sagebrush has."""
+    import _magma
+    sigs = _signatures(name)
+    out = ["Intrinsic '%s'" % name, "", "Signatures:", ""]
+    if sigs:
+        for types, f, ret in sigs:
+            text = SIGNATURES.get(name, {}).get(", ".join(types), ("",))[0] if f else "Not supported yet in Sagebrush."
+            out += ["    " + _sig_text(f, types, ret), "", _para(text, "        "), ""]
+    else:
+        text = TABLE.get(name, ([], ""))[1]
+        out += ["    " + _magma_signature(name, getattr(_magma, name))[len(name):], ""] + ([_para(text, "        "), ""] if text else [])
+    return "\n".join(out)
+
+
+def examples():
+    """Every example, by name (and by name(types) for a signature's)."""
+    out = dict(EXAMPLES)
+    for name, sigs in SIGNATURES.items():
+        for types, (_, example) in sigs.items():
+            out[_sig_key(name, types.split(", "))] = example
+    return out
+
+
+def _with_example(summary, example):
+    return summary + ("\n\nExample:\n\n" + "\n".join("    " + line for line in example.split("\n")) if example else "")
+
+
 def build_index():
     """[{name, module, kind, signature, summary, doc, examples, open_problem,
-    language, areas}] for Magma mode's intrinsics, by name."""
+    language, areas}] for Magma mode's intrinsics, by name; one for each
+    signature of an intrinsic of several (with its example's key)."""
     import _magma
     out = []
     for name in sorted(bound_names(), key=str.lower):
         if name not in TABLE:
             continue  # (test/docsearch fails for these)
         areas, summary = TABLE[name]
+        sigs = _signatures(name)
+        if sigs:
+            listing = "\n".join("    %s%s%s" % (name, _sig_text(f, types, ret), "" if f else "    (not supported yet)")
+                                for types, f, ret in sigs)
+            for types, f, ret in sigs:
+                if f is None or ", ".join(types) not in SIGNATURES.get(name, {}):
+                    continue  # (check() reports a missing one)
+                s_summary, example = SIGNATURES[name][", ".join(types)]
+                out.append({
+                    "name": name,
+                    "key": _sig_key(name, types),
+                    "module": "magma",
+                    "kind": "function",
+                    "signature": _sig_text(f, types, ret),
+                    "summary": s_summary,
+                    "doc": _with_example(s_summary, example) + "\n\nThe signatures of %s:\n\n%s" % (name, listing),
+                    "examples": sum(1 for line in example.split("\n") if line.startswith("> ")),
+                    "open_problem": False,
+                    "language": "magma",
+                    "areas": areas,
+                })
+            continue
         example = EXAMPLES.get(name, "")
-        doc = summary
-        if example:
-            doc += "\n\nExample:\n\n" + "\n".join("    " + line for line in example.split("\n"))
+        doc = _with_example(summary, example)
         out.append({
             "name": name,
             "module": "magma",
@@ -874,7 +977,14 @@ def check():
     that are not bound, and names of TABLE without an example (or examples
     of names not in TABLE)."""
     bound = set(bound_names())
-    return sorted(bound - set(TABLE)), sorted(set(TABLE) - bound), sorted(set(TABLE) ^ set(EXAMPLES))
+    missing, extra = sorted(bound - set(TABLE)), sorted(set(TABLE) - bound)
+    # (and each implemented signature of an intrinsic of several needs its
+    # own summary and example: name(types) is missing, or extra)
+    have = {_sig_key(n, t.split(", ")) for n, sigs in SIGNATURES.items() for t in sigs}
+    want = {_sig_key(n, types) for n in bound for types, f, _ in _signatures(n) if f is not None}
+    missing += sorted(want - have)
+    extra += sorted(have - want)
+    return missing, extra, sorted(set(TABLE) ^ set(EXAMPLES))
 
 
 def main(argv):
@@ -886,7 +996,7 @@ def main(argv):
         print(_json.dumps({"missing": missing, "extra": extra, "no_example": no_example}))
         return 1 if missing or extra or no_example else 0
     if "--examples" in argv:
-        print(_json.dumps(EXAMPLES))
+        print(_json.dumps(examples()))
         return 0
     print("usage: sagebrush -m _magma_docsearch --index | --check | --examples")
     return 2
