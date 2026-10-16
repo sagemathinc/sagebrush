@@ -1561,3 +1561,18 @@ test("clear: a cleared variable's name is the function again at the top level; i
     "3", "5", "4",
   ]);
 });
+
+test("clear in a function: a variable named like an ItemType is the one cleared; clearvars' arguments are always names (CORR-8398-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "disp(mat2str([f5() f6() f7() f8() f9() f10()]))",
+    "function r = f5()\n a = 5; all = 9;\n clear all\n r = [exist('a', 'var') exist('all', 'var')];\nend",
+    "function r = f6()\n a = 5;\n clear all\n r = exist('a', 'var');\nend",
+    "function r = f7()\n a = 5;\n clearvars all\n r = exist('a', 'var');\nend",
+    "function r = f8()\n a = 5; variables = 1;\n clear variables\n r = [exist('a', 'var') exist('variables', 'var')];\nend",
+    "function r = f9()\n a = 5;\n clear functions\n r = exist('a', 'var');\nend",
+    // (all is assigned only on a path not taken: at the clear it doesn't exist, so the keyword)
+    "function r = f10()\n a = 5;\n if false, all = 1; end\n clear all\n r = exist('a', 'var');\nend",
+  ].join("\n")], { encoding: "utf8" });
+  assert.equal(out.trim(), "[1 0 0 1 1 0 1 0]");
+});

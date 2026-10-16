@@ -941,6 +941,9 @@ const OP_FN: Record<string, string> = {
 };
 
 // functions given the workspace (they read or write variables by name)
+// clear's ItemType words, and those of them that clear the variables in scope
+const CLEAR_ITEMTYPES = new Set(["all", "classes", "functions", "global", "import", "java", "mex", "variables"]);
+const CLEAR_VARIABLE_ITEMTYPES = new Set(["all", "classes", "java", "variables"]);
 const WORKSPACE_FNS = new Set(["clear", "clearvars", "exist", "who", "whos", "load", "save", "isvarname_ws"]);
 
 class Emitter {
@@ -1430,17 +1433,30 @@ class Emitter {
       if (WORKSPACE_FNS.has(f.name) && !this.fnNames.has(f.name)) {
         // (clear inside a function: a function's variables are Python locals, which
         // locals() cannot delete, so the names given literally, or all the function's
-        // variables, become undefined again here; patterns and computed names go on to
-        // ws_call as before)
+        // variables, become undefined again here; patterns, computed names, -options and
+        // clear global go on to ws_call as before)
         if (scope.fn && (f.name === "clear" || f.name === "clearvars")) {
           const lit = e.args.every((a) => a.k === "str" && /^[A-Za-z]\w*$/.test(a.v));
-          const all = e.args.length === 0 || (e.args.length === 1 && e.args[0].k === "str" && (e.args[0].v === "all" || e.args[0].v === "variables"));
-          if (lit || all) {
-            const names = all ? [...scope.vars] : e.args.map((a) => (a as Extract<Expr, { k: "str" }>).v);
-            const own = names.filter((n) => scope.vars.has(n) && !scope.globals.has(n) && !scope.persistents.has(n));
+          const words = e.args.map((a) => (a as Extract<Expr, { k: "str" }>).v);
+          const own = (ns: string[]) => ns.filter((n) => scope.vars.has(n) && !scope.globals.has(n) && !scope.persistents.has(n));
+          const undef = (ns: string[]) => `[${ns.map((n) => `(${pyName(n)} := _m.Undef(${JSON.stringify(n)}))`).join(", ")}]`;
+          // (clear's ItemType words, which clearvars doesn't have: its arguments are names)
+          const kw = f.name === "clear" && lit ? words.filter((w) => CLEAR_ITEMTYPES.has(w)) : [];
+          if (lit && !(kw.length && (words.length > 1 || kw[0] === "global"))) {
+            const everything = own([...scope.vars]);
             e.frame.code = "_m.UNDEF";
-            if (!own.length) return "_m.NOVAL";
-            return `([${own.map((n) => `(${pyName(n)} := _m.Undef(${JSON.stringify(n)}))`).join(", ")}] and _m.NOVAL)`;
+            if (!words.length) return everything.length ? `(${undef(everything)} and _m.NOVAL)` : "_m.NOVAL";
+            if (kw.length) {
+              // (clear WORD alone: the keyword, unless a variable of that name exists,
+              // which is then the one cleared, as MATLAB's clear page says; whether it
+              // exists is known only at run time)
+              const w = kw[0];
+              const asKeyword = CLEAR_VARIABLE_ITEMTYPES.has(w) && everything.length ? `(${undef(everything)} and _m.NOVAL)` : "_m.NOVAL";
+              if (!own([w]).length) return asKeyword;
+              return `(${undef([w])} and _m.NOVAL if not isinstance(${pyName(w)}, _m.Undef) else ${asKeyword})`;
+            }
+            const named = own(words);
+            return named.length ? `(${undef(named)} and _m.NOVAL)` : "_m.NOVAL";
           }
         }
         const ns = scope.fn ? "locals()" : "globals()";
