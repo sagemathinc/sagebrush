@@ -6025,9 +6025,10 @@ def permute_(x, order):
     return Char(r) if type(x) is Char else _box(r)
 
 
-# (the most elements repmat makes: numeric, logical and char arrays; cell, struct and
-# string arrays, whose elements are Python objects and cost more)
-_REPMAT_NUMERIC_MAX = 4_000_000
+# (the most repmat makes: bytes of a numeric, logical or char result, whose tiling and
+# copy take about three times that; elements of a cell, struct or string array, which
+# are Python objects and cost more)
+_REPMAT_BYTES_MAX = 8 << 20
 _REPMAT_OBJECT_MAX = 200_000
 
 
@@ -6057,9 +6058,13 @@ def repmat_(x, *args):
     total = 1
     for a, b in zip(d, r):
         total *= a * b
-    cap = _REPMAT_OBJECT_MAX if t in (Cell, Struct, StrArr) else _REPMAT_NUMERIC_MAX
-    if total > cap:
-        raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for %s." % (total, cap, "a " + class_(x) + " array" if t in (Cell, Struct, StrArr) else "numeric, logical and char arrays"))
+    if t in (Cell, Struct, StrArr):
+        if total > _REPMAT_OBJECT_MAX:
+            raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array." % (total, _REPMAT_OBJECT_MAX, class_(x)))
+    else:
+        size = _arr(x).dtype.itemsize
+        if total * size > _REPMAT_BYTES_MAX:
+            raise _err("repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes." % (total, total * size, _REPMAT_BYTES_MAX))
     if 0 in r or 0 in d:
         # (an empty result, of the input's kind and the product of the sizes)
         out_d = tuple(a * b for a, b in zip(d, r))
