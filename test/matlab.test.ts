@@ -2183,3 +2183,43 @@ test("sum and prod 'native' of logical, sprintf's %s of character codes, strspli
   assert.deepEqual(run([tryIt("linspace(int8(0), int8(10), 3)"), tryIt("linspace(0, uint8(10), 3)"), "disp(class(linspace(single(0), 1, 3)))"].join("\n")),
     ["refused", "refused", "single"]);
 });
+
+test("a workspace function giving no value refuses an assignment; exist needs an argument; repmat's counts, empty results and strings; round keeps its class and refuses options; mod and rem of complex refused", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const msg = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(size(x))])`;
+  assert.deepEqual(run([
+    msg("x = save"), msg("x = exist"), "y = 5; disp(exist('y'))",
+    show("repmat([1 2], 0, 1)"), show("repmat([1 2], -1, 1)"), show("repmat({1}, 0, 3)"), show("repmat('ab', 0, 1)"), show("repmat(\"ab\", 1, 2)"),
+    tryIt("repmat([1 2], 2.5)"), tryIt("repmat([1 2], [2 NaN])"), "disp(mat2str(repmat([1 2], 2, 1)))",
+    show("round(single(pi), 2)"), "disp(round(single(pi), 2) == single(3.14))", tryIt("round(int8(5), -1)"),
+    "disp(round(pi, 2, 'Significant'))", tryIt("round(2.5, 'TieBreaker', 'even')"), tryIt("round(pi, 2, 'foo')"), "disp(round(123.456, -1))",
+    tryIt("mod(1i, 2)"), tryIt("rem(2, 1i)"), "disp(mat2str(mod([5 7], 3)))",
+  ].join("\n")), [
+    "Too many output arguments.", "Not enough input arguments.", "1",
+    "double [0 2]", "double [0 2]", "cell [0 3]", "char [0 2]", "string [1 2]",
+    "refused", "refused", "[1 2;1 2]",
+    "single [1 1]", "1", "refused",
+    "3.1000", "refused", "refused", "120",
+    "refused", "refused", "[2 1]"]);
+});
+
+test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects) before making it, under a 96 MiB heap, at the boundary for complex and a one-axis repeat", () => {
+  const { spawnSync } = require("node:child_process");
+  const tryIt = (e: string) => `try, x = ${e}; disp(numel(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 30))]), end`;
+  const code = [
+    tryIt("repmat(1, 100000, 100000)"), tryIt("repmat(1, 2001, 2000)"), tryIt("repmat('a', 1e9, 1)"), tryIt("repmat(true, [10 10 10 10 10 10 10 10])"),
+    tryIt("repmat({1}, 1000, 1000)"), tryIt("repmat(struct('a', 1), 1, 200001)"), tryIt("repmat(\"ab\", 500, 500)"), tryIt("repmat([1 2; 3 4], 1e300, 1e300)"),
+    tryIt("repmat(1, 1000, 1000)"), tryIt("repmat({1}, 400, 500)"), tryIt("repmat([1 2], 0, 1e9)"),
+    tryIt("repmat(1i, 1, 524288)"), tryIt("repmat(1i, 1, 524289)"), tryIt("repmat(1, 1, 1048576)"), tryIt("repmat(1, 1048577, 1)"),
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
+    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
+    "524288", "refused: repmat: a result of 524289 ele", "1048576", "refused: repmat: a result of 1048577 el"]);
+});
