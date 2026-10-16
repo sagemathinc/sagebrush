@@ -141,6 +141,8 @@ test("a question's problems as written, past the schema", () => {
   assert.deepEqual(p({ input: "number", min: 2, max: 1, step: 0 }), ["error min: its min (2) is more than its max (1)", "error step: its step is more than 0"]);
   assert.deepEqual(p({ input: "scale", min: 1, max: 1000 }), ["error max: a scale of more than 100 values (from 1 to 1000): a number question takes a range"]);
   assert.deepEqual(p({ input: "scale", min: 3, max: 3 }), ["error min: its min (3) is not less than its max (3)"]);
+  // (ends past 2^53: refused, before any control is made of them, CORR-448-4)
+  assert.deepEqual(p({ input: "scale", min: 9007199254740992, max: 9007199254740994 }), ["error min: a scale's min and max are whole numbers, at most 2^53 - 1 from 0"]);
   assert.deepEqual(p({ input: "radio", options: ["a"], answer: "b" }), [`error answer: "b" is not one of its options' values ("a")`]);
   assert.deepEqual(p({ input: "radio", options: Array.from({ length: 13 }, (_, i) => String(i)) }), ["warning input: 13 options: `choice` shows them as a list to choose from, which fits many"]);
 });

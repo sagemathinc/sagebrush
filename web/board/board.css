@@ -332,3 +332,29 @@
 .board-sticker-picker .bs-emoji { font: 22px/1 system-ui, sans-serif; padding: 6px 0; border: 0; border-radius: 6px; background: none; cursor: pointer; }
 .board-sticker-picker .bs-emoji:hover, .board-sticker-picker .bs-emoji:focus-visible, .board-sticker-picker .bs-emoji.on { background: #eef2ea; }
 .board-sticker-picker .bs-emoji.on { box-shadow: inset 0 0 0 1.5px #2a6f2f; }
+
+/* inline math with the punctuation that touches it (board.ts glueMath) */
+.board-nowrap { white-space: nowrap; }
+
+/* a question's controls (board.ts askEl) */
+.board-ask { display: flex; flex-direction: column; gap: 6px; }
+.board-ask-opts { display: flex; flex-direction: column; gap: 3px; }
+.board-ask-list { max-height: 12em; overflow-y: auto; border: 1px solid #0002; border-radius: 6px; padding: 4px 6px; }
+.board-ask-opt { display: flex; align-items: baseline; gap: 6px; cursor: pointer; }
+.board-ask-opt input { margin: 0; flex: none; accent-color: #2a6f2f; }
+.board-ask-label > p { margin: 0; display: inline; }
+.board-ask-text, .board-ask-number { font: inherit; width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid #0003; border-radius: 6px; background: #fff; resize: vertical; }
+.board-ask-number { width: 11em; }
+.board-ask-scale { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.board-ask-scale button { min-width: 2em; padding: 2px 6px; border: 1px solid #0003; border-radius: 6px; background: #fff; font: inherit; cursor: pointer; }
+.board-ask-scale button[aria-checked="true"] { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
+.board-ask-end { font-size: 0.85em; color: #667; }
+.board-ask-words summary { cursor: pointer; color: #2a6f2f; font-size: 0.9em; }
+.board-ask-words textarea { margin-top: 4px; }
+.board-ask-why { color: #a33; font-size: 0.85em; }
+.board-ask-why:empty { display: none; }
+.board-ask-foot { display: flex; gap: 10px; align-items: center; font-size: 0.85em; color: #667; }
+.board-ask-req { font-style: italic; }
+.board-ask-clear { border: none; background: none; color: #2a6f2f; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+.board-ask :disabled { cursor: default; }
+.board-ask-preview { font-size: 0.95em; padding: 2px 6px; border-left: 3px solid #2a6f2f33; }
