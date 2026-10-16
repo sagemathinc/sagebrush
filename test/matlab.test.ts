@@ -1776,3 +1776,24 @@ test("text: strncmp past the end and with a negative n, strcmp's sizes and scala
   assert.deepEqual(run(["x = strcat(['oak';'elm'], ['_a';'_b']); disp(mat2str(size(x))); disp(x)", tryIt("strcat(['oak';'elm'], ['_a';'_b';'_c'])"), "disp(strcat('oak  ', '_a'))"].join("\n")),
     ["[2 5]", "oak_a", "elm_b", "refused", "oak_a"]);
 });
+
+test("strcmp and its relatives: a character matrix's rows against a cell or string array (CORR-C4D9-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    "C = ['ab'; 'cd'];",
+    "disp(mat2str(strcmp({'ab'; 'cd'}, C))); disp(mat2str(strcmp(C, {'ab'; 'xx'}))); disp(mat2str(strcmpi({'AB'; 'cD'}, C)))",
+    "disp(mat2str(strncmp({'ax'; 'cd'}, C, 1))); disp(mat2str(strncmpi({'AX'; 'Cy'}, C, 1)))",
+    // (a one-element cell against each row; a string array of the rows' shape)
+    "disp(mat2str(strcmp({'ab'}, C))); disp(mat2str(strcmp([\"ab\"; \"zz\"], C)))",
+    // (two character arrays: compared whole)
+    "disp(mat2str([strcmp(C, ['ab'; 'cd']) strcmp(C, 'ab') strcmp(C, ['ab'; 'ce'])]))",
+    tryIt("strcmp({'ab'; 'cd'; 'ef'}, C)"), tryIt("strcmp({'ab'; 'c'}, ['ab'; 'c '])"), tryIt("strncmp(C, ['ab'; 'cd'], 1)"), tryIt("strcmp(\"ab\", C)"),
+  ].join("\n")), [
+    "[true;true]", "[true;false]", "[true;true]", "[true;true]", "[true;true]",
+    "[true;false]", "[true;false]", "[true false false]",
+    "refused", "refused", "refused", "refused",
+  ]);
+});
