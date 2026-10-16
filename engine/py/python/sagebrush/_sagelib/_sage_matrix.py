@@ -2594,10 +2594,14 @@ def matrix(*args, **kwds):
         ring = rest.pop(0) if rest and not isinstance(rest[0], int) else None
         if len(rest) > 2 or not all(isinstance(d, int) and not isinstance(d, bool) for d in rest):
             raise TypeError("too many arguments in matrix constructor")
-        A = args[-1].adjacency_matrix()
-        n = A.nrows()
+        # the dimensions and the n x n size are checked before the
+        # adjacency matrix is built (matrix(Graph(10000)) reached 1 GB
+        # before the entry cap: daybreak2's HARD-6B4-1)
+        n = args[-1].order()
         if rest and (rest[0] != n or rest[-1] != n):
             raise ValueError("the dimensions %s do not match the graph's %d vertices" % (" x ".join(map(str, rest)), n))
+        _shape(n, n)
+        A = args[-1].adjacency_matrix()
         if ring is None:
             return A
         return matrix(ring, [list(r) for r in A.rows()])

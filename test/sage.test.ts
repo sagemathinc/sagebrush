@@ -104,3 +104,11 @@ test("delete_edge reads at most 4 items of an edge that claims a length of 3 (HA
   assert.equal(cli("--sage", "-c", src), "ValueError 4 2\nValueError 4 2\n");
   assert.ok(Date.now() - t < 20000);
 });
+
+test("a large graph's adjacency matrices are refused before their n^2 entries exist (HARD-6B4-1)", () => {
+  // (matrix(Graph(10000)) reached 1 GB before the 4194304-entry cap)
+  const src = "G = Graph(10000)\nfor f in (G.adjacency_matrix, G.weighted_adjacency_matrix, G.laplacian_matrix, lambda: matrix(G), lambda: matrix(QQ, G), lambda: matrix(1, 1, G)):\n try:\n  f()\n except (NotImplementedError, ValueError) as err:\n  print(type(err).__name__)\nprint(matrix(Graph(3)).dimensions())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(5) + "ValueError\n(3, 3)\n");
+  assert.ok(Date.now() - t < 30000);
+});
