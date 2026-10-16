@@ -35,7 +35,6 @@ class Fn {
   assigned = new Set<string>();
   buf: Line[] = [];
   loops: { label: string | null }[] = [];
-  handlers: string[] = []; // JS variables holding the exceptions being handled
   constructor(
     public scope: Scope,
     public parent: Fn | null,
@@ -720,10 +719,9 @@ export class Emitter {
       case "Nonlocal":
         return;
       case "Raise": {
-        if (st.exc === null) {
-          const h = this.fn.handlers[this.fn.handlers.length - 1];
-          return this.w(h !== undefined ? `throw ${h};` : "throw reraise();");
-        }
+        // (the exception being handled, which in a finally run for one is
+        // that one, not the enclosing except clause's)
+        if (st.exc === null) return this.w("throw reraise();");
         const cause = st.cause === null ? "" : `, ${this.ex(st.cause)}`;
         return this.w(`throw raiseExc(${this.ex(st.exc)}${cause});`);
       }
@@ -973,9 +971,7 @@ export class Emitter {
         // raised (raiseExc); this catches the runtime's own errors.
         const x = this.temp();
         this.w("try {");
-        this.fn.handlers.push(e);
         this.block(h.body);
-        this.fn.handlers.pop();
         this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }`);
         if (h.name !== null) {
           this.w(this.storeName(h.name, "undefined"));

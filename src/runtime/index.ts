@@ -71,18 +71,17 @@ export function markCoro(impl: any): any {
 export function awaitIter(x: any): any {
   if (x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator") {
     if (x.$cls === T.coroutine || x.$awaitable === true) {
-      if (x.$awaiting === true) raise(T.RuntimeError, "coroutine is being awaited already");
-      return x;
+      return O.delegateTo(x);
     }
     raise(T.TypeError, "'generator' object can't be awaited");
   }
   const f = Ty.lookupDunder(x, "__await__");
   if (f === undefined) raise(T.TypeError, `'${typeName(x)}' object can't be awaited`);
   const it = f(x);
-  if (it instanceof Ty.CoroWrapper) return it.g;
+  if (it instanceof Ty.CoroWrapper) return O.delegateTo(it.g);
   if (it !== null && typeof it === "object" && it[Symbol.toStringTag] === "Generator") {
     if (it.$cls === T.coroutine) raise(T.TypeError, "__await__() returned a coroutine");
-    return it;
+    return O.delegateTo(it);
   }
   if (Ty.lookupDunder(it, "__next__") === undefined && !(it !== null && typeof it === "object" && typeof it.$next === "function")) raise(T.TypeError, `__await__() returned non-iterator of type '${typeName(it)}'`);
   return yieldFrom(it);
@@ -178,7 +177,7 @@ export function dictOf(...kv: any[]): Obj.PyDict {
 export function yieldFrom(x: any): any {
   if (Array.isArray(x) && (x as any).$cls === undefined) return x;
   const it = O.iter(x);
-  if (it instanceof O.GenIter) return it.g;
+  if (it instanceof O.GenIter) return O.delegateTo(it.g);
   const target = it instanceof O.ProtoIter ? it.o : it;
   const stop = (e: any) => ({ done: true, value: e.args?.length ? e.args[0] : null });
   const step = (f: () => any) => {

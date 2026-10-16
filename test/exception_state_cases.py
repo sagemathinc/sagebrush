@@ -553,3 +553,78 @@ try:
 except StopIteration:
     state("amain done")
 state("end")
+
+
+# --- a delegate keeps its own state however it is resumed: through
+# yield from in one handler, directly, then through another delegator
+def own(tag):
+    try:
+        raise LookupError(tag)
+    except LookupError:
+        yield 1
+        state(tag + " resumed")
+        yield 2
+        state(tag + " resumed again")
+        yield 3
+
+
+def via(inner, tag):
+    try:
+        raise ArithmeticError(tag)
+    except ArithmeticError:
+        yield from inner
+
+
+d = own("delegate")
+v = via(d, "first delegator")
+next(v)
+next(d)
+state("caller after direct resume")
+w = via(d, "second delegator")
+next(w)
+state("caller after second delegator")
+v.close()
+w.close()
+d.close()
+
+
+async def own_coro():
+    try:
+        raise LookupError("coro delegate")
+    except LookupError:
+        await Pause()
+        state("coro delegate resumed")
+        await Pause()
+        state("coro delegate resumed again")
+
+
+async def via_coro(c):
+    try:
+        raise ArithmeticError("coro delegator")
+    except ArithmeticError:
+        await c
+
+
+oc = own_coro()
+vc = via_coro(oc)
+vc.send(None)
+oc.send(None)
+state("caller after direct coro resume")
+try:
+    vc.send(None)
+except StopIteration:
+    state("coro delegator done")
+
+
+# a bare raise in a finally run for an exception re-raises that one
+try:
+    raise ValueError("lexical")
+except ValueError:
+    try:
+        try:
+            raise KeyError("pending")
+        finally:
+            raise
+    except Exception as got:
+        print("bare raise in finally", repr(got))
+state("end of delegation")
