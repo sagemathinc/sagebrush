@@ -248,7 +248,11 @@ function loop1(shape: number[], st: number[], off: number, f: (p: number, k: num
   let base = off, k = 0;
   for (;;) {
     let p = base;
-    for (let j = 0; j < L; j++, p += s) f(p, k++);
+    for (let j = 0; j < L; j++, p += s) {
+      f(p, k++);
+      // (Stop, every 1024 elements)
+      if ((k & 1023) === 0) O.pollInterrupt();
+    }
     let d = nd - 2;
     for (; d >= 0; d--) {
       base += st[d];
@@ -1164,18 +1168,19 @@ function unaryKernel(op: string, contiguous: boolean): any {
   if (k === undefined) {
     if (!Object.hasOwn(UN_EXPR, op)) throw new Error(`no fast kernel for ${op}`);
     const body = contiguous
-      ? `for (let i = 0; i < n; i++) { const v = ad[ao + i]; od[i] = ${UN_EXPR[op]}; }`
+      ? `for (let i = 0; i < n; i++) { const v = ad[ao + i]; od[i] = ${UN_EXPR[op]}; if ((i & 1023) === 1023) POLL(); }`
       : `const nd = shape.length, last = nd - 1, L = shape[last], s = st[last];
          const idx = new Array(nd).fill(0);
          let p = ao, o = 0;
          for (;;) {
            let x = p;
-           for (let i = 0; i < L; i++, x += s) { const v = ad[x]; od[o++] = ${UN_EXPR[op]}; }
+           for (let i = 0; i < L; i++, x += s) { const v = ad[x]; od[o++] = ${UN_EXPR[op]}; if ((o & 1023) === 0) POLL(); }
            let d = nd - 2;
            for (; d >= 0; d--) { p += st[d]; if (++idx[d] < shape[d]) break; p -= st[d] * shape[d]; idx[d] = 0; }
            if (d < 0) return;
          }`;
-    k = new Function("EXP", "LOG", "LOG1P", "FD", "POW", "CR", "EXP2", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p, FD, glibcPow, CR, glibcExp2);
+    // (Stop polled every 1024 elements: a large array of slow functions stays interruptible)
+    k = new Function("EXP", "LOG", "LOG1P", "FD", "POW", "CR", "EXP2", "POLL", "ad", "ao", "st", "shape", "od", "n", body).bind(null, glibcExp, glibcLog, glibcLog1p, FD, glibcPow, CR, glibcExp2, O.pollInterrupt);
     unKernels.set(key, k);
   }
   return k;
