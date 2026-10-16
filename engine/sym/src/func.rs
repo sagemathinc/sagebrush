@@ -463,11 +463,16 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             if n.is_negative() {
                 return None;
             }
-            // n! >= sqrt(2 pi n) (n/e)^n: refuse before the product
-            let nf = n.to_f64().unwrap_or(f64::INFINITY);
-            if nf >= 1.0 {
-                let lb = (nf * (nf.ln() - 1.0) + 0.5 * (2.0 * std::f64::consts::PI * nf).ln()) / std::f64::consts::LN_2;
-                crate::num::check_int_bits_at_least((lb - 1.0).max(0.0) as u64);
+            // n! >= sqrt(2 pi n) (n/e)^n: refuse before the product (past
+            // 2^64, n! >= 2^n has at least 2^64 bits)
+            match n.to_u64() {
+                Some(m) if m >= 1 => {
+                    let nf = m as f64;
+                    let lb = (nf * (nf.ln() - 1.0) + 0.5 * (2.0 * std::f64::consts::PI * nf).ln()) / std::f64::consts::LN_2;
+                    crate::num::check_int_bits_at_least((lb - 1.0).max(0.0) as u64);
+                }
+                Some(_) => {}
+                None => crate::num::check_int_bits_at_least(u64::MAX),
             }
             // (n below about 160000 now)
             let n = n.to_u64()?;
@@ -508,15 +513,27 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             }
             // binomial(n, k) = binomial(n, n - k): the shorter product
             let k = std::cmp::min(k.clone(), &n - &k);
-            // binomial(n, k) >= (n/k)^k and >= 2^(n H(k/n)) / (n + 1), H the
-            // binary entropy: refuse before the product
-            let (nf, kf) = (n.to_f64().unwrap_or(f64::INFINITY), k.to_f64().unwrap_or(f64::INFINITY));
-            if kf >= 1.0 {
+            // binomial(n, 0) = 1, binomial(n, 1) = n, exactly (n may be past
+            // the doubles)
+            if k.is_zero() {
+                return Some(int(1));
+            }
+            if k.is_one() {
+                return Some(big(n));
+            }
+            // binomial(n, k) >= (n/k)^k, with log2 n from n's bits (finite
+            // for every n), and >= 2^(n H(k/n)) / (n + 1), H the binary
+            // entropy, where n is a double: refuse before the product.
+            // k <= n/2, so n/k >= 2 and the first bound is at least k.
+            let kf = k.to_f64().unwrap_or(f64::INFINITY);
+            let mut lb = kf * (crate::num::log2_big(&n) - crate::num::log2_big(&k));
+            if n.bits() <= 1000 {
+                let nf = n.to_f64().unwrap();
                 let p = kf / nf;
                 let h = -p * p.log2() - (1.0 - p) * (1.0 - p).log2();
-                let lb = (kf * (nf / kf).log2()).max(nf * h - (nf + 1.0).log2());
-                crate::num::check_int_bits_at_least((lb - 1.0).max(0.0) as u64);
+                lb = lb.max(nf * h - (nf + 1.0).log2());
             }
+            crate::num::check_int_bits_at_least((lb - 1.0).max(0.0) as u64);
             // n (n-1) ... (n-k+1) / k!, each a product tree
             let k = k.to_u64()?;
             let r = falling(&n, 0, k) / falling(&BigInt::from(k), 0, k);

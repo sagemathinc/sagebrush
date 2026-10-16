@@ -732,6 +732,26 @@ assert "at least" in raises(NotImplementedError, lambda: _binom(_x, 2 * 10**6).s
 assert bool(_fact(_x).subs(x=1000) == _SR(_math.factorial(1000)))
 assert bool(_binom(_x, 990).subs(x=1000) == _SR(_math.comb(1000, 10)))
 assert bool(_binom(_x, 3).subs(x=10**100) == _SR(_math.comb(10**100, 3)))
+# HARD-684-1: n past the doubles is not a reason to refuse
+_n2 = 2**2000
+assert bool(_binom(_x, 1).subs(x=_n2) == _SR(_n2))
+assert bool(_binom(_x, _n2 - 1).subs(x=_n2) == _SR(_n2))
+assert bool(_binom(_x, 0).subs(x=_n2) == 1)
+assert bool(_binom(_x, 2).subs(x=_n2) == _SR(_n2 * (_n2 - 1) // 2))
+assert bool(_binom(_x, 1000).subs(x=_n2) == _SR(_math.comb(_n2, 1000)))
+assert "at least" in raises(NotImplementedError, lambda: _binom(_x, 2000).subs(x=_n2))
+# CORR-684-1: any n past the doubles, small k or small n - k
+for _n3 in [10**309, 10**400, 2**5000 + 12345]:
+    for _k in [2, 3, 7, 50]:
+        _c = _math.comb(_n3, _k)
+        assert bool(_binom(_x, _k).subs(x=_n3) == _SR(_c)), (_n3, _k)
+        assert bool(_binom(_x, _n3 - _k).subs(x=_n3) == _SR(_c)), (_n3, _k)
+assert "at least" in raises(NotImplementedError, lambda: _fact(_x).subs(x=_n2))
+# HARD-684-2: the engine's own integer constructors refuse before parsing
+import _sage_expr as _se
+assert "at least" in raises(NotImplementedError, _se._call, "int", "1" + "0" * 700000)
+assert "at least" in raises(NotImplementedError, _se._call, "rat", "1/1" + "0" * 700000)
+assert _se._call("int", "-" + "9" * 600000)[0].startswith("n-9")
 assert bool(_fact(_x).subs(x=100000) == _SR(_math.factorial(100000)))
 assert bool(_binom(_x, 500000).subs(x=10**6) == _SR(_math.comb(10**6, 500000)))
 assert "at most 2097152 bits" in raises(NotImplementedError, lambda: _SR(2**200000) * _SR(2**1990000))
