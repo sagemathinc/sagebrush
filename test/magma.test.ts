@@ -918,6 +918,48 @@ test("a constructor not implemented yet is refused in words (the signature regis
   assert.match(out, /\nend\n$/);
 });
 
+test("vectors keep their ring, residue collections their universe, permutations their degree: Magma's refusals (CORR-DFC-1..4)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [input, where, Magma 2.18's message] (its caret is at the operation, which Sagebrush doesn't say yet)
+  const cases: [string, string, string][] = [
+    ["u + w;", "'+'", "Bad argument types\nArgument types given: ModTupRngElt[RngInt], ModTupFldElt[FldRat]"],
+    ["u eq Vector(Rationals(), [1, 2]);", "'eq'", "Bad argument types\nArgument types given: ModTupRngElt[RngInt], ModTupFldElt[FldRat]"],
+    ["u * Matrix(Rationals(), 2, 2, [1, 0, 0, 1]);", "'*'", "Arguments have incompatible coefficient rings"],
+    ["(1/2) * u;", "'*'", "Arguments are not compatible\nArgument types given: FldRatElt, ModTupRngElt[RngInt]"],
+    ["Solution(Matrix(Integers(), 2, 2, [2, 0, 0, 2]), Vector(Rationals(), [1, 1]));", "'Solution'", "Arguments have incompatible coefficient rings"],
+    ["Sym(1)![true];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [BoolElt]"],
+    ["Sym(3)![2/1, 3/1, 1/1];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [FldRatElt]"],
+    ["Sym(3)![2.0, 3.0, 1.0];", "'!'", "Illegal coercion\nLHS: GrpPerm\nRHS: [FldReElt]"],
+    ["Sym(3)!(1, 2) eq Sym(4)!(1, 2);", "'eq'", "Arguments are not compatible\nArgument types given: GrpPermElt, GrpPermElt"],
+    ["Integers(5)!(Integers(12)!7);", "'!'", "Illegal coercion\nLHS: RngIntRes\nRHS: RngIntResElt"],
+    ["Intseq(7, 2, 3/1);", "'Intseq'", "Bad argument types\nArgument types given: RngIntElt, RngIntElt, FldRatElt"],
+  ];
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8",
+    input: "u := Vector(Integers(), [1, 2]); w := Vector(Rationals(), [1/2, 1]);\n" + cases.map((c) => c[0]).join("\n") + "\n\"end\";\n" }).stdout as string;
+  for (const [src, where, said] of cases)
+    assert.ok(out.includes(`Runtime error in ${where}: ${said}\n`), `${src}\n${out}`);
+  assert.doesNotMatch(out, /Error: |Traceback|Fraction\(/);
+  assert.match(out, /\nend\n$/);
+});
+
+test("Vector, Subsets and Solution are admitted before they copy or compute (HARD-DFC-1, -2, -3)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
+    "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a vector of more than \d+ entries is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.equal((out.match(/a set of subsets holding more than \d+ elements in all is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.match(out, /Solution of a system of more than 200000 \(rows times columns times the smaller\) steps is not supported yet/);
+  assert.match(r.stdout, /\n1\n256\n/);
+  assert.match(r.stdout, /\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("the intrinsics agents reached for refuse as Magma does, and a missing one names the catalog's alternative", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
