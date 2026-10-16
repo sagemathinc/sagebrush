@@ -2052,13 +2052,18 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     // (64-bit values Sagebrush can't hold exactly, beyond 2^53: refused, the limits and results alike;
     // the exact ones kept, -2^63 among them, and saturation to it; the six other maxima as before)
     tryIt("intmax('uint64')"), tryIt("intmax('int64')"), tryIt("int64(2)^62"), tryIt("uint64(2^53) + 1"), tryIt("int64(1e19)"),
-    "fprintf('%d %d %d %d\\n', intmin('int64'), int64(-1e30), int64(2)^52, uint64(2^53))",
+    "fprintf('%d %d %d %d\\n', intmin('int64'), int64(-1e30), int64(2)^52, uint64(2^53 - 1))",
     "fprintf('%d ', intmax('int8'), intmax('uint8'), intmax('int16'), intmax('uint16'), intmax('int32'), intmax('uint32')); fprintf('\\n')",
     // (complex integers aren't represented: refused; single stays single)
     tryIt("complex(uint8([1;2]), uint8([2;2]))"), "disp(class(complex(single(1), single(2))))",
     // (true and false like a sparse prototype: sparse)
     "A = logical(sparse(5, 3)); F = false(4, 'like', A); T = true(2, 'like', A); disp(mat2str([issparse(F) islogical(F) nnz(F) issparse(T) nnz(T)]))",
     tryIt("true(2, 3, 'like', sparse(1+2i))"), tryIt("false(2, 'like', sparse(5))"),
+    // (the names output, matches times names, admitted before it is built: 800 x 800 refused)
+    "p = ['(?<g0>a)' strjoin(arrayfun(@(k) sprintf('(?<g%d>b)?', k), 1:399, 'UniformOutput', false), '')];",
+    "disp(numel(regexp(repmat('a', 1, 300), p, 'start')))", tryIt("regexp(repmat('a', 1, 300), p, 'names')"),
+    "q = ['(?<g0>a)' strjoin(arrayfun(@(k) sprintf('(?<g%d>b)?', k), 1:799, 'UniformOutput', false), '')];",
+    tryIt("regexp(repmat('a', 1, 800), q, 'start')"), "disp(regexp('xaay', q, 'start', 'once'))",
     // (a token name in two alternatives: the fields in first appearance, the matching alternative's value)
     "n = regexp('01/11/2000  20-02-2020', ['(?<month>\\d+)/(?<day>\\d+)/(?<year>\\d+)|' '(?<day>\\d+)-(?<month>\\d+)-(?<year>\\d+)'], 'names');",
     "disp(strjoin(fieldnames(n)', ',')); disp([n(1).month ' ' n(1).day ' ' n(2).month ' ' n(2).day ' ' n(2).year])",
@@ -2072,8 +2077,8 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
     tryIt("str2num('2+3')"),
   ].join("\n")), ["refused", "refused", "refused", "refused", "refused",
-    "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740992",
+    "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740991",
     "127 255 32767 65535 2147483647 4294967295", "refused", "single",
-    "[1 1 0 1 4]", "refused", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
+    "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "month,day,year", "01 11 02 20 2020", "aaaa",
     "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
 });

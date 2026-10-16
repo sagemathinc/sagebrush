@@ -91,5 +91,5 @@ for i = 1:6
   end
 end
 show(cast(int8([-5 5]), 'uint8'));
-show(cast(uint64(2^53), 'int64'));
+show(cast(uint64(2^53 - 1), 'int64'));
 show(cast(intmin('int64'), 'uint32'));
