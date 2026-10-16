@@ -34,7 +34,7 @@
 // uses, window.sagebrush.board on sagebrush.space: load(doc), focus(ids),
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
-import { Board, type Camera, type Edge, type Item, plainTitle } from "./board";
+import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
 import { boardLink, layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
 import { BoardCodes } from "./codes";
@@ -541,9 +541,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.usePictures(docPixels);
     // (a language's interpreter could not start: the caption says why, until the next edit)
     c.onError = (why) => { if (code === c) say(plain("The code can't run here:", why)); };
+    const codeHost: CodeHost = { highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } };
+    // (an interpreter ready later, made as its language's items came: their
+    // code shown again, highlighted now, UI-C5A-1)
+    c.onReady = () => { if (code === c && board.code === codeHost) { board.setCode(codeHost); relayout(); } };
     c.ready.then((ok) => {
       if (!ok) return;
-      board.setCode({ highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } });
+      board.setCode(codeHost);
       relayout();
     });
     return c;

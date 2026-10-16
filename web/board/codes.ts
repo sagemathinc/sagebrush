@@ -29,6 +29,9 @@ export class BoardCodes {
   /** a language's interpreter could not start (made as its items first came:
    * after `ready`, which is only the interpreters made so far) */
   onError: ((why: string) => void) | null = null;
+  /** a language's interpreter is ready (its highlighter with it: code shown
+   * before it was is shown again, UI-C5A-1) */
+  onReady: ((mode: BoardMode) => void) | null = null;
   /** the board's output cache, and its name for the board shown: every language's (code.ts) */
   private cacheSet: OutputCache | null = null;
   private cacheIdSet: string | null = null;
@@ -71,7 +74,9 @@ export class BoardCodes {
     if (this.previewMsSet !== null) e.previewMs = this.previewMsSet;
     if (this.cacheMsSet !== null) e.cacheMs = this.cacheMsSet;
     e.ready.then((ok) => {
-      if (ok || !e!.error || this.engines.get(mode) !== e) return;
+      if (this.engines.get(mode) !== e) return;
+      if (ok) { this.onReady?.(mode); return; }
+      if (!e!.error) return;
       // (named by its language only when the board has another)
       const why = this.engines.size > 1 ? `${NAMES[mode]}: ${e!.error}` : e!.error;
       this.error ??= why;
