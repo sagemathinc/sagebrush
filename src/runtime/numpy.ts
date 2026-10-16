@@ -2689,12 +2689,15 @@ newBuiltinModule("_numpy", (m) => {
     return sortAxis(x, normAxis(Number(axis), x.ndim), true);
   });
   fn("result_type", (...xs: any[]) => {
+    // (a Python scalar is weak, NEP 50: np.result_type(1, 'i1') is int8)
     let r: DType | null = null;
+    const weak: Weak[] = [];
     for (const x of xs) {
       const dt = x instanceof DType ? x : x instanceof NDArray ? x.dt : (() => { try { return toDtype(x); } catch (e) { if (typeof x === "string" || Obj.isinstance(e, T.NotImplementedError)) throw e; // (float16, longdouble: refused, not float64; an unknown name: TypeError)
- const w = pyScalar(x); return w ? scalarDtype(w) : D.float64; } })();
-      r = r ? promote(r, dt) : dt;
+ const w = pyScalar(x); if (w && !w.dt) { weak.push(w); return null; } return w ? scalarDtype(w) : D.float64; } })();
+      if (dt !== null) r = r ? promote(r, dt) : dt;
     }
+    for (const w of weak) r = r ? weakType(r, w) : scalarDtype(w);
     return r ?? D.float64;
   });
   // sorted distinct values of a real array (np.unique without extras)

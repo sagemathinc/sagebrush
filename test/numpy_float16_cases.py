@@ -56,3 +56,4 @@ for c in ("np.greater([2], [1], dtype=bool)", "np.equal([2], [1], dtype=bool)", 
           "np.add.accumulate([1.5, 2], dtype=np.int8)", "np.multiply.accumulate([3] * 40, dtype=np.uint8)[-3:]", "np.hypot.accumulate([3, 4], dtype=np.int16)",
           "np.equal.reduce([1, 1], dtype=bool)", "str(np.result_type(1, 'i1'))", "np.result_type('abc')"):
     print(c, "->", tr(lambda: eval(c)))
+print([str(np.result_type(*a)) for a in ((1, 'i1'), (True, 'i1'), (1.5, 'f4'), (1, 'u1'), (1, 1.5), (True,), (1j, 'f4'), (1, 2), (1.5, 'i1'), (True, 1))])
