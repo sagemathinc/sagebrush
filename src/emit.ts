@@ -191,6 +191,15 @@ export class Emitter {
     }
   }
 
+  // An except clause's name at its end: None, then deleted, through the
+  // namespace's own operations (a locals mapping sees both, CORR-FBF-1)
+  clearName(id: string): string {
+    const r = resolve(this.fn.scope, id);
+    if (r.kind === "global") return `${this.gns(id)}${prop(id)} = null; R.delName(${this.gns(id)}, ${q(id)});`;
+    if (r.kind === "class") return `$ns.set(${q(id)}, null); $ns.delete(${q(id)});`;
+    return this.storeName(id, "undefined");
+  }
+
   // ------------------------------------------------------------ expressions
 
   ex(e: A.Expr): string {
@@ -370,12 +379,12 @@ export class Emitter {
     if (this.isZeroArgSuper(e)) return this.zeroArgSuper(false);
     const intro = this.introspectionCall(e);
     if (intro !== null) {
-      // (guarded on the name still being the builtin: a locals mapping, the
-      // globals or the builtins can bind it otherwise, and CPython looks it
-      // up as any name)
+      // (guarded on the name still being the builtin's own function: a
+      // locals mapping, the globals or the builtins module can bind it
+      // otherwise, and CPython looks it up as any name)
       const t = this.temp();
       const id = (f as Extract<A.Expr, { k: "Name" }>).id;
-      return `((${t} = ${this.load(id)}) === $B${prop(id)} ? ${intro} : ${this.plainCall(e, t)})`;
+      return `((${t} = ${this.load(id)}) === R.introspectionBuiltins${prop(id)} ? ${intro} : ${this.plainCall(e, t)})`;
     }
     const consumed = this.consumingCall(e);
     if (consumed !== null) return consumed;
@@ -1030,11 +1039,10 @@ export class Emitter {
         const x = this.temp();
         this.w("try {");
         this.block(h.body);
-        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }`);
-        if (h.name !== null) {
-          this.w(this.storeName(h.name, "undefined"));
-          this.fn.assigned.delete(h.name);
-        }
+        // (the name is cleared however the clause ends, CPython's
+        // `name = None; del name`)
+        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }${h.name !== null ? ` finally { ${this.clearName(h.name)} }` : ""}`);
+        if (h.name !== null) this.fn.assigned.delete(h.name);
         this.indent--;
       });
       this.w(`} else throw ${e};`);
