@@ -1861,3 +1861,121 @@ test("factorial's integer limits exact; unique's NaN rows and stable order; scal
     "[NaN 2 1]", "[1 2 4]", "[1 2 1 3]", "[NaN 2 NaN 1]", "[1 2 NaN NaN]",
     "int8", "120", "single", "int16", "refused", "refused", "refused", "ran"]);
 });
+
+test("asec, acsc, acot, asech, acsch and acoth: the base inverse function of 1./X, as their pages define them", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    "fprintf('%.4f ', [asec(2) acsc(2) acot(1) acot(0) asech(0.5) acsch(1) acoth(2)]); fprintf('\\n')",
+    // (outside the real domain the result is the base function's: complex, with its conventions)
+    "disp(mat2str([isequal(asec(0.5), acos(2)) isequal(acsc(-0.5), asin(-2)) isequal(asech(2), acosh(0.5)) isequal(acoth(-0.5), atanh(-2)) isequal(acoth(0.5), atanh(2))]))",
+    "disp(mat2str([isequal(asec([2 -4; 0.5 1]), acos(1 ./ [2 -4; 0.5 1])) isequal(acot(1+2i), atan(1 / (1+2i)))]))",
+    "disp(class(asec(single(2)))); disp(mat2str(size(acot(zeros(2, 3)))))",
+    tryIt("asec(int8(2))"), tryIt("acot({1})"),
+  ].join("\n")), ["1.0472 0.5236 0.7854 1.5708 1.3170 0.8814 0.5493", "[true true true true true]", "[true true]", "single", "[2 3]", "refused", "refused"]);
+});
+
+test("asin, acos, atanh and the reciprocal inverses on the real axis outside the domain, as the pages' examples; the poles of atanh and atan (CORR-EB2-1, -2, -3)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  // (+ 0 turns a negative zero into 0, as MATLAB's display shows it)
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).' + 0; imag(z(:)).' + 0]); fprintf('\\n')`;
+  assert.deepEqual(run([
+    // (the functions' own examples: real elements, in a real or a complex array)
+    z("acos([2 -3 1+2i])"), z("asin([2 -3 1+2i])"), z("atanh([2 -3 1+2i])"),
+    z("acos([2 -3])"), z("asin([2 -3])"),
+    // (the reciprocal inverses: asec(0.5) is acos(2), acsc(0.5) asin(2), asech's example)
+    z("[asec(0.5) acsc(0.5) asec(-0.5)]"), z("asech([2 -3 1+2i])"), z("asech(single([2 -3]))"),
+    // (atanh's poles in a complex array, and acoth's example; atan's poles)
+    z("acoth([-pi/2 -1 0 1/2 1 pi/2])"), z("acoth([1 0.5])"), z("[atan(1i) atan(-1i) acot(1i)]"),
+    // (a complex zero as a real zero: acsch's numeric example, and each reciprocal inverse at complex(0, 0))
+    z("acsch([-2i 0 2i/sqrt(3) 1/2 1i 3])"),
+    z("[acsch(complex(0, 0)) acot(complex(0, 0)) acoth(complex(0, 0)) asech(complex(0, 0))]"),
+    // (atan of a complex array with an infinite entry, so acot with a zero one: pi/2, as for a scalar)
+    z("atan([Inf 1i])"), z("acot([0 1i])"), z("acot(single([0 1+2i]))"),
+  ].join("\n")), [
+    "0.0000+1.3170i 3.1416-1.7627i 1.1437-1.5286i",
+    "1.5708-1.3170i -1.5708+1.7627i 0.4271+1.5286i",
+    "0.5493+1.5708i -0.3466-1.5708i 0.1733+1.1781i",
+    "0.0000+1.3170i 3.1416-1.7627i",
+    "1.5708-1.3170i -1.5708+1.7627i",
+    "0.0000+1.3170i 1.5708-1.3170i 3.1416-1.3170i",
+    "0.0000+1.0472i 0.0000+1.9106i 0.3966-1.3845i",
+    "0.0000+1.0472i 0.0000+1.9106i",
+    "-0.7525+0.0000i -Inf+0.0000i 0.0000+1.5708i 0.5493+1.5708i Inf+0.0000i 0.7525+0.0000i",
+    "Inf+0.0000i 0.5493+1.5708i",
+    "0.0000+Infi 0.0000-Infi 0.0000-Infi",
+    "0.0000+0.5236i Inf+0.0000i 0.0000-1.0472i 1.4436+0.0000i 0.0000-1.5708i 0.3275+0.0000i",
+    "Inf+0.0000i 1.5708+0.0000i 0.0000+1.5708i Inf+0.0000i",
+    "1.5708+0.0000i 0.0000+Infi",
+    "1.5708+0.0000i 0.0000-Infi",
+    "1.5708+0.0000i 0.2318-0.4024i",
+  ]);
+});
+
+test("asind, acosd, atand, asecd, acscd, acotd, secd, cscd and cotd: the radian functions in degrees", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).'; imag(z(:)).']); fprintf('\\n')`;
+  assert.deepEqual(run([
+    "fprintf('%.4f ', [asind(0.5) acosd(0.5) atand(1) asecd(2) acscd(2) acotd(1) secd(60) cscd(30) cotd(45)]); fprintf('\\n')",
+    // (exact where the radian function is: the ends of the domains, and the zeros of sind and cosd)
+    "disp(mat2str([asind(1) acosd(-1) atand(Inf) acotd(0) secd(90) cscd(0) cotd(90) cotd(0)]))",
+    // (outside the real domain: the radian function's complex value, in degrees)
+    z("[asind(2) acosd(2) asecd(0.5) acscd(0.5)]"),
+    "disp(class(asind(single(0.5)))); disp(class(secd(single(60)))); disp(mat2str(size(acotd(ones(2, 3)))))",
+    tryIt("asind(int8(1))"), tryIt("acosd({1})"),
+    // (complex results with an infinite part: each part in degrees on its own, no NaN)
+    z("[asind(Inf) asecd(0) atand(1i)]"),
+    // (the angle reduced exactly in degrees: near a pole, and large angles; cotd's page example)
+    "fprintf('%.4e ', cotd([180-eps(180) 180 180+eps(180)])); fprintf('\\n')",
+    "fprintf('%.4f ', [secd(1e10) cscd(1e10) cotd(1e10) sind(1e10) sind(30) cosd(60)]); fprintf('\\n')",
+    "disp(mat2str([sind(30) cosd(60) tand(45) sind(180) cosd(90) tand(-90)]))",
+    // (tand near a pole, against 50-digit values: the complement keeps the distance; tand(60) as Octave's)
+    "fprintf('%.15e ', [tand(90-eps(90)) tand(270-eps(270)) tand(90-1e-10) tand(89) tand(80)]); fprintf('\\n')",
+    "fprintf('%.17g ', [tand(60) tand(-45) tand(0)]); fprintf('\\n')",
+  ].join("\n")), [
+    "30.0000 60.0000 45.0000 60.0000 30.0000 45.0000 2.0000 2.0000 1.0000",
+    "[90 180 90 90 Inf Inf 0 Inf]",
+    "90.0000-75.4561i 0.0000+75.4561i 0.0000+75.4561i 90.0000-75.4561i",
+    "single", "single", "[2 3]", "refused", "refused",
+    "90.0000-Infi 0.0000+Infi 0.0000+Infi",
+    "-2.0159e+15 -Inf 2.0159e+15",
+    "5.7588 -1.0154 -0.1763 -0.9848 0.5000 0.5000",
+    "[0.5 0.5 1 0 0 -Inf]",
+    "4.031832051015932e+15 1.007958012753983e+15 5.729475701315806e+11 5.728996163075943e+01 5.671281819617709e+00",
+    "1.7320508075688767 -0.99999999999999989 0",
+  ]);
+});
+
+test("sqrt(-0) is +0; 1.^NaN and NaN.^0 are NaN; log1p, log10 and log2 with a pole or Inf in a complex array (CORR-3DB-1..5); the FFTs keep single", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).' + 0; imag(z(:)).' + 0]); fprintf('\\n')`;
+  assert.deepEqual(run([
+    "disp(mat2str([1./sqrt(-0) 1./sqrt([-0 0])])); disp(mat2str(1./sqrt(single(-0))))",
+    "disp(mat2str([1.^NaN NaN.^0 1^NaN NaN^0 power(1, NaN)])); disp(mat2str([1 2].^[NaN NaN])); disp(mat2str([NaN NaN].^[0 1]))",
+    "disp(mat2str(single(1).^single(NaN))); disp(mat2str(single(NaN).^single(0))); disp(class(single(NaN).^single(0))); disp(mat2str([2 1].^[0 3]))",
+    z("log1p([-2 -1 0 1])"), z("log10([-10 0 1 10])"), z("log2([-1 0 Inf])"),
+    "z = log1p([1e-16 -2]); fprintf('%.6g\\n', real(z(1)))",
+    // (the FFTs keep single: fft2, ifft2, fftn, ifftn, real or complex results)
+    "x = single(magic(3)); disp(strjoin({class(fft2(x)), class(ifft2(fft2(x))), class(fftn(x)), class(ifftn(x, 'symmetric')), class(fft2(x, 4, 4))}, ' '))",
+    "disp(class(fft2(magic(3))))",
+  ].join("\n")), [
+    "[Inf Inf Inf]", "Inf",
+    "[NaN NaN NaN NaN NaN]", "[NaN NaN]", "[NaN NaN]",
+    "NaN", "NaN", "single", "[1 1]",
+    "0.0000+3.1416i -Inf+0.0000i 0.0000+0.0000i 0.6931+0.0000i",
+    "1.0000+1.3644i -Inf+0.0000i 0.0000+0.0000i 1.0000+0.0000i",
+    "0.0000+4.5324i -Inf+0.0000i Inf+0.0000i",
+    "1e-16",
+    "single single single single single",
+    "double",
+  ]);
+});
