@@ -169,7 +169,7 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
 <h4>Looking</h4><ul>
-<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>0</kbd> or <kbd>Esc</kbd>: the whole board</li>
+<li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>Esc</kbd>: the board as it opens; <kbd>0</kbd>: all of it, however small</li>
 <li>Drag the background to move about; <kbd>+</kbd> <kbd>−</kbd>, Ctrl and the wheel, or two fingers to zoom</li>
 <li><kbd>PageDown</kbd> <kbd>PageUp</kbd>: the next and previous page</li>
 <li><kbd>Ctrl</kbd>+<kbd>F</kbd> (<kbd>⌘</kbd><kbd>F</kbd>): find words in the board</li>
@@ -722,7 +722,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (a slide: its card)
       const s = doc && lookOf(doc, pageIx).slide;
       if (s) { const c = board.cameraFor(s.x, s.y, s.x + s.w, s.y + s.h); if (now) board.setCamera(c); else board.flyTo(c); }
-      else board.focus(undefined, now);
+      // (the whole board, as legible as it can be: from its start if it is large, friction 6)
+      else board.overview(now);
     } else {
       const s = ss[at];
       board.focus(typeof s.focus === "string" ? [s.focus] : s.focus, now);
@@ -748,7 +749,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (e.key === "ArrowRight" || e.key === " ") go(onward);
     else if (e.key === "ArrowLeft") go(back);
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
-    else if ((e.key === "Escape" && !editor.escapes) || e.key === "0") go(() => step(-1));
+    else if (e.key === "Escape" && !editor.escapes) go(() => step(-1));
+    // (0, as the button that says so: everything, out of the tour; Esc, the board as it opens)
+    else if (e.key === "0") go(() => { step(-1); board.focus(); });
     else if (e.key === "?") help();
     else if (e.key === "PageDown") go(() => page(pageIx + 1));
     else if (e.key === "PageUp") go(() => page(pageIx - 1));

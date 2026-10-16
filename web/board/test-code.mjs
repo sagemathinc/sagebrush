@@ -377,7 +377,11 @@ try {
       check(await until(ran, 60000), "the long item ran: " + JSON.stringify(await outputs()));
       // (and the board laid out with its output: the item under it pushed down)
       check(await until("window.sagebrush.board.snapshot().items.find((it) => it.id === 'bottom').y > 1000", 10000), "the output pushed the bottom item down");
-      if (!moved) check(await until(inView, 10000), "after the first run, the board fitted again, the pushed-down item in view: " + JSON.stringify(await ev("window.sagebrush.board.snapshot().view")));
+      // (shown again as it opens: all of it, or, too large to read whole, at
+      // the legible zoom from its top, the pushed-down item a scroll away:
+      // William, Oct 15, legibility first)
+      const opened = "(() => { const s = window.sagebrush.board.snapshot(), v = s.view, t = s.items.find((it) => it.id === 'top'); return Math.abs(s.camera.z - 0.6) < 1e-6 && t.x >= v.x0 - 1 && t.y >= v.y0 - 1 && t.y + t.h <= v.y1 + 1; })()";
+      if (!moved) check(await until(`${inView} || ${opened}`, 10000), "after the first run, the board shown again as it opens (all of it, or legible from its top): " + JSON.stringify(await ev("window.sagebrush.board.snapshot().view")));
       else {
         await sleep(2500);
         check((await camera()) === before, "the reader moved the view: it stays where they put it: " + before + " then " + (await camera()));

@@ -863,16 +863,9 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
       at += (kind === "row" ? n.w : n.h) + GAP;
     }
   } else if (kind === "grid") {
-    // (columns as wide as the widest box; each row as tall as its own tallest,
-    // so one tall box, a plot, leaves no gaps in the other rows)
-    const cols = Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)));
-    const cw = Math.max(...nodes.map((n) => n.w), 0), rows: number[] = [];
-    nodes.forEach((n, i) => { const r = Math.floor(i / cols); rows[r] = Math.max(rows[r] ?? 0, n.h); });
-    const top = [0];
-    for (const h of rows) top.push(top[top.length - 1] + h + GAP);
-    nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: top[Math.floor(i / cols)] }));
+    for (const [id, p] of grid(nodes, Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length))))) out.set(id, p);
   } else {
-    for (const [id, p] of layered(nodes, links, dir)) out.set(id, p);
+    for (const [id, p] of graph(nodes, links, dir)) out.set(id, p);
   }
   // (placed beside the positioned ones, when there are both: not beside a
   // pen stroke, which would move them all when one is drawn, B1)
@@ -883,6 +876,63 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
   }
   for (const n of all) if (n.fixed) out.set(n.id, n.fixed);
   for (const n of all) if (n.ink && !n.fixed) out.set(n.id, { x: 0, y: 0 });
+  return out;
+}
+
+// A grid of `cols` columns, in order: columns as wide as the widest box;
+// each row as tall as its own tallest, so one tall box, a plot, leaves no
+// gaps in the other rows.
+function grid(nodes: Node[], cols: number): Map<string, { x: number; y: number }> {
+  const out = new Map<string, { x: number; y: number }>();
+  const cw = Math.max(...nodes.map((n) => n.w), 0), rows: number[] = [];
+  nodes.forEach((n, i) => { const r = Math.floor(i / cols); rows[r] = Math.max(rows[r] ?? 0, n.h); });
+  const top = [0];
+  for (const h of rows) top.push(top[top.length - 1] + h + GAP);
+  nodes.forEach((n, i) => out.set(n.id, { x: (i % cols) * (cw + GAP), y: top[Math.floor(i / cols)] }));
+  return out;
+}
+
+// A graph: one layered layout when its items are all linked, one part (or
+// up to four items with no edges, a row, as ever).  Else (friction 5: two
+// dozen items, a few of them linked, came out as one row many screens wide,
+// every part's first layer and every lone item side by side): each linked
+// part laid out on its own, the items with no edges as one grid, and the
+// parts, in reading order, packed in rows (top to bottom; with "LR", in
+// columns) that wrap, about half again as wide as tall.
+function graph(nodes: Node[], links: Link[], dir: "TB" | "LR"): Map<string, { x: number; y: number }> {
+  const root = new Map(nodes.map((n) => [n.id, n.id]));
+  const find = (v: string): string => { while (root.get(v) !== v) { root.set(v, root.get(root.get(v)!)!); v = root.get(v)!; } return v; };
+  const linked = new Set<string>();
+  for (const [a, b] of links) if (a !== b) { linked.add(a); linked.add(b); root.set(find(a), find(b)); }
+  const parts = new Map<string, Node[]>(), alone: Node[] = [];
+  for (const n of nodes) {
+    if (!linked.has(n.id)) alone.push(n);
+    else { const r = find(n.id); (parts.get(r) ?? parts.set(r, []).get(r)!).push(n); }
+  }
+  if ((parts.size === 1 && !alone.length) || (!parts.size && alone.length <= 4)) return layered(nodes, links, dir);
+  // the blocks, in the order of their first items
+  type Block = { first: number; pos: Map<string, { x: number; y: number }>; w: number; h: number };
+  const order = new Map(nodes.map((n, i) => [n.id, i]));
+  const block = (ns: Node[], pos: Map<string, { x: number; y: number }>): Block => ({
+    first: Math.min(...ns.map((n) => order.get(n.id)!)), pos,
+    w: Math.max(...ns.map((n) => pos.get(n.id)!.x + n.w)), h: Math.max(...ns.map((n) => pos.get(n.id)!.y + n.h)),
+  });
+  const blocks: Block[] = [...parts.values()].map((ns) => { const ids = new Set(ns.map((n) => n.id)); return block(ns, layered(ns, links.filter(([a]) => ids.has(a)), dir)); });
+  if (alone.length) blocks.push(block(alone, grid(alone, alone.length <= 4 ? alone.length : Math.ceil(Math.sqrt(alone.length * 1.5)))));
+  blocks.sort((a, b) => a.first - b.first);
+  // packed: along rows (TB) or columns (LR) as long as the longest block or
+  // the square root of their area, half again as wide as tall
+  const tb = dir === "TB", area = blocks.reduce((s, b) => s + (b.w + 2 * GAP) * (b.h + 2 * GAP), 0);
+  const limit = tb ? Math.max(...blocks.map((b) => b.w), Math.sqrt(area * 1.5)) : Math.max(...blocks.map((b) => b.h), Math.sqrt(area / 1.5));
+  const out = new Map<string, { x: number; y: number }>();
+  let u = 0, v = 0, depth = 0; // along the row, the row's start across, its depth
+  for (const b of blocks) {
+    const len = tb ? b.w : b.h, deep = tb ? b.h : b.w;
+    if (u > 0 && u + len > limit) { v += depth + 2 * GAP; u = 0; depth = 0; }
+    for (const [id, p] of b.pos) out.set(id, tb ? { x: u + p.x, y: v + p.y } : { x: v + p.x, y: u + p.y });
+    u += len + 2 * GAP;
+    depth = Math.max(depth, deep);
+  }
   return out;
 }
 
