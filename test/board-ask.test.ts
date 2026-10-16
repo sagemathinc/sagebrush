@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { askMarkdown, cleanDoc, layout, type DocAsk } from "../web/board/doc";
-import { answerProblem, askProblems, asksOf, answerText, onStep } from "../web/board/ask";
+import { answerProblem, askProblems, asksOf, answerText, stepProblem } from "../web/board/ask";
 import { checkText } from "../src/board-check";
 import { submissionProblem } from "../src/board-answers";
 
@@ -91,7 +91,7 @@ test("an answer each input takes, and why not", () => {
     [{ input: "text" }, "", null],
     [{ input: "text" }, "a".repeat(10_001), "its answer is longer than 10000 characters"],
     [{ input: "number", min: 0, max: 1, step: 0.1 }, 0.3, null],
-    [{ input: "number", min: 0, max: 1, step: 0.1 }, 0.35, "its answer 0.35 is not on its step, 0.1 from 0"],
+    [{ input: "number", min: 0, max: 1, step: 0.1 }, 0.35, "its answer 0.35 is not on its step, 0.1"],
     [{ input: "number", min: 0 }, -1, "its answer -1 is less than its min, 0"],
     [{ input: "number" }, Infinity, "its answer is a finite number"],
     [{ input: "scale" }, 5, null],
@@ -100,11 +100,21 @@ test("an answer each input takes, and why not", () => {
   ];
   for (const [q, ans, want] of cases) assert.equal(answerProblem(ask(q), ans), want, JSON.stringify([q, ans]));
   // (off its step however many steps away; decimal steps still taken; steps that can't be counted refused: astra's CORR-738-1)
-  assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 1000000000.5), "its answer 1000000000.5 is not on its step, 1 from 0");
-  assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 100000000.1), "its answer 100000000.1 is not on its step, 1 from 0");
-  for (const [v, from, step, want] of [[1e9, 0, 1, true], [2 ** 53, 0, 1, true], [0.3, 0, 0.1, true], [12345.7, 0, 0.1, true], [0.75, 0, 0.25, true], [-0.2, -1, 0.1, true], [0, 0, 0.1, true],
-    [0.35, 0, 0.1, false], [1000000000.5, 0, 1, false], [1e308, -1e308, 1e-300, false], [5, 0, 1e-320, false]] as [number, number, number, boolean][])
-    assert.equal(onStep(v, from, step), want, JSON.stringify([v, from, step]));
+  assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 1000000000.5), "its answer 1000000000.5 is not on its step, 1");
+  assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 100000000.1), "its answer 100000000.1 is not on its step, 1");
+  // (whole numbers exactly, however large; else within a thousandth of a step, or refused as too large to check: astra's bd46e6df)
+  const ok = (v: number, from: number, step: number) => stepProblem(v, from, step);
+  for (const [v, from, step] of [[1e9, 0, 1], [2 ** 53 - 1, 0, 1], [2 ** 53 - 2, 0, 2], [-(2 ** 53 - 1), 2 ** 53 - 1, 1], [9007199254740990, 10, 5], [0.3, 0, 0.1], [12345.7, 0, 0.1], [0.75, 0, 0.25], [-0.2, -1, 0.1], [0, 0, 0.1], [1.5, 0.5, 1]] as [number, number, number][])
+    assert.equal(ok(v, from, step), null, JSON.stringify([v, from, step]));
+  assert.equal(ok(2 ** 50 + 0.5, 0, 1), "its answer 1125899906842624.5 is not on its step, 1");
+  assert.equal(ok(1000000000000000.5, 0, 1), "its answer 1000000000000000.5 is not on its step, 1");
+  assert.equal(ok(0.35, 0, 0.1), "its answer 0.35 is not on its step, 0.1");
+  assert.equal(ok(7, 1, 2), null);
+  assert.equal(ok(8, 1, 2), "its answer 8 is not on its step, 2 from 1");
+  assert.equal(ok(2 ** 53 + 2, 0, 1), "its answer 9007199254740994 is too large to check against its step, 1");
+  assert.equal(ok(2 ** 50 + 0.5, 0, 0.5), "its answer 1125899906842624.5 is too large to check against its step, 0.5");
+  assert.equal(ok(1e308, -1e308, 1e-300), "its answer 1e+308 is too large to check against its step, 1e-300");
+  assert.equal(ok(5, 0, 1e-320), "its answer 5 is too large to check against its step, 1e-320");
   assert.equal(answerProblem(ask({ input: "check", options: Array.from({ length: 101 }, (_, i) => String(i)) }), Array.from({ length: 101 }, (_, i) => String(i))), "its answer lists more than 100 values");
   assert.equal(answerText(ask({ input: "radio", options: opts, answer: "y" })), '"y" (Y)');
   assert.equal(answerText(ask({ input: "check", options: opts, answer: [] })), "(none chosen)");
