@@ -30,3 +30,7 @@ T('values at 1', lambda: ['%.8f' % float(solve(ed, y)[j].substitute(c == 2).rhs(
 T('big content', lambda: [solve(x^2 == (9*2^58)*(a + b), x), solve(x^2 == 8*(a + b), x)])
 var('_solve_fn0'); ff = function('ff')
 T('requested name', lambda: [list(s) for s in solve([ff(x) == 2], ff(x), _solve_fn0)])
+# an assumption on a name like the temporary symbol's
+assume(_solve_fn0 > 0)
+T('assumed name', lambda: [solve(ff(x) == -2, ff(x)), solve(ff(x) == -2, ff(x), solution_dict=True)])
+forget()

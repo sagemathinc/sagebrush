@@ -4069,6 +4069,10 @@ def solve(f, *args, **kw):
         # solve([f(x) == 2], f(x), _solve_fn0) took the user's _solve_fn0)
         taken = set(n for g in eqs for n in g._names())
         taken |= set(n for v in vs for n in (_expr(v)._names() if not isinstance(v, str) else [v]))
+        # and not a name in the active assumptions (assume(_solve_fn0 > 0)
+        # made solve(ff(x) == -2, ff(x)) return [], the review's CORR-9E5-1)
+        for r in _ASSUMPTIONS:
+            taken |= set(r._names()) if isinstance(r, Expression) else {str(r._v)}
         new = {}
         for k, v in enumerate(fns):
             name = "_solve_fn%d" % k
