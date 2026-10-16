@@ -1,0 +1,61 @@
+# Matrices over RealField(p) and ComplexField(p) for p > 53 are computed in the field's own precision
+# (4 x 4 determinants, inverses and solutions were numpy's doubles padded to p bits; ComplexField(200) echelon forms raised AttributeError)
+# Values are shown rounded to 64 bits, and below 10^-40 as 0: the last bits and rounding residues of the two
+# eliminations may differ (test/mpfield-matrix.test.ts checks the precision against exact values)
+def T(name, fun):
+    try: print(name, '::', fun())
+    except Exception as e: print(name, '::', type(e).__name__)
+R64 = RealField(64)
+def c(x):
+    if 'Complex' in str(x.parent()):
+        return (c(x.real()), c(x.imag()))
+    return 0 if abs(x) < 10^-40 else R64(x)
+def cl(v):
+    return [c(x) for x in v]
+for p in (100, 200):
+    R = RealField(p)
+    A = matrix(R, 4, 4, [R(i + j + 1).sqrt() + (1 if i == j else 0) for i in range(4) for j in range(4)])
+    v = vector(R, [1, 2, 3, 4])
+    T('R%d det' % p, lambda: c(A.det()))
+    T('R%d inverse' % p, lambda: cl(A.inverse()[0]))
+    T('R%d solve' % p, lambda: cl(A.solve_right(v)))
+    T('R%d rank' % p, lambda: A.rank())
+    T('R%d charpoly' % p, lambda: cl(A.charpoly().list()))
+    T('R%d near rank' % p, lambda: matrix(R, 4, 4, [1, 2, 3, 4, 2, 3, 5, 7, 1, 1, 2, 3 + R(2)^(10 - p), 4, 1, 0, 2]).rank())
+    S = matrix(R, 4, 4, [1, 2, 3, 4, 2, 4, 6, 8, 1, 0, 1, 0, 0, 1, 1, 2])
+    T('R%d sing det' % p, lambda: c(S.det()))
+    T('R%d sing rank' % p, lambda: S.rank())
+    T('R%d sing kernel' % p, lambda: [cl(r) for r in S.right_kernel_matrix().rows()])
+    T('R%d echelon' % p, lambda: [cl(r) for r in S.echelon_form().rows()])
+C = ComplexField(200)
+B = matrix(C, 3, 3, [C(i, j) + (2 if i == j else 0) for i in range(3) for j in range(3)])
+T('C200 echelon', lambda: [cl(r) for r in B.echelon_form().rows()])
+T('C200 det', lambda: c(B.det()))
+T('C200 charpoly', lambda: cl(B.charpoly().list()))
+T('C200 inverse', lambda: cl(B.inverse()[0]))
+B4 = matrix(C, 4, 4, [C(i + 1, j) + (3 if i == j else 0) for i in range(4) for j in range(4)])
+T('C200 4 det', lambda: c(B4.det()))
+T('C200 4 rank', lambda: B4.rank())
+T('C200 one', lambda: C.one())
+# solve_right and solve_left check the right-hand side's size first, as Sage (astra's CORR-DCF-1: a short vector or
+# matrix was solved as if its missing equations did not exist, and a 3 x 0 matrix gave a 2 x 0 solution)
+def TM(name, fun):
+    try: print(name, '::', fun())
+    except Exception as e: print(name, '::', type(e).__name__, ':', e)
+for F in [RealField(100), ComplexField(100), GF(7), QQbar, RDF]:
+    A = identity_matrix(F, 2)
+    B = matrix(F, 2, 3, [1, 0, 0, 0, 1, 0])
+    TM('%s right vec1' % F, lambda: A.solve_right(vector(F, [1])))
+    TM('%s right vec3' % F, lambda: A.solve_right(vector(F, [1, 2, 3])))
+    TM('%s right mat1x1' % F, lambda: A.solve_right(matrix(F, 1, 1, [1])))
+    TM('%s right mat3x0' % F, lambda: A.solve_right(matrix(F, 3, 0, [])))
+    TM('%s right mat2x0' % F, lambda: A.solve_right(matrix(F, 2, 0, [])).dimensions())
+    TM('%s left vec1' % F, lambda: A.solve_left(vector(F, [1])))
+    TM('%s left vec3' % F, lambda: A.solve_left(vector(F, [1, 2, 3])))
+    TM('%s left mat1x1' % F, lambda: A.solve_left(matrix(F, 1, 1, [1])))
+    TM('%s left mat0x3' % F, lambda: A.solve_left(matrix(F, 0, 3, [])))
+    TM('%s left mat0x2' % F, lambda: A.solve_left(matrix(F, 0, 2, [])).dimensions())
+    TM('%s B right vec3' % F, lambda: B.solve_right(vector(F, [1, 2, 3])))
+    TM('%s B left vec2' % F, lambda: B.solve_left(vector(F, [1, 2])))
+    TM('%s B right vec2' % F, lambda: B.solve_right(vector(F, [1, 2])).list() == [1, 2, 0])
+    TM('%s B left vec3' % F, lambda: B.solve_left(vector(F, [1, 2, 0])).list() == [1, 2])
