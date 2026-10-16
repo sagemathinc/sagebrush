@@ -4744,20 +4744,39 @@ def lcm_(a, b):
 def factorial_(n):
     A = _farr(n)
     cls = class_(n)
+    flat = A.reshape(-1)
+    if np.any(np.isnan(flat)):
+        raise _err("factorial of NaN is not supported in Sagebrush.")
+    if np.any((flat < 0) | ((flat != np.floor(flat)) & np.isfinite(flat))):
+        raise _err("N must be a matrix of non-negative integers.", "MATLAB:factorial:NNegativeInt")
     if cls in _INTS:
-        # (an integer class: exact, saturating at its largest value)
-        hi = int(intmax_(Char(cls)).reshape(-1)[0])
-        vals = [min(_math.factorial(int(x)), hi) for x in A.reshape(-1)]
+        # (an integer class: exact, saturating at its largest value, the class's exact limit;
+        # 21! passes every class's, so larger N are not multiplied out. Sagebrush's 64-bit
+        # integers hold 53 bits, as doubles do: a result they would round is refused)
+        hi = _INTS[cls][2]
+        vals = [min(_math.factorial(int(x)), hi) if x <= 20 else hi for x in flat]
+        if cls in ("int64", "uint64"):
+            vals = [_exact_int(v) for v in vals]
         return _canon(np.array(vals, dtype=_INTS[cls][0]).reshape(A.shape))
-    out = np.array([float(_math.factorial(int(x))) if x <= 170 else _math.inf for x in A.reshape(-1)]).reshape(A.shape)
+    out = np.array([float(_math.factorial(int(x))) if x <= 170 else _math.inf for x in flat]).reshape(A.shape)
     return _finish(out, cls) if cls == "single" else _box(out)
 
 
 @_bs("nchoosek")
 def nchoosek_(n, k):
+    kcls = class_(k)
     k = _int_arg(k)
     if _numel(n) == 1:
-        return float(_math.comb(_int_arg(n), k))
+        c = _math.comb(_int_arg(n), k)
+        # (a single or integer n or k gives that class, as nchoosek's page says; an integer
+        # class's result past its range, or past the 53 bits Sagebrush's 64-bit integers
+        # keep, is refused rather than saturated or rounded)
+        cls = class_(n) if class_(n) != "double" else kcls
+        if cls in _INTS:
+            if c > _INTS[cls][2]:
+                raise _err("nchoosek: the result %d is outside %s's range: not supported in Sagebrush." % (c, cls))
+            return _canon(np.array([[_exact_int(c) if cls in ("int64", "uint64") else c]], dtype=_INTS[cls][0]))
+        return _finish(np.array([[float(c)]]), "single") if cls == "single" else float(c)
     v = list(_arr(n).reshape(-1))
     import itertools
     combos = list(itertools.combinations(range(len(v)), k))
@@ -9651,9 +9670,11 @@ def _setfn(nargout, op, a, b, opts):
                 distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
                 i += 2
                 continue
-            if t not in ("rows", "stable", "sorted", "legacy", "first", "last"):
+            if t not in ("rows", "stable", "sorted", "legacy") + (("first", "last") if op == "unique" else ()):
                 raise _err("%s: unsupported option '%s'." % (op, _text(o[i])))
             flags.append(t)
+        else:
+            raise _err("%s: options must be text; a %s option is not supported." % (op, class_(o[i])))
         i += 1
     rows = "rows" in flags
     stable = "stable" in flags
@@ -9717,22 +9738,43 @@ def _setfn(nargout, op, a, b, opts):
         row = _set_isrow(a)
     else:  # unique
         last = "last" in flags
-        keys = [k for k in dict.fromkeys(A) if not _is_nan_key(k)]
-        order = keys if stable else _sort_keys(keys)
-        pick = last_a if (last or legacy) else first_a
-        if nans_a and not distinct:
-            nans_a = [nans_a[-1] if (last or legacy) else nans_a[0]]
-        ia = [pick[k] for k in order] + nans_a
-        pos = {k: j for j, k in enumerate(order)}
-        ic = []
-        nk = 0
-        for k in A:
-            if _is_nan_key(k):
-                ic.append(len(order) + (nk if distinct else 0))
-                nk += 1
-            else:
-                ic.append(pos[k])
-        order = order + [A[i] for i in nans_a]
+        if kind in ("num", "rows") and not (A and type(A[0]) is complex):
+            # (each element or row a key in which NaN sorts after every number, as sort and
+            # sortrows place it; with TreatMissingAsDistinct false the NaNs are equal, so rows
+            # match on their other entries, else each NaN is its own key, in place when stable)
+            def ukey(i, k):
+                base = tuple((1, 0.0) if x != x else (0, x) for x in (k if type(k) is tuple else (k,)))
+                return base + ((i,),) if distinct and _is_nan_key(k) else base
+            cks = [ukey(i, k) for i, k in enumerate(A)]
+            first_c, last_c = {}, {}
+            for i, c in enumerate(cks):
+                first_c.setdefault(c, i)
+                last_c[c] = i
+            order_c = list(dict.fromkeys(cks))
+            if not stable:
+                order_c.sort()
+            pick = last_c if (last or legacy) else first_c
+            ia = [pick[c] for c in order_c]
+            pos = {c: j for j, c in enumerate(order_c)}
+            ic = [pos[c] for c in cks]
+            order = [A[i] for i in ia]
+        else:
+            keys = [k for k in dict.fromkeys(A) if not _is_nan_key(k)]
+            order = keys if stable else _sort_keys(keys)
+            pick = last_a if (last or legacy) else first_a
+            if nans_a and not distinct:
+                nans_a = [nans_a[-1] if (last or legacy) else nans_a[0]]
+            ia = [pick[k] for k in order] + nans_a
+            pos = {k: j for j, k in enumerate(order)}
+            ic = []
+            nk = 0
+            for k in A:
+                if _is_nan_key(k):
+                    ic.append(len(order) + (nk if distinct else 0))
+                    nk += 1
+                else:
+                    ic.append(pos[k])
+            order = order + [A[i] for i in nans_a]
         outs = [order, ia, ic]
         d = _dims(a)
         row = len(d) == 2 and d[0] == 1 and not rows
