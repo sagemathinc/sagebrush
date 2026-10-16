@@ -33,7 +33,9 @@
     ],
     "differs": [
       "Integers(1), the zero ring, is refused.",
-      "Order of a residue modulo an m of more than 128 bits is refused."
+      "Order of a residue modulo an m of more than 128 bits is refused.",
+      "A collection of residues coerces assignments only when its universe is declared: [R | 1, 7] takes Q[2] := 13, but [R!1, 7] refuses it.",
+      "Append and Include of an integer to a collection of residues are refused, even with a declared universe [R | ...] or {R | ...}."
     ],
     "status": "partial",
     "see_also": [
