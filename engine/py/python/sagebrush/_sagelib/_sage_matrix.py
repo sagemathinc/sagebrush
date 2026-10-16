@@ -2563,6 +2563,10 @@ def matrix(*args, **kwds):
         sage: matrix(QQ, 2, 3, [1, 2, 3, 4, 5, 6])
         [1 2 3]
         [4 5 6]
+        sage: matrix(Graph([(0, 1), (1, 2)]))
+        [0 1 0]
+        [1 0 1]
+        [0 1 0]
     """
     ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
@@ -2571,6 +2575,14 @@ def matrix(*args, **kwds):
     # over Qp the column count became the scalar entry)
     args = _int_dims(args)
     base = None
+    if args and any(c.__name__ == "GenericGraph" for c in type(args[-1]).__mro__):
+        # matrix(G) and matrix(R, G): the graph's adjacency matrix, as Sage
+        # (matrix(Graph([(0, 1)])) was the 1 x 2 row [0 1]: astra's hunt)
+        if len(args) > 2 or kwds:
+            raise NotImplementedError("matrix(..., graph, ...) with these arguments is not available in sagebrush yet")
+        A = args[-1].adjacency_matrix()
+        rows = [list(r) for r in A.rows()]
+        return matrix(args[0], rows) if len(args) == 2 else A
     import _sage_ffmat
     if args and _sage_ffmat._is_ff(args[0]):
         return _sage_ffmat.matrix(*args, **kwds)
