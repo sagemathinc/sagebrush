@@ -51,10 +51,10 @@ ok(await until("navigator.serviceWorker.controller !== null || navigator.service
 ok(await until("caches.keys().then(async (ks) => { const k = ks.find((k) => k.startsWith('sagebrush-')); if (!k) return false; const c = await caches.open(k); return (await c.keys()).length >= 10; })"), "the app's files are cached");
 let out = await runCode("print(2**100)");
 ok(out.includes("1267650600228229401496703205376"), "Python runs online: " + JSON.stringify(out));
-// what installing kept: the shell, not the engine or the documentation
-// indexes (LAZY: kept once used online)
+// what installing kept: the shell, not the engine, the documentation
+// indexes or the Python library's chunks (LAZY: kept once used online)
 const kept = (match) => ev(`(async () => { for (const name of await caches.keys()) { if (!name.startsWith("sagebrush-")) continue; const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes(${JSON.stringify(match)}))) return true; } return false; })()`);
-ok(!(await kept("sagebrush-engine.wasm")) && !(await kept("docs-index")), "installing keeps neither the engine nor the documentation indexes");
+ok(!(await kept("sagebrush-engine.wasm")) && !(await kept("docs-index")) && !(await kept("/lib/")), "installing keeps neither the engine, the documentation indexes nor the library's chunks");
 // a page the service worker controls (its worker too): the engine and Python's
 // documentation index, used online, are kept
 await send("Page.reload", { ignoreCache: false });
@@ -62,10 +62,16 @@ await sleep(1000);
 await ready();
 out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("274177 * 67280421310721") && (await until(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes("sagebrush-engine.wasm"))) return true; } return false; })()`)), "the engine, used online, is kept: " + JSON.stringify(out));
+ok((await kept("/lib/sage.src.")) && (await kept("/lib/sage.pre.")) && (await kept("/lib/core.pre.")), "Sage's part of the library (sources and compiled), fetched as Sage mode started, is kept");
+// a module of a part no mode's start fetches, imported (fetched synchronously
+// by the worker, web/lib-lazy.ts): kept too
+out = await runCode("import heapq\nprint(heapq.nsmallest(2, [3, 1, 2]))");
+ok(out.includes("[1, 2]") && (await until(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes("/lib/mod-heapq.src."))) return true; } return false; })()`)), "a library module imported online, its chunk fetched when imported, is kept: " + JSON.stringify(out));
+ok(!(await kept("/lib/matlab.")), "(MATLAB's part, never used, is not)");
 ok(await ev(`fetch("docs-index-python.json").then((r) => r.ok)`) && (await until(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes("docs-index-python.json"))) return true; } return false; })()`)), "Python's documentation index, used online, is kept");
 // The cache is the origin's storage: code that got into the origin (an escape
 // from Python into the worker, say) could rewrite a kept file.  A rewritten
-// copy is never used (SEC-8D6-1): the precompiled library, the engine.
+// copy is never used (SEC-8D6-1): a chunk of the library's compiled code, the engine.
 const poison = (match, body) => ev(`(async () => {
   for (const name of await caches.keys()) {
     const cache = await caches.open(name);
@@ -76,14 +82,14 @@ const poison = (match, body) => ev(`(async () => {
   }
   return false;
 })()`);
-ok(await poison("sagebrush-precompiled.json?h=", `async (res) => { const p = await res.json(); p.modules["py|fractions"].code = "(function module$$($g, R) { $g.POISONED = 'cache-poison-ran'; })"; return JSON.stringify(p); }`), "(the precompiled library's kept copy rewritten)");
+ok(await poison("/lib/core.pre.", `async (res) => { const p = await res.json(); p.modules["py|fractions"].code = "(function module$$($g, R) { $g.POISONED = 'cache-poison-ran'; })"; return JSON.stringify(p); }`), "(the kept copy of the library's compiled core rewritten)");
 ok(await poison("sagebrush-engine.wasm?h=", `async (res) => new Uint8Array(await res.arrayBuffer()).map((b, i) => (i > 1000 && i < 2000 ? 0 : b))`), "(the engine's kept copy rewritten)");
 await send("Page.reload", { ignoreCache: false });
 await sleep(1000);
 await ready();
 out = await runCode("import fractions\nprint(getattr(fractions, 'POISONED', 'clean'))\nfrom sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("clean") && out.includes("274177 * 67280421310721"), "a rewritten kept copy is not used: the library's own code and the engine run: " + JSON.stringify(out));
-ok(await ev(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); const req = (await c.keys()).find((r) => r.url.includes("sagebrush-precompiled.json?h=")); if (req) return !(await (await c.match(req)).text()).includes("cache-poison-ran"); } return false; })()`), "...and the kept copy is the site's again");
+ok(await ev(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); const req = (await c.keys()).find((r) => r.url.includes("/lib/core.pre.")); if (req) return !(await (await c.match(req)).text()).includes("cache-poison-ran"); } return false; })()`), "...and the kept copy is the site's again");
 // offline: no server at all
 server.kill();
 await sleep(500);
@@ -94,6 +100,10 @@ ok(await ready(), "offline, the notebook loads: " + (await ev("document.querySel
 ok(await ev("crossOriginIsolated"), "offline, the page is still cross-origin isolated (Stop keeps variables)");
 out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("274177 * 67280421310721"), "offline, Python and the engines run: " + JSON.stringify(out));
+out = await runCode("import heapq\nprint(heapq.nsmallest(2, [3, 1, 2]))");
+ok(out.includes("[1, 2]"), "offline, a library module imported online (its chunk fetched lazily then) imports: " + JSON.stringify(out));
+out = await runCode("import _matlab_sparse");
+ok(/could not load the Python library's matlab modules/.test(out), "offline, a module of a part never fetched is an error saying so: " + JSON.stringify(out.slice(0, 300)));
 ok(await ev(`fetch("docs-index-python.json").then((r) => r.ok, () => false)`), "offline, the documentation index used online is served");
 ok(await ev(`fetch("docs-index-magma.json").then(() => "served", () => "refused")`) === "refused", "offline, a documentation index never used is not there (a fetch error, as for any file offline)");
 // offline, a rewritten worker is not served (it would run without the server to correct it)
