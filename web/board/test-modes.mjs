@@ -106,6 +106,16 @@ try {
   await sleep(300);
   const tool = await ev("[...document.querySelectorAll('[data-tool=code][title]')].map((e) => e.title)");
   check(tool.length > 0 && tool.every((t) => /^Add a note with Magma code/.test(t)), "a Magma board: the Code tool says Magma: " + JSON.stringify(tool));
+  // (the toolbar's menu, drawn when it opens, on document.body: its Code row too; and as the board's language changes, astra's UI-231-1)
+  const menuRow = () => ev("document.querySelector('.board-toolbar-panel [data-tool=code][title]')?.title ?? null");
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
+  check(/^Add a note with Magma code/.test((await menuRow()) ?? ""), "...and the Code row of the toolbar's menu: " + (await menuRow()));
+  await ev(`${B}.edit((d) => { d.mode = "sage"; }).then(() => 1)`);
+  check(await until("/^Add a note with Sage code/.test(document.querySelector('.board-toolbar-panel [data-tool=code][title]')?.title ?? '') && /^Add a note with Sage code/.test(document.querySelector('.board-toolbar button[data-tool=code]')?.title ?? '')", 5000), "the board's language changed to Sage, the menu open: its row and the button say Sage: " + (await menuRow()));
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
+  check(/^Add a note with Sage code/.test((await menuRow()) ?? ""), "...and the menu opened again: " + (await menuRow()));
+  await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
   // (a code item of the board, empty, written in place: as a new one is)
   await ev(`${B}.editing(false), 1`);
   await ev(`${B}.load(${JSON.stringify({ title: "Magma", mode: "magma", nodes: [{ id: "c", title: "New", code: "", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
