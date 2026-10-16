@@ -631,6 +631,46 @@ test("intrinsics refuse strings and booleans where Python would read \"7\" as 7 
   );
 });
 
+test("a value added to a collection is made like its elements, all the way down (CORR-400-1/2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const session = (src: string) =>
+    spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8", input: src }).stdout as string;
+  // Magma's refusals (checked against Magma); their caret is said at the call
+  const refused: [string, string][] = [
+    ["A := [<2,\"p\">]; Append(~A, <1/5,\"r\">);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["A := [<2,\"p\">]; Include(~A, <1/5,\"r\">);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["B := [{2,3}]; Include(~B, {7/2});", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["C := [{@ 4 @}]; Append(~C, {9/4});", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["E := [[[3]]]; Append(~E, [[2/7]]);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["E := [[[3]]]; Include(~E, [[2/7]]);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["H := [{* 2 *}]; Include(~H, {* 1/9 *});", "Runtime error in 'Include': Cannot lift element into sequence"],
+    // after leading holes, the first defined element fixes the universe
+    ["S := []; S[3] := \"x\"; Append(~S, 4);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["T := []; T[2] := <1,\"a\">; Include(~T, <2,3>);", "Runtime error in 'Include': Cannot lift element into sequence"],
+  ];
+  // (each refusal is an error, and the session goes on to the next one;
+  // a refused Append changes nothing)
+  const out = session(refused.map(([src]) => src).join("\n") + "\nA;\n");
+  for (const [src, msg] of refused) assert.ok(out.includes(msg), `${src}\n${out}`);
+  assert.match(out, /\[ <2, "p"> \]\n$/);
+  // elements Sagebrush knows no parent for: a value of another type is
+  // refused in words, never written unchecked
+  const f = session("f := map< {1} -> {1} | x :-> x >; A := [f]; A[1] := 3;\nA;\n");
+  assert.match(f, /not supported yet/);
+  assert.doesNotMatch(f, /\[ 3 \]/);
+});
+
+test("writes after a million leading holes don't each scan them (HARD-400-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = "S := []; S[1000000] := \"x\";\nfor j in [1..1000] do S[1000000+j] := \"y\"; end for; print #S;\n";
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma", "-c", src], { encoding: "utf8", timeout: 15000 });
+  assert.equal(r.stdout, "1001000\n", r.stderr);
+  assert.ok(Date.now() - t0 < 15000);
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
