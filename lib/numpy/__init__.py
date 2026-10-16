@@ -672,10 +672,10 @@ class ufunc:
 
     def _cast_in(self, x, i, dt, casting):
         """Input i cast to the loop's dtype, if the casting rule allows it"""
-        if isinstance(x, (bool, int, float, complex)) and not isinstance(x, generic):
+        if isinstance(x, (_builtins.bool, _builtins.int, _builtins.float, _builtins.complex)) and not isinstance(x, generic):
             # (a Python scalar is weak: an int takes an int loop's type if it
             # fits, a float a float loop's, a complex a complex loop's)
-            k = "b" if isinstance(x, bool) else "i" if isinstance(x, int) else "f" if isinstance(x, float) else "c"
+            k = "b" if isinstance(x, _builtins.bool) else "i" if isinstance(x, _builtins.int) else "f" if isinstance(x, _builtins.float) else "c"
             if k == "i" and dt.kind in "iu":
                 info = iinfo(dt)
                 if not info.min <= x <= info.max:

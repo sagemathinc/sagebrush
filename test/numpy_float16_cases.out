@@ -77,3 +77,4 @@ np.hypot.accumulate([3, 4], dtype=np.int16) -> TypeError: No loop matching the s
 np.equal.reduce([1, 1], dtype=bool) -> True bool
 str(np.result_type(1, 'i1')) -> 'int8' str
 np.result_type('abc') -> TypeError: data type 'abc' not understood
+['int8', 'int8', 'float32', 'uint8', 'float64', 'bool', 'complex64', 'int64', 'float64', 'int64']
