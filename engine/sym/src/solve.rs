@@ -210,8 +210,10 @@ fn sqrt_content(d: &Expr) -> Expr {
     if s == 1 {
         return sqrt(d);
     }
-    let s2 = int((s * s) as i64);
-    mul2(&int(s as i64), &sqrt(&crate::expand::expand(&div(d, &s2))))
+    // (big integers: s*s cast to i64 wrapped for 9*2^58, and the roots were lost)
+    let sb = sagebrush_bigint::BigInt::from(s);
+    let s2 = big(&sb * &sb);
+    mul2(&big(sb), &sqrt(&crate::expand::expand(&div(d, &s2))))
 }
 
 fn poly_roots(c: &[Expr]) -> Vec<Expr> {
