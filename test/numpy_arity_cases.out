@@ -1,0 +1,11 @@
+gradient 12 TypeError: invalid number of arguments
+gradient 1-D, two spacings TypeError: invalid number of arguments
+gradient 2-D, three spacings TypeError: invalid number of arguments
+gradient 2-D, an array for both axes TypeError: invalid number of arguments
+gradient 1-D array([3., 4., 6., 7.])
+gradient 1-D, scalar array([1.5, 2. , 3. , 3.5])
+gradient 1-D, coordinates array([3.        , 2.83333333, 2.43333333, 2.33333333])
+gradient 2-D, one scalar [[[1.5, 1.5, 1.5], [1.5, 1.5, 1.5]], [[0.5, 0.5, 0.5], [0.5, 0.5, 0.5]]]
+gradient 2-D, two spacings [[[3.0, 3.0, 3.0], [3.0, 3.0, 3.0]], [[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]]]
+result_type none ValueError: at least one array or dtype is required
+result_type dtype('float64')
