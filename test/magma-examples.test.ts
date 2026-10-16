@@ -34,15 +34,44 @@ function transcript(lines: string[], out: string): string | null {
   return text.join("\n");
 }
 
-function sagebrush(lines: string[]): Promise<string | null> {
-  return new Promise((resolve, reject) => {
+// One fresh session: its transcript, or null with how the session ended.
+// (Under a loaded npm test a session once printed nothing: its exit code,
+// signal, stderr and any error writing its input say why.)
+type Run = { transcript: string | null; how: string };
+function session(lines: string[]): Promise<Run> {
+  return new Promise((resolve) => {
     const p = spawn(process.execPath, [cli, "--magma"], { stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
+    let err = "";
+    let stdinError = "";
     p.stdout.setEncoding("utf8").on("data", (d) => (out += d));
-    p.on("error", reject);
-    p.on("close", () => resolve(transcript(lines, out)));
+    // (drained, so that a session writing much to stderr can't block)
+    p.stderr.setEncoding("utf8").on("data", (d) => (err = (err + d).slice(-2000)));
+    // (a session that dies before reading its input: EPIPE here, not an
+    // uncaught error in the test)
+    p.stdin.on("error", (e) => (stdinError = String(e)));
+    p.on("error", (e) => resolve({ transcript: null, how: `could not start: ${e}` }));
+    p.on("close", (code, signal) => {
+      const t = transcript(lines, out);
+      const how = `exit code ${code}, signal ${signal}${stdinError ? `, writing its input: ${stdinError}` : ""}; ${out.length} characters of output; stderr: ${err.trim() || "(none)"}`;
+      resolve({ transcript: t, how });
+    });
     p.stdin.end(program(lines));
   });
+}
+
+// An example's transcript.  A session that died (a signal or a nonzero exit
+// with no transcript) is run once more, as that is the machine, not the
+// example; a second death, or any wrong transcript, is reported with how
+// the session ended.
+async function sagebrush(lines: string[]): Promise<string> {
+  let r = await session(lines);
+  if (r.transcript === null && !/^exit code 0, signal null[;,]/.test(r.how)) {
+    const first = r.how;
+    r = await session(lines);
+    if (r.transcript === null) return `(no transcript) first session: ${first}; second session: ${r.how}`;
+  }
+  return r.transcript ?? `(no transcript) ${r.how}`;
 }
 
 test("every Magma index example prints what it shows, in a fresh session", async () => {
