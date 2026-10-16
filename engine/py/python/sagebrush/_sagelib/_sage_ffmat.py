@@ -453,8 +453,11 @@ def _vector_pushout(R, S):
     if "nf" in (a, b):
         if a == "QQ" or b == "QQ":
             return S if a == "QQ" else R
-        # (a number field meets AA, QQbar, the numerical fields and other
-        # number fields by its embedding: not modelled)
+        # (a number field without an embedding meets nothing else: Sage's
+        # TypeError; with one, it meets AA, QQbar, the numerical fields and
+        # other number fields by its embedding: not modelled)
+        if "SR" not in (a, b) and any(c == "nf" and not getattr(X, "_emb", None) for c, X in ((a, R), (b, S))):
+            return None
         raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
     if "SR" in (a, b):
         return _sa().SR
