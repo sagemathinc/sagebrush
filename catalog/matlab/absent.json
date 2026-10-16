@@ -147,7 +147,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Sage mode's Graph for undirected graphs; in MATLAB mode, an adjacency matrix with loops (shortest paths by Dijkstra's or Floyd's algorithm in a few lines).",
+    "alternative": "No directed graphs in any mode's graph library. In MATLAB mode, an adjacency matrix with loops: shortest paths by Dijkstra's algorithm (nonnegative weights) or Floyd's (no negative cycles), in a few lines.",
     "tags": [
       "graphs"
     ]
@@ -310,7 +310,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Sage mode's Graph: shortest_path, distance, connected_components, degree and adjacency_matrix (no minimum spanning tree there). In MATLAB mode, an adjacency matrix or an edge list with loops: for a minimum spanning tree, sortrows of the edges by weight and add each one that joins two components (Kruskal).",
+    "alternative": "Sage mode's Graph, for undirected graphs: shortest_path(u, v, by_weight=True), distance, connected_components, degree and adjacency_matrix (no minimum spanning tree there). In MATLAB mode, an adjacency matrix or an edge list with loops: for a minimum spanning tree, sortrows of the edges by weight and add each one that joins two components (Kruskal).",
     "tags": [
       "graphs"
     ]
@@ -647,7 +647,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Sage mode's Graph(...).shortest_path(s, t, by_weight=True); in MATLAB mode, Dijkstra's algorithm on an adjacency matrix, with min over the unvisited nodes.",
+    "alternative": "Sage mode's Graph(...).shortest_path(s, t, by_weight=True) for an undirected graph; in MATLAB mode, Dijkstra's algorithm on an adjacency matrix (nonnegative weights), taking the min over the unvisited nodes.",
     "tags": [
       "graphs"
     ]
@@ -714,7 +714,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Sage mode for symbolic work: x = var('x'); solve(x^2 - 2 == 0, x). For exact fractions of numbers in MATLAB mode, [N, D] = rat(X) gives X as N./D; roots for polynomials and fzero for one equation.",
+    "alternative": "Sage mode for symbolic and exact rational work: x = var('x'); solve(x^2 - 2 == 0, x); QQ(1/4) + QQ(2/5). In MATLAB mode, [N, D] = rat(X) gives a rational approximation of X as N./D (exact for ratios of small integers); roots for polynomials and fzero for one equation.",
     "tags": [
       "symbolic"
     ]

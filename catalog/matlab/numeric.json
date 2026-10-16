@@ -203,7 +203,9 @@
       }
     ],
     "differs": [
-      "The one-output form, the continued fraction as text, is refused: use [N, D] = rat(X)."
+      "The one-output form, the continued fraction as text, is refused: use [N, D] = rat(X).",
+      "Complex X is refused.",
+      "tol must be a real nonnegative scalar, and a tolerance the expansion can't reach (such as 0 for pi) is refused rather than missed."
     ],
     "status": "partial",
     "see_also": [
