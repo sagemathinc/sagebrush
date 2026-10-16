@@ -54,3 +54,9 @@ t("parts of CC, RR, RealField(100), complex", lambda: (real(CC(1, 2)), imag(CC(1
 # limits at +oo with a^x for a constant a > 0 (by growth, as e^(x log a))
 for s, f in [("x/2^x", lambda: x/2^x), ("x^10/2^x", lambda: x^10/2^x), ("x^1000/2^x", lambda: x^1000/2^x), ("3^x/2^x", lambda: 3^x/2^x), ("2^x/3^x", lambda: 2^x/3^x), ("(1/2)^x", lambda: (1/2)^x), ("(2^x + x)/2^x", lambda: (2^x + x)/2^x), ("(2^x + 3^x)/3^x", lambda: (2^x + 3^x)/3^x), ("pi^x/3^x", lambda: pi^x/3^x), ("sqrt(2)^x/x^3", lambda: sqrt(2)^x/x^3), ("2^x - x^5", lambda: 2^x - x^5)]:
     t("limit(%s, x=oo)" % s, lambda: limit(f(), x=oo))
+# a complex coefficient as the whole numerator stays grouped
+for c in [-1-I, 1-I, 1+I, -1+I, 2*I-1, 3/2-I/2, CC(-2,-3), CC(2,-3)]:
+    t("c = %s" % c, lambda: (SR(c)/x, sin(SR(c)/x), SR(c)/(x*y), SR(c)/x^2, SR(c)/(x+1), x + SR(c)/x, latex(SR(c)/x)))
+t("c = -2*I", lambda: (SR(-2*I)/x, SR(-2*I)/(x*y), x - 2*I/x, latex(SR(-2*I)/x)))
+t("latex of CC", lambda: (latex(SR(CC(0,2))*x), latex(SR(CC(1,-2))), latex(SR(CC(0,-2.5))), latex(x + SR(CC(0,2)))))
+t("conjugate(RR(2))", lambda: (conjugate(RR(2)), conjugate(RR(2)).parent(), conjugate(RR(2)).sqrt(), conjugate(RealField(100)(2)).parent()))

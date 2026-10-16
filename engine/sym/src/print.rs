@@ -531,8 +531,11 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
     }
     let cstr = num_str(&c);
     if !c.is_one() {
-        if numer.is_empty() {
+        if numer.is_empty() && denom.is_empty() {
             s.push_str(&cstr.0);
+        } else if numer.is_empty() {
+            // the whole numerator: grouped when it is a sum (-(I + 1)/x)
+            s.push_str(&paren(cstr, P_MUL));
         } else {
             s.push_str(&paren(cstr, P_MUL));
             s.push('*');
@@ -733,11 +736,20 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
         }).collect();
         let top = if body.is_empty() { "1".to_string() } else { body };
         // the rational coefficient's denominator joins the fraction
-        let (cn, cd) = match c.as_rat() {
-            Some(r) => (crate::num::Num::big(r.numer().clone()), crate::num::Num::big(r.denom().clone())),
-            None => (c.clone(), Num::one()),
+        let (cn, cd) = match (&c, c.as_rat()) {
+            (_, Some(r)) => (crate::num::Num::big(r.numer().clone()), crate::num::Num::big(r.denom().clone())),
+            // an exact complex coefficient: its common denominator too
+            // (-\frac{i - 3}{2 \, x}, as Sage)
+            (Num::Exact(re, im), None) => {
+                use num_integer::Integer;
+                let l = re.denom().lcm(im.denom());
+                let lq = crate::num::Q::from_integer(l.clone());
+                (Num::Exact(re * &lq, im * &lq), crate::num::Num::big(l))
+            }
+            _ => (c.clone(), Num::one()),
         };
-        let top = if cn.is_one() { top } else if top == "1" { cn.latex() } else { format!("{} \\, {}", cn.latex(), top) };
+        let cn_one_term = cn.is_real() || matches!(&cn, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&cn, Num::Float(a, _) if *a == 0.0);
+        let top = if cn.is_one() { top } else if top == "1" { cn.latex() } else { format!("{} \\, {}", lparen((cn.latex(), if cn_one_term { P_ATOM } else { P_ADD }), P_MUL), top) };
         let bottom = if cd.is_one() { d.join(" ") } else { format!("{} \\, {}", cd.latex(), d.join(" ")) };
         let s = format!("\\frac{{{}}}{{{}}}", top, bottom);
         return (if neg_sign { format!("-{}", s) } else { s }, if neg_sign { P_NEG } else { P_MUL });

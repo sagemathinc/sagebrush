@@ -2362,7 +2362,12 @@ def conjugate(z):
 
         sage: conjugate(3 + 4*I), conjugate(7)
         (-4*I + 3, 7)
+        sage: conjugate(RR(2)), conjugate(RR(2)).parent(), conjugate(RR(2)).sqrt()
+        (2.00000000000000, Real Field with 53 bits of precision, 1.41421356237310)
     """
+    if isinstance(z, float) and type(z) is not float:
+        # a real number of RR (a float subclass): itself, not float's conjugate
+        return z
     return z.conjugate()
 
 
