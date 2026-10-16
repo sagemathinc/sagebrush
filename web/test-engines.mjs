@@ -21,8 +21,8 @@ const ok = (c, what) => { count++; if (!c) { failures++; console.log("FAIL", wha
 const { id } = JSON.parse(readFileSync(join(here, "dist/engine/latest.json"), "utf8"));
 const dir = join(here, "dist/engine", id);
 const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
-const entry = `import { handleEngines } from ${JSON.stringify(join(here, "engines.ts"))};
-export default { async fetch(req, env, ctx) { return (await handleEngines(req, env, ctx)) ?? new Response("not mine", { status: 418 }); } };`;
+const entry = `import { handleEngines, handleLibChunk } from ${JSON.stringify(join(here, "engines.ts"))};
+export default { async fetch(req, env, ctx) { return (await handleEngines(req, env, ctx)) ?? (await handleLibChunk(req, env, ctx)) ?? new Response("not mine", { status: 418 }); } };`;
 const entryFile = join(mkdtempSync(join(tmpdir(), "sb-engines-")), "entry.ts");
 writeFileSync(entryFile, entry);
 const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
@@ -71,6 +71,25 @@ await g.arrayBuffer();
 const h2 = await get(`/engine/${id}/sagebrush-engine.wasm`, { method: "HEAD" });
 ok(h2.status === 200 && h2.headers.get("content-type") === "application/wasm" && !(await h2.arrayBuffer()).byteLength, "HEAD after GET: the headers, no body");
 ok((await get(`/engine/latest.json`)).status === 418 && (await get(`/other`)).status === 418, "other paths are not the route's");
+// The library's chunks at lib/<name>, for a page older than the site's
+// files (HARD-813-1), as scripts/publish-engine.mjs puts them
+const chunks = Object.keys(man.files).filter((f) => f.startsWith("lib/"));
+ok(chunks.length > 5, "(the engine has the library's chunks)");
+for (const f of chunks) await bucket.put(f, readFileSync(join(dir, f)));
+for (const f of chunks) {
+  const r = await get("/" + f);
+  ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(readFileSync(join(dir, f))), `/${f}: the chunk, byte for byte`);
+  ok(r.headers.get("content-type") === "application/json" && /immutable/.test(r.headers.get("cache-control")) && r.headers.get("access-control-allow-origin") === "*" && r.headers.get("x-content-type-options") === "nosniff", `/${f}: JSON, immutable, CORS *, nosniff`);
+}
+// (bytes that are not the ones its name says: not served; nor a name of
+// another shape, nor a chunk R2 doesn't have)
+const [one] = chunks, forged = one.replace(/\.([0-9a-f]{16})\.json$/, ".0000000000000000.json");
+await bucket.put(forged, readFileSync(join(dir, one)));
+ok((await get("/" + forged)).status === 404, "a chunk whose bytes don't have its name's hash: 404");
+await bucket.put("lib/Bad_Name.src.0000000000000000.json", "{}");
+ok((await get("/lib/Bad_Name.src.0000000000000000.json")).status === 418 && (await get("/lib/x.src.123.json")).status === 418 && (await get("/lib/../engine/latest.json")).status === 418, "names of another shape are not the route's");
+ok((await get("/lib/nothing.src.0123456789abcdef.json")).status === 404, "a chunk R2 doesn't have: 404");
+ok((await get("/" + one, { method: "POST" })).status === 405, "a chunk: only GET and HEAD");
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
 process.exit(failures ? 1 : 0);

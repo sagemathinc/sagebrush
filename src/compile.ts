@@ -324,7 +324,17 @@ const safeExists = (p: string) => {
 // (a file's presence is a property of its own: in the browser's worker,
 // reading one fetches its part of the library, web/lib-lazy.ts)
 const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(p));
-const fileRead = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] : readFileSync(p, "utf8"));
+const fileRead = (p: string) => {
+  if (embedded === undefined || !p.startsWith(LIB_VIRTUAL + "/")) return readFileSync(p, "utf8");
+  try {
+    return embedded[p.slice(LIB_VIRTUAL.length + 1)];
+  } catch (e: any) {
+    // (the browser's worker: a part of the library it could not fetch,
+    // web/lib-lazy.ts, whose message says which and why: an ImportError,
+    // not an internal error)
+    throw (R.T as any).ImportError(String(e?.message ?? e));
+  }
+};
 export function libDir(): string {
   return embedded !== undefined ? LIB_VIRTUAL : resolvePath(__dirname, "../../lib");
 }
