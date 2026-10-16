@@ -5,7 +5,7 @@
 //   bun web/graph/test-spring.mjs
 import { springLayout, springSteps, MAX_NODES, MAX_EDGES } from "./spring.ts";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -112,6 +112,40 @@ check(springLayout(pts(1, 10, 10), [["v0", "v0"], ["v0", "nobody"]], { seed: 1 }
     check(there === here, `the same layout under ${cmd} (${there.slice(0, 80)})`);
   }
   rmSync(dir, { recursive: true, force: true });
+}
+
+// the same in Python (lib/_graph_spring.py, which Graph.plot uses): under
+// CPython and under Sagebrush's own runtime (dist/, when built)
+{
+  const root = new URL("../..", import.meta.url).pathname;
+  const cases = Object.entries(GRAPHS).map(([name, [nodes, edges]]) => [name, nodes, edges]);
+  const fixedCase = pts(12, 40, 30);
+  fixedCase[0].fixed = { x: 100, y: 50 };
+  cases.push(["fixed", fixedCase, Array.from({ length: 11 }, (_, i) => ["v" + i, "v" + (i + 1)])]);
+  const want = cases.map(([, nodes, edges]) => Object.fromEntries([...springLayout(nodes, edges, { seed: 5 })].map(([k, v]) => [k, [v.x, v.y]])));
+  const py = [
+    "import json, sys",
+    "sys.path.insert(0, sys.argv[1] + '/lib')",
+    "import _graph_spring as g",
+    "cases = json.loads(sys.stdin.read())",
+    "out = []",
+    "for name, nodes, edges in cases:",
+    "    ns = [(n['id'], n['w'], n['h'], (n['fixed']['x'], n['fixed']['y']) if n.get('fixed') else None) for n in nodes]",
+    "    out.append({k: list(v) for k, v in g.spring_layout(ns, [tuple(e) for e in edges], 5).items()})",
+    "print(json.dumps(out))",
+  ].join("\n");
+  const input = JSON.stringify(cases);
+  const runs = [["CPython", "python3", ["-c", py, root]]];
+  if (existsSync(root + "dist/src/cli.js")) runs.push(["Sagebrush", "node", [root + "dist/src/cli.js", "-c", py, root]]);
+  for (const [label, cmd, args] of runs) {
+    let got = null;
+    try {
+      got = JSON.parse(execFileSync(cmd, args, { input, encoding: "utf8", timeout: 300000 }));
+    } catch (e) {
+      got = String(e.message).slice(0, 300);
+    }
+    cases.forEach(([name], i) => check(JSON.stringify(got?.[i]) === JSON.stringify(want[i]), `Python under ${label} gives spring.ts's layout of ${name}${typeof got === "string" ? ": " + got : ""}`));
+  }
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
