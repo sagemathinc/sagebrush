@@ -190,6 +190,28 @@ and back-substitution finds the roots of each univariate polynomial in
 turn over the base field, such as $\mathbb{Q}$ or $\mathbb{F}_p$. A
 positive-dimensional ideal raises Sage's `ValueError`.
 
+`I.variety(ring)` also works over $\mathbb{R}$ and $\mathbb{C}$ (`RR`,
+`CC`, `RealField(p)`, `ComplexField(p)`, `RDF`, `CDF`) and over `AA` and
+`QQbar`, through a rational univariate representation (Rouillier, 1999):
+
+1. A separating linear form $t = x_0 + c x_1 + c^2 x_2 + \cdots$ is
+   chosen.
+2. The minimal polynomial $\chi$ of multiplication by $t$ is computed on
+   the normal basis of the radical (the ideal plus the squarefree parts of
+   its eliminants).
+3. Each coordinate is then a rational function of a root of the
+   squarefree $\chi$, so every point is exact.
+
+Over `AA` and `QQbar` the points are exact algebraic numbers; over the
+real and complex fields they are those exact points, correctly rounded to
+the field's precision. The real points come first, then the rest in
+increasing order, as Sage orders `AA` and `QQbar` points. Every size is
+capped before the work it bounds (an eliminant's degree at most 4096, at
+most 100 points, at most 32 tries for a separating form, at most 20,000
+digits), and anything over a cap raises `NotImplementedError` rather than
+running away or returning a partial list. Varieties over other number
+fields are refused for now.
+
 **Graphs.** `Graph` and `DiGraph` cover simple graphs with loops and edge
 labels (multigraphs are refused), with the `graphs.*` and `digraphs.*`
 families: degrees and neighbours, adjacency and Laplacian matrices,
