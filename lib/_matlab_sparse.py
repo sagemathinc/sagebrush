@@ -1123,6 +1123,21 @@ def blkdiag_b(nargout, *args):
     return r if _has_sparse(args) else full(r)
 
 
+def _fft_sizes_first(name):
+    """fft2, ifft2, fftn and ifftn of a sparse X: the full transform, the sizes (every
+    numeric argument after X) checked before X is made full"""
+    f = _FULL[name]
+
+    def g(nargout, *args):
+        if _has_sparse(args):
+            for a in args[1:]:
+                if _m._isnumlike(a):
+                    _m._fft_sizes(a)
+            args = [full(a) if type(a) is Sparse else a for a in args]
+        return f(nargout, *args)
+    return g
+
+
 _SPECIAL = {
     "sum": _sum_b, "any": _anyall_b(False), "all": _anyall_b(True), "mean": _mean_b, "diag": _diag_b,
     "tril": _tri_b(True), "triu": _tri_b(False), "kron": _kron_b, "repmat": _repmat_b, "reshape": _reshape_b,
@@ -2066,6 +2081,9 @@ def _register():
             _FULL[name] = _m._B[name].f
             _SPARSE_OUT_FN[name] = _sparse_out(name)
             _NATIVE[name] = _SPARSE_OUT_FN[name]
+    for name in ("fft2", "ifft2", "fftn", "ifftn"):
+        _FULL[name] = _m._B[name].f
+        _NATIVE[name] = _fft_sizes_first(name)
     for name, f in _SPECIAL.items():
         if name in _m._B:
             _FULL.setdefault(name, _m._B[name].f)
