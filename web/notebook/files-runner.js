@@ -15,7 +15,9 @@ export const FILES_RUNNER_SCRIPT = `
     const port = e.ports[0], f = e.data.files || {};
     try {
       const url = (name, type) => URL.createObjectURL(new Blob([f[name]], { type }));
-      const files = { "sagebrush-engine.wasm": url("sagebrush-engine.wasm", "application/wasm"), "sagebrush-precompiled.json": url("sagebrush-precompiled.json", "application/json") };
+      // (the engine, and the Python library's chunks: web/lib-lazy.ts)
+      const files = {};
+      for (const name of Object.keys(f)) if (name !== "sagebrush-worker.js") files[name] = url(name, name.endsWith(".wasm") ? "application/wasm" : "application/json");
       const script = new Blob(["self.__SB_FILES__ = " + JSON.stringify(files) + ";\\n", f["sagebrush-worker.js"]], { type: "text/javascript" });
       const w = new Worker(URL.createObjectURL(script), { name: String(e.data.name || "") });
       w.onmessage = (m) => { let d = m.data; if (d && d.ready) d = { ...d, interrupt: null }; port.postMessage(d); };

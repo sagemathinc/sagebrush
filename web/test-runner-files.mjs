@@ -17,7 +17,12 @@ const DIST = join(here, "dist");
 const PAGE = `<!doctype html><meta charset="utf-8"><body><script type="module">
 import { WorkerKernel, RunnerWorker } from "/sagebrush-notebook.js";
 const bytes = async (n) => (await fetch("/" + n)).arrayBuffer();
-const files = { "sagebrush-worker.js": await bytes("sagebrush-worker.js"), "sagebrush-engine.wasm": await bytes("sagebrush-engine.wasm"), "sagebrush-precompiled.json": await bytes("sagebrush-precompiled.json") };
+// (and the Python library's chunks, as a downloaded file carries them: every
+// part's sources, Sage's compiled modules; web/board/engine.ts engineFiles)
+const latest = await (await fetch("/engine/latest.json")).json();
+const lib = Object.keys((await (await fetch("/engine/" + latest.id + "/manifest.json")).json()).files).filter((n) => n.startsWith("lib/") && (n.includes(".src.") || ["core", "sci", "sage"].some((g) => n.startsWith("lib/" + g + ".pre."))));
+const files = { "sagebrush-worker.js": await bytes("sagebrush-worker.js"), "sagebrush-engine.wasm": await bytes("sagebrush-engine.wasm") };
+for (const n of lib) files[n] = await bytes(n);
 const kernel = new WorkerKernel({ createWorker: () => new RunnerWorker(null, { files }) });
 kernel.start();
 const run = (code, mode) => new Promise((done) => {
@@ -74,6 +79,11 @@ try {
   ok(sum === "45", "Python runs: " + sum);
   const f = (await ev("t.run('print(factor(2^64 + 1))', 'sage')")).trim();
   ok(f === "274177 * 67280421310721", "Sage mode and the engine run from the files given: " + f);
+  // a module of a part of the library no start loads: its chunk read (from
+  // the files given) when it is imported (web/lib-lazy.ts)
+  const r0 = requests.length;
+  const lazy = (await ev("t.run('import heapq\\nprint(heapq.nsmallest(2, [3, 1, 2]))', 'python')")).trim();
+  ok(lazy === "[1, 2]" && requests.length === r0, "a library module imported later, its chunk from the files given, nothing fetched: " + lazy);
   // from inside the worker, where escaped code would run
   const wk = workers.at(-1);
   const probe = wk && (await ev(`(async () => {

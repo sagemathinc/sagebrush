@@ -106,7 +106,7 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?:
     const local = checked(fetched(site.href), OWN_ENGINE.files), published = checked(fetched(new URL(`engine/${OWN_ENGINE.id}/`, ref.site).href), OWN_ENGINE.files);
     const have = embeddedText(), get = (name: string) => (ex ? published(name) : local(name).catch(() => published(name)));
     // (every part, the Sage library too: a file's board may change its language, William)
-    for (const name of engineFiles(true)) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
+    for (const name of engineFiles(true, Object.keys(OWN_ENGINE.files))) engine.push(`<script type="application/octet-stream" data-sb-engine="${name}">${have.get(name) ?? (await pack(await get(name)))}</script>`);
   }
   // (the slow items' outputs, keyed by what produced them: outcache.ts, carriedOutputs())
   const outputs = o.outputs?.length ? JSON.stringify(o.outputs.map(({ where: _w, ...e }) => e)).replace(/</g, "\\u003c") : null;

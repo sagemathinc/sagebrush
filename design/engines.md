@@ -1,7 +1,7 @@
 # Engines by their content
 
 An **engine** is what runs code in the browser:
-- the worker (`sagebrush-worker.js`), the WebAssembly engine and the precompiled library;
+- the worker (`sagebrush-worker.js`), the WebAssembly engine and the Python library's chunks (`lib/`: sources and precompiled code, web/lib-chunks.mts);
 - the notebook module, the reactive notebook's analyzer and the 3D viewer;
 - the runner's page.
 
@@ -32,7 +32,7 @@ An **engine** is what runs code in the browser:
 A board downloaded as one HTML file can embed the engine. A `file://` page is never cross-origin isolated, so there is no SharedArrayBuffer and so no broker.
 
 `RunnerWorker` in files mode (`new RunnerWorker(null, {files})`):
-- the page hands the frame the worker's script, the engine and the precompiled library;
+- the page hands the frame the worker's script, the engine and the library's chunks;
 - the frame is a `srcdoc` of its own, sandboxed with an opaque origin, whose policy allows no network but its own `blob:` URLs;
 - it makes `blob:` URLs of the files, and the worker reads them through `__SB_FILES__`;
 - with no interrupt flag, Stop restarts the worker.

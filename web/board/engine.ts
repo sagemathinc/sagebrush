@@ -26,8 +26,14 @@ export const OWN_ENGINE = typeof __SB_ENGINE__ === "undefined" ? null : __SB_ENG
 /** Where a downloaded file's engine comes from: the site it was downloaded from. */
 export interface EngineRef { site: string; id: string }
 
-/** The parts a downloaded file needs (the precompiled library only for Sage, which waits for it). */
-export const engineFiles = (sage: boolean) => ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", ...(sage ? ["sagebrush-precompiled.json"] : [])];
+/** The parts a downloaded file needs, of an engine with files `names`: the
+ * Python library's sources (web/lib-chunks.mts), and for Sage its compiled
+ * modules too (those of Sage's start and the scientific modules', which it
+ * waits for). */
+export const engineFiles = (sage: boolean, names: string[]) => [
+  "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js",
+  ...names.filter((n) => /^lib\/[\w.-]+\.src\.[0-9a-f]{16}\.json$/.test(n) || (sage && /^lib\/(core|sci|sage)\.pre\.[0-9a-f]{16}\.json$/.test(n))).sort(),
+];
 
 type Bytes = (name: string) => Promise<ArrayBuffer>;
 
@@ -86,7 +92,7 @@ export function checked(bytes: Bytes, sums: Record<string, string>): Bytes {
 /** Where a downloaded file's code comes from, as `use` says: the latest
  * engine (if the site has one this script can talk to), else its own,
  * carried in the file or fetched by its id. */
-export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | undefined): Promise<{ bytes: Bytes; id: string }> {
+export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | undefined): Promise<{ bytes: Bytes; id: string; names: string[] }> {
   const own = OWN_ENGINE;
   if (!own || own.id !== ref.id) throw new Error("this file's script has no engine of its own");
   if (use === "latest") {
@@ -97,7 +103,7 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
         const m = await (await fetch(new URL("manifest.json", base))).json();
         if (isManifest(m) && m.id === latest.id && m.api === own.api && (await sha256(new TextEncoder().encode(engineIdText(m.api, m.files)).buffer as ArrayBuffer)).slice(0, 20) === m.id) {
           const sums = Object.fromEntries(Object.entries(m.files).map(([k, v]) => [k, v.sha256]));
-          return { bytes: checked(fetched(base), sums), id: latest.id };
+          return { bytes: checked(fetched(base), sums), id: latest.id, names: Object.keys(sums) };
         }
       }
     } catch {}
@@ -105,19 +111,19 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
   // (a part the file doesn't carry, e.g. the Sage library in a file made
   // before offline mode carried every language's: from the site, checked the same)
   const carried = embedded(), site = fetched(new URL(`engine/${own.id}/`, ref.site).href);
-  return { bytes: checked(carried ? (name) => carried(name).catch(() => site(name)) : site, own.files), id: own.id };
+  return { bytes: checked(carried ? (name) => carried(name).catch(() => site(name)) : site, own.files), id: own.id, names: Object.keys(own.files) };
 }
 
 /** The engine's parts from `bytes`: all loaded and checked before Python
  * starts.  `math`: the file's own math module (sagebrush-math.js), for the
  * notebook's outputs. */
-export function fileEngine(load: () => Promise<{ bytes: Bytes }>, o: { sage: boolean; math?: string | null }): EngineParts {
+export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null }): EngineParts {
   const urls = new Map<string, string>(), raw = new Map<string, ArrayBuffer>();
   const type = (n: string) => (n.endsWith(".js") ? "text/javascript" : n.endsWith(".wasm") ? "application/wasm" : "application/json");
   return {
     async module() {
-      const { bytes } = await load();
-      const names = engineFiles(o.sage);
+      const { bytes, names: all } = await load();
+      const names = engineFiles(o.sage, all);
       const got = await Promise.all(names.map((n) => bytes(n).catch((e) => {
         throw new Error(e?.message === "Failed to fetch" ? `this file's code needs parts of Sagebrush it doesn't carry (${n}), from the site it came from, which can't be reached (no network?). Download it again in offline mode.` : String(e?.message ?? e));
       })));
@@ -126,7 +132,7 @@ export function fileEngine(load: () => Promise<{ bytes: Bytes }>, o: { sage: boo
       return import(urls.get("sagebrush-notebook.js")!);
     },
     // (the same bytes for each worker: Stop restarts it)
-    worker: (mod) => new mod.RunnerWorker(null, { files: Object.fromEntries([...raw].filter(([n]) => /^sagebrush-(worker\.js|engine\.wasm|precompiled\.json)$/.test(n))) }),
+    worker: (mod) => new mod.RunnerWorker(null, { files: Object.fromEntries([...raw].filter(([n]) => /^(sagebrush-(worker\.js|engine\.wasm)|lib\/.*)$/.test(n))) }),
     analyzer: () => new Worker(urls.get("sagebrush-analyze.js")!),
     assets: () => ({ assetUrl: (name: string) => urls.get(name) }),
   };
