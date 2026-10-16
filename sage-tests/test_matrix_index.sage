@@ -286,3 +286,25 @@ try:
 except Exception as e:
     print('B[0, 0] = 1.5; B', '!!', type(e).__name__, '')
 
+# entries are converted, not truncated: a non-integral real is refused by
+# ZZ, an integral one or an integer mod n is its integer (astra's CORR-552-1)
+def entries(A): return [str(x) for row in A.rows() for x in row]
+values = [('float-half', lambda: float(1.5)), ('float-negative', lambda: float(-1.5)), ('RR-half', lambda: RR(1.5)), ('RDF-half', lambda: RDF(1.5)), ('RF-half', lambda: RealField(100)(1.5)), ('QQ-half', lambda: QQ(3)/2), ('float-integral', lambda: float(2)), ('RR-integral', lambda: RR(2)), ('GF-two', lambda: GF(5)(2)), ('mod-two', lambda: Mod(2, 5))]
+for R in [ZZ, QQ]:
+    for name, mk in values:
+        for kind in ['entry', 'row', 'col', 'vector']:
+            A = matrix(R, 2, 2, [11, 12, 13, 14])
+            try:
+                v = mk()
+                if kind == 'entry': A[0, 0] = v
+                elif kind == 'row': A[0, :] = v
+                elif kind == 'col': A[:, 0] = v
+                else: A[0] = [v, 15]
+                print(str(R), name, kind, 'OK', entries(A))
+            except Exception as e:
+                print(str(R), name, kind, type(e).__name__, entries(A))
+# a bool index is 0 or 1 (CORR-552-2); an empty block takes any value
+A = matrix(QQ, 2, 2, [1, 2, 3, 4])
+print(A[True, False], A[False, True], A[True])
+A[True, False] = 7; print(entries(A))
+A[[], :] = float(1.5); A[:, []] = 'a'; print(entries(A))

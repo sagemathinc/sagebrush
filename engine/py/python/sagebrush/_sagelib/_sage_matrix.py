@@ -530,14 +530,26 @@ def _select(k, n, err="matrix index out of range"):
         return list(range(n))[k], False
 
     def one(i):
-        if isinstance(i, bool) or not isinstance(i, int) and not (hasattr(i, "__index__") and not isinstance(i, float)):
+        # (a bool is the integer 0 or 1, as in Sage: CORR-552-2)
+        if not isinstance(i, int) and not (hasattr(i, "__index__") and not isinstance(i, float)):
             raise TypeError("index must be an integer")
         i = operator.index(i)
         if i < -n or i >= n:
             raise IndexError(err)
         return i % n if n else i
     if isinstance(k, (list, tuple)):
-        return [one(i) for i in k], False
+        if type(k) in (list, tuple):
+            return [one(i) for i in k], False
+        # a subclass's len() may not be its length: read at most len(k) + 1
+        # items, the length the block's shape was checked with, and refuse
+        # a list that yields more or fewer (daybreak2's HARD-552-1: one that
+        # claimed 1 and yielded 4.3 million indices passed the shape check)
+        import itertools
+        m = len(k)
+        out = [one(i) for i in itertools.islice(iter(k), m + 1)]
+        if len(out) != m:
+            raise ValueError("an index list yielded %s items but has length %d" % ("more" if len(out) > m else len(out), m))
+        return out, False
     return [one(k)], True
 
 
@@ -782,6 +794,8 @@ class Matrix:
         if r1 and c1:
             self._rows[rs[0]][cs[0]] = self._entry(v)
             return
+        if not rs or not cs:
+            return  # (no entry selected: nothing is converted, as in Sage)
         if isinstance(v, Matrix):
             if v.nrows() != len(rs):
                 raise IndexError("value does not have the right number of rows")
@@ -813,7 +827,17 @@ class Matrix:
         is 3/2 in QQ; 'a' or a symbolic x is a TypeError, as in Sage)."""
         sa = _sa()
         if self._base is sa.QQ or self._base is sa.ZZ:
+            if any(c.__name__ == "IntegerMod" for c in type(x).__mro__):
+                x = int(x.lift())  # (GF(5)(2) is 2 here, as in Sage)
             try:
+                if self._base is sa.ZZ and not isinstance(x, int):
+                    # (ZZ(x) truncates a real: float(1.5) became 1, a wrong
+                    # entry; only an integral value is an integer, as in
+                    # Sage: astra's CORR-552-1)
+                    q = sa.QQ(x)
+                    if q.denominator != 1:
+                        raise TypeError
+                    return int(q.numerator)
                 return _norm(self._base(x))
             except (TypeError, ValueError):
                 raise TypeError("unable to convert %r to %s" % (x, "a rational" if self._base is sa.QQ else "an integer")) from None

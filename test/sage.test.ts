@@ -43,3 +43,14 @@ test("pickling an int/float/str/bytes/tuple subclass instance keeps its value", 
     "print(pickle.loads(pickle.dumps(b)).tag)";
   assert.equal(cli("-c", src), "1\n");
 });
+
+test("a matrix index list subclass whose len() lies is refused after len() + 1 items (HARD-552-1)", () => {
+  // (a list claiming length 1 that yielded 4.3 million indices passed the
+  // block-size check: 15 s and 230 MB before the timeout)
+  const src = "class E(list):\n def __len__(self): return 1\n def __iter__(self):\n  while True:\n   yield 0\n" +
+    "A = matrix(QQ, 1, 1, [0])\nfor f in (lambda: A[E(), 0], lambda: A[0, E()], lambda: A[E()], lambda: A.__setitem__((E(), 0), 1), lambda: A.__setitem__((0, E()), 1)):\n try:\n  f()\n except ValueError as e:\n  print(e)\nprint(A)\n";
+  const t = Date.now();
+  const line = "an index list yielded more items but has length 1\n";
+  assert.equal(cli("--sage", "-c", src), line.repeat(5) + "[0]\n");
+  assert.ok(Date.now() - t < 20000);
+});
