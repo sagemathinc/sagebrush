@@ -5,6 +5,7 @@
 
 import { T, PyBytes, raise, objectType, tuple } from "./object";
 import { newBuiltinModule } from "./modules";
+import * as O from "./ops";
 
 let ZlibError: any;
 
@@ -367,7 +368,7 @@ newBuiltinModule("binascii", (m) => {
   // (newline is keyword-only, as CPython's: b2a_base64(data, False) is a TypeError)
   const b2a = (data: any, newline: any = true) => {
     const e = b64encode(bytesOf(data));
-    if (!newline) return new PyBytes(e);
+    if (!O.truth(newline)) return new PyBytes(e); // (Python's truth: newline=[] is false, and __bool__'s errors propagate)
     const out = new Uint8Array(e.length + 1);
     out.set(e);
     out[e.length] = 10;

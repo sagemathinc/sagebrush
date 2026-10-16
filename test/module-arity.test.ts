@@ -14,6 +14,22 @@ import { isType } from "../src/runtime/object";
 void R;
 const MODULES = ["math", "cmath", "os", "sys", "time", "gc", "types", "struct", "re", "binascii", "zlib", "array"];
 const TEST = __dirname + "/../../test/";
+// Functions whose signature inspect cannot read, with CPython's positional
+// counts (from its own errors for 0 and 9 arguments); keyword-only
+// parameters are not counted.  hexlify and b2a_hex refuse separators, so
+// they may take fewer than CPython's.
+const UNREADABLE: Record<string, Record<string, [number, number]>> = {
+  binascii: { b2a_hex: [1, 3], hexlify: [1, 3] },
+  cmath: { log: [1, 2] },
+  math: { log: [1, 2] },
+  gc: { set_threshold: [1, 3] },
+  os: { chmod: [2, 2], get_terminal_size: [0, 1], link: [2, 2], register_at_fork: [0, 0], utime: [1, 2] },
+  struct: { pack: [1, Infinity], pack_into: [3, Infinity] },
+  sys: { getsizeof: [1, 2], set_asyncgen_hooks: [0, 2] },
+  time: { asctime: [0, 1], clock_getres: [1, 1], clock_settime: [2, 2], clock_settime_ns: [2, 2], ctime: [0, 1], get_clock_info: [1, 1], gmtime: [0, 1], localtime: [0, 1], pthread_getcpuclockid: [1, 1], strftime: [1, 2], strptime: [1, 2] },
+  zlib: { compressobj: [0, 6] },
+};
+const NARROWER = new Set(["binascii.b2a_hex", "binascii.hexlify"]);
 
 test("every builtin module function checks its positional argument count, as CPython's signature (math.sqrt(4, 5) is a TypeError)", () => {
   // (the library on sys.path, as the CLI puts it: os needs posixpath)
@@ -34,8 +50,21 @@ test("every builtin module function checks its positional argument count, as CPy
         unchecked.push(`${mod}.${k}`);
         continue;
       }
-      const w = want[mod]?.[k];
-      if (w === undefined || w === null) continue;
+      let w = want[mod]?.[k];
+      if (w === null) {
+        // (an unreadable signature: the table above, which must list it)
+        const u = UNREADABLE[mod]?.[k];
+        if (u === undefined) {
+          differ.push(`${mod}.${k}: CPython's signature is unreadable and UNREADABLE has no entry`);
+          continue;
+        }
+        if (NARROWER.has(`${mod}.${k}`)) {
+          if (got[0] < u[0] || got[1] > u[1]) differ.push(`${mod}.${k}: [${got[0]}, ${got[1]}] not within CPython [${u[0]}, ${u[1]}]`);
+          continue;
+        }
+        w = u;
+      }
+      if (w === undefined) continue;
       compared++;
       const hi = w[1] === null ? Infinity : w[1];
       if (got[0] !== w[0] || got[1] !== hi) differ.push(`${mod}.${k}: [${got[0]}, ${got[1]}], CPython [${w[0]}, ${hi}]`);
