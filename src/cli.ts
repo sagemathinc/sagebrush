@@ -64,8 +64,15 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
  * `sagebrush --magma` session died that way, printing nothing (the flaky
  * Magma examples test).  So: read to the end of input, waiting a little
  * whenever there is nothing to read yet. */
-function readStdin(): string {
+// The largest program read from stdin, in bytes: past it the program is refused
+// before more of it is kept (a source this size is far past any real program, and
+// the lexer's tokens are proportional to it)
+const STDIN_SOURCE_MAX = 8 << 20;
+
+/** The program on stdin, or null after refusing one past STDIN_SOURCE_MAX bytes. */
+function readStdin(): string | null {
   const chunks: Buffer[] = [];
+  let total = 0;
   const buf = Buffer.alloc(1 << 16);
   const pause = new Int32Array(new SharedArrayBuffer(4));
   for (;;) {
@@ -81,9 +88,15 @@ function readStdin(): string {
       throw e;
     }
     if (n === 0) break;
+    if (total + n > STDIN_SOURCE_MAX) {
+      // (refused before the chunk that crosses the limit is kept; the rest is not read)
+      process.stderr.write(`sagebrush: the program on stdin is more than ${STDIN_SOURCE_MAX >> 20} MiB: not supported.\n`);
+      return null;
+    }
+    total += n;
     chunks.push(Buffer.from(buf.subarray(0, n)));
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks, total).toString("utf8");
 }
 
 function exitCode(c: any): number {
@@ -557,18 +570,21 @@ async function main() {
     // MATLAB on stdin (or `--matlab -`): a program, run as a file of it is, up to its first
     // error, which gives exit status 1, as `matlab -batch` does
     main = mainModule("<stdin>");
-    const py = matlabSource(readStdin(), "<stdin>");
+    const src = readStdin();
+    const py = src === null ? null : matlabSource(src, "<stdin>");
     code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive && isMagma(null)) {
     // Magma on stdin: a session, as `magma < file` is
     main = mainModule("<stdin>");
-    const py = magmaSource(readStdin(), "<stdin>", "session");
-    if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
+    const src = readStdin();
+    const py = src === null ? null : magmaSource(src, "<stdin>", "session");
+    if (src === null) code = 1;
+    else if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive) {
     // program on stdin
     const source = readStdin();
     main = mainModule("<stdin>");
-    code = guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
+    code = source === null ? 1 : guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }
   flushFiles();
   R.stdout.flush();
