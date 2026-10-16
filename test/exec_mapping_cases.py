@@ -137,3 +137,11 @@ class Sink:
 sk = Sink()
 exec("def f(): pass", {}, sk)
 print(t(lambda: (sk.d['f'].__code__.co_filename, sk.d['f'].__module__, sk.d['f'].__globals__ is sk)))
+
+# a relative import's package is the globals' __package__, not the locals'
+import sys, types
+pk = types.ModuleType('pk'); pk.__path__ = []; sys.modules['pk'] = pk
+pks = types.ModuleType('pk.sub'); pks.v = 3; sys.modules['pk.sub'] = pks; pk.sub = pks
+print(t(lambda: exec("from . import sub\nprint(sub.v)", {'__package__': 'pk', '__name__': 'pk.m'}, {'__package__': 'zz'})))
+print(t(lambda: exec("from . import sub", {'__name__': 'x'}, {'__package__': 'pk'})))
+print(t(lambda: exec("from . import sub\nprint(sub.v)", {'__package__': 'pk', '__name__': 'pk.m'}, Sink())))

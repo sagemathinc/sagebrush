@@ -60,3 +60,7 @@ NameError: name 'len' is not defined
 NameError: name 'x' is not defined
 NameError: name 'y' is not defined
 ('<string>', None, False)
+3
+None
+ImportError: attempted relative import with no known parent package
+ValueError: boom print
