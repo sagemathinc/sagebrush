@@ -2022,3 +2022,23 @@ test("strrep's cell forms count overlapping matches; regexp's cell forms give ev
     tryIt("regexp({char('ab', 'cd')}, {'bc'})"), tryIt("regexp(char('AB', 'CD'), {'BC'})"), tryIt("regexp('ABCD', {char('AB', 'CD')})"),
   ].join("\n")), ["XXX", "XX", "XXX YY", "aaaa", "[1 3]", "ABC", "[1 3]", "abc", "[1 3]", "[1 2 3]", "A", "refused", "refused", "refused"]);
 });
+
+test("strrep and regexp with cell arrays: the text built or searched, all elements together, admitted before the work (HARD-180-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const t0 = Date.now();
+  assert.deepEqual(run([
+    // (100 copies of a 1,000,000-character text: refused at once rather than built)
+    "s = char(97*ones(1, 1000000)); old = cell(1, 100); old(:) = {char(98)};",
+    tryIt("strrep(s, old, char(120))"),
+    // (one result past the limit: 'a' -> 20 characters over 1,000,000 characters)
+    tryIt("strrep(s, {'a'}, {repmat('x', 1, 20)})"),
+    tryIt("regexp(s, old)"),
+    // (within it, as before)
+    "c = strrep(s(1:10), {'a', 'aa'}, 'x'); disp([c{1} ' ' c{2}])",
+    "r = regexp('abab', {'a', 'b'}); disp(mat2str([r{1} r{2}]))",
+  ].join("\n")), ["refused", "refused", "refused", "xxxxxxxxxx xxxxxxxxx", "[1 3 2 4]"]);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
