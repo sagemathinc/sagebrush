@@ -130,13 +130,20 @@ export class Emitter {
   gns(id: string): string {
     let s = this.fn.scope;
     const comp = s.kind === "comp" && !s.isGenerator;
-    while (s.kind === "comp" && !s.isGenerator && s.parent !== null) s = s.parent;
+    // (a walrus target in a top-level comprehension is the globals', reads
+    // and writes alike, declared global or not: CPython's symbol table does
+    // not count it as the top level's local, CORR-756-1)
+    let walrus = false;
+    while (s.kind === "comp" && !s.isGenerator && s.parent !== null) {
+      if (s.nonlocals.has(id)) walrus = true;
+      s = s.parent;
+    }
     if (s.kind !== "module") return "$G";
     // (an inlined comprehension at the top level reads the top level's
     // namespace even for a name declared global there, as CPython's,
     // CORR-C0F-1; the top level itself uses the globals for a name
     // declared global there or in any scope inside, CORR-C0F-2)
-    if (comp) return "$g";
+    if (comp) return walrus ? "$G" : "$g";
     return s.globals.has(id) || this.globalAnywhere().has(id) ? "$G" : "$g";
   }
   // the names some scope of this module declares global
