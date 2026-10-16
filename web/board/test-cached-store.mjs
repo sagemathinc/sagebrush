@@ -568,12 +568,17 @@ for (const closeA of [true, false]) {
 for (const closeAtOnce of [true, false]) {
   const cache = memCache(), base = cleanDoc(doc("base")), key = closeAtOnce ? "z1" : "z2";
   await cache.put({ key, json: canonical(base), hash: await hashOf(base), remoteHash: await hashOf(base), at: 0 });
-  let refusals = 0;
+  // (when each refusal came; the tenth's, awaited: not a fixed wait, which a
+  // loaded machine outlasts)
+  let refusals = 0, tenth;
+  const at = [], tenthSeen = new Promise((r) => (tenth = r));
   const put0 = cache.put;
   cache.put = async (c, expected) => {
     if (expected !== undefined && refusals < 12) {
       // (another store writes the copy: the board's title, the next version)
       refusals++;
+      at.push(Date.now());
+      if (refusals === 10) tenth();
       const cur = cache.m.get(c.key), o = cleanDoc({ title: "other " + refusals, nodes: [{ id: "n", title: "base" }] });
       cache.m.set(c.key, { ...cur, json: canonical(o), hash: await hashOf(o), v: (cur.v ?? 0) + 1 });
       return false;
@@ -586,14 +591,16 @@ for (const closeAtOnce of [true, false]) {
   const off = store.subscribe(() => {});
   await store.load();
   store.save(cleanDoc({ title: "T", nodes: [{ id: "n", title: "LOCAL" }] }));
-  await tick(30);
+  await Promise.race([tenthSeen, tick(10000)]);
   const first = { refusals, busy: store.busy(), cached: titleOf(cache.m.get(key).json) };
   if (closeAtOnce) off();
-  await tick(400);
+  // (written: on closing, or after the wait; left open, the eleventh try only after that wait, 50 ms)
+  for (const t0 = Date.now(); titleOf(cache.m.get(key).json) !== "LOCAL" && Date.now() - t0 < 10000; ) await tick(5);
   if (!closeAtOnce) off();
+  if (!closeAtOnce) first.waited = at.length > 10 && at[10] - at[9] >= 45;
   const again = cachedStore(fakeRemote(base), key, cache, FAST);
   const got = await again.load();
-  check(first.refusals === 10 && first.busy && first.cached === "base" && got?.doc.nodes[0].title === "LOCAL" && got.doc.title === "other 12", `an edit whose writes are refused more than ten times (${closeAtOnce ? "closed at once" : "left open"}): busy, kept, written ${closeAtOnce ? "on closing" : "after a wait"}, there when opened again: ` + JSON.stringify({ first, refusals, reopened: got && [got.doc.title, got.doc.nodes[0].title] }));
+  check(first.refusals === 10 && first.busy && first.cached === "base" && first.waited !== false && got?.doc.nodes[0].title === "LOCAL" && got.doc.title === "other 12", `an edit whose writes are refused more than ten times (${closeAtOnce ? "closed at once" : "left open"}): busy, kept, written ${closeAtOnce ? "on closing" : "after a wait"}, there when opened again: ` + JSON.stringify({ first, refusals, reopened: got && [got.doc.title, got.doc.nodes[0].title] }));
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
