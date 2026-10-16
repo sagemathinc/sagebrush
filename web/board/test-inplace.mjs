@@ -537,7 +537,11 @@ try {
   check(Math.abs(sa3.x - (sa2w.x - 12)) <= 2 && Math.abs(sa3.y - (sa2w.y - 10)) <= 2, "B3: ...and it is where it was dropped: " + JSON.stringify([sa2w, sa3]));
   // the selected item's grip over another note's link: the grip's, by mouse
   // and by touch, the link not followed (astra's UI-BDC-2)
-  const LK = { title: "Link under", nodes: [{ id: "under", text: "[Under WWWWWWWWWWWWWWWWWWWWWWWWWWW](#noop)", x: 0, y: 0, w: 260 }, { id: "over", title: "Selected", x: 250, y: 20, w: 260 }] };
+  // (a link out of the board: a "#" one is the board's own since round 0's
+  // 15, held back and gone to by the board itself; each click on it is
+  // recorded, whether held back, and never followed)
+  const LK = { title: "Link under", nodes: [{ id: "under", text: "[Under WWWWWWWWWWWWWWWWWWWWWWWWWWW](https://example.invalid/under)", x: 0, y: 0, w: 260 }, { id: "over", title: "Selected", x: 250, y: 20, w: 260 }] };
+  await ev("window.__clicks = []; document.addEventListener('click', (e) => { if (e.target.closest?.('a[href^=\"https://example.invalid\"]')) { window.__clicks.push(e.defaultPrevented); e.preventDefault(); } }), 1");
   for (const how of ["mouse", "touch"]) {
     await ev(`window.sagebrush.board.load(${JSON.stringify(LK)}).then(() => 1)`);
     await until("!!window.board.item('over')", 10000);
@@ -546,7 +550,8 @@ try {
     const ro = await rect("over");
     await click(ro.left + 150, ro.top + 30);
     await sleep(250);
-    const hash0 = await ev("location.hash"), o0 = await box("over"), gp2 = await gripOf("over");
+    const o0 = await box("over"), gp2 = await gripOf("over");
+    await ev("window.__clicks.length = 0, 1");
     const onLink = await ev(`!!document.elementFromPoint(${gp2.x}, ${gp2.y})?.closest('a')`);
     if (how === "mouse") await dragFrom(gp2.x, gp2.y, 80, 100);
     else {
@@ -558,17 +563,18 @@ try {
     }
     const o1 = await box("over");
     check(onLink && Math.abs(o1.x - (o0.x + 80)) <= 12 && Math.abs(o1.y - (o0.y + 100)) <= 12, `B2: the selected item's grip over another note's link drags it (${how}): ` + JSON.stringify([onLink, o0, o1]));
-    check((await ev("location.hash")) === hash0, `B2: ...and the link is not followed (${how}): ` + (await ev("location.hash")));
+    const clicks = await ev("window.__clicks");
+    check(clicks.every((held) => held), `B2: ...and the link is not followed, any click on it held back (${how}): ` + JSON.stringify(clicks));
   }
   // ...and once that drag is done, out of Edit with no other press, the
   // link opened from the keyboard is the link's (astra's UI-36C-1: the
   // guard was left on until the next press on the board)
   await ev("window.sagebrush.board.editing(false), 1");
   await sleep(300);
-  const focused = await ev(`(() => { const a = [...document.querySelectorAll('.board-item a')].find((x) => /Under/.test(x.textContent)); if (!a) return false; window.__cl = null; document.addEventListener('click', (e) => { window.__cl = e.defaultPrevented; e.preventDefault(); }, { once: true }); a.focus(); return document.activeElement === a; })()`);
+  const focused = await ev(`(() => { const a = [...document.querySelectorAll('.board-item a')].find((x) => /Under/.test(x.textContent)); if (!a) return false; window.__clicks.length = 0; a.focus(); return document.activeElement === a; })()`);
   await key("Enter");
   await sleep(200);
-  check(focused && (await ev("window.__cl")) === false, "B2: after a grip drag, a link opened by Enter out of Edit is not held back: " + JSON.stringify([focused, await ev("window.__cl")]));
+  check(focused && JSON.stringify(await ev("window.__clicks")) === "[false]", "B2: after a grip drag, a link opened by Enter out of Edit is not held back: " + JSON.stringify([focused, await ev("window.__clicks")]));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
