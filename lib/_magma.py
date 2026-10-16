@@ -3004,6 +3004,17 @@ def _iround(f):
     return q if n >= 0 else -q
 
 
+# A rational made a real has parts of at most this many bits (about 301000
+# decimal digits): decided from bit lengths, before any decimal conversion
+# (HARD-C68-1)
+_REAL_PART_BITS = 10 ** 6
+
+
+def _admit_real_parts(n, d):
+    if abs(n).bit_length() > _REAL_PART_BITS or d.bit_length() > _REAL_PART_BITS:
+        raise MagmaError("a real from a rational with a numerator or denominator of more than %d bits is not supported yet" % _REAL_PART_BITS)
+
+
 class MReal:
     """A real number to `prec` significant decimal digits (RealField(prec)),
     printed as Magma prints it."""
@@ -3051,6 +3062,7 @@ class MReal:
         n, d = int(f._numerator), int(f._denominator)
         if n == 0:
             return MReal(0, 0, prec)
+        _admit_real_parts(n, d)
         # n / d as m / 10^k with prec + 5 digits, then rounded
         k = prec + 5 - (len(str(abs(n))) - len(str(d)))
         if k >= 0:
