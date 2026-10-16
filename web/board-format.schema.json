@@ -301,6 +301,15 @@
      "type": "boolean",
      "description": "`true`: show only the code's output, not the code"
     },
+    "mode": {
+     "enum": [
+      "python",
+      "sage",
+      "magma",
+      "matlab"
+     ],
+     "description": "a code item's language, when it is not the board's (`\"python\"`, `\"sage\"`, `\"magma\"` or `\"matlab\"`; default: the board's `mode`). Each language runs in its own interpreter: languages share no values, so copy data from one to another as literals"
+    },
     "preview": {
      "type": "object",
      "description": "a slow code item's output, kept to show before it runs (written by Sagebrush)"
