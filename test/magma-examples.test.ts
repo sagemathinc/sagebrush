@@ -107,7 +107,7 @@ test("the index carries each example, and the search box's Insert takes its inpu
   const src = /^function docExamples\(doc, lang\) \{[\s\S]*?^\}/m.exec(html)![0];
   const docExamples = new Function(`${src}; return docExamples;`)() as (doc: string, lang: string) => string;
   for (const e of index) {
-    const lines = inputs(examples[e.name]);
+    const lines = inputs(examples[e.key ?? e.name]);
     assert.equal(e.examples, lines.length, e.name);
     assert.ok(e.doc.startsWith(e.summary + "\n\nExample:\n\n"), e.name);
     assert.equal(docExamples(e.doc, "magma"), lines.join("\n"), e.name);

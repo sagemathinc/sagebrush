@@ -3494,6 +3494,11 @@ def _str(v, indent=0, col=None, tail=""):
 
 def _str1(v, indent, col, tail):
     col = indent if col is None else col
+    if callable(v) and getattr(v, "__wrapped__", None) is not None and globals().get(getattr(v, "__name__", None)) is v:
+        # an intrinsic, as Magma prints one: its signatures, each with
+        # Sagebrush's summary (not a Python function's repr)
+        import _magma_docsearch
+        return _magma_docsearch.intrinsic_text(v.__name__), False
     if isinstance(v, _smat.MatrixSpace_):
         # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
         # Sage's "Full MatrixSpace of ... dense matrices")
@@ -3991,7 +3996,10 @@ class _Cat(str):
 # Categories bound as names (RngIntElt, SeqEnum, ...), for Type(x) eq
 # RngIntElt and record formats such as recformat< n : RngIntElt >.
 _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
-               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt").split()
+               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt "
+               # (and those of signatures: ISA(AlgMatElt, MtrxS))
+               "AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
+               "FldNum FldQuad FldAlg FldRe RngOrd RngQuad Rng Fld Str Cat Any").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
 
@@ -4023,6 +4031,12 @@ def _type_name(x):
         return "RngQuad" if x.K._quadratic else "RngOrd"
     if isinstance(x, _MNFElt):
         return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
+    if isinstance(x, _MMatrix) and (x._base is _sa.ZZ or x._base is _sa.QQ):
+        # (Magma's: a square matrix is an element of a matrix algebra,
+        # another of a module of matrices, over a field or a ring)
+        if x.nrows() == x.ncols():
+            return "AlgMatElt"
+        return "ModMatFldElt" if x._base is _sa.QQ else "ModMatRngElt"
     return None
 
 
@@ -4120,8 +4134,102 @@ def _bad_types(name, args, pos=None):
     if name.endswith(":="):
         # x +:= y: Magma doesn't list the types
         return MagmaError("Bad argument types", "'%s'" % name, True, pos)
-    return MagmaError("Bad argument types\nArgument types given: " + ", ".join(_ext_type(a) for a in args),
-                      "'%s'" % name, True, pos)
+    # (no arguments: "Argument types given:" ends the line, as Magma's)
+    return MagmaError("Bad argument types\nArgument types given:" + "".join(
+        (", " if i else " ") + _ext_type(a) for i, a in enumerate(args)), "'%s'" % name, True, pos)
+
+
+# ------------------------------------------------------------------ signatures
+#
+# A Magma intrinsic is one name over many signatures: Trace of a matrix,
+# of a number field element and of a finite field element are different
+# functions, chosen by the types of the arguments.  An intrinsic converted
+# to this form registers each signature it implements (_signature) and is
+# bound to a dispatcher that picks the most specific one, as Magma does;
+# arguments no signature accepts get Magma's "Bad argument types".
+
+# The types each of Magma's types is also, as Magma's ISA answers (checked
+# against Magma 2.18 with ISA): only those of the values Sagebrush makes.
+_ISA_UP = {t: frozenset(s.split()) for t, s in {
+    "RngIntElt": "RngElt", "FldRatElt": "FldElt RngElt", "FldReElt": "FldElt RngElt",
+    "FldFinElt": "FldElt RngElt", "FldNumElt": "FldAlgElt FldElt RngElt",
+    "FldQuadElt": "FldNumElt FldAlgElt FldElt RngElt", "RngUPolElt": "RngElt",
+    "AlgMatElt": "MtrxS Mtrx RngElt", "ModMatRngElt": "MtrxS Mtrx", "ModMatFldElt": "ModMatRngElt MtrxS Mtrx",
+    "BoolElt": "", "MonStgElt": "", "Tup": "", "List": "", "Rec": "", "Cat": "", "RecFrmt": "",
+    "SeqEnum": "Str", "SetEnum": "Str", "SetIndx": "Str", "SetMulti": "Str", "Map": "Str",
+    "RngInt": "Rng Str", "FldRat": "Fld Rng Str", "FldRe": "Fld Rng Str", "FldFin": "Fld Rng Str",
+    "FldNum": "FldAlg Fld Rng Str", "FldQuad": "FldNum FldAlg Fld Rng Str",
+    "RngOrd": "Rng Str", "RngQuad": "RngOrd Rng Str", "RngUPol": "Rng Str",
+}.items()}
+# (every type the table names: ISA of another is not known here)
+_ISA_KNOWN = frozenset(_ISA_UP) | frozenset().union(*_ISA_UP.values()) | {"Any"}
+
+
+def _isa(t, s):
+    return s == "Any" or t == s or s in _ISA_UP.get(t, ())
+
+
+def ISA(t, s):
+    """Whether the type t is also the type s (ISA(FldQuadElt, FldNumElt))."""
+    if not isinstance(t, _Cat) or not isinstance(s, _Cat):
+        raise _bad_types("ISA", [t, s])
+    if t not in _ISA_UP or s not in _ISA_KNOWN:
+        raise MagmaError("ISA(%s, %s) is not supported yet" % (t, s), "'ISA'")
+    return _isa(t, s)
+
+
+# name -> [(types, implementation or None, result type)], in registration
+# order; None: a signature Magma has that Sagebrush doesn't implement yet
+_SIGNATURES = {}
+
+
+def _signature(name, *types, ret="Any"):
+    """Registers the decorated function as name's implementation for
+    arguments of these Magma types (each type or one it ISA)."""
+    for t in types:
+        assert t in _ISA_KNOWN, t
+
+    def register(f):
+        _SIGNATURES.setdefault(name, []).append((types, f, ret))
+        return f
+    return register
+
+
+def _unsupported(name, *types, ret="Any"):
+    """A signature of Magma's that Sagebrush doesn't implement yet: such
+    arguments are refused in words, not with Bad argument types."""
+    _SIGNATURES.setdefault(name, []).append((types, None, ret))
+
+
+def _dispatch_type(x):
+    return _type_name(x) or _type(x)
+
+
+def _dispatcher(name):
+    sigs = _SIGNATURES[name]
+
+    def intrinsic(*args):
+        ts = [_dispatch_type(a) for a in args]
+        fits = [s for s in sigs if len(s[0]) == len(ts) and all(_isa(t, u) for t, u in zip(ts, s[0]))]
+        if not fits:
+            if any(t not in _ISA_UP for t in ts):
+                # (a value whose type the table doesn't know: its
+                # signatures may exist in Magma, so not Bad argument types)
+                raise MagmaError("%s with these arguments is not supported yet" % name, "'%s'" % name)
+            raise _bad_types(name, args)
+        # (the most specific: each of its types ISA those of every other fit)
+        best = [s for s in fits if all(all(_isa(a, b) for a, b in zip(s[0], o[0])) for o in fits)]
+        if len(best) != 1:
+            raise MagmaError("%s: more than one signature fits %s" % (name, ", ".join(ts)), "'%s'" % name)
+        f = best[0][1]
+        if f is None:
+            raise MagmaError("%s of a %s is not supported yet" % (name, ", ".join(ts)), "'%s'" % name)
+        return f(*args)
+
+    intrinsic.__name__ = name
+    intrinsic.__qualname__ = name
+    intrinsic._magma_signatures = sigs
+    return intrinsic
 
 
 # ------------------------------------------------------------------ polynomials
@@ -5888,14 +5996,34 @@ def Norm(x):
     return x * x
 
 
-def Trace(x):
-    if _is_ff(x):
-        return x.trace()
-    if isinstance(x, _snf.NumberFieldElement):
-        return _m_num(x.trace())
-    if hasattr(x, "trace"):
-        return x.trace()
-    raise MagmaError("Trace: bad argument")
+@_signature("Trace", "FldRatElt", ret="FldRatElt")
+@_signature("Trace", "RngIntElt", ret="RngIntElt")
+def _trace_rational(x):
+    return x
+
+
+@_signature("Trace", "FldFinElt", ret="FldFinElt")
+def _trace_ff(x):
+    return x.trace()
+
+
+@_signature("Trace", "FldAlgElt", ret="RngElt")
+def _trace_nf(x):
+    return _m_num(x.trace())
+
+
+@_signature("Trace", "MtrxS", ret="RngElt")
+def _trace_matrix(a):
+    if a.nrows() != a.ncols():
+        raise MagmaError("Argument 1 is not square", "'Trace'", True)
+    return a.trace()
+
+
+_unsupported("Trace", "RngUPolElt", ret="RngUPolElt")
+_unsupported("Trace", "RngOrdElt", ret="RngElt")
+_unsupported("Trace", "FldFinElt", "FldFin", ret="FldFinElt")
+_unsupported("Trace", "FldAlgElt", "Rng", ret="RngElt")
+_unsupported("Trace", "RngOrdElt", "Rng", ret="RngElt")
 
 
 def MinimalPolynomial(x):
@@ -6003,7 +6131,7 @@ def Rank(x):
 # intrinsics have no signature for them: every intrinsic refuses a string
 # or a boolean argument with Magma's error, except in the positions listed
 # here (None: any position).  Checked against Magma.
-_STR_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None, "Index": None, "Position": None,
+_STR_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None, "ISA": None, "Index": None, "Position": None,
              "Append": {1}, "Include": {1}, "Exclude": {1}, "Insert": {2},
              "Reverse": {0}, "StringToInteger": {0}, "EllipticCurve": {0}}
 # Intrinsics taking integers only, at these positions: a rational there,
@@ -6070,6 +6198,12 @@ def _guarded(name, f):
     intrinsic.__doc__ = f.__doc__
     intrinsic.__wrapped__ = f  # for help: the signature and source are f's
     return intrinsic
+
+
+# an intrinsic of registered signatures is its dispatcher (_signature)
+for _n in _SIGNATURES:
+    assert _n not in globals(), _n
+    globals()[_n] = _dispatcher(_n)
 
 
 for _n, _f in list(globals().items()):
