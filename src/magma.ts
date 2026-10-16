@@ -1343,7 +1343,8 @@ class Parser {
         }
         while (this.eat(",")) idx.push(this.expr());
         this.expect("]");
-        e = idx.length === 1 ? `_m._index(${e}, ${idx[0]}, ${at})` : `_m._index(${e}, _m.MTuple([${idx.join(", ")}]), ${at})`;
+        // (S[i, j]: its own helper, as S[<i, j>], a tuple index, is refused)
+        e = idx.length === 1 ? `_m._index(${e}, ${idx[0]}, ${at})` : `_m._index_multi(${e}, [${idx.join(", ")}], ${at})`;
       } else if (this.at(".") && this.peek(1).t === "num") {
         this.next();
         e = `_m._gen(${e}, ${this.next().v})`;

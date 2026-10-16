@@ -25,3 +25,23 @@ a[1..9];
 x := a[1.5];
 x := a[true];
 a[2], a[6];
+// a tuple is not an index; S[i, j] is S[i][j] while it can be indexed
+T := [[5,6],[7]]; T[<1,2>];
+T[<2>];
+T[<>];
+T[1,2];
+T[1,2,1];
+// index lists: of an empty sequence, of a string (the place in the list
+// names the index), of a tuple, of an indexed set; undefined elements kept
+E := []; E[[2]];
+w := "xyz"; w[[2,7]];
+w[2..5];
+u := <5,6>; u[[1,2]];
+u[2..1];
+I := {@ 6, 7 @}; I[[2,1]];
+I[[1,4]];
+I[3..1];
+N := {@ @}; N[true];
+N[1..0];
+V := [5]; V[4] := 9; V[1..4];
+V[2..3];
