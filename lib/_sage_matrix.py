@@ -2563,6 +2563,14 @@ def matrix(*args, **kwds):
         sage: matrix(QQ, 2, 3, [1, 2, 3, 4, 5, 6])
         [1 2 3]
         [4 5 6]
+        sage: matrix(Graph([(0, 1), (1, 2)]))
+        [0 1 0]
+        [1 0 1]
+        [0 1 0]
+        sage: matrix(Graph([(0, 1)]), 2)
+        Traceback (most recent call last):
+        ...
+        TypeError: too many arguments in matrix constructor
     """
     ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
@@ -2571,6 +2579,32 @@ def matrix(*args, **kwds):
     # over Qp the column count became the scalar entry)
     args = _int_dims(args)
     base = None
+    is_graph = lambda a: any(c.__name__ == "GenericGraph" for c in type(a).__mro__)
+    if any(is_graph(a) for a in args):
+        # matrix(G), matrix(R, G), with dimensions before G if wanted: the
+        # graph's adjacency matrix, as Sage (matrix(Graph([(0, 1)])) was the
+        # 1 x 2 row [0 1]: astra's hunt). A graph before other arguments
+        # (matrix(G, 2), matrix(ZZ, G, 2)) is Sage's TypeError; it was
+        # iterated as a list of entries (astra's CORR-EA6-1).
+        if not is_graph(args[-1]) or any(is_graph(a) for a in args[:-1]):
+            raise TypeError("too many arguments in matrix constructor")
+        if set(kwds) - {"sparse"}:
+            raise NotImplementedError("matrix(..., graph, %s) is not available in sagebrush yet" % ", ".join(sorted(kwds)))
+        rest = list(args[:-1])
+        ring = rest.pop(0) if rest and not isinstance(rest[0], int) else None
+        if len(rest) > 2 or not all(isinstance(d, int) and not isinstance(d, bool) for d in rest):
+            raise TypeError("too many arguments in matrix constructor")
+        # the dimensions and the n x n size are checked before the
+        # adjacency matrix is built (matrix(Graph(10000)) reached 1 GB
+        # before the entry cap: daybreak2's HARD-6B4-1)
+        n = args[-1].order()
+        if rest and (rest[0] != n or rest[-1] != n):
+            raise ValueError("the dimensions %s do not match the graph's %d vertices" % (" x ".join(map(str, rest)), n))
+        _shape(n, n)
+        A = args[-1].adjacency_matrix()
+        if ring is None:
+            return A
+        return matrix(ring, [list(r) for r in A.rows()])
     import _sage_ffmat
     if args and _sage_ffmat._is_ff(args[0]):
         return _sage_ffmat.matrix(*args, **kwds)
