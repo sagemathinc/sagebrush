@@ -2223,3 +2223,26 @@ test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects) b
     "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
     "524288", "refused: repmat: a result of 524289 ele", "1048576", "refused: repmat: a result of 1048577 el"]);
 });
+
+test("end inside a function call within an index is the enclosing indexed variable's: x(min(end, 5)), A(end, min(end, 2)), and y's in x(y(end))", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
+  assert.deepEqual(run([
+    "x = 10:10:80; disp(mat2str(x(min(end, 5))))", "x = 10:10:30; disp(mat2str(x(1:min(end, 5))))", "x = 10:10:80; disp(mat2str(x(end-1:end)))",
+    "x = 10:10:80; y = [1 2 3]; disp(mat2str(x(y(end))))", "A = magic(4); disp(mat2str(A(end, min(end, 2))))", "A = magic(4); disp(mat2str(A(min(end, 3), end)))",
+    "x = 1:10; disp(mat2str(x(max(1, end-2):end)))", "x = 1:10; disp(mat2str(x(round(end / 2))))", "x = 1:10; disp(mat2str(x(numel(x(1:min(end, 4))))))",
+    "s = 'hello'; disp(s(1:min(end, 3)))", "c = {1, 2, 3}; disp(mat2str(c{min(end, 2)}))", "x = 1:10; x(min(end, 3)) = 0; disp(mat2str(x(1:4)))",
+    "f = @(v) v(min(end, 2)); disp(f([7 8 9]))",
+    tryIt("disp(min(end, 5))"), tryIt("x = 1:3; disp(x(min(abs(end), 2)))"),
+    "function r = g(v)\nr = v(min(end, 2));\nend",
+  ].join("\n").replace("function r = g(v)", "disp(g([4 5 6]))\nfunction r = g(v)")), [
+    "50", "[10 20 30]", "[70 80]",
+    "30", "14", "12",
+    "[8 9 10]", "5", "4",
+    "hel", "2", "[1 2 0 4]",
+    "8",
+    "'end' cannot be used with a function call.", "2", "ran",
+    "5"]);
+});

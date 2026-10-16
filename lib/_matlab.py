@@ -2055,6 +2055,18 @@ def end(obj, k, n):
     return float(_prod(d[k:])) if k < len(d) else 1.0
 
 
+def end_chain(obj, k, n, *outer):
+    """`end` in an index that may be a function call, x(min(end, 5)): the innermost index
+    whose base is not a function, from outer's (base, k, n) triples, the base made on
+    demand; MATLAB's error when every one is a call"""
+    while _iscallable(obj):
+        if not outer:
+            raise _err("'end' cannot be used with a function call.")
+        obj, k, n = outer[0](), outer[1], outer[2]
+        outer = outer[3:]
+    return end(obj, k, n)
+
+
 def brace_cs(obj, args):
     """c{args}: the elements, as a list"""
     t = type(obj)
