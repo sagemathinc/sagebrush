@@ -2498,11 +2498,13 @@ _CF_MAX_DISC_BITS = 20000
 # total work: the bits of every numerator and denominator computed along
 # the way (sqrt(2).convergent(n) does about 0.64 n^2 bit operations)
 _CF_MAX_WORK = 10**9
-# an exact expression longer than this (about 2300 bits of integers) is
-# not given to AA, whose own work grows steeply with it: sqrt(2^2000 + 1)
-# takes 0.9 s there, sqrt(2^6000 + 1) more than 90 s, before any budget
-# here applies
-_CF_MAX_EXPR_CHARS = 700
+# an exact expression whose engine form (its integers in decimal, already
+# written when it was made) is longer than this, about 2300 bits of
+# integers, is not given to AA, whose own work grows steeply with it:
+# sqrt(2^2000 + 1) takes 0.9 s there, sqrt(2^6000 + 1) more than 90 s.
+# The engine form is measured, never str(x): printing a huge integer is
+# itself the expensive step (HARD-DB5-1)
+_CF_MAX_EXPR_CHARS = 800
 
 
 def _cf_bits(h, k, what):
@@ -2744,7 +2746,7 @@ class _ContinuedFractionReal:
     def _algebraic(self):
         # (the number in AA, its minimal polynomial's coefficients), or None
         if not hasattr(self, "_aa"):
-            if len(str(self._x)) > _CF_MAX_EXPR_CHARS:
+            if len(self._x._s) > _CF_MAX_EXPR_CHARS:
                 raise NotImplementedError("the continued fraction of an expression of more than %d characters" % _CF_MAX_EXPR_CHARS)
             try:
                 a = AA(self._x)
