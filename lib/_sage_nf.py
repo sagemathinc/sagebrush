@@ -803,8 +803,11 @@ def _poly_divmod(a, b):
 def _latex_name(K):
     """The generator's name in LaTeX, as Sage writes it."""
     f = K._f
-    if getattr(K, "_emb", None) and len(f) == 3 and f[1] == 0 and f[2] == 1:
-        return "\\sqrt{%d}" % (-f[0])  # QuadraticField(D)
+    emb = getattr(K, "_emb", None)
+    if emb and len(f) == 3 and f[1] == 0 and f[2] == 1 and not str(emb).lstrip().startswith("-"):
+        # QuadraticField(D), embedded at the positive (or upper) root; a
+        # field embedded at -sqrt(D) (QQ[-sqrt(2)], QQ[-I]) keeps its name
+        return "\\sqrt{%d}" % (-f[0])
     from _sage_poly import _latex_variable_name
     return _latex_variable_name(K._name)
 
