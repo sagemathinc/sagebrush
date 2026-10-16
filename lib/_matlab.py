@@ -8558,24 +8558,26 @@ def _clear_match(tokens, names):
 
 
 def _regex_linearish(p):
-    """False for a pattern that could backtrack badly: a repeated group that itself holds
-    a repetition or an alternation ((a+)+, (a|aa)*), a backreference, or more than three
-    unbounded repetitions (*, +, {m,}, or {m,n} with n beyond a name's 63 characters):
-    adjacent ones cost about 63^k steps (a*a*a*a*b). The regular expression engine can't
-    be interrupted, so such patterns are refused rather than run; with at most three,
-    a name of at most 63 characters takes at most about 250,000 steps"""
-    stack = [[False, False]]  # (per open group: holds a repetition, holds an alternation)
-    unbounded = 0
+    """False for a pattern that could backtrack badly. Each repetition has a weight, the
+    number of lengths it can take on a name of at most 63 characters (? two, {m,n}
+    min(n,63)-m+1, *, + and {m,} sixty-four); a sequence's weight is the product of its
+    parts', an alternation's the sum of its branches'. Past 10^5 the pattern is refused,
+    which bounds the backtracking paths per start position (at most 63 of them): the
+    regular expression engine can't be interrupted, so such patterns are refused rather
+    than run. A repeated group that itself holds a repetition or an alternation ((a+)+,
+    (a|aa)*) and a backreference are refused too"""
+    limit = 10 ** 5
+    # (per open group: [product of the current branch, sum of finished branches, holds a repetition])
+    stack = [[1, 0, False]]
     i, n = 0, len(p)
-    last_group = None
     while i < n:
         c = p[i]
-        quantified = False
+        weight = 1
+        group = None
         if c == "\\":
             if i + 1 < n and p[i + 1].isdigit():
                 return False
             i += 2
-            last_group = None
         elif c == "[":
             j = i + 1
             if j < n and p[j] == "^":
@@ -8585,45 +8587,50 @@ def _regex_linearish(p):
             while j < n and p[j] != "]":
                 j += 2 if p[j] == "\\" else 1
             i = j + 1
-            last_group = None
         elif c == "(":
-            stack.append([False, False])
+            stack.append([1, 0, False])
             i += 1
-            last_group = None
+            continue
         elif c == ")":
-            last_group = stack.pop() if len(stack) > 1 else [False, False]
+            if len(stack) > 1:
+                group = stack.pop()
+                weight = group[0] + group[1]
             i += 1
         elif c == "|":
-            stack[-1][1] = True
+            stack[-1][1] += stack[-1][0]
+            stack[-1][0] = 1
             i += 1
-            last_group = None
+            continue
         else:
             i += 1
-            last_group = None
         # (a quantifier after this atom)
         if i < n and p[i] in "*+?{":
             if p[i] == "{":
                 j = p.find("}", i)
-                if j < 0:
+                body = [t.strip() for t in p[i + 1:j].split(",")] if j > 0 else []
+                if not 1 <= len(body) <= 2 or not body[0].isdigit() or len(body) == 2 and body[1] and not body[1].isdigit():
+                    i += 1  # (a literal brace)
+                    stack[-1][0] *= weight
                     continue
-                body = p[i + 1:j].split(",")
-                if len(body) == 2 and (not body[1].strip() or not body[1].strip().isdigit() or int(body[1]) > 63):
-                    unbounded += 1
+                lo = int(body[0])
+                hi = lo if len(body) == 1 else int(body[1]) if body[1] else 63
+                times = max(1, min(hi, 63) - min(lo, 63) + 1)
                 i = j + 1
             else:
-                if p[i] in "*+":
-                    unbounded += 1
+                times = 2 if p[i] == "?" else 64
                 i += 1
             if i < n and p[i] in "?+":
                 i += 1
-            quantified = True
-        if quantified:
-            if last_group is not None and (last_group[0] or last_group[1]):
+            if group is not None and (group[2] or weight > 1):
                 return False
-            stack[-1][0] = True
-        elif last_group is not None and last_group[0]:
-            stack[-1][0] = True
-    return unbounded <= 3
+            weight *= times
+            stack[-1][2] = True
+        elif group is not None and group[2]:
+            stack[-1][2] = True
+        stack[-1][0] *= weight
+        if stack[-1][0] > limit:
+            return False
+    return stack[0][0] + stack[0][1] <= limit
 
 
 def _glob_select(pats, names):
