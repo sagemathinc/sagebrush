@@ -80,6 +80,7 @@ const ran = (ms = 90000) => until("window.sagebrush.board.outputs().then((os) =>
 // (what a check of the requests says: how many there were, and the ones it didn't expect)
 const odd = (ok) => { const bad = requests.filter((u) => !ok(u)); return `${requests.length} requests, ${bad.length} unexpected${bad.length ? ": " + bad.slice(0, 6).join(", ") : ""}`; };
 const caption = () => ev("document.querySelector('[data-sbb=say]').textContent");
+const engineNow = () => ev("window.sagebrush.board.engine().then((v) => v?.engine ?? null)");
 // (the engine's parts a file carries; board.js, in it too, has the tag's template)
 const parts = (html) => [...html.matchAll(/<script type="application\/octet-stream" data-sb-engine="(sagebrush-[^"]+)">/g)].map((m) => m[1]);
 
@@ -144,6 +145,7 @@ try {
   await open(fb);
   check(await ran(), "the file without Python runs its code, with its engine from the site: " + await caption());
   check(requests.length > 0 && requests.every((u) => u.startsWith(`${site}engine/${own.id}/`)), "...only the engine it was made with: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`)));
+  check((await engineNow()) === own.id, "...and engine() says so, as the ⋯ menu does: " + (await engineNow()));
   // ...and with the network off, it says why it can't
   await online(false);
   await open(fb);
@@ -201,6 +203,7 @@ try {
   await open(fl);
   check(await ran(), "set to the latest, the file runs its code: " + await caption());
   check(requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && !requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with the site's latest engine: " + odd((u) => u.startsWith(`${site}engine/${other}/`) || u === `${site}engine/latest.json`));
+  check((await engineNow()) === other, "...and engine() says the engine that ran it, the latest, not the one the file was made with (CORR-20A-1): " + (await engineNow()));
   // a manifest whose content doesn't give its id: not taken (HARD-CAC-4)
   const forged = "0123456789abcdef0123";
   for (const f of Object.keys(manifest.files)) overrides.set(`/engine/${forged}/${f}`, readFileSync(join(ownDir, f)));
@@ -209,10 +212,12 @@ try {
   await open(fl);
   check(await ran(), "the latest with a manifest that isn't its id's: the file runs its code: " + await caption());
   check(!requests.some((u) => u.startsWith(`${site}engine/${forged}/`) && !u.endsWith("/manifest.json")) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`) || u.startsWith(`${site}engine/${forged}/manifest.json`) || u === `${site}engine/latest.json`));
+  check((await engineNow()) === own.id, "...and engine() says its own: " + (await engineNow()));
   overrides.set("/engine/latest.json", Buffer.from(JSON.stringify({ id: other, api: own.api + 1 })));
   await open(fl);
   check(await ran(), "the latest with another api: the file runs its code: " + await caption());
   check(!requests.some((u) => u.startsWith(`${site}engine/${other}/`)) && requests.some((u) => u.startsWith(`${site}engine/${own.id}/`)), "...with its own engine: " + odd((u) => u.startsWith(`${site}engine/${own.id}/`) || u.startsWith(`${site}engine/${other}/manifest.json`) || u === `${site}engine/latest.json`));
+  check((await engineNow()) === own.id, "...and engine() says its own: " + (await engineNow()));
   overrides.clear();
 
   // Outputs carried (design/outputs.md, section 3): a board's slow items'

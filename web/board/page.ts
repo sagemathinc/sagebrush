@@ -199,6 +199,8 @@ if (fromParent) {
   }
 }
 
+// (the engine an exported file's code last ran with, as chooseEngine chose it)
+let chosen: string | null = null;
 const host: BoardHost = {
   store: {
     async load() {
@@ -277,7 +279,7 @@ const host: BoardHost = {
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__))
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
     // (one for each language the board's items are in: Sage's with its library, item 16)
-    : ref ? (d, mode) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
+    : ref ? (d, mode) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
@@ -307,6 +309,26 @@ const host: BoardHost = {
       const ex = (await (await fetch(new URL("examples/index.json", location.href))).json()) as { file: string; title: string; about: string }[];
       return ex.map((e) => ({ title: e.title, about: e.about, href: `?doc=${encodeURIComponent("examples/" + e.file)}`, current: source === "examples/" + e.file }));
     },
+  },
+  // (which Sagebrush: the site's /version.json, each field checked, as data;
+  // an exported file, or a site without it, the engine that ran its code
+  // (the latest, or its own when it fell back: CORR-20A-1), else the one it
+  // was built with or carries)
+  version: async () => {
+    const own = chosen ?? ref?.id ?? OWN_ENGINE?.id, v: { version?: string; build?: string; engine?: string } = {};
+    if (!file) {
+      try {
+        const r = await fetch(new URL("/version.json", location.href), { cache: "no-store" });
+        const j = r.ok ? await r.json() : null;
+        if (j && typeof j === "object") {
+          if (typeof j.version === "string" && /^[\w.+-]{1,40}$/.test(j.version)) v.version = j.version;
+          if (typeof j.build === "string" && /^[0-9a-f]{6,64}$/.test(j.build)) v.build = j.build;
+          if (typeof j.engine === "string" && /^[0-9a-f]{6,64}$/.test(j.engine)) v.engine = j.engine;
+        }
+      } catch {}
+    }
+    v.engine ??= own && /^[0-9a-f]{6,64}$/.test(own) ? own : undefined;
+    return v.version || v.build || v.engine ? v : null;
   },
   exportHtml: (d, o) => exportHtml(d, o),
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
