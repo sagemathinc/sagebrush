@@ -35,7 +35,9 @@ RUNNERS = {"python": "_python_examples:run"}
 
 # the public names of a mode, "module:function" returning them: each must have
 # an entry or be in catalog/<mode>/missing.txt (gate 2)
-PUBLIC = {"python": "_python_docsearch:public_names"}
+PUBLIC = {"python": "_python_docsearch:public_names", "magma": "_magma_docsearch:bound_names"}
+# (Magma mode's examples run through the CLI, which translates Magma code:
+# test/magma-catalog.test.ts)
 
 
 def root():

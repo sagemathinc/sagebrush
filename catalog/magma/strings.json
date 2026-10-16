@@ -10,8 +10,10 @@
         "expected": "[ 1, 2 ]!\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "A sequence made by a range prints as the range: Sprint([3..3]) is \"[ 3 .. 3 ]\" where Magma's is \"[ 3 ]\"."
+    ],
+    "status": "partial",
     "see_also": [
       "Sprintf"
     ],

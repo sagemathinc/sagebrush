@@ -4277,9 +4277,18 @@ def PreviousPrime(n, *, Proof=None):
     return _sa.previous_prime(n, proof=Proof)
 
 
+# Prime enumeration is admitted before any sieve is made, by the heap the
+# shared sieve may take (sage_all.prime_range, segmented: a narrow window
+# near 10^12 is cheap; HARD-3BE-1)
+def _admit_primes(name, start, stop, what=None):
+    if not _sa._prime_sieve_admits(start, stop):
+        raise MagmaError("%s needs more memory than Sagebrush has: not supported yet" % (what or "%s up to %d" % (name, stop - 1)), "'%s'" % name)
+
+
 def PrimesUpTo(n):
     if n < 1:
         raise _arg_error("PrimesUpTo", "Limit must be positive")
+    _admit_primes("PrimesUpTo", 2, n + 1)
     return MSeq(_sa.prime_range(n + 1))
 
 
@@ -4288,13 +4297,17 @@ def PrimesInInterval(a, b):
         raise _arg_error("PrimesInInterval", "Lower limit must be positive")
     if b < a:
         raise _arg_error("PrimesInInterval", "Upper limit < Lower Limit !")
+    _admit_primes("PrimesInInterval", a, b + 1)
     return MSeq(_sa.prime_range(a, b + 1))
 
 
 def NthPrime(n):
     if n < 0:
         raise _arg_error("NthPrime", "Argument 1 (%d) should be >= 0" % n)
-    return 1 if n == 0 else _sa.nth_prime(n)  # (Magma's NthPrime(0) is 1)
+    if n == 0:
+        return 1  # (Magma's NthPrime(0) is 1)
+    _admit_primes("NthPrime", 2, _sa._nth_prime_bound(n) + 1, "NthPrime(%d)" % n)
+    return _sa.nth_prime(n)
 
 
 def _int_arg(name, n):
@@ -4400,6 +4413,7 @@ def Modexp(a, k, m):
 
 
 def Modinv(a, m):
+    _no_rationals("Modinv", a, m)  # (before m == 1's 0: Modinv(3/2, 1) is refused, CORR-3BE-2)
     if m < 1:
         raise _arg_error("Modinv", "Argument 2 (%d) should be >= 1" % m)
     if m == 1:
@@ -4722,6 +4736,8 @@ def ChineseRemainderTheorem(a, m):
     """The least x >= 0 with x = a[i] mod m[i] for each i, or -1 when the
     congruences have no common solution (Magma's answer then)."""
     a, m = list(a), list(m)
+    if not a:
+        raise _arg_error("ChineseRemainderTheorem", "Sequence argument 1 must be non-empty")
     if len(a) != len(m):
         raise _arg_error("ChineseRemainderTheorem", "Lengths of sequence arguments should be the same")
     if any(mi == 0 for mi in m):
@@ -4757,10 +4773,12 @@ def IntegerToString(n, b=10):
 def StringToInteger(s, b=10):
     if not 2 <= b <= 36:
         raise _arg_error("StringToInteger", "Argument 2 (%d) should be in the range [2 .. 36]" % b)
-    # (Magma's digits only: not Python's spaces or underscores)
-    if not _re.fullmatch(r"[+-]?[0-9A-Za-z]+", s) or any(int(c, 36) >= b for c in s.lstrip("+-")):
+    # (Magma's form: whitespace around it and after the sign, but not
+    # within the digits, and not Python's underscores, CORR-3BE-3)
+    m = _re.fullmatch(r"\s*([+-]?)\s*([0-9A-Za-z]+)\s*", s)
+    if not m or any(int(c, 36) >= b for c in m.group(2)):
         raise _arg_error("StringToInteger", 'String "%s" does not represent an number in base %d' % (s, b))
-    return int(s, b)
+    return int(m.group(1) + m.group(2), b)
 
 
 def Sprint(x):

@@ -81,8 +81,10 @@
         "expected": "[ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ]\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "A bound beyond what the worker's heap allows for the sieve (about six million in a 96 MiB worker) is refused rather than computed."
+    ],
+    "status": "partial",
     "see_also": [
       "PrimesInInterval",
       "NthPrime"
@@ -100,7 +102,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Decomposition(MaximalOrder(K), p) for each prime p in PrimesUpTo(B)",
+    "alternative": "&cat[[t[1] : t in Decomposition(MaximalOrder(K), p) | Norm(t[1]) le B] : p in PrimesUpTo(B)] (the same ideals, in another order)",
     "upstream_version": "Magma 2.18",
     "tags": [
       "integers",
@@ -109,6 +111,9 @@
   },
   {
     "name": "Factorization",
+    "aliases": [
+      "Factorisation"
+    ],
     "kind": "function",
     "signature": "(<RngIntElt> n) -> RngIntEltFact, RngIntElt",
     "summary": "The prime factorization of a nonzero integer n, as [<p, e>, ...], and its sign.",
@@ -159,6 +164,10 @@
   },
   {
     "name": "Gcd",
+    "aliases": [
+      "GCD",
+      "GreatestCommonDivisor"
+    ],
     "kind": "function",
     "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt",
     "summary": "The greatest common divisor of two integers (non-negative).",
@@ -199,6 +208,10 @@
   },
   {
     "name": "Lcm",
+    "aliases": [
+      "LCM",
+      "LeastCommonMultiple"
+    ],
     "kind": "function",
     "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt",
     "summary": "The least common multiple of two integers (non-negative).",
@@ -238,6 +251,10 @@
   },
   {
     "name": "Xgcd",
+    "aliases": [
+      "XGCD",
+      "ExtendedGreatestCommonDivisor"
+    ],
     "kind": "function",
     "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt, RngIntElt, RngIntElt",
     "summary": "The gcd g of x and y with integers a, b such that a*x + b*y = g.",
@@ -281,6 +298,9 @@
   },
   {
     "name": "Modinv",
+    "aliases": [
+      "InverseMod"
+    ],
     "kind": "function",
     "signature": "(<RngIntElt> x, <RngIntElt> m) -> RngIntElt",
     "summary": "The inverse of x modulo m, between 0 and m - 1; an error unless gcd(x, m) = 1.",
@@ -470,6 +490,9 @@
   },
   {
     "name": "ChineseRemainderTheorem",
+    "aliases": [
+      "CRT"
+    ],
     "kind": "function",
     "signature": "(<SeqEnum[RngIntElt]> X, <SeqEnum[RngIntElt]> M) -> RngIntElt",
     "summary": "The least x >= 0 with x = X[i] mod M[i] for each i, or -1 when there is none.",
@@ -552,7 +575,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Modexp(n, (m - 1) div 2, m), which is 1, 0, or m - 1 where the symbol is -1",
+    "alternative": "Modexp(n, (m - 1) div 2, m), which is 1, 0, or m - 1 where the symbol is -1; or legendre_symbol(n, m) in Sage mode",
     "upstream_version": "Magma 2.18",
     "tags": [
       "integers"
@@ -566,7 +589,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "the product over <p, e> in Factorization(m) of the Legendre symbols (n/p)^e, each from Modexp(n, (p - 1) div 2, p)",
+    "alternative": "jacobi_symbol(n, m) in Sage mode; in Magma mode, the product over <p, e> in Factorization(m) of the Legendre symbols (n/p)^e, each from Modexp(n, (p - 1) div 2, p)",
     "upstream_version": "Magma 2.18",
     "tags": [
       "integers"
@@ -580,7 +603,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "for odd positive m, as JacobiSymbol's alternative; the factors (n/2) and (n/-1) by their definitions",
+    "alternative": "kronecker_symbol(n, m) in Sage mode",
     "upstream_version": "Magma 2.18",
     "tags": [
       "integers"
