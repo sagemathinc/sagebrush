@@ -4212,7 +4212,7 @@ def _signature(name, *types, ret="Any"):
     return register
 
 
-def _unsupported(name, *types, ret="Any"):
+def _unimplemented_signature(name, *types, ret="Any"):
     """A signature of Magma's that Sagebrush doesn't implement yet: such
     arguments are refused in words, not with Bad argument types."""
     _SIGNATURES.setdefault(name, []).append((types, None, ret))
@@ -6187,11 +6187,11 @@ def _trace_matrix(a):
     return a.trace()
 
 
-_unsupported("Trace", "RngUPolElt", ret="RngUPolElt")
-_unsupported("Trace", "RngOrdElt", ret="RngElt")
-_unsupported("Trace", "FldFinElt", "FldFin", ret="FldFinElt")
-_unsupported("Trace", "FldAlgElt", "Rng", ret="RngElt")
-_unsupported("Trace", "RngOrdElt", "Rng", ret="RngElt")
+_unimplemented_signature("Trace", "RngUPolElt", ret="RngUPolElt")
+_unimplemented_signature("Trace", "RngOrdElt", ret="RngElt")
+_unimplemented_signature("Trace", "FldFinElt", "FldFin", ret="FldFinElt")
+_unimplemented_signature("Trace", "FldAlgElt", "Rng", ret="RngElt")
+_unimplemented_signature("Trace", "RngOrdElt", "Rng", ret="RngElt")
 
 
 def MinimalPolynomial(x):
