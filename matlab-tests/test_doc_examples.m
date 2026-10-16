@@ -391,6 +391,54 @@ show(v);
 clear
 v = setdiff([1 2 3 4], [2 4]);
 show(v);
+% movmean
+clear
+v = movmean([3 1 8 4 9], 3);
+show(v);
+% movmedian
+clear
+v = movmedian([3 1 8 4 9], 3);
+show(v);
+% movmin
+clear
+v = movmin([3 1 8 4 9], 3);
+show(v);
+% movmax
+clear
+v = movmax([3 1 8 4 9], 3);
+show(v);
+% movsum
+clear
+v = movsum([3 1 8 4 9], 3);
+show(v);
+% movprod
+clear
+v = movprod([3 1 8 4 9], 3);
+show(v);
+% movvar
+clear
+v = movvar([1 3 5 7], 3);
+show(v);
+% movstd
+clear
+v = movstd([1 3 5 7], 3);
+show(v);
+% cov
+clear
+v = cov([0 0; 2 4; 4 8]);
+show(v);
+% corrcoef
+clear
+v = corrcoef([0 3; 2 1; 4 -1]);
+show(v);
+% quantile
+clear
+v = quantile([1 3 7 9], [0.25 0.5 0.75]);
+show(v);
+% prctile
+clear
+v = prctile([1 3 7 9], [25 50 75]);
+show(v);
 % mean
 clear
 v = mean([2 4 9]);
@@ -701,6 +749,18 @@ show(v);
 clear
 v = isequal([1 2], [1 2]);
 show(v);
+% strncmpi
+clear
+v = strncmpi('Window', 'windmill', 4);
+show(v);
+% regexpi
+clear
+v = regexpi('aB7 Ab8 ab9', 'ab\d', 'match');
+show(v);
+% newline
+clear
+v = double(newline);
+show(v);
 % num2str
 clear
 v = num2str(pi, 4);
@@ -752,6 +812,50 @@ show(v);
 % regexprep
 clear
 v = regexprep('abc123', '\d', '#');
+show(v);
+% cell
+clear
+v = cell(2, 1);
+show(v);
+% cellstr
+clear
+v = cellstr(['oak '; 'elm ']);
+show(v);
+% struct2cell
+clear
+v = struct2cell(struct('height', 4, 'width', 7));
+show(v);
+% rmfield
+clear
+v = rmfield(struct('x', 5, 'y', 9), 'x');
+show(v);
+% orderfields
+clear
+v = orderfields(struct('z', 4, 'a', 7));
+show(v);
+% getfield
+clear
+v = getfield(struct('count', 12), 'count');
+show(v);
+% setfield
+clear
+v = setfield(struct('count', 12), 'count', 15);
+show(v);
+% structfun
+clear
+v = structfun(@numel, struct('row', [2 4 6], 'column', [5; 9]));
+show(v);
+% feval
+clear
+v = feval(@sum, [2 4 6]);
+show(v);
+% func2str
+clear
+v = func2str(@hypot);
+show(v);
+% str2func
+clear
+v = feval(str2func('hypot'), 5, 12);
 show(v);
 % cellfun
 clear
