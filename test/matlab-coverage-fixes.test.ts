@@ -324,3 +324,20 @@ test("format rat in the documentation's layout: no size in the heading, as beta'
   const out = run("format rat\n[F, E] = log2([1 pi -3])\nformat short\nY = [1 2 3]\n", { SAGEBRUSH_MATLAB_DISPLAY: "doc" });
   assert.deepEqual(lines(out).map((x) => x.trim()), ["F =", "1/2          355/452         -3/4", "E =", "1              2              2", "Y = 1×3", "1     2     3"]);
 });
+
+test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integer refuse a limit Sagebrush can't hold exactly (CORR-D252-1, CORR-D252-2)", () => {
+  const out = lines(run([
+    "[m, f, c] = mode(logical([1 0 1 0])); fprintf('%s %s %s %s %d\\n', class(m), class(c{1}), class(f), mat2str(c{1}), f);",
+    "try, x = intmax('like', uint64(1)); disp('ran'), catch e, disp(e.message), end",
+    "try, x = intmax('like', int64(1)); disp('ran'), catch e, disp(e.message), end",
+    "fprintf('%s %d %s %d\\n', class(intmin('like', int64(1))), intmin('like', int64(1)) == -2^63, class(intmin('like', uint64(1))), intmin('like', uint64(1)));",
+    "fprintf('%d %d\\n', intmax('like', int8(1)), intmin('like', uint16(1)));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "logical logical double [false;true] 2",
+    "intmax(\"like\", p) for uint64 is not supported: Sagebrush's 64-bit integers are not exact at 18446744073709551615.",
+    "intmax(\"like\", p) for int64 is not supported: Sagebrush's 64-bit integers are not exact at 9223372036854775807.",
+    "int64 1 uint64 0",
+    "127 0",
+  ]);
+});
