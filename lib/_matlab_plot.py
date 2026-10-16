@@ -1960,6 +1960,9 @@ def clabel_(nargout, args):
 def _surface(args, mesh):
     ax, args = _axes_arg(args)
     pos, props = _split_props(args, 1)
+    if not pos:
+        # (surf and mesh need Z at least: MATLAB's error, not an internal one)
+        raise _m._err("Not enough input arguments.", "MATLAB:narginchk:notEnoughInputs")
     if len(pos) >= 3:
         X, Y, Z = pos[0], pos[1], pos[2]
     else:
@@ -2482,7 +2485,7 @@ def print_(nargout, args):
     import os
     base, ext = os.path.splitext(name)
     if ext.lower() not in (".svg", ""):
-        _m.warning_("Only SVG output is supported: writing %s.svg" % base)
+        _m.warning_("Only SVG output is supported: writing %s.svg" % base, note=True)
     path = base + ".svg"
     from _graphics import save_svg
     save_svg(figure_svg(fig), path)

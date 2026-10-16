@@ -1,0 +1,160 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Wrong answers found by running external MATLAB code (the coverage corpora),
+// each fixed to what the function's documentation page shows, or to Octave's
+// value where the page shows none (asin and acos beyond 1).
+
+const run = (code: string, env: Record<string, string> = {}) => {
+  const d = mkdtempSync(join(tmpdir(), "sb-cov-"));
+  try {
+    return execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--matlab", "-c", code],
+      { cwd: d, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } });
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+};
+const lines = (s: string) => s.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "");
+
+test("sets, comparisons and text: the pages' values", () => {
+  const out = run([
+    "[~, loc] = ismember([5 3 4 2], [2 4 4 4 6 8], 'legacy'); fprintf('%g ', loc); fprintf('\\n');",
+    "[tf, loc] = ismember([5 NaN NaN], [5 NaN NaN]); fprintf('%g ', tf, loc); fprintf('\\n');",
+    "[C, ia, ib] = union([5 7 1], [3 1 1], 'legacy'); fprintf('%g ', C, ia, ib); fprintf('| %d %d\\n', size(ia, 1), size(ib, 1));",
+    "fprintf('%g ', unique([5 8 NaN NaN], TreatMissingAsDistinct=false)); fprintf('\\n');",
+    "fprintf('%d %d\\n', isequal(\"foo\", 'foo'), isequal('foo', \"foo\"));",
+    "fprintf('%d ', isstrprop([77 65 84 76 65 66], 'alpha')); fprintf('\\n');",
+    "fprintf('%.4f ', std([1.77 -0.005 NaN -2.95; NaN 0.34 NaN 0.19], 'omitmissing')); fprintf('\\n');",
+    "fprintf('%.4f ', var([1.77 -0.005 NaN -2.95; NaN 0.34 NaN 0.19], 'omitnan')); fprintf('\\n');",
+    "fprintf('[%s]\\n', strrep('abc 2 def 22 ghi 222 jkl 2222', '22', '*'));",
+    "fprintf('[%s]\\n', sprintf(' %3$s %2$s %1$s', 'X', 'Y', 'Z'));",
+    "[p, n, e] = fileparts(\"/home/jsmith/.cshrc\"); fprintf('[%s][%s][%s]\\n', p, n, e);",
+    "B = sort([\"Santos\",\"Burns\"; \"Jones\",\"Morita\"; \"Petrov\",\"Adams\"]); fprintf('%s ', B); fprintf('\\n');",
+    "B = sort([\"Santos\",\"Burns\"; \"Jones\",\"Morita\"; \"Petrov\",\"Adams\"], 2); fprintf('%s ', B); fprintf('\\n');",
+    "k = strfind('abc', 'x'); fprintf('%d %d\\n', size(k));",
+    "T = cell2struct({1; 2}, [\"x\" \"y\"]); fprintf('%d %d\\n', T.x, T.y);",
+  ].join("\n") + "\n");
+  assert.deepEqual(lines(out), [
+    "0 0 4 1",
+    "1 0 0 1 0 0",
+    "1 3 5 7 1 2 3 1 | 1 1",
+    "5 8 NaN",
+    "1 1",
+    "1 1 1 1 1 1",
+    "0.0000 0.2440 NaN 2.2203",
+    "0.0000 0.0595 NaN 4.9298",
+    "[abc 2 def * ghi ** jkl ***]",
+    "[ Z Y X]",
+    "[/home/jsmith][][.cshrc]",
+    // (each column sorted, then along the rows: the pages' B, column by column)
+    "Jones Petrov Santos Adams Burns Morita",
+    "Burns Jones Adams Santos Morita Petrov",
+    "0 0",
+    "1 2",
+  ]);
+});
+
+test("numbers: classes kept, branch cuts, transforms, diagonals, 'like' prototypes", () => {
+  const out = run([
+    "m = median(int8(1:4)); fprintf('%s %d\\n', class(m), m);",
+    "p = primes(uint16(12)); fprintf('%s ', class(p)); fprintf('%d ', p); fprintf('\\n');",
+    "c = nchoosek(uint16([10 20 30]), 2); fprintf('%s %d\\n', class(c), c(3, 2));",
+    "y = atanh([2 -3 1+2i]); fprintf('%.4f %.4f %.4f %.4f\\n', real(y(1)), imag(y(1)), real(y(2)), imag(y(2)));",
+    "fprintf('%.4f ', real([asin(2) acos(2) acos(-2)]), imag([asin(2) acos(2) acos(-2)])); fprintf('\\n');",
+    "x = ifft(fft([1 2 3 4 5])); fprintf('%d\\n', isreal(x));",
+    "X = ifft2([3+1e-15i 5; 5 3], 'symmetric'); fprintf('%d %g %g %g %g\\n', isreal(X), X);",
+    "A = full(spdiags([1 -2 1], -1:1, 4, 4)); fprintf('%g ', A); fprintf('\\n');",
+    "x = [1 0; 0 0] \\ [1; 1]; fprintf('%g ', x); fprintf('\\n');",
+    "h = histc([1; 2; 2; 5], 0:2:6); fprintf('%d %d|', size(h)); h = histc([1 2 2 5], 0:2:6); fprintf('%d %d\\n', size(h));",
+    "d = eps('like', single(1i)); fprintf('%s %d\\n', class(d), isreal(d));",
+    "r = realmax('single'); fprintf('%s %g %g\\n', class(r), double(r), double(flintmax('single')));",
+    "fprintf('%d %d %d\\n', issparse(realmax('like', sparse(1))), isreal(zeros(2, 'like', 1i)), isreal(eye(2, 'like', 1i)));",
+  ].join("\n") + "\n");
+  assert.deepEqual(lines(out), [
+    "int8 3",
+    "uint16 2 3 5 7 11",
+    "uint16 30",
+    // (atanh's page: atanh(2) = 0.5493 + 1.5708i, atanh(-3) = -0.3466 - 1.5708i)
+    "0.5493 1.5708 -0.3466 -1.5708",
+    // (Octave's: asin(2) = 1.5708 - 1.3170i, acos(2) = 1.3170i, acos(-2) = 3.1416 - 1.3170i)
+    "1.5708 0.0000 3.1416 -1.3170 1.3170 -1.3170",
+    "1",
+    "1 4 0 0 -1",
+    "-2 1 0 0 1 -2 1 0 0 1 -2 1 0 0 1 -2",
+    "1 Inf",
+    "4 1|1 4",
+    "single 0",
+    "single 3.40282e+38 1.67772e+07",
+    "1 0 0",
+  ]);
+});
+
+test("files, warnings, errors and comma-separated lists", () => {
+  const out = run([
+    "fid = fopen('out.txt', 'w'); n = fprintf(fid, '%5d %5d %5d %5d\\n', magic(4)); fclose(fid); fprintf('%d %d %d\\n', fid > 2, n, isfile('out.txt'));",
+    "type out.txt",
+    "[fid, msg] = fopen('nope.txt'); fprintf('%d [%s]\\n', fid, msg);",
+    "fprintf('%d ', isfile([\"out.txt\" \"nope.txt\"])); fprintf('\\n');",
+    "s = warning('off', 'MATLAB:singularMatrix'); x = [1 2; 2 4] \\ [1; 2]; warning(s); [msg, id] = lastwarn; fprintf('[%s] [%s] [%s]\\n', s.state, id, msg);",
+    "warning('off'); warning",
+    "warning('on'); warning('off', 'MATLAB:singularMatrix'); warning",
+    "warning('on');",
+    "try, surf, catch err, fprintf('%s|%s\\n', err.message, err.identifier), end",
+    "S.a = []; S(2).a = []; S(3).a = []; [S.a] = deal(10, 20, 30); fprintf('%d ', S.a); fprintf('\\n');",
+    "[S(2:3).a] = deal(7, 8); fprintf('%d ', S.a); fprintf('\\n');",
+    "c = {1, [2 3]};",
+    "c{:}",
+  ].join("\n") + "\n");
+  assert.deepEqual(lines(out), [
+    "1 96 1",
+    "   16     5     9     4",
+    "    2    11     7    14",
+    "    3    10     6    15",
+    "   13     8    12     1",
+    "-1 [No such file or directory]",
+    "1 0",
+    // (the warning was off: lastwarn still has it, as lastwarn's page shows a disabled warning's)
+    "[on] [MATLAB:singularMatrix] [Matrix is singular to working precision.]",
+    'All warnings have the state "off".',
+    'The default warning state is "on". Warnings not set to the default are',
+    "State  Warning Identifier",
+    "    off  MATLAB:singularMatrix",
+    "Not enough input arguments.|MATLAB:narginchk:notEnoughInputs",
+    "10 20 30",
+    "10 7 8",
+    // (c{:} alone: each element as ans, as MATLAB shows idx{:})
+    "ans =",
+    "     1",
+    "ans =",
+    "     2     3",
+  ]);
+});
+
+test("display: struct fields since R2021b, cells of strings, empties, and the documentation's layout", () => {
+  const out = run([
+    "s.x = linspace(0, 1, 11); s.m = {'Jan', 'Feb', 'Mar'}; s.d = linspace(0, 2*pi);",
+    "s",
+    "k = zeros(1, 0)",
+    "c = zeros(0, 1)",
+    "T = {\"highs\", 1; \"lows\", 2}",
+  ].join("\n") + "\n");
+  const l = lines(out).map((x) => x.trim());
+  assert.ok(l.includes("x: [0 0.1000 0.2000 0.3000 0.4000 0.5000 0.6000 0.7000 0.8000 0.9000 1]"), l.join("\n"));
+  assert.ok(l.includes("m: {'Jan'  'Feb'  'Mar'}"), l.join("\n"));
+  assert.ok(l.some((x) => /^d: \[0 0\.0635 0\.1269 .* … \]$/.test(x)), l.join("\n"));
+  assert.ok(l.includes("1×0 empty double row vector") && l.includes("0×1 empty double column vector"), l.join("\n"));
+  assert.ok(l.includes('{["highs"]}    {[1]}') && l.includes('{["lows" ]}    {[2]}'), l.join("\n"));
+  // (the documentation's layout: warnings in line with the output, a long field and a wide cell whole)
+  const doc = lines(run([
+    "x = [1 2; 2 4] \\ [1; 2];",
+    "s.d = linspace(0, 2*pi)",
+    "c = {'accidents.mat', 'airlineResults.mat', 'census.mat', 'earth.mat'}",
+  ].join("\n") + "\n", { SAGEBRUSH_MATLAB_DISPLAY: "doc" }));
+  assert.equal(doc[0], "Warning: Matrix is singular to working precision.");
+  assert.ok(doc.some((x) => x.trim().startsWith("d: [0 0.0635 0.1269") && x.trim().endsWith(" 6.2832]")), doc.join("\n"));
+  assert.ok(doc.some((x) => x.includes("{'accidents.mat'}") && x.includes("{'earth.mat'}")), doc.join("\n"));
+});

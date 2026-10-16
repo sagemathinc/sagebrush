@@ -1562,8 +1562,12 @@ def _spdiags_b(nargout, *args):
     else:
         m, n = int(_m._scalar(args[2])), int(_m._scalar(args[3]))
         rows, cols, vals = [], [], []
-    if B.shape[0] == 1 and len(ds) > 1 or B.ndim == 1:
+    if B.ndim == 1:
         B = B.reshape((-1, len(ds)))
+    if B.shape[0] == 1 and B.shape[1] in (1, len(ds)):
+        # (a scalar or a row, one element per diagonal: each diagonal constant, as spdiags's page
+        # allows Bin to be a scalar or vector, only a column or matrix needing min(m, n) rows)
+        B = np.repeat(B, max(m, n), axis=0)
     for c, d in enumerate(ds):
         i, j, b = _diag_index(m, n, d)
         ok = b < B.shape[0]
@@ -2049,7 +2053,8 @@ def _register():
     for name, f in (("eig", _eig_b), ("svd", _svd_b), ("norm", _norm_b), ("accumarray", _accumarray_b)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = f
-    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False)):
+    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False),
+                     ("eps", True), ("realmax", True), ("realmin", True), ("flintmax", True)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = _like_fn(name, ok)
     for name in sorted(_ZERO_KEEPING | _SPARSE_FULL):
