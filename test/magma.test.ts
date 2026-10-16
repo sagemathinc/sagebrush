@@ -361,6 +361,36 @@ test("notebook session: a Magma cell's error fails its cell, said as Magma says 
   assert.equal(out(11, "stdout"), "42\n");
 });
 
+test("notebook session: a witness left unassigned stays unassigned in later cells, compiled on their own, as in Magma (CORR-39D-1)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  // each line a cell; Magma 2.18, run on these as one session, says what's expected
+  const cells = [
+    "w := 99; exists(w){x:x in [1..3]|false}; assigned w;",
+    "w;",
+    "S := [w]; #S;",
+    "assigned w;",
+    "w := 17; w;",
+    "forall(w){x:x in [1..3]|true}; assigned w;",
+    "w;",
+    "exists(u, v){<a, b> : a, b in [1..2] | false}; assigned u, assigned v;",
+    "u;",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], magma: true });
+  const out = (id: number) => msgs.filter((m) => m.id === id && m.stream === "stdout").map((m) => m.text).join("");
+  const failed = (id: number) => !!msgs.find((m) => m.id === id && m.done)?.error;
+  assert.deepEqual(cells.map((_, i) => failed(i + 1)), [false, true, true, false, false, false, true, false, true]);
+  assert.equal(out(1), "false\nfalse\n");
+  for (const [id, name] of [[2, "w"], [3, "w"], [7, "w"], [9, "u"]] as [number, string][])
+    assert.match(out(id), new RegExp(`User error: Identifier '${name}' has not been declared or assigned`), out(id));
+  assert.equal(out(4), "false\n");
+  assert.equal(out(5), "17\n");
+  assert.equal(out(6), "true\nfalse\n");
+  assert.equal(out(8), "false\nfalse false\n");
+});
+
 test("notebook session: an exit status as text is at most 4096 characters, and one that can't be text still ends its cell, failed (HARD-8E4-1, CORR-8E4-2)", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const msgs: any[] = [];

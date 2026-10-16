@@ -870,6 +870,16 @@ def _assigned_name(read):
         return False
 
 
+def _unset(g, names):
+    """After a top-level statement with exists(t){ } or forall(t){ }: a
+    witness it left unassigned is unbound, so that a later cell, compiled
+    without the witness's read checks, finds it unassigned too, as Magma
+    does (CORR-39D-1)."""
+    for n in names:
+        if g.get(n) is _NOVAL:
+            del g[n]
+
+
 def _wread(v, name, pos, local):
     """A read of a name exists(t){ } or forall(t){ } may have unassigned
     (_NOVAL): Magma's error for an unassigned name, a local's in a function."""
