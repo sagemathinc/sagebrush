@@ -1,0 +1,834 @@
+Finite Field of size 7 dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Finite Field of size 7 mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 1 over Finite Field of size 7'
+Finite Field of size 7 add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 1 over Finite Field of size 7'
+Finite Field of size 7 dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Finite Field of size 7 mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Finite Field of size 7' and 'Vector space of dimension 1 over Finite Field of size 7'
+Finite Field of size 7 add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Finite Field of size 7' and 'Vector space of dimension 1 over Finite Field of size 7'
+Finite Field of size 7 dot 3 3 :: 6 @ Finite Field of size 7
+Finite Field of size 7 mul 3 3 :: 6 @ Finite Field of size 7
+Finite Field of size 7 add 3 3 :: (3, 5, 0) @ Vector space of dimension 3 over Finite Field of size 7
+Ring of integers modulo 6 dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Ring of integers modulo 6 mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Ambient free module of rank 1 over Ring of integers modulo 6'
+Ring of integers modulo 6 add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Ambient free module of rank 1 over Ring of integers modulo 6'
+Ring of integers modulo 6 dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Ring of integers modulo 6 mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over Ring of integers modulo 6' and 'Ambient free module of rank 1 over Ring of integers modulo 6'
+Ring of integers modulo 6 add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 0 over Ring of integers modulo 6' and 'Ambient free module of rank 1 over Ring of integers modulo 6'
+Ring of integers modulo 6 dot 3 3 :: 2 @ Ring of integers modulo 6
+Ring of integers modulo 6 mul 3 3 :: 2 @ Ring of integers modulo 6
+Ring of integers modulo 6 add 3 3 :: (3, 5, 1) @ Ambient free module of rank 3 over Ring of integers modulo 6
+Algebraic Real Field dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Algebraic Real Field mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 1 over Algebraic Real Field'
+Algebraic Real Field add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 1 over Algebraic Real Field'
+Algebraic Real Field dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Algebraic Real Field mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Algebraic Real Field' and 'Vector space of dimension 1 over Algebraic Real Field'
+Algebraic Real Field add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Algebraic Real Field' and 'Vector space of dimension 1 over Algebraic Real Field'
+Algebraic Real Field dot 3 3 :: 20 @ Algebraic Real Field
+Algebraic Real Field mul 3 3 :: 20 @ Algebraic Real Field
+Algebraic Real Field add 3 3 :: (3, 5, 7) @ Vector space of dimension 3 over Algebraic Real Field
+Real Double Field dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Real Double Field mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 1 over Real Double Field'
+Real Double Field add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 1 over Real Double Field'
+Real Double Field dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Real Double Field mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Real Double Field' and 'Vector space of dimension 1 over Real Double Field'
+Real Double Field add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Real Double Field' and 'Vector space of dimension 1 over Real Double Field'
+Real Double Field dot 3 3 :: 20.0 @ Real Double Field
+Real Double Field mul 3 3 :: 20.0 @ Real Double Field
+Real Double Field add 3 3 :: (3.0, 5.0, 7.0) @ Vector space of dimension 3 over Real Double Field
+Real Field with 53 bits of precision dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Real Field with 53 bits of precision mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 1 over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 1 over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Real Field with 53 bits of precision mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Real Field with 53 bits of precision' and 'Vector space of dimension 1 over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Real Field with 53 bits of precision' and 'Vector space of dimension 1 over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision dot 3 3 :: 20.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision mul 3 3 :: 20.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision add 3 3 :: (3.00000000000000, 5.00000000000000, 7.00000000000000) @ Vector space of dimension 3 over Real Field with 53 bits of precision
+Complex Field with 53 bits of precision dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Complex Field with 53 bits of precision mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 1 over Complex Field with 53 bits of precision'
+Complex Field with 53 bits of precision add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 1 over Complex Field with 53 bits of precision'
+Complex Field with 53 bits of precision dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Complex Field with 53 bits of precision mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Complex Field with 53 bits of precision' and 'Vector space of dimension 1 over Complex Field with 53 bits of precision'
+Complex Field with 53 bits of precision add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Complex Field with 53 bits of precision' and 'Vector space of dimension 1 over Complex Field with 53 bits of precision'
+Complex Field with 53 bits of precision dot 3 3 :: 20.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision mul 3 3 :: 20.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision add 3 3 :: (3.00000000000000, 5.00000000000000, 7.00000000000000) @ Vector space of dimension 3 over Complex Field with 53 bits of precision
+Real Field with 100 bits of precision dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Real Field with 100 bits of precision mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 1 over Real Field with 100 bits of precision'
+Real Field with 100 bits of precision add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 1 over Real Field with 100 bits of precision'
+Real Field with 100 bits of precision dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Real Field with 100 bits of precision mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Real Field with 100 bits of precision' and 'Vector space of dimension 1 over Real Field with 100 bits of precision'
+Real Field with 100 bits of precision add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Real Field with 100 bits of precision' and 'Vector space of dimension 1 over Real Field with 100 bits of precision'
+Real Field with 100 bits of precision dot 3 3 :: 20.000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision mul 3 3 :: 20.000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision add 3 3 :: (3.0000000000000000000000000000, 5.0000000000000000000000000000, 7.0000000000000000000000000000) @ Vector space of dimension 3 over Real Field with 100 bits of precision
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? dot 2 1 :: ArithmeticError : degrees (2 and 1) must be the same
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? mul 2 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?' and 'Vector space of dimension 1 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?'
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? add 2 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?' and 'Vector space of dimension 1 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?'
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? dot 0 1 :: ArithmeticError : degrees (0 and 1) must be the same
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? mul 0 1 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?' and 'Vector space of dimension 1 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?'
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? add 0 1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 0 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?' and 'Vector space of dimension 1 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?'
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? dot 3 3 :: 20 @ Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? mul 3 3 :: 20 @ Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? add 3 3 :: (3, 5, 7) @ Vector space of dimension 3 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Integer Ring + Integer Ring :: (4, 6) @ Ambient free module of rank 2 over the principal ideal domain Integer Ring
+Integer Ring * Integer Ring :: 11 @ Integer Ring
+Integer Ring + Rational Field :: (4, 6) @ Vector space of dimension 2 over Rational Field
+Integer Ring * Rational Field :: 11 @ Rational Field
+Integer Ring + Finite Field of size 7 :: (4, 6) @ Vector space of dimension 2 over Finite Field of size 7
+Integer Ring * Finite Field of size 7 :: 4 @ Finite Field of size 7
+Integer Ring + Finite Field of size 5 :: (4, 1) @ Vector space of dimension 2 over Finite Field of size 5
+Integer Ring * Finite Field of size 5 :: 1 @ Finite Field of size 5
+Integer Ring + Ring of integers modulo 6 :: (4, 0) @ Ambient free module of rank 2 over Ring of integers modulo 6
+Integer Ring * Ring of integers modulo 6 :: 5 @ Ring of integers modulo 6
+Integer Ring + Finite Field in z of size 3^2 :: (1, 0) @ Vector space of dimension 2 over Finite Field in z of size 3^2
+Integer Ring * Finite Field in z of size 3^2 :: 2 @ Finite Field in z of size 3^2
+Integer Ring + Algebraic Real Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Real Field
+Integer Ring * Algebraic Real Field :: 11 @ Algebraic Real Field
+Integer Ring + Algebraic Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Integer Ring * Algebraic Field :: 11 @ Algebraic Field
+Integer Ring + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Integer Ring * Real Double Field :: 11.0 @ Real Double Field
+Integer Ring + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Integer Ring * Real Field with 53 bits of precision :: 11.0000000000000 @ Real Field with 53 bits of precision
+Integer Ring + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Integer Ring * Complex Double Field :: 11.0 @ Complex Double Field
+Integer Ring + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Integer Ring * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Integer Ring + Real Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Integer Ring * Real Field with 100 bits of precision :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Integer Ring + Complex Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Integer Ring * Complex Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Rational Field + Integer Ring :: (4, 6) @ Vector space of dimension 2 over Rational Field
+Rational Field * Integer Ring :: 11 @ Rational Field
+Rational Field + Rational Field :: (4, 6) @ Vector space of dimension 2 over Rational Field
+Rational Field * Rational Field :: 11 @ Rational Field
+Rational Field + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Rational Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Rational Field * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Rational Field + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Rational Field * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Rational Field + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Rational Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Rational Field * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Rational Field + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Rational Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Rational Field * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Rational Field + Algebraic Real Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Real Field
+Rational Field * Algebraic Real Field :: 11 @ Algebraic Real Field
+Rational Field + Algebraic Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Rational Field * Algebraic Field :: 11 @ Algebraic Field
+Rational Field + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Rational Field * Real Double Field :: 11.0 @ Real Double Field
+Rational Field + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Rational Field * Real Field with 53 bits of precision :: 11.0000000000000 @ Real Field with 53 bits of precision
+Rational Field + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Rational Field * Complex Double Field :: 11.0 @ Complex Double Field
+Rational Field + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Rational Field * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Rational Field + Real Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Rational Field * Real Field with 100 bits of precision :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Rational Field + Complex Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Rational Field * Complex Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Finite Field of size 7 + Integer Ring :: (4, 6) @ Vector space of dimension 2 over Finite Field of size 7
+Finite Field of size 7 * Integer Ring :: 4 @ Finite Field of size 7
+Finite Field of size 7 + Rational Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Rational Field'
+Finite Field of size 7 * Rational Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Rational Field'
+Finite Field of size 7 + Finite Field of size 7 :: (4, 6) @ Vector space of dimension 2 over Finite Field of size 7
+Finite Field of size 7 * Finite Field of size 7 :: 4 @ Finite Field of size 7
+Finite Field of size 7 + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Finite Field of size 5'
+Finite Field of size 7 * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Finite Field of size 5'
+Finite Field of size 7 + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Finite Field of size 7 * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Finite Field of size 7 + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Finite Field of size 7 * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Finite Field of size 7 + Algebraic Real Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Algebraic Real Field'
+Finite Field of size 7 * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Algebraic Real Field'
+Finite Field of size 7 + Algebraic Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Algebraic Field'
+Finite Field of size 7 * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Algebraic Field'
+Finite Field of size 7 + Real Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Real Double Field'
+Finite Field of size 7 * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Real Double Field'
+Finite Field of size 7 + Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Finite Field of size 7 * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Finite Field of size 7 + Complex Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Complex Double Field'
+Finite Field of size 7 * Complex Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Complex Double Field'
+Finite Field of size 7 + Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Finite Field of size 7 * Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Finite Field of size 7 + Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Finite Field of size 7 * Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Finite Field of size 7 + Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Finite Field of size 7 * Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Finite Field of size 5 + Integer Ring :: (4, 1) @ Vector space of dimension 2 over Finite Field of size 5
+Finite Field of size 5 * Integer Ring :: 1 @ Finite Field of size 5
+Finite Field of size 5 + Rational Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Rational Field'
+Finite Field of size 5 * Rational Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Rational Field'
+Finite Field of size 5 + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Finite Field of size 7'
+Finite Field of size 5 * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Finite Field of size 7'
+Finite Field of size 5 + Finite Field of size 5 :: (4, 1) @ Vector space of dimension 2 over Finite Field of size 5
+Finite Field of size 5 * Finite Field of size 5 :: 1 @ Finite Field of size 5
+Finite Field of size 5 + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Finite Field of size 5 * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Finite Field of size 5 + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Finite Field of size 5 * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Finite Field of size 5 + Algebraic Real Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Algebraic Real Field'
+Finite Field of size 5 * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Algebraic Real Field'
+Finite Field of size 5 + Algebraic Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Algebraic Field'
+Finite Field of size 5 * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Algebraic Field'
+Finite Field of size 5 + Real Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Real Double Field'
+Finite Field of size 5 * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Real Double Field'
+Finite Field of size 5 + Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Finite Field of size 5 * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Finite Field of size 5 + Complex Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Complex Double Field'
+Finite Field of size 5 * Complex Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Complex Double Field'
+Finite Field of size 5 + Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Finite Field of size 5 * Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Finite Field of size 5 + Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Finite Field of size 5 * Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Finite Field of size 5 + Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Finite Field of size 5 * Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Ring of integers modulo 6 + Integer Ring :: (4, 0) @ Ambient free module of rank 2 over Ring of integers modulo 6
+Ring of integers modulo 6 * Integer Ring :: 5 @ Ring of integers modulo 6
+Ring of integers modulo 6 + Rational Field :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Rational Field'
+Ring of integers modulo 6 * Rational Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Rational Field'
+Ring of integers modulo 6 + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Finite Field of size 7'
+Ring of integers modulo 6 * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Finite Field of size 7'
+Ring of integers modulo 6 + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Finite Field of size 5'
+Ring of integers modulo 6 * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Finite Field of size 5'
+Ring of integers modulo 6 + Ring of integers modulo 6 :: (4, 0) @ Ambient free module of rank 2 over Ring of integers modulo 6
+Ring of integers modulo 6 * Ring of integers modulo 6 :: 5 @ Ring of integers modulo 6
+Ring of integers modulo 6 + Finite Field in z of size 3^2 :: (1, 0) @ Vector space of dimension 2 over Finite Field in z of size 3^2
+Ring of integers modulo 6 * Finite Field in z of size 3^2 :: 2 @ Finite Field in z of size 3^2
+Ring of integers modulo 6 + Algebraic Real Field :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Algebraic Real Field'
+Ring of integers modulo 6 * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Algebraic Real Field'
+Ring of integers modulo 6 + Algebraic Field :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Algebraic Field'
+Ring of integers modulo 6 * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Algebraic Field'
+Ring of integers modulo 6 + Real Double Field :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Real Double Field'
+Ring of integers modulo 6 * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Real Double Field'
+Ring of integers modulo 6 + Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Ring of integers modulo 6 * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Ring of integers modulo 6 + Complex Double Field :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Complex Double Field'
+Ring of integers modulo 6 * Complex Double Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Complex Double Field'
+Ring of integers modulo 6 + Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Ring of integers modulo 6 * Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Ring of integers modulo 6 + Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Ring of integers modulo 6 * Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Ring of integers modulo 6 + Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Ring of integers modulo 6 * Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 6' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Finite Field in z of size 3^2 + Integer Ring :: (1, 0) @ Vector space of dimension 2 over Finite Field in z of size 3^2
+Finite Field in z of size 3^2 * Integer Ring :: 2 @ Finite Field in z of size 3^2
+Finite Field in z of size 3^2 + Rational Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Rational Field'
+Finite Field in z of size 3^2 * Rational Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Rational Field'
+Finite Field in z of size 3^2 + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Finite Field of size 7'
+Finite Field in z of size 3^2 * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Finite Field of size 7'
+Finite Field in z of size 3^2 + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Finite Field of size 5'
+Finite Field in z of size 3^2 * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Finite Field of size 5'
+Finite Field in z of size 3^2 + Ring of integers modulo 6 :: (1, 0) @ Vector space of dimension 2 over Finite Field in z of size 3^2
+Finite Field in z of size 3^2 * Ring of integers modulo 6 :: 2 @ Finite Field in z of size 3^2
+Finite Field in z of size 3^2 + Finite Field in z of size 3^2 :: (1, 0) @ Vector space of dimension 2 over Finite Field in z of size 3^2
+Finite Field in z of size 3^2 * Finite Field in z of size 3^2 :: 2 @ Finite Field in z of size 3^2
+Finite Field in z of size 3^2 + Algebraic Real Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Algebraic Real Field'
+Finite Field in z of size 3^2 * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Algebraic Real Field'
+Finite Field in z of size 3^2 + Algebraic Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Algebraic Field'
+Finite Field in z of size 3^2 * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Algebraic Field'
+Finite Field in z of size 3^2 + Real Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Real Double Field'
+Finite Field in z of size 3^2 * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Real Double Field'
+Finite Field in z of size 3^2 + Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Finite Field in z of size 3^2 * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Real Field with 53 bits of precision'
+Finite Field in z of size 3^2 + Complex Double Field :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Complex Double Field'
+Finite Field in z of size 3^2 * Complex Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Complex Double Field'
+Finite Field in z of size 3^2 + Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Finite Field in z of size 3^2 * Complex Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Complex Field with 53 bits of precision'
+Finite Field in z of size 3^2 + Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Finite Field in z of size 3^2 * Real Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Real Field with 100 bits of precision'
+Finite Field in z of size 3^2 + Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Finite Field in z of size 3^2 * Complex Field with 100 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Complex Field with 100 bits of precision'
+Algebraic Real Field + Integer Ring :: (4, 6) @ Vector space of dimension 2 over Algebraic Real Field
+Algebraic Real Field * Integer Ring :: 11 @ Algebraic Real Field
+Algebraic Real Field + Rational Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Real Field
+Algebraic Real Field * Rational Field :: 11 @ Algebraic Real Field
+Algebraic Real Field + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Algebraic Real Field * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Algebraic Real Field + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Algebraic Real Field * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Algebraic Real Field + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Real Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Algebraic Real Field * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Real Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Algebraic Real Field + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Algebraic Real Field * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Real Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Algebraic Real Field + Algebraic Real Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Real Field
+Algebraic Real Field * Algebraic Real Field :: 11 @ Algebraic Real Field
+Algebraic Real Field + Algebraic Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Real Field * Algebraic Field :: 11 @ Algebraic Field
+Algebraic Real Field + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Algebraic Real Field * Real Double Field :: 11.0 @ Real Double Field
+Algebraic Real Field + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Algebraic Real Field * Real Field with 53 bits of precision :: 11.0000000000000 @ Real Field with 53 bits of precision
+Algebraic Real Field + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Algebraic Real Field * Complex Double Field :: 11.0 @ Complex Double Field
+Algebraic Real Field + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Algebraic Real Field * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Algebraic Real Field + Real Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Algebraic Real Field * Real Field with 100 bits of precision :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Algebraic Real Field + Complex Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Algebraic Real Field * Complex Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Algebraic Field + Integer Ring :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Integer Ring :: 11 @ Algebraic Field
+Algebraic Field + Rational Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Rational Field :: 11 @ Algebraic Field
+Algebraic Field + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Algebraic Field * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Algebraic Field + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Algebraic Field * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Algebraic Field + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Algebraic Field * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Algebraic Field + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Algebraic Field * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Algebraic Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Algebraic Field + Algebraic Real Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Algebraic Real Field :: 11 @ Algebraic Field
+Algebraic Field + Algebraic Field :: (4, 6) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Algebraic Field :: 11 @ Algebraic Field
+Algebraic Field + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Algebraic Field * Real Double Field :: 11.0 @ Complex Double Field
+Algebraic Field + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Algebraic Field * Real Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Algebraic Field + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Algebraic Field * Complex Double Field :: 11.0 @ Complex Double Field
+Algebraic Field + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Algebraic Field * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Algebraic Field + Real Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Algebraic Field * Real Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Algebraic Field + Complex Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Algebraic Field * Complex Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Real Double Field + Integer Ring :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Integer Ring :: 11.0 @ Real Double Field
+Real Double Field + Rational Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Rational Field :: 11.0 @ Real Double Field
+Real Double Field + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Real Double Field * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Real Double Field + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Real Double Field * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Real Double Field + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Double Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Real Double Field * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Double Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Real Double Field + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Real Double Field * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Double Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Real Double Field + Algebraic Real Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Algebraic Real Field :: 11.0 @ Real Double Field
+Real Double Field + Algebraic Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Real Double Field * Algebraic Field :: 11.0 @ Complex Double Field
+Real Double Field + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Real Double Field :: 11.0 @ Real Double Field
+Real Double Field + Real Field with 53 bits of precision :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Real Field with 53 bits of precision :: 11.0 @ Real Double Field
+Real Double Field + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Real Double Field * Complex Double Field :: 11.0 @ Complex Double Field
+Real Double Field + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Real Double Field * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Real Double Field + Real Field with 100 bits of precision :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Real Field with 100 bits of precision :: 11.0 @ Real Double Field
+Real Double Field + Complex Field with 100 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Real Double Field * Complex Field with 100 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Real Field with 53 bits of precision + Integer Ring :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Integer Ring :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision + Rational Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Rational Field :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Real Field with 53 bits of precision * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Real Field with 53 bits of precision + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Real Field with 53 bits of precision * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Real Field with 53 bits of precision + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Real Field with 53 bits of precision * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Real Field with 53 bits of precision + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Real Field with 53 bits of precision * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Real Field with 53 bits of precision + Algebraic Real Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Algebraic Real Field :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision + Algebraic Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Real Field with 53 bits of precision * Algebraic Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Real Field with 53 bits of precision + Real Double Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Real Double Field :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Real Field with 53 bits of precision :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Real Field with 53 bits of precision * Complex Double Field :: 11.0 @ Complex Double Field
+Real Field with 53 bits of precision + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Real Field with 53 bits of precision * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Real Field with 53 bits of precision + Real Field with 100 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Real Field with 100 bits of precision :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision + Complex Field with 100 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Real Field with 53 bits of precision * Complex Field with 100 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Double Field + Integer Ring :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Integer Ring :: 11.0 @ Complex Double Field
+Complex Double Field + Rational Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Rational Field :: 11.0 @ Complex Double Field
+Complex Double Field + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Double Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Complex Double Field * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Double Field' and 'Vector space of dimension 2 over Finite Field of size 7'
+Complex Double Field + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Double Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Complex Double Field * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Double Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+Complex Double Field + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Double Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Complex Double Field * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Double Field' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Complex Double Field + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Double Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Complex Double Field * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Double Field' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Complex Double Field + Algebraic Real Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Algebraic Real Field :: 11.0 @ Complex Double Field
+Complex Double Field + Algebraic Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Algebraic Field :: 11.0 @ Complex Double Field
+Complex Double Field + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Real Double Field :: 11.0 @ Complex Double Field
+Complex Double Field + Real Field with 53 bits of precision :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Real Field with 53 bits of precision :: 11.0 @ Complex Double Field
+Complex Double Field + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Complex Double Field :: 11.0 @ Complex Double Field
+Complex Double Field + Complex Field with 53 bits of precision :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Complex Field with 53 bits of precision :: 11.0 @ Complex Double Field
+Complex Double Field + Real Field with 100 bits of precision :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Real Field with 100 bits of precision :: 11.0 @ Complex Double Field
+Complex Double Field + Complex Field with 100 bits of precision :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Double Field * Complex Field with 100 bits of precision :: 11.0 @ Complex Double Field
+Complex Field with 53 bits of precision + Integer Ring :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Integer Ring :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Rational Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Rational Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Complex Field with 53 bits of precision * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Complex Field with 53 bits of precision + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Complex Field with 53 bits of precision * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Complex Field with 53 bits of precision + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Complex Field with 53 bits of precision * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Complex Field with 53 bits of precision + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Complex Field with 53 bits of precision * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 53 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Complex Field with 53 bits of precision + Algebraic Real Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Algebraic Real Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Algebraic Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Algebraic Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Real Double Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Real Double Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Real Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Complex Double Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Complex Double Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Real Field with 100 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Real Field with 100 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision + Complex Field with 100 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 53 bits of precision * Complex Field with 100 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Real Field with 100 bits of precision + Integer Ring :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Real Field with 100 bits of precision * Integer Ring :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision + Rational Field :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Real Field with 100 bits of precision * Rational Field :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Real Field with 100 bits of precision * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Real Field with 100 bits of precision + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Real Field with 100 bits of precision * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Real Field with 100 bits of precision + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Real Field with 100 bits of precision * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Real Field with 100 bits of precision + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Real Field with 100 bits of precision * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Real Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Real Field with 100 bits of precision + Algebraic Real Field :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Real Field with 100 bits of precision * Algebraic Real Field :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision + Algebraic Field :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Real Field with 100 bits of precision * Algebraic Field :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Real Field with 100 bits of precision + Real Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Real Double Field
+Real Field with 100 bits of precision * Real Double Field :: 11.0 @ Real Double Field
+Real Field with 100 bits of precision + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 100 bits of precision * Real Field with 53 bits of precision :: 11.0000000000000 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Real Field with 100 bits of precision * Complex Double Field :: 11.0 @ Complex Double Field
+Real Field with 100 bits of precision + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Real Field with 100 bits of precision * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Real Field with 100 bits of precision + Real Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Real Field with 100 bits of precision
+Real Field with 100 bits of precision * Real Field with 100 bits of precision :: 11.000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision + Complex Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Real Field with 100 bits of precision * Complex Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision + Integer Ring :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision * Integer Ring :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision + Rational Field :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision * Rational Field :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision + Finite Field of size 7 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Complex Field with 100 bits of precision * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 7'
+Complex Field with 100 bits of precision + Finite Field of size 5 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Complex Field with 100 bits of precision * Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field of size 5'
+Complex Field with 100 bits of precision + Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Complex Field with 100 bits of precision * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Ambient free module of rank 2 over Ring of integers modulo 6'
+Complex Field with 100 bits of precision + Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Complex Field with 100 bits of precision * Finite Field in z of size 3^2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Complex Field with 100 bits of precision' and 'Vector space of dimension 2 over Finite Field in z of size 3^2'
+Complex Field with 100 bits of precision + Algebraic Real Field :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision * Algebraic Real Field :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision + Algebraic Field :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision * Algebraic Field :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision + Real Double Field :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 100 bits of precision * Real Double Field :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 100 bits of precision + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 100 bits of precision * Real Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 100 bits of precision + Complex Double Field :: (4.0, 6.0) @ Vector space of dimension 2 over Complex Double Field
+Complex Field with 100 bits of precision * Complex Double Field :: 11.0 @ Complex Double Field
+Complex Field with 100 bits of precision + Complex Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Complex Field with 53 bits of precision
+Complex Field with 100 bits of precision * Complex Field with 53 bits of precision :: 11.0000000000000 @ Complex Field with 53 bits of precision
+Complex Field with 100 bits of precision + Real Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision * Real Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision + Complex Field with 100 bits of precision :: (4.0000000000000000000000000000, 6.0000000000000000000000000000) @ Vector space of dimension 2 over Complex Field with 100 bits of precision
+Complex Field with 100 bits of precision * Complex Field with 100 bits of precision :: 11.000000000000000000000000000 @ Complex Field with 100 bits of precision
+Finite Field of size 7 - Finite Field of size 5 empty :: TypeError : unsupported operand parent(s) for -: 'Vector space of dimension 0 over Finite Field of size 7' and 'Vector space of dimension 0 over Finite Field of size 5'
+Finite Field of size 7 cross Finite Field of size 5 :: TypeError : unsupported operand parent(s) for *: 'Finite Field of size 7' and 'Finite Field of size 5'
+Rational Field - Finite Field of size 7 empty :: TypeError : unsupported operand parent(s) for -: 'Vector space of dimension 0 over Rational Field' and 'Vector space of dimension 0 over Finite Field of size 7'
+Rational Field cross Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Rational Field' and 'Finite Field of size 7'
+Algebraic Real Field - Algebraic Field empty :: () @ Vector space of dimension 0 over Algebraic Field
+Algebraic Real Field cross Algebraic Field :: (-4, 8, -4) @ Vector space of dimension 3 over Algebraic Field
+Integer Ring - Finite Field of size 7 empty :: () @ Vector space of dimension 0 over Finite Field of size 7
+Integer Ring cross Finite Field of size 7 :: (3, 1, 3) @ Vector space of dimension 3 over Finite Field of size 7
+Real Double Field - Complex Field with 53 bits of precision empty :: () @ Vector space of dimension 0 over Complex Field with 53 bits of precision
+Real Double Field cross Complex Field with 53 bits of precision :: (-4.00000000000000, 8.00000000000000, -4.00000000000000) @ Vector space of dimension 3 over Complex Field with 53 bits of precision
+Real Field with 53 bits of precision - Complex Double Field empty :: () @ Vector space of dimension 0 over Complex Double Field
+Real Field with 53 bits of precision cross Complex Double Field :: (-4.0, 8.0, -4.0) @ Vector space of dimension 3 over Complex Double Field
+Rational Field - Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? empty :: () @ Vector space of dimension 0 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Rational Field cross Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? :: (-4, 8, -4) @ Vector space of dimension 3 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Integer Ring - Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? empty :: () @ Vector space of dimension 0 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+Integer Ring cross Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? :: (-4, 8, -4) @ Vector space of dimension 3 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+cross 7 :: (26, 5, -33, -40, -16, -42, 0) @ Vector space of dimension 7 over Rational Field
+cross 7 ZZ GF7 :: (4, 0, 5, 6, 4, 0, 2) @ Vector space of dimension 7 over Finite Field of size 7
+cross 2 :: TypeError : Cross product only defined for vectors of length three or seven, not (2 and 2)
+cross list :: TypeError : right must be a free module element
+dot list :: TypeError : Cannot convert list to sage.modules.free_module_element.FreeModuleElement
+QQ neg :: (-1, -2) @ Vector space of dimension 2 over Rational Field
+QQ 2* :: (2, 4) @ Vector space of dimension 2 over Rational Field
+QQ cross :: (2, -1, 0) @ Vector space of dimension 3 over Rational Field
+mod 4 6 :: (0, 1) @ Vector space of dimension 2 over Ring of integers modulo 2
+mod 14 GF7 :: (2, 4) @ Vector space of dimension 2 over Finite Field of size 7
+mod GF3 GF9 :: 2 @ Finite Field in z of size 3^2
+mod 6 GF9 :: (2, 1) @ Vector space of dimension 2 over Finite Field in z of size 3^2
+mod GF9 GF27 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field in z of size 3^2' and 'Vector space of dimension 2 over Finite Field in w of size 3^3'
+M*v :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Vector space of dimension 1 over Finite Field of size 7'
+v*M :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+M*v mod 14 :: (5, 4) @ Vector space of dimension 2 over Finite Field of size 7
+Integer Ring [] norm 2 :: 0 @ Rational Field
+Integer Ring [] norm 1 :: 0 @ Rational Field
+Integer Ring [] norm +Infinity :: ValueError : max() iterable argument is empty
+Integer Ring [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Integer Ring [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Integer Ring [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Integer Ring [0, 0] norm 2 :: 0 @ Rational Field
+Integer Ring [0, 0] norm 1 :: 0 @ Rational Field
+Integer Ring [0, 0] norm +Infinity :: 0 @ Integer Ring
+Integer Ring [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Integer Ring [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Integer Ring [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Integer Ring [3, 4] norm 2 :: 5 @ Rational Field
+Integer Ring [3, 4] norm 1 :: 7 @ Rational Field
+Integer Ring [3, 4] norm +Infinity :: 4 @ Integer Ring
+Integer Ring [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Integer Ring [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Integer Ring [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Integer Ring [1, 1] norm 2 :: sqrt(2) @ Symbolic Ring
+Integer Ring [1, 1] norm 1 :: 2 @ Rational Field
+Integer Ring [1, 1] norm +Infinity :: 1 @ Integer Ring
+Integer Ring [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Integer Ring [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Integer Ring [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Rational Field [] norm 2 :: 0 @ Rational Field
+Rational Field [] norm 1 :: 0 @ Rational Field
+Rational Field [] norm +Infinity :: ValueError : max() iterable argument is empty
+Rational Field [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Rational Field [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Rational Field [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Rational Field [0, 0] norm 2 :: 0 @ Rational Field
+Rational Field [0, 0] norm 1 :: 0 @ Rational Field
+Rational Field [0, 0] norm +Infinity :: 0 @ Rational Field
+Rational Field [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Rational Field [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Rational Field [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Rational Field [3, 4] norm 2 :: 5 @ Rational Field
+Rational Field [3, 4] norm 1 :: 7 @ Rational Field
+Rational Field [3, 4] norm +Infinity :: 4 @ Rational Field
+Rational Field [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Rational Field [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Rational Field [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Rational Field [1, 1] norm 2 :: sqrt(2) @ Symbolic Ring
+Rational Field [1, 1] norm 1 :: 2 @ Rational Field
+Rational Field [1, 1] norm +Infinity :: 1 @ Rational Field
+Rational Field [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Rational Field [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Rational Field [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Finite Field of size 7 [] norm 2 :: 0 @ Rational Field
+Finite Field of size 7 [] norm 1 :: 0 @ Rational Field
+Finite Field of size 7 [] norm +Infinity :: ValueError : max() iterable argument is empty
+Finite Field of size 7 [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Finite Field of size 7 [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Finite Field of size 7 [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Finite Field of size 7 [0, 0] norm 2 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [0, 0] norm 1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [0, 0] norm +Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [0, 0] norm -Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [0, 0] norm 0 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [0, 0] norm -1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [3, 4] norm 2 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [3, 4] norm 1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [3, 4] norm +Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [3, 4] norm -Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [3, 4] norm 0 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [3, 4] norm -1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [1, 1] norm 2 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [1, 1] norm 1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [1, 1] norm +Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [1, 1] norm -Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [1, 1] norm 0 :: ArithmeticError : absolute value not defined on integers modulo n.
+Finite Field of size 7 [1, 1] norm -1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [] norm 2 :: 0 @ Rational Field
+Ring of integers modulo 6 [] norm 1 :: 0 @ Rational Field
+Ring of integers modulo 6 [] norm +Infinity :: ValueError : max() iterable argument is empty
+Ring of integers modulo 6 [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Ring of integers modulo 6 [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Ring of integers modulo 6 [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Ring of integers modulo 6 [0, 0] norm 2 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [0, 0] norm 1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [0, 0] norm +Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [0, 0] norm -Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [0, 0] norm 0 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [0, 0] norm -1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [3, 4] norm 2 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [3, 4] norm 1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [3, 4] norm +Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [3, 4] norm -Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [3, 4] norm 0 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [3, 4] norm -1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [1, 1] norm 2 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [1, 1] norm 1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [1, 1] norm +Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [1, 1] norm -Infinity :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [1, 1] norm 0 :: ArithmeticError : absolute value not defined on integers modulo n.
+Ring of integers modulo 6 [1, 1] norm -1 :: ArithmeticError : absolute value not defined on integers modulo n.
+Algebraic Real Field [] norm 2 :: 0 @ Rational Field
+Algebraic Real Field [] norm 1 :: 0 @ Rational Field
+Algebraic Real Field [] norm +Infinity :: ValueError : max() iterable argument is empty
+Algebraic Real Field [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Real Field [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Real Field [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Real Field [0, 0] norm 2 :: 0 @ Algebraic Real Field
+Algebraic Real Field [0, 0] norm 1 :: 0 @ Algebraic Real Field
+Algebraic Real Field [0, 0] norm +Infinity :: 0 @ Algebraic Real Field
+Algebraic Real Field [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Real Field [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Real Field [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Real Field [3, 4] norm 2 :: 5 @ Algebraic Real Field
+Algebraic Real Field [3, 4] norm 1 :: 7 @ Algebraic Real Field
+Algebraic Real Field [3, 4] norm +Infinity :: 4 @ Algebraic Real Field
+Algebraic Real Field [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Real Field [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Real Field [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Real Field [1, 1] norm 2 :: 1.414213562373095? @ Algebraic Real Field
+Algebraic Real Field [1, 1] norm 1 :: 2 @ Algebraic Real Field
+Algebraic Real Field [1, 1] norm +Infinity :: 1 @ Algebraic Real Field
+Algebraic Real Field [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Real Field [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Real Field [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Field [] norm 2 :: 0 @ Rational Field
+Algebraic Field [] norm 1 :: 0 @ Rational Field
+Algebraic Field [] norm +Infinity :: ValueError : max() iterable argument is empty
+Algebraic Field [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Field [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Field [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Field [0, 0] norm 2 :: 0 @ Algebraic Real Field
+Algebraic Field [0, 0] norm 1 :: 0 @ Algebraic Real Field
+Algebraic Field [0, 0] norm +Infinity :: 0 @ Algebraic Real Field
+Algebraic Field [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Field [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Field [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Field [3, 4] norm 2 :: 5 @ Algebraic Real Field
+Algebraic Field [3, 4] norm 1 :: 7 @ Algebraic Real Field
+Algebraic Field [3, 4] norm +Infinity :: 4 @ Algebraic Real Field
+Algebraic Field [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Field [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Field [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Algebraic Field [1, 1] norm 2 :: 1.414213562373095? @ Algebraic Real Field
+Algebraic Field [1, 1] norm 1 :: 2 @ Algebraic Real Field
+Algebraic Field [1, 1] norm +Infinity :: 1 @ Algebraic Real Field
+Algebraic Field [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Algebraic Field [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Algebraic Field [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Double Field [] norm 2 :: 0.0 @ Real Double Field
+Real Double Field [] norm 1 :: 0.0 @ Real Double Field
+Real Double Field [] norm +Infinity :: 0.0 @ Real Double Field
+Real Double Field [] norm -Infinity :: ValueError : zero-size array to reduction operation minimum which has no identity
+Real Double Field [] norm 0 :: 0.0 @ Real Double Field
+Real Double Field [] norm -1 :: +infinity @ Real Double Field
+Real Double Field [0, 0] norm 2 :: 0.0 @ Real Double Field
+Real Double Field [0, 0] norm 1 :: 0.0 @ Real Double Field
+Real Double Field [0, 0] norm +Infinity :: 0.0 @ Real Double Field
+Real Double Field [0, 0] norm -Infinity :: 0.0 @ Real Double Field
+Real Double Field [0, 0] norm 0 :: 0.0 @ Real Double Field
+Real Double Field [0, 0] norm -1 :: 0.0 @ Real Double Field
+Real Double Field [3, 4] norm 2 :: 5.0 @ Real Double Field
+Real Double Field [3, 4] norm 1 :: 7.0 @ Real Double Field
+Real Double Field [3, 4] norm +Infinity :: 4.0 @ Real Double Field
+Real Double Field [3, 4] norm -Infinity :: 3.0 @ Real Double Field
+Real Double Field [3, 4] norm 0 :: 2.0 @ Real Double Field
+Real Double Field [3, 4] norm -1 :: 1.7142857142857144 @ Real Double Field
+Real Double Field [1, 1] norm 2 :: 1.4142135623730951 @ Real Double Field
+Real Double Field [1, 1] norm 1 :: 2.0 @ Real Double Field
+Real Double Field [1, 1] norm +Infinity :: 1.0 @ Real Double Field
+Real Double Field [1, 1] norm -Infinity :: 1.0 @ Real Double Field
+Real Double Field [1, 1] norm 0 :: 2.0 @ Real Double Field
+Real Double Field [1, 1] norm -1 :: 0.5 @ Real Double Field
+Real Field with 53 bits of precision [] norm 2 :: 0 @ Rational Field
+Real Field with 53 bits of precision [] norm 1 :: 0 @ Rational Field
+Real Field with 53 bits of precision [] norm +Infinity :: ValueError : max() iterable argument is empty
+Real Field with 53 bits of precision [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 53 bits of precision [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 53 bits of precision [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 53 bits of precision [0, 0] norm 2 :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [0, 0] norm 1 :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [0, 0] norm +Infinity :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 53 bits of precision [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 53 bits of precision [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 53 bits of precision [3, 4] norm 2 :: 5.00000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [3, 4] norm 1 :: 7.00000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [3, 4] norm +Infinity :: 4.00000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 53 bits of precision [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 53 bits of precision [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 53 bits of precision [1, 1] norm 2 :: 1.41421356237310 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [1, 1] norm 1 :: 2.00000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [1, 1] norm +Infinity :: 1.00000000000000 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 53 bits of precision [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 53 bits of precision [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Double Field [] norm 2 :: 0.0 @ Real Double Field
+Complex Double Field [] norm 1 :: 0.0 @ Real Double Field
+Complex Double Field [] norm +Infinity :: 0.0 @ Real Double Field
+Complex Double Field [] norm -Infinity :: ValueError : zero-size array to reduction operation minimum which has no identity
+Complex Double Field [] norm 0 :: 0.0 @ Real Double Field
+Complex Double Field [] norm -1 :: +infinity @ Real Double Field
+Complex Double Field [0, 0] norm 2 :: 0.0 @ Real Double Field
+Complex Double Field [0, 0] norm 1 :: 0.0 @ Real Double Field
+Complex Double Field [0, 0] norm +Infinity :: 0.0 @ Real Double Field
+Complex Double Field [0, 0] norm -Infinity :: 0.0 @ Real Double Field
+Complex Double Field [0, 0] norm 0 :: 0.0 @ Real Double Field
+Complex Double Field [0, 0] norm -1 :: 0.0 @ Real Double Field
+Complex Double Field [3, 4] norm 2 :: 5.0 @ Real Double Field
+Complex Double Field [3, 4] norm 1 :: 7.0 @ Real Double Field
+Complex Double Field [3, 4] norm +Infinity :: 4.0 @ Real Double Field
+Complex Double Field [3, 4] norm -Infinity :: 3.0 @ Real Double Field
+Complex Double Field [3, 4] norm 0 :: 2.0 @ Real Double Field
+Complex Double Field [3, 4] norm -1 :: 1.7142857142857144 @ Real Double Field
+Complex Double Field [1, 1] norm 2 :: 1.4142135623730951 @ Real Double Field
+Complex Double Field [1, 1] norm 1 :: 2.0 @ Real Double Field
+Complex Double Field [1, 1] norm +Infinity :: 1.0 @ Real Double Field
+Complex Double Field [1, 1] norm -Infinity :: 1.0 @ Real Double Field
+Complex Double Field [1, 1] norm 0 :: 2.0 @ Real Double Field
+Complex Double Field [1, 1] norm -1 :: 0.5 @ Real Double Field
+Complex Field with 53 bits of precision [] norm 2 :: 0 @ Rational Field
+Complex Field with 53 bits of precision [] norm 1 :: 0 @ Rational Field
+Complex Field with 53 bits of precision [] norm +Infinity :: ValueError : max() iterable argument is empty
+Complex Field with 53 bits of precision [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 53 bits of precision [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 53 bits of precision [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 53 bits of precision [0, 0] norm 2 :: 0.000000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [0, 0] norm 1 :: 0.000000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [0, 0] norm +Infinity :: 0.000000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 53 bits of precision [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 53 bits of precision [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 53 bits of precision [3, 4] norm 2 :: 5.00000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [3, 4] norm 1 :: 7.00000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [3, 4] norm +Infinity :: 4.00000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 53 bits of precision [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 53 bits of precision [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 53 bits of precision [1, 1] norm 2 :: 1.41421356237310 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [1, 1] norm 1 :: 2.00000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [1, 1] norm +Infinity :: 1.00000000000000 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 53 bits of precision [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 53 bits of precision [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 100 bits of precision [] norm 2 :: 0 @ Rational Field
+Real Field with 100 bits of precision [] norm 1 :: 0 @ Rational Field
+Real Field with 100 bits of precision [] norm +Infinity :: ValueError : max() iterable argument is empty
+Real Field with 100 bits of precision [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 100 bits of precision [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 100 bits of precision [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 100 bits of precision [0, 0] norm 2 :: 0.00000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [0, 0] norm 1 :: 0.00000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [0, 0] norm +Infinity :: 0.00000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 100 bits of precision [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 100 bits of precision [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 100 bits of precision [3, 4] norm 2 :: 5.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [3, 4] norm 1 :: 7.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [3, 4] norm +Infinity :: 4.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 100 bits of precision [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 100 bits of precision [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 100 bits of precision [1, 1] norm 2 :: 1.4142135623730950488016887242 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [1, 1] norm 1 :: 2.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [1, 1] norm +Infinity :: 1.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Real Field with 100 bits of precision [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Real Field with 100 bits of precision [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 100 bits of precision [] norm 2 :: 0 @ Rational Field
+Complex Field with 100 bits of precision [] norm 1 :: 0 @ Rational Field
+Complex Field with 100 bits of precision [] norm +Infinity :: ValueError : max() iterable argument is empty
+Complex Field with 100 bits of precision [] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 100 bits of precision [] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 100 bits of precision [] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 100 bits of precision [0, 0] norm 2 :: 0.00000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [0, 0] norm 1 :: 0.00000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [0, 0] norm +Infinity :: 0.00000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [0, 0] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 100 bits of precision [0, 0] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 100 bits of precision [0, 0] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 100 bits of precision [3, 4] norm 2 :: 5.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [3, 4] norm 1 :: 7.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [3, 4] norm +Infinity :: 4.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [3, 4] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 100 bits of precision [3, 4] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 100 bits of precision [3, 4] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Complex Field with 100 bits of precision [1, 1] norm 2 :: 1.4142135623730950488016887242 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [1, 1] norm 1 :: 2.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [1, 1] norm +Infinity :: 1.0000000000000000000000000000 @ Real Field with 100 bits of precision
+Complex Field with 100 bits of precision [1, 1] norm -Infinity :: ValueError : -Infinity is not greater than or equal to 1
+Complex Field with 100 bits of precision [1, 1] norm 0 :: ValueError : 0 is not greater than or equal to 1
+Complex Field with 100 bits of precision [1, 1] norm -1 :: ValueError : -1 is not greater than or equal to 1
+Real Field with 53 bits of precision norm 3 :: 13.2755786895599 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision norm 5 :: 13.2504280661063 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision norm 7/2 :: 13.2588664281429 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision norm 3 :: 13.2755786895599 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision norm 5 :: 13.2504280661063 @ Real Field with 53 bits of precision
+Complex Field with 53 bits of precision norm 7/2 :: 13.2588664281429 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision norm 3 :: 13.275578689559943807226175434 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision norm 5 :: 13.250428066106296054057787789 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision norm 7/2 :: 13.258866428142900331709733958 @ Real Field with 100 bits of precision
+Complex Field with 70 bits of precision norm 3 :: 13.275578689559943807 @ Real Field with 70 bits of precision
+Complex Field with 70 bits of precision norm 5 :: 13.250428066106296054 @ Real Field with 70 bits of precision
+Complex Field with 70 bits of precision norm 7/2 :: 13.258866428142900332 @ Real Field with 70 bits of precision
+Real Double Field norm 3 :: 13.275578689559943 @ Real Double Field
+Real Double Field norm 5 :: 13.250428066106299 @ Real Double Field
+Real Double Field norm 7/2 :: 13.258866428142898 @ Real Double Field
+Complex Double Field norm 3 :: 13.275578689559943 @ Real Double Field
+Complex Double Field norm 5 :: 13.250428066106299 @ Real Double Field
+Complex Double Field norm 7/2 :: 13.258866428142898 @ Real Double Field
+Real Field with 53 bits of precision range 1e200 :: 1.41421356237310e200 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e200 p1 :: 2.00000000000000e200 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e-200 :: 1.41421356237309e-200 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e-200 p1 :: 2.00000000000000e-200 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e400 :: 1.41421356237309e400 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e400 p1 :: 2.00000000000000e400 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e-400 :: 1.41421356237309e-400 @ Real Field with 53 bits of precision
+Real Field with 53 bits of precision range 1e-400 p1 :: 2.00000000000000e-400 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision range 1e200 :: 1.4142135623730950488016887242e200 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e200 p1 :: 2.0000000000000000000000000000e200 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e-200 :: 1.4142135623730950488016887242e-200 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e-200 p1 :: 2.0000000000000000000000000000e-200 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e400 :: 1.4142135623730950488016887242e400 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e400 p1 :: 2.0000000000000000000000000000e400 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e-400 :: 1.4142135623730950488016887242e-400 @ Real Field with 100 bits of precision
+Real Field with 100 bits of precision range 1e-400 p1 :: 2.0000000000000000000000000000e-400 @ Real Field with 100 bits of precision
+AA exact :: 1.732050807568878? @ Algebraic Real Field
+AA exact 3 :: 4.497941445275415? @ Algebraic Real Field
+QQbar exact :: 1.414213562373095? @ Algebraic Real Field
+QQbar exact inf :: 1 @ Algebraic Real Field
+QQ norm :: 1/6*sqrt(13) @ Symbolic Ring
+QQ norm 3 :: 8 @ Rational Field
+QQ norm inf :: 1/2 @ Rational Field
+GF9 norm empty :: 0 @ Rational Field
+RDF norm -2 :: 2.4 @ Real Double Field
+RDF norm fro :: ValueError : vector norm 'p' must be +/- infinity or a real number, not fro
+Zmod6 parent :: Ambient free module of rank 2 over Ring of integers modulo 6
+QuadraticField(-1) :: Number Field in b with defining polynomial x^2 + 1 with b = 1*I
+QuadraticField(-4) :: Number Field in b with defining polynomial x^2 + 4 with b = 2*I
+QuadraticField(-9) :: Number Field in b with defining polynomial x^2 + 9 with b = 3*I
+QuadraticField(-2) :: Number Field in b with defining polynomial x^2 + 2 with b = 1.414213562373095?*I
+QuadraticField(3) :: Number Field in b with defining polynomial x^2 - 3 with b = 1.732050807568878?
