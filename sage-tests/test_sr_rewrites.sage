@@ -83,3 +83,15 @@ t("sage_eval cmds raising", _se_raise)
 t("sage_eval walrus", _se_walrus)
 t("sage_eval tuple locals copied", _se_tuple_copy)
 t("sage_eval comprehension", lambda: sage_eval('[t*i for i in range(3)]', locals={'t': 2}))
+def _se_global(pp):
+    d = {'a': 2}; return (sage_eval('a', locals=d, cmds='global a\na = 5', preparse=pp), d['a'])
+def _se_fglobal():
+    d = {'a': 2}; return (sage_eval('a', locals=d, cmds="globals()['a'] = 5\ndef f(): return a\na = f()", preparse=False), d['a'])
+def _se_nocmds():
+    d = {'x': 1}; return (sage_eval('x + 1', locals=d), sorted(d))
+def _se_cmds_keys():
+    d = {'x': 1}; return (sage_eval('x + y', locals=d, cmds='y = 2'), sorted(k for k in d if not k.startswith('_sage_const')))
+t("sage_eval global in cmds governs the expression", lambda: (_se_global(False), _se_global(True)))
+t("sage_eval function in cmds reads globals", _se_fglobal)
+t("sage_eval without cmds leaves locals", _se_nocmds)
+t("sage_eval with cmds: locals' keys", _se_cmds_keys)

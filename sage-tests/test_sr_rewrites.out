@@ -179,3 +179,7 @@ sage_eval cmds raising = 3
 sage_eval walrus = (4, 4)
 sage_eval tuple locals copied = (5, ['b'])
 sage_eval comprehension = [0, 2, 4]
+sage_eval global in cmds governs the expression = ((5, 2), (5, 2))
+sage_eval function in cmds reads globals = (5, 5)
+sage_eval without cmds leaves locals = (2, ['x'])
+sage_eval with cmds: locals' keys = (3, ['_sage_eval_returnval_', 'x', 'y'])
