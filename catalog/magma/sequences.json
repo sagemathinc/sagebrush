@@ -1,0 +1,306 @@
+[
+  {
+    "name": "Append",
+    "kind": "function",
+    "signature": "(<SeqEnum> Q, <Any> x) -> SeqEnum",
+    "summary": "The sequence Q with x added at the end (Q itself is unchanged).",
+    "examples": [
+      {
+        "code": "Append([1, 2], 3);",
+        "expected": "[ 1, 2, 3 ]\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Include",
+      "Insert"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Append",
+    "kind": "procedure",
+    "signature": "(<SeqEnum> ~Q, <Any> x)",
+    "summary": "Adds x at the end of the sequence Q, in place.",
+    "examples": [
+      {
+        "code": "Q := [1, 2]; Append(~Q, 3); Q;",
+        "expected": "[ 1, 2, 3 ]\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Sort",
+    "kind": "function",
+    "signature": "(<SeqEnum> Q) -> SeqEnum",
+    "summary": "The elements of Q in increasing order.",
+    "examples": [
+      {
+        "code": "Sort([3, 1, 2]); Sort([\"b\", \"a\", \"c\"]);",
+        "expected": "[ 1, 2, 3 ]\n[ a, b, c ]\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Reverse"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Reverse",
+    "kind": "function",
+    "signature": "(<SeqEnum> Q) -> SeqEnum",
+    "summary": "The elements of Q in reverse order.",
+    "examples": [
+      {
+        "code": "Reverse([1, 2, 3]);",
+        "expected": "[ 3, 2, 1 ]\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Sort"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Reverse",
+    "kind": "function",
+    "signature": "(<MonStgElt> S) -> MonStgElt",
+    "summary": "The characters of the string S in reverse order.",
+    "examples": [
+      {
+        "code": "Reverse(\"abc\");",
+        "expected": "cba\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets",
+      "strings and printing"
+    ]
+  },
+  {
+    "name": "Index",
+    "kind": "function",
+    "signature": "(<SeqEnum> Q, <Any> x) -> RngIntElt",
+    "summary": "The position of the first x in Q, or 0 when x is not in Q.",
+    "examples": [
+      {
+        "code": "Index([5, 6, 7], 6); Index([5, 6], 9);",
+        "expected": "2\n0\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Position"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Position",
+    "kind": "function",
+    "signature": "(<SeqEnum> S, <Any> x) -> RngIntElt",
+    "summary": "The position of the first x in S, or 0 when x is not in S.",
+    "examples": [
+      {
+        "code": "Position([5, 6, 7], 7);",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Index"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Position",
+    "kind": "function",
+    "signature": "(<MonStgElt> S, <MonStgElt> T) -> RngIntElt",
+    "summary": "Where the string T first occurs in S, or 0.",
+    "examples": [
+      {
+        "code": "Position(\"hello\", \"l\");",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets",
+      "strings and printing"
+    ]
+  },
+  {
+    "name": "Seqset",
+    "kind": "function",
+    "signature": "(<SeqEnum> Q) -> SetEnum",
+    "summary": "The set of the elements of Q.",
+    "examples": [
+      {
+        "code": "Seqset([1, 1, 2]);",
+        "expected": "{ 1, 2 }\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Setseq"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Setseq",
+    "kind": "function",
+    "signature": "(<SetEnum> S) -> SeqEnum",
+    "summary": "The elements of the set S as a sequence.",
+    "examples": [
+      {
+        "code": "Setseq({3, 1, 2});",
+        "expected": "[ 1, 2, 3 ]\n"
+      }
+    ],
+    "differs": [
+      "The order of a set's elements (and so of the sequence) follows Magma's for integers and rationals; for other elements it may differ."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Seqset"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Max",
+    "kind": "function",
+    "signature": "(<SeqEnum> S) -> Any, RngIntElt",
+    "summary": "The largest element of a non-empty sequence S, and its first position.",
+    "examples": [
+      {
+        "code": "m, i := Max([3, 1, 4]); m, i;",
+        "expected": "4 3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Min",
+      "Maximum"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Max",
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt",
+    "summary": "The larger of two integers.",
+    "examples": [
+      {
+        "code": "Max(3, 7);",
+        "expected": "7\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Min",
+    "kind": "function",
+    "signature": "(<SeqEnum> S) -> Any, RngIntElt",
+    "summary": "The least element of a non-empty sequence S, and its first position.",
+    "examples": [
+      {
+        "code": "Min([3, 1, 4]);",
+        "expected": "1 2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Max",
+      "Minimum"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Min",
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt",
+    "summary": "The smaller of two integers.",
+    "examples": [
+      {
+        "code": "Min(-2, 5);",
+        "expected": "-2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Abs",
+    "kind": "function",
+    "signature": "(<RngIntElt> x) -> RngIntElt",
+    "summary": "The absolute value of an integer.",
+    "examples": [
+      {
+        "code": "Abs(-5);",
+        "expected": "5\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  }
+]

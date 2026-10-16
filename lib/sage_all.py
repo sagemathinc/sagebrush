@@ -1657,12 +1657,53 @@ def prime_range(start, stop=None):
     start, stop = max(int(start), 2), int(stop)
     if stop <= start:
         return []
-    sieve = bytearray([1]) * stop
-    sieve[0:2] = b"\x00\x00"
-    for p in range(2, isqrt(stop - 1) + 1):
-        if sieve[p]:
-            sieve[p * p::p] = bytes(len(range(p * p, stop, p)))
-    return [i for i in range(start, stop) if sieve[i]]
+    _admit_prime_sieve(start, stop, "prime_range")
+    # (segmented: the primes up to the square root of stop, then the window
+    # [start, stop) alone, so that a narrow window near 10^12 is cheap)
+    root = _math.isqrt(stop - 1)
+    small = bytearray([1]) * (root + 1)
+    small[0:2] = b"\x00\x00"
+    for p in range(2, _math.isqrt(root) + 1):
+        if small[p]:
+            small[p * p::p] = bytes(len(range(p * p, root + 1, p)))
+    keep = bytearray([1]) * (stop - start)
+    for p in range(2, root + 1):
+        if small[p]:
+            first = max(p * p, -(-start // p) * p) - start
+            if first < stop - start:
+                keep[first::p] = bytes(len(range(first, stop - start, p)))
+    return [start + i for i, v in enumerate(keep) if v]
+
+
+# A prime sieve takes at most this share of the heap: its cells (the window
+# and the primes up to the square root of its end, a byte each) and its
+# result together are admitted before anything is made (HARD-3BE-1)
+_PRIME_HEAP_SHARE = 16
+
+
+def _prime_cells():
+    n = getattr(_sys_limit, "_sagebrush_heap_limit", None)
+    # (CPython, or a host that cannot say: a nominal 1 GiB)
+    return (int(n) if n else 1 << 30) // _PRIME_HEAP_SHARE
+
+
+def _prime_sieve_admits(start, stop):
+    """Whether a sieve of the integers in [start, stop) is admitted."""
+    return (stop - start) + _math.isqrt(max(stop - 1, 0)) <= _prime_cells()
+
+
+def _admit_prime_sieve(start, stop, name):
+    if not _prime_sieve_admits(start, stop):
+        raise MemoryError("%s over [%d, %d) is not supported in Sagebrush: at most %d integers, with the square root "
+                          "of the end, fit its heap" % (name, start, stop, _prime_cells()))
+
+
+def _nth_prime_bound(k):
+    """An upper bound for the k-th prime (Rosser: k (log k + log log k)
+    for k >= 6)."""
+    if k < 6:
+        return 13
+    return int(k * (_math.log(k) + _math.log(_math.log(k)))) + 1
 
 
 def primes(start, stop=None):
@@ -1689,11 +1730,12 @@ def primes_first_n(k):
         sage: primes_first_n(10)
         [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
     """
-    out, p = [], 1
-    while len(out) < k:
-        p = next_prime(p)
-        out.append(p)
-    return out
+    k = int(k)
+    if k < 1:
+        return []
+    bound = _nth_prime_bound(k)
+    _admit_prime_sieve(2, bound + 1, "primes_first_n")
+    return prime_range(bound + 1)[:k]
 
 
 def nth_prime(k):
@@ -1706,7 +1748,9 @@ def nth_prime(k):
     """
     if k < 1:
         raise ValueError("n must be positive")
-    return primes_first_n(k)[-1]
+    bound = _nth_prime_bound(int(k))
+    _admit_prime_sieve(2, bound + 1, "nth_prime")
+    return prime_range(bound + 1)[int(k) - 1]
 
 
 def prime_pi(x):

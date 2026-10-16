@@ -1,0 +1,752 @@
+[
+  {
+    "name": "IsPrime",
+    "kind": "function",
+    "signature": "(<RngIntElt> n : Proof := true) -> BoolElt",
+    "summary": "Whether the integer n is prime; a negative n is prime when -n is.",
+    "examples": [
+      {
+        "code": "IsPrime(97); IsPrime(91); IsPrime(-7);",
+        "expected": "true\nfalse\ntrue\n"
+      }
+    ],
+    "differs": [
+      "Magma's default (Proof := true) proves primality; Sagebrush's default proves it up to 3.3e24 and uses a BPSW probable-prime test above (pass Proof := true for a proof)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "NextPrime",
+      "Factorization"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "NextPrime",
+    "kind": "function",
+    "signature": "(<RngIntElt> n : Proof := true) -> RngIntElt",
+    "summary": "The least prime greater than n (n at least 0).",
+    "examples": [
+      {
+        "code": "NextPrime(100);",
+        "expected": "101\n"
+      }
+    ],
+    "differs": [
+      "Magma's default (Proof := true) proves primality; Sagebrush's default proves it up to 3.3e24 and uses a BPSW probable-prime test above (pass Proof := true for a proof)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "PreviousPrime",
+      "PrimesUpTo"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "PreviousPrime",
+    "kind": "function",
+    "signature": "(<RngIntElt> n : Proof := true) -> RngIntElt",
+    "summary": "The greatest prime less than n (n at least 3).",
+    "examples": [
+      {
+        "code": "PreviousPrime(100);",
+        "expected": "97\n"
+      }
+    ],
+    "differs": [
+      "Magma's default (Proof := true) proves primality; Sagebrush's default proves it up to 3.3e24 and uses a BPSW probable-prime test above (pass Proof := true for a proof)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "NextPrime"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "PrimesUpTo",
+    "kind": "function",
+    "signature": "(<RngIntElt> m) -> SeqEnum",
+    "summary": "The primes up to m, in increasing order (m at least 1).",
+    "examples": [
+      {
+        "code": "PrimesUpTo(30);",
+        "expected": "[ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ]\n"
+      }
+    ],
+    "differs": [
+      "A bound beyond what the worker's heap allows for the sieve (about six million in a 96 MiB worker) is refused rather than computed."
+    ],
+    "status": "partial",
+    "see_also": [
+      "PrimesInInterval",
+      "NthPrime"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "PrimesUpTo",
+    "kind": "function",
+    "signature": "(<RngIntElt> B, <FldAlg> K) -> SeqEnum",
+    "summary": "The prime ideals of a number field K of norm up to B.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "&cat[[t[1] : t in Decomposition(MaximalOrder(K), p) | Norm(t[1]) le B] : p in PrimesUpTo(B)] (the same ideals, in another order)",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers",
+      "number fields"
+    ]
+  },
+  {
+    "name": "Factorization",
+    "aliases": [
+      "Factorisation"
+    ],
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> RngIntEltFact, RngIntElt",
+    "summary": "The prime factorization of a nonzero integer n, as [<p, e>, ...], and its sign.",
+    "examples": [
+      {
+        "code": "Factorization(360);",
+        "expected": "[ <2, 3>, <3, 2>, <5, 1> ]\n"
+      },
+      {
+        "code": "f, s := Factorization(-12); f, s;",
+        "expected": "[ <2, 2>, <3, 1> ]\n-1\n"
+      }
+    ],
+    "differs": [
+      "Magma's third return value (the composite factors it left unfactored, with Proof := false or bounds) is not returned; its parameters (Proof, Bases, ECMLimit, ...) are not accepted."
+    ],
+    "status": "partial",
+    "see_also": [
+      "PrimeDivisors",
+      "Divisors"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Divisors",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> SeqEnum",
+    "summary": "The positive divisors of n (n at least 1), in increasing order.",
+    "examples": [
+      {
+        "code": "Divisors(12);",
+        "expected": "[ 1, 2, 3, 4, 6, 12 ]\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "NumberOfDivisors",
+      "SumOfDivisors"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Gcd",
+    "aliases": [
+      "GCD",
+      "GreatestCommonDivisor"
+    ],
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt",
+    "summary": "The greatest common divisor of two integers (non-negative).",
+    "examples": [
+      {
+        "code": "Gcd(12, 18); Gcd(-4, 6); Gcd(0, 0);",
+        "expected": "6\n2\n0\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Lcm",
+      "Xgcd"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Gcd",
+    "kind": "function",
+    "signature": "(<SeqEnum[RngIntElt]> Q) -> RngIntElt",
+    "summary": "The greatest common divisor of a sequence of integers.",
+    "examples": [
+      {
+        "code": "Gcd([12, 18, 8]);",
+        "expected": "2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Lcm",
+    "aliases": [
+      "LCM",
+      "LeastCommonMultiple"
+    ],
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt",
+    "summary": "The least common multiple of two integers (non-negative).",
+    "examples": [
+      {
+        "code": "Lcm(4, 6); Lcm(0, 5);",
+        "expected": "12\n0\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Gcd"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Lcm",
+    "kind": "function",
+    "signature": "(<SeqEnum[RngIntElt]> Q) -> RngIntElt",
+    "summary": "The least common multiple of a sequence of integers.",
+    "examples": [
+      {
+        "code": "Lcm([4, 6, 10]);",
+        "expected": "60\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Xgcd",
+    "aliases": [
+      "XGCD",
+      "ExtendedGreatestCommonDivisor"
+    ],
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> y) -> RngIntElt, RngIntElt, RngIntElt",
+    "summary": "The gcd g of x and y with integers a, b such that a*x + b*y = g.",
+    "examples": [
+      {
+        "code": "g, a, b := Xgcd(12, 18); g, a, b;",
+        "expected": "6 -1 1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Gcd",
+      "Modinv"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Modexp",
+    "kind": "function",
+    "signature": "(<RngIntElt> a, <RngIntElt> n, <RngIntElt> m) -> RngIntElt",
+    "summary": "a^n mod m, between 0 and m - 1 (m at least 2; a negative n inverts a mod m).",
+    "examples": [
+      {
+        "code": "Modexp(3, 100, 7);",
+        "expected": "4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Modinv"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Modinv",
+    "aliases": [
+      "InverseMod"
+    ],
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> m) -> RngIntElt",
+    "summary": "The inverse of x modulo m, between 0 and m - 1; an error unless gcd(x, m) = 1.",
+    "examples": [
+      {
+        "code": "Modinv(3, 7); Modinv(-3, 7);",
+        "expected": "5\n2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Modexp",
+      "Xgcd"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Binomial",
+    "kind": "function",
+    "signature": "(<RngIntElt> n, <RngIntElt> r) -> RngIntElt",
+    "summary": "The binomial coefficient n choose r.",
+    "examples": [
+      {
+        "code": "Binomial(5, 2); Binomial(5, 7);",
+        "expected": "10\n0\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Factorial"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Factorial",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> RngIntElt",
+    "summary": "n factorial, for n at least 0.",
+    "examples": [
+      {
+        "code": "Factorial(5);",
+        "expected": "120\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Binomial"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "EulerPhi",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> RngIntElt",
+    "summary": "Euler's totient of n (n at least 1): the number of 1 <= k <= n prime to n.",
+    "examples": [
+      {
+        "code": "EulerPhi(12);",
+        "expected": "4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "IsSquare",
+    "kind": "function",
+    "signature": "(<RngIntElt> x) -> BoolElt, RngIntElt",
+    "summary": "Whether x is the square of an integer, and if so its non-negative square root.",
+    "examples": [
+      {
+        "code": "IsSquare(16); IsSquare(15);",
+        "expected": "true 4\nfalse\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Isqrt"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "IsSquare",
+    "kind": "function",
+    "signature": "(<FldRatElt> x) -> BoolElt, FldRatElt",
+    "summary": "Whether the rational x is the square of a rational, and if so its non-negative square root.",
+    "examples": [
+      {
+        "code": "IsSquare(9/4);",
+        "expected": "true 3/2\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers",
+      "rationals and reals"
+    ]
+  },
+  {
+    "name": "Isqrt",
+    "kind": "function",
+    "signature": "(<RngIntElt> x) -> RngIntElt",
+    "summary": "The integer part of the square root of x (x at least 0).",
+    "examples": [
+      {
+        "code": "Isqrt(17);",
+        "expected": "4\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "IsSquare"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Intseq",
+    "kind": "function",
+    "signature": "(<RngIntElt> n [, <RngIntElt> b]) -> SeqEnum",
+    "summary": "The digits of n >= 0 in base b (10 by default), least significant first.",
+    "examples": [
+      {
+        "code": "Intseq(123); Intseq(10, 2);",
+        "expected": "[ 3, 2, 1 ]\n[ 0, 1, 0, 1 ]\n"
+      }
+    ],
+    "differs": [
+      "Refusing a negative n in the one-argument form, Magma also prints the package frames it went through; Sagebrush prints the error alone."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Seqint"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Seqint",
+    "kind": "function",
+    "signature": "(<SeqEnum[RngIntElt]> Q [, <RngIntElt> b]) -> RngIntElt",
+    "summary": "The integer whose base b digits (10 by default) are Q, least significant first.",
+    "examples": [
+      {
+        "code": "Seqint([3, 2, 1]); Seqint([1, 0, 1], 2);",
+        "expected": "123\n5\n"
+      }
+    ],
+    "differs": [
+      "Refusing a digit out of range in the one-argument form, Magma also prints the package frames it went through; Sagebrush prints the error alone."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Intseq"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "ChineseRemainderTheorem",
+    "aliases": [
+      "CRT"
+    ],
+    "kind": "function",
+    "signature": "(<SeqEnum[RngIntElt]> X, <SeqEnum[RngIntElt]> M) -> RngIntElt",
+    "summary": "The least x >= 0 with x = X[i] mod M[i] for each i, or -1 when there is none.",
+    "examples": [
+      {
+        "code": "ChineseRemainderTheorem([2, 3], [3, 5]); ChineseRemainderTheorem([1, 2], [4, 6]);",
+        "expected": "8\n-1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Valuation",
+    "kind": "function",
+    "signature": "(<RngIntElt> x, <RngIntElt> p) -> RngIntElt",
+    "summary": "The exponent of the prime p in the nonzero integer x.",
+    "examples": [
+      {
+        "code": "Valuation(24, 2);",
+        "expected": "3\n"
+      }
+    ],
+    "differs": [
+      "Valuation(0, p) is Infinity in Magma; Sagebrush refuses it."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Valuation",
+    "kind": "function",
+    "signature": "(<FldRatElt> x, <RngIntElt> p) -> RngIntElt",
+    "summary": "The exponent of the prime p in the nonzero rational x (negative in the denominator).",
+    "examples": [
+      {
+        "code": "Valuation(3/8, 2);",
+        "expected": "-3\n"
+      }
+    ],
+    "differs": [
+      "Valuation(0, p) is Infinity in Magma; Sagebrush refuses it."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Fibonacci",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> RngIntElt",
+    "summary": "The n-th Fibonacci number, F(0) = 0, F(1) = 1; negative n too.",
+    "examples": [
+      {
+        "code": "Fibonacci(10); Fibonacci(-2);",
+        "expected": "55\n-1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "LegendreSymbol",
+    "kind": "function",
+    "signature": "(<RngIntElt> n, <RngIntElt> m) -> RngIntElt",
+    "summary": "The Legendre symbol (n/m) for an odd prime m.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Modexp(n, (m - 1) div 2, m), which is 1, 0, or m - 1 where the symbol is -1; or legendre_symbol(n, m) in Sage mode",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "JacobiSymbol",
+    "kind": "function",
+    "signature": "(<RngIntElt> n, <RngIntElt> m) -> RngIntElt",
+    "summary": "The Jacobi symbol (n/m) for an odd positive m.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "jacobi_symbol(n, m) in Sage mode; in Magma mode, the product over <p, e> in Factorization(m) of the Legendre symbols (n/p)^e, each from Modexp(n, (p - 1) div 2, p)",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "KroneckerSymbol",
+    "kind": "function",
+    "signature": "(<RngIntElt> n, <RngIntElt> m) -> RngIntElt",
+    "summary": "The Kronecker symbol (n/m).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "kronecker_symbol(n, m) in Sage mode",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "PrimitiveRoot",
+    "kind": "function",
+    "signature": "(<RngIntElt> m) -> RngIntElt",
+    "summary": "The least primitive root modulo m, or 0 when there is none.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "PrimitiveElement(GF(p)) for a prime p (an element of GF(p); its integer value with IntegerRing()!x); or primitive_root(m) in Sage mode",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "IsSquarefree",
+    "kind": "function",
+    "signature": "(<RngIntElt> x) -> BoolElt",
+    "summary": "Whether no square of a prime divides x.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "forall{t : t in Factorization(x) | t[2] eq 1}; or is_squarefree(x) in Sage mode",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "CarmichaelLambda",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> RngIntElt",
+    "summary": "The exponent of the group of units modulo n.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "from Factorization(n): the Lcm of EulerPhi(p^e) over its odd prime powers, with 2^(e-2) for 2^e when e >= 3 (EulerPhi(2^e) otherwise)",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "NumberOfPartitions",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> RngIntElt",
+    "summary": "The number of partitions of n.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "a short Magma function by Euler's pentagonal number recurrence",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Iroot",
+    "kind": "function",
+    "signature": "(<RngIntElt> a, <RngIntElt> n) -> RngIntElt",
+    "summary": "The integer part of the n-th root of a.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Floor(RealField(30)!a ^ (1/n)) for moderate a, checked by raising to the n-th power; Isqrt for n = 2",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Ilog",
+    "kind": "function",
+    "signature": "(<RngIntElt> b, <RngIntElt> n) -> RngIntElt",
+    "summary": "The integer part of the logarithm of n to the base b.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "#Intseq(n, b) - 1 for n >= 1",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Modsqrt",
+    "kind": "function",
+    "signature": "(<RngIntElt> a, <RngIntElt> m) -> RngIntElt",
+    "summary": "A square root of a modulo m.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "IsSquare(GF(p)!a) for a prime m = p returns the root as a finite field element",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "StirlingSecond",
+    "kind": "function",
+    "signature": "(<RngIntElt> m, <RngIntElt> n) -> RngIntElt",
+    "summary": "The Stirling number of the second kind S(m, n).",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "the sum &+[(-1)^(n-k) * Binomial(n, k) * k^m : k in [0..n]] div Factorial(n)",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "Bernoulli",
+    "kind": "function",
+    "signature": "(<RngIntElt> n) -> FldRatElt",
+    "summary": "The n-th Bernoulli number.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "bernoulli(n) in Sage mode",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "ResidueClassRing",
+    "kind": "function",
+    "signature": "(<RngIntElt> m) -> RngIntRes, Map",
+    "summary": "The ring of integers modulo m.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "GF(p) for a prime m; otherwise compute with integers and mod, or Integers(m) in Sage mode",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "integers"
+    ]
+  }
+]
