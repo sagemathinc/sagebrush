@@ -188,7 +188,8 @@ def _plan(nodes, edges, seed, iterations, gap):
         groups[r].append(i)
     n = len(nodes)
     budget = WORK - (FINAL_SWEEPS + 3) * n * n
-    sq = sum(len(groups[r]) ** 2 + PART_COST for r in order if len(groups[r]) > 1)
+    # (and each link's force per iteration, HARD-7C9-1)
+    sq = sum(len(groups[r]) ** 2 + PART_COST for r in order if len(groups[r]) > 1) + len(links)
     if budget < MIN_ITERATIONS * sq:
         return None
     want = DEFAULT_ITERATIONS if iterations is None else iterations
@@ -224,7 +225,7 @@ def _plan(nodes, edges, seed, iterations, gap):
         parts.append(part)
     # (what the iterations leave, less the shelf and the check: the final
     # sweeps are counted against it, spring.ts's p.left, HARD-2F4-1)
-    used = sum(pt.iterations * (len(pt.bodies) * len(pt.bodies) + PART_COST) for pt in parts)
+    used = sum(pt.iterations * (len(pt.bodies) * len(pt.bodies) + PART_COST + len(pt.links)) for pt in parts)
     return parts, all_, gap, WORK - used - 2 * n * n
 
 

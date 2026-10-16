@@ -107,6 +107,20 @@ check(springLayout(pts(10), Array.from({ length: MAX_EDGES + 1 }, () => ["v0", "
   check(springWork.pairs <= WORK, `forced sweeps: ${springWork.pairs} pair evaluations, within WORK`);
   check(pos !== null && gapViolations(nodes, pos, 24).length === 0, "forced sweeps: still no two boxes closer than the gap");
 }
+// ... and with the links' forces counted (HARD-7C9-1): daybreak2's
+// envelope, 550 boxes and MAX_EDGES links, iterations 1000 asked (cut to
+// 870 by the budget), a fixed box under them as above
+{
+  const n = 550;
+  const nodes = pts(n, 60, 60);
+  nodes[0] = { id: "v0", w: 4e5, h: 4e5, fixed: { x: -2e5, y: -2e5 } };
+  const edges = Array.from({ length: MAX_EDGES }, (_, k) => k < n - 1 ? ["v" + k, "v" + (k + 1)] : ["v" + (k % n), "v" + ((k * 7 + 3) % n)]);
+  springWork.pairs = springWork.sweeps = 0;
+  const pos = springLayout(nodes, edges, { seed: 3, iterations: 1000 });
+  console.log(`  forced, ${MAX_EDGES} links: ${springWork.pairs} pair evaluations and link forces, ${springWork.sweeps} sweeps`);
+  check(springWork.pairs <= WORK, `forced sweeps, ${MAX_EDGES} links: ${springWork.pairs} evaluations, within WORK`);
+  check(pos !== null && gapViolations(nodes, pos, 24).length === 0, `forced sweeps, ${MAX_EDGES} links: no two boxes closer than the gap`);
+}
 check(springLayout([], [], { seed: 1 }).size === 0, "no nodes: an empty layout");
 // huge iterations, many parts: bounded (HARD-828-1)
 {
