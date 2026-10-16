@@ -5130,7 +5130,15 @@ def _fftn_call(x, sizes, inverse, name, nd=None, symmetric=False):
     them for fftn), each page beyond them apart, X padded or cut to sizes first"""
     A = _farr(x, name)
     dims = len(_dims(x)) if nd is None else nd
-    sz = None if sizes is None else [int(float(v)) for v in _arr(sizes).reshape(-1)]
+    sz = None if sizes is None else [float(v) for v in _arr(sizes).reshape(-1)]
+    # (each transform size a positive integer, as the pages specify; anything else refused,
+    # not truncated or made empty)
+    if sz is not None:
+        for v in sz:
+            if not (v == v and v >= 1 and v == _math.floor(v) and v != _math.inf):
+                shown = int(v) if v == v and abs(v) != _math.inf and v == _math.floor(v) else v
+                raise _err("Invalid number of FFT data points (%s) specified." % shown)
+        sz = [int(v) for v in sz]
     while A.ndim < dims:
         A = A.reshape((1,) + A.shape)
     axes = [A.ndim - d for d in range(1, dims + 1)]

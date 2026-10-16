@@ -215,3 +215,17 @@ test("[S(I,J).f] = ...: the comma-separated count admitted from the subscripts, 
   ]);
   assert.ok(Date.now() - t0 < 30000, "the refusals are immediate");
 });
+
+test("fft2, ifft2, fftn and ifftn refuse a transform size that is not a positive integer (CORR-0A8-1)", () => {
+  const out = lines(run([
+    ...["fft2(ones(2),-1,2)", "ifft2(ones(2),2,-1)", "fftn(ones(2),[-1 2])", "ifftn(ones(2),[2 -1])", "fft2(ones(2),1.5,2)", "fftn(ones(2),[0 2])"]
+      .map((c) => `try, x = ${c}; disp('ran'), catch e, disp(e.message), end`),
+    "disp(mat2str(size(fft2(ones(2), 3, 1))))",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "Invalid number of FFT data points (-1) specified.", "Invalid number of FFT data points (-1) specified.",
+    "Invalid number of FFT data points (-1) specified.", "Invalid number of FFT data points (-1) specified.",
+    "Invalid number of FFT data points (1.5) specified.", "Invalid number of FFT data points (0) specified.",
+    "[3 1]",
+  ]);
+});
