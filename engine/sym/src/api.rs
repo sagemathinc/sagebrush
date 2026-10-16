@@ -337,10 +337,10 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
     match op {
         // constructors
         "sym" => one_(sym(arg(0))),
-        "int" => one_(big(arg(0).parse::<BigInt>().unwrap_or_else(|_| crate::err::value_error("bad integer")))),
+        "int" => one_(big(parse_int(arg(0)).unwrap_or_else(|| crate::err::value_error("bad integer")))),
         "rat" => {
             let (n, q) = arg(0).split_once('/').unwrap_or((arg(0), "1"));
-            let (n, q): (BigInt, BigInt) = (n.parse().unwrap_or_else(|_| bad()), q.parse().unwrap_or_else(|_| bad()));
+            let (n, q) = (parse_int(n).unwrap_or_else(|| bad()), parse_int(q).unwrap_or_else(|| bad()));
             if num_traits::Zero::is_zero(&q) {
                 crate::err::throw(SymError::DivisionByZero);
             }

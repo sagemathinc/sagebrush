@@ -42,6 +42,17 @@ pub fn check_q_bits(x: &Q) {
     check_int_bits(x.numer().bits().max(x.denom().bits()));
 }
 
+/// log2 |n| for n != 0, finite however large n is (its top 64 bits and
+/// its length: n.to_f64() is infinite past 2^1024).
+pub fn log2_big(n: &BigInt) -> f64 {
+    let b = n.bits();
+    if b <= 64 {
+        return n.abs().to_f64().unwrap().log2();
+    }
+    let sh = b - 64;
+    (n.abs() >> sh as usize).to_f64().unwrap().log2() + sh as f64
+}
+
 fn q_bits(x: &Q) -> u64 {
     x.numer().bits().max(x.denom().bits())
 }
