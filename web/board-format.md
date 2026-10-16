@@ -134,7 +134,10 @@ the window, before zooming in.
 
 ## Asking the reader
 
-A board can ask the person reading it, and keep the answers. An item of
+A board can ask the person reading it, and keep the answers. (For now the
+board shows a question, its options and its answer, read-only: the
+controls to answer on the board come next. Until then the answers are
+written by a host's submission or by `sagebrush board answers --apply`.) An item of
 `"kind": "ask"` is a question: its `text` asks (Markdown with math), and
 its `input` says how it is answered:
 
@@ -328,7 +331,7 @@ A pen stroke, drawn by a person. Don't write these.
 
 ### A question (`kind: "ask"`)
 
-A question for the person reading the board, answered on the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`.
+A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`. (For now the board shows a question, its options and its answer read-only; a host's submission, or `sagebrush board answers --apply`, writes the answer.)
 
 | field | type | meaning |
 |---|---|---|

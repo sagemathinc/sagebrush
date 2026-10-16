@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { askMarkdown, cleanDoc, layout, type DocAsk } from "../web/board/doc";
-import { answerProblem, askProblems, asksOf, answerText } from "../web/board/ask";
+import { answerProblem, askProblems, asksOf, answerText, onStep } from "../web/board/ask";
 import { checkText } from "../src/board-check";
 import { submissionProblem } from "../src/board-answers";
 
@@ -57,6 +57,11 @@ test("a question as a reader without controls shows it: its text, its options ma
   assert.equal(askMarkdown(radio), "Q?\n\n- ○ Plan A\n- ◉ b\n\n_required_");
   assert.equal(askMarkdown(ask({ input: "check", options: ["x", "y"], answer: ["y", "zz"] })), "Q?\n\n- ☐ x\n- ☑ y\n- ☑ `zz` (not one of the options)");
   assert.equal(askMarkdown(ask({ input: "check" })), "Q?\n\n☐ _(not answered yet)_");
+  // (answered with nothing, and not answered: not the same, astra's 7383b15c note)
+  assert.equal(askMarkdown(ask({ input: "check", options: ["x"], answer: [] })), "Q?\n\n- ☐ x\n\n_(answered: none chosen)_");
+  assert.equal(askMarkdown(ask({ input: "check", options: ["x"] })), "Q?\n\n- ☐ x\n\n_(not answered yet)_");
+  assert.equal(askMarkdown(ask({ input: "text", answer: " " })), "Q?\n\n_(answered: left empty)_");
+  assert.equal(askMarkdown(ask({ input: "text" })), "Q?\n\n_(not answered yet)_");
   assert.equal(askMarkdown(ask({ input: "check", answer: true })), "Q?\n\n☑ yes");
   assert.equal(askMarkdown(ask({ input: "text", answer: "two\nlines" })), "Q?\n\n> two\n> lines");
   assert.equal(askMarkdown(ask({ input: "number", min: 0 })), "Q?\n\n_(not answered yet)_ · at least 0");
@@ -94,6 +99,12 @@ test("an answer each input takes, and why not", () => {
     [{ input: "scale", min: 0, max: 10 }, 2.5, "its answer is a whole number"],
   ];
   for (const [q, ans, want] of cases) assert.equal(answerProblem(ask(q), ans), want, JSON.stringify([q, ans]));
+  // (off its step however many steps away; decimal steps still taken; steps that can't be counted refused: astra's CORR-738-1)
+  assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 1000000000.5), "its answer 1000000000.5 is not on its step, 1 from 0");
+  assert.equal(answerProblem(ask({ input: "number", min: 0, step: 1 }), 100000000.1), "its answer 100000000.1 is not on its step, 1 from 0");
+  for (const [v, from, step, want] of [[1e9, 0, 1, true], [2 ** 53, 0, 1, true], [0.3, 0, 0.1, true], [12345.7, 0, 0.1, true], [0.75, 0, 0.25, true], [-0.2, -1, 0.1, true], [0, 0, 0.1, true],
+    [0.35, 0, 0.1, false], [1000000000.5, 0, 1, false], [1e308, -1e308, 1e-300, false], [5, 0, 1e-320, false]] as [number, number, number, boolean][])
+    assert.equal(onStep(v, from, step), want, JSON.stringify([v, from, step]));
   assert.equal(answerProblem(ask({ input: "check", options: Array.from({ length: 101 }, (_, i) => String(i)) }), Array.from({ length: 101 }, (_, i) => String(i))), "its answer lists more than 100 values");
   assert.equal(answerText(ask({ input: "radio", options: opts, answer: "y" })), '"y" (Y)');
   assert.equal(answerText(ask({ input: "check", options: opts, answer: [] })), "(none chosen)");

@@ -165,7 +165,7 @@ export interface DocSticker {
 // A question for the board's reader (web/board-host-protocol.md): its
 // answer is kept on it.  A reader that doesn't know the kind shows its
 // title and text as a note's, so the question is in them.
-/** A question for the person reading the board, answered on the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`. */
+/** A question for the person reading the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`. (For now the board shows a question, its options and its answer read-only; a host's submission, or `sagebrush board answers --apply`, writes the answer.) */
 export interface DocAsk {
   /** required: unique on its page (an answer names it) */
   id: string;
@@ -783,9 +783,12 @@ export function askMarkdown(a: DocAsk): string {
       for (const o of opts) out.push(`- ${chosen.has(o.value) ? on : off} ${o.label}`);
       // (an answer that names no option: said as it is)
       for (const v of chosen) if (!opts.some((o) => o.value === v)) out.push(`- ${on} ${code(v)} (not one of the options)`);
+      // (answered, none chosen; or not answered yet: not the same)
+      out.push("", Array.isArray(ans) && !ans.length ? "_(answered: none chosen)_" : ans === undefined ? none : "");
+      while (out.at(-1) === "") out.pop();
     }
   } else if (a.input === "text") {
-    out.push(typeof ans === "string" && ans.trim() ? ans.split("\n").map((l) => "> " + l).join("\n") : none);
+    out.push(typeof ans !== "string" ? none : ans.trim() ? ans.split("\n").map((l) => "> " + l).join("\n") : "_(answered: left empty)_");
   } else {
     const lo = a.min ?? (a.input === "scale" ? 1 : undefined), hi = a.max ?? (a.input === "scale" ? 5 : undefined);
     const range = lo !== undefined && hi !== undefined ? `from ${a.low ? `${lo} (${a.low})` : lo} to ${a.high ? `${hi} (${a.high})` : hi}` : lo !== undefined ? `at least ${lo}` : hi !== undefined ? `at most ${hi}` : "";
