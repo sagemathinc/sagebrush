@@ -5251,7 +5251,7 @@ def _fftn_call(x, sizes, inverse, name, nd=None, symmetric=False):
     """fft2, fftn and their inverses: the transform over MATLAB's first nd dimensions (all of
     them for fftn), each page beyond them apart, X padded or cut to sizes first"""
     dims = len(_dims(x)) if nd is None else nd
-    sz = None if sizes is None else _fft_sizes(sizes)
+    sz = sizes  # (parsed and checked by _fft_parse)
     # (X made dense only after the sizes are checked: an invalid size is refused at once)
     A = _farr(x, name)
     while A.ndim < dims:
@@ -5316,49 +5316,49 @@ def _hermitian(A, axes):
     return np.moveaxis(out, list(range(lead, A.ndim)), T)
 
 
-@_bs("fft2")
-def fft2_(x, m=None, n=None):
-    for a in (m, n):
-        if a is not None:
-            _fft_sizes(a)  # (a text or other bad size refused before _scalar reads it)
-    return _fftn_call(x, None if m is None else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None else m), False, "fft2", 2)
-
-
-def _ifft_args(name, rest, nsizes):
-    """the size arguments and 'symmetric' of ifft2/ifftn: the flag, 'symmetric' or
-    'nonsymmetric', only last; any other text, or text in a size's place, is refused
-    rather than ignored"""
+def _fft_parse(name, rest):
+    """fft2, ifft2, fftn and ifftn's arguments after X, parsed and checked as a whole: how
+    many sizes (none or two scalars for fft2 and ifft2, none or one vector for fftn and
+    ifftn), each size, and the inverses' flag, 'symmetric' or 'nonsymmetric', only
+    last; any other text is refused rather than ignored. Returns (sizes, symmetric):
+    sizes the transform sizes as ints, or None. The dense functions and the sparse forms
+    both call it first, so a sparse X is made full only for a valid call, and the two
+    can't disagree"""
     rest = list(rest)
     sym = False
-    if rest and _istext(rest[-1]):
+    if name in ("ifft2", "ifftn") and rest and _istext(rest[-1]):
         flag = _text(rest[-1]).lower()
         if flag not in ("symmetric", "nonsymmetric"):
             raise _err("%s: the option '%s' is not supported." % (name, _text(rest[-1])))
         sym = flag == "symmetric"
         rest.pop()
-    if len(rest) > nsizes:
+    if len(rest) > (2 if name in ("fft2", "ifft2") else 1):
         raise _err("Too many input arguments.", "MATLAB:TooManyInputs")
-    for a in rest:
-        _fft_sizes(a)
-    return rest, sym
+    if not rest:
+        return None, sym
+    if name in ("fft2", "ifft2") and len(rest) == 1:
+        # (the pages' forms are (X) and (X, m, n))
+        raise _err("Not enough input arguments.", "MATLAB:minrhs")
+    if len(rest) == 2:
+        # (fft2(X, m, n): two scalars)
+        m, n = (_fft_sizes(v) for v in rest)
+        if len(m) != 1 or len(n) != 1:
+            raise _err("%s(X, m, n): m and n must be scalars." % name)
+        return m + n, sym
+    return _fft_sizes(rest[0]), sym
 
 
-@_bs("ifft2")
-def ifft2_(x, *rest):
-    sizes, sym = _ifft_args("ifft2", rest, 2)
-    m, n = (sizes + [None, None])[:2]
-    return _fftn_call(x, None if m is None else (np.array([[_scalar(m)], [_scalar(n)]]) if n is not None else m), True, "ifft2", 2, sym)
+def _fft_entry(name, inverse, nd):
+    def f(x, *rest):
+        sizes, sym = _fft_parse(name, rest)
+        return _fftn_call(x, sizes, inverse, name, nd, sym)
+    _bs(name)(f)
 
 
-@_bs("fftn")
-def fftn_(x, sizes=None):
-    return _fftn_call(x, sizes, False, "fftn")
-
-
-@_bs("ifftn")
-def ifftn_(x, *rest):
-    sizes, sym = _ifft_args("ifftn", rest, 1)
-    return _fftn_call(x, sizes[0] if sizes else None, True, "ifftn", None, sym)
+_fft_entry("fft2", False, 2)
+_fft_entry("ifft2", True, 2)
+_fft_entry("fftn", False, None)
+_fft_entry("ifftn", True, None)
 
 
 def _fftshift_call(x, dim, inverse):
