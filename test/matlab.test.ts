@@ -2043,12 +2043,17 @@ test("strrep and regexp with cell arrays: the text built or searched, all elemen
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
-test("complex of integers, regexprep's dynamic expressions and options refused; true/false like sparse, regexp's repeated token names, primes and str2num as the pages", () => {
+test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dynamic expressions and options refused; true/false like sparse, regexp's repeated token names, primes and str2num as the pages", () => {
   const { execFileSync } = require("node:child_process");
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
   const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
   assert.deepEqual(run([
+    // (64-bit values Sagebrush can't hold exactly, beyond 2^53: refused, the limits and results alike;
+    // the exact ones kept, -2^63 among them, and saturation to it; the six other maxima as before)
+    tryIt("intmax('uint64')"), tryIt("intmax('int64')"), tryIt("int64(2)^62"), tryIt("uint64(2^53) + 1"), tryIt("int64(1e19)"),
+    "fprintf('%d %d %d %d\\n', intmin('int64'), int64(-1e30), int64(2)^52, uint64(2^53))",
+    "fprintf('%d ', intmax('int8'), intmax('uint8'), intmax('int16'), intmax('uint16'), intmax('int32'), intmax('uint32')); fprintf('\\n')",
     // (complex integers aren't represented: refused; single stays single)
     tryIt("complex(uint8([1;2]), uint8([2;2]))"), "disp(class(complex(single(1), single(2))))",
     // (true and false like a sparse prototype: sparse)
@@ -2066,7 +2071,9 @@ test("complex of integers, regexprep's dynamic expressions and options refused; 
     tryIt("primes(1:10)"), "disp(mat2str(primes(10)))",
     "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
     tryIt("str2num('2+3')"),
-  ].join("\n")), ["refused", "single",
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused",
+    "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740992",
+    "127 255 32767 65535 2147483647 4294967295", "refused", "single",
     "[1 1 0 1 4]", "refused", "refused", "month,day,year", "01 11 02 20 2020", "aaa",
     "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
 });
