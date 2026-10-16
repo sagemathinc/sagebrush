@@ -214,9 +214,10 @@ class IntegerModRing_:
         if isinstance(x, IntegerMod):
             if x._parent is self:
                 return x
-            if x._parent._n % self._n == 0:
-                return _elt(self, x._v % self._n)
-            raise TypeError("no canonical coercion from %r to %r" % (x._parent, self))
+            # a conversion, not a coercion: by the integer lift, whatever
+            # the moduli (GF(5)(GF(2)(1)) is 1, Integers(12)(Mod(5, 7)) is
+            # 5, as in Sage; arithmetic between them is still refused)
+            return _elt(self, x._v % self._n)
         if isinstance(x, (bool, int)):
             return _elt(self, int(x) % self._n)
         if isinstance(x, _F):
@@ -607,6 +608,9 @@ class IntegerMod:
     def __pow__(self, e, mod=None):
         if isinstance(e, IntegerMod):
             e = e._v
+        if isinstance(e, _F) and e.denominator != 1:
+            # (int() truncated it: pow(GF(5)(2), 3/2, 5) was 2), as Sage
+            raise TypeError("no conversion of this rational to integer")
         e = int(e)
         n = self._parent._n
         if e < 0:

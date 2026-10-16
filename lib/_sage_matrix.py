@@ -8,6 +8,13 @@ Dense; entries are Python ints or Sage Rationals."""
 from fractions import Fraction as _F
 
 
+
+def _is_symbolic_function(v):
+    """Whether v is a callable expression f(x) = ... (_sage_lang's
+    SymbolicFunction, whose type shows as Sage's Expression)."""
+    import _sage_lang
+    return isinstance(v, _sage_lang.SymbolicFunction)
+
 def _sa():
     import sage_all
     return sage_all
@@ -35,6 +42,10 @@ class Vector(list):
         sage: v + v, 2*v, v * v
         ((2, 4, 6), (2, 4, 6), 14)
     """
+
+    def _latex_(self):
+        import _sage_expr
+        return _sage_expr._latex_vector(self)
 
     def __init__(self, entries=()):
         # (read boundedly: a Vector is built from any iterable)
@@ -77,7 +88,7 @@ class Vector(list):
         try:
             return Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
-            if type(other).__name__ == "SymbolicFunction":
+            if _is_symbolic_function(other):
                 return NotImplemented
             return Vector(_norm(a / other) for a in self)
 
@@ -564,7 +575,7 @@ class Matrix:
         for r in self._rows:
             row = []
             for e in r:
-                if type(e).__name__ == "SymbolicFunction":
+                if _is_symbolic_function(e):
                     row.append(e(*args, **kw))
                 else:
                     ex = _expr(e)
@@ -836,8 +847,8 @@ class Matrix:
         return m
 
     def _latex_(self):
-        body = r" \\ ".join(" & ".join(repr(x) for x in r) for r in self._rows)
-        return r"\left(\begin{array}{%s}%s\end{array}\right)" % ("r" * self.ncols(), body)
+        import _sage_expr
+        return _sage_expr._latex_matrix(self._rows, self.ncols())
 
     def transpose(self):
         """The transpose (also .T).
@@ -2366,6 +2377,12 @@ def _is_parent(R):
     return callable(getattr(R, "is_field", None)) or callable(getattr(R, "characteristic", None)) or callable(getattr(R, "base_ring", None)) and not hasattr(R, "nrows")
 
 
+def _int_dims(args):
+    """args with each integral Rational among the first three (a ring and
+    two dimensions) as an int; a scalar entry there keeps its value."""
+    return tuple(int(a) if k < 3 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
+
+
 def matrix(*args, **kwds):
     """matrix([[1, 2], [3, 4]]), matrix(ZZ, rows), matrix(QQ, 2, 2, entries),
     matrix(ZZ, 3, 3, range(9)).
@@ -2381,6 +2398,10 @@ def matrix(*args, **kwds):
     """
     ncols = None  # (kept for a matrix with no rows)
     sa = _sa()
+    # dimensions that are integral rationals, as Sage takes them, before any
+    # dispatch (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational;
+    # over Qp the column count became the scalar entry)
+    args = _int_dims(args)
     base = None
     import _sage_ffmat
     if args and _sage_ffmat._is_ff(args[0]):
@@ -2408,6 +2429,9 @@ def matrix(*args, **kwds):
         ent = args[2] if len(args) > 2 else 0
         ncols = c
         if isinstance(ent, (int, _F)) or type(ent).__name__ == "Rational":
+            if ent != 0 and r != c:
+                # (matrix(QQ, 2, 3, 1) was a 2 x 3 "diagonal" matrix)
+                raise TypeError("nonzero scalar matrix must be square")
             rows = [[ent if i == j else 0 for j in range(c)] for i in range(r)]
         else:
             # at most r c + 1 entries are read (r rows of a list of rows)
@@ -2799,6 +2823,16 @@ class ComplexNumber(complex):
 
     __str__ = __repr__
 
+    def parent(self):
+        """CC, the complex field with 53 bits of precision.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).parent()
+            Complex Field with 53 bits of precision
+        """
+        return CC
+
     def real_part(self):
         """The real part.
 
@@ -2895,6 +2929,9 @@ class ComplexField_:
 
     def __repr__(self):
         return "Complex Field with 53 bits of precision"
+
+    def _latex_(self):
+        return "\\Bold{C}"
 
     def zero(self):
         """0.

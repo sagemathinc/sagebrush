@@ -108,6 +108,38 @@ class _Ring:
             return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
         return PolynomialRing(self, names)
 
+    def _latex_(self):
+        return "\\Bold{Q}" if self._field else "\\Bold{Z}"
+
+    def __iter__(self):
+        """The elements, in Sage's order: ZZ as 0, 1, -1, 2, -2, ...; QQ by
+        height max(|p|, q), and within height h, a/h then h/a for each a < h
+        prime to h, each followed by its negative.  (Without this, Python
+        iterated ZZ through __getitem__: ZZ[0], ZZ[1], ... polynomial rings.)
+
+        EXAMPLES::
+
+            sage: W = iter(ZZ); [next(W) for _ in range(5)]
+            [0, 1, -1, 2, -2]
+            sage: Q = iter(QQ); [next(Q) for _ in range(11)]
+            [0, 1, -1, 1/2, -1/2, 2, -2, 1/3, -1/3, 3, -3]
+        """
+        import math
+        yield _sa().Integer(0) if not self._field else _sa().Rational(0)
+        h = 1
+        while True:
+            if not self._field:
+                yield _sa().Integer(h)
+                yield _sa().Integer(-h)
+            else:
+                for a in range(1, h + 1):
+                    if math.gcd(a, h) != 1 or (a == h and h > 1):
+                        continue
+                    for r in ((_F(a, h), _F(h, a)) if a < h else (_F(1),)):
+                        yield _sa().Rational(r)
+                        yield _sa().Rational(-r)
+            h += 1
+
     def __contains__(self, x):
         try:
             return self._field and _F(x) is not None or (not self._field and _F(x).denominator == 1)
@@ -318,11 +350,31 @@ class PolynomialRing_:
             sage: R.<x> = QQ[]
             sage: R([1, 2, 3]), R(5), R(x^2 + 1)
             (3*x^2 + 2*x + 1, 5, x^2 + 1)
+            sage: ZZ['x'](PolynomialRing(ZZ, 2, 'x,y')({(2000000, 0): 1}))  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: a polynomial of degree 2000000 exceeds sagebrush's limit of 1048576 coefficients for this conversion
         """
         if isinstance(x, Polynomial):
             # (Sage converts between univariate rings by coefficients, so
             # QQ['y'](f) for f in ZZ['x'] maps x to y)
             return Polynomial(self, x._c)
+        if type(x).__name__ == "MPolynomial" and hasattr(x, "_ring") and hasattr(x._ring, "_names"):
+            # ZZ['x'](x) for x in ZZ['x', 'y']: in the variable of this
+            # ring's name, else a constant, as Sage converts
+            names = list(x._ring._names)
+            k = names.index(self._name) if self._name in names else None
+            cs = {}
+            for e, c in x._d.items():
+                if any(v for i, v in enumerate(e) if i != k):
+                    raise TypeError("cannot convert nonconstant polynomial")
+                cs[e[k] if k is not None else 0] = x._ring._dom._out(c)
+            # the coefficient list is dense: refused past the limit before
+            # it is made (one term of degree 2000000 made 2000001
+            # coefficients, the review's HARD-0FE-1)
+            if cs and max(cs) >= _MAX_DENSE_COEFFS:
+                raise NotImplementedError("a polynomial of degree %d exceeds sagebrush's limit of %d coefficients for this conversion" % (max(cs), _MAX_DENSE_COEFFS))
+            return Polynomial(self, [cs.get(i, 0) for i in range(max(cs) + 1)] if cs else [])
         if isinstance(x, (list, tuple)):
             return Polynomial(self, list(x))
         if isinstance(x, str):
@@ -353,6 +405,9 @@ class PolynomialRing_:
 
 _RINGS = {}
 
+# The most coefficients a conversion from a sparse polynomial writes densely.
+_MAX_DENSE_COEFFS = 1 << 20
+
 
 def PolynomialRing(base, *args, **kwds):
     """PolynomialRing(ZZ, 'x'), PolynomialRing(QQ, names=('y',)); several
@@ -376,6 +431,9 @@ def PolynomialRing(base, *args, **kwds):
     for a in args:
         if isinstance(a, int) and not isinstance(a, bool):
             n = int(a)
+        elif type(a).__name__ == "Rational":
+            # (PolynomialRing(QQ, 4/2, 'x') was a ring in a variable named 2)
+            n = a.__index__()
         elif a is not None and names is None:
             names = a
     order = kwds.get("order")
