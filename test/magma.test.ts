@@ -317,6 +317,29 @@ test("records nested deep or sharing their parts are bounded when copied too (HA
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("index selections are admitted before they are taken, and a long chain of indexes is refused in words (HARD-A57-1, HARD-A57-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
+  const t0 = Date.now();
+  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1]; #T;\n');
+  assert.equal(sel.signal, null, sel.stderr);
+  const flat = sel.stdout.replace(/\s+/g, " ");
+  assert.match(flat, /a selection of more than 1000000 elements is not supported yet/);
+  assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
+  assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
+  assert.match(sel.stdout, /\n1000000\n$/);
+  assert.ok(Date.now() - t0 < 30000);
+  // 5000 links: refused before running; 64 still work
+  const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\n");
+  assert.doesNotMatch(long.stdout + long.stderr, /RecursionError|Traceback/);
+  assert.match(long.stdout, /User error: a chain of more than 64 calls or indexes is not supported yet/);
+  assert.match(long.stdout, /\n1\n$/);
+  const ok = run("x := 7; for i in [1..64] do x := [x]; end for;\nx" + "[1]".repeat(64) + ";\n");
+  assert.equal(ok.stdout, "7\n");
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
