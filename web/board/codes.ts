@@ -26,6 +26,9 @@ export class BoardCodes {
   onRan: ((ids: string[]) => void) | null = null;
   /** why a language's interpreter could not start, or why one wasn't made */
   error: string | null = null;
+  /** a language's interpreter could not start (made as its items first came:
+   * after `ready`, which is only the interpreters made so far) */
+  onError: ((why: string) => void) | null = null;
   /** the board's output cache, and its name for the board shown: every language's (code.ts) */
   private cacheSet: OutputCache | null = null;
   private cacheIdSet: string | null = null;
@@ -65,7 +68,13 @@ export class BoardCodes {
     if (this.pictures !== null) e.usePictures(this.pictures);
     if (this.previewMsSet !== null) e.previewMs = this.previewMsSet;
     if (this.cacheMsSet !== null) e.cacheMs = this.cacheMsSet;
-    e.ready.then((ok) => { if (!ok && e!.error) this.error ??= `${NAMES[mode]}: ${e!.error}`; });
+    e.ready.then((ok) => {
+      if (ok || !e!.error || this.engines.get(mode) !== e) return;
+      // (named by its language only when the board has another)
+      const why = this.engines.size > 1 ? `${NAMES[mode]}: ${e!.error}` : e!.error;
+      this.error ??= why;
+      this.onError?.(why);
+    });
     this.engines.set(mode, e);
     return e;
   }
@@ -167,7 +176,10 @@ export class BoardCodes {
   async outputKeys(): Promise<Record<string, { key: string | null; ms: number | null; fromRoot: number; untimed: number; widget: boolean }> | null> {
     const all = await Promise.all([...this.engines.values()].map((e) => e.outputKeys()));
     if (all.every((k) => k === null) && all.length) return null;
-    return Object.assign({}, ...all.filter(Boolean));
+    // (each id its own entry, __proto__ too: defined, not assigned, SEC-781-1)
+    const out: Record<string, any> = {};
+    for (const k of all) for (const [id, v] of Object.entries(k ?? {})) Object.defineProperty(out, id, { value: v, enumerable: true, writable: true, configurable: true });
+    return out;
   }
   /** What a downloaded board carries (code.ts carry()): every language's,
    * the slowest first, at most DOC_CAP in all; with `expect`, only if each
