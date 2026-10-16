@@ -7284,13 +7284,32 @@ def struct2cell_(s):
 @_bs("cell2struct")
 def cell2struct_(c, fields, dim=None):
     names = [_text(e) for e in fields.a] if type(fields) is Cell else [r.rstrip() for r in fields.rows()] if type(fields) is Char and _dims(fields)[0] > 1 else [_text(fields)]
-    dm = _int_arg(dim) if dim is not None else 1
-    r, k = c.shape[0], _prod(c.shape[1:])
-    if dm == 1:
-        items = [{names[i]: cp(c.a[j * r + i]) for i in range(r)} for j in range(k)]
-        return Struct(items, (k, 1), names)
-    items = [{names[j]: cp(c.a[j * r + i]) for j in range(k)} for i in range(r)]
-    return Struct(items, (r, 1), names)
+    if type(c) is not Cell:
+        raise _err("cell2struct: CELLARRAY must be a cell array.")
+    dm = _int_arg(dim, "dimension") if dim is not None else 1
+    d = list(c.shape)
+    # (a dimension past the cell array's: refused rather than guessed)
+    if dm < 1 or dm > len(d):
+        raise _err("cell2struct: DIM must be a valid dimension of the cell array.")
+    if d[dm - 1] != len(names):
+        raise _err("cell2struct: number of FIELDS does not match dimension")
+    # the cells along dimension dm are one structure's fields; the structure array has
+    # the cell array's other dimensions (a single one as a column)
+    # (column-major strides: structure j's other subscripts, then field i along dm)
+    strides = [_prod(d[:k]) for k in range(len(d))]
+    other = [k for k in range(len(d)) if k != dm - 1]
+    rest = [d[k] for k in other]
+    items = []
+    for j in range(_prod(rest)):
+        base, q = 0, j
+        for k in other:
+            base += (q % d[k]) * strides[k]
+            q //= d[k]
+        items.append({names[i]: cp(c.a[base + i * strides[dm - 1]]) for i in range(len(names))})
+    shape = rest + [1] if len(rest) == 1 else rest
+    while len(shape) > 2 and shape[-1] == 1:
+        shape.pop()
+    return Struct(items, tuple(shape), names)
 
 
 @_bs("orderfields")
@@ -7418,9 +7437,17 @@ def cellfun_(nargout, f, *args):
             raise _err("cellfun: C must be a cell array.")
     shape = arrays[0].shape
     for a in arrays[1:]:
-        if len(a.a) != len(arrays[0].a):
+        if _size_key(a.shape) != _size_key(shape):
             raise _err("All of the input arguments must be of the same size and shape.")
     return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [a.a[k] for a in arrays], shape)
+
+
+def _size_key(d):
+    """a size without trailing singleton dimensions past the second, to compare sizes"""
+    d = [int(x) for x in d]
+    while len(d) > 2 and d[-1] == 1:
+        d.pop()
+    return tuple(d)
 
 
 def _element(a, k):
@@ -7446,7 +7473,7 @@ def arrayfun_(nargout, f, *args):
     fh = _fn_arg(f)
     shape = _dims(arrays[0])
     for a in arrays[1:]:
-        if _numel(a) != _numel(arrays[0]):
+        if _size_key(_dims(a)) != _size_key(shape):
             raise _err("All of the input arguments must be of the same size and shape.")
     return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [_element(a, k) for a in arrays], shape)
 
@@ -7455,12 +7482,17 @@ def arrayfun_(nargout, f, *args):
 def structfun_(nargout, f, s, *args):
     _, uniform, handler = _uniform_opts(args)
     fh = _fn_arg(f)
+    # (MATLAB's structfun takes one structure: a structure array is refused, not read
+    # at its first element)
+    if type(s) is not Struct or _numel(s) != 1:
+        raise _err("structfun: S must be a scalar structure.")
     vals = [s.a[0][n] for n in s.fields]
     r = _apply_each(nargout, fh, [], uniform, handler, lambda k: [vals[k]], (len(vals), 1))
     if not uniform:
-        out = r if nargout <= 1 else r[0]
-        st = _struct1({n: out.a[k] for k, n in enumerate(s.fields)})
-        return st
+        # (each output a structure with S's fields)
+        outs = [r] if nargout <= 1 else r
+        sts = [_struct1({n: o.a[k] for k, n in enumerate(s.fields)}) for o in outs]
+        return sts[0] if nargout <= 1 else sts
     return r
 
 
@@ -8427,13 +8459,24 @@ def orderfields_n(s, order=None):
     r = cp(s)
     if order is None:
         r.fields = sorted(r.fields)
-    elif type(order) is Struct:
-        r.fields = list(order.fields)
-    elif type(order) is Cell:
-        r.fields = [_text(e) for e in order.a]
+        return r
+    # (another structure's field order, every name once, or a permutation of the
+    # positions: anything else would drop or repeat fields, so it is refused)
+    if type(order) is Struct:
+        new = list(order.fields)
+        if sorted(new) != sorted(s.fields):
+            raise _err("orderfields: S1 and S2 do not have the same fields.")
+    elif type(order) in (Cell, StrArr):
+        new = [_text(e) for e in order.a] if type(order) is Cell else [str(e) for e in order.a]
+        if sorted(new) != sorted(s.fields):
+            raise _err("orderfields: the cell array must list each field of S1 exactly once.")
     else:
-        idx = [int(k) - 1 for k in _farr(order).reshape(-1)]
-        r.fields = [s.fields[k] for k in idx]
+        v = _farr(order).reshape(-1)
+        n = len(s.fields)
+        if len(v) != n or not all(k == _math.floor(k) and 1 <= k <= n for k in v) or len(set(int(k) for k in v)) != n:
+            raise _err("orderfields: the permutation vector must be a permutation of 1:%d." % n)
+        new = [s.fields[int(k) - 1] for k in v]
+    r.fields = new
     return r
 
 
