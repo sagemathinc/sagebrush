@@ -404,8 +404,10 @@ def _permutations(pool, r):
 
 
 def combinations(iterable, r):
-    pool = tuple(iterable)
+    # (r is converted before the pool is read, as CPython's arguments are;
+    # its sign is checked after, CORR-DBB-1)
     r = _ssize(r)
+    pool = tuple(iterable)
     if r < 0:
         raise ValueError("r must be non-negative")
     return _combinations(pool, r)
@@ -430,8 +432,10 @@ def _combinations(pool, r):
 
 
 def combinations_with_replacement(iterable, r):
-    pool = tuple(iterable)
+    # (r is converted before the pool is read, as CPython's arguments are;
+    # its sign is checked after, CORR-DBB-1)
     r = _ssize(r)
+    pool = tuple(iterable)
     if r < 0:
         raise ValueError("r must be non-negative")
     return _combinations_with_replacement(pool, r)
