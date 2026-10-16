@@ -339,3 +339,27 @@ test("checkSubmission: a host's check, against the board posted on the channel; 
   // (a board that isn't JSON, or two items with one id: no answers to it)
   assert.match((checkSubmission({ text: "graph TD; a-->b", name: "d.board.json", revision: "r7" }, m) as any).message, /has no questions/);
 });
+
+test("questions named as a plain object's inherited names (constructor, toString, __proto__): their notes and answers are their own (astra's CORR-299-1)", () => {
+  const text = '{"format": "sagebrush-board", "version": 1, "nodes": [' + ["constructor", "toString", "__proto__"].map((id) => `{"id": "${id}", "kind": "ask", "text": "Q", "input": "text", "required": true}`).join(", ") + "]}";
+  const d = cleanDoc(JSON.parse(text)), id = "8c6f0a5e-4d43-4b8e-9b0e-2f3c1a7d9e10";
+  const sub = (answers: string, notes: string) => JSON.parse(`{"sagebrush": "answers", "version": 1, "id": "${id}", "page": {"number": 1}, "answers": ${answers}, "notes": ${notes}}`);
+  // (none answered: refused, not a crash)
+  assert.equal(submissionProblem(d, sub("{}", "{}")), 'the required question "constructor" is not answered');
+  assert.equal((checkSubmission({ text }, sub("{}", "{}")) as any).message, 'the required question "constructor" is not answered');
+  // (each answered, in words or with an answer: taken)
+  const all = sub('{"toString": "a"}', '{"constructor": "in words", "__proto__": "also in words"}');
+  assert.equal(submissionProblem(d, all), null);
+  const r = checkSubmission({ text }, all) as any;
+  assert.equal(r.ok, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(r.submission.notes, "__proto__"), true);
+  // (the command line: refused with the same words, and applied)
+  const f = file("inherited.board.json", text), before = readFileSync(f, "utf8");
+  let c = run(["board", "answers", f, "--apply", file("inh-1.json", sub("{}", '{"constructor": "  "}'))]);
+  assert.equal(c.status, 1, c.stderr);
+  assert.match(c.stderr, /the required question "constructor" is not answered/);
+  assert.equal(readFileSync(f, "utf8"), before);
+  c = run(["board", "answers", f, "--apply", file("inh-2.json", all)]);
+  assert.equal(c.status, 0, c.stderr);
+  assert.match(c.stdout, /3 questions, 3 answered\n/);
+});
