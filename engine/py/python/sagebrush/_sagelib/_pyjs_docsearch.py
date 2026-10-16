@@ -14,9 +14,13 @@ method of the Sage library, its signature and its docstring.
     sagebrush -m _pyjs_docsearch --index the index as JSON (sagebrush.space and
                                          the MCP server's search_docs tool)
 
-Every word of the query must occur in the name, the summary or the docstring;
-matches in the name count most.  The same ranking is in web/docsearch.ts and
-in the MCP server (sagebrush/mcp_server.py), which read the JSON index.
+Every word of the query must occur in the name (or an alias), the summary
+or the docstring; matches in the name count most.  The same ranking is in
+web/index.html (docScore), and the MCP server's search_docs
+(sagebrush/mcp_server.py) uses this module, both reading the JSON index.
+A hit shows as describe() writes it, for agents: the call form and status,
+the summary, the first example, what differs from upstream, and what to use
+instead; --json gives each entry whole.
 """
 
 import re as _re
@@ -134,8 +138,10 @@ def _words(s):
 def score(entry, words, phrase):
     """The rank of an entry for the query words (0: no match).  Mirrored in
     web/docsearch.ts and sagebrush/mcp_server.py."""
-    name = entry["name"].lower()
-    name_words = set(_words(entry["name"]))
+    # (a catalog entry's aliases are names of it too: catalog/SCHEMA.md)
+    names = [entry["name"]] + list(entry.get("aliases") or [])
+    name = " ".join(names).lower()
+    name_words = set(w for n in names for w in _words(n))
     summary = entry["summary"].lower()
     doc = entry["doc"].lower()
     total = 0
@@ -150,8 +156,8 @@ def score(entry, words, phrase):
             total += 1
         else:
             return 0
-    last = name.split(".")[-1]
-    if phrase == last or phrase.replace(" ", "_") == last:
+    lasts = [n.lower().split(".")[-1] for n in names]
+    if phrase in lasts or phrase.replace(" ", "_") in lasts:
         total += 20
     if entry["open_problem"] and "open" in words:
         total += 5
@@ -171,6 +177,58 @@ def search(query, limit=20, mode=None):
     return hits[:limit]
 
 
+# (each mode's prompt and continuation, for an example's code)
+PROMPTS = {None: ("sage: ", "....:"), "sage": ("sage: ", "....:"), "python": (">>> ", "..."), "matlab": (">> ", None), "magma": ("> ", None)}
+
+
+def prompted(code, first=">>> ", cont="..."):
+    """code as typed at a prompt: `first` before each statement, `cont` and a
+    space before the lines of a block (and a decorator's def), and a `cont`
+    line ending it; a mode without continuations (cont None): `first` before
+    every line"""
+    if cont is None:
+        return "\n".join(first + line for line in code.split("\n"))
+    out, block, prev = [], False, ""
+    for line in code.split("\n"):
+        indented = line.startswith((" ", "\t"))
+        if block and not indented and not prev.lstrip().startswith("@"):
+            out.append(cont)
+            block = False
+        c = block and (indented or prev.lstrip().startswith("@"))
+        out.append((cont + " " if c else first) + line)
+        if line.startswith("@") or line.rstrip().endswith(":") or c:
+            block = True
+        prev = line
+    if block:
+        out.append(cont)
+    return "\n".join(out)
+
+
+def describe(e, mode=None):
+    """An entry as an agent reads it: the call form with its status, the
+    summary, and for a catalog entry its first example (at the mode's
+    prompt, then what it prints), what differs from upstream, and what to
+    use instead"""
+    forms = (e.get("signature") or "").split("\n")
+    head = e["name"] + (forms[0] or ("" if e["kind"] in ("class", "constant", "module", "keyword") else "()"))
+    tags = ("    [%s]" % mode if mode else "") + ("    [open problem]" if e.get("open_problem") else "")
+    if e.get("status") and e["status"] != "full":
+        tags += "    [%s]" % e["status"]
+    out = [head + tags]
+    out.extend("    also: " + e["name"] + f for f in forms[1:] if f)
+    s = e["summary"]
+    out.append("    " + (s if len(s) <= 150 else s[:147] + "..."))
+    exs = e.get("examples")
+    if isinstance(exs, list) and exs:
+        first, cont = PROMPTS.get(mode, PROMPTS[None])
+        out.extend("    " + ln for ln in prompted(exs[0]["code"], first, cont).split("\n"))
+        out.extend("    " + ln for ln in exs[0]["expected"].rstrip("\n").split("\n") if exs[0]["expected"])
+    out.extend("    differs: " + d for d in e.get("differs") or [])
+    if e.get("alternative"):
+        out.append("    instead: " + e["alternative"])
+    return "\n".join(out)
+
+
 def search_doc(query, limit=20, mode=None):
     """Search the documentation of Sagebrush's functions: every word of the
     query must occur in the name or the docstring.  obj? then shows one in
@@ -188,11 +246,7 @@ def search_doc(query, limit=20, mode=None):
         print("no function's documentation contains all of: %s" % query)
         return
     for _, e in hits:
-        head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
-        tag = "    [%s]" % mode if mode else ""
-        print(head + tag + ("    [open problem]" if e["open_problem"] else ""))
-        s = e["summary"]
-        print("    " + (s if len(s) <= 150 else s[:147] + "..."))
+        print(describe(e, mode))
 
 
 def main(argv):

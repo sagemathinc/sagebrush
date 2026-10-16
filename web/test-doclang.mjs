@@ -124,6 +124,16 @@ try {
   await choose("matlab");
   await sleep(300);
   check(await mode() === "matlab", "Yes changes it");
+
+  // a catalog entry's examples are its own (catalog/SCHEMA.md), inserted as they are
+  answer = true;
+  await choose("python");
+  await search("linspace");
+  await ev(`[...document.querySelectorAll("#docresults li[role=option]")].find((li) => li.textContent.startsWith("numpy.linspace(")).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await until(`document.querySelector("#docdlg").open`);
+  await ev(`document.querySelector("#docinsert").click()`);
+  await until(`window.sagebrush.notebook.cells().some((c) => c.ta.value === "np.linspace(0, 1, 5)")`).catch(() => {});
+  check(await ev(`window.sagebrush.notebook.cells().some((c) => c.ta.value === "np.linspace(0, 1, 5)")`), "a Python catalog entry's example is inserted into a Python notebook");
   await ev(`(() => { const i = document.querySelector("#docsearch"); i.value = ""; return 1; })()`);
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));
 } finally {

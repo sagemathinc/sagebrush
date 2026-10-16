@@ -21,10 +21,20 @@ test("sagebrush --search --mode searches that language's index; the default is u
   assert.match(matlab.stdout, /^linsolve\(\)    \[matlab\]/);
   const sage = run("--search", "selmer", "rank");
   assert.match(sage.stdout, /^EllipticCurve_rational_field\.selmer_rank\(\)\n/);
-  assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve\(a, b\)    \[python\]\n/);
+  // (a catalog entry, for agents: call form and status, summary, first example, differs: catalog/SCHEMA.md)
+  const py = run("--search", "linear", "system", "--mode", "python").stdout;
+  assert.match(py, /^numpy\.linalg\.solve\(a, b\)    \[python\]    \[partial\]\n    The solution x of the linear system a x = b\.\n    >>> np\.linalg\.solve\(\[\[3, 1\], \[1, 2\]\], \[9, 8\]\)\n    array\(\[2\., 3\.\]\)\n    differs: Not yet reviewed/);
+  const pyj = JSON.parse(run("--search", "linear", "system", "--mode", "python", "--json").stdout);
+  assert.equal(pyj[0].name, "numpy.linalg.solve");
+  for (const k of ["signature", "summary", "examples", "differs", "status", "upstream_version"]) assert.ok(k in pyj[0], k);
+  // (a block's code at the prompt, its continuation lines after ...)
+  assert.match(run("--search", "lru_cache", "--mode", "python").stdout, /\n    >>> @functools\.lru_cache\(maxsize=None\)\n    \.\.\. def fib\(n\):\n/);
   const json = JSON.parse(run("--search", "unit", "group", "--mode", "magma", "--json").stdout);
   assert.equal(json[0].name, "UnitGroup");
   assert.equal(json[0].language, "magma");
+  // (an alias is a name of its entry: found and ranked by it, catalog/SCHEMA.md)
+  const alias = run("-c", "import _pyjs_docsearch as d\ne = {'name': 'diff', 'aliases': ['derivative'], 'summary': 'S.', 'doc': '', 'open_problem': False}\nprint(d.score(e, ['derivative'], 'derivative'), d.score(dict(e, aliases=[]), ['derivative'], 'derivative'))").stdout.trim();
+  assert.equal(alias, "30 0");
   const bad = run("--search", "x", "--mode", "fortran");
   assert.equal(bad.status, 2);
   assert.match(bad.stdout, /--mode must be one of sage, python, magma, matlab/);

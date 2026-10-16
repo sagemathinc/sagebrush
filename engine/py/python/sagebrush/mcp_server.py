@@ -104,15 +104,25 @@ def _docsearch():
     return mod
 
 
-def search_docs(query, limit=10, full=False):
+def search_docs(query, limit=10, full=False, as_json=False):
     hits = _docsearch().search(query, limit)
+    if as_json:
+        # (each entry whole, for an agent to read: catalog/SCHEMA.md's fields
+        # where the entry is a catalog's)
+        import json
+        return json.dumps([dict(e, score=s) for s, e in hits], indent=1)
     if not hits:
         return "No function's documentation has all of the words: %s" % query
     out = []
+    ds = _docsearch()
     for _, e in hits:
-        head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
-        out.append(head + ("  [open problem]" if e["open_problem"] else ""))
-        out.append(("    " + e["doc"].replace("\n", "\n    ")) if full else "    " + e["summary"])
+        if full:
+            head = e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()"))
+            out.append(head + ("  [open problem]" if e["open_problem"] else ""))
+            out.append("    " + e["doc"].replace("\n", "\n    "))
+        else:
+            # (as `sagebrush --search` shows it: lib/_pyjs_docsearch.py describe)
+            out.append(ds.describe(e))
     return "\n".join(out)
 
 
@@ -163,6 +173,7 @@ TOOLS = [
                 "query": {"type": "string", "description": "words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\""},
                 "limit": {"type": "number", "description": "at most this many results (default 10)"},
                 "full": {"type": "boolean", "description": "include each result's whole docstring (default false)"},
+                "json": {"type": "boolean", "description": "return the matching entries whole, as JSON: signature, summary, examples with their expected output, what differs from upstream, status (default false)"},
             },
             "required": ["query"],
         },
@@ -274,7 +285,7 @@ class Server:
         if name == "guide":
             return [_text(GUIDE)], False
         if name == "search_docs":
-            return [_text(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full"))))], False
+            return [_text(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full")), bool(args.get("json"))))], False
         if name == "factor":
             n = str(args.get("n", "")).strip()
             if not n:

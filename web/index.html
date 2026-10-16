@@ -1636,7 +1636,9 @@ const docIndexes = {};
 function loadDocIndex(lang = nb.mode) {
   if (!DOC_INDEX[lang]) return Promise.resolve(null);
   docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => d.map((e) => ({
-    ...e, lang, _name: e.name.toLowerCase(), _words: new Set(docWords(e.name)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
+    // (a catalog entry's aliases are names of it too: catalog/SCHEMA.md)
+    ...e, lang, _name: [e.name, ...(e.aliases ?? [])].join(" ").toLowerCase(), _words: new Set([e.name, ...(e.aliases ?? [])].flatMap(docWords)),
+    _lasts: [e.name, ...(e.aliases ?? [])].map((n) => n.toLowerCase().split(".").at(-1)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
     // (a count in the older indexes; the catalog's entries list their examples, catalog/SCHEMA.md)
     _nex: Array.isArray(e.examples) ? e.examples.length : e.examples || 0,
   })));
@@ -1652,8 +1654,7 @@ function docScore(e, words, phrase) {
     else if (e._doc.includes(w)) total += 1;
     else return 0;
   }
-  const last = e._name.split(".").at(-1);
-  if (phrase === last || phrase.replaceAll(" ", "_") === last) total += 20;
+  if (e._lasts.includes(phrase) || e._lasts.includes(phrase.replaceAll(" ", "_"))) total += 20;
   if (e.open_problem && words.includes("open")) total += 5;
   return total;
 }
@@ -1759,7 +1760,9 @@ function docExamples(doc, lang) {
 }
 $("#docclose").onclick = () => docDlg.close();
 $("#docinsert").onclick = () => {
-  const code = docExamples(docOpen?.doc ?? "", docOpen?.lang);
+  // (a catalog entry's examples are its own: catalog/SCHEMA.md; the older
+  // indexes' are in the docstring)
+  const code = Array.isArray(docOpen?.examples) ? docOpen.examples.map((x) => x.code).join("\n\n") : docExamples(docOpen?.doc ?? "", docOpen?.lang);
   docDlg.close();
   if (!code || docOpen.lang !== nb.mode) return;
   const cell = nb.addCell(code, null, true);
