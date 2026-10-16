@@ -171,3 +171,8 @@ D := [K|]; Append(~D, 5); Parent(D[1]);
 D2 := [K|]; Include(~D2, 1/2); D2; Parent(D2[1]);
 D3 := [K|]; D3[1] := 1/11;
 I := {@ K | @}; Include(~I, 4); Parent(I[1]);
+// a copy keeps the element standing for its universe (CORR-47D-1)
+S := [<2/3,"q">]; S[1] := <4,"r">; T := S; T[1] := <1/3,"s">; S; T;
+S2 := [<2/7,"q">]; S2[1] := <5,"r">; T2 := Append(S2, <6,"s">); T2[1] := <1/7,"t">; T2;
+S3 := [<3/5,"q">]; S3[1] := <2,"r">; T3 := Include(S3, <9,"z">); T3[1] := <1/5,"t">; T3;
+S4 := [<3/5,"q">]; S4[1] := <2,"r">; T4 := Reverse(S4); T4[1] := <1/5,"t">; T4;
