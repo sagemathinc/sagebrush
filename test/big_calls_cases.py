@@ -131,3 +131,4 @@ show('__call__ small', lambda: (star.__call__(1, 2), C().m.__call__(1), max.__ca
 # unpack_from's required arguments come first (CORR-D6E-1)
 show('unpack_from no format', lambda: type_of(lambda: struct.unpack_from(buffer=b4)))
 show('unpack_from no format, offset', lambda: type_of(lambda: struct.unpack_from(buffer=b4, offset=0)))
+show('hypot', lambda: (round(math.hypot(*[3.0, 4.0] * (N // 2)) ** 2), round(math.hypot(*[1.0] * 2049) ** 2), math.hypot(3, 4), type_of(lambda: math.hypot(*xs, x=1))))
