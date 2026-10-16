@@ -1831,7 +1831,8 @@ test("asin, acos, atanh and the reciprocal inverses on the real axis outside the
   const { execFileSync } = require("node:child_process");
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
-  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).'; imag(z(:)).']); fprintf('\\n')`;
+  // (+ 0 turns a negative zero into 0, as MATLAB's display shows it)
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).' + 0; imag(z(:)).' + 0]); fprintf('\\n')`;
   assert.deepEqual(run([
     // (the functions' own examples: real elements, in a real or a complex array)
     z("acos([2 -3 1+2i])"), z("asin([2 -3 1+2i])"), z("atanh([2 -3 1+2i])"),
@@ -1840,6 +1841,9 @@ test("asin, acos, atanh and the reciprocal inverses on the real axis outside the
     z("[asec(0.5) acsc(0.5) asec(-0.5)]"), z("asech([2 -3 1+2i])"), z("asech(single([2 -3]))"),
     // (atanh's poles in a complex array, and acoth's example; atan's poles)
     z("acoth([-pi/2 -1 0 1/2 1 pi/2])"), z("acoth([1 0.5])"), z("[atan(1i) atan(-1i) acot(1i)]"),
+    // (a complex zero as a real zero: acsch's numeric example, and each reciprocal inverse at complex(0, 0))
+    z("acsch([-2i 0 2i/sqrt(3) 1/2 1i 3])"),
+    z("[acsch(complex(0, 0)) acot(complex(0, 0)) acoth(complex(0, 0)) asech(complex(0, 0))]"),
   ].join("\n")), [
     "0.0000+1.3170i 3.1416-1.7627i 1.1437-1.5286i",
     "1.5708-1.3170i -1.5708+1.7627i 0.4271+1.5286i",
@@ -1852,5 +1856,7 @@ test("asin, acos, atanh and the reciprocal inverses on the real axis outside the
     "-0.7525+0.0000i -Inf+0.0000i 0.0000+1.5708i 0.5493+1.5708i Inf+0.0000i 0.7525+0.0000i",
     "Inf+0.0000i 0.5493+1.5708i",
     "0.0000+Infi 0.0000-Infi 0.0000-Infi",
+    "0.0000+0.5236i Inf+0.0000i 0.0000-1.0472i 1.4436+0.0000i 0.0000-1.5708i 0.3275+0.0000i",
+    "Inf+0.0000i 1.5708+0.0000i 0.0000+1.5708i Inf+0.0000i",
   ]);
 });

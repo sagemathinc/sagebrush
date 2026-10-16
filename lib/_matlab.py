@@ -4503,6 +4503,12 @@ def _recip_inverse(name, base):
             # function on the other side of its branch cut from the real -1/3)
             R = R.copy()
             R.imag = np.where(R.imag == 0, 0.0, R.imag)
+            # (a complex zero's reciprocal as a real zero's, ±Inf + 0i, not Inf + NaNi: acsch of
+            # complex(0, 0) is Inf, as its page's numeric example shows)
+            zero = (A.real == 0) & (A.imag == 0)
+            if np.any(zero):
+                R.real = np.where(zero, np.copysign(np.inf, A.real), R.real)
+                R.imag = np.where(zero, 0.0, R.imag)
         return _B[base].f(nargout, _finish(R, "single" if cls == "single" else "double"))
     _B[name] = Builtin(g, name)
 
