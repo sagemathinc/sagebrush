@@ -2063,7 +2063,7 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     "n = regexp('01/11/2000  20-02-2020', ['(?<month>\\d+)/(?<day>\\d+)/(?<year>\\d+)|' '(?<day>\\d+)-(?<month>\\d+)-(?<year>\\d+)'], 'names');",
     "disp(strjoin(fieldnames(n)', ',')); disp([n(1).month ' ' n(1).day ' ' n(2).month ' ' n(2).day ' ' n(2).year])",
     // (comments don't count as groups: (?#...), and # lines with freespacing or (?x))
-    "n = regexp('a', '(?#()(?<x>a)', 'names'); m = regexp('a', sprintf('# (fake\\n(?<x>a)'), 'names', 'freespacing'); k = regexp('a', sprintf('(?x)# (fake\\n(?<x>a)'), 'names'); disp([n.x m.x k.x])",
+    "n = regexp('a', '(?#()(?<x>a)', 'names'); m = regexp('a', sprintf('# (fake\\n(?<x>a)'), 'names', 'freespacing'); k = regexp('a', sprintf('(?x)# (fake\\n(?<x>a)'), 'names'); j = regexp('a', sprintf('(?ix)# (fake\\n(?<x>a)'), 'names', 'literalspacing'); disp([n.x m.x k.x j.x])",
     // (regexprep: dynamic expressions and options it doesn't have refused, not ignored)
     tryIt("regexprep('here. there', '(^|\\.)\\s*.', '${upper($0)}')"), tryIt("regexprep('May', 'M(\\w+)y', 'April', 'preservecase')"),
     "disp(regexprep('aBa', 'b', 'x', 'ignorecase'))",
@@ -2074,6 +2074,6 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
   ].join("\n")), ["refused", "refused", "refused", "refused", "refused",
     "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740992",
     "127 255 32767 65535 2147483647 4294967295", "refused", "single",
-    "[1 1 0 1 4]", "refused", "refused", "month,day,year", "01 11 02 20 2020", "aaa",
+    "[1 1 0 1 4]", "refused", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
     "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
 });
