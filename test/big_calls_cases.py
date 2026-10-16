@@ -108,3 +108,14 @@ show('StringIO overwrite', lambda: (s4.write('XY'), s4.seek(0, 2), s4.write('Z')
 for n in (2046, 2047, 2048, 2049):
     ys = list(range(n))
     show('edge %d' % n, lambda: (star(*ys), len(struct.pack('%dB' % n, *[y % 256 for y in ys])), max(*ys), round(math.hypot(*[1.0] * n) ** 2), C().m(*ys), type_of(lambda: two(*ys)), type_of(lambda: len(*ys))))
+
+# unpack_from's keywords bound by its signature; StringIO(None) is empty (CORR-A78-1, -2)
+b4 = b'\x01\x00\x00\x00\x02\x00\x00\x00'
+for label, f in [('pos', lambda: struct.unpack_from('<i', b4, 4)), ('kw', lambda: struct.unpack_from('<i', b4, offset=4)),
+                 ('buffer kw', lambda: struct.unpack_from('<i', buffer=b4)), ('extra', lambda: struct.unpack_from('<i', b4, 0, 1)),
+                 ('extra kw', lambda: struct.unpack_from('<i', b4, 0, 1, offset=0)), ('dup', lambda: struct.unpack_from('<i', b4, 0, offset=0)),
+                 ('unknown', lambda: struct.unpack_from('<i', b4, bad=0)), ('format kw', lambda: struct.unpack_from(format='<i', buffer=b4)),
+                 ('missing', lambda: struct.unpack_from('<i')), ('missing kw', lambda: struct.unpack_from('<i', offset=0))]:
+    show('unpack_from ' + label, lambda: type_of(f))
+show('StringIO(None)', lambda: (io.StringIO(None).getvalue(), io.StringIO().getvalue(), io.StringIO('ab').read()))
+show('StringIO(5)', lambda: type_of(lambda: io.StringIO(5)))
