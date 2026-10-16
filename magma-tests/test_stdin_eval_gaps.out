@@ -89,4 +89,21 @@ Id(G)
 3
 67
 12
+1
+[ 1, 1, 1 ]
+1
+RngIntResElt
+1
+[ 2, 2 ]
+RngIntResElt
+1
+3
+ModTupFldElt
+FldRatElt
+FldRatElt
+(1/2   1)
+(0 0)
+(2 4)
+RngIntElt
+(1/2 1/4)
 end

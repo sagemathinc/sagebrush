@@ -11,7 +11,8 @@
       }
     ],
     "differs": [
-      "Vectors over rings other than the integers and the rationals are refused."
+      "Vectors over rings other than the integers and the rationals are refused.",
+      "Dividing a vector over the integers, and assigning an entry (v[i] := x), are refused."
     ],
     "status": "partial",
     "see_also": [
@@ -34,7 +35,8 @@
       }
     ],
     "differs": [
-      "Vectors over rings other than the integers and the rationals are refused."
+      "Vectors over rings other than the integers and the rationals are refused.",
+      "Dividing a vector over the integers, and assigning an entry (v[i] := x), are refused."
     ],
     "status": "partial",
     "upstream_version": "Magma 2.18",

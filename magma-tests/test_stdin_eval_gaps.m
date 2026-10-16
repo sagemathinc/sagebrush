@@ -21,4 +21,10 @@ Intseq(6, 2, 5); Intseq(6, 2, 2); Intseq(0, 7, 2);
 G := Sym(4); G; #G; Type(G); p := G!(1, 3, 2, 4); p; Type(p); [i^p : i in [1..4]];
 q := G!(1, 2)(3, 4); q; p * q; q * p; p^2; p^-1; p^4; p^q; Order(p); Order(q); Sign(p); Sign(q); Identity(G);
 G![4, 3, 2, 1]; Order(G![2, 3, 1, 4]); &+[ Order(x) : x in Sym(4) ]; #{ x : x in Sym(4) | Sign(x) eq 1 };
+// collections of residues take their ring; vectors keep their field (astra2's findings)
+R := Integers(6); S := {R | 1, 7}; #S; T := [R | 1, 7, -5]; T; T[2]; Type(T[2]); #{R!1, 1, 13}; [R!2, 8]; Type([R!2, 8][2]);
+Integers(6)!(Integers(12)!7); Integers(4)!(Integers(8)!7);
+Type(Vector([Rationals() | 1, 2])); w := Vector(Rationals(), [1, 2]); Type(w[1]); Type((w - w)[1]); w / 2; Vector([Rationals() | 1, 2]) - w;
+u := Vector(Integers(), [1, 2]); 2/1 * u; Type((2/1 * u)[1]);
+Solution(Matrix(Rationals(), 2, 2, [2, 0, 0, 4]), Vector(Rationals(), [1, 1]));
 "end";

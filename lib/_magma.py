@@ -644,6 +644,8 @@ def _into_universe(items, universe, kind):
     field; a finite field's elements into the integers (those of the prime
     field) or the rationals (none), as Magma does (CORR-A6D-1).  Other
     universes keep their items as before."""
+    if isinstance(universe, _MResRing) or (universe is None and any(isinstance(x, _MResElt) for x in items)):
+        return _res_items(items, universe, kind)
     ff = isinstance(universe, _MFinField)
     if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
         # (the rationals' elements are rationals, the integral ones too)
@@ -666,8 +668,36 @@ def _into_universe(items, universe, kind):
     return out
 
 
+def _res_items(items, R, kind):
+    """A collection's items in Integers(m): its declared universe R, or,
+    with none, the ring of the residues among them, into which integers
+    (and rationals with a unit denominator) are coerced, as Magma does
+    ({R!1, 7} is one element, CORR-DFC-1).  Residues of different moduli,
+    or other values among residues, are refused in words."""
+    where = _UNIVERSE_FAIL[kind]
+    if R is None:
+        rings = {x.R for x in items if isinstance(x, _MResElt)}
+        if len(rings) > 1:
+            raise MagmaError("a collection of residues modulo different integers is not supported yet", where)
+        R = rings.pop()
+    out = []
+    for k, x in enumerate(items):
+        if x is _UNDEF:
+            out.append(x)
+            continue
+        if not (isinstance(x, (_MResElt, _Fraction)) or (isinstance(x, int) and not isinstance(x, bool))):
+            raise MagmaError("a collection of residues and other values is not supported yet", where)
+        try:
+            out.append(R._magma_coerce(x))
+        except MagmaError:
+            raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), where)
+    return out
+
+
 def _seq(items, universe=None):
     items = list(items)
+    if universe is None and any(isinstance(x, _MResElt) for x in items):
+        items = _res_items(items, None, "seq")
     if universe is None:
         _ff_universe(items, "[ ... ]")
     else:
@@ -1101,6 +1131,11 @@ def _coerce_struct(x, u):
     if isinstance(u, _MFinField):
         y = _ff_into(u, x)
         return _NOCOERCE if y is None else y
+    if isinstance(u, _MResRing):
+        try:
+            return u._magma_coerce(x)
+        except MagmaError:
+            return _NOCOERCE
     if (u is _ZZ or u is _QQ) and _is_ff(x):
         W = _ffwrap(x.parent())
         if u is _ZZ and W.n == 1:
@@ -2650,6 +2685,9 @@ def _struct_eq(a, b, op, pos):
 
 
 def _eq(a, b, pos=None, op="eq"):
+    for x, y in ((a, b), (b, a)):
+        if isinstance(x, (_MVector, _MPerm)):
+            return x._magma_eq(y, op)
     if isinstance(a, _MResElt) or isinstance(b, _MResElt):
         # (a residue meets its own ring's residues and the integers)
         x, y = (a, b) if isinstance(a, _MResElt) else (b, a)
@@ -4050,8 +4088,9 @@ class _MResRing:
 
     def _magma_coerce(self, x):
         if isinstance(x, _MResElt):
-            if x.R == self:
-                return x
+            # (from Z/nZ to Z/mZ when m divides n, as Magma's)
+            if x.R.m % self.m == 0:
+                return _MResElt(x.v, self)
             raise MagmaError("Illegal coercion\nLHS: RngIntRes\nRHS: RngIntResElt", "'!'", True)
         if isinstance(x, bool):
             raise MagmaError("Illegal coercion\nLHS: RngIntRes\nRHS: BoolElt", "'!'", True)
@@ -5139,6 +5178,8 @@ def Intseq(n, b=10, s=None):
         raise MagmaError("Argument 1 (%d) should be >= 0" % n, "'Intseq'")
     d = list(_sa.digits(n, b))
     if s is not None:
+        if isinstance(s, bool) or not isinstance(s, int):
+            raise _bad_types("Intseq", [n, b, s])
         if s < 0:
             raise MagmaError("Argument 3 (%d) is not small and non-negative" % s, "'Intseq'", True)
         if s > _COLLECT_MAX:
@@ -5719,8 +5760,11 @@ def _subsets(S, k):
     items = S.ordered()
     n = len(items)
     count = 2 ** n if k is None else (_math.comb(n, k) if k <= n else 0)
-    if count > _COLLECT_MAX:
-        raise MagmaError("a set of more than %d subsets is not supported yet" % _COLLECT_MAX, "'Subsets'")
+    # (and the elements copied into them: n * 2^(n-1) in all subsets,
+    # k * C(n, k) in those of k elements, HARD-DFC-2)
+    cells = (n * 2 ** (n - 1) if n else 0) if k is None else k * count
+    if count > _COLLECT_MAX or cells > _COLLECT_MAX:
+        raise MagmaError("a set of subsets holding more than %d elements in all is not supported yet" % _COLLECT_MAX, "'Subsets'")
     sizes = range(n + 1) if k is None else [k]
     return MSet(MSet(c) for r in sizes for c in _itertools.combinations(items, r))
 
@@ -6520,8 +6564,13 @@ class _MVector(list):
     the right, v * A, as Magma does."""
 
     def __init__(self, items=(), base=None):
-        list.__init__(self, items)
-        self._base = base if base is not None else (_sa.QQ if any(isinstance(x, _Fraction) and not isinstance(x, int) for x in self) else _sa.ZZ)
+        items = list(items)
+        if base is None:
+            base = _sa.QQ if any(isinstance(x, _Fraction) and not isinstance(x, int) for x in items) else _sa.ZZ
+        # (a rational vector's entries are rationals, the integral ones too:
+        # FldRatElt, as Magma's; CORR-DFC-2)
+        list.__init__(self, [_qelt(x) if base is _sa.QQ else x for x in items])
+        self._base = base
 
     def _magma_index(self, i):
         _check_index(len(self), i)
@@ -6534,15 +6583,30 @@ class _MVector(list):
         raise _bad_types("#", [self])
 
     def __repr__(self):
-        cells = [repr(x) for x in self]
+        cells = [_inline(x) for x in self]
         w = max(len(c) for c in cells) if cells else 0
         return "(" + " ".join(c.rjust(w) for c in cells) + ")"
 
     def _with(self, o, op, name):
-        if not isinstance(o, _MVector) or len(o) != len(self):
+        # (vectors of one length over one ring: a Z-vector and a Q-vector
+        # don't meet, as Magma's, CORR-DFC-3)
+        if not isinstance(o, _MVector) or len(o) != len(self) or o._base is not self._base:
             raise _bad_types(name, [self, o])
-        base = _sa.QQ if _sa.QQ in (self._base, o._base) else _sa.ZZ
-        return _MVector((_m_num(op(a, b)) for a, b in zip(self, o)), base)
+        return _MVector((op(a, b) for a, b in zip(self, o)), self._base)
+
+    def _magma_eq(self, o, op):
+        if not isinstance(o, _MVector) or o._base is not self._base:
+            raise _bad_types(op, [self, o])
+        if len(o) != len(self):
+            raise MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % (_ext_type(self), _ext_type(o)), "'%s'" % op, True)
+        return all(a == b for a, b in zip(self, o))
+
+    def __truediv__(self, o):
+        if self._base is not _sa.QQ or isinstance(o, bool) or not isinstance(o, (int, _Fraction)):
+            raise MagmaError("dividing a vector over the integers, or by this, is not supported yet", "'/'", True)
+        if o == 0:
+            raise MagmaError("Division by zero", "'/'", True)
+        return _MVector((a / o for a in self), self._base)
 
     def __add__(self, o):
         return self._with(o, lambda a, b: a + b, "+")
@@ -6555,14 +6619,18 @@ class _MVector(list):
 
     def __mul__(self, o):
         if isinstance(o, _smat.Matrix):
-            # v * A: the row vector times the matrix
+            # v * A: the row vector times the matrix, over one ring (CORR-DFC-3)
+            if o._base is not self._base:
+                raise MagmaError("Arguments have incompatible coefficient rings", "'*'", True)
             if o.nrows() != len(self):
                 raise _bad_types("*", [self, o])
-            base = _sa.QQ if _sa.QQ in (self._base, o._base) else _sa.ZZ
-            return _MVector((_m_num(sum((a * r[j] for a, r in zip(self, o._rows)), 0)) for j in range(o.ncols())), base)
+            return _MVector((sum((a * r[j] for a, r in zip(self, o._rows)), 0) for j in range(o.ncols())), self._base)
         if isinstance(o, (int, _Fraction)) and not isinstance(o, bool):
-            base = self._base if isinstance(o, int) else _sa.QQ
-            return _MVector((_m_num(a * o) for a in self), base)
+            # (a rational scalar times an integral vector only when it is
+            # an integer, as Magma's)
+            if self._base is _sa.ZZ and _Fraction(o).denominator != 1:
+                raise MagmaError("Arguments are not compatible\nArgument types given: FldRatElt, %s" % _ext_type(self), "'*'", True)
+            return _MVector((a * (int(o) if self._base is _sa.ZZ else o) for a in self), self._base)
         raise _bad_types("*", [self, o])
 
     def __rmul__(self, o):
@@ -6579,6 +6647,15 @@ class _MVector(list):
     __hash__ = None
 
 
+def _vector_items(Q):
+    """Q's elements, its size admitted first: a lazy range is never
+    expanded past the collection bound (HARD-DFC-1)."""
+    n = Q.size() if isinstance(Q, MRange) else len(Q)
+    if n > _COLLECT_MAX:
+        raise MagmaError("a vector of more than %d entries is not supported yet" % _COLLECT_MAX, "'Vector'")
+    return list(Q)
+
+
 def _vector_base(R):
     if R is _ZZ:
         return _sa.ZZ
@@ -6591,34 +6668,50 @@ def _vector_base(R):
 def _vector_seq(Q):
     """A vector of the elements of Q, over their universe (the integers, or
     the rationals with a rational among them)."""
-    items = list(Q)
+    items = _vector_items(Q)
     if any(isinstance(x, bool) or not isinstance(x, (int, _Fraction)) for x in items):
         raise MagmaError("Vector of these elements is not supported yet: only integers and rationals", "'Vector'")
     if not items:
         raise MagmaError("Vector of an empty sequence is not supported yet", "'Vector'")
-    return _MVector((_m_num(x) for x in items))
+    # (over the sequence's universe: the rationals when declared, inferred,
+    # or holding a rational, CORR-DFC-2)
+    q = getattr(Q, "universe", None) is _QQ or getattr(Q, "_inf", None) is _QQ or \
+        any(isinstance(x, _Fraction) and not isinstance(x, int) for x in items)
+    return _MVector(items, _sa.QQ if q else _sa.ZZ)
 
 
 @_signature("Vector", "Rng", "SeqEnum", ret="ModTupRngElt")
 def _vector_ring(R, Q):
     """A vector over R (the integers or the rationals) of the elements of Q."""
     base = _vector_base(R)
-    items = list(Q)
+    items = _vector_items(Q)
     out = []
     for x in items:
         y = _coerce_struct(x, R)
         if y is _NOCOERCE or y is None:
             raise MagmaError("Vector: an element can't be coerced into the ring", "'Vector'")
-        out.append(_m_num(y))
+        out.append(y)
     return _MVector(out, base)
+
+
+# Solution's exact elimination: at most this many entry operations (about
+# a 58 by 58 system; its rational entries grow as it goes)
+_SOLVE_WORK = 2 * 10 ** 5
 
 
 @_signature("Solution", "MtrxS", "ModTupRngElt", ret="ModTupRngElt")
 def _solution(A, w):
     """The vector v with v * A = w: the unique solution, over A's ring."""
     m, n = A.nrows(), A.ncols()
+    if A._base is not w._base:
+        raise MagmaError("Arguments have incompatible coefficient rings", "'Solution'", True)
     if len(w) != n:
         raise _bad_types("Solution", [A, w])
+    # (exact elimination takes about m * n * min(m, n) rational operations,
+    # whose entries grow: admitted before the system is copied, HARD-DFC-3)
+    if m * n * min(m, n) > _SOLVE_WORK:
+        raise MagmaError("Solution of a system of more than %d (rows times columns times the smaller) steps is not supported yet"
+                         % _SOLVE_WORK, "'Solution'")
     # the system sum_i v_i A[i][j] = w_j: rows are the equations (one for
     # each column j), columns the unknowns v_i, then the right-hand side
     rows = [[_Fraction(A._rows[i][j]) for i in range(m)] + [_Fraction(w[j])] for j in range(n)]
@@ -6646,7 +6739,7 @@ def _solution(A, w):
     base = _sa.QQ if (A._base is _sa.QQ or w._base is _sa.QQ) else _sa.ZZ
     if base is _sa.ZZ and any(x.denominator != 1 for x in v):
         raise _arg_error("Solution", "No solution exists")
-    return _MVector((_m_num(x) for x in v), base)
+    return _MVector((x if base is _sa.QQ else int(x) for x in v), base)
 
 
 @_signature("Submatrix", "Mtrx", "RngIntElt", "RngIntElt", "RngIntElt", "RngIntElt", ret="Mtrx")
@@ -6782,8 +6875,12 @@ class _MSymGroup:
                 return x
             raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
         if isinstance(x, (MSeq, MRange)):
-            # G![images]: the permutation i -> images[i]
+            # G![images]: the permutation i -> images[i], integers only
+            # (CORR-DFC-4)
             images = tuple(x)
+            bad = next((y for y in images if isinstance(y, bool) or not isinstance(y, int)), None)
+            if bad is not None:
+                raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: [%s]" % _type_of(bad), "'!'", True)
             if len(images) != self.n or sorted(images) != list(range(1, self.n + 1)):
                 raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: [RngIntElt]", "'!'", True)
             return _MPerm(self, images)
@@ -6822,6 +6919,11 @@ class _MPerm:
 
     def __eq__(self, o):
         return isinstance(o, _MPerm) and o.images == self.images
+
+    def _magma_eq(self, o, op):
+        if not isinstance(o, _MPerm) or o.G != self.G:
+            raise MagmaError("Arguments are not compatible\nArgument types given: GrpPermElt, %s" % _ext_type(o), "'%s'" % op, True)
+        return o.images == self.images
 
     def _cycles(self):
         seen, out = set(), []
