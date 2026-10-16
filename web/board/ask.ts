@@ -18,14 +18,21 @@ export const scaleRange = (a: DocAsk): [number, number] => [a.min ?? 1, a.max ??
 // (a value in a message: short, quoted)
 const show = (v: unknown) => { const s = JSON.stringify(typeof v === "string" && v.length > 40 ? v.slice(0, 37) + "..." : v); return s === undefined ? String(v) : s; };
 
-/** Whether v is from + k * step for a whole k: the nearest such value
- * within a few units in the last place of the larger of the two (a step of
- * 0.1 is not exact in binary), never a fraction of a step however many
- * steps from `from` (CORR-738-1); not when the steps can't be counted. */
-export function onStep(v: number, from: number, step: number): boolean {
+/** Why v is not from + k * step for a whole k, or null if it is
+ * (CORR-738-1).  Whole numbers (a whole step from a whole start, v and the
+ * start safe integers): exactly.  Else the nearest such value, within a
+ * few units in the last place of the larger of the two (a step of 0.1 is
+ * not exact in binary), but only where that is under a thousandth of a
+ * step: past that a value can't be told from its neighbours on the step,
+ * and is refused as too large to check. */
+export function stepProblem(v: number, from: number, step: number): string | null {
+  const off = `its answer ${v} is not on its step, ${step}${from ? ` from ${from}` : ""}`;
+  if (Number.isInteger(step) && Number.isSafeInteger(from) && Number.isFinite(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER)
+    return Number.isInteger(v) && (BigInt(v) - BigInt(from)) % BigInt(step) === 0n ? null : off;
   const k = Math.round((v - from) / step), near = from + k * step;
-  if (!Number.isFinite(k) || !Number.isFinite(near)) return false;
-  return Math.abs(v - near) <= 8 * Number.EPSILON * Math.max(Math.abs(v), Math.abs(near), Number.MIN_VALUE);
+  const ulps = 8 * Number.EPSILON * Math.max(Math.abs(v), Math.abs(near));
+  if (!Number.isFinite(k) || !Number.isFinite(near) || ulps >= step / 1000) return `its answer ${v} is too large to check against its step, ${step}`;
+  return Math.abs(v - near) <= ulps ? null : off;
 }
 
 /** Why `ans` is not an answer the question takes, or null if it is one. */
@@ -57,7 +64,7 @@ export function answerProblem(a: DocAsk, ans: unknown): string | null {
       if (typeof ans !== "number" || !Number.isFinite(ans)) return "its answer is a finite number";
       if (a.min !== undefined && ans < a.min) return `its answer ${ans} is less than its min, ${a.min}`;
       if (a.max !== undefined && ans > a.max) return `its answer ${ans} is more than its max, ${a.max}`;
-      if (a.step !== undefined && a.step > 0 && !onStep(ans, a.min ?? 0, a.step)) return `its answer ${ans} is not on its step, ${a.step}${a.min !== undefined ? ` from ${a.min}` : ""}`;
+      if (a.step !== undefined && a.step > 0) return stepProblem(ans, a.min ?? 0, a.step);
       return null;
     case "scale": {
       const [lo, hi] = scaleRange(a);
