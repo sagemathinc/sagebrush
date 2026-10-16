@@ -1597,3 +1597,33 @@ test("clear and clearvars at the top level look exact names up directly: 3000 na
   // (before: 3000 names took over 30 s; the eval loop that makes the variables is most of this)
   assert.ok(ms < 20000, `${ms} ms`);
 });
+
+test("clearvars -except and -regexp, and clear with patterns or computed names in a function; globals and persistents there refused", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const ex = (ns: string) => `disp(mat2str([${ns.split(" ").map((n) => `exist('${n}', 'var')`).join(" ")}]))`;
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (top level: -except keeps what it names, exactly or by wildcard; function syntax too)
+    "p = 1; q = 2; clearvars -except p", ex("p q"),
+    "p = 1; px = 2; q = 3; clearvars p* -except px", ex("p px q"),
+    "p = 1; q = 2; r = 3; clearvars('-except', 'q', 'r')", ex("p q r"),
+    "kA = 1; kB = 2; m1 = 3; clearvars -regexp ^k -except kB", ex("kA kB m1"),
+    "s1 = 1; s22 = 2; clear -regexp ^s\\d$", ex("s1 s22"),
+    // (a variable named like clear's words: clearvars all is the variable; clear all too when it exists)
+    "all = 9; a = 5; clearvars all", ex("a all"),
+    "all = 9; a = 5; clear all", ex("a all"),
+    "disp(mat2str([f1() f2() f3()]))",
+    "function r = f1()\n abc = 5; xyz = 7;\n clear ab*\n r = [exist('abc', 'var') xyz];\nend",
+    "function r = f2()\n a = 5; b = 7; n = 'a';\n clear(n)\n r = [exist('a', 'var') b];\nend",
+    "function r = f3()\n a = 1; b = 2; c = 3;\n clearvars -except b\n r = [exist('a', 'var') exist('b', 'var') exist('c', 'var')];\nend",
+  ].join("\n")), ["[1 0]", "[0 1 1]", "[0 1 1]", "[0 1 1]", "[0 1]", "[1 0]", "[1 0]", "[0 7 0 7 0 1 0]"]);
+  // (refused, not done wrongly: a function's global or persistent, and options Sagebrush doesn't have)
+  assert.deepEqual(run([
+    tryIt("g1()"), tryIt("g2()"), tryIt("g3()"), tryIt("clearvars -global x"), tryIt("clear -bogus x"),
+    "function g1()\n global G\n G = 7;\n clear G\nend",
+    "function g2()\n persistent P\n P = 7;\n clear\nend",
+    "function g3()\n global G\n G = 1; ab = 2;\n clear a* G*\nend",
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused"]);
+});
