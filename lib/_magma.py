@@ -4031,7 +4031,9 @@ def _type_name(x):
         return "RngQuad" if x.K._quadratic else "RngOrd"
     if isinstance(x, _MNFElt):
         return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
-    if isinstance(x, _MMatrix) and (x._base is _sa.ZZ or x._base is _sa.QQ):
+    if isinstance(x, _smat.Matrix) and (x._base is _sa.ZZ or x._base is _sa.QQ):
+        # (a matrix Magma mode made, or one its arithmetic returned: A + A
+        # is the underlying matrix class, CORR-803-1)
         # (Magma's: a square matrix is an element of a matrix algebra,
         # another of a module of matrices, over a field or a ring)
         if x.nrows() == x.ncols():
