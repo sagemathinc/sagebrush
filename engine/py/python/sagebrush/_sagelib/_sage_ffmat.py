@@ -462,7 +462,38 @@ class FFMatrix:
         import _sage_matrix
         if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
             return o.dimensions() == self.dimensions() and all(a == b for r, t in zip(self._rows, o._rows) for a, b in zip(r, t))
+        # a scalar c is c times the identity (any shape for 0), as in Sage;
+        # it was NotImplemented, so A * A.inverse() == 1 was False
+        c = self._scalar(o) if not isinstance(o, (list, tuple, str)) else None
+        if c is not None:
+            zero = self._base.zero()
+            if c == zero:
+                return all(x == zero for r in self._rows for x in r)
+            if len(self._rows) != self._ncols:
+                return False
+            return all(x == (c if i == j else zero) for i, r in enumerate(self._rows) for j, x in enumerate(r))
         return NotImplemented
+
+    def __ne__(self, o):
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
+
+    def _scalar_identity(self, o, op, left):
+        """o as o times the identity, for A + o, A - o and o - A (a square
+        A), or None when o is not a scalar; a non-square A is Sage's
+        TypeError."""
+        if isinstance(o, (list, tuple, str)):
+            return None
+        c = self._scalar(o)
+        if c is None:
+            return None
+        n = len(self._rows)
+        if n != self._ncols:
+            op_parent = o.parent() if callable(getattr(o, "parent", None)) else _sa().ZZ
+            pair = (op_parent, self.parent()) if left else (self.parent(), op_parent)
+            raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
+        zero = self._base.zero()
+        return FFMatrix(self._base, [[c if i == j else zero for j in range(n)] for i in range(n)], n)
 
     def __hash__(self):
         return hash(tuple(tuple(r) for r in self._rows))
@@ -510,11 +541,18 @@ class FFMatrix:
 
     def __add__(self, o):
         o = self._from_qq(o)
+        if not isinstance(o, FFMatrix):
+            o = self._scalar_identity(o, "+", False)
         if not isinstance(o, FFMatrix) or o.dimensions() != self.dimensions():
             return NotImplemented
         return FFMatrix(self._base, [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, o._rows)], self._ncols)
 
-    __radd__ = __add__
+    def __radd__(self, o):
+        if not isinstance(o, FFMatrix) and self._from_qq(o) is o:
+            o = self._scalar_identity(o, "+", True)
+            if o is None:
+                return NotImplemented
+        return self.__add__(o)
 
     def __neg__(self):
         return FFMatrix(self._base, [[-a for a in r] for r in self._rows], self._ncols)
@@ -522,8 +560,20 @@ class FFMatrix:
     def __sub__(self, o):
         o = self._from_qq(o)
         if not isinstance(o, FFMatrix):
+            o = self._scalar_identity(o, "-", False)
+        if not isinstance(o, FFMatrix):
             return NotImplemented
         return self + (-o)
+
+    def __rsub__(self, o):
+        # o - A for a scalar o (a QQ matrix o goes through _from_qq)
+        q = self._from_qq(o)
+        if isinstance(q, FFMatrix):
+            return q + (-self)
+        q = self._scalar_identity(o, "-", True)
+        if q is None:
+            return NotImplemented
+        return q + (-self)
 
     def __mul__(self, o):
         o = self._from_qq(o)
