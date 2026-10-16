@@ -750,7 +750,9 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
         };
         let cn_one_term = cn.is_real() || matches!(&cn, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&cn, Num::Float(a, _) if *a == 0.0);
         let top = if cn.is_one() { top } else if top == "1" { cn.latex() } else { format!("{} \\, {}", lparen((cn.latex(), if cn_one_term { P_ATOM } else { P_ADD }), P_MUL), top) };
-        let bottom = if cd.is_one() { d.join(" ") } else { format!("{} \\, {}", cd.latex(), d.join(" ")) };
+        // a factor in front of the denominator groups a sum
+        // (\frac{1}{2 \, {\left(x + 1\right)}}, as Sage)
+        let bottom = if cd.is_one() { d.join(" ") } else { format!("{} \\, {}", cd.latex(), denom.iter().map(fac).collect::<Vec<_>>().join(" ")) };
         let s = format!("\\frac{{{}}}{{{}}}", top, bottom);
         return (if neg_sign { format!("-{}", s) } else { s }, if neg_sign { P_NEG } else { P_MUL });
     }
