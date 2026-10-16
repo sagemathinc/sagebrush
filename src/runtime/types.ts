@@ -1032,7 +1032,7 @@ function rsplitWhitespace(s: string, maxsplit: number): string[] {
 // the end stays past it)
 function clampRange(s: string, start: any, end: any): [number, number] {
   const p = SP.pairs(s);
-  const n = p === null ? s.length : s.length - p.length;
+  const n = p === null ? s.length : s.length - p.n;
   let a = start === undefined || start === null ? 0 : Number(start);
   let b = end === undefined || end === null ? n : Number(end);
   if (a < 0) a = Math.max(0, a + n);

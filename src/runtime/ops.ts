@@ -1694,8 +1694,8 @@ export function seqIndex(i: any, len: number, what: string): number {
   return j;
 }
 
-function strGetitemPairs(o: string, p: Int32Array, k: any): string {
-  const len = o.length - p.length;
+function strGetitemPairs(o: string, p: SP.Pos, k: any): string {
+  const len = o.length - p.n;
   if (!(k instanceof PySlice)) return SP.charAt(o, p, seqIndex(k, len, "string"));
   const [start, step, n] = sliceIndices(k, len);
   if (step === 1) return o.slice(SP.unitOf(p, start), SP.unitOf(p, start + n));

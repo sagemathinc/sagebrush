@@ -62,3 +62,11 @@ for e in CASES:
     except Exception as x:
         r = type(x).__name__ + ': ' + str(x)
     print(ascii(e), '->', ascii(r))
+
+# pairs on either side of the index's 32-unit blocks, short and long strings
+for k in range(0, 70, 3):
+    for tail in ('c' * 10, 'c' * 300):
+        s = 'a' * k + '\U0001F600' + 'b' + '\U0001F600' * 40 + 'x\ud800y' + tail
+        n = len(s)
+        picks = ''.join(s[i] for i in range(n))
+        print(k, len(tail), n, picks == s, s[k], s[k + 1], s[-n], s[::-7][:5], s[k:k + 3], s.find('b'), s.rfind('\U0001F600'), s.index('y'), s.count('\U0001F600'), s.find('\U0001F600', k + 2, k + 30))
