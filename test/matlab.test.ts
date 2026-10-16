@@ -2087,3 +2087,15 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "refused", "20000", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
     "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
 });
+
+test("abs of an integer class's minimum saturates, as MATLAB's; int64's is refused (CORR-D265-ABS-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    "fprintf('%d ', abs(int8(-128)), abs(intmin('int16')), abs(intmin('int32')), abs(int64(-5)), abs(uint8(7))); fprintf('\\n')",
+    "disp(class(abs(int8(-128)))); disp(class(abs(uint16(3))))",
+    tryIt("abs(intmin('int64'))"), tryIt("-intmin('int64')"),
+  ].join("\n")), ["127 32767 2147483647 5 7", "int8", "uint16", "refused", "refused"]);
+});
