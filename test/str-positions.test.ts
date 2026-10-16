@@ -102,3 +102,22 @@ test("joining a lone high surrogate to a lone low one is refused, not read as on
   const got = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trimEnd().split("\n");
   cases.forEach(([e, want], i) => assert.equal(got[i], want, e));
 });
+
+// An equal string that is another object (each json.dumps result) costs one
+// full comparison with the string last indexed, not one per position:
+// json.loads of a new dumps was 25 times slower from its second call on
+// (sage2's report, perf-json-loads-slowdown)
+test("indexing a new string equal to the last one indexed is not slower: json.loads of each new json.dumps", () => {
+  const code = [
+    "import json, time",
+    "data = [[i, str(i)] for i in range(20000)]",
+    "ts = []",
+    "for k in range(3):",
+    "    s = json.dumps(data)",
+    "    a = time.time(); json.loads(s); ts.append(time.time() - a)",
+    "print(ts[0], max(ts[1:]))",
+  ].join("\n");
+  const [first, later] = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 120000 }).trim().split(" ").map(Number);
+  // (generous: a loaded machine; the bug was 25x)
+  assert.ok(later < Math.max(first * 5, 1.0), `first ${first} s, later ${later} s`);
+});
