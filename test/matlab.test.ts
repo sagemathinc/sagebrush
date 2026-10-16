@@ -1568,3 +1568,15 @@ test("statistics as documented: moving windows padded by 'Endpoints', quantile i
     "3-1i 3.5-0.5i 0+1i 2+0.5i",
   ]);
 });
+
+test("moving statistics with a fill take the window's outside positions as the fill, no padded copy: as quick as 'shrink' (HARD-755-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const t0 = Date.now();
+  // (one 1 and 10000 filled zeros: the mean 1/10001; the sum 1; the max 1; with a NaN fill and omitnan, 1)
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c",
+    "fprintf('%.12g %.12g %.12g %.12g\\n', movmean(1, [5000 5000], 'Endpoints', 0), movsum(2, [5000 5000], 'Endpoints', 0), movmax(-1, [5000 5000], 'Endpoints', 0), movmean(1, [5000 5000], 'Endpoints', 'fill', 'omitnan'))"],
+    { encoding: "utf8", timeout: 60000 });
+  const ms = Date.now() - t0;
+  assert.equal(out.trim(), "9.99900009999e-05 2 0 1");
+  assert.ok(ms < 15000, `${ms} ms`);
+});
