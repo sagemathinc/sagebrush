@@ -832,3 +832,91 @@ QuadraticField(-4) :: Number Field in b with defining polynomial x^2 + 4 with b 
 QuadraticField(-9) :: Number Field in b with defining polynomial x^2 + 9 with b = 3*I
 QuadraticField(-2) :: Number Field in b with defining polynomial x^2 + 2 with b = 1.414213562373095?*I
 QuadraticField(3) :: Number Field in b with defining polynomial x^2 - 3 with b = 1.732050807568878?
+RF24 + CDF :: (2.00000, 5.00000, 7.00000) @ Vector space of dimension 3 over Complex Field with 24 bits of precision
+CDF + RF24 :: (2.00000, 5.00000, 7.00000) @ Vector space of dimension 3 over Complex Field with 24 bits of precision
+RF24 * CDF :: 19.0000 @ Complex Field with 24 bits of precision
+CDF cross RF24 :: (1.00000, 1.00000, -1.00000) @ Vector space of dimension 3 over Complex Field with 24 bits of precision
+RF24 - CDF empty :: () @ Vector space of dimension 0 over Complex Field with 24 bits of precision
+RF52 + CDF :: (2.00000030000000, 5.00000000000000, 7.00000000000000) @ Vector space of dimension 3 over Complex Field with 52 bits of precision
+CDF + RF52 :: (2.00000030000000, 5.00000000000000, 7.00000000000000) @ Vector space of dimension 3 over Complex Field with 52 bits of precision
+RF52 * CDF :: 19.0000003000000 @ Complex Field with 52 bits of precision
+CDF cross RF52 :: (1.00000000000000, 0.999999800000000, -0.999999900000001) @ Vector space of dimension 3 over Complex Field with 52 bits of precision
+RF52 - CDF empty :: () @ Vector space of dimension 0 over Complex Field with 52 bits of precision
+RF53 + CDF :: (2.0000003, 5.0, 7.0) @ Vector space of dimension 3 over Complex Double Field
+CDF + RF53 :: (2.0000003, 5.0, 7.0) @ Vector space of dimension 3 over Complex Double Field
+RF53 * CDF :: 19.000000300000018 @ Complex Double Field
+CDF cross RF53 :: (1.0, 0.9999998000000003, -0.9999999000000002) @ Vector space of dimension 3 over Complex Double Field
+RF53 - CDF empty :: () @ Vector space of dimension 0 over Complex Double Field
+RF54 + CDF :: (2.0000003, 5.0, 7.0) @ Vector space of dimension 3 over Complex Double Field
+CDF + RF54 :: (2.0000003, 5.0, 7.0) @ Vector space of dimension 3 over Complex Double Field
+RF54 * CDF :: 19.000000300000018 @ Complex Double Field
+CDF cross RF54 :: (1.0, 0.9999997999999994, -0.9999998999999997) @ Vector space of dimension 3 over Complex Double Field
+RF54 - CDF empty :: () @ Vector space of dimension 0 over Complex Double Field
+ZZ.dot(QQ) [1, 2] :: 5 @ Rational Field
+QQ.dot(ZZ) [1, 2] :: 5 @ Rational Field
+ZZ.dot(QQ) [] :: 0 @ Rational Field
+QQ.dot(ZZ) [] :: 0 @ Rational Field
+ZZ.dot(QQ) [0] :: 0 @ Rational Field
+QQ.dot(ZZ) [0] :: 0 @ Rational Field
+Real Field with 100 bits of precision norm 3.00000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838684548616017295045961 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3.00000 (1.00000000000000, 2.00000000000000) :: 2.08008386845486 @ Real Field with 53 bits of precision
+Complex Field with 100 bits of precision norm 3.00000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838684548616017295045961 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3.00000 () :: 0.000000 @ Real Field with 24 bits of precision
+Real Field with 100 bits of precision norm 3.00000 () :: 0.000000 @ Real Field with 24 bits of precision
+Real Field with 100 bits of precision norm 3.00000000000000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838230519040299604592231 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3.00000000000000 (1.00000000000000, 2.00000000000000) :: 2.08008382305190 @ Real Field with 53 bits of precision
+Complex Field with 100 bits of precision norm 3.00000000000000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838230519040299604592231 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3.00000000000000 () :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision norm 3.00000000000000 () :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision norm 2.00000000000000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.2360679774997896964091736687 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 2.00000000000000 (1.00000000000000, 2.00000000000000) :: 2.23606797749979 @ Real Field with 53 bits of precision
+Complex Field with 100 bits of precision norm 2.00000000000000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.2360679774997896964091736687 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 2.00000000000000 () :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision norm 2.00000000000000 () :: 0.000000000000000 @ Real Field with 53 bits of precision
+Real Field with 100 bits of precision norm 3.0000000000000000000000000000000000000000000000000000000000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838230519041145300568244 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3.0000000000000000000000000000000000000000000000000000000000 (1.00000000000000, 2.00000000000000) :: 2.08008382305190 @ Real Field with 53 bits of precision
+Complex Field with 100 bits of precision norm 3.0000000000000000000000000000000000000000000000000000000000 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838230519041145300568244 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3.0000000000000000000000000000000000000000000000000000000000 () :: 0.00000000000000000000000000000000000000000000000000000000000 @ Real Field with 200 bits of precision
+Real Field with 100 bits of precision norm 3.0000000000000000000000000000000000000000000000000000000000 () :: 0.00000000000000000000000000000000000000000000000000000000000 @ Real Field with 200 bits of precision
+Real Field with 100 bits of precision norm 3 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838230519041145300568244 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3 (1.00000000000000, 2.00000000000000) :: 2.08008382305190 @ Real Field with 53 bits of precision
+Complex Field with 100 bits of precision norm 3 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0800838230519041145300568244 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 3 () :: 0 @ Rational Field
+Real Field with 100 bits of precision norm 3 () :: 0 @ Rational Field
+Real Field with 100 bits of precision norm 7/2 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0489892348660561685623863727 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 7/2 (1.00000000000000, 2.00000000000000) :: 2.04898923486606 @ Real Field with 53 bits of precision
+Complex Field with 100 bits of precision norm 7/2 (1.0000000000000000000000000000, 2.0000000000000000000000000000) :: 2.0489892348660561685623863727 @ Real Field with 100 bits of precision
+Real Field with 53 bits of precision norm 7/2 () :: 0 @ Rational Field
+Real Field with 100 bits of precision norm 7/2 () :: 0 @ Rational Field
+Real Double Field [1, 0] norm nan :: NaN @ Real Double Field
+Real Double Field [] norm nan :: NaN @ Real Double Field
+Real Double Field [1, nan] norm +Infinity :: NaN @ Real Double Field
+Real Double Field [nan, 1] norm +Infinity :: NaN @ Real Double Field
+Real Double Field [1, nan] norm -Infinity :: NaN @ Real Double Field
+Real Double Field [nan, 1] norm -Infinity :: NaN @ Real Double Field
+Real Double Field [1, nan] norm 2 :: NaN @ Real Double Field
+Real Double Field [nan] norm -1 :: NaN @ Real Double Field
+Complex Double Field [1, 0] norm nan :: NaN @ Real Double Field
+Complex Double Field [] norm nan :: NaN @ Real Double Field
+Complex Double Field [1, nan] norm +Infinity :: NaN @ Real Double Field
+Complex Double Field [nan, 1] norm +Infinity :: NaN @ Real Double Field
+Complex Double Field [1, nan] norm -Infinity :: NaN @ Real Double Field
+Complex Double Field [nan, 1] norm -Infinity :: NaN @ Real Double Field
+Complex Double Field [1, nan] norm 2 :: NaN @ Real Double Field
+Complex Double Field [nan] norm -1 :: NaN @ Real Double Field
+SR + Symbolic Ring :: (4, 6) @ Vector space of dimension 2 over Symbolic Ring
+Symbolic Ring * SR :: 11 @ Symbolic Ring
+SR + Integer Ring :: (4, 6) @ Vector space of dimension 2 over Symbolic Ring
+Integer Ring * SR :: 11 @ Symbolic Ring
+SR + Rational Field :: (4, 6) @ Vector space of dimension 2 over Symbolic Ring
+Rational Field * SR :: 11 @ Symbolic Ring
+SR + Real Field with 53 bits of precision :: (4.00000000000000, 6.00000000000000) @ Vector space of dimension 2 over Symbolic Ring
+Real Field with 53 bits of precision * SR :: 11.0000000000000 @ Symbolic Ring
+SR + RDF :: (4.0, 6.0) @ Vector space of dimension 2 over Symbolic Ring
+SR norm :: 5 @ Symbolic Ring
+SR norm sqrt :: sqrt(5) @ Symbolic Ring
+Zmod1 + Zmod6 :: (0, 0) @ Ambient free module of rank 2 over Ring of integers modulo 1
+Zmod4 + Zmod1 :: (0, 0) @ Ambient free module of rank 2 over Ring of integers modulo 1
+Zmod1 + GF3 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 1' and 'Vector space of dimension 2 over Finite Field of size 3'
+GF2 + Zmod1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 2' and 'Ambient free module of rank 2 over Ring of integers modulo 1'
+Zmod4 + Zmod9 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 4' and 'Ambient free module of rank 2 over Ring of integers modulo 9'

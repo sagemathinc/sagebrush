@@ -326,10 +326,15 @@ def _mod_pushout(R, S):
         return None  # (two extension fields: GF(4) and GF(16) do not meet in Sage)
     if ext[0] or ext[1]:
         E, Z = (R, S) if ext[0] else (S, R)
+        if Z._n == 1:
+            raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
         return E if Z._n % E._p == 0 else None
     g = math.gcd(R._n, S._n)
     if g == 1:
-        return None
+        # (Z/1Z meets every Z/nZ, but not GF(p); GF(5) and GF(7) do not meet)
+        if R._is_gf or S._is_gf:
+            return None
+        return R if R._n == 1 else S if S._n == 1 else None
     for X in (R, S):
         if X._n == g and X._is_gf:
             return X
@@ -342,13 +347,14 @@ def _mod_pushout(R, S):
 def _num_pushout(R, S):
     """Where two numerical fields meet, as Sage's coercion finds it: the
     lower precision (of RDF and RR, or CDF and CC, the left one), and
-    complex when either is (CDF with any real field, else ComplexField of
-    the lower precision: RDF and ComplexField(100) give CC)."""
+    complex when either is (CDF with a real field of at least 53 bits,
+    else ComplexField of the lower precision: RDF and ComplexField(100)
+    give CC, CDF and RealField(24) ComplexField(24))."""
     (cr, dr, pr), (cs, ds, ps) = _num_kind(R), _num_kind(S)
     if cr == cs:
         return R if pr <= ps else S
-    C, Rl = (R, S) if cr else (S, R)
-    if (dr if cr else ds):
+    C = R if cr else S
+    if (dr if cr else ds) and min(pr, ps) >= 53:
         return C
     return _sa().ComplexField(min(pr, ps))
 
@@ -462,11 +468,26 @@ def _vector_op(u, v, op):
         s = P.zero() if P is not _sa().SR else 0
         for x, y in zip(a, b):
             s = s + x * y
-        return s
+        return _symbolic(s) if P is _sa().SR else s
     if P is _sa().SR:
         import _sage_matrix
-        return _sage_matrix.Vector(r)
+        w = _sage_matrix.Vector(r)
+        w._ring = P
+        return w
     return FFVector(P, r)
+
+
+def _symbolic(s):
+    """s in SR, or NotImplementedError when sagebrush's SR cannot hold it
+    as Sage does (an RDF or CDF number: SR(RDF(11)) prints as RR's 11.0000000000000,
+    Sage's as 11.0)."""
+    import _sage_rdf
+    if type(s).__name__ in ("RealDoubleElement", "ComplexDoubleElement") or (callable(getattr(s, "parent", None)) and s.parent() in (_sage_rdf.RDF, _sage_rdf.CDF)):
+        raise NotImplementedError("%r as a symbolic expression is not available in sagebrush yet" % (s,))
+    try:
+        return _sa().SR(s)
+    except TypeError:
+        raise NotImplementedError("%r as a symbolic expression is not available in sagebrush yet" % (s,))
 
 
 def _in_ring(P, v, R):
@@ -513,22 +534,47 @@ def _inf_sign(p):
     return 1 if f == float("inf") else -1 if f == float("-inf") else 0
 
 
-def _p_norm(vals, p, root, check=None):
+def _exact_exponent(p):
+    return isinstance(p, (int, _F)) or type(p).__name__ in ("Integer", "Rational")
+
+
+def _real_exponent(p):
+    """Whether p is an element of RR or of RealField(prec) (not a Python
+    float, not NaN)."""
+    if type(p) is float or isinstance(p, (int, str, _F)):
+        return False
+    par = getattr(p, "parent", None)
+    try:
+        k = _num_kind(par()) if callable(par) else None
+    except Exception:
+        return False
+    return k is not None and not k[0] and not k[1] and p == p
+
+
+def _p_norm(vals, p, root, check=None, R=None):
     """Sage's p-norm of the absolute values vals: the largest for p =
     Infinity (ValueError when there are none), else (p >= 1, else
-    ValueError) root(sum of their p-th powers, p), 0 in QQ when there are
-    none; check(vals, p) first, to refuse powers too large to compute."""
+    ValueError) root(sum of their p-th powers, p); when there are none, 0
+    in QQ for an integer or rational p, 0 in p's field for a real p.  An
+    exponent in RR or RealField(prec) is admitted only over a real field R
+    (the powers in R: Sage keeps the vector's precision); other exponents
+    (a Python float, RDF, ...) are refused, empty vectors included.
+    check(vals, p) runs first, to refuse powers too large to compute."""
     if _inf_sign(p) > 0:
         return max(vals)
     if p < 1:
         raise ValueError("%s is not greater than or equal to 1" % (p,))
+    real = _real_exponent(p)
+    if not _exact_exponent(p) and not (real and R is not None):
+        raise NotImplementedError("the norm with exponent %r (%s) is not available in sagebrush yet" % (p, type(p).__name__))
     if not vals:
-        return _sa().QQ(0)
+        return p.parent()(0) if real else _sa().QQ(0)
     if check is not None:
         check(vals, p)
-    s = vals[0] ** p
+    q = R(p) if real else p
+    s = vals[0] ** q
     for t in vals[1:]:
-        s = s + t ** p
+        s = s + t ** q
     return root(s, p)
 
 
@@ -537,17 +583,20 @@ def _double_norm(vals, p):
     arithmetic: no scaling, so squares overflow and underflow): any real p,
     -Infinity the smallest, 0 the number of nonzero values."""
     inf = float("inf")
+    nan = any(t != t for t in vals)
     s = _inf_sign(p)
     if s > 0:
-        return max(vals, default=0.0)
+        return float("nan") if nan else max(vals, default=0.0)
     if s < 0:
         if not vals:
             raise ValueError("zero-size array to reduction operation minimum which has no identity")
-        return min(vals)
+        return float("nan") if nan else min(vals)
     try:
         q = float(p)
     except (TypeError, ValueError):
         raise ValueError("vector norm 'p' must be +/- infinity or a real number, not %s" % (p,))
+    if q != q:
+        return q  # (a NaN exponent: NaN, empty vectors included)
     if q == 0:
         return float(sum(1 for t in vals if t != 0))
     if q == 2:
@@ -796,9 +845,11 @@ class FFVector:
                     return s
                 if q == 2:
                     return s.sqrt()
+                # (1/q as Sage: exact for an integer or rational q, then
+                # rounded into R; for a real q, in q's own field)
                 e = R(1) / R(q) if isinstance(q, int) or type(q).__name__ == "Integer" else R(1 / q)
                 return s ** e
-            return _p_norm(vals, p, root)
+            return _p_norm(vals, p, root, R=R)
         raise NotImplementedError("the norm of a vector over %r is not available in sagebrush yet" % (B,))
 
     def is_zero(self):
