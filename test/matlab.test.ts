@@ -2150,9 +2150,9 @@ test("sum and prod 'native' of logical, sprintf's %s of character codes, strspli
   ].join("\n")), ["logical true", "logical false", "int8 3", "double 2", "refused", "refused"]);
   assert.deepEqual(run([
     "disp(sprintf('%s', [72 105]))", "disp(sprintf('%s|', [65 66 67]))", "disp(sprintf('%s', 65.5))", "disp(sprintf('%c', 65.5))",
-    "disp(sprintf('%c%c', 72, 105))", "disp(sprintf('%s and %d', [72 105], 3.5))", "disp(sprintf('[%5s]', 65))", "disp(sprintf('%d %s', 1, 'x'))",
+    "disp(sprintf('%c%c', 72, 105))", "disp(sprintf('%s:%d', [72 105], 7))", "disp(sprintf('%s-%s', 65, 66))", "disp(sprintf('[%3s|%d]', 65, 66))", "disp(sprintf('%s and %d', [72 105], 3.5))", "disp(sprintf('[%5s]', 65))", "disp(sprintf('%d %s', 1, 'x'))",
     tryIt("sprintf('%s', -1)"), tryIt("sprintf('%a', 1)"), tryIt("sprintf('%bx', 1)"), tryIt("sprintf('%y')"),
-  ].join("\n")), ["Hi", "ABC|", "6.550000e+01", "6.550000e+01", "Hi", "Hi and 3.500000e+00", "[    A]", "1 x", "refused", "refused", "refused", "refused"]);
+  ].join("\n")), ["Hi", "ABC|", "6.550000e+01", "6.550000e+01", "Hi", "Hi:7", "A-B", "[  A|66]", "Hi and 3.500000e+00", "[    A]", "1 x", "refused", "refused", "refused", "refused"]);
   assert.deepEqual(run([
     "disp(strjoin(strsplit('a,,b', ',', 'DelimiterType', 'Simple'), '|'))",
     "disp(strjoin(strsplit('a,,b', ',', 'CollapseDelimiters', false), '|'))",
@@ -2168,15 +2168,18 @@ test("sum and prod 'native' of logical, sprintf's %s of character codes, strspli
   ].join("\n")), ["25", "1", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused"]);
   assert.deepEqual(run([
     tryIt("rand(2, 'like', 1i)"), tryIt("rand(2, 'int8')"), tryIt("rand(2, 'like', sparse(1))"), tryIt("randn(1, 'like', 1i)"), tryIt("rand(1, 'like', true)"),
-    tryIt("randi(10, 1, 'like', 1i)"), tryIt("randi([3 2])"), tryIt("randi(0)"), tryIt("randi(2.5)"), tryIt("randi(300, 1, 'int8')"), tryIt("randi(2^60)"),
+    tryIt("randi(10, 1, 'like', 1i)"), tryIt("randi([3 2])"), tryIt("randi(0)"), tryIt("randi(2.5)"), tryIt("randi(2^60)"),
     "disp(class(randi(10, 1, 'int8')))", "disp(class(rand(1, 'like', single(1))))", "disp(class(randn(2, 'single')))",
-  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "int8", "single", "single"]);
+    show("randi([300 300], 1, 'int8')"), show("randi([-10 -10], 1, 'uint8')"), show("randi([1 1], 1, 'logical')"),
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "int8", "single", "single",
+    "int8 127", "uint8 0", "logical true"]);
   assert.deepEqual(run([
     tryIt("rng(1, 'philox')"), tryIt("rng('philox')"), tryIt("rng('shuffle', 'combRecursive')"), tryIt("rng(-1)"), tryIt("rng(2.5)"), tryIt("rng(struct('State', 99))"),
     "rng(3); s = rng; disp(s.Seed)", "rng(7, 'twister'); s = rng; disp(s.Seed)", "rng('default'); s = rng; disp(s.Seed)",
     "rng(5); s = rng; a = rand; rng(9); rng(s); b = rand; t = rng; disp([a == b, t.Seed])",
     "rng(0); a = rand; rng(0, 'twister'); disp(a == rand)",
-  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "3", "7", "0", "1     5", "1"]);
+    "rng(0, 'twister'); a = rand; rng(9); rng('twister'); b = rand; s = rng; disp([a == b, s.Seed])",
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "3", "7", "0", "1     5", "1", "1     0"]);
   assert.deepEqual(run([tryIt("linspace(int8(0), int8(10), 3)"), tryIt("linspace(0, uint8(10), 3)"), "disp(class(linspace(single(0), 1, 3)))"].join("\n")),
     ["refused", "refused", "single"]);
 });
