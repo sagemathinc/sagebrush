@@ -191,15 +191,17 @@ function parseF(s: string): number {
   return parseFloat(l);
 }
 
+// __complex__'s result: a complex; a strict subclass's value with CPython's
+// DeprecationWarning; else TypeError
+function complexResult(r: any): [number, number] {
+  if (!(r instanceof PyComplex)) raise(T.TypeError, `__complex__ returned non-complex (type ${typeName(r)})`);
+  if (typeOf(r) !== complexType) O.deprecatedSubclass("__complex__", r, "complex");
+  return [r.re, r.im];
+}
 function asComplex(x: any, what: string): [number, number] {
   const c = toC(x);
   if (c !== undefined) return c;
-  const f = lookupType(typeOf(x), "__complex__");
-  if (f !== undefined) {
-    const r = f(x);
-    if (!(r instanceof PyComplex)) raise(T.TypeError, `__complex__ returned non-complex (type ${typeName(r)})`);
-    return [r.re, r.im];
-  }
+  if (lookupType(typeOf(x), "__complex__") !== undefined) return complexResult(O.lookupSpecial(x, "__complex__")(x));
   const v = Ty.floatCallSafe(x);
   if (v !== undefined) return [v, 0];
   raise(T.TypeError, `complex() ${what} must be a number, not '${typeName(x)}'`);
@@ -212,6 +214,9 @@ function complexCall(real: any = undefined, imag: any = undefined): PyComplex {
   }
   if (typeof imag === "string") raise(T.TypeError, "complex() second arg can't be a string");
   if (real instanceof PyComplex && imag === undefined && real.constructor === PyComplex) return real;
+  // (a complex subclass's __complex__, which it may override, as CPython's
+  // complex_new; its value when it does not)
+  if (real instanceof PyComplex && typeOf(real) !== complexType && imag === undefined) return new PyComplex(...complexResult(O.lookupSpecial(real, "__complex__")(real)));
   // As CPython: components are only combined when an argument is complex,
   // so complex(0.0, -0.0) keeps its signed zero.
   const [ar, ai] = real === undefined ? [0, 0] : asComplex(real, "first argument");

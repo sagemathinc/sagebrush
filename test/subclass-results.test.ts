@@ -14,3 +14,10 @@ test("conversion hooks' subclass results warn, other results are TypeError, as C
   const got = execFileSync(process.execPath, [CLI, TEST + "subclass_results_cases.py"], { encoding: "utf8" });
   assert.equal(got, readFileSync(TEST + "subclass_results_cases.out", "utf8"));
 });
+// Which conversions call a subclass's own hook (float(), int(), complex()),
+// and which read its value (an index, math, cmath), as CPython's
+// (test/subclass_overrides_cases.py; its .out is CPython 3.14's)
+test("a subclass's own conversion hooks are called where CPython calls them, and only there", () => {
+  const got = execFileSync(process.execPath, [CLI, TEST + "subclass_overrides_cases.py"], { encoding: "utf8" });
+  assert.equal(got, readFileSync(TEST + "subclass_overrides_cases.out", "utf8"));
+});

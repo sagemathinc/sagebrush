@@ -1,0 +1,28 @@
+float(G(2)) -> 9.0
+math.sqrt(G(4)) -> 2.0
+cmath.sqrt(G(4)) -> (2+0j)
+int(G(2.5)) -> 2
+int(J(2)) -> 5
+int(JI(2)) -> 2
+operator.index(JI(2)) -> 2
+[1, 2, 3, 4, 5, 6, 7, 8][JI(2)] -> 3
+(1, 2, 3, 4, 5, 6, 7, 8)[JI(2)] -> 3
+'abcdefgh'[JI(2)] -> 'c'
+b'abcdefgh'[JI(2)] -> 99
+float(J(2)) -> 2.0
+complex(C(1+2j)) -> 5j
+complex(G(2)) -> (2+0j)
+complex(J(2)) -> (2+0j)
+cmath.sqrt(C(4)) -> (2+0j)
+abs(C(3+4j)) -> 5.0
+complex(CF(1+2j)) -> (1+2j)
+round(G(2.5)) -> 2
+str(G(2)) -> '2.0'
+'%d' % J(2) -> '2'
+'%f' % G(2) -> '2.000000'
+format(G(2), '.1f') -> '2.0'
+hex(JI(2)) -> '0x2'
+list(range(JI(3))) -> [0, 1, 2]
+[0] * JI(2) -> [0, 0]
+math.factorial(JI(3)) -> 6
+complex(CS(1)) -> 3j ['__complex__ returned non-complex (type CF).  The a']

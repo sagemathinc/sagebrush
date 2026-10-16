@@ -1652,6 +1652,9 @@ export function index(x: any): number | bigint {
   if (typeof x === "number" && isInt(x)) return x;
   if (typeof x === "bigint") return x;
   if (typeof x === "boolean") return +x;
+  // (an int subclass is its own value, its __index__ not called, as
+  // CPython's PyNumber_Index; numpy's shims, no int subclasses there, are not)
+  if (x instanceof PrimBox && typeOf(x).$mro.includes(T.int) && shimName(x, "int") === null) return x.$v;
   const f = special(x, "__index__");
   if (f !== undefined) return intResult("__index__", f(x));
   raise(T.TypeError, `'${typeName(x)}' object cannot be interpreted as an integer`);
@@ -1674,7 +1677,7 @@ function shimName(r: any, base: string): string | null {
   return null;
 }
 const resultTypeName = (r: any) => (typeOf(r).$module === "numpy" ? `numpy.${typeName(r)}` : typeName(r));
-function deprecatedSubclass(what: string, r: any, base: string): void {
+export function deprecatedSubclass(what: string, r: any, base: string): void {
   callObj(getattr(hooks.importModule("warnings"), "warn"), [`${what} returned non-${base} (type ${resultTypeName(r)}).  The ability to return an instance of a strict subclass of ${base} is deprecated, and may be removed in a future version of Python.`, T.DeprecationWarning, 2]);
 }
 export function intResult(what: string, r: any): number | bigint {
@@ -1721,7 +1724,11 @@ export function seqIndex(i: any, len: number, what: string): number {
   if (typeof i === "number" && isInt(i)) j = i;
   else if (typeof i === "boolean") j = +i;
   else if (typeof i === "bigint") j = i < 0n ? -Infinity : Infinity;
-  else {
+  else if (i instanceof PrimBox && typeOf(i).$mro.includes(T.int) && shimName(i, "int") === null) {
+    // (an int subclass: its own value, as O.index)
+    const v = i.$v;
+    j = typeof v === "bigint" ? (v < 0n ? -Infinity : Infinity) : v;
+  } else {
     const f = special(i, "__index__");
     if (f === undefined) raise(T.TypeError, `${what} indices must be integers or slices, not ${typeName(i)}`);
     const r = intResult("__index__", f(i));
