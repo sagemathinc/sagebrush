@@ -1425,10 +1425,11 @@ def _to_real(R, x, base=10):
             v = v._re
         return _to_real(R, v)
     if type(x).__name__ in ("AlgebraicNumber", "AlgebraicReal"):
-        z = x._approx(int(prec * _LOG10_2) + 10)
-        if z[1]:
+        # correctly rounded from certified balls (a fixed prec + 10 digits
+        # gave wrong digits, 0 or the wrong sign after cancellation)
+        if not x._is_real():
             raise TypeError("unable to convert %r to a real number" % (x,))
-        return _to_real(R, z[0])
+        return _to_real(R, x._rounded(lambda v: _to_real(R, v), prec)[0])
     try:
         return _to_real(R, _F(x))
     except (TypeError, ValueError):
@@ -3068,8 +3069,9 @@ class ComplexField_:
                 return ComplexNumberMP(self, R(v._re), R(v._im))
             return ComplexNumberMP(self, R(v), R(0))
         if type(x).__name__ in ("AlgebraicNumber", "AlgebraicReal"):
-            z = x._approx(int(self._prec * _LOG10_2) + 10)
-            return ComplexNumberMP(self, R(z[0]), R(z[1]))
+            # each part correctly rounded, from certified balls
+            re, im = x._rounded(R, self._prec)
+            return ComplexNumberMP(self, R(re), R(im))
         return ComplexNumberMP(self, R(x), R(0))
 
 

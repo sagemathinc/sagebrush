@@ -122,3 +122,32 @@ test("a large graph's adjacency matrices are refused before their n^2 entries ex
   assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(5) + "ValueError\n(3, 3)\n");
   assert.ok(Date.now() - t < 30000);
 });
+
+test("an algebraic number converts to RR, RealField(p), float, CC and n() correctly rounded", () => {
+  // (z = sqrt(2) - q, q its truncation to k decimals, so z > 0: a fixed
+  // number of digits gave wrong digits, 0 (n() at k = 19) or the wrong sign
+  // (RealField(100) at k = 60); the expected values are Sage 10.10's
+  // RealField(600)(z) and z.n(prec=100), which agree. And a value 2.1e-35
+  // above the midpoint 1 + 2^-53 must round up, also as a variety point.)
+  const src = "s = AA(2).sqrt()\nfor k in (15, 19, 60):\n q = QQ(floor(sqrt(RealField(400)(2)) * 10^k)) / 10^k\n z = s - AA(q)\n print(RR(z), RealField(100)(z), float(z), z.n())\n" +
+    "w = QQbar(2).sqrt() * QQbar(I) + 1 - QQbar(I) * QQbar(QQ(14142135623730950488016887)/10^25)\nprint(CC(w), w.n())\n" +
+    "q = QQ(14142135623730950488016887242096981)/10^34\nm = 1 + QQ(1)/2^53\nz = AA(m) + AA(q) - AA(2).sqrt()\nprint(float(RR(z)).hex(), float(z).hex(), float(z.n()).hex())\n" +
+    "R.<x,y> = PolynomialRing(QQ, order='lex')\nprint([float(d[y]).hex() for d in R.ideal([(x+y)^2-2, x+2*y-m-q]).variety(RR)])\n";
+  assert.equal(cli("--sage", "-c", src),
+    "4.88016887242097e-17 4.8801688724209698078569671875e-17 4.88016887242097e-17 4.88016887242097e-17\n" +
+    "1.68872420969808e-21 1.6887242096980785696718753769e-21 1.6887242096980786e-21 1.68872420969808e-21\n" +
+    "7.37990732478462e-61 7.3799073247846210703885038753e-61 7.379907324784621e-61 7.37990732478462e-61\n" +
+    "1.00000000000000 + 2.42096980785697e-26*I 1.00000000000000 + 2.42096980785697e-26*I\n" +
+    "0x1.0000000000001p+0 0x1.0000000000001p+0 0x1.0000000000001p+0\n" +
+    "['0x1.0000000000001p+0', '0x1.ea09e667f3bcdp+1']\n");
+});
+
+test("an algebraic number's conversion checks its digit cap before asking the root engine (HARD-883-1)", () => {
+  // (RealField(10^7)(sqrt(2)) asked the engine for 3010315 digits and leaked
+  // its ValueError; the cap is now checked first, and a doubling stops at it)
+  const src = "for p in (10^7, 400000):\n try:\n  RealField(p)(AA(2).sqrt())\n except ArithmeticError as e:\n  print(type(e).__name__, e)\nprint(RealField(3000)(AA(2).sqrt()).str()[:12], RealField(2000)(AA(1/3)).str()[:8])\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src),
+    "ArithmeticError the approximation did not converge within 99995 digits\n".repeat(2) + "1.4142135623 0.333333\n");
+  assert.ok(Date.now() - t < 30000);
+});

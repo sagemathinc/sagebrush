@@ -4330,11 +4330,16 @@ def _poly_rem(c, g):
 def _numeric_points(g, rems, ring, kind):
     """For each root theta of the irreducible g (rational coefficients) that
     the ring keeps (real roots for a real field), the coordinates
-    rems[i](theta) in the ring. A coordinate that is rational (a constant
-    remainder, 0 included) is exact. The others are evaluated exactly at a
-    decimal approximation of theta (certified to its digits), with digits
-    doubled until the derivative bound puts the error below 2^-(p+10) of the
-    value; refused beyond 20000 digits."""
+    rems[i](theta) in the ring, correctly rounded. A coordinate that is
+    rational (a constant remainder, 0 included) is exact. The others are
+    evaluated exactly at a decimal approximation of theta (certified to its
+    digits), with digits doubled until the derivative bound puts the error
+    below 2^-(p+10) of the value and both ends of the certified interval
+    round to the same number of the ring (Ziv's test: the 1-ulp guarantee
+    alone could round a value just above a midpoint down, astra's
+    DOC-6D8-1). An irrational coordinate is never a midpoint, so this ends;
+    a real or imaginary part that is rational is computed exactly instead.
+    Refused beyond 20000 digits."""
     import _sage_qqbar as qb
     from sagebrush import nf
     sa = _sa()
@@ -4353,18 +4358,28 @@ def _numeric_points(g, rems, ring, kind):
         if R is None:
             return ring(float(re), float(im))
         return ring(R(re), R(im))
+
+    def rnd(v):
+        """v (a rational) rounded to the precision of the ring's parts."""
+        if not complex_ring:
+            return ring(v)
+        return float(v) if R is None else R(v)
     alg = []  # the exact roots of g (qqbar), computed when first needed
 
-    def exact_zero(tr, ti, r, part):
-        """Whether the real (part 0) or imaginary (part 1) part of r(theta)
-        is exactly 0, theta the root of g nearest (tr, ti); None if qqbar
-        cannot tell."""
+    def exact_part(tr, ti, r, part):
+        """The real (part 0) or imaginary (part 1) part of r(theta), theta
+        the root of g nearest (tr, ti), if it is rational (0 included);
+        None if it is not, or if qqbar cannot tell."""
         try:
             if not alg:
                 alg.extend(qb._roots_of(gi, qb.AlgebraicNumber))
             z = min(alg, key=lambda z: abs(z._gen.z[0] - tr) + abs(z._gen.z[1] - ti))
             v = qb.AlgebraicNumber(z._gen, r)
-            return (v.real() if part == 0 else v.imag()) == 0
+            w = v.real() if part == 0 else v.imag()
+            if w == 0:
+                return _F(0)
+            m = w._minpoly_coeffs()
+            return _F(-m[0], m[1]) if len(m) == 2 else None
         except ArithmeticError:
             return None
     digits = max(30, prec * 30103 // 100000 + 20)
@@ -4395,12 +4410,12 @@ def _numeric_points(g, rems, ring, kind):
                 comps = [vr] if real_root else [vr, vi]
                 vals = []
                 for part, c in enumerate(comps):
-                    if bound <= eps * abs(c):
+                    if bound <= eps * abs(c) and rnd(c - bound) == rnd(c + bound):
                         vals.append(c)
                         continue
-                    z = exact_zero(tr, ti, r, part) if not real_root else None
-                    if z:
-                        vals.append(_F(0))
+                    q = exact_part(tr, ti, r, part) if not real_root else None
+                    if q is not None:
+                        vals.append(q)
                     else:
                         ok = False
                         break
