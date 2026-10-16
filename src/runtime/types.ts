@@ -2180,7 +2180,9 @@ export class Zip {
 const zip = iteratorType("zip", Zip, (...xs: any[]) => new Zip(xs.map(O.iter), false));
 // (strict wherever it is given; any other keyword refused, as CPython's)
 zip.$kw = (pos, names, values) => {
-  // (every keyword checked before strict's truth is taken, CORR-71C-2)
+  // (every keyword checked before strict's truth is taken, CORR-71C-2; more
+  // than one is refused by count, as CPython's)
+  if (names.length > 1) raise(T.TypeError, `zip() takes at most 1 keyword argument (${names.length} given)`);
   for (const n of names) if (n !== "strict") raise(T.TypeError, `zip() got an unexpected keyword argument '${n}'`);
   let strict = false;
   names.forEach((_n, i) => (strict = O.truth(values[i])));
