@@ -171,3 +171,64 @@ print(all(float(v) == math.exp2(x) for v, x in zip(np.exp2(np.array(xs)), xs)))
     "True",
   ]);
 });
+
+test("norms decide midpoints exactly, and atan2's tiny ratios round below a subnormal midpoint (CORR-343-1, CORR-343-2)", () => {
+  // (a = s^2: a^2 + s^2 = (a + 1/2)^2 - 1/4, just below the midpoint, so a; Fraction's oracle below)
+  const s = 67108865, a = s * s;
+  assert.equal(CR.hypot(a, s), a);
+  assert.equal(CR.hypotN([a, s, 0]), a);
+  // (1 + 2^-52 + 2^-106 is (1 + 2^-53)^2 exactly: a tie, to the even 1; 2^-108 more rounds up)
+  assert.equal(CR.hypotN([1, 2 ** -26, 2 ** -53]), 1);
+  assert.equal(CR.hypotN([1, 2 ** -26, 2 ** -53, 2 ** -54]), 1 + 2 ** -52);
+  // (u = 2^-1074: 3u/2 and 3 2^-500 / 2^575 = 3u/2 are midpoints, atan just below them)
+  const u = 5e-324;
+  assert.equal(CR.atan2(3 * u, 2), u);
+  assert.equal(CR.atan2(-3 * u, 2), -u);
+  assert.equal(CR.atan2(3 * 2 ** -500, 2 ** 575), u);
+  for (let K = 1; K < 400; K += 2) {
+    assert.equal(CR.atan2(K * u, 2), ((K - 1) / 2) * u, `atan2(${K}u, 2)`);
+    assert.equal(CR.atan2(K * u, 4), Math.round(K / 4) * u, `atan2(${K}u, 4)`); // (never a tie)
+  }
+  // the square-midpoint family at many scales, two and three coordinates, and vectors near
+  // ties, against an exact oracle (Python's Fraction: midpoints compared with the square sum)
+  const cases: number[][] = [];
+  for (let k = 1; k < 120; k += 2) {
+    const t = 2 ** 26 + k;
+    for (const j of [-1020, -1000, -600, -60, 0, 60, 500, 900, 971]) {
+      cases.push([t * t * 2 ** j, t * 2 ** j], [t * t * 2 ** j, t * 2 ** j, 0], [t * 2 ** j, t * t * 2 ** j, -0]);
+    }
+  }
+  for (let k = 0; k < 60; k++) {
+    cases.push([1 + k * 2 ** -52, 2 ** -26, 2 ** -53, 2 ** -54], [1 + k * 2 ** -52, 2 ** -26 * (1 + k * 2 ** -52), 2 ** -53]);
+  }
+  let r = 12345;
+  for (let i = 0; i < 300; i++) {
+    r = (Math.imul(r, 1103515245) + 12345) >>> 0;
+    const m = r & 0xfffff;
+    r = (Math.imul(r, 1103515245) + 12345) >>> 0;
+    cases.push([m * u, (r & 0xfffff) * u], [m * u, (r & 0xff) * u, 3 * u]); // (subnormal results)
+  }
+  const got = cases.map((c) => (c.length === 2 ? CR.hypot(c[0], c[1]) : CR.hypotN(c)));
+  const file = join(mkdtempSync(join(tmpdir(), "crmath-")), "norms.json");
+  writeFileSync(file, JSON.stringify(cases.map((c, i) => [c.map((v) => v.toString()), got[i].toString()])));
+  const bad = JSON.parse(execFileSync("python3", ["-c", `
+import json, math
+from fractions import Fraction as F
+def nearest(S):
+    # (a first guess, scaled: float(S) itself can overflow or underflow)
+    h = (S.numerator.bit_length() - S.denominator.bit_length()) // 2
+    c = math.ldexp(math.sqrt(float(S / F(2) ** (2 * h))), h)
+    def up(c):  # the root is at or above the midpoint of c and its upper neighbour
+        m = (F(c) + F(math.nextafter(c, math.inf))) / 2
+        return S > m * m or (S == m * m and math.frexp(c)[0] * 2**53 % 2 == 1)
+    while up(c): c = math.nextafter(c, math.inf)
+    while c > 0 and not up(math.nextafter(c, 0)): c = math.nextafter(c, 0)
+    return c
+bad = []
+for xs, got in json.load(open(${JSON.stringify(file)})):
+    xs = [float(v) for v in xs]
+    want = nearest(sum(F(v) ** 2 for v in xs))
+    if want != float(got): bad.append([xs, got, want])
+print(json.dumps([len(bad)] + bad[:5]))`], { encoding: "utf8", maxBuffer: 1 << 26 }));
+  assert.deepEqual(bad, [0]);
+});
