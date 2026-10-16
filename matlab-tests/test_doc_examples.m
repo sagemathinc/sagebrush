@@ -80,6 +80,46 @@ show(v);
 clear
 v = cosd([0 90 180 270]);
 show(v);
+% tand
+clear
+v = tand([-45 0 60]);
+show(v);
+% atan
+clear
+v = atan([-2 0 2]);
+show(v);
+% sec
+clear
+v = sec([0 pi/4]);
+show(v);
+% csc
+clear
+v = csc([pi/6 pi/2]);
+show(v);
+% cot
+clear
+v = cot([pi/8 pi/4]);
+show(v);
+% sinh
+clear
+v = sinh([-0.5 0 0.5]);
+show(v);
+% cosh
+clear
+v = cosh([0 0.5 1]);
+show(v);
+% tanh
+clear
+v = tanh([-2 0 2]);
+show(v);
+% asinh
+clear
+v = asinh([-2 0 2]);
+show(v);
+% expm1
+clear
+v = expm1([-1e-8 0 1e-8]);
+show(v);
 % factorial
 clear
 v = factorial([3 5]);
@@ -579,10 +619,6 @@ show(P);
 % chol
 clear
 v = chol([4 2; 2 3]);
-show(v);
-% qr
-clear
-v = abs(qr([3 1; 4 2]));
 show(v);
 % svd
 clear

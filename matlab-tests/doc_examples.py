@@ -33,6 +33,7 @@ OCTAVE_SKIP = {
     "strlength": "not in Octave 11",
     "split": "not in Octave 11",
     "replace": "not in Octave 11",
+    "qr": "Octave 8's one-output qr includes Householder vectors below the diagonal; MATLAB R2022a+ returns only R (https://www.mathworks.com/help/matlab/ref/qr.html)",
 }
 # (compared to 12 significant digits: Octave's and Sagebrush's last bits differ)
 OCTAVE_ROUND = {"inv", "polyfit", "linsolve", "gamma", "gammainc", "besselj"}
