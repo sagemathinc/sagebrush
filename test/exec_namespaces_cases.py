@@ -76,3 +76,11 @@ for code, ev in [("global x\nr=[x for _ in range(1)]", "r"), ("global x\nr={x fo
                  ("sub = {'x': 40}\nexec('global x\\nx = 50', None, sub)\nr = x", "r"), ("sub = {'x': 40}\nexec('r2 = x', None, sub)\nr = sub['r2']", "r"),
                  ("sub = {}\nexec('r2 = x', None, sub)\nr = sub['r2']", "r"), ("r = eval('x', None, {})", "r"), ("exec('r = x')", "r")]:
     print(repr(code), '->', t2(code, ev))
+# a walrus target in a comprehension binds in the enclosing scope and
+# follows its rule, reads and writes alike (CORR-756-1)
+for code, ev in [("global x\nr=[(x:=i) for i in range(2)]", "r"), ("global x\nr={(x:=i) for i in range(2)}", "r"),
+                 ("global x\nr={i: (x:=i) for i in range(2)}", "r"), ("global x\nr=[[(x:=j) for j in range(2)] for i in range(2)]", "r"),
+                 ("global x\nr=[i for i in range(3) if (x:=i) > 0]", "r"), ("global x\nr=[(x,(x:=i)) for i in range(2)]", "r"),
+                 ("global x\nr=[(x:=i,(lambda:x)()) for i in range(2)]", "r"), ("r=[(x:=i) for i in range(2)]", "r"),
+                 ("r=[(x,(x:=i)) for i in range(2)]", "r"), ("global x\nr=list((x:=i) for i in range(2))", "r"), ("r=[x for _ in range(1)]", "r")]:
+    print(repr(code), '->', t2(code, ev))
