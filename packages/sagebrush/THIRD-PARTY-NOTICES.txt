@@ -49,6 +49,12 @@ Copyright (c) 2001 Python Software Foundation. See
   half-even correction, `m_remainder`, `math_isclose_impl`,
   `math_modf_impl`, `math_fmod_impl`); `src/runtime/ops.ts`, `floatDivmod`:
   `_float_div_mod` (`Objects/floatobject.c`).
+- `src/runtime/complex.ts`, the `cmath` module: ported from CPython 3.14's
+  `Modules/cmathmodule.c` (each function's special-value table, its
+  large-argument formulas and its errno: `cmath_sqrt_impl`, `c_log`,
+  `cmath_exp_impl`, the trigonometric, hyperbolic and inverse functions,
+  `cmath_rect_impl`, `cmath_polar_impl`), with `_Py_c_quot` and `_Py_c_abs`
+  (`Objects/complexobject.c`).
 
 ### NumPy (BSD 3-Clause)
 
