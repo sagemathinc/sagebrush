@@ -22,3 +22,8 @@ for nm, f in [('mul', lambda X, Y: X * Y), ('add', lambda X, Y: X + Y), ('sub', 
     T('AA QQbar empty ' + nm, lambda: f(matrix(AA, 0, 0, []), matrix(QQbar, 0, 0, [])).base_ring())
 T('AA mat QQbar vec', lambda: ((matrix(AA, [[1, 2]]) * vector(QQbar, [QQbar(I), 1])).base_ring(), list(matrix(AA, [[1, 2]]) * vector(QQbar, [QQbar(I), 1]))))
 T('K mat L vec', lambda: list(matrix(K, [[0]]) * vector(L, [1])))
+T('K L augment', lambda: matrix(K, [[1]]).augment(matrix(L, [[1]])).list())
+T('K L stack', lambda: matrix(K, [[0]]).stack(matrix(L, [[0]])).list())
+T('GF7 GF5 augment', lambda: matrix(GF(7), [[1]]).augment(matrix(GF(5), [[1]])).list())
+T('QQbar AA augment', lambda: (matrix(QQbar, [[I]]).augment(matrix(AA, [[2]])).base_ring(), matrix(QQbar, [[I]]).augment(matrix(AA, [[2]])).list()))
+T('K K stack', lambda: matrix(K, [[a]]).stack(matrix(K, [[1]])).list())

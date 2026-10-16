@@ -1303,6 +1303,17 @@ class FFMatrix:
             raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), o.parent()))
         return (self if self._base is F else FFMatrix(F, self._rows, self._ncols)), (o if o._base is F else FFMatrix(F, o._rows, o._ncols))
 
+    def _join_field(self, other, what):
+        """For augment and stack: nothing when other is over this field;
+        Sage's TypeError when the two fields have no common field (astra's
+        24 cases after CORR-ABC-1); NotImplementedError for a widening
+        sagebrush does not do here (AA with QQbar on the right)."""
+        F = _common_field(self._base, other._base)
+        if F is None:
+            raise TypeError("no common canonical parent for objects with parents: '%r' and '%r'" % (self.parent(), other.parent()))
+        if F is not self._base:
+            raise NotImplementedError("%s a matrix over %r with one over %r is not available in sagebrush yet" % (what, self._base, other._base))
+
     def _from_qq(self, o):
         """A QQ matrix o as a matrix over this (QQbar) field."""
         import _sage_matrix
@@ -1796,8 +1807,8 @@ class FFMatrix:
             other = FFMatrix(self._base, [[x] for x in other])
         if other.nrows() != self.nrows():
             raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), other.nrows()))
-        if isinstance(other, FFMatrix) and _common_field(self._base, other._base) is not self._base:
-            raise NotImplementedError("augmenting a matrix over %r with one over %r is not available in sagebrush yet" % (self._base, other._base))
+        if isinstance(other, FFMatrix):
+            self._join_field(other, "augmenting")
         _admit_size(self._base, self.nrows(), self._ncols + other.ncols())
         return FFMatrix(self._base, [r + s for r, s in zip(self._rows, other._rows)], self._ncols + other.ncols())
 
@@ -1814,8 +1825,8 @@ class FFMatrix:
             other = FFMatrix(self._base, [other._e])
         if other.ncols() != self._ncols:
             raise TypeError("number of columns must be the same, %d != %d" % (self._ncols, other.ncols()))
-        if isinstance(other, FFMatrix) and _common_field(self._base, other._base) is not self._base:
-            raise NotImplementedError("stacking a matrix over %r on one over %r is not available in sagebrush yet" % (self._base, other._base))
+        if isinstance(other, FFMatrix):
+            self._join_field(other, "stacking")
         _admit_size(self._base, self.nrows() + other.nrows(), self._ncols)
         return FFMatrix(self._base, self._rows + other._rows, self._ncols)
 
