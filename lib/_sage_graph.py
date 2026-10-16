@@ -187,7 +187,7 @@ class GenericGraph:
         if v is None:
             u, v, label = _edge_spec(u, True)
         nbrs = self._adj.get(u, {})
-        if v not in nbrs or (label is not None and nbrs[v] != label):
+        if v not in nbrs or (label is not None and not (nbrs[v] == label)):
             # a missing edge, or one with another label (a label of None
             # matches any edge), is left alone, as in Sage
             return
