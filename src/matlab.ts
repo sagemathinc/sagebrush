@@ -271,7 +271,9 @@ export function lex(src: string): Tok[] {
 
 // what `end` in an index refers to (cur: the argument being parsed; fn: its base is a name that
 // may be a function, known only when the code runs)
-interface Frame { code: string; n: number; cur: number; fn?: boolean }
+interface Frame { code: string; n: number; cur: number; fn?: boolean; used?: boolean }
+// (used: an end refers to it, so a computed base is made once, into a temporary, and the
+// index and its ends read that one value)
 
 type Expr =
   | { k: "num"; v: string }
@@ -814,6 +816,8 @@ class Parser {
       this.next();
       const frame = this.frames[this.frames.length - 1];
       const outer = this.frames.slice(0, -1).reverse().map((f) => ({ frame: f, pos: f.cur }));
+      frame.used = true;
+      for (const o of outer) o.frame.used = true;
       return { k: "end", frame, pos: frame.cur, outer };
     }
     if (this.at("(")) {
@@ -1475,8 +1479,7 @@ class Emitter {
       case "range": return e.step ? `_m.colon(${this.expr(e.a, scope)}, ${this.expr(e.step, scope)}, ${this.expr(e.b, scope)})` : `_m.colon(${this.expr(e.a, scope)}, ${this.expr(e.b, scope)})`;
       case "index":
         if (e.brace) {
-          const base = this.expr(e.e, scope);
-          e.frame.code = base;
+          const base = this.onceBase(e.frame, this.expr(e.e, scope));
           return `_m.brace(${base}, ${this.argList(e.args, scope)})`;
         }
         return this.indexExpr(e, scope, "1");
@@ -1584,8 +1587,21 @@ class Emitter {
     }
     else if (f.k === "field" && f.e.k === "id" && !this.isVar(f.e.name, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
     else base = this.expr(f, scope);
-    e.frame.code = base;
+    base = this.onceBase(e.frame, base);
     return `_m.paren(${base}, ${this.argList(e.args, scope)}, ${nargout})`;
+  }
+
+  /** an index's base as the code that makes it: when an end refers to the index and the
+   * base is computed (s(k).a, c{k}), it is made once, into a temporary, before the
+   * arguments, which read the temporary (s(tick()).a(min(end, 5)) calls tick once) */
+  onceBase(frame: Frame, base: string): string {
+    if (!frame.used || /^[A-Za-z_][A-Za-z0-9_]*$/.test(base)) {
+      frame.code = base;
+      return base;
+    }
+    const t = this.fresh("_b");
+    frame.code = t;
+    return `(${t} := ${base})`;
   }
 
   /** arguments (or elements): c{:} and s.f expand to their values */
