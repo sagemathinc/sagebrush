@@ -15,6 +15,11 @@
   Access-Control-Allow-Origin: *
 /sagebrush-precompiled.json
   Access-Control-Allow-Origin: *
+# the Python library's chunks (web/lib-chunks.mts): named by their content's
+# hash, so never changed in place
+/lib/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
 # engines by their content (web/build.ts, design/engines.md): readable from any
 # page or file; on sagebrush.space the site's Worker serves them from R2
 /engine/*
