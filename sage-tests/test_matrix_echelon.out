@@ -1,0 +1,32 @@
+Integer Ring 0x3 :: (((0, 3), Integer Ring, []), ((0, 3), Rational Field, []), ((0, 3), Integer Ring, []))
+Integer Ring 3x0 :: (((3, 0), Rational Field, []), ((3, 0), Integer Ring, []))
+Integer Ring kernels [3] :: [((0, 1), Integer Ring, []), ((0, 1), Integer Ring, []), ((0, 1), Integer Ring, [])]
+Integer Ring kernel rref [3] :: [((0, 1), Rational Field, []), ((0, 1), Rational Field, [])]
+Integer Ring kernels [1, 0, 0, 1] :: [((0, 2), Integer Ring, []), ((0, 2), Integer Ring, []), ((0, 2), Integer Ring, [])]
+Integer Ring kernel rref [1, 0, 0, 1] :: [((0, 2), Rational Field, []), ((0, 2), Rational Field, [])]
+Integer Ring kernels [1, 2, 2, 4] :: [((1, 2), Integer Ring, [2, -1]), ((1, 2), Integer Ring, [2, -1]), ((1, 2), Integer Ring, [2, -1])]
+Integer Ring kernel rref [1, 2, 2, 4] :: [((1, 2), Rational Field, [1, -1/2]), ((1, 2), Rational Field, [1, -1/2])]
+Integer Ring change_ring :: (((0, 3), Rational Field, []), ((0, 3), Real Double Field, []))
+Integer Ring solve_right :: ((0, 3), Rational Field, [])
+Rational Field 0x3 :: (((0, 3), Rational Field, []), ((0, 3), Rational Field, []), ((0, 3), Rational Field, []))
+Rational Field 3x0 :: (((3, 0), Rational Field, []), ((3, 0), Rational Field, []))
+Rational Field kernels [3] :: [((0, 1), Rational Field, []), ((0, 1), Rational Field, []), ((0, 1), Rational Field, [])]
+Rational Field kernel rref [3] :: [((0, 1), Rational Field, []), ((0, 1), Rational Field, [])]
+Rational Field kernels [1, 0, 0, 1] :: [((0, 2), Rational Field, []), ((0, 2), Rational Field, []), ((0, 2), Rational Field, [])]
+Rational Field kernel rref [1, 0, 0, 1] :: [((0, 2), Rational Field, []), ((0, 2), Rational Field, [])]
+Rational Field kernels [1, 2, 2, 4] :: [((1, 2), Rational Field, [1, -1/2]), ((1, 2), Rational Field, [1, -1/2]), ((1, 2), Rational Field, [1, -1/2])]
+Rational Field kernel rref [1, 2, 2, 4] :: [((1, 2), Rational Field, [1, -1/2]), ((1, 2), Rational Field, [1, -1/2])]
+Rational Field change_ring :: (((0, 3), Rational Field, []), ((0, 3), Real Double Field, []))
+Rational Field solve_right :: ((0, 3), Rational Field, [])
+ZZ rref [2] :: (((1, 1), Rational Field, [1]), ((1, 1), Integer Ring, [2]))
+ZZ rref [2, 4, 3, 5] :: (((2, 2), Rational Field, [1, 0, 0, 1]), ((2, 2), Integer Ring, [1, 1, 0, 2]))
+ZZ rref [2, 4, 6, 4, 8, 12] :: (((2, 3), Rational Field, [1, 2, 3, 0, 0, 0]), ((2, 3), Integer Ring, [2, 4, 6, 0, 0, 0]))
+ZZ rref [0, 6, 3, 4, 2, 0] :: (((2, 3), Rational Field, [1, 0, -1/4, 0, 1, 1/2]), ((2, 3), Integer Ring, [4, 2, 0, 0, 6, 3]))
+QQ rref :: ((2, 2), Rational Field, [1, 0, 0, 1])
+change_ring GF :: ((0, 3), Finite Field of size 5, [])
+hermite :: ((0, 3), Integer Ring, [])
+smith :: [((0, 3), Integer Ring, []), ((0, 0), Integer Ring, []), ((3, 3), Integer Ring, [1, 0, 0, 0, 1, 0, 0, 0, 1])]
+LLL :: ((0, 3), Integer Ring, [])
+block :: ((0, 3), Integer Ring, [])
+random :: (0, 3)
+transpose :: (((3, 0), Rational Field, []), ((0, 3), Rational Field, []))
