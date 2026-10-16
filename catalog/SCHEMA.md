@@ -1,4 +1,4 @@
-# The function catalog: entry schema (draft 6)
+# The function catalog: entry schema (draft 7)
 
 Every function, class, method or constant an agent can use in a Sagebrush
 mode has one **entry**. The entries are what `sb --search`, the MCP
@@ -86,21 +86,24 @@ then the error:
 - **matlab**: what the MATLAB command window shows, `ans = ...` included, with the mode's display format.
 
 An example that draws shows, where the graphic is displayed, one line per
-figure that it made or changed, in the form `[figure N: SUMMARY]`. The runner
-prints this line from the mode's graphics model, never from pixels, so it is
-deterministic on every runtime. SUMMARY lists, in drawing order, the parts the
-figure has, with counts and texts: the number of axes, then for each axes its
-lines, markers, bars, patches, surfaces, images and texts, with the title,
-axis labels and legend entries quoted. For example:
+figure that it made or changed, in the form `[figure N: DESCRIPTION]`. N
+counts the example's figures from 1. DESCRIPTION is the text description that
+`lib/_graphics.py` stores in every figure it draws (the SVG's `<title>`),
+never anything taken from pixels, so it is the same on every runtime: the
+parts in drawing order, with their labels, then the axes' ranges. For example:
 
 ```
-[figure 1: 1 axes; axes 1: 2 lines, legend 'sin' 'cos', title 'Two waves', xlabel 'x']
+[figure 1: Plot: "Two waves"; line "sin" through 5 points, line "cos" through 5 points; x (x) from -0.3142 to 6.597, y from -1.1 to 1.1]
 ```
 
-Each mode's runner defines the exact wording for its graphics. A Sage
-`Graphics` object that is the value of the last line prints its own repr
-(`Graphics object consisting of 1 graphics primitive`), as Sage does. Plotting
-functions need examples like any other.
+A mode's runner gets these lines by setting `builtins.__sagebrush_catalog__`
+to `[0]` (its figure count) while the example runs; `lib/_graphics.py` show()
+then prints the line instead of displaying the figure. Python's runner also
+shows the figures an example leaves open, as the notebook does after a cell,
+and closes those an earlier example left. A Sage `Graphics` object that is
+the value of a line prints its own repr (`Graphics object consisting of 1
+graphics primitive`), as Sage does. Plotting functions need examples like any
+other.
 
 An example that raises shows the error as the mode reports it, by the mode's
 rule: **python** and **sage**, only the last line of the traceback

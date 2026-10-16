@@ -1,0 +1,110 @@
+[
+  {
+    "name": "matplotlib.pyplot.plot",
+    "kind": "function",
+    "signature": "(*args, scalex=True, scaley=True, data=None, **kwargs)",
+    "summary": "Lines and/or markers through the points: plot(y), plot(x, y), with a format string such as 'r--o'.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nx = np.linspace(0, 2 * np.pi, 5)\nplt.plot(x, np.sin(x), label='sin')\nplt.plot(x, np.cos(x), label='cos')\nplt.title('Two waves')\nplt.xlabel('x')\nplt.legend()\nplt.show()",
+        "expected": "[figure 1: Plot: \"Two waves\"; line \"sin\" through 5 points, line \"cos\" through 5 points; x (x) from -0.3142 to 6.597, y from -1.1 to 1.1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.bar",
+    "kind": "function",
+    "signature": "(x, height, width=0.8, bottom=None, *, align='center', **kwargs)",
+    "summary": "A bar chart: bars at x with the given heights (width, bottom, color, label).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.bar(['a', 'b'], [3, 5])\nplt.show()",
+        "expected": "[figure 1: Plot: 2 bars; x from -0.49 to 1.49, y from 0 to 5.25]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.hist",
+    "kind": "function",
+    "signature": "(x, bins=None, range=None, density=False, cumulative=False, histtype='bar', **kwargs)",
+    "summary": "A histogram of the data: counts in bins (bins, range, density, cumulative, histtype); returns (n, bins, patches).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nn, bins, _ = plt.hist([1, 2, 2, 3], bins=3)\nprint(n, bins)\nplt.show()",
+        "expected": "[1. 2. 1.] [1.         1.66666667 2.33333333 3.        ]\n[figure 1: Plot: 3 bars; x from 0.9 to 3.1, y from 0 to 2.1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.scatter",
+    "kind": "function",
+    "signature": "(x, y, s=None, c=None, marker=None, cmap=None, alpha=None, **kwargs)",
+    "summary": "Markers at the points (x, y), with sizes s and colors c (through a colormap when numbers).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.scatter([1, 2, 3], [3, 1, 2])\nplt.show()",
+        "expected": "[figure 1: Plot: 3 points; x from 0.9 to 3.1, y from 0.9 to 3.1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.subplots",
+    "kind": "function",
+    "signature": "(nrows=1, ncols=1, *, sharex=False, sharey=False, squeeze=True, figsize=None, **kwargs)",
+    "summary": "A figure and a grid of axes: fig, ax = subplots(), or fig, axs = subplots(nrows, ncols).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, axs = plt.subplots(1, 2)\naxs[0].plot([1, 4, 9])\naxs[1].bar([1, 2], [2, 1])\nplt.show()",
+        "expected": "[figure 1: Figure with 2 plots: line through 3 points; x from -0.1 to 2.1, y from 0.6 to 9.4 | 2 bars; x from 0.51 to 2.49, y from 0 to 2.1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.show",
+    "kind": "function",
+    "signature": "(*, block=None)",
+    "summary": "Shows every open figure, then closes them.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.plot([1, 2, 4])\nplt.show()",
+        "expected": "[figure 1: Plot: line through 3 points; x from -0.1 to 2.1, y from 0.85 to 4.15]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  }
+]
