@@ -190,6 +190,15 @@ try {
   ok(/KeyboardInterrupt/.test(out), "Stop interrupts the Rust engine (ECM): " + JSON.stringify(out.trim().slice(-60)));
   out = await runCode("print(globals()['keep'], factor(2^64 + 1))");
   ok(out.includes("41 274177 * 67280421310721"), "...the engine works after it, variables kept: " + out.trim());
+  // a call that never checks the flag (a backtracking re match): within 2 s
+  // the interpreter is ended and restarted, which the cell says, and the
+  // next cell runs
+  const t0 = Date.now();
+  out = await runAndStop("import re\nre.match('(a+)+$', 'a' * 40 + 'b')", 800);
+  ok(/did not stop when interrupted, so the interpreter was restarted; variables are gone/.test(out) && Date.now() - t0 - 800 < 4000, `Stop ends a catastrophic re.match by restarting the interpreter (${Date.now() - t0 - 800} ms): ` + JSON.stringify(out.trim().slice(-120)));
+  await ready();
+  out = await runCode("print(6 * 7)");
+  ok(out.includes("42"), "...and the next cell runs: " + out.trim());
   // Magma mode: translated to Python in the page
   await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");

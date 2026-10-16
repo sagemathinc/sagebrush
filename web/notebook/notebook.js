@@ -23,7 +23,7 @@ import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
-const STOP_MESSAGE = "\nStopped (it did not respond to the interrupt, so the interpreter was restarted; variables are gone).\n";
+const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
 
 // ------------------------------------------------------------ highlighting
 // (web/notebook/highlight.js, which the board's editor uses too)
