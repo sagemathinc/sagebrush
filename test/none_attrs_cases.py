@@ -109,3 +109,23 @@ class X:
 
 
 binascii.b2a_base64(e, newline=X())
+# with no source, under an export: a no-op, a subclass too (CORR-254-1)
+eb = bytearray()
+es = B()
+
+
+class Y:
+    def __bool__(self):
+        out = []
+        for target in (eb, es):
+            try:
+                target.__init__()
+                out.append('ok %d' % len(target))
+            except Exception as ex:
+                out.append(type(ex).__name__)
+        print(out)
+        return True
+
+
+binascii.b2a_base64(eb, newline=Y())
+binascii.b2a_base64(es, newline=Y())
