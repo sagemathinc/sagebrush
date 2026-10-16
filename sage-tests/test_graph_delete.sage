@@ -40,3 +40,24 @@ for C in (Graph, DiGraph):
     g=C([(0,1),(1,2)])
     g.delete_vertices(v for v in [0,0,1])
     print(C.__name__, 'duplicates generator', g.vertices(sort=True), g.edges(sort=True))
+
+# a label is matched by equality, as Sage: __eq__ and __ne__ may both be True
+# (astra's CORR-CAC-1 on cac31e10)
+class Label:
+    def __eq__(self, other):
+        return True
+    def __ne__(self, other):
+        return True
+    def __hash__(self):
+        return 0
+    def __repr__(self):
+        return 'Label()'
+for C in (Graph, DiGraph):
+    for name, f in (("delete_edges", lambda g, l: g.delete_edges([(0, 1, l)])),
+                    ("delete_edge(u, v, l)", lambda g, l: g.delete_edge(0, 1, l)),
+                    ("delete_edge((u, v, l))", lambda g, l: g.delete_edge((0, 1, l)))):
+        for same in (True, False):
+            l = Label()
+            g = C([(0, 1, l)])
+            f(g, l if same else Label())
+            print(C.__name__, name, 'same' if same else 'equal', g.size())
