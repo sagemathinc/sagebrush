@@ -7855,19 +7855,18 @@ def _ws_vars(ns):
 def ws_call(name, ns, args, nargout):
     """functions that see the caller's variables"""
     if name in ("clear", "clearvars"):
-        names = [_text(a) for a in args]
-        flags = [n for n in names if n.startswith("-")]
-        names = [n for n in names if not n.startswith("-")]
-        if not names or names[0] in ("all", "variables", "-all"):
-            if names and names[0] == "all":
-                _globals.clear()
-                _persistents.clear()
-            names = _ws_vars(ns)
-        elif names[0] in ("functions", "classes", "global", "import"):
-            if names[0] == "global":
-                _globals.clear()
+        tokens = [_text(a) for a in args]
+        if "__name__" not in ns:
+            # (a function's locals() is a copy, which can't delete its variables: the
+            # compiler handles clear in functions; anything reaching here is refused)
+            raise _err("This form of %s inside a function is not supported." % name)
+        if name == "clear" and tokens in (["all"], ["-all"]) and "all" not in _ws_vars(ns):
+            _globals.clear()
+            _persistents.clear()
+        if name == "clear" and tokens == ["global"] and "global" not in _ws_vars(ns):
+            _globals.clear()
             return NOVAL
-        for v in _glob_select(names, _ws_vars(ns)):
+        for v in clear_select(name, tokens, _ws_vars(ns)):
             key = "_k_" + v if v in _PYKW else v
             if key in ns:
                 try:
@@ -8540,6 +8539,176 @@ def trapz_n(*args):
     else:
         dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
     return _unmat(np.sum(dx * (Y[1:] + Y[:-1]) / 2, axis=0).reshape((1, -1)))
+
+
+_CLEAR_ITEMTYPES = ("all", "classes", "functions", "global", "import", "java", "mex", "variables")
+
+
+def clear_select(fn, tokens, defined, protected=()):
+    """the variables clear or clearvars removes, of those defined (holding a value):
+    - clear WORD alone, WORD an ItemType: the variable WORD if it exists (MATLAB's clear
+      page), else the keyword (all, variables, classes, java: every variable; the others
+      none here);
+    - names and wildcards (* ?), or after -regexp regular expressions;
+    - clearvars: its words are always names; with -except, the variables matched after
+      it are kept.
+    protected: names that may not be removed (a function's globals and persistents,
+    which Sagebrush can't unlink exactly): one selected is refused."""
+    tokens = [t if type(t) is str else _text(t) for t in tokens]
+    defined = list(defined)
+    if fn == "clear":
+        flags = [t for t in tokens if t.startswith("-")]
+        words = [t for t in tokens if not t.startswith("-")]
+        if any(f.lower() not in ("-regexp", "-all") for f in flags):
+            raise _err("clear: the option '%s' is not supported." % next(f for f in flags if f.lower() not in ("-regexp", "-all")))
+        if tokens and tokens[0].lower() == "-all":
+            words = ["all"] + words[0:]
+            tokens = tokens[1:]
+        if len(words) == 1 and words[0] in _CLEAR_ITEMTYPES and not flags:
+            w = words[0]
+            if w in defined:
+                chosen = [w]
+            elif w in ("all", "variables", "classes", "java"):
+                chosen = defined + [p for p in protected if p not in defined]
+            elif w == "global":
+                # (clear global: the global variables go, from the global store and from
+                # this workspace; a function's own links to them can't be undone exactly,
+                # so a function that declares a global or persistent is refused)
+                if protected:
+                    raise _err("clear global inside a function that declares global or persistent variables is not supported.")
+                _globals.clear()
+                chosen = []
+            else:
+                chosen = []
+        elif any(w in _CLEAR_ITEMTYPES for w in words) and not flags:
+            raise _err("clear: an ItemType word (%s) among other names is not supported." % next(w for w in words if w in _CLEAR_ITEMTYPES))
+        elif not tokens:
+            chosen = defined + [p for p in protected if p not in defined]
+        else:
+            chosen = _clear_match(tokens, defined + list(protected))
+    else:
+        if any(t.lower() == "-global" for t in tokens):
+            raise _err("clearvars -global is not supported.")
+        lower = [t.lower() for t in tokens]
+        cut = lower.index("-except") if "-except" in lower else len(tokens)
+        targets, keep = tokens[:cut], tokens[cut + 1:]
+        if any(t.startswith("-") and t.lower() != "-regexp" for t in targets + keep):
+            raise _err("clearvars: the option '%s' is not supported." % next(t for t in targets + keep if t.startswith("-") and t.lower() != "-regexp"))
+        everything = defined + [p for p in protected if p not in defined]
+        budget = [0]  # (the -regexp work of the targets and -except together)
+        chosen = _clear_match(targets, everything, budget) if [t for t in targets if not t.startswith("-")] else everything
+        if keep:
+            kept = set(_clear_match(keep, everything, budget))
+            chosen = [v for v in chosen if v not in kept]
+    bad = [v for v in chosen if v in protected]
+    if bad:
+        raise _err("Clearing the global or persistent variable '%s' inside a function is not supported." % bad[0])
+    return [v for v in chosen if v in defined]
+
+
+def _clear_match(tokens, names, budget=None):
+    """names matched by tokens: wildcards (* ?), and regular expressions after -regexp
+    (a match anywhere in the name, as regexp finds it). Each expression's weight
+    (_regex_linearish) times the number of names counts against 4,000,000, with budget
+    carrying the count between clearvars' targets and -except, so many expressions
+    over a large workspace are refused as many wildcards are"""
+    if "-regexp" in [t.lower() for t in tokens]:
+        k = [t.lower() for t in tokens].index("-regexp")
+        plain, rx = tokens[:k], tokens[k + 1:]
+    else:
+        plain, rx = tokens, []
+    chosen = set(_glob_select(plain, names)) if plain else set()
+    weights = []
+    for r in rx:
+        w = _regex_linearish(r)
+        if not w:
+            raise _err("The -regexp pattern '%s' repeats a repetition or an alternation (it could take exponential time to match): not supported." % r)
+        weights.append(w)
+    budget = budget if budget is not None else [0]
+    budget[0] += sum(weights) * len(names)
+    if budget[0] > 4000000:
+        raise _err("Too many -regexp patterns, or patterns too complex, for this workspace: not supported.")
+    for r in rx:
+        pat = _re.compile(_regex(r))
+        chosen.update(n for n in names if pat.search(n))
+    return [n for n in names if n in chosen]
+
+
+def _regex_linearish(p):
+    """The pattern's weight, or 0 for a pattern that could backtrack badly. Each repetition has a weight, the
+    number of lengths it can take on a name of at most 63 characters (? two, {m,n}
+    min(n,63)-m+1, *, + and {m,} sixty-four); a sequence's weight is the product of its
+    parts', an alternation's the sum of its branches'. Past 10^5 the pattern is refused,
+    which bounds the backtracking paths per start position (at most 63 of them): the
+    regular expression engine can't be interrupted, so such patterns are refused rather
+    than run. A repeated group that itself holds a repetition or an alternation ((a+)+,
+    (a|aa)*) and a backreference are refused too"""
+    limit = 10 ** 5
+    # (per open group: [product of the current branch, sum of finished branches, holds a repetition])
+    stack = [[1, 0, False]]
+    i, n = 0, len(p)
+    while i < n:
+        c = p[i]
+        weight = 1
+        group = None
+        if c == "\\":
+            if i + 1 < n and p[i + 1].isdigit():
+                return 0
+            i += 2
+        elif c == "[":
+            j = i + 1
+            if j < n and p[j] == "^":
+                j += 1
+            if j < n and p[j] == "]":
+                j += 1
+            while j < n and p[j] != "]":
+                j += 2 if p[j] == "\\" else 1
+            i = j + 1
+        elif c == "(":
+            stack.append([1, 0, False])
+            i += 1
+            continue
+        elif c == ")":
+            if len(stack) > 1:
+                group = stack.pop()
+                weight = group[0] + group[1]
+            i += 1
+        elif c == "|":
+            stack[-1][1] += stack[-1][0]
+            stack[-1][0] = 1
+            i += 1
+            continue
+        else:
+            i += 1
+        # (a quantifier after this atom)
+        if i < n and p[i] in "*+?{":
+            if p[i] == "{":
+                j = p.find("}", i)
+                body = [t.strip() for t in p[i + 1:j].split(",")] if j > 0 else []
+                if not 1 <= len(body) <= 2 or not body[0].isdigit() or len(body) == 2 and body[1] and not body[1].isdigit():
+                    i += 1  # (a literal brace)
+                    stack[-1][0] *= weight
+                    continue
+                lo = int(body[0])
+                hi = lo if len(body) == 1 else int(body[1]) if body[1] else 63
+                times = max(1, min(hi, 63) - min(lo, 63) + 1)
+                i = j + 1
+            else:
+                times = 2 if p[i] == "?" else 64
+                i += 1
+            if i < n and p[i] in "?+":
+                i += 1
+            if group is not None and (group[2] or weight > 1):
+                return 0
+            weight *= times
+            stack[-1][2] = True
+        elif group is not None and group[2]:
+            stack[-1][2] = True
+        stack[-1][0] *= weight
+        if stack[-1][0] > limit:
+            return 0
+    weight = stack[0][0] + stack[0][1]
+    return weight if weight <= limit else 0
 
 
 def _glob_select(pats, names):

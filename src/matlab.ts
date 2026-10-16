@@ -50,7 +50,7 @@ const OPS = ["==", "~=", "!=", "<=", ">=", "&&", "||", ".*", "./", ".\\", ".^", 
 
 // Commands written without parentheses whose first argument starts with '-'
 // (save f -ascii); for any other name `x -1` is an expression.
-const DASH_COMMANDS = new Set(["save", "load", "format", "warning", "pkg", "close", "clear", "hold", "print", "graphics_toolkit"]);
+const DASH_COMMANDS = new Set(["save", "load", "format", "warning", "pkg", "close", "clear", "clearvars", "hold", "print", "graphics_toolkit"]);
 
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
@@ -1432,9 +1432,8 @@ class Emitter {
       // a function call (or a workspace variable, at the top level)
       if (WORKSPACE_FNS.has(f.name) && !this.fnNames.has(f.name)) {
         // (clear inside a function: a function's variables are Python locals, which
-        // locals() cannot delete, so the names given literally, or all the function's
-        // variables, become undefined again here; patterns, computed names, -options and
-        // clear global go on to ws_call as before)
+        // locals() cannot delete, so the names chosen become undefined again here: the
+        // names given literally at compile time, the rest at run time)
         if (scope.fn && (f.name === "clear" || f.name === "clearvars")) {
           const lit = e.args.every((a) => a.k === "str" && /^[A-Za-z]\w*$/.test(a.v));
           const words = e.args.map((a) => (a as Extract<Expr, { k: "str" }>).v);
@@ -1442,7 +1441,10 @@ class Emitter {
           const undef = (ns: string[]) => `[${ns.map((n) => `(${pyName(n)} := _m.Undef(${JSON.stringify(n)}))`).join(", ")}]`;
           // (clear's ItemType words, which clearvars doesn't have: its arguments are names)
           const kw = f.name === "clear" && lit ? words.filter((w) => CLEAR_ITEMTYPES.has(w)) : [];
-          if (lit && !(kw.length && (words.length > 1 || kw[0] === "global"))) {
+          // (the function's globals and persistents, which these lowerings can't unlink)
+          const prot = [...new Set([...scope.globals, ...scope.persistents])];
+          const touchesProt = prot.length > 0 && (!words.length || kw.length > 0 || words.some((w) => prot.includes(w)));
+          if (lit && !touchesProt && !(kw.length && (words.length > 1 || kw[0] === "global"))) {
             const everything = own([...scope.vars]);
             e.frame.code = "_m.UNDEF";
             if (!words.length) return everything.length ? `(${undef(everything)} and _m.NOVAL)` : "_m.NOVAL";
@@ -1458,6 +1460,18 @@ class Emitter {
             const named = own(words);
             return named.length ? `(${undef(named)} and _m.NOVAL)` : "_m.NOVAL";
           }
+          // (anything else, patterns, computed names, -except, -regexp: chosen at run
+          // time from the function's variables that hold a value, by the same rules as at
+          // the top level (_m.clear_select), and those made undefined; a global or
+          // persistent chosen is refused there)
+          const cands = own([...scope.vars]);
+          const cs = this.fresh("_cs");
+          const pairs = cands.map((n) => `(${JSON.stringify(n)}, ${pyName(n)})`).join(", ");
+          const defd = cands.length ? `[_n for _n, _v in (${pairs}${cands.length === 1 ? "," : ""}) if not isinstance(_v, _m.Undef)]` : "[]";
+          const sel = `_m.clear_select(${JSON.stringify(f.name)}, ${this.argList(e.args, scope)}, ${defd}, ${JSON.stringify(prot)})`;
+          e.frame.code = "_m.UNDEF";
+          const each = cands.map((n) => `((${pyName(n)} := _m.Undef(${JSON.stringify(n)})) if ${JSON.stringify(n)} in ${cs} else None)`);
+          return `(${cs} := ${sel}, ${each.length ? each.join(", ") + ", " : ""}_m.NOVAL)[-1]`;
         }
         const ns = scope.fn ? "locals()" : "globals()";
         e.frame.code = "_m.UNDEF";
