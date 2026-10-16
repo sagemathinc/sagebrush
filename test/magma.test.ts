@@ -62,6 +62,183 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
 
+test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprime is refused at once (HARD-731-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const n = "463168356949264781694283940034751674351099985030800860588560112898177302183821";
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: `K := QuadraticField(${n});\nQuadraticField(12);\n`, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, "it must not run on");
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.match(flat, new RegExp(`QuadraticField: the squarefree part of ${n} was not found within the limit \\(its prime factors above 100000 are not known\\); this is not supported yet`));
+  assert.match(flat, /Quadratic Field with defining polynomial x\^2 - 3 over the Rational Field/);
+  // more than 1024 bits: refused before any of the work, a prime too (HARD-4A9-1)
+  const t0 = Date.now();
+  const big = spawnSync(process.execPath, [cli, "--magma"], { input: "K := QuadraticField(2^44497 - 1);\nK := QuadraticField(2^1279 - 1);\nK := QuadraticField(-2^1100);\n1;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(big.signal, null);
+  // (the message wraps at 80 columns, so whitespace is flattened)
+  assert.equal((big.stdout.replace(/\s+/g, " ").match(/QuadraticField of an integer of more than 1024 bits is not supported yet/g) ?? []).length, 3, big.stdout);
+  assert.match(big.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 30000);
+});
+
+test("what Sagebrush lacks is refused in words, never a Python exception, class or function", () => {
+  // (the coverage run's 38 Handbook programs where Python's TypeError,
+  // AttributeError or IndexError reached the user; /scratch/coverage/magma)
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const src = [
+    "Integers(7);",
+    "P<a, b, c> := PolynomialRing(Rationals(), 3);",
+    "K := Integers(); K`__class__;",
+    "x := 5; x`real;",
+    "assigned x`real;",
+    "x`f := 1;",
+    "Newforms(1, 2);",
+    "Divisors([1]);",
+    "CuspidalSubspace(ModularForms(11, 2));",
+    "HeckePolynomial(CuspForms(11, 2), 2);",
+    "Zx<z> := PolynomialRing(Integers()); F<w> := NumberField(z^2 - 5);",
+    "E := EllipticCurve([0, w]);",
+    "CremonaReference(EllipticCurve([0, 0, 0, 0, 1000003]));",
+    "Integers(F);",
+    "SetSeed(1);",
+    "Random(1, 4);",
+    "Universe({ {1} });",
+    "H<h> := GF(9); J<j> := GF(81); h + j;",
+  ].join("\n") + "\n";
+  const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
+  // (messages are wrapped at 80 columns, as Magma's are)
+  const flat = out.replace(/\s+/g, " ");
+  for (const said of [
+    "Runtime error in 'Integers': Integers(m), the integers modulo m, is not supported yet",
+    "Runtime error in 'PolynomialRing': PolynomialRing in more than one variable (or with weights) is not supported yet",
+    "Runtime error in `: the attribute __class__ of this object (not a record) is not supported yet",
+    "Runtime error in `: the attribute real of this object (not a record) is not supported yet",
+    "Runtime error in `: the attribute f of this object (not a record) is not supported yet",
+    "Runtime error: Newforms with these arguments is not supported yet",
+    "Runtime error in 'Divisors': Divisors of a SeqEnum is not supported yet",
+    "Runtime error in 'CuspidalSubspace': CuspidalSubspace of a",
+    "Runtime error in 'HeckePolynomial': HeckePolynomial of a",
+    "Runtime error in 'EllipticCurve': EllipticCurve with a coefficient in a FldNumElt is not supported yet",
+    "Runtime error: not supported yet: this curve is not in sagebrush's table",
+    "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
+    "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
+    "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
+    "Runtime error in '+': arithmetic of two finite fields of characteristic 3, neither the prime field, is not supported yet",
+  ]) assert.ok(flat.includes(said), said + "\n" + out);
+  // Integers(F) is F's maximal order
+  assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
+  assert.doesNotMatch(out, /[A-Z][a-z]+Error: |Traceback|<class |<built-in|object has no attribute/);
+});
+
+test("printf's precision on a real: Magma's digits where they are sure, else refused (its reals are binary)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (src: string) => spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout.replace(/\s+/g, " ");
+  // (Magma 2.18: 53.211, 123.20, 65.556, 3.142)
+  assert.equal(run('printf "%.3o %.2o %.3o %.3o\\n", 53.211, 123.2, 0.53211 * 123.2, 3.14159;\n').trim(), "53.211 123.20 65.556 3.142");
+  // a tie (0.125 is binary's: Magma gives 0.12, but 0.25 gives 0.3), under 1, no digit
+  // after the point, a digit added by rounding, past 10^20: refused
+  for (const [v, n] of [["1.125", 2], ["0.5", 2], ["2.5", 0], ["99.999", 2], ["1.0e25", 2]] as [string, number][])
+    assert.match(run(`printf "%.${n}o\\n", ${v};\n`), new RegExp(`Runtime error in printf: printf's precision \\(%\\.${n}o\\) for this real is not supported yet`), v);
+  assert.match(run('printf "%m\\n", 5;\n'), /printing in the level Magma \(%m\) is not supported yet/);
+  assert.match(run('printf "%O\\n", 5, "Maximal";\n'), /printing in the level Maximal \(%O\) is not supported yet/);
+});
+
+test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (coverage run: 254 Handbook programs)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const cases: [string, string][] = [
+    ["x := 5; x; $1;", "$1 (the values printed last)"],
+    ["f := func< n | n le 2 select 1 else $$(n-1) + $$(n-2) >;", "$$ in func< >"],
+    ["P<[X]> := PolynomialRing(Rationals(), 2);", "P<[...]> (generator names in a sequence)"],
+    ["S := {1}; S join:= {2};", "join:= (an assignment with join)"],
+    ["for x, y in [1, 2] do x; end for;", "for x, y in S (several loop variables)"],
+    ["M := {* 1^^4, 2^^5 *};", "a^^n (a multiplicity in a multiset)"],
+    ["x := 255; x: Hex;", "x: Hex (a printing level)"],
+    ["y := x where x is 10;", "where x is ... (a definition after an expression)"],
+    ["x := eval \"1+1\";", "eval"],
+    ["try x := 1; catch e x := 2; end try;", "try ... catch"],
+    ["f := function(x, ...) return x; end function;", "... (a function with a variable number of arguments)"],
+    ["z := case< 1 | 1: 2, default: 3 >;", "case< ... >"],
+    ["G := [1, 2]; i := 2; G.i;", "G.i (a generator by a variable's index)"],
+    ["y := Integers()!!3;", "!! (a coercion that may change the structure)"],
+    ["load galpols;", "load (Magma's library files)"],
+    ["for i in [1..3], j in [i+1..4] do i; end for;", "for i in S, j in T (several loops in one for)"],
+    ["G := 1; G.-1;", "G.-1 (a generator's inverse by its index)"],
+    ["B := 1; B.<3,1>;", "B.<...> (an element by its indices)"],
+    ["x := 2; r := x = 3;", "= (an equation, as in a relation)"],
+    ["F<x, y>, f := FPGroup(G);", "F<...>, ... := (generator names with other values)"],
+  ];
+  for (const [src, name] of cases) {
+    const out = spawnSync(process.execPath, [cli, "--magma"], { input: src + "\n", encoding: "utf8" }).stdout;
+    assert.match(out.replace(/\s+/g, " "), new RegExp(`User error: ${name.replace(/[$^.*+?()[\]{}|\\]/g, "\\$&")} is not supported yet`), src + "\n" + out);
+    assert.doesNotMatch(out, /bad syntax/, src);
+  }
+  // the session goes on with the next line, as after a syntax error
+  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "S := {1}; S join:= {2};\n7;\n", encoding: "utf8" }).stdout;
+  assert.match(next, /join:= \(an assignment with join\) is not supported yet\n7\n$/);
+  // a cell (no recovery: the kernel's) says it too
+  const { magmaToPython, MagmaSyntaxError } = require("../src/magma");
+  assert.throws(() => magmaToPython("y := x where x is 10;\n", "<cell>"), (e: any) => e instanceof MagmaSyntaxError && /where x is \.\.\. \(a definition after an expression\) is not supported yet/.test(e.message));
+});
+
+test("finite fields: GF(p, n)'s arguments and Log's base, in Magma's words (CORR-581-1, CORR-581-5)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const out = spawnSync(process.execPath, [cli, "--magma"], { input: "G := GF(4, 2);\nG := GF(2, 0);\nG := GF(2, -1);\nF := GF(9);\nLog(F!0, F!1);\n", encoding: "utf8" }).stdout;
+  for (const said of ["Runtime error in 'GF': Argument 1 (4) should be prime", "Runtime error in 'GF': Argument 2 (0) should be >= 1", "Runtime error in 'GF': Argument 2 (-1) should be >= 1", "Runtime error in 'Log': Base argument 1 must be non-zero"])
+    assert.ok(out.includes(said), said + "\n" + out);
+});
+
+test("finite fields by bounded work: GF of more than 1024 bits refused before its power; Random and iteration of a large field without all its elements (HARD-581-1, HARD-581-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // under a 96 MB heap, as in the review
+  const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
+  const t0 = Date.now();
+  const big = run("F := GF(2, 1000000000);\nF := GF(2, 1025);\nF := GF(2^1100);\nF := GF(2^1100 + 1);\nF := GF(3, 1000);\nF := GF(2^44497 - 1, 2);\n1;\n");
+  assert.equal(big.signal, null);
+  assert.equal((big.stdout.replace(/\s+/g, " ").match(/GF of a field of more than 1024 bits is not supported yet/g) ?? []).length, 6, big.stdout);
+  assert.match(big.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 30000);
+  const r = run("F := GF(1000003);\nx := Random(F);\nx in F, Parent(x) eq F;\nexists(t){ y : y in F | y^2 eq 4 }; t;\nRandom([1..10^30]) le 10^30;\nRandom([]);\nRandom({* 7, 7, 7 *});\n");
+  assert.equal(r.signal, null, r.stderr);
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.match(flat, /true true true 2 /);
+  assert.match(flat, /Runtime error in 'Random': Argument 1 is not non-empty 7 $/);
+});
+
+test("comprehensions by bounded work: at most 10^6 elements, x, y in S admitted before iterating (HARD-FCC-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // under a 96 MB heap, as in the review
+  const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 120000 });
+  const refusal = /a comprehension of more than 1000000 elements is not supported yet/g;
+  // above the limit: #S^2 refused at once without a condition (each kind of
+  // collection); with one, or several clauses, by the collector at 10^6 + 1
+  const t0 = Date.now();
+  const above = run(
+    "S := [1..20000];\nT := [ <x,y> : x,y in S ];\nT := { x : x, y in [1..1001] };\nT := {@ x : x, y in {1..1001} @};\nT := {* x : x, y, z in [1..101] *};\n" +
+      "T := [ x : x, y in [1..1001] | true ];\nT := [ x : x in [1..1000], y in [1..1001] ];\n1;\n",
+  );
+  assert.equal(above.signal, null, above.stderr);
+  assert.equal((above.stdout.replace(/\s+/g, " ").match(refusal) ?? []).length, 6, above.stdout);
+  assert.match(above.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 60000);
+  // just at the limit: 10^6 elements are built
+  const at = run("#[ x : x, y in [1..1000] ];\n#[ y : x in [1..1000], y in [1..1000] | true ];\n#{ x*y : x, y in [1..1000] };\n");
+  assert.equal(at.signal, null, at.stderr);
+  assert.match(at.stdout, /^1000000\n1000000\n248083\n$/);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
@@ -182,6 +359,36 @@ test("notebook session: a Magma cell's error fails its cell, said as Magma says 
   assert.equal(out(10, "stderr"), "a message\n");
   // (the session goes on, x as it was)
   assert.equal(out(11, "stdout"), "42\n");
+});
+
+test("notebook session: a witness left unassigned stays unassigned in later cells, compiled on their own, as in Magma (CORR-39D-1)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  // each line a cell; Magma 2.18, run on these as one session, says what's expected
+  const cells = [
+    "w := 99; exists(w){x:x in [1..3]|false}; assigned w;",
+    "w;",
+    "S := [w]; #S;",
+    "assigned w;",
+    "w := 17; w;",
+    "forall(w){x:x in [1..3]|true}; assigned w;",
+    "w;",
+    "exists(u, v){<a, b> : a, b in [1..2] | false}; assigned u, assigned v;",
+    "u;",
+  ];
+  for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], magma: true });
+  const out = (id: number) => msgs.filter((m) => m.id === id && m.stream === "stdout").map((m) => m.text).join("");
+  const failed = (id: number) => !!msgs.find((m) => m.id === id && m.done)?.error;
+  assert.deepEqual(cells.map((_, i) => failed(i + 1)), [false, true, true, false, false, false, true, false, true]);
+  assert.equal(out(1), "false\nfalse\n");
+  for (const [id, name] of [[2, "w"], [3, "w"], [7, "w"], [9, "u"]] as [number, string][])
+    assert.match(out(id), new RegExp(`User error: Identifier '${name}' has not been declared or assigned`), out(id));
+  assert.equal(out(4), "false\n");
+  assert.equal(out(5), "17\n");
+  assert.equal(out(6), "true\nfalse\n");
+  assert.equal(out(8), "false\nfalse false\n");
 });
 
 test("notebook session: an exit status as text is at most 4096 characters, and one that can't be text still ends its cell, failed (HARD-8E4-1, CORR-8E4-2)", async () => {

@@ -1,0 +1,21 @@
+// printf and Sprintf, as the Handbook describes them (Magma 2.18)
+for i := 1 to 150 by 33 do printf "[%3o]\n", i; end for;
+for i := 1 to 150 by 33 do printf "[%-3o]\n", i; end for;
+for w := 1 to 5 do printf "[%*o]", w, 1; end for;
+printf "\n[%*o][%*o][%0o][%3o]\n", 4, 7, -4, 7, 5, 12345;
+p := 53.211; x := 123.2;
+printf "%.3o%% of %.2o is %.3o\n", p, x, p/100.0 * x;
+printf "[%8.3o][%-8.2o][%.3o][%.2o][%.3o]\n", 3.14159, 2.0, 7, 1/3, "abcdef";
+printf "[%h][%h][%5h][%h]\n", 255, 4096, 10, -255;
+printf "[%o][%O][%o]\n", "s", "t", "Default", [1, 2];
+printf "[%o]\n", 1, 2;
+Q := [Sprintf("{%4o<->%-4o}", x, x): x in [1, 10, 100, 1000]];
+Q;
+printf "%o %o\n", 1;
+printf "[%d]\n", 5;
+printf "%";
+printf "[%h]\n", 2.5;
+printf "[%O]\n", 5, "Bogus";
+printf "[%O]\n", 5;
+printf "[%*o]\n", "x", 5;
+printf 5;

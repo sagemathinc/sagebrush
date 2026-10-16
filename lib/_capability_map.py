@@ -46,6 +46,7 @@ MAGMA_QUERIES = {
     "structures": "ring", "integers": "prime", "rationals and reals": "real", "strings and printing": "string",
     "sequences and sets": "sequence", "records": "record", "polynomials": "polynomial",
     "maps": "map", "modular forms": "modular", "elliptic curves": "elliptic", "number fields": "number field", "matrices": "matrix",
+    "finite fields": "finite field",
 }
 
 # MATLAB: areas by the module that implements a function, then by its name

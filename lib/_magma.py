@@ -13,6 +13,7 @@ from fractions import Fraction as _Fraction
 import sage_all as _sa
 from sage_all import Rational as _Rational, _intdiv
 import _sage_poly as _sp
+import _sage_ff as _sff
 
 __all__ = []  # filled at the end: every intrinsic
 
@@ -78,6 +79,30 @@ def _undeclared(name, line, col):
     return line, col
 
 
+_ARITY = _re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\(\) (takes|missing|got an unexpected keyword argument '([A-Za-z_][A-Za-z0-9_]*)'|got multiple values)")
+
+
+def _unsupported_call(e):
+    """A Python exception that says Sagebrush lacks something, in those
+    words, or None.  An intrinsic called with arguments or a parameter
+    its Python function doesn't take (Random(1, 4), Newforms(I, S),
+    Order(G : Strategy := "Easy")) is a form Sagebrush doesn't have yet,
+    not a Python TypeError; so is a NotImplementedError, and the
+    curve-table LookupError.  (Python's message names the function: this
+    runtime has no traceback to tell a call's boundary.)"""
+    if isinstance(e, NotImplementedError):
+        return "not supported yet: %s" % e if str(e) else "not supported yet"
+    if type(e) is LookupError:
+        return "not supported yet: %s" % e
+    if isinstance(e, TypeError):
+        m = _ARITY.match(str(e))
+        if m and not m.group(1).startswith("_") and callable(globals().get(m.group(1))):
+            if m.group(3):
+                return "%s with the parameter %s is not supported yet" % (m.group(1), m.group(3))
+            return "%s with these arguments is not supported yet" % m.group(1)
+    return None
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
@@ -90,6 +115,8 @@ def _report(e, line, col):
         name = m.group(1)
         name = name[:-1] if name.endswith("_") else name
         line, col = getattr(e, "_mpos", None) or _undeclared(name, line, col)
+        if name in ("SetSeed", "GetSeed"):
+            _SEEDED.append(True)
         if _is_intrinsic_name(name):
             # one of Magma's intrinsics that Sagebrush doesn't have: said so,
             # not as an undeclared name (Magma has it)
@@ -108,7 +135,7 @@ def _report(e, line, col):
             v = um.group(1)
             msg = "Variable '%s' has not been initialized" % (v[:-1] if v.endswith("_") and v[:-1] in _PYKW else v)
         else:
-            msg = str(e) if isinstance(e, MagmaError) else "%s: %s" % (type(e).__name__, e)
+            msg = str(e) if isinstance(e, MagmaError) else _unsupported_call(e) or "%s: %s" % (type(e).__name__, e)
         where = getattr(e, "where", None)
         blank = "\n" if getattr(e, "blank", True) else ""
         line, col = getattr(e, "pos", None) or (line, col)
@@ -128,10 +155,14 @@ def _compile_error(line, col, msg):
         raise SystemExit(1)
 
 
-def _syntax_error(line, col, detail):
+def _syntax_error(line, col, detail, unsupported=False):
     """A syntax error at (line, col) (line 0: at the end of the input), in
-    Magma's words on stdout; the parser's reason goes to stderr."""
-    if line:
+    Magma's words on stdout; the parser's reason goes to stderr.  A
+    construct of Magma's that Sagebrush doesn't have yet (unsupported) is
+    said so on stdout, not called bad syntax."""
+    if line and unsupported:
+        _sys.stdout.write("%sUser error: %s\n" % (_where(line, col), detail))
+    elif line:
         _sys.stdout.write("%sUser error: bad syntax\n" % _where(line, col))
     else:
         _sys.stdout.write("\nUser error: syntax error at end of input\n")
@@ -203,14 +234,14 @@ def _present(v):
     return v
 
 
-def _values(v, n):
+def _values(v, n, pos=None):
+    """a, b := e: e's first n values (Magma's words, at the :=, when it has fewer)."""
+    m = len(v) if isinstance(v, Multi) else 1
+    if m < n:
+        raise MagmaError("Expected to assign %d value(s) but only computed %d value(s)" % (n, m), ":=", False, pos)
     if isinstance(v, Multi):
-        if len(v) < n:
-            raise MagmaError("too few return values (%d) for %d variables" % (len(v), n))
         return list(v[:n])
-    if n == 1:
-        return [v]
-    raise MagmaError("the expression has one value, assigned to %d variables" % n)
+    return [v]
 
 
 def _ref1(r):
@@ -388,6 +419,10 @@ class MRange:
         self.b = a + (n - 1) * c if n > 0 else a - c
 
     def __len__(self):
+        return self.size()
+
+    def size(self):
+        # (len() of a range of more than 2^63 elements overflows: this doesn't)
         return max(0, (self.b - self.a) // self.c + 1)
 
     def __iter__(self):
@@ -505,13 +540,98 @@ def _sortkey(x):
     raise TypeError
 
 
+def _ff_universe(items, where):
+    """Finite fields' elements in one collection (CORR-581-4): another
+    characteristic has no common universe, as Magma says; two fields of one
+    characteristic, neither the prime field, are refused (Magma finds a
+    field containing both)."""
+    fields = {}
+    for x in items:
+        if _is_ff(x):
+            fields.setdefault(id(x.parent()), _ffwrap(x.parent()))
+    if len(fields) > 1:
+        Ks = list(fields.values())
+        if len({K.p for K in Ks}) > 1:
+            raise MagmaError("No valid universe containing all elements", where)
+        if sum(1 for K in Ks if K.n > 1) > 1:
+            raise MagmaError("a collection of elements of finite fields of characteristic %d, neither the prime field, is not supported yet" % Ks[0].p, where)
+    return items
+
+
+def _ff_into(U, x):
+    """x coerced into the finite field U (a declared universe), or None
+    where Magma's coercion fails: an integer, a rational with a denominator
+    prime to p, an element of U, of its prime field, or of another field of
+    characteristic p lying in the prime field (checked against Magma)."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, int):
+        return U.K(x)
+    if isinstance(x, _Fraction):
+        if x.denominator % U.p == 0:
+            return None
+        return U.K(x.numerator) / U.K(x.denominator)
+    if _is_ff(x):
+        if x.parent() is U.K:
+            return x
+        Kx = _ffwrap(x.parent())
+        if Kx.p != U.p:
+            return None
+        if Kx.n == 1:
+            return U.K(int(x))
+        if x ** U.p == x:
+            return U.K(int(x.list()[0]))
+        if U.n % Kx.n == 0:
+            raise MagmaError("an element of a subfield of a finite field in a collection over it is not supported yet")
+        return None
+    if isinstance(x, (MSeq, MSet, MTuple, MRange, list, tuple)):
+        raise MagmaError("a collection in a collection over a finite field is not supported yet")
+    return None
+
+
+# where Magma reports a failed coercion into a declared universe, by kind
+_UNIVERSE_FAIL = {"seq": "[ ... ]", "set": "{ ... }", "indexed": "{@ ... @}", "multi": "sub< ... >"}
+
+
+def _into_universe(items, universe, kind):
+    """A collection's items with a declared universe: coerced into a finite
+    field; a finite field's elements into the integers (those of the prime
+    field) or the rationals (none), as Magma does (CORR-A6D-1).  Other
+    universes keep their items as before."""
+    ff = isinstance(universe, _MFinField)
+    if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
+        return items
+    out = []
+    for k, x in enumerate(items):
+        if ff:
+            y = _ff_into(universe, x)
+        elif not _is_ff(x):
+            y = x
+        elif universe is _ZZ and _ffwrap(x.parent()).n == 1:
+            y = int(x)
+        elif universe is _ZZ and x ** _ffwrap(x.parent()).p == x:
+            y = int(x.list()[0])
+        else:
+            y = None
+        if y is None:
+            raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
+        out.append(y)
+    return out
+
+
 def _seq(items, universe=None):
+    items = list(items)
+    if universe is None:
+        _ff_universe(items, "[ ... ]")
+    else:
+        items = _into_universe(items, universe, "seq")
     return MSeq(items, universe)
 
 
 def _set_universe(items):
     """Magma refuses a set of values with no hashing algorithm (records,
     Rationals(), real fields, polynomial rings)."""
+    _ff_universe(items, "{ ... }")
     for x in items:
         if isinstance(x, (MRec, _RationalField, RealField_, _sp.PolynomialRing_)):
             raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }")
@@ -519,25 +639,87 @@ def _set_universe(items):
 
 
 def _set(items, universe=None):
-    return MSet(_set_universe(list(items)), "set", universe)
+    return MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
 
 
 def _iset(items, universe=None):
-    return MSet(_set_universe(list(items)), "indexed", universe)
+    return MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
 
 
 def _mset(items, universe=None):
-    return MSet(_set_universe(list(items)), "multi", universe)
+    return MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
 
 
-def _range(a, b, c, open_):
+def _still_range(v):
+    """Whether a set made by a range still has exactly the range's elements
+    (Include, Exclude and the like change its elements, not its range)."""
+    lo, hi, step = v.range
+    n = (hi - lo) // step + 1
+    return len(v.items) == n and all(isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi and (x - lo) % step == 0 for x in v.items)
+
+
+# a comprehension ([ e : x in S ], { ... }, {@ ... @}, {* ... *}) builds at
+# most this many elements (HARD-FCC-1)
+_COLLECT_MAX = 10 ** 6
+
+
+def _collect_refusal():
+    return MagmaError("a comprehension of more than %d elements is not supported yet" % _COLLECT_MAX)
+
+
+def _collect(gen):
+    """A comprehension's elements, refused once there are more than
+    _COLLECT_MAX of them, before the collection is built (HARD-FCC-1)."""
+    v = []
+    for x in gen:
+        if len(v) == _COLLECT_MAX:
+            raise _collect_refusal()
+        v.append(x)
+    return v
+
+
+def _admit_power(s, k):
+    """x1, ..., xk in S in a comprehension without a condition: #S^k
+    elements, refused before any is built when there are too many (S of a
+    known size; otherwise _collect bounds it) (HARD-FCC-1)."""
+    if isinstance(s, MRange):
+        n = s.size()
+    elif isinstance(s, (MSeq, MSet, MTuple, list, tuple)):
+        n = len(s)
+    elif isinstance(s, _MFinField):
+        n = s.q
+    else:
+        return s
+    if n > 1 and (n > _COLLECT_MAX or n ** k > _COLLECT_MAX):
+        raise _collect_refusal()
+    return s
+
+
+def _witness(gen):
+    """The first of a generator (exists(t){ ... }'s witness, in a 1-tuple), or None."""
+    return next(iter(gen), None)
+
+
+def _range(a, b, c, open_, universe=None, pos=None):
+    if universe is not None and universe is not _ZZ:
+        # (a range's elements are integers: Magma refuses another universe)
+        if open_ == "[":
+            raise MagmaError("Invalid sequence universe", "[ ... ]", True, pos)
+        if open_ == "{":
+            raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }", True, pos)
+        raise MagmaError("a range with a universe in %s ... is not supported yet" % open_)
     if open_ == "[":
         if isinstance(a, int) and isinstance(b, int) and isinstance(c, int):
             return MRange(a, b, c)
         return MSeq(_sa.srange(a, b + c if c > 0 else b - c, c) if False else _frange(a, b, c))
     s = MSet(MRange(a, b, c) if isinstance(a, int) and isinstance(b, int) else _frange(a, b, c), {"{": "set", "{@": "indexed", "{*": "multi"}[open_])
-    if open_ == "{" and isinstance(a, int) and isinstance(b, int) and c == 1 and b >= a:
-        s.range = (a, b)
+    if open_ == "{" and all(isinstance(v, int) and not isinstance(v, bool) for v in (a, b, c)) and c != 0:
+        # printed as Magma prints a range set, { 2 .. 6 by 2 } (lowest to
+        # highest), while its elements are still that range (_str checks)
+        n = len(range(a, b + (1 if c > 0 else -1), c))
+        if n >= 2:
+            lo, hi = (a, a + (n - 1) * c) if c > 0 else (a + (n - 1) * c, a)
+            s.range = (lo, hi, abs(c))
     return s
 
 
@@ -591,7 +773,7 @@ def _to(a, b, c):
 
 def _check_index(n, i):
     if not isinstance(i, int) or isinstance(i, bool):
-        raise MagmaError("Bad argument types\nArgument types given: %s" % Type(i))
+        raise MagmaError("Bad argument types\nArgument types given: %s" % _type_of(i))
     if i < 1 or i > n:
         raise MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (abs(i), i, n) if i < 1 else "Sequence element %d not defined" % i)
 
@@ -637,8 +819,7 @@ def _assign_path(obj, path, val):
             else:
                 obj._set(i, _assign_path(obj._get(i, pos), path[1:], val), pos)
             return obj
-        setattr(obj, i, _assign_path(getattr(obj, i, None), path[1:], val))
-        return obj
+        raise _no_attributes(i, pos)
     if isinstance(obj, MRange):
         obj = MSeq(obj)
     if obj is None:
@@ -664,7 +845,12 @@ def _getattr(x, name, pos=None):
         return x._get(name, pos)
     if not isinstance(name, str):
         raise MagmaError("Bad argument types", "`", True, pos)
-    return getattr(x, name)
+    # (never Python's attributes: x`__class__, 5`real)
+    raise _no_attributes(name, pos)
+
+
+def _no_attributes(name, pos=None):
+    return MagmaError("the attribute %s of this object (not a record) is not supported yet" % name, "`", True, pos)
 
 
 def _assigned(x, name):
@@ -672,16 +858,38 @@ def _assigned(x, name):
     if isinstance(x, MRec):
         x._field(name, None)
         return name in x.vals
-    return hasattr(x, name)
+    raise _no_attributes(name)
 
 
 def _assigned_name(read):
-    """assigned x, for a variable x."""
+    """assigned x, for a variable x (unassigned too when a witness search
+    found none: _NOVAL)."""
     try:
-        read()
-        return True
+        return read() is not _NOVAL
     except NameError:
         return False
+
+
+def _unset(g, names):
+    """After a top-level statement with exists(t){ } or forall(t){ }: a
+    witness it left unassigned is unbound, so that a later cell, compiled
+    without the witness's read checks, finds it unassigned too, as Magma
+    does (CORR-39D-1)."""
+    for n in names:
+        if g.get(n) is _NOVAL:
+            del g[n]
+
+
+def _wread(v, name, pos, local):
+    """A read of a name exists(t){ } or forall(t){ } may have unassigned
+    (_NOVAL): Magma's error for an unassigned name, a local's in a function."""
+    if v is _NOVAL:
+        if local:
+            raise UnboundLocalError("cannot access local variable '%s' where it is not associated with a value" % name)
+        e = NameError("name '%s' is not defined" % name)
+        e._mpos = pos
+        raise e
+    return v
 
 
 # ------------------------------------------------------------------ records
@@ -750,6 +958,30 @@ def _format_name(fmt):
 # Python keywords: a Magma name that is one gets a trailing _ (src/magma.ts pyName)
 _PYKW = set(("False None True and as assert async await break class continue def del elif else except finally for from global "
              "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split())
+# Python's builtins (CPython 3.14's), which src/magma.ts's pyName also
+# renames (PY_BUILTINS): a Magma name is never Python's ord, len or list
+_PYBUILTINS = set((
+    "ArithmeticError AssertionError AttributeError BaseException BaseExceptionGroup "
+    "BlockingIOError BrokenPipeError BufferError BytesWarning ChildProcessError "
+    "ConnectionAbortedError ConnectionError ConnectionRefusedError ConnectionResetError "
+    "DeprecationWarning EOFError Ellipsis EncodingWarning EnvironmentError Exception "
+    "ExceptionGroup False FileExistsError FileNotFoundError FloatingPointError FutureWarning "
+    "GeneratorExit IOError ImportError ImportWarning IndentationError IndexError "
+    "InterruptedError IsADirectoryError KeyError KeyboardInterrupt LookupError MemoryError "
+    "ModuleNotFoundError NameError None NotADirectoryError NotImplemented NotImplementedError "
+    "OSError OverflowError PendingDeprecationWarning PermissionError ProcessLookupError "
+    "PythonFinalizationError RecursionError ReferenceError ResourceWarning RuntimeError "
+    "RuntimeWarning StopAsyncIteration StopIteration SyntaxError SyntaxWarning SystemError "
+    "SystemExit TabError TimeoutError True TypeError UnboundLocalError UnicodeDecodeError "
+    "UnicodeEncodeError UnicodeError UnicodeTranslateError UnicodeWarning UserWarning "
+    "ValueError Warning ZeroDivisionError abs aiter all anext any ascii bin bool breakpoint "
+    "bytearray bytes callable chr classmethod compile complex copyright credits delattr dict "
+    "dir divmod enumerate eval exec exit filter float format frozenset getattr globals hasattr "
+    "hash help hex id input int isinstance issubclass iter len license list locals map max "
+    "memoryview min next object oct open ord pow print property quit range repr reversed round "
+    "set setattr slice sorted staticmethod str sum super tuple type vars zip "
+).split())
+_PYKW |= _PYBUILTINS
 
 
 class MRec:
@@ -778,7 +1010,7 @@ class MRec:
         if c is None:
             return v
         if isinstance(c, _Cat):
-            return v if Type(v) == c else None
+            return v if _type_of(v) == c else None
         try:
             return _coerce(c, v)
         except Exception:
@@ -866,7 +1098,7 @@ def _struct_name(S):
     """A map's domain or codomain as Magma prints it in the map: "RngInt: x"
     when a global variable x holds it, else the structure itself."""
     n = _global_name(S)
-    return "%s: %s" % (Type(S), n) if n is not None else _inline(S)
+    return "%s: %s" % (_type_of(S), n) if n is not None else _inline(S)
 
 
 class MMap:
@@ -1069,7 +1301,10 @@ def _unsupported(name, pos=None):
 def _bool(v):
     if isinstance(v, bool):
         return v
-    raise MagmaError("Bad argument types: expected a boolean, got %s" % Type(v))
+    if isinstance(v, Multi):
+        # an intrinsic with several values (IsSquare): its first counts
+        return _bool(v[0])
+    raise MagmaError("Bad argument types: expected a boolean, got %s" % _type_of(v))
 
 
 def _num(x):
@@ -1143,12 +1378,88 @@ def _value_base(x):
     return None
 
 
+def _ff_operands(a, b):
+    """a and b, a finite field's element's partner coerced into its field
+    (a rational, or the prime field's element into an extension), once
+    _ff_check has let them meet; others as they are."""
+    fa, fb = _is_ff(a), _is_ff(b)
+    if not (fa or fb):
+        return a, b
+    if fa and fb:
+        if a.parent() is b.parent():
+            return a, b
+        Ka, Kb = _ffwrap(a.parent()), _ffwrap(b.parent())
+        return (Kb._magma_coerce(a), b) if Ka.n == 1 else (a, Ka._magma_coerce(b))
+    if fa and isinstance(b, _Fraction):
+        return a, _ffwrap(a.parent())._magma_coerce(b)
+    if fb and isinstance(a, _Fraction):
+        return _ffwrap(b.parent())._magma_coerce(a), b
+    return a, b
+
+
+def _ff_eq(a, b):
+    """a eq b for a finite field's element and what it meets (_ff_check):
+    in the larger field."""
+    x, y = (a, b) if _is_ff(a) else (b, a)
+    if _is_ff(y) and x.parent() is not y.parent():
+        Kx, Ky = _ffwrap(x.parent()), _ffwrap(y.parent())
+        x, y = (Ky._magma_coerce(x), y) if Kx.n == 1 else (x, Kx._magma_coerce(y))
+        return x == y
+    return x == _ffwrap(x.parent())._magma_coerce(y)
+
+
+def _ff_check(op, a, b, pos):
+    """Magma's rules for a finite field's element with another value (an
+    operation or a comparison), checked against Magma 2.18: True if they
+    meet (the operation goes ahead), False if neither is such an element;
+    else Magma's error, or "not supported yet" for what Magma computes but
+    Sagebrush doesn't.  An integer meets any finite field, and a rational
+    one whose denominator is prime to p; the same field, or the prime field
+    with an extension of it, meet; another characteristic is "not
+    compatible"; reals, polynomials over Z or Q and number fields don't
+    meet them."""
+    fa, fb = _is_ff(a), _is_ff(b)
+    if not (fa or fb):
+        return False
+    x, y = (a, b) if fa else (b, a)
+    o = op[:-2] if op.endswith(":=") else op
+    # (Magma coerces the other operand into the field first, and has no div
+    # or mod there, and no power but by an integer: CORR-581-2)
+    ff2 = lambda: MagmaError("Bad argument types\nArgument types given: FldFinElt, FldFinElt", "'%s'" % o, True, pos)
+    if o in ("div", "mod"):
+        raise ff2()
+    if o == "^" and not (fa and isinstance(b, int) and not isinstance(b, bool)):
+        raise ff2()
+    Kx = _ffwrap(x.parent())
+    if _is_ff(y):
+        Ky = _ffwrap(y.parent())
+        if x.parent() is y.parent() or (Kx.p == Ky.p and 1 in (Kx.n, Ky.n)):
+            return True
+        if Kx.p != Ky.p:
+            raise _incompatible("C", o, a, b, pos)
+        # (Magma computes in a field containing both)
+        raise MagmaError("arithmetic of two finite fields of characteristic %d, neither the prime field, is not supported yet" % Kx.p, "'%s'" % o, True, pos)
+    if isinstance(y, int) and not isinstance(y, bool):
+        return True
+    if isinstance(y, _Fraction):
+        if y.denominator % Kx.p == 0:
+            raise _bad_types(o, (a, b), pos)
+        return True
+    if isinstance(y, _smat.Matrix):
+        raise MagmaError("arithmetic of a finite field's element and a matrix is not supported yet", "'%s'" % o, True, pos)
+    if isinstance(y, (bool, str, MReal, _sp.Polynomial, _snf.NumberFieldElement)):
+        raise _bad_types(o, (a, b), pos)
+    return False
+
+
 def _arith_rule(op, a, b, pos):
     """Raises Magma's error for a op b (op one of + - * / div mod ^ and
     their op-assignments), if Magma has one; checked against Magma 2.18 pair
     by pair (test/magma-compare.test.ts).  What Magma computes but Sagebrush
     doesn't model is refused ("not supported yet")."""
     o = op[:-2] if op.endswith(":=") else op
+    if _ff_check(op, a, b, pos):
+        return
     A, B = _ak(a), _ak(b)
     err = lambda code: _incompatible(code, o, a, b, pos)
     unsupported = lambda what: MagmaError("%s is not supported yet" % what, "'%s'" % o, True, pos)
@@ -1371,6 +1682,7 @@ def _add(a, b, pos=None, op="+"):
     if type(a) is int and type(b) is int:
         return a + b
     _arith(op, (a, b), pos)
+    a, b = _ff_operands(a, b)
     try:
         return a + b
     except TypeError:
@@ -1381,6 +1693,7 @@ def _sub(a, b, pos=None, op="-"):
     if type(a) is int and type(b) is int:
         return a - b
     _arith(op, (a, b), pos)
+    a, b = _ff_operands(a, b)
     try:
         return a - b
     except TypeError:
@@ -1393,6 +1706,7 @@ def _mul(a, b, pos=None, op="*"):
     if type(a) is str and type(b) is str:
         return a + b  # Magma's * joins strings
     _arith(op, (a, b), pos)
+    a, b = _ff_operands(a, b)
     try:
         return a * b
     except TypeError:
@@ -1425,6 +1739,7 @@ def _div(a, b, pos=None, op="/"):
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) / MReal.of(b)
+    a, b = _ff_operands(a, b)
     return a / b
 
 
@@ -1677,6 +1992,10 @@ def _struct_eq(a, b, op, pos):
             if (a.nrows(), a.ncols(), _base(a.base_ring())) == (b.nrows(), b.ncols(), _base(b.base_ring())):
                 return True
             raise _incompatible("C", op, a, b, pos)
+        if ca == "FldNum" and getattr(a, "_quadratic", False) and getattr(b, "_quadratic", False):
+            # (QuadraticField(5) eq QuadraticField(45): Magma's quadratic
+            # fields are the same field for the same squarefree part)
+            return list(a._f) == list(b._f)
         return False  # number fields made apart differ
     if {ca, cb} in ({"RngInt", "FldRat"}, {"FldRat", "FldNum"}):
         return False
@@ -1686,7 +2005,9 @@ def _struct_eq(a, b, op, pos):
 def _eq(a, b, pos=None, op="eq"):
     if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
         # Magma has no equality of record formats
-        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (Type(a), Type(b)), "'%s'" % op, True, pos)
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(a), _type_of(b)), "'%s'" % op, True, pos)
+    if _ff_check(op, a, b, pos):
+        return _ff_eq(a, b)
     da, db = _desc(a), _desc(b)
     if da is not None and db is not None:
         code = _common(da, db)
@@ -1894,7 +2215,12 @@ def _meets(x, s):
 
 def _in(x, s, pos=None, op="in"):
     if hasattr(s, "_magma_contains"):
-        return s._magma_contains(x)
+        try:
+            return s._magma_contains(x)
+        except MagmaError as e:
+            if e.pos is None and e.where == "'in'":
+                e.pos = pos  # (at the in, as Magma shows it)
+            raise
     if isinstance(s, str):
         return x in s
     if isinstance(s, MTuple):
@@ -2056,13 +2382,35 @@ def _reduce(op, s, pos=None):
 def _gen(R, i):
     if hasattr(R, "_magma_gen"):
         return R._magma_gen(i)
+    if not callable(getattr(R, "gen", None)):
+        # (not a Python AttributeError)
+        raise MagmaError("generators of this structure (its .i) are not supported yet")
     return R.gen(i - 1)
 
 
-def _coerce(R, x):
-    if hasattr(R, "_magma_coerce"):
-        return R._magma_coerce(x)
-    return R(x)
+def _coerce(R, x, pos=None):
+    try:
+        if hasattr(R, "_magma_coerce"):
+            return R._magma_coerce(x)
+        if isinstance(R, _sp.PolynomialRing_) and isinstance(x, (MSeq, MRange)):
+            # P ! [c0, c1, ...]: each coefficient coerced into the base
+            # ring as ! would (Q ! [1, 2] is 1/2)
+            K = _ZZ if R.base_ring() is _sp.ZZ else _QQ
+            cs = []
+            for k, c in enumerate(x):
+                try:
+                    cs.append(_coerce(K, c, pos))
+                except MagmaError:
+                    raise MagmaError("Cannot coerce sequence element %d into the coefficient ring" % (k + 1), "'!'", True, pos)
+            return R(cs)
+        if not callable(R):
+            raise MagmaError("coercion (!) into this structure is not supported yet", "'!'")
+        return R(x)
+    except MagmaError as e:
+        # (a coercion's error is at its !, as Magma shows it)
+        if e.pos is None and e.where == "'!'":
+            e.pos = pos
+        raise
 
 
 def _apply(f, x):
@@ -2109,7 +2457,7 @@ class MReal:
             return MReal._frac(_Fraction(x), prec)
         if isinstance(x, float):
             return MReal._frac(_Fraction(x), prec)
-        raise MagmaError("cannot convert %s to a real" % Type(x))
+        raise MagmaError("cannot convert %s to a real" % _type_of(x))
 
     @staticmethod
     def _frac(f, prec):
@@ -2197,8 +2545,9 @@ class MReal:
         e = self.e + len(str(abs(self.m))) - 1  # value = d[0].d[1:] * 10^e
         if 0 <= e < p:
             return sign + d[: e + 1] + "." + d[e + 1:]
-        if e == -1:
-            return sign + "0." + d
+        if -4 <= e <= -1:
+            # (Magma: 0.0005000000000 in RealField(10), 5.000000000E-5)
+            return sign + "0." + "0" * (-e - 1) + d
         return sign + d[0] + "." + d[1:] + "E" + str(e)
 
 
@@ -2237,7 +2586,7 @@ def RealField(prec=30):
 # ------------------------------------------------------------------ printing
 
 def _atomic(v):
-    if isinstance(v, (bool, int, str, _Fraction, MReal)):
+    if isinstance(v, (bool, int, str, _Fraction, MReal)) or _is_ff(v):
         return True
     if isinstance(v, MTuple):
         return all(_atomic(x) for x in v)
@@ -2262,6 +2611,8 @@ def _inline(v, in_tuple=False):
         return o + ", ".join(items) + c
     if v is None:
         return "None"
+    if _is_ff(v):
+        return _ff_str(v)
     return repr(v)
 
 
@@ -2292,6 +2643,16 @@ def _str(v, indent=0, col=None):
     """Magma's printing of v (possibly over several lines), starting at
     column `col` (default: the indentation)."""
     col = indent if col is None else col
+    if isinstance(v, _smat.MatrixSpace_):
+        # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
+        # Sage's "Full MatrixSpace of ... dense matrices")
+        R = v.base_ring()
+        name = "Integer Ring" if R == _sp.ZZ else "Rational Field" if R == _sp.QQ else None
+        if name is None:
+            raise MagmaError("printing this matrix space is not supported yet")
+        if v.nrows() == v.ncols():
+            return "Full Matrix Algebra of degree %d over %s" % (v.nrows(), name)
+        return "Full %sMatrixSpace of %d by %d matrices over %s" % ("R" if R == _sp.ZZ else "K", v.nrows(), v.ncols(), name)
     if type(v).__name__ == "MList":
         if not v:
             return "[* *]"
@@ -2303,8 +2664,9 @@ def _str(v, indent=0, col=None):
         return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]"
     if isinstance(v, MRange):
         return _range_str(v)
-    if isinstance(v, MSet) and v.range is not None and v.kind == "set":
-        return "{ %d .. %d }" % v.range
+    if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
+        lo, hi, step = v.range
+        return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step)
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
@@ -2404,30 +2766,112 @@ def _show_values(v):
     _print_line([v])
 
 
-def _sprintf(fmt, *args):
+def _fixed(x, n):
+    """x (a real) with n digits after the point, as printf's %.no prints it,
+    or None where Sagebrush can't be sure of Magma's digits.  Magma's reals
+    are binary: a value at a rounding tie (0.125, 0.25) rounds by its binary
+    form, which Sagebrush's decimal reals don't have.  Under 1, past 10^20,
+    or when rounding adds a digit (99.999 to 100.00), Magma may print
+    1.E2-style; and with no digit after the point its rules differ again.
+    Those are refused rather than guessed."""
+    if n < 1 or x.m == 0:
+        return None
+    v = _Fraction(x.m) * _Fraction(10) ** x.e
+    a = abs(v)
+    if not (1 <= a < 10 ** 20):
+        return None
+    q, r = divmod(a * 10 ** n, 1)
+    # (a tie, within the real's own precision: its binary value decides)
+    if abs(r - _Fraction(1, 2)) * 10 ** x.prec <= a * 10 ** (n + 2):
+        return None
+    q = int(q) + (1 if r > _Fraction(1, 2) else 0)
+    digits = str(q).rjust(n + 1, "0")
+    whole, frac = digits[:-n], digits[-n:]
+    if len(whole) != len(str(int(a))):
+        return None
+    return ("-" if v < 0 else "") + whole + "." + frac
+
+
+def _sprintf(fmt, *args, where="printf"):
+    """printf's and Sprintf's format: %o (an object, default printing), %O
+    (in the printing level the next argument names), %m (Magma's level),
+    %h (an integer in hexadecimal), %%; a field width after the %, digits
+    (negative: left-justified) or * (the next argument); a precision .n
+    for a real (n digits after the point).  As Magma 2.18's Handbook says
+    and Magma does, with its words for a bad format."""
+    blank = where != "printf"  # (Magma follows Sprintf's errors with an empty line, not printf's)
+
+    def bad(msg):
+        return MagmaError(msg, where, blank)
+
+    if not isinstance(fmt, str):
+        raise bad("Argument 1 should be a format string")
     out, k, i = [], 0, 0
+
+    def take(what="% conversions"):
+        nonlocal k
+        if k >= len(args):
+            raise bad("Not enough arguments for %s" % what)
+        k += 1
+        return args[k - 1]
+
     while i < len(fmt):
         c = fmt[i]
-        if c == "%" and i + 1 < len(fmt):
-            d = fmt[i + 1]
-            i += 2
-            if d == "%":
-                out.append("%")
-            elif d in "omh":
-                out.append(_str(args[k]) if d != "h" else hex(args[k])[2:])
-                k += 1
-            else:
-                # %3o and the like
-                j = i - 1
-                while j < len(fmt) and fmt[j].isdigit():
-                    j += 1
-                w = int(fmt[i - 1:j]) if j > i - 1 else 0
-                out.append(_str(args[k]).rjust(w))
-                k += 1
-                i = j + 1
+        if c != "%":
+            out.append(c)
+            i += 1
             continue
-        out.append(c)
         i += 1
+        if fmt[i:i + 1] == "%":
+            out.append("%")
+            i += 1
+            continue
+        # the field width: -digits, digits or *
+        width = 0
+        if fmt[i:i + 1] == "*":
+            w = take()
+            if not isinstance(w, int) or isinstance(w, bool) or abs(w) >= 2 ** 30:
+                raise bad("Argument %d for * is not a small integer" % (k + 1))
+            width, i = w, i + 1
+        else:
+            j = i + 1 if fmt[i:i + 1] == "-" else i
+            while j < len(fmt) and fmt[j].isdigit():
+                j += 1
+            if j > i and fmt[i:j] != "-":
+                width = int(fmt[i:j])
+                i = j
+        prec = None
+        if fmt[i:i + 1] == "." and fmt[i + 1:i + 2].isdigit():
+            j = i + 1
+            while j < len(fmt) and fmt[j].isdigit():
+                j += 1
+            prec, i = int(fmt[i + 1:j]), j
+        d = fmt[i:i + 1]
+        if d not in ("o", "O", "m", "h"):
+            raise bad("Bad percent character '%s' in format string" % d)
+        i += 1
+        x = take()
+        if d == "h":
+            # (a field width doesn't apply to %h)
+            if not isinstance(x, int) or isinstance(x, bool):
+                raise bad("Non-integer argument for %h")
+            out.append(("-" if x < 0 else "") + "0x" + format(abs(x), "X"))
+            continue
+        if d == "O":
+            level = take("%O conversion")
+            if level not in ("Default", "Minimal", "Maximal", "Magma"):
+                raise bad("Bad print level for %O conversion")
+            if level != "Default":
+                raise MagmaError("printing in the level %s (%%O) is not supported yet" % level, where, blank)
+        elif d == "m":
+            raise MagmaError("printing in the level Magma (%m) is not supported yet", where, blank)
+        if prec is not None and isinstance(x, MReal):
+            t = _fixed(x, prec)
+            if t is None:
+                raise MagmaError("printf's precision (%%.%do) for this real is not supported yet" % prec, where, blank)
+        else:
+            t = _str(x)
+        out.append(t.ljust(-width) if width < 0 else t.rjust(width))
     return "".join(out)
 
 
@@ -2471,7 +2915,23 @@ class _RationalField:
     def __call__(self, x):
         if isinstance(x, (bool, str)):
             raise MagmaError("Illegal coercion\nLHS: FldRat\nRHS: %s" % _type(x), "'!'", False)
-        return _sa._q(_Fraction(x)) if not isinstance(x, int) else x
+        if isinstance(x, int):
+            return x
+        if isinstance(x, (MSeq, MRange)):
+            # Q ! [n, d] is n/d (Magma's words for the rest)
+            rhs = "[%s]" % _elt_type(x)
+            v = list(x)
+            if len(v) != 2:
+                raise MagmaError("Sequence must have length 2 to lift into this field\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
+            if not all(isinstance(c, int) and not isinstance(c, bool) for c in v):
+                raise MagmaError("Should be a sequence of integers\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
+            if v[1] == 0:
+                raise MagmaError("Division by zero\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
+            return _m_num(_sa._q(_Fraction(v[0], v[1])))
+        try:
+            return _sa._q(_Fraction(x))
+        except (TypeError, ValueError):
+            raise MagmaError("coercion of a %s into the rationals is not supported yet" % _type_of(x), "'!'", False)
 
     _magma_coerce = __call__
 
@@ -2485,6 +2945,8 @@ _ZZ, _QQ = _IntegerRing(), _RationalField()
 def _coerce_int(x):
     if isinstance(x, int) and not isinstance(x, bool):
         return x
+    if _is_ff(x) and _ffwrap(x.parent()).n == 1:
+        return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
     if isinstance(x, (bool, str)):
@@ -2493,8 +2955,17 @@ def _coerce_int(x):
     raise MagmaError("Illegal coercion")
 
 
-def Integers():
-    return _ZZ
+def Integers(K=None):
+    """Integers(): the ring of integers; Integers(K): K's maximal order."""
+    if K is None:
+        return _ZZ
+    if isinstance(K, (_MNumberField, _MOrder)):
+        return MaximalOrder(K)
+    if isinstance(K, int) and not isinstance(K, bool):
+        raise MagmaError("Integers(m), the integers modulo m, is not supported yet", "'Integers'")
+    if isinstance(K, _MFinField):
+        raise MagmaError("Bad argument types\nArgument types given: FldFin", "'Integers'")
+    raise MagmaError("Integers of a %s is not supported yet" % _type_of(K), "'Integers'")
 
 
 IntegerRing = Integers
@@ -2510,6 +2981,8 @@ RationalField = Rationals
 def Parent(x):
     if hasattr(x, "_magma_parent"):
         return x._magma_parent()
+    if _is_ff(x):
+        return _ffwrap(x.parent())
     if isinstance(x, bool):
         raise MagmaError("Parent of a boolean")
     if isinstance(x, int):
@@ -2533,7 +3006,7 @@ class _Cat(str):
 # Categories bound as names (RngIntElt, SeqEnum, ...), for Type(x) eq
 # RngIntElt and record formats such as recformat< n : RngIntElt >.
 _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
-               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map").split()
+               "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
 
@@ -2547,21 +3020,39 @@ def _type_name(x):
         return "RecFrmt"
     if isinstance(x, MMap):
         return "Map"
+    if _is_ff(x):
+        return "FldFinElt"
+    if isinstance(x, _MFinField):
+        return "FldFin"
     if x is _ZZ:
         return "RngInt"
     if x is _QQ:
         return "FldRat"
     if type(x).__name__ == "MList":
         return "List"
-    if x is _ZZ:
-        return "RngInt"
-    if x is _QQ:
-        return "FldRat"
+    # (number fields: Magma 2.18's names; a field made by QuadraticField is
+    # its own type, with its own order and elements)
+    if isinstance(x, _MNumberField):
+        return "FldQuad" if x._quadratic else "FldNum"
+    if isinstance(x, _MOrder):
+        return "RngQuad" if x.K._quadratic else "RngOrd"
+    if isinstance(x, _MNFElt):
+        return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
     return None
 
 
-def Type(x):
+def _type_of(x):
+    """x's type, for messages; Python's name for a type Magma mode doesn't
+    name yet."""
     return _Cat(_type_name(x) or _type(x))
+
+
+def Type(x):
+    t = _type_name(x) or _type(x)
+    if t == type(x).__name__:
+        # (not a Magma type's name, but Python's: never given as a value)
+        raise MagmaError("Type of this object is not supported yet", "'Type'")
+    return _Cat(t)
 
 
 def _type(x):
@@ -2606,7 +3097,7 @@ def _ext_type(x):
         return "Map[%s, %s]" % (_ext_type(x.dom), _ext_type(x.cod))
     if isinstance(x, MRec):
         return "Rec"
-    return str(Type(x))
+    return str(_type_of(x))
 
 
 def _ring_cat(b):
@@ -2644,9 +3135,13 @@ def _bad_types(name, args, pos=None):
 
 def PolynomialRing(R, n=1):
     """A new polynomial ring; its variable prints as $.1 until named."""
+    # (one variable only: PolynomialRing(Q, 3) is not a univariate ring)
+    if n != 1 or isinstance(n, bool):
+        raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
-        raise MagmaError("PolynomialRing: only over Integers() and Rationals() so far")
+        # (a refusal in words: finite fields' users reach it, PolynomialRing(GF(p)))
+        raise MagmaError("PolynomialRing over a %s (not the integers or the rationals) is not supported yet" % _type_of(R), "'PolynomialRing'")
     return _sp.PolynomialRing_(base, "$.1")
 
 
@@ -2789,12 +3284,18 @@ def NthPrime(n):
     return _sa.nth_prime(n)
 
 
+def _int_arg(name, n):
+    if not isinstance(n, int) or isinstance(n, bool):
+        raise MagmaError("%s of a %s is not supported yet" % (name, _type_of(n)), "'%s'" % name)
+    return n
+
+
 def PrimeDivisors(n):
-    return MSeq(p for p, _ in _sa.factor(abs(n)))
+    return MSeq(p for p, _ in _sa.factor(abs(_int_arg("PrimeDivisors", n))))
 
 
 def Divisors(n):
-    return MSeq(_sa.divisors(abs(n)))
+    return MSeq(_sa.divisors(abs(_int_arg("Divisors", n))))
 
 
 def NumberOfDivisors(n):
@@ -2884,6 +3385,8 @@ def Fibonacci(n):
 
 
 def IsSquare(n):
+    if _is_ff(n):
+        return _multi([True, _ff_sqrt(n)]) if n.is_square() else False
     if isinstance(n, int) and n >= 0:
         r = _math.isqrt(n)
         if r * r == n:
@@ -2901,7 +3404,37 @@ def Isqrt(n):
     return _math.isqrt(n)
 
 
+def _ff_sqrt(x):
+    """The square root of a square x that Magma returns (measured against
+    Magma 2.18):
+    - in characteristic 2 the root is unique;
+    - in GF(p^n), n > 1, the root with the smaller logarithm to the
+      generator (every square tested, in fields up to 3^12 elements);
+    - in GF(p), p = 3 mod 4, x^((p+1)/4), the root that is itself a square
+      (Lagrange's formula; every square tested for p < 1100);
+    - in GF(p), p = 1 mod 4, Magma's choice follows no rule found (neither
+      Tonelli-Shanks with the least non-residue nor the smaller logarithm
+      to PrimitiveElement), so Sagebrush returns the root whose integer
+      representative is smaller: a correct root, possibly not Magma's."""
+    if not x:
+        return x
+    F = _ffwrap(x.parent())
+    if F.p == 2:
+        return x.sqrt()
+    if F.n > 1:
+        r = x.sqrt()
+        return min((r, -r), key=lambda y: int(y.log(F.K.gen())))
+    if F.p % 4 == 3:
+        return x ** ((F.p + 1) // 4)
+    r = int(x.sqrt())
+    return F.K(min(r, F.p - r))
+
+
 def Sqrt(x):
+    if _is_ff(x):
+        if not x.is_square():
+            raise MagmaError("Argument must be a square", "'Sqrt'")
+        return _ff_sqrt(x)
     if isinstance(x, MReal):
         return _rsqrt(x)
     return _rsqrt(MReal.of(x))
@@ -2940,6 +3473,17 @@ def Exp(x):
 
 
 def Log(x, b=None):
+    if _is_ff(x):
+        # Log(x): to the primitive element; Log(b, x): to the base b
+        base, y = (x, b) if b is not None else (PrimitiveElement(_ffwrap(x.parent())), x)
+        if b is not None and not base:
+            raise MagmaError("Base argument 1 must be non-zero", "'Log'")  # (CORR-581-5)
+        if not y:
+            raise MagmaError("Can not take log of zero element", "'Log'")
+        try:
+            return int(y.log(base))
+        except ValueError:
+            return -1  # as Magma: Log(w^2, w) is -1 in GF(9)
     if b is not None:
         return Log(x) / Log(b)
     x = MReal.of(x)
@@ -3137,7 +3681,243 @@ def Sprint(x):
 
 
 def Sprintf(fmt, *args):
-    return _sprintf(fmt, *args)
+    return _sprintf(fmt, *args, where="'Sprintf'")
+
+
+# ------------------------------------------------------------------ finite fields
+
+def _is_ff(x):
+    """An element of a finite field (lib/_sage_ff.py)."""
+    if isinstance(x, _sff.FiniteFieldElement):
+        return True
+    return isinstance(x, _sff.IntegerMod) and getattr(x.parent(), "_prime", False)
+
+
+_FF = {}  # id(_sage_ff field) -> its _MFinField
+
+# Magma prints the nonzero elements of a field with at most this many
+# elements as powers of its generator, and of larger fields as polynomials
+# in it (checked against Magma: GF(2^20) and GF(1021^2) by powers,
+# GF(1031^2) and GF(3^13) by polynomials).
+_FF_POWERS_MAX = 2 ** 20
+# GF(q) and GF(p, n) of more bits are refused before any work on q (its
+# power, its prime-power test, its tables) (HARD-581-1)
+_FF_BITS = 1024
+
+
+class _MFinField:
+    """GF(q) in Magma mode: Magma's names, printing, iteration and
+    coercions over the field of lib/_sage_ff.py, which does the arithmetic.
+    Like Magma's, GF(q) is one object: naming its generator (F<w> := GF(9))
+    names it everywhere.  From Magma's documentation (Finite Fields) and
+    checked against Magma."""
+
+    def __init__(self, K):
+        self.K = K
+        self.q, self.p, self.n = int(K.order()), int(K.characteristic()), int(K.degree())
+        self.name = None  # the generator's name, once assigned
+
+    def __repr__(self):
+        return "Finite field of size %d" % self.p if self.n == 1 else "Finite field of size %d^%d" % (self.p, self.n)
+
+    def _gen_name(self):
+        if self.name is not None:
+            return self.name
+        v = _global_name(self)
+        return "%s.1" % v if v is not None else "$.1"
+
+    def _magma_names(self, names):
+        if names:
+            self.name = names[0]
+
+    def _magma_gen(self, i):
+        if i != 1:
+            raise MagmaError("Bad argument types", "'.'")
+        return self.K.gen()
+
+    def _magma_card(self):
+        return self.q
+
+    def _magma_degree(self):
+        return self.n
+
+    def _magma_contains(self, x):
+        # x in F by value, as Magma (CORR-581-3): an integer; an element of
+        # F, or of its prime field; F's element lying in the prime field P
+        # (x^p = x) for x in P
+        if isinstance(x, bool):
+            raise MagmaError("Bad argument types", "'in'")
+        if isinstance(x, int):
+            return True
+        if _is_ff(x):
+            Kx = _ffwrap(x.parent())
+            if x.parent() is self.K:
+                return True
+            if Kx.p != self.p:
+                raise MagmaError("Arguments have no covering structure", "'in'")
+            if Kx.n == 1:
+                return True
+            if self.n == 1:
+                return x ** self.p == x
+            raise MagmaError("membership between finite fields of characteristic %d, neither the prime field, is not supported yet" % self.p, "'in'")
+        if isinstance(x, (_Fraction, MReal)):
+            raise MagmaError("Bad argument types", "'in'")
+        raise MagmaError("membership of a %s in a finite field is not supported yet" % _type_of(x), "'in'")
+
+    def _magma_coerce(self, x):
+        if _is_ff(x):
+            if x.parent() is self.K:
+                return x
+            if _ffwrap(x.parent()).n == 1 and int(x.parent().order()) == self.p:
+                return self.K(int(x))  # from the prime field
+            raise MagmaError("Illegal coercion")
+        if isinstance(x, bool):
+            raise MagmaError("Illegal coercion")
+        if isinstance(x, int):
+            return self.K(x)
+        if isinstance(x, _Fraction):
+            if x.denominator % self.p == 0:
+                raise MagmaError("Illegal coercion")
+            return self.K(x.numerator) / self.K(x.denominator)
+        if isinstance(x, (MSeq, MRange)):
+            # (CORR-581-4) the coefficients on the power basis (Eltseq):
+            # integers or the prime field's elements; a sequence of F's own
+            # (or other fields') elements lifts only one; Magma's words else
+            v, rhs = list(x), "[%s]" % _elt_type(x)
+            # (a declared universe other than the integers or a prime field
+            # of p: Magma's words, not its items' (CORR-A6D-1))
+            u = getattr(x, "universe", None)
+            if u is not None and u is not _ZZ and not (isinstance(u, _MFinField) and (u.n == 1 and u.p == self.p or u is self)):
+                raise MagmaError("Illegal coercion\nLHS: FldFin\nRHS: %s" % rhs, "'!'", False)
+            coeff = lambda c: (isinstance(c, int) and not isinstance(c, bool)) or (_is_ff(c) and _ffwrap(c.parent()).n == 1 and _ffwrap(c.parent()).p == self.p)
+            if v and all(coeff(c) for c in v) and (self.n > 1 or len(v) == 1):
+                if len(v) == self.n or self.n == 1:
+                    return sum((self.K(int(c)) * self.K.gen() ** i for i, c in enumerate(v)), self.K(0))
+                raise MagmaError("coercion of a sequence of %d coefficients into a field of degree %d is not supported yet" % (len(v), self.n), "'!'", False)
+            if v and any(_is_ff(c) for c in v) and all(_is_ff(c) or (isinstance(c, int) and not isinstance(c, bool)) for c in v):
+                # (a sequence of finite fields' elements, integers among them:
+                # its universe a finite field)
+                if len(v) != 1:
+                    raise MagmaError("Sequence must have length 1 to lift into this finite field\nLHS: FldFin\nRHS: [FldFinElt]", "'!'", False)
+                return self._magma_coerce(v[0])
+            raise MagmaError("Illegal coercion\nLHS: FldFin\nRHS: %s" % rhs, "'!'", False)
+        raise MagmaError("Illegal coercion")
+
+    def __iter__(self):
+        # Magma's order: 0, 1, ..., p - 1 for a prime field; else 1, w,
+        # w^2, ..., w^(q-2) and then 0
+        if self.n == 1:
+            # (lazily: the first elements without all p (HARD-581-2))
+            return (self.K(i) for i in range(self.p))
+        def powers():
+            g, x = self.K.gen(), self.K(1)
+            for _ in range(self.q - 1):
+                yield x
+                x = x * g
+            yield self.K(0)
+        return powers()
+
+
+def _ffwrap(K):
+    w = _FF.get(id(K))
+    if w is None:
+        w = _FF[id(K)] = _MFinField(K)
+    return w
+
+
+def GF(q, n=None):
+    """GF(q) or GF(p, n): the finite field with q = p^n elements, defined
+    (as in Magma) by the Conway polynomial."""
+    q = _coerce_int(q)
+    if n is not None:
+        # GF(p, n): a prime, and a degree of at least 1 (CORR-581-1)
+        n = _coerce_int(n)
+        # (the base's size first: no primality test of a huge one (HARD-E6A-1))
+        if q.bit_length() > _FF_BITS:
+            raise MagmaError("GF of a field of more than %d bits is not supported yet" % _FF_BITS, "'GF'")
+        if not _sa.is_prime(q):
+            raise MagmaError("Argument 1 (%d) should be prime" % q, "'GF'")
+        if n < 1:
+            raise MagmaError("Argument 2 (%d) should be >= 1" % n, "'GF'")
+        # p^n has at least n * (bits of p - 1) + 1 bits: refused before
+        # the power is computed (HARD-581-1)
+        if n > _FF_BITS or n * (q.bit_length() - 1) >= _FF_BITS:
+            raise MagmaError("GF of a field of more than %d bits is not supported yet" % _FF_BITS, "'GF'")
+        q = q ** n
+    if q.bit_length() > _FF_BITS:
+        raise MagmaError("GF of a field of more than %d bits is not supported yet" % _FF_BITS, "'GF'")
+    if q < 2 or _sff._is_prime_power(q) is None:
+        raise MagmaError("Argument 1 (%d) is not a prime power" % q, "'GF'")
+    try:
+        K = _sff.GF(q)
+    except NotImplementedError:
+        # Magma uses other polynomials beyond its tables: not known yet
+        raise MagmaError("GF(%d): the defining polynomial of this field is not supported yet" % q, "'GF'")
+    return _ffwrap(K)
+
+
+FiniteField = GaloisField = GF
+
+
+def _ff_str(x):
+    """A finite field element as Magma prints it: an integer in a prime
+    field; else 0, an element of the prime field as an integer, a power of
+    the generator (fields of at most 2^20 elements), or a polynomial in
+    it."""
+    F = _ffwrap(x.parent())
+    if F.n == 1:
+        return str(int(x))
+    c = [int(a) for a in x.list()]
+    if not any(c[1:]):
+        return str(c[0])
+    name = F._gen_name()
+    if F.q <= _FF_POWERS_MAX:
+        k = int(x.log(F.K.gen()))
+        return name if k == 1 else "%s^%d" % (name, k)
+    terms = []
+    for i in range(len(c) - 1, -1, -1):
+        if c[i]:
+            mon = "1" if i == 0 else name if i == 1 else "%s^%d" % (name, i)
+            terms.append(mon if c[i] == 1 and i else ("%d" % c[i] if i == 0 else "%d*%s" % (c[i], mon)))
+    return " + ".join(terms)
+
+
+def _ff_field(x, what):
+    if isinstance(x, _MFinField):
+        return x
+    raise MagmaError("Bad argument types", "'%s'" % what)
+
+
+def Characteristic(F):
+    """The characteristic of a ring."""
+    if isinstance(F, _MFinField):
+        return F.p
+    if F is _ZZ or F is _QQ:
+        return 0
+    raise MagmaError("Bad argument types", "'Characteristic'")
+
+
+def PrimitiveElement(F):
+    """A generator of the multiplicative group of a finite field (for
+    GF(p^n): its generator, a root of the Conway polynomial)."""
+    F = _ff_field(F, "PrimitiveElement")
+    return F.K.multiplicative_generator()
+
+
+def Order(x):
+    """The multiplicative order of a nonzero finite field element."""
+    if _is_ff(x):
+        if not x:
+            raise MagmaError("Argument 1 must be non-zero", "'Order'")
+        return int(x.multiplicative_order())
+    raise MagmaError("Order of this argument is not supported yet", "'Order'")
+
+
+def IsPrimitive(x):
+    """Whether a finite field element generates the multiplicative group."""
+    if _is_ff(x):
+        return bool(x) and int(x.multiplicative_order()) == int(x.parent().order()) - 1
+    raise MagmaError("IsPrimitive of this argument is not supported yet", "'IsPrimitive'")
 
 
 # ------------------------------------------------------------------ sequences and sets
@@ -3379,6 +4159,13 @@ def Set(s):
 def Eltseq(x):
     if isinstance(x, _sp.Polynomial):
         return Coefficients(x)
+    if _is_ff(x):
+        # coefficients on the power basis, in the prime field
+        F = _ffwrap(x.parent())
+        if F.n == 1:
+            return MSeq([x])
+        P = _sff.GF(F.p)
+        return MSeq([P(int(c)) for c in x.list()])
     return MSeq(x)
 
 
@@ -3387,16 +4174,79 @@ def Universe(s):
     if u is not None:
         return u
     items = list(_iter(s))
+    if not items:
+        if isinstance(s, (MSeq, MRange)):
+            raise MagmaError("Illegal null sequence", "'Universe'")
+        raise MagmaError("Universe of an empty set is not supported yet", "'Universe'")
     if all(isinstance(x, int) and not isinstance(x, bool) for x in items):
         return _ZZ
-    if all(isinstance(x, (int, _Fraction)) for x in items):
+    if all(isinstance(x, (int, _Fraction)) and not isinstance(x, bool) for x in items):
         return _QQ
-    return None
+    # (never None, which printed nothing: a set of sets is Magma's "Set of
+    # subsets of Integer Ring", which Sagebrush doesn't model)
+    raise MagmaError("Universe of this %s is not supported yet" % _type_of(s), "'Universe'")
 
 
-def Random(s):
+# Magma's random generator can't be reproduced: a program that uses SetSeed
+# or GetSeed (intrinsics Sagebrush doesn't have; _report notes them) expects
+# Magma's numbers, so from then on Random refuses rather than give others
+_SEEDED = []
+
+
+# Random(S) of a collection without a known size enumerates at most this
+# many elements (HARD-581-2)
+_RANDOM_ENUM_MAX = 10 ** 6
+
+
+def _random_elt(s, random):
+    """Random(S): an element of S, chosen without enumerating S when its
+    size is known: a finite field by its coefficients, a range by its
+    index (HARD-581-2)."""
+    if isinstance(s, _MFinField):
+        if s.n == 1:
+            return s.K(random.randrange(s.p))
+        g = s.K.gen()
+        return sum((s.K(random.randrange(s.p)) * g ** i for i in range(s.n)), s.K(0))
+    if isinstance(s, MRange):
+        n = s.size()
+        if not n:
+            raise MagmaError("Argument 1 is not non-empty", "'Random'")
+        return s[random.randrange(n)]
+    if isinstance(s, MSet) and s.kind == "multi":
+        # (each element as often as its multiplicity)
+        k = random.randrange(len(s))
+        for x in s.items:
+            k -= s.keys[_key(x)][1]
+            if k < 0:
+                return x
+    if isinstance(s, MSet):
+        v = s.items
+    elif isinstance(s, (MSeq, MTuple, list, tuple)):
+        v = s
+    else:
+        v = []
+        for x in _iter(s):
+            if len(v) == _RANDOM_ENUM_MAX:
+                raise MagmaError("Random of a structure of more than %d elements is not supported yet" % _RANDOM_ENUM_MAX, "'Random'")
+            v.append(x)
+    v = list(v) if not isinstance(v, (list, tuple)) else v
+    if not v:
+        raise MagmaError("Argument 1 is not non-empty", "'Random'")
+    return random.choice(v)
+
+
+def Random(s, b=None):
     import random
-    return random.choice(list(_iter(s)))
+    if _SEEDED:
+        raise MagmaError("Random after SetSeed or GetSeed is not supported yet: Sagebrush can't reproduce Magma's random numbers", "'Random'")
+    if b is None:
+        return _random_elt(s, random)
+    # Random(a, b): an integer in [a, b]
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (s, b)):
+        raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(s), _type_of(b)), "'Random'")
+    if s > b:
+        raise MagmaError("Random(a, b) with a > b is not supported yet", "'Random'")
+    return random.randint(s, b)
 
 
 # ------------------------------------------------------------------ modular forms
@@ -3432,7 +4282,11 @@ def Gamma0(N):
 
 
 def _level(N):
-    return N.N if isinstance(N, MGamma0) else N
+    if isinstance(N, MGamma0):
+        return N.N
+    if not isinstance(N, int) or isinstance(N, bool):
+        raise MagmaError("a space of modular forms or symbols from a %s is not supported yet" % _type_of(N))
+    return N
 
 
 class MModSym:
@@ -3467,7 +4321,7 @@ class MModSym:
 
 
 def ModularSymbols(N, k=2, sign=0):
-    return MModSym(_level(N), int(k), int(sign))
+    return MModSym(_level(N), _int_arg("ModularSymbols", k), _int_arg("ModularSymbols", sign))
 
 
 def Dimension(M):
@@ -3477,12 +4331,16 @@ def Dimension(M):
 
 
 def CuspidalSubspace(M):
+    if not isinstance(M, MModSym):
+        raise MagmaError("CuspidalSubspace of a %s is not supported yet" % _type_of(M), "'CuspidalSubspace'")
     if M.kind not in ("full", "cuspidal"):
         return M
     return MModSym(M.N, M.k, M.sign, "cuspidal")
 
 
 def NewSubspace(M):
+    if not isinstance(M, MModSym):
+        raise MagmaError("NewSubspace of a %s is not supported yet" % _type_of(M), "'NewSubspace'")
     if M.kind == "full":
         raise MagmaError("The given space must be contained in the cuspidal subspace")
     return MModSym(M.N, M.k, M.sign, "new")
@@ -3514,7 +4372,15 @@ def _cusp_poly(M, p):
     return g
 
 
+def _msym(name, M):
+    """M, a space of modular symbols: what these functions handle so far."""
+    if not isinstance(M, MModSym):
+        raise MagmaError("%s of a %s (not a space of modular symbols) is not supported yet" % (name, _type_of(M)), "'%s'" % name)
+    return M
+
+
 def HeckePolynomial(M, p):
+    _msym("HeckePolynomial", M)
     R = _qx("x" if M.kind != "full" else None)
     if M.kind == "full":
         f = M._sage().hecke_polynomial(p)
@@ -3537,7 +4403,7 @@ class _HeckeOp:
 
 
 def HeckeOperator(M, p):
-    return _HeckeOp(M, p)
+    return _HeckeOp(_msym("HeckeOperator", M), p)
 
 
 def CharacteristicPolynomial(T):
@@ -3547,6 +4413,7 @@ def CharacteristicPolynomial(T):
 
 
 def NewformDecomposition(M):
+    _msym("NewformDecomposition", M)
     if M.kind not in ("cuspidal", "new"):
         M = NewSubspace(CuspidalSubspace(M))
     if M.kind == "cuspidal":
@@ -3579,11 +4446,11 @@ class MModForms:
 
 
 def CuspForms(N, k=2):
-    return MModForms(_level(N), int(k))
+    return MModForms(_level(N), _int_arg("CuspForms", k))
 
 
 def ModularForms(N, k=2):
-    return MModForms(_level(N), int(k), cusp=False)
+    return MModForms(_level(N), _int_arg("ModularForms", k), cusp=False)
 
 
 class MNewform:
@@ -3646,6 +4513,11 @@ def EllipticCurve(a, b=None):
     if b is not None and (isinstance(a, str) or _num(a) and _num(b)):
         # a label is one argument, and a curve's coefficients come in a sequence
         raise _bad_types("EllipticCurve", (a, b))
+    if isinstance(a, (MSeq, MRange)):
+        bad = next((c for c in a if not (isinstance(c, (int, _Fraction)) and not isinstance(c, bool))), None)
+        if bad is not None:
+            # (over the rationals only, so far)
+            raise MagmaError("EllipticCurve with a coefficient in a %s is not supported yet" % _type_of(bad), "'EllipticCurve'")
     try:
         return _smod.EllipticCurve(list(a) if isinstance(a, (MSeq, MRange)) else a, b)
     except (ValueError, ArithmeticError) as e:
@@ -3677,7 +4549,10 @@ class _AbGroup:
 
     def __init__(self, invs):
         # finite invariants > 1, and 0 for each copy of Z
-        self.invs = [d for d in invs if d > 1] + [0 for d in invs if d == 0]
+        # (Magma lists the invariants from the smallest, Z/2 + Z/2 + Z/10,
+        # where Sage's class group lists them from the largest; every group
+        # made here is in that form, each dividing the next)
+        self.invs = sorted(d for d in invs if d > 1) + [0 for d in invs if d == 0]
         self.name = "$"
 
     def _magma_assigned(self, name):
@@ -3757,10 +4632,26 @@ class _MNumberField(_snf.NumberField_absolute):
         return self.degree()
 
     def _magma_discriminant(self):
-        return self.discriminant()
+        # Magma's Discriminant(K) is its defining polynomial's (its equation
+        # order's), not the maximal order's: 729 for x^3 - 9*x - 9, whose
+        # maximal order's is 81; but a field made by QuadraticField (FldQuad)
+        # gives the field's, 5 for QuadraticField(5) (checked against Magma
+        # 2.18)
+        if self._quadratic:
+            # Q(sqrt(s)), s squarefree: s or 4s, without the general route
+            # (which could factor s again)
+            s = -int(self._f[0])
+            return s if s % 4 == 1 else 4 * s
+        return _m_num(self.polynomial().discriminant())
 
     def _magma_coerce(self, x):
-        return self(x)
+        try:
+            return self(x)
+        except TypeError as e:
+            if isinstance(x, _MNFElt) and x.parent() is not self:
+                # (an element of another number field: Magma's words)
+                raise MagmaError("Arguments are not compatible\nLHS: %s\nRHS: %s" % (_type_of(self), _type_of(x)), "'!'", False)
+            raise MagmaError("coercion of a %s into this number field is not supported yet" % _type_of(x), "'!'", False)
 
     def __repr__(self):
         kind = "Quadratic Field" if self._quadratic else "Number Field"
@@ -3790,7 +4681,8 @@ class _MOrder:
         return self.K.degree()
 
     def _magma_discriminant(self):
-        return self.K.discriminant()
+        # (a quadratic field's maximal order: its field's, s or 4s)
+        return self.K._magma_discriminant() if self.K._quadratic else self.K.discriminant()
 
 
 def _field(x):
@@ -3810,11 +4702,57 @@ def NumberField(f, *, Check=True):
         raise MagmaError("NumberField: %s" % e)
 
 
+# (the squarefree part's work: trial division by the primes up to this,
+# then what is left must be decided without factoring it, HARD-731-1; and
+# no more than this many bits at all, checked before any of it: the
+# primality test and isqrt of a 44497-bit integer took 30 s, HARD-4A9-1)
+_SQUAREFREE_TRIAL = 10 ** 5
+_SQUAREFREE_BITS = 1024
+
+
+def _squarefree_part(d):
+    """The squarefree part of the integer d, with its sign (0 for 0), by
+    bounded work: trial division by the primes up to _SQUAREFREE_TRIAL,
+    then the cofactor m, all of whose primes are larger, is decided when it
+    is 1, a square, a prime, or below the bound cubed (then a product of two
+    different primes); else refused rather than factored without a bound
+    (a 78-digit semiprime would take ECM minutes; Magma 2.18 also tries to
+    factor it)."""
+    if d == 0:
+        return 0
+    if abs(d).bit_length() > _SQUAREFREE_BITS:
+        raise MagmaError("QuadraticField of an integer of more than %d bits is not supported yet" % _SQUAREFREE_BITS, "'QuadraticField'")
+    s, m = (-1 if d < 0 else 1), abs(d)
+    for p in _sa.prime_range(2, _SQUAREFREE_TRIAL + 1):
+        if p * p > m:
+            break
+        e = 0
+        while m % p == 0:
+            m //= p
+            e += 1
+        if e % 2:
+            s *= p
+    if m == 1:
+        return s
+    r = _math.isqrt(m)
+    if r * r == m:
+        return s
+    if m < _SQUAREFREE_TRIAL ** 3 or _sa.is_prime(m):
+        # (no prime below the bound left: m is a prime, or below the bound
+        # cubed, two different primes, as it isn't a square)
+        return s * m
+    raise MagmaError("QuadraticField: the squarefree part of %d was not found within the limit (its prime factors above %d are not known); this is not supported yet" % (d, _SQUAREFREE_TRIAL), "'QuadraticField'")
+
+
 def QuadraticField(d):
-    d = int(d)
-    if _sa.is_square(d):
-        raise MagmaError("QuadraticField: the argument must not be a square")
-    return _MNumberField([-d, 0, 1], quadratic=True)
+    # (an integer only: int() would take 25/7 as 3)
+    if isinstance(d, bool) or not isinstance(d, int):
+        raise MagmaError("Bad argument types\nArgument types given: %s" % _type_of(d), "'QuadraticField'")
+    # Magma's field is Q(sqrt(s)), s the squarefree part of d: x^2 - 3 for 12
+    s = _squarefree_part(d)
+    if s in (0, 1):
+        raise MagmaError("QuadraticField of a square (Magma's rational field) is not supported yet")
+    return _MNumberField([-s, 0, 1], quadratic=True)
 
 
 def MaximalOrder(K):
@@ -3916,12 +4854,16 @@ def Decomposition(O, p):
 def Norm(x):
     if hasattr(x, "_magma_norm"):
         return x._magma_norm()
+    if _is_ff(x):
+        return x.norm()
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.norm())
     return x * x
 
 
 def Trace(x):
+    if _is_ff(x):
+        return x.trace()
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.trace())
     if hasattr(x, "trace"):

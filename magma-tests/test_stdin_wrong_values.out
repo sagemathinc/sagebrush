@@ -1,0 +1,51 @@
+46 89
+1 1
+2 1
+3 1
+1 1 1
+2 1 1
+1 2
+2 4
+<2, 3>
+
+>> for x in [1 .. 2] do break q; end for;
+                        ^
+User error: Cannot do (break q) since 'q' is not a loop variable
+{ 2 .. 6 by 2 }
+{ 2 .. 6 by 2 }
+{}
+{ 3 }
+{ 1, 2, 3, 4, 9 }
+{ 1, 3, 4 }
+{ 1, 2, 3, 4, 5 }
+{ 2 .. 6 by 2 }
+Integer Ring
+
+>> S := [ Rationals() | 1 .. 4 ];
+        ^
+Runtime error in [ ... ]: Invalid sequence universe
+
+
+>> R := { Rationals() | 1 .. 4 };
+        ^
+Runtime error in { ... }: Invalid set universe (no hashing algorithm)
+
+Full Matrix Algebra of degree 2 over Integer Ring
+Full RMatrixSpace of 2 by 3 matrices over Integer Ring
+Full Matrix Algebra of degree 2 over Rational Field
+Full KMatrixSpace of 2 by 3 matrices over Rational Field
+Abelian Group isomorphic to Z/2 + Z/2 + Z/10
+Defined on 3 generators
+Relations:
+    2*g.1 = 0
+    2*g.2 = 0
+    10*g.3 = 0
+0.0005000000000
+9.990000000E-5
+0.0001230000000
+-0.001230000000
+0.05000000000
+true
+true
+false
+false

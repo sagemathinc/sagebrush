@@ -1,0 +1,222 @@
+Finite field of size 11
+FldFin 11 11 1
+[ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
+3 FldFinElt true
+10 5 4 1 8 1
+7 8
+8
+[ 1, 2, 2, 3, 2, 5, 6, 2, 3 ]
+5 2 true false
+7 4 -1
+true 4 false 5
+[ 1, 17, 9, 5, 11, 16, 7, 4, 6 ]
+Finite field of size 5^3
+[ 1, $.1, $.1^2, 0 ]
+t^7 1 t^76 t^97 t^63 t^123
+[ 3, 2, 0 ]
+[ 3, 0, 0 ]
+t^61
+4
+31 31 5
+0 2 2 3
+false true t
+t^3 t^45
+125 5 3
+true
+u^3
+true
+H.1^20
+$.1^50
+B.1^15 + B.1^14 + B.1^11 + B.1^9
+904*z + 701
+0 1
+true
+true
+true
+13
+false
+11
+9
+10
+5
+12
+e^349
+false
+true
+e^259
+e^57
+
+>> x + 1/19;
+     ^
+Runtime error in '+': Bad argument types
+Argument types given: FldFinElt, FldRatElt
+
+
+>> x + G!2;
+     ^
+Runtime error in '+': Arguments are not compatible
+Argument types given: FldFinElt, FldFinElt
+
+
+>> x + 1.5;
+     ^
+Runtime error in '+': Bad argument types
+Argument types given: FldFinElt, FldReElt
+
+[ 1, 17, 9, 5, 11, 16, 7, 4, 6 ]
+Finite field of size 3^2
+
+>> a^(1/2);
+    ^
+Runtime error in '^': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+a^2
+
+>> (P!2) div 2;
+         ^
+Runtime error in 'div': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+
+>> a div a;
+     ^
+Runtime error in 'div': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+
+>> a mod 2;
+     ^
+Runtime error in 'mod': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+
+>> 2 div a;
+     ^
+Runtime error in 'div': Bad argument types
+Argument types given: FldFinElt, FldFinElt
+
+true
+true
+true
+false
+
+>> (GF(5)!1) in F;
+             ^
+Runtime error in 'in': Arguments have no covering structure
+
+
+>> 1/2 in F;
+       ^
+Runtime error in 'in': Bad argument types
+
+
+>> 2.5 in F;
+       ^
+Runtime error in 'in': Bad argument types
+
+
+>> F![1/2, 2];
+    ^
+Runtime error in '!': Illegal coercion
+LHS: FldFin
+RHS: [FldRatElt]
+
+>> F![a, 0];
+    ^
+Runtime error in '!': Sequence must have length 1 to lift into this finite field
+LHS: FldFin
+RHS: [FldFinElt]
+a^3
+a^3
+a
+
+>> [GF(3)!1, GF(5)!1];
+   ^
+Runtime error in [ ... ]: No valid universe containing all elements
+
+[ 1, a ]
+[ 1, a ]
+0
+-1
+true
+true
+2
+true
+7
+true
+[ 2 ]
+FldFinElt
+Finite field of size 3
+[ 2 ]
+
+>> [GF(3) | GF(5)!1];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+[ 2, 1 ]
+
+>> [GF(3) | GF(9).1];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+[ 2 ]
+
+>> [GF(3) | "a"];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [GF(3) | 1/3];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [GF(3) | true];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+{ 2 }
+{@ 1 @}
+{* 1^^2 *}
+[ 1, 2, 0, 1 ]
+
+>> {GF(3) | 1, GF(5)!1};
+   ^
+Runtime error in { ... }: Cannot coerce argument 2 into the universe
+
+
+>> {@ GF(3) | 1, 2, 1/3 @};
+   ^
+Runtime error in {@ ... @}: Cannot coerce argument 3 into the universe
+
+
+>> {* GF(3) | 1, 1, "a" *};
+   ^
+Runtime error in sub< ... >: Cannot coerce argument 3 into the universe
+
+[ 1 ]
+[ 2 ]
+
+>> [Integers() | GF(9).1];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [Rationals() | GF(3)!1];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [GF(9) | GF(27).1];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> F![Rationals() | 1, 2];
+    ^
+Runtime error in '!': Illegal coercion
+LHS: FldFin
+RHS: [FldRatElt]
+a^3
+a^3
