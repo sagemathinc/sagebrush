@@ -14,4 +14,8 @@ Valuation(-48, 2); Valuation(5/27, 3);
 Seqint([0, 0, 1], 3); Seqint([9, 9]);
 StringToInteger("+17"); StringToInteger("Zz", 36); StringToInteger("-101", 2);
 Max([2, 9, 9]); Min({4, -1});
+// a narrow window of primes high up (a sieve of the window alone)
+PrimesInInterval(10^12, 10^12 + 100); PrimesInInterval(999950, 1000050); NthPrime(78498);
+#PrimesInInterval(10^12 - 10^6 + 1, 10^12);
+StringToInteger(" 12"); StringToInteger("12 "); StringToInteger(" - 5 "); StringToInteger(" ff ", 16);
 "end";

@@ -774,6 +774,9 @@ test("integer intrinsics refuse arguments as Magma does, in its words, not with 
     ["StringToInteger(\"12a\");", "StringToInteger", "String \"12a\" does not represent an number in base 10"],
     ["StringToInteger(\"1_2\");", "StringToInteger", "String \"1_2\" does not represent an number in base 10"],
     ["StringToInteger(\"12\", 37);", "StringToInteger", "Argument 2 (37) should be in the range [2 .. 36]"],
+    ["ChineseRemainderTheorem([], []);", "ChineseRemainderTheorem", "Sequence argument 1 must be non-empty"],
+    ["Modinv(3/2, 1);", "Modinv", "Bad argument types\nArgument types given: FldRatElt, FldRatElt"],
+    ["StringToInteger(\" \");", "StringToInteger", "String \" \" does not represent an number in base 10"],
   ];
   const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
     { input: cases.map((c) => c[0]).join("\n") + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
@@ -783,6 +786,31 @@ test("integer intrinsics refuse arguments as Magma does, in its words, not with 
     assert.ok(flat.includes(`Runtime error in '${name}': ${said}\n`), `${src}\n${out}`);
   assert.doesNotMatch(out, /Error:|Traceback|UserWarning/);
   assert.match(out, /\nend\n$/);
+});
+
+test("prime enumeration is admitted by the heap before any sieve, and a narrow window near 10^12 is sieved alone (HARD-3BE-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const src = "PrimesUpTo(10^12);\nPrimesInInterval(1, 10^13);\nPrimesInInterval(10^12, 10^12 + 10^9);\nNthPrime(10^9);\n" +
+    "PrimesInInterval(10^12, 10^12 + 100);\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  for (const name of ["PrimesUpTo", "PrimesInInterval"])
+    assert.equal(out.split(`Runtime error in '${name}': ${name} up to `).length - 1, name === "PrimesUpTo" ? 1 : 2, out);
+  assert.equal(out.split("needs more memory than Sagebrush has: not supported yet").length - 1, 4, out);
+  assert.ok(out.includes("Runtime error in 'NthPrime': NthPrime(1000000000) needs more memory"), out);
+  assert.match(r.stdout, /\[ 1000000000039, 1000000000061, 1000000000063, 1000000000091 \]\nend\n$/);
+  // (the shared sieve: Sage mode's prime_range too)
+  const sage = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "-c",
+    "import sage_all as S\nprint(S.prime_range(10**12, 10**12 + 100))\ntry:\n    S.prime_range(10**12)\nexcept MemoryError as e:\n    print('MemoryError', e)\n" +
+    "try:\n    S.nth_prime(10**9)\nexcept MemoryError as e:\n    print('MemoryError', e)\nprint(S.nth_prime(10000), S.primes_first_n(5))\n"], { encoding: "utf8", timeout: 60000 });
+  assert.equal(sage.signal, null, sage.stderr);
+  assert.match(sage.stdout, /^\[1000000000039, 1000000000061, 1000000000063, 1000000000091\]\nMemoryError prime_range over \[2, 1000000000000\) is not supported in Sagebrush/);
+  assert.match(sage.stdout, /\nMemoryError nth_prime over \[2, \d+\) is not supported in Sagebrush[^\n]*\n104729 \[2, 3, 5, 7, 11\]\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
 test("a real field of a huge precision is refused in words before any of its numbers is made (HARD-762-1)", () => {

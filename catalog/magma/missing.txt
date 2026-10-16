@@ -10,7 +10,6 @@ Coefficient
 Coefficients
 Conductor
 CremonaReference
-CRT
 CuspForms
 CuspidalSubspace
 Decomposition
@@ -31,16 +30,12 @@ Eltseq
 Evaluate
 Exclude
 Exp
-ExtendedGreatestCommonDivisor
-Factorisation
 FiniteField
 Floor
 Format
 GaloisField
 Gamma0
-GCD
 GF
-GreatestCommonDivisor
 HeckeOperator
 HeckePolynomial
 HermiteForm
@@ -51,7 +46,6 @@ IntegerRing
 Integers
 IntegralBasis
 Inverse
-InverseMod
 IsEmpty
 IsEven
 IsIrreducible
@@ -63,9 +57,7 @@ IsProbablePrime
 IsUnit
 IsZero
 jInvariant
-LCM
 LeadingCoefficient
-LeastCommonMultiple
 LLL
 Log
 Matrix
@@ -128,4 +120,3 @@ Type
 UnitGroup
 UnitRank
 Universe
-XGCD
