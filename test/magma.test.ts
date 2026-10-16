@@ -215,13 +215,14 @@ test("finite fields by bounded work: GF of more than 1024 bits refused before it
   assert.match(flat, /Runtime error in 'Random': Argument 1 is not non-empty 7 $/);
 });
 
-test("comprehensions by bounded work: at most 10^6 elements, x, y in S admitted before iterating (HARD-FCC-1)", () => {
+test("comprehensions by bounded work: at most 10^6 elements (fewer in a small heap), x, y in S admitted before iterating (HARD-FCC-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
   // under a 96 MB heap, as in the review
   const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 120000 });
-  const refusal = /a comprehension of more than 1000000 elements is not supported yet/g;
+  // (a 96 MiB heap admits 96 MiB / 2048 bytes = 49152 elements, HARD-A57-1)
+  const refusal = /a comprehension of more than 49152 elements is not supported yet/g;
   // above the limit: #S^2 refused at once without a condition (each kind of
   // collection); with one, or several clauses, by the collector at 10^6 + 1
   const t0 = Date.now();
@@ -233,10 +234,13 @@ test("comprehensions by bounded work: at most 10^6 elements, x, y in S admitted 
   assert.equal((above.stdout.replace(/\s+/g, " ").match(refusal) ?? []).length, 6, above.stdout);
   assert.match(above.stdout, /\n1\n$/);
   assert.ok(Date.now() - t0 < 60000);
-  // just at the limit: 10^6 elements are built
-  const at = run("#[ x : x, y in [1..1000] ];\n#[ y : x in [1..1000], y in [1..1000] | true ];\n#{ x*y : x, y in [1..1000] };\n");
+  // within the limit: 200^2 elements are built in 96 MiB
+  const at = run("#[ x : x, y in [1..200] ];\n#[ y : x in [1..200], y in [1..200] | true ];\n#{ x*y : x, y in [1..200] };\n#[ <x, [x, x+1], x/3> : x in [1..49152] ];\n");
   assert.equal(at.signal, null, at.stderr);
-  assert.match(at.stdout, /^1000000\n1000000\n248083\n$/);
+  assert.match(at.stdout, /^40000\n40000\n\d+\n49152\n$/);
+  // and 10^6 in an ordinary heap
+  const big = spawnSync(process.execPath, [cli, "--magma"], { input: "#[ x : x, y in [1..1000] ];\n", encoding: "utf8", timeout: 120000 });
+  assert.equal(big.stdout, "1000000\n", big.stderr);
 });
 
 test("a long integer is laid out in lines of 79 digits and a backslash, in time linear in its length", () => {
@@ -323,13 +327,15 @@ test("index selections are admitted before they are taken, and a long chain of i
   const cli = join(__dirname, "..", "src", "cli.js");
   const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
   const t0 = Date.now();
-  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1]; #T;\n');
+  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 39999]; #T;\n');
   assert.equal(sel.signal, null, sel.stderr);
   const flat = sel.stdout.replace(/\s+/g, " ");
-  assert.match(flat, /a selection of more than 1000000 elements is not supported yet/);
+  // (the limit in a 96 MiB heap: 49152 elements, HARD-A57-1; a selection of
+  // 10^6 aborted V8 there on Node 24)
+  assert.equal((flat.match(/a selection of more than 49152 elements is not supported yet/g) ?? []).length, 2, sel.stdout);
   assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
   assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
-  assert.match(sel.stdout, /\n1000000\n$/);
+  assert.match(sel.stdout, /\n40000\n$/);
   assert.ok(Date.now() - t0 < 30000);
   // 5000 links: refused before running; 64 still work
   const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\n");
@@ -716,7 +722,7 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a real literal with an exponent of more than 10000 is not supported yet/g) ?? []).length, 2, r.stdout);
   assert.match(out, /a range endpoint of more than 100000 digits is not supported yet/);
-  assert.equal((out.match(/a set of more than 1000000 elements is not supported yet/g) ?? []).length, 3, r.stdout);
+  assert.equal((out.match(/a set of more than 49152 elements is not supported yet/g) ?? []).length, 3, r.stdout);
   assert.match(out, /Sequence range does not consist of integers/);
   // (a sequence's range stays lazy: its size is known at once)
   assert.match(r.stdout, /\n100000000\nend\n$/);
