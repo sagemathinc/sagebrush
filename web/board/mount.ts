@@ -34,8 +34,8 @@
 // uses, window.sagebrush.board on sagebrush.space: load(doc), focus(ids),
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
-import { Board, type Camera, type Edge, type Item } from "./board";
-import { layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
+import { Board, type Camera, type Edge, type Item, plainTitle } from "./board";
+import { boardLink, layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote } from "./doc";
 import type { BoardCode } from "./code";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
@@ -652,6 +652,38 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     ($("pgnext") as HTMLButtonElement).disabled = pageIx >= n - 1;
     $("rmpage").hidden = n < 2;
   }
+
+  // Links to places on the board (`#p2`, `#p2-3`, `#3`, `#page-id`,
+  // `#item-id`, `#page-id/item-id`) in a note's ref, its text, the caption:
+  // a click goes there, a move of the reader's (round 0's 15); one naming
+  // nothing does nothing (the address is the tour's)
+  board.linkLabel = (ref) => {
+    const l = doc && boardLink(doc, pageIx, ref);
+    if (!l) return null;
+    if (l.item) { const it = (function find(ns: DocNode[]): DocNode | undefined { for (const x of ns) { if (x.id === l.item) return x; if (x.kind === "group") { const y = find(x.children); if (y) return y; } } })(pageView(doc!, l.page).nodes ?? []); return plainTitle((it as { title?: string })?.title ?? "") || l.item; }
+    return pageOf(doc!, l.page).title || (pageCount(doc!) > 1 ? `Page ${l.page + 1}` : doc!.title || "the start");
+  };
+  on(root, "click", (e: MouseEvent) => {
+    const a = (e.target as Element | null)?.closest?.("a[href^='#']") as HTMLAnchorElement | null;
+    if (!a || !root.contains(a) || a.closest(".board-editing")) return;
+    e.preventDefault();
+    const l = doc && boardLink(doc, pageIx, a.getAttribute("href") ?? "");
+    if (!l) return;
+    go(async () => {
+      const g = loadGen, other = l.page !== pageIx;
+      if (other) {
+        const p = page(l.page), mine = pageGen;
+        await p;
+        // (the link is retired with its document, or when another page was
+        // asked for meanwhile: nothing of it is done to what is shown now, UI-07E-2)
+        if (destroyed || g !== loadGen || mine !== pageGen || pageIx !== l.page) return;
+      }
+      if (l.item) board.focus([l.item]);
+      // (a page's start on the page shown too: its intro, the tour from the
+      // top, as from another page, UI-07E-1; page() has shown it otherwise)
+      else if (l.step >= 0 || !other) step(l.step);
+    });
+  }, true);
 
   /** The steps of the page shown. */
   const steps = () => (doc ? pageView(doc, pageIx).steps ?? [] : []);

@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, cleanDoc, layout } from "./doc.ts";
+import { canonical, cleanDoc, layout, formatError, isBoard } from "./doc.ts";
 import { boardFromText } from "./mermaid.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -84,6 +84,17 @@ check(gBox(900, 700).w === 900 && gBox(900, 700).h === 700, "a group made larger
 check(gBox(10, 10).w === natural.w && gBox(10, 10).h === natural.h, "...made smaller, as large as its items need: " + JSON.stringify([gBox(10, 10), natural]));
 const emptyG = layout({ nodes: [{ id: "e", kind: "group", children: [], w: 480, h: 320 }] }).items[0];
 check(emptyG.empty === true && emptyG.w === 480 && emptyG.h === 320, "an empty group is as large as it was made, and says it is empty: " + JSON.stringify(emptyG));
+// every JSON example in board-format.md is a board as the format says: a
+// board, no error, nothing left out when it is read (the layout guide's
+// dashboard among them)
+{
+  const md = readFileSync(join(here, "..", "board-format.md"), "utf8"), blocks = [...md.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
+  check(blocks.length >= 2, "board-format.md's JSON examples: " + blocks.length);
+  for (const b of blocks) {
+    const d = JSON.parse(b), title = d.title;
+    check(isBoard(d) && !formatError(d) && same(JSON.parse(canonical(cleanDoc(d))), JSON.parse(canonical(d))), "board-format.md's example is a board, read as written: " + title);
+  }
+}
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);
