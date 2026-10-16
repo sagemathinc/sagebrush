@@ -1947,7 +1947,19 @@ method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(
 // ------------------------------------------------------------------ bytes, bytearray
 
 const Ty_lookup = (x: any, name: string) => lookupType(typeOf(x), name);
+// bytes()'s and bytearray()'s encoding and errors are str, checked before
+// anything else (a bytearray is not emptied), as CPython's argument parsing
+function codecArgs(array: boolean, encoding: any, errors: any): [any, any] {
+  const str = (v: any, what: string) => {
+    if (v === undefined || typeof v === "string") return v;
+    if (isinstance(v, T.str)) return unbox(v);
+    return raise(T.TypeError, `${array ? "bytearray" : "bytes"}() argument '${what}' must be str, not ${v === null ? "None" : typeName(v)}`);
+  };
+  return [str(encoding, "encoding"), str(errors, "errors")];
+}
 function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false): Uint8Array {
+  [encoding, errors] = codecArgs(array, encoding, errors);
+  if (typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
   if (typeof x !== "string") {
     // (with no source too: bytes(encoding='ascii') is TypeError, as CPython's)
     if (encoding !== undefined) raise(T.TypeError, "encoding without a string argument");
@@ -2512,7 +2524,9 @@ subclassable(bytearray, PyByteArray, ["a", "n"]);
   allocator(bytearray, (cls: any, ..._args: any[]) => empty(cls), (pos) => empty(pos[0]));
   method(bytearray, "__init__", (b: PyByteArray, source: any = undefined, encoding: any = undefined, errors: any = undefined) => {
     // (emptied, then filled, as CPython's: each a re-size, refused while
-    // exported, and a bad source leaves it empty)
+    // exported, and a bad source leaves it empty; but bad encoding or
+    // errors types are refused first, leaving it as it was)
+    codecArgs(true, encoding, errors);
     if (b.n !== 0) checkResizable(b);
     b.n = 0;
     const a = toBytes(source, encoding, errors, true);

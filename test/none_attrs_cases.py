@@ -57,3 +57,19 @@ b.__init__(3)
 print(b, t(lambda: b.__init__('x')), t(lambda: b.__init__(encoding='ascii')), b)
 print(t(lambda: bytes(encoding='ascii')), t(lambda: bytearray(errors='x')), t(lambda: bytes(errors='x')), t(lambda: bytearray(b'x', errors='x')),
       t(lambda: bytes(3, errors='x')), t(lambda: bytes('a', 'ascii', 'strict')))
+# encoding and errors are str, checked before a bytearray is emptied
+# (CORR-CBE-1)
+
+
+class S(str):
+    pass
+
+
+for K in (bytearray, B):
+    out = []
+    for c in ("b.__init__('xy', 5)", "b.__init__('xy', 'ascii', 5)", "b.__init__('xy', 'nope')", "b.__init__(5, 5)", "b.__init__(None)",
+              "b.__init__(b'x', None)", "b.__init__('xy', errors=5)", "b.__init__(encoding=5)", "b.__init__('xy')", "b.__init__(S('xy'), S('ascii'))",
+              "K('xy', 'ascii', 5)", "bytes('xy', 5)", "bytes(b'x', None)", "bytes(S('ab'), 'ascii')", "b.__init__('xy', 'ascii', 'strict')"):
+        b = K(b'abc')
+        out.append("%s %s" % (t(lambda: eval(c)), bytes(b)))
+    print(K.__name__, out)
