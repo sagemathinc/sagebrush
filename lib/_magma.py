@@ -400,10 +400,9 @@ class MSeq(list):
     def __init__(self, it=(), universe=None, sample=None):
         list.__init__(self, it)
         self.universe = universe
-        # (the universe Magma infers for it, when known: _inferred)
-        self._inf = None
-        # (its first defined element, once looked for: _first_defined)
-        self._wit = None
+        # (_inf, the universe Magma infers for it, and _wit, its first
+        # defined element, are set only once known: unset, they cost a
+        # sequence nothing, as a large copy needs, HARD-756-1)
         # an element that stands for the universe when none is declared, kept
         # when the sequence is emptied (Magma's sequence keeps its universe)
         self.sample = sample if sample is not None or not len(self) else self[0]
@@ -454,7 +453,6 @@ class MSet:
 
     def __init__(self, it=(), kind="set", universe=None):
         self.items, self.keys, self.kind, self.universe, self.range = [], {}, kind, universe, None
-        self._inf = None
         for x in it:
             self.add(x)
 
@@ -810,12 +808,11 @@ def _own(v, name=None, depth=0):
             raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
     if isinstance(v, MSeq):
         t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
-        t._inf = v._inf  # (a copy keeps the inferred universe)
-        t._wit = v._wit
+        _keep_inf(t, v, v[0] if len(v) else _UNDEF)
         return t
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
-        s._inf = v._inf
+        _keep_inf(s, v, v.items[0] if v.items else _UNDEF)
         s.items = [_own(x, None, depth + 1) for x in v.items]
         s.keys = {k: (list(val) if v.kind == "multi" else val) for k, val in v.keys.items()}
         s.range = v.range
@@ -825,6 +822,21 @@ def _own(v, name=None, depth=0):
     if isinstance(v, MRec):
         return v._copy(depth)
     return v
+
+
+def _keep_inf(t, v, first):
+    """The copy t keeps what v knows of its universe (_inf) and its first
+    defined element (_wit), where finding them again would cost more than
+    a look at its first element: the integers or rationals inferred (a
+    scan), and anything after leading holes.  (A copy with a defined first
+    element finds the rest at once, and keeps no attributes: a large copy
+    fits its heap, HARD-756-1.)"""
+    inf = getattr(v, "_inf", None)
+    if inf is not None and (inf is not _NOINF or first is _UNDEF):
+        t._inf = inf
+    wit = getattr(v, "_wit", None)
+    if wit is not None and first is _UNDEF:
+        t._wit = wit
 
 
 def _iter(s):
@@ -1065,7 +1077,9 @@ def _like(c, val, refuse, depth=2):
             t = MSeq(out, c.universe, getattr(c, "sample", None))
         else:
             t = MSet(out, c.kind, c.universe)
-        t._inf = c._inf
+        inf = getattr(c, "_inf", None)
+        if inf is not None:
+            t._inf = inf
         return t
     if isinstance(c, MTuple):
         if not isinstance(val, MTuple) or len(val) != len(c):
