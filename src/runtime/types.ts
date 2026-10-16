@@ -1187,13 +1187,11 @@ const MAX_STR = 2 ** 29 - 24;
 method(S, "translate", (s: string, table: any) => {
   // The output in blocks: unchanged runs are sliced, the pieces joined every
   // 4096 and the blocks appended, so memory goes with the output, not with a
-  // JS entry per input character (HARD-C56-1).  A plain dict is read without
-  // a KeyError per unmapped character, and what each code point maps to is
-  // remembered (at most one entry per distinct code point) when no lookup
-  // can be observed: every key is an int, str, float, bool or None (none of
-  // them in $buckets, where keys with a Python __eq__ live), CORR-8E6-1.
+  // JS entry per input character (HARD-C56-1).  A plain dict is read
+  // directly for each character, without a KeyError per unmapped one: every
+  // lookup is made, as CPython's (a key's __eq__ may count them, CORR-8E6-1),
+  // and nothing is kept per code point (HARD-72C-1).
   const plain = table instanceof PyDict && (table as any).$cls === T.dict;
-  const seen = plain && (table as PyDict).$buckets === null ? new Map<number, any>() : null;
   const NONE = {}; // (a key that is not in the table: kept as is)
   let out = "";
   let pieces: string[] = [];
@@ -1211,14 +1209,7 @@ method(S, "translate", (s: string, table: any) => {
     const cp = s.codePointAt(i)!;
     const w = cp > 0xffff ? 2 : 1;
     let r: any;
-    if (seen !== null) {
-      r = seen.get(cp);
-      if (r === undefined) {
-        const v = dictGet(table, cp);
-        r = v === undefined ? NONE : v;
-        seen.set(cp, r);
-      }
-    } else if (plain) {
+    if (plain) {
       // (each lookup made, as CPython's, but no KeyError raised for a miss)
       const v = dictGet(table, cp);
       r = v === undefined ? NONE : v;
