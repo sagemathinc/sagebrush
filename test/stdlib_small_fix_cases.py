@@ -79,3 +79,22 @@ print(x)
 f = frozenset({1}); g = f; f |= {2}; print(sorted(f), sorted(g), f is g)
 f = frozenset({1, 2}); g = f; f &= {2}; f -= {9}; f ^= {7}; print(sorted(f), sorted(g))
 t = {1}; u = t; t |= {2}; t &= {1, 2, 3}; t -= {9}; t ^= {5}; print(sorted(t), t is u)
+
+# translate: kept runs, deletions, astral characters, a dict subclass with
+# __missing__, and a table that is no dict
+print("abcabc😀x".translate({97: None, 98: "BB", 0x1F600: 0x41}), "".translate({}), "abc".translate({}))
+class Miss(dict):
+    def __missing__(self, k): return "?" if k == 99 else None
+print("abcd".translate(Miss({97: "A"})))
+class Seq:
+    def __getitem__(self, k):
+        if k == 98: raise IndexError
+        return k + 1
+print("abc".translate(Seq()))
+print("aaaa".translate({97: "x" * 3}), "a\tb".translate(str.maketrans("\t", " ")))
+t = str.maketrans("a😀c", "😀bz", "q")
+print(sorted(t.items()), "a😀cq".translate(t))
+try:
+    str.maketrans("a😀", "abc")
+except ValueError as e:
+    print(e)

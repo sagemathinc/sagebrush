@@ -39,13 +39,20 @@ test("set and frozenset subclasses inherit the reflected and in-place operators,
   same("set_slots_cases.py");
 });
 
-test("textwrap's refusal checks the text by str's own iteration, and the indents and placeholder too (CORR-978-4)", () => {
+test("textwrap's refusal checks the text by str's own iteration, the indents and placeholder, and the chunks it measures (CORR-978-4)", () => {
   const code = [
     "import textwrap",
     "class Hidden(str):",
     "    def __iter__(self): return iter('x')",
+    "class Expanded(str):",
+    "    def expandtabs(self, *args): return '\\U0001F600'",
+    "class Translated(str):",
+    "    def translate(self, table): return '\\U0001F600'",
+    "class Chunked(textwrap.TextWrapper):",
+    "    def _split_chunks(self, text): return ['\\U0001F600']",
     "for f in (lambda: textwrap.wrap('ab', width=3, initial_indent='\\U0001F600'), lambda: textwrap.wrap('abc de', width=5, subsequent_indent='\\U0001F600'),",
-    "          lambda: textwrap.shorten('aaaa bbbb cccc', width=8, placeholder='\\U0001F600'), lambda: textwrap.wrap(Hidden('\\U0001F600'), width=1)):",
+    "          lambda: textwrap.shorten('aaaa bbbb cccc', width=8, placeholder='\\U0001F600'), lambda: textwrap.wrap(Hidden('\\U0001F600'), width=1),",
+    "          lambda: textwrap.wrap(Expanded('x'), width=1), lambda: textwrap.wrap(Translated('x'), width=1, expand_tabs=False), lambda: Chunked(width=1).wrap('x')):",
     "    try:",
     "        print(f())",
     "    except NotImplementedError as e:",
@@ -53,5 +60,5 @@ test("textwrap's refusal checks the text by str's own iteration, and the indents
   ].join("\n");
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
   const msg = "textwrap: text with characters beyond U+FFFF (such as '\u{1F600}') is not supported in Sagebrush yet";
-  assert.equal(got, [msg, msg, msg, msg, ""].join("\n"));
+  assert.equal(got, [msg, msg, msg, msg, msg, msg, msg, ""].join("\n"));
 });
