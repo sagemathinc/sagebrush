@@ -123,11 +123,13 @@ test("a large graph's adjacency matrices are refused before their n^2 entries ex
   assert.ok(Date.now() - t < 30000);
 });
 
-test("matrix() over a number field is refused before anything is read (HARD-541-1)", () => {
-  // (matrix(K, 0, 0, []) iterated K[0], K[1], ... until the heap ran out)
-  const src = "P.<t> = QQ[]\nK = NumberField(t^2 - 2, 'a')\nfor f in (lambda: matrix(K, 0, 0, []), lambda: matrix(K, [[K.gen()]]), lambda: matrix(QuadraticField(-3, 'b'), 1, 1, [1])):\n try:\n  f()\n except NotImplementedError as e:\n  print(type(e).__name__)\nprint(matrix(QQbar, 2, 2, [1, 2, 3, 4]).det())\n";
+test("matrix() over a number field is built by elimination over K; a ring of integers is refused before anything is read (HARD-541-1)", () => {
+  // (matrix(K, 0, 0, []) iterated K[0], K[1], ... until the heap ran out;
+  // number fields now take QQbar's generic field path, and an order, which
+  // matrices do not support yet, is still refused without being iterated)
+  const src = "P.<t> = QQ[]\nK = NumberField(t^2 - 2, 'a')\nprint(matrix(K, 0, 0, []).dimensions(), matrix(K, [[K.gen()]]).det(), matrix(QuadraticField(-3, 'b'), 1, 1, [1]).rank())\ntry:\n matrix(K.maximal_order(), 0, 0, [])\nexcept NotImplementedError as e:\n print(type(e).__name__)\nprint(matrix(QQbar, 2, 2, [1, 2, 3, 4]).det())\n";
   const t = Date.now();
-  assert.equal(cli("--sage", "-c", src), "NotImplementedError\n".repeat(3) + "-2\n");
+  assert.equal(cli("--sage", "-c", src), "(0, 0) a 1\nNotImplementedError\n-2\n");
   assert.ok(Date.now() - t < 30000);
 });
 
