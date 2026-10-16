@@ -24,6 +24,7 @@ MAX_ITERATIONS = 1000
 PART_COST = 64
 DEFAULT_ITERATIONS = 300
 FINAL_SWEEPS = 60
+MARGIN = 1e-3
 _M = 0xFFFFFFFF
 
 
@@ -53,7 +54,7 @@ def _rng(seed):
 
 
 class _Body:
-    __slots__ = ("id", "w", "h", "r", "x", "y", "fixed")
+    __slots__ = ("id", "w", "h", "r", "x", "y", "fixed", "fx", "fy")
 
 
 def _separate(B, gap):
@@ -76,7 +77,7 @@ def _separate(B, gap):
             else:
                 before = a.y < b.y or (a.y == b.y and i < j)
             sign = -1 if before else 1
-            need = (ox if along_x else oy) + 1e-6
+            need = (ox if along_x else oy) + MARGIN
             sa = 0 if a.fixed else (1 if b.fixed else 0.5)
             sb = 1 - sa
             if along_x:
@@ -183,7 +184,7 @@ def _plan(nodes, edges, seed, iterations, gap):
             order.append(r)
         groups[r].append(i)
     n = len(nodes)
-    budget = WORK - FINAL_SWEEPS * n * n
+    budget = WORK - (FINAL_SWEEPS + 3) * n * n
     sq = sum(len(groups[r]) ** 2 + PART_COST for r in order if len(groups[r]) > 1)
     if budget < MIN_ITERATIONS * sq:
         return None
@@ -199,6 +200,8 @@ def _plan(nodes, edges, seed, iterations, gap):
         b.x = fixed[0] + b.w / 2 if fixed else 0
         b.y = fixed[1] + b.h / 2 if fixed else 0
         b.fixed = bool(fixed)
+        b.fx = fixed[0] if fixed else 0
+        b.fy = fixed[1] if fixed else 0
         all_.append(b)
     where = {}
     for r in order:
@@ -260,6 +263,59 @@ def _finish(parts, all_, gap):
     for _ in range(FINAL_SWEEPS):
         if not _separate(all_, gap):
             break
+    _shelve(all_, gap)
+
+
+def _shelve(all_, gap):
+    """the movable boxes still closer than gap to another, in a row below
+    every other box, gap apart (spring.ts's shelve)"""
+    bad = set()
+    n = len(all_)
+    for i in range(n):
+        a = all_[i]
+        for j in range(i + 1, n):
+            b = all_[j]
+            if a.fixed and b.fixed:
+                continue
+            ox = (a.w + b.w) / 2 + gap - abs(a.x - b.x)
+            oy = (a.h + b.h) / 2 + gap - abs(a.y - b.y)
+            if ox > -MARGIN / 2 and oy > -MARGIN / 2:
+                bad.add(j if a.fixed else i)
+    if not bad:
+        return
+    left, bottom = math.inf, -math.inf
+    for i in range(n):
+        if i in bad:
+            continue
+        left = min(left, all_[i].x - all_[i].w / 2)
+        bottom = max(bottom, all_[i].y + all_[i].h / 2)
+    if left == math.inf:
+        left, bottom = 0, -gap
+    x = left
+    y = bottom + gap + MARGIN
+    for i in range(n):
+        if i not in bad:
+            continue
+        b = all_[i]
+        b.x = x + b.w / 2
+        b.y = y + b.h / 2
+        x += b.w + gap + MARGIN
+
+
+def gap_violations(nodes, pos, gap):
+    """the pairs (by index) of boxes in pos closer than gap, two fixed ones
+    aside (spring.ts's gapViolations)"""
+    out = []
+    for i in range(len(nodes)):
+        for j in range(i + 1, len(nodes)):
+            a, b = nodes[i], nodes[j]
+            if a[3] and b[3]:
+                continue
+            p, q = pos[a[0]], pos[b[0]]
+            aw, ah, bw, bh = max(0, a[1]), max(0, a[2]), max(0, b[1]), max(0, b[2])
+            if p[0] < q[0] + bw + gap and q[0] < p[0] + aw + gap and p[1] < q[1] + bh + gap and q[1] < p[1] + ah + gap:
+                out.append((i, j))
+    return out
 
 
 def spring_layout(nodes, edges, seed, iterations=None, gap=24):
@@ -271,4 +327,7 @@ def spring_layout(nodes, edges, seed, iterations=None, gap=24):
         while part.done < part.iterations:
             part.step(gap)
     _finish(parts, all_, gap)
-    return {b.id: (_round(b.x - b.w / 2), _round(b.y - b.h / 2)) for b in all_}
+    # (a fixed box exactly where it was given; the promise checked on what
+    # is returned: None rather than two boxes closer than gap)
+    pos = {b.id: (b.fx, b.fy) if b.fixed else (_round(b.x - b.w / 2), _round(b.y - b.h / 2)) for b in all_}
+    return pos if not gap_violations(nodes, pos, gap) else None
