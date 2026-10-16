@@ -417,7 +417,20 @@ fn sage(e: &Expr) -> (String, u8) {
                 let (c, _) = split_coeff(t);
                 if k == 0 {
                     s.push_str(&paren(sage_inner(t), P_ADD));
-                } else if c.looks_negative() && c.is_real() {
+                } else if let Kind::Num(n) = &t.kind {
+                    // a number's own sign (x - 2*I + 1), as Sage prints it
+                    let ns = num_str(n).0;
+                    match ns.strip_prefix('-') {
+                        Some(rest) => {
+                            s.push_str(" - ");
+                            s.push_str(rest);
+                        }
+                        None => {
+                            s.push_str(" + ");
+                            s.push_str(&ns);
+                        }
+                    }
+                } else if c.looks_negative() {
                     s.push_str(" - ");
                     s.push_str(&paren(sage_inner(&neg(t)), P_MUL));
                 } else {
@@ -511,7 +524,7 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
     };
     let nstr: Vec<String> = numer.iter().map(fac).collect();
     let mut s = String::new();
-    let neg_sign = coeff.looks_negative() && coeff.is_real();
+    let neg_sign = coeff.looks_negative();
     let c = if neg_sign { coeff.neg() } else { coeff.clone() };
     if neg_sign {
         s.push('-');
@@ -596,7 +609,19 @@ fn latex(e: &Expr) -> (String, u8) {
                 let (c, _) = split_coeff(t);
                 if k == 0 {
                     s.push_str(&latex(t).0);
-                } else if c.looks_negative() && c.is_real() {
+                } else if matches!(t.kind, Kind::Num(_)) {
+                    let ns = latex(t).0;
+                    match ns.strip_prefix('-') {
+                        Some(rest) => {
+                            s.push_str(" - ");
+                            s.push_str(rest);
+                        }
+                        None => {
+                            s.push_str(" + ");
+                            s.push_str(&ns);
+                        }
+                    }
+                } else if c.looks_negative() {
                     s.push_str(" - ");
                     s.push_str(&latex(&neg(t)).0);
                 } else {
@@ -690,7 +715,7 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
     }
     numer.sort_by(mul_order);
     denom.sort_by(mul_order);
-    let neg_sign = coeff.looks_negative() && coeff.is_real();
+    let neg_sign = coeff.looks_negative();
     let c = if neg_sign { coeff.neg() } else { coeff.clone() };
     let fac = |f: &Expr| -> String {
         match &f.kind {
@@ -718,7 +743,9 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
         return (if neg_sign { format!("-{}", s) } else { s }, if neg_sign { P_NEG } else { P_MUL });
     }
     if !c.is_one() {
-        body = if body.is_empty() { c.latex() } else { format!("{} \\, {}", lparen((c.latex(), if c.is_real() { P_ATOM } else { P_ADD }), P_MUL), body) };
+        // (a pure imaginary coefficient is one term: 10 i \, x, as Sage)
+        let one_term = c.is_real() || matches!(&c, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&c, Num::Float(a, _) if *a == 0.0);
+        body = if body.is_empty() { c.latex() } else { format!("{} \\, {}", lparen((c.latex(), if one_term { P_ATOM } else { P_ADD }), P_MUL), body) };
     }
     (if neg_sign { format!("-{}", body) } else { body }, if neg_sign { P_NEG } else { P_MUL })
 }

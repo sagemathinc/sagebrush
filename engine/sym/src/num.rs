@@ -165,7 +165,8 @@ impl Num {
     /// imaginary part) is negative.
     pub fn looks_negative(&self) -> bool {
         match self {
-            Num::Exact(a, b) => a.is_negative() || (a.is_zero() && b.is_negative()),
+            // as printed, the imaginary part first (-2*I + 1): Sage's sign
+            Num::Exact(a, b) => b.is_negative() || (b.is_zero() && a.is_negative()),
             Num::Float(a, b) => *a < 0.0 || (*a == 0.0 && *b < 0.0),
         }
     }
