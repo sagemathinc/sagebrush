@@ -577,6 +577,8 @@ _R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _x, _y = _R.gens(
 assert _f.coefficient(_sx**2) == 2 * _y + 3; raises(TypeError, _f.monomial_coefficient, _sx**2 * _sy)  # R2-MUL-F6; monomial_coefficient as Sage
 _D = PolynomialRing(QQ, names=("x", "x")); _da, _db = _D.gens(); _g = 7 * _x**5 + 11 * _x**3
 raises(TypeError, _g.coefficient, _da**2 * _db**3); raises(TypeError, _g.monomial_coefficient, _da**2 * _db**3)  # CORR-F61-1
+_h = 2 * _x**2 * _y + 3 * _x**2 + 5; raises(ValueError, _h.monomial_coefficient, _R(0))  # as Sage: mon must not be equal to 0
+assert (_h.monomial_coefficient(_R(1)), _h.monomial_coefficient(2 * _x**2), _h.monomial_coefficient(_x**2 * _y), _R(0).monomial_coefficient(_x)) == (5, 3, 2, 0)
 print("mpoly coefficient ok")
 from sagebrush.sage import CyclotomicField
 for _n in (3, 4, 5):
