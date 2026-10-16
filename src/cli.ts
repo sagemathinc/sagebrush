@@ -417,7 +417,7 @@ async function main() {
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2;
   // `board` with a command it doesn't have is said so there, R0-3, unless
   // there is a script named board here, to run as before)
-  if (argv[0] === "board" && (["render", "run", "check", "-h", "--help"].includes(argv[1]) || !existsSync("board"))) {
+  if (argv[0] === "board" && (["render", "run", "check", "answers", "-h", "--help"].includes(argv[1]) || !existsSync("board"))) {
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;

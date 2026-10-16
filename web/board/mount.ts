@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
-import { boardLink, layout, isBoard, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
+import { boardLink, layout, isBoard, isNote, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
 import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
@@ -238,7 +238,7 @@ function codeNotes(d: BoardDoc): Map<string, DocNote> {
     const walk = (ns: DocNode[] | undefined) => {
       for (const n of ns ?? []) {
         if (n.kind === "group") walk(n.children);
-        else if (n.kind !== "ink" && n.kind !== "sticker" && n.code !== undefined) on.set(n.id, n);
+        else if (isNote(n) && n.code !== undefined) on.set(n.id, n);
       }
     };
     walk(pageOf(d, i).nodes);

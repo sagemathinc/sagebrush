@@ -224,7 +224,7 @@ export class Images {
       const walk = (ns: DocNode[] | undefined) => {
         for (const n of ns ?? []) {
           if (n.kind === "group") walk(n.children);
-          else if (n.kind !== "ink" && n.kind !== "sticker" && n.image && rename.has(n.image)) n.image = rename.get(n.image);
+          else if ((n.kind === undefined || n.kind === "note") && n.image && rename.has(n.image)) n.image = rename.get(n.image);
         }
       };
       walk(d.nodes);

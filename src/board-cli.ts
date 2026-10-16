@@ -20,9 +20,12 @@ const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
   check a board before anyone opens it: the format, ids, edges, steps,
   pictures, and its code items run; every problem in one report
   (sagebrush board check --help)
+       sagebrush board answers FILE [--json] [--apply SUBMISSION]
+  its questions and the answers kept in it; --apply writes a host's
+  submission into it first (sagebrush board answers --help)
 `;
 /** The board commands this sagebrush has. */
-const COMMANDS = ["render", "run", "check"];
+const COMMANDS = ["render", "run", "check", "answers"];
 
 /** The command line as a reader of boards, in what it says of one it can't
  * read: which sagebrush refused it, and what to do (formatError). */
@@ -44,6 +47,8 @@ export async function boardCommand(argv: string[]): Promise<number> {
   if (argv[0] === "run") return (await import("./board-run")).boardRun(argv.slice(1));
   // (sagebrush board check: src/board-check.ts)
   if (argv[0] === "check") return (await import("./board-check")).boardCheck(argv.slice(1));
+  // (sagebrush board answers: src/board-answers.ts)
+  if (argv[0] === "answers") return (await import("./board-answers")).boardAnswers(argv.slice(1));
   // (a command this sagebrush doesn't have: said so, with the ones it has,
   // not taken as a file's name, agent-UX R0-3)
   if (argv.length && !COMMANDS.includes(argv[0]) && !["-h", "--help"].includes(argv[0])) {
@@ -83,7 +88,9 @@ export async function boardCommand(argv: string[]): Promise<number> {
   if (pics) process.stderr.write(`sagebrush board render: ${pics}\n`);
   const pages = pageCount(doc);
   if (!Number.isInteger(page) || page < 1 || page > pages) { process.stderr.write(`sagebrush board render: --page: from 1 to ${pages}\n`); return 2; }
-  const { svg, left, overflow } = boardSvg(doc, { page: page - 1 });
+  // (math typeset: MathJax, loaded only for a board with math in it)
+  const math = JSON.stringify(doc).includes("$") ? (await import("./board-math")).texSvg : undefined;
+  const { svg, left, overflow } = boardSvg(doc, { page: page - 1, math });
   if (out === null) process.stdout.write(svg);
   else writeFileSync(out, svg);
   if (left.length) process.stderr.write(`sagebrush board render: shown only in part: ${left.join(", ")}\n`);

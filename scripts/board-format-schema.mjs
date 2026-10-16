@@ -28,7 +28,7 @@ const problems = [];
 
 // [file, interface]: the schema's definitions; BoardDoc is the document
 const DEFS = [
-  [DOC, "BoardDoc"], [DOC, "BoardPage"], [DOC, "DocNote"], [DOC, "DocGroup"], [DOC, "DocInk"], [DOC, "DocSticker"],
+  [DOC, "BoardDoc"], [DOC, "BoardPage"], [DOC, "DocNote"], [DOC, "DocGroup"], [DOC, "DocInk"], [DOC, "DocSticker"], [DOC, "DocAsk"], [DOC, "AskChoice"],
   [DOC, "DocEdge"], [DOC, "DocStep"], [DOC, "SlideRect"], [DOC, "PageBackground"], ["web/board/images.ts", "ImageInfo"],
 ];
 const DEFINED = new Set(DEFS.map(([, n]) => n));
@@ -103,7 +103,7 @@ bound(DOC, "if (d?.version > VERSION)");
 const positive = { exclusiveMinimum: 0 };
 const FIELD_RULES = {
   "DocNote.color": { pattern: colorPattern }, "DocGroup.color": { pattern: colorPattern }, "DocInk.color": { pattern: colorPattern },
-  "DocSticker.color": { pattern: colorPattern }, "PageBackground.color": { pattern: colorPattern },
+  "DocSticker.color": { pattern: colorPattern }, "DocAsk.color": { pattern: colorPattern }, "PageBackground.color": { pattern: colorPattern },
   "DocNote.image": { pattern: IMAGE_NAME }, "PageBackground.image": { pattern: IMAGE_NAME },
   "DocSticker.icon": { pattern: ICON_NAME }, "DocSticker.emoji": { pattern: "^[^A-Za-z\\p{Cc}]*[^A-Za-z\\p{Cc}\\s][^A-Za-z\\p{Cc}]*$" }, "BoardDoc.seed": { pattern: SEED },
   "ImageInfo.src": { anyOf: [{ pattern: IMAGE_SRC, description: "an https: address" }, { pattern: DATA_URL, description: "a data: URL of a PNG, JPEG, GIF or WebP picture (base64)" }] },
@@ -185,7 +185,7 @@ if (defs.BoardDoc?.properties.images) defs.BoardDoc.properties.images.propertyNa
 // an item: its kind says which (a note's is "note", or left out)
 const nodeUnion = parse(DOC).aliases.DocNode;
 if (!nodeUnion) problems.push(`no type DocNode in ${DOC}`);
-defs.DocNode = { description: "An item: a note, a group, ink or a sticker, as its `kind` says (a note's `kind` is `\"note\"`, or left out).", anyOf: split(nodeUnion ?? "", "|").map((n) => ({ $ref: `#/$defs/${n}` })) };
+defs.DocNode = { description: "An item: a note, a group, ink, a sticker or a question, as its `kind` says (a note's `kind` is `\"note\"`, or left out).", anyOf: split(nodeUnion ?? "", "|").map((n) => ({ $ref: `#/$defs/${n}` })) };
 
 const { $ref, ...doc } = { $ref: null, ...defs.BoardDoc };
 const schema = {
