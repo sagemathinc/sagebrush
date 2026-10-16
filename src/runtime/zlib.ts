@@ -3,15 +3,16 @@
 // no compression), crc32 and adler32; base64 and hex for binascii.  Enough
 // for scipy.io.loadmat's compressed MATLAB arrays and for base64 data.
 
-import { T, PyBytes, raise, objectType, tuple } from "./object";
+import { T, PyBytes, raise, objectType, tuple, typeName, withExport } from "./object";
 import { newBuiltinModule } from "./modules";
+import * as O from "./ops";
 
 let ZlibError: any;
 
 function bytesOf(b: any): Uint8Array {
   if (b instanceof PyBytes) return b.a.subarray(0, b.n);
   if (typeof b === "string") return new TextEncoder().encode(b);
-  raise(T.TypeError, "a bytes-like object is required");
+  raise(T.TypeError, `a bytes-like object is required, not '${typeName(b)}'`);
 }
 
 // ------------------------------------------------------------------ inflate
@@ -364,15 +365,28 @@ newBuiltinModule("binascii", (m) => {
     f.__name__ = name;
     m[name] = f;
   };
-  fn("b2a_base64", (data: any, newline: any = true) => {
+  // (newline is keyword-only, as CPython's: b2a_base64(data, False) is a TypeError)
+  const b2a = (data: any, newline: any = true) => {
+    // (as CPython: the buffer first, then newline's truth, which may run
+    // Python code, then the encoding, of the buffer as it is then, CORR-644-1)
+    // (a bytearray's buffer is exported meanwhile, as CPython's: newline's
+    // __bool__ may write it but not re-size it, and the encoding reads the
+    // storage as it is after, CORR-59A-1, -2)
+    bytesOf(data);
+    const nl = withExport(data, () => O.truth(newline)); // (Python's truth: newline=[] is false, and __bool__'s errors propagate)
     const e = b64encode(bytesOf(data));
-    if (!newline) return new PyBytes(e);
+    if (!nl) return new PyBytes(e);
     const out = new Uint8Array(e.length + 1);
     out.set(e);
     out[e.length] = 10;
     return new PyBytes(out);
-  });
-  m.b2a_base64.$kw = (pos: any[], names: string[], values: any[]) => m.b2a_base64(pos[0], names.includes("newline") ? values[names.indexOf("newline")] : true);
+  };
+  fn("b2a_base64", (data: any) => b2a(data));
+  m.b2a_base64.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (pos.length !== 1) raise(T.TypeError, `b2a_base64() takes exactly one positional argument (${pos.length} given)`);
+    for (const n of names) if (n !== "newline") raise(T.TypeError, `b2a_base64() got an unexpected keyword argument '${n}'`);
+    return b2a(pos[0], names.includes("newline") ? values[names.indexOf("newline")] : true);
+  };
   fn("a2b_base64", (data: any) => new PyBytes(b64decode(bytesOf(data))));
   fn("hexlify", (data: any) => {
     const a = bytesOf(data);

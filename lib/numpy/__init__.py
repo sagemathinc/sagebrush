@@ -370,6 +370,8 @@ def issubdtype(arg1, arg2):
 
 
 def result_type(*arrays_and_dtypes):
+    if not arrays_and_dtypes:
+        raise ValueError("at least one array or dtype is required")
     return _np.result_type(*arrays_and_dtypes)
 
 
@@ -1518,31 +1520,65 @@ def ediff1d(ary, to_end=None, to_begin=None):
 def gradient(f, *varargs, axis=None, edge_order=1):
     f = asarray(f, float64)
     axes = list(range(f.ndim)) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
-    spacing = list(varargs) if varargs else [1.0] * len(axes)
-    if len(spacing) == 1 and len(axes) > 1:
-        spacing = spacing * len(axes)
-    res = []
+    # (NumPy's rule: no spacing, one scalar for every axis, or one per
+    # axis; any other count is a TypeError, not a truncated zip)
+    n = len(varargs)
+    if n == 0:
+        spacing = [1.0] * len(axes)
+    elif n == 1 and ndim(varargs[0]) == 0:
+        spacing = list(varargs) * len(axes)
+    elif n == len(axes):
+        spacing = list(varargs)
+    else:
+        raise TypeError("invalid number of arguments")
+    if edge_order > 2:
+        raise ValueError("'edge_order' greater than 2 not supported")
+    if edge_order < 1:
+        raise ValueError("'edge_order' must be 1 or 2")
+    # (each spacing a scalar, or 1-D coordinates as long as its axis, as
+    # NumPy's; evenly spaced coordinates are a scalar spacing, CORR-CDE-1)
+    steps = []
     for ax, h in zip(axes, spacing):
-        fm = moveaxis(f, ax, 0)
-        if fm.shape[0] < 2:
-            raise ValueError("Shape of array too small to calculate a numerical gradient, at least (edge_order + 1) elements are required.")
         hv = asarray(h, float64)
-        g = zeros(fm.shape, float64)
         if hv.ndim == 0:
-            hh = float(hv)
-            g[1:-1] = (fm[2:] - fm[:-2]) / (2 * hh)
-            g[0] = (fm[1] - fm[0]) / hh
-            g[-1] = (fm[-1] - fm[-2]) / hh
+            steps.append(float(hv))
+            continue
+        if hv.ndim != 1:
+            raise ValueError("distances must be either scalars or 1d")
+        if len(hv) != f.shape[ax]:
+            raise ValueError("when 1d, distances must match the length of the corresponding dimension")
+        dx = diff(hv)
+        steps.append(float(dx[0]) if len(dx) and bool((dx == dx[0]).all()) else dx)
+    res = []
+    for ax, h in zip(axes, steps):
+        fm = moveaxis(f, ax, 0)
+        if fm.shape[0] < edge_order + 1:
+            raise ValueError("Shape of array too small to calculate a numerical gradient, at least (edge_order + 1) elements are required.")
+        g = zeros(fm.shape, float64)
+        if not isinstance(h, ndarray):
+            g[1:-1] = (fm[2:] - fm[:-2]) / (2 * h)
+            if edge_order == 1:
+                g[0] = (fm[1] - fm[0]) / h
+                g[-1] = (fm[-1] - fm[-2]) / h
+            else:
+                g[0] = (-1.5 * fm[0] + 2.0 * fm[1] - 0.5 * fm[2]) / h
+                g[-1] = (0.5 * fm[-3] - 2.0 * fm[-2] + 1.5 * fm[-1]) / h
         else:
-            dx = diff(hv)
+            dx = h
             dx1, dx2 = dx[:-1], dx[1:]
             a = -dx2 / (dx1 * (dx1 + dx2))
             b = (dx2 - dx1) / (dx1 * dx2)
             c = dx1 / (dx2 * (dx1 + dx2))
             sh = (-1,) + (1,) * (fm.ndim - 1)
             g[1:-1] = a.reshape(sh) * fm[:-2] + b.reshape(sh) * fm[1:-1] + c.reshape(sh) * fm[2:]
-            g[0] = (fm[1] - fm[0]) / dx[0]
-            g[-1] = (fm[-1] - fm[-2]) / dx[-1]
+            if edge_order == 1:
+                g[0] = (fm[1] - fm[0]) / dx[0]
+                g[-1] = (fm[-1] - fm[-2]) / dx[-1]
+            else:
+                d1, d2 = float(dx[0]), float(dx[1])
+                g[0] = (-(2.0 * d1 + d2) / (d1 * (d1 + d2))) * fm[0] + ((d1 + d2) / (d1 * d2)) * fm[1] + (-d1 / (d2 * (d1 + d2))) * fm[2]
+                d1, d2 = float(dx[-2]), float(dx[-1])
+                g[-1] = (d2 / (d1 * (d1 + d2))) * fm[-3] + (-(d2 + d1) / (d1 * d2)) * fm[-2] + ((2.0 * d2 + d1) / (d2 * (d1 + d2))) * fm[-1]
         res.append(moveaxis(g, 0, ax))
     return res[0] if len(res) == 1 else res
 
