@@ -83,6 +83,8 @@ class Do:
         return False
 for label, act in [('same-length slice', lambda b: b.__setitem__(slice(None), b'cd')), ('item', lambda b: b.__setitem__(0, 100)),
                    ('append', lambda b: b.append(99)), ('extend', lambda b: b.extend(b'xy')), ('pop', lambda b: b.pop()),
+                   ('extend empty', lambda b: b.extend(b'')), ('extend empty list', lambda b: b.extend([])), ('extend empty iterator', lambda b: b.extend(iter(()))),
+                   ('extend bad', lambda b: b.extend([1, 300])), ('same-length extended slice', lambda b: b.__setitem__(slice(None, None, -1), b'zy')),
                    ('growing slice', lambda b: b.__setitem__(slice(0, 1), b'xyz')), ('shrinking slice', lambda b: b.__setitem__(slice(0, 2), b''))]:
     ba = bytearray(b'ab')
     try:
