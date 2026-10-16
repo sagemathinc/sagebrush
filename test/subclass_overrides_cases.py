@@ -116,3 +116,25 @@ for c in ["complex(1+2j, 1)", "complex(1, 2j)", "complex(C(1+2j), 1)", "complex(
         warnings.simplefilter('always')
         out = t(lambda: eval(c))
     print(c, '->', out, [str(x.message)[:60] for x in w])
+# only an omitted real is 0 (None refused); __complex__ = None is a hook
+# that is not callable; the real-part warning only for an argument with
+# neither __float__ nor __index__ (CORR-D5F-1, -2, -3)
+
+
+class CFl(complex):
+    __float__ = lambda s: 3.0
+
+
+class CIx(complex):
+    __index__ = lambda s: 3
+
+
+class NoneHook:
+    __complex__ = None
+
+
+for c in ["complex(real=CFl(1, 2))", "complex(real=CIx(1, 2))", "complex(real=np.complex64(1j))", "complex(real=np.complex128(1j))",
+          "complex(real=1+2j)", "complex(None, 1)", "complex(real=None)", "complex(None)", "complex(NoneHook())", "complex(NoneHook(), 1)"]:
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        print(c, '->', t(lambda: eval(c)))
