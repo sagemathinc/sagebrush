@@ -94,14 +94,17 @@ test("a vector over a field too big for a 96 MiB heap is refused before it is bu
   const src = VECTORS.map((c) => `try:\n v = ${c}\n print('built', len(v))\nexcept NotImplementedError as e:\n print('refused', str(e)[:40])\n`).join("") +
     // (an endless iterator of entries: stopped at the budget)
     "import itertools\ntry:\n vector(GF(7), (i for i in itertools.count()))\nexcept NotImplementedError as e:\n print('refused', str(e)[:40])\n" +
-    // (Sage's error for a wrong length comes first)
-    "try:\n VectorSpace(GF(7), 300000)([1, 2])\nexcept TypeError as e:\n print('TypeError', e)\n";
+    // (Sage's error for a wrong length comes first, whatever sized object
+    // has it)
+    "class L(list): pass\nclass T(tuple): pass\n" +
+    "for x in ([1, 2], vector(QQ, [1, 2]), range(2), L([1, 2]), T((1, 2))):\n try:\n  VectorSpace(GF(7), 300000)(x)\n except TypeError as e:\n  print('TypeError', e)\n";
   const r = run(["--max-old-space-size=96"], src);
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
-  assert.equal(lines.length, VECTORS.length + 2, r.stdout);
-  for (const l of lines.slice(0, -1)) assert.match(l, /^refused a vector /, l);
-  assert.equal(lines[VECTORS.length + 1], "TypeError entries must be a list of length 300000");
+  assert.equal(lines.length, VECTORS.length + 6, r.stdout);
+  for (const l of lines.slice(0, VECTORS.length + 1)) assert.match(l, /^refused a vector /, l);
+  // (a list, a vector over QQ, a range, a list and a tuple subclass: astra's CORR-4E2-1)
+  for (const l of lines.slice(VECTORS.length + 1)) assert.equal(l, "TypeError entries must be a list of length 300000");
   const d = run([], VECTORS.map((c) => `print(len(${c}))\n`).join(""));
   assert.equal(d.status, 0, d.stderr);
   assert.equal(d.stdout, "200000\n50000\n200000\n300000\n");

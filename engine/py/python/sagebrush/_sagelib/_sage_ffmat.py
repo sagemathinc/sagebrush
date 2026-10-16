@@ -2092,8 +2092,10 @@ class FFVectorSpace:
             _admit_vector(self._base, self._n)
             return FFVector(self._base, [0] * self._n)
         from _sage_matrix import _bounded_list
-        if type(x) in (list, tuple) or isinstance(x, FFVector):
-            # (the length is known: Sage's error for a wrong one first)
+        if hasattr(x, "__len__") and not isinstance(x, (str, bytes)):
+            # (the length of anything sized is known without reading it:
+            # Sage's error for a wrong one first, for a vector over QQ, a
+            # range or a list subclass too, astra's CORR-4E2-1)
             if len(x) != self._n:
                 raise TypeError("entries must be a list of length %d" % self._n)
             _admit_vector(self._base, self._n)
