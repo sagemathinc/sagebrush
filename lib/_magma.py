@@ -120,14 +120,16 @@ def _report(e, line, col):
         if _is_intrinsic_name(name):
             # one of Magma's intrinsics that Sagebrush doesn't have: said so,
             # not as an undeclared name (Magma has it)
+            # (Sagebrush's own message, which Magma doesn't print: one line)
             _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush\n" % (_where(line, col), name))
         else:
-            _sys.stdout.write("%sUser error: Identifier '%s' has not been declared or assigned\n" % (_where(line, col), name))
+            # (wrapped at 80 columns, as Magma wraps it)
+            _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: Identifier '%s' has not been declared or assigned" % name, 0, 0)))
         if _src[2] is None:
             raise SystemExit(1)  # no recovery: a cell stops, as before
         return
     if isinstance(e, _UserError):
-        _sys.stdout.write("Runtime error: %s\n" % e)
+        _sys.stdout.write("%s\n" % _wrap("Runtime error: %s" % e, 0, 0))
     else:
         um = _re.search(r"local variable '([A-Za-z_][A-Za-z0-9_]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
         if um:
@@ -2683,7 +2685,13 @@ def _str1(v, indent, col, tail):
             items = _items(v)
             # the opening bracket, each item with its comma, and the closing
             # bracket, laid out as Magma's printer does (_flow)
-            chunks = [(o.strip(), True)] + [(it + ("," if k < len(items) - 1 else ""), True) for k, it in enumerate(items)] + [(c.strip() + tail, False)]
+            # (an item with spaces, such as a tuple or a string, breaks at
+            # them too, its comma on its last word)
+            chunks = [(o.strip(), True)]
+            for k, it in enumerate(items):
+                words = (it + ("," if k < len(items) - 1 else "")).split(" ")
+                chunks += [(w, True) for w in words]
+            chunks.append((c.strip() + tail, False))
             return _flow(chunks, col, indent), True
         pad = " " * (indent + 4)
         inner = [pad + _str(x, indent + 4, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
@@ -2708,11 +2716,13 @@ def _extra(v):
 def _flow(chunks, first_col, cont, indent=None):
     """Magma's layout of chunks (text, space after it) on lines of WIDTH
     columns, the first starting at first_col (its text already written),
-    the others at cont.  Past the middle of the line, counted from the
-    structure's indentation (column c with c - indent > (WIDTH - indent)/2),
-    a chunk that doesn't fit within WIDTH starts a new line; before it (and
-    on a new line) a chunk is written up to column 79 and continued on the
-    next line after a backslash in column 80.  A space is written only where
+    the others at cont.  A chunk that doesn't fit within WIDTH starts a new
+    line when it would start past the middle of the line counted from the
+    structure's indentation (column c with c - indent > (WIDTH - indent)/2)
+    and moving it gains more than the indentation (c - indent > indent), or
+    when only column 80 is left; otherwise (and on a new line) it is written
+    up to column 79 and continued on the next line after a backslash in
+    column 80 (thresholds measured at indentations 0 to 48).  A space is written only where
     the line has room.  Measured against Magma 2.18 as a black box
     (integers, rationals, strings, reals and polynomials of any length, in
     sequences, nested sequences, tuples and print lines)."""
@@ -2720,7 +2730,7 @@ def _flow(chunks, first_col, cont, indent=None):
     out, c = [], first_col
     for text, space in chunks:
         if text:
-            if 2 * (c - indent) > WIDTH - indent and c > cont:
+            if (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
                 if c + len(text) <= WIDTH:
                     out.append(text)
                     c += len(text)

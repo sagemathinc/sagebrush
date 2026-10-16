@@ -34,3 +34,17 @@ s := &cat["a" : i in [1..100]]; s; [s];
 <111111111111111111111111111111111111111111111111111111111111111111111111111, 2>;
 {10^100, 3};
 Zx<x> := PolynomialRing(Integers()); (10^100)*x^2 + 1;
+// a tuple's or a string's own spaces are places to break too
+[<10^20,10^45>,<2,3>];
+[<10^37,10^45>];
+["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "tail"];
+// deep indentation: a chunk moves only when that gains more than the
+// indentation (indentation 28, columns 55 and 57; indentation 40, 79)
+[[[[[[[[ 11111111111111111111111, 10^85, 9 ]]]]]]]];
+[[[[[[[[ 1111111111111111111111111, 10^85, 9 ]]]]]]]];
+[[[[[[[[[[[ 10000000000000000000000000000000, 10^85, 9 ]]]]]]]]]]];
+[[[[[[[[[[[ 1000000000000000000000000000000000000, 10^85, 9 ]]]]]]]]]]];
+// error messages
+error "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+error 10^65;
+missingvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv;
