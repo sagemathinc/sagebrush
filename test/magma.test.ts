@@ -723,6 +723,75 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
+test("a rational with huge parts made a real is refused in words, before any decimal conversion (HARD-C68-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = "x := (2^2000000 + 1)/3; y := 3/(2^2000000 + 1);\nRealField()!x;\nRealField()!y;\nx^(1/2);\n2^y;\nExp(y);\nLog(x);\n\"end\";\n";
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /ValueError|Traceback|SystemError/);
+  const said = /a real from a rational with a numerator or denominator of more than 1000000 bits is not supported yet/g;
+  assert.equal((r.stdout.replace(/\s+/g, " ").match(said) ?? []).length, 6, r.stdout.slice(0, 2000));
+  assert.match(r.stdout, /\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("a real field of a huge precision is refused in words before any of its numbers is made (HARD-762-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = "R := RealField(100000000); R!1;\nRealField(1001);\nprintf \"%.100000000o\\n\", 1.5;\n" +
+    "S := RealField(1000); x := S!2; y := Sqrt(x); z := Exp(S!1); w := Log(x); #Sprint(y); #Sprint(z); #Sprint(w);\n\"end\";\n";
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.equal(r.status, 0, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a real field of precision more than 1000 is not supported yet/g) ?? []).length, 2, r.stdout.slice(0, 2000));
+  assert.match(out, /printf's precision \(%\.100000000o\) for this real is not supported yet/);
+  // (Magma's own refusals of a precision; its caret is at the call, which
+  // Sagebrush doesn't say yet)
+  const bad = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
+    { input: "RealField(0);\nRealField(-3);\nRealField(3/2);\nRealField(2.0);\n", encoding: "utf8" }).stdout;
+  assert.equal(bad.split("Runtime error in 'RealField': Argument 1 is not positive\n").length, 3, bad);
+  assert.ok(bad.includes("Runtime error in 'RealField': Bad argument types\nArgument types given: FldRatElt\n"), bad);
+  assert.ok(bad.includes("Runtime error in 'RealField': Bad argument types\nArgument types given: FldReElt\n"), bad);
+  // (precision 1000 itself still works, quickly: its numbers print 1000 digits, with a point)
+  assert.match(r.stdout, /\n100[1-9]\n100[1-9]\n100[1-9]\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("a real power too large to make is refused in words, quickly (CORR-C682-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], {
+    input: "10.0^(2^29);\n0.1^(2^29);\n1.0001^(2^29) gt 1;\n\"end\";\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /Error:|Traceback/);
+  assert.equal((r.stdout.replace(/\s+/g, " ").match(/a real with a binary exponent of more than 1000000 is not supported yet/g) ?? []).length, 2, r.stdout);
+  // (within the bound: about 10^23316, made in 29 squarings)
+  assert.match(r.stdout, /\ntrue\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("intrinsics taking integers refuse a rational, an integral one too (CORR-765-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const session = (src: string) =>
+    spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { encoding: "utf8", input: src }).stdout as string;
+  // Magma's words (checked against Magma); their caret is said at the call
+  const one = ["Factorial", "IsEven", "IsOdd", "Factorization", "Divisors", "NextPrime", "Isqrt", "Fibonacci",
+    "PrimeDivisors", "PreviousPrime", "NumberOfDivisors", "PrimesUpTo", "IsProbablePrime"];
+  const out = session("a := 12/3;\n" + one.map((f) => `${f}(a);`).join("\n") + "\nBinomial(a, 2);\nGcd(a, 6);\n\"end\";\n");
+  for (const f of one) assert.ok(out.includes(`Runtime error in '${f}': Bad argument types\nArgument types given: FldRatElt\n`), `${f}\n${out}`);
+  assert.ok(out.includes("Runtime error in 'Binomial': Bad argument types\nArgument types given: FldRatElt, RngIntElt\n"), out);
+  assert.ok(out.includes("Runtime error in 'Gcd': Bad argument types\nArgument types given: FldRatElt, FldRatElt\n"), out);
+  assert.match(out, /\nend\n$/);
+  // integers still work
+  assert.equal(session("Factorial(4); IsEven(4); Gcd(4, 6); Binomial(4, 2);\n"), "24\ntrue\n2\n6\n");
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
