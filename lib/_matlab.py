@@ -4697,7 +4697,10 @@ def abs_(nargout, x):
         return abs(x)
     cls = class_(x)
     if cls in _INTS:
-        return _canon(np.abs(_arr(x)))
+        # (in double and back through the class's rounding: abs of the minimum saturates, as
+        # abs(int8(-128)) is 127, where the integer abs wraps to the minimum; int64's
+        # 2^63 is refused there, Sagebrush's 64-bit integers not being exact)
+        return _finish(np.abs(_farr(x)), cls)
     A = _farr(x, "abs")
     return _finish(np.abs(A).astype(np.float64), "single" if cls == "single" else "double")
 
