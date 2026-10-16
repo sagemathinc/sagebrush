@@ -79,6 +79,10 @@ class Vector(list):
     def __mul__(self, other):
         if _is_ffvector(other):
             return _ffmat()._vector_op(self, other, "*")
+        if getattr(other, "_is_ffmatrix", False):
+            # (the vector-matrix product over a finite or other field; it
+            # was a scalar product, a vector of matrices)
+            return other._vecmat(self)
         if isinstance(other, Matrix):
             # the vector-matrix product
             if len(self) != other.nrows():

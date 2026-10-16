@@ -1,0 +1,104 @@
+Number Field in a with defining polynomial t^2 - 2 * Integer Ring[1, 2] :: (a + 4, 2*a + 1) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
+Integer Ring[1, 2] * Number Field in a with defining polynomial t^2 - 2 :: (a + 2, 2*a + 2) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
+Number Field in a with defining polynomial t^2 - 2 * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Number Field in a with defining polynomial t^2 - 2 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2'
+Number Field in a with defining polynomial t^2 - 2 * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Number Field in a with defining polynomial t^2 - 2 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2'
+Number Field in a with defining polynomial t^2 - 2 * Rational Field[1, 2] :: (a + 4, 2*a + 1) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
+Rational Field[1, 2] * Number Field in a with defining polynomial t^2 - 2 :: (a + 2, 2*a + 2) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
+Number Field in a with defining polynomial t^2 - 2 * Rational Field[1/2, 3] :: (1/2*a + 6, 3*a + 1/2) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
+Rational Field[1/2, 3] * Number Field in a with defining polynomial t^2 - 2 :: (1/2*a + 3, 3*a + 1) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
+Number Field in a with defining polynomial t^2 - 2 * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Number Field in a with defining polynomial t^2 - 2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2'
+Number Field in a with defining polynomial t^2 - 2 * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Number Field in a with defining polynomial t^2 - 2 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2'
+Finite Field of size 7 * Integer Ring[1, 2] :: (5, 4) @ Vector space of dimension 2 over Finite Field of size 7
+Integer Ring[1, 2] * Finite Field of size 7 :: (0, 3) @ Vector space of dimension 2 over Finite Field of size 7
+Finite Field of size 7 * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+Finite Field of size 7 * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+Finite Field of size 7 * Rational Field[1, 2] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Vector space of dimension 2 over Rational Field'
+Rational Field[1, 2] * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+Finite Field of size 7 * Rational Field[1/2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Vector space of dimension 2 over Rational Field'
+Rational Field[1/2, 3] * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+Finite Field of size 7 * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+Finite Field of size 7 * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Finite Field of size 7 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7'
+Ring of integers modulo 6 * Integer Ring[1, 2] :: (5, 1) @ Ambient free module of rank 2 over Ring of integers modulo 6
+Integer Ring[1, 2] * Ring of integers modulo 6 :: (1, 0) @ Ambient free module of rank 2 over Ring of integers modulo 6
+Ring of integers modulo 6 * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6'
+Ring of integers modulo 6 * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6'
+Ring of integers modulo 6 * Rational Field[1, 2] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6' and 'Vector space of dimension 2 over Rational Field'
+Rational Field[1, 2] * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6'
+Ring of integers modulo 6 * Rational Field[1/2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6' and 'Vector space of dimension 2 over Rational Field'
+Rational Field[1/2, 3] * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 2 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6'
+Ring of integers modulo 6 * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6'
+Ring of integers modulo 6 * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Ring of integers modulo 6 :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6'
+Algebraic Real Field * Integer Ring[1, 2] :: (3.414213562373095?, 2) @ Vector space of dimension 2 over Algebraic Real Field
+Integer Ring[1, 2] * Algebraic Real Field :: (1.414213562373095?, 3) @ Vector space of dimension 2 over Algebraic Real Field
+Algebraic Real Field * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field'
+Algebraic Real Field * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field'
+Algebraic Real Field * Rational Field[1, 2] :: (3.414213562373095?, 2) @ Vector space of dimension 2 over Algebraic Real Field
+Rational Field[1, 2] * Algebraic Real Field :: (1.414213562373095?, 3) @ Vector space of dimension 2 over Algebraic Real Field
+Algebraic Real Field * Rational Field[1/2, 3] :: (3.707106781186548?, 3) @ Vector space of dimension 2 over Algebraic Real Field
+Rational Field[1/2, 3] * Algebraic Real Field :: (0.7071067811865475?, 7/2) @ Vector space of dimension 2 over Algebraic Real Field
+Algebraic Real Field * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field'
+Algebraic Real Field * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Algebraic Real Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Real Field'
+Algebraic Field * Integer Ring[1, 2] :: (I + 2, 2) @ Vector space of dimension 2 over Algebraic Field
+Integer Ring[1, 2] * Algebraic Field :: (I + 4, 1) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field'
+Algebraic Field * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field'
+Algebraic Field * Rational Field[1, 2] :: (I + 2, 2) @ Vector space of dimension 2 over Algebraic Field
+Rational Field[1, 2] * Algebraic Field :: (I + 4, 1) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Rational Field[1/2, 3] :: (1/2*I + 3, 1) @ Vector space of dimension 2 over Algebraic Field
+Rational Field[1/2, 3] * Algebraic Field :: (1/2*I + 6, 1/2) @ Vector space of dimension 2 over Algebraic Field
+Algebraic Field * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field'
+Algebraic Field * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Algebraic Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Algebraic Field'
+Real Double Field * Integer Ring[1, 2] :: (5.5, 2.0) @ Vector space of dimension 2 over Real Double Field
+Integer Ring[1, 2] * Real Double Field :: (1.5, 4.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field'
+Real Double Field * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field'
+Real Double Field * Rational Field[1, 2] :: (5.5, 2.0) @ Vector space of dimension 2 over Real Double Field
+Rational Field[1, 2] * Real Double Field :: (1.5, 4.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Rational Field[1/2, 3] :: (6.75, 3.0) @ Vector space of dimension 2 over Real Double Field
+Rational Field[1/2, 3] * Real Double Field :: (0.75, 4.0) @ Vector space of dimension 2 over Real Double Field
+Real Double Field * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field'
+Real Double Field * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Real Double Field :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Double Field'
+Real Field with 53 bits of precision * Integer Ring[1, 2] :: (5.00000000000000, 11.0000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Integer Ring[1, 2] * Real Field with 53 bits of precision :: (7.00000000000000, 10.0000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Integer Ring[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision' and 'Ambient free module of rank 0 over the principal ideal domain Integer Ring'
+Integer Ring[] * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 0 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision * Integer Ring[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision' and 'Ambient free module of rank 3 over the principal ideal domain Integer Ring'
+Integer Ring[1, 2, 3] * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision * Rational Field[1, 2] :: (5.00000000000000, 11.0000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Rational Field[1, 2] * Real Field with 53 bits of precision :: (7.00000000000000, 10.0000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Rational Field[1/2, 3] :: (6.50000000000000, 13.5000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Rational Field[1/2, 3] * Real Field with 53 bits of precision :: (9.50000000000000, 13.0000000000000) @ Vector space of dimension 2 over Real Field with 53 bits of precision
+Real Field with 53 bits of precision * Rational Field[] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision' and 'Vector space of dimension 0 over Rational Field'
+Rational Field[] * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 0 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision'
+Real Field with 53 bits of precision * Rational Field[1, 2, 3] :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision' and 'Vector space of dimension 3 over Rational Field'
+Rational Field[1, 2, 3] * Real Field with 53 bits of precision :: TypeError : unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision'
+K row * QQ :: (a + 4) @ Vector space of dimension 1 over Number Field in a with defining polynomial t^2 - 2
+K row * QQ list :: [a + 4] @ 
+QQ * K col :: (a + 4) @ Vector space of dimension 1 over Number Field in a with defining polynomial t^2 - 2
+K row * QQ empty :: TypeError : unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 2 dense matrices over Number Field in a with defining polynomial t^2 - 2' and 'Vector space of dimension 0 over Rational Field'
+K 0x0 * QQ empty :: () @ Vector space of dimension 0 over Number Field in a with defining polynomial t^2 - 2
+QQ empty * K 0x2 :: (0, 0) @ Vector space of dimension 2 over Number Field in a with defining polynomial t^2 - 2
