@@ -605,13 +605,14 @@ def _into_universe(items, universe, kind):
     universes keep their items as before."""
     ff = isinstance(universe, _MFinField)
     if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
-        return items
+        # (the rationals' elements are rationals, the integral ones too)
+        return [_qelt(x) for x in items] if universe is _QQ and all(_num(x) for x in items) else items
     out = []
     for k, x in enumerate(items):
         if ff:
             y = _ff_into(universe, x)
         elif not _is_ff(x):
-            y = x
+            y = _qelt(x) if universe is _QQ and _num(x) else x
         elif universe is _ZZ and _ffwrap(x.parent()).n == 1:
             y = int(x)
         elif universe is _ZZ and x ** _ffwrap(x.parent()).p == x:
@@ -630,10 +631,19 @@ def _seq(items, universe=None):
         _ff_universe(items, "[ ... ]")
     else:
         items = _into_universe(items, universe, "seq")
-    t = MSeq(items, universe)
+    inf = _infer_from(items) if universe is None else None
+    t = MSeq(_as_inferred(items, inf), universe)
     if universe is None:
-        t._inf = _infer_from(items)  # (Magma fixes it as the sequence is made)
+        t._inf = inf  # (Magma fixes it as the sequence is made)
     return t
+
+
+def _as_inferred(items, inf):
+    """The items of a collection whose universe Magma infers as inf: in
+    the rationals, its integers are rationals (CORR-765-1)."""
+    if inf is _QQ:
+        return [x if x is _UNDEF else _qelt(x) for x in items]
+    return items
 
 
 def _set_universe(items):
@@ -647,23 +657,29 @@ def _set_universe(items):
 
 
 def _set(items, universe=None):
-    m = MSet(_set_universe(_into_universe(list(items), universe, "set")), "set", universe)
+    items = _into_universe(list(items), universe, "set")
+    inf = _infer_from(items) if universe is None else None
+    m = MSet(_set_universe(_as_inferred(items, inf)), "set", universe)
     if universe is None:
-        m._inf = _infer_from(m.items)
+        m._inf = inf
     return m
 
 
 def _iset(items, universe=None):
-    m = MSet(_set_universe(_into_universe(list(items), universe, "indexed")), "indexed", universe)
+    items = _into_universe(list(items), universe, "indexed")
+    inf = _infer_from(items) if universe is None else None
+    m = MSet(_set_universe(_as_inferred(items, inf)), "indexed", universe)
     if universe is None:
-        m._inf = _infer_from(m.items)
+        m._inf = inf
     return m
 
 
 def _mset(items, universe=None):
-    m = MSet(_set_universe(_into_universe(list(items), universe, "multi")), "multi", universe)
+    items = _into_universe(list(items), universe, "multi")
+    inf = _infer_from(items) if universe is None else None
+    m = MSet(_set_universe(_as_inferred(items, inf)), "multi", universe)
     if universe is None:
-        m._inf = _infer_from(m.items)
+        m._inf = inf
     return m
 
 
@@ -747,6 +763,8 @@ def _range_int(v, open_, pos):
 
 
 def _range(a, b, c, open_, universe=None, pos=None):
+    # (an integral rational is a range's integer, as Magma takes it)
+    a, b, c = (int(v) if isinstance(v, _Fraction) and v.denominator == 1 else v for v in (a, b, c))
     if universe is not None and universe is not _ZZ:
         # (a range's elements are integers: Magma refuses another universe)
         if open_ == "[":
@@ -1820,6 +1838,14 @@ def _num(x):
     return isinstance(x, (int, _Fraction)) and not isinstance(x, bool)
 
 
+def _qelt(x):
+    """The integer or rational x as an element of the rational field: a
+    Rational even when it is integral, so that its type and parent are
+    FldRatElt and the Rational Field, as Magma's (it prints, compares and
+    hashes as the integer; CORR-765-1)."""
+    return _sa._q(_Fraction(x))
+
+
 # Values Python's operators give a meaning Magma's don't ("ab" * 3,
 # [1] + [2], true + 1): arithmetic on them is Magma's error, never a value.
 _NOARITH = (bool, str, list, tuple, set, frozenset, dict, MSet, MRange)
@@ -2257,6 +2283,7 @@ def _idiv(a, b, pos=None):
         if b == 0:
             raise MagmaError("Division by zero", "'div'")
         return a // b
+    _no_rationals("div", a, b, pos)
     _arith("div", (a, b), pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[0]
@@ -2268,6 +2295,7 @@ def _mod(a, b, pos=None):
         if b == 0:
             raise MagmaError("Division by zero", "'mod'")
         return a % b
+    _no_rationals("mod", a, b, pos)
     _arith("mod", (a, b), pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[1]
@@ -2285,9 +2313,32 @@ def _pow(a, b, pos=None, op="^"):
             raise MagmaError("Argument 2 (%d) should be >= 0" % b, "'%s'" % op, True, pos)
         return a * b
     _arith(op, (a, b), pos)
+    if _num(a) and isinstance(b, _Fraction):
+        return _rat_pow(a, b, op, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         return MReal.of(a) ** b
     return a ** b
+
+
+def _rat_pow(a, b, op, pos):
+    """a^b for a rational exponent b, an integral one too: a real, as
+    Magma's (2^(8/2) is 16.000..., (-8)^(1/3) is -2.000...; checked against
+    Magma, CORR-765-1)."""
+    p, q = b.numerator, b.denominator
+    if q == 1:
+        return MReal.of(a) ** p
+    if a == 0:
+        if p < 0:
+            raise MagmaError("a negative power of zero is not supported yet", "'%s'" % op, True, pos)
+        return MReal.of(0)
+    # (through Exp and Log, with guard digits, then to the default precision)
+    g = 40
+    if a < 0:
+        if q % 2 == 0:
+            raise MagmaError("an even root of a negative number is not supported yet", "'%s'" % op, True, pos)
+        r = MReal.of(MReal.of(-a, g) ** MReal.of(b, g), 30)
+        return -r if p % 2 else r
+    return MReal.of(MReal.of(a, g) ** MReal.of(b, g), 30)
 
 
 def _is_struct(x):
@@ -3664,7 +3715,7 @@ class _RationalField:
         if isinstance(x, (bool, str)):
             raise MagmaError("Illegal coercion\nLHS: FldRat\nRHS: %s" % _type(x), "'!'", False)
         if isinstance(x, int):
-            return x
+            return _qelt(x)
         if isinstance(x, (MSeq, MRange)):
             # Q ! [n, d] is n/d (Magma's words for the rest)
             rhs = "[%s]" % _elt_type(x)
@@ -3675,7 +3726,7 @@ class _RationalField:
                 raise MagmaError("Should be a sequence of integers\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
             if v[1] == 0:
                 raise MagmaError("Division by zero\nLHS: FldRat\nRHS: %s" % rhs, "'!'", False)
-            return _m_num(_sa._q(_Fraction(v[0], v[1])))
+            return _qelt(_Fraction(v[0], v[1]))
         try:
             return _sa._q(_Fraction(x))
         except (TypeError, ValueError):
@@ -3868,6 +3919,14 @@ def _elt_type(s):
     if len(types) == 1:
         return types[0]
     return "FldRatElt" if set(types) <= {"RngIntElt", "FldRatElt"} else "Any"
+
+
+def _no_rationals(name, a, b, pos=None):
+    """Integers only, as div, mod and Gcd take them: with a rational (an
+    integral one too), Magma's error names both as rationals, the common
+    universe it found (checked against Magma, CORR-765-1)."""
+    if _num(a) and _num(b) and (isinstance(a, _Fraction) or isinstance(b, _Fraction)):
+        raise MagmaError("Bad argument types\nArgument types given: FldRatElt, FldRatElt", "'%s'" % name, True, pos)
 
 
 def _bad_types(name, args, pos=None):
@@ -4075,6 +4134,8 @@ def IsPrimePower(n):
 
 
 def Gcd(*args):
+    if len(args) == 2:
+        _no_rationals("Gcd", *args)
     if len(args) == 1:
         args = tuple(args[0])
     if any(isinstance(a, _sp.Polynomial) for a in args):
@@ -4695,7 +4756,7 @@ def _into(x, d, ring):
     if t == "Z":
         return int(x) if num and _Fraction(x).denominator == 1 else _NOCOERCE
     if t == "Q":
-        return x if num else _NOCOERCE
+        return _qelt(x) if num else _NOCOERCE
     if t == "R":
         return MReal.of(x) if num or isinstance(x, MReal) else _NOCOERCE
     if t in ("ZX", "QX"):
@@ -5748,6 +5809,12 @@ def Rank(x):
 _STR_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None, "Index": None, "Position": None,
              "Append": {1}, "Include": {1}, "Exclude": {1}, "Insert": {2},
              "Reverse": {0}, "StringToInteger": {0}, "EllipticCurve": {0}}
+# Intrinsics taking integers only, at these positions: a rational there,
+# an integral one too (Rationals()!4, 8/2), is Magma's "Bad argument types"
+# (checked against Magma, CORR-765-1).
+_INT_ARGS = {"Factorial": {0}, "Binomial": {0, 1}, "IsEven": {0}, "IsOdd": {0}, "Factorization": {0},
+             "Divisors": {0}, "PrimeDivisors": {0}, "NumberOfDivisors": {0}, "NextPrime": {0},
+             "PreviousPrime": {0}, "Isqrt": {0}, "Fibonacci": {0}, "PrimesUpTo": {0}}
 _BOOL_ARGS = {"Sprint": None, "Sprintf": None, "Type": None, "Parent": None,
               "Append": {1}, "Include": {1}, "Exclude": {1}, "Insert": {2}, "Index": {1}, "Position": {1}}
 
@@ -5787,9 +5854,12 @@ def _check_params(name, f, args, kw):
 
 def _guarded(name, f):
     strs, bools = _STR_ARGS.get(name, ()), _BOOL_ARGS.get(name, ())
+    ints = _INT_ARGS.get(name, ())
 
     def intrinsic(*args, **kw):
         for i, a in enumerate(args):
+            if i in ints and isinstance(a, _Fraction):
+                raise _bad_types(name, args)
             if isinstance(a, bool):
                 if bools is not None and i not in bools:
                     raise _bad_types(name, args)
