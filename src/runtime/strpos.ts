@@ -160,3 +160,83 @@ export function charAt(s: string, p: Pos, i: number): string {
   const u = unitOf(p, i);
   return step(s, u) === 2 ? s.slice(u, u + 2) : s[u];
 }
+
+// ---------------------------------------------------------------- seams
+// A JS string cannot tell the astral character U+1F600 from the two lone
+// surrogates '\ud83d' + '\ude00', which CPython keeps as two code points
+// (CORR-C4D-1).  So an operation that would put a lone high surrogate right
+// before a lone low one refuses instead of answering with one character.
+const endsHigh = (s: string) => s.length > 0 && isHigh(s.charCodeAt(s.length - 1));
+const startsLow = (s: string) => s.length > 0 && isLow(s.charCodeAt(0));
+
+export function refuseMerge(): never {
+  raise(T.NotImplementedError, "a lone high surrogate followed by a lone low surrogate would become one character in Sagebrush's strings; not supported");
+}
+// a + b
+export function glue(a: string, b: string): string {
+  if (endsHigh(a) && startsLow(b)) refuseMerge();
+  return a + b;
+}
+// parts joined by sep (empty parts let their neighbours meet)
+export function joinChecked(parts: string[], sep: string): string {
+  let high = false;
+  const sepHigh = endsHigh(sep), sepLow = startsLow(sep);
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0 && sep.length) {
+      if (high && sepLow) refuseMerge();
+      high = sepHigh;
+    }
+    const p = parts[i];
+    if (p.length) {
+      if (high && isLow(p.charCodeAt(0))) refuseMerge();
+      high = isHigh(p.charCodeAt(p.length - 1));
+    }
+  }
+  return parts.join(sep);
+}
+// s * n
+export function repeatChecked(s: string, n: number): string {
+  if (n > 1 && endsHigh(s) && startsLow(s)) refuseMerge();
+  return s.repeat(n);
+}
+// r was built with pieces meeting at these offsets: none may join a pair
+export function checkSeams(r: string, seams: number[]): string {
+  for (const p of seams) if (p > 0 && p < r.length && isHigh(r.charCodeAt(p - 1)) && isLow(r.charCodeAt(p))) refuseMerge();
+  return r;
+}
+
+// ---------------------------------------------------------------- searches
+// A match of sub at unit j counts only on code-point boundaries: a sub that
+// starts with a low surrogate or ends with a high one could otherwise match
+// half an astral character (CORR-C4D-2).
+export const risky = (sub: string) => sub.length > 0 && (isLow(sub.charCodeAt(0)) || isHigh(sub.charCodeAt(sub.length - 1)));
+export function onBoundaries(s: string, j: number, m: number): boolean {
+  if (j > 0 && isLow(s.charCodeAt(j)) && isHigh(s.charCodeAt(j - 1))) return false;
+  const e = j + m;
+  return !(e > 0 && e < s.length && isLow(s.charCodeAt(e)) && isHigh(s.charCodeAt(e - 1)));
+}
+// s.indexOf(sub, from) / s.lastIndexOf(sub, from), counting only such matches
+export function indexOf(s: string, sub: string, from: number): number {
+  let j = s.indexOf(sub, from);
+  if (!risky(sub)) return j;
+  while (j >= 0 && !onBoundaries(s, j, sub.length)) j = s.indexOf(sub, j + 1);
+  return j;
+}
+export function lastIndexOf(s: string, sub: string, from: number): number {
+  let j = s.lastIndexOf(sub, from);
+  if (!risky(sub)) return j;
+  while (j >= 0 && !onBoundaries(s, j, sub.length)) j = j > 0 ? s.lastIndexOf(sub, j - 1) : -1;
+  return j;
+}
+// the pieces of s between non-overlapping matches of sub, left to right
+export function split(s: string, sub: string): string[] {
+  if (!risky(sub)) return s.split(sub);
+  const out: string[] = [];
+  let i = 0;
+  for (let j = indexOf(s, sub, 0); j >= 0; j = indexOf(s, sub, j + sub.length)) {
+    out.push(s.slice(i, j));
+    i = j + sub.length;
+  }
+  out.push(s.slice(i));
+  return out;
+}

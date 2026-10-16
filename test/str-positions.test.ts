@@ -47,3 +47,45 @@ test("a string of millions of astral characters is indexed in a 96 MiB heap (HAR
   const out = execFileSync(process.execPath, ["--max-old-space-size=96", CLI, "-c", code], { encoding: "utf8", timeout: 120000 });
   assert.equal(out, "10000000 True True -1 10\n4194304 True 1048575 3145728\n");
 });
+
+// A JS string cannot keep '\ud83d' + '\ude00' as the two code points CPython
+// keeps: they would read as U+1F600 (CORR-C4D-1).  Every operation that would
+// put a lone high surrogate right before a lone low one refuses
+// (NotImplementedError; a literal written so is a SyntaxError), and
+// everything else, astral characters included, is unchanged.
+test("joining a lone high surrogate to a lone low one is refused, not read as one character (CORR-C4D-1)", () => {
+  const cases: [string, string][] = [
+    ["h + l", "NotImplementedError"],
+    ["chr(0xd83d) + chr(0xde00)", "NotImplementedError"],
+    ["eval('h') + eval('l')", "NotImplementedError"],
+    ["''.join([h, l])", "NotImplementedError"],
+    ["''.join([h, '', l])", "NotImplementedError"],
+    ["h.join(['a', l + 'b'])", "NotImplementedError"],
+    ["(l + h) * 2", "NotImplementedError"],
+    ["2 * (l + h)", "NotImplementedError"],
+    ["(l + h)[::-1]", "NotImplementedError"],
+    ["('a' + l + 'x' + h)[::2]", "'ax'"],
+    ["(h + 'x' + l)[::2]", "NotImplementedError"],
+    ["('\\U0001F600' + l + h)[::-1]", "NotImplementedError"],
+    ["f'{h}{l}'", "NotImplementedError"],
+    ["f'{h}' f'{l}'", "NotImplementedError"],
+    ["'%s%s' % (h, l)", "NotImplementedError"],
+    ["'{}{}'.format(h, l)", "NotImplementedError"],
+    ["l.rjust(3, h)", "NotImplementedError"],
+    ["format(l, h + '>3')", "NotImplementedError"],
+    ["('a' + h + 'b').replace('b', l)", "NotImplementedError"],
+    ["eval(\"'\\\\ud83d\\\\ude00'\")", "SyntaxError"],
+    ["eval(\"'\\\\ud83d' '\\\\ude00'\")", "SyntaxError"],
+    ["len(h + 'x' + l)", "3"],
+    ["len(l + h)", "2"],
+    ["len(f'{h}x{l}')", "3"],
+    ["len('\\U0001F600' + 'x' + '\\ud83d')", "3"],
+    ["len('{}{}'.format('\\U0001F600', l))", "2"],
+    ["len(('\\U0001F600' * 3)[::-1])", "3"],
+  ];
+  const code = ["h = '\\ud83d'", "l = '\\ude00'"]
+    .concat(cases.map(([e]) => `try:\n    print(ascii(${e}))\nexcept Exception as x:\n    print(type(x).__name__)`))
+    .join("\n");
+  const got = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trimEnd().split("\n");
+  cases.forEach(([e, want], i) => assert.equal(got[i], want, e));
+});

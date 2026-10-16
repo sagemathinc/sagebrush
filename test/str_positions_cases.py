@@ -70,3 +70,18 @@ for k in range(0, 70, 3):
         n = len(s)
         picks = ''.join(s[i] for i in range(n))
         print(k, len(tail), n, picks == s, s[k], s[k + 1], s[-n], s[::-7][:5], s[k:k + 3], s.find('b'), s.rfind('\U0001F600'), s.index('y'), s.count('\U0001F600'), s.find('\U0001F600', k + 2, k + 30))
+
+# matches only on code-point boundaries: never half an astral character (CORR-C4D-2)
+s = 'a\U0001F600b'
+for h in ('\ud83d', '\ude00'):
+    def t(f):
+        try:
+            return f()
+        except Exception as e:
+            return type(e).__name__
+    print(ord(h), s.find(h), s.rfind(h), s.count(h), t(lambda: s.index(h)), t(lambda: s.rindex(h)), h in s,
+          s.split(h), s.rsplit(h), s.partition(h), s.rpartition(h), s.replace(h, 'X'), s.count(h, 1), s.find(h, 1, 2))
+print(s.startswith('a\ud83d'), s.endswith('\ude00b'), s.startswith('\ude00', 1), s.removeprefix('a\ud83d'), s.removesuffix('\ude00b'),
+      s.startswith(('a\ud83d', 'a')), s.split('\ude00b'), s.count('a\ud83d'), s.replace('a\ud83d', 'Z', 1))
+lone = 'x\ud83dy\ude00z\ude00\ud83d'
+print(*map(ascii, (lone.find('\ud83d'), lone.rfind('\ud83d'), lone.count('\ude00'), lone.split('\ude00'), lone.replace('\ud83d', '-'), '\ude00' in lone, lone.index('\ude00\ud83d'))))

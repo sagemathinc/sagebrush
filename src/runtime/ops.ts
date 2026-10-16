@@ -332,7 +332,7 @@ export function add(a: any, b: any): any {
     if (isInt(a) && isInt(b)) return isSafe(r) ? r : normBig(BigInt(a) + BigInt(b));
     return isInt(r) ? new FloatBox(r) : r;
   }
-  if (typeof a === "string" && typeof b === "string") return a + b;
+  if (typeof a === "string" && typeof b === "string") return SP.glue(a, b);
   return addSlow(a, b);
 }
 // Does x, an instance of a Python subclass of list or tuple, define its own
@@ -397,8 +397,8 @@ function mulSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) * big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x * y);
-  if (typeof a === "string" && repeatCount(b) !== undefined) return a.repeat(repeatCount(b)!);
-  if (typeof b === "string" && repeatCount(a) !== undefined) return b.repeat(repeatCount(a)!);
+  if (typeof a === "string" && repeatCount(b) !== undefined) return SP.repeatChecked(a, repeatCount(b)!);
+  if (typeof b === "string" && repeatCount(a) !== undefined) return SP.repeatChecked(b, repeatCount(a)!);
   if (Array.isArray(a) && !overrides(a, "__mul__") && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
   if (Array.isArray(b) && !overrides(b, "__rmul__") && repeatCount(a) !== undefined) return repeatArray(b, repeatCount(a)!);
   if (a instanceof PyBytes && repeatCount(b) !== undefined) return repeatBytes(a, repeatCount(b)!);
@@ -736,7 +736,7 @@ const BIN: Record<string, (a: any, b: any) => any> = { add, sub, mul, truediv, f
 
 export function iadd(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return add(a, b);
-  if (typeof a === "string" && typeof b === "string") return a + b;
+  if (typeof a === "string" && typeof b === "string") return SP.glue(a, b);
   // (a Python subclass of list with its own __iadd__ goes through it)
   if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__iadd__")) {
     if (Array.isArray(b)) {
@@ -990,7 +990,7 @@ export function contains(c: any, x: any): boolean {
   if (Array.isArray(c) && ((c as any).$cls === undefined || layoutPlain((c as any).$cls))) return arrContains(c, x);
   if (typeof c === "string") {
     if (typeof x !== "string") raise(T.TypeError, `'in <string>' requires string as left operand, not ${typeName(x)}`);
-    return c.includes(x);
+    return SP.indexOf(c, x, 0) >= 0;
   }
   if (c instanceof PyDict && c.$cls === T.dict) return dictGet(c, x) !== undefined;
   if (c instanceof PySet && (c.$cls === T.set || c.$cls === T.frozenset)) return dictGet(c.$d, x) !== undefined;
@@ -1700,9 +1700,10 @@ function strGetitemPairs(o: string, p: SP.Pos, k: any): string {
   const [start, step, n] = sliceIndices(k, len);
   if (step === 1) return o.slice(SP.unitOf(p, start), SP.unitOf(p, start + n));
   let r = "";
-  for (let i = 0, j = start; i < n; i++, j += step) r += SP.charAt(o, p, j);
+  for (let i = 0, j = start; i < n; i++, j += step) r = SP.glue(r, SP.charAt(o, p, j));
   return r;
 }
+const LONE_PAIR = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
 export function getitem(o: any, k: any): any {
   if (Array.isArray(o) && (o as any).$cls === undefined) {
     if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) return o[k];
@@ -1782,6 +1783,8 @@ function getitemSlow(o: any, k: any): any {
       if (step === 1) return o.slice(start, start + n);
       let r = "";
       for (let i = 0, j = start; i < n; i++, j += step) r += o[j];
+      // (o has no pairs, so a pair here is two lone surrogates joined: SP.glue)
+      if (LONE_PAIR.test(r)) SP.refuseMerge();
       return r;
     }
     return o[seqIndex(k, o.length, "string")];
