@@ -55,17 +55,32 @@ def _float_s(v):
     return _call("float", repr(float(v)))[0]
 
 
+# The largest integer an expression may hold (the engine's MAX_INT_BITS):
+# expressions cross into the engine as decimal text, so a larger one is
+# refused before it is formatted, as CPython refuses int-to-str past its
+# digit limit.
+_MAX_INT_BITS = 1 << 21
+
+
+def _rat_s(p, q=1):
+    """The engine serialization of the rational p/q (q > 0, exact ints)."""
+    bits = max(p.bit_length(), q.bit_length())
+    if bits > _MAX_INT_BITS:
+        raise NotImplementedError(
+            "an integer of %d bits in a symbolic expression: sagebrush's "
+            "symbolic ring holds integers of at most %d bits" % (bits, _MAX_INT_BITS))
+    return "n%d/%d;" % (p, q)
+
+
 def _to_s(v):
     """The engine serialization of a Python value, or None."""
     if isinstance(v, Expression):
         return v._s
-    if isinstance(v, bool):
-        return "n%d/1;" % int(v)
     if isinstance(v, int):
-        return "n%d/1;" % int(v)
+        return _rat_s(int(v))
     if isinstance(v, _Fraction):
         # exact ints first: formatting an int subclass must not round it
-        return "n%d/%d;" % (int(v.numerator), int(v.denominator))
+        return _rat_s(int(v.numerator), int(v.denominator))
     if isinstance(v, float):
         if _rr_args((v,)) == 2:
             # (the engine's real numbers are doubles)
@@ -88,7 +103,7 @@ def _to_s(v):
         try:
             p, q = v.numerator, v.denominator
             p, q = (p() if callable(p) else p), (q() if callable(q) else q)
-            return "n%d/%d;" % (int(p), int(q)) if int(q) > 0 else None
+            return _rat_s(int(p), int(q)) if int(q) > 0 else None
         except (TypeError, ValueError):
             return None
     return None

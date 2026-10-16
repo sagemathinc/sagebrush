@@ -31,7 +31,19 @@ pub fn encode(e: &Expr) -> String {
 }
 
 fn enc_q(q: &Q, s: &mut String) {
+    crate::num::check_q_bits(q);
     let _ = write!(s, "{}/{}", q.numer(), q.denom());
+}
+
+/// A decimal integer, refused by its length before parsing when it is
+/// past the symbolic ring's size limit.
+pub fn parse_int(t: &str) -> Option<BigInt> {
+    let digits = t.trim_start_matches(['-', '+']).trim_start_matches('0').len() as u64;
+    // 10^(d-1) >= 2^((d-1) log2 10)
+    crate::num::check_int_bits_at_least((digits.saturating_sub(1) as f64 * std::f64::consts::LOG2_10) as u64);
+    let n = t.parse::<BigInt>().ok()?;
+    crate::num::check_int_bits(n.bits());
+    Some(n)
 }
 
 fn enc(e: &Expr, s: &mut String) {
@@ -163,7 +175,7 @@ impl<'a> Dec<'a> {
     fn q(&mut self) -> Q {
         let t = self.until(b';');
         let (n, d) = t.split_once('/').unwrap_or_else(|| bad());
-        Q::new(n.parse::<BigInt>().unwrap_or_else(|_| bad()), d.parse::<BigInt>().unwrap_or_else(|_| bad()))
+        Q::new(parse_int(n).unwrap_or_else(|| bad()), parse_int(d).unwrap_or_else(|| bad()))
     }
     fn braced(&mut self) -> Expr {
         if self.next() != b'{' {
@@ -325,10 +337,10 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
     match op {
         // constructors
         "sym" => one_(sym(arg(0))),
-        "int" => one_(big(arg(0).parse::<BigInt>().unwrap_or_else(|_| crate::err::value_error("bad integer")))),
+        "int" => one_(big(parse_int(arg(0)).unwrap_or_else(|| crate::err::value_error("bad integer")))),
         "rat" => {
             let (n, q) = arg(0).split_once('/').unwrap_or((arg(0), "1"));
-            let (n, q): (BigInt, BigInt) = (n.parse().unwrap_or_else(|_| bad()), q.parse().unwrap_or_else(|_| bad()));
+            let (n, q) = (parse_int(n).unwrap_or_else(|| bad()), parse_int(q).unwrap_or_else(|| bad()));
             if num_traits::Zero::is_zero(&q) {
                 crate::err::throw(SymError::DivisionByZero);
             }
