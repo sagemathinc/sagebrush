@@ -7423,11 +7423,8 @@ def _cmp_text(a, b, f, same_size=False):
         if type(v) is Char:
             if _dims(v)[0] > 1:
                 # (a character matrix against a cell or string array: its rows, as a
-                # column; a row ending in blanks may be padding, which the pages don't
-                # settle, so that is refused)
+                # column, exactly as stored, padding blanks included, as MATLAB does)
                 rows = v.rows()
-                if any(r != r.rstrip(" ") for r in rows):
-                    raise _err("Comparing a character matrix whose rows end in blanks is not supported.")
                 return rows, (len(rows), 1)
             return [v.text()], None
         if type(v) is Str:

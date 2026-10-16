@@ -1790,10 +1790,13 @@ test("strcmp and its relatives: a character matrix's rows against a cell or stri
     "disp(mat2str(strcmp({'ab'}, C))); disp(mat2str(strcmp([\"ab\"; \"zz\"], C)))",
     // (two character arrays: compared whole)
     "disp(mat2str([strcmp(C, ['ab'; 'cd']) strcmp(C, 'ab') strcmp(C, ['ab'; 'ce'])]))",
-    tryIt("strcmp({'ab'; 'cd'; 'ef'}, C)"), tryIt("strcmp({'ab'; 'c'}, ['ab'; 'c '])"), tryIt("strncmp(C, ['ab'; 'cd'], 1)"), tryIt("strcmp(\"ab\", C)"),
+    // (rows as stored, padding blanks included: char('a', 'bb') has the row 'a ')
+    "M = char('a', 'bb'); disp(mat2str([strcmp({'a '; 'bb'}, M) strcmp({'a'; 'bb'}, M) strncmp({'a'; 'b'}, M, 1) strncmpi(M, {'A'; 'BX'}, 1) strncmp(M, {'a'; 'bb'}, 2)]))",
+    tryIt("strcmp({'ab'; 'cd'; 'ef'}, C)"), tryIt("strncmp(C, ['ab'; 'cd'], 1)"), tryIt("strcmp(\"ab\", C)"),
   ].join("\n")), [
     "[true;true]", "[true;false]", "[true;true]", "[true;true]", "[true;true]",
     "[true;false]", "[true;false]", "[true false false]",
-    "refused", "refused", "refused", "refused",
+    "[true false true true false;true true true true true]",
+    "refused", "refused", "refused",
   ]);
 });
