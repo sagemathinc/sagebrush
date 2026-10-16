@@ -714,22 +714,22 @@ function isqrt(n: bigint): bigint {
 // least exponent of the coordinates) S is an integer, the result's last place is 2^(k+sh),
 // n = floor(sqrt(S / 4^sh)), and 4S against (2n + 1)^2 4^sh says which side of the
 // midpoint the root is on (a tie goes to the even n)
+// (two streaming passes, both polling Stop: the least exponent, then the sum; nothing is
+// kept per coordinate, so the memory is S's alone)
 function normExact(xs: number[]): number {
-  const ms: bigint[] = [], ks: number[] = [];
   let k = Infinity;
+  for (let i = 0; i < xs.length; i++) {
+    if ((i & 1023) === 1023) pollInterrupt();
+    const a = Math.abs(xs[i]);
+    if (a !== 0) k = Math.min(k, split(a)[1]);
+  }
+  let S = 0n;
   for (let i = 0; i < xs.length; i++) {
     if ((i & 1023) === 1023) pollInterrupt();
     const a = Math.abs(xs[i]);
     if (a === 0) continue;
     const [m, ki] = split(a);
-    ms.push(m);
-    ks.push(ki);
-    if (ki < k) k = ki;
-  }
-  let S = 0n;
-  for (let i = 0; i < ms.length; i++) {
-    if ((i & 1023) === 1023) pollInterrupt();
-    const v = ms[i] << BigInt(ks[i] - k);
+    const v = m << BigInt(ki - k);
     S += v * v;
   }
   const b = bitLength(isqrt(S)); // (the root's integer part has b bits: the result is near 2^(k + b - 1))
