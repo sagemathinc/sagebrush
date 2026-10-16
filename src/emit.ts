@@ -128,16 +128,16 @@ export class Emitter {
   // globals, and writes the locals (CPython's LOAD_NAME and STORE_NAME),
   // and a function defined there sees only the globals.
   gns(id: string): string {
-    let s = this.fn.scope;
+    const cur = this.fn.scope;
+    let s = cur;
     const comp = s.kind === "comp" && !s.isGenerator;
-    // (a walrus target in a top-level comprehension is the globals', reads
-    // and writes alike, declared global or not: CPython's symbol table does
-    // not count it as the top level's local, CORR-756-1)
-    let walrus = false;
-    while (s.kind === "comp" && !s.isGenerator && s.parent !== null) {
-      if (s.nonlocals.has(id)) walrus = true;
-      s = s.parent;
-    }
+    // (a walrus target of a top-level comprehension is the globals' in that
+    // comprehension, reads and writes alike, declared global or not:
+    // CPython's symbol table does not count it as the top level's local,
+    // CORR-756-1; only that comprehension's own targets, not those of one
+    // inside or around it, CORR-7D2-1)
+    const walrus = comp && cur.walrusTargets.has(id);
+    while (s.kind === "comp" && !s.isGenerator && s.parent !== null) s = s.parent;
     if (s.kind !== "module") return "$G";
     // (an inlined comprehension at the top level reads the top level's
     // namespace even for a name declared global there, as CPython's,
