@@ -273,13 +273,21 @@ newBuiltinModule("math", (m) => {
   };
   const domain = () => raise(T.ValueError, "math domain error");
   const range = () => raise(T.OverflowError, "math range error");
-  const unary = (name: string, f: (x: number) => number, ok: (x: number) => boolean = () => true) =>
+  // CPython 3.14's math_1: a NaN from a non-NaN, or (unless the function can
+  // overflow) an infinity from a finite input, is a domain error, in the
+  // function's own words when it has them (msg, with the input's repr)
+  const OVERFLOWS = new Set(["exp", "exp2", "expm1", "sinh", "cosh"]);
+  const unary = (name: string, f: (x: number) => number, ok: (x: number) => boolean = () => true, msg: string | null = null) =>
     fn(m, name, (x: any) => {
       const v = F(x);
-      if (!ok(v)) domain();
+      const bad = () => (msg === null ? domain() : raise(T.ValueError, msg.replace("%s", floatRepr(v))));
+      if (!ok(v)) bad();
       const r = f(v);
-      if (r !== r && v === v) domain();
-      if (!Number.isFinite(r) && Number.isFinite(v)) range();
+      if (r !== r && v === v) bad();
+      if (!Number.isFinite(r) && Number.isFinite(v)) {
+        if (OVERFLOWS.has(name)) range();
+        bad();
+      }
       return O.mkfloat(r);
     });
   m.pi = Math.PI;
@@ -287,55 +295,66 @@ newBuiltinModule("math", (m) => {
   m.tau = 2 * Math.PI;
   m.inf = new FloatBox(Infinity);
   m.nan = NaN;
-  unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x);
+  unary("sqrt", Math.sqrt, (x) => x >= 0 || x !== x, "expected a nonnegative input, got %s");
   unary("exp", glibcExp);
   unary("expm1", FD.expm1);
-  unary("sin", FD.sin, (x) => Number.isFinite(x) || x !== x);
-  unary("cos", FD.cos, (x) => Number.isFinite(x) || x !== x);
-  unary("tan", FD.tan, (x) => Number.isFinite(x) || x !== x);
-  unary("asin", FD.asin, (x) => (x >= -1 && x <= 1) || x !== x);
-  unary("acos", FD.acos, (x) => (x >= -1 && x <= 1) || x !== x);
+  unary("sin", FD.sin, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("cos", FD.cos, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("tan", FD.tan, (x) => Number.isFinite(x) || x !== x, "expected a finite input, got %s");
+  unary("asin", FD.asin, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
+  unary("acos", FD.acos, (x) => (x >= -1 && x <= 1) || x !== x, "expected a number in range from -1 up to 1, got %s");
   unary("atan", FD.atan);
   unary("sinh", FD.sinh);
   unary("cosh", FD.cosh);
   unary("tanh", FD.tanh);
   unary("asinh", FD.asinh);
-  unary("acosh", FD.acosh, (x) => x >= 1 || x !== x);
-  unary("atanh", FD.atanh, (x) => (x > -1 && x < 1) || x !== x);
+  unary("acosh", FD.acosh, (x) => x >= 1 || x !== x, "expected argument value not less than 1, got %s");
+  unary("atanh", FD.atanh, (x) => (x > -1 && x < 1) || x !== x, "expected a number between -1 and 1, got %s");
   unary("fabs", Math.abs);
-  unary("log2", FD.log2, (x) => x > 0 || x !== x);
-  unary("log10", FD.log10, (x) => x > 0 || x !== x);
-  unary("log1p", glibcLog1p, (x) => x > -1 || x !== x);
-  unary("degrees", (x) => (x * 180) / Math.PI);
-  unary("radians", (x) => (x * Math.PI) / 180);
+  unary("log1p", glibcLog1p, (x) => x > -1 || x !== x, "expected argument value > -1, got %s");
+  // (x times CPython's constants, so no intermediate overflows, CORR-447-4;
+  // an infinite result is CPython's too)
+  const radToDeg = 180 / Math.PI, degToRad = Math.PI / 180;
+  fn(m, "degrees", (x: any) => O.mkfloat(F(x) * radToDeg));
+  fn(m, "radians", (x: any) => O.mkfloat(F(x) * degToRad));
   unary("cbrt", FD.cbrt);
-  fn(m, "log", (x: any, base: any = undefined) => {
-    const ln = (v: any) => {
-      if (typeof v === "bigint") {
-        if (v <= 0n) domain();
-        const d = Number(v);
-        if (d !== Infinity) return glibcLog(d);
-        // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
-        const s = v.toString(2).length;
-        let top = v >> BigInt(s - 64);
-        if (top << BigInt(s - 64) !== v) top |= 1n; // sticky bit for correct rounding
-        let x = Number(top) / 18446744073709551616, e = s;
-        if (x === 1) {
-          x = 0.5;
-          e += 1;
-        }
-        return glibcLog(x) + e * Math.LN2;
+  // CPython's loghelper: an int (huge ones too) by its own path, refused
+  // without its value; anything else as a float, refused with it
+  const logOf = (v: any, f: (x: number) => number, ln2: number): number => {
+    if (typeof v === "bigint" || typeof v === "boolean" || (typeof v === "number" && Number.isInteger(v)) || O.isPyInt(v)) {
+      const b = BigInt(typeof v === "boolean" ? +v : O.index(v));
+      if (b <= 0n) raise(T.ValueError, "expected a positive input");
+      const d = Number(b);
+      if (d !== Infinity) return f(d);
+      // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
+      const s = b.toString(2).length;
+      let top = b >> BigInt(s - 64);
+      if (top << BigInt(s - 64) !== b) top |= 1n; // sticky bit for correct rounding
+      let x = Number(top) / 18446744073709551616, e = s;
+      if (x === 1) {
+        x = 0.5;
+        e += 1;
       }
-      const f = F(v);
-      if (f <= 0) domain();
-      return glibcLog(f);
-    };
-    const r = base === undefined ? ln(x) : ln(x) / ln(base);
-    return O.mkfloat(r);
+      return f(x) + e * ln2;
+    }
+    const x = F(v);
+    if (x <= 0) raise(T.ValueError, `expected a positive input, got ${floatRepr(x)}`);
+    return f(x);
+  };
+  fn(m, "log", (x: any, base: any = undefined) => {
+    const num = logOf(x, glibcLog, Math.LN2);
+    if (base === undefined) return O.mkfloat(num);
+    const den = logOf(base, glibcLog, Math.LN2);
+    // (a base of 1: float division by zero, CORR-447-2)
+    if (den === 0) raise(T.ZeroDivisionError, "division by zero");
+    return O.mkfloat(num / den);
   });
+  fn(m, "log2", (x: any) => O.mkfloat(logOf(x, FD.log2, 1)));
+  fn(m, "log10", (x: any) => O.mkfloat(logOf(x, FD.log10, Math.log10(2))));
   fn(m, "pow", (x: any, y: any) => {
     const a = F(x), b = F(y);
-    if (a === 0 && b < 0) domain();
+    // (0 to a negative finite power: a pole; to -inf, inf, CORR-447-5)
+    if (a === 0 && b < 0 && b !== -Infinity) domain();
     if (a < 0 && !Number.isInteger(b) && Number.isFinite(b)) domain();
     const r = glibcPow(a, b);
     if (!Number.isFinite(r) && Number.isFinite(a) && Number.isFinite(b)) range();
@@ -506,7 +525,8 @@ newBuiltinModule("math", (m) => {
   fn(m, "comb", (nn: any, kk: any) => {
     const n = bigOf(nn);
     let k = bigOf(kk);
-    if (n < 0n || k < 0n) raise(T.ValueError, "n and k must be non-negative integers");
+    if (n < 0n) raise(T.ValueError, "n must be a non-negative integer");
+    if (k < 0n) raise(T.ValueError, "k must be a non-negative integer");
     if (k > n) return 0;
     if (k > n - k) k = n - k;
     let r = 1n;
@@ -515,7 +535,11 @@ newBuiltinModule("math", (m) => {
   });
   fn(m, "perm", (nn: any, kk: any = null) => {
     const n = bigOf(nn);
+    // (a negative k was 1; CPython 3.14's checks and messages)
+    if (kk === null && n < 0n) raise(T.ValueError, "factorial() not defined for negative values");
     const k = kk === null ? n : bigOf(kk);
+    if (n < 0n) raise(T.ValueError, "n must be a non-negative integer");
+    if (k < 0n) raise(T.ValueError, "k must be a non-negative integer");
     if (k > n) return 0;
     let r = 1n;
     for (let i = n - k + 1n; i <= n; i++) r *= i;
@@ -617,7 +641,9 @@ newBuiltinModule("math", (m) => {
   };
   const nextafter = (a: number, b: number, steps = 1n): number => {
     if (a !== a || b !== b) return a !== a ? a : b;
-    if (a === b || steps === 0n) return a === b ? b : a;
+    // (no steps: x itself, its zero's sign too, CORR-447-3)
+    if (steps === 0n) return a;
+    if (a === b) return b;
     const ka = toOrd(a), kb = toOrd(b);
     const r = kb > ka ? (kb - ka <= steps ? kb : ka + steps) : (ka - kb <= steps ? kb : ka - steps);
     if (r === kb) return b;
@@ -644,6 +670,7 @@ newBuiltinModule("math", (m) => {
   });
   fn(m, "dist", (p: any, q: any) => {
     const a = O.toArray(p).map(F), b = O.toArray(q).map(F);
+    if (a.length !== b.length) raise(T.ValueError, "both points must have the same number of dimensions");
     return O.mkfloat(FD.v8hypot(...a.map((v, i) => v - b[i])));
   });
 });
