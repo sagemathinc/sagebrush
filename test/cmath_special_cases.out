@@ -2418,3 +2418,58 @@ exp (1000+1j) OverflowError
 acos (1e+308-1e+308j) 0x1.921fb54442d18p-1 0x1.631e32ef5c834p+9
 acosh (-1e+308+3j) 0x1.62f1d6695e8ecp+9 0x1.921fb54442d18p+1
 asinh (-1e+308-0j) -0x1.62f1d6695e8ecp+9 -0x0.0p+0
+cmath.rect(F(), F()) -0x1.aa22657537205p-1 0x1.d18f6ead1b446p+0
+cmath.rect(I(), I()) -0x1.aa22657537205p-1 0x1.d18f6ead1b446p+0
+cmath.isclose(2, 2, rel_tol=F(), abs_tol=I()) True
+cmath.rect(Bad(), 1) TypeError Bad.__float__ returned non-float (type str)
+cmath.rect('a', 1) TypeError must be real number, not str
+cmath.rect(10 ** 400, 0) OverflowError int too large to convert to float
+cmath.rect(BigI(), 0) OverflowError int too large to convert to float
+cmath.isclose(1, 1, rel_tol='x') TypeError must be real number, not str
+cmath.rect(True, I()) -0x1.aa22657537205p-2 0x1.d18f6ead1b446p-1
+cmath.rect(FS(1.5), 0) 0x1.8000000000000p+0 0x0.0p+0
+cmath.isclose(1, 1.0000001, rel_tol=FS(1e-6)) True
+cmath.isclose(1, 2, abs_tol=Bad()) TypeError Bad.__float__ returned non-float (type str)
+cmath.rect(FStatic(), 0) 0x1.0000000000000p+1 0x0.0p+0
+cmath.rect(1, FStatic()) -0x1.aa22657537205p-2 0x1.d18f6ead1b446p-1
+cmath.isclose(1, 2, rel_tol=FStatic()) True
+cmath.isclose(1, 2, abs_tol=FStatic()) True
+cmath.rect(FClass(), 0) 0x1.4000000000000p+2 0x0.0p+0
+cmath.rect(1, FClass()) 0x1.22785706b4ad9p-2 -0x1.eaf81f5e09933p-1
+cmath.isclose(1, 2, rel_tol=FClass()) True
+cmath.isclose(1, 2, abs_tol=FClass()) True
+cmath.rect(FProp(), 0) 0x1.0000000000000p+2 0x0.0p+0
+cmath.rect(1, FProp()) -0x1.4eaa606db24c1p-1 -0x1.837b9dddc1eaep-1
+cmath.isclose(1, 2, rel_tol=FProp()) True
+cmath.isclose(1, 2, abs_tol=FProp()) True
+cmath.rect(FNone(), 0) TypeError 'NoneType' object is not callable
+cmath.rect(1, FNone()) TypeError 'NoneType' object is not callable
+cmath.isclose(1, 2, rel_tol=FNone()) TypeError 'NoneType' object is not callable
+cmath.isclose(1, 2, abs_tol=FNone()) TypeError 'NoneType' object is not callable
+cmath.rect(INone(), 0) TypeError 'NoneType' object is not callable
+cmath.rect(1, INone()) TypeError 'NoneType' object is not callable
+cmath.isclose(1, 2, rel_tol=INone()) TypeError 'NoneType' object is not callable
+cmath.isclose(1, 2, abs_tol=INone()) TypeError 'NoneType' object is not callable
+cmath.rect(IStr(), 0) TypeError __index__ returned non-int (type str)
+cmath.rect(1, IStr()) TypeError __index__ returned non-int (type str)
+cmath.isclose(1, 2, rel_tol=IStr()) TypeError __index__ returned non-int (type str)
+cmath.isclose(1, 2, abs_tol=IStr()) TypeError __index__ returned non-int (type str)
+cmath.rect(IList(), 0) TypeError __index__ returned non-int (type list)
+cmath.rect(1, IList()) TypeError __index__ returned non-int (type list)
+cmath.isclose(1, 2, rel_tol=IList()) TypeError __index__ returned non-int (type list)
+cmath.isclose(1, 2, abs_tol=IList()) TypeError __index__ returned non-int (type list)
+cmath.rect(IFloat(), 0) TypeError __index__ returned non-int (type float)
+cmath.rect(1, IFloat()) TypeError __index__ returned non-int (type float)
+cmath.isclose(1, 2, rel_tol=IFloat()) TypeError __index__ returned non-int (type float)
+cmath.isclose(1, 2, abs_tol=IFloat()) TypeError __index__ returned non-int (type float)
+cmath.rect(IComplex(), 0) TypeError __index__ returned non-int (type complex)
+cmath.rect(1, IComplex()) TypeError __index__ returned non-int (type complex)
+cmath.isclose(1, 2, rel_tol=IComplex()) TypeError __index__ returned non-int (type complex)
+cmath.isclose(1, 2, abs_tol=IComplex()) TypeError __index__ returned non-int (type complex)
+cmath.rect(IBool(), 0) 0x1.0000000000000p+0 0x0.0p+0
+cmath.rect(1, IBool()) 0x1.14a280fb5068cp-1 0x1.aed548f090ceep-1
+cmath.isclose(1, 2, rel_tol=IBool()) True
+cmath.isclose(1, 2, abs_tol=IBool()) True
+cmath.rect(J(2), 0) 0x1.8000000000000p+1 0x0.0p+0
+cmath.rect(JPlain(2), 0) 0x1.0000000000000p+1 0x0.0p+0
+cmath.isclose(1, 3, abs_tol=J(1)) True
