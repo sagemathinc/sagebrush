@@ -239,6 +239,84 @@ test("comprehensions by bounded work: at most 10^6 elements, x, y in S admitted 
   assert.match(at.stdout, /^1000000\n1000000\n248083\n$/);
 });
 
+test("a long integer is laid out in lines of 79 digits and a backslash, in time linear in its length", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: "10^20000;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const lines = r.stdout.split("\n").filter((l: string) => l);
+  // 20001 digits: 253 full lines of 79 digits, each ending in a backslash, and 14 more
+  assert.equal(lines.length, 254);
+  assert.ok(lines.slice(0, -1).every((l: string) => l.length === 80 && l.endsWith("\\")));
+  assert.equal(lines.map((l: string) => l.replace(/\\$/, "")).join(""), "1" + "0".repeat(20000));
+  assert.ok(Date.now() - t0 < 30000);
+});
+
+test("printing a value nested deeper than 100 is refused in Magma's form, not a host RecursionError (HARD-133-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (input: string) => spawnSync(process.execPath, [cli, "--magma"], { input, encoding: "utf8", timeout: 60000 });
+  // (built in a loop, a value is copied as it is assigned: refused there)
+  const deep = run("x := 1; for i in [1..5000] do x := [x]; end for;\nt := 1; for i in [1..5000] do t := <t>; end for;\n1;\n");
+  assert.equal(deep.signal, null, deep.stderr);
+  assert.equal((deep.stdout.match(/Runtime error: a value nested more than 100 deep is not supported yet/g) ?? []).length, 2, deep.stdout.slice(0, 2000));
+  assert.doesNotMatch(deep.stdout + deep.stderr, /RecursionError|Traceback/);
+  assert.match(deep.stdout, /\n1\n$/);
+  // 100 deep still prints (at that indentation the innermost [ 1 ] is
+  // laid out a chunk a line): 100 brackets each way, no error
+  const ok = run("x := 1; for i in [1..100] do x := [x]; end for;\nx;\n");
+  assert.equal((ok.stdout.match(/\[/g) ?? []).length, 100, ok.stdout.slice(0, 500));
+  assert.equal((ok.stdout.match(/\]/g) ?? []).length, 100);
+  assert.doesNotMatch(ok.stdout, /error/);
+  // a tuple counts once too (CORR-90E-1): 100 deep prints, in a session and
+  // by Sprintf, mixed with sequences and records; 101 deep is refused
+  const t = run("v := 1; for i in [1..100] do v := <v>; end for;\n#Sprint(v) gt 0;\n#Sprintf(\"%o\", v) gt 0;\n" +
+    "w := [4]; for i in [1..98] do w := [w]; end for; w := <w>; #Sprint(w) gt 0;\n" +
+    "F := recformat< a >; r := <5>; for i in [1..99] do r := rec< F | a := r >; end for; #Sprint(r) gt 0;\n" +
+    "u := 1; for i in [1..101] do u := <u>; end for;\n");
+  assert.match(t.stdout, /^true\ntrue\ntrue\ntrue\n/, t.stdout.slice(0, 500));
+  assert.equal((t.stdout.match(/a value nested more than 100 deep is not supported yet/g) ?? []).length, 1, t.stdout.slice(0, 2000));
+  assert.doesNotMatch(t.stdout, /printing a value nested/);
+});
+
+test("a copy of a value that shares its parts is admitted before it is made: x := [x, x] doubled is refused quickly (HARD-756-1, _own)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input: "x := 1; for i in [1..40] do x := [x, x]; end for;\n1;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 100000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
+  assert.match(r.stdout, /\n1\n$/);
+  // (a value of 50000 sequences is copied as before; at the default heap,
+  // since each copy of it costs tens of megabytes)
+  const c = spawnSync(process.execPath, [cli, "--magma"], { input: "y := [ [i, i^2] : i in [1..50000] ]; z := y; #z;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(c.stdout, "50000\n", c.stderr);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("records nested deep or sharing their parts are bounded when copied too (HARD-319-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], {
+    input: "R := recformat< a, b >;\nx := 1; for i in [1..5000] do x := rec< R | a := x >; end for;\ny := 1; for i in [1..40] do y := rec< R | a := y, b := y >; end for;\nw := rec< R | a := [rec< R | a := 1 >] >; v := w; v`a[1]`a;\n",
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /RecursionError|Traceback/);
+  const flat = r.stdout.replace(/\s+/g, " ");
+  assert.match(flat, /a value nested more than 100 deep is not supported yet/);
+  assert.match(flat, /a value of more than 100000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
+  assert.match(r.stdout, /\n1\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
