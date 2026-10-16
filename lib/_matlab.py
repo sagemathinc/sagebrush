@@ -522,7 +522,12 @@ def _pow(A, B):
         if np.any((A < 0) & (B != np.floor(B))):
             A = A.astype(np.complex128)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        return A ** B
+        r = A ** B
+    # (1.^NaN and NaN.^0 are NaN in MATLAB, as power's IEEE table says, not IEEE's 1)
+    odd = ((A == 1) & np.isnan(B)) | (np.isnan(A) & (B == 0))
+    if np.any(odd):
+        r = np.where(odd, np.nan, r)
+    return r
 
 
 def _scalar_div(a, b):
@@ -575,6 +580,8 @@ def ldivide(a, b):
 
 def power(a, b):
     if type(a) is float and type(b) is float:
+        if (a == 1 and b != b) or (a != a and b == 0):
+            return _math.nan
         try:
             r = a ** b
         except ZeroDivisionError:
@@ -4395,6 +4402,14 @@ def cellstr_(x):
 _REAL_FIX = {}  # (name: real_fix, for _complex_fallback too)
 
 
+def _apply_real_fix(fix, A, r):
+    """fix(A, r) for a real A; for a complex A, at its elements with a zero imaginary part,
+    which MATLAB's examples treat as the real numbers (acos([2 -3 1+2i]) starts 0 + 1.3170i)"""
+    if A.dtype.kind != "c":
+        return fix(A, r)
+    return np.where(A.imag == 0, fix(A.real, r), r)
+
+
 def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
     """a math function on every element; complex_if(A): where the result is complex;
     real_fix(A, r): the result r adjusted for a real A made complex (MATLAB's own
@@ -4415,8 +4430,8 @@ def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
             A = A.astype(np.complex128)
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             r = f(A)
-            if A0 is not None and real_fix is not None:
-                r = real_fix(A0, r)
+            if real_fix is not None:
+                r = _apply_real_fix(real_fix, A0 if A0 is not None else A, r)
         if cls in _INTS:
             if keep_int:
                 return _finish(r, cls)
@@ -4437,28 +4452,78 @@ def _vec_math(f, A, bad=_math.nan):
     return out
 
 
+def _sincosd(A):
+    """sind and cosd of a real array: the angle reduced exactly in degrees (fmod by 360, then
+    to the nearest multiple of 90 and a remainder of at most 45) before it is converted to
+    radians, so a quarter turn's multiples are exact zeros and nearby angles keep their
+    digits (cotd(180 - eps(180)) is -2.0159e15); -0 results are 0"""
+    if A.dtype.kind == "c":
+        raise _err("Complex arguments to sind, cosd and the other degree functions are not supported in Sagebrush.")
+    r = np.array(A, dtype=np.float64)
+    big = (np.abs(r) >= 360) & np.isfinite(r)
+    if np.any(big):
+        # (math.fmod is exact; the runtime's numpy has no fmod)
+        idx = np.flatnonzero(big)
+        r.flat[idx] = [_math.fmod(float(r.flat[i]), 360.0) for i in idx]
+    q = np.round(r / 90.0)
+    d = (r - 90.0 * q) * (_math.pi / 180)
+    q = np.mod(q, 4)
+    sd, cd = np.sin(d), np.cos(d)
+    s = np.select([q == 0, q == 1, q == 2], [sd, cd, -sd], -cd)
+    c = np.select([q == 0, q == 1, q == 2], [cd, -sd, -cd], sd)
+    return np.where(s == 0, 0.0, s), np.where(c == 0, 0.0, c)
+
+
+def _tand(A):
+    """tand: tan of the angle reduced exactly to [-90, 90] (fmod by 180, then the nearest
+    multiple of 180), within 15 degrees of a pole by the reciprocal of its exact complement;
+    0 and ±Inf exactly at the multiples of 90 (tand(60) is tan(60*pi/180), as Octave's;
+    near 180 and near 90 the angle's distance keeps its digits)"""
+    if A.dtype.kind == "c":
+        raise _err("Complex arguments to sind, cosd and the other degree functions are not supported in Sagebrush.")
+    r = np.array(A, dtype=np.float64)
+    big = (np.abs(r) >= 180) & np.isfinite(r)
+    if np.any(big):
+        idx = np.flatnonzero(big)
+        r.flat[idx] = [_math.fmod(float(r.flat[i]), 180.0) for i in idx]
+    t = r - 180.0 * np.round(r / 180.0)
+    out = np.tan(t * (_math.pi / 180))
+    # (near a pole, |t| > 75: the complement 90 - |t|, exact in degrees, so the distance to
+    # the pole keeps its digits: tand(90 - eps(90)) is 1/tan of eps(90) degrees)
+    near = np.abs(t) > 75
+    if np.any(near):
+        with np.errstate(divide="ignore"):
+            out = np.where(near, np.sign(t) / np.tan((90.0 - np.abs(t)) * (_math.pi / 180)), out)
+    out = np.where(t == 0, 0.0, out)
+    out = np.where(t == 90, _math.inf, out)
+    return np.where(t == -90, -_math.inf, out)
+
+
 def _sind(A):
-    r = np.sin(A * (_math.pi / 180))
-    return np.where(np.mod(A, 180) == 0, 0.0, r)
+    return _sincosd(A)[0]
 
 
 def _cosd(A):
-    r = np.cos(A * (_math.pi / 180))
-    return np.where(np.mod(A - 90, 180) == 0, 0.0, r)
+    return _sincosd(A)[1]
 
 
-_unary("sqrt", np.sqrt, lambda A: A < 0)
+# (+ 0.0: sqrt(-0) is +0 in MATLAB, as its page says, not IEEE's -0)
+_unary("sqrt", lambda A: np.sqrt(A) + 0.0, lambda A: A < 0)
 _unary("exp", np.exp)
 _unary("log", np.log, lambda A: A < 0)
-_unary("log2", lambda A: np.log(A) / _math.log(2) if A.dtype.kind == "c" else np.log2(A), lambda A: A < 0)
+# (a complex log divided part by part: log2 of a complex 0 or Inf keeps a zero imaginary part)
+_unary("log2", lambda A: _div(np.log(A), np.float64(_math.log(2))) if A.dtype.kind == "c" else np.log2(A), lambda A: A < 0)
 _unary("log10", np.log10, lambda A: A < 0)
 _unary("log1p", np.log1p, lambda A: A < -1)
 _unary("expm1", np.expm1)
 _unary("sin", np.sin)
 _unary("cos", np.cos)
 _unary("tan", np.tan)
-_unary("asin", np.arcsin, lambda A: np.abs(A) > 1)
-_unary("acos", np.arccos, lambda A: np.abs(A) > 1)
+# (for real x > 1, MATLAB's asin and acos take the conjugate of the C library's value at x + 0i,
+# as their pages' examples show: acos(2) = 0 + 1.3170i, asin(2) = 1.5708 - 1.3170i; for x < -1
+# they agree: acos(-3) = 3.1416 - 1.7627i)
+_unary("asin", np.arcsin, lambda A: np.abs(A) > 1, real_fix=lambda A, r: np.where(A > 1, np.conj(r), r))
+_unary("acos", np.arccos, lambda A: np.abs(A) > 1, real_fix=lambda A, r: np.where(A > 1, np.conj(r), r))
 _unary("atan", np.arctan)
 _unary("sinh", np.sinh)
 _unary("cosh", np.cosh)
@@ -4473,7 +4538,65 @@ _unary("csc", lambda A: 1 / np.sin(A))
 _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
-_unary("tand", lambda A: _sind(A) / _cosd(A))
+_unary("tand", lambda A: _tand(A))
+# (from sind and cosd, which are exactly 0 at their zeros: secd(90) and cscd(180) are Inf, cotd(90) 0)
+_unary("secd", lambda A: 1 / _cosd(A))
+_unary("cscd", lambda A: 1 / _sind(A))
+_unary("cotd", lambda A: np.divide(*reversed(_sincosd(A))))
+
+
+def _recip_inverse(name, base):
+    """asec, acsc, acot and the hyperbolic three: the base inverse function of 1./X, as
+    their pages define them (asec(X) is acos(1./X)), so the complex results of real
+    arguments outside the domain follow the base function's conventions"""
+    def g(nargout, x):
+        cls = class_(x)
+        if cls in ("cell", "struct", "string", "function_handle") or cls in _INTS:
+            raise _err("Undefined function '%s' for input arguments of type '%s'." % (name, cls), "MATLAB:UndefinedFunction")
+        A = _farr(x, name)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            R = 1 / A
+        if R.dtype.kind == "c":
+            # (a zero imaginary part as +0: 1/(-3+0i) is -1/3 - 0i, which would put the base
+            # function on the other side of its branch cut from the real -1/3)
+            R = R.copy()
+            R.imag = np.where(R.imag == 0, 0.0, R.imag)
+            # (a complex zero's reciprocal as a real zero's, ±Inf + 0i, not Inf + NaNi: acsch of
+            # complex(0, 0) is Inf, as its page's numeric example shows)
+            zero = (A.real == 0) & (A.imag == 0)
+            if np.any(zero):
+                R.real = np.where(zero, np.copysign(np.inf, A.real), R.real)
+                R.imag = np.where(zero, 0.0, R.imag)
+        return _B[base].f(nargout, _finish(R, "single" if cls == "single" else "double"))
+    _B[name] = Builtin(g, name)
+
+
+for _n, _b in (("asec", "acos"), ("acsc", "asin"), ("acot", "atan"), ("asech", "acosh"), ("acsch", "asinh"), ("acoth", "atanh")):
+    _recip_inverse(_n, _b)
+
+
+def _in_degrees(name, base):
+    """asind, acosd, atand and the reciprocal three: the radian function's result times
+    180/pi, a complex result too, in its class (asind(2) is 90 - 75.4561i)"""
+    def g(nargout, x):
+        r = _B[base].f(nargout, x)
+        cls = class_(r)
+        R = _farr(r, name)
+        k = 180 / _math.pi
+        if R.dtype.kind == "c":
+            # (each part scaled on its own, a zero part kept zero: a complex Inf times 180/pi
+            # would put NaN into the other part)
+            R = _cplx(np.where(R.real == 0, 0.0, R.real * k), np.where(R.imag == 0, 0.0, R.imag * k))
+        else:
+            R = R * k
+        return _finish(R, "single" if cls == "single" else "double")
+    _B[name] = Builtin(g, name)
+
+
+for _n in ("asin", "acos", "atan", "asec", "acsc", "acot"):
+    _in_degrees(_n + "d", _n)
+
+
 def _gamma(x):
     """MATLAB's gamma: exact (x-1)! at the integers up to 171, Inf at the poles"""
     if x != x or x == -_math.inf:
@@ -5288,6 +5411,12 @@ def _fft_sizes(sizes):
 
 
 def _fftn_call(x, sizes, inverse, name, nd=None, symmetric=False):
+    """the transform in X's class: single stays single (computed in double, then rounded)"""
+    r = _fftn_core(x, sizes, inverse, name, nd, symmetric)
+    return _finish(_farr(r), "single") if class_(x) == "single" else r
+
+
+def _fftn_core(x, sizes, inverse, name, nd=None, symmetric=False):
     """fft2, fftn and their inverses: the transform over MATLAB's first nd dimensions (all of
     them for fftn), each page beyond them apart, X padded or cut to sizes first"""
     dims = len(_dims(x)) if nd is None else nd
@@ -9054,7 +9183,12 @@ def _cmath_log(f):
 
 for _n in ("log", "log10", "log2"):
     _CMATH[_n] = _cmath_log(_CMATH[_n])
-_CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else _cmath.log(1 + z)
+# (a real entry > -1 of a complex array by the real log1p, which keeps a small x's digits)
+_CMATH["log1p"] = lambda z: complex(-_math.inf, 0.0) if z == -1 else \
+    complex(_math.log1p(z.real), 0.0) if z.imag == 0 and z.real > -1 else _cmath.log(1 + z)
+# (the poles, where cmath raises: atanh(±1) = ±Inf, atan(±1i) = ±Inf i, as MATLAB gives)
+_CMATH["atanh"] = lambda z: complex(_math.copysign(_math.inf, z.real), 0.0) if z.imag == 0 and abs(z.real) == 1 else _cmath.atanh(z)
+_CMATH["atan"] = lambda z: complex(0.0, _math.copysign(_math.inf, z.imag)) if z.real == 0 and abs(z.imag) == 1 else _cmath.atan(z)
 
 
 def _complex_fallback(name):
@@ -9071,8 +9205,8 @@ def _complex_fallback(name):
             A0 = _farr(x)
             A = A0.astype(np.complex128)
             out = np.array([f(complex(z)) for z in A.reshape(-1)], dtype=np.complex128).reshape(A.shape)
-            if A0.dtype.kind != "c" and name in _REAL_FIX:
-                out = _REAL_FIX[name](A0, out)
+            if name in _REAL_FIX:
+                out = _apply_real_fix(_REAL_FIX[name], A0, out)
             return _finish(out, "single" if class_(x) == "single" else "double")
     _B[name] = Builtin(g, name)
 
