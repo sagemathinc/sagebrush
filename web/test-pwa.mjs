@@ -51,6 +51,18 @@ ok(await until("navigator.serviceWorker.controller !== null || navigator.service
 ok(await until("caches.keys().then(async (ks) => { const k = ks.find((k) => k.startsWith('sagebrush-')); if (!k) return false; const c = await caches.open(k); return (await c.keys()).length >= 10; })"), "the app's files are cached");
 let out = await runCode("print(2**100)");
 ok(out.includes("1267650600228229401496703205376"), "Python runs online: " + JSON.stringify(out));
+// what installing kept: the shell, not the engine or the documentation
+// indexes (LAZY: kept once used online)
+const kept = (match) => ev(`(async () => { for (const name of await caches.keys()) { if (!name.startsWith("sagebrush-")) continue; const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes(${JSON.stringify(match)}))) return true; } return false; })()`);
+ok(!(await kept("sagebrush-engine.wasm")) && !(await kept("docs-index")), "installing keeps neither the engine nor the documentation indexes");
+// a page the service worker controls (its worker too): the engine and Python's
+// documentation index, used online, are kept
+await send("Page.reload", { ignoreCache: false });
+await sleep(1000);
+await ready();
+out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
+ok(out.includes("274177 * 67280421310721") && (await until(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes("sagebrush-engine.wasm"))) return true; } return false; })()`)), "the engine, used online, is kept: " + JSON.stringify(out));
+ok(await ev(`fetch("docs-index-python.json").then((r) => r.ok)`) && (await until(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); if ((await c.keys()).some((r) => r.url.includes("docs-index-python.json"))) return true; } return false; })()`)), "Python's documentation index, used online, is kept");
 // The cache is the origin's storage: code that got into the origin (an escape
 // from Python into the worker, say) could rewrite a kept file.  A rewritten
 // copy is never used (SEC-8D6-1): the precompiled library, the engine.
@@ -82,6 +94,8 @@ ok(await ready(), "offline, the notebook loads: " + (await ev("document.querySel
 ok(await ev("crossOriginIsolated"), "offline, the page is still cross-origin isolated (Stop keeps variables)");
 out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("274177 * 67280421310721"), "offline, Python and the engines run: " + JSON.stringify(out));
+ok(await ev(`fetch("docs-index-python.json").then((r) => r.ok, () => false)`), "offline, the documentation index used online is served");
+ok(await ev(`fetch("docs-index-magma.json").then(() => "served", () => "refused")`) === "refused", "offline, a documentation index never used is not there (a fetch error, as for any file offline)");
 // offline, a rewritten worker is not served (it would run without the server to correct it)
 ok(await poison("sagebrush-worker.js", `async () => 'postMessage({ ready: true, version: "POISONED", interrupt: null, seeded: false, startup: [] })'`), "(the worker's kept copy rewritten)");
 await send("Page.reload", { ignoreCache: false });
