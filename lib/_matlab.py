@@ -7658,10 +7658,21 @@ def strncmpi_(a, b, n):
     return _cmp_text(a, b, lambda x, y: x[:k].lower() == y[:k].lower())
 
 
-def _strrep_text(t, o, nw):
+# (the characters text functions may build in one call, their outputs together: past it,
+# refused before anything is built)
+_TEXT_MAX = 10_000_000
+
+
+def _text_admit(n, what):
+    if n > _TEXT_MAX:
+        raise _err("%s would build %d characters, beyond Sagebrush's limit of %d." % (what, n, _TEXT_MAX))
+
+
+def _strrep_text(t, o, nw, budget=None):
     """strrep's replacement, which counts overlapping matches, as its page shows: every place
     where old starts gives one copy of new, and the characters of a match are dropped (strrep of
-    '222' with '22' -> '*' is '**', where replace and regexprep give '*2')"""
+    '222' with '22' -> '*' is '**', where replace and regexprep give '*2'). The result's length
+    is counted against budget (a one-element list of characters left) before it is built"""
     if not o:
         return t
     starts = set()
@@ -7669,6 +7680,17 @@ def _strrep_text(t, o, nw):
     while k >= 0:
         starts.add(k)
         k = t.find(o, k + 1)
+    if starts:
+        # (its exact length: a copy of new per start, and the characters no match covers)
+        kept, covered = 0, -1
+        for i in sorted(starts):
+            kept += max(0, i - covered - 1)
+            covered = max(covered, i + len(o) - 1)
+        size = len(starts) * len(nw) + kept + (len(t) - covered - 1)
+        budget = budget if budget is not None else [_TEXT_MAX]
+        if size > budget[0]:
+            _text_admit(_TEXT_MAX - budget[0] + size, "strrep")
+        budget[0] -= size
     out = []
     covered = -1
     for i, c in enumerate(t):
@@ -7707,10 +7729,13 @@ def strrep_(s, old, new):
                 raise _err("strrep: cell arrays must contain character vectors.")
             return e.text()
         return _text(a)
+    # (the texts read and the results built, all elements together, admitted against one limit)
+    _text_admit(len(_text(s)) * n if type(s) is not Cell else sum(len(_text(e)) for e in s.a) * (n if len(s.a) == 1 else 1), "strrep")
+    budget = [_TEXT_MAX]
     out = []
     for k in range(n):
         t, o, nw = item(s, k), item(old, k), item(new, k)
-        out.append(Char(_strrep_text(t, o, nw)))
+        out.append(Char(_strrep_text(t, o, nw, budget)))
     return Cell(out, shape)
 
 
@@ -7903,6 +7928,8 @@ def _regexp(nargout, s, pat, opts, flags):
             strs = [_regexp_row(e) for e in s.a]
         else:
             strs = [_regexp_row(s)] * len(pats)
+        # (each expression searches its text: the texts searched, together, admitted first)
+        _text_admit(sum(len(_text(t)) for t in strs), "regexp with a cell array of expressions")
         per = [_regexp(max(1, nargout), t, p, opts, flags) for t, p in zip(strs, pats)]
         if nargout <= 1:
             return Cell(per, pat.shape)
