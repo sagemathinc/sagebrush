@@ -85,8 +85,40 @@ def _err(msg, ident=""):
     return MatlabError(msg, ident)
 
 
+# (the function catalog's absent entries, catalog/matlab: name -> what to use instead)
+_ABSENT = [None]
+
+
+def _absent_alternative(name):
+    """what the catalog says to use instead of a MATLAB function Sagebrush lacks, or None
+    (containers.Map is found by its first word too, the name MATLAB reports undefined)"""
+    if _ABSENT[0] is None:
+        table = {}
+        try:
+            import _catalog
+            for _, e in _catalog.load("matlab"):
+                if isinstance(e, dict) and e.get("status") == "absent" and e.get("alternative"):
+                    table[e["name"]] = (e["name"], e["alternative"])
+                    table.setdefault(e["name"].split(".")[0], (e["name"], e["alternative"]))
+        except Exception:
+            pass
+        _ABSENT[0] = table
+    return _ABSENT[0].get(name)
+
+
+def _undefined_message(name):
+    """MATLAB's message for a name that is no variable or function, with the catalog's
+    alternative when the name is a MATLAB function Sagebrush lacks: an agent reads the
+    error, so the error says what to use"""
+    msg = "Unrecognized function or variable '%s'." % name
+    alt = _absent_alternative(name)
+    if alt is not None:
+        msg += " %s is not in Sagebrush; instead: %s" % (alt[0], alt[1])
+    return msg
+
+
 def _undefined(name):
-    return MatlabError("Unrecognized function or variable '%s'." % name, "MATLAB:UndefinedFunction")
+    return MatlabError(_undefined_message(name), "MATLAB:UndefinedFunction")
 
 
 def _message(e):
@@ -99,7 +131,7 @@ def _message(e):
         name = s[i + 1:j] if 0 <= i < j else s
         if name.startswith("_k_"):
             name = name[3:]
-        return "Unrecognized function or variable '%s'." % name
+        return _undefined_message(name)
     if isinstance(e, RecursionError):
         return "Maximum recursion limit of 500 reached."
     if isinstance(e, MemoryError):
@@ -4991,6 +5023,77 @@ def nchoosek_(n, k):
     return _convert(_unmat(out), cls) if cls in _INTS or cls == "single" else _unmat(out)
 
 
+@_bi("rat")
+def rat_(nargout, x, tol=None):
+    """[N, D] = rat(X) as its page describes: each element as N./D by continued fraction
+    expansion (each term rounded to the nearest integer), stopped once abs(X - N./D) is
+    within tol, by default 1e-6*norm(X(:), 1); D is positive; Inf is 1/0 (or -1/0) and
+    NaN 0/0. The one-output form, the expansion as text, is refused"""
+    if nargout < 2:
+        raise _err("rat with one output (the continued fraction as text) is not supported in Sagebrush; use [N, D] = rat(X), which gives X as N./D.")
+    cls = class_(x)
+    if cls not in ("double", "single"):
+        raise _err("rat: X must be double or single.")
+    A = _farr(x)
+    if A.dtype.kind == "c":
+        raise _err("rat of complex values is not supported in Sagebrush.")
+    flat = A.reshape(-1)
+    fin = flat[np.isfinite(flat)]
+    t = 1e-6 * float(np.sum(np.abs(fin))) if tol is None else _scalar(tol)
+    N = np.zeros(flat.size)
+    D = np.zeros(flat.size)
+    for i, v in enumerate(flat):
+        v = float(v)
+        if v != v:
+            continue
+        if v in (_math.inf, -_math.inf):
+            N[i], D[i] = (1.0 if v > 0 else -1.0), 0.0
+            continue
+        n, d = float(round(v)), 1.0
+        ln, ld = 1.0, 0.0
+        frac = v - round(v)
+        k = 0
+        while abs(v - n / d) >= t and frac != 0 and k < 64:
+            flip = 1.0 / frac
+            step = float(round(flip))
+            frac = flip - step
+            n, ln = n * step + ln, n
+            d, ld = d * step + ld, d
+            k += 1
+        if d < 0:
+            n, d = -n, -d
+        N[i], D[i] = n, d
+    shape = A.shape
+    return [_finish(N.reshape(shape), cls), _finish(D.reshape(shape), cls)] + [NOVAL] * (nargout - 2)
+
+
+# (the most elements perms makes: n! rows of n; 9 elements are 362880 rows)
+_PERMS_MAX = 4_000_000
+
+
+@_bs("perms")
+def perms_(v):
+    """perms(v) as its page says: every permutation of the elements of v, one per row, in
+    reverse lexicographic order of their positions (perms(1:3) starts [3 2 1]), in v's class"""
+    t = type(v)
+    if t in (Cell, Struct, StrArr) or _iscallable(v):
+        raise _err("perms of a %s is not supported in Sagebrush; use it on an index vector, C(perms(1:numel(C)))." % class_(v))
+    if t is Str:
+        raise _err("perms of a string scalar is not supported in Sagebrush.")
+    n = _numel(v)
+    if n and _math.factorial(n) * n > _PERMS_MAX:
+        raise _err("perms of %d elements (%d permutations) is not supported in Sagebrush: at most %d elements are made." % (n, _math.factorial(n), _PERMS_MAX))
+    flat = _arr(v).reshape(-1)
+    if n == 0:
+        return _box(np.zeros((0, 1), dtype=flat.dtype)) if t is not Char else Char(np.zeros((0, 1), dtype=flat.dtype))
+    import itertools
+    rows = np.array(list(itertools.permutations(range(n)))[::-1], dtype=np.int64)
+    out = _canon(_contig(flat[rows].T))
+    if t is Char:
+        return Char(out)
+    return _box(out) if out.dtype == np.float64 else out
+
+
 @_bs("primes")
 def primes_(n):
     # (in the class of n: primes(uint16(12)) is uint16)
@@ -6788,6 +6891,81 @@ def conv_(a, b, shape=None):
         raise _err("SHAPE must be 'full', 'same', or 'valid'.")
     col = _dims(a)[1] == 1 and _dims(a)[0] > 1
     return _box(r.reshape((1, -1)) if col else r.reshape((-1, 1)))
+
+
+# (the most multiply-adds one xcorr may do: lengths times lags)
+_XCORR_WORK = 20_000_000
+
+
+@_bi("xcorr")
+def xcorr_(nargout, x, *args):
+    """xcorr as its page describes for vectors: r(m) = sum over n of x(n+m) conj(y(n)), the
+    shorter vector padded with zeros, at lags -maxlag..maxlag (N - 1 by default, N the
+    longer length), with scaleopt 'none', 'biased' (r/N), 'unbiased' (r/(N - |m|)) or
+    'normalized' (or 'coeff': r over the zero-lag autocorrelations' geometric mean, so an
+    autocorrelation is 1 at lag 0); [r, lags] gives the lags too. r is oriented as x"""
+    args = list(args)
+    scale = "none"
+    if args and _istext(args[-1]):
+        scale = _text(args.pop()).lower()
+        scale = {"coeff": "normalized"}.get(scale, scale)
+        if scale not in ("none", "biased", "unbiased", "normalized"):
+            raise _err("xcorr: scaleopt must be 'none', 'biased', 'unbiased' or 'normalized'.")
+    y = None
+    maxlag = None
+    if args and _numel(args[0]) > 1 or (args and len(args) == 2):
+        y = args.pop(0)
+    if args:
+        maxlag = _int_arg(args.pop(0), "maximum lag")
+        if maxlag < 0:
+            raise _err("xcorr: the maximum lag must be a nonnegative integer.")
+    if args:
+        raise _err("xcorr: too many input arguments.")
+    for v in (x, y):
+        if v is None:
+            continue
+        c = class_(v)
+        if c not in ("double", "single", "logical"):
+            raise _err("xcorr of %s input is not supported; it takes double or single vectors." % c)
+        d = _dims(v)
+        if len(d) > 2 or (d[0] > 1 and d[1] > 1):
+            raise _err("xcorr of a matrix (the correlations of all its columns) is not supported in Sagebrush; give it vectors.")
+    X = _farr(x).reshape(-1).astype(np.complex128 if _farr(x).dtype.kind == "c" else np.float64)
+    Y = X if y is None else _farr(y).reshape(-1)
+    if Y.dtype.kind == "c" and X.dtype.kind != "c":
+        X = X.astype(np.complex128)
+    N = max(X.size, Y.size)
+    if scale != "none" and y is not None and X.size != Y.size:
+        raise _err("xcorr: with scaleopt '%s', x and y must have the same length." % scale)
+    L = N - 1 if maxlag is None else maxlag
+    if N * (2 * min(L, N) + 1) > _XCORR_WORK:
+        raise _err("xcorr of vectors of %d elements is not supported in Sagebrush: too much work." % N)
+    Xp = np.concatenate([X, np.zeros(N - X.size, dtype=X.dtype)])
+    Yp = np.concatenate([Y, np.zeros(N - Y.size, dtype=Y.dtype)])
+    cplx = Xp.dtype.kind == "c" or Yp.dtype.kind == "c"
+    out = np.zeros(2 * L + 1, dtype=np.complex128 if cplx else np.float64)
+    for j, m in enumerate(range(-L, L + 1)):
+        if abs(m) >= N:
+            continue
+        if m >= 0:
+            s_ = np.sum(Xp[m:] * np.conj(Yp[:N - m]))
+        else:
+            s_ = np.sum(Xp[:N + m] * np.conj(Yp[-m:]))
+        out[j] = s_
+    if scale == "biased":
+        out = out / N
+    elif scale == "unbiased":
+        lags_abs = np.abs(np.arange(-L, L + 1))
+        out = np.where(lags_abs < N, out / np.maximum(N - lags_abs, 1), 0)
+    elif scale == "normalized":
+        out = out / _math.sqrt(float(np.sum(np.abs(Xp) ** 2)) * float(np.sum(np.abs(Yp) ** 2)))
+    if out.dtype.kind == "c" and not np.any(out.imag):
+        out = out.real
+    cls = "single" if "single" in (class_(x), class_(y) if y is not None else "double") else "double"
+    col = _dims(x)[1] == 1 and _dims(x)[0] > 1
+    r = _finish(out.reshape((1, -1)) if col else out.reshape((-1, 1)), cls)
+    lags = _box(np.arange(-L, L + 1, dtype=np.float64).reshape((-1, 1)))
+    return [r, lags] if nargout >= 2 else r
 
 
 @_bi("deconv")

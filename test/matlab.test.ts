@@ -2223,3 +2223,32 @@ test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects) b
     "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
     "524288", "refused: repmat: a result of 524289 ele", "1048576", "refused: repmat: a result of 1048577 el"]);
 });
+
+test("a MATLAB function Sagebrush lacks is refused with the catalog's alternative in the message; perms, xcorr and rat", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const msg = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
+  const out = run([msg("s = sym(1/4)"), msg("g = graph([1 2], [2 3])"), msg("m = containers.Map()"), msg("y = rats"), msg("z = not_a_function_at_all(2)")].join("\n"));
+  assert.match(out[0], /^Unrecognized function or variable 'sym'\. sym is not in Sagebrush; instead: Sage mode .*rat\(X\)/);
+  assert.match(out[1], /^Unrecognized function or variable 'graph'\. graph is not in Sagebrush; instead: Sage mode's Graph/);
+  assert.match(out[2], /^Unrecognized function or variable 'containers'\. containers\.Map is not in Sagebrush; instead: A struct with dynamic field names/);
+  assert.match(out[3], /^Unrecognized function or variable 'rats'\. rats is not in Sagebrush; instead: \[N, D\] = rat\(X\)/);
+  assert.equal(out[4], "Unrecognized function or variable 'not_a_function_at_all'.");
+  const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(x, 6)])`;
+  assert.deepEqual(run([
+    show("perms([2 4 6])"), show("perms(int8([1 2]))"), show("size(perms(1:9))"), msg("perms(1:10)"), show("perms('ab')"),
+    "[r, l] = xcorr([1 2 3], [0 1 2]); disp(mat2str([r; l]))", "[r, l] = xcorr([1 0 0], [0 1 0]); [~, k] = max(r); disp(l(k))",
+    "disp(mat2str(xcorr([1 2 3], 'unbiased'), 5))", "r = xcorr([1i 2], [1 1i]); disp(mat2str([real(r); imag(r)]))", "[r, l] = xcorr([1 2], 3); disp(mat2str([r; l]))",
+    "r = xcorr([1 2 3]', [1 1 1]'); disp(mat2str(size(r)))", msg("xcorr([1 2; 3 4])"), msg("xcorr([1 2 3], [1 2], 'biased')"), msg("xcorr(int8([1 2]))"),
+    "[n, d] = rat(pi); disp([n d])", "[n, d] = rat([0.75 -0.5 Inf NaN 2]); disp(mat2str([n; d]))", "[n, d] = rat(0.333, 0.01); disp([n d])", msg("rat(0.5)"),
+  ].join("\n")), [
+    "double [6 4 2;6 2 4;4 6 2;4 2 6;2 6 4;2 4 6]", "int8 [2 1;1 2]", "double [362880 9]",
+    "perms of 10 elements (3628800 permutations) is not supported in Sagebrush: at most 4000000 elements are made.", "char ['ba';'ab']",
+    "[2 5 8 3 0;-2 -1 0 1 2]", "-1",
+    "[3 4 4.6667 4 3]", "[1 0 2;0 -1 0]", "[0 0 2 5 2 0 0;-3 -2 -1 0 1 2 3]",
+    "[5 1]", "xcorr of a matrix (the correlations of all its columns) is not supported in Sagebrush; give it vectors.",
+    "xcorr: with scaleopt 'biased', x and y must have the same length.", "xcorr of int8 input is not supported; it takes double or single vectors.",
+    "355   113", "[3 -1 1 0 2;4 2 0 0 1]", "1     3",
+    "rat with one output (the continued fraction as text) is not supported in Sagebrush; use [N, D] = rat(X), which gives X as N./D."]);
+});
