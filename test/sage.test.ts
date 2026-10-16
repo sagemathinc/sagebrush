@@ -95,3 +95,12 @@ test("QQ[a] refuses a field of degree above 16 before building it (HARD-EC1-1)",
   assert.equal(cli("--sage", "-c", src), "refused 4\nrefused 5\nrefused 7\nrefused qqbar\n8\n");
   assert.ok(Date.now() - t < 30000);
 });
+
+test("delete_edge reads at most 4 items of an edge that claims a length of 3 (HARD-658-1)", () => {
+  // (tuple(e) read the whole iterator: 2,000,000 items and 414 MB, or forever)
+  const src = "class E:\n def __init__(self): self.n = 0\n def __len__(self): return 3\n def __iter__(self):\n  while True:\n   self.n += 1\n   yield self.n\n" +
+    "g = Graph([(0, 1), (1, 2)])\nfor f in (lambda e: g.delete_edge(e), lambda e: g.delete_edges([e])):\n e = E()\n try:\n  f(e)\n except ValueError as err:\n  print(type(err).__name__, e.n, g.size())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "ValueError 4 2\nValueError 4 2\n");
+  assert.ok(Date.now() - t < 20000);
+});
