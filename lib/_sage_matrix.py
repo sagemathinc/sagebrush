@@ -3167,6 +3167,17 @@ class ComplexField_:
 CC = ComplexField_()
 
 
+def _numeric_field_kind(ring):
+    """'real' for RR, RealField(p) and RDF, 'complex' for CC,
+    ComplexField(p) and CDF, None otherwise."""
+    name = type(ring).__name__
+    if ring is _sa().RR or name in ("_RealField", "RealField_", "RealDoubleField_"):
+        return "real"
+    if ring is CC or name in ("ComplexField_", "ComplexDoubleField_"):
+        return "complex"
+    return None
+
+
 def numeric_roots(coeffs, ring):
     """The roots of a polynomial with rational coefficients (constant first)
     in RR or CC, as Sage lists them: [(root, multiplicity)].
