@@ -364,15 +364,21 @@ newBuiltinModule("binascii", (m) => {
     f.__name__ = name;
     m[name] = f;
   };
-  fn("b2a_base64", (data: any, newline: any = true) => {
+  // (newline is keyword-only, as CPython's: b2a_base64(data, False) is a TypeError)
+  const b2a = (data: any, newline: any = true) => {
     const e = b64encode(bytesOf(data));
     if (!newline) return new PyBytes(e);
     const out = new Uint8Array(e.length + 1);
     out.set(e);
     out[e.length] = 10;
     return new PyBytes(out);
-  });
-  m.b2a_base64.$kw = (pos: any[], names: string[], values: any[]) => m.b2a_base64(pos[0], names.includes("newline") ? values[names.indexOf("newline")] : true);
+  };
+  fn("b2a_base64", (data: any) => b2a(data));
+  m.b2a_base64.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (pos.length !== 1) raise(T.TypeError, `b2a_base64() takes exactly one positional argument (${pos.length} given)`);
+    for (const n of names) if (n !== "newline") raise(T.TypeError, `b2a_base64() got an unexpected keyword argument '${n}'`);
+    return b2a(pos[0], names.includes("newline") ? values[names.indexOf("newline")] : true);
+  };
   fn("a2b_base64", (data: any) => new PyBytes(b64decode(bytesOf(data))));
   fn("hexlify", (data: any) => {
     const a = bytesOf(data);

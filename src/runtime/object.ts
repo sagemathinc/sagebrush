@@ -1374,6 +1374,7 @@ export function checkArity(f: any, name: string, self: boolean, range?: [number,
   for (const k of Object.keys(f)) w[k] = f[k];
   // Keyword calls bind all parameters and call the unchecked function.
   w.$raw = f;
+  w.$argRange = [min, max]; // (the positional counts it takes: test/module-arity.test.ts)
   return w;
 }
 

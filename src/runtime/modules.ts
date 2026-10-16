@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType } from "./object";
+import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj } from "./object";
 import * as O from "./ops";
@@ -33,6 +33,37 @@ function fn(m: any, name: string, f: any) {
   builtin(f, name);
   f.__module__ = m.__name__; // (as CPython's: math.isclose.__module__ is 'math')
   m[name] = f;
+}
+
+// A builtin module's functions take the positional arguments CPython's do,
+// and a call with more or fewer is a TypeError: a JS function ignores extra
+// arguments, so math.sqrt(4, 5) was 2.0.  Once a public module is filled,
+// each of its plain functions not already checked is wrapped by checkArity,
+// with the count from its JS parameters or, where those differ from
+// CPython's signature, from ARITY.  (test/module-arity.test.ts compares every
+// one with CPython's inspect.signature.)  Modules whose names start with _
+// are the runtime's own, called only by its Python-written modules.
+export const ARITY: Record<string, Record<string, [number, number]>> = {
+  // (os's functions are written (...a) to pass their errors through oserr)
+  os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1] },
+  sys: { audit: [1, Infinity] },
+};
+
+function checkModuleArity(m: any) {
+  const mod: string = m.__name__;
+  if (mod.startsWith("_")) return;
+  const table = ARITY[mod];
+  const wrapped = new Map<any, any>(); // (an alias stays the same object)
+  for (const k of Object.keys(m)) {
+    const f = m[k];
+    if (typeof f !== "function" || isType(f) || f.$argRange !== undefined) continue;
+    let w = wrapped.get(f);
+    if (w === undefined) {
+      w = checkArity(f, f.__name__ ?? k, false, table?.[k]);
+      wrapped.set(f, w);
+    }
+    m[k] = w;
+  }
 }
 
 export function importModule(name: string): any {
@@ -74,6 +105,7 @@ export function importModule(name: string): any {
     m = Ty.newModule(name);
     dictSet(sysModules, name, m);
     f(m);
+    checkModuleArity(m);
   } else {
     m = loader.load(name);
     if (m === null) {
