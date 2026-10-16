@@ -1750,3 +1750,46 @@ test("command syntax: a comma or semicolon inside a word's brackets is refused, 
   assert.doesNotThrow(() => matlabToPython("clear -regexp a{2}b ^x(1)$, y = 1;"));
   assert.doesNotThrow(() => matlabToPython("disp 'a{0,31}'"));
 });
+
+test("coverage wrongs: exact int64 literals, std/var flags, integer classes kept, strfind's [], NaN in ismember and unique, c{:} displayed", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (int64/uint64 of an integer literal: its exact value, not the nearest double's; 2^53 + 1 is odd)
+    // (an integer literal's exact value up to 2^53, where Sagebrush's 64-bit integers stop
+    // being exact: beyond it, refused rather than rounded, decimal or hex)
+    "fprintf('%d %d\\n', int64(9007199254740992) == 2^53, mod(int64(-9007199254740991), int64(2)))",
+    tryIt("int64(9007199254740993)"), tryIt("uint64(18446744073709551615)"), tryIt("x = 0x20000000000001s64"),
+    // (std and var with only a flag: the flag is not the weight)
+    "fprintf('%.4f ', std([2 NaN; NaN 3; 4 5], 'omitmissing'), std([7; NaN], 'omitnan'), var([NaN 1 3], 'omitnan')); fprintf('\\n')",
+    // (median, factorial, nchoosek and primes keep an integer class)
+    "m = median(int16([10 20 31 40])); fprintf('%s %d\\n', class(m), m); m = median(uint8([1 2])); fprintf('%s %d\\n', class(m), m)",
+    "f = factorial(uint8([3 6])); fprintf('%s %d %d\\n', class(f), f)",
+    "c = nchoosek(uint8([4 7 9]), 2); fprintf('%s %s\\n', class(c), mat2str(double(c)))",
+    "p = primes(int32(10)); fprintf('%s %s\\n', class(p), mat2str(double(p)))",
+    // (strfind with no match: [])
+    "disp(mat2str(size(strfind('abc', 'z')))); disp(strfind('abc', 'b'))",
+    // (NaN is never a member; unique keeps each NaN unless TreatMissingAsDistinct is false)
+    "[tf, loc] = ismember([NaN 2 NaN], [2 NaN]); disp(mat2str(tf)); disp(mat2str(loc))",
+    "disp(mat2str(unique([3 NaN 1 NaN]))); [u, ia, ic] = unique([3 NaN 1 NaN], 'TreatMissingAsDistinct', false); disp(mat2str(u)); disp(mat2str(ia')); disp(mat2str(ic'))",
+    tryIt("unique([1 2], 'bogus')"),
+    // (c{:} alone: each element displayed as ans)
+    "c = {7, 'two'}; c{:}",
+    "c{2:-1:1};", "disp(ans)",
+  ].join("\n")), [
+    "1 1", "refused", "refused", "refused",
+    "1.4142 1.4142 0.0000 2.0000",
+    "int16 26", "uint8 2",
+    "uint8 6 255",
+    "uint8 [4 7;4 9;7 9]",
+    "int32 [2 3 5 7]",
+    "[0 0]", "     2",
+    "[false true false]", "[0 1 0]",
+    "[1 3 NaN NaN]", "[1 3 NaN]", "[3 1 2]", "[2 3 1 3]",
+    "refused",
+    "ans =", "     7", "ans =", "    'two'",
+    "     7",
+  ]);
+});

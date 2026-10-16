@@ -4730,8 +4730,14 @@ def lcm_(a, b):
 @_bs("factorial")
 def factorial_(n):
     A = _farr(n)
+    cls = class_(n)
+    if cls in _INTS:
+        # (an integer class: exact, saturating at its largest value)
+        hi = int(intmax_(Char(cls)).reshape(-1)[0])
+        vals = [min(_math.factorial(int(x)), hi) for x in A.reshape(-1)]
+        return _canon(np.array(vals, dtype=_INTS[cls][0]).reshape(A.shape))
     out = np.array([float(_math.factorial(int(x))) if x <= 170 else _math.inf for x in A.reshape(-1)]).reshape(A.shape)
-    return _box(out)
+    return _finish(out, cls) if cls == "single" else _box(out)
 
 
 @_bs("nchoosek")
@@ -5042,9 +5048,9 @@ def mode_(nargout, x, *args):
 
 def _var_impl(x, args, sq):
     w = 0
-    rest = []
-    if args:
-        if _numel(args[0]) > 0 and not _istext(args[0]):
+    rest = list(args)
+    if args and not _istext(args[0]):
+        if _numel(args[0]) > 0:
             a0 = args[0]
             # (w is 0 or 1, the normalization, or a vector of weights, which
             # Sagebrush does not compute: refused, not read as a scalar)
@@ -9613,16 +9619,24 @@ def _colvec(vals):
 
 
 def _setfn(nargout, op, a, b, opts):
-    # (TreatMissingAsDistinct=false: unique's NaNs are one value)
-    opts = list(opts)
+    # (the options these functions take; another word, or a name=value they don't have,
+    # is refused rather than ignored)
+    flags = []
     distinct = True
-    for k in range(len(opts) - 1):
-        if _istext(opts[k]) and _text(opts[k]).lower() == "treatmissingasdistinct":
-            v = opts[k + 1]
-            distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
-            del opts[k:k + 2]
-            break
-    flags = [_text(o).lower() for o in opts if _istext(o)]
+    o = list(opts)
+    i = 0
+    while i < len(o):
+        if _istext(o[i]):
+            t = _text(o[i]).lower()
+            if t == "treatmissingasdistinct" and op == "unique" and i + 1 < len(o):
+                v = o[i + 1]
+                distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
+                i += 2
+                continue
+            if t not in ("rows", "stable", "sorted", "legacy", "first", "last"):
+                raise _err("%s: unsupported option '%s'." % (op, _text(o[i])))
+            flags.append(t)
+        i += 1
     rows = "rows" in flags
     stable = "stable" in flags
     ka, A = _set_items(a, rows)
@@ -9785,10 +9799,11 @@ def ismember_s(nargout, a, s, *opts):
         else:
             pos.setdefault(k, i + 1)
     keys = [complex(v) if A.dtype.kind == "c" else float(v) for v in A.reshape(-1)]
-    tf = _box(np.array([k in pos for k in keys], dtype=bool).reshape(A.shape))
+    # (NaN equals nothing, so it is never a member: ismember([5 NaN], [5 NaN]) is [1 0])
+    tf = _box(np.array([k == k and k in pos for k in keys], dtype=bool).reshape(A.shape))
     if nargout <= 1:
         return tf
-    return [tf, _box(np.array([float(pos.get(k, 0)) for k in keys]).reshape(A.shape))]
+    return [tf, _box(np.array([float(pos.get(k, 0)) if k == k else 0.0 for k in keys]).reshape(A.shape))]
 
 
 # ------------------------------------------------------------------ accumarray, bitshift, interp1, cond, ... (from the documentation's examples)
@@ -10130,7 +10145,22 @@ def intlit(digits, radix, cls):
         w = int(cls[3:])
         if v >= 1 << (w - 1):
             v -= 1 << w
-    return np.array([[v]], dtype=_INTS[cls][0])
+    return np.array([[_exact_int(v)]], dtype=_INTS[cls][0])
+
+
+def _exact_int(v):
+    """v, if Sagebrush's 64-bit integers hold it exactly (they keep 53 bits, as doubles
+    do); a value they would round is refused, not changed"""
+    if float(v) != v:
+        raise _err("Integers beyond 2^53 in magnitude (here %d) are not represented exactly in Sagebrush." % v)
+    return v
+
+
+def declit(text, cls):
+    """int64 or uint64 of a decimal integer literal: its exact value (saturated), not the
+    nearest double's"""
+    lo, hi = (-(1 << 63), (1 << 63) - 1) if cls == "int64" else (0, (1 << 64) - 1)
+    return np.array([[_exact_int(min(max(int(text), lo), hi))]], dtype=_INTS[cls][0])
 
 
 _BYTES = {"double": 8, "single": 4, "logical": 1, "char": 2, "int8": 1, "uint8": 1, "int16": 2, "uint16": 2,
