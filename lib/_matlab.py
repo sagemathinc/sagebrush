@@ -4924,16 +4924,36 @@ def nchoosek_(n, k):
     kcls = class_(k)
     k = _int_arg(k)
     if _numel(n) == 1:
-        c = _math.comb(_int_arg(n), k)
+        ncls = class_(n)
+        # (the classes first: an error that depends on them only comes before any work)
+        if ncls != kcls and "double" not in (ncls, kcls):
+            raise _err("nchoosek: N and K must be the same class, or one of them double.")
+        nn = _int_arg(n)
+        if not 0 <= k <= nn:
+            raise _err("nchoosek: K must be an integer between 0 and N.")
         # (a single or integer n or k gives that class, as nchoosek's page says; an integer
         # class's result past its range, or past the 53 bits Sagebrush's 64-bit integers
         # keep, is refused rather than saturated or rounded)
-        cls = class_(n) if class_(n) != "double" else kcls
+        cls = ncls if ncls != "double" else kcls
+        # (a lower bound on the result's size before the exact binomial is computed: with
+        # j = min(K, N - K), C(N, K) >= (N/j)^j, so j*log2(N/j) bits past the class's range,
+        # with 8 to spare for rounding, is refused unbuilt. Below it j <= 1032 and N is
+        # bounded too, so the exact product is small; K = 1 and K = N - 1 stay exact)
+        j = min(k, nn - k)
+        if j > 0:
+            bits = j * (_math.log2(nn) - _math.log2(j))
+            if not bits <= (64 if cls in _INTS else 128 if cls == "single" else 1024) + 8:
+                raise _err("nchoosek: the result, at least 2^%d, is outside %s's range: not supported in Sagebrush." % (int(min(bits, 1e9)), cls))
+        c = _math.comb(nn, j)
         if cls in _INTS:
             if c > _INTS[cls][2]:
                 raise _err("nchoosek: the result %d is outside %s's range: not supported in Sagebrush." % (c, cls))
             return _canon(np.array([[_exact_int(c) if cls in ("int64", "uint64") else c]], dtype=_INTS[cls][0]))
-        return _finish(np.array([[float(c)]]), "single") if cls == "single" else float(c)
+        try:
+            f = float(c)
+        except OverflowError:
+            raise _err("nchoosek: the result, about 2^%d, is outside %s's range: not supported in Sagebrush." % (c.bit_length() - 1, cls))
+        return _finish(np.array([[f]]), "single") if cls == "single" else f
     v = list(_arr(n).reshape(-1))
     import itertools
     combos = list(itertools.combinations(range(len(v)), k))
@@ -10096,12 +10116,14 @@ def _setfn(nargout, op, a, b, opts):
     # is refused rather than ignored)
     flags = []
     distinct = True
+    missing_opt = False
     o = list(opts)
     i = 0
     while i < len(o):
         if _istext(o[i]):
             t = _text(o[i]).lower()
             if t == "treatmissingasdistinct" and op == "unique" and i + 1 < len(o):
+                missing_opt = True
                 v = o[i + 1]
                 distinct = _text(v).lower() == "true" if _istext(v) else bool(np.all(_farr(v) != 0))
                 i += 2
@@ -10112,6 +10134,9 @@ def _setfn(nargout, op, a, b, opts):
         else:
             raise _err("%s: options must be text; a %s option is not supported." % (op, class_(o[i])))
         i += 1
+    if missing_opt and "legacy" in flags:
+        # (unique's page: TreatMissingAsDistinct is not supported with 'legacy')
+        raise _err("unique: TreatMissingAsDistinct cannot be used with 'legacy'.")
     rows = "rows" in flags
     stable = "stable" in flags
     ka, A = _set_items(a, rows)
