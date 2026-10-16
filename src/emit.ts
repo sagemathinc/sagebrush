@@ -279,13 +279,19 @@ export class Emitter {
 
   fstring(parts: A.FPart[]): string {
     if (parts.length === 0) return '""';
-    const pieces = parts.map((p) => {
-      if (typeof p === "string") return q(p);
+    const pieces: string[] = [];
+    for (const p of parts) {
+      if (typeof p === "string") {
+        pieces.push(q(p));
+        continue;
+      }
       const spec = p.spec === null ? '""' : this.fstring(p.spec);
-      const v = `fmt(${this.ex(p.expr)}, ${p.conv === null ? "null" : q(p.conv)}, ${spec})`;
-      return p.text ? `${q(p.text)} + ${v}` : v;
-    });
-    return `(${typeof parts[0] === "string" ? "" : '"" + '}${pieces.join(" + ")})`;
+      if (p.text) pieces.push(q(p.text));
+      pieces.push(`fmt(${this.ex(p.expr)}, ${p.conv === null ? "null" : q(p.conv)}, ${spec})`);
+    }
+    // (fcat joins the pieces refusing to join lone surrogates into one
+    // character, CORR-C4D-1; one piece is a string already)
+    return pieces.length === 1 ? pieces[0] : `fcat(${pieces.join(", ")})`;
   }
 
   compare(e: Extract<A.Expr, { k: "Compare" }>): string {
@@ -1077,7 +1083,7 @@ const RUNTIME_NAMES = [
   "sagediv", "isagediv", "sagepow", "isagepow",
   "neg", "pos", "invert", "truth", "lt", "le", "gt", "ge", "eq", "ne", "is", "contains",
   "getitem", "setitem", "delitem", "PySlice", "tuple", "newSet", "setAdd", "newDict", "dictSet", "dictUpdate", "dictOf",
-  "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fbox", "callObj", "callKw", "callEx", "superOf", "superAttr", "superNoArgs", "newCell", "classCellGet",
+  "iter", "DONE", "unpack", "unpackEx", "toArray", "fmt", "fcat", "fbox", "callObj", "callKw", "callEx", "superOf", "superAttr", "superNoArgs", "newCell", "classCellGet",
   "defn", "dflt", "kwdflt", "tooManyArgs", "gname", "unboundLocal", "unboundFree", "yieldFrom", "yfr", "awaitIter", "markCoro",
   "raiseExc", "toPyExc", "excMatch", "withEnter", "withExit", "reraise", "excEnter", "excLeave", "classDef",
   "importModule", "importTop", "importAs", "importFromStmt", "importFrom", "importStar", "resolveRelative", "delattr", "Ellipsis", "T", "typeOf",
