@@ -2137,3 +2137,46 @@ test("nchoosek refuses mixed classes and results past their class's range before
     "int64 9007199254740991", "uint64 9007199254740991", "int64 9007199254740991", "1  1  1",
     "155117520", "120", "1.0000e+09"]);
 });
+
+test("sum and prod 'native' of logical, sprintf's %s of character codes, strsplit's options, interp1's methods and grid, rand's classes and rng's generator and seed", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(x)])`;
+  assert.deepEqual(run([
+    show("sum([true true], 'native')"), show("prod([true false], 'native')"), show("sum(int8([1 2]), 'native')"), show("sum([true true])"),
+    tryIt("sum('ab', 'native')"), tryIt("mean([true false], 'native')"),
+  ].join("\n")), ["logical true", "logical false", "int8 3", "double 2", "refused", "refused"]);
+  assert.deepEqual(run([
+    "disp(sprintf('%s', [72 105]))", "disp(sprintf('%s|', [65 66 67]))", "disp(sprintf('%s', 65.5))", "disp(sprintf('%c', 65.5))",
+    "disp(sprintf('%c%c', 72, 105))", "disp(sprintf('%s and %d', [72 105], 3.5))", "disp(sprintf('[%5s]', 65))", "disp(sprintf('%d %s', 1, 'x'))",
+    tryIt("sprintf('%s', -1)"), tryIt("sprintf('%a', 1)"), tryIt("sprintf('%bx', 1)"), tryIt("sprintf('%y')"),
+  ].join("\n")), ["Hi", "ABC|", "6.550000e+01", "6.550000e+01", "Hi", "Hi and 3.500000e+00", "[    A]", "1 x", "refused", "refused", "refused", "refused"]);
+  assert.deepEqual(run([
+    "disp(strjoin(strsplit('a1b22c', '\\d+', 'DelimiterType', 'RegularExpression'), '|'))",
+    "disp(strjoin(strsplit('a1b', '(\\d)', 'DelimiterType', 'RegularExpression'), '|'))",
+    "disp(strjoin(strsplit('a,,b', ',', 'DelimiterType', 'Simple'), '|'))",
+    "disp(strjoin(strsplit('a,,b', ',', 'CollapseDelimiters', false), '|'))",
+    tryIt("strsplit('a b', ' ', 'Foo', 1)"), tryIt("strsplit('a b', ' ', 'CollapseDelimiters')"), tryIt("strsplit('a b', ' ', 'DelimiterType', 'glob')"),
+  ].join("\n")), ["a|b|c", "a|b", "a|b", "a||b", "refused", "refused", "refused"]);
+  assert.deepEqual(run([
+    "disp(interp1([1 2 3], [10 20 30], 2.5))", "disp(interp1([1 2 3 4], [1 4 9 16], 2.5, 'cubic') == interp1([1 2 3 4], [1 4 9 16], 2.5, 'pchip'))",
+    tryIt("interp1([1 2 3 4], [1 4 9 16], 2.5, 'makima')"), tryIt("interp1([1 2 3], [1 4 9], 'linear', 'pp')"), tryIt("interp1([1 2 3], [1 2 3], 1.5, 'linaer')"),
+    tryIt("interp1([1 2 2], [1 2 3], 1.5)"), tryIt("interp1([1 2 3], [1 2], 1.5)"), tryIt("interp1(1, 2, 1)"), tryIt("interp1([1 NaN 3], [1 2 3], 2)"),
+    tryIt("interp1([1 2 3], [1 2 3], 2, 'linear', 'nearest')"),
+  ].join("\n")), ["25", "1", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused"]);
+  assert.deepEqual(run([
+    tryIt("rand(2, 'like', 1i)"), tryIt("rand(2, 'int8')"), tryIt("rand(2, 'like', sparse(1))"), tryIt("randn(1, 'like', 1i)"), tryIt("rand(1, 'like', true)"),
+    tryIt("randi(10, 1, 'like', 1i)"), tryIt("randi([3 2])"), tryIt("randi(0)"), tryIt("randi(2.5)"), tryIt("randi(300, 1, 'int8')"), tryIt("randi(2^60)"),
+    "disp(class(randi(10, 1, 'int8')))", "disp(class(rand(1, 'like', single(1))))", "disp(class(randn(2, 'single')))",
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "int8", "single", "single"]);
+  assert.deepEqual(run([
+    tryIt("rng(1, 'philox')"), tryIt("rng('philox')"), tryIt("rng('shuffle', 'combRecursive')"), tryIt("rng(-1)"), tryIt("rng(2.5)"), tryIt("rng(struct('State', 99))"),
+    "rng(3); s = rng; disp(s.Seed)", "rng(7, 'twister'); s = rng; disp(s.Seed)", "rng('default'); s = rng; disp(s.Seed)",
+    "rng(5); s = rng; a = rand; rng(9); rng(s); b = rand; t = rng; disp([a == b, t.Seed])",
+    "rng(0); a = rand; rng(0, 'twister'); disp(a == rand)",
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "3", "7", "0", "1     5", "1"]);
+  assert.deepEqual(run([tryIt("linspace(int8(0), int8(10), 3)"), tryIt("linspace(0, uint8(10), 3)"), "disp(class(linspace(single(0), 1, 3)))"].join("\n")),
+    ["refused", "refused", "single"]);
+});
