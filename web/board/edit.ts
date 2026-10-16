@@ -971,12 +971,27 @@ export class Editor {
       // (only what the question takes: an answer it refuses, a note past the length an answer may have, not kept, HARD-448-1)
       if (patch.answer !== undefined && patch.answer !== null && answerProblem(n, patch.answer)) return;
       if (typeof patch.note === "string" && patch.note.length > ASK_LIMITS.text) return;
+      // (another answer: the verdict was the last one's, so it goes; the attempts stay counted)
+      if ("answer" in patch && JSON.stringify(patch.answer ?? null) !== JSON.stringify(n.answer ?? null)) delete n.result;
       for (const k of ["answer", "note"] as const) {
         if (!(k in patch)) continue;
         const v = patch[k];
         if (v === null || v === undefined) delete n[k];
         else (n as any)[k] = v;
       }
+    });
+  }
+
+  /** A question's answer checked: the answer kept, with its attempt counted
+   * and the verdict (an error, the check's own failure, is not the reader's
+   * attempt: not counted); one step to undo. */
+  attempt(id: string, answer: AskAnswer, result: "right" | "wrong" | "error") {
+    return this.commit((d) => {
+      const n = find(this.pg(d), id)?.node;
+      if (n?.kind !== "ask" || answerProblem(n, answer)) return;
+      n.answer = answer;
+      if (result !== "error") n.attempts = (n.attempts ?? 0) + 1;
+      n.result = result;
     });
   }
 

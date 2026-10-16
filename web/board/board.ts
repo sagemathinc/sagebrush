@@ -610,8 +610,69 @@ export class Board {
   // (an item's content as drawn: a question's whole definition, and whether it
   // can be answered now, CORR-448-1, CORR-448-3)
   private keyOf(it: Item): string {
-    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify(it.ask) + (this.onAnswer ? "+" : "-") : "");
+    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify([it.ask, this.askFeedback.get(it.ask.id) ?? null, !!this.onCheck]) + (this.onAnswer ? "+" : "-") : "");
   }
+  /** A question's answer checked by its check (mount.ts): the answer the controls hold. None: no Check (no interpreter). */
+  onCheck: ((id: string, answer: AskAnswer) => void) | null = null;
+  /** What the last check of each question said, and its hints so far, rendered (mount.ts); `pending` while it runs. */
+  askFeedback = new Map<string, { pending?: boolean; message?: string | null; hints?: (string | null)[] }>();
+
+  private askCheckEl(a: DocAsk, id: string, current: () => AskAnswer | undefined, can: boolean): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "board-ask-checked";
+    const fb = this.askFeedback.get(id);
+    if (can && this.onCheck) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "board-ask-check";
+      b.textContent = fb?.pending ? "Checking…" : "Check";
+      b.disabled = !!fb?.pending;
+      // (pressed with a field still being written: the field keeps its focus, so
+      // its answer isn't saved, and the card drawn again, under the press; the
+      // check keeps the answer it checks)
+      b.onmousedown = (e) => e.preventDefault();
+      const why = document.createElement("span");
+      why.className = "board-ask-why";
+      b.onclick = () => {
+        const v = current();
+        if (v === undefined) { why.textContent = "Answer first, then check"; return; }
+        const bad = answerProblem(a, v);
+        if (bad) { why.textContent = bad.replace(/^its answer/, "The answer"); return; }
+        this.onCheck?.(id, v);
+      };
+      const row = document.createElement("div");
+      row.className = "board-ask-foot";
+      row.append(b, why);
+      for (const t of ["pointerdown", "mousedown", "dblclick", "click", "keydown"]) row.addEventListener(t, (e) => e.stopPropagation());
+      box.append(row);
+    }
+    // the verdict, as the board keeps it; the check's own words, while shown
+    const md = (src: string, cls: string) => { const d = document.createElement("div"); d.className = cls; if (this.markdown) d.innerHTML = this.markdown(src); else d.textContent = src; glueMath(d); box.append(d); return d; };
+    if (a.result) {
+      const v = document.createElement("div");
+      v.className = "board-ask-result board-ask-" + a.result;
+      v.textContent = a.result === "right" ? "✓ Right" : a.result === "wrong" ? "✗ Not yet" : "The check could not decide";
+      box.append(v);
+      if (fb?.message) md(fb.message, "board-text board-ask-message");
+    }
+    // the hints: one more after each wrong attempt (a computed one once Check has run it)
+    const wrong = Math.max(0, (a.attempts ?? 0) - (a.result === "right" ? 1 : 0));
+    (a.hints ?? []).slice(0, wrong).forEach((h, k) => {
+      const shown = typeof h === "string" ? h : fb?.hints?.[k] ?? null;
+      md(shown === null ? "_A hint from your answer: press Check to see it._" : `**Hint ${k + 1}.** ${shown}`, "board-text board-ask-hint");
+    });
+    // where to go now
+    const to = a.result === "right" ? a.next?.right : a.result === "wrong" ? a.next?.wrong : undefined;
+    if (to) {
+      const l = document.createElement("a");
+      l.className = "board-ref";
+      l.href = "#" + to;
+      l.textContent = "→ " + (this.linkLabel?.("#" + to) ?? to);
+      box.append(l);
+    }
+    return box;
+  }
+
   /** Questions whose "In your own words" is open (kept open as the board is drawn again). */
   askOpen = new Set<string>();
   /** Questions grown past their measured height: as tall as their open field, its preview, or a field made taller by hand needs. */
@@ -675,6 +736,8 @@ export class Board {
       return l;
     };
     const opts = askOptions(a);
+    // (the answer the controls hold now, saved or not: what Check checks)
+    let current: () => AskAnswer | undefined = () => ans;
     if (a.input === "check" || a.input === "radio" || a.input === "choice") {
       const list = document.createElement("div");
       list.className = "board-ask-opts" + (a.input === "choice" ? " board-ask-list" : "");
@@ -686,6 +749,7 @@ export class Board {
         c.checked = ans === true;
         c.disabled = !can;
         c.onchange = () => set({ answer: c.checked });
+        current = () => c.checked;
         list.append(row(c, "Yes"));
       } else {
         const chosen = new Set(Array.isArray(ans) ? ans : typeof ans === "string" ? [ans] : []);
@@ -701,6 +765,7 @@ export class Board {
           inputs.push(c);
           list.append(row(c, o.label));
         }
+        current = () => (a.input === "check" ? inputs.filter((x) => x.checked).map((x) => x.value) : inputs.find((x) => x.checked)?.value);
       }
       box.append(quiet(list));
     } else if (a.input === "text") {
@@ -711,6 +776,7 @@ export class Board {
       t.disabled = !can;
       t.placeholder = "Your answer";
       t.onchange = () => { if (within(t.value)) set({ answer: t.value === "" ? null : t.value }); };
+      current = () => (t.value === "" || !within(t.value) ? undefined : t.value);
       box.append(quiet(t), preview(t));
     } else {
       const [lo, hi] = a.input === "scale" ? scaleRange(a) : [a.min, a.max];
@@ -753,6 +819,7 @@ export class Board {
           why.textContent = bad ? bad.replace(/^its answer/, "The answer") : "";
           if (!bad) set({ answer: v });
         };
+        current = () => { const v = Number(n.value); return n.value.trim() === "" || !Number.isFinite(v) ? undefined : v; };
         box.append(quiet(n), why);
       }
     }
@@ -775,6 +842,9 @@ export class Board {
     w.onchange = () => { if (within(w.value)) set({ note: w.value.trim() === "" ? null : w.value }); };
     words.append(sum, w, preview(w));
     box.append(quiet(words));
+    // its check: a button, then the verdict, the check's words, the hints
+    // so far and where to go next (stream 5: teaching boards)
+    if (a.check !== undefined) box.append(this.askCheckEl(a, id, current, can));
     // (its state: required; and a way to take an answer back)
     const foot = document.createElement("div");
     foot.className = "board-ask-foot";

@@ -242,7 +242,12 @@ export function otherLanguage(doc: BoardDoc): string | null {
 /** Every code item of a (clean) board run as the board runs it (see the
  * top of this file); `timeout` seconds an item.  A board with items in
  * another language than its own is refused (otherLanguage). */
-export async function runBoard(doc: BoardDoc, timeout: number): Promise<BoardRun> {
+/** A question's check or computed hint, run in the board's interpreter
+ * once its code items have run (`sagebrush board try`): its verdict
+ * (lib/_sb_check.py), or why there is none. */
+export type Evaluate = (code: string, answer: unknown, ms: number) => Promise<{ ok: boolean; value?: unknown; error?: string; isolated?: boolean; preserved?: boolean | null; timedOut: boolean }>;
+
+export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate: Evaluate, run: BoardRun) => Promise<void>): Promise<BoardRun> {
   const mode = doc.mode ?? "python";
   const other = otherLanguage(doc);
   if (other) throw new Error(other);
@@ -286,7 +291,7 @@ export async function runBoard(doc: BoardDoc, timeout: number): Promise<BoardRun
       });
     }
     // (one run: code with its options; its messages to `on`; resolves when it is done)
-    const send = (msg: any, on: (m: any) => void, limit = Infinity) => new Promise<{ ms: number; error: boolean; timedOut: boolean; dead: boolean }>((resolve) => {
+    const send = (msg: any, on: (m: any) => void, limit = Infinity) => new Promise<{ ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }>((resolve) => {
       if (dead || !worker) return resolve({ ms: 0, error: true, timedOut: false, dead: true });
       const id = nextId++;
       let timedOut = false, timer: any = null, kill: any = null;
@@ -295,9 +300,9 @@ export async function runBoard(doc: BoardDoc, timeout: number): Promise<BoardRun
         sinks.delete(id);
         clearTimeout(timer);
         clearTimeout(kill);
-        resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead });
+        resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       });
-      if (limit < Infinity) timer = setTimeout(() => {
+      if (limit < Infinity && limit > 0) timer = setTimeout(() => {
         // over its time: interrupted (KeyboardInterrupt), and if it does not stop, the interpreter stopped
         timedOut = true;
         if (intr) { Atomics.store(intr, 1, id); Atomics.store(intr, 0, 1); }
@@ -386,10 +391,33 @@ export async function runBoard(doc: BoardDoc, timeout: number): Promise<BoardRun
       }
     }
 
-    return {
+    const result: BoardRun = {
       mode, list: items.map(({ key }) => reports.get(key)!), items, reports, notes, outputs,
-      fromRoot: (key) => reactive.fromRoot(key).ms, times: reactive.times, dead, workerErr,
+      fromRoot: (key) => (items.length ? reactive.fromRoot(key).ms : 0), times: reactive.times, dead, workerErr,
     };
+    // (questions' checks and hints, in the interpreter the code ran in: `board try`)
+    if (after) {
+      if (!worker && !dead) {
+        // (a board with no code items: an interpreter for its checks all the same)
+        worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir } }, stdout: true, stderr: true });
+        worker.stdout.resume();
+        worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
+        await new Promise<void>((resolve, reject) => {
+          worker!.on("message", (m: any) => { if (m.ready) { intr = new Int32Array(m.$intr); return resolve(); } sinks.get(m.id)?.(m); });
+          worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); });
+          worker!.on("exit", () => { dead ??= "the interpreter stopped"; for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
+        });
+      }
+      let n = 0;
+      await after(async (code, answer, ms) => {
+        const r = await send({ cell: `check${++n}`, code: "", opts: { evaluate: { code, answer }, seed: seedOf("check") } }, () => {}, ms);
+        if (r.timedOut) return { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true };
+        if (r.dead || r.evaluated === undefined) return { ok: false, error: dead ?? "the interpreter stopped", timedOut: false };
+        const v = JSON.parse(r.evaluated);
+        return { ok: !!v.ok, ...(v.ok ? { value: v.value } : { error: String(v.error) }), isolated: v.isolated !== false, preserved: v.preserved ?? null, timedOut: false };
+      }, result);
+    }
+    return result;
   } finally {
     await worker?.terminate();
     rmSync(dir, { recursive: true, force: true });

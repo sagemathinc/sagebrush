@@ -35,6 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
+import { asksOf } from "./ask";
 import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
 import { BoardCodes } from "./codes";
@@ -490,6 +491,33 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     editor.answer(id, patch).catch(fail);
   };
   board.onAnswer = answer;
+  // (a question's answer checked: its check run in the board's interpreter,
+  // in a copy of the board's names, with a deadline; the verdict kept with
+  // the answer, the check's words and the hints shown so far only here)
+  const check = async (id: string, given: AskAnswer) => {
+    const c = engine(), a = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask;
+    if (viewing || !c || !a?.check) return;
+    const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000;
+    board.askFeedback.set(id, { pending: true });
+    redraw().catch(fail);
+    const r = await c.evaluate(mode, a.check, given, ms);
+    const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
+    const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
+    // (the hints shown after this attempt: the computed ones computed now, with the same answer)
+    const wrong = (a.attempts ?? 0) + (outcome === "wrong" ? 1 : 0);
+    const hints: (string | null)[] = [];
+    for (const [k, h] of (a.hints ?? []).slice(0, wrong).entries()) {
+      if (typeof h === "string") { hints[k] = null; continue; }
+      const got = await c.evaluate(mode, h.code, given, ms);
+      hints[k] = got.ok && typeof got.value === "string" ? got.value : "(this hint could not be computed: " + (got.ok ? "it gave no text" : got.error ?? "it could not run") + ")";
+    }
+    board.askFeedback.set(id, { message, hints });
+    if (viewing) return;
+    await editor.attempt(id, given, outcome).catch(fail);
+    redraw().catch(fail);
+  };
+  const checked = host.code ? (id: string, given: AskAnswer) => { check(id, given).catch((e) => { board.askFeedback.delete(id); fail(e); }); } : null;
+  board.onCheck = checked;
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
   board.onAskResize = () => { redraw().catch(fail); };
   board.onToggleCode = (id) => {
@@ -1806,6 +1834,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     viewing = boardHistory!.docAt(v.time);
     // (a version being looked at: its questions shown, not answered, CORR-448-3)
     board.onAnswer = null;
+    board.onCheck = null;
     redraw().catch(fail);
   }
   /** Close the bar: the board as it is again (`now`: drawn at once). */
@@ -1814,6 +1843,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     $("tt").hidden = true;
     viewing = null;
     board.onAnswer = answer;
+    board.onCheck = checked;
     if (liveCode) board.setCode(liveCode);
     liveCode = null;
     if (now) redraw().catch(fail);

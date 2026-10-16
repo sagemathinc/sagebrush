@@ -147,6 +147,27 @@ test("a question's problems as written, past the schema", () => {
   assert.deepEqual(p({ input: "radio", options: Array.from({ length: 13 }, (_, i) => String(i)) }), ["warning input: 13 options: `choice` shows them as a list to choose from, which fits many"]);
 });
 
+test("a question's check, hints and next as written: lint", () => {
+  const p = (q: Partial<DocAsk> & { input: DocAsk["input"] }, mode?: string) => askProblems(ask(q), mode).map((x) => `${x.level} ${x.field}: ${x.message}`);
+  assert.deepEqual(p({ input: "number", check: "answer == 2", hints: ["one", { code: "str(answer)" }], next: { right: "a" }, checkMs: 500, example: 2 }), []);
+  assert.deepEqual(p({ input: "number", check: "answer == 2" }, "magma"), ["error check: checks and computed hints run in Python and Sage boards (for now): this board's language is magma"]);
+  assert.deepEqual(p({ input: "number", hints: [{ code: "1" }] }, "matlab").slice(0, 1), ["error hints: checks and computed hints run in Python and Sage boards (for now): this board's language is matlab"]);
+  assert.deepEqual(p({ input: "number", check: "  ", hints: [{ code: "" }] }), ["error check: an empty check: it is code whose last line is true (right), false (wrong) or a message (wrong, saying why)", "error hints[0]: an empty computed hint: its code's last line is the hint's text"]);
+  assert.deepEqual(p({ input: "number", hints: ["h"], next: { wrong: "a" }, checkMs: 100, example: 1 }).map((s) => s.split(":")[0]), ["warning hints", "warning next", "warning checkMs", "warning example"]);
+  assert.deepEqual(p({ input: "radio", options: ["a"], check: "True", example: "b" }), [`error example: "b" is not one of its options' values ("a")`]);
+  assert.deepEqual(p({ input: "text", result: "right" }), ["error result: a verdict with no answer: the verdict is the answer's"]);
+});
+
+test("board check: `next` names an item of the question's page", () => {
+  const b = { format: "sagebrush-board", version: 1, nodes: [
+    { id: "q", kind: "ask", text: "Q", input: "text", check: "True", next: { right: "done", wrong: "hepl" } },
+    { id: "done", title: "Done" }, { id: "help", title: "Help" },
+  ] };
+  const got = checkText(JSON.stringify(b)).problems;
+  assert.deepEqual(got.map((x) => `${x.level} ${x.path}`), ["error nodes[0].next.wrong"]);
+  assert.match(got[0].message, /no item "hepl" on this page.*help/);
+});
+
 test("the questions of a board, page by page, those in groups too", () => {
   assert.deepEqual(asksOf(cleanDoc(BOARD)).map((q) => [q.page, q.pageId, q.pageTitle, q.ask.id]), [[2, "decide", "Decisions", "plan"], [2, "decide", "Decisions", "areas"], [2, "decide", "Decisions", "sure"], [2, "decide", "Decisions", "why"]]);
   assert.deepEqual(asksOf(cleanDoc(BOARD.pages[1] as any)).map((q) => [q.page, q.pageId, q.ask.id]), [[1, undefined, "plan"], [1, undefined, "areas"], [1, undefined, "sure"], [1, undefined, "why"]]);

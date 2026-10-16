@@ -181,6 +181,51 @@ options don't fit. Read the note as the answer whenever it is there.
 }
 ```
 
+### Teaching: a check, hints and where to go next
+
+A question can also check its answer, for a reader learning something. Its
+`check` is code in the board's language (Python and Sage boards, for now),
+run in the page when the reader presses **Check**. It sees the board's
+names (what its code items made) in a copy of its own, so it can't change
+them, with the answer as `answer`. The value of its last line is the
+verdict: `True` (right), `False` (wrong), or a string (wrong, and the
+string, Markdown with math, is shown to say why). A check that fails or
+runs past `checkMs` milliseconds (default 2000, at most 10000) decides
+nothing and isn't counted as an attempt.
+
+`hints` are shown in order, one more after each wrong attempt. A hint is
+Markdown, or `{"code": "..."}`, code whose last line is the hint's text,
+computed with the reader's answer like the check. `next` sends the reader
+on: `{"right": "id", "wrong": "id"}` names an item of the question's page
+for each verdict. `example` is an answer for trying the check
+(`sagebrush board try`). The board keeps the verdict in `result` and the
+number of checked attempts in `attempts`; a new answer clears `result`.
+
+```json
+{
+  "format": "sagebrush-board",
+  "version": 1,
+  "title": "Orbits",
+  "mode": "sage",
+  "layout": "column",
+  "nodes": [
+    { "id": "c0", "code": "G = SymmetricGroup(4)" },
+    { "id": "orbit", "kind": "ask", "input": "number", "title": "An orbit",
+      "text": "To how many points can $G$ move the point $1$?",
+      "check": "answer == len(G.orbit(1)) or ('Each of $1, 2, 3, 4$ is one: count them' if answer < 4 else False)",
+      "hints": ["$G$ is every permutation of $\\{1, 2, 3, 4\\}$.", { "code": "'Is there a permutation taking $1$ to $%d$?' % (answer % 4 + 1)" }],
+      "next": { "right": "transitive", "wrong": "orbits" }, "example": 4 },
+    { "id": "transitive", "title": "Transitive", "text": "One orbit: $G$ is transitive." },
+    { "id": "orbits", "title": "Orbits", "text": "The orbit of $1$ is every point $g(1)$." }
+  ]
+}
+```
+
+`sagebrush board check FILE` lints these (a check in another language, an
+empty one, `next` naming no item of the page). `sagebrush board try FILE
+--json` runs every question's check, with its `example` or with `--case
+'id=JSON'`, and its computed hints, and reports what a reader would see.
+
 `sagebrush board answers FILE` lists the questions and the answers kept in
 the board, with each one's note; with `--json`, for a program. A host that shows the board
 passes the reader's answers back as a submission
@@ -358,6 +403,13 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `lines` | number | `text`: how many lines its field shows (default 1) |
 | `note` | string | the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered |
 | `answer` | string \| number \| boolean \| [string] | the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number |
+| `check` | string | code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` |
+| `checkMs` | number | the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) |
+| `hints` | [string \| computed hint] | hints, one more shown after each wrong attempt: Markdown, or `{ "code": ... }`, run as the check is, its value a string (Markdown) |
+| `next` | next | where to go after an attempt: the id of a note on this page, for `right` and for `wrong` |
+| `example` | string \| number \| boolean \| [string] | an answer to try its check with (`sagebrush board check` runs it) |
+| `attempts` | number | how many times its answer was checked (written by Sagebrush) |
+| `result` | `"right"` \| `"wrong"` \| `"error"` | the last check's verdict: `right`, `wrong` or `error` (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
 | `color` | string | a color |
 | `x` | number | its position: leave it out, and the board places it |
@@ -373,6 +425,23 @@ One of a question's options, whose `value` its answer names: its `label` (defaul
 |---|---|---|
 | `value` | string | required: what an answer says when this is chosen |
 | `label` | string | what the reader sees (Markdown with math; default: `value`) |
+
+### A computed hint (in a question's `hints`)
+
+A hint computed from the reader's answer.
+
+| field | type | meaning |
+|---|---|---|
+| `code` | string | required: code run as the question's check is, `answer` bound; its value, a string, is the hint (Markdown) |
+
+### Where a question leads (its `next`)
+
+Where a question leads after an attempt: notes on its page, by id.
+
+| field | type | meaning |
+|---|---|---|
+| `right` | string | the note to go to after a right answer |
+| `wrong` | string | the note to go to after a wrong one |
 
 ### A slide's card (`slide`)
 

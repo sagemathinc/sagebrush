@@ -197,6 +197,20 @@ export interface DocAsk {
   note?: string;
   /** the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number */
   answer?: AskAnswer;
+  /** code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` */
+  check?: string;
+  /** the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) */
+  checkMs?: number;
+  /** hints, one more shown after each wrong attempt: Markdown, or `{ "code": ... }`, run as the check is, its value a string (Markdown) */
+  hints?: AskHint[];
+  /** where to go after an attempt: the id of a note on this page, for `right` and for `wrong` */
+  next?: AskNext;
+  /** an answer to try its check with (`sagebrush board check` runs it) */
+  example?: AskAnswer;
+  /** how many times its answer was checked (written by Sagebrush) */
+  attempts?: number;
+  /** the last check's verdict: `right`, `wrong` or `error` (written by Sagebrush) */
+  result?: AskResult;
   /** Markdown shown only when zoomed in */
   detail?: string;
   /** a color */
@@ -220,6 +234,20 @@ export interface AskChoice {
   label?: string;
 }
 export type AskOption = string | AskChoice;
+/** A hint computed from the reader's answer. */
+export interface AskHintCode {
+  /** required: code run as the question's check is, `answer` bound; its value, a string, is the hint (Markdown) */
+  code: string;
+}
+export type AskHint = string | AskHintCode;
+/** Where a question leads after an attempt: notes on its page, by id. */
+export interface AskNext {
+  /** the note to go to after a right answer */
+  right?: string;
+  /** the note to go to after a wrong one */
+  wrong?: string;
+}
+export type AskResult = "right" | "wrong" | "error";
 export type AskAnswer = string | number | boolean | string[];
 
 export type DocNode = DocNote | DocGroup | DocInk | DocSticker | DocAsk;
@@ -529,7 +557,11 @@ export function cleanDoc(d: any): BoardDoc {
     if (n.kind === "ask" && one(n.input, ASK_INPUTS)) {
       const options = Array.isArray(n.options) ? n.options.map(askOption).filter((o: AskOption | undefined): o is AskOption => o !== undefined) : undefined;
       return strip({ id: String(n.id), kind: "ask" as const, title: str(n.title), text: str(n.text), input: n.input as AskInput, options, required: n.required === true ? true : undefined,
-        min: num(n.min), max: num(n.max), step: num(n.step), low: str(n.low), high: str(n.high), lines: num(n.lines), answer: askAnswer(n.answer), note: typeof n.note === "string" ? n.note : undefined, detail: str(n.detail),
+        min: num(n.min), max: num(n.max), step: num(n.step), low: str(n.low), high: str(n.high), lines: num(n.lines), answer: askAnswer(n.answer), note: typeof n.note === "string" ? n.note : undefined,
+        check: typeof n.check === "string" ? n.check : undefined, checkMs: Number.isInteger(n.checkMs) && n.checkMs >= 1 && n.checkMs <= 10000 ? n.checkMs : undefined,
+        hints: Array.isArray(n.hints) ? n.hints.filter((h: unknown) => typeof h === "string" || (!!h && typeof h === "object" && typeof (h as any).code === "string")).map((h: any) => (typeof h === "string" ? h : { code: h.code })) : undefined,
+        next: n.next && typeof n.next === "object" && !Array.isArray(n.next) ? strip({ right: typeof n.next.right === "string" ? n.next.right : undefined, wrong: typeof n.next.wrong === "string" ? n.next.wrong : undefined }) : undefined,
+        example: askAnswer(n.example), attempts: Number.isInteger(n.attempts) && n.attempts >= 0 ? n.attempts : undefined, result: one(n.result, ["right", "wrong", "error"] as const), detail: str(n.detail),
         color: safeColor(n.color), x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
     }
     // (kind "code": the code items of documents before every note could have code)

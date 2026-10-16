@@ -727,6 +727,70 @@
      ],
      "description": "the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number"
     },
+    "check": {
+     "type": "string",
+     "description": "code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs`"
+    },
+    "checkMs": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 10000,
+     "description": "the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000)"
+    },
+    "hints": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "$ref": "#/$defs/AskHintCode"
+       }
+      ]
+     },
+     "description": "hints, one more shown after each wrong attempt: Markdown, or `{ \"code\": ... }`, run as the check is, its value a string (Markdown)"
+    },
+    "next": {
+     "$ref": "#/$defs/AskNext",
+     "description": "where to go after an attempt: the id of a note on this page, for `right` and for `wrong`"
+    },
+    "example": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "number",
+       "minimum": -1.7976931348623157e+308,
+       "maximum": 1.7976931348623157e+308
+      },
+      {
+       "type": "boolean"
+      },
+      {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     ],
+     "description": "an answer to try its check with (`sagebrush board check` runs it)"
+    },
+    "attempts": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 1.7976931348623157e+308,
+     "description": "how many times its answer was checked (written by Sagebrush)"
+    },
+    "result": {
+     "enum": [
+      "right",
+      "wrong",
+      "error"
+     ],
+     "description": "the last check's verdict: `right`, `wrong` or `error` (written by Sagebrush)"
+    },
     "detail": {
      "type": "string",
      "description": "Markdown shown only when zoomed in"
@@ -784,6 +848,35 @@
    "required": [
     "value"
    ],
+   "additionalProperties": false
+  },
+  "AskHintCode": {
+   "type": "object",
+   "description": "A hint computed from the reader's answer.",
+   "properties": {
+    "code": {
+     "type": "string",
+     "description": "required: code run as the question's check is, `answer` bound; its value, a string, is the hint (Markdown)"
+    }
+   },
+   "required": [
+    "code"
+   ],
+   "additionalProperties": false
+  },
+  "AskNext": {
+   "type": "object",
+   "description": "Where a question leads after an attempt: notes on its page, by id.",
+   "properties": {
+    "right": {
+     "type": "string",
+     "description": "the note to go to after a right answer"
+    },
+    "wrong": {
+     "type": "string",
+     "description": "the note to go to after a wrong one"
+    }
+   },
    "additionalProperties": false
   },
   "DocEdge": {
