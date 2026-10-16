@@ -3045,6 +3045,16 @@ class ComplexField_:
         """
         return self(0)
 
+    def one(self):
+        """1.
+
+        EXAMPLES::
+
+            sage: ComplexField(30).one()
+            1.0000000
+        """
+        return self(1)
+
     def __call__(self, re=0, im=None):
         """A complex number from a number, or real and imaginary parts.
 
