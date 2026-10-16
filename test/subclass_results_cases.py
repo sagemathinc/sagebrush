@@ -76,3 +76,58 @@ for c in ("bytes([RX()])", "bytearray(RXS())", "(1, 2)[RXS()]"):
         warnings.simplefilter('always')
         out = show(c)
     print(c, '->', out, [str(x.message)[:40] for x in w])
+# NumPy's scalars are no int subclasses, nor float subclasses but float64:
+# their results are refused (CORR-CA8-2); an int subclass's int value in
+# the math log family and floor/ceil/trunc, not its __float__ (CORR-CA8-1)
+import numpy as np
+
+
+class NA:
+    def __index__(self):
+        return np.int64(3)
+
+
+class NB:
+    def __int__(self):
+        return np.int32(3)
+
+
+class NC:
+    def __float__(self):
+        return np.float32(2.5)
+
+
+class ND:
+    def __float__(self):
+        return np.float64(2.5)
+
+
+class NS(np.float64):
+    pass
+
+
+class NE:
+    def __float__(self):
+        return NS(1.5)
+
+
+class J35(int):
+    def __float__(self):
+        return 3.5
+
+
+class JF(int):
+    def __float__(self):
+        return 3.5
+
+    def __floor__(self):
+        return 7
+
+
+for c in ("operator.index(NA())", "int(NB())", "float(NC())", "math.sqrt(NC())", "float(ND())", "float(NE())", "[1, 2, 3, 4][NA()]",
+          "math.log(J35(2))", "math.log2(J35(8))", "math.log10(J35(100))", "math.log(J35(8), 2)", "math.log(8, J35(2))", "math.floor(J35(2))",
+          "math.ceil(J35(2))", "math.trunc(J35(2))", "math.sqrt(J35(4))", "math.floor(JF(2))", "math.exp(J35(0))", "math.log(np.int64(8))"):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        out = show(c)
+    print(c, '->', out, [str(x.message)[:50] for x in w])
