@@ -717,7 +717,23 @@ def _witness(gen):
     return next(iter(gen), None)
 
 
+def _range_int(v, open_, pos):
+    """A range's endpoint or step as the integer it is (2/1 or 3.0 too, as
+    Magma takes it), or Magma's refusal of one that is not."""
+    if isinstance(v, bool) or not (isinstance(v, (int, _Fraction)) or isinstance(v, MReal)):
+        return v  # (another type: its own errors, as before)
+    f = v.frac() if isinstance(v, MReal) else _Fraction(v)
+    if f.denominator != 1:
+        what = "Sequence" if open_ == "[" else "Set"
+        where = "[ ... ]" if open_ == "[" else "%s ... %s" % (open_, {"{": "}", "{@": "@}", "{*": "*}"}[open_])
+        raise MagmaError("%s range does not consist of integers" % what, where, True, pos)
+    return int(f.numerator)
+
+
 def _range(a, b, c, open_, universe=None, pos=None):
+    a, b, c = (_range_int(v, open_, pos) for v in (a, b, c))
+    if isinstance(c, int) and c == 0 and isinstance(a, int) and isinstance(b, int):
+        raise MagmaError("Set/Sequence constructor: step must be non-zero", "[ ... ]" if open_ == "[" else "{ ... }", True, pos)
     if universe is not None and universe is not _ZZ:
         # (a range's elements are integers: Magma refuses another universe)
         if open_ == "[":
