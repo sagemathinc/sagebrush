@@ -32,13 +32,17 @@ test("a matrix over a field too big for a 96 MiB heap is refused before it is bu
     // (an endless row iterator: stopped at the budget for the rows read
     // and their conversion, daybreak2's HARD-5B6-1)
     "import itertools\ntry:\n matrix(RDF, ([0.0] * 512 for i in itertools.count()))\nexcept NotImplementedError as e:\n print('refused', str(e)[:30])\n" +
+    // (one row, a generator past the budget: astra's CORR-03D-1)
+    "try:\n matrix(RDF, ((0.0 for j in range(100000)) for i in range(1)))\nexcept NotImplementedError as e:\n print('refused', str(e)[:30])\n" +
+    // (and an endless one: daybreak2's HARD-03D-1)
+    "try:\n matrix(RDF, (iter(itertools.repeat(0.0)) for i in range(1)))\nexcept NotImplementedError as e:\n print('refused', str(e)[:30])\n" +
     "print(sys._sagebrush_heap_limit > 0)\n";
   const r = run(["--max-old-space-size=96"], "import sys\n" + src);
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
-  assert.equal(lines.length, CASES.length + 3, r.stdout);
+  assert.equal(lines.length, CASES.length + 5, r.stdout);
   for (const l of lines.slice(0, -1)) assert.match(l, /^refused a /, l);
-  assert.equal(lines[CASES.length + 2], "True");
+  assert.equal(lines[CASES.length + 4], "True");
 });
 
 test("the same matrices are built in the default heap", () => {

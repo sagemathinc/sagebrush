@@ -139,6 +139,10 @@ def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
     from _sage_matrix import _bounded_list
     if isinstance(rows, (str, bytes)):
         raise TypeError("%r is not a list of rows" % (rows,))
+    def refuse():
+        mib, limit = 1 << 20, _heap_limit()
+        return NotImplementedError("a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
+            base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
     out, used = [], 0
     for r in iter(rows):
         if loose and not (isinstance(r, (list, tuple)) or (hasattr(r, "__iter__") and not isinstance(r, str)) or type(r).__name__ in ("Vector", "FFVector")):
@@ -149,14 +153,15 @@ def _admitted_rows(base, rows, ncols=None, loose=False, structural=True):
             try:
                 r = _bounded_list(r, cap - used, total=cap)
             except ValueError as e:
-                if not str(e).startswith("more than %d " % cap):
-                    raise
-                used = cap + 1
+                # (the row itself is past the budget: refused at once, the
+                # row, a generator perhaps, not touched again: astra's
+                # CORR-03D-1)
+                if str(e).startswith("more than %d " % cap):
+                    raise refuse()
+                raise
         used += len(r) or 1
         if used > cap:
-            mib, limit = 1 << 20, _heap_limit()
-            raise NotImplementedError("a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
-                base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+            raise refuse()
         out.append(r)
     return out
 
