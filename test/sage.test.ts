@@ -104,3 +104,13 @@ test("delete_edge reads at most 4 items of an edge that claims a length of 3 (HA
   assert.equal(cli("--sage", "-c", src), "ValueError 4 2\nValueError 4 2\n");
   assert.ok(Date.now() - t < 20000);
 });
+
+test("variety refuses large point counts and precisions before the work (HARD-11A-1/2)", () => {
+  // (x^1000000 - 1 reached the 100-point cap after 8 s and 1 GB; a linear
+  // ideal over RealField(10^9) built 2^-(10^9) before its 20000-digit check)
+  const src = "R.<x,y> = PolynomialRing(QQ, sparse=True)\nfor F in (RR, AA):\n try:\n  R.ideal([x^1000000 - 1, y]).variety(F)\n except NotImplementedError as e:\n  print('refused')\n" +
+    "try:\n R.ideal([x - 1, y]).variety(RealField(10^9))\nexcept NotImplementedError as e:\n print('refused')\nprint(len(R.ideal([x^100 - 1, y]).variety(CC)))\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "refused\nrefused\nrefused\n100\n");
+  assert.ok(Date.now() - t < 60000);
+});

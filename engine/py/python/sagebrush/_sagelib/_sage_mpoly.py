@@ -3881,7 +3881,7 @@ class MPolynomialIdeal:
         self._over_field("vector_space_dimension")
         return _sa().Integer(len(self.normal_basis()))
 
-    def normal_basis(self):
+    def normal_basis(self, _limit=None):
         """The standard monomials (those not divisible by a leading monomial
         of the Groebner basis), for a zero-dimensional ideal.
 
@@ -3907,11 +3907,18 @@ class MPolynomialIdeal:
 
         def rec(i, e):
             if i == n:
-                t = tuple(e)
-                if not any(_divides_e(m, t) for m in lms):
-                    out.append(t)
+                out.append(tuple(e))
+                if _limit is not None and len(out) > _limit:
+                    raise NotImplementedError("more than %d standard monomials" % _limit)
                 return
             for k in range(bounds[i]):
+                # (the standard monomials are an order ideal: once e with k
+                # here, and zeros after, is divisible by a leading monomial,
+                # so is every larger k; this visits only standard monomials
+                # and their n immediate neighbours, not the whole box)
+                t = tuple(e + [k] + [0] * (n - i - 1))
+                if any(_divides_e(m, t) for m in lms):
+                    break
                 rec(i + 1, e + [k])
         rec(0, [])
         # as Singular's kbase: the last variable most significant, decreasing
@@ -4125,13 +4132,34 @@ class MPolynomialIdeal:
         if R._base is not sa.QQ and R._base is not sa.ZZ:
             raise NotImplementedError("variety over %r of an ideal over %r is not available in sagebrush yet" % (ring, R._base))
         I = self if R._base is sa.QQ else MPolynomialIdeal(self._field_ring(), [self._field_ring()(g) for g in self._gens])
-        I = I.radical()
-        B = I.normal_basis()
+        # (each cap is checked before the work it bounds: daybreak2's
+        # HARD-11A-1, where ideal([x^1000000 - 1, y]).variety(RR) took 8 s and
+        # 1 GB before the point count was read)
+        refuse = "variety over %r of an ideal with more than %d points is not available in sagebrush yet" % (ring, _VARIETY_MAX_POINTS)
+        if I.dimension() != 0:
+            raise ValueError("The dimension of the ideal is %d, but it should be 0" % I.dimension())
+        R2 = I._ring
+        gens = list(I._gens)
+        for i in range(R2._n):
+            others = [R2.gen(j) for j in range(R2._n) if j != i]
+            for g in I.elimination_ideal(others)._gens:
+                if not g._d or g.is_constant():
+                    continue
+                if g.degree(R2.gen(i)) > _VARIETY_MAX_ELIMINANT:
+                    raise NotImplementedError(refuse)
+                h = _sqf_part(g, R2, i)
+                # (more distinct values of one coordinate than points allowed)
+                if h.degree(R2.gen(i)) > _VARIETY_MAX_POINTS:
+                    raise NotImplementedError(refuse)
+                gens.append(h)
+        I = MPolynomialIdeal(R2, list(reversed(MPolynomialIdeal(R2, gens).groebner_basis())))
+        try:
+            B = I.normal_basis(_limit=_VARIETY_MAX_POINTS)
+        except NotImplementedError:
+            raise NotImplementedError(refuse) from None
         D = len(B)
         if D == 0:
             return []
-        if D > _VARIETY_MAX_POINTS:
-            raise NotImplementedError("variety over %r of an ideal with %d points (more than %d) is not available in sagebrush yet" % (ring, D, _VARIETY_MAX_POINTS))
         Q = I._ring
         index = {next(iter(b._d)): k for k, b in enumerate(B)}
 
@@ -4143,7 +4171,10 @@ class MPolynomialIdeal:
         n = Q._n
         xs = [coords(Q.gen(i)) for i in range(n)]
         one = coords(Q(1))
-        for c in range(1, (n - 1) * D * (D - 1) // 2 + 2):
+        # (one of these values of c separates the points; the first nearly
+        # always does, and each try reduces D products, so the tries are
+        # capped)
+        for c in range(1, min((n - 1) * D * (D - 1) // 2 + 2, _VARIETY_MAX_TRIES + 1)):
             # t = x_0 + c x_1 + c^2 x_2 + ...: two points have the same t for
             # at most n - 1 values of c, so one of these c separates them all
             # (the first one, almost always)
@@ -4158,6 +4189,8 @@ class MPolynomialIdeal:
             if sol is not None:
                 break
         else:
+            if (n - 1) * D * (D - 1) // 2 + 1 > _VARIETY_MAX_TRIES:
+                raise NotImplementedError("variety over %r: no separating linear form among the first %d tried" % (ring, _VARIETY_MAX_TRIES))
             raise RuntimeError("internal error: no separating linear form found")
         chi = [-a for a in sol[0]] + [_F(1)]  # t^D - sum a_k t^k
         kind = _numeric_field_kind(ring)
@@ -4233,6 +4266,10 @@ def _clean_algebraic(v):
 
 
 _VARIETY_MAX_POINTS = 100
+# (an eliminant's degree before its squarefree part is taken, and the tries
+# for a separating linear form)
+_VARIETY_MAX_ELIMINANT = 4096
+_VARIETY_MAX_TRIES = 32
 
 
 def _algebraic_target(ring):
@@ -4278,6 +4315,9 @@ def _numeric_points(g, rems, ring, kind):
     sa = _sa()
     gi = [int(x) for x in qb._primitive(g)]
     prec = int(ring.prec()) if hasattr(ring, "prec") else 53
+    # (checked before 2^-(prec+10) is built: daybreak2's HARD-11A-2)
+    if prec * 30103 // 100000 + 20 > 20000:
+        raise NotImplementedError("variety over %r: the points could not be evaluated to its precision within 20000 digits" % (ring,))
     eps = _F(1, 2 ** (prec + 10))
     complex_ring = kind == "complex"
     R = sa.RealField(prec) if complex_ring and type(ring).__name__ != "ComplexDoubleField_" else None
