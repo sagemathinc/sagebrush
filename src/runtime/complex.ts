@@ -313,82 +313,473 @@ void PyBytes;
 
 // ------------------------------------------------------------------ cmath
 
+// A port of CPython's Modules/cmathmodule.c (PSF license, NOTICE.md): each
+// function's special-value table for infinite and NaN parts, its
+// large-argument formulas, and its errno: EDOM is "math domain error"
+// (ValueError), ERANGE "math range error" (OverflowError).  The real
+// primitives are the math module's.
 const C = (re: number, im: number) => new PyComplex(re, im);
 function arg(x: any): [number, number] {
   const c = toC(x);
   if (c !== undefined) return c;
   return asComplex(x, "argument");
 }
-// The finite-value algorithms of CPython's Modules/cmathmodule.c.
-function csqrt(re: number, im: number): PyComplex {
-  if (!Number.isFinite(re) || !Number.isFinite(im)) {
-    if (Math.abs(im) === Infinity) return C(Infinity, im);
-    if (re === -Infinity) return C(im !== im ? NaN : 0, im !== im ? NaN : im < 0 || Object.is(im, -0) ? -Infinity : Infinity);
-    if (re === Infinity) return C(Infinity, im !== im ? NaN : im < 0 || Object.is(im, -0) ? -0 : 0);
-    return C(NaN, NaN);
+function realArg(x: any): number {
+  const v = O.fv(x);
+  return v === undefined ? raise(T.TypeError, `must be real number, not ${typeName(x)}`) : v;
+}
+const EDOM = 1, ERANGE = 2;
+let errno = 0;
+const DBL_MAX = 1.7976931348623157e308, DBL_MIN = 2.2250738585072014e-308, DBL_MANT_DIG = 53;
+const CM_LARGE_DOUBLE = DBL_MAX / 4;
+const CM_SQRT_LARGE_DOUBLE = Math.sqrt(CM_LARGE_DOUBLE);
+const CM_LOG_LARGE_DOUBLE = glibcLog(CM_LARGE_DOUBLE);
+const CM_SQRT_DBL_MIN = Math.sqrt(DBL_MIN);
+const CM_SCALE_UP = 2 * Math.floor(DBL_MANT_DIG / 2) + 1, CM_SCALE_DOWN = -Math.floor((CM_SCALE_UP + 1) / 2);
+const M_LN2 = 0.6931471805599453094, M_LN10 = 2.302585092994045684, PI = 3.141592653589793, E = 2.718281828459045;
+const ldexp = (x: number, e: number) => x * 2 ** e; // (exact here: e is CM_SCALE_UP, CM_SCALE_DOWN or DBL_MANT_DIG)
+const signBuf = new DataView(new ArrayBuffer(8));
+const signbit = (y: number) => {
+  signBuf.setFloat64(0, y);
+  return (signBuf.getUint8(0) & 0x80) !== 0;
+};
+const copysign = (x: number, y: number) => (signbit(y) ? -Math.abs(x) : Math.abs(x));
+const isfinite = Number.isFinite;
+const isinf = (x: number) => x === Infinity || x === -Infinity;
+const isnan = (x: number) => x !== x;
+
+// special_type: 0 -inf, 1 negative, 2 -0, 3 +0, 4 positive, 5 +inf, 6 NaN
+function specialType(d: number): number {
+  if (isfinite(d)) {
+    if (d !== 0) return signbit(d) ? 1 : 4;
+    return signbit(d) ? 2 : 3;
   }
-  if (re === 0 && im === 0) return C(0, im);
-  let ax = Math.abs(re), ay = Math.abs(im), sr: number, d: number;
-  if (ax < 2.2250738585072014e-308 && ay < 2.2250738585072014e-308) {
-    ax = ax * 2 ** 53;
-    sr = Math.sqrt((ax + CR.hypot(ax, ay * 2 ** 53)) / 2) * 2 ** -26.5;
+  if (isnan(d)) return 6;
+  return signbit(d) ? 0 : 5;
+}
+const P = PI, P14 = 0.25 * PI, P12 = 0.5 * PI, P34 = 0.75 * PI, INF = Infinity, N = NaN, U = -9.5426319407711027e33;
+type Table = [number, number][][];
+const special = (z: PyComplex, table: Table): PyComplex => {
+  const [re, im] = table[specialType(z.re)][specialType(z.im)];
+  return C(re, im);
+};
+const nonfinite = (z: PyComplex) => !isfinite(z.re) || !isfinite(z.im);
+
+const acosTable: Table = [
+  [[P34, INF], [P, INF], [P, INF], [P, -INF], [P, -INF], [P34, -INF], [N, INF]],
+  [[P12, INF], [U, U], [U, U], [U, U], [U, U], [P12, -INF], [N, N]],
+  [[P12, INF], [U, U], [P12, 0], [P12, -0], [U, U], [P12, -INF], [P12, N]],
+  [[P12, INF], [U, U], [P12, 0], [P12, -0], [U, U], [P12, -INF], [P12, N]],
+  [[P12, INF], [U, U], [U, U], [U, U], [U, U], [P12, -INF], [N, N]],
+  [[P14, INF], [0, INF], [0, INF], [0, -INF], [0, -INF], [P14, -INF], [N, INF]],
+  [[N, INF], [N, N], [N, N], [N, N], [N, N], [N, -INF], [N, N]],
+];
+function cacos(z: PyComplex): PyComplex {
+  if (nonfinite(z)) {
+    errno = 0;
+    return special(z, acosTable);
+  }
+  let r: PyComplex;
+  if (Math.abs(z.re) > CM_LARGE_DOUBLE || Math.abs(z.im) > CM_LARGE_DOUBLE) {
+    // (avoid unnecessary overflow for large arguments)
+    r = C(CR.atan2(Math.abs(z.im), z.re), -copysign(glibcLog(CR.hypot(z.re / 2, z.im / 2)) + M_LN2 * 2, z.im));
   } else {
-    ax /= 8;
-    sr = 2 * Math.sqrt(ax + CR.hypot(ax, ay / 8));
+    const s1 = csqrt(C(1 - z.re, -z.im)), s2 = csqrt(C(1 + z.re, z.im));
+    r = C(2 * CR.atan2(s1.re, s2.re), CR.asinh(s2.re * s1.im - s2.im * s1.re));
   }
-  d = ay / (2 * sr);
-  const sgn = (v: number) => (im < 0 || Object.is(im, -0) ? -v : v);
-  return re >= 0 ? C(sr, sgn(d)) : C(d, sgn(sr));
+  errno = 0;
+  return r;
 }
-function cexp(re: number, im: number): PyComplex {
-  const e = glibcExp(re);
-  if (im === 0) return C(e, im);
-  return C(e * CR.cos(im), e * CR.sin(im));
+
+const acoshTable: Table = [
+  [[INF, -P34], [INF, -P], [INF, -P], [INF, P], [INF, P], [INF, P34], [INF, N]],
+  [[INF, -P12], [U, U], [U, U], [U, U], [U, U], [INF, P12], [N, N]],
+  [[INF, -P12], [U, U], [0, -P12], [0, P12], [U, U], [INF, P12], [N, P12]],
+  [[INF, -P12], [U, U], [0, -P12], [0, P12], [U, U], [INF, P12], [N, P12]],
+  [[INF, -P12], [U, U], [U, U], [U, U], [U, U], [INF, P12], [N, N]],
+  [[INF, -P14], [INF, -0], [INF, -0], [INF, 0], [INF, 0], [INF, P14], [INF, N]],
+  [[INF, N], [N, N], [N, N], [N, N], [N, N], [INF, N], [N, N]],
+];
+function cacosh(z: PyComplex): PyComplex {
+  if (nonfinite(z)) {
+    errno = 0;
+    return special(z, acoshTable);
+  }
+  let r: PyComplex;
+  if (Math.abs(z.re) > CM_LARGE_DOUBLE || Math.abs(z.im) > CM_LARGE_DOUBLE) {
+    r = C(glibcLog(CR.hypot(z.re / 2, z.im / 2)) + M_LN2 * 2, CR.atan2(z.im, z.re));
+  } else {
+    const s1 = csqrt(C(z.re - 1, z.im)), s2 = csqrt(C(z.re + 1, z.im));
+    r = C(CR.asinh(s1.re * s2.re + s1.im * s2.im), 2 * CR.atan2(s1.im, s2.re));
+  }
+  errno = 0;
+  return r;
 }
-function clog(re: number, im: number): PyComplex {
-  const ax = Math.abs(re), ay = Math.abs(im);
-  if (ax === 0 && ay === 0) raise(T.ValueError, "math domain error");
-  const h = CR.hypot(ax, ay);
-  let lr: number;
-  if (0.71 <= h && h <= 1.73) {
-    const am = Math.max(ax, ay), an = Math.min(ax, ay);
-    lr = glibcLog1p((am - 1) * (am + 1) + an * an) / 2;
-  } else lr = glibcLog(h);
-  return C(lr, CR.atan2(im, re));
-}
-const mul = (a: PyComplex, b: PyComplex) => C(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
-const div = (a: PyComplex, b: PyComplex) => cdiv([a.re, a.im], [b.re, b.im]);
-function casinh(z: PyComplex): PyComplex {
-  const s1 = csqrt(1 + z.im, -z.re), s2 = csqrt(1 - z.im, z.re);
-  return C(CR.asinh(s1.re * s2.im - s2.re * s1.im), CR.atan2(z.im, s1.re * s2.re - s1.im * s2.im));
-}
+
+// asin(z) = -i asinh(iz)
 function casin(z: PyComplex): PyComplex {
   const s = casinh(C(-z.im, z.re));
   return C(s.im, -s.re);
 }
-function cacos(z: PyComplex): PyComplex {
-  const s1 = csqrt(1 - z.re, -z.im), s2 = csqrt(1 + z.re, z.im);
-  return C(2 * CR.atan2(s1.re, s2.re), CR.asinh(s2.re * s1.im - s2.im * s1.re));
+
+const asinhTable: Table = [
+  [[-INF, -P14], [-INF, -0], [-INF, -0], [-INF, 0], [-INF, 0], [-INF, P14], [-INF, N]],
+  [[-INF, -P12], [U, U], [U, U], [U, U], [U, U], [-INF, P12], [N, N]],
+  [[-INF, -P12], [U, U], [-0, -0], [-0, 0], [U, U], [-INF, P12], [N, N]],
+  [[INF, -P12], [U, U], [0, -0], [0, 0], [U, U], [INF, P12], [N, N]],
+  [[INF, -P12], [U, U], [U, U], [U, U], [U, U], [INF, P12], [N, N]],
+  [[INF, -P14], [INF, -0], [INF, -0], [INF, 0], [INF, 0], [INF, P14], [INF, N]],
+  [[INF, N], [N, N], [N, -0], [N, 0], [N, N], [INF, N], [N, N]],
+];
+function casinh(z: PyComplex): PyComplex {
+  if (nonfinite(z)) {
+    errno = 0;
+    return special(z, asinhTable);
+  }
+  let r: PyComplex;
+  if (Math.abs(z.re) > CM_LARGE_DOUBLE || Math.abs(z.im) > CM_LARGE_DOUBLE) {
+    const l = glibcLog(CR.hypot(z.re / 2, z.im / 2)) + M_LN2 * 2;
+    r = C(z.im >= 0 ? copysign(l, z.re) : -copysign(l, -z.re), CR.atan2(z.im, Math.abs(z.re)));
+  } else {
+    const s1 = csqrt(C(1 + z.im, -z.re)), s2 = csqrt(C(1 - z.im, z.re));
+    r = C(CR.asinh(s1.re * s2.im - s2.re * s1.im), CR.atan2(z.im, s1.re * s2.re - s1.im * s2.im));
+  }
+  errno = 0;
+  return r;
 }
-function cacosh(z: PyComplex): PyComplex {
-  const s1 = csqrt(z.re - 1, z.im), s2 = csqrt(z.re + 1, z.im);
-  return C(CR.asinh(s1.re * s2.re + s1.im * s2.im), 2 * CR.atan2(s1.im, s2.re));
+
+// atan(z) = -i atanh(iz)
+function catan(z: PyComplex): PyComplex {
+  const s = catanh(C(-z.im, z.re));
+  return C(s.im, -s.re);
 }
+
+const atanhTable: Table = [
+  [[-0, -P12], [-0, -P12], [-0, -P12], [-0, P12], [-0, P12], [-0, P12], [-0, N]],
+  [[-0, -P12], [U, U], [U, U], [U, U], [U, U], [-0, P12], [N, N]],
+  [[-0, -P12], [U, U], [-0, -0], [-0, 0], [U, U], [-0, P12], [-0, N]],
+  [[0, -P12], [U, U], [0, -0], [0, 0], [U, U], [0, P12], [0, N]],
+  [[0, -P12], [U, U], [U, U], [U, U], [U, U], [0, P12], [N, N]],
+  [[0, -P12], [0, -P12], [0, -P12], [0, P12], [0, P12], [0, P12], [0, N]],
+  [[0, -P12], [N, N], [N, N], [N, N], [N, N], [0, P12], [N, N]],
+];
 function catanh(z: PyComplex): PyComplex {
+  if (nonfinite(z)) {
+    errno = 0;
+    return special(z, atanhTable);
+  }
+  // (reduced to z.real >= 0, as atanh(z) = -atanh(-z))
   if (z.re < 0) {
     const w = catanh(C(-z.re, -z.im));
     return C(-w.re, -w.im);
   }
   const ay = Math.abs(z.im);
-  if (z.re === 1 && ay < 1.4916681462400413e-154) {
-    if (ay === 0) raise(T.ValueError, "math domain error");
-    return C(-glibcLog(Math.sqrt(ay) / Math.sqrt(CR.hypot(ay, 2))), (z.im < 0 ? -1 : 1) * CR.atan2(2, -ay) / 2);
+  if (z.re > CM_SQRT_LARGE_DOUBLE || ay > CM_SQRT_LARGE_DOUBLE) {
+    // (abs(z) large: atanh(z) ~ 1/z +/- i pi/2)
+    const h = CR.hypot(z.re / 2, z.im / 2); // (safe from overflow)
+    errno = 0;
+    return C(z.re / 4 / h / h, copysign(PI / 2, z.im));
   }
+  if (z.re === 1 && ay < CM_SQRT_DBL_MIN) {
+    // (atanh(1 +/- 0i) is inf +/- 0i, a domain error)
+    if (ay === 0) {
+      errno = EDOM;
+      return C(INF, z.im);
+    }
+    errno = 0;
+    return C(-glibcLog(Math.sqrt(ay) / Math.sqrt(CR.hypot(ay, 2))), copysign(CR.atan2(2, -ay) / 2, z.im));
+  }
+  errno = 0;
   return C(glibcLog1p((4 * z.re) / ((1 - z.re) * (1 - z.re) + ay * ay)) / 4, -CR.atan2(-2 * z.im, (1 - z.re) * (1 + z.re) - ay * ay) / 2);
 }
-function catan(z: PyComplex): PyComplex {
-  const s = catanh(C(-z.im, z.re));
+
+// cos(z) = cosh(iz)
+const ccos = (z: PyComplex) => ccosh(C(-z.im, z.re));
+
+const coshTable: Table = [
+  [[INF, N], [U, U], [INF, 0], [INF, -0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[N, 0], [U, U], [1, 0], [1, -0], [U, U], [N, 0], [N, 0]],
+  [[N, 0], [U, U], [1, -0], [1, 0], [U, U], [N, 0], [N, 0]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[INF, N], [U, U], [INF, -0], [INF, 0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [N, N], [N, 0], [N, 0], [N, N], [N, N], [N, N]],
+];
+function ccosh(z: PyComplex): PyComplex {
+  let r: PyComplex;
+  if (nonfinite(z)) {
+    // (cosh(+/-inf + iy), y finite and nonzero: infinities signed by cos y, sin y)
+    if (isinf(z.re) && isfinite(z.im) && z.im !== 0) {
+      r = z.re > 0 ? C(copysign(INF, CR.cos(z.im)), copysign(INF, CR.sin(z.im))) : C(copysign(INF, CR.cos(z.im)), -copysign(INF, CR.sin(z.im)));
+    } else r = special(z, coshTable);
+    errno = isinf(z.im) && !isnan(z.re) ? EDOM : 0;
+    return r;
+  }
+  if (Math.abs(z.re) > CM_LOG_LARGE_DOUBLE) {
+    // (cosh(z.real) overflows where cosh(z) need not)
+    const x1 = z.re - copysign(1, z.re);
+    r = C(CR.cos(z.im) * FD.cosh(x1) * E, CR.sin(z.im) * FD.sinh(x1) * E);
+  } else r = C(CR.cos(z.im) * FD.cosh(z.re), CR.sin(z.im) * FD.sinh(z.re));
+  errno = isinf(r.re) || isinf(r.im) ? ERANGE : 0;
+  return r;
+}
+
+const expTable: Table = [
+  [[0, 0], [U, U], [0, -0], [0, 0], [U, U], [0, 0], [0, 0]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[N, N], [U, U], [1, -0], [1, 0], [U, U], [N, N], [N, N]],
+  [[N, N], [U, U], [1, -0], [1, 0], [U, U], [N, N], [N, N]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[INF, N], [U, U], [INF, -0], [INF, 0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [N, N], [N, -0], [N, 0], [N, N], [N, N], [N, N]],
+];
+function cexp(z: PyComplex): PyComplex {
+  let r: PyComplex;
+  if (nonfinite(z)) {
+    if (isinf(z.re) && isfinite(z.im) && z.im !== 0) {
+      r = z.re > 0 ? C(copysign(INF, CR.cos(z.im)), copysign(INF, CR.sin(z.im))) : C(copysign(0, CR.cos(z.im)), copysign(0, CR.sin(z.im)));
+    } else r = special(z, expTable);
+    // (EDOM: an infinite imaginary part, and a real part finite or +inf)
+    errno = isinf(z.im) && (isfinite(z.re) || (isinf(z.re) && z.re > 0)) ? EDOM : 0;
+    return r;
+  }
+  if (z.re > CM_LOG_LARGE_DOUBLE) {
+    const l = glibcExp(z.re - 1);
+    r = C(l * CR.cos(z.im) * E, l * CR.sin(z.im) * E);
+  } else {
+    const l = glibcExp(z.re);
+    r = C(l * CR.cos(z.im), l * CR.sin(z.im));
+  }
+  errno = isinf(r.re) || isinf(r.im) ? ERANGE : 0;
+  return r;
+}
+
+const logTable: Table = [
+  [[INF, -P34], [INF, -P], [INF, -P], [INF, P], [INF, P], [INF, P34], [INF, N]],
+  [[INF, -P12], [U, U], [U, U], [U, U], [U, U], [INF, P12], [N, N]],
+  [[INF, -P12], [U, U], [-INF, -P], [-INF, P], [U, U], [INF, P12], [N, N]],
+  [[INF, -P12], [U, U], [-INF, -0], [-INF, 0], [U, U], [INF, P12], [N, N]],
+  [[INF, -P12], [U, U], [U, U], [U, U], [U, U], [INF, P12], [N, N]],
+  [[INF, -P14], [INF, -0], [INF, -0], [INF, 0], [INF, 0], [INF, P14], [INF, N]],
+  [[INF, N], [N, N], [N, N], [N, N], [N, N], [INF, N], [N, N]],
+];
+function clog(z: PyComplex): PyComplex {
+  if (nonfinite(z)) {
+    errno = 0;
+    return special(z, logTable);
+  }
+  const ax = Math.abs(z.re), ay = Math.abs(z.im);
+  let lr: number;
+  if (ax > CM_LARGE_DOUBLE || ay > CM_LARGE_DOUBLE) {
+    lr = glibcLog(CR.hypot(ax / 2, ay / 2)) + M_LN2;
+  } else if (ax < DBL_MIN && ay < DBL_MIN) {
+    if (ax > 0 || ay > 0) {
+      // (hypot(ax, ay) subnormal: rescaled)
+      lr = glibcLog(CR.hypot(ldexp(ax, DBL_MANT_DIG), ldexp(ay, DBL_MANT_DIG))) - DBL_MANT_DIG * M_LN2;
+    } else {
+      // (log(+/-0 +/- 0i))
+      errno = EDOM;
+      return C(-INF, CR.atan2(z.im, z.re));
+    }
+  } else {
+    const h = CR.hypot(ax, ay);
+    if (0.71 <= h && h <= 1.73) {
+      const am = ax > ay ? ax : ay, an = ax > ay ? ay : ax;
+      lr = glibcLog1p((am - 1) * (am + 1) + an * an) / 2;
+    } else lr = glibcLog(h);
+  }
+  errno = 0;
+  return C(lr, CR.atan2(z.im, z.re));
+}
+function clog10(z: PyComplex): PyComplex {
+  const r = clog(z);
+  return C(r.re / M_LN10, r.im / M_LN10);
+}
+
+// sin(z) = -i sinh(iz)
+function csin(z: PyComplex): PyComplex {
+  const s = csinh(C(-z.im, z.re));
   return C(s.im, -s.re);
+}
+
+const sinhTable: Table = [
+  [[INF, N], [U, U], [-INF, -0], [-INF, 0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[0, N], [U, U], [-0, -0], [-0, 0], [U, U], [0, N], [0, N]],
+  [[0, N], [U, U], [0, -0], [0, 0], [U, U], [0, N], [0, N]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[INF, N], [U, U], [INF, -0], [INF, 0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [N, N], [N, -0], [N, 0], [N, N], [N, N], [N, N]],
+];
+function csinh(z: PyComplex): PyComplex {
+  let r: PyComplex;
+  if (nonfinite(z)) {
+    if (isinf(z.re) && isfinite(z.im) && z.im !== 0) {
+      r = z.re > 0 ? C(copysign(INF, CR.cos(z.im)), copysign(INF, CR.sin(z.im))) : C(-copysign(INF, CR.cos(z.im)), copysign(INF, CR.sin(z.im)));
+    } else r = special(z, sinhTable);
+    errno = isinf(z.im) && !isnan(z.re) ? EDOM : 0;
+    return r;
+  }
+  if (Math.abs(z.re) > CM_LOG_LARGE_DOUBLE) {
+    const x1 = z.re - copysign(1, z.re);
+    r = C(CR.cos(z.im) * FD.sinh(x1) * E, CR.sin(z.im) * FD.cosh(x1) * E);
+  } else r = C(CR.cos(z.im) * FD.sinh(z.re), CR.sin(z.im) * FD.cosh(z.re));
+  errno = isinf(r.re) || isinf(r.im) ? ERANGE : 0;
+  return r;
+}
+
+const sqrtTable: Table = [
+  [[INF, -INF], [0, -INF], [0, -INF], [0, INF], [0, INF], [INF, INF], [N, INF]],
+  [[INF, -INF], [U, U], [U, U], [U, U], [U, U], [INF, INF], [N, N]],
+  [[INF, -INF], [U, U], [0, -0], [0, 0], [U, U], [INF, INF], [N, N]],
+  [[INF, -INF], [U, U], [0, -0], [0, 0], [U, U], [INF, INF], [N, N]],
+  [[INF, -INF], [U, U], [U, U], [U, U], [U, U], [INF, INF], [N, N]],
+  [[INF, -INF], [INF, -0], [INF, -0], [INF, 0], [INF, 0], [INF, INF], [INF, N]],
+  [[INF, -INF], [N, N], [N, N], [N, N], [N, N], [INF, INF], [N, N]],
+];
+// sqrt of x + iy, x, y >= 0: s = sqrt((x + hypot(x, y))/2), d = (y/2)/s, as
+// s = 2 sqrt(x/8 + hypot(x/8, y/8)) against overflow, and both scaled up
+// first when subnormal
+function csqrt(z: PyComplex): PyComplex {
+  if (nonfinite(z)) {
+    errno = 0;
+    return special(z, sqrtTable);
+  }
+  if (z.re === 0 && z.im === 0) return C(0, z.im);
+  let ax = Math.abs(z.re);
+  const ay = Math.abs(z.im);
+  let s: number;
+  if (ax < DBL_MIN && ay < DBL_MIN) {
+    ax = ldexp(ax, CM_SCALE_UP);
+    s = ldexp(Math.sqrt(ax + CR.hypot(ax, ldexp(ay, CM_SCALE_UP))), CM_SCALE_DOWN);
+  } else {
+    ax /= 8;
+    s = 2 * Math.sqrt(ax + CR.hypot(ax, ay / 8));
+  }
+  const d = ay / (2 * s);
+  errno = 0;
+  return z.re >= 0 ? C(s, copysign(d, z.im)) : C(d, copysign(s, z.im));
+}
+
+// tan(z) = -i tanh(iz)
+function ctan(z: PyComplex): PyComplex {
+  const s = ctanh(C(-z.im, z.re));
+  return C(s.im, -s.re);
+}
+
+const tanhTable: Table = [
+  [[-1, 0], [U, U], [-1, -0], [-1, 0], [U, U], [-1, 0], [-1, 0]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[-0, N], [U, U], [-0, -0], [-0, 0], [U, U], [-0, N], [-0, N]],
+  [[0, N], [U, U], [0, -0], [0, 0], [U, U], [0, N], [0, N]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[1, 0], [U, U], [1, -0], [1, 0], [U, U], [1, 0], [1, 0]],
+  [[N, N], [N, N], [N, -0], [N, 0], [N, N], [N, N], [N, N]],
+];
+// tanh(x+iy) = (tanh(x)(1+tan(y)^2) + i tan(y)(1-tanh(x)^2)) / (1+tan(y)^2 tanh(x)^2),
+// 1-tanh(x)^2 as 1/cosh(x)^2, or 4 exp(-2|x|) when |x| is large
+function ctanh(z: PyComplex): PyComplex {
+  let r: PyComplex;
+  if (nonfinite(z)) {
+    if (isinf(z.re) && isfinite(z.im) && z.im !== 0) {
+      r = C(z.re > 0 ? 1 : -1, copysign(0, 2 * CR.sin(z.im) * CR.cos(z.im)));
+    } else r = special(z, tanhTable);
+    errno = isinf(z.im) && isfinite(z.re) ? EDOM : 0;
+    return r;
+  }
+  if (Math.abs(z.re) > CM_LOG_LARGE_DOUBLE) {
+    r = C(copysign(1, z.re), 4 * CR.sin(z.im) * CR.cos(z.im) * glibcExp(-2 * Math.abs(z.re)));
+  } else {
+    const tx = FD.tanh(z.re), ty = CR.tan(z.im), cx = 1 / FD.cosh(z.re);
+    const txty = tx * ty, denom = 1 + txty * txty;
+    r = C((tx * (1 + ty * ty)) / denom, ((ty / denom) * cx) * cx);
+  }
+  errno = 0;
+  return r;
+}
+
+// _Py_c_quot (Objects/complexobject.c): Smith's algorithm, a zero divisor
+// EDOM, and the infinities and zeros C11 Annex G recovers from nan+nanj
+function cquot(a: PyComplex, b: PyComplex): PyComplex {
+  const abr = Math.abs(b.re), abi = Math.abs(b.im);
+  let re: number, im: number;
+  if (abr >= abi) {
+    if (abr === 0) {
+      errno = EDOM;
+      re = im = 0;
+    } else {
+      const ratio = b.im / b.re, denom = b.re + b.im * ratio;
+      re = (a.re + a.im * ratio) / denom;
+      im = (a.im - a.re * ratio) / denom;
+    }
+  } else if (abi >= abr) {
+    const ratio = b.re / b.im, denom = b.re * ratio + b.im;
+    re = (a.re * ratio + a.im) / denom;
+    im = (a.im * ratio - a.re) / denom;
+  } else re = im = NaN;
+  if (isnan(re) && isnan(im)) {
+    if ((isinf(a.re) || isinf(a.im)) && isfinite(b.re) && isfinite(b.im)) {
+      const x = copysign(isinf(a.re) ? 1 : 0, a.re), y = copysign(isinf(a.im) ? 1 : 0, a.im);
+      re = INF * (x * b.re + y * b.im);
+      im = INF * (y * b.re - x * b.im);
+    } else if ((isinf(abr) || isinf(abi)) && isfinite(a.re) && isfinite(a.im)) {
+      const x = copysign(isinf(b.re) ? 1 : 0, b.re), y = copysign(isinf(b.im) ? 1 : 0, b.im);
+      re = 0 * (a.re * x + a.im * y);
+      im = 0 * (a.im * x - a.re * y);
+    }
+  }
+  return C(re, im);
+}
+
+// _Py_c_abs: an infinite part gives inf, else a NaN part NaN; overflow ERANGE
+function cabs(z: PyComplex): number {
+  if (nonfinite(z)) {
+    if (isinf(z.re)) {
+      errno = 0;
+      return Math.abs(z.re);
+    }
+    if (isinf(z.im)) {
+      errno = 0;
+      return Math.abs(z.im);
+    }
+    return NaN;
+  }
+  const r = CR.hypot(z.re, z.im);
+  errno = isfinite(r) ? 0 : ERANGE;
+  return r;
+}
+
+const rectTable: Table = [
+  [[INF, N], [U, U], [-INF, 0], [-INF, -0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[0, 0], [U, U], [-0, 0], [-0, -0], [U, U], [0, 0], [0, 0]],
+  [[0, 0], [U, U], [0, -0], [0, 0], [U, U], [0, 0], [0, 0]],
+  [[N, N], [U, U], [U, U], [U, U], [U, U], [N, N], [N, N]],
+  [[INF, N], [U, U], [INF, -0], [INF, 0], [U, U], [INF, N], [INF, N]],
+  [[N, N], [N, N], [N, 0], [N, 0], [N, N], [N, N], [N, N]],
+];
+function crect(r: number, phi: number): PyComplex {
+  errno = 0;
+  if (!isfinite(r) || !isfinite(phi)) {
+    let z: PyComplex;
+    // (r infinite, phi finite and nonzero: infinities signed by cos phi, sin phi)
+    if (isinf(r) && isfinite(phi) && phi !== 0) {
+      z = r > 0 ? C(copysign(INF, CR.cos(phi)), copysign(INF, CR.sin(phi))) : C(-copysign(INF, CR.cos(phi)), -copysign(INF, CR.sin(phi)));
+    } else {
+      const [re, im] = rectTable[specialType(r)][specialType(phi)];
+      z = C(re, im);
+    }
+    // (EDOM: r a nonzero number and phi infinite)
+    errno = r !== 0 && !isnan(r) && isinf(phi) ? EDOM : 0;
+    return z;
+  }
+  if (phi === 0) return C(r, r * phi);
+  return C(r * CR.cos(phi), r * CR.sin(phi));
+}
+
+function mathError(): never {
+  if (errno === EDOM) raise(T.ValueError, "math domain error");
+  raise(T.OverflowError, "math range error");
 }
 
 newBuiltinModule("cmath", (m) => {
@@ -396,12 +787,14 @@ newBuiltinModule("cmath", (m) => {
     f.__name__ = name;
     m[name] = f;
   };
-  // As CPython, an infinite result from a finite argument is an OverflowError.
+  // (errno cleared, the function, then its errno raised, as CPython's
+  // Py_complex_protected converters)
   const unary = (name: string, f: (z: PyComplex) => PyComplex) =>
     fn(name, (x: any) => {
       const z = C(...arg(x));
+      errno = 0;
       const r = f(z);
-      if (Number.isFinite(z.re) && Number.isFinite(z.im) && (Math.abs(r.re) === Infinity || Math.abs(r.im) === Infinity)) raise(T.OverflowError, "math range error");
+      if (errno !== 0) mathError();
       return r;
     });
   m.pi = Math.PI;
@@ -411,36 +804,46 @@ newBuiltinModule("cmath", (m) => {
   m.nan = NaN;
   m.infj = C(0, Infinity);
   m.nanj = C(0, NaN);
-  unary("sqrt", (z) => csqrt(z.re, z.im));
-  unary("exp", (z) => cexp(z.re, z.im));
+  unary("sqrt", csqrt);
+  unary("exp", cexp);
   fn("log", (x: any, base: any = undefined) => {
-    const l = clog(...arg(x));
-    return base === undefined ? l : div(l, clog(...arg(base)));
+    // (x converted and its log taken before base is converted, as CPython's)
+    const z = C(...arg(x));
+    errno = 0;
+    let r = clog(z);
+    if (base !== undefined) r = cquot(r, clog(C(...arg(base))));
+    if (errno !== 0) mathError();
+    return r;
   });
-  unary("log10", (z) => {
-    const l = clog(z.re, z.im);
-    return C(l.re / Math.LN10, l.im / Math.LN10);
-  });
-  unary("sin", (z) => C(CR.sin(z.re) * FD.cosh(z.im), CR.cos(z.re) * FD.sinh(z.im)));
-  unary("cos", (z) => C(CR.cos(z.re) * FD.cosh(z.im), -CR.sin(z.re) * FD.sinh(z.im)));
-  unary("tan", (z) => div(C(CR.sin(z.re) * FD.cosh(z.im), CR.cos(z.re) * FD.sinh(z.im)), C(CR.cos(z.re) * FD.cosh(z.im), -CR.sin(z.re) * FD.sinh(z.im))));
-  unary("sinh", (z) => C(FD.sinh(z.re) * CR.cos(z.im), FD.cosh(z.re) * CR.sin(z.im)));
-  unary("cosh", (z) => C(FD.cosh(z.re) * CR.cos(z.im), FD.sinh(z.re) * CR.sin(z.im)));
-  unary("tanh", (z) => div(C(FD.sinh(z.re) * CR.cos(z.im), FD.cosh(z.re) * CR.sin(z.im)), C(FD.cosh(z.re) * CR.cos(z.im), FD.sinh(z.re) * CR.sin(z.im))));
+  unary("log10", clog10);
+  unary("sin", csin);
+  unary("cos", ccos);
+  unary("tan", ctan);
+  unary("sinh", csinh);
+  unary("cosh", ccosh);
+  unary("tanh", ctanh);
   unary("asin", casin);
   unary("acos", cacos);
   unary("atan", catan);
   unary("asinh", casinh);
   unary("acosh", cacosh);
   unary("atanh", catanh);
-  fn("phase", (x: any) => O.mkfloat(CR.atan2(arg(x)[1], arg(x)[0])));
+  fn("phase", (x: any) => {
+    const [re, im] = arg(x);
+    return O.mkfloat(CR.atan2(im, re));
+  });
   fn("polar", (x: any) => {
-    const [r, i] = arg(x);
-    return tuple([O.mkfloat(CR.hypot(r, i)), O.mkfloat(CR.atan2(i, r))]);
+    const z = C(...arg(x));
+    const phi = CR.atan2(z.im, z.re);
+    errno = 0;
+    const r = cabs(z);
+    if (errno !== 0) mathError();
+    return tuple([O.mkfloat(r), O.mkfloat(phi)]);
   });
   fn("rect", (r: any, phi: any) => {
-    const a = O.fv(r)!, p = O.fv(phi)!;
-    return C(a * CR.cos(p), a * CR.sin(p));
+    const z = crect(realArg(r), realArg(phi));
+    if (errno !== 0) mathError();
+    return z;
   });
   fn("isfinite", (x: any) => arg(x).every(Number.isFinite));
   fn("isinf", (x: any) => arg(x).some((v) => Math.abs(v) === Infinity));
