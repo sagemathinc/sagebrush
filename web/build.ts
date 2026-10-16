@@ -2,8 +2,9 @@
 //                                sagebrush-math.js, katex/, sagebrush-engine.wasm, sagebrush-raster.wasm}
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is embedded, the Unicode name table is not.
-import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync } from "node:fs";
+import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 const here = import.meta.dir;
 const shims: Record<string, string> = {
@@ -29,13 +30,36 @@ if (buildId !== currentBuildId(join(here, ".."))) throw new Error("build/cli is 
 // file's SHA-256 and uses it only if the bytes it fetched have it
 // (design/security.md, SEC-8D6-1: a cached copy is origin storage).
 mkdirSync(join(here, "dist"), { recursive: true });
+// (each mode's start, recorded apart: the library's chunks are made from
+// them, web/lib-chunks.mts)
+const STARTS: Record<string, string[]> = {
+  py: ["-c", "import json, re, math, fractions, collections, random, itertools, functools"],
+  sci: ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"],
+  sage: ["--sage", "-c", "pass"],
+  matlab: ["--matlab", "-c", "1;"],
+  magma: ["--magma", "-c", "1;"],
+};
+const recDir = mkdtempSync(join(tmpdir(), "sagebrush-precompile-"));
+const recordings: Record<string, any> = {};
+await Promise.all(Object.entries(STARTS).map(async ([mode, args]) => {
+  const out = join(recDir, mode + ".json");
+  const p = Bun.spawn(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: out, SAGEBRUSH_NO_COMPILE_CACHE: "1" }, stdout: "ignore", stderr: "pipe" });
+  if ((await p.exited) !== 0) throw new Error(`precompiling the library (${mode}): ${(await new Response(p.stderr).text()).slice(0, 500)}`);
+  recordings[mode] = JSON.parse(readFileSync(out, "utf8"));
+  if (recordings[mode].build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
+}));
+rmSync(recDir, { recursive: true, force: true });
+const { libChunks } = await import("./lib-chunks.mts");
+const { libFiles } = await import("../scripts/build-id.mjs");
+const { manifest: libManifest, chunks: libChunkFiles } = libChunks(libFiles(join(here, "..")), recordings, buildId);
+rmSync(join(here, "dist", "lib"), { recursive: true, force: true });
+mkdirSync(join(here, "dist", "lib"), { recursive: true });
+for (const [f, bytes] of libChunkFiles) writeFileSync(join(here, "dist", f), bytes);
+const LIB_CHUNKS = [...libChunkFiles.keys()];
+console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifest.chunks).map(([g, c]) => `${g} ${(c.src.size / 1e3).toFixed(0)}+${((c.pre?.size ?? 0) / 1e3).toFixed(0)} kB`).join(", "));
+// (the whole table, Sage's start and the scientific modules', as before)
 const prePath = join(here, "dist", "sagebrush-precompiled.json");
-rmSync(prePath, { force: true });
-for (const args of [["--sage", "-c", "pass"], ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"]]) {
-  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: prePath, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
-  if (r.exitCode !== 0) throw new Error(`precompiling the library: ${r.stderr.toString().slice(0, 500)}`);
-}
-if (JSON.parse(readFileSync(prePath, "utf8")).build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
+writeFileSync(prePath, JSON.stringify({ build: buildId, modules: { ...recordings.sci.modules, ...recordings.sage.modules } }));
 const precompiledHash = new Bun.CryptoHasher("sha256").update(readFileSync(prePath)).digest("hex");
 const result = await Bun.build(<any>{
   metafile: true,
@@ -357,6 +381,9 @@ copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.ht
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
 for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+// (the library's chunks)
+rmSync(join(here, "site", "public", "lib"), { recursive: true, force: true });
+cpSync(join(here, "dist", "lib"), join(here, "site", "public", "lib"), { recursive: true });
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
 // every page's Content-Security-Policy, in _headers (web/csp.ts)
