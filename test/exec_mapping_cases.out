@@ -1,0 +1,139 @@
+M M
+{'z': 6} [('set', 'x'), ('get', 'x'), ('get', 'y'), ('set', 'z'), ('get', 'print'), ('get', 'type'), ('get', 'locals'), ('get', 'type'), ('get', 'vars'), ('del', 'x')]
+['y']
+NameError: name 'y' is not defined [('del', 'y')]
+NameError: name 'q' is not defined
+['C', 'f', 'i', 'mm', 'r', 'x', 'z'] 5 5 1 [('set', 'x'), ('get', 'x'), ('set', 'x'), ('get', 'range'), ('set', 'i'), ('set', 'i'), ('set', 'mm'), ('set', 'C'), ('set', 'f'), ('get', 'f'), ('set', 'r')]
+[5, 6] ['C', 'f', 'i', 'mm', 'r', 'x', 'z']
+True
+50 False
+ValueError: boom
+43 <built-in function len> 7
+TypeError: 'Dflt' object does not support item assignment
+[0, 1]
+None
+None
+{'w': 3, 'v': 6}
+'miss' 'miss'
+set x
+get x
+{'x': 1}
+<built-in function len>
+NameError: name 'q' is not defined
+("name 'q' is not defined", None)
+N AttributeError: 'N' object has no attribute 'keys'
+K2 TypeError: K2.keys() returned a non-iterable (type int)
+K3 ['a', 'b', 'c']
+K4 ['b', 'z']
+TypeError: list indices must be integers or slices, not str
+TypeError: 'tuple' object does not support item assignment
+TypeError: locals must be a mapping or None, not int
+NameError: name 'y' is not defined
+NameError: name 'len' is not defined
+NameError: name 'len' is not defined
+1
+None
+NameError: name 'zz' is not defined
+5 6 7 8
+None
+6
+None
+e1 x2
+None
+g
+None
+['__firstlineno__', '__module__', '__qualname__', 'a']
+None
+9
+None
+'builtins'
+None None
+None
+'G'
+'G'
+None
+'G'
+None
+None
+None
+NameError: name 'len' is not defined
+NameError: name 'x' is not defined
+NameError: name 'y' is not defined
+('<string>', None, False)
+3
+None
+ImportError: attempted relative import with no known parent package
+ValueError: boom print
+None {'r': 7} [('set', 'x', False), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+None {'r': 7} [('set', 'x', False), ('del', 'x'), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+None {'r': 7} [('set', 'x', False), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+None {'i': 0, 'r': 7} [('set', 'i', False), ('set', 'x', False), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+set x False
+set x True
+del x
+None {}
+[]
+None
+False
+None
+ret
+get x
+get x
+get x
+get x
+42 42 42 1 42
+set y
+get y
+set r
+del y
+['r', 'x']
+get print
+get sorted
+get locals
+get globals
+get locals
+['r', 'x'] True
+locals custom custom
+globals custom custom
+vars custom custom
+dir custom custom
+eval custom custom
+exec custom custom
+'dict'
+[false, "record", "    pass", [null, [["clear", null, null]]]]
+[false, "record", "    raise TypeError(\"body\")", [["TypeError", "body", "ValueError"], [["clear", "ValueError", "inner"]]]]
+[false, "record", "    raise", [["ValueError", "inner", null], [["clear", "ValueError", "inner"]]]]
+[false, "record", "break", [null, [["clear", null, null]]]]
+[false, "record", "continue", [null, [["clear", null, null]]]]
+[false, "record", "nested", [null, [["clear", null, null]]]]
+[false, "reraise", "    pass", [["RuntimeError", "No active exception to reraise", null], [["clear", null, null]]]]
+[false, "reraise", "    raise TypeError(\"body\")", [["ValueError", "inner", null], [["clear", "ValueError", "inner"]]]]
+[false, "reraise", "    raise", [["ValueError", "inner", null], [["clear", "ValueError", "inner"]]]]
+[false, "reraise", "break", [["RuntimeError", "No active exception to reraise", null], [["clear", null, null]]]]
+[false, "reraise", "continue", [["RuntimeError", "No active exception to reraise", null], [["clear", null, null]]]]
+[false, "reraise", "nested", [["RuntimeError", "No active exception to reraise", null], [["clear", null, null]]]]
+[false, "new", "    pass", [["KeyError", "'c'", null], [["clear", null, null]]]]
+[false, "new", "    raise TypeError(\"body\")", [["KeyError", "'c'", "ValueError"], [["clear", "ValueError", "inner"]]]]
+[false, "new", "    raise", [["KeyError", "'c'", "ValueError"], [["clear", "ValueError", "inner"]]]]
+[false, "new", "break", [["KeyError", "'c'", null], [["clear", null, null]]]]
+[false, "new", "continue", [["KeyError", "'c'", null], [["clear", null, null]]]]
+[false, "new", "nested", [["KeyError", "'c'", null], [["clear", null, null]]]]
+[true, "record", "    pass", [null, [["clear", "LookupError", "outer"]]]]
+[true, "record", "    raise TypeError(\"body\")", [["TypeError", "body", "ValueError"], [["clear", "ValueError", "inner"]]]]
+[true, "record", "    raise", [["ValueError", "inner", "LookupError"], [["clear", "ValueError", "inner"]]]]
+[true, "record", "break", [null, [["clear", "LookupError", "outer"]]]]
+[true, "record", "continue", [null, [["clear", "LookupError", "outer"]]]]
+[true, "record", "nested", [null, [["clear", "LookupError", "outer"]]]]
+[true, "reraise", "    pass", [["LookupError", "outer", null], [["clear", "LookupError", "outer"]]]]
+[true, "reraise", "    raise TypeError(\"body\")", [["ValueError", "inner", "LookupError"], [["clear", "ValueError", "inner"]]]]
+[true, "reraise", "    raise", [["ValueError", "inner", "LookupError"], [["clear", "ValueError", "inner"]]]]
+[true, "reraise", "break", [["LookupError", "outer", null], [["clear", "LookupError", "outer"]]]]
+[true, "reraise", "continue", [["LookupError", "outer", null], [["clear", "LookupError", "outer"]]]]
+[true, "reraise", "nested", [["LookupError", "outer", null], [["clear", "LookupError", "outer"]]]]
+[true, "new", "    pass", [["KeyError", "'c'", "LookupError"], [["clear", "LookupError", "outer"]]]]
+[true, "new", "    raise TypeError(\"body\")", [["KeyError", "'c'", "ValueError"], [["clear", "ValueError", "inner"]]]]
+[true, "new", "    raise", [["KeyError", "'c'", "ValueError"], [["clear", "ValueError", "inner"]]]]
+[true, "new", "break", [["KeyError", "'c'", "LookupError"], [["clear", "LookupError", "outer"]]]]
+[true, "new", "continue", [["KeyError", "'c'", "LookupError"], [["clear", "LookupError", "outer"]]]]
+[true, "new", "nested", [["KeyError", "'c'", "LookupError"], [["clear", "LookupError", "outer"]]]]
+inner None
