@@ -277,6 +277,8 @@ def describe(e, mode=None):
         out.append("    ...[%d more differs lines: --json has them]" % (len(differs) - _DIFFERS))
     if e.get("alternative"):
         out.append("    instead: " + _clip(e["alternative"], _PART))
+    if e.get("source"):
+        out.append("    source: " + _clip(e["source"], _PART))
     return _clip("\n".join(out), HIT_CHARS)
 
 

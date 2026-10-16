@@ -65,6 +65,21 @@ def _index_module(name):
     return next((m for m, _, _ in sorted(MODULES, key=lambda t: -len(t[0])) if name.startswith(m + ".")), name.rsplit(".", 1)[0])
 
 
+def resolve(name):
+    """The object a catalog name of Python mode names, or None (for its link
+    to the source: lib/_catalog.py SOURCES)"""
+    index_name = next((m for m, _, _ in sorted(MODULES, key=lambda t: -len(t[0])) if name.startswith(m + ".")), None)
+    if index_name is None:
+        return None
+    try:
+        obj = _module(*next((mn, a) for i, mn, a in MODULES if i == index_name))
+        for part in name[len(index_name) + 1:].split("."):
+            obj = getattr(obj, part)
+        return obj
+    except Exception:
+        return None
+
+
 def public_names():
     """Every public function and class of the modules Python mode indexes,
     by their index names (the catalog gate: each has an entry or is in

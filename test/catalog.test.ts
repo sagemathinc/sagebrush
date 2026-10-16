@@ -104,6 +104,30 @@ test("catalog gate 1: a file must be a JSON array of entries", () => {
   }
 });
 
+test("an entry links to the lines of lib/ that implement it, at the commit given, and to none without one", () => {
+  const code = [
+    "import json, re, _catalog as c",
+    "es = {e['name']: e for e in c.index('python')}",
+    "src = es['numpy.linalg.solve'].get('source', '')",
+    "m = re.match(r'^https://github\\.com/sagemathinc/sagebrush/blob/abc123/lib/(\\S+)#L(\\d+)-L(\\d+)$', src)",
+    "lines = c._lib_text(m.group(1)).split('\\n') if m else []",
+    "first = lines[int(m.group(2)) - 1] if m else ''",
+    "span = [c._span(t.split('\\n'), 1) for t in ['@dec\\ndef f():\\n    x = 1\\n\\n    # c\\n    return x\\n\\n# after\\ndef g(): pass',",
+    "        'class A:\\n    def m(self):\\n        pass\\n\\n    y = 2\\nz = 3', 'def h(): return 1\\nk = 2']]",
+    "print(json.dumps([bool(m), first, m and int(m.group(3)) > int(m.group(2)), sum(1 for e in es.values() if 'source' in e), len(es), span, c.validate({k: v for k, v in dict(es['numpy.linalg.solve'], examples=[{'code': 'x', 'expected': ''}]).items() if k in c.FIELDS})]))",
+  ].join("\n");
+  const run = (ref: string) => JSON.parse(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_SOURCE_REF: ref }, maxBuffer: 64 * 2 ** 20 }));
+  const [ok, first, spans, linked, total, span, errs] = run("abc123");
+  assert.equal(ok, true);
+  assert.match(first, /def solve\(/);
+  assert.equal(spans, true);
+  assert.ok(linked >= total / 2, `${linked} of ${total} entries linked`);
+  assert.deepEqual(span, [6, 5, 1]);
+  assert.deepEqual(errs, []);
+  const none = run("");
+  assert.equal(none[3], 0);
+});
+
 test("catalog coverage is reported per mode", () => {
   const cov = JSON.parse(cli(["-m", "_catalog", "--coverage"]));
   assert.deepEqual(Object.keys(cov), ["python", "sage", "magma", "matlab"]);

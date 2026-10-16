@@ -332,6 +332,14 @@ newBuiltinModule("sys", (m) => {
   // catalog.gen.js: JSON text), for lib/_catalog.py away from a source tree;
   // None in the browser, whose search reads the built indexes
   m._sagebrush_catalog = (globalThis as any).__SAGEBRUSH_CATALOG__ ?? null;
+  // the commit the CLI bundle was built from (a clean tree's; else None),
+  // and its library's own files by their path in lib/, for the catalog's
+  // links to the source (lib/_catalog.py source_url)
+  m._sagebrush_commit = (globalThis as any).__SAGEBRUSH_COMMIT__ ?? null;
+  m._sagebrush_lib_file = builtin((rel: any) => {
+    const lib = (globalThis as any).__PYJS_LIB__;
+    return lib !== undefined && typeof rel === "string" && Object.prototype.hasOwnProperty.call(lib, rel) ? lib[rel] : null;
+  }, "_sagebrush_lib_file");
   sysRef.m = m;
   m.stdout = stdout;
   m.stderr = stderr;
