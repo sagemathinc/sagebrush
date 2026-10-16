@@ -39,3 +39,5 @@ A := RealField(50)!(2/7); B := RealField(80)!(2/7); B/A; A/B; B - A; A - B; A eq
 RealField(2)!(5/4); RealField(2)!(9/4); RealField(2)!(11/4); RealField(2)!(13/4); RealField(3)!(1125/1000); RealField(2)!(249999/200000);
 // a square root at its own scale (CORR-0C6-3)
 Sqrt(RealField(10)!(1/10^30)); Sqrt(RealField(10)!(4/10^40)); Sqrt(RealField(50)!(1/10^120)); Sqrt(RealField(30)!(9*10^60)); Sqrt(RealField(30)!(2/10^50)); Sqrt(RealField(30)!2^-301);
+// a real of precision 1 prints two significant digits
+R1 := RealField(1); R1!(5/2); R1!(-5/2); R1!(1/3); R1!3; R1!(15/4); R1!(9/4); R1!100; R1!123; R1!0; R1!(1/1000); R1!(10^6); R1!(1/20);
