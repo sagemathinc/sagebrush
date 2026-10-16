@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
-import { boardLink, layout, isBoard, isNote, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
+import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
 import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
@@ -485,17 +485,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (a question answered with its controls: kept in the document, as any
   // change; not in a version being looked at, which is not the document)
-  board.onAnswer = (id, patch) => {
+  const answer = (id: string, patch: { answer?: AskAnswer | null; note?: string | null }) => {
     if (viewing) return;
     editor.answer(id, patch).catch(fail);
   };
+  board.onAnswer = answer;
+  // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
+  board.onAskResize = () => { redraw().catch(fail); };
   board.onToggleCode = (id) => {
     if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
     if (!flipped.delete(id)) flipped.add(id);
     redraw().catch(fail);
   };
 
-  const heightKey = (n: MeasuredNote, w: number) => JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w]);
+  // (a question's height also as its fields are open and as far as it has grown: UI-448-2)
+  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0] : null; };
+  const atLeastGrown = (n: MeasuredNote, h: number) => { const a = (n as { ask?: DocAsk }).ask; return a ? Math.max(h, board.askGrown.get(a.id) ?? 0) : h; };
+  const heightKey = (n: MeasuredNote, w: number) => JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w, askState(n)]);
   const widthKey = (n: MeasuredNote, max: number) => JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
   // (code items' heights measured with the rest for one layout: premeasure)
   const codeHeights = new Map<string, number>();
@@ -508,7 +514,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     const k = heightKey(n, w);
     let h = heights.get(k);
-    if (h === undefined) heights.set(k, (h = board.measure({ ...n, kind: "note", image: n.img }, w)));
+    if (h === undefined) heights.set(k, (h = atLeastGrown(n, board.measure({ ...n, kind: "note", image: n.img }, w))));
     return h;
   }
   // (and a `fit` note's width)
@@ -542,7 +548,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       }
       if (hs.size) {
         const got = board.measureMany([...hs.values()].map(([n, w]) => ({ it: { ...n, kind: "note" as const, image: n.img, ...(n.code !== undefined ? { order: 1 } : {}) }, w })));
-        [...hs].forEach(([k, [n]], i) => (n.code !== undefined ? codeHeights : heights).set(k, got[i]));
+        [...hs].forEach(([k, [n]], i) => (n.code !== undefined ? codeHeights : heights).set(k, atLeastGrown(n, got[i])));
       }
       return undefined;
     }
@@ -1798,6 +1804,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     $("ttwhen").textContent = `Version ${i + 1} of ${vs.length} · ${new Date(v.ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
     ($("ttrevert") as HTMLButtonElement).disabled = i === vs.length - 1;
     viewing = boardHistory!.docAt(v.time);
+    // (a version being looked at: its questions shown, not answered, CORR-448-3)
+    board.onAnswer = null;
     redraw().catch(fail);
   }
   /** Close the bar: the board as it is again (`now`: drawn at once). */
@@ -1805,6 +1813,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if ($("tt").hidden) return;
     $("tt").hidden = true;
     viewing = null;
+    board.onAnswer = answer;
     if (liveCode) board.setCode(liveCode);
     liveCode = null;
     if (now) redraw().catch(fail);
