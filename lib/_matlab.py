@@ -4107,11 +4107,12 @@ def randi_(r, *args):
     lo, hi = (1, int(ra[0])) if ra.size == 1 else (int(ra[0]), int(ra[1]))
     if hi < lo:
         raise _err("randi: the range must have imin <= imax (imax >= 1 for randi(imax)).")
-    d, cls = _rand_class(args, "randi", ("double", "single", "int8", "uint8", "int16", "uint16", "int32", "uint32")) if args else ((1, 1), None)
-    # (the range within the class's exactly represented integers, as the page requires)
-    top = {"double": 2.0 ** 53, "single": 2.0 ** 24}.get(cls or "double")
-    if top is not None and (abs(lo) > top or abs(hi) > top) or cls in _INTS and not (_INTS[cls][1] <= lo and hi <= _INTS[cls][2]):
-        raise _err("randi: the range [%d %d] is outside what class '%s' holds." % (lo, hi, cls or "double"))
+    d, cls = _rand_class(args, "randi", ("double", "single", "int8", "uint8", "int16", "uint16", "int32", "uint32", "logical")) if args else ((1, 1), None)
+    # (the range's integers sampled exactly, in double, then converted to the class, which
+    # saturates as the page says: past 2^53, or single's 2^24, they aren't exact)
+    top = 2.0 ** 24 if cls == "single" else 2.0 ** 53
+    if abs(lo) > top or abs(hi) > top:
+        raise _err("randi: the range [%d %d] is past the integers %s holds exactly: not supported in Sagebrush." % (lo, hi, "single" if cls == "single" else "a double"))
     n = _prod(d)
     u = _rng[0].random_sample(n) if n else np.zeros(0)
     v = lo + np.floor(u * (hi - lo + 1))
@@ -7229,7 +7230,13 @@ def _conv(m, item, width, prec):
 def _sprintf(fmt, args):
     f = _escapes(fmt)
     segs = _parse_format(f)
-    items = _fmt_items(args)
+    items = []
+    # (the input argument each item comes from: one %s takes successive codes of one argument only)
+    owner = []
+    for j, a in enumerate(args):
+        its = _fmt_items([a])
+        items.extend(its)
+        owner.extend([j] * len(its))
     specs = [s for s in segs if type(s) is not str]
     if not specs:
         return "".join(segs)
@@ -7289,7 +7296,7 @@ def _sprintf(fmt, args):
             if s.group("conv") == "s" and _is_code(item):
                 # (one %s prints successive character codes, as long as they are codes)
                 j = k
-                while j < len(items) and _is_code(items[j]):
+                while j < len(items) and owner[j] == owner[k] and _is_code(items[j]):
                     j += 1
                 out.append(_pyspec(s, "s", width, prec) % "".join(chr(int(float(v))) for v in items[k:j]))
                 k = j
@@ -7300,6 +7307,7 @@ def _sprintf(fmt, args):
                 # a string with a numeric conversion: its characters, one by one
                 codes = [float(ord(c)) for c in item]
                 items[k:k + 1] = codes
+                owner[k:k + 1] = [owner[k]] * len(codes)
                 if not codes:
                     continue
                 item = items[k]
@@ -10108,9 +10116,9 @@ def rng_n(nargout, *args):
                 import time
                 seed = int(time.time() * 1000) % 4294967296
             else:
-                # (a generator named alone: twister keeps the seed; another is refused)
+                # (a generator named alone is rng(0, generator), as rng's page says; only twister)
                 _rng_generator(a)
-                seed = int(_rng_seed[0])
+                seed = 0
         else:
             seed = _rng_seed_arg(a)
         _rng[0] = np.random.RandomState(seed if seed != 0 else 5489)
