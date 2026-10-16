@@ -14,6 +14,7 @@
 
 import * as FD from "./fdlibm";
 import { glibcLog1p } from "./libm";
+import { pollInterrupt } from "./ops";
 
 // ------------------------------------------------------------ double-double arithmetic
 // (a value hi + lo with |lo| <= ulp(hi)/2; the operations below are good to about 2^-104
@@ -657,8 +658,10 @@ export function hypot(x: number, y: number): number {
 export function hypotN(xs: number[]): number {
   if (xs.length === 2) return hypot(xs[0], xs[1]);
   let max = 0, nan = false;
-  for (const x of xs) {
-    const a = Math.abs(x);
+  // (Stop polled every 1024 coordinates in both passes)
+  for (let i = 0; i < xs.length; i++) {
+    const a = Math.abs(xs[i]);
+    if ((i & 1023) === 1023) pollInterrupt();
     if (a === Infinity) return Infinity;
     if (a !== a) nan = true;
     else if (a > max) max = a;
@@ -667,9 +670,10 @@ export function hypotN(xs: number[]): number {
   if (max === 0) return 0;
   const e = ilogb(max);
   let s: DD = [0, 0];
-  for (const x of xs) {
-    const v = scale(Math.abs(x), -e);
+  for (let i = 0; i < xs.length; i++) {
+    const v = scale(Math.abs(xs[i]), -e);
     s = add(s, twoProd(v, v));
+    if ((i & 1023) === 1023) pollInterrupt();
   }
   return roundScaled(sqrt(s), e);
 }
