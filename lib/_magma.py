@@ -848,6 +848,34 @@ def _int_index(j):
     return isinstance(j, int) and not isinstance(j, bool)
 
 
+def _first_outside(r, n):
+    """The first place k (1-based) and member j of the range r outside
+    [1 .. n], from its ends without walking it (HARD-A57-1), or None."""
+    size = r.size()
+    if size == 0:
+        return None
+    if not 1 <= r.a <= n:
+        return 1, r.a
+    last = r.a + (size - 1) * r.c
+    if 1 <= last <= n:
+        return None
+    # the first member past n (going up) or below 1 (going down)
+    k = (n - r.a) // r.c + 2 if r.c > 0 else (r.a - 1) // (-r.c) + 2
+    return k, r.a + (k - 1) * r.c
+
+
+def _admit_selection(i, n, pos, outside):
+    """An index list's checks before any element is taken: a range's
+    members outside [1 .. n] from its ends (outside(k, j) says it), then
+    the result's size against _COLLECT_MAX (HARD-A57-1)."""
+    if isinstance(i, MRange):
+        bad = _first_outside(i, n)
+        if bad is not None:
+            raise outside(*bad)
+        if i.size() > _COLLECT_MAX:
+            raise MagmaError("a selection of more than %d elements is not supported yet" % _COLLECT_MAX, "'[]'", True, pos)
+
+
 def _index(s, i, pos=None):
     """s[i], with Magma's rules and words for each kind of s (checked
     against Magma): an integer index; a sequence of them (a range too)
@@ -864,6 +892,7 @@ def _index(s, i, pos=None):
             n = s.size() if isinstance(s, MRange) else len(s)
             if n == 0:
                 raise MagmaError("Illegal null sequence", "'[]'", True, pos)
+            _admit_selection(i, n, pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
             out = []
             for j in i:
                 if not _int_index(j):
@@ -882,6 +911,7 @@ def _index(s, i, pos=None):
     if isinstance(s, str):
         if isinstance(i, (MSeq, MRange)):
             # (an index outside the string is named by its place in the list)
+            _admit_selection(i, len(s), pos, lambda k, j: MagmaError("Index %d (%d) should be in the range [1 .. %d]" % (k, j, len(s)), "'[]'", True, pos))
             out = []
             for k, j in enumerate(i):
                 if not _int_index(j):
@@ -894,6 +924,7 @@ def _index(s, i, pos=None):
         return s[i - 1]
     if isinstance(s, MSet) and s.kind == "indexed":
         if isinstance(i, (MSeq, MRange)):
+            _admit_selection(i, len(s.items), pos, lambda k, j: MagmaError("Sequence element not defined", "'[]'", True, pos))
             out = []
             for j in i:
                 if not _int_index(j):

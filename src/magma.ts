@@ -1311,7 +1311,13 @@ class Parser {
   postfix(): string {
     let e = this.primary();
     let chainAt = ""; // the first "[" of consecutive indexes
+    let links = 0;
     while (true) {
+      // a chain of calls and indexes nests its translation: past a limit it
+      // is refused in words, before any host limit (HARD-A57-2)
+      if ((this.at("(") || this.at("[")) && ++links > MAX_CHAIN) {
+        this.reject(this.peek(), `a chain of more than ${MAX_CHAIN} calls or indexes is not supported yet`);
+      }
       if (this.at("(")) {
         this.next();
         const a = this.args(")");
@@ -1729,6 +1735,9 @@ class Parser {
     return `${ctor}([${elems.join(", ")}], universe=${universe})`;
   }
 }
+
+/** The most calls and indexes one chain such as S[1][2](x) may have. */
+const MAX_CHAIN = 64;
 
 /** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
 type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok };
