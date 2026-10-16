@@ -33,7 +33,7 @@ test("a SyntaxError's attributes, args and str() are CPython's; compile(..., 'si
   cases("syntax_error_cases.py");
 });
 
-test("Sage, Magma and MATLAB have no limit on an integer's digits, as those systems", () => {
+test("Sage, Magma and MATLAB have no CPython-style 4300-digit limit on an integer's digits, as those systems (Sagebrush's own ceiling remains: int-digit-limits.test.ts)", () => {
   const run = (args: string[]) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", ...args], { encoding: "utf8" }).trim();
   assert.equal(run(["--sage", "-c", "print(len(str(2^20000)), len(str(int(2)**20000)))"]), "6021 6021");
   assert.equal(run(["--magma", "-c", "print #Sprint(2^20000);"]), "6021");
