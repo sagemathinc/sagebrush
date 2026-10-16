@@ -1283,8 +1283,10 @@ class Emitter {
     // element (MATLAB's comma-separated list on the left, as [S.a] = deal(A1,A2,A3) fills S(1..3).a)
     // ([S(i).a] = ... too: the elements S(i) selects)
     const csIdx = (lv: LValue) => lv.path.length === 2 && lv.path[0]!.k === "index" && !(lv.path[0] as Extract<Expr, { k: "index" }>).brace && lv.path[1]!.k === "field";
+    // ([C{i}] = ... and [C{:}] = ...: the cells of a cell array the braces select, one output each)
+    const csBrace = (lv: LValue) => lv.path.length === 1 && lv.path[0]!.k === "index" && (lv.path[0] as Extract<Expr, { k: "index" }>).brace;
     const csField = (lv: LValue | null): lv is LValue =>
-      !!lv && this.isVar(lv.name, scope) && ((lv.path.length === 1 && lv.path[0]!.k === "field") || csIdx(lv));
+      !!lv && this.isVar(lv.name, scope) && ((lv.path.length === 1 && lv.path[0]!.k === "field") || csIdx(lv) || csBrace(lv));
     const subs: string[] = [];
     const poss: string[] = [];
     const counts: string[] = s.lhs.map((lv, k) => {
@@ -1292,7 +1294,7 @@ class Emitter {
       poss[k] = "None";
       if (!csField(lv)) return "1";
       const c = this.fresh();
-      if (csIdx(lv)) {
+      if (csIdx(lv) || csBrace(lv)) {
         const p0 = lv.path[0] as Extract<Expr, { k: "index" }>;
         p0.frame.code = this.varRead(lv.name, scope);
         subs[k] = this.fresh();
@@ -1300,7 +1302,7 @@ class Emitter {
       }
       // (the positions once, their count admitted before they are built, reused by the assignment)
       poss[k] = this.fresh();
-      this.emit(`${poss[k]} = _m.cs_positions(${this.varRead(lv.name, scope)}, ${subs[k]})`);
+      this.emit(`${poss[k]} = _m.${csBrace(lv) ? "cs_brace_positions" : "cs_positions"}(${this.varRead(lv.name, scope)}, ${subs[k]})`);
       this.emit(`${c} = _m.cs_count(${poss[k]})`);
       return c;
     });
@@ -1315,7 +1317,9 @@ class Emitter {
     this.emit(`${t} = _m.nout(${code}, ${n})`);
     let off = "0";
     s.lhs.forEach((lv, k) => {
-      if (lv && csField(lv)) {
+      if (lv && csField(lv) && csBrace(lv)) {
+        this.emit(`${pyName(lv.name)} = _m.set_brace_cs(${this.varRead(lv.name, scope)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
+      } else if (lv && csField(lv)) {
         const f = (lv.path[lv.path.length - 1] as Extract<Expr, { k: "field" }>).name;
         this.emit(`${pyName(lv.name)} = _m.set_field_cs(${this.varRead(lv.name, scope)}, ${JSON.stringify(f)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
       } else if (lv) this.store(lv, `${t}[${off}]`, scope);

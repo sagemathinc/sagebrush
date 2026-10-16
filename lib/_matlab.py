@@ -417,6 +417,10 @@ def _int_round(r, cls):
     dt, lo, hi = _INTS[cls]
     r = np.asarray(r)
     if r.dtype.kind == "c":
+        # (a complex integer array is not represented: refused rather than its imaginary part dropped;
+        # a zero imaginary part leaves a real array)
+        if np.any(r.imag != 0):
+            raise _err("Complex %s values are not supported in Sagebrush." % cls)
         r = r.real
     if r.dtype.kind in "iu":
         # (the bounds inside the source class's own range, which clip needs)
@@ -2167,6 +2171,30 @@ def cs_count(pos):
     return max(len(pos), 1) if pos is not None else 1
 
 
+def cs_brace_positions(c, subs):
+    """the linear indices (1-based) of the cells [c{subs}] = ... sets, their count admitted first
+    (as cs_positions); None for a value that is not a cell array (one output)"""
+    if type(c) is not Cell:
+        return None
+    try:
+        k = _cs_cardinality(_dims(c), list(subs))
+    except MatlabError:
+        raise _err("[C{...}] = ... beyond the end of C (growing it) is not supported in Sagebrush.")
+    _cs_admit(k, "[C{...}] = ...")
+    lin = _box(np.arange(1, _numel(c) + 1, dtype=np.float64).reshape(_stored(_dims(c))))
+    return [int(x) for x in _farr(index(lin, list(subs))).reshape(-1)]
+
+
+def set_brace_cs(c, vals, subs, pos=None):
+    """[c{subs}] = vals: each selected cell set to the next value (pos: cs_brace_positions)"""
+    vals = list(vals)
+    if type(c) is not Cell or pos is None:
+        return assign(c, [("b", list(subs))], cp(vals[0]))
+    for k, v in zip(pos, vals):
+        c = assign(c, [("b", [float(k)])], cp(v))
+    return c
+
+
 def set_field_cs(s, f, vals, subs=None, pos=None):
     """[s.f] = vals or [s(subs).f] = vals: each selected element's field f set to the next value
     (pos: cs_positions of s and subs)"""
@@ -3533,7 +3561,8 @@ def display(name, v):
         t = type(v)
         if head:
             h = head[0].strip()
-        elif (t is np.ndarray or t is complex) and _numel(v) > 1:
+        elif (t is np.ndarray or t is complex) and _numel(v) > 1 and _format["num"] != "rat":
+            # (with format rat the documentation's heading has no size: beta's, log2's, rat's pages)
             h = _dimstr(_dims(v)) + (" complex" if _arr(v).dtype.kind == "c" else "")
         else:
             h = ""
@@ -3830,16 +3859,33 @@ def flintmax_(*a):
     return _float_limit("flintmax", a, 9007199254740992.0, 16777216.0)
 
 
+def _int_limit(name, a, k):
+    """intmax and intmin: of int32, the integer class named, or of "like", p's class"""
+    if len(a) == 2 and _istext(a[0]) and _text(a[0]).lower() == "like":
+        c = class_(a[1])
+        if c not in _INTS:
+            raise _err("%s: the prototype p of \"like\", p must be an integer." % name)
+        if _isnumlike(a[1]) and _arr(a[1]).dtype.kind == "c":
+            raise _err("%s(\"like\", p) for a complex integer p is not supported in Sagebrush." % name)
+    elif len(a) == 1 and _istext(a[0]):
+        c = _text(a[0])
+    elif not a:
+        c = "int32"
+    else:
+        raise _err("%s: specify the name of an integer class, or \"like\", p." % name)
+    if c not in _INTS:
+        raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
+    return np.array([[_INTS[c][k]]], dtype=_INTS[c][0])
+
+
 @_bs("intmax")
-def intmax_(cls=None):
-    c = _text(cls) if cls is not None else "int32"
-    return np.array([[_INTS[c][2]]], dtype=_INTS[c][0])
+def intmax_(*a):
+    return _int_limit("intmax", a, 2)
 
 
 @_bs("intmin")
-def intmin_(cls=None):
-    c = _text(cls) if cls is not None else "int32"
-    return np.array([[_INTS[c][1]]], dtype=_INTS[c][0])
+def intmin_(*a):
+    return _int_limit("intmin", a, 1)
 
 
 @_bs("eye")
@@ -4938,18 +4984,54 @@ def median_(x, *args):
     return _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
 
 
-@_bs("mode")
-def mode_(x, *args):
-    def md(A, ax):
+@_bi("mode")
+def mode_(nargout, x, *args):
+    """[M, F, C] = mode(A, dim): as mode's page says, NaN is ignored, the smallest of equally
+    frequent values is M, F counts it (double), C holds every value as frequent, sorted, as a
+    column; M keeps A's class"""
+    if _arr(x).dtype.kind == "c":
+        raise _err("mode of complex numbers is not supported in Sagebrush.")
+    store = []
+
+    def slices(A, ax):
         A2 = np.moveaxis(A, ax, -1)
-        shp = A2.shape[:-1]
-        flat = A2.reshape((-1, A2.shape[-1]))
-        out = []
-        for row in flat:
+        res = []
+        for row in A2.reshape((-1, A2.shape[-1])):
+            row = row[~np.isnan(row)]
             vals, counts = np.unique(row, return_counts=True)
-            out.append(float(vals[np.argmax(counts)]) if vals.size else _math.nan)
-        return np.array(out).reshape(shp if shp else (1,))
-    return _reduce(x, args, md, "mode", out_cls="double")
+            if vals.size:
+                top = counts.max()
+                res.append((float(vals[np.argmax(counts)]), float(top), vals[counts == top]))
+            else:
+                res.append((_math.nan, 0.0, None))
+        return A2.shape[:-1] or (1,), res
+
+    def part(k):
+        def f(A, ax):
+            shp, res = slices(A, ax)
+            if k < 2:
+                return np.array([r[k] for r in res]).reshape(shp)
+            out = []
+            for r in res:
+                out.append(len(store))
+                store.append(r[2])
+            return np.array(out, dtype=float).reshape(shp)
+        return f
+    cls = class_(x)
+    M = _reduce(x, args, part(0), "mode", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
+    if nargout < 2:
+        return M
+    F = _reduce(x, args, part(1), "mode", out_cls="double")
+    if nargout < 3:
+        return [M, F]
+    I = _reduce(x, args, part(2), "mode", empty_value=-1.0, out_cls="double")
+    cells = []
+    for i in np.asarray(_arr(I), dtype=float).reshape(-1):
+        v = store[int(i)] if i >= 0 else None
+        if v is None:
+            raise _err("mode: C for values that are all NaN, or for no values, is not supported in Sagebrush.")
+        cells.append(_finish(_contig(np.asarray(v, dtype=float).reshape((1, -1))), class_(M)))
+    return [M, F, Cell(cells, _dims(I))]
 
 
 def _var_impl(x, args, sq):
@@ -6272,10 +6354,19 @@ def expm_(x):
 # ---- polynomials, sets, interpolation
 
 
-@_bs("polyval")
-def polyval_(p, x):
+@_bi("polyval")
+def polyval_(nargout, p, x, S=None, mu=None):
+    """polyval(p, x), and polyval(p, x, [], mu) at (x - mu(1))/mu(2) as its page says; the error
+    estimate delta is not computed"""
+    if nargout >= 2:
+        raise _err("[y, delta] = polyval(...): the error estimate delta is not supported in Sagebrush.")
     c = _farr(p).reshape(-1)
     X = _farr(x)
+    if mu is not None:
+        m = _farr(mu).reshape(-1)
+        if m.size != 2:
+            raise _err("polyval: centerScale must be a two-element vector.")
+        X = (X - m[0]) / m[1]
     y = np.zeros(X.shape, dtype=np.complex128 if X.dtype.kind == "c" or c.dtype.kind == "c" else np.float64)
     for a in c:
         y = y * X + a
@@ -6283,13 +6374,23 @@ def polyval_(p, x):
 
 
 @_bi("polyfit")
-def polyfit_(nargout, x, y, n):
-    """p (highest power first); [p,S]: S.R, S.df, S.normr; [p,S,mu]: fitted on (x - mu(1))/mu(2)"""
+def polyfit_(nargout, x, y, n, *opts):
+    """p (highest power first); [p,S]: S.R, S.df, S.normr; [p,S,mu]: fitted on (x - mu(1))/mu(2),
+    with Normalize=true (the default with three outputs), mu = [0 1] with Normalize=false"""
     xv = _farr(x).reshape(-1)
     yv = _farr(y).reshape(-1)
     n = _int_arg(n)
+    normalize = nargout >= 3
+    if len(opts) % 2:
+        raise _err("polyfit: name-value arguments must come in pairs.")
+    for k in range(0, len(opts), 2):
+        if not (_istext(opts[k]) and _text(opts[k]).lower() == "normalize"):
+            raise _err("polyfit: the option %s is not supported in Sagebrush." % (_text(opts[k]) if _istext(opts[k]) else "given"))
+        normalize = bool(_scalar(opts[k + 1]))
     mu = None
-    if nargout >= 3:
+    if nargout >= 3 and not normalize:
+        mu = (0.0, 1.0)
+    if normalize:
         m = float(np.mean(xv))
         sd = float(np.sqrt(np.sum((xv - m) ** 2) / max(1, xv.size - 1)))
         mu = (m, sd)
@@ -7236,7 +7337,27 @@ def strcat_(*args):
             out.append(Char(s))
         return Cell(out, shape)
     if any(type(a) is Str or type(a) is StrArr for a in args):
-        return Str("".join(_text(a) for a in args))
+        # (element by element, scalars expanded; a character vector's trailing whitespace removed,
+        # a string's kept, as strcat's page says)
+        parts, shape = [], None
+        for a in args:
+            if type(a) is StrArr:
+                if shape is not None and tuple(a.shape) != shape:
+                    raise _err("strcat: the string arrays must be the same size.")
+                shape = tuple(a.shape)
+                parts.append(list(a.a))
+            elif type(a) is Str:
+                parts.append([a.s])
+            elif type(a) is Char and _dims(a)[0] <= 1:
+                parts.append([a.text().rstrip(" \t\n\r\f\v\x00")])
+            else:
+                raise _err("strcat of a string array and a %s is not supported in Sagebrush." % class_(a))
+        n = _prod(shape) if shape is not None else 1
+        out = []
+        for k in range(n):
+            vs = [p[k] if len(p) > 1 else p[0] for p in parts]
+            out.append(None if None in vs else "".join(vs))
+        return _strarr(out, shape if shape is not None else (1, 1))
     s = ""
     for a in args:
         if type(a) is Char:
@@ -7366,8 +7487,25 @@ def strsplit_(s, *args):
 
 @_bs("strjoin")
 def strjoin_(c, delim=None):
-    d = _escapes(_text(delim)) if delim is not None else " "
-    return Char(d.join(_text(e) for e in c.a))
+    """strjoin(C, delimiter), as its page says: a character delimiter with its escape sequences, or
+    one fewer delimiters than C (a cell or string array), as literal text; a string scalar of a
+    string array C"""
+    if type(c) is Cell:
+        items = [_text(e) for e in c.a]
+    elif type(c) in (Str, StrArr):
+        items = _strings_of(c)
+        if None in items:
+            raise _err("strjoin of a string array with missing elements is not supported in Sagebrush.")
+    else:
+        raise _err("strjoin: the first input must be a cell array of character vectors or a string array.")
+    if type(delim) is Cell or type(delim) is StrArr:
+        ds = [_text(e) for e in delim.a] if type(delim) is Cell else list(delim.a)
+        if len(ds) != max(len(items) - 1, 0):
+            raise _err("strjoin: the delimiter must have one fewer element than C.")
+        out = "".join(x + d for x, d in zip(items, ds + [""]))
+    else:
+        out = (_escapes(_text(delim)) if delim is not None else " ").join(items)
+    return Str(out) if type(c) in (Str, StrArr) else Char(out)
 
 
 def _text_pred(name, f):
@@ -7808,9 +7946,19 @@ def _apply_each(nargout, f, arrays, uniform, handler, elems, shape):
     return outs[0] if nargout <= 1 else outs
 
 
+def _str_cells(v):
+    """a string array as a cell array of its elements' character vectors"""
+    items = _strings_of(v)
+    if None in items:
+        raise _err("cellfun of a string array with missing elements is not supported in Sagebrush.")
+    return Cell([Char(x) for x in items], v.shape if type(v) is StrArr else (1, 1))
+
+
 @_bi("cellfun")
 def cellfun_(nargout, f, *args):
     arrays, uniform, handler = _uniform_opts(args)
+    # (a string array: each element as though it were a character vector, as cellfun's page says)
+    arrays = [_str_cells(a) if type(a) in (Str, StrArr) else a for a in arrays]
     if _istext(f):
         name = _text(f)
         legacy = {"isempty": lambda e: _numel(e) == 0, "length": length_, "ndims": ndims_, "prodofsize": lambda e: float(_numel(e)),
@@ -8804,6 +8952,30 @@ def _complex_fallback(name):
 for _n in _CMATH:
     if _n in _B:
         _complex_fallback(_n)
+
+
+def _log2_parts():
+    """[F, E] = log2(X): X = F.*2.^E with 0.5 <= abs(F) < 1 (C's frexp); zeros give F = E = 0,
+    Inf and NaN themselves in F with E = 0, as log2's page says; complex X is an error there"""
+    old = _B["log2"].f
+
+    def g(nargout, x):
+        if nargout < 2:
+            return old(nargout, x)
+        A = _arr(x)
+        if A.dtype.kind == "c":
+            raise _err("log2: the two-output syntax does not accept complex input.")
+        if class_(x) != "double":
+            raise _err("[F, E] = log2(X) for a %s X is not supported in Sagebrush." % class_(x))
+        A = _farr(x)
+        fe = [_math.frexp(float(v)) for v in A.reshape(-1)]
+        F = np.array([f for f, _ in fe], dtype=float).reshape(A.shape)
+        E = np.array([float(e) for _, e in fe], dtype=float).reshape(A.shape)
+        return [_box(_contig(F)), _box(_contig(E))]
+    _B["log2"] = Builtin(g, "log2")
+
+
+_log2_parts()
 
 
 def _real_cut(name, fix):
@@ -10111,6 +10283,13 @@ def fullfile_(*parts):
 
 @_bi("fileparts")
 def fileparts_(nargout, f):
+    if type(f) is StrArr:
+        # (a string array: each element's parts, three string arrays of its size)
+        if None in f.a:
+            raise _err("fileparts of a string array with missing elements is not supported in Sagebrush.")
+        parts = [[_text(x) for x in fileparts_(3, Str(e))] for e in f.a]
+        out = [StrArr([p[k] for p in parts], f.shape) for k in range(3)]
+        return out[0] if nargout <= 1 else out[:nargout]
     t = _text(f)
     d, base = (t.rsplit("/", 1) if "/" in t else ("", t))
     if "/" in t and d == "":

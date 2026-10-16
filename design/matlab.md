@@ -694,7 +694,19 @@ They also settled several function rules:
 - `regexp` takes its documented options (`'dotexceptnewline'`,
   `'lineanchors'`, `'freespacing'`, `'emptymatch'`, `'forceCellOutput'` and
   the others) and refuses ones it does not know; `'names'` returns a 1×n
-  struct array when there are several matches.
+  struct array when there are several matches;
+- `[C{:}] = ...` and `[C{i}] = ...` take one output per selected cell, the
+  count admitted as for structs (growing C this way is refused);
+- string arrays: `strcat` and `fileparts` work element by element, and
+  `cellfun` passes each element as a character vector, as their pages say;
+  `strjoin` takes one fewer delimiters than C, as literal text;
+- `[F, E] = log2(X)`, `[M, F, C] = mode(A)` (NaN ignored, M in A's class)
+  and `polyfit(..., Normalize=tf)` follow their pages; `polyval`'s error
+  estimate delta, and polyfit's other options, are refused;
+- complex integer arrays are not represented: converting a complex value
+  with a nonzero imaginary part to an integer class is refused (it used
+  to drop the imaginary part);
+- in the documentation's layout, `format rat` headings have no size.
 
 `gamma`, `gammaln`, `erf` and `erfc` use Python's `math` (src/runtime:
 fdlibm's erf and lgamma, musl's tgamma). `gamma` is exact at the integers,

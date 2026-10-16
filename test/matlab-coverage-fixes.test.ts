@@ -256,10 +256,71 @@ test("errors that leaked from the implementation: the documented forms, or MATLA
     // (zero-length matches are left out, as regexp's page says of the default 'noemptymatch')
     "0",
     "regexp: the option 'bogus' is not supported in Sagebrush.",
-    "intmax with 3 inputs is not supported in Sagebrush (it takes at most 1 here).",
+    "intmax: specify the name of an integer class, or \"like\", p.",
     "sortrows with 4 inputs is not supported in Sagebrush (it takes at most 2 here).",
     "Not enough input arguments.",
     // (bar's page: x = [1 2 3] with a 2-by-3 vals is two series of three bars)
     "2 3",
   ]);
+});
+
+test("more outputs and string arrays: log2, mode, polyfit, deal into cells, strjoin, strcat, fileparts, cellfun", () => {
+  const out = run([
+    // (log2's page: [F,E] = log2([1 pi -3 eps realmax realmin]); zeros, Inf and NaN as it says)
+    "[F, E] = log2([1 pi -3 eps realmax realmin 0 Inf NaN]); fprintf('%.4f ', F); fprintf('| '); fprintf('%d ', E); fprintf('\\n');",
+    "try, [F, E] = log2(1i), catch e, disp(e.message), end",
+    // (mode's page: [M,F] = mode([3 3 1 4; 0 0 1 1; 0 1 2 4]); NaN ignored, the class kept)
+    "[M, F] = mode([3 3 1 4; 0 0 1 1; 0 1 2 4]); fprintf('%d ', M, F); fprintf('\\n');",
+    "[M, F, C] = mode([1 2 2 3 3 NaN NaN NaN]); fprintf('%d %d %d %d %s\\n', M, F, C{1}, class(C));",
+    "[M, F, C] = mode(int8([1 1 2 2; 3 3 3 4]), 2); fprintf('%s %d %d %d %d %d\\n', class(M), M, F, numel(C{1}));",
+    "v = intmax(like=int16(4)); w = intmin('like', uint8(1)); fprintf('%s %d %s %d\\n', class(v), v, class(w), w);",
+    // (complex integers are not represented: refused, not their imaginary parts dropped)
+    "try, p = int8([-12 3+2i 2]), catch e, disp(e.message), end",
+    "try, t = int16(2) * 1i, catch e, disp(e.message), end",
+    // (polyfit's page: Normalize=true, then polyval(coeffsNorm, x, [], centerScale))
+    "x = 1750:25:2000; y = 1e6*[791 856 978 1050 1262 1544 1650 2532 6122 8170 11560];",
+    "[cn, ~, cs] = polyfit(x, y, 5, Normalize=true); yf = polyval(cn, x, [], cs); fprintf('%.4f %.4f %.4e %.4e\\n', cs, cn(1), max(abs(yf - y)));",
+    "[p0, ~, cs0] = polyfit(1:5, [1 4 9 16 25], 2, Normalize=false); fprintf('%.4f %d %d\\n', p0(1), cs0);",
+    "try, polyfit(1:3, 1:3, 1, Weights=[1 1 1]), catch e, disp(e.message), end",
+    // (deal's page: [C{:}] = deal(A1,A2,A3) and [D{1:3}] = deal(A1,A2,A3))
+    "c = {0}; I = ones(1, 1e5); try, [c{I,I}] = deal(1); catch e, disp(e.message), end",
+    "c = cell(1, 2); try, [c{1:3}] = deal(1, 2, 3); catch e, disp(e.message), end",
+    "C = cell(1,3); [C{:}] = deal(100, \"foo\", 1:5); D = cell(1,5); [D{1:3}] = deal(100, \"foo\", 1:5); fprintf('%d %s %d %d %d\\n', C{1}, C{2}, numel(C{3}), numel(D{3}), isempty(D{4}));",
+    // (strjoin's page: one fewer delimiters than C, as literal text; a string array gives a string)
+    "[m, s] = regexp('She sells sea shells by the seashore.', '[Ss]h.', 'match', 'split'); disp(strjoin(s, m));",
+    "a = strjoin({'a','b','c'}, {',',' '}); b = strjoin([\"x\",\"y\"], '-'); fprintf('%s %s %s\\n', a, class(b), b);",
+    // (strcat's page: string arrays element by element; a character vector's trailing whitespace removed)
+    "s = strcat([\"John \",\"Mary \"], [\"Smith\",\"Jones\"]); t = strcat(s, ', M.D.'); u = strcat(\"a \", 'b  ', \"c\"); fprintf('%s|', s, t, u); fprintf('\\n');",
+    // (fileparts's page: a 2-by-2 string array)
+    "[p, n, e] = fileparts([\"H:/user1/matlab/file1.txt\", \"H:/user2/matlab/file2.txt\"; \"H:/user3/matlab/file3.txt\", \"H:/user4/matlab/file4.txt\"]); fprintf('%s %d %d %s %s\\n', class(p), size(n), p(2,1), e(1,2));",
+    // (cellfun's page: a string array's elements as character vectors)
+    "B = cellfun(@(x) x(1:3), [\"Saturday\", \"Sunday\"], 'UniformOutput', false); fprintf('%s %s %s\\n', class(B), B{:});",
+  ].join("\n") + "\n");
+  assert.deepEqual(lines(out), [
+    "0.5000 0.7854 -0.7500 0.5000 1.0000 0.5000 0.0000 Inf NaN | 1 2 2 -51 1024 -1021 0 0 0",
+    "log2: the two-output syntax does not accept complex input.",
+    "0 0 1 4 2 1 2 2",
+    "2 2 2 3 cell",
+    "int8 1 3 2 3 2",
+    "int16 32767 uint8 0",
+    "Complex int8 values are not supported in Sagebrush.",
+    "Complex int16 values are not supported in Sagebrush.",
+    // (numpy's least-squares fit of the normalized x gives the same coefficients and residual)
+    "1875.0000 82.9156 -5.9431e+08 6.9883e+08",
+    "1.0000 0 1",
+    "polyfit: the option Weights is not supported in Sagebrush.",
+    "[C{...}] = ... with 10000000000 comma-separated outputs is beyond Sagebrush's limit of 100000.",
+    "[C{...}] = ... beyond the end of C (growing it) is not supported in Sagebrush.",
+    "100 foo 5 5 1",
+    "She sells sea shells by the seashore.",
+    "a,b c string x-y",
+    "John Smith|Mary Jones|John Smith, M.D.|Mary Jones, M.D.|a bc|",
+    "string 2 2 H:/user3/matlab .txt",
+    "cell Sat Sun",
+  ]);
+});
+
+test("format rat in the documentation's layout: no size in the heading, as beta's, log2's and rat's pages show", () => {
+  const out = run("format rat\n[F, E] = log2([1 pi -3])\nformat short\nY = [1 2 3]\n", { SAGEBRUSH_MATLAB_DISPLAY: "doc" });
+  assert.deepEqual(lines(out).map((x) => x.trim()), ["F =", "1/2          355/452         -3/4", "E =", "1              2              2", "Y = 1×3", "1     2     3"]);
 });
