@@ -2332,8 +2332,13 @@ def _part(z, name):
 def _float_of(z):
     """float(z), as Sage takes a float subclass's parts: CPython's float()
     (its __float__ bound as on an instance, the result checked to be a
-    float and made exact)."""
-    return float(z)
+    float and made exact), but without float()'s DeprecationWarning for a
+    strict float subclass result, which Sage does not give (only that
+    warning: the hook's own warnings go to the caller's filters)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*The ability to return an instance of a strict subclass of float is deprecated", category=DeprecationWarning)
+        return float(z)
 
 
 def _plain_float_subclass(z):
