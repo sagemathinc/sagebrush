@@ -794,6 +794,38 @@ test("integer intrinsics refuse arguments as Magma does, in its words, not with 
   assert.match(out, /\nend\n$/);
 });
 
+test("polynomial, finite field and real intrinsics refuse arguments as Magma does, and roots are never sought in a ring they weren't asked for", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [input, intrinsic, Magma 2.18's message] (its caret is at the call, which Sagebrush doesn't say yet)
+  const cases: [string, string, string][] = [
+    ["Roots(P!0);", "Roots", "Argument 1 is not non-zero"],
+    ["Roots(t^2 - 1/4, Integers());", "Roots", "Argument 1 cannot be coerced to be over argument 2"],
+    ["Coefficient(x^2, -1);", "Coefficient", "Argument 2 (-1) should be >= 0"],
+    ["LeadingCoefficient(P!0);", "LeadingCoefficient", "Argument 1 is not non-zero"],
+    ["Derivative(x^2, -1);", "Derivative", "Argument 2 (-1) should be >= 0"],
+    ["Discriminant(P!3);", "Discriminant", "Degree of argument is less than 1"],
+    ["IsIrreducible(P!0);", "IsIrreducible", "Argument 1 is not non-zero"],
+    ["Factorization(Q!0);", "Factorization", "Argument 1 is not non-zero"],
+    ["GF(1);", "GF", "Argument 1 (1) should be >= 2"],
+    ["Order(GF(7)!0);", "Order", "Can not take order of zero element"],
+    ["Log(0.0);", "Log", "Argument 1 is not positive"],
+    ["Log(1.0, 5.0);", "Log", "Base for logarithm should not be 1"],
+    ["Log(-2.0, 8.0);", "Log", "Argument 1 is not positive"],
+    ["Log(2.0, -8.0);", "Log", "Argument 2 is not positive"],
+  ];
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"],
+    { input: "P<x> := PolynomialRing(Integers()); Q<t> := PolynomialRing(Rationals());\n" + cases.map((c) => c[0]).join("\n") +
+      "\nRoots(x^2 - 2, RealField(10));\nSqrt(-4);\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  for (const [src, name, said] of cases)
+    assert.ok(out.includes(`Runtime error in '${name}': ${said}\n`), `${src}\n${out}`);
+  // (Magma's answers are real or complex numbers, which these don't give: refused in words)
+  assert.ok(out.includes("Runtime error in 'Roots': Roots in a ring other than the integers or the rationals is not supported yet\n"), out);
+  assert.ok(out.includes("Runtime error in 'Sqrt': Sqrt of a negative number (a complex number in Magma) is not supported yet\n"), out);
+  assert.doesNotMatch(out, /Error:|Traceback/);
+  assert.match(out, /\nend\n$/);
+});
+
 test("prime enumeration is admitted by the heap before any sieve, and a narrow window near 10^12 is sieved alone (HARD-3BE-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
