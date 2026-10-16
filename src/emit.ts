@@ -1025,6 +1025,9 @@ export class Emitter {
       // It is the exception being handled, for sys.exception() and
       // sys.exc_info(), while the clauses are matched and the chosen one runs.
       this.w(`excEnter(${e});`);
+      // (whether a clause with a name has left it already, CORR-142-1)
+      const left = st.handlers.some((h) => h.name !== null) ? this.temp() : null;
+      if (left !== null) this.w(`${left} = false;`);
       this.w("try {");
       this.indent++;
       st.handlers.forEach((h, i) => {
@@ -1037,17 +1040,20 @@ export class Emitter {
         // Exceptions raised while handling get this one as __context__ when
         // raised (raiseExc); this catches the runtime's own errors.
         const x = this.temp();
+        if (h.name !== null) this.w(`${x} = undefined;`);
         this.w("try {");
         this.block(h.body);
         // (the name is cleared however the clause ends, CPython's
-        // `name = None; del name`)
-        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }${h.name !== null ? ` finally { ${this.clearName(h.name)} }` : ""}`);
+        // `name = None; del name`: after the exception stops being the one
+        // handled when the clause ends or jumps out, before when it raises)
+        const clear = h.name === null ? "" : ` finally { if (${x} === undefined) { excLeave(${e}); ${left} = true; } ${this.clearName(h.name)} }`;
+        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }${clear}`);
         if (h.name !== null) this.fn.assigned.delete(h.name);
         this.indent--;
       });
       this.w(`} else throw ${e};`);
       this.indent--;
-      this.w(`} finally { excLeave(${e}); }`);
+      this.w(`} finally { ${left !== null ? `if (!${left}) ` : ""}excLeave(${e}); }`);
       this.indent--;
       this.w("}");
     } else {
