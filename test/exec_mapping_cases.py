@@ -204,3 +204,45 @@ for name, code in [('locals', 'r = locals()'), ('globals', 'r = globals()'), ('v
         setattr(builtins, name, old)
     print(name, r1, ns['r2'])
 print(t(lambda: eval("type(locals()).__name__", {}, {})))
+
+# the clause's name is cleared after the exception stops being the one
+# handled when the clause ends or jumps out, before when it raises
+# (CORR-142-1, after astra's cleanup-state probe)
+import json
+class CM:
+    def __init__(self, mode): self.d = {}; self.log = []; self.mode = mode
+    def __getitem__(self, k): return self.d[k]
+    def __setitem__(self, k, v):
+        if k == 'x' and v is None:
+            e = sys.exception()
+            self.log.append(['clear', None if e is None else type(e).__name__, None if e is None else str(e)])
+            if self.mode == 'reraise': raise
+            if self.mode == 'new': raise KeyError('c')
+        self.d[k] = v
+    def __delitem__(self, k): del self.d[k]
+def run(mode, body, outer):
+    m = CM(mode)
+    def go(): exec(body, {}, m)
+    err = None
+    try:
+        if outer:
+            try: raise LookupError('outer')
+            except LookupError: go()
+        else: go()
+    except BaseException as e:
+        c = e.__context__
+        err = [type(e).__name__, str(e), None if c is None else type(c).__name__]
+    return [err, m.log]
+for outer in [False, True]:
+    for mode in ['record', 'reraise', 'new']:
+        for body in ['    pass', '    raise TypeError("body")', '    raise']:
+            print(json.dumps([outer, mode, body, run(mode, 'try:\n    raise ValueError("inner")\nexcept Exception as x:\n' + body, outer)]))
+        print(json.dumps([outer, mode, 'break', run(mode, 'for i in range(2):\n    try:\n        raise ValueError("inner")\n    except Exception as x:\n        break', outer)]))
+        print(json.dumps([outer, mode, 'continue', run(mode, 'for i in range(1):\n    try:\n        raise ValueError("inner")\n    except Exception as x:\n        continue', outer)]))
+        print(json.dumps([outer, mode, 'nested', run(mode, 'try:\n    raise ValueError("inner")\nexcept Exception as x:\n    try:\n        raise KeyError("k")\n    except KeyError:\n        pass', outer)]))
+def fret():
+    try:
+        raise ValueError('inner')
+    except Exception as x:
+        return sys.exception()
+print(fret(), sys.exception())
