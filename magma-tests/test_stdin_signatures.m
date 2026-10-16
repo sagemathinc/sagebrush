@@ -18,6 +18,10 @@ K<r> := QuadraticField(-5); Trace(2 - 3*r); Trace(r^2);
 L<s> := NumberField(PolynomialRing(Rationals()).1^3 - 3); Trace(s + 1);
 F<y> := GF(25); Trace(y); Trace(y^3); Trace(F!3);
 G<t> := GF(7); Trace(t + 2);
+// the results of matrix arithmetic are matrices too
+A := Matrix(Integers(), 2, 2, [1, 2, 3, 5]); B := Matrix(Rationals(), 2, 2, [1/2, 1, 0, 3]);
+Trace(A + A); Trace(A * A); Trace(-A); Trace(A^0); Trace(A^2); Trace(3 * A); Trace(A - A); Trace(A^-1);
+Trace(B^-1); Trace(B * B); Type(A + A); Type(B^-1); Type(Transpose(Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6])));
 // (arguments no signature takes: test/magma.test.ts, as Magma says it but
 // for the caret, which Magma puts at the call)
 "end";
