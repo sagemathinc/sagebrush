@@ -825,17 +825,20 @@ def _own(v, name=None, depth=0):
 
 
 def _keep_inf(t, v, first):
-    """The copy t keeps what v knows of its universe (_inf) and its first
-    defined element (_wit), where finding them again would cost more than
-    a look at its first element: the integers or rationals inferred (a
-    scan), and anything after leading holes.  (A copy with a defined first
-    element finds the rest at once, and keeps no attributes: a large copy
-    fits its heap, HARD-756-1.)"""
+    """The copy t keeps what v knows of its universe: its first defined
+    element (_wit) whenever it was looked for, since it stands for the
+    universe fixed for the elements when the present ones may not (a
+    rational part of a tuple replaced by an integer, CORR-47D-1); its
+    inferred universe (_inf) where finding it again would cost more than
+    a look at its first element: the integers or rationals (a scan), and
+    anything after leading holes.  (_wit is set only by a write, so a
+    large copy of a value made by literals keeps no attributes and fits
+    its heap, HARD-756-1.)"""
     inf = getattr(v, "_inf", None)
     if inf is not None and (inf is not _NOINF or first is _UNDEF):
         t._inf = inf
     wit = getattr(v, "_wit", None)
-    if wit is not None and first is _UNDEF:
+    if wit is not None:
         t._wit = wit
 
 
@@ -1100,7 +1103,12 @@ def _as_seq(s):
     universe (a range's being the integers), for the intrinsics that make a
     new sequence from an old one (CORR-D689-2)."""
     t = MSeq(s, getattr(s, "universe", None), getattr(s, "sample", None))
-    t._inf = _ZZ if isinstance(s, MRange) else getattr(s, "_inf", None)
+    inf = _ZZ if isinstance(s, MRange) else getattr(s, "_inf", None)
+    if inf is not None:
+        t._inf = inf
+    wit = getattr(s, "_wit", None)
+    if wit is not None:
+        t._wit = wit  # (CORR-47D-1)
     return t
 
 
