@@ -85,3 +85,16 @@ NM
 NM ['__firstlineno__', '__module__', '__qualname__', 'g', 'q']
 1 __main__ NameError: name 'q' is not defined
 NameError: name 'nothere' is not defined
+builtin retry NameError name 'len' is not defined
+builtin calls 1
+frame import ok None
+import log ['old']
+nested builtins 99
+prepared eval/exec ok (42, 30)
+prepared nondict ok 7
+prepared cleanup NameError name 'e' is not defined
+['lookup', 'body']
+NameError: name 'builtins' is not defined [('old', 'anything', None), ('old', 'other', ('len',))]
+None True 98
+TypeError: 'NoneType' object is not callable
+TypeError: 'NoneType' object is not callable
