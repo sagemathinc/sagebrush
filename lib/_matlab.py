@@ -4445,14 +4445,34 @@ def _vec_math(f, A, bad=_math.nan):
     return out
 
 
+def _sincosd(A):
+    """sind and cosd of a real array: the angle reduced exactly in degrees (fmod by 360, then
+    to the nearest multiple of 90 and a remainder of at most 45) before it is converted to
+    radians, so a quarter turn's multiples are exact zeros and nearby angles keep their
+    digits (cotd(180 - eps(180)) is -2.0159e15); -0 results are 0"""
+    if A.dtype.kind == "c":
+        raise _err("Complex arguments to sind, cosd and the other degree functions are not supported in Sagebrush.")
+    r = np.array(A, dtype=np.float64)
+    big = (np.abs(r) >= 360) & np.isfinite(r)
+    if np.any(big):
+        # (math.fmod is exact; the runtime's numpy has no fmod)
+        idx = np.flatnonzero(big)
+        r.flat[idx] = [_math.fmod(float(r.flat[i]), 360.0) for i in idx]
+    q = np.round(r / 90.0)
+    d = (r - 90.0 * q) * (_math.pi / 180)
+    q = np.mod(q, 4)
+    sd, cd = np.sin(d), np.cos(d)
+    s = np.select([q == 0, q == 1, q == 2], [sd, cd, -sd], -cd)
+    c = np.select([q == 0, q == 1, q == 2], [cd, -sd, -cd], sd)
+    return np.where(s == 0, 0.0, s), np.where(c == 0, 0.0, c)
+
+
 def _sind(A):
-    r = np.sin(A * (_math.pi / 180))
-    return np.where(np.mod(A, 180) == 0, 0.0, r)
+    return _sincosd(A)[0]
 
 
 def _cosd(A):
-    r = np.cos(A * (_math.pi / 180))
-    return np.where(np.mod(A - 90, 180) == 0, 0.0, r)
+    return _sincosd(A)[1]
 
 
 _unary("sqrt", np.sqrt, lambda A: A < 0)
@@ -4484,11 +4504,11 @@ _unary("csc", lambda A: 1 / np.sin(A))
 _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
-_unary("tand", lambda A: _sind(A) / _cosd(A))
+_unary("tand", lambda A: np.divide(*_sincosd(A)))
 # (from sind and cosd, which are exactly 0 at their zeros: secd(90) and cscd(180) are Inf, cotd(90) 0)
 _unary("secd", lambda A: 1 / _cosd(A))
 _unary("cscd", lambda A: 1 / _sind(A))
-_unary("cotd", lambda A: _cosd(A) / _sind(A))
+_unary("cotd", lambda A: np.divide(*reversed(_sincosd(A))))
 
 
 def _recip_inverse(name, base):
@@ -4527,7 +4547,15 @@ def _in_degrees(name, base):
     def g(nargout, x):
         r = _B[base].f(nargout, x)
         cls = class_(r)
-        return _finish(_farr(r, name) * (180 / _math.pi), "single" if cls == "single" else "double")
+        R = _farr(r, name)
+        k = 180 / _math.pi
+        if R.dtype.kind == "c":
+            # (each part scaled on its own, a zero part kept zero: a complex Inf times 180/pi
+            # would put NaN into the other part)
+            R = _cplx(np.where(R.real == 0, 0.0, R.real * k), np.where(R.imag == 0, 0.0, R.imag * k))
+        else:
+            R = R * k
+        return _finish(R, "single" if cls == "single" else "double")
     _B[name] = Builtin(g, name)
 
 

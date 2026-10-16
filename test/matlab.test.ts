@@ -1880,10 +1880,20 @@ test("asind, acosd, atand, asecd, acscd, acotd, secd, cscd and cotd: the radian 
     z("[asind(2) acosd(2) asecd(0.5) acscd(0.5)]"),
     "disp(class(asind(single(0.5)))); disp(class(secd(single(60)))); disp(mat2str(size(acotd(ones(2, 3)))))",
     tryIt("asind(int8(1))"), tryIt("acosd({1})"),
+    // (complex results with an infinite part: each part in degrees on its own, no NaN)
+    z("[asind(Inf) asecd(0) atand(1i)]"),
+    // (the angle reduced exactly in degrees: near a pole, and large angles; cotd's page example)
+    "fprintf('%.4e ', cotd([180-eps(180) 180 180+eps(180)])); fprintf('\\n')",
+    "fprintf('%.4f ', [secd(1e10) cscd(1e10) cotd(1e10) sind(1e10) sind(30) cosd(60)]); fprintf('\\n')",
+    "disp(mat2str([sind(30) cosd(60) tand(45) sind(180) cosd(90) tand(-90)]))",
   ].join("\n")), [
     "30.0000 60.0000 45.0000 60.0000 30.0000 45.0000 2.0000 2.0000 1.0000",
     "[90 180 90 90 Inf Inf 0 Inf]",
     "90.0000-75.4561i 0.0000+75.4561i 0.0000+75.4561i 90.0000-75.4561i",
     "single", "single", "[2 3]", "refused", "refused",
+    "90.0000-Infi 0.0000+Infi 0.0000+Infi",
+    "-2.0159e+15 -Inf 2.0159e+15",
+    "5.7588 -1.0154 -0.1763 -0.9848 0.5000 0.5000",
+    "[0.5 0.5 1 0 0 -Inf]",
   ]);
 });
