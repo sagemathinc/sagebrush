@@ -21,7 +21,10 @@ import json
 import sys
 
 VALUES = ["0", "-1", "1", "2", "7", "2 ** 70", "-(2 ** 70)", "0.5", "-0.0", "float('nan')", "float('inf')", "-float('inf')",
-          "True", "False", "None", "[]", "()", "''", "[3, 1, 2]", "(1, 2)", "'abc'", "{1: 2}", "range(5)"]
+          "True", "False", "None", "[]", "()", "''", "[3, 1, 2]", "(1, 2)", "'abc'", "{1: 2}", "range(5)",
+          # (strings past ASCII, and callables: a function with an attribute
+          # of its own, and a builtin; CORR-D1C-1 and CORR-D1C-2)
+          "'Straße'", "'ǅİ'", "_fn", "len"]
 BASES = ["2", "[3, 1, 2]", "'abc'", "0.5", "range(5)", "1"]
 
 
@@ -30,7 +33,11 @@ def answer(f, args_src):
     import itertools
     import random
     random.seed(0)
-    args = eval("[" + args_src + "]")
+
+    def _fn(*a, **k):
+        return a
+    _fn.tag = 7
+    args = eval("[" + args_src + "]", {"_fn": _fn})
     try:
         r = f(*args)
     except Exception as err:
@@ -40,8 +47,15 @@ def answer(f, args_src):
             r = list(itertools.islice(r, 20))
         except Exception as err:
             return "iter raise " + type(err).__name__
+    # (a function made: its own attributes too, as update_wrapper copies them)
+    extra = ""
+    if callable(r) and hasattr(r, "__dict__"):
+        try:
+            extra = " | attrs " + repr(sorted(k for k in vars(r) if not k.startswith("__")))
+        except Exception as err:
+            extra = " | attrs raise " + type(err).__name__
     try:
-        return repr(r) + " | " + repr(args)
+        return repr(r) + " | " + repr(args) + extra
     except Exception as err:
         return "repr raise " + type(err).__name__
 

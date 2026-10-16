@@ -128,12 +128,17 @@
       {
         "code": "def double(x): return 2 * x\n@functools.wraps(double)\ndef wrapper(x): return double(x)\n(wrapper.__name__, wrapper(4), wrapper.__wrapped__ is double)",
         "expected": "('double', 8, True)\n"
+      },
+      {
+        "code": "def f():\n    pass\nf.tag = 7\n@functools.wraps(f)\ndef g():\n    pass\n(g.tag, g.__wrapped__ is f)",
+        "expected": "(7, True)\n"
       }
     ],
     "differs": [
-      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
+      "The functools.partial it returns keeps its fields (func, args, keywords and two private ones) in its __dict__, so vars() of it lists them; Python's __dict__ is empty.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {
@@ -182,9 +187,10 @@
       }
     ],
     "differs": [
-      "Gives Python 3.14.8's answer on a probe of edge values of each argument (scripts/catalog-probe.py; catalog/python/probes/stdlib.json), and accepts every argument of its signature; not reviewed line by line."
+      "The cached function is a plain function, with cache_info and cache_clear among its own attributes (vars() lists them); Python's is a functools._lru_cache_wrapper object.",
+      "Found by a probe of edge values against Python 3.14.8 (scripts/catalog-probe.py; catalog/python/probes/stdlib.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "upstream_version": "Python 3.14"
   },
   {

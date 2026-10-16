@@ -499,7 +499,8 @@ function allImpl(x: any): boolean {
 function varsImpl(o: any = undefined): PyDict {
   if (o === undefined) raise(T.NotImplementedError, "vars() without an argument is not supported");
   if (isType(o)) return getattr(o, "__dict__");
-  if (!hasInstanceDict(o)) raise(T.TypeError, "vars() argument must have __dict__ attribute");
+  // (or a __dict__ its type defines: a function's, as CPython's)
+  if (!hasInstanceDict(o) && lookupType(typeOf(o), "__dict__") === undefined) raise(T.TypeError, "vars() argument must have __dict__ attribute");
   return getattr(o, "__dict__");
 }
 function hashImpl(x: any): any {

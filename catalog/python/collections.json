@@ -59,6 +59,10 @@
       {
         "code": "label = collections.UserString('cat')\nlabel.data = 'kitten'\n(str(label), len(label))",
         "expected": "('kitten', 6)\n"
+      },
+      {
+        "code": "collections.UserString('Straße').casefold()",
+        "expected": "'strasse'\n"
       }
     ],
     "differs": [

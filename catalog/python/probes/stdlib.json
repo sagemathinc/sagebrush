@@ -186,17 +186,17 @@
   ]
  },
  "collections.ChainMap": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
  "collections.UserList": {
-  "calls": 24,
+  "calls": 28,
   "differ": 0,
   "first": []
  },
  "collections.UserString": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
@@ -232,7 +232,7 @@
   ]
  },
  "fractions.Fraction.limit_denominator": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
@@ -268,7 +268,7 @@
   ]
  },
  "functools.cached_property": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
@@ -304,34 +304,71 @@
   ]
  },
  "functools.lru_cache": {
-  "calls": 69,
-  "differ": 0,
-  "first": []
+  "calls": 81,
+  "differ": 2,
+  "first": [
+   {
+    "args": "_fn",
+    "cpython": "<functools._lru_cache_wrapper object at 0x709e501c2fb0> | [<function answer.<locals>._fn at 0x709e5034fab0>] | attrs ['cache_parameters', 'tag']",
+    "sagebrush": "<function answer.<locals>._fn at 0x7f00000019a0> | [<function answer.<locals>._fn at 0x7f00000019c0>] | attrs ['cache_clear', 'cache_info', 'cache_parameters', 'tag']"
+   },
+   {
+    "args": "len",
+    "cpython": "<functools._lru_cache_wrapper object at 0x709e501c2fb0> | [<built-in function len>] | attrs ['cache_parameters']",
+    "sagebrush": "<function len at 0x7f00000019e0> | [<built-in function len>] | attrs ['cache_clear', 'cache_info', 'cache_parameters']"
+   }
+  ]
  },
  "functools.singledispatch": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
  "functools.singledispatchmethod": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
  "functools.total_ordering": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
  "functools.update_wrapper": {
-  "calls": 112,
+  "calls": 132,
   "differ": 0,
   "first": []
  },
  "functools.wraps": {
-  "calls": 135,
-  "differ": 0,
-  "first": []
+  "calls": 159,
+  "differ": 159,
+  "first": [
+   {
+    "args": "''",
+    "cpython": "functools.partial(<function update_wrapper at 0x709e50598880>, wrapped='', assigned=('__module__', '__name__', '__qualname__', '__doc__', '__annotate__', '__type_params__'), updated=('__dict__',)) | [''] | attrs []",
+    "sagebrush": "functools.partial(<function update_wrapper at 0x7f00000013c0>, wrapped='', assigned=('__module__', '__name__', '__qualname__', '__doc__', '__annotate__', '__type_params__'), updated=('__dict__',)) | [''] | attrs ['_merger', '_phcount', 'args', 'func', 'keywords']"
+   },
+   {
+    "args": "'', 2",
+    "cpython": "functools.partial(<function update_wrapper at 0x709e50598880>, wrapped='', assigned=2, updated=('__dict__',)) | ['', 2] | attrs []",
+    "sagebrush": "functools.partial(<function update_wrapper at 0x7f00000013c0>, wrapped='', assigned=2, updated=('__dict__',)) | ['', 2] | attrs ['_merger', '_phcount', 'args', 'func', 'keywords']"
+   },
+   {
+    "args": "'', 2, 2",
+    "cpython": "functools.partial(<function update_wrapper at 0x709e50598880>, wrapped='', assigned=2, updated=2) | ['', 2, 2] | attrs []",
+    "sagebrush": "functools.partial(<function update_wrapper at 0x7f00000013c0>, wrapped='', assigned=2, updated=2) | ['', 2, 2] | attrs ['_merger', '_phcount', 'args', 'func', 'keywords']"
+   },
+   {
+    "args": "'Straße'",
+    "cpython": "functools.partial(<function update_wrapper at 0x709e50598880>, wrapped='Straße', assigned=('__module__', '__name__', '__qualname__', '__doc__', '__annotate__', '__type_params__'), updated=('__dict__',)) | ['Straße'] | attrs []",
+    "sagebrush": "functools.partial(<function update_wrapper at 0x7f00000013c0>, wrapped='Straße', assigned=('__module__', '__name__', '__qualname__', '__doc__', '__annotate__', '__type_params__'), updated=('__dict__',)) | ['Straße'] | attrs ['_merger', '_phcount', 'args', 'func', 'keywords']"
+   },
+   {
+    "args": "'Straße', 2",
+    "cpython": "functools.partial(<function update_wrapper at 0x709e50598880>, wrapped='Straße', assigned=2, updated=('__dict__',)) | ['Straße', 2] | attrs []",
+    "sagebrush": "functools.partial(<function update_wrapper at 0x7f00000013c0>, wrapped='Straße', assigned=2, updated=('__dict__',)) | ['Straße', 2] | attrs ['_merger', '_phcount', 'args', 'func', 'keywords']"
+   }
+  ]
  },
  "heapq.heapify": {
   "calls": 23,
@@ -604,47 +641,47 @@
   ]
  },
  "heapq.merge": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
  "heapq.nlargest": {
-  "calls": 112,
+  "calls": 132,
   "differ": 0,
   "first": []
  },
  "heapq.nsmallest": {
-  "calls": 112,
+  "calls": 132,
   "differ": 0,
   "first": []
  },
  "itertools.accumulate": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
  "itertools.batched": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
  "itertools.chain": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
  "itertools.combinations": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
  "itertools.combinations_with_replacement": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
  "itertools.compress": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
@@ -680,17 +717,17 @@
   ]
  },
  "itertools.cycle": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
  "itertools.dropwhile": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
  "itertools.filterfalse": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
@@ -757,22 +794,22 @@
   ]
  },
  "itertools.permutations": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
  "itertools.product": {
-  "calls": 68,
+  "calls": 80,
   "differ": 0,
   "first": []
  },
  "itertools.starmap": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
  "itertools.takewhile": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  },
@@ -819,7 +856,7 @@
   ]
  },
  "random.choice": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
@@ -855,12 +892,12 @@
   ]
  },
  "random.shuffle": {
-  "calls": 23,
+  "calls": 27,
   "differ": 0,
   "first": []
  },
  "random.uniform": {
-  "calls": 45,
+  "calls": 53,
   "differ": 0,
   "first": []
  }
