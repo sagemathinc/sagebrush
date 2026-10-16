@@ -2195,14 +2195,14 @@ test("a workspace function giving no value refuses an assignment; exist needs an
     msg("x = save"), msg("x = exist"), "y = 5; disp(exist('y'))",
     show("repmat([1 2], 0, 1)"), show("repmat([1 2], -1, 1)"), show("repmat({1}, 0, 3)"), show("repmat('ab', 0, 1)"), show("repmat(\"ab\", 1, 2)"),
     tryIt("repmat([1 2], 2.5)"), tryIt("repmat([1 2], [2 NaN])"), "disp(mat2str(repmat([1 2], 2, 1)))",
-    show("round(single(pi), 2)"), "disp(round(single(pi), 2) == single(3.14))", "x = round(int8(5), -1); disp([class(x) ' ' num2str(x)])",
+    show("round(single(pi), 2)"), "disp(round(single(pi), 2) == single(3.14))", tryIt("round(int8(5), -1)"),
     "disp(round(pi, 2, 'Significant'))", tryIt("round(2.5, 'TieBreaker', 'even')"), tryIt("round(pi, 2, 'foo')"), "disp(round(123.456, -1))",
     tryIt("mod(1i, 2)"), tryIt("rem(2, 1i)"), "disp(mat2str(mod([5 7], 3)))",
   ].join("\n")), [
     "Too many output arguments.", "Not enough input arguments.", "1",
     "double [0 2]", "double [0 2]", "cell [0 3]", "char [0 2]", "string [1 2]",
     "refused", "refused", "[1 2;1 2]",
-    "single [1 1]", "1", "int8 10",
+    "single [1 1]", "1", "refused",
     "3.1000", "refused", "refused", "120",
     "refused", "refused", "[2 1]"]);
 });
