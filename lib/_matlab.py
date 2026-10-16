@@ -8558,11 +8558,14 @@ def _clear_match(tokens, names):
 
 
 def _regex_linearish(p):
-    """False for a pattern that could backtrack exponentially: a repeated group that
-    itself holds a repetition or an alternation ((a+)+, (a|aa)*), or a backreference.
-    The regular expression engine can't be interrupted, so such patterns are refused
-    rather than run; names are at most 63 characters, so anything else is quick"""
+    """False for a pattern that could backtrack badly: a repeated group that itself holds
+    a repetition or an alternation ((a+)+, (a|aa)*), a backreference, or more than three
+    unbounded repetitions (*, +, {m,}, or {m,n} with n beyond a name's 63 characters):
+    adjacent ones cost about 63^k steps (a*a*a*a*b). The regular expression engine can't
+    be interrupted, so such patterns are refused rather than run; with at most three,
+    a name of at most 63 characters takes at most about 250,000 steps"""
     stack = [[False, False]]  # (per open group: holds a repetition, holds an alternation)
+    unbounded = 0
     i, n = 0, len(p)
     last_group = None
     while i < n:
@@ -8603,8 +8606,13 @@ def _regex_linearish(p):
                 j = p.find("}", i)
                 if j < 0:
                     continue
+                body = p[i + 1:j].split(",")
+                if len(body) == 2 and (not body[1].strip() or not body[1].strip().isdigit() or int(body[1]) > 63):
+                    unbounded += 1
                 i = j + 1
             else:
+                if p[i] in "*+":
+                    unbounded += 1
                 i += 1
             if i < n and p[i] in "?+":
                 i += 1
@@ -8615,7 +8623,7 @@ def _regex_linearish(p):
             stack[-1][0] = True
         elif last_group is not None and last_group[0]:
             stack[-1][0] = True
-    return True
+    return unbounded <= 3
 
 
 def _glob_select(pats, names):
