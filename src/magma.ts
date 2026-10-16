@@ -121,8 +121,30 @@ export function lex(src: string): Tok[] {
 const PYKW = new Set(("False None True and as assert async await break class continue def del elif else except finally for from global " +
   "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split(" "));
 
+// Python's builtins (CPython 3.14's): a Magma name never reaches them.  An
+// unassigned ord, len, sum or list is undeclared, as in Magma, not Python's
+// function or class; lib/_magma.py's _PYBUILTINS is the same list.
+export const PY_BUILTINS = new Set(("ArithmeticError AssertionError AttributeError BaseException BaseExceptionGroup BlockingIOError " +
+  "BrokenPipeError BufferError BytesWarning ChildProcessError ConnectionAbortedError " +
+  "ConnectionError ConnectionRefusedError ConnectionResetError DeprecationWarning EOFError Ellipsis " +
+  "EncodingWarning EnvironmentError Exception ExceptionGroup False FileExistsError " +
+  "FileNotFoundError FloatingPointError FutureWarning GeneratorExit IOError ImportError " +
+  "ImportWarning IndentationError IndexError InterruptedError IsADirectoryError KeyError " +
+  "KeyboardInterrupt LookupError MemoryError ModuleNotFoundError NameError None NotADirectoryError " +
+  "NotImplemented NotImplementedError OSError OverflowError PendingDeprecationWarning " +
+  "PermissionError ProcessLookupError PythonFinalizationError RecursionError ReferenceError " +
+  "ResourceWarning RuntimeError RuntimeWarning StopAsyncIteration StopIteration SyntaxError " +
+  "SyntaxWarning SystemError SystemExit TabError TimeoutError True TypeError UnboundLocalError " +
+  "UnicodeDecodeError UnicodeEncodeError UnicodeError UnicodeTranslateError UnicodeWarning " +
+  "UserWarning ValueError Warning ZeroDivisionError abs aiter all anext any ascii bin bool " +
+  "breakpoint bytearray bytes callable chr classmethod compile complex copyright credits delattr " +
+  "dict dir divmod enumerate eval exec exit filter float format frozenset getattr globals hasattr " +
+  "hash help hex id input int isinstance issubclass iter len license list locals map max memoryview " +
+  "min next object oct open ord pow print property quit range repr reversed round set setattr slice " +
+  "sorted staticmethod str sum super tuple type vars zip").split(" "));
+
 /** A Magma identifier as a Python one. */
-export const pyName = (s: string) => (PYKW.has(s) || s.startsWith("_m") || /^__/.test(s) ? s + "_" : s);
+export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.startsWith("_m") || /^__/.test(s) ? s + "_" : s);
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -147,7 +169,26 @@ class Parser {
     if (!this.rejected) this.rejected = { line: t.line, col: t.col, msg };
   }
 
-  constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {}
+  constructor(private toks: Tok[], private filename: string, private src = "", private recover: Recover | null = null) {
+    // the names a witness of exists(t){ } or forall(t){ } may unassign
+    // (Magma unassigns them when there is no witness): their reads check
+    for (let k = 0; k + 2 < toks.length; k++) {
+      if ((toks[k].v !== "exists" && toks[k].v !== "forall") || toks[k].t !== "id" || toks[k + 1].v !== "(") continue;
+      let q = k + 2;
+      const names: string[] = [];
+      while (toks[q]?.t === "id" && (toks[q + 1]?.v === "," || toks[q + 1]?.v === ")")) {
+        names.push(toks[q].v);
+        q += 2;
+        if (toks[q - 1].v === ")") break;
+      }
+      if (toks[q - 1]?.v === ")" && toks[q]?.v === "{") names.forEach((n) => this.witnesses.add(n));
+    }
+  }
+  private witnesses = new Set<string>();
+  // the witnesses a top-level statement assigns (with no witness, unassigns):
+  // unbound when it ends, so that later cells, compiled on their own, don't
+  // read the no-value marker (CORR-39D-1)
+  private topWitnesses: string[] = [];
 
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
@@ -172,6 +213,120 @@ class Parser {
   }
   fresh(base = "_mt") { return `${base}${++this.tmp}`; }
 
+  /** A construct of Magma's that Sagebrush's parser doesn't have, among
+   * the tokens of a statement up to its syntax error, and where: said
+   * "not supported yet" rather than "bad syntax", which would say the code
+   * is wrong (the coverage run's 254 Handbook programs). */
+  unsupported(from: number, to: number): { name: string; tok: Tok } | null {
+    const T = this.toks, end = Math.min(to + 1, T.length - 1);
+    const next = (a: Tok, b: Tok) => b.line === a.line && b.col === a.col + a.v.length;
+    for (let k = from; k <= end; k++) {
+      const a = T[k], b = T[k + 1] ?? a, c = T[k + 2] ?? b;
+      const found = (name: string) => ({ name, tok: a });
+      // ($1 where an operand starts: 3 $ 4 is bad syntax, as Magma says)
+      const operandBefore = k > from && (["num", "real", "id", "str"].includes(T[k - 1].t) || ")]}".includes(T[k - 1].v));
+      if (a.v === "$" && b.t === "num" && !operandBefore) return found("$1 (the values printed last)");
+      if (a.v === "$$" && T.slice(from, k).some((x) => x.v === "func")) return found("$$ in func< >");
+      if (a.t === "id" && b.v === "<" && c.v === "[") return found(`${a.v}<[...]> (generator names in a sequence)`);
+      if (a.t === "kw" && ["join", "meet", "cat", "diff", "sdiff", "div", "mod", "and", "or", "xor"].includes(a.v) && b.v === ":=") return found(`${a.v}:= (an assignment with ${a.v})`);
+      if (a.v === "for" && b.t === "id" && c.v === ",") return found("for x, y in S (several loop variables)");
+      if (a.v === "load" && a.t === "id" && k === from) return found("load (Magma's library files)");
+      if (a.v === "for" && b.t === "id" && c.v === "in") {
+        // for i in S, j in T do: several loops in one
+        let depth = 0;
+        for (let q = k + 3; q < T.length && T[q].v !== "do"; q++) {
+          if ("([{<".includes(T[q].v)) depth++;
+          else if (")]}>".includes(T[q].v)) depth--;
+          else if (T[q].v === "," && depth === 0) return found("for i in S, j in T (several loops in one for)");
+        }
+      }
+      if (a.t === "id" && b.v === "<" && k === from) {
+        // S<y>, h := f(...): generator names, and other values
+        let q = k + 2;
+        while (q < T.length && T[q].v !== ">" && T[q].v !== ";") q++;
+        if (T[q]?.v === ">" && T[q + 1]?.v === ",") return found(`${a.v}<...>, ... := (generator names with other values)`);
+      }
+      if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
+      if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
+      if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
+      if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
+      if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
+      if (a.v === "eval" && a.t === "kw") return found("eval");
+      if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
+      if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
+      if (a.v === "case" && b.v === "<") return found("case< ... >");
+      if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
+      if (a.v === "!" && b.v === "!" && next(a, b)) return found("!! (a coercion that may change the structure)");
+      if (a.v === "\\") return found("\\ (a line continued)");
+    }
+    return null;
+  }
+
+  // The loops being parsed, innermost last (a function's body starts its
+  // own): for `break x` / `continue x`, which leave or go on with the for
+  // loop of x through the loops inside it.  Such a jump sets
+  // _mlb = (target, 0 | 1) and breaks; after each loop it passes, the loop
+  // around it breaks again, until the target's body, which takes it
+  // (break, or continue).  `escapes`: the targets outside a loop that a jump
+  // inside it is going to; `target`: whether a jump goes to this loop (it
+  // then starts with _mlb = None).
+  loops: { v: string | null; id: number; mark: number; ind: string; escapes: Set<number>; target: boolean }[] = [];
+  loopIds = 0;
+  loop(v: string | null, emitHead: () => void, body: () => void) {
+    const L = { v, id: ++this.loopIds, mark: this.out.length, ind: this.ind, escapes: new Set<number>(), target: false };
+    emitHead();
+    this.loops.push(L);
+    try {
+      body();
+    } finally {
+      this.loops.pop();
+    }
+    if (L.escapes.size) {
+      // (in the body of the loop around this one)
+      const P = this.loops[this.loops.length - 1];
+      for (const [k, word] of [[0, "break"], [1, "continue"]] as [number, string][]) {
+        if (!L.escapes.has(P.id)) break;
+        this.emit(`if _mlb == (${P.id}, ${k}):`);
+        this.block(() => { this.emit("_mlb = None"); this.emit(word); });
+      }
+      const further = [...L.escapes].filter((t) => t !== P.id);
+      if (further.length) {
+        this.emit("if _mlb is not None:");
+        this.block(() => this.emit("break"));
+        for (const t of further) P.escapes.add(t);
+      }
+    }
+    if (L.target) this.out.splice(L.mark, 0, L.ind + "_mlb = None");
+  }
+  /** break; continue; break x; continue x (x a for loop's variable). */
+  jump(word: "break" | "continue") {
+    const w = this.next();
+    if (this.peek().t !== "id") {
+      this.expect(";");
+      this.emit(word);
+      return;
+    }
+    const t = this.next();
+    this.expect(";");
+    const v = pyName(t.v);
+    let j = this.loops.length - 1;
+    while (j >= 0 && this.loops[j].v !== v) j--;
+    if (j < 0) {
+      this.reject(w, `Cannot do (${word} ${t.v}) since '${t.v}' is not a loop variable`);
+      this.emit(word);
+      return;
+    }
+    if (j === this.loops.length - 1) {
+      this.emit(word);
+      return;
+    }
+    const T = this.loops[j];
+    T.target = true;
+    this.loops[this.loops.length - 1].escapes.add(T.id);
+    this.emit(`_mlb = (${T.id}, ${word === "break" ? 0 : 1})`);
+    this.emit("break");
+  }
+
   // -------- output
   emit(line: string) { this.out.push(this.ind + line); }
   block(f: () => void) {
@@ -195,11 +350,13 @@ class Parser {
     this.emit(`_m._source(${JSON.stringify(this.filename)}, ${JSON.stringify(this.toks.length ? this.src : "")}${mode})`);
     while (this.peek().t !== "eof") {
       const t = this.peek();
+      const i0 = this.i;
       const saved = { out: this.out, n: this.out.length, ind: this.ind, fns: this.fns.length };
       try {
         // each top-level statement on its own, as Magma runs them; what an
         // error does is up to _m._report (a file stops, a session goes on)
         this.rejected = null;
+        this.topWitnesses = [];
         this.emit("try:");
         this.block(() => {
           this.emit(`_m._here(${t.line}, ${t.col})`);
@@ -213,8 +370,21 @@ class Parser {
           const r = this.rejected as { line: number; col: number; msg: string };
           this.out.length = saved.n;
           this.emit(`_m._compile_error(${r.line}, ${r.col}, ${JSON.stringify(r.msg)})`);
+        } else if (this.topWitnesses.length) {
+          const names = [...new Set(this.topWitnesses)].map((n) => JSON.stringify(n)).join(", ");
+          this.emit("finally:");
+          this.block(() => this.emit(`_m._unset(globals(), [${names}])`));
         }
       } catch (e) {
+        // (a construct Sagebrush doesn't have yet: said so, where it is)
+        const u = e instanceof MagmaSyntaxError ? this.unsupported(i0, this.i) : null;
+        // (the line the statement is dropped through, in a session: the error's)
+        const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
+        if (u && e instanceof MagmaSyntaxError) {
+          e.message = `${u.name} is not supported yet`;
+          e.line = u.tok.line;
+          e.col = u.tok.col;
+        }
         if (!(e instanceof MagmaSyntaxError) || this.recover === null) throw e;
         // Magma's rule: the statements before a syntax error have run; the
         // error is reported; a file stops there, and a session drops the
@@ -224,9 +394,9 @@ class Parser {
         this.ind = saved.ind;
         this.fns.length = saved.fns;
         const atEnd = this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
-        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)})`);
+        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)}${u ? ", True" : ""})`);
         if (this.recover === "file" || atEnd) break;
-        while (this.peek().t !== "eof" && this.peek().line <= e.line) this.i++;
+        while (this.peek().t !== "eof" && this.peek().line <= Math.max(errLine, e.line)) this.i++;
       }
     }
     return this.out.join("\n") + "\n";
@@ -453,8 +623,8 @@ class Parser {
         case "while": return this.whileStmt();
         case "repeat": return this.repeatStmt();
         case "case": return this.caseStmt();
-        case "break": this.next(); if (this.peek().t === "id") this.next(); this.expect(";"); this.emit("break"); return;
-        case "continue": this.next(); if (this.peek().t === "id") this.next(); this.expect(";"); this.emit("continue"); return;
+        case "break": return this.jump("break");
+        case "continue": return this.jump("continue");
         case "return": return this.returnStmt();
         case "print": return this.printStmt();
         case "printf": return this.printfStmt();
@@ -651,6 +821,8 @@ class Parser {
   }
 
   assign(lhs: Target[]) {
+    // (the := just read: where Magma puts a multiple assignment's error)
+    const op = this.toks[this.i - 1];
     // R<x> := PolynomialRing(...)
     if (lhs.length === 1 && lhs[0].kind === "gens") {
       const g = lhs[0];
@@ -669,7 +841,7 @@ class Parser {
       return;
     }
     const tmp = this.fresh();
-    this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length})`);
+    this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length}, (${op.line}, ${op.col}))`);
     lhs.forEach((t, k) => {
       if (t.py === "_m_discard") return;
       if (t.kind !== "name") return this.store(t, `_m._present(${tmp}[${k}])`);
@@ -712,14 +884,13 @@ class Parser {
       const b = this.expr();
       const by = this.eat("by") ? this.expr() : "1";
       this.expect("do");
-      this.emit(`for ${v} in _m._to(${a}, ${b}, ${by}):`);
+      this.loop(v, () => this.emit(`for ${v} in _m._to(${a}, ${b}, ${by}):`), () => this.block(() => this.statements(["end"])));
     } else {
       this.expect("in");
       const s = this.expr();
       this.expect("do");
-      this.emit(`for ${v} in _m._iter(${s}):`);
+      this.loop(v, () => this.emit(`for ${v} in _m._iter(${s}):`), () => this.block(() => this.statements(["end"])));
     }
-    this.block(() => this.statements(["end"]));
     this.expect("end");
     this.expect("for");
     this.expect(";");
@@ -729,8 +900,7 @@ class Parser {
     this.expect("while");
     const c = this.expr();
     this.expect("do");
-    this.emit(`while _m._bool(${c}):`);
-    this.block(() => this.statements(["end"]));
+    this.loop(null, () => this.emit(`while _m._bool(${c}):`), () => this.block(() => this.statements(["end"])));
     this.expect("end");
     this.expect("while");
     this.expect(";");
@@ -738,15 +908,14 @@ class Parser {
 
   repeatStmt() {
     this.expect("repeat");
-    this.emit("while True:");
-    this.block(() => {
+    this.loop(null, () => this.emit("while True:"), () => this.block(() => {
       this.statements(["until"]);
       this.expect("until");
       const c = this.expr();
       this.expect(";");
       this.emit(`if _m._bool(${c}):`);
       this.block(() => this.emit("break"));
-    });
+    }));
   }
 
   caseStmt() {
@@ -886,9 +1055,10 @@ class Parser {
     const fn: Fn = { name, refs: p.refs, procedure: kind === "procedure" };
     let lines: string[] = [];
     const u0 = this.uses.length, a0 = this.assigned.length;
-    const saveOut = this.out, saveInd = this.ind;
+    const saveOut = this.out, saveInd = this.ind, saveLoops = this.loops;
     this.out = lines;
     this.ind = "";
+    this.loops = [];
     this.emit("def"); // the signature, once the captures are known
     this.fns.push(fn);
     this.capturing++;
@@ -910,6 +1080,7 @@ class Parser {
       this.localsOpen = saveLocals;
       this.out = saveOut;
       this.ind = saveInd;
+      this.loops = saveLoops;
     }
     this.expect("end");
     this.expect(kind);
@@ -1175,8 +1346,8 @@ class Parser {
         const f = this.field() as { code: string; line: number; col: number };
         e = `_m._getattr(${e}, ${f.code}, (${f.line}, ${f.col}))`;
       } else if (this.at("!")) {
-        this.next();
-        e = `_m._coerce(${e}, ${this.unary()})`;
+        const t = this.next();
+        e = `_m._coerce(${e}, ${this.unary()}, (${t.line}, ${t.col}))`;
       } else if (this.at("@")) {
         this.next();
         e = `_m._apply(${this.unary()}, ${e})`;
@@ -1193,11 +1364,14 @@ class Parser {
     if (t.t === "num") { this.next(); return t.v; }
     if (t.t === "real") { this.next(); return `_m._real(${JSON.stringify(t.v)})`; }
     if (t.t === "str") { this.next(); return JSON.stringify(t.v); }
+    if (t.t === "id" && (t.v === "exists" || t.v === "forall") && this.quantifierAhead()) return this.quantifier();
     if (t.t === "id" && this.at("<", 1)) return this.ctorExpr();
     if (t.t === "id") {
       this.next();
       const n = pyName(t.v);
-      return this.capturing ? this.useVar(n, "r", t) : n;
+      const r = this.capturing ? this.useVar(n, "r", t) : n;
+      // (a witness exists(t){ } may have unassigned: Magma's error, not its old value)
+      return this.witnesses.has(t.v) ? `_m._wread(${r}, ${JSON.stringify(n)}, (${t.line}, ${t.col}), ${this.fns.length ? "True" : "False"})` : r;
     }
     if (this.at("assigned")) return this.assignedExpr(this.next());
     if (this.eat("true")) return "True";
@@ -1419,8 +1593,98 @@ class Parser {
     return this.selectExpr();
   }
 
+  /** A comprehension's clauses after its ":" (x in S, y, z in T | cond) up
+   * to `close`: its loops as Python's (the last clause the outermost: the
+   * first variable varies fastest), and its condition.  h0: where the
+   * head's uses begin (its loop variables are bound there).  collect: it
+   * builds a collection (not a quantifier's test), so that x, y in S
+   * without a condition admits #S^2 elements before iterating
+   * (HARD-FCC-1). */
+  comprehension(h0: number, close: string, collect = false): { loops: string; cond: string | null } {
+    const h1 = this.uses.length;
+    const loops: ((cond: boolean) => string)[] = [];
+    const bound: string[] = [];
+    const sets: { vars: string[]; from: number; to: number }[] = [];
+    do {
+      const vars = [pyName(this.ident())];
+      while (this.eat(",")) vars.push(pyName(this.ident()));
+      bound.push(...vars);
+      this.expect("in");
+      const from = this.uses.length;
+      const set = this.expr();
+      // x, y in S: each over S (evaluated once), x the outer loop, as
+      // Magma does ([ <a, b> : a, b in [1..2] ] is <1,1>, <1,2>, <2,1>, <2,2>)
+      if (vars.length === 1) loops.push(() => `for ${vars[0]} in _m._iter(${set})`);
+      else {
+        const t = this.fresh();
+        const k = vars.length;
+        loops.push((cond) => [`for ${t} in (${collect && !cond ? `_m._admit_power(${set}, ${k})` : set},)`, ...vars.map((v) => `for ${v} in _m._iter(${t})`)].join(" "));
+      }
+      sets.push({ vars, from, to: this.uses.length });
+    } while (this.eat(","));
+    const c0 = this.uses.length;
+    const cond = this.eat("|") ? this.expr() : null;
+    // the loop variables are bound in the head and the condition; a set
+    // sees the variables of the loops after it (they are the outer
+    // loops), not its own or those before it
+    this.bindUses(h0, h1, bound);
+    this.bindUses(c0, this.uses.length, bound);
+    sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
+    this.expect(close);
+    return { loops: loops.map((l) => l(cond !== null)).reverse().join(" "), cond };
+  }
+
+  /** exists{ ... } or forall{ ... }, or with witnesses, exists(t){ ... }
+   * (not a call exists(t) of a function of that name). */
+  quantifierAhead(): boolean {
+    if (this.at("{", 1)) return true;
+    if (!this.at("(", 1)) return false;
+    let k = this.i + 2;
+    while (this.toks[k]?.t === "id" && this.toks[k + 1]?.v === ",") k += 2;
+    return this.toks[k]?.t === "id" && this.toks[k + 1]?.v === ")" && this.toks[k + 2]?.v === "{";
+  }
+
+  /** exists{ e : x in S | P }: whether some x satisfies P; forall{ ... }:
+   * whether all do (true for none).  exists(t){ ... } also assigns the
+   * first e that does to t, and forall(t){ ... } the first that doesn't;
+   * exists(u, v){ <a, b> : ... } assigns the tuple's parts.  With none, the
+   * witnesses aren't assigned.  As Magma 2.18 does. */
+  quantifier(): string {
+    const kw = this.next().v;
+    const wit: Tok[] = [];
+    if (this.eat("(")) {
+      do {
+        const w = this.peek();
+        this.ident();
+        wit.push(w);
+      } while (this.eat(","));
+      this.expect(")");
+    }
+    this.expect("{");
+    const h0 = this.uses.length;
+    const head = this.expr();
+    this.expect(":");
+    const { loops, cond } = this.comprehension(h0, "}");
+    const test = cond ? `_m._bool(${cond})` : "True";
+    if (!wit.length) return `${kw === "exists" ? "any" : "all"}(${test} ${loops})`;
+    // the first witness (in a 1-tuple, so that any value is one), assigned
+    // with := in the expression, only when there is one
+    const t = this.fresh();
+    const found = `(${t} := _m._witness(((${head},) ${loops} if ${kw === "exists" ? test : `not ${test}`})))`;
+    const names = wit.map((w) => pyName(w.v));
+    names.forEach((n, k) => this.declareGlobal(n, wit[k]));
+    if (this.fns.length === 0) this.topWitnesses.push(...names);
+    const assign = names.map((n, k) => `(${n} := ${names.length === 1 ? `${t}[0]` : `_m._index(${t}[0], ${k + 1})`})`).join(", ");
+    // (no witness: they are unassigned, as in Magma, not left with old values)
+    const unassign = names.map((n) => `(${n} := _m._NOVAL)`).join(", ");
+    return kw === "exists"
+      ? `((${found} is not None and (${assign}, True)[-1]) or (${unassign}, False)[-1])`
+      : `((${found} is None and (${unassign}, True)[-1]) or (${assign}, False)[-1])`;
+  }
+
   /** [ ... ], { ... }: elements, a range a..b [by c], or a comprehension. */
   collection(open: string, close: string, ctor: string): string {
+    const ot = this.peek();
     this.expect(open);
     if (this.eat(close)) return `${ctor}([])`;
     let universe = "None";
@@ -1442,35 +1706,14 @@ class Parser {
       const b = this.expr();
       const by = this.eat("by") ? this.expr() : "1";
       this.expect(close);
-      return `_m._range(${first}, ${b}, ${by}, ${JSON.stringify(open)})`;
+      // ([ U | a..b ]: the universe too, which Magma checks)
+      return `_m._range(${first}, ${b}, ${by}, ${JSON.stringify(open)}${universe !== "None" ? `, ${universe}, (${ot.line}, ${ot.col})` : ""})`;
     }
     if (this.eat(":")) {
       // [ e : x in S, y in T | cond ]
-      const h1 = this.uses.length;
-      const loops: [string, string][] = [];
-      const bound: string[] = [];
-      const sets: { vars: string[]; from: number; to: number }[] = [];
-      do {
-        const vars = [pyName(this.ident())];
-        while (this.eat(",")) vars.push(pyName(this.ident()));
-        bound.push(...vars);
-        this.expect("in");
-        const from = this.uses.length;
-        loops.push([vars.length === 1 ? vars[0] : `(${vars.join(", ")})`, this.expr()]);
-        sets.push({ vars, from, to: this.uses.length });
-      } while (this.eat(","));
-      const c0 = this.uses.length;
-      const cond = this.eat("|") ? this.expr() : null;
-      // the loop variables are bound in the head and the condition; a set
-      // sees the variables of the loops after it (they are the outer
-      // loops), not its own or those before it
-      this.bindUses(h0, h1, bound);
-      this.bindUses(c0, this.uses.length, bound);
-      sets.forEach((st, k) => this.bindUses(st.from, st.to, sets.slice(k + 1).flatMap((t) => t.vars)));
-      this.expect(close);
-      // the first variable varies fastest: the last loop is the outermost
-      const gen = `${first} ${loops.reverse().map(([v, s]) => `for ${v} in _m._iter(${s})`).join(" ")}${cond ? ` if _m._bool(${cond})` : ""}`;
-      return `${ctor}([${gen}], universe=${universe})`;
+      // (its elements through one bounded collector (HARD-FCC-1))
+      const { loops, cond } = this.comprehension(h0, close, true);
+      return `${ctor}(_m._collect((${first} ${loops}${cond ? ` if _m._bool(${cond})` : ""})), universe=${universe})`;
     }
     // x -> y: an arrow pair, as in a map's graph [ 1 -> 30, 2 -> 20 ]
     const arrow = (e: string) => (this.eat("->") ? `_m.MTuple([${e}, ${this.expr()}])` : e);

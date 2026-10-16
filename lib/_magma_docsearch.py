@@ -154,6 +154,14 @@ TABLE = {
     "CremonaReference": (["elliptic curves"], "The Cremona label of an elliptic curve over Q."),
     "TorsionSubgroup": (["elliptic curves"], "The torsion subgroup of the rational points of an elliptic curve."),
     "Rank": (["elliptic curves", "matrices"], "The rank of an elliptic curve or a matrix."),
+    # finite fields
+    "GF": (["finite fields"], "The finite field with q = p^n elements, GF(q) or GF(p, n), defined by the Conway polynomial."),
+    "FiniteField": (["finite fields"], "The same as GF."),
+    "GaloisField": (["finite fields"], "The same as GF."),
+    "Characteristic": (["finite fields"], "The characteristic of a finite field."),
+    "PrimitiveElement": (["finite fields"], "A generator of a finite field's multiplicative group."),
+    "IsPrimitive": (["finite fields"], "Whether an element generates its finite field's multiplicative group."),
+    "Order": (["finite fields"], "The multiplicative order of an element of a finite field."),
     # number fields
     "NumberField": (["number fields"], "The number field defined by an irreducible polynomial."),
     "QuadraticField": (["number fields"], "The quadratic field Q(sqrt(d))."),
@@ -196,6 +204,30 @@ TABLE = {
 # test/magma-examples.json, made by scripts/magma-examples-table.py) and
 # lists where the two differ.
 EXAMPLES = {
+    "GF": """\
+> F<w> := GF(9);
+> F;
+Finite field of size 3^2
+> w^4;
+2""",
+    "FiniteField": """\
+> FiniteField(7);
+Finite field of size 7""",
+    "GaloisField": """\
+> GaloisField(2, 3);
+Finite field of size 2^3""",
+    "Characteristic": """\
+> Characteristic(GF(25));
+5""",
+    "PrimitiveElement": """\
+> PrimitiveElement(GF(7));
+3""",
+    "IsPrimitive": """\
+> IsPrimitive(GF(7)!3);
+true""",
+    "Order": """\
+> Order(GF(7)!2);
+3""",
     "Integers": """\
 > Z := Integers();
 > Z ! 17;
