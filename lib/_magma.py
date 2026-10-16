@@ -738,8 +738,9 @@ def _frange(a, b, c):
 _NEST_MAX = 100
 # and a copy that would make more containers than this (a value sharing
 # its parts, x := [x, x], copies to a tree of them) is refused before it
-# starts
-_OWN_CONTAINERS_MAX = 10 ** 5
+# starts; with what it copies from, the largest copy admitted fits a 96 MB
+# heap (measured: about 90000 small sequences fit, HARD-756-1)
+_OWN_CONTAINERS_MAX = 5 * 10 ** 4
 _OWN_RECORD_WEIGHT = 8
 
 
@@ -2725,6 +2726,28 @@ def _items(v):
     return ["undef" if x is _UNDEF else _inline(x) for x in items]
 
 
+# While Sprint or Sprintf makes a string (the value it was given, in a
+# tuple), not session output: Magma lays a value given that way out
+# without the 80-column layout, its nested elements a line each without
+# indentation, each such line laid out on 80 columns (checked against
+# Magma 2.18)
+_SPRINT = [None]
+
+
+def _sprint_str(v):
+    """v as Sprint and Sprintf's %o make it a string."""
+    old = _SPRINT[0]
+    _SPRINT[0] = (v,)
+    try:
+        return _str(v)
+    finally:
+        _SPRINT[0] = old
+
+
+def _sprint_top(v):
+    return _SPRINT[0] is not None and v is _SPRINT[0][0]
+
+
 def _str(v, indent=0, col=None, tail=""):
     """Magma's printing of v (possibly over several lines), starting at
     column `col` (default: the indentation), followed by `tail` (the comma
@@ -2750,7 +2773,8 @@ def _str1(v, indent, col, tail):
         if not v:
             return "[* *]", False
         if all(_atomic(x) for x in v):
-            return _wrap("[* " + ", ".join(_inline(x) for x in v) + " *]", indent, indent), False
+            t = "[* " + ", ".join(_inline(x) for x in v) + " *]"
+            return (t if _sprint_top(v) else _wrap(t, indent, indent)), False
         if all(type(x).__name__ == "MList" for x in v):
             return "[* " + ", ".join(_str(x, indent) for x in v) + " *]", False
         pad = " " * (indent + 4)
@@ -2776,14 +2800,19 @@ def _str1(v, indent, col, tail):
                 words = (it + ("," if k < len(items) - 1 else "")).split(" ")
                 chunks += [(w, True) for w in words]
             chunks.append((c.strip() + tail, False))
+            if _sprint_top(v):
+                return "".join(t + (" " if sp else "") for t, sp in chunks), True
             return _flow(chunks, col, indent), True
-        pad = " " * (indent + 4)
-        inner = [pad + _str(x, indent + 4, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
+        step = 0 if _SPRINT[0] is not None else 4
+        pad = " " * (indent + step)
+        inner = [pad + _str(x, indent + step, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
         return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
         return v._str(indent), False
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
+    if _sprint_top(v):
+        return _inline(v) + tail, True
     return _wrap(_inline(v) + tail, col, indent + _extra(v), indent), True
 
 
@@ -2911,7 +2940,7 @@ def _fixed(x, n):
     return ("-" if v < 0 else "") + whole + "." + frac
 
 
-def _sprintf(fmt, *args, where="printf"):
+def _sprintf(fmt, *args, where="printf", string=False):
     """printf's and Sprintf's format: %o (an object, default printing), %O
     (in the printing level the next argument names), %m (Magma's level),
     %h (an integer in hexadecimal), %%; a field width after the %, digits
@@ -2989,7 +3018,8 @@ def _sprintf(fmt, *args, where="printf"):
             if t is None:
                 raise MagmaError("printf's precision (%%.%do) for this real is not supported yet" % prec, where, blank)
         else:
-            t = _str(x)
+            # (Sprintf makes a string: no session layout, _sprint_str)
+            t = _sprint_str(x) if string else _str(x)
         out.append(t.ljust(-width) if width < 0 else t.rjust(width))
     return "".join(out)
 
@@ -3796,11 +3826,11 @@ def StringToInteger(s, b=10):
 
 
 def Sprint(x):
-    return _str(x)
+    return _sprint_str(x)
 
 
 def Sprintf(fmt, *args):
-    return _sprintf(fmt, *args, where="'Sprintf'")
+    return _sprintf(fmt, *args, where="'Sprintf'", string=True)
 
 
 # ------------------------------------------------------------------ finite fields
