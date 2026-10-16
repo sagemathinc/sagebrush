@@ -3,7 +3,7 @@
 // no compression), crc32 and adler32; base64 and hex for binascii.  Enough
 // for scipy.io.loadmat's compressed MATLAB arrays and for base64 data.
 
-import { T, PyBytes, raise, objectType, tuple, typeName } from "./object";
+import { T, PyBytes, raise, objectType, tuple, typeName, withExport } from "./object";
 import { newBuiltinModule } from "./modules";
 import * as O from "./ops";
 
@@ -369,9 +369,12 @@ newBuiltinModule("binascii", (m) => {
   const b2a = (data: any, newline: any = true) => {
     // (as CPython: the buffer first, then newline's truth, which may run
     // Python code, then the encoding, of the buffer as it is then, CORR-644-1)
-    const buf = bytesOf(data);
-    const nl = O.truth(newline); // (Python's truth: newline=[] is false, and __bool__'s errors propagate)
-    const e = b64encode(buf);
+    // (a bytearray's buffer is exported meanwhile, as CPython's: newline's
+    // __bool__ may write it but not re-size it, and the encoding reads the
+    // storage as it is after, CORR-59A-1, -2)
+    bytesOf(data);
+    const nl = withExport(data, () => O.truth(newline)); // (Python's truth: newline=[] is false, and __bool__'s errors propagate)
+    const e = b64encode(bytesOf(data));
     if (!nl) return new PyBytes(e);
     const out = new Uint8Array(e.length + 1);
     out.set(e);

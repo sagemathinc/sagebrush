@@ -1310,7 +1310,24 @@ export function dictClear(d: PyDict) {
 export class PyBytes {
   constructor(public a: Uint8Array, public n: number = a.length) {}
 }
-export class PyByteArray extends PyBytes {}
+// A bytearray counts the exports of its buffer (CPython's ob_exports): while
+// one is held it may be written but not re-sized (BufferError).
+export class PyByteArray extends PyBytes {
+  $exports = 0;
+}
+export function checkResizable(b: PyByteArray) {
+  if (b.$exports > 0) raise(T.BufferError, "Existing exports of data: object cannot be re-sized");
+}
+// f() with an export of x's buffer held (a bytearray's), released on every path
+export function withExport<R>(x: any, f: () => R): R {
+  if (!(x instanceof PyByteArray)) return f();
+  x.$exports++;
+  try {
+    return f();
+  } finally {
+    x.$exports--;
+  }
+}
 export function isBytesLike(x: any): x is PyBytes {
   return x instanceof PyBytes;
 }

@@ -4,7 +4,7 @@
 
 import {
   T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, PrimBox, table, handledExceptions,
+  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
 import { INTR } from "./interrupt";
@@ -1803,6 +1803,7 @@ function bytearraySetSlice(o: PyByteArray, k: PySlice, v: any) {
   const src: Uint8Array = bufferOf(v)?.slice() ?? Uint8Array.from(toArray(v).map(byteValue));
   const [start, step, n] = sliceIndices(k, o.n);
   if (step === 1) {
+    if (src.length !== n) checkResizable(o);
     const r = new Uint8Array(o.n - n + src.length);
     r.set(o.a.subarray(0, start), 0);
     r.set(src, start);
