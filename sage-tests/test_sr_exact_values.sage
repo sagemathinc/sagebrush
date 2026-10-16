@@ -106,3 +106,8 @@ def _err3(f):
     except TypeError:
         return "TypeError"
 t("a __float__ returning np.float32 is refused", lambda: (_err3(lambda: conjugate(_P3(2))), _err3(lambda: real(_P3(2))), _err3(lambda: imag(_P3(2)))))
+def _ret3(v):
+    class _Q3(float):
+        def __float__(self): return v
+    return _Q3(2)
+t("a __float__ returning RR, RDF or CC is refused", lambda: tuple(_err3(lambda: f(_ret3(v))) for v in (RR(9), RDF(9), CC(9)) for f in (conjugate, real, imag)))
