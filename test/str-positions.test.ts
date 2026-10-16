@@ -121,3 +121,30 @@ test("indexing a new string equal to the last one indexed is not slower: json.lo
   // (generous: a loaded machine; the bug was 25x)
   assert.ok(later < Math.max(first * 5, 1.0), `first ${first} s, later ${later} s`);
 });
+
+// ... and once adopted, the old equal string is not kept alive: the cache
+// holds one body of a huge string, not two (HARD-3F4-1). Two 20-million-unit
+// strings with a pair (the cache's big entry), the first dropped once the
+// second is indexed: the heap keeps about one of them.
+test("adopting an equal string keeps one body of it alive, not two", () => {
+  const code = [
+    `const sp = require(${JSON.stringify(__dirname + "/../src/runtime/strpos.js")});`,
+    "const collect = globalThis.gc, heap = () => (collect(), collect(), process.memoryUsage().heapUsed);",
+    "const N = 20_000_000;",
+    "const base = heap();",
+    "let a = 'x'.repeat(N) + '\\u{1F600}';",
+    "sp.pairs(a);",
+    "let b = ('y' + 'x'.repeat(N - 1)).replace('y', 'x') + '\\u{1F600}';",  // (equal to a, another object)
+    "if (a !== b) throw new Error('not equal');",
+    "sp.pairs(b); sp.pairs(b);",
+    // (V8 keeps the last regular expression's subject, RegExp.input: scan's
+    // search of a; another match lets go of it, as any later re call does)
+    "/x/.test('x');",
+    "a = null;",
+    "const one = heap() - base;",
+    "console.log(JSON.stringify({ one, body: 2 * N }));",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["--expose-gc", "-e", code], { encoding: "utf8", timeout: 120000 }).trim());
+  // (one body is 2N bytes, two-byte for the pair; two would be 4N)
+  assert.ok(r.one < 1.5 * r.body, `kept ${r.one} bytes for a ${r.body}-byte string`);
+});
