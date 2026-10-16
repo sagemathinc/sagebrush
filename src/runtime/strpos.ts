@@ -70,16 +70,19 @@ function scan(s: string): Pos | null {
   return n ? new Pos(s, c, n) : null;
 }
 
-// The comparisons of contents that found two strings equal: for an equal
-// string that is another object, each is a full one (the tests count them).
-export const equalCompares = { n: 0 };
+// The comparisons of contents that can be full: of two strings of the same
+// length, and the cache's lookup when it finds one (the tests count them).
+export const compares = { n: 0 };
 
 // An equal string that is another object becomes the one every reference
 // here holds (lastKey, bigKey, its index's s, its cache key): one body is
 // kept alive, not two equal ones (HARD-3F4-1), and the next comparisons are
 // of pointers.  Where it was found says which of them hold it, so they are
-// assigned, not compared again: one full comparison per new object
-// (HARD-3F4-2).
+// assigned, not compared again (HARD-3F4-2).  A new object is compared in
+// full at most twice: with lastKey, which can fail late when it is as long
+// and differs near the end, then with what finds it (bigKey or the cache)
+// (HARD-3F4-3); bigKey is not compared again when it is lastKey.  (The
+// cache's lookup is V8's Map's: a key of the same hash is compared too.)
 let lastKey: string | null = null;
 let lastVal: Pos | null = null;
 let lastBig = false; // lastKey is bigKey
@@ -91,11 +94,11 @@ export function pairs(s: string): Pos | null {
   if (s.length < SHORT) return SURROGATE.test(s) ? scan(s) : null;
   // (the string last asked about first: a loop over one string compares
   // its pointer, not its contents; an equal string that is another object is
-  // compared in full once, then kept as the key, so the next asks about it
+  // compared in full (at most twice, above), then kept as the key, so the next asks about it
   // compare pointers again: json.loads of a new json.dumps result took a
   // full comparison per character)
+  if (lastKey !== null && s.length === lastKey.length) compares.n++;
   if (s === lastKey) {
-    equalCompares.n++;
     lastKey = s;
     if (lastBig) bigKey = s;
     if (lastVal !== null) lastVal.s = s;
@@ -112,15 +115,16 @@ export function pairs(s: string): Pos | null {
     cache.set(lastKey!, lastEntry);
   }
   lastTouched = false;
-  const p = longPairs(s);
+  const p = longPairs(s, lastBig);
   lastKey = s;
   return (lastVal = p);
 }
-function longPairs(s: string): Pos | null {
+// (wasBig: lastKey, just found unequal to s, is bigKey)
+function longPairs(s: string, wasBig: boolean): Pos | null {
   lastBig = false;
   lastEntry = null;
-  if (s === bigKey) {
-    equalCompares.n++;
+  if (!wasBig && bigKey !== null && s.length === bigKey.length) compares.n++;
+  if (!wasBig && s === bigKey) {
     bigKey = s;
     if (bigVal !== null) bigVal.s = s;
     lastBig = true;
@@ -128,7 +132,7 @@ function longPairs(s: string): Pos | null {
   }
   const hit = cache.get(s);
   if (hit !== undefined) {
-    equalCompares.n++;
+    compares.n++;
     // (re-inserted under the new object, which the index then holds too)
     cache.delete(hit.key);
     hit.key = s;
