@@ -7894,7 +7894,8 @@ def isstrprop_(s, kind):
 def _group_names(p, freespacing=False):
     """[(group number, name)] of a MATLAB pattern's named capturing groups, in order: a name may
     appear more than once, in different alternatives ('(?<day>\\d+)-...|...(?<day>\\d+)').
-    Comments are skipped: (?#...), and with freespacing (the option or an inline (?x)) a
+    Comments are skipped: (?#...), and with freespacing (the compiled flags: the option or any
+    inline flag group containing x, such as (?ix)) a
     # to the end of the line"""
     out = []
     i, n, k = 0, len(p), 0
@@ -8121,7 +8122,7 @@ def _regexp(nargout, s, pat, opts, flags):
                 # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one.
                 # The fields in the order the names first appear; a name used in several
                 # alternatives takes the group that took part in the match)
-                groups = _group_names(_text(pat), bool(flags & _re.VERBOSE))
+                groups = _group_names(_text(pat), bool(rx.flags & _re.VERBOSE))
                 names = list(dict.fromkeys(nm for _, nm in groups))
                 def value(m, nm):
                     for g, x in groups:
