@@ -251,11 +251,28 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
 
         sage: timeit("2 + 2")  # random
         625 loops, best of 3: 41.3 ns per loop
+
+    The statement is Sage code, as in Sage::
+
+        sage: L = []
+        sage: timeit("L.append(2^3); L.append(1/2)", number=1, repeat=1, globals=globals())  # random
+        1 loop, best of 1: 26.9 μs per loop
+        sage: L
+        [8, 1/2]
     """
     import time as _t
     import sys as _s
     g = globals if globals is not None else _s.modules["__main__"].__dict__
-    code = compile(str(stmt), "<timeit>", "exec")
+    stmt = str(stmt)
+    import builtins as _b
+    if not kwds.get("preparse", True):
+        code = compile(stmt, "<timeit>", "exec")
+    elif hasattr(_b, "__pyjs_compile_sage__"):
+        # as Sage: the statement is Sage code, so 2^3 is 8 and 1/2 exact
+        code = _b.__pyjs_compile_sage__(stmt, "<timeit>", "exec")
+    else:
+        from sagebrush.preparse import preparse as _preparse
+        code = compile(_preparse(stmt), "<timeit>", "exec")
     n = int(number) or 1
     if not number:
         while True:
@@ -274,7 +291,8 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
         best = d if best is None or d < best else best
     for unit, scale in (("s", 1), ("ms", 1e-3), ("\u03bcs", 1e-6), ("ns", 1e-9)):
         if best >= scale or unit == "ns":
-            print("%d loops, best of %d: %.3g %s per loop" % (n, int(repeat), best / scale, unit))
+            print("%d loop%s, best of %d: %.3g %s per loop"
+                  % (n, "" if n == 1 else "s", int(repeat), best / scale, unit))
             break
 
 
