@@ -1189,9 +1189,11 @@ method(S, "translate", (s: string, table: any) => {
   // 4096 and the blocks appended, so memory goes with the output, not with a
   // JS entry per input character (HARD-C56-1).  A plain dict is read without
   // a KeyError per unmapped character, and what each code point maps to is
-  // remembered (at most one entry per distinct code point).
+  // remembered (at most one entry per distinct code point) when no lookup
+  // can be observed: every key is an int, str, float, bool or None (none of
+  // them in $buckets, where keys with a Python __eq__ live), CORR-8E6-1.
   const plain = table instanceof PyDict && (table as any).$cls === T.dict;
-  const seen = plain ? new Map<number, any>() : null;
+  const seen = plain && (table as PyDict).$buckets === null ? new Map<number, any>() : null;
   const NONE = {}; // (a key that is not in the table: kept as is)
   let out = "";
   let pieces: string[] = [];
@@ -1216,6 +1218,10 @@ method(S, "translate", (s: string, table: any) => {
         r = v === undefined ? NONE : v;
         seen.set(cp, r);
       }
+    } else if (plain) {
+      // (each lookup made, as CPython's, but no KeyError raised for a miss)
+      const v = dictGet(table, cp);
+      r = v === undefined ? NONE : v;
     } else {
       try {
         r = O.getitem(table, cp);

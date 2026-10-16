@@ -98,3 +98,33 @@ try:
     str.maketrans("a😀", "abc")
 except ValueError as e:
     print(e)
+
+# A table's lookups stay observable when a key has a Python __eq__: no cache
+# then (astra's translate_keys probe, CORR-8E6-1; '😀😀😀' is left out:
+# text[0] of it is UTF-16's until str positions count code points)
+class TKey:
+    def __init__(self, code):
+        self.code = code
+        self.n = 0
+    def __hash__(self): return self.code
+    def __eq__(self, other):
+        self.n += 1
+        return self.n % 2 == 1
+
+for text in ['ééé', 'ΩΩΩΩ', 'éxéxé']:
+    k = TKey(ord(text[0]))
+    table = {k: 'X'}
+    print(ascii(text), ascii(text.translate(table)), k.n)
+
+class Change:
+    def __init__(self): self.n = 0
+    def __getitem__(self, key):
+        self.n += 1
+        return ord('X') + self.n
+for text in ['ééé', '😀😀😀']:
+    table = Change()
+    print('mapping', ascii(text), ascii(text.translate(table)), table.n)
+
+for text in ['', 'é😀é😀', 'aaébb😀cc', 'a'*4100+'é'+'b'*4100]:
+    result = text.translate(str.maketrans('é😀', 'ΩZ', 'ab'))
+    print('ordinary', ascii(result), len(result))
