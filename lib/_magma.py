@@ -743,16 +743,20 @@ def _range_int(v, open_, pos):
     if isinstance(v, bool) or not (isinstance(v, (int, _Fraction)) or isinstance(v, MReal)):
         return v  # (another type: its own errors, as before)
     if isinstance(v, MReal):
-        # (decided from its digits m and exponent e, value m * 10^e, before
+        # (decided from its bits m and exponent e, value m * 2^e, before
         # any expansion: a huge exponent is never made into a huge integer,
         # HARD-1CD-1)
         m, e = v.m, v.e
-        nd = len(str(abs(m)))
-        if m and e >= 0 and nd + e > _RANGE_DIGITS:
-            raise MagmaError("a range endpoint of more than %d digits is not supported yet" % _RANGE_DIGITS)
-        if not m or e >= 0:
-            return m * 10 ** e
-        f = _Fraction(m, 10 ** -e) if -e <= nd else _Fraction(1, 2)  # (|m| < 10^-e: not an integer)
+        if m and e >= 0:
+            # (10^_RANGE_DIGITS has fewer bits than this; past it, refused
+            # unexpanded; nearer, by its digits)
+            if abs(m).bit_length() + e > 4 * _RANGE_DIGITS or len(str(abs(m) << e)) > _RANGE_DIGITS:
+                raise MagmaError("a range endpoint of more than %d digits is not supported yet" % _RANGE_DIGITS)
+            return m << e
+        if not m:
+            return 0
+        # (|m| < 2^-e: not an integer; else one when 2^-e divides m)
+        f = _Fraction(m >> -e) if -e < abs(m).bit_length() and not abs(m) & ((1 << -e) - 1) else _Fraction(1, 2)
     else:
         f = _Fraction(v)
     if f.denominator != 1:
@@ -763,8 +767,6 @@ def _range_int(v, open_, pos):
 
 
 def _range(a, b, c, open_, universe=None, pos=None):
-    # (an integral rational is a range's integer, as Magma takes it)
-    a, b, c = (int(v) if isinstance(v, _Fraction) and v.denominator == 1 else v for v in (a, b, c))
     if universe is not None and universe is not _ZZ:
         # (a range's elements are integers: Magma refuses another universe)
         if open_ == "[":
