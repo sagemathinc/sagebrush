@@ -2064,6 +2064,9 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     "disp(numel(regexp(repmat('a', 1, 300), p, 'start')))", tryIt("regexp(repmat('a', 1, 300), p, 'names')"),
     "q = ['(?<g0>a)' strjoin(arrayfun(@(k) sprintf('(?<g%d>b)?', k), 1:799, 'UniformOutput', false), '')];",
     tryIt("regexp(repmat('a', 1, 800), q, 'start')"), "disp(regexp('xaay', q, 'start', 'once'))",
+    // (the outputs asked for are counted too: all seven of 200,000 matches refused; one of 20,000 kept)
+    tryIt("[a, b, c, d, e, f, g] = regexp(repmat(char(97), 1, 200000), char(97))"), "fprintf('%d\\n', numel(regexp(repmat('a', 1, 20000), 'a')))",
+    tryIt("regexp(repmat({repmat('a', 1, 20000)}, 1, 10), 'a')"),
     // (a token name in two alternatives: the fields in first appearance, the matching alternative's value)
     "n = regexp('01/11/2000  20-02-2020', ['(?<month>\\d+)/(?<day>\\d+)/(?<year>\\d+)|' '(?<day>\\d+)-(?<month>\\d+)-(?<year>\\d+)'], 'names');",
     "disp(strjoin(fieldnames(n)', ',')); disp([n(1).month ' ' n(1).day ' ' n(2).month ' ' n(2).day ' ' n(2).year])",
@@ -2079,6 +2082,6 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
   ].join("\n")), ["refused", "refused", "refused", "refused", "refused",
     "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740991",
     "127 255 32767 65535 2147483647 4294967295", "refused", "single",
-    "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "month,day,year", "01 11 02 20 2020", "aaaa",
+    "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "refused", "20000", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
     "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
 });

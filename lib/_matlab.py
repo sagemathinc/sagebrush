@@ -8010,8 +8010,10 @@ def _regexp_row(e):
     return Char(_text(e))
 
 
-# (the group slots, matches times groups plus one, a regexp call may keep)
+# (the slots a regexp call may use, its matches times their groups and outputs; a call
+# over the elements of a cell array shares one budget, _RX_BUDGET, between them)
 _MATCH_SLOTS = 200_000
+_RX_BUDGET = [None]
 
 
 def _regexp(nargout, s, pat, opts, flags):
@@ -8040,8 +8042,15 @@ def _regexp(nargout, s, pat, opts, flags):
             return Cell(per, pat.shape)
         return [Cell([q[k] for q in per], pat.shape) for k in range(nargout)]
     if type(s) is Cell or type(s) is StrArr:
-        # (each element: a cell of results)
-        per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
+        # (each element: a cell of results; the elements share one match budget)
+        owner = _RX_BUDGET[0] is None
+        if owner:
+            _RX_BUDGET[0] = _MATCH_SLOTS
+        try:
+            per = [_regexp(max(1, nargout), Char(_text(e)) if type(e) is not str else Char(e), pat, opts, flags) for e in s.a]
+        finally:
+            if owner:
+                _RX_BUDGET[0] = None
         if nargout <= 1:
             return Cell(per, s.shape)
         return [Cell([p[k] for p in per], s.shape) for k in range(nargout)]
@@ -8088,11 +8097,14 @@ def _regexp(nargout, s, pat, opts, flags):
     if not wanted:
         wanted = ["start", "end", "tokenextents", "match", "tokens", "names", "split"]
     rx = _re.compile(_regex(_text(pat)), flags)
-    # (the matches kept, each holding its groups, admitted as they are found: past
-    # _MATCH_SLOTS group slots the call is refused rather than run out of memory; 'once'
-    # stops at the first)
+    # (the matches kept, and per match the outputs asked for, admitted as they are found:
+    # each match holds its groups, start and end a number each, match and split a char
+    # array, tokens, tokenExtents and names one entry per group; past _MATCH_SLOTS the call
+    # is refused rather than run out of memory. 'once' stops at the first)
     ms = []
-    slots = rx.groups + 1
+    g = rx.groups
+    cost = {"start": 1, "end": 1, "match": 2, "split": 2, "tokens": 1 + g, "tokenextents": 1 + g, "names": 1 + g}
+    slots = (g + 1) + sum(cost[w] for w in wanted[:max(1, nargout)])
 
     def stepwise():
         # (one match at a time, for an input that could pass the limit: the runtime's
@@ -8110,8 +8122,10 @@ def _regexp(nargout, s, pat, opts, flags):
             ms.append(m)
             if once:
                 break
-            if len(ms) * slots > _MATCH_SLOTS:
-                raise _err("regexp: more than %d matches of a pattern with %d groups are not supported in Sagebrush." % (_MATCH_SLOTS // slots, rx.groups))
+            if len(ms) * slots > (_RX_BUDGET[0] if _RX_BUDGET[0] is not None else _MATCH_SLOTS):
+                raise _err("regexp: more than %d matches are not supported in Sagebrush for this pattern (%d groups) and these %d outputs." % (_MATCH_SLOTS // slots, rx.groups, min(len(wanted), max(1, nargout))))
+    if _RX_BUDGET[0] is not None:
+        _RX_BUDGET[0] -= len(ms) * slots
 
     def row(vals):
         return Cell(vals, (1, len(vals)))
