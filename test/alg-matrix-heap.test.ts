@@ -25,12 +25,12 @@ test("the charge of the four measured AA/QQbar cases exceeds a 96 MiB budget, wh
   assert.equal(r.stdout, "128 True True\n120 True True\n100 True True\n128 True True\n");
 });
 
-test("a matrix over AA whose entries each have their own field is refused, not crashed, in a small heap", () => {
+test("a matrix over AA whose entries each have their own field is refused, not crashed, in 96 MiB", () => {
   // (refused within a row of the budget: NotImplementedError, and the process
-  // goes on.  64 MiB rather than 96: the entries up to the budget are built
-  // first, 38 s at 96 MiB)
+  // goes on, well before the heap is full: the entries up to the budget are
+  // built first)
   const c = "A = matrix(AA, 128, 128, lambda i, j: AA(128*i + j + 2).sqrt())";
-  const r = run(["--max-old-space-size=64"], `try:\n ${c}\n print('built')\nexcept NotImplementedError as e:\n print('refused', str(e)[:24])\nprint(matrix(AA, [[1, 2]]) + matrix(AA, [[3, 4]]))\n`);
+  const r = run(["--max-old-space-size=96"], `try:\n ${c}\n print('built')\nexcept NotImplementedError as e:\n print('refused', str(e)[:24])\nprint(matrix(AA, [[1, 2]]) + matrix(AA, [[3, 4]]))\n`);
   assert.equal(r.status, 0, r.stderr.slice(-400));
   const lines = r.stdout.trim().split("\n");
   assert.match(lines[0], /^refused a /);

@@ -33,6 +33,18 @@ Ring of integers modulo 6 RR-3 :: 3
 Finite Field of size 7 RR1e30 :: 5
 Finite Field of size 2 RR1e30 :: 0
 Ring of integers modulo 6 RR1e30 :: 4
+Finite Field of size 7 RR1e309 :: 2
+Finite Field of size 2 RR1e309 :: 0
+Ring of integers modulo 6 RR1e309 :: 2
+Finite Field of size 7 RR-1e309 :: 5
+Finite Field of size 2 RR-1e309 :: 0
+Ring of integers modulo 6 RR-1e309 :: 4
+Finite Field of size 7 RR1e400 :: 3
+Finite Field of size 2 RR1e400 :: 0
+Ring of integers modulo 6 RR1e400 :: 0
+Finite Field of size 7 RR1e1000 :: 3
+Finite Field of size 2 RR1e1000 :: 0
+Ring of integers modulo 6 RR1e1000 :: 2
 list 1.25 :: TypeError
 list RR2 :: [2]
 fn 1.25 :: TypeError
