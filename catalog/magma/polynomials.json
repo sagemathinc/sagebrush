@@ -188,8 +188,10 @@
         "expected": "60*x^2\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "A huge order k (10^12, say) is refused by Magma; Sagebrush returns 0 once the derivatives reach zero."
+    ],
+    "status": "partial",
     "upstream_version": "Magma 2.18",
     "tags": [
       "polynomials"
