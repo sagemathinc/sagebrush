@@ -33,6 +33,11 @@ REQUIRED = ["name", "kind", "signature", "summary", "examples", "differs", "stat
 # cannot have examples run yet
 RUNNERS = {"python": "_python_examples:run"}
 
+# what a mode's examples may use without importing it, "module:NAME" (a
+# string of import lines); the built index gives each example the lines it
+# needs, as `setup`, so that it runs where it is copied to (CORR-012-1)
+PRELUDES = {"python": "_python_examples:PRELUDE"}
+
 # the public names of a mode, "module:function" returning them: each must have
 # an entry or be in catalog/<mode>/missing.txt (gate 2)
 PUBLIC = {"python": "_python_docsearch:public_names"}
@@ -209,6 +214,34 @@ def _aliases(mode, base=None):
     return out
 
 
+def _prelude(mode):
+    spec = PRELUDES.get(mode)
+    if spec is None:
+        return ""
+    modname, attr = spec.split(":")
+    return getattr(__import__(modname), attr)
+
+
+def setup(prelude, code):
+    """The lines of prelude (import statements) that code needs: each
+    reduced to the names code uses, as a word, in the order given"""
+    import re
+    used = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", code))
+    out = []
+    for line in prelude.split("\n"):
+        line = line.strip()
+        if line.startswith("from ") and " import " in line:
+            head, names = line.split(" import ", 1)
+            keep = [n.strip() for n in names.split(",") if (n.split(" as ")[-1].strip()) in used]
+            if keep:
+                out.append(head + " import " + ", ".join(keep))
+        elif line.startswith("import "):
+            keep = [n.strip() for n in line[len("import "):].split(",") if n.split(" as ")[-1].strip().split(".")[0] in used]
+            if keep:
+                out.append("import " + ", ".join(keep))
+    return "\n".join(out)
+
+
 def _module(name, group):
     return name.rsplit(".", 1)[0] if "." in name else group
 
@@ -217,8 +250,11 @@ def index(mode, base=None):
     """The mode's built index: each entry, in schema order, with `mode` and
     `module`, and `open_problem` (False) for the readers of the older index"""
     out = []
+    prelude = _prelude(mode)
     for group, e in load(mode, base):
         d = {k: e[k] for k in FIELDS if k in e}
+        if prelude and isinstance(d.get("examples"), list):
+            d["examples"] = [dict(x, setup=setup(prelude, x["code"])) for x in d["examples"]]
         d["mode"] = mode
         d["module"] = _module(e["name"], group)
         d["open_problem"] = False

@@ -204,24 +204,35 @@ def prompted(code, first=">>> ", cont="..."):
     return "\n".join(out)
 
 
+def call_form(e, form):
+    """A signature as written after its name: `(a, b)` follows the name; any
+    other form (MATLAB's `M = max(A)`, `[M, I] = max(___)`) is a whole call,
+    shown as it is (catalog/SCHEMA.md, CORR-012-2)"""
+    if form and not form.startswith("("):
+        return form
+    return e["name"] + (form or ("" if e["kind"] in ("class", "constant", "module", "keyword") else "()"))
+
+
 def describe(e, mode=None):
     """An entry as an agent reads it: the call form with its status, the
     summary, and for a catalog entry its first example (at the mode's
     prompt, then what it prints), what differs from upstream, and what to
     use instead"""
     forms = (e.get("signature") or "").split("\n")
-    head = e["name"] + (forms[0] or ("" if e["kind"] in ("class", "constant", "module", "keyword") else "()"))
+    head = call_form(e, forms[0])
     tags = ("    [%s]" % mode if mode else "") + ("    [open problem]" if e.get("open_problem") else "")
     if e.get("status") and e["status"] != "full":
         tags += "    [%s]" % e["status"]
     out = [head + tags]
-    out.extend("    also: " + e["name"] + f for f in forms[1:] if f)
+    out.extend("    also: " + call_form(e, f) for f in forms[1:] if f)
     s = e["summary"]
     out.append("    " + (s if len(s) <= 150 else s[:147] + "..."))
     exs = e.get("examples")
     if isinstance(exs, list) and exs:
         first, cont = PROMPTS.get(mode, PROMPTS[None])
-        out.extend("    " + ln for ln in prompted(exs[0]["code"], first, cont).split("\n"))
+        # (with the imports it needs, so that it runs where it is copied to)
+        code = ((exs[0].get("setup") or "") + "\n" + exs[0]["code"]).lstrip("\n")
+        out.extend("    " + ln for ln in prompted(code, first, cont).split("\n"))
         out.extend("    " + ln for ln in exs[0]["expected"].rstrip("\n").split("\n") if exs[0]["expected"])
     out.extend("    differs: " + d for d in e.get("differs") or [])
     if e.get("alternative"):
