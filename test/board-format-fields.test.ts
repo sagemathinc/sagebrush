@@ -58,9 +58,9 @@ test("a kind of item added to DocNode without a section is refused (HARD-EC7-1)"
     mkdirSync(join(dir, "web", "board"), { recursive: true });
     for (const f of ["web/board/doc.ts", "web/board/images.ts", "web/board-format.md"]) cpSync(join(repo, f), join(dir, f));
     const doc = readFileSync(join(dir, "web/board/doc.ts"), "utf8");
-    const union = "export type DocNode = DocNote | DocGroup | DocInk | DocSticker;";
+    const union = "export type DocNode = DocNote | DocGroup | DocInk | DocSticker | DocAsk;";
     assert.ok(doc.includes(union));
-    writeFileSync(join(dir, "web/board/doc.ts"), doc.replace(union, "/** A widget. */\nexport interface DocWidget {\n  /** required: unique on its page */\n  id: string;\n}\nexport type DocNode = DocNote | DocGroup | DocInk | DocSticker | DocWidget;"));
+    writeFileSync(join(dir, "web/board/doc.ts"), doc.replace(union, "/** A widget. */\nexport interface DocWidget {\n  /** required: unique on its page */\n  id: string;\n}\nexport type DocNode = DocNote | DocGroup | DocInk | DocSticker | DocAsk | DocWidget;"));
     const r = run(["--check"], dir);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /DocNode's DocWidget: a kind of item with no section/);
@@ -95,9 +95,9 @@ test("a picture's name as the reference says it, letters, digits, _ and -, at mo
 
 test("every type the reference writes in words is a section's, item, or object (DOC-EC7-4)", () => {
   const r = run(["--stdout"]);
-  assert.match(r.stdout, /`item` is any of note, group, ink or sticker;/);
+  assert.match(r.stdout, /`item` is any of note, group, ink, sticker or question;/);
   assert.match(r.stdout, /\| `preview` \| object \| a slow code item's output, kept to show before it runs \(written by Sagebrush\) \|/);
-  const sections = new Set(["note", "group", "edge", "step", "page", "card", "background", "picture", "sticker", "ink"]);
+  const sections = new Set(["note", "group", "edge", "step", "page", "card", "background", "picture", "sticker", "ink", "question", "option"]);
   for (const row of r.stdout.split("\n").filter((l) => /^\| `\w+` \|/.test(l))) {
     const type = row.split(/(?<!\\)\|/)[2].replace(/`[^`]*`/g, "");
     for (const w of type.match(/[a-z]+/g) ?? []) assert.ok(["string", "number", "boolean", "object", "item", "name"].includes(w) || sections.has(w), `${w} in ${row}`);

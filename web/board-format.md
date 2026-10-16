@@ -132,10 +132,56 @@ holds everything.
 https://sagebrush.space/board/ and look at it as it first opens, fitted to
 the window, before zooming in.
 
+## Asking the reader
+
+A board can ask the person reading it, and keep the answers. An item of
+`"kind": "ask"` is a question: its `text` asks (Markdown with math), and
+its `input` says how it is answered:
+
+- `check`: any of its `options` (checkboxes), or, without options, one
+  yes/no box;
+- `radio`: one of its `options`;
+- `choice`: one of its `options`, from a list (for many);
+- `text`: a text field (`lines` for more than one line);
+- `number`: a number, within `min` and `max`, on `step`;
+- `scale`: a whole number from `min` to `max` (default 1 to 5), with words
+  at its ends in `low` and `high`.
+
+An option is a text, or `{"value": "b", "label": "Plan **B**"}`: the answer
+names the value, so the words can change. `"required": true` marks a
+question that must be answered before the answers are sent. The answer is
+kept in the item, as `answer`: for `check` a list of values (or `true` or
+`false`), for `radio` and `choice` one value, for `text` a string, for
+`number` and `scale` a number.
+
+```json
+{
+  "format": "sagebrush-board",
+  "version": 1,
+  "title": "Decisions",
+  "layout": "column",
+  "nodes": [
+    { "id": "plan", "kind": "ask", "text": "Which plan should I follow?", "input": "radio", "required": true,
+      "options": [{ "value": "a", "label": "Plan A: fix it now" }, { "value": "b", "label": "Plan B: document it" }] },
+    { "id": "areas", "kind": "ask", "text": "Which modes should it cover?", "input": "check", "options": ["Python", "Sage", "MATLAB"] },
+    { "id": "sure", "kind": "ask", "text": "How sure are you?", "input": "scale", "low": "not at all", "high": "very" },
+    { "id": "why", "kind": "ask", "text": "Anything else?", "input": "text", "lines": 3 }
+  ]
+}
+```
+
+`sagebrush board answers FILE` lists the questions and the answers kept in
+the board; with `--json`, for a program. A host that shows the board
+passes the reader's answers back as a submission
+(https://sagebrush.space/board-host-protocol.md), and
+`sagebrush board answers FILE --apply SUBMISSION.json` writes them into
+the file. A reader that doesn't know questions yet shows each as a note,
+with its title and text.
+
 <!-- fields: written by scripts/board-format-fields.mjs from the doc comments of web/board/doc.ts; edit those, not this -->
 ## Fields
 
-Each kind of thing in a board, its fields, their types and what they mean. A type in words (note, edge, page, ...) is the section of that name, and `item` is any of note, group, ink or sticker; `[x]` is a list of them, `{name: x}` an object of them by name; `object` is one Sagebrush writes, whose fields this page doesn't list.
+Each kind of thing in a board, its fields, their types and what they mean. A type in words (note, edge, page, ...) is the section of that name, and `item` is any of note, group, ink, sticker or question; `[x]` is a list of them, `{name: x}` an object of them by name; `object` is one Sagebrush writes, whose fields this page doesn't list.
 
 ### The document
 
@@ -280,6 +326,42 @@ A pen stroke, drawn by a person. Don't write these.
 | `x` | number | required: the corner of its box |
 | `y` | number | required: as `x` |
 
+### A question (`kind: "ask"`)
+
+A question for the person reading the board, answered on the board: checkboxes, radio buttons, a list to choose from, a text, a number or a scale. Its answer is kept in it, as `answer`.
+
+| field | type | meaning |
+|---|---|---|
+| `id` | string | required: unique on its page (an answer names it) |
+| `kind` | `"ask"` | required: `"ask"` |
+| `title` | string | a heading (plain text, math allowed) |
+| `text` | string | the question: Markdown with math (`$...$`) |
+| `input` | `"check"` \| `"radio"` \| `"choice"` \| `"text"` \| `"number"` \| `"scale"` | required: how it is answered: `check` (any of `options`, or without them one yes/no box), `radio` (one of `options`), `choice` (one of `options`, from a list: for many), `text`, `number` or `scale` (a whole number from `min` to `max`) |
+| `options` | [string \| option] | `check`, `radio` and `choice`: what may be chosen; each a text, or `{ "value": ..., "label": ... }` to keep its answers when its words change |
+| `required` | boolean | `true`: it must be answered before the answers are sent |
+| `min` | number | `number`: the least it takes; `scale`: its first value (default 1) |
+| `max` | number | `number`: the most it takes; `scale`: its last value (default 5) |
+| `step` | number | `number`: the step between the values it takes |
+| `low` | string | `scale`: the words at its low end ("disagree") |
+| `high` | string | `scale`: the words at its high end ("agree") |
+| `lines` | number | `text`: how many lines its field shows (default 1) |
+| `answer` | string \| number \| boolean \| [string] | the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number |
+| `detail` | string | Markdown shown only when zoomed in |
+| `color` | string | a color |
+| `x` | number | its position: leave it out, and the board places it |
+| `y` | number | as `x` |
+| `w` | number | its width (default 320) |
+| `h` | number | its height (default: as tall as what it shows) |
+
+### An option (in a question's `options`)
+
+One of a question's options, whose `value` its answer names: its `label` (default: the value) is what the reader sees.
+
+| field | type | meaning |
+|---|---|---|
+| `value` | string | required: what an answer says when this is chosen |
+| `label` | string | what the reader sees (Markdown with math; default: `value`) |
+
 ### A slide's card (`slide`)
 
 A slide's card on its page, in board coordinates.
@@ -323,6 +405,8 @@ A picture a note shows, by its name in the document's `images`.
 
 ## What's new
 
+- **2026-10-16:** questions for the reader (`"kind": "ask"`), their answers
+  kept in the board, and `sagebrush board answers`.
 - **2026-10-14:**
   - `"mode": "magma"` and `"mode": "matlab"`;
   - template pages (`template`, `uses`) and stickers;

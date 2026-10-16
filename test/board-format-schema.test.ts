@@ -47,6 +47,7 @@ function full(): any {
           { id: "i1", kind: "ink", points: [3, 3, 0.5, 13, 13, 0.5], size: 3, color: "blue", opacity: 0.5, x: 7, y: 8 },
           { id: "s1", kind: "sticker", emoji: "🌵", color: "green", x: 0, y: 0, w: 64 },
           { id: "s2", kind: "sticker", icon: "star", color: "red" },
+          { id: "q1", kind: "ask", title: "Q", text: "Which?", input: "radio", options: ["a", { value: "b", label: "B" }], required: true, min: 1, max: 5, step: 1, low: "l", high: "h", lines: 2, answer: "a", detail: "d", color: "#fff", x: 0, y: 0, w: 320, h: 100 },
         ],
         edges: [{ from: "n1", to: "g1", label: "l", hidden: true, arrow: "both", line: "dotted" }, { from: "n2", to: "s1", arrow: "none", line: "thick" }],
         steps: [{ focus: ["n1", "g1"], say: "Look" }, { focus: "s1" }],
@@ -96,6 +97,8 @@ const BAD: [Path, unknown[]][] = [
   [[...N(1), "layout"], ["tree"]], [[...N(1), "direction"], ["BT"]], [[...N(1), "color"], ["nope!"]],
   [[...N(2), "size"], [0, 500]], [[...N(2), "opacity"], [1, 0, 2]], [[...N(2), "points"], [[], ["a", 1, 2], [3, 3, 0.5, 13], [3, 3, 4, 13, 13, 0.5]]], [[...N(2), "x"], [undefined]],
   [[...N(3), "emoji"], ["ab", "", "🌵🌵", 5]], [[...N(3), "w"], [4, 5000]], [[...N(4), "icon"], ["Star", "a b"]],
+  [[...N(5), "input"], ["slider", 1]], [[...N(5), "options"], ["a", [5], [{ value: 5 }], [{ value: "b", label: 3 }], [["a"]]]], [[...N(5), "answer"], [{}, [1], null, ["a", 2]]],
+  [[...N(5), "required"], ["yes"]], [[...N(5), "lines"], ["2"]], [[...N(5), "color"], ["nope!"]], [[...N(5), "min"], ["1"]], [[...N(5), "question"], ["Which?"]],
   [[...P, "edges", 0, "arrow"], ["end"]], [[...P, "edges", 0, "line"], ["dashed"]], [[...P, "edges", 0, "hidden"], ["true"]], [[...P, "edges", 0, "weight"], [2]],
   [[...P, "steps", 1, "focus"], [3, undefined]], [[...P, "steps", 0, "camera"], [1]],
 ];
@@ -199,8 +202,8 @@ test("the validator's messages say where, what, and for a misspelt field what wa
   const got = v.validate(d).map((p) => `${p.path}: ${p.message}`);
   assert.deepEqual(got, [
     "pages[1].nodes[0].colour: unknown field `colour` (did you mean `color`?)",
-    "pages[1].nodes[5].kind: unknown kind \"image\": one of \"note\", \"group\", \"ink\", \"sticker\" (a note's kind may be left out)",
-    "pages[1].nodes[6]: needs `emoji` or `icon`",
+    "pages[1].nodes[6].kind: unknown kind \"image\": one of \"note\", \"group\", \"ink\", \"sticker\", \"ask\" (a note's kind may be left out)",
+    "pages[1].nodes[7]: needs `emoji` or `icon`",
     "pages[1].edges[2]: needs `to`: an item's id",
     "pages[1].edges[2].too: unknown field `too` (did you mean `to`?)",
   ]);
