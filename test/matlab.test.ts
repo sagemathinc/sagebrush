@@ -1982,3 +1982,63 @@ test("sqrt(-0) is +0; 1.^NaN and NaN.^0 are NaN; log1p, log10 and log2 with a po
     "double",
   ]);
 });
+
+test("regexp with a cell array of expressions, strrep with cell arrays of OLD or NEW, as the pages describe; other forms refused", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (one text, two expressions: a cell of the expressions' shape)
+    "m = regexp('oak elm', {'o.k', 'e.m'}, 'match'); disp(mat2str(size(m))); disp([m{1}{1} ' ' m{2}{1}])",
+    "s = regexp('oak elm', {'o'; 'm'}, 'start'); disp(mat2str(size(s))); disp(mat2str([s{1} s{2}]))",
+    // (two texts, two expressions: pairwise)
+    "m = regexp({'ab12', 'cd34'}, {'\\d+', '[a-z]+'}, 'match', 'once'); disp([m{1} ' ' m{2}])",
+    tryIt("regexp({'ab', 'cd'}, {'a'; 'c'}, 'match')"), tryIt("regexp(\"oak\", {'o'}, 'match')"),
+    // (strrep: each element with the corresponding OLD and NEW; a scalar goes with every element)
+    "c = strrep({'v=?'; 'w=?'}, '?', {'3'; '8'}); disp(mat2str(size(c))); disp([c{1} ' ' c{2}])",
+    "c = strrep('a-b', {'-', 'a'}, {'+', 'A'}); disp([c{1} ' ' c{2}])",
+    tryIt("strrep({'a', 'b'}, '?', {'1'; '2'})"), tryIt("strrep(\"x?\", '?', {'1'})"),
+  ].join("\n")), ["[1 2]", "oak elm", "[2 1]", "[1 7]", "12 cd", "refused", "refused", "[2 1]", "v=3 w=8", "a+b A-b", "refused", "refused"]);
+});
+
+test("strrep's cell forms count overlapping matches; regexp's cell forms give every match's names; character matrices refused there (CORR-6CE-1, -2, -3)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (every place OLD starts gives one NEW, overlaps included, as for a character vector)
+    "c = strrep('aaaa', {'aa'}, 'X'); disp(c{1})",
+    "c = strrep('ababa', {'aba'}, 'X'); disp(c{1})",
+    "c = strrep({'aaaa'; 'ababa'}, {'aa'; 'aba'}, {'X'; 'Y'}); disp([c{1} ' ' c{2}])",
+    "c = strrep('aaa', {'aa'}, {'aa'}); disp(c{1})",
+    // (names: a 1-by-n structure array per expression, in regexpi and as the sixth output too)
+    "n = regexp('ABC', {'(?<letter>[A-Z])'}, 'names'); disp(mat2str(size(n{1}))); disp([n{1}.letter])",
+    "n = regexpi('abc', {'(?<l>[A-Z])'}, 'names'); disp(mat2str(size(n{1}))); disp([n{1}.l])",
+    "[s, e, te, m, t, nm] = regexp('ABC', {'(?<letter>[A-Z])'}); disp(mat2str(size(nm{1}))); disp(mat2str(s{1}))",
+    "n = regexp('ABC', {'(?<letter>[A-Z])'}, 'names', 'once'); disp(n{1}.letter)",
+    // (a character matrix as a text or an expression: refused, not its rows joined)
+    tryIt("regexp({char('ab', 'cd')}, {'bc'})"), tryIt("regexp(char('AB', 'CD'), {'BC'})"), tryIt("regexp('ABCD', {char('AB', 'CD')})"),
+  ].join("\n")), ["XXX", "XX", "XXX YY", "aaaa", "[1 3]", "ABC", "[1 3]", "abc", "[1 3]", "[1 2 3]", "A", "refused", "refused", "refused"]);
+});
+
+test("strrep and regexp with cell arrays: the text built or searched, all elements together, admitted before the work (HARD-180-1)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  const t0 = Date.now();
+  assert.deepEqual(run([
+    // (100 copies of a 1,000,000-character text: refused at once rather than built)
+    "s = char(97*ones(1, 1000000)); old = cell(1, 100); old(:) = {char(98)};",
+    tryIt("strrep(s, old, char(120))"),
+    // (one result past the limit: 'a' -> 20 characters over 1,000,000 characters)
+    tryIt("strrep(s, {'a'}, {repmat('x', 1, 20)})"),
+    tryIt("regexp(s, old)"),
+    // (within it, as before)
+    "c = strrep(s(1:10), {'a', 'aa'}, 'x'); disp([c{1} ' ' c{2}])",
+    "r = regexp('abab', {'a', 'b'}); disp(mat2str([r{1} r{2}]))",
+  ].join("\n")), ["refused", "refused", "refused", "xxxxxxxxxx xxxxxxxxx", "[1 3 2 4]"]);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
