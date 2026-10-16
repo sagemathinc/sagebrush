@@ -81,7 +81,8 @@ On the channel:
     pressed while a `required` item is unanswered.
   - `comment`: the text of the Submit bar's comment field, possibly `""`.
 - From the host: `{ sagebrush: "received", version: 1, id }`. The submission
-  `id` was taken; the frame shows "Received".
+  `id` was admitted durably as the agent's turn (see Once); the frame shows
+  "Received".
 - From the host: `{ sagebrush: "refused", version: 1, id, message }`. The
   submission `id` was refused; the frame shows `message` and lets the user
   change the answers and submit again.
@@ -144,11 +145,24 @@ message, so that every host checks the same way. It goes in the
   - With no answer in 30 seconds, the frame offers "Send again", which
     sends the same `id`. Changing an answer after `refused` makes a new
     `id` on the next press.
-  - The host records an `id` as taken synchronously, when the message
-    arrives, before any asynchronous delivery. It delivers each `id` at
-    most once, and answers a repeat with `received` again.
+  - The host marks an `id` *pending* synchronously, when the message
+    arrives, before any asynchronous step. A repeat of a pending `id` is
+    ignored: the first one's outcome answers both.
+  - `received` means the agent's turn was admitted durably (in CoCalc, the
+    chat message saved), not that the message arrived. The host awaits
+    that admission, then marks the `id` taken and sends `received`. It
+    answers a repeat of a taken `id` with `received` again.
+  - When admission definitely fails, the host forgets the pending `id` and
+    sends `refused` with the reason. The user can send again with the same
+    `id`.
+  - When the outcome is unknown (a timeout, a lost connection), the host
+    asks the service with the `id` before it answers. The submission `id`
+    is the idempotency key of the turn it starts, at the service and not
+    only in the page, so that a submission sent again after a reload or
+    from another tab can't start a second turn.
   - The host keeps at most 100 ids per channel and refuses submissions
-    past that. The ids go when the channel is closed.
+    past that. The ids go when the channel is closed; the service's keys
+    last as long as its own idempotency window.
 - **Unsent answers.** The frame keeps nothing: it has no storage. Posting a
   new board restarts the frame, and answers not yet submitted are lost. So
   post a new board only when the agent has published one, and preferably
@@ -166,24 +180,36 @@ in, so nothing in a submission is hidden from it.
 
 ```js
 const f = document.querySelector("iframe"); // src: https://sagebrush.space/frame/board/
-let port = null, posted = null, taken = null;
+let port = null, posted = null, taken = null, pending = null;
 function show(text, name, revision) {
   port?.close();
   const ch = new MessageChannel();
   port = ch.port1;
   posted = { text, name, revision };
   taken = new Set();
-  port.onmessage = (e) => {
+  pending = new Set();
+  const p = port, say = (sagebrush, id, message) => p.postMessage({ sagebrush, version: 1, id, ...(message ? { message } : {}) });
+  p.onmessage = async (e) => {
     const m = e.data;
     // (checkSubmission: Sagebrush's check, against the board posted on this channel)
     const r = checkSubmission(posted, m);
-    if (!r.ok) return r.id && port.postMessage({ sagebrush: "refused", version: 1, id: r.id, message: r.message });
-    if (!taken.has(m.id)) {
-      if (taken.size >= 100) return port.postMessage({ sagebrush: "refused", version: 1, id: m.id, message: "too many submissions" });
-      taken.add(m.id); // (before anything asynchronous)
-      sendToAgent({ from: currentUser, stale: posted.revision !== currentRevision(), submission: r.submission });
+    if (!r.ok) return r.id && say("refused", r.id, r.message);
+    if (taken.has(m.id)) return say("received", m.id);
+    if (pending.has(m.id)) return; // (the first one's outcome answers)
+    if (taken.size + pending.size >= 100) return say("refused", m.id, "too many submissions");
+    pending.add(m.id); // (before anything asynchronous)
+    // (admitDurably: resolves once the turn is saved, rejects on a definite
+    // failure; the submission id is the turn's idempotency key at the
+    // service, which it asks again on an unknown outcome)
+    try {
+      await admitDurably({ idempotencyKey: m.id, from: currentUser, stale: posted.revision !== currentRevision(), submission: r.submission });
+      taken.add(m.id);
+      say("received", m.id);
+    } catch (err) {
+      say("refused", m.id, "not sent: " + err.message);
+    } finally {
+      pending.delete(m.id);
     }
-    port.postMessage({ sagebrush: "received", version: 1, id: m.id });
   };
   f.contentWindow.postMessage({ sagebrush: "board", version: 1, text, name, revision }, "*", [ch.port2]);
 }
