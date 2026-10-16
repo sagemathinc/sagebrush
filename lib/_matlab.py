@@ -427,7 +427,9 @@ def _int_round(r, cls):
         _, slo, shi = _INTS[_dtclass(r.dtype)]
         return _int64_exact(np.clip(r, max(lo, slo), min(hi, shi)).astype(dt), cls)
     r = np.where(np.isnan(r), 0.0, r)
-    r = np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5))
+    # (a double of magnitude 2^52 or more is already an integer: adding 0.5 there would round
+    # it up, uint64(2^53 - 1) becoming 2^53)
+    r = np.where(np.abs(r) >= 2.0 ** 52, r, np.where(r >= 0, np.floor(r + 0.5), -np.floor(-r + 0.5)))
     return _int64_exact(np.clip(r, float(lo), float(hi)).astype(dt), cls)
 
 
