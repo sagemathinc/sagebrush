@@ -339,14 +339,10 @@ newBuiltinModule("time", (m) => {
 // ------------------------------------------------------------------ math
 
 newBuiltinModule("math", (m) => {
+  // (PyFloat_AsDouble, Ty.asDouble: an int subclass's __float__ too)
   const F = (x: any): number => {
-    const v = O.fv(x);
-    if (v === undefined) {
-      const f = Ty.floatCallSafe(x);
-      if (f === undefined) raise(T.TypeError, `must be real number, not ${typeName(x)}`);
-      return f;
-    }
-    return v;
+    const v = Ty.asDouble(x);
+    return v === undefined ? raise(T.TypeError, `must be real number, not ${typeName(x)}`) : v;
   };
   const domain = () => raise(T.ValueError, "math domain error");
   const range = () => raise(T.OverflowError, "math range error");
