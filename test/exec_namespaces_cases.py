@@ -84,3 +84,10 @@ for code, ev in [("global x\nr=[(x:=i) for i in range(2)]", "r"), ("global x\nr=
                  ("global x\nr=[(x:=i,(lambda:x)()) for i in range(2)]", "r"), ("r=[(x:=i) for i in range(2)]", "r"),
                  ("r=[(x,(x:=i)) for i in range(2)]", "r"), ("global x\nr=list((x:=i) for i in range(2))", "r"), ("r=[x for _ in range(1)]", "r")]:
     print(repr(code), '->', t2(code, ev))
+# only a comprehension's own walrus targets, not those of one inside or
+# around it (CORR-7D2-1)
+for code, ev in [("r=[([x for j in range(1)], False and (x:=i)) for i in range(2)]", "r"), ("r=[([x for j in range(1)], [(x:=j) for j in []]) for i in range(2)]", "r"),
+                 ("r=[(x:=i,[x for j in range(1)]) for i in range(2)]", "r"), ("r=[([(x:=j) for j in range(2)], x) for i in range(2)]", "r"),
+                 ("r=[[(x:=j) for j in range(2)] for i in range(2)]", "r"), ("r=[(x, [(x:=j) for j in range(2)], x) for i in range(1)]", "r"),
+                 ("r=[[(x, (x:=j)) for j in range(2)] for i in range(1)]", "r")]:
+    print(repr(code), '->', t2(code, ev))

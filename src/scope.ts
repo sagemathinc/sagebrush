@@ -9,6 +9,9 @@ export type ScopeKind = "module" | "function" | "class" | "comp";
 export class Scope {
   bound = new Set<string>();
   globals = new Set<string>();
+  // (a comprehension's own walrus targets: those written directly in it,
+  // not in a comprehension inside it; src/emit.ts gns)
+  walrusTargets = new Set<string>();
   nonlocals = new Set<string>();
   params = new Set<string>();
   iterVars = new Set<string>(); // comprehension targets
@@ -386,6 +389,7 @@ class Collector {
         return this.expr(e.value);
       case "NamedExpr": {
         // Binds in the nearest enclosing non-comprehension scope.
+        if (this.s.kind === "comp") this.s.walrusTargets.add(e.target);
         let s: Scope = this.s;
         while (s.kind === "comp") {
           if (s.iterVars.has(e.target)) throw new SyntaxErr(`assignment expression cannot rebind comprehension iteration variable '${e.target}'`, e.line);
