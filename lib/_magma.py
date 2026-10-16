@@ -717,12 +717,28 @@ def _witness(gen):
     return next(iter(gen), None)
 
 
+# A range's endpoint from a real has at most this many digits (HARD-1CD-1)
+_RANGE_DIGITS = 10 ** 5
+
+
 def _range_int(v, open_, pos):
     """A range's endpoint or step as the integer it is (2/1 or 3.0 too, as
     Magma takes it), or Magma's refusal of one that is not."""
     if isinstance(v, bool) or not (isinstance(v, (int, _Fraction)) or isinstance(v, MReal)):
         return v  # (another type: its own errors, as before)
-    f = v.frac() if isinstance(v, MReal) else _Fraction(v)
+    if isinstance(v, MReal):
+        # (decided from its digits m and exponent e, value m * 10^e, before
+        # any expansion: a huge exponent is never made into a huge integer,
+        # HARD-1CD-1)
+        m, e = v.m, v.e
+        nd = len(str(abs(m)))
+        if m and e >= 0 and nd + e > _RANGE_DIGITS:
+            raise MagmaError("a range endpoint of more than %d digits is not supported yet" % _RANGE_DIGITS)
+        if not m or e >= 0:
+            return m * 10 ** e
+        f = _Fraction(m, 10 ** -e) if -e <= nd else _Fraction(1, 2)  # (|m| < 10^-e: not an integer)
+    else:
+        f = _Fraction(v)
     if f.denominator != 1:
         what = "Sequence" if open_ == "[" else "Set"
         where = "[ ... ]" if open_ == "[" else "%s ... %s" % (open_, {"{": "}", "{@": "@}", "{*": "*}"}[open_])
@@ -734,6 +750,11 @@ def _range(a, b, c, open_, universe=None, pos=None):
     a, b, c = (_range_int(v, open_, pos) for v in (a, b, c))
     if isinstance(c, int) and c == 0 and isinstance(a, int) and isinstance(b, int):
         raise MagmaError("Set/Sequence constructor: step must be non-zero", "[ ... ]" if open_ == "[" else "{ ... }", True, pos)
+    if open_ != "[" and all(isinstance(v, int) and not isinstance(v, bool) for v in (a, b, c)) \
+            and MRange(a, b, c).size() > _COLLECT_MAX:
+        # (a set of a range is made element by element: bounded first, as a
+        # sequence's range, which stays lazy, needn't be; HARD-1CD-1)
+        raise MagmaError("a set of more than %d elements is not supported yet" % _COLLECT_MAX)
     if universe is not None and universe is not _ZZ:
         # (a range's elements are integers: Magma refuses another universe)
         if open_ == "[":
@@ -3053,8 +3074,15 @@ def _real_ok(o):
 
 
 def _real(s):
-    f = _Fraction(s)
-    return MReal._frac(f, 30)
+    """A real literal (1.5, 2., 3e10, 1.5e-3) as a real of the default
+    field, made from its digits and exponent: 1e100000000 is never
+    expanded to its integer (HARD-1CD-1)."""
+    m = _re.fullmatch(r"(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?", s)
+    if not m:
+        return MReal._frac(_Fraction(s), 30)
+    whole, frac, exp = m.group(1) or "", m.group(2) or "", int(m.group(3) or 0)
+    digits = (whole + frac).lstrip("0")
+    return MReal(int(digits) if digits else 0, exp - len(frac), 30)
 
 
 class RealField_:
