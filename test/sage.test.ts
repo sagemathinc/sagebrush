@@ -43,3 +43,13 @@ test("pickling an int/float/str/bytes/tuple subclass instance keeps its value", 
     "print(pickle.loads(pickle.dumps(b)).tag)";
   assert.equal(cli("-c", src), "1\n");
 });
+
+test("QQ[a] refuses a field of degree above 16 before building it (HARD-EC1-1)", () => {
+  // (nested radicals double the degree at each level: degree 32 took 8 s and
+  // 250 MB in qqbar's Kronecker and characteristic-polynomial work)
+  const src = "for n in [4, 5, 7]:\n x = sqrt(2)\n for i in range(n):\n  x = sqrt(x + i + 3)\n try:\n  QQ[x]\n except NotImplementedError as e:\n  print('refused', n)\n" +
+    "a = QQbar(sqrt(2) + sqrt(3) + sqrt(5) + sqrt(7) + sqrt(11))\ntry:\n QQ[a]\nexcept NotImplementedError as e:\n print('refused qqbar')\nprint(QQ[sqrt(2 + sqrt(3 + sqrt(5)))].degree())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "refused 4\nrefused 5\nrefused 7\nrefused qqbar\n8\n");
+  assert.ok(Date.now() - t < 30000);
+});

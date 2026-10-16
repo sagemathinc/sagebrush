@@ -197,6 +197,51 @@ class _Ring:
 
 
 ZZ = _Ring("Integer Ring", False)
+# The largest degree QQ[a] builds: the number field and every qqbar step on
+# the way (daybreak2's HARD-EC1-1; degree 16 takes 0.2 s, 32 took 8 s).
+_QQ_ALGEBRAIC_MAX_DEGREE = 16
+
+
+def _degree_bound(e):
+    """An upper bound for the degree of a constant symbolic expression over
+    QQ, from its tree (a product of the operands' bounds; a power with
+    exponent p/q multiplies by q; I is 2), or None when a node is not of
+    those kinds (QQbar decides then, under its own cap)."""
+    from fractions import Fraction
+    import _sage_expr
+    stack, total = [e], 1
+    while stack:
+        x = stack.pop()
+        try:
+            r = Fraction(QQ(x))
+            continue
+        except (TypeError, ValueError, ArithmeticError, NotImplementedError):
+            pass
+        s = str(x)
+        if s == "I":
+            total *= 2
+            continue
+        op = x.operator()
+        if op is None:
+            return None
+        import operator as o
+        args = x.operands()
+        if op is o.pow and len(args) == 2:
+            try:
+                q = Fraction(QQ(args[1]))
+            except (TypeError, ValueError, ArithmeticError, NotImplementedError):
+                return None
+            total *= q.denominator
+            stack.append(args[0])
+        elif op in (o.add, o.mul):
+            stack.extend(args)
+        else:
+            return None
+        if total > 1 << 20:
+            break
+    return total
+
+
 def _algebraic_extension(R, gens):
     """R[a] for a constant symbolic algebraic number a: for R = QQ the
     number field of a's minimal polynomial, embedded at a (the generator is
@@ -215,9 +260,22 @@ def _algebraic_extension(R, gens):
           or isinstance(g, (_F, _sage_qqbar.AlgebraicNumber))]
     if not cs:
         return None
+    bound = _degree_bound(cs[0]) if isinstance(cs[0], _sage_expr.Expression) else None
+    if bound is not None and bound > _QQ_ALGEBRAIC_MAX_DEGREE:
+        raise NotImplementedError("QQ[%s]: a number field of degree up to %d (more than %d) is not available in sagebrush yet" % (cs[0], bound, _QQ_ALGEBRAIC_MAX_DEGREE))
+    old_cap = _sage_qqbar._degree_cap
+    _sage_qqbar._degree_cap = _QQ_ALGEBRAIC_MAX_DEGREE
     try:
         a = _sage_qqbar.QQbar(cs[0])
-    except (TypeError, ValueError, NotImplementedError, ArithmeticError):
+    except NotImplementedError as e:
+        if "more than %d" % _QQ_ALGEBRAIC_MAX_DEGREE in str(e):
+            raise NotImplementedError("QQ[%s]: %s" % (cs[0], e)) from None
+        a = None
+    except (TypeError, ValueError, ArithmeticError):
+        a = None
+    finally:
+        _sage_qqbar._degree_cap = old_cap
+    if a is None:
         if str(cs[0]).isidentifier():
             return None  # QQ[pi]: a polynomial ring in the name, as Sage
         # Sage makes QQ[sin(pi/7)] a number field (it is algebraic) and
@@ -230,6 +288,9 @@ def _algebraic_extension(R, gens):
     if not R._field:
         raise NotImplementedError("ZZ[%s]: orders of number fields are not available in sagebrush yet" % (cs[0],))
     f = a.minpoly()
+    if f.degree() > _QQ_ALGEBRAIC_MAX_DEGREE:
+        # (a QQbar element given directly: its field is not built)
+        raise NotImplementedError("QQ[%s]: a number field of degree %d (more than %d) is not available in sagebrush yet" % (cs[0], f.degree(), _QQ_ALGEBRAIC_MAX_DEGREE))
     if f.degree() == 1:
         # Sage: the number field x - r (QQ[2/3], QQ[SR(2)], QQ[QQbar(2)])
         raise NotImplementedError("QQ[%s]: number fields of degree 1 are not available in sagebrush yet" % (cs[0],))

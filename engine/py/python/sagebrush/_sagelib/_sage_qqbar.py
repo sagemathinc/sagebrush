@@ -1156,6 +1156,7 @@ class AlgebraicNumber:
                 if s is not None:
                     return AlgebraicNumber(_gaussian_gen(), [0, s], None)
         f = self._minpoly_coeffs()
+        _check_degree((len(f) - 1) * n, "an algebraic number")
         h = []
         for i, c in enumerate(f):
             h += [c] + [0] * (n - 1) if i < len(f) - 1 else [c]
@@ -1398,10 +1399,23 @@ def _root_near(fs, target, T, check):
     return T(gen, [0, 1], gen.civ)
 
 
+# The largest degree a conversion may build, or None for no cap: QQ[a] sets
+# it while converting a (daybreak2's HARD-EC1-1: nested radicals double the
+# degree at each level, and degree 32 took 8 s and 250 MB).
+_degree_cap = None
+
+
+def _check_degree(d, what):
+    if _degree_cap is not None and d > _degree_cap:
+        raise NotImplementedError("%s of degree up to %d (more than %d) is not available in sagebrush yet" % (what, d, _degree_cap))
+
+
 def _combine(a, b, op, T, civ):
     """a op b for elements of different fields: the minimal polynomial is a
     factor of the characteristic polynomial of a Kronecker combination."""
     fa, fb = a._minpoly_coeffs(), b._minpoly_coeffs()
+    # (checked before the Kronecker matrix is built)
+    _check_degree((len(fa) - 1) * (len(fb) - 1), "an algebraic number")
     if op == "/":
         fb = list(reversed(fb))  # the minimal polynomial of 1/b
     A, B = _companion(fa), _companion(fb)
