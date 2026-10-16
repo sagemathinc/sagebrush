@@ -234,6 +234,8 @@ function unpack(fmt: any, b: any): any {
   return tuple(unpackFrom(L, a, 0));
 }
 function unpackFromImpl(fmt: any, b: any, offset: any = 0): any {
+  // (required arguments first, before any decoding: CORR-D6E-1)
+  if (fmt === undefined) raise(T.TypeError, "unpack_from() missing required argument 'format' (pos 1)");
   if (b === undefined) raise(T.TypeError, "unpack_from() missing required argument 'buffer' (pos 2)");
   const L = layout(fmt);
   const a = buffer(b);

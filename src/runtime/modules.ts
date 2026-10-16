@@ -542,8 +542,24 @@ newBuiltinModule("math", (m) => {
     return a;
   };
   // (each also as an array of its arguments, for gcd(*xs) of any length: BIG_CALL)
-  const gcdN = (xs: any[]) => O.normBig(xs.map(bigOf).reduce(gcd2, 0n));
-  const lcmN = (xs: any[]) => O.normBig(xs.map(bigOf).reduce((a, b) => (a === 0n || b === 0n ? 0n : ((a * b < 0n ? -(a * b) : a * b) / gcd2(a, b))), 1n));
+  // (streamed, no mapped copy, and Stop polled over a long list)
+  const gcdN = (xs: any[]) => {
+    let g = 0n;
+    for (let i = 0; i < xs.length; i++) {
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      g = gcd2(g, bigOf(xs[i]));
+    }
+    return O.normBig(g);
+  };
+  const lcmN = (xs: any[]) => {
+    let l = 1n;
+    for (let i = 0; i < xs.length; i++) {
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      const b = bigOf(xs[i]);
+      l = l === 0n || b === 0n ? 0n : ((l * b < 0n ? -(l * b) : l * b) / gcd2(l, b));
+    }
+    return O.normBig(l);
+  };
   fn(m, "gcd", positionalArray((...xs: any[]) => gcdN(xs), gcdN));
   fn(m, "lcm", positionalArray((...xs: any[]) => lcmN(xs), lcmN));
   fn(m, "isqrt", (x: any) => {
