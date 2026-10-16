@@ -2639,9 +2639,16 @@ def _items(v):
     return ["undef" if x is _UNDEF else _inline(x) for x in items]
 
 
-def _str(v, indent=0, col=None):
+def _str(v, indent=0, col=None, tail=""):
     """Magma's printing of v (possibly over several lines), starting at
-    column `col` (default: the indentation)."""
+    column `col` (default: the indentation), followed by `tail` (the comma
+    after an element of a sequence printed one element a line), which is
+    laid out with v's last chunk, as Magma's printer does."""
+    s, used = _str1(v, indent, col, tail)
+    return s if used else s + tail
+
+
+def _str1(v, indent, col, tail):
     col = indent if col is None else col
     if isinstance(v, _smat.MatrixSpace_):
         # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
@@ -2651,49 +2658,41 @@ def _str(v, indent=0, col=None):
         if name is None:
             raise MagmaError("printing this matrix space is not supported yet")
         if v.nrows() == v.ncols():
-            return "Full Matrix Algebra of degree %d over %s" % (v.nrows(), name)
-        return "Full %sMatrixSpace of %d by %d matrices over %s" % ("R" if R == _sp.ZZ else "K", v.nrows(), v.ncols(), name)
+            return "Full Matrix Algebra of degree %d over %s" % (v.nrows(), name), False
+        return "Full %sMatrixSpace of %d by %d matrices over %s" % ("R" if R == _sp.ZZ else "K", v.nrows(), v.ncols(), name), False
     if type(v).__name__ == "MList":
         if not v:
-            return "[* *]"
+            return "[* *]", False
         if all(_atomic(x) for x in v):
-            return _wrap("[* " + ", ".join(_inline(x) for x in v) + " *]", indent, indent)
+            return _wrap("[* " + ", ".join(_inline(x) for x in v) + " *]", indent, indent), False
         if all(type(x).__name__ == "MList" for x in v):
-            return "[* " + ", ".join(_str(x, indent) for x in v) + " *]"
+            return "[* " + ", ".join(_str(x, indent) for x in v) + " *]", False
         pad = " " * (indent + 4)
-        return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]"
+        return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]", False
     if isinstance(v, MRange):
-        return _range_str(v)
+        return _range_str(v), False
     if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
         lo, hi, step = v.range
-        return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step)
+        return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step), False
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
         if not raw:
-            return o.strip() + c.strip()
+            return o.strip() + c.strip(), False
         if all(_atomic(x) or x is _UNDEF for x in raw):
             items = _items(v)
-            # wrapped at WIDTH: an item fits when the line (from the column
-            # it starts at), it and ", " do
-            lines, line = [], o
-            for k, it in enumerate(items):
-                piece = it + (", " if k < len(items) - 1 else c)
-                start = col if not lines else indent
-                if line.strip() and start + len(line) + len(it) + 2 > WIDTH:
-                    lines.append(line)
-                    line = ""
-                line += piece
-            lines.append(line)
-            return "\n".join(l if i == 0 else " " * indent + l for i, l in enumerate(lines))
+            # the opening bracket, each item with its comma, and the closing
+            # bracket, laid out as Magma's printer does (_flow)
+            chunks = [(o.strip(), True)] + [(it + ("," if k < len(items) - 1 else ""), True) for k, it in enumerate(items)] + [(c.strip() + tail, False)]
+            return _flow(chunks, col, indent), True
         pad = " " * (indent + 4)
-        inner = [pad + _str(x, indent + 4) for x in raw]
-        return o.strip() + "\n" + ",\n".join(inner) + "\n" + " " * indent + c.strip()
+        inner = [pad + _str(x, indent + 4, None, "," if k < len(raw) - 1 else "") for k, x in enumerate(raw)]
+        return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
-        return v._str(indent)
+        return v._str(indent), False
     if getattr(v, "_magma_nowrap", False):
-        return _inline(v)
-    return _wrap(_inline(v), col, indent + _extra(v), indent)
+        return _inline(v), False
+    return _wrap(_inline(v) + tail, col, indent + _extra(v), indent), True
 
 
 def _extra(v):
@@ -2706,29 +2705,55 @@ def _extra(v):
     return 0
 
 
+def _flow(chunks, first_col, cont, indent=None):
+    """Magma's layout of chunks (text, space after it) on lines of WIDTH
+    columns, the first starting at first_col (its text already written),
+    the others at cont.  Past the middle of the line, counted from the
+    structure's indentation (column c with c - indent > (WIDTH - indent)/2),
+    a chunk that doesn't fit within WIDTH starts a new line; before it (and
+    on a new line) a chunk is written up to column 79 and continued on the
+    next line after a backslash in column 80.  A space is written only where
+    the line has room.  Measured against Magma 2.18 as a black box
+    (integers, rationals, strings, reals and polynomials of any length, in
+    sequences, nested sequences, tuples and print lines)."""
+    indent = cont if indent is None else indent
+    out, c = [], first_col
+    for text, space in chunks:
+        if text:
+            if 2 * (c - indent) > WIDTH - indent and c > cont:
+                if c + len(text) <= WIDTH:
+                    out.append(text)
+                    c += len(text)
+                    text = ""
+                else:
+                    out.append("\n" + " " * cont)
+                    c = cont
+            # (by offsets: no copy of the rest of a long chunk for each line)
+            i, n = 0, len(text)
+            while i < n and c + n - i > WIDTH - 1:
+                k = max(1, WIDTH - 1 - c)
+                out.append(text[i:i + k] + "\\\n" + " " * cont)
+                i, c = i + k, cont
+            out.append(text[i:])
+            c += n - i
+        if space and c < WIDTH:
+            out.append(" ")
+            c += 1
+    return "".join(out)
+
+
 def _wrap(text, first_col, cont, indent=0):
-    """Magma's line breaking at WIDTH columns, at spaces: a word fits when it
-    does (the space after it only if there is room); continuation lines
-    start at column `cont`.  The first line starts at `first_col` (its
-    indentation already written)."""
+    """Magma's line breaking at WIDTH columns, at spaces, a word that is too
+    long split with a backslash (_flow); continuation lines start at column
+    `cont`.  The first line starts at `first_col` (its indentation already
+    written)."""
     if "\n" in text:
         lines = text.split("\n")
         return "\n".join(_wrap(l, first_col if k == 0 else 0, cont if k == 0 else 0) for k, l in enumerate(lines))
-    if first_col + len(text) <= WIDTH or " " not in text:
+    if first_col + len(text) < WIDTH:
         return text
     words = text.split(" ")
-    lines, line = [], ""
-    for k, w in enumerate(words):
-        start = first_col if not lines else cont
-        if line and start + len(line) + len(w) > WIDTH:
-            lines.append(line)
-            line = ""
-            start = cont
-        line += w
-        if k < len(words) - 1 and start + len(line) + 1 <= WIDTH:
-            line += " "
-    lines.append(line)
-    return lines[0] + "".join("\n" + " " * cont + l for l in lines[1:])
+    return _flow([(w, k < len(words) - 1) for k, w in enumerate(words)], first_col, cont, indent)
 
 
 def _print_line(vals):

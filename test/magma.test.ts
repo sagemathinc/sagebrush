@@ -239,6 +239,21 @@ test("comprehensions by bounded work: at most 10^6 elements, x, y in S admitted 
   assert.match(at.stdout, /^1000000\n1000000\n248083\n$/);
 });
 
+test("a long integer is laid out in lines of 79 digits and a backslash, in time linear in its length", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: "10^20000;\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const lines = r.stdout.split("\n").filter((l: string) => l);
+  // 20001 digits: 253 full lines of 79 digits, each ending in a backslash, and 14 more
+  assert.equal(lines.length, 254);
+  assert.ok(lines.slice(0, -1).every((l: string) => l.length === 80 && l.endsWith("\\")));
+  assert.equal(lines.map((l: string) => l.replace(/\\$/, "")).join(""), "1" + "0".repeat(20000));
+  assert.ok(Date.now() - t0 < 30000);
+});
+
 test("functions take the values of their free variables when they are defined", () => {
   // a capture is a keyword-only default argument: taken once, when the def runs
   // (an unbound name is decided when the def runs: lib/_magma.py _capture)
