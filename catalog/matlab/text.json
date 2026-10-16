@@ -1,0 +1,314 @@
+[
+  {
+    "name": "disp",
+    "kind": "function",
+    "signature": "disp(X)",
+    "summary": "Displays a value without its name: numbers, text, cell arrays and structures, in the command window's format.",
+    "doc": "An empty array displays nothing. Numbers use the current `format`.",
+    "examples": [
+      {
+        "code": "disp([1 2; 3 4])",
+        "expected": "     1     2\n     3     4\n"
+      },
+      {
+        "code": "disp('hello')",
+        "expected": "hello\n"
+      },
+      {
+        "code": "disp(pi)",
+        "expected": "    3.1416\n"
+      },
+      {
+        "code": "disp([1 2 3])",
+        "expected": "     1     2     3\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "fprintf",
+      "display",
+      "num2str"
+    ],
+    "tags": [
+      "output"
+    ]
+  },
+  {
+    "name": "fprintf",
+    "kind": "function",
+    "signature": "fprintf(formatSpec, A1, ..., An)\nfprintf(fileID, formatSpec, A1, ..., An)\nnbytes = fprintf(___)",
+    "summary": "Writes formatted text to the command window or a file opened with fopen, cycling the format through all the values given.",
+    "doc": "The format has C-style conversions: %d %i %u %o %x %X %f %e %g %E %G %c %s, with flags, width and precision, `*` for either, and `n$` identifiers, plus escapes such as \\n and \\t. The arguments' elements are taken in column order and the format is reused until they run out. A non-integer under %d prints as %e; an integer character code under %s or %c prints as its character, one %s taking successive codes of one argument. `nbytes` is the number of bytes written.",
+    "examples": [
+      {
+        "code": "fprintf('%d %d\\n', [1 2 3 4])",
+        "expected": "1 2\n3 4\n"
+      },
+      {
+        "code": "fprintf('x = %5.2f\\n', pi)",
+        "expected": "x =  3.14\n"
+      },
+      {
+        "code": "fprintf('%5.2f\\n', pi)",
+        "expected": " 3.14\n"
+      }
+    ],
+    "differs": [
+      "The %b and %t subtypes and the %a conversion are refused, as is any % that begins no conversion.",
+      "A text conversion (%s, %c) of a value that is no character code is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sprintf",
+      "disp"
+    ],
+    "tags": [
+      "output",
+      "text"
+    ]
+  },
+  {
+    "name": "num2str",
+    "kind": "function",
+    "signature": "s = num2str(A)\ns = num2str(A, precision)\ns = num2str(A, formatSpec)",
+    "summary": "A number or array as text: four digits after the point by default, a given number of significant digits, or a format.",
+    "doc": "Integers print without a decimal point. A matrix gives a char matrix, a row per row, with columns aligned. `precision` is the number of significant digits. Leading spaces are removed, even with a format: `num2str(pi, '%10.5f')` is '3.14159', as in MATLAB (use sprintf to keep them).",
+    "examples": [
+      {
+        "code": "num2str(pi)",
+        "expected": "\nans =\n\n    '3.1416'\n\n"
+      },
+      {
+        "code": "num2str(pi, 8)",
+        "expected": "\nans =\n\n    '3.1415927'\n\n"
+      },
+      {
+        "code": "num2str([1 2 3])",
+        "expected": "\nans =\n\n    '1  2  3'\n\n"
+      },
+      {
+        "code": "num2str(pi, 4)",
+        "expected": "\nans =\n\n    '3.142'\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "sprintf",
+      "mat2str",
+      "str2num"
+    ],
+    "tags": [
+      "text",
+      "conversion"
+    ]
+  },
+  {
+    "name": "regexp",
+    "kind": "function",
+    "signature": "startIndex = regexp(str, expression)\n[tok, mat] = regexp(str, expression, 'tokens', 'match')\n[___] = regexp(___, outkey1, ..., outkeyN)\n___ = regexp(___, 'once')\n___ = regexp(___, option)",
+    "summary": "Matches a regular expression in text: start and end indices, matches, tokens, named tokens, or the text split around matches.",
+    "doc": "Output keys are 'start', 'end', 'tokenExtents', 'match', 'tokens', 'names' and 'split', in the order asked for. 'once' gives the first match only. Options include 'ignorecase', 'freespacing' and 'emptymatch'. Lookahead, lookbehind, backreferences and named tokens (?<name>...) work.",
+    "examples": [
+      {
+        "code": "regexp('ab12cd345', '\\d+', 'match')",
+        "expected": "\nans =\n\n  1×2 cell array\n\n    {'12'}    {'345'}\n\n"
+      },
+      {
+        "code": "regexp('k=v', '(?<key>\\w)=(?<val>\\w)', 'names')",
+        "expected": "\nans = \n\n  struct with fields:\n\n    key: 'k'\n    val: 'v'\n\n"
+      },
+      {
+        "code": "regexp('a1b22c333', '\\d+', 'match')",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'1'}    {'22'}    {'333'}\n\n"
+      }
+    ],
+    "differs": [
+      "Dynamic expressions (??@...), (?@...) and ${...} are refused.",
+      "Matching has no bound on its work: an expression that backtracks badly (such as (a+)+$) can take a long time.",
+      "The number of matches kept is bounded; a call that would keep more is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "regexpi",
+      "regexprep",
+      "strfind"
+    ],
+    "tags": [
+      "text",
+      "regular expressions"
+    ]
+  },
+  {
+    "name": "sprintf",
+    "kind": "function",
+    "signature": "str = sprintf(formatSpec, A1, ..., An)",
+    "summary": "Formatted text as a character vector, or a string scalar when the format is a string, with the same format as fprintf.",
+    "doc": "See `fprintf` for the conversions and how the format cycles through the values.",
+    "examples": [
+      {
+        "code": "sprintf('%5.2f', pi)",
+        "expected": "\nans =\n\n    ' 3.14'\n\n"
+      },
+      {
+        "code": "sprintf('%d,', [1 2 3])",
+        "expected": "\nans =\n\n    '1,2,3,'\n\n"
+      },
+      {
+        "code": "sprintf('%s and %s', 'a', 'b')",
+        "expected": "\nans =\n\n    'a and b'\n\n"
+      },
+      {
+        "code": "sprintf('%d-%d', 3, 4)",
+        "expected": "\nans =\n\n    '3-4'\n\n"
+      }
+    ],
+    "differs": [
+      "The second output, an error message ([str, errmsg] = sprintf(...)), is not supported.",
+      "The %b and %t subtypes, %a, and a % that begins no conversion are refused.",
+      "Integers past 2^53 (int64(2^53) and beyond) are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fprintf",
+      "num2str",
+      "compose"
+    ],
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "strcat",
+    "kind": "function",
+    "signature": "s = strcat(s1, ..., sN)",
+    "summary": "Text joined end to end; trailing whitespace of character-array arguments is removed first.",
+    "doc": "With a cell array of character vectors, each element is joined; with string arrays, whitespace is kept and the result is a string.",
+    "examples": [
+      {
+        "code": "strcat('a', 'b', 'c')",
+        "expected": "\nans =\n\n    'abc'\n\n"
+      },
+      {
+        "code": "strcat({'a', 'b'}, 'x')",
+        "expected": "\nans =\n\n  1×2 cell array\n\n    {'ax'}    {'bx'}\n\n"
+      },
+      {
+        "code": "strcat('ab', 'cd')",
+        "expected": "\nans =\n\n    'abcd'\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "horzcat",
+      "strjoin",
+      "append"
+    ],
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "strjoin",
+    "kind": "function",
+    "signature": "str = strjoin(C)\nstr = strjoin(C, delimiter)",
+    "summary": "The text of a cell array or string array joined with a space, or with a delimiter, between each element.",
+    "doc": "A character delimiter takes escape sequences; a cell array of delimiters, one fewer than C's elements, gives each in turn.",
+    "examples": [
+      {
+        "code": "strjoin({'a', 'b', 'c'})",
+        "expected": "\nans =\n\n    'a b c'\n\n"
+      },
+      {
+        "code": "strjoin({'a', 'b'}, ', ')",
+        "expected": "\nans =\n\n    'a, b'\n\n"
+      },
+      {
+        "code": "strjoin({'a', 'b', 'c'}, '-')",
+        "expected": "\nans =\n\n    'a-b-c'\n\n"
+      }
+    ],
+    "differs": [
+      "A string array with missing elements is refused."
+    ],
+    "status": "full",
+    "see_also": [
+      "strsplit",
+      "join"
+    ],
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "strrep",
+    "kind": "function",
+    "signature": "newStr = strrep(str, old, new)",
+    "summary": "Every occurrence of a piece of text replaced by another, in text or in each element of a cell array.",
+    "doc": "Overlapping occurrences are each replaced, as MATLAB's page shows: `strrep('aaa', 'aa', 'b')` is 'bb'.",
+    "examples": [
+      {
+        "code": "strrep('hello world', 'o', '0')",
+        "expected": "\nans =\n\n    'hell0 w0rld'\n\n"
+      },
+      {
+        "code": "strrep({'ab', 'cb'}, 'b', 'x')",
+        "expected": "\nans =\n\n  1×2 cell array\n\n    {'ax'}    {'cx'}\n\n"
+      },
+      {
+        "code": "strrep('hello', 'l', 'L')",
+        "expected": "\nans =\n\n    'heLLo'\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "replace",
+      "regexprep"
+    ],
+    "tags": [
+      "text"
+    ]
+  },
+  {
+    "name": "strsplit",
+    "kind": "function",
+    "signature": "C = strsplit(str)\nC = strsplit(str, delimiter)\nC = strsplit(___, Name, Value)",
+    "summary": "A character vector split at whitespace, or at given delimiters, into a cell array of character vectors.",
+    "doc": "`delimiter` is a character vector or a cell array of them, with escape sequences such as '\\t'. By default consecutive delimiters count as one ('CollapseDelimiters', true).",
+    "examples": [
+      {
+        "code": "strsplit('a b  c')",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'a'}    {'b'}    {'c'}\n\n"
+      },
+      {
+        "code": "strsplit('a,b;c', {',', ';'})",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'a'}    {'b'}    {'c'}\n\n"
+      },
+      {
+        "code": "strsplit('a  b', ' ', 'CollapseDelimiters', false)",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'a'}    {0×0 char}    {'b'}\n\n"
+      },
+      {
+        "code": "strsplit('a,b,c', ',')",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'a'}    {'b'}    {'c'}\n\n"
+      }
+    ],
+    "differs": [
+      "'DelimiterType', 'RegularExpression' is refused: a regular expression's matching has no bound on its work. Use regexp(str, expression, 'split').",
+      "The second output, the delimiters matched, is not supported.",
+      "Other options are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "split",
+      "regexp",
+      "strjoin"
+    ],
+    "tags": [
+      "text"
+    ]
+  }
+]

@@ -22,10 +22,16 @@ test("every MATLAB search example prints exactly the output its documentation sh
   for (const [k, [name, code, expected]] of data.entries()) assert.equal(got.get(k), expected, `${name}: ${code}`);
 });
 
-test("the MATLAB search index shows a function's examples, after the prompt >>, and counts them", () => {
+test("the MATLAB search index shows a function's examples, after the prompt >>: a catalog entry's, and the others'", () => {
   const index = JSON.parse(cli("-m", "_matlab_docsearch", "--index"));
+  // (a catalog entry, catalog/matlab: all its fields, its examples a list)
   const max = index.find((e: any) => e.name === "max");
-  assert.equal(max.examples, 1);
-  assert.match(max.doc, /\n\nExamples:\n\n>> \[m, k\] = max\(\[3 9 4\]\)\n\nm =\n\n     9\n\n\nk =\n\n     2$/);
-  assert.ok(index.filter((e: any) => e.examples > 0).length >= 100);
+  assert.equal(max.status, "partial");
+  assert.ok(max.examples.length >= 3);
+  assert.match(max.doc, /\n\nExamples:\n\n>> \[m, k\] = max\(\[3 9 4\]\)\n\nm =\n\n     9\n\n\nk =\n\n     2\n\n/);
+  // (a built-in with no entry yet: its docstring and lib/_matlab_examples.py's examples, counted)
+  const hypot = index.find((e: any) => e.name === "hypot");
+  assert.equal(hypot.examples, 1);
+  assert.match(hypot.doc, /\n\nExamples:\n\n>> hypot\(3, 4\)\n\nans =\n\n     5$/);
+  assert.ok(index.filter((e: any) => Array.isArray(e.examples) ? e.examples.length : e.examples > 0).length >= 300);
 });

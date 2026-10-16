@@ -12,6 +12,52 @@ rewrites the outputs below after a change to the display.
 
 
 
+class _Capped:
+    """a text buffer that keeps the first megabyte an example prints"""
+    LIMIT = 1 << 20
+
+    def __init__(self):
+        self.parts = []
+        self.n = 0
+
+    def write(self, s):
+        if self.n < self.LIMIT:
+            s = s[:self.LIMIT - self.n]
+            self.parts.append(s)
+            self.n += len(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def getvalue(self):
+        return "".join(self.parts)
+
+
+def run(code):
+    """What the MATLAB command window shows for code run in a fresh session
+    (catalog/SCHEMA.md, Examples; lib/_catalog.py RUNNERS): what it prints,
+    then an error's message as the window reports it, in the order printed.
+    The code runs as a notebook cell does, through the host's translator."""
+    import builtins
+    import sys
+    host = getattr(builtins, "__pyjs_host__", None)
+    if host is None:
+        raise RuntimeError("MATLAB examples need the host's MATLAB translator (src/matlab.ts matlabHostOps)")
+    import _matlab
+    _matlab.fresh_session()
+    py = host("matlab_cell", code, "<example>")
+    buf = _Capped()
+    old = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = buf
+    try:
+        exec(py, {"__name__": "__main__"})
+        _matlab.cell_failed()
+    finally:
+        sys.stdout, sys.stderr = old
+    return buf.getvalue()
+
+
 def examples():
     """name -> [(code, output)]: one to three lines of MATLAB, and what it prints"""
     out = {}
@@ -28,20 +74,12 @@ OUTPUTS = {}
 # matlab-tests/doc_examples.py --update
 CODES = [
     # elementary math
-    ("abs", "abs([-3 2 -1.5])"),
-    ("sqrt", "sqrt([4 9 2])"),
-    ("exp", "exp([0 1])"),
-    ("log", "log([1 10])"),
     ("log10", "log10([10 1000 0.01])"),
     ("log2", "log2([8 0.5])"),
     ("nthroot", "nthroot(-27, 3)"),
     ("hypot", "hypot(3, 4)"),
-    ("round", "round([2.5 -1.4 3.75])"),
-    ("floor", "floor([-2.5 2.5])"),
     ("ceil", "ceil([-2.5 2.5])"),
     ("fix", "fix([-2.7 2.7])"),
-    ("mod", "mod([7 -7], 3)"),
-    ("rem", "rem([7 -7], 3)"),
     ("sign", "sign([-2 0 5])"),
     ("sin", "sin([0 pi/6 pi/2])"),
     ("cos", "cos([0 pi])"),
@@ -86,16 +124,9 @@ CODES = [
     ("NaN", "NaN(2, 1)"),
     ("inf", "inf(1, 2)"),
     ("Inf", "Inf(2, 1)"),
-    ("zeros", "zeros(2, 3)"),
-    ("ones", "ones(2)"),
-    ("eye", "eye(3)"),
     ("magic", "magic(3)"),
-    ("linspace", "linspace(0, 1, 5)"),
     ("colon", "colon(1, 2, 9)"),
-    ("repmat", "repmat([1 2], 2, 2)"),
-    ("reshape", "reshape(1:6, 2, 3)"),
     ("transpose", "transpose([1 2 3])"),
-    ("cat", "cat(1, [1 2], [3 4])"),
     ("horzcat", "horzcat([1 2], [3 4 5])"),
     ("vertcat", "vertcat([1 2], [3 4])"),
     ("diag", "diag([4 5 6])"),
@@ -106,23 +137,9 @@ CODES = [
     ("tril", "tril(magic(3))"),
     ("triu", "triu(magic(3))"),
     ("kron", "kron([1 2], [1; 10])"),
-    ("size", "size(zeros(2, 5))"),
-    ("numel", "numel(magic(4))"),
-    ("length", "length(zeros(3, 7))"),
     ("ndims", "ndims(ones(2, 3, 4))"),
     ("isempty", "isempty([])"),
-    ("find", "find([0 4 0 7])"),
-    ("any", "any([0 0 1])"),
-    ("all", "all([1 1 0])"),
-    ("cumsum", "cumsum(1:5)"),
-    ("cumprod", "cumprod([1 2 3 4])"),
     ("diff", "diff([1 4 9 16])"),
-    ("sum", "sum([1 2; 3 4])"),
-    ("prod", "prod([1 2 3 4])"),
-    ("max", "[m, k] = max([3 9 4])"),
-    ("min", "min([4 2 8; 1 5 3])"),
-    ("sort", "[s, k] = sort([3 1 2], 'descend')"),
-    ("unique", "unique([3 1 3 2 1])"),
     ("ismember", "ismember([1 5 2], [2 3 1])"),
     ("intersect", "intersect([1 2 3 4], [3 4 5])"),
     ("union", "union([1 3], [2 3])"),
@@ -140,11 +157,6 @@ CODES = [
     ("corrcoef", "corrcoef([0 3; 2 1; 4 -1])"),
     ("quantile", "quantile([1 3 7 9], [0.25 0.5 0.75])"),
     ("prctile", "prctile([1 3 7 9], [25 50 75])"),
-    ("mean", "mean([2 4 9])"),
-    ("median", "median([5 1 3 2])"),
-    ("mode", "mode([1 2 2 3 3 3])"),
-    ("std", "std([2 4 4 4 5 5 7 9])"),
-    ("var", "var([1 2 3 4])"),
     # linear algebra
     ("bandwidth", "[lb, ub] = bandwidth([1 2 0; 3 4 5; 0 0 6])"),
     ("blkdiag", "blkdiag([1 2; 3 4], -2)"),
@@ -164,13 +176,9 @@ CODES = [
     ("spones", "full(spones(sparse([0 5; -2 0])))"),
     ("speye", "full(speye(2, 3))"),
     ("spfun", "full(spfun(@(x) x.^2, sparse([0 -3; 2 0])))"),
-    ("det", "det([1 2; 3 4])"),
-    ("inv", "inv([1 2; 3 4])"),
     ("rank", "rank(magic(4))"),
     ("trace", "trace(magic(3))"),
     ("mldivide", "mldivide([4 -2; 1 1], [2; 3])"),
-    ("eig", "eig([2 0; 0 3])"),
-    ("norm", "norm([3 4])"),
     ("dot", "dot([1 2 3], [4 5 6])"),
     ("cross", "cross([1 0 0], [0 1 0])"),
     # polynomials and interpolation
@@ -186,15 +194,11 @@ CODES = [
     ("pchip", "pchip([0 2 4], [0 1 4], [1 3])"),
     ("spline", "spline([-1 0 1 2], [1 0 1 4], [-0.5 0.5 1.5])"),
     ("interp2", "interp2([1 3; 2 6], [1 1.5 2], 1.5)"),
-    ("polyval", "polyval([1 2 3], 2)"),
     ("roots", "roots([1 -3 2])"),
     ("conv", "conv([1 1], [1 -1])"),
-    ("polyfit", "p = polyfit([0 1 2], [1 3 5], 1)"),
-    ("interp1", "interp1([1 2 3], [10 20 30], [1.5 2.5])"),
     ("trapz", "trapz([1 2 3])"),
     # types
     ("int16", "int16([-40000 -2.5 2.5 40000])"),
-    ("int64", "int64([-2.5 0 2.5])"),
     ("uint16", "uint16([-1 12.5 70000])"),
     ("uint32", "uint32([-1 2.5 4294967296])"),
     ("uint64", "uint64([-1 2.5 20])"),
@@ -223,24 +227,15 @@ CODES = [
     ("strncmpi", "strncmpi('Window', 'windmill', 4)"),
     ("regexpi", "regexpi('aB7 Ab8 ab9', 'ab\\d', 'match')"),
     ("newline", "double(newline)"),
-    ("num2str", "num2str(pi, 4)"),
     ("str2double", "str2double('3.25') * 2"),
-    ("sprintf", "sprintf('%d-%d', 3, 4)"),
     ("mat2str", "mat2str([1 2; 3 4])"),
-    ("strcat", "strcat('ab', 'cd')"),
-    ("strsplit", "strsplit('a,b,c', ',')"),
-    ("strjoin", "strjoin({'a', 'b', 'c'}, '-')"),
-    ("strrep", "strrep('hello', 'l', 'L')"),
     ("upper", "upper('abc')"),
     ("lower", "lower('ABC')"),
     ("strtrim", "strtrim('  hi  ')"),
     ("strcmp", "strcmp('abc', 'abc')"),
     ("contains", "contains(\"science\", \"ien\")"),
     ("regexprep", "regexprep('abc123', '\\d', '#')"),
-    ("fprintf", "fprintf('%5.2f\\n', pi)"),
-    ("disp", "disp([1 2 3])"),
     # cells and structures
-    ("cell", "cell(2, 1)"),
     ("cellstr", "cellstr(['oak '; 'elm '])"),
     ("struct2cell", "struct2cell(struct('height', 4, 'width', 7))"),
     ("rmfield", "rmfield(struct('x', 5, 'y', 9), 'x')"),
@@ -251,13 +246,9 @@ CODES = [
     ("feval", "feval(@sum, [2 4 6])"),
     ("func2str", "func2str(@hypot)"),
     ("str2func", "feval(str2func('hypot'), 5, 12)"),
-    ("cellfun", "cellfun(@numel, {'ab', 'cde', ''})"),
-    ("arrayfun", "arrayfun(@(x) x^2, 1:4)"),
     ("cell2mat", "cell2mat({1 2; 3 4})"),
     ("num2cell", "num2cell([1 2])"),
-    ("struct", "s = struct('a', 1, 'b', 'text')"),
     ("fieldnames", "fieldnames(struct('a', 1, 'b', 2))"),
-    ("isfield", "isfield(struct('a', 1), {'a', 'b'})"),
     # operators
     ("plus", "[1 2 3] + 10"),
     ("minus", "[5 7] - [1 2]"),
@@ -291,7 +282,6 @@ CODES = [
     ("linsolve", "linsolve([2 1; 1 3], [3; 5])"),
     ("issymmetric", "issymmetric([1 2; 2 1])"),
     # text
-    ("regexp", "regexp('a1b22c333', '\\d+', 'match')"),
     ("strfind", "strfind('abcabc', 'bc')"),
     ("startsWith", "startsWith(\"report.txt\", \"rep\")"),
     ("endsWith", "endsWith({'a.m', 'b.txt'}, '.m')"),
@@ -354,8 +344,6 @@ CODES = [
     ("accumarray", "accumarray([1; 2; 1], [10; 20; 30])"),
     ("histcounts", "histcounts([1 2 2 3 5], [0 2 4 6])"),
     ("deal", "[a, b] = deal(7)"),
-    ("cumsum", "cumsum([1 2; 3 4], 2)"),
-    ("abs", "abs(3 + 4i)"),
     # text and number bases
     ("split", "split(\"red,green,blue\", \",\")"),
     ("replace", "replace(\"cats and cats\", \"cats\", \"dogs\")"),
@@ -372,20 +360,12 @@ CODES = [
 
 # ---- outputs (matlab-tests/doc_examples.py --update) ----
 OUTPUTS = {
-"abs([-3 2 -1.5])": "\nans =\n\n    3.0000    2.0000    1.5000\n\n",
-"sqrt([4 9 2])": "\nans =\n\n    2.0000    3.0000    1.4142\n\n",
-"exp([0 1])": "\nans =\n\n    1.0000    2.7183\n\n",
-"log([1 10])": "\nans =\n\n         0    2.3026\n\n",
 "log10([10 1000 0.01])": "\nans =\n\n     1     3    -2\n\n",
 "log2([8 0.5])": "\nans =\n\n     3    -1\n\n",
 "nthroot(-27, 3)": "\nans =\n\n    -3\n\n",
 "hypot(3, 4)": "\nans =\n\n     5\n\n",
-"round([2.5 -1.4 3.75])": "\nans =\n\n     3    -1     4\n\n",
-"floor([-2.5 2.5])": "\nans =\n\n    -3     2\n\n",
 "ceil([-2.5 2.5])": "\nans =\n\n    -2     3\n\n",
 "fix([-2.7 2.7])": "\nans =\n\n    -2     2\n\n",
-"mod([7 -7], 3)": "\nans =\n\n     1     2\n\n",
-"rem([7 -7], 3)": "\nans =\n\n     1    -1\n\n",
 "sign([-2 0 5])": "\nans =\n\n    -1     0     1\n\n",
 "sin([0 pi/6 pi/2])": "\nans =\n\n         0    0.5000    1.0000\n\n",
 "cos([0 pi])": "\nans =\n\n     1    -1\n\n",
@@ -429,16 +409,9 @@ OUTPUTS = {
 "NaN(2, 1)": "\nans =\n\n   NaN\n   NaN\n\n",
 "inf(1, 2)": "\nans =\n\n   Inf   Inf\n\n",
 "Inf(2, 1)": "\nans =\n\n   Inf\n   Inf\n\n",
-"zeros(2, 3)": "\nans =\n\n     0     0     0\n     0     0     0\n\n",
-"ones(2)": "\nans =\n\n     1     1\n     1     1\n\n",
-"eye(3)": "\nans =\n\n     1     0     0\n     0     1     0\n     0     0     1\n\n",
 "magic(3)": "\nans =\n\n     8     1     6\n     3     5     7\n     4     9     2\n\n",
-"linspace(0, 1, 5)": "\nans =\n\n         0    0.2500    0.5000    0.7500    1.0000\n\n",
 "colon(1, 2, 9)": "\nans =\n\n     1     3     5     7     9\n\n",
-"repmat([1 2], 2, 2)": "\nans =\n\n     1     2     1     2\n     1     2     1     2\n\n",
-"reshape(1:6, 2, 3)": "\nans =\n\n     1     3     5\n     2     4     6\n\n",
 "transpose([1 2 3])": "\nans =\n\n     1\n     2\n     3\n\n",
-"cat(1, [1 2], [3 4])": "\nans =\n\n     1     2\n     3     4\n\n",
 "horzcat([1 2], [3 4 5])": "\nans =\n\n     1     2     3     4     5\n\n",
 "vertcat([1 2], [3 4])": "\nans =\n\n     1     2\n     3     4\n\n",
 "diag([4 5 6])": "\nans =\n\n     4     0     0\n     0     5     0\n     0     0     6\n\n",
@@ -449,23 +422,9 @@ OUTPUTS = {
 "tril(magic(3))": "\nans =\n\n     8     0     0\n     3     5     0\n     4     9     2\n\n",
 "triu(magic(3))": "\nans =\n\n     8     1     6\n     0     5     7\n     0     0     2\n\n",
 "kron([1 2], [1; 10])": "\nans =\n\n     1     2\n    10    20\n\n",
-"size(zeros(2, 5))": "\nans =\n\n     2     5\n\n",
-"numel(magic(4))": "\nans =\n\n    16\n\n",
-"length(zeros(3, 7))": "\nans =\n\n     7\n\n",
 "ndims(ones(2, 3, 4))": "\nans =\n\n     3\n\n",
 "isempty([])": "\nans =\n\n  logical\n\n   1\n\n",
-"find([0 4 0 7])": "\nans =\n\n     2     4\n\n",
-"any([0 0 1])": "\nans =\n\n  logical\n\n   1\n\n",
-"all([1 1 0])": "\nans =\n\n  logical\n\n   0\n\n",
-"cumsum(1:5)": "\nans =\n\n     1     3     6    10    15\n\n",
-"cumprod([1 2 3 4])": "\nans =\n\n     1     2     6    24\n\n",
 "diff([1 4 9 16])": "\nans =\n\n     3     5     7\n\n",
-"sum([1 2; 3 4])": "\nans =\n\n     4     6\n\n",
-"prod([1 2 3 4])": "\nans =\n\n    24\n\n",
-"[m, k] = max([3 9 4])": "\nm =\n\n     9\n\n\nk =\n\n     2\n\n",
-"min([4 2 8; 1 5 3])": "\nans =\n\n     1     2     3\n\n",
-"[s, k] = sort([3 1 2], 'descend')": "\ns =\n\n     3     2     1\n\n\nk =\n\n     1     3     2\n\n",
-"unique([3 1 3 2 1])": "\nans =\n\n     1     2     3\n\n",
 "ismember([1 5 2], [2 3 1])": "\nans =\n\n  1\u00d73 logical array\n\n   1   0   1\n\n",
 "intersect([1 2 3 4], [3 4 5])": "\nans =\n\n     3     4\n\n",
 "union([1 3], [2 3])": "\nans =\n\n     1     2     3\n\n",
@@ -482,11 +441,6 @@ OUTPUTS = {
 "corrcoef([0 3; 2 1; 4 -1])": "\nans =\n\n     1    -1\n    -1     1\n\n",
 "quantile([1 3 7 9], [0.25 0.5 0.75])": "\nans =\n\n     2     5     8\n\n",
 "prctile([1 3 7 9], [25 50 75])": "\nans =\n\n     2     5     8\n\n",
-"mean([2 4 9])": "\nans =\n\n     5\n\n",
-"median([5 1 3 2])": "\nans =\n\n    2.5000\n\n",
-"mode([1 2 2 3 3 3])": "\nans =\n\n     3\n\n",
-"std([2 4 4 4 5 5 7 9])": "\nans =\n\n    2.1381\n\n",
-"var([1 2 3 4])": "\nans =\n\n    1.6667\n\n",
 "[lb, ub] = bandwidth([1 2 0; 3 4 5; 0 0 6])": "\nlb =\n\n     1\n\n\nub =\n\n     1\n\n",
 "blkdiag([1 2; 3 4], -2)": "\nans =\n\n     1     2     0\n     3     4     0\n     0     0    -2\n\n",
 "hankel([2 4 6], [6 8 10])": "\nans =\n\n     2     4     6\n     4     6     8\n     6     8    10\n\n",
@@ -505,13 +459,9 @@ OUTPUTS = {
 "full(spones(sparse([0 5; -2 0])))": "\nans =\n\n     0     1\n     1     0\n\n",
 "full(speye(2, 3))": "\nans =\n\n     1     0     0\n     0     1     0\n\n",
 "full(spfun(@(x) x.^2, sparse([0 -3; 2 0])))": "\nans =\n\n     0     9\n     4     0\n\n",
-"det([1 2; 3 4])": "\nans =\n\n    -2\n\n",
-"inv([1 2; 3 4])": "\nans =\n\n   -2.0000    1.0000\n    1.5000   -0.5000\n\n",
 "rank(magic(4))": "\nans =\n\n     3\n\n",
 "trace(magic(3))": "\nans =\n\n    15\n\n",
 "mldivide([4 -2; 1 1], [2; 3])": "\nans =\n\n    1.3333\n    1.6667\n\n",
-"eig([2 0; 0 3])": "\nans =\n\n     2\n     3\n\n",
-"norm([3 4])": "\nans =\n\n     5\n\n",
 "dot([1 2 3], [4 5 6])": "\nans =\n\n    32\n\n",
 "cross([1 0 0], [0 1 0])": "\nans =\n\n     0     0     1\n\n",
 "poly([-3 1 2])": "\nans =\n\n     1     0    -7     6\n\n",
@@ -526,14 +476,10 @@ OUTPUTS = {
 "pchip([0 2 4], [0 1 4], [1 3])": "\nans =\n\n    0.3125    2.1875\n\n",
 "spline([-1 0 1 2], [1 0 1 4], [-0.5 0.5 1.5])": "\nans =\n\n    0.2500    0.2500    2.2500\n\n",
 "interp2([1 3; 2 6], [1 1.5 2], 1.5)": "\nans =\n\n    1.5000    3.0000    4.5000\n\n",
-"polyval([1 2 3], 2)": "\nans =\n\n    11\n\n",
 "roots([1 -3 2])": "\nans =\n\n     2\n     1\n\n",
 "conv([1 1], [1 -1])": "\nans =\n\n     1     0    -1\n\n",
-"p = polyfit([0 1 2], [1 3 5], 1)": "\np =\n\n    2.0000    1.0000\n\n",
-"interp1([1 2 3], [10 20 30], [1.5 2.5])": "\nans =\n\n    15    25\n\n",
 "trapz([1 2 3])": "\nans =\n\n     4\n\n",
 "int16([-40000 -2.5 2.5 40000])": "\nans =\n\n  1\u00d74 int16 row vector\n\n   -32768       -3        3    32767\n\n",
-"int64([-2.5 0 2.5])": "\nans =\n\n  1\u00d73 int64 row vector\n\n   -3    0    3\n\n",
 "uint16([-1 12.5 70000])": "\nans =\n\n  1\u00d73 uint16 row vector\n\n       0      13   65535\n\n",
 "uint32([-1 2.5 4294967296])": "\nans =\n\n  1\u00d73 uint32 row vector\n\n            0            3   4294967295\n\n",
 "uint64([-1 2.5 20])": "\nans =\n\n  1\u00d73 uint64 row vector\n\n    0    3   20\n\n",
@@ -561,23 +507,14 @@ OUTPUTS = {
 "strncmpi('Window', 'windmill', 4)": "\nans =\n\n  logical\n\n   1\n\n",
 "regexpi('aB7 Ab8 ab9', 'ab\\d', 'match')": "\nans =\n\n  1\u00d73 cell array\n\n    {'aB7'}    {'Ab8'}    {'ab9'}\n\n",
 "double(newline)": "\nans =\n\n    10\n\n",
-"num2str(pi, 4)": "\nans =\n\n    '3.142'\n\n",
 "str2double('3.25') * 2": "\nans =\n\n    6.5000\n\n",
-"sprintf('%d-%d', 3, 4)": "\nans =\n\n    '3-4'\n\n",
 "mat2str([1 2; 3 4])": "\nans =\n\n    '[1 2;3 4]'\n\n",
-"strcat('ab', 'cd')": "\nans =\n\n    'abcd'\n\n",
-"strsplit('a,b,c', ',')": "\nans =\n\n  1\u00d73 cell array\n\n    {'a'}    {'b'}    {'c'}\n\n",
-"strjoin({'a', 'b', 'c'}, '-')": "\nans =\n\n    'a-b-c'\n\n",
-"strrep('hello', 'l', 'L')": "\nans =\n\n    'heLLo'\n\n",
 "upper('abc')": "\nans =\n\n    'ABC'\n\n",
 "lower('ABC')": "\nans =\n\n    'abc'\n\n",
 "strtrim('  hi  ')": "\nans =\n\n    'hi'\n\n",
 "strcmp('abc', 'abc')": "\nans =\n\n  logical\n\n   1\n\n",
 "contains(\"science\", \"ien\")": "\nans =\n\n  logical\n\n   1\n\n",
 "regexprep('abc123', '\\d', '#')": "\nans =\n\n    'abc###'\n\n",
-"fprintf('%5.2f\\n', pi)": " 3.14\n",
-"disp([1 2 3])": "     1     2     3\n",
-"cell(2, 1)": "\nans =\n\n  2\u00d71 cell array\n\n    {0\u00d70 double}\n    {0\u00d70 double}\n\n",
 "cellstr(['oak '; 'elm '])": "\nans =\n\n  2\u00d71 cell array\n\n    {'oak'}\n    {'elm'}\n\n",
 "struct2cell(struct('height', 4, 'width', 7))": "\nans =\n\n  2\u00d71 cell array\n\n    {[4]}\n    {[7]}\n\n",
 "rmfield(struct('x', 5, 'y', 9), 'x')": "\nans = \n\n  struct with fields:\n\n    y: 9\n\n",
@@ -588,13 +525,9 @@ OUTPUTS = {
 "feval(@sum, [2 4 6])": "\nans =\n\n    12\n\n",
 "func2str(@hypot)": "\nans =\n\n    'hypot'\n\n",
 "feval(str2func('hypot'), 5, 12)": "\nans =\n\n    13\n\n",
-"cellfun(@numel, {'ab', 'cde', ''})": "\nans =\n\n     2     3     0\n\n",
-"arrayfun(@(x) x^2, 1:4)": "\nans =\n\n     1     4     9    16\n\n",
 "cell2mat({1 2; 3 4})": "\nans =\n\n     1     2\n     3     4\n\n",
 "num2cell([1 2])": "\nans =\n\n  1\u00d72 cell array\n\n    {[1]}    {[2]}\n\n",
-"s = struct('a', 1, 'b', 'text')": "\ns = \n\n  struct with fields:\n\n    a: 1\n    b: 'text'\n\n",
 "fieldnames(struct('a', 1, 'b', 2))": "\nans =\n\n  2\u00d71 cell array\n\n    {'a'}\n    {'b'}\n\n",
-"isfield(struct('a', 1), {'a', 'b'})": "\nans =\n\n  1\u00d72 logical array\n\n   1   0\n\n",
 "[1 2 3] + 10": "\nans =\n\n    11    12    13\n\n",
 "[5 7] - [1 2]": "\nans =\n\n     4     5\n\n",
 "-[2 -3]": "\nans =\n\n    -2     3\n\n",
@@ -625,7 +558,6 @@ OUTPUTS = {
 "cond([2 0; 0 0.5])": "\nans =\n\n     4\n\n",
 "linsolve([2 1; 1 3], [3; 5])": "\nans =\n\n    0.8000\n    1.4000\n\n",
 "issymmetric([1 2; 2 1])": "\nans =\n\n  logical\n\n   1\n\n",
-"regexp('a1b22c333', '\\d+', 'match')": "\nans =\n\n  1\u00d73 cell array\n\n    {'1'}    {'22'}    {'333'}\n\n",
 "strfind('abcabc', 'bc')": "\nans =\n\n     2     5\n\n",
 "startsWith(\"report.txt\", \"rep\")": "\nans =\n\n  logical\n\n   1\n\n",
 "endsWith({'a.m', 'b.txt'}, '.m')": "\nans =\n\n  1\u00d72 logical array\n\n   1   0\n\n",
@@ -685,8 +617,6 @@ OUTPUTS = {
 "accumarray([1; 2; 1], [10; 20; 30])": "\nans =\n\n    40\n    20\n\n",
 "histcounts([1 2 2 3 5], [0 2 4 6])": "\nans =\n\n     1     3     1\n\n",
 "[a, b] = deal(7)": "\na =\n\n     7\n\n\nb =\n\n     7\n\n",
-"cumsum([1 2; 3 4], 2)": "\nans =\n\n     1     3\n     3     7\n\n",
-"abs(3 + 4i)": "\nans =\n\n     5\n\n",
 "split(\"red,green,blue\", \",\")": "\nans = \n\n  3\u00d71 string array\n\n    \"red\"  \n    \"green\"\n    \"blue\" \n\n",
 "replace(\"cats and cats\", \"cats\", \"dogs\")": "\nans = \n\n    \"dogs and dogs\"\n\n",
 "dec2bin(10)": "\nans =\n\n    '1010'\n\n",

@@ -1,21 +1,5 @@
 % The values the search box's MATLAB examples make (lib/_matlab_examples.py),
 % compared with GNU Octave's (made by matlab-tests/doc_examples.py --octave).
-% abs
-clear
-v = abs([-3 2 -1.5]);
-show(v);
-% sqrt
-clear
-v = sqrt([4 9 2]);
-show(v);
-% exp
-clear
-v = exp([0 1]);
-show(v);
-% log
-clear
-v = log([1 10]);
-show(v);
 % log10
 clear
 v = log10([10 1000 0.01]);
@@ -28,14 +12,6 @@ show(v);
 clear
 v = hypot(3, 4);
 show(v);
-% round
-clear
-v = round([2.5 -1.4 3.75]);
-show(v);
-% floor
-clear
-v = floor([-2.5 2.5]);
-show(v);
 % ceil
 clear
 v = ceil([-2.5 2.5]);
@@ -43,14 +19,6 @@ show(v);
 % fix
 clear
 v = fix([-2.7 2.7]);
-show(v);
-% mod
-clear
-v = mod([7 -7], 3);
-show(v);
-% rem
-clear
-v = rem([7 -7], 3);
 show(v);
 % sign
 clear
@@ -225,45 +193,17 @@ show(v);
 clear
 v = Inf(2, 1);
 show(v);
-% zeros
-clear
-v = zeros(2, 3);
-show(v);
-% ones
-clear
-v = ones(2);
-show(v);
-% eye
-clear
-v = eye(3);
-show(v);
 % magic
 clear
 v = magic(3);
-show(v);
-% linspace
-clear
-v = linspace(0, 1, 5);
 show(v);
 % colon
 clear
 v = colon(1, 2, 9);
 show(v);
-% repmat
-clear
-v = repmat([1 2], 2, 2);
-show(v);
-% reshape
-clear
-v = reshape(1:6, 2, 3);
-show(v);
 % transpose
 clear
 v = transpose([1 2 3]);
-show(v);
-% cat
-clear
-v = cat(1, [1 2], [3 4]);
 show(v);
 % horzcat
 clear
@@ -305,18 +245,6 @@ show(v);
 clear
 v = kron([1 2], [1; 10]);
 show(v);
-% size
-clear
-v = size(zeros(2, 5));
-show(v);
-% numel
-clear
-v = numel(magic(4));
-show(v);
-% length
-clear
-v = length(zeros(3, 7));
-show(v);
 % ndims
 clear
 v = ndims(ones(2, 3, 4));
@@ -325,55 +253,9 @@ show(v);
 clear
 v = isempty([]);
 show(v);
-% find
-clear
-v = find([0 4 0 7]);
-show(v);
-% any
-clear
-v = any([0 0 1]);
-show(v);
-% all
-clear
-v = all([1 1 0]);
-show(v);
-% cumsum
-clear
-v = cumsum(1:5);
-show(v);
-% cumprod
-clear
-v = cumprod([1 2 3 4]);
-show(v);
 % diff
 clear
 v = diff([1 4 9 16]);
-show(v);
-% sum
-clear
-v = sum([1 2; 3 4]);
-show(v);
-% prod
-clear
-v = prod([1 2 3 4]);
-show(v);
-% max
-clear
-[m, k] = max([3 9 4]);
-show(m);
-show(k);
-% min
-clear
-v = min([4 2 8; 1 5 3]);
-show(v);
-% sort
-clear
-[s, k] = sort([3 1 2], 'descend');
-show(s);
-show(k);
-% unique
-clear
-v = unique([3 1 3 2 1]);
 show(v);
 % ismember
 clear
@@ -438,26 +320,6 @@ show(v);
 % prctile
 clear
 v = prctile([1 3 7 9], [25 50 75]);
-show(v);
-% mean
-clear
-v = mean([2 4 9]);
-show(v);
-% median
-clear
-v = median([5 1 3 2]);
-show(v);
-% mode
-clear
-v = mode([1 2 2 3 3 3]);
-show(v);
-% std
-clear
-v = std([2 4 4 4 5 5 7 9]);
-show(v);
-% var
-clear
-v = var([1 2 3 4]);
 show(v);
 % bandwidth
 clear
@@ -532,14 +394,6 @@ show(v);
 clear
 v = full(spfun(@(x) x.^2, sparse([0 -3; 2 0])));
 show(v);
-% det
-clear
-v = det([1 2; 3 4]);
-show(v);
-% inv
-clear
-v = inv([1 2; 3 4]);
-show(round(v * 1e12) / 1e12);
 % rank
 clear
 v = rank(magic(4));
@@ -551,14 +405,6 @@ show(v);
 % mldivide
 clear
 v = mldivide([4 -2; 1 1], [2; 3]);
-show(v);
-% eig
-clear
-v = eig([2 0; 0 3]);
-show(v);
-% norm
-clear
-v = norm([3 4]);
 show(v);
 % dot
 clear
@@ -621,10 +467,6 @@ show(v);
 clear
 v = interp2([1 3; 2 6], [1 1.5 2], 1.5);
 show(v);
-% polyval
-clear
-v = polyval([1 2 3], 2);
-show(v);
 % roots
 clear
 v = roots([1 -3 2]);
@@ -633,14 +475,6 @@ show(v);
 clear
 v = conv([1 1], [1 -1]);
 show(v);
-% polyfit
-clear
-p = polyfit([0 1 2], [1 3 5], 1);
-show(round(p * 1e12) / 1e12);
-% interp1
-clear
-v = interp1([1 2 3], [10 20 30], [1.5 2.5]);
-show(v);
 % trapz
 clear
 v = trapz([1 2 3]);
@@ -648,10 +482,6 @@ show(v);
 % int16
 clear
 v = int16([-40000 -2.5 2.5 40000]);
-show(v);
-% int64
-clear
-v = int64([-2.5 0 2.5]);
 show(v);
 % uint16
 clear
@@ -761,37 +591,13 @@ show(v);
 clear
 v = double(newline);
 show(v);
-% num2str
-clear
-v = num2str(pi, 4);
-show(v);
 % str2double
 clear
 v = str2double('3.25') * 2;
 show(v);
-% sprintf
-clear
-v = sprintf('%d-%d', 3, 4);
-show(v);
 % mat2str
 clear
 v = mat2str([1 2; 3 4]);
-show(v);
-% strcat
-clear
-v = strcat('ab', 'cd');
-show(v);
-% strsplit
-clear
-v = strsplit('a,b,c', ',');
-show(v);
-% strjoin
-clear
-v = strjoin({'a', 'b', 'c'}, '-');
-show(v);
-% strrep
-clear
-v = strrep('hello', 'l', 'L');
 show(v);
 % upper
 clear
@@ -812,10 +618,6 @@ show(v);
 % regexprep
 clear
 v = regexprep('abc123', '\d', '#');
-show(v);
-% cell
-clear
-v = cell(2, 1);
 show(v);
 % cellstr
 clear
@@ -857,14 +659,6 @@ show(v);
 clear
 v = feval(str2func('hypot'), 5, 12);
 show(v);
-% cellfun
-clear
-v = cellfun(@numel, {'ab', 'cde', ''});
-show(v);
-% arrayfun
-clear
-v = arrayfun(@(x) x^2, 1:4);
-show(v);
 % cell2mat
 clear
 v = cell2mat({1 2; 3 4});
@@ -873,17 +667,9 @@ show(v);
 clear
 v = num2cell([1 2]);
 show(v);
-% struct
-clear
-s = struct('a', 1, 'b', 'text');
-show(s);
 % fieldnames
 clear
 v = fieldnames(struct('a', 1, 'b', 2));
-show(v);
-% isfield
-clear
-v = isfield(struct('a', 1), {'a', 'b'});
 show(v);
 % plus
 clear
@@ -1002,10 +788,6 @@ show(round(v * 1e12) / 1e12);
 % issymmetric
 clear
 v = issymmetric([1 2; 2 1]);
-show(v);
-% regexp
-clear
-v = regexp('a1b22c333', '\d+', 'match');
 show(v);
 % strfind
 clear
@@ -1230,14 +1012,6 @@ clear
 [a, b] = deal(7);
 show(a);
 show(b);
-% cumsum
-clear
-v = cumsum([1 2; 3 4], 2);
-show(v);
-% abs
-clear
-v = abs(3 + 4i);
-show(v);
 % dec2bin
 clear
 v = dec2bin(10);
@@ -1271,3 +1045,439 @@ show(c);
 clear
 c = mat2cell([1 2 3 4], 1, [1 3]);
 show(c);
+% cat
+clear
+v = cat(1, [1 2], [3 4]);
+show(v);
+% cat
+clear
+v = size(cat(3, [1 2], [3 4]));
+show(v);
+% eye
+clear
+v = eye(3);
+show(v);
+% eye
+clear
+v = eye(2, 3);
+show(v);
+% length
+clear
+v = length(zeros(3, 7));
+show(v);
+% linspace
+clear
+v = linspace(0, 1, 5);
+show(v);
+% numel
+clear
+v = numel(magic(4));
+show(v);
+% ones
+clear
+v = ones(2, 3);
+show(v);
+% ones
+clear
+v = ones(1, 2, 'like', int16(1));
+show(v);
+% ones
+clear
+v = ones(2);
+show(v);
+% repmat
+clear
+v = repmat([1 2], 2, 2);
+show(v);
+% reshape
+clear
+v = reshape(1:6, 2, 3);
+show(v);
+% reshape
+clear
+v = reshape(1:6, 2, []);
+show(v);
+% size
+clear
+v = size(zeros(2, 5));
+show(v);
+% size
+clear
+[r, c] = size(zeros(2, 5, 3));
+show(r);
+show(c);
+% zeros
+clear
+v = zeros(2, 3);
+show(v);
+% zeros
+clear
+v = zeros(2, 'int8');
+show(v);
+% arrayfun
+clear
+v = arrayfun(@(x) x^2, [1 2 3]);
+show(v);
+% arrayfun
+clear
+v = arrayfun(@(x) 1:x, 1:3, 'UniformOutput', false);
+show(v);
+% arrayfun
+clear
+v = arrayfun(@(x) x^2, 1:4);
+show(v);
+% cell
+clear
+c = cell(2);
+show(c);
+% cell
+clear
+v = size(cell(2, 3));
+show(v);
+% cell
+clear
+v = cell(2, 1);
+show(v);
+% cellfun
+clear
+v = cellfun(@length, {'ab', 'c', ''});
+show(v);
+% cellfun
+clear
+v = cellfun(@(x) x * 2, {1, [1 2]}, 'UniformOutput', false);
+show(v);
+% cellfun
+clear
+v = cellfun(@numel, {'ab', 'cde', ''});
+show(v);
+% isfield
+clear
+v = isfield(struct('a', 1), 'a');
+show(v);
+% isfield
+clear
+v = isfield(struct('a', 1), {'a', 'b'});
+show(v);
+% struct
+clear
+s = struct('a', 1, 'b', 'text');
+show(s);
+% abs
+clear
+v = abs([-3 2 -1.5]);
+show(v);
+% abs
+clear
+v = abs(-2 + 1i);
+show(v);
+% abs
+clear
+v = abs(3 + 4i);
+show(v);
+% exp
+clear
+v = exp([0 1]);
+show(v);
+% floor
+clear
+v = floor([-2.5 2.5]);
+show(v);
+% log
+clear
+v = log([1 10]);
+show(v);
+% log
+clear
+v = log(-1);
+show(v);
+% mod
+clear
+v = mod([7 -7], 3);
+show(v);
+% mod
+clear
+v = mod(7, -3);
+show(v);
+% rem
+clear
+v = rem([7 -7], 3);
+show(v);
+% round
+clear
+v = round([2.5 -1.4 3.75]);
+show(v);
+% sqrt
+clear
+v = sqrt([4 9 2]);
+show(v);
+% sqrt
+clear
+v = sqrt(-4);
+show(v);
+% int64
+clear
+v = int64(2.5);
+show(v);
+% int64
+clear
+v = int64(5) * 2.6;
+show(v);
+% int64
+clear
+v = int64([-2.5 0 2.5]);
+show(v);
+% det
+clear
+v = det(magic(3));
+show(v);
+% norm
+clear
+v = norm([3 4]);
+show(v);
+% fzero
+clear
+v = fzero(@(x) x^2 - 2, 1);
+show(round(v * 1e12) / 1e12);
+% fzero
+clear
+v = fzero(@(x) cos(x) - x, [0 1]);
+show(round(v * 1e12) / 1e12);
+% integral
+clear
+v = integral(@(x) x.^2, 0, 1);
+show(v);
+% interp1
+clear
+v = interp1([1 2 3], [10 20 30], 2.5);
+show(v);
+% interp1
+clear
+v = interp1([1 2 3], [10 20 30], 4, 'linear', 'extrap');
+show(v);
+% interp1
+clear
+v = interp1([1 2 3], [10 20 30], [1.5 2.5]);
+show(v);
+% polyfit
+clear
+p = polyfit(1:5, [2.1 3.9 6.2 7.8 10.1], 1);
+show(round(p * 1e12) / 1e12);
+% polyfit
+clear
+p = polyfit([-1 0 1 2], [5 1 1 5], 2);
+show(round(p * 1e12) / 1e12);
+% polyfit
+clear
+p = polyfit([0 1 2], [1 3 5], 1);
+show(round(p * 1e12) / 1e12);
+% polyval
+clear
+v = polyval([1 2 3], 2);
+show(v);
+% all
+clear
+v = all([1 1 0]);
+show(v);
+% any
+clear
+v = any([0 0 1]);
+show(v);
+% cumprod
+clear
+v = cumprod([1 2 3 4]);
+show(v);
+% cumsum
+clear
+v = cumsum([1 2 3 4]);
+show(v);
+% cumsum
+clear
+v = cumsum(1:5);
+show(v);
+% max
+clear
+[m, k] = max([3 9 4]);
+show(m);
+show(k);
+% max
+clear
+v = max([1 5], [3 2]);
+show(v);
+% mean
+clear
+v = mean([2 4 9]);
+show(v);
+% median
+clear
+v = median([3 1 2 10]);
+show(v);
+% median
+clear
+v = median([5 1 3 2]);
+show(v);
+% min
+clear
+[m, k] = min([3 1 4]);
+show(m);
+show(k);
+% min
+clear
+v = min([4 2], 3);
+show(v);
+% mode
+clear
+v = mode([1 2 2 3 3]);
+show(v);
+% mode
+clear
+[m, f, c] = mode([1 2 2 3 3]);
+show(m);
+show(f);
+show(c);
+% mode
+clear
+v = mode([1 2 2 3 3 3]);
+show(v);
+% prod
+clear
+v = prod([1 2 3 4]);
+show(v);
+% std
+clear
+v = std([2 4 4 4 5 5 7 9]);
+show(v);
+% std
+clear
+v = std([2 4 4 4 5 5 7 9], 1);
+show(v);
+% var
+clear
+v = var([1 2 3 4]);
+show(v);
+% var
+clear
+v = var([1 2 3 4], 1);
+show(v);
+% find
+clear
+v = find([0 4 0 7]);
+show(v);
+% sort
+clear
+[s, k] = sort([3 1 2], 'descend');
+show(s);
+show(k);
+% sort
+clear
+v = sort({'pear', 'apple', 'fig'});
+show(v);
+% unique
+clear
+v = unique([3 1 2 3 1]);
+show(v);
+% unique
+clear
+[c, ia, ic] = unique([3 1 2 3 1]);
+show(c);
+show(ia);
+show(ic);
+% unique
+clear
+v = unique([3 1 2 3 1], 'stable');
+show(v);
+% unique
+clear
+v = unique([3 1 3 2 1]);
+show(v);
+% num2str
+clear
+v = num2str(pi);
+show(v);
+% num2str
+clear
+v = num2str(pi, 8);
+show(v);
+% num2str
+clear
+v = num2str([1 2 3]);
+show(v);
+% num2str
+clear
+v = num2str(pi, 4);
+show(v);
+% regexp
+clear
+v = regexp('ab12cd345', '\d+', 'match');
+show(v);
+% regexp
+clear
+v = regexp('k=v', '(?<key>\w)=(?<val>\w)', 'names');
+show(v);
+% regexp
+clear
+v = regexp('a1b22c333', '\d+', 'match');
+show(v);
+% sprintf
+clear
+v = sprintf('%5.2f', pi);
+show(v);
+% sprintf
+clear
+v = sprintf('%d,', [1 2 3]);
+show(v);
+% sprintf
+clear
+v = sprintf('%s and %s', 'a', 'b');
+show(v);
+% sprintf
+clear
+v = sprintf('%d-%d', 3, 4);
+show(v);
+% strcat
+clear
+v = strcat('a', 'b', 'c');
+show(v);
+% strcat
+clear
+v = strcat({'a', 'b'}, 'x');
+show(v);
+% strcat
+clear
+v = strcat('ab', 'cd');
+show(v);
+% strjoin
+clear
+v = strjoin({'a', 'b', 'c'});
+show(v);
+% strjoin
+clear
+v = strjoin({'a', 'b'}, ', ');
+show(v);
+% strjoin
+clear
+v = strjoin({'a', 'b', 'c'}, '-');
+show(v);
+% strrep
+clear
+v = strrep('hello world', 'o', '0');
+show(v);
+% strrep
+clear
+v = strrep({'ab', 'cb'}, 'b', 'x');
+show(v);
+% strrep
+clear
+v = strrep('hello', 'l', 'L');
+show(v);
+% strsplit
+clear
+v = strsplit('a b  c');
+show(v);
+% strsplit
+clear
+v = strsplit('a  b', ' ', 'CollapseDelimiters', false);
+show(v);
+% strsplit
+clear
+v = strsplit('a,b,c', ',');
+show(v);

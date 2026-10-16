@@ -1,0 +1,407 @@
+[
+  {
+    "name": "all",
+    "kind": "function",
+    "signature": "B = all(A)\nB = all(A, dim)\nB = all(A, vecdim)\nB = all(A, 'all')",
+    "summary": "Whether every element is nonzero, along the first non-singleton dimension, a given dimension or dimensions, or all of them.",
+    "doc": "The result is logical. `all([])` is true.",
+    "examples": [
+      {
+        "code": "all([1 1 0])",
+        "expected": "\nans =\n\n  logical\n\n   0\n\n"
+      },
+      {
+        "code": "all([1 1; 0 1])",
+        "expected": "\nans =\n\n  1×2 logical array\n\n   0   1\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "any"
+    ],
+    "tags": [
+      "logical"
+    ]
+  },
+  {
+    "name": "any",
+    "kind": "function",
+    "signature": "B = any(A)\nB = any(A, dim)\nB = any(A, vecdim)\nB = any(A, 'all')",
+    "summary": "Whether any element is nonzero, along the first non-singleton dimension, a given dimension or dimensions, or all of them.",
+    "doc": "The result is logical. NaN counts as zero here, so `any([0 NaN])` is false, as in MATLAB. `any([])` is false.",
+    "examples": [
+      {
+        "code": "any([0 0 1])",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      },
+      {
+        "code": "any([0 1; 0 0], 2)",
+        "expected": "\nans =\n\n  2×1 logical array\n\n   1\n   0\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "all",
+      "find"
+    ],
+    "tags": [
+      "logical"
+    ]
+  },
+  {
+    "name": "cumprod",
+    "kind": "function",
+    "signature": "B = cumprod(A)\nB = cumprod(A, dim)\nB = cumprod(___, direction)\nB = cumprod(___, nanflag)",
+    "summary": "The running products of an array's elements along its first non-singleton dimension or a given dimension.",
+    "doc": "Takes the same arguments as `cumsum`.",
+    "examples": [
+      {
+        "code": "cumprod([1 2 3 4])",
+        "expected": "\nans =\n\n     1     2     6    24\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "prod",
+      "cumsum"
+    ],
+    "tags": [
+      "reductions"
+    ]
+  },
+  {
+    "name": "cumsum",
+    "kind": "function",
+    "signature": "B = cumsum(A)\nB = cumsum(A, dim)\nB = cumsum(___, direction)\nB = cumsum(___, nanflag)",
+    "summary": "The running sums of an array's elements along its first non-singleton dimension or a given dimension.",
+    "doc": "`direction` is `'forward'` (the default) or `'reverse'`. With `'omitnan'`, NaN elements count as 0. An integer class's running sums saturate at its limits.",
+    "examples": [
+      {
+        "code": "cumsum([1 2 3 4])",
+        "expected": "\nans =\n\n     1     3     6    10\n\n"
+      },
+      {
+        "code": "cumsum([1 2 3], 'reverse')",
+        "expected": "\nans =\n\n     6     5     3\n\n"
+      },
+      {
+        "code": "cumsum(1:5)",
+        "expected": "\nans =\n\n     1     3     6    10    15\n\n"
+      },
+      {
+        "code": "cumsum([1 2; 3 4], 2)",
+        "expected": "\nans =\n\n     1     3\n     3     7\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "sum",
+      "cumprod",
+      "diff"
+    ],
+    "tags": [
+      "reductions"
+    ]
+  },
+  {
+    "name": "max",
+    "kind": "function",
+    "signature": "M = max(A)\nM = max(A, [], dim)\nM = max(A, [], vecdim)\nM = max(A, [], 'all')\n[M, I] = max(___)\n[M, I] = max(A, [], 'all', 'linear')\nC = max(A, B)\n___ = max(___, missingflag)",
+    "summary": "The largest elements of an array along a dimension, with their indices, or the elementwise larger of two arrays.",
+    "doc": "NaN is ignored unless `missingflag` is `'includenan'`. `I` is the index of the first maximum along the dimension, or a linear index with `'linear'`. Complex values compare by magnitude, then phase angle. `max(A, B)` expands a scalar, and mixing an integer class with a double gives the integer class.",
+    "examples": [
+      {
+        "code": "[m, k] = max([3 9 4])",
+        "expected": "\nm =\n\n     9\n\n\nk =\n\n     2\n\n"
+      },
+      {
+        "code": "max([1 5; 7 2], [], 2)",
+        "expected": "\nans =\n\n     5\n     7\n\n"
+      },
+      {
+        "code": "max([1 5], [3 2])",
+        "expected": "\nans =\n\n     3     5\n\n"
+      }
+    ],
+    "differs": [
+      "The 'ComparisonMethod' option is refused.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "min",
+      "sort",
+      "bounds"
+    ],
+    "tags": [
+      "reductions"
+    ]
+  },
+  {
+    "name": "mean",
+    "kind": "function",
+    "signature": "M = mean(A)\nM = mean(A, dim)\nM = mean(A, vecdim)\nM = mean(A, 'all')\nM = mean(___, outtype)\nM = mean(___, nanflag)",
+    "summary": "The arithmetic mean of an array's elements along its first non-singleton dimension, a given dimension or dimensions, or all of them.",
+    "doc": "The mean of an integer, logical or char array is double, unless `outtype` is `'native'` for an integer class (rounded to it). With `'omitnan'`, NaN elements are left out. `mean([])` is NaN.",
+    "examples": [
+      {
+        "code": "mean([2 4 9])",
+        "expected": "\nans =\n\n     5\n\n"
+      },
+      {
+        "code": "mean([1 2; 3 4], 2)",
+        "expected": "\nans =\n\n    1.5000\n    3.5000\n\n"
+      }
+    ],
+    "differs": [
+      "The 'Weights' option is refused.",
+      "'native' with a logical array is refused.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "median",
+      "mode",
+      "sum"
+    ],
+    "tags": [
+      "statistics",
+      "reductions"
+    ]
+  },
+  {
+    "name": "median",
+    "kind": "function",
+    "signature": "M = median(A)\nM = median(A, dim)\nM = median(A, vecdim)\nM = median(A, 'all')\nM = median(___, nanflag)",
+    "summary": "The median of an array's elements: the middle value once sorted, or the mean of the two middle values.",
+    "doc": "By default a NaN makes the median NaN; `'omitnan'` leaves NaN elements out. The median of an integer class is in that class. `median([])` is NaN.",
+    "examples": [
+      {
+        "code": "median([3 1 2 10])",
+        "expected": "\nans =\n\n    2.5000\n\n"
+      },
+      {
+        "code": "median([5 1 3 2])",
+        "expected": "\nans =\n\n    2.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "mean",
+      "mode"
+    ],
+    "tags": [
+      "statistics",
+      "reductions"
+    ]
+  },
+  {
+    "name": "min",
+    "kind": "function",
+    "signature": "M = min(A)\nM = min(A, [], dim)\nM = min(A, [], vecdim)\nM = min(A, [], 'all')\n[M, I] = min(___)\nC = min(A, B)\n___ = min(___, missingflag)",
+    "summary": "The smallest elements of an array along a dimension, with their indices, or the elementwise smaller of two arrays.",
+    "doc": "The counterpart of `max`, taking the same arguments.",
+    "examples": [
+      {
+        "code": "[m, k] = min([3 1 4])",
+        "expected": "\nm =\n\n     1\n\n\nk =\n\n     2\n\n"
+      },
+      {
+        "code": "min([4 2], 3)",
+        "expected": "\nans =\n\n     3     2\n\n"
+      },
+      {
+        "code": "min([4 2 8; 1 5 3])",
+        "expected": "\nans =\n\n     1     2     3\n\n"
+      }
+    ],
+    "differs": [
+      "The 'ComparisonMethod' option is refused.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "max",
+      "sort"
+    ],
+    "tags": [
+      "reductions"
+    ]
+  },
+  {
+    "name": "mode",
+    "kind": "function",
+    "signature": "M = mode(A)\nM = mode(A, dim)\nM = mode(A, vecdim)\nM = mode(A, 'all')\n[M, F, C] = mode(___)",
+    "summary": "The most frequent value of an array's elements, the smallest of them on a tie, with its frequency and all the tied values.",
+    "doc": "`F` is how often `M` occurs, and `C` a cell array holding the sorted column of every value that occurs that often.",
+    "examples": [
+      {
+        "code": "mode([1 2 2 3 3])",
+        "expected": "\nans =\n\n     2\n\n"
+      },
+      {
+        "code": "[m, f, c] = mode([1 2 2 3 3])",
+        "expected": "\nm =\n\n     2\n\n\nf =\n\n     2\n\n\nc =\n\n  1×1 cell array\n\n    {2×1 double}\n\n"
+      },
+      {
+        "code": "mode([1 2 2 3 3 3])",
+        "expected": "\nans =\n\n     3\n\n"
+      }
+    ],
+    "differs": [
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "mean",
+      "median",
+      "histcounts"
+    ],
+    "tags": [
+      "statistics",
+      "reductions"
+    ]
+  },
+  {
+    "name": "prod",
+    "kind": "function",
+    "signature": "B = prod(A)\nB = prod(A, dim)\nB = prod(A, vecdim)\nB = prod(A, 'all')\nB = prod(___, outtype)\nB = prod(___, nanflag)",
+    "summary": "The product of the elements of an array along its first non-singleton dimension, a given dimension or dimensions, or all of them.",
+    "doc": "Takes the same dimension, `outtype` and `nanflag` arguments as `sum`. The product of `[]` is 1.",
+    "examples": [
+      {
+        "code": "prod([1 2; 3 4])",
+        "expected": "\nans =\n\n     3     8\n\n"
+      },
+      {
+        "code": "prod([1 2 3 4], 'all')",
+        "expected": "\nans =\n\n    24\n\n"
+      },
+      {
+        "code": "prod([1 2 3 4])",
+        "expected": "\nans =\n\n    24\n\n"
+      }
+    ],
+    "differs": [
+      "'native' with a char array is refused.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "full",
+    "see_also": [
+      "sum",
+      "cumprod"
+    ],
+    "tags": [
+      "reductions"
+    ]
+  },
+  {
+    "name": "std",
+    "kind": "function",
+    "signature": "S = std(A)\nS = std(A, w)\nS = std(A, w, dim)\nS = std(A, w, vecdim)\nS = std(A, w, 'all')\nS = std(___, nanflag)",
+    "summary": "The standard deviation of an array's elements, normalized by n - 1 by default or by n.",
+    "doc": "`w` is 0 (normalize by n - 1, the default) or 1 (by n). `std` of a scalar is 0. With `'omitnan'`, NaN elements are left out.",
+    "examples": [
+      {
+        "code": "std([2 4 4 4 5 5 7 9])",
+        "expected": "\nans =\n\n    2.1381\n\n"
+      },
+      {
+        "code": "std([2 4 4 4 5 5 7 9], 1)",
+        "expected": "\nans =\n\n     2\n\n"
+      }
+    ],
+    "differs": [
+      "A weight vector w is refused.",
+      "The second output, the mean ([S, M] = std(...)), is not supported.",
+      "Integer-class input is accepted (MATLAB refuses it) and computed in double.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "var",
+      "mean"
+    ],
+    "tags": [
+      "statistics",
+      "reductions"
+    ]
+  },
+  {
+    "name": "sum",
+    "kind": "function",
+    "signature": "S = sum(A)\nS = sum(A, dim)\nS = sum(A, vecdim)\nS = sum(A, 'all')\nS = sum(___, outtype)\nS = sum(___, nanflag)",
+    "summary": "The sum of the elements of an array along its first non-singleton dimension, a given dimension or dimensions, or all of them.",
+    "doc": "Sums along the first dimension whose size is not 1, unless `dim` (a positive integer), `vecdim` (a vector of dimensions) or `'all'` says otherwise; the summed dimensions become 1. `outtype` is `'default'`, `'double'` or `'native'`: by default the result is double, except that single stays single; `'native'` keeps the input's class, so an integer sum saturates at the class's limits and a logical sum is logical. `nanflag` is `'includenan'` (the default: a NaN makes the sum NaN) or `'omitnan'` (NaN elements are left out). The sum of `[]` is 0.",
+    "examples": [
+      {
+        "code": "sum([1 2; 3 4])",
+        "expected": "\nans =\n\n     4     6\n\n"
+      },
+      {
+        "code": "sum([1 2; 3 4], 2)",
+        "expected": "\nans =\n\n     3\n     7\n\n"
+      },
+      {
+        "code": "sum([1 NaN 3], 'omitnan')",
+        "expected": "\nans =\n\n     4\n\n"
+      }
+    ],
+    "differs": [
+      "Tables and timetables, durations and datetimes, and gpuArray inputs are not supported.",
+      "'native' with a char array is refused, as MATLAB refuses it."
+    ],
+    "status": "partial",
+    "see_also": [
+      "cumsum",
+      "prod",
+      "mean"
+    ],
+    "tags": [
+      "reductions"
+    ]
+  },
+  {
+    "name": "var",
+    "kind": "function",
+    "signature": "V = var(A)\nV = var(A, w)\nV = var(A, w, dim)\nV = var(A, w, vecdim)\nV = var(A, w, 'all')\nV = var(___, nanflag)",
+    "summary": "The variance of an array's elements, normalized by n - 1 by default or by n.",
+    "doc": "Takes the same arguments as `std`, of which it is the square.",
+    "examples": [
+      {
+        "code": "var([1 2 3 4])",
+        "expected": "\nans =\n\n    1.6667\n\n"
+      },
+      {
+        "code": "var([1 2 3 4], 1)",
+        "expected": "\nans =\n\n    1.2500\n\n"
+      }
+    ],
+    "differs": [
+      "A weight vector w is refused.",
+      "The second output, the mean, is not supported.",
+      "Integer-class input is accepted (MATLAB refuses it) and computed in double.",
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "std",
+      "mean"
+    ],
+    "tags": [
+      "statistics",
+      "reductions"
+    ]
+  }
+]

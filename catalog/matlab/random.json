@@ -1,0 +1,117 @@
+[
+  {
+    "name": "rand",
+    "kind": "function",
+    "signature": "X = rand\nX = rand(n)\nX = rand(sz1, ..., szN)\nX = rand(sz)\nX = rand(___, typename)\nX = rand(___, 'like', p)",
+    "summary": "Uniformly distributed random numbers in the open interval (0, 1), from the global Mersenne Twister generator that rng seeds.",
+    "doc": "The stream matches MATLAB's for the same seed: after `rng(0)`, `rand` is 0.8147, as in MATLAB. `typename` is `'double'` or `'single'`.",
+    "examples": [
+      {
+        "code": "rng(0); rand(1, 3)",
+        "expected": "\nans =\n\n    0.8147    0.9058    0.1270\n\n"
+      }
+    ],
+    "differs": [
+      "A complex or sparse 'like' prototype is refused: MATLAB's order for drawing the real and imaginary parts isn't reproduced.",
+      "Integer and logical classes are refused, as MATLAB refuses them.",
+      "RandStream objects (rand(s, ...)) are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "randn",
+      "randi",
+      "rng"
+    ],
+    "tags": [
+      "random numbers"
+    ]
+  },
+  {
+    "name": "randi",
+    "kind": "function",
+    "signature": "X = randi(imax)\nX = randi(imax, n)\nX = randi(imax, sz1, ..., szN)\nX = randi([imin imax], ___)\nX = randi(___, typename)\nX = randi(___, 'like', p)",
+    "summary": "Uniformly distributed random integers from 1 to imax, or from imin to imax, from the global generator that rng seeds.",
+    "doc": "The values are drawn in double, then converted to `typename`, which saturates: `randi([300 300], 1, 'int8')` is 127. `typename` is double, single, an 8-, 16- or 32-bit integer class, or logical. The stream matches MATLAB's for the same seed.",
+    "examples": [
+      {
+        "code": "rng(0); randi(10, 1, 5)",
+        "expected": "\nans =\n\n     9    10     2    10     7\n\n"
+      },
+      {
+        "code": "rng(0); randi([5 10], 2)",
+        "expected": "\nans =\n\n     9     5\n    10    10\n\n"
+      }
+    ],
+    "differs": [
+      "A range past the integers a double holds exactly (2^53; 2^24 for single) is refused.",
+      "A complex or sparse 'like' prototype, and the 64-bit integer classes, are refused.",
+      "RandStream objects are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "rand",
+      "randperm",
+      "rng"
+    ],
+    "tags": [
+      "random numbers"
+    ]
+  },
+  {
+    "name": "randn",
+    "kind": "function",
+    "signature": "X = randn\nX = randn(n)\nX = randn(sz1, ..., szN)\nX = randn(sz)\nX = randn(___, typename)\nX = randn(___, 'like', p)",
+    "summary": "Normally distributed random numbers, mean 0 and standard deviation 1, from the global generator that rng seeds.",
+    "doc": "The stream matches MATLAB's for the same seed: after `rng(0)`, `randn(1, 3)` is 0.5377, 1.8339, -2.2588, as in MATLAB. `typename` is `'double'` or `'single'`.",
+    "examples": [
+      {
+        "code": "rng(0); randn(1, 3)",
+        "expected": "\nans =\n\n    0.5377    1.8339   -2.2588\n\n"
+      }
+    ],
+    "differs": [
+      "A complex or sparse 'like' prototype is refused.",
+      "Integer and logical classes are refused, as MATLAB refuses them.",
+      "RandStream objects are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "rand",
+      "randi",
+      "rng"
+    ],
+    "tags": [
+      "random numbers"
+    ]
+  },
+  {
+    "name": "rng",
+    "kind": "function",
+    "signature": "rng(seed)\nrng(seed, generator)\nrng('shuffle')\nrng('shuffle', generator)\nrng('default')\nrng(s)\ns = rng\ns = rng(___)",
+    "summary": "Seeds, saves or restores the generator rand, randn and randi draw from.",
+    "doc": "`rng(seed)` seeds the Mersenne Twister with a nonnegative integer below $2^{32}$; `rng('default')` is seed 0, the state a session starts in; `rng('shuffle')` seeds from the clock. `s = rng` returns the current settings (Type, Seed, State), and `rng(s)` restores them, so the same numbers come again. `rng(generator)` alone is `rng(0, generator)`.",
+    "examples": [
+      {
+        "code": "rng(0); a = rand; rng(0); b = rand; a == b",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      },
+      {
+        "code": "s = rng; x = rand; rng(s); y = rand; x == y",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      }
+    ],
+    "differs": [
+      "Only the 'twister' generator: 'philox', 'threefry', 'combRecursive', 'multFibonacci', 'simdTwister' and the legacy generators are refused.",
+      "The settings' State field is a handle into this session's saved states, not MATLAB's 625-element vector; the most recent 1000 saved states can be restored."
+    ],
+    "status": "partial",
+    "see_also": [
+      "rand",
+      "randn",
+      "randi"
+    ],
+    "tags": [
+      "random numbers"
+    ]
+  }
+]

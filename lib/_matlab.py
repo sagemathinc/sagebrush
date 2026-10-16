@@ -11379,6 +11379,28 @@ def end_program():
         mod.flush()
 
 
+# (a new session's display format, as the runtime starts)
+_FRESH_FORMAT = dict(_format)
+
+
+def fresh_session():
+    """a new session's state, for a catalog example (lib/_matlab_examples.py run): no
+    globals or persistent variables, the display format, generator and warnings a
+    session starts with, and no failed cell"""
+    _globals.clear()
+    _persistents.clear()
+    _format.clear()
+    _format.update(_FRESH_FORMAT)
+    _rng[0] = np.random.RandomState(5489)
+    if "_rng_seed" in globals():
+        globals()["_rng_seed"][0] = 0.0
+    _lastwarn[:] = ["", ""]
+    _warn_all[0] = "on"
+    _warn_ids.clear()
+    _cell_failed[0] = False
+    _cell_error[0] = None
+
+
 # ---- handle values in the rest of the runtime
 
 
