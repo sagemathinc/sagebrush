@@ -314,7 +314,7 @@ export const BOARD_SCHEMA = {
     },
     "ref": {
      "type": "string",
-     "description": "a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`"
+     "description": "a link: a URL, a paper, or a path (`src/file.py#L10`) resolved against `refBase`; or a place on the board: `#p2` (page 2), `#p2-3` (its step 3), `#3` (this page's step 3), `#id` (the page with that id, or the item), `#page-id/item-id` (an item on a page); in Markdown text too, as `[see Boards](#boards)`"
     },
     "color": {
      "type": "string",
@@ -337,7 +337,7 @@ export const BOARD_SCHEMA = {
       "inv-trapezoid",
       "flag"
      ],
-     "description": "its outline (a flowchart's); its text is then centered"
+     "description": "its outline (a flowchart's); its text is then centered. `diamond` (a decision) is pointed at its left and right and flat at its top and bottom, so that its text fits a note's width, not a true rhombus (which would need twice its text's width and height); `hexagon` is the same, less pointed"
     },
     "fit": {
      "type": "boolean",
