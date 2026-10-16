@@ -389,6 +389,14 @@ export function mul(a: any, b: any): any {
   return mulSlow(a, b);
 }
 function repeatCount(n: any): number | undefined {
+  // (an int subclass that keeps int's __mul__ and __rmul__ repeats by its
+  // own value, as CPython's sequence repetition: [0] * J(2) is [0, 0])
+  // (int's own: int's, or the unboxing proxy's wrapper of it, types.ts)
+  const intsOwn = (t: any, name: string) => {
+    const m = lookupType(t, name);
+    return m === lookupType(T.int, name) || m?.$unboxing === true;
+  };
+  if (n instanceof PrimBox && typeOf(n).$mro.includes(T.int) && shimName(n, "int") === null && intsOwn(typeOf(n), "__mul__") && intsOwn(typeOf(n), "__rmul__")) n = n.$v;
   if (!isPyInt(n)) return undefined;
   const k = Number(n);
   return k < 0 ? 0 : k;

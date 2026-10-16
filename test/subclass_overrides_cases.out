@@ -26,3 +26,4 @@ list(range(JI(3))) -> [0, 1, 2]
 [0] * JI(2) -> [0, 0]
 math.factorial(JI(3)) -> 6
 complex(CS(1)) -> 3j ['__complex__ returned non-complex (type CF).  The a']
+[0, 0] abab b'aa' (1, 1) [1, 1] JM.__rmul__
