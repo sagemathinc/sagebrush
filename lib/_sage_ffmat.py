@@ -1399,7 +1399,9 @@ class FFMatrix:
                     row.append(s)
                 out.append(row)
             return FFMatrix(A._base, out, o.ncols())
-        if isinstance(o, FFVector):
+        if _vec_base(o) is not None:
+            # (an FFVector, or a plain ZZ/QQ vector: one was multiplied as a
+            # scalar, entry by entry, into a vector of matrices)
             A, o = self._vector_operand(o, False)
             return FFVector(A._base, [FFVector(A._base, r)._dot(o._e) for r in A._rows])
         c = self._scalar(o)
@@ -1421,17 +1423,18 @@ class FFMatrix:
         (unsupported operand parents) when v's entries are not as many as
         the matrix's rows (or columns) or the two fields do not meet."""
         n = len(self._rows) if left else self._ncols
-        P = _vector_pushout(self._base, v._base) if len(v) == n else None
+        B = _vec_base(v)
+        P = _vector_pushout(self._base, B) if len(v) == n else None
         if P is None:
             raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % ((v.parent(), self.parent()) if left else (self.parent(), v.parent())))
         A = self
         if P is not self._base:
             # (a matrix over AA meets a vector over QQbar in QQbar, as two
             # matrices do: _common_field; other larger rings are not modelled)
-            if _common_field(self._base, v._base) is not P:
-                raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, v._base))
+            if _common_field(self._base, B) is not P:
+                raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, B))
             A = FFMatrix(P, self._rows, self._ncols)
-        return A, (v if v._base is P else FFVector(P, _in_ring(P, v, v._base)))
+        return A, (v if isinstance(v, FFVector) and B is P else FFVector(P, _in_ring(P, v, B)))
 
     def _vecmat(self, v):
         A, v = self._vector_operand(v, True)
