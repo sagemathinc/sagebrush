@@ -894,6 +894,8 @@ class AlgebraicNumber:
 
     # ---- comparison
     def __eq__(self, o):
+        if getattr(o, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: a == A as A == a)
         o = self._coerce(o)
         if o is None:
             return NotImplemented

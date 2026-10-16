@@ -8,6 +8,7 @@ the field; printed as Sage prints them."""
 import random as _random
 
 import _sage_ff as _ff
+from fractions import Fraction as _F
 
 
 def _sa():
@@ -36,6 +37,78 @@ def _field(base):
 
 
 # ------------------------------------------------------------------ vectors
+
+def _strict_base(B):
+    """Whether scalars meet matrices over B by Sage's canonical coercion
+    (finite fields, Z/nZ, number fields, QQbar, AA) rather than by
+    conversion (RDF, RR, CC, ...)."""
+    import _sage_qqbar as qb
+    if isinstance(B, (_ff.IntegerModRing_, _ff.FiniteField_ext)) or B is qb.QQbar or B is qb.AA:
+        return True
+    import _sage_nf
+    return isinstance(B, _sage_nf.NumberField_absolute)
+
+
+def _admit(B, o):
+    """o as an element of B when Sage coerces it into B, else None.  Over
+    the strict bases (_strict_base) that is an integer, a rational in
+    characteristic 0, an element of B, or an AA element for QQbar: a float
+    is never admitted (identity_matrix(GF(7), 2) == 1.5 was True and + 1.5
+    added 1, the float truncated) nor an element of another field (GF(5)
+    in GF(7)), astra's CORR-BD3-1.  Other bases convert as before."""
+    if isinstance(o, (list, tuple, str, dict)) or getattr(o, "_is_ffmatrix", False) or isinstance(o, FFVector):
+        return None
+    if not _strict_base(B):
+        try:
+            return B(o)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(o, int):
+        return B(int(o))
+    if isinstance(o, (float, complex)):
+        return None
+    if isinstance(o, _F) or type(o).__name__ == "Rational":
+        return B(o) if B.characteristic() == 0 else None
+    par = getattr(o, "parent", None)
+    if callable(par):
+        try:
+            P = par()
+        except Exception:
+            return None
+        import _sage_qqbar as qb
+        if P is B or P == B or (B is qb.QQbar and P is qb.AA):
+            return B(o)
+    return None
+
+
+def _pushout(B, o):
+    """The field where a matrix over QQbar or AA and the scalar o meet when
+    o is not admitted into B (as Sage: a float with AA gives RDF and with
+    QQbar CDF, RR gives RR or CC, a QQbar element with AA gives QQbar),
+    else None."""
+    import _sage_qqbar as qb
+    if (B is not qb.QQbar and B is not qb.AA) or isinstance(o, int):
+        return None
+    par = getattr(o, "parent", None)
+    P = None
+    if callable(par):
+        try:
+            P = par()
+        except Exception:
+            return None
+    if B is qb.AA and P is qb.QQbar:
+        return qb.QQbar
+    name = type(o).__name__
+    is_c = isinstance(o, complex) or name in ("ComplexDoubleElement", "ComplexNumber", "ComplexNumberMP")
+    is_r = not is_c and (isinstance(o, float) or name == "RealNumberMP")
+    if not (is_c or is_r):
+        return None
+    import _sage_rdf
+    F = P if P is not None else (_sage_rdf.CDF if is_c else _sage_rdf.RDF)
+    if B is qb.QQbar and is_r:
+        F = _sage_rdf.CDF if F is _sage_rdf.RDF else _sa().ComplexField(F.prec())
+    return F
+
 
 class FFVector:
     """A vector over a finite field.
@@ -160,16 +233,14 @@ class FFVector:
             return self.dot_product(o)
         if isinstance(o, FFMatrix):
             return o._vecmat(self)
-        try:
-            c = self._base(o)
-        except (TypeError, ValueError):
+        c = _admit(self._base, o)
+        if c is None:
             return NotImplemented
         return FFVector(self._base, [a * c for a in self._e])
 
     def __rmul__(self, o):
-        try:
-            c = self._base(o)
-        except (TypeError, ValueError):
+        c = _admit(self._base, o)
+        if c is None:
             return NotImplemented
         return FFVector(self._base, [c * a for a in self._e])
 
@@ -464,7 +535,11 @@ class FFMatrix:
             return o.dimensions() == self.dimensions() and all(a == b for r, t in zip(self._rows, o._rows) for a, b in zip(r, t))
         # a scalar c is c times the identity (any shape for 0), as in Sage;
         # it was NotImplemented, so A * A.inverse() == 1 was False
-        c = self._scalar(o) if not isinstance(o, (list, tuple, str)) else None
+        c = self._scalar(o)
+        if c is None:
+            p = self._numeric(o)
+            if p is not None:
+                return p[0] == p[1]
         if c is not None:
             zero = self._base.zero()
             if c == zero:
@@ -488,6 +563,9 @@ class FFMatrix:
         if c is None:
             return None
         n = len(self._rows)
+        if n != self._ncols and c == self._base.zero():
+            # (A + 0 is A for any shape, as in Sage)
+            return FFMatrix(self._base, [[c] * self._ncols for _ in self._rows], self._ncols)
         if n != self._ncols:
             op_parent = o.parent() if callable(getattr(o, "parent", None)) else _sa().ZZ
             pair = (op_parent, self.parent()) if left else (self.parent(), op_parent)
@@ -526,11 +604,18 @@ class FFMatrix:
     T = property(transpose)
 
     # ---- arithmetic
+    _is_ffmatrix = True
+
     def _scalar(self, c):
-        try:
-            return self._base(c)
-        except (TypeError, ValueError):
+        return _admit(self._base, c)
+
+    def _numeric(self, o):
+        """(M, c): this matrix and o in the field where they meet when o is
+        not admitted (_pushout), else None."""
+        F = _pushout(self._base, o)
+        if F is None:
             return None
+        return FFMatrix(F, [[F(x) for x in r] for r in self._rows], self._ncols), F(o)
 
     def _from_qq(self, o):
         """A QQ matrix o as a matrix over this (QQbar) field."""
@@ -542,16 +627,22 @@ class FFMatrix:
     def __add__(self, o):
         o = self._from_qq(o)
         if not isinstance(o, FFMatrix):
-            o = self._scalar_identity(o, "+", False)
-        if not isinstance(o, FFMatrix) or o.dimensions() != self.dimensions():
+            q = self._scalar_identity(o, "+", False)
+            if q is None:
+                p = self._numeric(o)
+                return NotImplemented if p is None else p[0] + p[1]
+            o = q
+        if o.dimensions() != self.dimensions():
             return NotImplemented
         return FFMatrix(self._base, [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, o._rows)], self._ncols)
 
     def __radd__(self, o):
         if not isinstance(o, FFMatrix) and self._from_qq(o) is o:
-            o = self._scalar_identity(o, "+", True)
-            if o is None:
-                return NotImplemented
+            q = self._scalar_identity(o, "+", True)
+            if q is None:
+                p = self._numeric(o)
+                return NotImplemented if p is None else p[0] + p[1]
+            o = q
         return self.__add__(o)
 
     def __neg__(self):
@@ -560,19 +651,24 @@ class FFMatrix:
     def __sub__(self, o):
         o = self._from_qq(o)
         if not isinstance(o, FFMatrix):
-            o = self._scalar_identity(o, "-", False)
-        if not isinstance(o, FFMatrix):
-            return NotImplemented
+            q = self._scalar_identity(o, "-", False)
+            if q is None:
+                p = self._numeric(o)
+                return NotImplemented if p is None else p[0] - p[1]
+            o = q
         return self + (-o)
 
     def __rsub__(self, o):
-        # o - A for a scalar o (a QQ matrix o goes through _from_qq)
+        # o - A for a scalar o (a QQ matrix o goes through _from_qq); a
+        # numeric o is applied with the matrix on the left (o + M with
+        # o in CC raised in complex(M) before M was asked)
         q = self._from_qq(o)
         if isinstance(q, FFMatrix):
             return q + (-self)
         q = self._scalar_identity(o, "-", True)
         if q is None:
-            return NotImplemented
+            p = self._numeric(o)
+            return NotImplemented if p is None else -p[0] + p[1]
         return q + (-self)
 
     def __mul__(self, o):
@@ -599,13 +695,15 @@ class FFMatrix:
             return FFVector(self._base, [FFVector(self._base, r).dot_product(o) for r in self._rows])
         c = self._scalar(o)
         if c is None:
-            return NotImplemented
+            p = self._numeric(o)
+            return NotImplemented if p is None else p[0] * p[1]
         return FFMatrix(self._base, [[a * c for a in r] for r in self._rows], self._ncols)
 
     def __rmul__(self, o):
         c = self._scalar(o)
         if c is None:
-            return NotImplemented
+            p = self._numeric(o)
+            return NotImplemented if p is None else p[0] * p[1]
         return FFMatrix(self._base, [[c * a for a in r] for r in self._rows], self._ncols)
 
     def _vecmat(self, v):
@@ -862,7 +960,8 @@ class FFMatrix:
     def __truediv__(self, o):
         c = self._scalar(o)
         if c is None:
-            return NotImplemented
+            p = self._numeric(o)
+            return NotImplemented if p is None else p[0] / p[1]
         return self * (1 / c)
 
     def charpoly(self, var="x"):

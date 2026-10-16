@@ -975,6 +975,8 @@ class NumberFieldElement:
         return hash(tuple(self._c))
 
     def __eq__(self, other):
+        if getattr(other, "_is_ffmatrix", False):
+            return NotImplemented  # (the matrix compares: a == A as A == a)
         # elements of equal fields compare by coordinates; a nonconstant
         # polynomial is not a field element (x^2 == K(2) was True through the
         # conversion K(x^2), with different hashes: the second review's
