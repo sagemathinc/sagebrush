@@ -14,3 +14,14 @@ T('derivative empty', lambda: derivative(x^2, []))
 f(x) = x^3
 T('callable empty', lambda: f.diff([]))
 T('series', lambda: (x^2 + x).series(x, 4).diff([]))
+
+# polynomial roots in a number field (they were always [])
+R.<t> = QQ[]
+K = QuadraticField(2, 'a'); L = NumberField(t^3 - 2, 'b')
+T('K roots', lambda: sorted((t^2 - 2).roots(K), key=str))
+T('L roots', lambda: sorted((t^6 - 4).roots(L), key=str))
+T('K nomult', lambda: sorted((t^2 - 2).roots(K, multiplicities=False), key=str))
+T('K mult', lambda: sorted(((t^2 - 2)^2*(t - 1)).roots(K), key=str))
+T('K none', lambda: (t^2 - 3).roots(K))
+T('ZZ poly', lambda: sorted(ZZ['t']([-2, 0, 1]).roots(K), key=str))
+T('parent', lambda: [r.parent() for r, m in (t^2 - 2).roots(K)][0])
