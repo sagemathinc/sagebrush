@@ -107,3 +107,29 @@ r = continued_fraction(415/93)
 print(r, list(r), len(r), r.value(), r[1], r.convergents())
 print(continued_fraction([1, 2, 3]), continued_fraction([2, 4, 1]), continued_fraction([0, 7, 6, 1]), continued_fraction(0), continued_fraction(-7/3), continued_fraction(1/2 + 0*sqrt(2)))
 print(continued_fraction(pi)[30], continued_fraction(e)[40])
+# review follow-ups (CORR-1D1-1..4): integers only, Sage's negative
+# convergent indices, immutable finite continued fractions
+def _e(f):
+    try:
+        print(f())
+    except Exception as _err:
+        print(type(_err).__name__)
+r = continued_fraction(415/93)
+c2 = continued_fraction(sqrt(2))
+_e(lambda: continued_fraction([1, 3/2]))
+_e(lambda: continued_fraction([1, -2]))
+_e(lambda: continued_fraction([1, 0, 2]))
+_e(lambda: continued_fraction([]))
+_e(lambda: (r.convergent(-2), r.numerator(-2), r.denominator(-2), r.numerator(-1), r.denominator(-1)))
+_e(lambda: r.convergent(-1))
+_e(lambda: r.convergent(-3))
+_e(lambda: (c2.convergent(-2), c2.numerator(-1), c2.denominator(-1)))
+_e(lambda: c2.convergent(3/2))
+_e(lambda: c2[3/2])
+_e(lambda: c2[-1])
+_e(lambda: r[-1])
+_e(lambda: r[3/2])
+def _set():
+    r[0] = 99
+_e(_set)
+print(r, r.value())

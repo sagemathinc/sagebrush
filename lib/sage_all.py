@@ -2446,7 +2446,11 @@ def continued_fraction(x, nterms=20):
         ([2; 1, 2, 1, 1, 4, 1, 1, 6, 1, 1, 8, 1, 1, 10, 1, 1, 12, 1, 1, 14, 1, 1, 16], [1; 1, 2])
     """
     if isinstance(x, (list, tuple)):
-        qs = [int(a) for a in x]
+        qs = [_cf_int(a, "an integer quotient") for a in x]
+        if not qs:
+            raise ValueError("continued fraction can not represent infinity")
+        if any(a <= 0 for a in qs[1:]):
+            raise ValueError("all quotient except the first must be positive")
         if len(qs) > 1 and qs[-1] == 1:
             # the canonical form, as Sage's: [..., a, 1] is [..., a + 1]
             qs[-2] += 1
@@ -2479,6 +2483,62 @@ def continued_fraction(x, nterms=20):
     return _ContinuedFraction(out)
 
 
+# limits of an infinite continued fraction (daybreak2's HARD-1D1-1..3):
+# indices of convergents and slices, quadratic period length, and digits of
+# a certified enclosure
+_CF_MAX_INDEX = 100000
+_CF_MAX_PERIOD = 100000
+_CF_MAX_DIGITS = 100000
+
+
+def _cf_admit(n, what):
+    if n > _CF_MAX_INDEX:
+        raise NotImplementedError("%s %d of an infinite continued fraction: the limit is %d" % (what, n, _CF_MAX_INDEX))
+
+
+def _cf_int(n, what="an integer"):
+    """n as an int, refusing a non-integer instead of truncating it
+    (astra's CORR-1D1-1: a quotient 3/2 or an index 2.9 was truncated)."""
+    if isinstance(n, bool):
+        raise TypeError("unable to convert %r to %s" % (n, what))
+    if isinstance(n, int):
+        return int(n)
+    if isinstance(n, _Fraction):
+        if n.denominator == 1:
+            return int(n.numerator)
+        raise TypeError("unable to convert rational %s to %s" % (n, what))
+    if isinstance(n, _Expr):
+        q = _py_number_expr(n)
+        if isinstance(q, int):
+            return q
+        if isinstance(q, _Fraction) and q.denominator == 1:
+            return int(q.numerator)
+    raise TypeError("unable to convert %s to %s" % (n, what))
+
+
+def _py_number_expr(n):
+    try:
+        from _sage_expr import _py_number
+        return _py_number(n._s)
+    except Exception:
+        return None
+
+
+def _cf_negative_convergent(n, part):
+    # Sage's initial pairs: p_{-2}/q_{-2} = 0/1, p_{-1}/q_{-1} = 1/0
+    # (CORR-1D1-2: a negative index gave an unrelated prefix)
+    if n < -2:
+        raise ValueError("n must be at least -2")
+    num, den = (0, 1) if n == -2 else (1, 0)
+    if part == "numerator":
+        return num
+    if part == "denominator":
+        return den
+    if den == 0:
+        raise ZeroDivisionError("rational division by zero")
+    return _q(_Fraction(num, den))
+
+
 def _cf_convergent(qs, n):
     """The n-th convergent of the partial quotients qs[0..n]."""
     h0, h1, k0, k1 = 1, qs[0], 0, 1
@@ -2487,33 +2547,49 @@ def _cf_convergent(qs, n):
     return _q(_Fraction(h1, k1))
 
 
-class _ContinuedFraction(list):
-    """Partial quotients, printed as Sage prints a continued fraction."""
+class _ContinuedFraction(tuple):
+    """Partial quotients, printed as Sage prints a continued fraction.
+    Immutable, as Sage's (CORR-1D1-4: a list that could be changed
+    disagreed with its cached value)."""
 
-    def __init__(self, qs=(), value=None):
-        list.__init__(self, qs)
-        self._value = value
+    def __new__(cls, qs=(), value=None):
+        obj = tuple.__new__(cls, qs)
+        obj._value = value
+        return obj
 
     def __repr__(self):
         return "[%s]" % (str(self[0]) + ("; " + ", ".join(str(a) for a in self[1:]) if len(self) > 1 else ""))
 
     def __getitem__(self, i):
-        r = list.__getitem__(self, i)
-        return _ContinuedFraction(r) if isinstance(i, slice) else r
+        if isinstance(i, slice):
+            return _ContinuedFraction(tuple.__getitem__(self, i))
+        i = _cf_int(i)
+        if i < 0:
+            raise ValueError("n (=%d) should be positive" % i)
+        return tuple.__getitem__(self, i)
 
     def quotient(self, n):
         return self[n]
 
     def convergent(self, n):
-        return _cf_convergent(self, n)
+        n = _cf_int(n)
+        if n < 0:
+            return _cf_negative_convergent(n, "convergent")
+        return _cf_convergent(self, min(n, len(self) - 1))
 
     def convergents(self):
         return [_cf_convergent(self, n) for n in range(len(self))]
 
     def numerator(self, n):
+        n = _cf_int(n)
+        if n < 0:
+            return _cf_negative_convergent(n, "numerator")
         return self.convergent(n).numerator()
 
     def denominator(self, n):
+        n = _cf_int(n)
+        if n < 0:
+            return _cf_negative_convergent(n, "denominator")
         return self.convergent(n).denominator()
 
     def value(self):
@@ -2530,6 +2606,10 @@ class _ContinuedFractionReal:
         (8, 8, 2177/528, sqrt(17))
         sage: c[10^12], continued_fraction(-sqrt(3))[10^12 + 1]  # sagebrush only (periodic: no list to 10^12)
         (8, 2)
+        sage: c.convergent(10^9)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: convergent 1000000000 of an infinite continued fraction: the limit is 100000
         sage: c[:5], len(continued_fraction(-sqrt(3))[:4])
         ([4; 8, 8, 8, 8], 4)
     """
@@ -2538,6 +2618,7 @@ class _ContinuedFractionReal:
         self._x = x
         self._qs = []
         self._periodic = None
+        self._err = None
         self._gen = self._quotients()
 
     def value(self):
@@ -2553,33 +2634,57 @@ class _ContinuedFractionReal:
             i += 1
 
     def quotient(self, n):
-        n = int(n)
+        n = _cf_int(n)
         if n < 0:
             raise IndexError("negative index")
+        if self._err is not None:
+            # the computation failed before: the same refusal again, never a
+            # stale or empty result (CORR-1D1-3: retrying returned None)
+            raise self._err[0](*self._err[1])
         if self._periodic is None and not self._qs:
             # the first step: a quadratic irrational sets _periodic (and
             # yields nothing); anything else yields its first quotient
-            first = next(self._gen, None)
+            first = self._next()
             if self._periodic is None:
                 self._qs.append(first)
         if self._periodic is not None:
             pre, per = self._periodic
             return pre[n] if n < len(pre) else per[(n - len(pre)) % len(per)]
         while len(self._qs) <= n:
-            self._qs.append(next(self._gen))
+            self._qs.append(self._next())
         return self._qs[n]
+
+    def _next(self):
+        # one quotient from the generator; a failure is remembered and
+        # raised again on every later request
+        try:
+            return next(self._gen)
+        except StopIteration:
+            if self._periodic is not None:
+                return None  # the quadratic setup step yields nothing
+            self._err = (RuntimeError, ("the continued fraction ended unexpectedly",))
+            raise RuntimeError("the continued fraction ended unexpectedly")
+        except Exception as err:
+            self._err = (type(err), err.args)
+            raise
 
     def __getitem__(self, i):
         if isinstance(i, slice):
             if i.stop is None or i.stop < 0 or (i.start or 0) < 0:
                 raise NotImplementedError("only finite slices of an infinite continued fraction")
-            return continued_fraction([self.quotient(k) for k in range(*i.indices(int(i.stop)))])
+            stop = _cf_int(i.stop)
+            _cf_admit(stop, "a slice to index")
+            return continued_fraction([self.quotient(k) for k in range(*i.indices(stop))])
+        i = _cf_int(i)
+        if i < 0:
+            raise ValueError("n (=%d) should be positive" % i)
         return self.quotient(i)
 
     def convergent(self, n):
-        n = int(n)
+        n = _cf_int(n)
         if n < 0:
-            raise IndexError("negative index")
+            return _cf_negative_convergent(n, "convergent")
+        _cf_admit(n, "convergent")
         h0, h1, k0, k1 = 1, self.quotient(0), 0, 1
         for i in range(1, n + 1):
             a = self.quotient(i)
@@ -2597,9 +2702,15 @@ class _ContinuedFractionReal:
         return _LazyConvergents(self)
 
     def numerator(self, n):
+        n = _cf_int(n)
+        if n < 0:
+            return _cf_negative_convergent(n, "numerator")
         return self.convergent(n).numerator()
 
     def denominator(self, n):
+        n = _cf_int(n)
+        if n < 0:
+            return _cf_negative_convergent(n, "denominator")
         return self.convergent(n).denominator()
 
     def __repr__(self):
@@ -2650,8 +2761,16 @@ class _LazyConvergents:
         if isinstance(i, slice):
             if i.stop is None or i.stop < 0 or (i.start or 0) < 0:
                 raise NotImplementedError("only finite slices of an infinite list")
-            return [self._cf.convergent(k) for k in range(*i.indices(int(i.stop)))]
-        return self._cf.convergent(int(i))
+            _cf_admit(_cf_int(i.stop), "a slice to index")
+            want = set(range(*i.indices(_cf_int(i.stop))))
+            out = []
+            for k, v in enumerate(self):  # one pass, not each from the start
+                if k >= _cf_int(i.stop):
+                    break
+                if k in want:
+                    out.append(v)
+            return out if (i.step or 1) > 0 else out[::-1]
+        return self._cf.convergent(_cf_int(i))
 
     def __len__(self):
         raise ValueError("the length is infinite!")
@@ -2679,6 +2798,8 @@ def _cf_quadratic(a, m):
     r = _math.isqrt(D)
     seen, qs = {}, []
     while (P, Q) not in seen:
+        if len(qs) >= _CF_MAX_PERIOD:
+            raise NotImplementedError("a quadratic irrational whose period is longer than %d" % _CF_MAX_PERIOD)
         seen[(P, Q)] = len(qs)
         k = (P + r) // Q if Q > 0 else -((P + r) // -Q + 1)
         qs.append(k)
@@ -2701,6 +2822,8 @@ def _cf_enclosed(x, a):
         return _Fraction(I._lo), _Fraction(I._hi)
     emitted, digits, width = 0, 30, None
     while True:
+        if digits > _CF_MAX_DIGITS:
+            raise NotImplementedError("the continued fraction of %s: precision limit (%d digits) reached at partial quotient %d" % (x, _CF_MAX_DIGITS, emitted))
         lo, hi = enclose(digits)
         w = hi - lo
         if width is not None and w * 2 > width:
@@ -2716,9 +2839,9 @@ def _cf_enclosed(x, a):
                 emitted += 1
             k += 1
             lo, hi = 1 / (hi - fa), 1 / (lo - fa)
-        if digits > 100000:
-            raise NotImplementedError("the continued fraction of %s: precision limit reached at partial quotient %d" % (x, emitted))
-        digits *= 2
+        # double, clamped to the limit; past it the loop refuses before
+        # asking for an enclosure (61440 digits doubled asked for 122880)
+        digits = _CF_MAX_DIGITS + 1 if digits >= _CF_MAX_DIGITS else min(digits * 2, _CF_MAX_DIGITS)
 
 
 # Sage's Integer methods on Python ints: (12).factor(), 13.is_prime(); under
