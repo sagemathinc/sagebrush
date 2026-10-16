@@ -747,6 +747,14 @@ def _range_int(v, open_, pos):
 
 
 def _range(a, b, c, open_, universe=None, pos=None):
+    if universe is not None and universe is not _ZZ:
+        # (a range's elements are integers: Magma refuses another universe)
+        if open_ == "[":
+            raise MagmaError("Invalid sequence universe", "[ ... ]", True, pos)
+        if open_ == "{":
+            raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }", True, pos)
+        raise MagmaError("a range with a universe in %s ... is not supported yet" % open_)
+    # (the universe first, as Magma checks it, CORR-1CD-1)
     a, b, c = (_range_int(v, open_, pos) for v in (a, b, c))
     if isinstance(c, int) and c == 0 and isinstance(a, int) and isinstance(b, int):
         raise MagmaError("Set/Sequence constructor: step must be non-zero", "[ ... ]" if open_ == "[" else "{ ... }", True, pos)
@@ -755,13 +763,6 @@ def _range(a, b, c, open_, universe=None, pos=None):
         # (a set of a range is made element by element: bounded first, as a
         # sequence's range, which stays lazy, needn't be; HARD-1CD-1)
         raise MagmaError("a set of more than %d elements is not supported yet" % _COLLECT_MAX)
-    if universe is not None and universe is not _ZZ:
-        # (a range's elements are integers: Magma refuses another universe)
-        if open_ == "[":
-            raise MagmaError("Invalid sequence universe", "[ ... ]", True, pos)
-        if open_ == "{":
-            raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }", True, pos)
-        raise MagmaError("a range with a universe in %s ... is not supported yet" % open_)
     if open_ == "[":
         if isinstance(a, int) and isinstance(b, int) and isinstance(c, int):
             return MRange(a, b, c)
