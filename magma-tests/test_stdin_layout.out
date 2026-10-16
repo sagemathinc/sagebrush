@@ -1,0 +1,344 @@
+rec<F | 
+    a := 3,
+    b := [ 1, 2 ]>
+rec<F | 
+    a := rec<F | 
+        a := 3,
+        b := [ 1, 2 ]>,
+    b := x>
+rec<F | 
+    a := [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 ],
+    b := 2>
+<[
+    [ 5, 6 ],
+    [ 7, 8 ]
+], 9>
+<1, [
+    [ 2 ]
+], 3>
+<[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+22, 23, 24, 25, 26, 27, 28, 29, 30 ], [
+    [ 1 ],
+    [ 2 ]
+]>
+rec<F | 
+a := 3,
+b := [ 1, 2 ]>
+rec<F | 
+a := rec<F | 
+a := 3,
+b := [ 1, 2 ]>,
+b := x>
+<[
+[ 5, 6 ],
+[ 7, 8 ]
+], 9>
+[
+[ 1 ],
+[ 2 ]
+]
+<[
+[ 5, 6 ],
+[ 7, 8 ]
+], 9>
+rec<F | 
+a := 3,
+b := [ 1, 2 ]>
+[
+    <[
+        [ 1 ],
+        [ 2 ]
+    ], 3>,
+    <[
+        [ 4 ]
+    ], 5>
+]
+<[
+    [ 1 ],
+    [ 2 ]
+], [
+    [ 3 ]
+]>
+<<[
+    [ 1 ],
+    [ 2 ]
+]>, 4>
+rec<F | 
+    a := <[
+        [ 1 ],
+        [ 2 ]
+    ], 3>,
+    b := 2>
+<rec<F | 
+    a := 1,
+    b := 2>, 5>
+<[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+22, 23, 24, 25, 26, 27, 28, 29, 30 ], [
+    [ 1 ],
+    [ 2 ]
+], [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+22, 23, 24, 25, 26, 27, 28, 29, 30 ]>
+<"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", [
+    [ 1 ],
+    [ 2 ]
+], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb">
+[
+    [
+        <[
+            [ 1 ]
+        ], 2>
+    ]
+]
+<[], [
+    [ 1 ]
+]>
+<[
+    []
+], 1>
+rec<F | 
+a := <[
+[ 1 ],
+[ 2 ]
+], 3>,
+b := 2>
+<<[
+[ 1 ],
+[ 2 ]
+]>, 4>
+rec<F | 
+a := <[
+[ 1 ],
+[ 2 ]
+], 3>,
+b := 2>|
+[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40 ]
+<[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+22, 23, 24, 25, 26, 27, 28, 29, 30 ], [
+[ 1 ],
+[ 2 ]
+]>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+    [ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+    [ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+    [ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+[
+    [ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"\
+, [
+    [ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\
+", [
+    [ 6 ]
+], 8>
+[
+    <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>
+]
+[
+    <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>
+]
+[
+    <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>
+]
+[
+    <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+    [
+        [ 6 ]
+    ], 8>
+]
+[
+    <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"\
+    , [
+        [ 6 ]
+    ], 8>
+]
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+rec<G | 
+    u := 6>, 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+rec<G | 
+    u := 6>, 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+rec<G | 
+    u := 6>, 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"\
+, rec<G | 
+    u := 6>, 8>
+rec<G | 
+    u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+        [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\
+        yyyyyyyyyyyyyyyyyyyyyy", [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := rec<G | 
+        w := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\
+            yyyyyyyyyyyyyyyyyyyyyyyy", [
+            [ 6 ]
+        ], 8>>>
+rec<G | 
+    u := <[
+        [ 6 ]
+    ], "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\
+        yyyyyyyyyyyyyyyyy", 8>>
+rec<G | 
+    u := <100000000000000000000000000000000000000000000000000000000000000000000\
+        00000000000000000000, [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <[
+        [ 6 ]
+    ], 100000000000000000000000000000000000000000000000000000000000000000000000\
+        00000000000000000, 8>>
+rec<G | 
+    w := rec<G | 
+        u := <10000000000000000000000000000000000000000000000000000000000000000\
+            000000000000000000000000, [
+            [ 6 ]
+        ], 8>>>
+rec<G | 
+    w := rec<G | 
+        u := <[
+            [ 6 ]
+        ], 10000000000000000000000000000000000000000000000000000000000000000000\
+            000000000000000000000, 8>>>
+rec<G | 
+    u := <[ 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 256, 
+        289, 324, 361, 400, 441, 484, 529, 576, 625, 676, 729, 784, 841, 900 ], 
+        [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <[
+        [ 6 ]
+    ], [ 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 256, 
+        289, 324, 361, 400, 441, 484, 529, 576, 625, 676, 729, 784, 841, 900 ], 
+        8>>
+rec<G | 
+    u := <<10000000000000000000000000000000000000000000000000000000000000000000\
+        000000000000000000000, 5>, [
+        [ 6 ]
+    ], 8>>
+rec<G | 
+    u := <[
+        [ 6 ]
+    ], <10000000000000000000000000000000000000000000000000000000000000000000000\
+        000000000000000000, 5>, 8>>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+[ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", [
+[ 6 ]
+], 8>
+<"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 
+[
+[ 6 ]
+], 8>
+121
+rec<G | 
+u := <"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\
+yyyyyyyyyyyyyyyy", [
+[ 6 ]
+], 8>>
+<rec<G | >, 8>
+abcdefghij100000000000000000000000000000000000000000000000000000000000000000000\
+0000000000
+abc[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+22, 23, 24, 25, 26, 27, 28, 29, 30 ]|100000000000000000000000000000000000000000\
+00000000000000000000000000000
+rec<G | 
+    w := rec<G | 
+        u := <[
+            [ 6 ]
+        ], [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35 ], 
+        8>>>
+rec<G | 
+    w := rec<G | 
+        u := <[
+            [ 6 ]
+        ], [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34 ], 8>>>
+rec<G | 
+    w := rec<G | 
+        u := [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 
+            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 
+            36 ]>>
+rec<G | 
+    w := rec<G | 
+        u := qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\
+        >>
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk<"zzzzzzz\
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", [
+[ 13 ]
+], "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww">|
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk<"zzz\
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", [
+[ 13 ]
+], "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"\
+>|
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk<\
+"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\
+", [
+[ 13 ]
+], "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\
+www">|
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\
+<"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\
+zz", [
+[ 13 ]
+], "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\
+wwww">|
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\
+k<"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\
+zzzz", [
+[ 13 ]
+], "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\
+wwwww">|
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\
+kkkkkk<"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\
+zzzzzzzzzzzzzz", [
+[ 13 ]
+], "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\
+wwwwwwwwww">|
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\
+k
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[ 1, 2, 3, 4, 5, 6, 
+7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 ]

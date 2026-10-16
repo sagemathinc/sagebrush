@@ -1491,21 +1491,30 @@ class MRec:
         # (its fields one level deeper, for _own's depth bound: HARD-319-1)
         return MRec(self.fmt, {k: _own(v, None, depth + 1) for k, v in self.vals.items()})
 
-    def _str(self, indent):
+    def _str(self, indent, tail=""):
+        """Printed over lines at `indent`, its closing ">" added after its
+        last field is laid out (_close), then `tail` (a sequence's comma)."""
         head = "rec<%s | " % _format_name(self.fmt)
         names = [n for n in self.fmt.names if n in self.vals]
         if not names:
-            return head + ">"
-        pad = " " * (indent + 4)
+            return head + ">" + tail
+        # (no indentation in a string Sprint or printf makes)
+        step = 0 if _SPRINT[0] is not None else 4
+        pad = " " * (indent + step)
         lines = []
         for n in names:
             start = "%s := " % n
             v = self.vals[n]
-            # a record or a list of structures nests 4 deeper; a value that
-            # wraps (a long sequence or string) continues 8 deeper
-            deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet)) and not all(_atomic(x) for x in v))
-            lines.append(pad + start + _str(v, indent + (4 if deep else 8), indent + 4 + len(start)))
-        return head + "\n" + ",\n".join(lines) + ">"
+            # a record, a list of structures or a tuple of one nests 4
+            # deeper; a value that wraps (a long sequence or string)
+            # continues 8 deeper
+            deep = isinstance(v, MRec) or (isinstance(v, (MSeq, MSet, MTuple)) and _multiline(v))
+            if isinstance(v, MTuple) and deep:
+                # (its structure 4 deeper, its continuation 8, CORR-4F1-2)
+                lines.append(pad + start + _nested(v, _tuple_str, v, indent + step, indent + step + len(start), "", indent + 2 * step))
+            else:
+                lines.append(pad + start + _str(v, indent + (step if deep else 2 * step), indent + step + len(start)))
+        return _close(head + "\n" + ",\n".join(lines), ">", indent + step) + tail
 
 
 def _rec(fmt, assigns, pos=None):
@@ -3107,6 +3116,8 @@ def _inline1(v, in_tuple):
         return "<" + ", ".join(_inline(x, True) for x in v) + ">"
     if isinstance(v, MRange):
         return _range_str(v)
+    if isinstance(v, MRec):
+        return v._str(0)  # (one without fields: rec<F | >)
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         items = _items(v)
@@ -3151,19 +3162,26 @@ def _items(v):
 _SPRINT = [None]
 
 
-def _sprint_str(v):
-    """v as Sprint and Sprintf's %o make it a string."""
+_NOMOVE = [False]
+
+
+def _sprint_str(v, nowidth=True, col=None):
+    """v as Sprint and Sprintf's %o make it a string; nowidth=False: as
+    printf's %o writes it, without indentation but laid out on 80 columns
+    (checked against Magma 2.18)."""
     old = _SPRINT[0]
-    _SPRINT[0] = (v,)
+    _SPRINT[0] = (v, nowidth)
+    _NOMOVE[0] = not nowidth and bool(col)
     try:
-        return _str(v)
+        return _str(v, 0, col)
     finally:
         _SPRINT[0] = old
+        _NOMOVE[0] = False
 
 
 def _making_string():
     """Whether a string is being made: no width layout anywhere in it."""
-    return _SPRINT[0] is not None
+    return _SPRINT[0] is not None and _SPRINT[0][1]
 
 
 def _str(v, indent=0, col=None, tail=""):
@@ -3228,12 +3246,89 @@ def _str1(v, indent, col, tail):
         inner = [pad + ("undef" + ("," if k < len(raw) - 1 else "") if x is _UNDEF else _str(x, indent + step, None, "," if k < len(raw) - 1 else "")) for k, x in enumerate(raw)]
         return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
-        return v._str(indent), False
+        return v._str(indent, tail), True
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
+    if isinstance(v, MTuple) and any(_multiline(p) for p in v):
+        return _tuple_str(v, indent, col, tail), True
     if _making_string():
         return _inline(v) + tail, True
     return _wrap(_inline(v) + tail, col, indent + _extra(v), indent), True
+
+
+def _multiline(v, depth=0):
+    """Whether v prints over several lines: a sequence or set of
+    structures, a record with fields, a tuple holding one."""
+    if depth > _PRINT_DEPTH_MAX:
+        return False
+    if isinstance(v, MRec):
+        return any(n in v.vals for n in v.fmt.names)
+    if isinstance(v, (MSeq, MSet)):
+        raw = v.ordered() if isinstance(v, MSet) else list(v)
+        return bool(raw) and not all(_atomic(x) or x is _UNDEF for x in raw)
+    if isinstance(v, MTuple):
+        return any(_multiline(p, depth + 1) for p in v)
+    return False
+
+
+def _close(text, closer, pad):
+    """text (a record printed over lines) with its closer added as Magma's
+    record printer adds it, after its last field is laid out: at the end
+    of the last line if it ends before column 79; else the line's last
+    word moves to a new line at the record's field indentation `pad` when
+    _flow would move it (as "8>>>"), or the closer goes there after a
+    backslash (checked against Magma 2.18, CORR-4F1-2)."""
+    if _making_string():
+        return text + closer
+    nl = text.rfind("\n")
+    line = text[nl + 1:]
+    c = len(line)
+    if c < WIDTH - 1:
+        return text + closer
+    s = line.rfind(" ") + 1
+    if s > pad and (2 * (s - pad) > WIDTH - pad and s > 2 * pad or s >= WIDTH - 1):
+        return text[:nl + 1] + line[:s] + "\n" + " " * pad + line[s:] + closer
+    return text + "\\\n" + " " * pad + closer
+
+
+def _tuple_str(v, indent, col, tail, cont=None):
+    """A tuple with a part printed over several lines, as Magma prints it:
+    its text, and the opening line of that part ("[", "rec<F | "), laid out
+    as chunks on 80 columns (_flow: a chunk that doesn't fit moves to the
+    next line, CORR-4F1-1), continued at `cont` (the indentation, or 8
+    deeper as a record's field, CORR-4F1-2); the rest of that part at the
+    tuple's indentation, `indent` (checked against Magma 2.18)."""
+    cont = indent if cont is None else cont
+    out, c, text = [], col if col is not None else indent, "<"
+
+    def flush(text, opener, c):
+        if _making_string():
+            t = text + opener
+        else:
+            words = text.split(" ")
+            chunks = [(w, k < len(words) - 1) for k, w in enumerate(words)]
+            if opener:
+                chunks.append((opener, False))
+            t = _flow(chunks, c, cont, indent)
+        out.append(t)
+        return len(t) - t.rfind("\n") - 1 if "\n" in t else c + len(t)
+
+    for k, p in enumerate(v):
+        sep = ">" + tail if k == len(v) - 1 else ", "
+        if _multiline(p):
+            # (made before the text before it is laid out: printf's first
+            # chunk flag kept for that text, _sprint_str)
+            keep, _NOMOVE[0] = _NOMOVE[0], False
+            first, rest = _str(p, indent).split("\n", 1)
+            _NOMOVE[0] = keep
+            c = flush(text, first, c)
+            out.append("\n" + rest)
+            c = len(rest) - rest.rfind("\n") - 1 if "\n" in rest else len(rest)
+            text = sep
+        else:
+            text += _inline(p, True) + sep
+    flush(text, "", c)
+    return "".join(out)
 
 
 def _extra(v):
@@ -3262,8 +3357,11 @@ def _flow(chunks, first_col, cont, indent=None):
     indent = cont if indent is None else indent
     out, c = [], first_col
     for text, space in chunks:
+        # (the first chunk of a value printf writes after its own text is
+        # split where it doesn't fit, never moved: _sprint_str)
+        nomove, _NOMOVE[0] = _NOMOVE[0], False
         if text:
-            if (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
+            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
                 if c + len(text) <= WIDTH:
                     out.append(text)
                     c += len(text)
@@ -3274,7 +3372,12 @@ def _flow(chunks, first_col, cont, indent=None):
             # (by offsets: no copy of the rest of a long chunk for each line)
             i, n = 0, len(text)
             while i < n and c + n - i > WIDTH - 1:
-                k = max(1, WIDTH - 1 - c)
+                k = WIDTH - 1 - c
+                if k <= 0:
+                    # (just the backslash when the line is full and the
+                    # next has room, as after printf's own text; else at
+                    # least one character, so that deep lines progress)
+                    k = 0 if c == WIDTH - 1 and cont < WIDTH - 1 else 1
                 out.append(text[i:i + k] + "\\\n" + " " * cont)
                 i, c = i + k, cont
             out.append(text[i:])
@@ -3383,15 +3486,27 @@ def _sprintf(fmt, *args, where="printf", string=False):
         k += 1
         return args[k - 1]
 
+    col = [0]
+
+    def put(t, literal=False):
+        # (printf's own text is broken as Magma's session output breaks a
+        # line: a character that would be the 80th starts a new line after
+        # a backslash; Sprintf makes a string, never broken)
+        if literal and not string and t != "\n" and col[0] >= WIDTH - 1:
+            out.append("\\\n")
+            col[0] = 0
+        out.append(t)
+        col[0] = len(t) - t.rfind("\n") - 1 if "\n" in t else col[0] + len(t)
+
     while i < len(fmt):
         c = fmt[i]
         if c != "%":
-            out.append(c)
+            put(c, True)
             i += 1
             continue
         i += 1
         if fmt[i:i + 1] == "%":
-            out.append("%")
+            put("%", True)
             i += 1
             continue
         # the field width: -digits, digits or *
@@ -3423,7 +3538,7 @@ def _sprintf(fmt, *args, where="printf", string=False):
             # (a field width doesn't apply to %h)
             if not isinstance(x, int) or isinstance(x, bool):
                 raise bad("Non-integer argument for %h")
-            out.append(("-" if x < 0 else "") + "0x" + format(abs(x), "X"))
+            put(("-" if x < 0 else "") + "0x" + format(abs(x), "X"))
             continue
         if d == "O":
             level = take("%O conversion")
@@ -3438,9 +3553,11 @@ def _sprintf(fmt, *args, where="printf", string=False):
             if t is None:
                 raise MagmaError("printf's precision (%%.%do) for this real is not supported yet" % prec, where, blank)
         else:
-            # (Sprintf makes a string: no session layout, _sprint_str)
-            t = _sprint_str(x) if string else _str(x)
-        out.append(t.ljust(-width) if width < 0 else t.rjust(width))
+            # (Sprintf makes a string: no session layout; printf writes
+            # without indentation, _sprint_str)
+            # (from the column printf's line has got to, CORR-4F1 follow-up)
+            t = _sprint_str(x, string, None if string else col[0])
+        put(t.ljust(-width) if width < 0 else t.rjust(width))
     return "".join(out)
 
 
