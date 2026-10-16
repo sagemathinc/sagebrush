@@ -320,16 +320,26 @@ newBuiltinModule("math", (m) => {
   unary("cbrt", FD.cbrt);
   // CPython's loghelper: an int (huge ones too) by its own path, refused
   // without its value; anything else as a float, refused with it
+  const LOG_MAX_BITS = 2 ** 27;
   const logOf = (v: any, f: (x: number) => number, ln2: number): number => {
     if (typeof v === "bigint" || typeof v === "boolean" || (typeof v === "number" && Number.isInteger(v)) || O.isPyInt(v)) {
       const b = BigInt(typeof v === "boolean" ? +v : O.index(v));
       if (b <= 0n) raise(T.ValueError, "expected a positive input");
       const d = Number(b);
       if (d !== Infinity) return f(d);
+      // Sagebrush's own bound, where CPython has none: its bit length takes
+      // copies of b, so past 2^27 bits (16 MiB) it is refused, which
+      // asUintN finds with a copy of at most that size (HARD-315-1)
+      if (BigInt.asUintN(LOG_MAX_BITS, b) !== b) {
+        raise(T.OverflowError, `int too large: Sagebrush takes the logarithm of an int of at most ${LOG_MAX_BITS} bits`);
+      }
       // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
-      const s = O.bitLength(b); // (not b.toString(2): HARD-909-1)
+      const s = O.bitLength(b, LOG_MAX_BITS); // (not b.toString(2): HARD-909-1)
       let top = b >> BigInt(s - 64);
-      if (BigInt.asUintN(s - 64, b) !== 0n) top |= 1n; // sticky bit for correct rounding
+      // the sticky bit, for correct rounding: it matters only when the 11
+      // bits below the 53 kept are exactly half, so only then is the rest
+      // of b examined (a copy)
+      if ((top & 0x7ffn) === 0x400n && BigInt.asUintN(s - 64, b) !== 0n) top |= 1n;
       let x = Number(top) / 18446744073709551616, e = s;
       if (x === 1) {
         x = 0.5;
