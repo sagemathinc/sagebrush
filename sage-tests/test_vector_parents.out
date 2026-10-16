@@ -920,3 +920,13 @@ Zmod4 + Zmod1 :: (0, 0) @ Ambient free module of rank 2 over Ring of integers mo
 Zmod1 + GF3 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 1' and 'Vector space of dimension 2 over Finite Field of size 3'
 GF2 + Zmod1 :: TypeError : unsupported operand parent(s) for +: 'Vector space of dimension 2 over Finite Field of size 2' and 'Ambient free module of rank 2 over Ring of integers modulo 1'
 Zmod4 + Zmod9 :: TypeError : unsupported operand parent(s) for +: 'Ambient free module of rank 2 over Ring of integers modulo 4' and 'Ambient free module of rank 2 over Ring of integers modulo 9'
+CC(1_0e-400j) :: ValueError : given string '1_0e-400I' is not a complex number
+CC(1e-4_00j) :: ValueError : given string '1e-4_00I' is not a complex number
+CC(1e4_00j) :: ValueError : given string '1e4_00I' is not a complex number
+CC(1_0e400j) :: ValueError : given string '1_0e400I' is not a complex number
+CC(1_0) :: ValueError : given string '1_0' is not a complex number
+CC(2_5j) :: ValueError : given string '2_5I' is not a complex number
+SR empty norm 2 :: 0 @ Rational Field
+SR empty norm 1 :: 0 @ Rational Field
+SR empty norm +Infinity :: ValueError : max() iterable argument is empty
+SR empty norm 3 :: 0 @ Rational Field

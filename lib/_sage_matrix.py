@@ -341,6 +341,10 @@ class Vector(list):
         sa = _sa()
         R = self.base_ring()
         ff = _ffmat()
+        if not self:
+            # (Sage's identities for an empty vector: 0 in QQ, before any
+            # ring's own norm; vector(SR, []).norm() is 0 in QQ)
+            return ff._p_norm([], p, None)
         if (R is not sa.ZZ and R is not sa.QQ) or not all(isinstance(a, int) or type(a).__name__ == "Rational" for a in self):
             if p == 2:
                 r = sa.sqrt(sum(a * a for a in self))
@@ -3398,6 +3402,11 @@ class ComplexField_:
             ...
             NotImplementedError: CC('1e-400j'): complex numbers beyond the range of doubles are not available in sagebrush yet
         """
+        for x in (re, im):
+            if isinstance(x, str) and "_" in x:
+                # (Python's complex() accepts digit separators, Sage does
+                # not; '1_0e-400j' also slipped past the range check)
+                raise ValueError("given string %r is not a complex number" % (x.replace("j", "I"),))
         z = complex(re) + complex(im) * 1j
         # (CC's numbers are doubles: CC('1e400') was +infinity, CC('1e-400') 0)
         for x in (re, im):
