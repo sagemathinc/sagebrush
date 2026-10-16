@@ -29,7 +29,9 @@ if [ -f build/cli/pyjs.cjs ]; then
   trap 'rm -f "$index"' EXIT
   for pair in _pyjs_docsearch:docs-index.json _python_docsearch:docs-index-python.json; do
     mod=${pair%%:*}; out=$DEST/_sagelib/${pair#*:}
-    node build/cli/pyjs.cjs -m $mod --index > "$index"
+    # (no links to the source: this index is committed, so no commit of its
+    # own can be in it; lib/_catalog.py source_ref)
+    SAGEBRUSH_SOURCE_REF= node build/cli/pyjs.cjs -m $mod --index > "$index"
     if [ "$1" = "--check" ]; then
       cmp -s "$index" $out || { echo "out of date: $out (run scripts/sync-python-package.sh)"; bad=1; }
     else
