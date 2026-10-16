@@ -813,4 +813,17 @@ _r8 = _p8.reduce_trig()
 for _ in range(3):
     _pt = {str(_v): _random3.uniform(-2, 2) for _v in _xs[:8]}
     assert abs(float(_r8.subs(**_pt)) - float(_p8.subs(**_pt))) < 1e-9
+# floating arguments: 0.1*x sums need not cancel, so the bound does not
+# hold (sin(0.1*x)^48*sin(0.1*y)^19 had 3386 terms against 980): refused
+_x3, _y3 = _xs[0], _xs[1]
+for _e in [_sin3(0.1 * _x3)**48 * _sin3(0.1 * _y3)**19, _sin3(0.1 * _x3)**31 * _sin3(0.1 * _y3)**31,
+           _sin3(0.1 * _x3)**64, _sin3(0.1 * _x3) * _sinh3(_y3)]:
+    _t = _time3.time()
+    assert "floating-point arguments" in raises(NotImplementedError, _e.reduce_trig)
+    assert _time3.time() - _t < 1
+assert str(_sin3(0.1 * _x3).reduce_trig()) == str(_sin3(0.1 * _x3))
+_e64 = _sin3(_x3 / 10)**64
+_r64 = _e64.reduce_trig()
+assert len(_r64.operands()) == 33, len(_r64.operands())
+assert abs(float(_r64.subs(x0=1.3)) - float(_e64.subs(x0=1.3))) < 1e-12
 print("reduce_trig term bound ok")

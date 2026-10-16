@@ -215,6 +215,14 @@ fn reduce_waves(ws: &[(Wave, Expr)], hyper: bool) -> Vec<Expr> {
                 }
             }
         }
+        // a backstop to the bound checked before expanding
+        if d.len() as u64 > MAX_REDUCE_TERMS {
+            crate::err::not_implemented(format!(
+                "reduce_trig of a product of {} sine and cosine factors: past sagebrush's limit of {} terms",
+                ws.len(),
+                MAX_REDUCE_TERMS
+            ));
+        }
         c = d;
     }
     // pair E(v) with E(-v): c E(v) + d E(-v) = (c + d) cos v + i (c - d) sin v
@@ -257,6 +265,10 @@ fn last_term_negative(v: &Expr) -> bool {
         (None, Some(_)) => false,
         (None, None) => s.starts_with('-'),
     }
+}
+
+fn has_float(e: &Expr) -> bool {
+    matches!(&e.kind, Kind::Num(Num::Float(..))) || e.children().iter().any(has_float)
 }
 
 /// The most terms reduce_trig expands one product into.
@@ -305,6 +317,13 @@ fn reduce_product(e: &Expr) -> Reduce {
     }
     if trig.len() + hyp.len() <= 1 {
         return Reduce::NoWaves;
+    }
+    // floating arguments: sums like 0.1*x + 0.1*x - 0.1*x need not cancel
+    // exactly, so the terms do not combine as counted below
+    if trig.iter().chain(hyp.iter()).any(|(_, u)| has_float(u)) {
+        crate::err::not_implemented(
+            "reduce_trig of a product of sines and cosines with floating-point arguments; use exact arguments (0.1*x as x/10)".to_string(),
+        );
     }
     // the expansion has at most prod (m_u + 1) terms over the distinct
     // arguments u (m_u factors each), trig times hyperbolic: refused past
