@@ -4,7 +4,7 @@
 //   bun web/build.ts && (cd web/dist && python3 -m http.server 8765) &
 //   node web/test-notebook.mjs          (CHROME=... for another browser binary)
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
@@ -199,6 +199,14 @@ try {
   await ready();
   out = await runCode("print(6 * 7)");
   ok(out.includes("42"), "...and the next cell runs: " + out.trim());
+  if (process.env.SHOT) {
+    // (SHOT=file.png: the page after the restart, the stopped cell and the next one in view)
+    await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 760, deviceScaleFactor: 1, mobile: false });
+    await ev("(() => { const cs = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()); cs.at(-2).scrollIntoView({ block: 'center' }); })()");
+    await sleep(300);
+    writeFileSync(process.env.SHOT, Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+    await send("Emulation.clearDeviceMetricsOverride");
+  }
   // Magma mode: translated to Python in the page
   await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'magma'; m.dispatchEvent(new Event('change')); })()");
   out = await runCode("R<x> := PolynomialRing(Integers());\nFactorization(x^4 - 1);\n[ p : p in [1..30] | IsPrime(p) ];");
