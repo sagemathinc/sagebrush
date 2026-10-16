@@ -3883,10 +3883,12 @@ def _int_limit(name, a, k):
     if c not in _INTS:
         raise _err("%s: the class must be the name of an integer class, not '%s'." % (name, c))
     v = _INTS[c][k]
-    if len(a) == 2 and float(v) != v:
-        # (the "like" form, new here: a 64-bit limit Sagebrush's double-backed 64-bit
-        # integers can't hold exactly, 2^63 - 1 or 2^64 - 1, is refused rather than rounded)
-        raise _err("%s(\"like\", p) for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (name, c, v))
+    if float(v) != v:
+        # (a 64-bit limit Sagebrush's double-backed 64-bit integers can't hold exactly,
+        # 2^63 - 1 or 2^64 - 1, is refused rather than rounded: intmax('uint64') would
+        # show 18446744073709551616)
+        form = "%s(\"like\", p)" % name if len(a) == 2 else "%s('%s')" % (name, c)
+        raise _err("%s for %s is not supported: Sagebrush's 64-bit integers are not exact at %d." % (form, c, v))
     return np.array([[v]], dtype=_INTS[c][0])
 
 
@@ -4710,8 +4712,15 @@ def angle_(x):
 
 @_bs("complex")
 def complex_(a, b=0.0):
+    ca, cb = class_(a), class_(b)
+    if ca in _INTS or cb in _INTS:
+        # (complex integers, as complex(uint8(1), uint8(2)) makes in MATLAB, are not
+        # represented: refused rather than made double)
+        raise _err("complex of %s values is not supported in Sagebrush: complex integers are not represented." % (ca if ca in _INTS else cb))
     r = _broadcast(lambda x, y: x + 1j * y, _farr(a), _farr(b))
     r = np.asarray(r, dtype=np.complex128)
+    if "single" in (ca, cb):
+        return _canon(_contig(r.astype(np.complex64)))
     if r.size == 1:
         z = complex(r.reshape(-1)[0])
         return np.array([[z]], dtype=np.complex128) if z.imag == 0 else z
@@ -4912,6 +4921,8 @@ def nchoosek_(n, k):
 @_bs("primes")
 def primes_(n):
     # (in the class of n: primes(uint16(12)) is uint16)
+    if _numel(n) != 1:
+        raise _err("N must be a scalar.")
     cls = class_(n)
     if cls in _INTS or cls == "single":
         r = primes_(float(_scalar(n)))
@@ -7448,6 +7459,7 @@ def str2num_(nargout, s):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
     vals = []
+    logical = True
     for r in rows:
         parts = [p for p in _re.split(r"[,\s]+", r.strip()) if p]
         row = []
@@ -7457,8 +7469,12 @@ def str2num_(nargout, s):
                 if p.lower() in ("true", "false"):
                     v = 1.0 if p.lower() == "true" else 0.0
                 else:
-                    out = np.zeros((0, 0))
-                    return out if nargout <= 1 else [out, False]
+                    # (str2num evaluates its text: an expression, 2+3, is 5 in MATLAB; only
+                    # numbers and true/false are read here, so anything else is refused
+                    # rather than given as [])
+                    raise _err("str2num of '%s' is not supported in Sagebrush: only numbers and true/false are read." % t[:40])
+            else:
+                logical = False
             row.append(v)
         vals.append(row)
     if not vals:
@@ -7469,6 +7485,9 @@ def str2num_(nargout, s):
             out = np.zeros((0, 0))
             return out if nargout <= 1 else [out, False]
         out = _unmat(np.array(vals))
+        if logical:
+            # (true and false only: a logical array, as MATLAB's evaluation gives)
+            out = _box(_arr(out).astype(bool)) if type(out) is not float else bool(out)
     return out if nargout <= 1 else [out, True]
 
 # ---- text functions
@@ -7859,6 +7878,39 @@ def isstrprop_(s, kind):
     return _char_pred(f)(1, s)
 
 
+def _group_names(p):
+    """[(group number, name)] of a MATLAB pattern's named capturing groups, in order: a name may
+    appear more than once, in different alternatives ('(?<day>\\d+)-...|...(?<day>\\d+)')"""
+    out = []
+    i, n, k = 0, len(p), 0
+    while i < n:
+        c = p[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            j = i + 1
+            if j < n and p[j] == "^":
+                j += 1
+            if j < n and p[j] == "]":
+                j += 1
+            while j < n and p[j] != "]":
+                j += 2 if p[j] == "\\" else 1
+            i = j + 1
+            continue
+        if c == "(":
+            if p.startswith("(?<", i) or p.startswith("(?P<", i):
+                j = i + (3 if p[i + 2] == "<" else 4)
+                if j < n and p[j] not in "=!":
+                    e = p.find(">", j)
+                    k += 1
+                    out.append((k, p[j:e]))
+            elif not p.startswith("(?", i):
+                k += 1
+        i += 1
+    return out
+
+
 def _regex(p):
     """MATLAB's regular expression syntax as Python's"""
     p = p.replace("(?<", "(?P<").replace("(?P<=", "(?<=").replace("(?P<!", "(?<!")
@@ -7894,6 +7946,13 @@ def regexprep_(s, pat, rep, *opts):
             flags |= _re.IGNORECASE
         elif t == "once":
             count = 1
+        elif t != "matchcase":
+            # ('preservecase', 'emptymatch', a match number and the rest change the result:
+            # refused rather than ignored)
+            raise _err("regexprep: the option '%s' is not supported in Sagebrush." % _text(o))
+    if "${" in _text(rep) or "(??@" in _text(pat) or "(?@" in _text(pat):
+        # (dynamic expressions run MATLAB code on each match: not supported, and not left as text)
+        raise _err("regexprep: dynamic expressions ($" + "{...}, (??@...), (?@...)) are not supported in Sagebrush.")
     if type(s) is Cell:
         return Cell([regexprep_(e, pat, rep, *opts) for e in s.a], s.shape)
     rx = _re.compile(_regex(_text(pat)), flags)
@@ -8032,9 +8091,17 @@ def _regexp(nargout, s, pat, opts, flags):
             out.append(v[0] if once and v else _box(np.array(v).reshape((len(v), 1))) if v else np.zeros((0, 1)) if not once else np.zeros((0, 0)))
         elif w == "names":
             if ms and rx.groupindex:
-                # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one)
-                names = sorted(rx.groupindex, key=lambda k: rx.groupindex[k])
-                items = [{k: Char(m.group(k) or "") for k in names} for m in ms]
+                # (a 1-by-n structure array, one element per match, as regexp's page says; 'once' one.
+                # The fields in the order the names first appear; a name used in several
+                # alternatives takes the group that took part in the match)
+                groups = _group_names(_text(pat))
+                names = list(dict.fromkeys(nm for _, nm in groups))
+                def value(m, nm):
+                    for g, x in groups:
+                        if x == nm and g <= rx.groups and m.group(g) is not None:
+                            return m.group(g)
+                    return ""
+                items = [{k: Char(value(m, k)) for k in names} for m in ms]
                 out.append(_struct1(items[0]) if once or len(items) == 1 else Struct(items, (1, len(items)), names))
             else:
                 out.append(Struct([{}], (1, 1), []))
