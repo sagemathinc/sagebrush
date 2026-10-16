@@ -1,5 +1,6 @@
 // Builtin types and their methods.
 
+import * as SP from "./strpos";
 import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, DONE, NotImplemented, Ellipsis,
   builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
@@ -1027,13 +1028,18 @@ function rsplitWhitespace(s: string, maxsplit: number): string[] {
   }
   return out.reverse();
 }
+// start and end as UTF-16 offsets, from code-point positions (a start past
+// the end stays past it)
 function clampRange(s: string, start: any, end: any): [number, number] {
-  const n = s.length;
+  const p = SP.pairs(s);
+  const n = p === null ? s.length : s.length - p.length;
   let a = start === undefined || start === null ? 0 : Number(start);
   let b = end === undefined || end === null ? n : Number(end);
   if (a < 0) a = Math.max(0, a + n);
   if (b < 0) b = Math.max(0, b + n);
-  return [a, Math.min(b, n)];
+  b = Math.min(b, n);
+  if (p === null) return [a, b];
+  return [a > n ? s.length + 1 : SP.unitOf(p, a), SP.unitOf(p, Math.max(b, 0))];
 }
 method(S, "join", (sep: string, items: any) => {
   const parts = Array.isArray(items) ? items : O.toArray(items);
@@ -1105,7 +1111,9 @@ function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): n
   const [a, b] = clampRange(s, start, end);
   if (b - a < sub.length || a > s.length) return -1;
   const j = rev ? s.lastIndexOf(sub, b - sub.length) : s.indexOf(sub, a);
-  return j < a || j + sub.length > b ? -1 : j;
+  if (j < a || j + sub.length > b) return -1;
+  const p = SP.pairs(s);
+  return p === null ? j : SP.cpOf(p, j);
 }
 method(S, "find", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, false));
 method(S, "rfind", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, true));
@@ -1124,7 +1132,7 @@ method(S, "count", (s: string, sub: string, start: any = undefined, end: any = u
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return 0;
   const t = s.slice(a, b);
-  return sub === "" ? t.length + 1 : t.split(sub).length - 1;
+  return sub === "" ? SP.cpLen(t) + 1 : t.split(sub).length - 1;
 });
 function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean {
   if (Array.isArray(x)) return x.some((p) => affix(s, p, start, end, ends));
@@ -1175,7 +1183,7 @@ method(S, "ljust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, 
 method(S, "rjust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "r"));
 method(S, "zfill", (s: string, w: any) => {
   const sign = s[0] === "-" || s[0] === "+" ? s[0] : "";
-  const n = Number(w) - s.length;
+  const n = Number(w) - SP.cpLen(s);
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
 // str.translate and str.maketrans, as CPython's (their messages included);
@@ -1332,7 +1340,7 @@ method(S, "expandtabs", (s: string, ts: any = 8) => {
 method(S, "format", (s: string, ...args: any[]) => strFormat(s, args, new Map()));
 S.$dict.get("format").$kw = (pos: any[], names: string[], values: any[]) => strFormat(pos[0], pos.slice(1), new Map(names.map((n, i) => [n, values[i]])));
 method(S, "format_map", (s: string, m: any) => strFormat(s, [], m));
-method(S, "__len__", (s: string) => s.length);
+method(S, "__len__", (s: string) => SP.cpLen(s));
 method(S, "__contains__", (s: string, x: any) => O.contains(s, x));
 method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
 method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s + x : NotImplemented));
