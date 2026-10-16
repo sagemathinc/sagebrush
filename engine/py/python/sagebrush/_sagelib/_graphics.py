@@ -1440,6 +1440,14 @@ def show(obj, save_name="plot"):
     """Display obj richly when the host can (the browser, Jupyter); else
     write an SVG file and print its path (the command line)."""
     import builtins
+    # (a catalog example, catalog/SCHEMA.md: one line per figure, from the
+    # description render_svg stores, the same on every runtime; the runner
+    # sets __sagebrush_catalog__ to its count of figures)
+    count = getattr(builtins, "__sagebrush_catalog__", None)
+    if isinstance(count, list):
+        count[0] += 1
+        print("[figure %d: %s]" % (count[0], describe_svg(obj._repr_svg_())))
+        return None
     if getattr(builtins, "__sagebrush_doctest__", False):
         return None  # doctests show the repr only, as Sage's do
     shown = host_display(obj)
