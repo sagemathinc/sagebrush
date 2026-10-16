@@ -361,6 +361,21 @@ ENTRIES = [
     ("scipy.io.loadmat", "(file_name, mdict=None, squeeze_me=False)", "The variables of a MATLAB .mat file, as a dict of arrays.", []),
     ("scipy.io.savemat", "(file_name, mdict, oned_as='row')", "Writes a dict of arrays to a MATLAB .mat file.", []),
     # ---------------------------------------------------------------- math
+    ('math.acos', '(x)', 'The inverse cosine, in radians.', ['round(math.acos(0.5), 6)']),
+    ('math.acosh', '(x)', 'The inverse hyperbolic cosine.', ['round(math.acosh(2), 6)']),
+    ('math.asin', '(x)', 'The inverse sine, in radians.', ['round(math.asin(0.5), 6)']),
+    ('math.asinh', '(x)', 'The inverse hyperbolic sine.', ['round(math.asinh(2), 6)']),
+    ('math.atan', '(x)', 'The inverse tangent, in radians.', ['round(math.atan(2), 6)']),
+    ('math.atanh', '(x)', 'The inverse hyperbolic tangent.', ['round(math.atanh(0.5), 6)']),
+    ('math.cosh', '(x)', 'The hyperbolic cosine.', ['round(math.cosh(1), 6)']),
+    ('math.erfc', '(x)', 'The complementary error function.', ['round(math.erfc(1), 6)']),
+    ('math.expm1', '(x)', 'exp(x) minus one, accurate for small x.', ['round(math.expm1(0.001), 6)']),
+    ('math.log1p', '(x)', 'log(1+x), accurate for small x.', ['round(math.log1p(0.001), 6)']),
+    ('math.sinh', '(x)', 'The hyperbolic sine.', ['round(math.sinh(1), 6)']),
+    ('math.tanh', '(x)', 'The hyperbolic tangent.', ['round(math.tanh(1), 6)']),
+    ('math.cbrt', '(x)', 'The real cube root, including negative inputs.', ['math.cbrt(-8)']),
+    ('math.exp2', '(x)', 'Two raised to the power x.', ['math.exp2(5)']),
+    ('math.isfinite', '(x)', 'Whether x is neither infinite nor NaN.', ['[math.isfinite(x) for x in (1.5, math.inf, math.nan)]']),
     ("math.sqrt", "(x)", "The square root of x.", ["math.sqrt(2)"]),
     ("math.isqrt", "(n)", "The integer square root of a non-negative integer.", ["math.isqrt(10**20 + 1)"]),
     ("math.exp", "(x)", "e raised to the power x.", ["math.exp(1)"]),
@@ -403,6 +418,22 @@ ENTRIES = [
     ("math.nextafter", "(x, y)", "The next float after x toward y.", ["math.nextafter(1.0, 2.0)"]),
     ("math.ulp", "(x)", "The value of the least significant bit of x.", ["math.ulp(1.0)"]),
     # ---------------------------------------------------------------- cmath
+    ('cmath.acos', '(z)', 'The complex inverse cosine.', ['z = cmath.acos(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.acosh', '(z)', 'The complex inverse hyperbolic cosine.', ['z = cmath.acosh(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.asin', '(z)', 'The complex inverse sine.', ['z = cmath.asin(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.asinh', '(z)', 'The complex inverse hyperbolic sine.', ['z = cmath.asinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.atan', '(z)', 'The complex inverse tangent.', ['z = cmath.atan(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.atanh', '(z)', 'The complex inverse hyperbolic tangent.', ['z = cmath.atanh(0.5+0.5j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.cos', '(z)', 'The complex cosine.', ['z = cmath.cos(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.cosh', '(z)', 'The complex hyperbolic cosine.', ['z = cmath.cosh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.log10', '(z)', 'The complex base-ten logarithm.', ['z = cmath.log10(10j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.sin', '(z)', 'The complex sine.', ['z = cmath.sin(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.sinh', '(z)', 'The complex hyperbolic sine.', ['z = cmath.sinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.tan', '(z)', 'The complex tangent.', ['z = cmath.tan(1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.tanh', '(z)', 'The complex hyperbolic tangent.', ['z = cmath.tanh(1+1j)\n(round(z.real, 6), round(z.imag, 6))']),
+    ('cmath.isfinite', '(z)', 'Whether both components of z are finite.', ['[cmath.isfinite(z) for z in (1+2j, complex(math.inf, 0), complex(0, math.nan))]']),
+    ('cmath.isinf', '(z)', 'Whether either component of z is infinite.', ['[cmath.isinf(z) for z in (1+2j, complex(0, math.inf))]']),
+    ('cmath.isnan', '(z)', 'Whether either component of z is NaN.', ['[cmath.isnan(z) for z in (1+2j, complex(math.nan, 0))]']),
     ("cmath.sqrt", "(z)", "The complex square root.", ["cmath.sqrt(-4)"]),
     ("cmath.exp", "(z)", "The complex exponential.", ["cmath.exp(1j * math.pi)"]),
     ("cmath.log", "(z, base=e)", "The complex logarithm.", ["cmath.log(-1)"]),
@@ -453,9 +484,23 @@ ENTRIES = [
     ("random.choice", "(seq)", "A random element of a sequence.", ["random.seed(3)\nrandom.choice('abcdef')"]),
     ("random.shuffle", "(x)", "Shuffles a list in place.", ["random.seed(4)\nx = list(range(6))\nrandom.shuffle(x)\nx"]),
     ("random.uniform", "(a, b)", "A random float between a and b.", ["random.seed(5)\nrandom.uniform(10, 20)"]),
+    ('bisect.bisect', '(a, x, lo=0, hi=len(a), *, key=None)', 'The insertion index to the right of existing equal values.', ['bisect.bisect([1, 2, 2, 4], 2)']),
+    ('bisect.bisect_right', '(a, x, lo=0, hi=len(a), *, key=None)', 'The insertion index to the right of existing equal values.', ['bisect.bisect_right([1, 2, 2, 4], 2)']),
+    ('bisect.insort_left', '(a, x, lo=0, hi=len(a), *, key=None)', 'Insert x into a sorted list, before equal keys.', ['rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_left(rows, (2, "new"), key=lambda row: row[0])\nrows']),
+    ('bisect.insort_right', '(a, x, lo=0, hi=len(a), *, key=None)', 'Insert x into a sorted list, after equal keys.', ['rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_right(rows, (2, "new"), key=lambda row: row[0])\nrows']),
     ("bisect.bisect_left", "(a, x)", "Where x would be inserted to keep the sorted list a sorted (before equal elements).",
      ["bisect.bisect_left([1, 2, 4, 4, 8], 4)"]),
     ("bisect.insort", "(a, x)", "x inserted into a sorted list, keeping it sorted.", ["a = [1, 3, 5]\nbisect.insort(a, 4)\na"]),
+    ('heapq.heapify', '(x)', 'Rearrange a list in place into a minimum heap.', ['h = [3, 1, 4, 2]\nheapq.heapify(h)\nh[0]']),
+    ('heapq.heappop', '(heap)', 'Remove and return the minimum item.', ['h = [3, 1, 4, 2]\nheapq.heapify(h)\n[heapq.heappop(h) for _ in range(4)]']),
+    ('heapq.heappushpop', '(heap, item)', 'Push an item, then remove and return the minimum.', ['h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heappushpop(h, 3), sorted(h))']),
+    ('heapq.heapreplace', '(heap, item)', 'Remove the minimum item, then insert the new item.', ['h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heapreplace(h, 5), sorted(h))']),
+    ('heapq.heapify_max', '(x)', 'Rearrange a list in place into a maximum heap.', ['h = [3, 1, 4, 2]\nheapq.heapify_max(h)\nh[0]']),
+    ('heapq.heappop_max', '(heap)', 'Remove and return the maximum item.', ['h = [3, 1, 4, 2]\nheapq.heapify_max(h)\n[heapq.heappop_max(h) for _ in range(4)]']),
+    ('heapq.heappushpop_max', '(heap, item)', 'Push an item, then remove and return the maximum.', ['h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heappushpop_max(h, 3), sorted(h))']),
+    ('heapq.heapreplace_max', '(heap, item)', 'Remove the maximum item, then insert the new item.', ['h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heapreplace_max(h, 5), sorted(h))']),
+    ('heapq.heappush_max', '(heap, item)', 'Push an item while preserving the max-heap order.', ['h = [3, 1, 2]\nheapq.heapify_max(h)\nheapq.heappush_max(h, 5)\nh[0]']),
+    ('heapq.merge', '(*iterables, key=None, reverse=False)', 'Merge already sorted iterables into one sorted iterator.', ['list(heapq.merge([1, 4, 7], [2, 4, 6]))']),
     ("heapq.heappush", "(heap, item)", "An item pushed onto a heap (a list with the smallest first).",
      ["h = []\nfor x in [5, 1, 4, 2]:\n    heapq.heappush(h, x)\n[heapq.heappop(h) for _ in range(4)]"]),
     ("heapq.nlargest", "(n, iterable, key=None)", "The n largest elements.", ["heapq.nlargest(2, [5, 1, 8, 3])"]),
@@ -1287,6 +1332,36 @@ OUTPUTS = {
         'array([0. , 1.5, 4. , 7.5])\n',
     'from scipy.integrate import dblquad\ndblquad(lambda y, x: x * y, 0, 1, 0, 2)[0]':
         '0.9999999999999999\n',
+    'round(math.acos(0.5), 6)':
+        '1.047198\n',
+    'round(math.acosh(2), 6)':
+        '1.316958\n',
+    'round(math.asin(0.5), 6)':
+        '0.523599\n',
+    'round(math.asinh(2), 6)':
+        '1.443635\n',
+    'round(math.atan(2), 6)':
+        '1.107149\n',
+    'round(math.atanh(0.5), 6)':
+        '0.549306\n',
+    'round(math.cosh(1), 6)':
+        '1.543081\n',
+    'round(math.erfc(1), 6)':
+        '0.157299\n',
+    'round(math.expm1(0.001), 6)':
+        '0.001001\n',
+    'round(math.log1p(0.001), 6)':
+        '0.001\n',
+    'round(math.sinh(1), 6)':
+        '1.175201\n',
+    'round(math.tanh(1), 6)':
+        '0.761594\n',
+    'math.cbrt(-8)':
+        '-2.0\n',
+    'math.exp2(5)':
+        '32.0\n',
+    '[math.isfinite(x) for x in (1.5, math.inf, math.nan)]':
+        '[True, False, False]\n',
     'math.sqrt(2)':
         '1.4142135623730951\n',
     'math.isqrt(10**20 + 1)':
@@ -1375,6 +1450,38 @@ OUTPUTS = {
         '1.0000000000000002\n',
     'math.ulp(1.0)':
         '2.220446049250313e-16\n',
+    'z = cmath.acos(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.570796, -0.881374)\n',
+    'z = cmath.acosh(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.881374, 1.570796)\n',
+    'z = cmath.asin(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.0, 0.881374)\n',
+    'z = cmath.asinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.061275, 0.666239)\n',
+    'z = cmath.atan(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.017222, 0.402359)\n',
+    'z = cmath.atanh(0.5+0.5j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.402359, 0.553574)\n',
+    'z = cmath.cos(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.543081, -0.0)\n',
+    'z = cmath.cosh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.83373, 0.988898)\n',
+    'z = cmath.log10(10j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.0, 0.682188)\n',
+    'z = cmath.sin(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.0, 1.175201)\n',
+    'z = cmath.sinh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.634964, 1.298458)\n',
+    'z = cmath.tan(1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(0.0, 0.761594)\n',
+    'z = cmath.tanh(1+1j)\n(round(z.real, 6), round(z.imag, 6))':
+        '(1.083923, 0.271753)\n',
+    '[cmath.isfinite(z) for z in (1+2j, complex(math.inf, 0), complex(0, math.nan))]':
+        '[True, False, False]\n',
+    '[cmath.isinf(z) for z in (1+2j, complex(0, math.inf))]':
+        '[False, True]\n',
+    '[cmath.isnan(z) for z in (1+2j, complex(math.nan, 0))]':
+        '[False, True]\n',
     'cmath.sqrt(-4)':
         '2j\n',
     'cmath.exp(1j * math.pi)':
@@ -1457,10 +1564,38 @@ OUTPUTS = {
         '[3, 5, 4, 0, 2, 1]\n',
     'random.seed(5)\nrandom.uniform(10, 20)':
         '16.22901694889702\n',
+    'bisect.bisect([1, 2, 2, 4], 2)':
+        '3\n',
+    'bisect.bisect_right([1, 2, 2, 4], 2)':
+        '3\n',
+    'rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_left(rows, (2, "new"), key=lambda row: row[0])\nrows':
+        "[(1, 'a'), (2, 'new'), (2, 'b'), (2, 'c')]\n",
+    'rows = [(1, "a"), (2, "b"), (2, "c")]\nbisect.insort_right(rows, (2, "new"), key=lambda row: row[0])\nrows':
+        "[(1, 'a'), (2, 'b'), (2, 'c'), (2, 'new')]\n",
     'bisect.bisect_left([1, 2, 4, 4, 8], 4)':
         '2\n',
     'a = [1, 3, 5]\nbisect.insort(a, 4)\na':
         '[1, 3, 4, 5]\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify(h)\nh[0]':
+        '1\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify(h)\n[heapq.heappop(h) for _ in range(4)]':
+        '[1, 2, 3, 4]\n',
+    'h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heappushpop(h, 3), sorted(h))':
+        '(2, [3, 4, 6])\n',
+    'h = [2, 4, 6]\nheapq.heapify(h)\n(heapq.heapreplace(h, 5), sorted(h))':
+        '(2, [4, 5, 6])\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify_max(h)\nh[0]':
+        '4\n',
+    'h = [3, 1, 4, 2]\nheapq.heapify_max(h)\n[heapq.heappop_max(h) for _ in range(4)]':
+        '[4, 3, 2, 1]\n',
+    'h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heappushpop_max(h, 3), sorted(h))':
+        '(6, [2, 3, 4])\n',
+    'h = [2, 4, 6]\nheapq.heapify_max(h)\n(heapq.heapreplace_max(h, 5), sorted(h))':
+        '(6, [2, 4, 5])\n',
+    'h = [3, 1, 2]\nheapq.heapify_max(h)\nheapq.heappush_max(h, 5)\nh[0]':
+        '5\n',
+    'list(heapq.merge([1, 4, 7], [2, 4, 6]))':
+        '[1, 2, 4, 4, 6, 7]\n',
     'h = []\nfor x in [5, 1, 4, 2]:\n    heapq.heappush(h, x)\n[heapq.heappop(h) for _ in range(4)]':
         '[1, 2, 4, 5]\n',
     'heapq.nlargest(2, [5, 1, 8, 3])':
