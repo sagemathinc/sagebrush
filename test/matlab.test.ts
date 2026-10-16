@@ -2042,3 +2042,48 @@ test("strrep and regexp with cell arrays: the text built or searched, all elemen
   ].join("\n")), ["refused", "refused", "refused", "xxxxxxxxxx xxxxxxxxx", "[1 3 2 4]"]);
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
+
+test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dynamic expressions and options refused; true/false like sparse, regexp's repeated token names, primes and str2num as the pages", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (64-bit values Sagebrush can't hold exactly, beyond 2^53: refused, the limits and results alike;
+    // the exact ones kept, -2^63 among them, and saturation to it; the six other maxima as before)
+    tryIt("intmax('uint64')"), tryIt("intmax('int64')"), tryIt("int64(2)^62"), tryIt("uint64(2^53) + 1"), tryIt("int64(1e19)"),
+    // (intmin('int64') + k rounds back to -2^63 in double: refused, not shown as intmin)
+    "m = intmin('int64');", tryIt("m + int64(1)"), tryIt("m + 511"), tryIt("sum([m int64(1)], 'native')"),
+    "fprintf('%d %d %d %d\\n', intmin('int64'), int64(-1e30), int64(2)^52, uint64(2^53 - 1))",
+    "fprintf('%d ', intmax('int8'), intmax('uint8'), intmax('int16'), intmax('uint16'), intmax('int32'), intmax('uint32')); fprintf('\\n')",
+    // (complex integers aren't represented: refused; single stays single)
+    tryIt("complex(uint8([1;2]), uint8([2;2]))"), "disp(class(complex(single(1), single(2))))",
+    // (true and false like a sparse prototype: sparse)
+    "A = logical(sparse(5, 3)); F = false(4, 'like', A); T = true(2, 'like', A); disp(mat2str([issparse(F) islogical(F) nnz(F) issparse(T) nnz(T)]))",
+    tryIt("true(2, 3, 'like', sparse(1+2i))"), tryIt("false(2, 'like', sparse(5))"),
+    // (the names output, matches times names, admitted before it is built: 800 x 800 refused)
+    "p = ['(?<g0>a)' strjoin(arrayfun(@(k) sprintf('(?<g%d>b)?', k), 1:399, 'UniformOutput', false), '')];",
+    "disp(numel(regexp(repmat('a', 1, 300), p, 'start')))", tryIt("regexp(repmat('a', 1, 300), p, 'names')"),
+    "q = ['(?<g0>a)' strjoin(arrayfun(@(k) sprintf('(?<g%d>b)?', k), 1:799, 'UniformOutput', false), '')];",
+    tryIt("regexp(repmat('a', 1, 800), q, 'start')"), "disp(regexp('xaay', q, 'start', 'once'))",
+    // (the outputs asked for are counted too: all seven of 200,000 matches refused; one of 20,000 kept)
+    tryIt("[a, b, c, d, e, f, g] = regexp(repmat(char(97), 1, 200000), char(97))"), "fprintf('%d\\n', numel(regexp(repmat('a', 1, 20000), 'a')))",
+    tryIt("regexp(repmat({repmat('a', 1, 20000)}, 1, 10), 'a')"),
+    // (a token name in two alternatives: the fields in first appearance, the matching alternative's value)
+    "n = regexp('01/11/2000  20-02-2020', ['(?<month>\\d+)/(?<day>\\d+)/(?<year>\\d+)|' '(?<day>\\d+)-(?<month>\\d+)-(?<year>\\d+)'], 'names');",
+    "disp(strjoin(fieldnames(n)', ',')); disp([n(1).month ' ' n(1).day ' ' n(2).month ' ' n(2).day ' ' n(2).year])",
+    // (comments don't count as groups: (?#...), and # lines with freespacing or (?x))
+    "n = regexp('a', '(?#()(?<x>a)', 'names'); m = regexp('a', sprintf('# (fake\\n(?<x>a)'), 'names', 'freespacing'); k = regexp('a', sprintf('(?x)# (fake\\n(?<x>a)'), 'names'); j = regexp('a', sprintf('(?ix)# (fake\\n(?<x>a)'), 'names', 'literalspacing'); disp([n.x m.x k.x j.x])",
+    // (regexprep: dynamic expressions and options it doesn't have refused, not ignored)
+    tryIt("regexprep('here. there', '(^|\\.)\\s*.', '${upper($0)}')"), tryIt("regexprep('May', 'M(\\w+)y', 'April', 'preservecase')"),
+    "disp(regexprep('aBa', 'b', 'x', 'ignorecase'))",
+    // (primes takes a scalar; str2num reads numbers and true/false, logical when all are)
+    tryIt("primes(1:10)"), "disp(mat2str(primes(10)))",
+    "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
+    tryIt("str2num('2+3')"),
+  ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
+    "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740991",
+    "127 255 32767 65535 2147483647 4294967295", "refused", "single",
+    "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "refused", "20000", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
+    "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
+});

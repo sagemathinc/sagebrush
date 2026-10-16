@@ -1701,6 +1701,12 @@ def _like_fn(name, ok):
         if type(proto) is Sparse:
             if not ok:
                 raise _err('Sparse input following "like" is not supported.', "MATLAB:%s:sparsePrototype" % name)
+            if name in ("true", "false"):
+                # (a logical result, from a logical prototype only, as the pages say: never
+                # the prototype's class or complexity)
+                if class_(proto) != "logical":
+                    raise _err("%s: the prototype following \"like\" must be logical." % name)
+                return from_full(f(nargout, *args[:-2]))
             # (the prototype's class and complexity, from its storage)
             r = from_full(f(nargout, *(args[:-2] + (_m.Char(class_(proto)),))))
             if proto.pr.dtype.kind == "c":
@@ -2072,7 +2078,7 @@ def _register():
     for name, f in (("eig", _eig_b), ("svd", _svd_b), ("norm", _norm_b), ("accumarray", _accumarray_b)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = f
-    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("rand", False), ("randn", False), ("randi", False),
+    for name, ok in (("zeros", True), ("ones", True), ("eye", True), ("true", True), ("false", True), ("rand", False), ("randn", False), ("randi", False),
                      ("eps", True), ("realmax", True), ("realmin", True), ("flintmax", True)):
         _FULL[name] = _m._B[name].f
         _NATIVE[name] = _like_fn(name, ok)
