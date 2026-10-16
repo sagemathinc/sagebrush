@@ -18,8 +18,14 @@ import sys as _sys
 
 # name -> (areas, summary), written for Sagebrush
 TABLE = {
+    "Vector": (["matrices"], "A row vector over the integers or the rationals, which a matrix multiplies on the right."),
+    "Solution": (["matrices"], "The vector v with v * A = w, for a matrix A and a vector w."),
+    "Submatrix": (["matrices"], "A block of a matrix, by its top left entry and its size."),
+    "Subsets": (["sequences and sets"], "The set of the subsets of a set, or of those of a given size."),
+    "Sym": (["structures"], "The symmetric group on 1 .. n, whose elements are permutations."),
+    "Identity": (["structures"], "The identity element of a group."),
     # structures and types
-    "Integers": (["structures"], "The ring of integers."),
+    "Integers": (["structures"], "The ring of integers; Integers(m), the integers modulo m; Integers(K), a number field's maximal order."),
     "IntegerRing": (["structures"], "The ring of integers (the same as Integers())."),
     "Rationals": (["structures", "rationals and reals"], "The field of rational numbers."),
     "RationalField": (["structures", "rationals and reals"], "The field of rational numbers (the same as Rationals())."),
@@ -205,6 +211,28 @@ TABLE = {
 # test/magma-examples.json, made by scripts/magma-examples-table.py) and
 # lists where the two differ.
 EXAMPLES = {
+    "Vector": """\
+> Vector(Rationals(), [1, 2, 3]);
+(1 2 3)""",
+    "Solution": """\
+> A := Matrix(Rationals(), 2, 2, [1, 2, 3, 4]);
+> Solution(A, Vector(Rationals(), [4, 6]));
+(1 1)""",
+    "Submatrix": """\
+> C := Matrix(Integers(), 3, 3, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+> Submatrix(C, 2, 2, 2, 2);
+[5 6]
+[8 9]""",
+    "Subsets": """\
+> #Subsets({1, 2, 3, 4}, 2);
+6""",
+    "Sym": """\
+> #Sym(4);
+24""",
+    "Identity": """\
+> G := Sym(3);
+> Identity(G);
+Id(G)""",
     "ISA": """\
 > ISA(AlgMatElt, MtrxS);
 true""",
@@ -790,6 +818,31 @@ Rational Field""",
 # example)}, written for Sagebrush.  (Its TABLE summary and EXAMPLES entry
 # are for the name as a whole.)
 SIGNATURES = {
+    "Vector": {
+        "SeqEnum": ("A vector of the integers or rationals of a sequence (over the rationals if any is not an integer).",
+                    "> Vector([3, -1]);\n( 3 -1)"),
+        "Rng, SeqEnum": ("A vector over the integers or the rationals of the elements of a sequence.",
+                         "> Vector(Rationals(), [1, 2]) * Matrix(Rationals(), 2, 2, [1, 2, 3, 4]);\n( 7 10)"),
+    },
+    "Solution": {
+        "MtrxS, ModTupRngElt": ("The unique vector v with v * A = w, over A's ring; an error when there is none.",
+                                "> Solution(Matrix(Integers(), 2, 2, [2, 0, 0, 2]), Vector(Integers(), [2, 4]));\n(1 2)"),
+    },
+    "Submatrix": {
+        "Mtrx, RngIntElt, RngIntElt, RngIntElt, RngIntElt": ("The p by q block of a matrix whose top left entry is in row i, column j.",
+                                                             "> Submatrix(Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]), 1, 2, 2, 2);\n[2 3]\n[5 6]"),
+    },
+    "Subsets": {
+        "SetEnum": ("The set of all subsets of a set.", "> #Subsets({1, 2, 3});\n8"),
+        "SetEnum, RngIntElt": ("The set of the subsets of a set that have k elements.", "> #Subsets({1..10}, 3);\n120"),
+    },
+    "Sym": {
+        "RngIntElt": ("The symmetric group on 1 .. n; i^p is the image of i under a permutation p.",
+                      "> G := Sym(3);\n> p := G!(1, 2, 3);\n> [i^p : i in [1..3]];\n[ 2, 3, 1 ]"),
+    },
+    "Identity": {
+        "GrpPerm": ("The identity permutation of a symmetric group.", "> Order(Identity(Sym(5)));\n1"),
+    },
     "Trace": {
         "RngIntElt": ("An integer is its own trace.", "> Trace(-7);\n-7"),
         "FldRatElt": ("A rational number is its own trace.", "> Trace(3/4);\n3/4"),
