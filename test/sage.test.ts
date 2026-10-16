@@ -43,3 +43,12 @@ test("pickling an int/float/str/bytes/tuple subclass instance keeps its value", 
     "print(pickle.loads(pickle.dumps(b)).tag)";
   assert.equal(cli("-c", src), "1\n");
 });
+
+test("delete_edge reads at most 4 items of an edge that claims a length of 3 (HARD-658-1)", () => {
+  // (tuple(e) read the whole iterator: 2,000,000 items and 414 MB, or forever)
+  const src = "class E:\n def __init__(self): self.n = 0\n def __len__(self): return 3\n def __iter__(self):\n  while True:\n   self.n += 1\n   yield self.n\n" +
+    "g = Graph([(0, 1), (1, 2)])\nfor f in (lambda e: g.delete_edge(e), lambda e: g.delete_edges([e])):\n e = E()\n try:\n  f(e)\n except ValueError as err:\n  print(type(err).__name__, e.n, g.size())\n";
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "ValueError 4 2\nValueError 4 2\n");
+  assert.ok(Date.now() - t < 20000);
+});

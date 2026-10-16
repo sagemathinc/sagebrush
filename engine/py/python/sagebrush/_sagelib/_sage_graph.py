@@ -29,7 +29,11 @@ def _edge_spec(e, single):
     delete_edges)."""
     n = len(e)  # (TypeError "object of type 'int' has no len()")
     if n == 3:
-        return tuple(e)
+        # unpacked, not tuple(e): an object may claim a length of 3 and
+        # yield millions of items, or never stop; unpacking asks for a 4th
+        # at most (daybreak2's HARD-658-1)
+        u, v, label = e
+        return u, v, label
     if n == 2:
         u, v = e
         return u, v, None
