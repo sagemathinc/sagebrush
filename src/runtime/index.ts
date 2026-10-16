@@ -255,8 +255,10 @@ export function withExit(m: any): (t: any, v: any, tb: any) => any {
   return (t, v, tb) => f(m, t, v, tb);
 }
 
+// A bare `raise` outside any except clause of its own function: the
+// exception being handled, as in CPython, if a caller is handling one.
 export function reraise(): any {
-  return Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
+  return Obj.currentExc() ?? Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
 }
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
@@ -665,8 +667,8 @@ export const R: any = {
   withEnter,
   withExit,
   reraise,
-  excEnter: (e: any) => { Obj.handledExceptions.push(e); },
-  excLeave: () => { Obj.handledExceptions.pop(); },
+  excEnter: Obj.excEnter,
+  excLeave: Obj.excLeave,
   PyBytes: Obj.PyBytes,
   dflt,
   kwdflt,

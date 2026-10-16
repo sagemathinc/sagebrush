@@ -939,7 +939,10 @@ export class Emitter {
   tryStmt(st: Extract<A.Stmt, { k: "Try" }>) {
     const before = new Set(this.fn.assigned);
     const hasFinally = st.finalbody.length > 0;
-    if (hasFinally) {
+    // (the exception passing through the finally, if any)
+    const p = hasFinally ? this.temp() : null;
+    if (p !== null) {
+      this.w(`${p} = undefined;`);
       this.w("try {");
       this.indent++;
     }
@@ -954,6 +957,11 @@ export class Emitter {
       this.w(`} catch (${e}_) {`);
       this.indent++;
       this.w(`${e} = toPyExc(${e}_);`);
+      // It is the exception being handled, for sys.exception() and
+      // sys.exc_info(), while the clauses are matched and the chosen one runs.
+      this.w(`excEnter(${e});`);
+      this.w("try {");
+      this.indent++;
       st.handlers.forEach((h, i) => {
         this.line = h.line;
         if (h.type === null && i !== st.handlers.length - 1) this.fail("default 'except:' must be last", h.line);
@@ -961,16 +969,14 @@ export class Emitter {
         this.w(`${i === 0 ? "" : "} else "}if (${cond}) {`);
         this.indent++;
         if (h.name !== null) this.w(this.storeName(h.name, e));
-        // Exceptions raised while handling get this one as __context__.
+        // Exceptions raised while handling get this one as __context__ when
+        // raised (raiseExc); this catches the runtime's own errors.
         const x = this.temp();
-        // (and it is the exception being handled, for sys.exception() and
-        // sys.exc_info(), while the handler runs)
-        this.w(`excEnter(${e});`);
         this.w("try {");
         this.fn.handlers.push(e);
         this.block(h.body);
         this.fn.handlers.pop();
-        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ == null) ${x}.__context__ = ${e}; throw ${x}; } finally { excLeave(); }`);
+        this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; }`);
         if (h.name !== null) {
           this.w(this.storeName(h.name, "undefined"));
           this.fn.assigned.delete(h.name);
@@ -978,6 +984,8 @@ export class Emitter {
         this.indent--;
       });
       this.w(`} else throw ${e};`);
+      this.indent--;
+      this.w(`} finally { excLeave(${e}); }`);
       this.indent--;
       this.w("}");
     } else {
@@ -991,10 +999,18 @@ export class Emitter {
       this.w("}");
     }
     this.fn.assigned = before;
-    if (hasFinally) {
+    if (p !== null) {
+      // An exception passing through is the one being handled while the
+      // finally runs, and the __context__ of one the finally raises.
+      const x = this.temp();
       this.indent--;
-      this.w("} finally {");
+      this.w(`} catch (${p}_) { ${p} = toPyExc(${p}_); throw ${p}; } finally {`);
+      this.indent++;
+      this.w(`if (${p} !== undefined) excEnter(${p});`);
+      this.w("try {");
       this.block(st.finalbody);
+      this.w(`} catch (${x}_) { ${x} = toPyExc(${x}_); if (${p} !== undefined && ${x} !== ${p} && ${x}.__context__ === undefined) ${x}.__context__ = ${p}; throw ${x}; } finally { if (${p} !== undefined) excLeave(${p}); }`);
+      this.indent--;
       this.w("}");
     }
   }
@@ -1013,7 +1029,9 @@ export class Emitter {
       this.withStmt(st, i + 1);
       this.indent--;
     } else this.block(st.body);
-    this.w(`} catch (${e}_) { ${ok} = false; ${e} = toPyExc(${e}_); if (!truth(${exit}(typeOf(${e}), ${e}, null))) throw ${e}; } finally { if (${ok}) ${exit}(null, null, null); }`);
+    // (the body's exception is the one being handled while __exit__ runs)
+    const x = this.temp();
+    this.w(`} catch (${e}_) { ${ok} = false; ${e} = toPyExc(${e}_); excEnter(${e}); try { if (!truth(${exit}(typeOf(${e}), ${e}, null))) throw ${e}; } catch (${x}_) { ${x} = toPyExc(${x}_); if (${x} !== ${e} && ${x}.__context__ === undefined) ${x}.__context__ = ${e}; throw ${x}; } finally { excLeave(${e}); } } finally { if (${ok}) ${exit}(null, null, null); }`);
   }
 
   // ------------------------------------------------------------ module

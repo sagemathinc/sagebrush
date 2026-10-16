@@ -926,8 +926,55 @@ ${ways}
 
 // Raised Python exceptions are thrown as the exception instance itself.  The
 // JS stack is captured into `$tb` when raised, for tracebacks.
+// The exceptions being handled, innermost last (sys.exception(),
+// sys.exc_info()): an except clause's exception while it is matched and its
+// body runs, a finally's or a with's while an exception passes through it.
+// A generator's entries are its own: genStep moves them off when it pauses
+// and back when it resumes, as CPython keeps them in each frame.
+export const handledExceptions: any[] = [];
+export function excEnter(e: any): void {
+  handledExceptions.push(e);
+}
+// (by identity: a generator resumed outside the frame that ran it may not
+// have its entries on top)
+export function excLeave(e: any): void {
+  const n = handledExceptions.length - 1;
+  if (handledExceptions[n] === e) handledExceptions.length = n;
+  else {
+    const i = handledExceptions.lastIndexOf(e);
+    if (i >= 0) handledExceptions.splice(i, 1);
+  }
+}
+export function currentExc(): any {
+  const n = handledExceptions.length;
+  return n === 0 ? null : handledExceptions[n - 1];
+}
+// What raising e does to its __context__, as CPython's _PyErr_SetObject: the
+// exception being handled becomes it, with any cycle back to e cut.
+export function setContext(e: any): void {
+  const h = currentExc();
+  if (h === null || h === e) return;
+  let o = h, slow = h, step = false;
+  for (;;) {
+    const c = o.__context__;
+    if (c === null || c === undefined) break;
+    if (c === e) {
+      o.__context__ = null;
+      break;
+    }
+    o = c;
+    // (a cycle not through e, made by assigning __context__, would loop)
+    if (o === slow) break;
+    if (step) slow = slow.__context__;
+    step = !step;
+  }
+  e.__context__ = h;
+}
+
 export function raise(cls: PyType, msg?: string): never {
-  throw newException(cls, msg === undefined ? [] : [msg]);
+  const e = newException(cls, msg === undefined ? [] : [msg]);
+  if (handledExceptions.length !== 0) setContext(e);
+  throw e;
 }
 
 export function newException(cls: PyType, args: any[]): any {
@@ -957,6 +1004,7 @@ export function raiseExc(x: any, cause?: any): any {
     e.__cause__ = c;
     e.__suppress_context__ = true;
   }
+  setContext(e);
   captureTraceback(e, true);
   return e;
 }
@@ -1366,9 +1414,6 @@ export function globalsDict(g: any): PyDict {
 // (exec/eval with an explicit globals mapping).
 export const NS_DICT = Symbol("globals dict");
 
-// The exceptions being handled, innermost last: an except clause's body runs
-// with its exception here (sys.exception(), sys.exc_info())
-export const handledExceptions: any[] = [];
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
