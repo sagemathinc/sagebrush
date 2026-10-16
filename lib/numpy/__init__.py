@@ -1875,6 +1875,20 @@ def interp(x, xp, fp, left=None, right=None, period=None):
     cplx = fp_a.dtype.kind == "c"
     fp_l = fp_a.tolist()
     xs = asarray(x, float64)
+    if period is not None:
+        # (NumPy's: x and xp taken modulo the period, xp sorted, and one
+        # period's continuation each side; left and right are not used)
+        period = float(period)
+        if period == 0:
+            raise ValueError("period must be a non-zero value")
+        period = abs(period)
+        if len(xp_l) != len(fp_l):
+            raise ValueError("fp and xp are not of the same length")
+        pairs = sorted(zip([v % period for v in xp_l], fp_l), key=lambda t: t[0])
+        xp_l = [pairs[-1][0] - period] + [p[0] for p in pairs] + [pairs[0][0] + period]
+        fp_l = [pairs[-1][1]] + [p[1] for p in pairs] + [pairs[0][1]]
+        xs = asarray(xs % period, float64)
+        left = right = None
     lo_v = fp_l[0] if left is None else left
     hi_v = fp_l[-1] if right is None else right
     res = []
