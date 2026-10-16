@@ -16,9 +16,10 @@
       }
     ],
     "differs": [
+      "The 'PlotFcns' option is refused.",
       "Its last iterate can differ from MATLAB's in the final digits."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "fminbnd",
       "roots",
@@ -104,9 +105,10 @@
       }
     ],
     "differs": [
+      "The 'Mass' and 'NonNegative' options are refused.",
       "The solver's own step points can differ from MATLAB's, so outputs with a two-element tspan differ in their times, though not in accuracy."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "ode23",
       "ode15s",
