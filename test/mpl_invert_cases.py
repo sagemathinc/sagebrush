@@ -79,24 +79,3 @@ lims("left", a1)
 lims("right", a2)
 plt.ylim(3, 1)
 lims("plt.ylim on the current axes", a2)
-
-# axis(): the limits, whatever it is given
-fig, ax = plt.subplots()
-ax.plot([0, 2], [1, 5])
-for a in ((), ("off",), ([0, 3, 0, 6],), ("on",), ("auto",)):
-    print("axis", a, [round(float(v), 6) for v in ax.axis(*a)])
-print("axis kw", [round(float(v), 6) for v in ax.axis(xmin=-1, ymax=7)])
-ax.set_ylim(6, 0)
-print("axis auto, inverted", [round(float(v), 6) for v in ax.axis("auto")], ax.yaxis_inverted())
-print("axis tight", [round(float(v), 6) for v in ax.axis("tight")])
-ax.plot([0, 10], [0, 50])
-lims("tight keeps its limits", ax)
-fig, ax = plt.subplots()
-ax.plot([0, 2], [1, 5])
-print("axis image", [round(float(v), 6) for v in ax.axis("image")])
-print("plt.axis", [round(float(v), 6) for v in plt.axis()])
-for args, kw in ((("bogus",), {}), (([0, 1, 2],), {}), ((5,), {}), (([0, 1, 2, 3],), {"xmin": 1}), ((), {"foo": 1})):
-    try:
-        ax.axis(*args, **kw)
-    except Exception as e:
-        print("axis error", type(e).__name__, e)

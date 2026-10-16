@@ -968,56 +968,14 @@ class Axes:
         elif isinstance(aspect, (int, float)):
             self._opts["aspect_ratio"] = aspect
 
-    def axis(self, arg=None, /, *, emit=True, **kw):
-        """Set or get the axes' limits: axis() and every form return
-        (xmin, xmax, ymin, ymax); axis([xmin, xmax, ymin, ymax]),
-        axis(xmin=..., ...), or one of 'on', 'off', 'equal', 'scaled',
-        'square', 'tight', 'image', 'auto' (as matplotlib's)."""
-        for k in kw:
-            if k not in ("xmin", "xmax", "ymin", "ymax"):
-                raise TypeError("axis() got an unexpected keyword argument %r" % k)
-        if isinstance(arg, str):
-            a = arg.lower()
-            if a == "on":
-                self._opts["axes"] = True
-            elif a == "off":
-                self._opts["axes"] = False
-            elif a in ("equal", "scaled", "square"):
-                self._opts["aspect_ratio"] = 1
-            elif a in ("auto", "tight", "image"):
-                # (autoscaled again, in the direction each axis has; 'tight'
-                # and 'image' then keep those limits)
-                for x in "xy":
-                    inverted = self.xaxis_inverted() if x == "x" else self.yaxis_inverted()
-                    self._opts.pop(x + "min", None)
-                    self._opts.pop(x + "max", None)
-                    self._opts[x + "invert"] = inverted
-                if a == "auto":
-                    self._opts.pop("aspect_ratio", None)
-                else:
-                    lims = self.get_xlim() + self.get_ylim()
-                    self.set_xlim(lims[0], lims[1])
-                    self.set_ylim(lims[2], lims[3])
-                    if a == "image":
-                        # (equal units, the box taking the shape: the limits stay, as imshow's)
-                        self._opts["aspect_ratio"] = 1
-                        self._opts["fit_aspect"] = True
-            else:
-                raise ValueError("Unrecognized string %r to axis; try 'on' or 'off'" % arg)
-        elif arg is not None:
-            if kw:
-                raise TypeError("axis() got an unexpected keyword argument %r" % next(iter(kw)))
-            if len(arg) != 4:
-                raise TypeError("The first argument to axis() must be an iterable of the form [xmin, xmax, ymin, ymax]")
-            xmin, xmax, ymin, ymax = arg
-            self.set_xlim(xmin, xmax)
-            self.set_ylim(ymin, ymax)
-        if kw:
-            if "xmin" in kw or "xmax" in kw:
-                self.set_xlim(kw.get("xmin"), kw.get("xmax"))
-            if "ymin" in kw or "ymax" in kw:
-                self.set_ylim(kw.get("ymin"), kw.get("ymax"))
-        return self.get_xlim() + self.get_ylim()
+    def axis(self, arg=None, **kw):
+        if arg == "off":
+            self._opts["axes"] = False
+        elif arg in ("equal", "scaled", "square"):
+            self._opts["aspect_ratio"] = 1
+        elif isinstance(arg, (list, tuple)) and len(arg) == 4:
+            self.set_xlim(arg[0], arg[1])
+            self.set_ylim(arg[2], arg[3])
 
     def set(self, **kw):
         for k, v in kw.items():

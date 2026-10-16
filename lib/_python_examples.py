@@ -467,7 +467,7 @@ SUMMARIES = {
     # matplotlib: pyplot (on the current figure and axes), Axes and Figure
     "matplotlib.axes.Axes.annotate": "A text annotation at a point, with an optional arrow to it from the text's position.",
     "matplotlib.axes.Axes.axhline": "A horizontal line across the axes at height y.",
-    "matplotlib.axes.Axes.axis": "The axes' limits (xmin, xmax, ymin, ymax), returned by every form; set by [xmin, xmax, ymin, ymax], xmin=... or 'on', 'off', 'equal', 'scaled', 'square', 'tight', 'image', 'auto'.",
+    "matplotlib.axes.Axes.axis": "Sets the limits from [xmin, xmax, ymin, ymax]; 'off' hides the axes, and 'equal', 'scaled' or 'square' give equal units. Returns None, where matplotlib returns the limits.",
     "matplotlib.axes.Axes.axvline": "A vertical line across the axes at x.",
     "matplotlib.axes.Axes.bar": "A bar chart: bars at x with the given heights (width, bottom, color, label).",
     "matplotlib.axes.Axes.barh": "A horizontal bar chart: bars at y with the given widths.",
@@ -522,7 +522,7 @@ SUMMARIES = {
     "matplotlib.pyplot.Line2D": "A line drawn by plot: its data, color, style and label.",
     "matplotlib.pyplot.annotate": "A text annotation at a point, with an optional arrow to it from the text's position.",
     "matplotlib.pyplot.axhline": "A horizontal line across the axes at height y.",
-    "matplotlib.pyplot.axis": "The axes' limits (xmin, xmax, ymin, ymax), returned by every form; set by [xmin, xmax, ymin, ymax], xmin=... or 'on', 'off', 'equal', 'scaled', 'square', 'tight', 'image', 'auto'.",
+    "matplotlib.pyplot.axis": "Sets the limits from [xmin, xmax, ymin, ymax]; 'off' hides the axes, and 'equal', 'scaled' or 'square' give equal units. Returns None, where matplotlib returns the limits.",
     "matplotlib.pyplot.axvline": "A vertical line across the axes at x.",
     "matplotlib.pyplot.bar": "A bar chart: bars at x with the given heights (width, bottom, color, label).",
     "matplotlib.pyplot.barh": "A horizontal bar chart: bars at y with the given widths.",
