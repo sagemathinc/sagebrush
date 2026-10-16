@@ -899,6 +899,7 @@ interface Scope {
   globals: Set<string>;
   persistents: Set<string>;
   caps?: Set<string>; // in an anonymous function: captured names that may be functions (_m.NOVAR)
+  anon?: boolean; // an anonymous function's body: its parameters and captures are Python locals
 }
 
 /** the names a statement list assigns (for loops' bodies and functions) */
@@ -947,6 +948,9 @@ class Emitter {
   ind = "";
   tmp = 0;
   fnNames = new Set<string>();
+  // (whether the program can clear a variable as it runs: only then do top-level reads
+  // check that the variable still exists, so other programs' reads stay plain names)
+  mayClear = false;
 
   constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
@@ -971,6 +975,7 @@ class Emitter {
   }
 
   program(stmts: Stmt[], src: string): string {
+    this.mayClear = /\b(clear\w*|eval\w*|feval|run)\b/.test(src);
     this.emit("import _matlab as _m");
     this.emit(`_m.begin(${JSON.stringify(this.filename)}, ${JSON.stringify(src)})`);
     this.emit("_L = 0");
@@ -1352,7 +1357,15 @@ class Emitter {
       case "str": return e.dq ? `_m.Str(${JSON.stringify(e.v)})` : `_m.Char(${JSON.stringify(e.v)})`;
       case "id": {
         if (scope.caps?.has(e.name)) return `_m.val(_m.capf(${pyName(e.name)}, ${JSON.stringify(e.name)}))`;
-        if (this.isVar(e.name, scope)) return this.varRead(e.name, scope);
+        if (this.isVar(e.name, scope)) {
+          // (at the top level, a variable that clear removed: the function of that name
+          // again, as MATLAB's, so upper = 7; clear; upper('abc') works)
+          if (this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(e.name) && !this.fnNames.has(e.name)) {
+            const py = pyName(e.name);
+            return `(${py} if ${JSON.stringify(py)} in globals() else _m.val(_m.fn(${JSON.stringify(e.name)})))`;
+          }
+          return this.varRead(e.name, scope);
+        }
         if (e.name === "nargin" && scope.fn) return "_m.nargs(_a)";
         if (e.name === "nargout" && scope.fn) return "_m.nargs(_nargout)";
         if (WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
@@ -1415,12 +1428,29 @@ class Emitter {
     if (f.k === "id" && !this.isVar(f.name, scope)) {
       // a function call (or a workspace variable, at the top level)
       if (WORKSPACE_FNS.has(f.name) && !this.fnNames.has(f.name)) {
+        // (clear inside a function: a function's variables are Python locals, which
+        // locals() cannot delete, so the names given literally, or all the function's
+        // variables, become undefined again here; patterns and computed names go on to
+        // ws_call as before)
+        if (scope.fn && (f.name === "clear" || f.name === "clearvars")) {
+          const lit = e.args.every((a) => a.k === "str" && /^[A-Za-z]\w*$/.test(a.v));
+          const all = e.args.length === 0 || (e.args.length === 1 && e.args[0].k === "str" && (e.args[0].v === "all" || e.args[0].v === "variables"));
+          if (lit || all) {
+            const names = all ? [...scope.vars] : e.args.map((a) => (a as Extract<Expr, { k: "str" }>).v);
+            const own = names.filter((n) => scope.vars.has(n) && !scope.globals.has(n) && !scope.persistents.has(n));
+            e.frame.code = "_m.UNDEF";
+            if (!own.length) return "_m.NOVAL";
+            return `([${own.map((n) => `(${pyName(n)} := _m.Undef(${JSON.stringify(n)}))`).join(", ")}] and _m.NOVAL)`;
+          }
+        }
         const ns = scope.fn ? "locals()" : "globals()";
         e.frame.code = "_m.UNDEF";
         return `_m.ws_call(${JSON.stringify(f.name)}, ${ns}, ${this.argList(e.args, scope)}, ${nargout})`;
       }
       base = this.lookup(f.name, scope);
     } else if (f.k === "id" && scope.caps?.has(f.name)) base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
+    // (at the top level, x(args) after clear x is the function x again)
+    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) base = this.lookup(f.name, scope);
     else if (f.k === "field" && f.e.k === "id" && !this.isVar(f.e.name, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
     else base = this.expr(f, scope);
     e.frame.code = base;
@@ -1450,7 +1480,7 @@ class Emitter {
 
   anon(e: Extract<Expr, { k: "anon" }>, scope: Scope): string {
     // the body sees its parameters, and the values variables have now
-    const inner: Scope = { fn: scope.fn, vars: new Set(e.params.filter((p) => p !== "~")), globals: new Set(), persistents: new Set(), caps: new Set() };
+    const inner: Scope = { fn: scope.fn, vars: new Set(e.params.filter((p) => p !== "~")), globals: new Set(), persistents: new Set(), caps: new Set(), anon: true };
     const captured: string[] = [];
     const free = new Set<string>();
     freeNames(e.body, free);
