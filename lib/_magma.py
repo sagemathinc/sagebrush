@@ -233,14 +233,14 @@ def _present(v):
     return v
 
 
-def _values(v, n):
+def _values(v, n, pos=None):
+    """a, b := e: e's first n values (Magma's words, at the :=, when it has fewer)."""
+    m = len(v) if isinstance(v, Multi) else 1
+    if m < n:
+        raise MagmaError("Expected to assign %d value(s) but only computed %d value(s)" % (n, m), ":=", False, pos)
     if isinstance(v, Multi):
-        if len(v) < n:
-            raise MagmaError("too few return values (%d) for %d variables" % (len(v), n))
         return list(v[:n])
-    if n == 1:
-        return [v]
-    raise MagmaError("the expression has one value, assigned to %d variables" % n)
+    return [v]
 
 
 def _ref1(r):
@@ -566,6 +566,11 @@ def _still_range(v):
     lo, hi, step = v.range
     n = (hi - lo) // step + 1
     return len(v.items) == n and all(isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi and (x - lo) % step == 0 for x in v.items)
+
+
+def _witness(gen):
+    """The first of a generator (exists(t){ ... }'s witness, in a 1-tuple), or None."""
+    return next(iter(gen), None)
 
 
 def _range(a, b, c, open_, universe=None, pos=None):
