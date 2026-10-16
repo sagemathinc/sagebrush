@@ -618,7 +618,23 @@ export function buildClassOf(b: any): any {
   if (bc === undefined) raise(T.NameError, "__build_class__ not found");
   return bc;
 }
-export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any>, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
+// The namespace a class body runs in, made before it (CPython's
+// __build_class__: the metaclass resolved, its __prepare__ called); a
+// replaced __build_class__, given a stand-in body afterwards, a Map
+export function classNamespace(name: string, bases: any[], kwNames: string[], kwValues: any[], bc: any): Map<string, any> | Ty.PreparedNs {
+  return bc === defaultBuildClass ? Ty.classNamespace(name, bases, kwNames, kwValues) : new Map();
+}
+// A class body's __module__: its __name__, as LOAD_NAME there, the
+// namespace's (a prepared one's), then the globals' and the builtins'
+export function classModuleIn(ns: Map<string, any> | Ty.PreparedNs, g: any, b: any): any {
+  const v = ns.get("__name__");
+  return v !== undefined ? v : classModule(g, b);
+}
+// locals() in a class body: a prepared namespace's mapping itself
+export function classLocals(ns: Map<string, any> | Ty.PreparedNs): any {
+  return ns instanceof Ty.PreparedNs ? ns.m : localsDict([...ns.keys()], [...ns.values()]);
+}
+export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any> | Ty.PreparedNs, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   const cls = Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
   // CPython's __build_class__: type.__new__ must have set the class cell
@@ -801,6 +817,9 @@ export const R: any = {
   builtinName: M.builtinName,
   globalLoads,
   buildClassOf,
+  classNamespace,
+  classModuleIn,
+  classLocals,
   classModule,
   unboundName,
   execIn,

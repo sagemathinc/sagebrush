@@ -156,3 +156,74 @@ for code in ['a = 5\nr = [(a:=i) for i in range(2)]\nb = a',
              'b0 = a\nr = [[(a:=j) for j in range(2)] for i in range(1)]\nb = a']:
     g = {'a': 1}; d = {'a': 2}
     print(repr(code), t(lambda: exec(code, g, d)), g.get('a'), sorted((k, v) for k, v in d.items() if not callable(v)))
+
+# a metaclass's __prepare__ runs before the class body, which reads, writes
+# and deletes through the namespace it returns (its __name__ the class's
+# __module__), and the metaclass receives that namespace; a conflict or a
+# non-mapping is raised before the body
+log = []
+class LM(dict):
+    def __getitem__(self, k): log.append(('get', k)); return super().__getitem__(k)
+    def __setitem__(self, k, v):
+        if k not in ('__static_attributes__', '__classdictcell__'): log.append(('set', k))
+        super().__setitem__(k, v)
+    def __delitem__(self, k): log.append(('del', k)); super().__delitem__(k)
+class Meta(type):
+    @classmethod
+    def __prepare__(mcls, name, bases, **kw):
+        log.append(('prepare', name, tuple(sorted(kw))))
+        ns = LM(); dict.__setitem__(ns, '__name__', 'PREP'); dict.__setitem__(ns, 'pre', 1); return ns
+    def __new__(mcls, name, bases, ns, **kw):
+        log.append(('new', type(ns).__name__, ns.get('__module__'), 'pre' in ns, 'b' in ns))
+        return super().__new__(mcls, name, bases, dict(ns))
+    def __init__(cls, *a, **kw): pass
+def kwv(): log.append('kw'); return 1
+def bs(): log.append('bases'); return object
+class C(bs(), metaclass=Meta, flag=kwv()):
+    log.append('body')
+    b = pre
+    def f(self): return 1
+    del f
+print(log)
+print(C.__module__, C.b)
+class M1(type): pass
+class M2(type): pass
+A = M1('A', (), {}); B = M2('B', (), {})
+def body_conflict():
+    class X(A, B):
+        print('body ran')
+print(t(body_conflict))
+class BadP(type):
+    @classmethod
+    def __prepare__(m, n, b): return 5
+def bad():
+    class Y(metaclass=BadP):
+        print('body ran')
+print(t(bad))
+class Plain(type):
+    @classmethod
+    def __prepare__(m, n, b): return {'__name__': 'PN', 'z': 3}
+class Z(metaclass=Plain):
+    w = z
+    l = sorted(k for k in locals())
+print(Z.__module__, Z.w, Z.l)
+class NM:
+    def __init__(self): self.d = {}
+    def __getitem__(self, k): return self.d[k]
+    def __setitem__(self, k, v): self.d[k] = v
+    def __delitem__(self, k): del self.d[k]
+class MM(type):
+    @classmethod
+    def __prepare__(m, n, b): return NM()
+    def __new__(m, n, b, ns):
+        print(type(ns).__name__, sorted(k for k in ns.d if k not in ('__static_attributes__', '__classdictcell__')))
+        return super().__new__(m, n, b, dict(ns.d))
+class W(metaclass=MM):
+    q = 1
+    print(type(locals()).__name__)
+    def g(self): return q
+print(W.q, W.__module__, t(W().g))
+def nodel():
+    class V(metaclass=MM):
+        del nothere
+print(t(nodel))

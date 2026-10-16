@@ -76,3 +76,12 @@ NameError: name 'len' is not defined
 'for a in range(3): pass\nq = [(a:=i) for i in range(1)]' None 0 [('a', 2), ('q', [0])]
 'b0 = a\nr = list((a:=i) for i in range(2))\nb = a' None 1 [('a', 2), ('b', 1), ('b0', 1), ('r', [0, 1])]
 'b0 = a\nr = [[(a:=j) for j in range(2)] for i in range(1)]\nb = a' None 1 [('a', 2), ('b', 1), ('b0', 1), ('r', [[0, 1]])]
+['bases', 'kw', ('prepare', 'C', ('flag',)), ('get', '__name__'), ('set', '__module__'), ('set', '__qualname__'), ('set', '__firstlineno__'), ('get', 'log'), 'body', ('get', 'pre'), ('set', 'b'), ('set', 'f'), ('del', 'f'), ('new', 'LM', 'PREP', True, True)]
+PREP 1
+TypeError: metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases
+TypeError: BadP.__prepare__() must return a mapping, not int
+PN 3 ['__firstlineno__', '__module__', '__name__', '__qualname__', 'w', 'z']
+NM
+NM ['__firstlineno__', '__module__', '__qualname__', 'g', 'q']
+1 __main__ NameError: name 'q' is not defined
+NameError: name 'nothere' is not defined
