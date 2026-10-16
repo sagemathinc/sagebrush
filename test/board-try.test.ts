@@ -88,6 +88,17 @@ test("board try: a case whose names can't be copied runs alone; inline --case; c
   refuse({ checks: [{ case_id: "a", ask_id: "nope", answer: 1 }] }, /no question has the id "nope"/);
   refuse({ checks: [{ case_id: "a", ask_id: "q", answer: 1 }, { case_id: "a", ask_id: "q", answer: 2 }] }, /the case_id "a" is there twice/);
   refuse({ checks: [{ case_id: "a", ask_id: "q" }] }, /an answer, or a note/);
-  assert.equal(run(["board", "try", f]).status, 2);
+  // (no cases, and no question with an example: nothing to try)
+  const none = run(["board", "try", f]);
+  assert.equal(none.status, 2);
+  assert.match(none.stderr, /nothing to try: no question has an `example`/);
   assert.equal(run(["board", "try", f, "--case", "q"]).status, 2);
+});
+
+test("board try: with no cases, each question's example", () => {
+  const b = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "n = 2" }, { id: "q", kind: "ask", text: "Q", input: "number", check: "answer == n", example: 2 },
+    { id: "w", kind: "ask", text: "W", input: "text", check: "answer == 'yes'", example: "no" }, { id: "plain", kind: "ask", text: "P", input: "text" }] };
+  const r = run(["board", "try", file("ex.board.json", b), "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).checks.map((c: any) => [c.case_id, c.ask_id, c.outcome]), [["example-q", "q", "right"], ["example-w", "w", "wrong"]]);
 });

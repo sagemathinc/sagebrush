@@ -1,4 +1,4 @@
-// sagebrush board try FILE (--cases CASES.json | --case 'ID=JSON' ...) [--json]
+// sagebrush board try FILE [--cases CASES.json | --case 'ID=JSON' ...] [--json]
 // [--timeout S]: a board's questions tried with given answers, as a reader
 // would answer them, for an evaluator (the teaching boards' grader:
 // /scratch/sagebrush-eval/teaching/FORMAT.md).  The board is validated and
@@ -31,7 +31,7 @@ import { CLI_READER } from "./board-cli";
 import { runBoard, type Evaluate } from "./board-run";
 import { oneLine } from "./terminal-text";
 
-const USAGE = `usage: sagebrush board try FILE (--cases CASES.json | --case 'ID=JSON' ...) [--json] [--timeout S]
+const USAGE = `usage: sagebrush board try FILE [--cases CASES.json | --case 'ID=JSON' ...] [--json] [--timeout S]
   try a board's questions with given answers, as a reader would answer
   them: the board validated, its code run, each answer checked by its
   question's check (in a copy of the board's names), each hint shown, and
@@ -41,6 +41,7 @@ const USAGE = `usage: sagebrush board try FILE (--cases CASES.json | --case 'ID=
                 "note"?}], "sequences": [{"ask_id", "answers": [...]}]}
   --case ID=V   a question's id and an answer, as JSON (--case 'q1="1/2"');
                 repeated for more
+  (neither: each question's \`example\` answer, case_id "example-ID")
   --json        the report as JSON (else a summary)
   --timeout S   the most seconds the whole run may take (default 600)
   The exit status is 0 when every case could be tried, 1 if the board
@@ -119,7 +120,7 @@ export async function boardTry(argv: string[]): Promise<number> {
     else if (file === null) file = a;
     else { process.stderr.write(USAGE); return 2; }
   }
-  if (file === null || (casesFile === null && !inline.length)) { process.stderr.write(USAGE); return 2; }
+  if (file === null) { process.stderr.write(USAGE); return 2; }
   if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 86400) { say("--timeout takes a number of seconds, more than 0 and at most 86400"); return 2; }
 
   // the board: its exact bytes, read and checked
@@ -146,7 +147,7 @@ export async function boardTry(argv: string[]): Promise<number> {
       const c = readBounded(casesFile, 64 * 2 ** 20);
       if (c === null) throw new Error("the cases file is past 64 MB");
       given = JSON.parse(c.toString("utf8"));
-    } else given = { checks: [] };
+    } else given = { checks: inline.length ? [] : [...asks.values()].filter((a) => a.example !== undefined).map((a) => ({ case_id: `example-${a.id}`, ask_id: a.id, answer: a.example })) };
     for (const [k, [id, v]] of inline.entries()) (given as any).checks.push({ case_id: `case-${k + 1}`, ask_id: id, answer: JSON.parse(v) });
   } catch (e: any) {
     say(`the cases: ${e?.message ?? e}`);
@@ -154,6 +155,7 @@ export async function boardTry(argv: string[]): Promise<number> {
   }
   const cases = readCases(given, asks);
   if (typeof cases === "string") { say(cases); return 1; }
+  if (casesFile === null && !inline.length && !cases.checks.length) { say("nothing to try: no question has an `example`; give --case or --cases"); process.stderr.write(USAGE); return 2; }
 
   const report: any = {
     schema_version: 1, complete: false, board_sha256: createHash("sha256").update(bytes).digest("hex"), runtime: runtime(),
