@@ -1,0 +1,32 @@
+I forms :: (I, I + 1, -I, I - 1, 2*I, 1/2*I + 1/3, 2*I, 2*I + 1, -2*I - 1, I, I - 3, 1 + 1.414213562373095?*I, 1/2*I)
+I matrix :: [    I I + 1]
+[  2*I     3]
+GF9 mat :: [      1   z + 1]
+[      z 2*z + 1]
+GF9 mat2 :: [      1   z + 1       0]
+[      z       1 2*z + 1]
+GF11 mat :: [ 1 10]
+[10  1]
+[ 5  3]
+ZZ mat :: [  1 100]
+[ 20   3]
+QQ mat :: [    1 1/100]
+[   20     3]
+K mat :: [    1 a + 1]
+[  2*a     3]
+AA mat :: [                 1 1.414213562373095?]
+[                20                  3]
+GF7 AA :: ValueError Cannot coerce irrational Algebraic Real 1.414213562373095? to Rational
+GF7 AA rational :: 3
+GF7 QQbar :: ValueError Cannot coerce algebraic number with nonzero imaginary part to algebraic real
+GF7 K :: TypeError Unable to coerce a to a rational
+GF7 K rational :: 3
+Zmod6 AA :: ValueError Cannot coerce irrational Algebraic Real 1.414213562373095? to Rational
+GF101 mat :: [  1 100]
+[  2   3]
+Zmod1000 mat :: [  1 999   5]
+[  2   3   4]
+GF16 mat :: [          1 w^3 + w + 1]
+[          w           1]
+RDF mat :: [  1.0   2.5]
+[100.0   3.0]

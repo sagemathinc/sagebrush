@@ -234,6 +234,21 @@ class IntegerModRing_:
             return self(int(s))
         if isinstance(x, FiniteFieldElement) and x._parent._p == self._n and x.is_in_prime_field():
             return _elt(self, x._c[0])
+        tn = type(x).__name__
+        if tn in ("AlgebraicNumber", "AlgebraicReal"):
+            # (an algebraic number converts when it is rational; otherwise
+            # Sage's ValueError, not "unable to convert")
+            if x._gen is None:
+                return self(x._q())
+            if not x._is_real():
+                raise ValueError("Cannot coerce algebraic number with nonzero imaginary part to algebraic real")
+            raise ValueError("Cannot coerce irrational Algebraic Real %r to Rational" % (x,))
+        if tn == "NumberFieldElement":
+            # (a rational element of a number field converts, as in Sage:
+            # GF(7)(K(3)) is 3; an irrational one is Sage's TypeError)
+            if all(v == 0 for v in x._c[1:]):
+                return self(x._c[0] if x._c else _F(0))
+            raise TypeError("Unable to coerce %r to a rational" % (x,))
         if hasattr(x, "lift") and not isinstance(x, (list, tuple)):
             return self(x.lift())
         if isinstance(x, float) or type(x).__name__ == "RealNumberMP":
