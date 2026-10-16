@@ -1637,6 +1637,8 @@ function loadDocIndex(lang = nb.mode) {
   if (!DOC_INDEX[lang]) return Promise.resolve(null);
   docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => d.map((e) => ({
     ...e, lang, _name: e.name.toLowerCase(), _words: new Set(docWords(e.name)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
+    // (a count in the older indexes; the catalog's entries list their examples, catalog/SCHEMA.md)
+    _nex: Array.isArray(e.examples) ? e.examples.length : e.examples || 0,
   })));
   return docIndexes[lang];
 }
@@ -1670,7 +1672,7 @@ let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false;
 const docHead = (e) => e.name + (e.signature || (e.kind === "class" ? "" : "()"));
 function showDocList() {
   docList.innerHTML = docHits.length
-    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e.examples ? `<span class="badge">${e.examples} example${e.examples > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
+    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
     : `<li class="none">${docNoIndex ? `There is no function search for ${LANG_NAME[nb.mode] ?? nb.mode} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>`;
   docList.hidden = false;
   docInput.setAttribute("aria-expanded", "true");
@@ -1731,7 +1733,7 @@ function openDoc(e) {
   $("#doctitle").textContent = docHead(e);
   $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}`;
   // (its examples go into a notebook of its own language only: inserting never changes the notebook's)
-  $("#docinsert").hidden = !e.examples || e.lang !== nb.mode;
+  $("#docinsert").hidden = !e._nex || e.lang !== nb.mode;
   docDlg.showModal();
 }
 // the sage: lines of a docstring (with their ....: continuations), as a cell;
