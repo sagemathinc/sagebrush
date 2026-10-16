@@ -525,7 +525,8 @@ async function main() {
   if (cmd !== null && isMatlab(null)) {
     main = mainModule("<string>");
     const py = matlabSource(cmd, "<string>");
-    if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
+    // (a syntax error, reported: exit status 1)
+    code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
   } else if (cmd !== null && isMagma(null)) {
     main = mainModule("<string>");
     const py = magmaSource(cmd, "<string>");
@@ -539,7 +540,7 @@ async function main() {
     });
   } else if (file !== null && file !== "-" && isMatlab(file)) {
     const py = matlabSource(readFileSync(file, "utf8"), file);
-    if (py !== null) code = guarded(() => {
+    code = py === null ? 1 : guarded(() => {
       main = execModule(py, file!, "__main__", false, false);
     });
   } else if (file !== null && file !== "-" && isMagma(file)) {
@@ -552,6 +553,12 @@ async function main() {
     code = guarded(() => {
       main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"));
     });
+  } else if (!interactive && isMatlab(null)) {
+    // MATLAB on stdin (or `--matlab -`): a program, run as a file of it is, up to its first
+    // error, which gives exit status 1, as `matlab -batch` does
+    main = mainModule("<stdin>");
+    const py = matlabSource(readStdin(), "<stdin>");
+    code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive && isMagma(null)) {
     // Magma on stdin: a session, as `magma < file` is
     main = mainModule("<stdin>");
