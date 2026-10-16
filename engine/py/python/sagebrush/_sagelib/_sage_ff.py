@@ -236,6 +236,22 @@ class IntegerModRing_:
             return _elt(self, x._c[0])
         if hasattr(x, "lift") and not isinstance(x, (list, tuple)):
             return self(x.lift())
+        if isinstance(x, float) or type(x).__name__ == "RealNumberMP":
+            # (a real converts only when it is an integer, as in Sage:
+            # GF(7)(1.25) was 1, and matrix(GF(7), [[1.25]]) [1], astra's
+            # CORR-A1D-1)
+            try:
+                i = int(x)
+            except (ValueError, OverflowError):
+                raise TypeError("unable to convert %r to an element of %r" % (x, self))
+            # (compared on the real's side: int == RR is not symmetric past
+            # the doubles, and RR("1e400") was taken as non-integral, astra's
+            # CORR-ADD-1)
+            if not (x == i):
+                if type(x).__name__ in ("RealNumber", "RealNumberMP", "RealLiteral"):
+                    raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
+                raise TypeError("cannot convert non-integral float to integer")
+            return self(i)
         try:
             return self(int(x))
         except Exception:
