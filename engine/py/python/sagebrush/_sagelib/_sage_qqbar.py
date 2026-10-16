@@ -124,6 +124,24 @@ class _CIv:
         return _CIv(self.re * ni, -(self.im * ni))
 
 
+def _civ_has0(c):
+    """Whether the complex interval c may contain 0 (the inverse of an
+    interval that does is not bounded)."""
+    def has0(iv):
+        return iv.lo <= 0 <= iv.hi
+    return has0(c.re) and (c.im._is_zero() or has0(c.im))
+
+
+def _civ_narrow(c):
+    """Whether the complex interval c shows about 14 significant digits in
+    each part (an interval widened by long interval arithmetic printed as
+    0.?e32 for an entry equal to 1)."""
+    def narrow(iv):
+        w = iv.hi - iv.lo
+        return w == 0 or w * 2 ** 48 <= max(abs(iv.lo), abs(iv.hi))
+    return narrow(c.re) and narrow(c.im)
+
+
 def _civ_rational(q):
     return _CIv(_Iv._of(q))
 
@@ -739,6 +757,47 @@ class AlgebraicNumber:
             acc = ci if acc is None else acc * z + ci
         return acc if acc is not None else _civ_rational(0)
 
+    def _civ_nonzero(self):
+        """An interval for this nonzero number that excludes 0: its own, or
+        one from a ball refined until it does.  An interval from interval
+        arithmetic can be too wide to show that the number is nonzero:
+        dividing by a nonzero pivot in an elimination over AA (the right
+        kernel of a 24 x 24 matrix of rank 5) raised "interval contains 0"."""
+        c = self._civ
+        d = 20
+        while _civ_has0(c):
+            if d > _ROUND_MAX_DIGITS:
+                raise ArithmeticError("the approximation did not converge within %d digits" % _ROUND_MAX_DIGITS)
+            re, im, err = self._ball(d)
+            c = _CIv(_Iv._around(re, err), _ZERO if self._is_real_gen() else _Iv._around(im, err))
+            d *= 2
+        return c
+
+    def _exactified(self):
+        """This number with the exact interval of its rational value when it
+        is rational, as Sage's elements are after the zero tests of an
+        elimination (their rational entries print exactly); else itself."""
+        if self._gen is None and not self._exact_rational():
+            return self._new(None, self._c, None, self._gauss)
+        return self
+
+    def _display_civ(self):
+        """The interval to print: the cached one when it is narrow; else,
+        for a rational value, None (printed exactly), and otherwise one from
+        a ball refined until it is narrow (up to 200 digits)."""
+        c = self._civ
+        if _civ_narrow(c):
+            return c
+        if self._gen is None:
+            return None
+        d = 20
+        while True:
+            re, im, err = self._ball(d)
+            c = _CIv(_Iv._around(re, err), _ZERO if self._is_real_gen() else _Iv._around(im, err))
+            if _civ_narrow(c) or d >= 200:
+                return c
+            d *= 2
+
     def _approx(self, digits):
         """The value (re, im) to about `digits` digits."""
         if self._gen is None:
@@ -864,13 +923,14 @@ class AlgebraicNumber:
         if self._gen is None:
             if self._exact_rational():
                 return _str_rational(self._q())
-            return _str_civ(self._civ)
+            c = self._display_civ()
+            return _str_rational(self._q()) if c is None else _str_civ(c)
         if self._gauss:
             return _str_gaussian(self._c)
         gc = self._gaussian_coords()
         if gc is not None:
             return _str_gaussian(gc)
-        return _str_civ(self._civ)
+        return _str_civ(self._display_civ())
 
     __str__ = __repr__
 
@@ -896,7 +956,7 @@ class AlgebraicNumber:
         a, b = (o, self) if rev else (self, o)
         T = a._result_type(b)
         civ = {"+": lambda: a._civ + b._civ, "-": lambda: a._civ - b._civ,
-               "*": lambda: a._civ * b._civ, "/": lambda: a._civ * b._civ._inv()}[op]
+               "*": lambda: a._civ * b._civ, "/": lambda: a._civ * b._civ_nonzero()._inv()}[op]
         if op == "/" and not b:
             raise ZeroDivisionError("division by zero in algebraic field")
         gauss = a._gauss_like() and b._gauss_like() and (a._gauss or b._gauss)
