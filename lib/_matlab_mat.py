@@ -340,7 +340,7 @@ def _array(name, v):
     dims = list(_m._dims(v))
     flags = 0
     if t is _m.Str or t is _m.StrArr:
-        _m.warning_("'%s' is a string: saved as a char array (strings are MATLAB objects in a MAT-file)" % name)
+        _m.warning_("'%s' is a string: saved as a char array (strings are MATLAB objects in a MAT-file)" % name, note=True)
         v = _m.char_n(v)
         t = _m.Char
         dims = list(_m._dims(v))
@@ -419,7 +419,7 @@ def write(variables, compress=True):
         try:
             el = _array(name, v)
         except MatError as e:
-            _m.warning_("Variable '%s' not saved: %s." % (name, e))
+            _m.warning_("Variable '%s' not saved: %s." % (name, e), note=True)
             continue
         if compress:
             z = zlib.compress(el)

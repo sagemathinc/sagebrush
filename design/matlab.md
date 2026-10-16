@@ -634,6 +634,41 @@ The examples settled several display rules:
 - cells pad inside their braces (`{1×2 cell }`) and show short double rows
   inline (`{[2.6000 4.7000 3.9000]}`);
 - N-D arrays print page by page (`A(:,:,1) =`).
+- a struct's row-vector field shows its elements, each as a scalar shows in
+  format short, as many as fit and then `… ]`, as MATLAB does since R2021b
+  (the struct page's version history). A row of character vectors shows as
+  `{'Jan'  'Feb'  'Mar'}`. MATLAB's exact cut-off is not documented, so
+  Sagebrush's is its own; the documentation layout shows the whole row;
+- a string in a cell is left-aligned in its brackets (`{["lows" ]}`), and a
+  number is right-aligned;
+- numeric empties are `1×0 ... row vector`, `0×1 ... column vector`, and
+  otherwise `matrix`; logical, char and N-D empties are `array`;
+- in the documentation layout, as in the Live Editor and the Command Window,
+  warnings print in line with the output. Elsewhere they go to stderr, as
+  `-batch` writes them. Cell arrays are not split into `Columns`, and a
+  cell's row vectors show their elements.
+
+Running external MATLAB code (the coverage corpora, kept outside this repository)
+settled more:
+- `warning` keeps states: `warning(state)`, `warning(state, id)`,
+  `s = warning`, `warning(s)`, and the display of the states, as warning's
+  page shows. A disabled warning still sets `lastwarn`;
+- `asin` and `acos` of a real x beyond 1 take the side Octave gives:
+  `asin(2)` is $\pi/2 - 1.3170i$, odd in x. `atanh` takes the side its page
+  shows, $\operatorname{atanh}(-3) = -0.3466 - 1.5708i$, odd in x. Both apply
+  to a complex array's elements whose imaginary part is zero;
+- `zeros`, `ones`, `eye`, `eps`, `realmax`, `realmin` and `flintmax` with
+  `"like", p` take p's class, complexity and sparsity. A complex prototype
+  keeps the result complex even with zero imaginary parts;
+- `strrep` counts overlapping matches (`'222'` with `'22'` gives `'**'`),
+  where `replace` and `regexprep` do not;
+- `A\b` with a diagonal A divides each row by its element, so
+  `[1 0; 0 0]\[1; 1]` is `[1; Inf]` with the singular warning;
+- `fft` of real data is exactly conjugate-symmetric, so `ifft` of it is
+  real. `ifft2` and `ifftn` take `'symmetric'`, and are real for exactly
+  symmetric input;
+- `[S.a] = ...` and `[S(i).a] = ...` take one output per selected element,
+  and `c{:}` alone displays each element as `ans`.
 
 They also settled several function rules:
 - set functions return the first occurrence's index (as since R2013a, and

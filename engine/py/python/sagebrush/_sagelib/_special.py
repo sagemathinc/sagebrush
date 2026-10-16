@@ -3595,11 +3595,19 @@ def _bessel_parts(nu, t, comps, x):
     overflow bound (_bessely_up) taken at the least nonzero |beta|; J_b is
     not computed where no alpha needs it, Y_b where no beta does.
 
-    J_b as a double suffices: J_b leaves the doubles only below the turning
-    point, where |J_b Y_b| is near 1/(pi b) (DLMF 10.19.1), so |Y_b| > 2^1021
-    / b, and every beta that is not 0 is a product of a non-integer order's
-    sin and cos, at least 2^-51 or 2b (b < 1); the J term is then below
-    2^-1000 of the Y term.  A part is refused (NotCovered) where its two
+    J_b as a double suffices.  Beyond the turning point it is within its
+    absolute accuracy, a fraction of the envelope, even next to its zeros.
+    Below the turning point it can fall below the normal doubles only for b >
+    0.95, as (x/2)^b / Gamma(b + 1) > 2^-1022 for b <= 0.95 at any x >= 2^-1074;
+    there |J_b Y_b| is near 1/(pi b) (DLMF 10.19.1), so |Y_b| > 2^1021 / b.  A
+    beta that is not 0 is a product of at most two of the reduced sin(b pi) and
+    cos(b pi), with a factor 2 (cos^2(b pi) in the imaginary part of Y_-b(-x)),
+    and each of those is either 0 (dropped), 1 in modulus, or at least 2^-52
+    for a double b >= 0.95 (its distance to the nearest integer or
+    half-integer is at least an ulp, 2^-53): so |beta| >= 2^-104, |alpha| <= 2,
+    and the J term is below 2^-1800 of the Y term (astra's note on 97a12fc:
+    the bound is not 2^-51 for products and squares; the overflow bound uses
+    the actual least |beta|).  A part is refused (NotCovered) where its two
     terms cancel: where 5e-15 (|alpha J| + |beta Y|), 5e-15 a bound on J_b's
     and Y_b's measured errors (3.1e-15 at most), exceeds 1e-12 of max(|the
     part|, max(|alpha|, |beta|) sqrt(2/(pi t)) for t > b)"""
