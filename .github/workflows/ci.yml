@@ -97,6 +97,7 @@ jobs:
           CHROME=google-chrome node web/board/test-cached.mjs
           CHROME=google-chrome node web/board/test-code.mjs
           CHROME=google-chrome node web/board/test-modes.mjs
+          CHROME=google-chrome node web/board/test-engine-start.mjs
           CHROME=google-chrome node web/board/test-outputs.mjs
           CHROME=google-chrome node web/board/test-images.mjs
           CHROME=google-chrome node web/board/test-mobile.mjs
