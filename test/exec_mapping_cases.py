@@ -145,3 +145,62 @@ pks = types.ModuleType('pk.sub'); pks.v = 3; sys.modules['pk.sub'] = pks; pk.sub
 print(t(lambda: exec("from . import sub\nprint(sub.v)", {'__package__': 'pk', '__name__': 'pk.m'}, {'__package__': 'zz'})))
 print(t(lambda: exec("from . import sub", {'__name__': 'x'}, {'__package__': 'pk'})))
 print(t(lambda: exec("from . import sub\nprint(sub.v)", {'__package__': 'pk', '__name__': 'pk.m'}, Sink())))
+
+# an except clause's name is set to None, then deleted, through the locals'
+# own methods, however the clause ends (CORR-FBF-1)
+class L:
+    def __init__(self): self.d = {}; self.log = []
+    def __getitem__(self, k): return self.d[k]
+    def __setitem__(self, k, v): self.log.append(('set', k, v is None)); self.d[k] = v
+    def __delitem__(self, k): self.log.append(('del', k)); del self.d[k]
+for code in ["try:\n    1/0\nexcept Exception as x:\n    pass\nr = 7",
+             "try:\n    1/0\nexcept Exception as x:\n    del x\nr = 7",
+             "try:\n    try:\n        1/0\n    except Exception as x:\n        raise ValueError('v')\nexcept ValueError:\n    pass\nr = 7",
+             "for i in range(2):\n    try:\n        1/0\n    except Exception as x:\n        break\nr = 7"]:
+    lm = L()
+    print(t(lambda: exec(code, {}, lm)), lm.d, lm.log)
+class LD(dict):
+    def __setitem__(self, k, v): print('set', k, v is None); super().__setitem__(k, v)
+    def __delitem__(self, k): print('del', k); super().__delitem__(k)
+ld = LD()
+print(t(lambda: exec("try:\n    1/0\nexcept Exception as x:\n    pass", {}, ld)), ld)
+print(t(lambda: exec("class C:\n    try:\n        1/0\n    except Exception as x:\n        pass\nprint(sorted(k for k in vars(C) if not k.startswith('__')))")))
+print(t(lambda: exec("def f():\n    global gx\n    try:\n        1/0\n    except Exception as gx:\n        pass\nf()\nprint('gx' in globals())")))
+def fx():
+    try:
+        1/0
+    except Exception as e:
+        return 'ret'
+    finally:
+        pass
+print(fx())
+
+# a dict subclass as both globals and locals is a mapping for the names, its
+# storage behind them for the globals (CORR-FBF-2)
+class DG(dict):
+    def __getitem__(self, k):
+        print('get', k); return 42 if k == 'x' else super().__getitem__(k)
+    def __setitem__(self, k, v): print('set', k); super().__setitem__(k, v)
+    def __delitem__(self, k): print('del', k); super().__delitem__(k)
+dg = DG(x=1)
+print(eval('x', dg), eval('x', dg, dg), eval('x', {}, dg), eval('x', dg, {}), eval('x', dg, None))
+exec('y = 3\nr = y\ndel y', dg)
+print(sorted(k for k in dg if k != '__builtins__'))
+exec('print(sorted(k for k in locals() if k != "__builtins__"), globals() is locals())', dg)
+
+# the builtins module's own replacements of them are called (CORR-FBF-3)
+import builtins
+_exec = exec
+for name, code in [('locals', 'r = locals()'), ('globals', 'r = globals()'), ('vars', 'r = vars()'), ('dir', 'r = dir()'), ('eval', 'r = eval("1")'), ('exec', 'r = exec("1")')]:
+    old = getattr(builtins, name)
+    try:
+        setattr(builtins, name, lambda *a: 'custom')
+        out = {}
+        _exec(code, {}, out)
+        r1 = out['r']
+        ns = {}
+        _exec('def f():\n    ' + code + '\n    return r\nr2 = f()', ns)
+    finally:
+        setattr(builtins, name, old)
+    print(name, r1, ns['r2'])
+print(t(lambda: eval("type(locals()).__name__", {}, {})))

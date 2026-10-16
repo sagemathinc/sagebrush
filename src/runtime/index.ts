@@ -306,7 +306,10 @@ function execNamespace(globals: any, locals: any, g: any, callerLocals: any): an
     // (as CPython's exec/eval: the builtins module's dict, not the module)
     if (Obj.dictGet(globals, "__builtins__") === undefined) Obj.dictSet(globals, "__builtins__", Obj.instanceDict(B.builtins));
     const ns = Obj.namespaceOf(globals);
-    return locals !== undefined && locals !== null && locals !== globals ? layered(localsNamespace(locals), ns) : ns;
+    if (locals !== undefined && locals !== null && locals !== globals) return layered(localsNamespace(locals), ns);
+    // (a dict subclass as both: its own methods for the names, as locals,
+    // and its storage behind them, as LOAD_NAME's globals, CORR-FBF-2)
+    return Obj.typeOf(globals) === T.dict ? ns : layered(mappingNamespace(globals), ns);
   }
   if (g === null || g === undefined) g = Obj.dictGet(M.sysModules, "__main__") ?? Ty.newModule("__main__");
   // (explicit locals over the real globals: an exec inside exec's top level
@@ -575,6 +578,10 @@ B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefine
 B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
 B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");
 B.builtins.locals = Obj.builtin(() => raise(T.RuntimeError, "locals() called indirectly is not supported"), "locals");
+// The builtins the compiler runs in place: their own functions, which a
+// call's guard compares with, not the builtins module's names, which code
+// can rebind (CORR-FBF-3)
+const introspectionBuiltins = Object.freeze({ globals: B.builtins.globals, locals: B.builtins.locals, vars: B.builtins.vars, dir: B.builtins.dir, eval: B.builtins.eval, exec: B.builtins.exec });
 
 // ------------------------------------------------------------------ classes
 
@@ -761,6 +768,7 @@ export const R: any = {
   localsDict,
   sortedKeys,
   delName,
+  introspectionBuiltins,
   classModule,
   unboundName,
   execIn,

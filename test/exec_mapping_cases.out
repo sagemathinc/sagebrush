@@ -64,3 +64,39 @@ NameError: name 'y' is not defined
 None
 ImportError: attempted relative import with no known parent package
 ValueError: boom print
+None {'r': 7} [('set', 'x', False), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+None {'r': 7} [('set', 'x', False), ('del', 'x'), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+None {'r': 7} [('set', 'x', False), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+None {'i': 0, 'r': 7} [('set', 'i', False), ('set', 'x', False), ('set', 'x', True), ('del', 'x'), ('set', 'r', False)]
+set x False
+set x True
+del x
+None {}
+[]
+None
+False
+None
+ret
+get x
+get x
+get x
+get x
+42 42 42 1 42
+set y
+get y
+set r
+del y
+['r', 'x']
+get print
+get sorted
+get locals
+get globals
+get locals
+['r', 'x'] True
+locals custom custom
+globals custom custom
+vars custom custom
+dir custom custom
+eval custom custom
+exec custom custom
+'dict'
