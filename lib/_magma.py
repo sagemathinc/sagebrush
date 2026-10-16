@@ -3036,6 +3036,13 @@ def _admit_real_parts(n, d):
         raise MagmaError("a real from a rational with a numerator or denominator of more than %d bits is not supported yet" % _REAL_PART_BITS)
 
 
+def _shown(prec):
+    """The significant digits a real of RealField(prec) prints: prec, but
+    never fewer than 2 (RealField(1)!(5/2) is 2.5, 1/3 there is 0.34, 0 is
+    0.00; checked against Magma 2.18)."""
+    return max(prec, 2)
+
+
 def _bits(prec):
     """The bits of RealField(prec)'s numbers: the least b with 2^b >= 10^prec
     (Magma's: 100 for 30 digits, 167 for 50, 34 for 10, measured as the
@@ -3238,7 +3245,7 @@ class MReal:
     def _dec(self):
         """The value to prec significant decimal digits: (m, e) with value
         about m * 10^e, 10^(prec-1) <= |m| < 10^prec (rounded to nearest)."""
-        p = self.prec
+        p = _shown(self.prec)
         f = abs(self.frac())
         n, d = f.numerator, f.denominator
         e = len(str(n)) - len(str(d)) - p
@@ -3259,7 +3266,7 @@ class MReal:
         return (q if self.m > 0 else -q), e
 
     def __repr__(self):
-        p = self.prec
+        p = _shown(self.prec)
         if self.m == 0:
             return "0." + "0" * p
         sign = "-" if self.m < 0 else ""
