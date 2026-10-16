@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
+import { globalsDict, realGlobals, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
@@ -165,7 +165,8 @@ export function importAs(name: string, g?: any): any {
 export function importFromStmt(module: string, names: string[], level: number, g: any): any {
   const c = customImport();
   if (c !== null) return callObj(c, [module, gdict(g), null, tuple(names), level]);
-  return importModule(level ? resolveRelative(module, level, g.__package__) : module);
+  // (the globals' __package__, never exec's locals')
+  return importModule(level ? resolveRelative(module, level, realGlobals(g).__package__) : module);
 }
 
 export function resolveRelative(name: string, level: number, pkg: any): string {
