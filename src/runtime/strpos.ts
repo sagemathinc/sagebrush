@@ -75,14 +75,23 @@ let lastVal: Pos | null = null;
 export function pairs(s: string): Pos | null {
   if (s.length < SHORT) return SURROGATE.test(s) ? scan(s) : null;
   // (the string last asked about first: a loop over one string compares
-  // its pointer, not its contents)
-  if (s === lastKey) return lastVal;
+  // its pointer, not its contents; an equal string that is another object is
+  // compared in full once, then kept as the key, so the next asks about it
+  // compare pointers again: json.loads of a new json.dumps result took a
+  // full comparison per character)
+  if (s === lastKey) {
+    lastKey = s;
+    return lastVal;
+  }
   const p = longPairs(s);
   lastKey = s;
   return (lastVal = p);
 }
 function longPairs(s: string): Pos | null {
-  if (s === bigKey) return bigVal;
+  if (s === bigKey) {
+    bigKey = s;
+    return bigVal;
+  }
   const hit = cache.get(s);
   if (hit !== undefined) {
     cache.delete(s);
