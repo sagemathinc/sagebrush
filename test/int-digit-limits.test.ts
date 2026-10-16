@@ -108,3 +108,24 @@ test("a float formatted with a huge precision costs only the zeros it pads with,
   const want = execFileSync("python3", ["-c", code], { encoding: "utf8" });
   assert.equal(execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", timeout: 30000 }), want);
 });
+
+test("the powers kept between conversions stay small, whatever bases and sizes are converted (HARD-50F-1)", async () => {
+  await import("../src/compile"); // (the runtime, initialized)
+  const F = await import("../src/runtime/format");
+  // (large conversions in many bases, then the kept powers: a few hundred KB
+  // at most; the larger powers were each conversion's own)
+  for (let base = 3; base <= 36; base++) {
+    if ((base & (base - 1)) === 0) continue;
+    const digits = "z0123456789abcdefghijklmnopqrstuvwxy".slice(1, base + 1).repeat(Math.ceil(300_000 / base));
+    F.parseDigits(digits.slice(0, 300_000), base);
+  }
+  // (CPython's 4300-digit limit lifted, as Sage, Magma and MATLAB modes do)
+  const saved = F.intDigits.max;
+  F.intDigits.max = 0;
+  try {
+    F.decimalOf(10n ** 1_000_000n - 1n);
+  } finally {
+    F.intDigits.max = saved;
+  }
+  assert.ok(F.sharedPowerBytes() < 1_000_000, `kept ${F.sharedPowerBytes()} bytes`);
+});

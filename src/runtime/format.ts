@@ -55,32 +55,48 @@ export function hardLimit(digits: number | string): never {
 }
 
 // powers[b] = [b^k, b^2k, b^4k, ...] for the pieces (k digits each at the
-// bottom), made as needed.
+// bottom), made as needed.  Only the first SHARED levels (up to 16,000
+// digits, a few KB each) are kept between conversions; larger powers are
+// one conversion's own (local), so memory doesn't grow with each large
+// conversion in a new base (HARD-50F-1).
 const PIECE = 1000;
+const SHARED = 5;
 const powers = new Map<number, bigint[]>();
-function powerOf(base: number, level: number): bigint {
-  let a = powers.get(base);
-  if (a === undefined) powers.set(base, (a = [BigInt(base) ** BigInt(PIECE)]));
-  while (a.length <= level) {
-    pollInterrupt();
-    a.push(a[a.length - 1] * a[a.length - 1]);
+function powerOf(base: number, level: number, local: bigint[]): bigint {
+  if (level < SHARED) {
+    let a = powers.get(base);
+    if (a === undefined) powers.set(base, (a = [BigInt(base) ** BigInt(PIECE)]));
+    while (a.length <= level) a.push(a[a.length - 1] * a[a.length - 1]);
+    return a[level];
   }
-  return a[level];
+  while (local.length <= level - SHARED) {
+    pollInterrupt();
+    const prev = local.length ? local[local.length - 1] : powerOf(base, SHARED - 1, local);
+    local.push(prev * prev);
+  }
+  return local[level - SHARED];
+}
+
+// (for tests: the bytes the kept powers take, about)
+export function sharedPowerBytes(): number {
+  let n = 0;
+  for (const a of powers.values()) for (const p of a) n += p.toString(16).length / 2;
+  return n;
 }
 
 // The decimal digits of 0 <= a < 10^(PIECE * 2^(level+1)), padded to width
 // when it is given: natively when small, else split by 10^(PIECE * 2^level).
-function decimalPieces(a: bigint, level: number, width: number): string {
+function decimalPieces(a: bigint, level: number, width: number, local: bigint[]): string {
   if (level < 4) {
     const s = a.toString();
     return width ? s.padStart(width, "0") : s;
   }
   pollInterrupt();
-  const p = powerOf(10, level);
+  const p = powerOf(10, level, local);
   const hi = a / p, lo = a - hi * p;
   const w = PIECE * 2 ** level;
-  if (hi === 0n && !width) return decimalPieces(lo, level - 1, 0);
-  return decimalPieces(hi, level - 1, width ? width - w : 0) + decimalPieces(lo, level - 1, w);
+  if (hi === 0n && !width) return decimalPieces(lo, level - 1, 0, local);
+  return decimalPieces(hi, level - 1, width ? width - w : 0, local) + decimalPieces(lo, level - 1, w, local);
 }
 
 function decimalDigits(abs: bigint): string {
@@ -88,11 +104,11 @@ function decimalDigits(abs: bigint): string {
   const digits = abs.toString(16).length * 4 * Math.log10(2) + 1;
   let level = 0;
   while (PIECE * 2 ** (level + 1) < digits) level++;
-  return decimalPieces(abs, level, 0);
+  return decimalPieces(abs, level, 0, []);
 }
 
 // The int of digits t (lowercase, no sign or underscores) in base, by halves.
-export function parseDigits(t: string, base: number): bigint {
+export function parseDigits(t: string, base: number, local: bigint[] = []): bigint {
   if (t.length <= 4 * PIECE) {
     if (base === 10) return BigInt(t);
     let v = 0n;
@@ -109,7 +125,7 @@ export function parseDigits(t: string, base: number): bigint {
   let level = 0;
   while (PIECE * 2 ** (level + 1) < t.length / 2) level++;
   const w = PIECE * 2 ** level;
-  return parseDigits(t.slice(0, t.length - w), base) * powerOf(base, level) + parseDigits(t.slice(t.length - w), base);
+  return parseDigits(t.slice(0, t.length - w), base, local) * powerOf(base, level, local) + parseDigits(t.slice(t.length - w), base, local);
 }
 
 // The decimal digits of an int, or CPython's ValueError past the limit, or

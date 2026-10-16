@@ -91,8 +91,10 @@ class _Mixin:
         self.close()
 
     def readlines(self, hint=None):
+        # (the hint first, then closed, as CPython's IOBase.readlines)
+        hint = io._index_hint(hint, "argument should be integer or None, not '%s'")
         self._closed_check()
-        return io._readlines(self, hint, False, "argument should be integer or None, not '%s'")
+        return io._readlines(self, hint, False, isinstance(self, io.TextIOBase))
 
     def writelines(self, lines):
         self._closed_check()
