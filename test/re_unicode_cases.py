@@ -190,3 +190,16 @@ for setup, expr in ROUND2:
     except Exception as x:
         r = type(x).__name__ + ': ' + str(x)
     print(ascii(expr), '->', ascii(r))
+
+# ASCII and bytes IGNORECASE fold only ASCII letters (CORR-BD8-1)
+print(bool(re.fullmatch('i', 'İ', re.A | re.I)), bool(re.fullmatch('[A-Z]', 'K', re.A | re.I)), bool(re.fullmatch(b'\xe9', b'\xc9', re.I)))
+print(re.findall('[a-c]+', 'ABCabcK', re.A | re.I), re.findall('[^a-c]', 'AbZİ', re.A | re.I), re.findall(b'[a-z]+', b'ABC\xc9\xe9xy', re.I))
+print(bool(re.fullmatch('k', 'K', re.I)), bool(re.fullmatch('k', 'K', re.A | re.I)), bool(re.fullmatch('(?i:i)', 'I', re.A)), bool(re.fullmatch('(?i:i)', 'İ', re.A)))
+print(bool(re.fullmatch('(?a)Straße', 'STRASSE', re.I)), re.findall('(?ai)[k-m]', 'KLMKkl'), bool(re.fullmatch(b'(?i)abc', b'AbC')), bool(re.fullmatch('(?a)(?i)x(?-i:y)', 'XY')))
+# escaped literals fold as the same characters do (CORR-BD8-2)
+print(bool(re.fullmatch(r'İ', 'i', re.I)), bool(re.fullmatch(r'\x69', 'ı', re.I)), bool(re.fullmatch(r'[\x69]', 'İ', re.I)), bool(re.fullmatch(r'\U00000130', 'I', re.I)), bool(re.fullmatch(r'\151', 'İ', re.I)))
+print(bool(re.fullmatch(r'\x41', 'a', re.A | re.I)), bool(re.fullmatch(r'\x69', 'İ', re.A | re.I)), bool(re.fullmatch(r'A', 'a', re.I)), bool(re.fullmatch(rb'\x41', b'a', re.I)))
+# zero-width matches never fall between a surrogate pair's halves (CORR-BD8-3)
+print([m.span() for m in re.finditer(r'\B', 'a\U0001F600b')], [m.span() for m in re.finditer(r'\B', '\U00010400')], [m.span() for m in re.finditer(r'\b', 'a\U0001F600b')])
+print(re.sub(r'\B', '-', 'a\U0001F600b\U00010400c'), re.split(r'\b', '\U0001F600a\U0001F600'), [m.span() for m in re.finditer('', '\U0001F600x\U0001F600')], re.findall(r'\B', '\U0001F600\U0001F600'))
+print(bool(re.search(r'\B', '\U0001F600')), re.search(r'(?=\W)', 'a\U0001F600').span(), re.sub(r'\B', '|', '\U0001F600\U0001F600', count=1), re.subn('', '.', '\U0001F600'))

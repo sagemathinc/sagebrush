@@ -14,3 +14,24 @@ test("re's \\b \\w \\s . and IGNORECASE, and complex products and quotients, as 
   const w = want.split("\n"), g = got.split("\n");
   for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], `line ${i + 1}`);
 });
+
+// What the translation cannot do faithfully it refuses, rather than
+// answering differently: scoped a, L and x flags (they were accepted and
+// ignored), and IGNORECASE backreferences in ASCII or bytes patterns (no JS
+// i flag there, CORR-BD8-1).
+test("unsupported scoped flags and ASCII IGNORECASE backreferences are refused (NotImplementedError)", () => {
+  const cases = [
+    "re.fullmatch(r'(?a:\\w+)', 'é')",
+    "re.fullmatch(r'(?x:a b)', 'ab')",
+    "re.fullmatch(r'(?-x:a)', 'a', re.X)",
+    "re.fullmatch(r'(a)\\1', 'aA', re.A | re.I)",
+    "re.fullmatch(r'(?P<g>a)(?P=g)', 'aA', re.A | re.I)",
+    "re.fullmatch(rb'(a)\\1', b'aA', re.I)",
+  ];
+  const code = ["import re"].concat(cases.map((e) => `try:\n    print(${e})\nexcept Exception as x:\n    print(type(x).__name__)`)).join("\n");
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trimEnd().split("\n");
+  cases.forEach((e, i) => assert.equal(got[i], "NotImplementedError", e));
+  // (and what is supported still works: i, m, s scopes; backreferences with Unicode IGNORECASE)
+  const ok = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", "import re\nprint(bool(re.fullmatch(r'(?i:a)(?s:.)(?m:^)?', 'A\\n')), bool(re.fullmatch(r'(a)\\1', 'aA', re.I)), bool(re.fullmatch(r'(?u:\\w)', 'é')))"], { encoding: "utf8" });
+  assert.equal(ok, "True True True\n");
+});

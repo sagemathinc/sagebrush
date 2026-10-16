@@ -45,13 +45,31 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
   const scopes: number[] = [];
   let classAt = 0, classNeg = false;
   let negSets: string[] = [];
+  // A literal character under IGNORECASE (JS's i flag folds by Unicode, so
+  // ASCII and bytes patterns never have it: their letters are written as
+  // both cases, CORR-BD8-1), escaped or not (CORR-BD8-2)
+  const lit = (ch: string, src: string): string => {
+    if (cur & I) {
+      if (ascii) {
+        if (/^[A-Za-z]$/.test(ch)) return `[${ch.toLowerCase()}${ch.toUpperCase()}]`;
+      } else if (ch === "I" || ch === "i" || ch === "\u0130" || ch === "\u0131") return `[${DOTTED_I}]`;
+    }
+    return src;
+  };
   const closeClass = () => {
     const pos = out.slice(classAt + (classNeg ? 2 : 1));
     out = out.slice(0, classAt);
     const has = (ch: string) =>
-      (pos !== "" && new RegExp(`[${pos}]`, "u" + (cur & I ? "i" : "")).test(ch)) || negSets.some((n) => !new RegExp(`[${n}]`, "u").test(ch));
+      (pos !== "" && new RegExp(`[${pos}]`, "u" + (cur & I && !ascii ? "i" : "")).test(ch)) || negSets.some((n) => !new RegExp(`[${n}]`, "u").test(ch));
     let body = pos;
-    if (cur & I && ["I", "i", "\u0130", "\u0131"].some(has)) body += DOTTED_I;
+    if (cur & I && ascii) {
+      // (each ASCII letter the class holds, in both cases)
+      for (let k = 0; k < 26; k++) {
+        const lo = String.fromCharCode(97 + k), up = String.fromCharCode(65 + k);
+        const hl = has(lo), hu = has(up);
+        if (hl !== hu) body += hl ? up : lo;
+      }
+    } else if (cur & I && ["I", "i", "\u0130", "\u0131"].some(has)) body += DOTTED_I;
     if (negSets.length === 0) out += `[${classNeg ? "^" : ""}${body}]`;
     else if (!classNeg) out += `(?:${[...(body ? [`[${body}]`] : []), ...negSets.map((n) => `[^${n}]`)].join("|")})`;
     // (one atom, so that a quantifier after it repeats all of it)
@@ -128,28 +146,31 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         case "x": {
           const h = p.slice(i, i + 2);
           if (!/^[0-9a-fA-F]{2}$/.test(h)) raise(ReError, `incomplete escape \\x${h}`);
-          out += "\\x" + h;
+          out += inClass ? "\\x" + h : lit(String.fromCharCode(parseInt(h, 16)), "\\x" + h);
           i += 2;
           continue;
         }
         case "u": {
           const h = p.slice(i, i + 4);
           if (!/^[0-9a-fA-F]{4}$/.test(h)) raise(ReError, `incomplete escape \\u${h}`);
-          out += "\\u" + h;
+          out += inClass ? "\\u" + h : lit(String.fromCharCode(parseInt(h, 16)), "\\u" + h);
           i += 4;
           continue;
         }
         case "U": {
           const h = p.slice(i, i + 8);
           if (!/^[0-9a-fA-F]{8}$/.test(h)) raise(ReError, `incomplete escape \\U${h}`);
-          out += `\\u{${parseInt(h, 16).toString(16)}}`;
+          const cp = parseInt(h, 16);
+          if (cp > 0x10ffff) raise(ReError, `bad escape \\U${h}`);
+          out += inClass ? `\\u{${cp.toString(16)}}` : lit(String.fromCodePoint(cp), `\\u{${cp.toString(16)}}`);
           i += 8;
           continue;
         }
         case "0": {
           const o = /^[0-7]{0,2}/.exec(p.slice(i))![0];
           i += o.length;
-          out += `\\u{${parseInt("0" + o, 8).toString(16)}}`;
+          const cp = parseInt("0" + o, 8);
+          out += inClass ? `\\u{${cp.toString(16)}}` : lit(String.fromCodePoint(cp), `\\u{${cp.toString(16)}}`);
           continue;
         }
       }
@@ -158,11 +179,13 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         const o3 = /^[0-7]{2}/.exec(p.slice(i));
         if (/[0-7]/.test(d) && o3) {
           i += 2;
-          out += `\\u{${parseInt(d + o3[0], 8).toString(16)}}`;
+          const cp = parseInt(d + o3[0], 8);
+          out += inClass ? `\\u{${cp.toString(16)}}` : lit(String.fromCodePoint(cp), `\\u{${cp.toString(16)}}`);
           continue;
         }
         const num = /^\d?/.exec(p.slice(i))![0];
         i += num.length;
+        if (!inClass && ascii && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
         out += inClass ? "" : `\\${d}${num}`;
         continue;
       }
@@ -256,6 +279,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
             continue;
           }
           if ((g = /^\(\?P=([A-Za-z_]\w*)\)/.exec(rest))) {
+            if (ascii && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
             out += `\\k<${g[1]}>`;
             i += g[0].length;
             continue;
@@ -267,10 +291,14 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
           if ((g = /^\(\?([aiLmsux]*)(?:-([imsx]+))?:/.exec(rest)) && (g[1] || g[2])) {
             // scoped flags: m and s are this translation's own (^, $ and .);
             // i is JS's modifier, and is in force for the class rules too
+            // (a, L and x in a scope are not implemented: refused, not ignored;
+            // u is str patterns' default)
+            if (/[aLx]/.test(g[1] + (g[2] ?? "")) || (bytes && g[1].includes("u"))) raise(T.NotImplementedError, `scoped flags (?${g[1]}${g[2] ? "-" + g[2] : ""}:...) are not supported`);
             scopes.push(cur);
             for (const f of g[1]) if (f === "i" || f === "m" || f === "s") cur |= { i: I, m: M, s: S }[f]!;
             for (const f of g[2] ?? "") if (f === "i" || f === "m" || f === "s") cur &= ~{ i: I, m: M, s: S }[f]!;
-            const on = g[1].includes("i") ? "i" : "", off = (g[2] ?? "").includes("i") ? "-i" : "";
+            // (in ASCII and bytes patterns IGNORECASE is written out, lit)
+            const on = g[1].includes("i") && !ascii ? "i" : "", off = (g[2] ?? "").includes("i") && !ascii ? "-i" : "";
             out += on || off ? `(?${on}${off}:` : "(?:";
             i += g[0].length;
             continue;
@@ -284,7 +312,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         i++;
         continue;
       default:
-        out += cur & I && (c === "I" || c === "i" || c === "\u0130" || c === "\u0131") ? `[${DOTTED_I}]` : c;
+        out += lit(c, c);
         i++;
     }
   }
@@ -305,7 +333,9 @@ export class PyPattern {
     const t = translate(text, flags, isBytes);
     this.flags = t.flags | (isBytes ? 0 : U);
     let jf = "dgu";
-    if (t.flags & I) jf += "i";
+    // (JS's i folds by Unicode: ASCII and bytes patterns write out their
+    // letters' cases instead, CORR-BD8-1)
+    if (t.flags & I && !(t.flags & A) && !isBytes) jf += "i";
     if (t.flags & S) jf += "s";
     try {
       this.rx = new RegExp(t.src, jf);
@@ -342,7 +372,7 @@ export class PyPattern {
     const s = e < s0.length ? s0.slice(0, e) : s0;
     const rx = kind === "search" ? this.rx : kind === "match" ? this.sticky : this.full;
     rx.lastIndex = p;
-    const m = rx.exec(s);
+    const m = kind === "search" ? execAt(rx, s) : rx.exec(s);
     return m === null ? null : new PyMatch(this, string, s0, m, p, e);
   }
 }
@@ -435,24 +465,39 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
   const rx = p.rx;
   rx.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((n === 0 || k < n) && (m = rx.exec(s)) !== null) {
+  const seams: number[] = []; // (a replacement's ends: no lone surrogates joined, SP.checkSeams)
+  while ((n === 0 || k < n) && (m = execAt(rx, s)) !== null) {
     // (Stop, every 1024 matches: a long string has millions, HARD-978-1)
     if ((k & 1023) === 1023) O.pollInterrupt();
     const pm = new PyMatch(p, string, s, m, 0, s.length);
     out += s.slice(last, m.index);
+    seams.push(out.length);
     if (tmpl !== null) out += expandTemplate(p, tmpl, pm);
     else {
       const r = callObj(repl, [pm]);
       out += p.isBytes ? Ty.decode(r, "latin1") : p.str(r);
     }
+    seams.push(out.length);
     last = m.index + m[0].length;
     k++;
     if (m[0].length === 0) rx.lastIndex = advance(s, m.index);
   }
   out += s.slice(last);
-  return [p.out(out), k];
+  return [p.out(SP.checkSeams(out, seams)), k];
 }
 const advance = (s: string, i: number) => (i < s.length && s.charCodeAt(i) >= 0xd800 && s.charCodeAt(i) < 0xdc00 ? i + 2 : i + 1);
+// rx.exec(s), skipping a match V8 finds inside a surrogate pair (its scan
+// tries zero-width matches between a pair's halves, where lookarounds see
+// neither: \B in 'a😀b', CORR-BD8-3); the search goes on after the pair
+const midPair = (s: string, i: number) => i > 0 && i < s.length && (s.charCodeAt(i) & 0xfc00) === 0xdc00 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800;
+function execAt(rx: RegExp, s: string): RegExpExecArray | null {
+  let m = rx.exec(s);
+  while (m !== null && (midPair(s, m.index) || midPair(s, m.index + m[0].length))) {
+    rx.lastIndex = advance(s, m.index);
+    m = rx.exec(s);
+  }
+  return m;
+}
 
 function allMatches(p: PyPattern, string: any, pos: any = 0, endpos: any = null): PyMatch[] {
   const s0 = p.str(string);
@@ -462,7 +507,7 @@ function allMatches(p: PyPattern, string: any, pos: any = 0, endpos: any = null)
   const rx = p.rx;
   rx.lastIndex = ps;
   let m: RegExpExecArray | null;
-  while ((m = rx.exec(s)) !== null) {
+  while ((m = execAt(rx, s)) !== null) {
     if ((out.length & 1023) === 1023) O.pollInterrupt();
     out.push(new PyMatch(p, string, s0, m, ps, e));
     if (m[0].length === 0) rx.lastIndex = advance(s, m.index);
