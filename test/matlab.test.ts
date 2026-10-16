@@ -2247,7 +2247,7 @@ test("end inside a function call within an index is the enclosing indexed variab
     "5"]);
 });
 
-test("an index's computed base is made once when an end refers to it: s(tick()).a(min(end, 5)), c{tick()}(min(end, 5)) and s(tick()).a(end) call tick once", () => {
+test("an index's computed base is made once when an end refers to it: s(tick()).a(min(end, 5)), c{tick()}{min(end, 3)} and the assignment s(tick()).a(min(end, 5)) = v call tick once", () => {
   const { execFileSync } = require("node:child_process");
   const code = [
     "global calls",
@@ -2257,6 +2257,10 @@ test("an index's computed base is made once when an end refers to it: s(tick()).
     "calls = 0; disp(s(tick()).a(end)); disp(calls)",
     "calls = 0; disp(c{tick()}(end)); disp(calls)",
     "f = @(k) s(k).a(min(end, 2)); disp(f(2))",
+    "calls = 0; d = {{10, 20, 30}, {1, 2}}; disp(d{tick()}{min(end, 3)}); disp(calls)",
+    "calls = 0; disp([d{tick()}{min(end, 3)}]); disp(calls)",
+    "calls = 0; s(tick()).a(min(end, 5)) = 99; disp(mat2str(s(1).a)); disp(mat2str(s(2).a)); disp(calls)",
+    "calls = 0; s(tick()).a(end) = 7; disp(mat2str(s(1).a)); disp(calls)",
     "function r = tick()",
     "  global calls",
     "  calls = calls + 1;",
@@ -2265,5 +2269,6 @@ test("an index's computed base is made once when an end refers to it: s(tick()).
   ].join("\n");
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code], { encoding: "utf8" })
     .split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
-  assert.deepEqual(out, ["50", "1", "50", "1", "30", "1", "80", "1", "80", "1", "2"]);
+  assert.deepEqual(out, ["50", "1", "50", "1", "30", "1", "80", "1", "80", "1", "2",
+    "30", "1", "30", "1", "[10 20 30 40 99 60 70 80]", "[1 2]", "1", "[10 20 30 40 99 60 70 7]", "1"]);
 });

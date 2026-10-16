@@ -1389,6 +1389,24 @@ class Emitter {
     }
     // the path, outermost first; `end` in an index refers to the part so far
     const parts: string[] = [];
+    if (!scope.globals.has(lv.name) && lv.path.some((p) => p.k === "index" && p.frame.used)) {
+      // (an end in the path: the parts are made once, in order, into a list the ends read,
+      // so a computed subscript, s(tick()).a(min(end, 5)) = v, is evaluated once)
+      const tp = this.fresh("_p");
+      this.emit(`${tp} = []`);
+      for (const p of lv.path) {
+        if (p.k === "field") this.emit(`${tp}.append(("f", ${JSON.stringify(p.name)}))`);
+        else if (p.k === "dynfield") this.emit(`${tp}.append(("f", _m.fieldname(${this.expr(p.name, scope)})))`);
+        else if (p.k === "index") {
+          p.frame.code = `_m.peek(${base}, ${tp})`;
+          this.emit(`${tp}.append((${p.brace ? '"b"' : '"p"'}, ${this.argList(p.args, scope)}))`);
+        }
+      }
+      this.emit(`${name} = _m.assign(${base}, ${tp}, ${value})`);
+      scope.vars.add(lv.name);
+      this.afterAssign(lv.name, scope);
+      return;
+    }
     for (const p of lv.path) {
       if (p.k === "field") parts.push(`("f", ${JSON.stringify(p.name)})`);
       else if (p.k === "dynfield") parts.push(`("f", _m.fieldname(${this.expr(p.name, scope)}))`);
@@ -1616,8 +1634,7 @@ class Emitter {
   /** the values of c{...} or s.f as a list (a comma-separated list) */
   csList(a: Expr, scope: Scope): string {
     if (a.k === "index" && a.brace) {
-      const base = this.expr(a.e, scope);
-      a.frame.code = base;
+      const base = this.onceBase(a.frame, this.expr(a.e, scope));
       return `_m.brace_cs(${base}, ${this.argList(a.args, scope)})`;
     }
     if (a.k === "field") return `_m.field_cs(${this.fieldBase(a.e, scope)}, ${JSON.stringify(a.name)})`;
