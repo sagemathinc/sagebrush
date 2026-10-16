@@ -280,8 +280,10 @@
         "expected": "0.693147180559945309417232121458\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "Very near 1 (Log(1.000000001), say) the last printed digit can differ from Magma's."
+    ],
+    "status": "partial",
     "see_also": [
       "Exp"
     ],
@@ -301,8 +303,11 @@
         "expected": "3.00000000000000000000000000000\n3.00000000000000000000000000000\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "Log(0.0, 0.0) names argument 1 in its refusal, where Magma names argument 2.",
+      "Very near 1 the last printed digit can differ from Magma's."
+    ],
+    "status": "partial",
     "upstream_version": "Magma 2.18",
     "tags": [
       "rationals and reals"

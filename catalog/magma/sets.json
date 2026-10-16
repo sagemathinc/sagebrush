@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Subsets",
+    "kind": "function",
+    "signature": "(<SetEnum> S) -> SetEnum",
+    "summary": "The set of all subsets of the set S.",
+    "examples": [
+      {
+        "code": "#Subsets({1, 2, 3}); { #T : T in Subsets({1, 2, 3}) };",
+        "expected": "8\n{ 0, 1, 2, 3 }\n"
+      }
+    ],
+    "differs": [
+      "A set prints its elements in Sagebrush's sorted order, not in Magma's internal order (so Subsets(S) prints its subsets in another order)."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  },
+  {
+    "name": "Subsets",
+    "kind": "function",
+    "signature": "(<SetEnum> S, <RngIntElt> k) -> SetEnum",
+    "summary": "The set of the subsets of the set S with k elements.",
+    "examples": [
+      {
+        "code": "#Subsets({1..10}, 3); Subsets({1, 2}, 2);",
+        "expected": "120\n{\n    { 1, 2 }\n}\n"
+      }
+    ],
+    "differs": [
+      "A set prints its elements in Sagebrush's sorted order, not in Magma's internal order."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "sequences and sets"
+    ]
+  }
+]

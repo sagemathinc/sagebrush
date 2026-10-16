@@ -5,6 +5,7 @@ with value semantics, sets, tuples, multiple return values, reference
 arguments) and its printing, checked against Magma by magma-tests/.
 """
 
+import itertools as _itertools
 import math as _math
 import re as _re
 import sys as _sys
@@ -103,6 +104,26 @@ def _unsupported_call(e):
     return None
 
 
+_ABSENT = []  # [name -> alternative], from the catalog, once
+
+
+def _absent_alternative(name):
+    """The alternative the Magma catalog gives for an intrinsic Sagebrush
+    doesn't have (an entry of status absent), or None.  (Read once; no
+    catalog, no alternatives: the message is as before.)"""
+    if not _ABSENT:
+        table = {}
+        try:
+            import _catalog
+            for _, e in _catalog.load("magma"):
+                if e.get("status") == "absent" and e.get("alternative") and e["name"] not in table:
+                    table[e["name"]] = e["alternative"]
+        except Exception:
+            table = {}
+        _ABSENT.append(table)
+    return _ABSENT[0].get(name)
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
@@ -120,8 +141,12 @@ def _report(e, line, col):
         if _is_intrinsic_name(name):
             # one of Magma's intrinsics that Sagebrush doesn't have: said so,
             # not as an undeclared name (Magma has it)
-            # (Sagebrush's own message, which Magma doesn't print: one line)
-            _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush\n" % (_where(line, col), name))
+            # (Sagebrush's own message, which Magma doesn't print: one line,
+            # with the catalog's alternative where it has one, as agents
+            # read refusals)
+            alt = _absent_alternative(name)
+            _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush%s\n"
+                              % (_where(line, col), name, "; instead: " + alt if alt else ""))
         else:
             # (wrapped at 80 columns, as Magma wraps it)
             _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: Identifier '%s' has not been declared or assigned" % name, 0, 0)))
@@ -523,6 +548,22 @@ class MTuple(tuple):
     def __repr__(self):
         return _str(self)
 
+    def __call__(self, *args):
+        # (1, 2)(3, 4): a product of cycles, for G!(1, 2)(3, 4) (the
+        # translator reads (1, 2) as a tuple and the next one as a call)
+        return _MCycles([self, MTuple(args)])
+
+
+class _MCycles(list):
+    """A product of cycles written (a, b)(c, d): only a permutation group's
+    coercion takes one."""
+
+    def __call__(self, *args):
+        return _MCycles(list(self) + [MTuple(args)])
+
+    def __repr__(self):
+        raise MagmaError("a product of cycles outside G!( ... ) is not supported yet")
+
 
 def _key(x):
     if isinstance(x, (MSeq, MRange, list)):
@@ -603,6 +644,8 @@ def _into_universe(items, universe, kind):
     field; a finite field's elements into the integers (those of the prime
     field) or the rationals (none), as Magma does (CORR-A6D-1).  Other
     universes keep their items as before."""
+    if isinstance(universe, _MResRing) or (universe is None and any(isinstance(x, _MResElt) for x in items)):
+        return _res_items(items, universe, kind)
     ff = isinstance(universe, _MFinField)
     if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
         # (the rationals' elements are rationals, the integral ones too)
@@ -625,8 +668,36 @@ def _into_universe(items, universe, kind):
     return out
 
 
+def _res_items(items, R, kind):
+    """A collection's items in Integers(m): its declared universe R, or,
+    with none, the ring of the residues among them, into which integers
+    (and rationals with a unit denominator) are coerced, as Magma does
+    ({R!1, 7} is one element, CORR-DFC-1).  Residues of different moduli,
+    or other values among residues, are refused in words."""
+    where = _UNIVERSE_FAIL[kind]
+    if R is None:
+        rings = {x.R for x in items if isinstance(x, _MResElt)}
+        if len(rings) > 1:
+            raise MagmaError("a collection of residues modulo different integers is not supported yet", where)
+        R = rings.pop()
+    out = []
+    for k, x in enumerate(items):
+        if x is _UNDEF:
+            out.append(x)
+            continue
+        if not (isinstance(x, (_MResElt, _Fraction)) or (isinstance(x, int) and not isinstance(x, bool))):
+            raise MagmaError("a collection of residues and other values is not supported yet", where)
+        try:
+            out.append(R._magma_coerce(x))
+        except MagmaError:
+            raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), where)
+    return out
+
+
 def _seq(items, universe=None):
     items = list(items)
+    if universe is None and any(isinstance(x, _MResElt) for x in items):
+        items = _res_items(items, None, "seq")
     if universe is None:
         _ff_universe(items, "[ ... ]")
     else:
@@ -1060,6 +1131,11 @@ def _coerce_struct(x, u):
     if isinstance(u, _MFinField):
         y = _ff_into(u, x)
         return _NOCOERCE if y is None else y
+    if isinstance(u, _MResRing):
+        try:
+            return u._magma_coerce(x)
+        except MagmaError:
+            return _NOCOERCE
     if (u is _ZZ or u is _QQ) and _is_ff(x):
         W = _ffwrap(x.parent())
         if u is _ZZ and W.n == 1:
@@ -1895,7 +1971,8 @@ def _not_supported(what, pos=None):
 def _unsupported(name, pos=None):
     """A constructor name< ... > the translator parses but Sagebrush doesn't
     implement yet: an error, never a guess."""
-    raise MagmaError("%s< ... > is not supported yet" % name, None, True, pos)
+    alt = _absent_alternative(name)
+    raise MagmaError("%s< ... > is not supported yet%s" % (name, "; instead: " + alt if alt else ""), None, True, pos)
 
 
 # ------------------------------------------------------------------ operators
@@ -1949,7 +2026,8 @@ def _arith(op, args, pos):
             if k is not None and (k[0] in ("N", "P", "F") or (k[0] == "M" and k[1] == k[2])):
                 raise MagmaError("Argument 1 must be an integer, rational", "'*'", True, pos)
     for a in args:
-        if isinstance(a, _NOARITH):
+        # (a vector is a list underneath, but has arithmetic: _MVector)
+        if isinstance(a, _NOARITH) and not isinstance(a, _MVector):
             raise _bad_types(op, args, pos)
     if len(args) == 2:
         _arith_rule(op, args[0], args[1], pos)
@@ -2665,6 +2743,13 @@ def _struct_eq(a, b, op, pos):
 
 
 def _eq(a, b, pos=None, op="eq"):
+    for x, y in ((a, b), (b, a)):
+        if isinstance(x, (_MVector, _MPerm)):
+            return x._magma_eq(y, op)
+    if isinstance(a, _MResElt) or isinstance(b, _MResElt):
+        # (a residue meets its own ring's residues and the integers)
+        x, y = (a, b) if isinstance(a, _MResElt) else (b, a)
+        return x._magma_eq(y, op)
     if isinstance(a, MRecFormat) or isinstance(b, MRecFormat):
         # Magma has no equality of record formats
         raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(a), _type_of(b)), "'%s'" % op, True, pos)
@@ -2712,6 +2797,10 @@ def _order(a, b, op, pos):
     numbers, strings, booleans, sequences lexicographically, tuples of one
     length, Integers() with itself); Magma's error where it has none.  The
     orders Magma has on polynomials and matrices are not modelled: refused."""
+    if isinstance(a, _MResElt):
+        return a._magma_cmp(b, op)
+    if isinstance(b, _MResElt):
+        return -b._magma_cmp(a, op)
     da, db = _desc(a), _desc(b)
     num = ("Z", "Q", "R")
     if da is not None and db is not None and da[0] in num and db[0] in num:
@@ -3467,7 +3556,7 @@ def _container(v):
 
 
 def _atomic(v):
-    if isinstance(v, (bool, int, str, _Fraction, MReal)) or _is_ff(v):
+    if isinstance(v, (bool, int, str, _Fraction, MReal, _MResElt)) or _is_ff(v):
         return True
     if isinstance(v, MTuple):
         return _nested(v, lambda: all(_atomic(x) for x in v))
@@ -3960,6 +4049,8 @@ class _IntegerRing:
         return "Integer Ring"
 
     def __call__(self, x):
+        if isinstance(x, _MResElt):
+            return x.v  # (a residue's integer, 0 .. m - 1, as Magma's)
         return _coerce_int(x)
 
     _magma_coerce = __call__
@@ -4018,6 +4109,164 @@ def _coerce_int(x):
     raise MagmaError("Illegal coercion")
 
 
+# Order of a residue modulo m factors m and phi(m): m is bounded
+_RES_ORDER_BITS = 128
+
+
+class _MResRing:
+    """Integers(m): the ring of integers modulo m, as Magma has it
+    (RngIntRes): elements print as 0 .. m - 1."""
+
+    def __init__(self, m):
+        self.m = m
+
+    def __repr__(self):
+        return "Residue class ring of integers modulo %d" % self.m
+
+    def __eq__(self, other):
+        return isinstance(other, _MResRing) and other.m == self.m
+
+    def __hash__(self):
+        return hash(("Zmod", self.m))
+
+    def _magma_card(self):
+        return self.m
+
+    def __iter__(self):
+        if self.m > _COLLECT_MAX:
+            raise MagmaError("iterating over more than %d residues is not supported yet" % _COLLECT_MAX)
+        return (_MResElt(v, self) for v in range(self.m))
+
+    def _magma_contains(self, x):
+        if isinstance(x, int) and not isinstance(x, bool):
+            return True
+        if isinstance(x, _MResElt):
+            return x.R == self
+        raise MagmaError("Bad argument types", "'in'", True)
+
+    def _magma_coerce(self, x):
+        if isinstance(x, _MResElt):
+            # (from Z/nZ to Z/mZ when m divides n, as Magma's)
+            if x.R.m % self.m == 0:
+                return _MResElt(x.v, self)
+            raise MagmaError("Illegal coercion\nLHS: RngIntRes\nRHS: RngIntResElt", "'!'", True)
+        if isinstance(x, bool):
+            raise MagmaError("Illegal coercion\nLHS: RngIntRes\nRHS: BoolElt", "'!'", True)
+        if isinstance(x, int):
+            return _MResElt(x, self)
+        if isinstance(x, _Fraction):
+            n, d = x.numerator, x.denominator
+            if _math.gcd(d, self.m) != 1:
+                raise MagmaError("Denominator is not a unit\nLHS: RngIntRes\nRHS: FldRatElt", "'!'", True)
+            return _MResElt(n * pow(d, -1, self.m), self)
+        raise MagmaError("coercion of a %s into Integers(m) is not supported yet" % _type_of(x), "'!'", True)
+
+
+class _MResElt:
+    """An element of Integers(m) (RngIntResElt): v in 0 .. m - 1."""
+
+    __slots__ = ("v", "R")
+
+    def __init__(self, v, R):
+        self.v, self.R = v % R.m, R
+
+    def __repr__(self):
+        return str(self.v)
+
+    def parent(self):
+        return self.R
+
+    def _magma_parent(self):
+        return self.R
+
+    def __hash__(self):
+        return hash((self.R.m, self.v))
+
+    def _meet(self, o, op):
+        """o as a residue of this ring, for a op b (an integer is one)."""
+        if isinstance(o, _MResElt):
+            if o.R != self.R:
+                raise MagmaError("Arguments are not compatible\nArgument types given: RngIntResElt, RngIntResElt", "'%s'" % op, True)
+            return o.v
+        if isinstance(o, int) and not isinstance(o, bool):
+            return o
+        raise _bad_types(op, (self, o))
+
+    def __add__(self, o):
+        return _MResElt(self.v + self._meet(o, "+"), self.R)
+
+    def __radd__(self, o):
+        return _MResElt(self._meet(o, "+") + self.v, self.R)
+
+    def __sub__(self, o):
+        return _MResElt(self.v - self._meet(o, "-"), self.R)
+
+    def __rsub__(self, o):
+        return _MResElt(self._meet(o, "-") - self.v, self.R)
+
+    def __mul__(self, o):
+        return _MResElt(self.v * self._meet(o, "*"), self.R)
+
+    def __rmul__(self, o):
+        return _MResElt(self._meet(o, "*") * self.v, self.R)
+
+    def __neg__(self):
+        return _MResElt(-self.v, self.R)
+
+    def _inverse(self):
+        if _math.gcd(self.v, self.R.m) != 1:
+            return None
+        return pow(self.v, -1, self.R.m)
+
+    def __truediv__(self, o):
+        d = _MResElt(self._meet(o, "/"), self.R)
+        inv = d._inverse()
+        if inv is None:
+            raise MagmaError("Tried to divide by non-unit (%d)" % d.v, "'/'", True)
+        return _MResElt(self.v * inv, self.R)
+
+    def __rtruediv__(self, o):
+        return _MResElt(self._meet(o, "/"), self.R) / self
+
+    def __pow__(self, n):
+        if not isinstance(n, int) or isinstance(n, bool):
+            raise _bad_types("^", (self, n))
+        if n < 0:
+            inv = self._inverse()
+            if inv is None:
+                raise MagmaError("Can not take negative power of non-unit", "'^'", True)
+            return _MResElt(pow(inv, -n, self.R.m), self.R)
+        return _MResElt(pow(self.v, n, self.R.m), self.R)
+
+    def __eq__(self, o):
+        return isinstance(o, _MResElt) and o.R == self.R and o.v == self.v
+
+    def _magma_eq(self, o, op):
+        return self.v == _MResElt(self._meet(o, op), self.R).v
+
+    def _magma_cmp(self, o, op):
+        w = _MResElt(self._meet(o, op), self.R).v
+        return (self.v > w) - (self.v < w)
+
+    def _magma_order(self):
+        """The multiplicative order: 0 for a non-unit, as Magma's."""
+        if self.v == 0:
+            raise _arg_error("Order", "Can not take order of zero element")
+        m = self.R.m
+        if _math.gcd(self.v, m) != 1:
+            return 0
+        # (it divides the group's order, phi(m): each prime of phi(m) taken
+        # out while the power stays 1; m is factored, so bounded)
+        if m.bit_length() > _RES_ORDER_BITS:
+            raise MagmaError("Order in Integers(m) for m of more than %d bits is not supported yet" % _RES_ORDER_BITS, "'Order'")
+        k = int(_sa.euler_phi(m))
+        for p, _ in _sa.factor(k):
+            p = int(p)
+            while k % p == 0 and pow(self.v, k // p, m) == 1:
+                k //= p
+        return k
+
+
 def Integers(K=None):
     """Integers(): the ring of integers; Integers(K): K's maximal order."""
     if K is None:
@@ -4025,7 +4274,12 @@ def Integers(K=None):
     if isinstance(K, (_MNumberField, _MOrder)):
         return MaximalOrder(K)
     if isinstance(K, int) and not isinstance(K, bool):
-        raise MagmaError("Integers(m), the integers modulo m, is not supported yet", "'Integers'")
+        if K < 1:
+            raise _arg_error("Integers", "Argument 1 (%d) should be >= 2" % K)
+        if K == 1:
+            # (Magma's prints with a map, as a ring of one element)
+            raise MagmaError("Integers(1), the zero ring, is not supported yet", "'Integers'")
+        return _MResRing(K)
     if isinstance(K, _MFinField):
         raise MagmaError("Bad argument types\nArgument types given: FldFin", "'Integers'")
     raise MagmaError("Integers of a %s is not supported yet" % _type_of(K), "'Integers'")
@@ -4071,7 +4325,7 @@ class _Cat(str):
 _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
                "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt "
                # (and those of signatures: ISA(AlgMatElt, MtrxS))
-               "AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
+               "GrpPermElt GrpPerm RngIntResElt RngIntRes ModTupRngElt ModTupFldElt AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
                "FldNum FldQuad FldAlg FldRe RngOrd RngQuad Rng Fld Str Cat Any").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
@@ -4104,6 +4358,16 @@ def _type_name(x):
         return "RngQuad" if x.K._quadratic else "RngOrd"
     if isinstance(x, _MNFElt):
         return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
+    if isinstance(x, _MVector):
+        return "ModTupFldElt" if x._base is _sa.QQ else "ModTupRngElt"
+    if isinstance(x, _MResElt):
+        return "RngIntResElt"
+    if isinstance(x, _MPerm):
+        return "GrpPermElt"
+    if isinstance(x, _MSymGroup):
+        return "GrpPerm"
+    if isinstance(x, _MResRing):
+        return "RngIntRes"
     if isinstance(x, _smat.Matrix) and (x._base is _sa.ZZ or x._base is _sa.QQ):
         # (a matrix Magma mode made, or one its arithmetic returned: A + A
         # is the underlying matrix class, CORR-803-1)
@@ -4159,6 +4423,8 @@ def _ext_type(x):
         return "%s[%s]" % (_type(x), _elt_type(x))
     if isinstance(x, _sp.Polynomial):
         return "RngUPolElt[%s]" % _ring_cat(x.parent().base_ring())
+    if isinstance(x, _MVector):
+        return "%s[%s]" % (_type_name(x), _ring_cat(x._base))
     if isinstance(x, _smat.Matrix):
         return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
     if isinstance(x, _Cat):
@@ -4230,6 +4496,9 @@ _ISA_UP = {t: frozenset(s.split()) for t, s in {
     "FldFinElt": "FldElt RngElt", "FldNumElt": "FldAlgElt FldElt RngElt",
     "FldQuadElt": "FldNumElt FldAlgElt FldElt RngElt", "RngUPolElt": "RngElt",
     "AlgMatElt": "MtrxS Mtrx RngElt", "ModMatRngElt": "MtrxS Mtrx", "ModMatFldElt": "ModMatRngElt MtrxS Mtrx",
+    "ModTupRngElt": "Mtrx", "ModTupFldElt": "ModTupRngElt Mtrx",
+    "RngIntResElt": "RngElt", "RngIntRes": "Rng Str",
+    "GrpPermElt": "", "GrpPerm": "Str",
     "BoolElt": "", "MonStgElt": "", "Tup": "", "List": "", "Rec": "", "Cat": "", "RecFrmt": "",
     "SeqEnum": "Str", "SetEnum": "Str", "SetIndx": "Str", "SetMulti": "Str", "Map": "Str",
     "RngInt": "Rng Str", "FldRat": "Fld Rng Str", "FldRe": "Fld Rng Str", "FldFin": "Fld Rng Str",
@@ -4317,7 +4586,9 @@ def PolynomialRing(R, n=1):
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         # (a refusal in words: finite fields' users reach it, PolynomialRing(GF(p)))
-        raise MagmaError("PolynomialRing over a %s (not the integers or the rationals) is not supported yet" % _type_of(R), "'PolynomialRing'")
+        alt = ("; instead: Sage mode, R.<x> = GF(5)[], where factor, roots, gcd and is_irreducible work over finite fields"
+               if isinstance(R, _MFinField) else "")
+        raise MagmaError("PolynomialRing over a %s (not the integers or the rationals) is not supported yet%s" % (_type_of(R), alt), "'PolynomialRing'")
     return _sp.PolynomialRing_(base, "$.1")
 
 
@@ -4445,7 +4716,7 @@ def _factorization(n):
         out.sort(key=lambda t: (t[0].degree(), list(reversed(t[0].list()))))
         consts = [MTuple([R(p), e]) for p, e in sorted(consts)]
         return _multi([MSeq(consts + out), _m_num(n.leading_coefficient())], show=1)
-    if isinstance(n, _Fraction) and not isinstance(n, int):
+    if isinstance(n, bool) or not isinstance(n, (int, _Fraction)) or not _Fraction(n).denominator == 1:
         raise _bad_types("Factorization", [n])
     if n == 0:
         raise _arg_error("Factorization", "Argument 1 is not non-zero")
@@ -4625,6 +4896,8 @@ def Quotrem(a, b):
 
 
 def Modexp(a, k, m):
+    if any(isinstance(x, bool) or not isinstance(x, int) for x in (a, k, m)):
+        raise _bad_types("Modexp", (a, k, m))
     if m < 2:
         raise _arg_error("Modexp", "Argument 3 (%d) should be >= 2" % m)
     return pow(a, k, m)
@@ -4850,14 +5123,22 @@ def IsOdd(n):
 
 
 def IsZero(x):
+    if isinstance(x, _MResElt):
+        return x.v == 0
     return x == 0
 
 
 def IsOne(x):
+    if isinstance(x, _MResElt):
+        return x.v == 1 % x.R.m
     return x == 1
 
 
 def IsUnit(x):
+    if isinstance(x, _MResElt):
+        return _math.gcd(x.v, x.R.m) == 1
+    if _is_ff(x):
+        return bool(x)  # (every nonzero element of a field)
     return x in (1, -1)
 
 
@@ -4866,6 +5147,8 @@ def Abs(x):
 
 
 def Sign(x):
+    if isinstance(x, _MPerm):
+        return x._sign()
     return (x > 0) - (x < 0)
 
 
@@ -4944,12 +5227,23 @@ def Denominator(x):
     return x.denominator if isinstance(x, _Fraction) else 1
 
 
-def Intseq(n, b=10):
+def Intseq(n, b=10, s=None):
+    """The base b digits of n >= 0, least significant first; with s, padded
+    with zeros to at least s digits (never cut)."""
     if b < 2:
         raise MagmaError("Argument 2 (%d) should be >= 2" % b, "'Intseq'")
     if n < 0:
         raise MagmaError("Argument 1 (%d) should be >= 0" % n, "'Intseq'")
-    return MSeq(_sa.digits(n, b))
+    d = list(_sa.digits(n, b))
+    if s is not None:
+        if isinstance(s, bool) or not isinstance(s, int):
+            raise _bad_types("Intseq", [n, b, s])
+        if s < 0:
+            raise MagmaError("Argument 3 (%d) is not small and non-negative" % s, "'Intseq'", True)
+        if s > _COLLECT_MAX:
+            raise MagmaError("a sequence of more than %d elements is not supported yet" % _COLLECT_MAX, "'Intseq'")
+        d += [0] * (s - len(d))
+    return MSeq(d)
 
 
 def Seqint(s, b=10):
@@ -5232,6 +5526,8 @@ def Characteristic(F):
     """The characteristic of a ring."""
     if isinstance(F, _MFinField):
         return F.p
+    if isinstance(F, _MResRing):
+        return F.m
     if F is _ZZ or F is _QQ:
         return 0
     raise MagmaError("Bad argument types", "'Characteristic'")
@@ -5250,6 +5546,10 @@ def Order(x):
         if not x:
             raise _arg_error("Order", "Can not take order of zero element")
         return int(x.multiplicative_order())
+    if isinstance(x, _MResElt):
+        return x._magma_order()
+    if isinstance(x, _MPerm):
+        return x._order()
     raise MagmaError("Order of this argument is not supported yet", "'Order'")
 
 
@@ -5497,6 +5797,35 @@ def IsEmpty(s):
 
 def Seqset(s):
     return MSet(s)
+
+
+@_signature("Subsets", "SetEnum", ret="SetEnum")
+def _subsets_all(S):
+    """The set of all subsets of the set S."""
+    return _subsets(S, None)
+
+
+@_signature("Subsets", "SetEnum", "RngIntElt", ret="SetEnum")
+def _subsets_k(S, k):
+    """The set of the subsets of the set S with k elements."""
+    if k < 0:
+        raise _arg_error("Subsets", "Argument 2 (%d) should be >= 0" % k)
+    return _subsets(S, k)
+
+
+def _subsets(S, k):
+    """(admitted by their number before any is made)"""
+    items = S.ordered()
+    n = len(items)
+    count = 2 ** n if k is None else (_math.comb(n, k) if k <= n else 0)
+    # (charged together with the elements copied into them: n * 2^(n-1) in
+    # all subsets, k * C(n, k) in those of k elements; a subset's own set
+    # counts as 4 elements, so many small subsets are bounded too, HARD-DFC-2)
+    cells = (n * 2 ** (n - 1) if n else 0) if k is None else k * count
+    if 4 * count + cells > _COLLECT_MAX:
+        raise MagmaError("a set of subsets holding more than %d elements in all is not supported yet" % _COLLECT_MAX, "'Subsets'")
+    sizes = range(n + 1) if k is None else [k]
+    return MSet(MSet(c) for r in sizes for c in _itertools.combinations(items, r))
 
 
 def SetToSequence(s):
@@ -6266,18 +6595,226 @@ class _MMatrix(_smat.Matrix):
 
     def _magma_index(self, i):
         _check_index(self.nrows(), i)
-        return _MVector(self._rows[i - 1])
+        return _MVector(self._rows[i - 1], self._base)
+
+
+class _MVectorSpace:
+    """The parent of a vector: Magma's full vector space (over the
+    rationals) or RSpace (over the integers) of a degree."""
+
+    def __init__(self, base, n):
+        self.base, self.n = base, n
+
+    def __repr__(self):
+        if self.base is _sa.QQ:
+            return "Full Vector space of degree %d over Rational Field" % self.n
+        return "Full RSpace of degree %d over Integer Ring" % self.n
+
+    def __eq__(self, other):
+        return isinstance(other, _MVectorSpace) and (other.base, other.n) == (self.base, self.n)
+
+    def __hash__(self):
+        return hash((self.n, self.base is _sa.QQ))
 
 
 class _MVector(list):
+    """A vector of Magma's (a row), over the integers or the rationals:
+    printed (1 2 3), added, negated, scaled, and multiplied by a matrix on
+    the right, v * A, as Magma does."""
+
+    def __init__(self, items=(), base=None):
+        items = list(items)
+        if base is None:
+            base = _sa.QQ if any(isinstance(x, _Fraction) and not isinstance(x, int) for x in items) else _sa.ZZ
+        # (a rational vector's entries are rationals, the integral ones too:
+        # FldRatElt, as Magma's; CORR-DFC-2)
+        list.__init__(self, [_qelt(x) if base is _sa.QQ else x for x in items])
+        self._base = base
+
     def _magma_index(self, i):
         _check_index(len(self), i)
         return self[i - 1]
 
+    def _magma_parent(self):
+        return _MVectorSpace(self._base, len(self))
+
+    def _magma_card(self):
+        raise _bad_types("#", [self])
+
     def __repr__(self):
-        cells = [repr(x) for x in self]
+        cells = [_inline(x) for x in self]
         w = max(len(c) for c in cells) if cells else 0
         return "(" + " ".join(c.rjust(w) for c in cells) + ")"
+
+    def _with(self, o, op, name):
+        # (vectors of one length over one ring: a Z-vector and a Q-vector
+        # don't meet, as Magma's, CORR-DFC-3)
+        if not isinstance(o, _MVector) or len(o) != len(self) or o._base is not self._base:
+            raise _bad_types(name, [self, o])
+        return _MVector((op(a, b) for a, b in zip(self, o)), self._base)
+
+    def _magma_eq(self, o, op):
+        if not isinstance(o, _MVector) or o._base is not self._base:
+            raise _bad_types(op, [self, o])
+        if len(o) != len(self):
+            raise MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % (_ext_type(self), _ext_type(o)), "'%s'" % op, True)
+        return all(a == b for a, b in zip(self, o))
+
+    def __truediv__(self, o):
+        if self._base is not _sa.QQ or isinstance(o, bool) or not isinstance(o, (int, _Fraction)):
+            raise MagmaError("dividing a vector over the integers, or by this, is not supported yet", "'/'", True)
+        if o == 0:
+            raise MagmaError("Division by zero", "'/'", True)
+        return _MVector((a / o for a in self), self._base)
+
+    def __add__(self, o):
+        return self._with(o, lambda a, b: a + b, "+")
+
+    def __sub__(self, o):
+        return self._with(o, lambda a, b: a - b, "-")
+
+    def __neg__(self):
+        return _MVector((-a for a in self), self._base)
+
+    def __mul__(self, o, left=False):
+        if isinstance(o, _smat.Matrix):
+            # v * A: the row vector times the matrix, over one ring (CORR-DFC-3)
+            if o._base is not self._base:
+                raise MagmaError("Arguments have incompatible coefficient rings", "'*'", True)
+            if o.nrows() != len(self):
+                raise _bad_types("*", [self, o])
+            return _MVector((sum((a * r[j] for a, r in zip(self, o._rows)), 0) for j in range(o.ncols())), self._base)
+        if isinstance(o, (int, _Fraction)) and not isinstance(o, bool):
+            # (a rational scalar times an integral vector only when it is
+            # an integer, as Magma's)
+            if self._base is _sa.ZZ and _Fraction(o).denominator != 1:
+                types = ("FldRatElt", _ext_type(self)) if left else (_ext_type(self), "FldRatElt")
+                raise MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % types, "'*'", True)
+            return _MVector((a * (int(o) if self._base is _sa.ZZ else o) for a in self), self._base)
+        raise _bad_types("*", [self, o])
+
+    def __rmul__(self, o):
+        if isinstance(o, (int, _Fraction)) and not isinstance(o, bool):
+            return self.__mul__(o, left=True)  # (o on the left: its words name it first)
+        raise _bad_types("*", [o, self])
+
+    def __eq__(self, o):
+        return isinstance(o, _MVector) and list.__eq__(self, o)
+
+    def __ne__(self, o):
+        return not self == o
+
+    __hash__ = None
+
+
+def _vector_items(Q):
+    """Q's elements, its size admitted first: a lazy range is never
+    expanded past the collection bound (HARD-DFC-1)."""
+    n = Q.size() if isinstance(Q, MRange) else len(Q)
+    if n > _COLLECT_MAX:
+        raise MagmaError("a vector of more than %d entries is not supported yet" % _COLLECT_MAX, "'Vector'")
+    return list(Q)
+
+
+def _vector_base(R):
+    if R is _ZZ:
+        return _sa.ZZ
+    if R is _QQ:
+        return _sa.QQ
+    raise MagmaError("Vector over a ring other than the integers or the rationals is not supported yet", "'Vector'")
+
+
+@_signature("Vector", "SeqEnum", ret="ModTupRngElt")
+def _vector_seq(Q):
+    """A vector of the elements of Q, over their universe (the integers, or
+    the rationals with a rational among them)."""
+    items = _vector_items(Q)
+    if any(isinstance(x, bool) or not isinstance(x, (int, _Fraction)) for x in items):
+        raise MagmaError("Vector of these elements is not supported yet: only integers and rationals", "'Vector'")
+    if not items:
+        raise MagmaError("Vector of an empty sequence is not supported yet", "'Vector'")
+    # (over the sequence's universe: the rationals when declared, inferred,
+    # or holding a rational, CORR-DFC-2)
+    q = getattr(Q, "universe", None) is _QQ or getattr(Q, "_inf", None) is _QQ or \
+        any(isinstance(x, _Fraction) and not isinstance(x, int) for x in items)
+    return _MVector(items, _sa.QQ if q else _sa.ZZ)
+
+
+@_signature("Vector", "Rng", "SeqEnum", ret="ModTupRngElt")
+def _vector_ring(R, Q):
+    """A vector over R (the integers or the rationals) of the elements of Q."""
+    base = _vector_base(R)
+    items = _vector_items(Q)
+    out = []
+    for x in items:
+        y = _coerce_struct(x, R)
+        if y is _NOCOERCE or y is None:
+            raise MagmaError("Vector: an element can't be coerced into the ring", "'Vector'")
+        out.append(y)
+    return _MVector(out, base)
+
+
+# Solution's exact elimination: at most this many entry operations (about
+# a 58 by 58 system; its rational entries grow as it goes)
+_SOLVE_WORK = 2 * 10 ** 5
+
+
+@_signature("Solution", "MtrxS", "ModTupRngElt", ret="ModTupRngElt")
+def _solution(A, w):
+    """The vector v with v * A = w: the unique solution, over A's ring."""
+    m, n = A.nrows(), A.ncols()
+    if A._base is not w._base:
+        raise MagmaError("Arguments have incompatible coefficient rings", "'Solution'", True)
+    if len(w) != n:
+        raise _bad_types("Solution", [A, w])
+    # (exact elimination takes about m * n * min(m, n) rational operations,
+    # whose entries grow: admitted before the system is copied, HARD-DFC-3)
+    if m * n * min(m, n) > _SOLVE_WORK:
+        raise MagmaError("Solution of a system of more than %d (rows times columns times the smaller) steps is not supported yet"
+                         % _SOLVE_WORK, "'Solution'")
+    # the system sum_i v_i A[i][j] = w_j: rows are the equations (one for
+    # each column j), columns the unknowns v_i, then the right-hand side
+    rows = [[_Fraction(A._rows[i][j]) for i in range(m)] + [_Fraction(w[j])] for j in range(n)]
+    piv, r = [], 0
+    for c in range(m):
+        k = next((k for k in range(r, n) if rows[k][c] != 0), None)
+        if k is None:
+            continue
+        rows[r], rows[k] = rows[k], rows[r]
+        lead = rows[r][c]
+        rows[r] = [x / lead for x in rows[r]]
+        for k2 in range(n):
+            if k2 != r and rows[k2][c] != 0:
+                f = rows[k2][c]
+                rows[k2] = [a - f * b for a, b in zip(rows[k2], rows[r])]
+        piv.append(c)
+        r += 1
+    if any(row[m] != 0 for row in rows[r:]):
+        raise _arg_error("Solution", "No solution exists")
+    if r < m:
+        # (more than one solution: Magma returns a particular one of its
+        # own choosing, which Sagebrush doesn't reproduce)
+        raise MagmaError("Solution of a system with more than one solution is not supported yet", "'Solution'")
+    v = [rows[piv.index(c)][m] for c in range(m)]
+    base = _sa.QQ if (A._base is _sa.QQ or w._base is _sa.QQ) else _sa.ZZ
+    if base is _sa.ZZ and any(x.denominator != 1 for x in v):
+        raise _arg_error("Solution", "No solution exists")
+    return _MVector((x if base is _sa.QQ else int(x) for x in v), base)
+
+
+@_signature("Submatrix", "Mtrx", "RngIntElt", "RngIntElt", "RngIntElt", "RngIntElt", ret="Mtrx")
+def _submatrix(A, i, j, p, q):
+    """The p by q submatrix of A whose top left entry is A[i][j]."""
+    m, n = A.nrows(), A.ncols()
+    for k, (v, lo, hi) in enumerate([(i, 1, m + 1), (j, 1, n + 1)], 2):
+        if not lo <= v <= hi:
+            raise _arg_error("Submatrix", "Argument %d (%d) should be in the range [%d .. %d]" % (k, v, lo, hi))
+    for k, (v, hi) in enumerate([(p, m - i + 1), (q, n - j + 1)], 4):
+        if not 0 <= v <= hi:
+            raise _arg_error("Submatrix", "Argument %d (%d) should be in the range [0 .. %d]" % (k, v, hi))
+    if p == 0 or q == 0:
+        raise MagmaError("Submatrix with no rows or no columns is not supported yet", "'Submatrix'")
+    return _MMatrix(A._base, [r[j - 1:j - 1 + q] for r in A._rows[i - 1:i - 1 + p]])
 
 
 def _mmat(M):
@@ -6352,6 +6889,187 @@ def Rank(x):
     if isinstance(x, _smat.Matrix):
         return x.rank()
     return x.rank()
+
+
+# ------------------------------------------------------------------ permutation groups
+
+def _order_text(n):
+    """Order = 24 = 2^3 * 3, as Magma prints a group's order."""
+    if n == 1:
+        return "Order = 1"
+    f = " * ".join(str(p) if e == 1 else "%d^%d" % (p, e) for p, e in _sa.factor(n))
+    return "Order = %d" % n if f == str(n) else "Order = %d = %s" % (n, f)
+
+
+class _MSymGroup:
+    """Sym(n): the symmetric group on 1 .. n (GrpPerm), its elements the
+    permutations, composed left to right as Magma's: i^(p*q) = (i^p)^q."""
+
+    def __init__(self, n):
+        self.n = n
+
+    def __repr__(self):
+        name = _global_name(self)
+        return "Symmetric group %sacting on a set of cardinality %d\n%s" % (name + " " if name else "", self.n, _order_text(_math.factorial(self.n)))
+
+    def __eq__(self, other):
+        return isinstance(other, _MSymGroup) and other.n == self.n
+
+    def __hash__(self):
+        return hash(("Sym", self.n))
+
+    def _magma_card(self):
+        return _math.factorial(self.n)
+
+    def __iter__(self):
+        # (every permutation, in a fixed order of Sagebrush's: lexicographic
+        # in the images, which is not Magma's order)
+        if _math.factorial(self.n) > _COLLECT_MAX:
+            raise MagmaError("iterating over a group of more than %d elements is not supported yet" % _COLLECT_MAX)
+        for images in _itertools.permutations(range(1, self.n + 1)):
+            yield _MPerm(self, images)
+
+    def _identity(self):
+        return _MPerm(self, tuple(range(1, self.n + 1)))
+
+    def _magma_coerce(self, x):
+        if isinstance(x, _MPerm):
+            if x.G == self:
+                return x
+            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+        if isinstance(x, (MSeq, MRange)):
+            # G![images]: the permutation i -> images[i], integers only
+            # (CORR-DFC-4)
+            images = tuple(x)
+            bad = next((y for y in images if isinstance(y, bool) or not isinstance(y, int)), None)
+            if bad is not None:
+                raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: [%s]" % _type_of(bad), "'!'", True)
+            if len(images) != self.n or sorted(images) != list(range(1, self.n + 1)):
+                raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: [RngIntElt]", "'!'", True)
+            return _MPerm(self, images)
+        cycles = [x] if isinstance(x, MTuple) else list(x) if isinstance(x, _MCycles) else None
+        if cycles is None:
+            raise MagmaError("coercion of a %s into a permutation group is not supported yet" % _type_of(x), "'!'", True)
+        images = list(range(1, self.n + 1))
+        p = self._identity()
+        for c in cycles:
+            pts = list(c)
+            if not pts or len(set(pts)) != len(pts) or any(isinstance(a, bool) or not isinstance(a, int) or not 1 <= a <= self.n for a in pts):
+                raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True)
+            img = list(range(1, self.n + 1))
+            for k, a in enumerate(pts):
+                img[a - 1] = pts[(k + 1) % len(pts)]
+            p = p * _MPerm(self, tuple(img))
+        return p
+
+
+class _MPerm:
+    """A permutation of 1 .. n, an element of Sym(n) (GrpPermElt)."""
+
+    __slots__ = ("G", "images")
+
+    def __init__(self, G, images):
+        self.G, self.images = G, tuple(images)
+
+    def parent(self):
+        return self.G
+
+    def _magma_parent(self):
+        return self.G
+
+    def __hash__(self):
+        return hash(self.images)
+
+    def __eq__(self, o):
+        return isinstance(o, _MPerm) and o.images == self.images
+
+    def _magma_eq(self, o, op):
+        if not isinstance(o, _MPerm) or o.G != self.G:
+            raise MagmaError("Arguments are not compatible\nArgument types given: GrpPermElt, %s" % _ext_type(o), "'%s'" % op, True)
+        return o.images == self.images
+
+    def _cycles(self):
+        seen, out = set(), []
+        for i in range(1, self.G.n + 1):
+            if i in seen or self.images[i - 1] == i:
+                continue
+            c, j = [], i
+            while j not in seen:
+                seen.add(j)
+                c.append(j)
+                j = self.images[j - 1]
+            out.append(c)
+        return out
+
+    def __repr__(self):
+        cs = self._cycles()
+        if not cs:
+            return "Id(%s)" % (_global_name(self.G) or "$")
+        return "".join("(" + ", ".join(str(a) for a in c) + ")" for c in cs)
+
+    def __mul__(self, o):
+        if not isinstance(o, _MPerm):
+            raise _bad_types("*", (self, o))
+        if o.G != self.G:
+            raise MagmaError("Arguments are not compatible\nArgument types given: GrpPermElt, GrpPermElt", "'*'", True)
+        # (left to right: i^(p*q) = (i^p)^q)
+        return _MPerm(self.G, tuple(o.images[self.images[i] - 1] for i in range(self.G.n)))
+
+    def _inverse(self):
+        inv = [0] * self.G.n
+        for i, j in enumerate(self.images):
+            inv[j - 1] = i + 1
+        return _MPerm(self.G, tuple(inv))
+
+    def __pow__(self, k):
+        if isinstance(k, _MPerm):
+            # p^q: conjugation q^-1 p q
+            return k._inverse() * self * k
+        if not isinstance(k, int) or isinstance(k, bool):
+            raise _bad_types("^", (self, k))
+        b = self if k >= 0 else self._inverse()
+        r, k = self.G._identity(), abs(k) % max(self._order(), 1)
+        while k:
+            if k & 1:
+                r = r * b
+            b = b * b
+            k >>= 1
+        return r
+
+    def __rpow__(self, i):
+        # i^p: the image of the point i
+        if isinstance(i, int) and not isinstance(i, bool) and 1 <= i <= self.G.n:
+            return self.images[i - 1]
+        raise MagmaError("Cannot apply permutation to this object", "'^'", True)
+
+    def _order(self):
+        o = 1
+        for c in self._cycles():
+            o = o * len(c) // _math.gcd(o, len(c))
+        return o
+
+    def _sign(self):
+        return -1 if sum(len(c) - 1 for c in self._cycles()) % 2 else 1
+
+
+@_signature("Sym", "RngIntElt", ret="GrpPerm")
+def _sym(n):
+    """The symmetric group on 1 .. n."""
+    if n < 1:
+        raise _arg_error("Sym", "Argument 1 (%d) should be >= 1" % n)
+    if n > _SYM_MAX:
+        raise MagmaError("Sym(n) for n above %d is not supported yet" % _SYM_MAX, "'Sym'")
+    return _MSymGroup(n)
+
+
+# the largest n of Sym(n): its permutations are tuples of n points
+_SYM_MAX = 10 ** 4
+
+
+@_signature("Identity", "GrpPerm", ret="GrpPermElt")
+def _identity(G):
+    """The identity element of the group G."""
+    return G._identity()
 
 
 # ------------------------------------------------------------------ argument guard
