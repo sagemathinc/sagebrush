@@ -7710,7 +7710,7 @@ def strrep_(s, old, new):
     out = []
     for k in range(n):
         t, o, nw = item(s, k), item(old, k), item(new, k)
-        out.append(Char(t.replace(o, nw) if o else t))
+        out.append(Char(_strrep_text(t, o, nw)))
     return Cell(out, shape)
 
 
@@ -7880,6 +7880,14 @@ def regexpi_(nargout, s, pat, *opts):
     return _regexp(nargout, s, pat, opts, _re.IGNORECASE)
 
 
+def _regexp_row(e):
+    """a text or expression of regexp's cell forms as a character vector; a character matrix
+    is outside its page's character-vector inputs, so it is refused rather than its rows joined"""
+    if type(e) is Char and _dims(e)[0] > 1:
+        raise _err("regexp: character matrices are not supported; use a cell array of character vectors.")
+    return Char(_text(e))
+
+
 def _regexp(nargout, s, pat, opts, flags):
     if type(pat) is StrArr or (type(pat) is Cell and (type(s) is StrArr or type(s) is Str)):
         # (string arrays of expressions give string outputs whose exact forms the page
@@ -7888,13 +7896,13 @@ def _regexp(nargout, s, pat, opts, flags):
     if type(pat) is Cell:
         # (a cell array of expressions: each with STR, or with STR's corresponding
         # element when both are cell arrays, which must then have the same dimensions)
-        pats = [Char(_text(e)) for e in pat.a]
+        pats = [_regexp_row(e) for e in pat.a]
         if type(s) is Cell:
             if _text_size_key(s.shape) != _text_size_key(pat.shape):
                 raise _err("regexp: STR and EXPRESSION must have the same dimensions when both are arrays.")
-            strs = [Char(_text(e)) for e in s.a]
+            strs = [_regexp_row(e) for e in s.a]
         else:
-            strs = [s] * len(pats)
+            strs = [_regexp_row(s)] * len(pats)
         per = [_regexp(max(1, nargout), t, p, opts, flags) for t, p in zip(strs, pats)]
         if nargout <= 1:
             return Cell(per, pat.shape)
