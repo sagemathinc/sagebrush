@@ -1,0 +1,51 @@
+GF7 :: [5 6 0]
+[1 2 3]
+GF9 :: [1, z + 1, z, 2*z + 1]
+AA :: [1.414213562373095? 1.732050807568878?]
+[1.732050807568878?                  2]
+QQbar :: [    1.414213562373095?*I 1 + 1.414213562373095?*I]
+[    1.732050807568878?*I 1 + 1.732050807568878?*I]
+K :: [    1     2]
+[    a a + 1]
+RDF :: [               1.0                0.5]
+[               0.5 0.3333333333333333]
+AA empty :: (0, 3)
+GF7 raises :: ZeroDivisionError
+AA parent :: Algebraic Real Field
+Finite Field of size 7 RR1.25 :: TypeError
+Finite Field of size 2 RR1.25 :: TypeError
+Ring of integers modulo 6 RR1.25 :: TypeError
+Finite Field of size 7 float1.25 :: TypeError
+Finite Field of size 2 float1.25 :: TypeError
+Ring of integers modulo 6 float1.25 :: TypeError
+Finite Field of size 7 RDF1.25 :: TypeError
+Finite Field of size 2 RDF1.25 :: TypeError
+Ring of integers modulo 6 RDF1.25 :: TypeError
+Finite Field of size 7 RR2 :: 2
+Finite Field of size 2 RR2 :: 0
+Ring of integers modulo 6 RR2 :: 2
+Finite Field of size 7 float2 :: 2
+Finite Field of size 2 float2 :: 0
+Ring of integers modulo 6 float2 :: 2
+Finite Field of size 7 RR-3 :: 4
+Finite Field of size 2 RR-3 :: 1
+Ring of integers modulo 6 RR-3 :: 3
+Finite Field of size 7 RR1e30 :: 5
+Finite Field of size 2 RR1e30 :: 0
+Ring of integers modulo 6 RR1e30 :: 4
+Finite Field of size 7 RR1e309 :: 2
+Finite Field of size 2 RR1e309 :: 0
+Ring of integers modulo 6 RR1e309 :: 2
+Finite Field of size 7 RR-1e309 :: 5
+Finite Field of size 2 RR-1e309 :: 0
+Ring of integers modulo 6 RR-1e309 :: 4
+Finite Field of size 7 RR1e400 :: 3
+Finite Field of size 2 RR1e400 :: 0
+Ring of integers modulo 6 RR1e400 :: 0
+Finite Field of size 7 RR1e1000 :: 3
+Finite Field of size 2 RR1e1000 :: 0
+Ring of integers modulo 6 RR1e1000 :: 2
+list 1.25 :: TypeError
+list RR2 :: [2]
+fn 1.25 :: TypeError
+calls [(0, 0)]
