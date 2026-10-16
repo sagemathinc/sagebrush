@@ -12,6 +12,7 @@ import math as _math
 import builtins as _builtins
 import _numpy as _np
 from _numpy import ndarray, dtype
+_dtype_of = dtype  # (the class, where a parameter is named dtype)
 
 __version__ = "2.5.1+sagebrush"
 
@@ -499,7 +500,8 @@ def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
         out[0] = start
         if endpoint and num > 1:
             out[-1] = stop
-    return out
+    # (dtype applied to the result, as NumPy's)
+    return out if dtype is None else out.astype(dtype)
 
 
 def eye(N, M=None, k=0, dtype=float, order="C", *, like=None):
@@ -599,12 +601,24 @@ class ufunc:
                 args = args[:-1]
             else:
                 raise TypeError("%s() takes from %d to %d positional arguments but %d were given" % (self.__name__, self.nin, self.nin + 1, len(args)))
+        scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
+        if dtype is not None:
+            # (the loop is resolved from dtype before computing, as NumPy's:
+            # the inputs cast to it, then the operation in it)
+            dt = _dtype_of(dtype)
+            args = tuple(asarray(x).astype(dt) for x in args)
         if self.nin == 1:
             r = getattr(_np, "u_" + self._op)(args[0])
         else:
             r = _np.binary(self._op, args[0], args[1])
         if dtype is not None:
-            r = asarray(r).astype(dtype)
+            r = asarray(r)
+            if r.dtype != dt:
+                if r.dtype.kind in "fc" and dt.kind in "biu":
+                    raise TypeError("ufunc '%s' did not contain a loop with signature matching types" % self.__name__)
+                r = r.astype(dt)
+            if scalars and r.ndim == 0:
+                r = r[()]
         if where is not True:
             r = _np.where3(where, r, out if out is not None else r)
         if out is not None:
@@ -616,6 +630,8 @@ class ufunc:
 
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
         a = asarray(a)
+        if dtype is not None:
+            a = a.astype(dtype)  # (accumulated in dtype, as NumPy's)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         if self._op in quick and initial is None:
@@ -634,6 +650,8 @@ class ufunc:
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
         a = asarray(a)
+        if dtype is not None:
+            a = a.astype(dtype)  # (accumulated in dtype, as NumPy's)
         if self._op == "add":
             return cumsum(a, axis=axis, dtype=dtype)
         if self._op == "multiply":
@@ -648,7 +666,7 @@ class ufunc:
 
     def outer(self, A, B, **kw):
         A, B = asarray(A), asarray(B)
-        return self(A.reshape(A.shape + (1,) * B.ndim), B)
+        return self(A.reshape(A.shape + (1,) * B.ndim), B, **kw)
 
 
 _BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "power",
@@ -667,7 +685,7 @@ for _name in _UNARY:
 divide = true_divide
 mod = remainder
 abs = absolute
-fabs = absolute
+fabs = ufunc("fabs", 1)
 degrees, radians = rad2deg, deg2rad
 bitwise_not = bitwise_invert = invert
 pow = power

@@ -37,6 +37,20 @@ test("float16, the float ufuncs NumPy computes in float16, and longdouble are re
     "np.array([1.0], dtype='g')",
     "np.array([1.0], dtype='clongdouble')",
     "np.array([1.0], dtype='complex256')",
+    "np.result_type('float16')",
+    "np.result_type(np.float16)",
+    "np.result_type(np.int8, 'f2')",
+    "np.geomspace(1, 2, 3, dtype='float16')",
+    "np.add.reduce([1, 2], dtype='float16')",
+    "np.maximum.accumulate([1, 2], dtype='float16')",
+    "np.add.outer([1], [2], dtype='float16')",
+    "np.hypot(np.array([1], np.int8), np.array([2], np.uint8))",
+    "np.arctan2(np.array([1], np.int8), 2)",
+    "np.copysign(np.array([True]), np.array([1], np.uint8))",
+    "np.rint(np.array([1], np.int8))",
+    "np.fabs(np.array([-128], np.int8))",
+    "np.fabs(np.array([True]))",
+    "np.sqrt(np.array([2], np.int16), dtype=np.float16)",
   ];
   const code = ["import numpy as np"].concat(cases.map((c) => `try:\n    print(repr(${c}))\nexcept NotImplementedError as e:\n    print('refused')`)).join("\n");
   const got = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trimEnd().split("\n");
