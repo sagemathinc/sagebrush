@@ -89,3 +89,25 @@ Universe(Reverse([Rationals() | 1, 2]));
 L := [2/3, 1]; L := Exclude(L, 2/3); Universe(L);
 M := [Rationals() | 1]; M := Include(M, 3); Universe(M);
 E := []; E := Append(E, 1/2); E[1] := 4; Universe(E);
+// a refused write changes nothing; the first defined value fixes the
+// universe, after holes too; a sequence of sequences takes a whole new
+// element only into its elements' universe
+I := [2,5]; I[4] := 1/3;
+I;
+T := [Integers()|]; T[3] := 1/2;
+T;
+S := []; S[3] := 2; S[4] := 1/2;
+S;
+S[1] := "x";
+U := []; U[3] := 2/3; U[3] := 4; Universe(U);
+A := [[2,5],[3,4]]; A[1] := [1/3,5];
+A;
+B := [[2/3,5],[3,4]]; B[1] := [6,7]; B[1][1] := 1/2; B;
+C := []; C[1][1] := 2;
+D := [[2,5],[3,4]]; D[3][2] := 1/2;
+D;
+D[3][2] := 7;
+F := [[2,5]]; F[3] := [1]; F;
+G := [1]; G[3][1] := 2;
+H := [[2,5],[3]]; H[2][3] := 9; H;
+K := [[2,5]]; K[1] := 3;
