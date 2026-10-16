@@ -4485,6 +4485,10 @@ _unary("cot", lambda A: 1 / np.tan(A))
 _unary("sind", _sind)
 _unary("cosd", _cosd)
 _unary("tand", lambda A: _sind(A) / _cosd(A))
+# (from sind and cosd, which are exactly 0 at their zeros: secd(90) and cscd(180) are Inf, cotd(90) 0)
+_unary("secd", lambda A: 1 / _cosd(A))
+_unary("cscd", lambda A: 1 / _sind(A))
+_unary("cotd", lambda A: _cosd(A) / _sind(A))
 
 
 def _recip_inverse(name, base):
@@ -4515,6 +4519,20 @@ def _recip_inverse(name, base):
 
 for _n, _b in (("asec", "acos"), ("acsc", "asin"), ("acot", "atan"), ("asech", "acosh"), ("acsch", "asinh"), ("acoth", "atanh")):
     _recip_inverse(_n, _b)
+
+
+def _in_degrees(name, base):
+    """asind, acosd, atand and the reciprocal three: the radian function's result times
+    180/pi, a complex result too, in its class (asind(2) is 90 - 75.4561i)"""
+    def g(nargout, x):
+        r = _B[base].f(nargout, x)
+        cls = class_(r)
+        return _finish(_farr(r, name) * (180 / _math.pi), "single" if cls == "single" else "double")
+    _B[name] = Builtin(g, name)
+
+
+for _n in ("asin", "acos", "atan", "asec", "acsc", "acot"):
+    _in_degrees(_n + "d", _n)
 
 
 def _gamma(x):
