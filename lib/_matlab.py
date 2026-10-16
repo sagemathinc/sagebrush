@@ -4696,6 +4696,9 @@ def round_(nargout, x, n=None, kind=None):
     if t not in ("decimals", "significant"):
         raise _err("round: the rounding type must be 'decimals' or 'significant'.")
     cls = class_(x)
+    if cls not in ("double", "single"):
+        # (round's page: with N, X is single or double)
+        raise _err("round: with a number of digits, X must be single or double, not %s." % cls)
     A = _farr(x)
     if t == "significant":
         with np.errstate(divide="ignore"):
@@ -4708,9 +4711,8 @@ def round_(nargout, x, n=None, kind=None):
     else:
         s = 10.0 ** (-d)
         r = _round_c(A / s) * s
-    # (the input's class, as round's page says: single stays single, an integer class
-    # its class)
-    return _finish(r, cls if cls in _INTS or cls == "single" else "double")
+    # (the input's class, as round's page says: single stays single)
+    return _finish(r, cls)
 
 
 @_bi("abs")
