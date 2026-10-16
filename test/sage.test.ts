@@ -56,3 +56,13 @@ test("ideal conversion is linear in the arity; sqrt(prec) is admitted first", ()
   assert.equal(cli("--sage", "-c", src), "2 True\nrefused True\nTrue\n");
   assert.ok(Date.now() - t < 30000, `took ${Date.now() - t} ms`);
 });
+
+test("divmod with a real number above 16384 bits is refused first, integral or not (HARD-F2B-1)", () => {
+  // (the cap came after the exact conversion and the integral fast path:
+  // divmod(1/1, RealField(2^20)(2)) gave (1/2, 0))
+  const src = "R = RealField(2^20)\nfor x in (R(2), R(1)/3, -R(2)):\n try:\n  print(divmod(1/1, x))\n except NotImplementedError as e:\n  print(e)\n";
+  const t = Date.now();
+  const line = "divmod with a real number of more than 16384 bits of precision is not implemented\n";
+  assert.equal(cli("--sage", "-c", src), line.repeat(3));
+  assert.ok(Date.now() - t < 20000);
+});
