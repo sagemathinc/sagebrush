@@ -1902,3 +1902,25 @@ test("asind, acosd, atand, asecd, acscd, acotd, secd, cscd and cotd: the radian 
     "1.7320508075688767 -0.99999999999999989 0",
   ]);
 });
+
+test("sqrt(-0) is +0; 1.^NaN and NaN.^0 are NaN; log1p, log10 and log2 with a pole or Inf in a complex array (CORR-3DB-1..5)", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const z = (e: string) => `z = ${e}; fprintf('%.4f%+.4fi ', [real(z(:)).' + 0; imag(z(:)).' + 0]); fprintf('\\n')`;
+  assert.deepEqual(run([
+    "disp(mat2str([1./sqrt(-0) 1./sqrt([-0 0])])); disp(mat2str(1./sqrt(single(-0))))",
+    "disp(mat2str([1.^NaN NaN.^0 1^NaN NaN^0 power(1, NaN)])); disp(mat2str([1 2].^[NaN NaN])); disp(mat2str([NaN NaN].^[0 1]))",
+    "disp(mat2str(single(1).^single(NaN))); disp(mat2str(single(NaN).^single(0))); disp(class(single(NaN).^single(0))); disp(mat2str([2 1].^[0 3]))",
+    z("log1p([-2 -1 0 1])"), z("log10([-10 0 1 10])"), z("log2([-1 0 Inf])"),
+    "z = log1p([1e-16 -2]); fprintf('%.6g\\n', real(z(1)))",
+  ].join("\n")), [
+    "[Inf Inf Inf]", "Inf",
+    "[NaN NaN NaN NaN NaN]", "[NaN NaN]", "[NaN NaN]",
+    "NaN", "NaN", "single", "[1 1]",
+    "0.0000+3.1416i -Inf+0.0000i 0.0000+0.0000i 0.6931+0.0000i",
+    "1.0000+1.3644i -Inf+0.0000i 0.0000+0.0000i 1.0000+0.0000i",
+    "0.0000+4.5324i -Inf+0.0000i Inf+0.0000i",
+    "1e-16",
+  ]);
+});
