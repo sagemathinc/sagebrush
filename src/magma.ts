@@ -185,6 +185,10 @@ class Parser {
     }
   }
   private witnesses = new Set<string>();
+  // the witnesses a top-level statement assigns (with no witness, unassigns):
+  // unbound when it ends, so that later cells, compiled on their own, don't
+  // read the no-value marker (CORR-39D-1)
+  private topWitnesses: string[] = [];
 
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
@@ -352,6 +356,7 @@ class Parser {
         // each top-level statement on its own, as Magma runs them; what an
         // error does is up to _m._report (a file stops, a session goes on)
         this.rejected = null;
+        this.topWitnesses = [];
         this.emit("try:");
         this.block(() => {
           this.emit(`_m._here(${t.line}, ${t.col})`);
@@ -365,6 +370,10 @@ class Parser {
           const r = this.rejected as { line: number; col: number; msg: string };
           this.out.length = saved.n;
           this.emit(`_m._compile_error(${r.line}, ${r.col}, ${JSON.stringify(r.msg)})`);
+        } else if (this.topWitnesses.length) {
+          const names = [...new Set(this.topWitnesses)].map((n) => JSON.stringify(n)).join(", ");
+          this.emit("finally:");
+          this.block(() => this.emit(`_m._unset(globals(), [${names}])`));
         }
       } catch (e) {
         // (a construct Sagebrush doesn't have yet: said so, where it is)
@@ -1664,6 +1673,7 @@ class Parser {
     const found = `(${t} := _m._witness(((${head},) ${loops} if ${kw === "exists" ? test : `not ${test}`})))`;
     const names = wit.map((w) => pyName(w.v));
     names.forEach((n, k) => this.declareGlobal(n, wit[k]));
+    if (this.fns.length === 0) this.topWitnesses.push(...names);
     const assign = names.map((n, k) => `(${n} := ${names.length === 1 ? `${t}[0]` : `_m._index(${t}[0], ${k + 1})`})`).join(", ");
     // (no witness: they are unassigned, as in Magma, not left with old values)
     const unassign = names.map((n) => `(${n} := _m._NOVAL)`).join(", ");
