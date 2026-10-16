@@ -1677,3 +1677,67 @@ test("moving statistics with a fill take the window's outside positions as the f
   assert.equal(out.trim(), "9.99900009999e-05 2 0 1");
   assert.ok(ms < 15000, `${ms} ms`);
 });
+
+test("clearvars -except and -regexp, and clear with patterns or computed names in a function; globals and persistents there refused", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trimEnd()).filter((s: string) => s !== "");
+  const ex = (ns: string) => `disp(mat2str([${ns.split(" ").map((n) => `exist('${n}', 'var')`).join(" ")}]))`;
+  const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
+  assert.deepEqual(run([
+    // (top level: -except keeps what it names, exactly or by wildcard; function syntax too)
+    "p = 1; q = 2; clearvars -except p", ex("p q"),
+    "p = 1; px = 2; q = 3; clearvars p* -except px", ex("p px q"),
+    "p = 1; q = 2; r = 3; clearvars('-except', 'q', 'r')", ex("p q r"),
+    "kA = 1; kB = 2; m1 = 3; clearvars -regexp ^k -except kB", ex("kA kB m1"),
+    "s1 = 1; s22 = 2; clear -regexp ^s\\d$", ex("s1 s22"),
+    // (a variable named like clear's words: clearvars all is the variable; clear all too when it exists)
+    "all = 9; a = 5; clearvars all", ex("a all"),
+    "all = 9; a = 5; clear all", ex("a all"),
+    "disp(mat2str([f1() f2() f3()]))",
+    "function r = f1()\n abc = 5; xyz = 7;\n clear ab*\n r = [exist('abc', 'var') xyz];\nend",
+    "function r = f2()\n a = 5; b = 7; n = 'a';\n clear(n)\n r = [exist('a', 'var') b];\nend",
+    "function r = f3()\n a = 1; b = 2; c = 3;\n clearvars -except b\n r = [exist('a', 'var') exist('b', 'var') exist('c', 'var')];\nend",
+  ].join("\n")), ["[1 0]", "[0 1 1]", "[0 1 1]", "[0 1 1]", "[0 1]", "[1 0]", "[1 0]", "[0 7 0 7 0 1 0]"]);
+  // (refused, not done wrongly: a function's global or persistent, and options Sagebrush doesn't have)
+  assert.deepEqual(run([
+    tryIt("g1()"), tryIt("g2()"), tryIt("g3()"), tryIt("clearvars -global x"), tryIt("clear -bogus x"),
+    // (clear global in a function with its own global: refused, in each form)
+    tryIt("g4()"), tryIt("g5()"), tryIt("g6()"),
+    // (a -regexp that could backtrack exponentially, here on a 31-character name, is refused, not run)
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab = 1;", tryIt("clear -regexp ^(a+)+$"), tryIt("clearvars -except -regexp (a|aa)*b"),
+    // (a sequence's weight is the product of its repetitions' lengths, an alternation's the sum of
+    // its branches': past 10^5, refused, whether unbounded, optional, bounded, or alternation groups)
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa = 2;",
+    tryIt("clear -regexp ^a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*b$"), tryIt("clear -regexp a*a*a*a*"), tryIt("clear -regexp a*a*a*b"),
+    tryIt("clear -regexp ^" + "a?".repeat(50) + "b$"), tryIt("clear('-regexp', '" + "a{0,31}".repeat(8) + "b')"),
+    tryIt("clear -regexp " + "(a|b)".repeat(19) + "c"),
+    "function g4()\n global G\n G = 7;\n clear global\nend",
+    "function g5()\n global G\n G = 7;\n clear('global')\nend",
+    "function g6()\n global G\n G = 7; n = 'global';\n clear(n)\nend",
+    "function g1()\n global G\n G = 7;\n clear G\nend",
+    "function g2()\n persistent P\n P = 7;\n clear\nend",
+    "function g3()\n global G\n G = 1; ab = 2;\n clear a* G*\nend",
+  ].join("\n")), Array(16).fill("refused"));
+  // (up to the bound they're allowed, and quick even against a 63-character name that doesn't match;
+  // simple selectors are far below it)
+  const t0 = Date.now();
+  assert.deepEqual(run(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa = 1; q = 2;",
+    "clear('-regexp', 'a*a*b', '" + "a?".repeat(16) + "b', '" + "a{0,31}".repeat(3) + "b', '(ab)+c', '^Mon\\d{3}$', '^q$')",
+    "disp(mat2str([exist('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'var') exist('q', 'var')]))"].join("\n")), ["[1 0]"]);
+  assert.ok(Date.now() - t0 < 10000, `${Date.now() - t0} ms`);
+  // (the expressions' weights times the workspace's names count against 4,000,000, -except's
+  // with the targets': half the expressions run, all of them, or split by -except, are refused)
+  const half = "p = repmat({'a*a*b'}, 1, 200); x1 = 1; x2 = 2;";
+  assert.deepEqual(run([
+    half, tryIt("clearvars('-regexp', p{:})"),
+    half, tryIt("clearvars('-regexp', p{:}, p{:})"),
+    half, tryIt("clearvars('-regexp', p{:}, '-except', '-regexp', p{:})"),
+  ].join("\n")), ["ran", "refused", "refused"]);
+  // (clear global in a function without globals of its own: the global store is cleared)
+  assert.deepEqual(run([
+    "global H\nH = 7; zap(); disp(readback())",
+    "function zap()\n clear global\nend",
+    "function r = readback()\n global H\n r = isempty(H);\nend",
+  ].join("\n")), ["   1"]);
+});
