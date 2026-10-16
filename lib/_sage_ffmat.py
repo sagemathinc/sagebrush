@@ -274,6 +274,353 @@ def _pushout(B, o):
     return F
 
 
+# ------------------------------------------------------------------ vector parents
+
+def _num_kind(R):
+    """(complex, double, bits) for the numerical fields (RDF, CDF, RR, CC,
+    RealField(p) and ComplexField(p) rounding to nearest), else None."""
+    import _sage_rdf, _sage_real
+    sa = _sa()
+    if R is _sage_rdf.RDF or R is _sage_rdf.CDF:
+        return (R is _sage_rdf.CDF, True, 53)
+    if R is sa.RR or R is sa.CC:
+        return (R is sa.CC, False, 53)
+    if isinstance(R, _sage_real.RealField_) and R._rnd == "RNDN" and not R._rr_internal:
+        return (False, False, R._prec)
+    if isinstance(R, _sage_real.ComplexField_):
+        return (True, False, R._prec)
+    return None
+
+
+def _ring_class(R):
+    """What sagebrush models of R's coercions into other rings: "ZZ", "QQ",
+    "mod" (GF(q), Z/nZ), "AA", "QQbar", "num", "nf", "SR", else None."""
+    import _sage_qqbar as qb, _sage_nf
+    sa = _sa()
+    if R is sa.ZZ:
+        return "ZZ"
+    if R is sa.QQ:
+        return "QQ"
+    if isinstance(R, (_ff.IntegerModRing_, _ff.FiniteField_ext)):
+        return "mod"
+    if R is qb.AA:
+        return "AA"
+    if R is qb.QQbar:
+        return "QQbar"
+    if _num_kind(R) is not None:
+        return "num"
+    if isinstance(R, _sage_nf.NumberField_absolute):
+        return "nf"
+    if R is sa.SR:
+        return "SR"
+    return None
+
+
+def _mod_pushout(R, S):
+    """The common ring of GF(q) or Z/nZ R and S: Z/mZ and Z/nZ meet in
+    Z/gcd(m, n)Z (GF(p) when either is GF(p) of that size), a prime field
+    in its extension; None (Sage's TypeError) otherwise."""
+    import math
+    ext = [isinstance(X, _ff.FiniteField_ext) for X in (R, S)]
+    if ext[0] and ext[1]:
+        return None  # (two extension fields: GF(4) and GF(16) do not meet in Sage)
+    if ext[0] or ext[1]:
+        E, Z = (R, S) if ext[0] else (S, R)
+        if Z._n == 1:
+            raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
+        return E if Z._n % E._p == 0 else None
+    g = math.gcd(R._n, S._n)
+    if g == 1:
+        # (Z/1Z meets every Z/nZ, but not GF(p); GF(5) and GF(7) do not meet)
+        if R._is_gf or S._is_gf:
+            return None
+        return R if R._n == 1 else S if S._n == 1 else None
+    for X in (R, S):
+        if X._n == g and X._is_gf:
+            return X
+    for X in (R, S):
+        if X._n == g:
+            return X
+    return _ff.IntegerModRing(g)
+
+
+def _num_pushout(R, S):
+    """Where two numerical fields meet, as Sage's coercion finds it: the
+    lower precision (of RDF and RR, or CDF and CC, the left one), and
+    complex when either is (CDF with a real field of at least 53 bits,
+    else ComplexField of the lower precision: RDF and ComplexField(100)
+    give CC, CDF and RealField(24) ComplexField(24))."""
+    (cr, dr, pr), (cs, ds, ps) = _num_kind(R), _num_kind(S)
+    if cr == cs:
+        return R if pr <= ps else S
+    C = R if cr else S
+    if (dr if cr else ds) and min(pr, ps) >= 53:
+        return C
+    return _sa().ComplexField(min(pr, ps))
+
+
+def _complexified(R):
+    import _sage_rdf
+    sa = _sa()
+    if R is _sage_rdf.RDF:
+        return _sage_rdf.CDF
+    if R is sa.RR:
+        return sa.CC
+    k = _num_kind(R)
+    return R if k[0] else sa.ComplexField(k[2])
+
+
+def _vector_pushout(R, S):
+    """The ring in which vectors over R and over S meet (their sum, product
+    and cross product lie over it), as Sage's coercion finds it; None when
+    Sage has none (TypeError); NotImplementedError for rings whose meeting
+    sagebrush does not model (number fields with other fields: their
+    embeddings).
+
+    EXAMPLES::
+
+        sage: K = QuadraticField(2)
+        sage: (vector(QQ, [1, 2]) + vector(K, [1, 1])).parent()
+        Vector space of dimension 2 over Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+        sage: vector(RDF, [1, 2]) + vector(K, [1, 1])  # sagebrush only (Sage: (2.0, 3.0))
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: vectors over Real Double Field and Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095? are not available together in sagebrush yet
+    """
+    if R is S or R == S:
+        return R
+    a, b = _ring_class(R), _ring_class(S)
+    if a is None or b is None:
+        raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
+    if a == "ZZ":
+        return S
+    if b == "ZZ":
+        return R
+    if "mod" in (a, b):
+        return _mod_pushout(R, S) if a == b else None
+    if "nf" in (a, b):
+        if a == "QQ" or b == "QQ":
+            return S if a == "QQ" else R
+        # (a number field meets AA, QQbar, the numerical fields and other
+        # number fields by its embedding: not modelled)
+        raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
+    if "SR" in (a, b):
+        return _sa().SR
+    if a == "QQ":
+        return S
+    if b == "QQ":
+        return R
+    import _sage_qqbar as qb
+    if a == "num" and b == "num":
+        return _num_pushout(R, S)
+    if a == "num" or b == "num":
+        N, E = (R, S) if a == "num" else (S, R)
+        return _complexified(N) if E is qb.QQbar else N
+    return qb.QQbar  # (AA and QQbar)
+
+
+def _vec_base(v):
+    """The base ring of a vector (FFVector or a ZZ, QQ or symbolic Vector),
+    else None."""
+    if isinstance(v, FFVector):
+        return v._base
+    import _sage_matrix
+    if isinstance(v, _sage_matrix.Vector) and not isinstance(v, _sage_matrix.SeriesVector):
+        return v.base_ring()
+    return None
+
+
+def _vector_op(u, v, op):
+    """u op v for vectors u and v, one of them an FFVector: "+", "-", "*"
+    (the dot product), "dot" (dot_product) or "cross" (cross_product), in
+    the ring where their base rings meet.  The dimensions and the rings are
+    checked before any entry is computed, with Sage's errors: TypeError
+    "unsupported operand parent(s)" naming the vector spaces (the base
+    rings for dot and cross products), ArithmeticError for dot products of
+    different degrees."""
+    R, S = _vec_base(u), _vec_base(v)
+    n, m = len(u), len(v)
+    sym = "*" if op in ("dot", "cross") else op
+    if op == "dot" and n != m:
+        raise ArithmeticError("degrees (%d and %d) must be the same" % (n, m))
+    if op in ("+", "-", "*") and n != m:
+        raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (sym, u.parent(), v.parent()))
+    P = _vector_pushout(R, S)
+    if P is None:
+        if op in ("dot", "cross"):
+            raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (R, S))
+        raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (sym, u.parent(), v.parent()))
+    if op == "cross" and not (n == m and n in (3, 7)):
+        raise TypeError("Cross product only defined for vectors of length three or seven, not (%d and %d)" % (n, m))
+    if P is _sa().SR:
+        # (a symbolic vector and one over a field of characteristic 0: the
+        # entries meet in SR themselves)
+        a, b = list(u), list(v)
+    else:
+        a, b = _in_ring(P, u, R), _in_ring(P, v, S)
+    if op == "+":
+        r = [x + y for x, y in zip(a, b)]
+    elif op == "-":
+        r = [x - y for x, y in zip(a, b)]
+    elif op == "cross":
+        r = _cross(a, b)
+    else:
+        s = P.zero() if P is not _sa().SR else 0
+        for x, y in zip(a, b):
+            s = s + x * y
+        return _symbolic(s) if P is _sa().SR else s
+    if P is _sa().SR:
+        import _sage_matrix
+        w = _sage_matrix.Vector(r)
+        w._ring = P
+        return w
+    return FFVector(P, r)
+
+
+def _symbolic(s):
+    """s in SR, or NotImplementedError when sagebrush's SR cannot hold it
+    as Sage does (an RDF or CDF number: SR(RDF(11)) prints as RR's 11.0000000000000,
+    Sage's as 11.0)."""
+    import _sage_rdf
+    if type(s).__name__ in ("RealDoubleElement", "ComplexDoubleElement") or (callable(getattr(s, "parent", None)) and s.parent() in (_sage_rdf.RDF, _sage_rdf.CDF)):
+        raise NotImplementedError("%r as a symbolic expression is not available in sagebrush yet" % (s,))
+    try:
+        return _sa().SR(s)
+    except TypeError:
+        raise NotImplementedError("%r as a symbolic expression is not available in sagebrush yet" % (s,))
+
+
+def _in_ring(P, v, R):
+    """The entries of the vector v over R, as elements of P (from Z/mZ to
+    Z/nZ or GF(p^k) by their integer representatives: Z/6Z -> GF(3))."""
+    if R is P:
+        return list(v)
+    if isinstance(R, _ff.IntegerModRing_):
+        return [P(int(x)) for x in v]
+    return [P(x) for x in v]
+
+
+def _cross(a, b):
+    """The cross product of two lists of 3 or of 7 entries (7: e_i x e_(i+1)
+    = e_(i+3), indices mod 7, as Sage)."""
+    if len(a) == 3:
+        return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    r = [a[0] * 0 for _ in range(7)]
+    for i in range(7):
+        j, k = (i + 1) % 7, (i + 3) % 7
+        # e_i x e_j = e_k, e_j x e_k = e_i, e_k x e_i = e_j
+        r[k] = r[k] + a[i] * b[j] - a[j] * b[i]
+        r[i] = r[i] + a[j] * b[k] - a[k] * b[j]
+        r[j] = r[j] + a[k] * b[i] - a[i] * b[k]
+    return r
+
+
+# ------------------------------------------------------------------ norms
+
+# exact p-norms (over AA and QQbar) for integer p up to this; and over ZZ
+# and QQ while the p-th powers have at most _EXACT_NORM_BITS bits
+_EXACT_NORM_P = 64
+_EXACT_NORM_BITS = 1 << 22
+
+
+def _inf_sign(p):
+    """1 for +Infinity (Sage's, a float or a real), -1 for -Infinity, else 0."""
+    if isinstance(p, (int, str, _F)) or type(p).__name__ in ("Integer", "Rational"):
+        return 0
+    try:
+        f = float(p)
+    except Exception:
+        return 0
+    return 1 if f == float("inf") else -1 if f == float("-inf") else 0
+
+
+def _exact_exponent(p):
+    return isinstance(p, (int, _F)) or type(p).__name__ in ("Integer", "Rational")
+
+
+def _real_exponent(p):
+    """Whether p is an element of RR or of RealField(prec) (not a Python
+    float, not NaN)."""
+    if type(p) is float or isinstance(p, (int, str, _F)):
+        return False
+    par = getattr(p, "parent", None)
+    try:
+        k = _num_kind(par()) if callable(par) else None
+    except Exception:
+        return False
+    return k is not None and not k[0] and not k[1] and p == p
+
+
+def _p_norm(vals, p, root, check=None, R=None):
+    """Sage's p-norm of the absolute values vals: the largest for p =
+    Infinity (ValueError when there are none), else (p >= 1, else
+    ValueError) root(sum of their p-th powers, p); when there are none, 0
+    in QQ for an integer or rational p, 0 in p's field for a real p.  An
+    exponent in RR or RealField(prec) is admitted only over a real field R
+    (the powers in R: Sage keeps the vector's precision); other exponents
+    (a Python float, RDF, ...) are refused, empty vectors included.
+    check(vals, p) runs first, to refuse powers too large to compute."""
+    if _inf_sign(p) > 0:
+        return max(vals)
+    if p < 1:
+        raise ValueError("%s is not greater than or equal to 1" % (p,))
+    real = _real_exponent(p)
+    if not _exact_exponent(p) and not (real and R is not None):
+        raise NotImplementedError("the norm with exponent %r (%s) is not available in sagebrush yet" % (p, type(p).__name__))
+    if not vals:
+        return p.parent()(0) if real else _sa().QQ(0)
+    if check is not None:
+        check(vals, p)
+    q = R(p) if real else p
+    s = vals[0] ** q
+    for t in vals[1:]:
+        s = s + t ** q
+    return root(s, p)
+
+
+def _double_norm(vals, p):
+    """The p-norm of the doubles vals, as RDF and CDF vectors (IEEE double
+    arithmetic: no scaling, so squares overflow and underflow): any real p,
+    -Infinity the smallest, 0 the number of nonzero values."""
+    inf = float("inf")
+    nan = any(t != t for t in vals)
+    s = _inf_sign(p)
+    if s > 0:
+        return float("nan") if nan else max(vals, default=0.0)
+    if s < 0:
+        if not vals:
+            raise ValueError("zero-size array to reduction operation minimum which has no identity")
+        return float("nan") if nan else min(vals)
+    try:
+        q = float(p)
+    except (TypeError, ValueError):
+        raise ValueError("vector norm 'p' must be +/- infinity or a real number, not %s" % (p,))
+    if q != q:
+        return q  # (a NaN exponent: NaN, empty vectors included)
+    if q == 0:
+        return float(sum(1 for t in vals if t != 0))
+    if q == 2:
+        import math
+        return math.sqrt(sum(t * t for t in vals))
+
+    def pw(t, e):
+        if t == 0:
+            return inf if e < 0 else 0.0
+        if t == inf:
+            return 0.0 if e < 0 else inf
+        return t ** e
+    return pw(sum(pw(t, q) for t in vals), 1.0 / q)
+
+
+def _real_field(R):
+    """The real field of the absolute values of a numerical field's
+    elements (RR for CC, RealField(p) for ComplexField(p))."""
+    k = _num_kind(R)
+    if not k[0]:
+        return R
+    return _sa().RealField(k[2])
+
+
 class FFVector:
     """A vector over a finite field.
 
@@ -318,11 +665,9 @@ class FFVector:
             sage: vector(GF(7), [1, 2, 3]).cross_product(vector(GF(7), [4, 5, 6]))
             (4, 6, 4)
         """
-        from _sage_matrix import _bounded_list
-        a, b = list(self), _bounded_list(other, 3)
-        if len(a) != 3 or len(b) != 3:
-            raise TypeError("the cross product is defined for vectors of length 3")
-        return FFVector(self._base, [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
+        if _vec_base(other) is None:
+            raise TypeError("right must be a free module element")
+        return _vector_op(self, other, "cross")
 
     def list(self):
         """The entries.
@@ -374,27 +719,35 @@ class FFVector:
     def __hash__(self):
         return hash(tuple(self._e))
 
+    # (with another vector: in the ring where their base rings meet, the
+    # dimensions and rings checked first, _vector_op; a list or tuple is not
+    # a vector, as in Sage)
     def __add__(self, o):
-        if not isinstance(o, (FFVector, list, tuple)) or len(o) != len(self._e):
+        if _vec_base(o) is None:
             return NotImplemented
-        return FFVector(self._base, [a + b for a, b in zip(self._e, o)])
+        return _vector_op(self, o, "+")
 
-    __radd__ = __add__
+    def __radd__(self, o):
+        if _vec_base(o) is None:
+            return NotImplemented
+        return _vector_op(o, self, "+")
 
     def __neg__(self):
         return FFVector(self._base, [-a for a in self._e])
 
     def __sub__(self, o):
-        if not isinstance(o, (FFVector, list, tuple)) or len(o) != len(self._e):
+        if _vec_base(o) is None:
             return NotImplemented
-        return FFVector(self._base, [a - b for a, b in zip(self._e, o)])
+        return _vector_op(self, o, "-")
 
     def __rsub__(self, o):
-        return (-self) + o
+        if _vec_base(o) is None:
+            return NotImplemented
+        return _vector_op(o, self, "-")
 
     def __mul__(self, o):
-        if isinstance(o, FFVector):
-            return self.dot_product(o)
+        if _vec_base(o) is not None:
+            return _vector_op(self, o, "*")
         if isinstance(o, FFMatrix):
             return o._vecmat(self)
         c = _admit(self._base, o)
@@ -403,40 +756,101 @@ class FFVector:
         return FFVector(self._base, [a * c for a in self._e])
 
     def __rmul__(self, o):
+        if _vec_base(o) is not None:
+            return _vector_op(o, self, "*")
         c = _admit(self._base, o)
         if c is None:
             return NotImplemented
         return FFVector(self._base, [c * a for a in self._e])
 
     def dot_product(self, o):
-        """The dot product.
+        """The dot product, in the ring where the two base rings meet.
 
         EXAMPLES::
 
             sage: vector(GF(5), [1, 2]).dot_product(vector(GF(5), [3, 4]))
             1
+            sage: vector(GF(7), [1, 2]).dot_product(vector(ZZ, [3, 4])).parent()
+            Finite Field of size 7
+            sage: vector(GF(7), [1, 2]).dot_product(vector(GF(7), [3]))
+            Traceback (most recent call last):
+            ...
+            ArithmeticError: degrees (2 and 1) must be the same
         """
+        if _vec_base(o) is None:
+            raise TypeError("Cannot convert %s to sage.modules.free_module_element.FreeModuleElement" % type(o).__name__)
+        return _vector_op(self, o, "dot")
+
+    def _dot(self, o):
+        # (the dot product with entries o over this field, of this length)
         s = self._base.zero()
         for a, b in zip(self._e, o):
             s = s + a * b
         return s
 
     def norm(self, p=2):
-        """The p-norm (over a numerical field).
+        """The p-norm: over RDF and CDF in double arithmetic (any real p;
+        -Infinity the smallest entry, 0 the number of nonzero entries);
+        over RR, CC and the real and complex fields of other precisions in
+        the real field of that precision (p >= 1 or Infinity); exactly in AA
+        over AA and QQbar (an integer p >= 1, or Infinity).  Finite fields
+        and Z/nZ have no absolute value: ArithmeticError.
 
         EXAMPLES::
 
-            sage: vector(RDF, [3, 4]).norm()
-            5.0
+            sage: vector(RDF, [3, 4]).norm(), vector(RDF, [3, 4]).norm(Infinity)
+            (5.0, 4.0)
+            sage: vector(RealField(100), [1, 1]).norm()
+            1.4142135623730950488016887242
+            sage: vector(RR, [RR('1e200'), RR('1e200')]).norm()
+            1.41421356237310e200
+            sage: v = vector(QQbar, [I, 1]).norm(); v, v.parent()
+            (1.414213562373095?, Algebraic Real Field)
+            sage: vector(GF(7), [3, 4]).norm()
+            Traceback (most recent call last):
+            ...
+            ArithmeticError: absolute value not defined on integers modulo n.
         """
-        import math as _math
-        vals = [abs(complex(x)) for x in self._e]
-        if p == float("inf"):
-            v = max(vals)
-        else:
-            v = sum(t ** p for t in vals) ** (1.0 / p) if p != 2 else _math.sqrt(sum(t * t for t in vals))
-        import _sage_rdf
-        return _sage_rdf.RealDoubleElement(v) if self._base is _sage_rdf.RDF or self._base is _sage_rdf.CDF else _sa().RR(v)
+        import _sage_rdf, _sage_qqbar as qb
+        B = self._base
+        if B is _sage_rdf.RDF or B is _sage_rdf.CDF:
+            return _sage_rdf.RealDoubleElement(_double_norm([abs(complex(x)) for x in self._e], p))
+        if isinstance(B, (_ff.IntegerModRing_, _ff.FiniteField_ext)):
+            if self._e and isinstance(B, _ff.FiniteField_ext):
+                raise TypeError("bad operand type for abs(): '%s'" % type(self._e[0]).__name__)
+            if self._e:
+                raise ArithmeticError("absolute value not defined on integers modulo n.")
+            return _p_norm([], p, None)
+        if B is qb.AA or B is qb.QQbar:
+            vals = [qb.AA(abs(x)) for x in self._e]
+
+            def check(vals, q):
+                # (exact powers grow with q: an integer q up to _EXACT_NORM_P)
+                if not (isinstance(q, int) or type(q).__name__ == "Integer") or q > _EXACT_NORM_P:
+                    raise NotImplementedError("the %s-norm of a vector over %r is not available in sagebrush yet" % (q, B))
+            return _p_norm(vals, p, lambda s, q: s if q == 1 else s.nth_root(int(q)), check)
+        import _sage_nf
+        if isinstance(B, _sage_nf.NumberField_absolute):
+            # (Sage's checks of p; the norm itself, an element of K, QQ or
+            # SR by the embedding, is not modelled)
+            if self._e and (_inf_sign(p) > 0 or not p < 1):
+                raise NotImplementedError("the norm of a vector over %r is not available in sagebrush yet" % (B,))
+            return _p_norm([], p, None)
+        if _num_kind(B) is not None:
+            R = _real_field(B)
+            vals = [R(abs(x)) for x in self._e]
+
+            def root(s, q):
+                if q == 1:
+                    return s
+                if q == 2:
+                    return s.sqrt()
+                # (1/q as Sage: exact for an integer or rational q, then
+                # rounded into R; for a real q, in q's own field)
+                e = R(1) / R(q) if isinstance(q, int) or type(q).__name__ == "Integer" else R(1 / q)
+                return s ** e
+            return _p_norm(vals, p, root, R=R)
+        raise NotImplementedError("the norm of a vector over %r is not available in sagebrush yet" % (B,))
 
     def is_zero(self):
         """Whether all entries are 0.
@@ -896,7 +1310,8 @@ class FFMatrix:
                 out.append(row)
             return FFMatrix(self._base, out, o.ncols())
         if isinstance(o, FFVector):
-            return FFVector(self._base, [FFVector(self._base, r).dot_product(o) for r in self._rows])
+            o = self._vector_operand(o, False)
+            return FFVector(self._base, [FFVector(self._base, r)._dot(o._e) for r in self._rows])
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "*")
@@ -910,8 +1325,22 @@ class FFMatrix:
             return NotImplemented if p is None else p
         return FFMatrix(self._base, [[c * a for a in r] for r in self._rows], self._ncols)
 
+    def _vector_operand(self, v, left):
+        """The vector v over this matrix's field, as Sage multiplies them
+        (v * self when left, else self * v): TypeError (unsupported operand
+        parents) when v's entries are not as many as the matrix's rows (or
+        columns) or are over a field this one does not contain."""
+        n = len(self._rows) if left else self._ncols
+        P = _vector_pushout(self._base, v._base) if len(v) == n else None
+        if P is None:
+            raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % ((v.parent(), self.parent()) if left else (self.parent(), v.parent())))
+        if P is not self._base:
+            raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, v._base))
+        return v if v._base is P else FFVector(P, _in_ring(P, v, v._base))
+
     def _vecmat(self, v):
-        return FFVector(self._base, [v.dot_product(c) for c in self.columns()])
+        v = self._vector_operand(v, True)
+        return FFVector(self._base, [v._dot(c) for c in self.columns()])
 
     def __pow__(self, e):
         e = int(e)
@@ -1606,6 +2035,8 @@ class FFVectorSpace:
         self._base, self._n = base, n
 
     def __repr__(self):
+        if not _field(self._base):
+            return "Ambient free module of rank %d over %r" % (self._n, self._base)
         return "Vector space of dimension %d over %r" % (self._n, self._base)
 
     def __call__(self, x=0):
