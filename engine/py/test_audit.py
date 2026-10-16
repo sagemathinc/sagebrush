@@ -574,7 +574,7 @@ _x = polygen(QQ, "x"); _K = NumberField(_x**2 - 2, "a"); _M = QuadraticField(2, 
 assert _K != _M and not (_K.gen() == _M.gen()) and _K(1) == _L(1) and _K(QQ(2) / 3) == _L(QQ(2) / 3) and len({_K(1), _L(1), 1}) == 1  # R2-NFD-F3
 print("nf parents ok")
 _R, _S = PolynomialRing(QQ, "x,y"), PolynomialRing(QQ, "y,x"); _x, _y = _R.gens(); _sy, _sx = _S.gens(); _f = 2 * _x * _x * _y + 3 * _x * _x + _x * _y
-assert _f.coefficient(_sx**2) == 2 * _y + 3 and _f.monomial_coefficient(_sx**2 * _sy) == 2  # R2-MUL-F6
+assert _f.coefficient(_sx**2) == 2 * _y + 3; raises(TypeError, _f.monomial_coefficient, _sx**2 * _sy)  # R2-MUL-F6; monomial_coefficient as Sage
 _D = PolynomialRing(QQ, names=("x", "x")); _da, _db = _D.gens(); _g = 7 * _x**5 + 11 * _x**3
 raises(TypeError, _g.coefficient, _da**2 * _db**3); raises(TypeError, _g.monomial_coefficient, _da**2 * _db**3)  # CORR-F61-1
 print("mpoly coefficient ok")
