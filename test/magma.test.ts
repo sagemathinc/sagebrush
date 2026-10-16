@@ -874,6 +874,51 @@ test("intrinsics taking integers refuse a rational, an integral one too (CORR-76
   assert.equal(session("Factorial(4); IsEven(4); Gcd(4, 6); Binomial(4, 2);\n"), "24\ntrue\n2\n6\n");
 });
 
+test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const src = "P<x> := PolynomialRing(Integers());\nTrace(x^2 + 1);\nF<z> := GF(9);\nTrace(z, GF(3));\n" +
+    "K<w> := QuadraticField(7);\nTrace(w, Rationals());\nE := EllipticCurve([0, -1, 1, -10, -20]);\nTrace(E);\n" +
+    "ISA(Mtrx, MtrxS);\nISA(1, RngIntElt);\n\"end\";\n";
+  const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (Magma has these signatures: not Bad argument types)
+  assert.ok(out.includes("Runtime error in 'Trace': Trace of a RngUPolElt is not supported yet"), out);
+  assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldFinElt, FldFin is not supported yet"), out);
+  assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldQuadElt, FldRat is not supported yet"), out);
+  // (a value whose type the signatures don't know)
+  assert.ok(out.includes("Runtime error in 'Trace': Trace with these arguments is not supported yet"), out);
+  assert.doesNotMatch(out, /Runtime error in 'Trace': Bad argument types/);
+  // (ISA of a type outside the table is not guessed)
+  assert.ok(out.includes("ISA(Mtrx, MtrxS) is not supported yet"), out);
+  assert.ok(out.includes("Runtime error in 'ISA': Bad argument types\nArgument types given: RngIntElt, Cat[RngIntElt]\n"), out);
+  assert.match(out, /\nend\n$/);
+  // arguments no signature takes: Magma's words (checked against Magma)
+  const bad = spawnSync(process.execPath, [cli, "--magma"], { encoding: "utf8",
+    input: "Trace(Matrix(Rationals(), 2, 3, [1/2, 0, 1, 5, -4, 7]));\nTrace(2.5);\nTrace(\"abc\");\nTrace(false);\nTrace([3, 4]);\nTrace({1});\nTrace(3, 4);\nTrace();\n" }).stdout as string;
+  for (const said of ["Argument 1 is not square\n", "Bad argument types\nArgument types given: FldReElt\n", "Bad argument types\nArgument types given: MonStgElt\n",
+    "Bad argument types\nArgument types given: BoolElt\n", "Bad argument types\nArgument types given: SeqEnum[RngIntElt]\n",
+    "Bad argument types\nArgument types given: SetEnum[RngIntElt]\n", "Bad argument types\nArgument types given: RngIntElt, RngIntElt\n",
+    "Bad argument types\nArgument types given:\n"])
+    assert.ok(bad.includes("Runtime error in 'Trace': " + said), said + "\n" + bad);
+  // one index entry for each signature Sagebrush implements, with its own summary
+  const index = JSON.parse(spawnSync(process.execPath, [cli, "-m", "_magma_docsearch", "--index"], { encoding: "utf8" }).stdout);
+  const trace = index.filter((e: any) => e.name === "Trace");
+  assert.deepEqual(trace.map((e: any) => e.signature),
+    ["(<RngIntElt> x) -> RngIntElt", "(<FldRatElt> x) -> FldRatElt", "(<FldFinElt> x) -> FldFinElt", "(<FldAlgElt> x) -> RngElt", "(<MtrxS> a) -> RngElt"]);
+  assert.equal(new Set(trace.map((e: any) => e.summary)).size, 5);
+  assert.match(trace[4].summary, /square matrix/);
+  assert.match(trace[4].doc, /The signatures of Trace:\n\n[\s\S]*Trace\(<RngUPolElt> x1\) -> RngUPolElt    \(not supported yet\)/);
+  // an intrinsic prints as Magma prints one, with Sagebrush's signatures and words
+  const shown = spawnSync(process.execPath, [cli, "--magma"], { input: "Trace;\nFactorial;\n#Sprint(Trace) gt 0;\n", encoding: "utf8" }).stdout as string;
+  assert.ok(shown.startsWith("Intrinsic 'Trace'\n\nSignatures:\n\n    (<RngIntElt> x) -> RngIntElt\n\n        An integer is its own trace.\n\n"), shown);
+  assert.ok(shown.includes("    (<MtrxS> a) -> RngElt\n\n        The trace of a square matrix: the sum of its diagonal entries.\n"), shown);
+  assert.ok(shown.includes("    (<RngUPolElt> x1) -> RngUPolElt\n\n        Not supported yet in Sagebrush.\n"), shown);
+  assert.ok(shown.includes("Intrinsic 'Factorial'\n\nSignatures:\n\n    (n)\n\n        "), shown);
+  assert.doesNotMatch(shown, /function|0x/);
+  assert.match(shown, /true\n$/);
+});
+
 test("every intrinsic goes through the argument guard, and help still shows its own signature", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
