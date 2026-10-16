@@ -2496,6 +2496,27 @@ export function subclassable(P: PyType, jsClass: any, fields: string[] = []) {
 }
 subclassable(bytesType, PyBytes, ["a", "n"]);
 subclassable(bytearray, PyByteArray, ["a", "n"]);
+// bytearray.__new__ makes an empty one, and __init__ fills it, as CPython's
+// (its __new__ gave the filled bytearray, so __new__(bytearray, b"xy") had 2)
+{
+  const empty = (cls: any) => {
+    const o = new PyByteArray(new Uint8Array(0));
+    if (cls !== bytearray) Object.setPrototypeOf(o, cls.$ctor!.prototype);
+    return o;
+  };
+  allocator(bytearray, (cls: any, ..._args: any[]) => empty(cls), (pos) => empty(pos[0]));
+  method(bytearray, "__init__", (b: PyByteArray, source: any = undefined, encoding: any = undefined, errors: any = undefined) => {
+    // (emptied, then filled, as CPython's: each a re-size, refused while
+    // exported, and a bad source leaves it empty)
+    if (b.n !== 0) checkResizable(b);
+    b.n = 0;
+    const a = toBytes(source, encoding, errors, true);
+    if (a.length !== 0) checkResizable(b);
+    b.a = a;
+    b.n = a.length;
+    return null;
+  }, sig(["self", "source", "encoding", "errors"]));
+}
 subclassable(T.map, MapIter, ["f", "its"]);
 subclassable(T.filter, FilterIter, ["f", "it"]);
 subclassable(T.zip, Zip, ["its", "strict"]);
