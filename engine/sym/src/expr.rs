@@ -669,6 +669,17 @@ pub fn sqrt(a: &Expr) -> Expr {
 
 // ------------------------------------------------------------------ powers
 
+fn has_trig(e: &Expr) -> bool {
+    match &e.kind {
+        Kind::Fun(Fun::Sin | Fun::Cos, _) => true,
+        Kind::Fun(_, a) => a.iter().any(has_trig),
+        Kind::Add(v) | Kind::Mul(v) => v.iter().any(has_trig),
+        Kind::Pow(b, x) => has_trig(b) || has_trig(x),
+        Kind::Rel(_, a, b) => has_trig(a) || has_trig(b),
+        _ => false,
+    }
+}
+
 pub fn pow(b: &Expr, x: &Expr) -> Expr {
     if let Kind::Num(n) = &x.kind {
         if n.is_zero() && n.is_exact() {
@@ -691,6 +702,17 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
             }
             if n.is_positive() {
                 return zero();
+            }
+        }
+    }
+    // e^(q*I*pi) = cos(q*pi) + I*sin(q*pi) where both are exact (Sage:
+    // e^(I*pi) = -1, e^(1/3*I*pi) = 1/2*I*sqrt(3) + 1/2; e^(1/7*I*pi) stays)
+    if b.is_const(Const::E) {
+        if let Some(q) = crate::func::ipi_multiple(x) {
+            let t = mul2(&qnum(q), &pi());
+            let (c, s) = (fun1(Fun::Cos, &t), fun1(Fun::Sin, &t));
+            if !has_trig(&c) && !has_trig(&s) {
+                return add2(&c, &mul2(&i(), &s));
             }
         }
     }
@@ -750,6 +772,14 @@ fn num_pow(b: &Num, x: &Num) -> Expr {
     }
     if let Some(n) = x.as_i64() {
         return num(b.pow_int(n));
+    }
+    // 1, -1, I, -I to an integer past i64: by the exponent mod 4
+    // (I^(10^20 + 3) = -I)
+    if let (Some(n), Num::Exact(re, im)) = (x.as_int(), b) {
+        let unit = (re.is_zero() && (im.is_one() || (-im).is_one())) || (im.is_zero() && (re.is_one() || (-re).is_one()));
+        if unit {
+            return num(b.pow_int(n.mod_floor(&BigInt::from(4)).to_i64().unwrap()));
+        }
     }
     let r = match x.as_rat() {
         Some(r) => r.clone(),

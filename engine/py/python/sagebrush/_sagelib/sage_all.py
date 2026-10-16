@@ -47,7 +47,7 @@ __all__ = [
     "sin", "cos", "tan", "cot", "sec", "csc", "asin", "acos", "atan", "arcsin", "arccos", "arctan",
     "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
     "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
-    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside",
+    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside", "real", "imag", "real_part", "imag_part", "conjugate",
     "psi", "log_gamma", "zetaderiv", "hurwitz_zeta", "beta", "erfc", "erfi", "erfinv", "exp_integral_e1", "Ei",
     "exp_integral_ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec", "legendre_P", "gen_legendre_P",
     "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
@@ -2300,10 +2300,70 @@ def factorial(n):
         sage: var('n'); factorial(n)
         n
         factorial(n)
+        sage: factorial(SR(20)), factorial(SR(100)) / factorial(SR(98))
+        (2432902008176640000, 9900)
     """
-    if _symbolic(n):
+    from _sage_expr import Expression
+    if _symbolic(n) or isinstance(n, Expression):
+        # (a constant expression too: factorial(SR(20)) is the symbolic 20!)
         return _symbolic_fun("factorial", n)
     return _math.factorial(n)
+
+
+def _part(z, name):
+    from _sage_matrix import ComplexNumber
+    if isinstance(z, ComplexNumber):
+        # (an element of CC: its parts are RR's)
+        from _sage_lang import RealNumber
+        return RealNumber(getattr(complex(z), name))
+    if isinstance(z, float) and type(z) is not float:
+        # a real number of RR (a float subclass): itself, and the exact 0
+        return z if name == "real" else Integer(0)
+    p = getattr(z, name)
+    r = p() if callable(p) else p
+    if name == "imag" and isinstance(r, float) and r == 0 and type(z) not in (float, complex):
+        # a real number of RR: the exact 0, as Sage
+        return Integer(0)
+    return r
+
+
+def real_part(z):
+    """The real part of z (also called real).
+
+    EXAMPLES::
+
+        sage: real(3 + 4*I), real_part(SR(-2)), real(2.5), real(7)
+        (3, -2, 2.50000000000000, 7)
+        sage: real(RealField(100)(1/3)), real(CC(1, 2))
+        (0.33333333333333333333333333333, 1.00000000000000)
+    """
+    return _part(z, "real")
+
+
+def imag_part(z):
+    """The imaginary part of z (also called imag).
+
+    EXAMPLES::
+
+        sage: imag(3 + 4*I), imag_part(SR(-2)), imag(7), imag(2.5), imag(CC(1, 2)), imag(CC(1, 0))
+        (4, 0, 0, 0, 2.00000000000000, 0.000000000000000)
+    """
+    return _part(z, "imag")
+
+
+real = real_part
+imag = imag_part
+
+
+def conjugate(z):
+    """The complex conjugate of z.
+
+    EXAMPLES::
+
+        sage: conjugate(3 + 4*I), conjugate(7)
+        (-4*I + 3, 7)
+    """
+    return z.conjugate()
 
 
 def fibonacci(n):

@@ -51,6 +51,17 @@ pub fn to_c64_env(e: &Expr, env: &dyn Fn(&str) -> Option<C>) -> Option<C> {
             }
             s
         }
+        // e^x as exp(x): powf of the rounded e multiplies its rounding
+        // error by x (n(e^100) was wrong in the 14th digit)
+        Kind::Pow(b, x) if matches!(b.kind, Kind::Const(Const::E)) => {
+            let (re, im) = to_c64_env(x, env)?;
+            let m = re.exp();
+            if im == 0.0 {
+                (m, 0.0)
+            } else {
+                (m * im.cos(), m * im.sin())
+            }
+        }
         Kind::Pow(b, x) => cpow(to_c64_env(b, env)?, to_c64_env(x, env)?),
         Kind::Fun(f, a) => {
             let v: Option<Vec<C>> = a.iter().map(|x| to_c64_env(x, env)).collect();
