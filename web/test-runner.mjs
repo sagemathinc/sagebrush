@@ -70,7 +70,7 @@ const PROBE = `(async () => {
   out.isolated = self.crossOriginIsolated;
   out.secure = self.isSecureContext;
   out.subtle = !!(self.crypto && self.crypto.subtle);
-  out.precompiled = !!self.__SAGEBRUSH_PRECOMPILED__;
+  out.precompiled = Object.keys(self.__SAGEBRUSH_PRECOMPILED__?.modules ?? {}).length;
   const reach = async (u, credentials = "include") => { try { await fetch(u, { mode: "cors", credentials }); return true; } catch { return false; } };
   out.elsewhere = await reach("https://example.com/");
   out.sitePage = await reach(${JSON.stringify(new URL("/", base).href)} + "?probe");
@@ -93,7 +93,10 @@ try {
   ok((await run("sum(range(10))")).trim() === "45", "code runs in the runner");
   ok((await run("from fractions import Fraction\nprint(Fraction(1, 3) + Fraction(1, 6))")).includes("1/2"), "printing works");
   ok((await run("import numpy as np\nprint(np.arange(6).reshape(2, 3).sum(axis=0))")).includes("[3 5 7]"), "numpy works");
-  // (the engine and the precompiled library: fetched by the page, handed through the frame)
+  // (a module of a part of the library no start loads: its chunk, like the
+  // engine and Sage's part below, fetched by the page and handed through the
+  // frame; web/lib-lazy.ts)
+  ok((await run("import heapq\nprint(heapq.nsmallest(2, [3, 1, 2]))")).includes("[1, 2]"), "a library module imported later: its chunk through the frame");
   // (changing the language of a notebook with code asks first: yes)
   await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change', {bubbles: true})); })()");
   await sleep(500);
@@ -122,7 +125,7 @@ try {
   const inWorker = await evIn(PROBE, { sessionId: wk });
   ok(inWorker.origin === "null" && !inWorker.indexedDB && !inWorker.elsewhere && !inWorker.sitePage && !inWorker.websocket && !inWorker.ownFiles, "the worker (where escaped code would run): the same, no network at all: " + JSON.stringify(inWorker));
   await sleep(500);
-  ok(inWorker.precompiled, "the precompiled library reached the worker (checked by its SHA-256 without crypto.subtle: the runner's worker is not a secure context)");
+  ok(inWorker.precompiled > 50, "Sage's compiled modules reached the worker (checked by their SHA-256 without crypto.subtle: the runner's worker is not a secure context): " + inWorker.precompiled);
   ok(violations.length > 0 && violations.some((v) => /example\.com\/beacon/.test(v)), `the attempts were blocked by the runner's policy, the beacon too (${violations.length} CSP reports)`);
 
   // A runner that answers but whose worker never starts (as in WebKit, where

@@ -111,8 +111,8 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
 // file it was made from: by the build that made it (whose id covers the
 // compiler and the library), for its mode and module, at its exact path in
 // the library, whose source is the library's own (the embedded copy,
-// __PYJS_LIB__).  (The worker checks the whole table's SHA-256 before
-// installing it: design/security.md, SEC-8D6-1, PRE-8D6-2.)
+// __PYJS_LIB__).  (The worker checks each chunk's SHA-256 before installing
+// it: web/lib-lazy.ts; design/security.md, SEC-8D6-1, PRE-8D6-2.)
 interface Precompiled { build: string; modules: Record<string, Compiled & { path: string }> }
 const precompiledKey = (name: string, sage: boolean) => (sage ? "sage|" : "py|") + name;
 // (a file in the library: its path in it, or null)
@@ -321,7 +321,9 @@ const safeExists = (p: string) => {
     return false;
   }
 };
-const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] !== undefined : safeExists(p));
+// (a file's presence is a property of its own: in the browser's worker,
+// reading one fetches its part of the library, web/lib-lazy.ts)
+const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(p));
 const fileRead = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? embedded[p.slice(LIB_VIRTUAL.length + 1)] : readFileSync(p, "utf8"));
 export function libDir(): string {
   return embedded !== undefined ? LIB_VIRTUAL : resolvePath(__dirname, "../../lib");

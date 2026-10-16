@@ -7,7 +7,7 @@
 //   new WorkerKernel({ createWorker: () => new RunnerWorker("/runner/", { name }) })
 //
 // This page fetches what the interpreter needs (its script, its engine and
-// precompiled library, and the shared files it was told to mount) and hands
+// Python library, and the shared files it was told to mount) and hands
 // the bytes over; nothing else.  Messages are relayed through the frame (page
 // <-> frame by a MessagePort, frame <-> worker).  The interrupt flag stays in
 // the frame, so Stop is a message (interrupt()).
@@ -22,15 +22,16 @@ import { FILES_RUNNER } from "./files-runner.js";
 
 // the files the runner may have the page fetch for its worker: the engine,
 // the PNG module (fetched when Python first writes or reads a PNG) and the
-// precompiled library, each checked by its SHA-256 in the worker
-const OWN = /\/sagebrush-(engine\.wasm|raster\.wasm|precompiled\.json)$/;
+// Python library's chunks (web/lib-lazy.ts), each checked by its SHA-256 in
+// the worker
+const OWN = /\/(sagebrush-(engine\.wasm|raster\.wasm)|lib\/[\w.-]+\.[0-9a-f]{16}\.json)$/;
 
 // Files mode: the runner for a page that has the engine's files itself (a
 // board downloaded as one HTML file).  A file:// page is never cross-origin
 // isolated, so there is no SharedArrayBuffer and no broker: the frame (a
 // srcdoc of its own, opaque, sandboxed) makes blob: URLs of the files, and
-// the worker reads them (the engine by synchronous XHR, the precompiled
-// library by fetch; __SB_FILES__ in web/worker.ts).  Its policy allows no
+// the worker reads them (the engine and the library's chunks by synchronous
+// XHR or fetch; __SB_FILES__ in web/worker.ts, web/lib-lazy.ts).  Its policy allows no
 // network but those blob: URLs.  No interrupt flag: Stop restarts the
 // worker.  (A srcdoc frame also inherits its parent's policy: the page must
 // allow its inline script, as a downloaded file, with no policy, does, and
@@ -41,8 +42,8 @@ export class RunnerWorker {
    * @param {{name?: string, fallback?: () => any, files?: Record<string, ArrayBuffer>}} [o]
    *   the worker's name (TimeTravel replay's parameters); a plain worker to use
    *   if the frame doesn't answer; or, with src null, the engine's files
-   *   themselves (sagebrush-worker.js, sagebrush-engine.wasm and
-   *   sagebrush-precompiled.json), for files mode
+   *   themselves (sagebrush-worker.js, sagebrush-engine.wasm and the
+   *   library's chunks, lib/...), for files mode
    */
   constructor(src, { name = "", fallback, files } = {}) {
     this.onmessage = null;
