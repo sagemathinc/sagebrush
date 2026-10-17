@@ -11,9 +11,10 @@
 
 import { T, DONE, positionalArray, lookupType, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
 import { newBuiltinModule, importModule } from "./modules";
-import { mkfloat, iter, index, pollInterrupt } from "./ops";
+import { mkfloat, iter, index, pollInterrupt, truth } from "./ops";
 import { floatRepr, decimalOf, repr as pyRepr } from "./format";
 import * as SP from "./strpos";
+import { sortList } from "./types";
 
 // Stop reaches every long loop here (HARD-C0E-2): a scan of characters
 // polls at every 4096th, a loop over values, frames or escapes every 4096
@@ -192,7 +193,6 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
   const indent1 = () => {
     if (indBad) raise(T.TypeError, `can only concatenate str (not "${typeName(indent)}") to str`);
   };
-  const sorted = importModule("builtins").sorted;
   const allow = !!O_truth(allowNan), skip = !!O_truth(skipKeys), sortk = !!O_truth(sortKeys);
 
   const floatStr = (o: any): string => {
@@ -322,7 +322,11 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
       }
     }
     enter(o);
-    if (sortk) items = collect(callObj(sorted, [items]));
+    // (the runtime's own sort, as sorted()'s: no rebinding of the builtin reaches it)
+    if (sortk) {
+      items = items.slice();
+      sortList(items, null, false);
+    }
     out += "{";
     let nl: string | null = null, sep = is;
     if (ind !== null) {
@@ -474,7 +478,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
 function O_truth(x: any): boolean {
   if (typeof x === "boolean") return x;
   if (x === null || x === 0 || x === "") return false;
-  return callObj(importModule("builtins").bool, [x]) === true;
+  return truth(x);
 }
 
 // ------------------------------------------------------------------ loads

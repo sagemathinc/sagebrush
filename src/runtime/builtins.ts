@@ -2,7 +2,7 @@
 
 import { writeSync, readSync } from "fs";
 import {
-  T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple,
+  T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple, hooks,
   isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity, unbox,
 } from "./object";
 import * as O from "./ops";
@@ -606,18 +606,191 @@ const anextImpl = (x: any) => {
 };
 define("aiter", aiterImpl, [1, 1]);
 define("anext", anextImpl, [1, 2]);
-define("__pyjs_aiter__", aiterImpl, [1, 1]);
-define("__pyjs_anext__", anextImpl, [1, 1]);
-define("__pyjs_aenter__", (m: any) => {
+
+// match statements (frontend.ts lowers them): CPython's MATCH_SEQUENCE,
+// MATCH_MAPPING, MATCH_KEYS and MATCH_CLASS, each checking a subject, then
+// extracting what a pattern's subpatterns need, as CPython's compiler
+// stages them. Intrinsics (R.$i): no Python name reaches them.
+// A subject is a sequence or a mapping by its real type (not __class__),
+// as CPython's Py_TPFLAGS_SEQUENCE/MAPPING: the builtins that have the flag
+// and their subclasses, and what collections.abc's Sequence and Mapping
+// count by inheritance or register(); str, bytes and bytearray never.
+let abcs: { Sequence: any; Mapping: any } | null = null;
+const abcOf = () => {
+  if (abcs === null) {
+    const m = hooks.importModule("collections.abc");
+    abcs = { Sequence: getattr(m, "Sequence"), Mapping: getattr(m, "Mapping") };
+  }
+  return abcs;
+};
+// (the runtime's own isinstance and issubclass, which no rebinding of the
+// builtins reaches; the types by identity, which no class's name or module
+// imitates)
+let seqTypes: Set<any> | null = null, notSeqTypes: Set<any> | null = null, mapTypes: Set<any> | null = null;
+const isSequence = (s: any): boolean => {
+  seqTypes ??= new Set([T.list, T.tuple, T.range, T.memoryview]);
+  // (array.array, once its module has made it: array.ts)
+  if ((T as any).$arrayType !== undefined) seqTypes.add((T as any).$arrayType);
+  notSeqTypes ??= new Set([T.str, T.bytes, T.bytearray]);
+  const t = typeOf(s);
+  for (const c of t.$mro) {
+    if (seqTypes.has(c)) return true;
+    if (notSeqTypes.has(c)) return false;
+  }
+  return issubclassImpl(t, abcOf().Sequence);
+};
+const isMapping = (s: any): boolean => {
+  mapTypes ??= new Set([T.dict, Ty.mappingproxy]);
+  const t = typeOf(s);
+  for (const c of t.$mro) if (mapTypes.has(c)) return true;
+  return issubclassImpl(t, abcOf().Mapping);
+};
+// the values a fixed-length or starred sequence pattern takes, by iterating
+// the subject (CPython's UNPACK_SEQUENCE and UNPACK_EX; an exact list or
+// tuple by its items, copied): at most `limit` items, one more than a fixed
+// pattern's, so that a longer subject stops there
+const unpack = (s: any, limit: number): any[] => {
+  const t = typeOf(s);
+  if (t === T.list || t === T.tuple) return s.slice(0, limit);
+  const out: any[] = [];
+  const it = O.iter(s);
+  while (out.length < limit) {
+    const v = it.$next();
+    if (v === DONE) break;
+    out.push(v);
+  }
+  return out;
+};
+// (the types whose one positional subpattern is the subject itself,
+// CPython's Py_TPFLAGS_MATCH_SELF, which their subclasses inherit)
+const MATCH_SELF = ["bool", "bytearray", "bytes", "dict", "float", "frozenset", "int", "list", "set", "str", "tuple"];
+const ONLY_WILDCARDS: any[] = Object.freeze([]) as any;
+export const intrinsics: any = {
+  // size: the sequence pattern's subpatterns, its star among them (or -1);
+  // mode 0: the values unpacked; 1 (a wildcard star) and 2 (only
+  // wildcards): nothing taken here (match_item takes mode 1's, each as its
+  // subpattern is reached)
+  match_seq(s: any, size: number, star: number, mode: number): any {
+    if (!isSequence(s)) return null;
+    if (star < 0) {
+      if (O.len(s) !== size) return null;
+    } else if (size - 1 > 0 && O.len(s) < size - 1) return null;
+    if (mode !== 0) return ONLY_WILDCARDS;
+    if (star < 0) {
+      const items = unpack(s, size + 1);
+      if (items.length !== size) raise(T.ValueError, items.length > size ? `too many values to unpack (expected ${size})` : `not enough values to unpack (expected ${size}, got ${items.length})`);
+      return items;
+    }
+    const items = unpack(s, Infinity);
+    const fixed = size - 1, after = size - 1 - star;
+    if (items.length < fixed) raise(T.ValueError, `not enough values to unpack (expected at least ${fixed}, got ${items.length})`);
+    return [...items.slice(0, star), items.slice(star, items.length - after), ...items.slice(items.length - after)];
+  },
+  // item i of a sequence matched by a pattern with a wildcard star: by its
+  // nonnegative index, from the subject's length after the star (CPython's:
+  // a subject needn't take negative indexes)
+  match_item(s: any, i: number, size: number, star: number): any {
+    return O.getitem(s, i < star ? i : O.sub(O.len(s), size - i));
+  },
+  // a mapping, with at least n items (none asked when n is 0)
+  match_map(s: any, n: number): boolean {
+    return isMapping(s) && (n === 0 || O.len(s) >= n);
+  },
+  // the keys' values, by the mapping's get() looked up once, or None
+  match_keys(s: any, keys: any[]): any {
+    const seen = new PyDict();
+    const dummy = {};
+    const get = getattr(s, "get");
+    const out: any[] = [];
+    for (const k of keys) {
+      if (dictGet(seen, k) !== undefined) raise(T.ValueError, `mapping pattern checks duplicate key (${repr(k)})`);
+      dictSet(seen, k, true);
+      const v = callObj(get, [k, dummy]);
+      if (v === dummy) return null;
+      out.push(v);
+    }
+    return out;
+  },
+  // **rest: a new dict of the subject's items but the keys, made only once
+  // the other subpatterns have matched
+  match_rest(s: any, keys: any[]): any {
+    const d = new PyDict();
+    callObj(getattr(d, "update"), [s]);
+    for (const k of keys) callObj(getattr(d, "__delitem__"), [k]);
+    return d;
+  },
+  match_class(s: any, cls: any, npos: number, kw: string[]): any {
+    if (!isType(cls)) raise(T.TypeError, "called match pattern must be a class");
+    if (!isinstanceImpl(s, cls)) return null;
+    const name = (cls as any).$name;
+    const seen = new Set<string>();
+    const out: any[] = [];
+    let missing = false;
+    // (each attribute in order: its name checked, then looked up; a missing
+    // one fails the match at once, as CPython's match_class_attr)
+    const attr = (a: string): void => {
+      if (seen.has(a)) raise(T.TypeError, `${name}() got multiple sub-patterns for attribute ${repr(a)}`);
+      seen.add(a);
+      try {
+        out.push(getattr(s, a));
+      } catch (e: any) {
+        if (!isinstance(e, T.AttributeError)) throw e;
+        missing = true;
+      }
+    };
+    if (npos > 0) {
+      let ma: any = undefined;
+      try {
+        ma = getattr(cls, "__match_args__");
+      } catch (e: any) {
+        if (!isinstance(e, T.AttributeError)) throw e;
+      }
+      if (ma === undefined) {
+        const self = (cls as any).$mro.some((c: any) => MATCH_SELF.includes(c.$name) && c === (T as any)[c.$name]);
+        const allowed = self ? 1 : 0;
+        if (npos > allowed) raise(T.TypeError, `${name}() accepts ${allowed} positional sub-pattern${allowed === 1 ? "" : "s"} (${npos} given)`);
+        out.push(s);
+      } else {
+        if (typeOf(ma) !== T.tuple) raise(T.TypeError, `${name}.__match_args__ must be a tuple (got ${typeName(ma)})`);
+        if (npos > ma.length) raise(T.TypeError, `${name}() accepts ${ma.length} positional sub-pattern${ma.length === 1 ? "" : "s"} (${npos} given)`);
+        for (let i = 0; i < npos && !missing; i++) {
+          const a = ma[i];
+          // (exact strs, as CPython's PyUnicode_CheckExact)
+          if (typeof a !== "string") raise(T.TypeError, `__match_args__ elements must be strings (got ${typeName(a)})`);
+          attr(a);
+        }
+      }
+    }
+    for (const a of kw) {
+      if (missing) break;
+      attr(a);
+    }
+    return missing ? null : out;
+  },
+  match_true: (..._a: any[]) => true,
+  // async for / async with (frontend.ts)
+  aiter: (x: any) => aiterImpl(x),
+  anext: (x: any) => anextImpl(x),
+  aenter: (m: any) => aenterImpl(m),
+  aexit: (m: any) => aexitImpl(m),
+  type: (x: any) => typeOf(x),
+  get BaseException() {
+    return T.BaseException;
+  },
+  get StopAsyncIteration() {
+    return T.StopAsyncIteration;
+  },
+};
+const aenterImpl = (m: any) => {
   const f = Ty.lookupDunder(m, "__aenter__");
   if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the asynchronous context manager protocol`);
   return f(m);
-}, [1, 1]);
-define("__pyjs_aexit__", (m: any) => {
+};
+const aexitImpl = (m: any) => {
   const f = Ty.lookupDunder(m, "__aexit__");
   if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the asynchronous context manager protocol (missed __aexit__ method)`);
   return builtin((t: any, v: any, tb: any) => f(m, t, v, tb), "__aexit__");
-}, [1, 1]);
+};
 define("next", nextImpl, [1, 2]);
 define("any", anyImpl);
 define("all", allImpl);
