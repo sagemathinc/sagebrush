@@ -146,6 +146,7 @@ jobs:
           bun web/board/test-preview.mjs
           bun web/board/test-outcache.mjs
           bun web/test-image-size.mjs
+          bun web/test-lib-chunks.mjs
           bun web/board/test-ink.mjs
       - name: Mermaid flowcharts on boards, against Mermaid's own parser (its e2e and docs flowcharts)
         run: |

@@ -121,12 +121,22 @@ function libPath(filename: string): string | null {
   const dir = libDir();
   return filename.startsWith(dir + "/") ? filename.slice(dir.length + 1) : null;
 }
+// (a module's path for precompiled code: a library file's path in lib/, or
+// a mounted package file's "pkg:<dir>/<path>" (its checked bytes); else null)
+function precompiledPath(filename: string): string | null {
+  const key = pkgKeys.get(filename);
+  return key !== undefined ? "pkg:" + key : libPath(filename);
+}
 function precompiled(source: string, filename: string, name: string, sage: boolean): Compiled | null {
   const g = globalThis as any;
   const p: Precompiled | undefined = g.__SAGEBRUSH_PRECOMPILED__;
   if (p === undefined || p === null || typeof p !== "object" || p.build !== g.__SAGEBRUSH_BUILD_ID__ || typeof p.modules !== "object" || p.modules === null) return null;
-  const rel = libPath(filename), lib = g.__PYJS_LIB__;
-  if (rel === null || lib === undefined || !Object.hasOwn(lib, rel) || lib[rel] !== source) return null;
+  // (a library file's own source, or a package file's checked bytes)
+  const rel = precompiledPath(filename), lib = g.__PYJS_LIB__;
+  if (rel === null) return null;
+  if (rel.startsWith("pkg:")) {
+    if (mounted.get(filename) !== source) return null;
+  } else if (lib === undefined || !Object.hasOwn(lib, rel) || lib[rel] !== source) return null;
   const key = precompiledKey(name, sage);
   const m = Object.hasOwn(p.modules, key) ? p.modules[key] : undefined;
   if (m === undefined || m === null || typeof m !== "object" || m.path !== rel || typeof m.code !== "string" || !Array.isArray(m.lineMap)) return null;
@@ -149,9 +159,9 @@ if (recording !== null) {
 function compileCached(source: string, filename: string, name: string, sage: boolean, jsName: string): { compiled: Compiled; script: Script } {
   const pre = precompiled(source, filename, name, sage);
   if (pre !== null) return { compiled: pre, script: new Script(pre.code, { filename: jsName }) };
-  if (recording !== null && libPath(filename) !== null) {
+  if (recording !== null && precompiledPath(filename) !== null) {
     const compiled = compile(source, filename, name, false, false, { sage });
-    recording[precompiledKey(name, sage)] = { ...compiled, path: libPath(filename)! };
+    recording[precompiledKey(name, sage)] = { ...compiled, path: precompiledPath(filename)! };
     return { compiled, script: new Script(compiled.code, { filename: jsName }) };
   }
   // (a package's module too, by its checked bytes, which the key covers)
@@ -412,8 +422,10 @@ function packagesDir(): string {
 const mounted = new Map<string, string>();
 const mountedBases: string[] = [];
 const mountedRoots = new Map<string, string>();
-// (the repository path of a mounted file, for the catalog's source links)
+// (the repository path of a mounted file, for the catalog's source links,
+// and its package path "<dir>/<path>", for precompiled code)
 const repoPaths = new Map<string, string>();
+const pkgKeys = new Map<string, string>();
 const packageName = (id: string) => id.slice(0, id.lastIndexOf("@"));
 // A package's file: its bytes and text, or null if it isn't there
 function readPackageFile(dir: string, pkg: PackageEntry, path: string): { bytes: Uint8Array; text: string } | null {
@@ -459,6 +471,7 @@ function mountPackage(id: string, name: string): string {
   for (const [p, text] of got) {
     mounted.set(p, text);
     repoPaths.set(p, "packages/" + pkg.dir + "/" + p.slice(base.length + 1));
+    pkgKeys.set(p, pkg.dir + "/" + p.slice(base.length + 1));
   }
   mountedBases.push(base);
   const root = join(base, pkg.root);
