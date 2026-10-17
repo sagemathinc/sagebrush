@@ -30,7 +30,7 @@
 // writes to the copy are refused again and again is kept, never dropped
 // (CORR-1EC-1).
 //   bun web/board/test-cached-store.mjs
-import { adopted, cachedStore, merge3 } from "./cached.ts";
+import { adopted, cachedStore, merge3, IdbDocCache, COPY_UNAVAILABLE } from "./cached.ts";
 import { canonical, cleanDoc, formatError } from "./doc.ts";
 
 const fails = [];
@@ -601,6 +601,27 @@ for (const closeAtOnce of [true, false]) {
   const again = cachedStore(fakeRemote(base), key, cache, FAST);
   const got = await again.load();
   check(first.refusals === 10 && first.busy && first.cached === "base" && first.waited !== false && got?.doc.nodes[0].title === "LOCAL" && got.doc.title === "other 12", `an edit whose writes are refused more than ten times (${closeAtOnce ? "closed at once" : "left open"}): busy, kept, written ${closeAtOnce ? "on closing" : "after a wait"}, there when opened again: ` + JSON.stringify({ first, refusals, reopened: got && [got.doc.title, got.doc.nodes[0].title] }));
+}
+
+// This browser's copy whose database never opens (an IndexedDB open with no
+// answer at all, as behind another page's upgrade, web/board/idb-open.ts):
+// the board opens from the remote within the open's bound, and says so; an
+// edit goes to the remote, the copy failing at once (board-doccache-bounded)
+{
+  const realIdb = globalThis.indexedDB;
+  globalThis.indexedDB = { open: () => ({}) }; // (a request that never answers)
+  try {
+    const cache = new IdbDocCache("stalled", 200, 100), R = fakeRemote(doc("saved"));
+    const t0 = Date.now(), store = cachedStore(R, "k-stall", cache, FAST);
+    const got = await store.load(), took = Date.now() - t0;
+    check(got?.doc.nodes[0].title === "saved" && got.notice === COPY_UNAVAILABLE && took < 2000, `a copy whose database never opens: the remote's, within the bound, said (${took} ms): ` + JSON.stringify(got && [got.doc.nodes[0].title, got.notice]));
+    const t1 = Date.now();
+    store.save(cleanDoc(doc("edited")));
+    for (let i = 0; i < 50 && R.doc.nodes[0].title !== "edited"; i++) await tick(10);
+    check(R.doc.nodes[0].title === "edited" && !store.busy() && Date.now() - t1 < 1000, "...an edit goes to the remote, at once, the copy failing at once: " + JSON.stringify([R.doc.nodes[0].title, store.busy(), Date.now() - t1]));
+  } finally {
+    globalThis.indexedDB = realIdb;
+  }
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
