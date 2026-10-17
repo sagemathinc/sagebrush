@@ -387,6 +387,8 @@ class Collector {
         if (this.s.isAsync) throw new SyntaxErr(e.k === "YieldFrom" ? "'yield from' inside async function" : "async generators are not supported yet", e.line);
         this.s.isGenerator = true;
         return this.expr(e.value);
+      case "Intrinsic":
+        return e.args?.forEach((a) => this.expr(a));
       case "NamedExpr": {
         // Binds in the nearest enclosing non-comprehension scope.
         if (this.s.kind === "comp") this.s.walrusTargets.add(e.target);

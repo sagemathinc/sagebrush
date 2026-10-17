@@ -926,6 +926,7 @@ function interrupted(): never {
 }
 
 export const R: any = {
+  $i: B.intrinsics,
   /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
   host: null,
   INTR,
