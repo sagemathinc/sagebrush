@@ -32,6 +32,10 @@ const CELLS = [
   "DiGraph({0: {1: 'a'}, 1: {0: 'b', 1: 'c'}}, loops=True).plot(edge_labels=True)",
   "Graph([(i, (3 * i + 1) % 16) for i in range(16)] + [(i, i + 1) for i in range(15)]).plot()",
   "graphs.CycleGraph(5).plot() + point((0, 0))",
+  "Graph([(i, (3 * i + 1) % 16) for i in range(16)] + [(i, i + 1) for i in range(15)]).plot(iterations=60)",
+  "Graph([(0, 1, 'a'), (1, 2, 'b'), (2, 2, 'c'), (0, 0, 'd')], loops=True).plot(loop_size=2, edge_labels=True)",
+  "DiGraph([(0, 1), (1, 0)]).plot(pos={0: (1000, 1000), 1: (1001, 1000)})",
+  "graphs.CycleGraph(4).plot(title='T')",
 ];
 const cv = (i) => `sagebrush.notebook.cells()[${i}].out.querySelector('figure.plotgraph canvas')`;
 const png = (i) => ev(`${cv(i)}.toDataURL()`);
@@ -90,6 +94,22 @@ try {
       writeFileSync(join(process.env.GRAPH_SHOT, `graph-view-${i}.png`), Buffer.from(shot.data, "base64"));
     }
   }
+  // astra's CORR-4D6: "Lay out again" with nothing moved ends on the first
+  // picture with iterations given (4) and with loops of size 2 and labels,
+  // the range covering them as Python's does (5); a reciprocal pair far
+  // from the origin is offset by 1.2% of its own extent (3); a picture with
+  // a title is the SVG only (2)
+  await until(`!!${cv(4)} && !!${cv(5)} && !!${cv(6)}`);
+  for (const i of [4, 5]) {
+    const before = await png(i), r0 = await ev(`${cv(i)}.sbGraph.range()`);
+    await click(i, "Lay out again");
+    await until(`!${cv(i)}.sbGraph.busy()`, 60000);
+    const r1 = await ev(`${cv(i)}.sbGraph.range()`);
+    ok((await png(i)) === before && JSON.stringify(r0) === JSON.stringify(r1), `cell ${i}: Lay out again with nothing moved ends on the first picture and range ${JSON.stringify(r0)} ${JSON.stringify(r1)}`);
+  }
+  const off = await ev(`${cv(6)}.sbGraph.offset()`);
+  ok(Math.abs(off - 0.012) < 1e-12, "a reciprocal pair at (1000, 1000), (1001, 1000) is offset by 1.2% of its own extent: " + off);
+  ok(await ev("!sagebrush.notebook.cells()[7].out.querySelector('canvas') && sagebrush.notebook.cells()[7].out.querySelector('svg')?.style.display === ''"), "a picture with a title is the SVG only, shown");
   // check() refuses malformed data, before anything is drawn
   const refusals = await ev(`(() => {
     const good = { format: 1, directed: false, nodes: [{ label: "0", x: 0, y: 0, color: "#fec7b8" }], edges: [], radius: 12, thickness: 1, dash: "-", loop: 0.1, offset: 0, label_background: null, spring: true, range: [-1, 1, -1, 1] };

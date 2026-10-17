@@ -1156,25 +1156,31 @@ def _plot_graph(G, options):
         if p:
             g += sa.points([pos[v] for v in p], size=size, color=c, zorder=2)
     labels = options.get("vertex_labels", True)
+    # (each label found once, a function called once per vertex, and the
+    # picture and its data given the same text, CORR-4D6-1)
+    vlabel = {}
     if labels:
         for v in vs:
             # (a dict, a function of the vertex, CORR-896-1, or True)
             t = labels.get(v) if isinstance(labels, dict) else labels(v) if callable(labels) else str(v)
             if t is not None:
-                g += sa.text(str(t), pos[v], color="black", zorder=3)
+                vlabel[v] = str(t)
+                g += sa.text(vlabel[v], pos[v], color="black", zorder=3)
     # (on Sage's white, so that the line under a label does not cross it)
     background = options.get("edge_labels_background", "white")
     if background == "transparent":
         background = None
+    elabel = {}
     if options.get("edge_labels"):
-        for u, v, l in edges:
+        for i, (u, v, l) in enumerate(edges):
+            elabel[i] = str(l)
             if u == v:
                 x, y = pos[u]
                 xy = (x - math.sqrt(2) * loop, y + math.sqrt(2) * loop)
             else:
                 a, b = ends(u, v)
                 xy = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-            g += sa.text(str(l), xy, color="black", zorder=3, background_color=background)
+            g += sa.text(elabel[i], xy, color="black", zorder=3, background_color=background)
     g.axes(False)
     g.set_aspect_ratio(1)
     # (a margin, so that the vertices at the edge are whole)
@@ -1192,17 +1198,22 @@ def _plot_graph(G, options):
         for v in p:
             colour[v] = to_color(c, "#fec7b8")
     at = {v: i for i, v in enumerate(vs)}
-    label_of = (lambda v: labels.get(v) if isinstance(labels, dict) else labels(v) if callable(labels) else str(v)) if labels else (lambda v: None)
+    # (a picture with options of its own (a title, a border, a size, ranges)
+    # is the SVG only: the canvas draws none of them, CORR-4D6-2)
+    if gopts or options.get("graph_border"):
+        return g
     data = {
         "format": 1,
         "directed": bool(G._directed),
-        "nodes": [{"label": None if label_of(v) is None else str(label_of(v)), "x": pos[v][0], "y": pos[v][1],
+        "nodes": [{"label": vlabel.get(v), "x": pos[v][0], "y": pos[v][1],
                    "color": colour.get(v, "#fec7b8")} for v in vs],
         "edges": [{"s": at[u], "t": at[v], "color": to_color(colour_of.get(i, edge_color), "black"),
-                   "label": str(l) if options.get("edge_labels") else None} for i, (u, v, l) in enumerate(edges)],
+                   "label": elabel.get(i)} for i, (u, v, l) in enumerate(edges)],
         "radius": r, "thickness": float(thickness), "dash": style, "loop": loop, "offset": off,
         "label_background": to_color(background) if background else None,
         "spring": pos_from_spring,
+        # (the layout's options, for the canvas's "Lay out again", CORR-4D6-4)
+        "iterations": None if options.get("iterations") is None else float(options["iterations"]),
         "range": [mm["xmin"] - pad, mm["xmax"] + pad, mm["ymin"] - pad, mm["ymax"] + pad],
     }
     return GraphPlot(g, data)
@@ -1227,11 +1238,16 @@ class GraphPlot(_sa_plot().Graphics):
         super().__init__(g._primitives)
         self._options = dict(g._options)
         self._graph = data
+        self._drawn = dict(g._options)
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         import json
-        return {GRAPH_MIME: json.dumps(self._graph, separators=(",", ":")), "image/svg+xml": self._svg(),
-                "text/plain": repr(self)}
+        out = {"image/svg+xml": self._svg(), "text/plain": repr(self)}
+        # (options changed since it was drawn, set_axes_range or axes():
+        # the SVG only, CORR-4D6-2)
+        if self._options == self._drawn:
+            out[GRAPH_MIME] = json.dumps(self._graph, separators=(",", ":"))
+        return out
 
 
 class Graph(GenericGraph):

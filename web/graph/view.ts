@@ -28,6 +28,7 @@ export type GraphData = {
   offset: number;
   label_background: string | null;
   spring: boolean;
+  iterations: number | null;
   range: [number, number, number, number];
 };
 
@@ -75,6 +76,7 @@ export function check(raw: unknown): GraphData {
     loop: num(d.loop, "the loop size", 0, 1e6), offset: num(d.offset, "the offset", 0, 1e6),
     label_background: d.label_background === null ? null : color(d.label_background, "the label background"),
     spring: d.spring === true, range,
+    iterations: d.iterations === null || d.iterations === undefined ? null : num(d.iterations, "the iterations", 0, 1e15),
   };
 }
 
@@ -148,7 +150,26 @@ export function mount(fig: HTMLElement, data: unknown): boolean {
   const dx = (px: number) => ((px - tx) / k - ox) / base;
   const dy = (py: number) => -(((py - ty) / k - oy) / base);
 
+  // (both arrows of u -> v and v -> u apart, as Python draws them: each to
+  // its left by 1.2% of the vertices' extent, which a translation does not
+  // change, CORR-4D6-3)
+  let pairs = new Set<string>(), off = 0;
+  const geometry = () => {
+    pairs = new Set(g.edges.map((e) => e.s + "," + e.t));
+    if (!g.nodes.length) return;
+    const xs = g.nodes.map((v) => v.x), ys = g.nodes.map((v) => v.y);
+    off = 0.012 * Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1e-9);
+  };
+  const dataEnds = (e: GraphEdge): [number, number, number, number] => {
+    const a = g.nodes[e.s], b = g.nodes[e.t];
+    if (!(g.directed && pairs.has(e.t + "," + e.s))) return [a.x, a.y, b.x, b.y];
+    const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const nx = (-(b.y - a.y) / L) * off, ny = ((b.x - a.x) / L) * off;
+    return [a.x + nx, a.y + ny, b.x + nx, b.y + ny];
+  };
+
   function draw() {
+    geometry();
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     W = rect.width || 640;
@@ -163,19 +184,9 @@ export function mount(fig: HTMLElement, data: unknown): boolean {
     c.fillStyle = "#fff";
     c.fillRect(0, 0, W, H);
     const r = g.radius;
-    // (both arrows of u -> v and v -> u apart, as Python draws them)
-    const xs = g.nodes.map((v) => v.x), ys = g.nodes.map((v) => v.y);
-    const off = 0.012 * Math.max(Math.max(...xs, 0) - Math.min(...xs, 0), Math.max(...ys, 0) - Math.min(...ys, 0), 1e-9);
-    const pairs = new Set(g.edges.map((e) => e.s + "," + e.t));
     const ends = (e: GraphEdge) => {
-      const a = g.nodes[e.s], b = g.nodes[e.t];
-      let ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y);
-      if (g.directed && pairs.has(e.t + "," + e.s)) {
-        const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const nx = (-(b.y - a.y) / L) * off, ny = ((b.x - a.x) / L) * off;
-        ax = sx(a.x + nx); ay = sy(a.y + ny); bx = sx(b.x + nx); by = sy(b.y + ny);
-      }
-      return [ax, ay, bx, by];
+      const [ax, ay, bx, by] = dataEnds(e);
+      return [sx(ax), sy(ay), sx(bx), sy(by)];
     };
     c.lineWidth = g.thickness * 0.9;
     c.setLineDash(DASHES[g.dash]);
@@ -292,7 +303,8 @@ export function mount(fig: HTMLElement, data: unknown): boolean {
     const ids = g.nodes.map((_, i) => "v" + i);
     const nodes: SpringNode[] = g.nodes.map((v, i) => ({ id: ids[i], w: BOX, h: BOX, fixed: pinned.has(i) ? toSpring(v.x, v.y) : null }));
     const edges: [string, string][] = g.edges.filter((e) => e.s !== e.t).map((e) => [ids[e.s], ids[e.t]]);
-    const steps = springSteps(nodes, edges, { seed: 0 }, 1);
+    // (Python's layout's options: the same seed, and its iterations, CORR-4D6-4)
+    const steps = springSteps(nodes, edges, g.iterations === null ? { seed: 0 } : { seed: 0, iterations: g.iterations }, 1);
     animating = true;
     relayout.disabled = true;
     const frame = () => {
@@ -311,11 +323,27 @@ export function mount(fig: HTMLElement, data: unknown): boolean {
     };
     requestAnimationFrame(frame);
   });
-  // (the range follows the vertices, with Python's 10% margin)
+  // (the range: what Python's picture's range covers, the vertices, the
+  // arrows' ends, the edges' labels and the loops and theirs, with its 10%
+  // margin, CORR-4D6-5)
   const refit = () => {
-    const xs = g.nodes.map((v) => v.x), ys = g.nodes.map((v) => v.y);
-    if (!xs.length) return;
-    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    if (!g.nodes.length) return;
+    geometry();
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    const at = (x: number, y: number) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
+    for (const v of g.nodes) at(v.x, v.y);
+    const R = g.loop;
+    for (const e of g.edges) {
+      if (e.s === e.t) {
+        const v = g.nodes[e.s], cx = v.x - R / Math.SQRT2, cy = v.y + R / Math.SQRT2;
+        at(cx - R, cy - R); at(cx + R, cy + R);
+        if (e.label !== null) at(v.x - Math.SQRT2 * R, v.y + Math.SQRT2 * R);
+        continue;
+      }
+      const [ax, ay, bx, by] = dataEnds(e);
+      at(ax, ay); at(bx, by);
+      if (e.label !== null) at((ax + bx) / 2, (ay + by) / 2);
+    }
     const pad = 0.1 * Math.max(x1 - x0, y1 - y0, 1);
     g.range = [x0 - pad, x1 + pad, y0 - pad, y1 + pad];
   };
@@ -340,6 +368,7 @@ export function mount(fig: HTMLElement, data: unknown): boolean {
     pos: (i: number) => ({ x: g.nodes[i].x, y: g.nodes[i].y }),
     pinned: () => [...pinned].sort((a, b) => a - b),
     busy: () => animating,
+    offset: () => (geometry(), off),
     range: () => [...g.range],
     all: () => g.nodes.map((v) => [v.x, v.y]),
   };
