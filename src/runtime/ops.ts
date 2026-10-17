@@ -294,9 +294,11 @@ function seqBase(x: any): PyType | undefined {
 function nativeSeqMethod(x: any, name: string): boolean {
   const base = seqBase(x);
   if (base === undefined) return false;
-  // (a str subclass's: str's, or the unboxing proxy's wrapper of it)
-  const m = lookupType(typeOf(x), name);
-  return m === lookupType(base, name) || m?.$unboxing === true;
+  // (a str subclass's: str's, or the unboxing proxy's wrapper of it; a
+  // class body's `__mul__ = list.__mul__`: the self-checking form Python
+  // holds of it, the same descriptor, CORR-57F-1)
+  const m = lookupType(typeOf(x), name), b = lookupType(base, name);
+  return m === b || (b !== undefined && m === b.$selfChecked) || m?.$unboxing === true;
 }
 // Has a builtin sequence's type CPython's sequence repeat, sq_repeat? Only
 // if it keeps the builtin's __mul__ and __rmul__: one of its own instead
@@ -501,6 +503,12 @@ export function repeatArray(a: any[], n: number): any[] {
 }
 
 export function repeatBytes(a: PyBytes, n: number): PyBytes {
+  // (a result past what a buffer holds: a MemoryError before it is made;
+  // past an index-sized length, bytes's OverflowError, as CPython's)
+  if (a.n > 0 && n > Math.floor(4294967295 / a.n)) {
+    if (!(a instanceof PyByteArray) && BigInt(a.n) * BigInt(n) > 9223372036854775807n) raise(T.OverflowError, "repeated bytes are too long");
+    raise(T.MemoryError);
+  }
   const total = a.n * n;
   const r = new Uint8Array(total);
   if (total > 0) {
@@ -934,10 +942,22 @@ export function listInplaceRepeat(a: any[], n: any, direct = false): any[] {
   for (const v of r) a.push(v);
   return a;
 }
+// bytearray *= n as CPython's bytearray_irepeat: in place, the count
+// converted first; a size it already has is no resize (so no export check)
+export function bytearrayInplaceRepeat(b: PyByteArray, n: any, direct = false): PyByteArray {
+  const c = direct ? ssizeCount(n) : seqCount(n);
+  if (c === 1) return b;
+  const r = repeatBytes(b, c);
+  if (r.n !== b.n) checkResizable(b);
+  b.a = r.a;
+  b.n = r.n;
+  return b;
+}
 // x *= n as CPython's PyNumber_InPlaceMultiply: an __imul__ of x's own
 // (not a builtin sequence's), then the numeric multiply (a list
 // subclass's own __mul__, CORR-970-1, the right operand's __rmul__,
-// CORR-72B-2), then list's in-place repeat, else a sequence's repeat, of
+// CORR-72B-2), then list's or bytearray's in-place repeat, else a
+// sequence's repeat, of
 // the left operand, else of the right one
 export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
@@ -953,6 +973,7 @@ export function imul(a: any, b: any): any {
   const r = binaryNumeric(a, b, "mul");
   if (r !== NotImplemented) return r;
   if (Array.isArray(a) && (a as any).$t !== true && nativeSeqMethod(a, "__imul__")) return listInplaceRepeat(a, b);
+  if (a instanceof PyByteArray && nativeSeqMethod(a, "__imul__")) return bytearrayInplaceRepeat(a, b);
   if (seqRepeats(a)) return seqRepeat(a, b);
   if (seqRepeats(b)) return seqRepeat(b, a);
   raise(T.TypeError, `unsupported operand type(s) for *=: '${typeOf(a).$name}' and '${typeOf(b).$name}'`);
