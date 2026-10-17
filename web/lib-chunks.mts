@@ -17,7 +17,9 @@
 // that it is in; files no start uses are grouped by family (sage-more,
 // matlab-more, magma-more) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
-// "-").  A chunk's file name has its content's
+// "-").  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
+// pkg-<name>, its files by "<name>/<path>", and the manifest carries the
+// packages' registry (src/compile.ts checks each file against it).  A chunk's file name has its content's
 // SHA-256, and the manifest the whole hash, which the worker checks before it
 // uses one (design/security.md, SEC-8D6-1: a cached copy is origin storage).
 import { createHash } from "node:crypto";
@@ -32,7 +34,10 @@ export type LibManifest = {
   chunks: Record<string, { src: ChunkRef; pre?: ChunkRef }>;
   /** mode -> the groups its start needs, fetched when the mode starts */
   modes: Record<string, string[]>;
+  /** the packages' registry, and each package file ("<dir>/<path>") -> its group */
+  packages: { registry: unknown; files: Record<string, string> };
 };
+export type Packages = { registry: { packages: Record<string, { dir: string }> }; files: Record<string, string> };
 
 export const START_ORDER = ["core", "sci", "sage", "matlab", "magma"] as const;
 
@@ -50,7 +55,7 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
 
 /** The chunks (name -> bytes) and the manifest, for `lib` (path -> source)
  * and each mode's recording (py, sci, sage, matlab, magma). */
-export function libChunks(lib: Record<string, string>, recordings: Record<string, Recording>, build: string): { manifest: LibManifest; chunks: Map<string, Buffer> } {
+export function libChunks(lib: Record<string, string>, recordings: Record<string, Recording>, build: string, packages: Packages = { registry: { packages: {} }, files: {} }): { manifest: LibManifest; chunks: Map<string, Buffer> } {
   for (const [m, r] of Object.entries(recordings)) if (r.build !== build) throw new Error(`the ${m} recording is not this build's`);
   const sets = Object.fromEntries(Object.entries(recordings).map(([m, r]) => [m, new Set(Object.values(r.modules).map((x) => x.path))]));
   const files: Record<string, string> = {};
@@ -86,11 +91,23 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     const modules = pre.get(g);
     refs[g] = { src: put(g, "src", { files: f }), ...(modules ? { pre: put(g, "pre", { modules: Object.fromEntries(Object.entries(modules).sort((a, b) => a[0].localeCompare(b[0]))) }) } : {}) };
   }
+  // (a package's files: one group, sources only)
+  const pkgFiles: Record<string, string> = {};
+  const pkgGroups = new Map<string, Record<string, string>>();
+  for (const key of Object.keys(packages.files).sort()) {
+    const g = "pkg-" + key.split("/")[0];
+    pkgFiles[key] = g;
+    (pkgGroups.get(g) ?? pkgGroups.set(g, {}).get(g)!)[key] = packages.files[key];
+  }
+  for (const [g, f] of pkgGroups) {
+    if (refs[g]) throw new Error(`library chunks: ${g} is a library group's name too`);
+    refs[g] = { src: put(g, "src", { files: f }) };
+  }
   const modes: Record<string, string[]> = {};
   for (const m of ["sage", "matlab", "magma"]) {
     if (!sets[m]) continue;
     const gs = new Set([...sets[m]].map((p) => files[p]).filter((g) => g !== undefined));
     modes[m] = [...gs].sort((a, b) => START_ORDER.indexOf(a as any) - START_ORDER.indexOf(b as any));
   }
-  return { manifest: { build, files, chunks: refs, modes }, chunks };
+  return { manifest: { build, files, chunks: refs, modes, packages: { registry: packages.registry, files: pkgFiles } }, chunks };
 }
