@@ -300,10 +300,21 @@ class RealNumber(float):
             # 1e308 * RR('1e-320'), a literal on the left, reaches here)
             if a and isinstance(a[0], _RealBig):
                 return _rr_slow(name, self, a)
+            if a and name == "__pow__" and type(a[0]).__name__ == "RealNumberMP":
+                # (a power is in the base's field, as Sage: RR(2)^RealField(100)(2))
+                return g(self, _RealField()(a[0]))
+            if a and isinstance(a[0], _Fraction):
+                # a rational is converted to RR, as Sage: (float() would
+                # lose one past the doubles, and float + Fraction is a float)
+                return g(self, _RealField()(a[0]), *a[1:])
             try:
                 r = f(float(self), *a)
             except OverflowError:
                 return _rr_edge(name, self, a, None)
+            if r != r and name == "__pow__" and float(self) < 0:
+                # (a negative base to a NaN power: a complex NaN, as Sage)
+                import _sage_matrix
+                return _sage_matrix.ComplexNumber(complex(r, r))
             if type(r) is float or isinstance(r, float):
                 # (strictly above 2^-1022: a result rounded up to it from
                 # below may be a 53-bit RR number that the double lost)
@@ -1065,7 +1076,7 @@ def _rr_real_pow(mx, my):
     """mx ** my (53-bit MP values) in RR; a negative base to a non-integer
     power is complex, and CC holds doubles: refused when the base is past
     them."""
-    if mx._m < 0 and not my.is_integer():
+    if mx._m < 0 and not my._special and not my.is_integer():
         raise NotImplementedError("%s^%s: a negative real to a non-integer power is complex, and CC holds doubles; this one, past the double range, is not available in sagebrush yet" % (_rr_from_mp(mx), _rr_from_mp(my)))
     return _rr_from_mp(mx ** my)
 

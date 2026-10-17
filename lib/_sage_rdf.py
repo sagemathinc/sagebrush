@@ -22,6 +22,40 @@ def _frepr(x):
     return float.__repr__(float(x))
 
 
+def _double(x):
+    """float(x), with an integer or rational past the doubles as an infinity
+    of its sign, as Sage converts it to RDF (float() raises OverflowError)."""
+    try:
+        return float(x)
+    except OverflowError:
+        from fractions import Fraction
+        if isinstance(x, (int, Fraction)):
+            return float("inf") if x > 0 else float("-inf")
+        raise
+
+
+def _ipow(x, n):
+    """x^n for a double x and an integer n as Sage computes it in RDF: binary
+    powering from the low bits, of 1/x for a negative n (0.0^-3 is
+    +infinity), rounding after each product."""
+    if n < 0:
+        x = 1 / x if x else math.copysign(float("inf"), x)
+        n = -n
+    r = 1.0
+    while n:
+        if n & 1:
+            r *= x
+        n >>= 1
+        if n:
+            x2 = x * x
+            if x2 == x or x2 != x2:
+                # (0, 1, an infinity or NaN: every later product is the
+                # same, so one stands for them all: a huge n ends here)
+                return r * x2
+            x = x2
+    return r
+
+
 # ------------------------------------------------------------------ RDF
 
 class RealDoubleField_:
@@ -61,7 +95,7 @@ class RealDoubleField_:
             if z.imag:
                 raise TypeError("unable to convert %r to a real number" % (x,))
             x = z.real
-        return RealDoubleElement(float(x))
+        return RealDoubleElement(_double(x))
 
     def __eq__(self, o):
         return isinstance(o, RealDoubleField_)
@@ -211,15 +245,12 @@ class RealDoubleElement(float):
     def _num(self, o):
         if isinstance(o, (int, float)) or type(o).__name__ in ("Integer", "Rational", "RealNumber"):
             try:
-                return float(o)
+                return _double(o)
             except (TypeError, ValueError, OverflowError):
                 return None
-        try:
-            from fractions import Fraction
-            if isinstance(o, Fraction):
-                return float(o)
-        except ImportError:
-            pass
+        from fractions import Fraction
+        if isinstance(o, Fraction):
+            return _double(o)
         return None
 
     def __add__(self, o):
@@ -272,18 +303,34 @@ class RealDoubleElement(float):
 
     def __pow__(self, e, mod=None):
         x = float(self)
+        inf = float("inf")
         if isinstance(e, int) or type(e).__name__ == "Integer":
-            try:
-                return RealDoubleElement(x ** int(e))
-            except OverflowError:
-                return RealDoubleElement(float("inf"))
-        y = float(e)
-        if x < 0:
-            return CDF(x) ** y
+            return RealDoubleElement(_ipow(x, int(e)))
+        y = self._num(e)
+        if y is None:
+            y = float(e)
         if x == 0:
-            return RealDoubleElement(0.0 if y > 0 else float("inf"))
+            # (0.0 or -0.0 itself for a positive or NaN exponent)
+            if y < 0:
+                raise ZeroDivisionError("0.0 cannot be raised to a negative power")
+            return RealDoubleElement(1.0 if y == 0 else x)
+        if not x > 0:
+            # a negative base (or NaN) to an integral power, as Sage:
+            # +-exp(y log|x|)
+            if not (-inf < y < inf) or y != math.floor(y):
+                raise ValueError("negative number cannot be raised to a fractional power")
+            try:
+                r = math.exp(y * math.log(-x))
+            except OverflowError:
+                r = inf
+            return RealDoubleElement(-r if math.fmod(y, 2) else r)
+        if y == 0 or x == 1:
+            return RealDoubleElement(1.0)
         # as Sage: exp(y log x)
-        return RealDoubleElement(math.exp(y * math.log(x)))
+        try:
+            return RealDoubleElement(math.exp(y * math.log(x)))
+        except OverflowError:
+            return RealDoubleElement(inf)
 
     def __rpow__(self, b):
         return RDF(b) ** self
