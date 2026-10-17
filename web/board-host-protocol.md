@@ -215,8 +215,9 @@ thing.
 
 The host's model reads the reader's words as data, not instructions: the
 words decide among the options and do nothing else. The host answers only
-with a name from `options`, or `null`, and limits how often a channel may
-ask. A request costs the user's allowance, so the frame sends one only when
+with a name from `options`, or `null`. The host limits how often requests
+may be made, per channel or per user and board, whichever it can see, and
+bounds the total rate it serves. A request costs the user's allowance, so the frame sends one only when
 the reader asks for it.
 
 ## Delivery
