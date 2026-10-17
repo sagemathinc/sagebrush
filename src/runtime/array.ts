@@ -165,6 +165,8 @@ newBuiltinModule("array", (m) => {
     return r;
   };
   const A = Ty.builtinTypeFor("array", PyArray, "array", make);
+  // (a sequence to a match statement's sequence patterns: builtins.ts)
+  (T as any).$arrayType = A;
   Ty.subclassable(A, PyArray, ["a", "n", "tc"]);
   const M = (name: string, f: any) => Ty.method(A, name, f);
   const items = (o: any): any[] | undefined => (o instanceof PyArray ? o.items() : undefined);

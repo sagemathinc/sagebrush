@@ -623,33 +623,42 @@ const abcOf = () => {
   }
   return abcs;
 };
-const pyIssubclass = (t: any, cls: any): boolean => callObj(builtins.issubclass, [t, cls]) === true;
-const SEQ_NAMES = new Set(["list", "tuple", "range", "memoryview", "deque", "array"]);
-const NOT_SEQ = new Set(["str", "bytes", "bytearray", "dict"]);
+// (the runtime's own isinstance and issubclass, which no rebinding of the
+// builtins reaches; the types by identity, which no class's name or module
+// imitates)
+let seqTypes: Set<any> | null = null, notSeqTypes: Set<any> | null = null, mapTypes: Set<any> | null = null;
 const isSequence = (s: any): boolean => {
+  seqTypes ??= new Set([T.list, T.tuple, T.range, T.memoryview]);
+  // (array.array, once its module has made it: array.ts)
+  if ((T as any).$arrayType !== undefined) seqTypes.add((T as any).$arrayType);
+  notSeqTypes ??= new Set([T.str, T.bytes, T.bytearray]);
   const t = typeOf(s);
-  if (t === T.list || t === T.tuple) return true;
   for (const c of t.$mro) {
-    if (SEQ_NAMES.has(c.$name) && (c.$module === "builtins" || c.$module === "collections" || c.$module === "array")) return true;
-    if (NOT_SEQ.has(c.$name) && c.$module === "builtins") return false;
+    if (seqTypes.has(c)) return true;
+    if (notSeqTypes.has(c)) return false;
   }
-  return pyIssubclass(t, abcOf().Sequence);
+  return issubclassImpl(t, abcOf().Sequence);
 };
 const isMapping = (s: any): boolean => {
+  mapTypes ??= new Set([T.dict, Ty.mappingproxy]);
   const t = typeOf(s);
-  if (t === T.dict) return true;
-  for (const c of t.$mro) if ((c.$name === "dict" && c.$module === "builtins") || c.$name === "mappingproxy") return true;
-  return pyIssubclass(t, abcOf().Mapping);
+  for (const c of t.$mro) if (mapTypes.has(c)) return true;
+  return issubclassImpl(t, abcOf().Mapping);
 };
 // the values a fixed-length or starred sequence pattern takes, by iterating
-// the subject once (CPython's UNPACK_SEQUENCE and UNPACK_EX; an exact list
-// or tuple by its items, copied)
-const unpackAll = (s: any): any[] => {
+// the subject (CPython's UNPACK_SEQUENCE and UNPACK_EX; an exact list or
+// tuple by its items, copied): at most `limit` items, one more than a fixed
+// pattern's, so that a longer subject stops there
+const unpack = (s: any, limit: number): any[] => {
   const t = typeOf(s);
-  if (t === T.list || t === T.tuple) return s.slice();
+  if (t === T.list || t === T.tuple) return s.slice(0, limit);
   const out: any[] = [];
   const it = O.iter(s);
-  for (let v = it.$next(); v !== DONE; v = it.$next()) out.push(v);
+  while (out.length < limit) {
+    const v = it.$next();
+    if (v === DONE) break;
+    out.push(v);
+  }
   return out;
 };
 // (the types whose one positional subpattern is the subject itself,
@@ -658,28 +667,30 @@ const MATCH_SELF = ["bool", "bytearray", "bytes", "dict", "float", "frozenset", 
 const ONLY_WILDCARDS: any[] = Object.freeze([]) as any;
 export const intrinsics: any = {
   // size: the sequence pattern's subpatterns, its star among them (or -1);
-  // mode 0: values unpacked; 1: a wildcard star, the others by index
-  // (CPython's subscripts, from the end after the star); 2: only wildcards,
-  // nothing taken
+  // mode 0: the values unpacked; 1 (a wildcard star) and 2 (only
+  // wildcards): nothing taken here (match_item takes mode 1's, each as its
+  // subpattern is reached)
   match_seq(s: any, size: number, star: number, mode: number): any {
     if (!isSequence(s)) return null;
     if (star < 0) {
       if (O.len(s) !== size) return null;
     } else if (size - 1 > 0 && O.len(s) < size - 1) return null;
-    if (mode === 2) return ONLY_WILDCARDS;
-    if (mode === 1) {
-      const out: any[] = [];
-      for (let i = 0; i < size; i++) out.push(i === star ? null : O.getitem(s, i < star ? i : i - size));
-      return out;
-    }
-    const items = unpackAll(s);
+    if (mode !== 0) return ONLY_WILDCARDS;
     if (star < 0) {
+      const items = unpack(s, size + 1);
       if (items.length !== size) raise(T.ValueError, items.length > size ? `too many values to unpack (expected ${size})` : `not enough values to unpack (expected ${size}, got ${items.length})`);
       return items;
     }
+    const items = unpack(s, Infinity);
     const fixed = size - 1, after = size - 1 - star;
     if (items.length < fixed) raise(T.ValueError, `not enough values to unpack (expected at least ${fixed}, got ${items.length})`);
     return [...items.slice(0, star), items.slice(star, items.length - after), ...items.slice(items.length - after)];
+  },
+  // item i of a sequence matched by a pattern with a wildcard star: by its
+  // nonnegative index, from the subject's length after the star (CPython's:
+  // a subject needn't take negative indexes)
+  match_item(s: any, i: number, size: number, star: number): any {
+    return O.getitem(s, i < star ? i : O.sub(O.len(s), size - i));
   },
   // a mapping, with at least n items (none asked when n is 0)
   match_map(s: any, n: number): boolean {
@@ -710,7 +721,7 @@ export const intrinsics: any = {
   },
   match_class(s: any, cls: any, npos: number, kw: string[]): any {
     if (!isType(cls)) raise(T.TypeError, "called match pattern must be a class");
-    if (callObj(builtins.isinstance, [s, cls]) !== true) return null;
+    if (!isinstanceImpl(s, cls)) return null;
     const name = (cls as any).$name;
     const seen = new Set<string>();
     const out: any[] = [];

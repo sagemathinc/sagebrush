@@ -93,7 +93,8 @@ function foldLiteral(k: any): Lit | undefined {
       const l = foldLiteral(k.left), r = foldLiteral(k.right);
       if (l === undefined || r === undefined || l.t !== "num" || r.t !== "num" || r.im === null) return undefined;
       const sign = k.op._type === "Sub" ? -1 : 1;
-      return { t: "num", re: l.re, im: (l.im ?? 0) + sign * r.im };
+      // (a complex number's parts are floats: its real part converted)
+      return { t: "num", re: typeof l.re === "bigint" ? Number(l.re) : l.re, im: (l.im ?? 0) + sign * r.im };
     }
   }
   return undefined;
@@ -536,7 +537,15 @@ class Convert {
         // star, the others by index; else all unpacked)
         const mode = pats.every(wildcard) ? 2 : star >= 0 && wildcard(pats[star]) ? 1 : 0;
         const [t, test] = unpacked("match_seq", [subj, int(pats.length), int(star), int(mode)]);
-        return and([test, ...pats.map((x: any, i: number) => (x._type === "MatchStar" ? (x.name ? this.capture(x, x.name, item(t, i), ctx) : null) : this.pattern(x, item(t, i), ctx, true)))]);
+        if (mode === 0) return and([test, ...pats.map((x: any, i: number) => (x._type === "MatchStar" ? (x.name ? this.capture(x, x.name, item(t, i), ctx) : null) : this.pattern(x, item(t, i), ctx, true)))]);
+        // (a wildcard star: each other item taken as its subpattern is
+        // reached, not before, and none for a wildcard)
+        return and([test, ...pats.map((x: any, i: number) => {
+          if (mode === 2 || wildcard(x)) return null;
+          const e = `$e${ctx.n}_${this.tmp++}`;
+          const got: A.Expr = this.intrinsic("match_true", [{ k: "NamedExpr", line, target: e, value: this.intrinsic("match_item", [subj, int(i), int(pats.length), int(star)], line) }], line);
+          return and([got, this.pattern(x, this.name(e, line), ctx, true)]);
+        })]);
       }
       case "MatchMapping": {
         const seen = new Set<string>();
