@@ -227,3 +227,140 @@ t('iter is itself', lambda: (iter(it) is it, type(iter(Src())).__name__, type(it
 t('iter non-iterator', lambda: iter(Bad()))
 t('iter getitem', lambda: type(iter(type('G', (), {'__getitem__': lambda s, i: 1 / 0})())).__name__)
 t('iter list', lambda: (type(iter([])).__name__, type(iter('')).__name__, type(iter({})).__name__, type(iter(x for x in ())).__name__))
+
+# astra's HOLD on 28af38b3: a deque's own length and deletion, never a
+# subclass's (CORR-28A-1)
+class DL(deque):
+    def __len__(self):
+        return 0
+
+
+dl = DL([1, 2, 3])
+t('subclass len', lambda: (list(dl), list(reversed(dl)), dl.count(2), 2 in dl, dl.index(2), dl[1], (dl.remove(2), list(dl))[1]))
+events = []
+
+
+class DD(deque):
+    def __delitem__(self, i):
+        events.append(i)
+
+    def append(self, x):
+        events.append(('append', x))
+
+    def popleft(self):
+        events.append('popleft')
+
+
+dd = DD([1, 2, 3])
+t('subclass delitem', lambda: ((dd.remove(2), list(dd))[1], events))
+t('subclass extend', lambda: (lambda d: (d.extend([4]), list(d), events[-1:]))(DD([1], maxlen=1)))
+
+
+# a deque made again counts as changed (CORR-28A-2)
+def reinit(rev):
+    d = deque([1, 2])
+    it = reversed(d) if rev else iter(d)
+    d.__init__([3, 4])
+    return next(it)
+
+
+t('reinit iter', lambda: reinit(False))
+t('reinit reversed', lambda: reinit(True))
+t('reinit empty', lambda: (lambda d: (lambda it: (d.__init__([]), list(it)))(iter(d)))(deque()))
+t('reinit maxlen', lambda: (lambda d: (d.__init__([1, 2, 3], 2), list(d), d.maxlen))(deque([9])))
+
+
+def reinit_search(method, *args):
+    d = deque()
+
+    class X:
+        def __eq__(self, other):
+            d.__init__([2, 3])
+            return False
+    d.extend([X(), 1])
+    return getattr(d, method)(*args)
+
+
+for m in ('count', '__contains__', 'index', 'remove'):
+    t('reinit search ' + m, lambda: reinit_search(m, 3))
+
+
+# count's numbers by the type's own slots (CORR-28A-3)
+class Hide(type):
+    def __getattribute__(cls, key):
+        if key in ('__int__', '__index__', '__float__'):
+            raise AttributeError(key)
+        return super().__getattribute__(key)
+
+
+class Raise(type):
+    def __getattribute__(cls, key):
+        if key in ('__int__', '__index__', '__float__'):
+            raise ValueError(key)
+        return super().__getattribute__(key)
+
+
+class Fake(type):
+    def __getattr__(cls, key):
+        return lambda self: 1
+
+
+class Number(metaclass=Hide):
+    def __int__(self):
+        return 1
+
+
+class Number2(metaclass=Raise):
+    def __float__(self):
+        return 1.0
+
+
+class NotNumber(metaclass=Fake):
+    pass
+
+
+for c in (Number, Number2, NotNumber, int, float, complex, bool):
+    t('count of ' + c.__name__, lambda: bool(itertools.count(c())))
+
+# the iterators' own constructors: the deque, and how many are taken (CORR-28A-4)
+T = type(iter(deque()))
+R = type(reversed(deque()))
+t('iterator start', lambda: (list(T(deque('abcd'), 1)), list(R(deque('abcd'), 1)), list(T(deque('abcd'))), list(T(deque('ab'), 5)), list(T(deque('ab'), -1))))
+t('iterator start float', lambda: T(deque('ab'), 1.5))
+t('iterator not deque', lambda: T('ab'))
+t('iterator subclass deque', lambda: list(T(DL([1, 2]), 1)))
+
+
+# strict end: no StopIteration value left (CORR-28A-5)
+class Done:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        raise StopIteration('payload')
+
+
+def stop(f):
+    try:
+        next(f)
+    except StopIteration as e:
+        return e.args, e.value
+
+
+for name, mk in (('map', lambda *a, **k: map(str, *a, **k)), ('zip', zip)):
+    t(name + ' strict payload', lambda: (stop(mk(Done(), strict=True)), stop(mk(Done(), Done(), strict=True))))
+    t(name + ' strict payload again', lambda: (lambda it: (stop(it), stop(it)))(mk(Done(), strict=True)))
+    t(name + ' payload not strict', lambda: stop(mk(Done())))
+
+
+def g():
+    yield 1
+
+
+class GI:
+    def __iter__(self):
+        return gen
+
+
+gen = g()
+t('iter generator identity', lambda: (iter(GI()) is gen, type(iter(GI())).__name__))
