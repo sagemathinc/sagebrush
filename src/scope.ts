@@ -73,6 +73,9 @@ export function resolve(scope: Scope, name: string): Resolution {
     if (scope.kind === "class") return { kind: "class", outer: { kind: "global" } };
     return { kind: "local" };
   }
+  // (a class's annotation scope: a name the class declares global is the
+  // globals', not looked up in its namespace, as CPython's)
+  if (scope.annotation && scope.parent!.kind === "class" && scope.parent!.globals.has(name)) return { kind: "global" };
   if (scope.kind === "class" || (scope.annotation && scope.parent!.kind === "class")) return { kind: "class", outer: resolveFree(scope.parent!, name) };
   return resolveFree(scope.parent!, name);
 }
@@ -431,12 +434,13 @@ class Collector {
     }
   }
 
-  // A new annotation scope here, its one parameter format
+  // A new annotation scope here. Its one parameter, format, binds no source
+  // name (an annotation's `format` is the enclosing scopes', as CPython's):
+  // src/emit.ts gives it a JS name of its own, ANNOT_FORMAT, which only
+  // its locals() shows
   annotationScope(key: object): Scope {
     const sc = this.newScope("function", "__annotate__", key);
     sc.annotation = true;
-    sc.bound.add("format");
-    sc.params.add("format");
     return sc;
   }
   // An annotation's expression, in annotation scope `as`: its names that

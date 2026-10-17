@@ -112,7 +112,8 @@ export function unparse(e: any, level = PR_TEST): string {
       return `${s}(${parts.join(", ")})`;
     }
     case "Constant":
-      return constant(e.value);
+      // (a u-prefixed str keeps its prefix, as CPython's append_ast_constant)
+      return (e.kind === "u" ? "u" : "") + constant(e.value);
     case "JoinedStr":
       return "f" + strRepr(fbody(e.values));
     case "Attribute": {
