@@ -1864,7 +1864,7 @@ class RealNumberMP:
             # (|x| to an infinite power: no complex part, as Sage)
             a = -x
             return R(1) if a == 1 else a ** y
-        if x._m < 0 and not y._special and (y._e >= 0 or y._m % (1 << -y._e) == 0):
+        if x._m < 0 and not y._special and _mp_integral(y._m, y._e):
             # a negative real to an integral real power: real, as Sage (an
             # even power when y has trailing zero bits: no 2^e-bit integer)
             return (-x) ** y if y._e > 0 else x ** (y._m >> -y._e)
@@ -2722,6 +2722,14 @@ class RealNumberMP:
             2.0000000
         """
         return self
+
+
+def _mp_integral(m, e):
+    """Whether m 2^e is an integer, without a 2^-e-bit integer: a nonzero
+    value below 1 (-e past m's bits; e may be near -2^62) is not."""
+    if e >= 0:
+        return True
+    return -e <= abs(m).bit_length() and m & ((1 << -e) - 1) == 0
 
 
 def _arith(a, b, op, R):
