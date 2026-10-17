@@ -1109,21 +1109,32 @@ export function lengthHint(x: any): void {
     // function as itself, any other value through its type's __get__,
     // whose errors are raised; then called without arguments, where a
     // TypeError, from the call alone, means no guess)
-    let f = lookupType(t, "__length_hint__");
+    // (x's type now: __len__ may have changed x's __class__)
+    const tn: any = typeOf(x);
+    let f = lookupType(tn, "__length_hint__");
     if (f === undefined) return;
-    let method = builtinSlot(t, "__length_hint__") || (typeof f === "function" && f.$pyfn === true);
+    // (a Python function: $pyfn, but not a builtin type's method, which has
+    // $pyfn too, with $builtinMethod and its $owner)
+    const pyfn = typeof f === "function" && f.$pyfn === true && f.$builtinMethod !== true && f.$owner === undefined;
+    let method = builtinSlot(tn, "__length_hint__") || pyfn;
     if (f !== null && typeof f === "object" && f.asDunder !== undefined) {
       f = f.asDunder();
       method = true;
     }
     let call: () => any;
     // (a Python function, a staticmethod or classmethod, or a builtin type's
-    // method, bound without fail; anything else (a class, a builtin
-    // function, a callable object, a descriptor) as CPython binds it)
+    // method found on that type, bound without fail; a builtin type's method
+    // put on another class, bound with its receiver check (CPython's method
+    // descriptor's: a wrong receiver is a TypeError then); anything else (a
+    // class, a builtin function, a callable object, a descriptor) as CPython
+    // binds it)
     if (method) call = () => f(x);
-    else {
+    else if (typeof f === "function" && f.$owner !== undefined) {
+      if (!isinstance(x, f.$owner)) raise(T.TypeError, `descriptor '${f.__name__}' for '${f.$owner.$name}' objects doesn't apply to a '${typeName(x)}' object`);
+      call = () => f(x);
+    } else {
       const get = lookupType(typeOf(f), "__get__");
-      const bound = get !== undefined ? callObj(get, [f, x, t]) : f;
+      const bound = get !== undefined ? callObj(get, [f, x, tn]) : f;
       call = () => callObj(bound, []);
     }
     let v: any;
