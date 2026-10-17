@@ -298,11 +298,40 @@ class RealNumber(float):
         # (closure constants and float.__new__: this is every operation)
         lo, inf, new = _NORMAL_MIN, _INF, float.__new__
         def g(self, *a):
+            if name in ("__pow__", "__rpow__") and len(a) == 2:
+                # (pow(x, y, m): Sage's RR ignores the modulus)
+                a = a[:1]
+            if a and name in ("__pow__", "__rpow__"):
+                o = a[0]
+                if isinstance(o, float) and type(o) is not float and not isinstance(o, RealNumber) and type(o).__name__ != "RealDoubleElement":
+                    # (a user's float subclass: Python float's power, as
+                    # Sage, its own value, no __float__ call, CORR-726-1)
+                    if name == "__pow__":
+                        # (computed here, not NotImplemented: a direct
+                        # RR(2).__pow__(F(3)) is 8.0 too, CORR-3FE-2)
+                        import _sage_real
+                        return _sage_real._cpow(float.__float__(self), float.__float__(o))
+                    return float.__float__(o) ** float.__float__(self)
+                if isinstance(o, complex) or type(o).__name__ == "ComplexNumberMP":
+                    # (a complex operand: the coarser complex field's power)
+                    import _sage_real
+                    return _sage_real._real_complex_pow(self, 53, o, name == "__rpow__")
+            if a and name in ("__pow__", "__rpow__") and not isinstance(a[0], _RealBig) and not isinstance(self, _RealBig):
+                s = _rr_pow_special(self, a[0], name == "__rpow__")
+                if s is not None:
+                    return s
             # (an operand held in the MP field has a lossy backing double:
             # 1e308 * RR('1e-320'), a literal on the left, reaches here)
             if a and isinstance(a[0], _RealBig):
                 return _rr_slow(name, self, a)
             if a and name == "__pow__" and type(a[0]).__name__ == "RealNumberMP":
+                p = a[0].parent().precision()
+                b, e = float.__float__(self), float(a[0])
+                if p < 53 and ((b != b and e != 0) or (e != e and b != 1)):
+                    # (no real power: a complex NaN in the coarser field's
+                    # complex field, CORR-726-3)
+                    import _sage_real
+                    return _sage_real.ComplexField(p)(_m.nan, _m.nan)
                 # (a power is in the base's field, as Sage: RR(2)^RealField(100)(2))
                 return g(self, _RealField()(a[0]))
             if a and isinstance(a[0], _Fraction) and name in _RR_Q_OPS:
@@ -891,8 +920,7 @@ class _RealBig(RealNumber):
     del _bin
 
     def __pow__(self, o, mod=None):
-        if mod is not None:
-            return NotImplemented
+        # (pow(x, y, m): Sage's RR ignores the modulus)
         if isinstance(o, int) or type(o).__name__ == "Integer" or (isinstance(o, _Fraction) and o.denominator == 1):
             return _rr_from_mp(self._mp ** int(o))
         m = _rr_operand(o)
@@ -1054,6 +1082,51 @@ def _rr_arith(a, b, op):
     """a op b (53-bit MP values), rounded once."""
     import _sage_real
     return _sage_real._arith(a, b, op, _rr_mp())
+
+
+def _rr_pow_special(x, o, rev):
+    """x^o (o^x if rev) for RR when a zero, an infinite or a NaN operand
+    decides it, as Sage (MPFR's pow, a NaN result Sage's complex NaN); None
+    otherwise.  0^-y is +infinity, -0 to an odd negative integer -infinity;
+    -infinity^y is real (+-infinity, +-0); x^0 = 1 and 1^y = 1."""
+    if not isinstance(o, (int, float)):
+        return None
+    # (the operands' own values: a float subclass's __float__ is not
+    # called, CORR-726-1)
+    inf = _INF
+    xv = float.__float__(x)
+    if isinstance(o, float):
+        ov = float.__float__(o)
+    elif rev:
+        try:
+            ov = float(int.__int__(o))
+        except OverflowError:
+            return None
+    else:
+        # (an integer exponent: its parity and sign from the integer, no
+        # float conversion of a huge one)
+        n = int.__int__(o)
+        ov = 0.0 if n == 0 else (1.0 if n > 0 else -1.0) * (3.0 if n % 2 else 2.0)
+    b, e = (ov, xv) if rev else (xv, ov)
+    if e == 0 or b == 1:
+        return None
+    if isinstance(o, int) and not rev and b == b and b != 0 and b != -inf:
+        # (a finite base to an integer: the ordinary path)
+        return None
+    odd = -inf < e < inf and e == _m.floor(e) and _m.fmod(e, 2) != 0
+    if b != b or e != e:
+        import _sage_matrix
+        return _sage_matrix.ComplexNumber(complex(_m.nan, _m.nan))
+    if b == 0:
+        neg = _m.copysign(1.0, b) < 0 and odd
+        if e < 0:
+            return RealNumber(-inf if neg else inf)
+        return RealNumber(-0.0 if neg else 0.0)
+    if b == -inf:
+        if e > 0:
+            return RealNumber(-inf if odd else inf)
+        return RealNumber(-0.0 if odd else 0.0)
+    return None
 
 
 _RR_PARENT = "'Real Field with 53 bits of precision'"
