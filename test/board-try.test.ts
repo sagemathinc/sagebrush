@@ -56,7 +56,9 @@ test("board try: each case checked from the board's state, its verdict, message,
   assert.deepEqual(j.code.map((c: any) => [c.id, c.ok]), [["c1", true], ["c2", true]]);
   const by = Object.fromEntries(j.checks.map((c: any) => [c.case_id, c]));
   // (right; and its mutation of a copied list never reaches the board: the next case starts from the same state)
-  assert.deepEqual([by.r.outcome, by.r.raw_result, by.r.next, by.r.scope_preserved, by.r.isolation, by.r.check_invoked], ["right", true, "yes", true, "copy", true]);
+  // (the board has a function: its state can't be shown unchanged, so null, with why, and each case fresh)
+  assert.deepEqual([by.r.outcome, by.r.raw_result, by.r.next, by.r.scope_preserved, by.r.isolation, by.r.check_invoked], ["right", true, "yes", null, "copy", true]);
+  assert.match(by.r.scope_preserved_reason, /grow holds a function/);
   assert.deepEqual([by.w.outcome, by.w.raw_result, by.w.message, by.w.next], ["wrong", "Not 5: add the list", "Not 5: add the list", "no"]);
   assert.equal(by.r2.outcome, "right");
   assert.deepEqual([by.en.outcome, by.en.check_invoked, by.en.raw_result, by.en.next, by.en.note], ["in words", false, null, null, "I don't know how to add"]);
@@ -68,8 +70,8 @@ test("board try: each case checked from the board's state, its verdict, message,
   assert.equal(by["after-slow"].outcome, "right");
   assert.equal(by.none.outcome, "error");
   assert.match(by.none.error, /not True, False or a message/);
-  // (a check that changes the board through a function it shares: said, not hidden)
-  assert.deepEqual([by.grow.outcome, by.grow.scope_preserved, by.grow.isolation], ["right", false, "copy"]);
+  // (a check that changes the board through a function it shares: never said to be preserved)
+  assert.deepEqual([by.grow.outcome, by.grow.scope_preserved, by.grow.isolation], ["right", null, "copy"]);
   // hints: one record each, a computed one with the first wrong answer
   assert.deepEqual(j.hints.filter((h: any) => h.ask_id === "q1").map((h: any) => [h.index, h.rendered, h.error]), [[0, "Add them up.", null], [1, "You wrote 5.", null]]);
   // a sequence: wrong, wrong, right; the hints shown; its progress saved and read back
@@ -117,20 +119,42 @@ const tryCases = (name: string, board: unknown, cases: unknown) => {
 test("board try: a helper's change to an object inside the board is seen; the next case starts from the board's state", () => {
   const b = one("class Box:\n    pass\nb = Box()\nb.x = []\ndef grow():\n    b.x.append(1)\ndef size():\n    return len(b.x)", "grow() if answer == 1 else None\nsize() == 0 if answer == 0 else True");
   const k = tryCases("object2", b, { checks: [{ case_id: "grow", ask_id: "q", answer: 1 }, { case_id: "size", ask_id: "q", answer: 0 }] });
-  assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["grow", "right", "copy", false], ["size", "right", "copy", true]]);
+  assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["grow", "right", "copy", null], ["size", "right", "copy", null]]);
 });
 
 test("board try: a change the copy can't keep in (a method using the board's globals) is seen, and the board is run again before the next case", () => {
   const b = one("xs = []\nclass C:\n    def add(self):\n        xs.append(1)\nc = C()", "c.add() if answer == 1 else None\nxs == [] if answer == 0 else True");
   const j = tryCases("method", b, { checks: [{ case_id: "add", ask_id: "q", answer: 1 }, { case_id: "empty", ask_id: "q", answer: 0 }, { case_id: "again", ask_id: "q", answer: 0 }] });
-  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["add", "right", false], ["empty", "right", true], ["again", "right", true]]);
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["add", "right", null], ["empty", "right", null], ["again", "right", null]]);
+});
+
+test("board try: state in the board's own classes, functions, closures, dict keys and list subclasses: a change seen, the next case fresh (astra2's CORR-A19-1, at cb1a5279)", () => {
+  const boards: [string, string, string][] = [
+    ["class", "class Box:\n    xs = []", "len(Box.xs)"],
+    ["function", "def f():\n    pass\nf.xs = []", "len(f.xs)"],
+    ["closure", "def make():\n    xs = []\n    def g(add):\n        if add:\n            xs.append(1)\n        return len(xs)\n    return g\nf = make()", "f(False)"],
+    ["dict-key", "class K:\n    def __init__(self):\n        self.xs = []\nholders = {K(): 1}", "len(next(iter(holders)).xs)"],
+    ["list-attribute", "class L(list):\n    pass\nb = L([1])\nb.xs = []", "len(b.xs)"],
+  ];
+  const grow: Record<string, string> = { class: "Box.xs.append(1)", function: "f.xs.append(1)", closure: "f(True)", "dict-key": "next(iter(holders)).xs.append(1)", "list-attribute": "b.xs.append(1)" };
+  for (const [name, code, size] of boards) {
+    const j = tryCases("state-" + name, one(code, `${grow[name]} if answer == 1 else None\n${size} == 0 if answer == 0 else True`), { checks: [{ case_id: "grow", ask_id: "q", answer: 1 }, { case_id: "size", ask_id: "q", answer: 0 }] });
+    assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["grow", "right", null], ["size", "right", null]], name);
+    assert.match(j.checks[0].scope_preserved_reason, /holds a/, name);
+  }
+});
+
+test("board try: a board of plain values: shown unchanged (true), or changed (false), and then the next case fresh", () => {
+  const b = one("xs = [1, (2, 'a')]\nd = {'k': 1.5, 2: None}", "__import__('__main__').xs.append(9) if answer == 1 else None\nxs == [1, (2, 'a')] if answer == 0 else True");
+  const j = tryCases("plain", b, { checks: [{ case_id: "read", ask_id: "q", answer: 0 }, { case_id: "write", ask_id: "q", answer: 1 }, { case_id: "after", ask_id: "q", answer: 0 }] });
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["read", "right", true], ["write", "right", false], ["after", "right", true]]);
 });
 
 test("board try: a state that can't be copied: each check, hint and sequence answer from the board's state run afresh", () => {
   const b = one("gen = (i for i in range(20))", "next(gen) == 0", { hints: [{ code: "str(next(gen))" }] });
   const j = tryCases("gen", b, { checks: [{ case_id: "a", ask_id: "q", answer: 0 }, { case_id: "b", ask_id: "q", answer: 0 }], sequences: [{ ask_id: "q", answers: [0, 0] }, { ask_id: "q", answers: [0] }] });
   assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["a", "right", "rerun", null], ["b", "right", "rerun", null]]);
-  assert.match(j.checks[0].scope_preserved_reason, /iterator/);
+  assert.match(j.checks[0].scope_preserved_reason, /gen holds a generator/);
   assert.deepEqual(j.hints.map((h: any) => h.rendered), ["0"]);
   assert.deepEqual(j.interaction.map((i: any) => i.sequence), [["right", "right"], ["right"]]);
 });
