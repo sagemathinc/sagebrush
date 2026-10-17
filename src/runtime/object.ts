@@ -605,7 +605,34 @@ export function getattr(o: any, name: string, dflt?: any): any {
     if (dflt !== undefined) return dflt;
     raise(T.AttributeError, `'${typeName(o)}' object has no attribute '${name}'`);
   }
-  if (isType(o)) return typeGetattr(o, name, dflt);
+  if (isType(o)) {
+    // (a metaclass's own __getattribute__, then its __getattr__, as
+    // CPython's slot_tp_getattr_hook; type's own lookup otherwise)
+    const meta = typeOf(o);
+    if (meta !== T.type) {
+      const ga = lookupType(meta, "__getattribute__");
+      const own = ga !== undefined && ga !== T.object.$dict.get("__getattribute__") && ga !== T.type.$dict.get("__getattribute__");
+      const gf = lookupType(meta, "__getattr__");
+      if (own || gf !== undefined) {
+        try {
+          return own ? metaHookCall(ga, o, meta, name) : typeGetattr(o, name);
+        } catch (e) {
+          if (!isinstance(e, T.AttributeError)) throw e;
+          if (gf === undefined) {
+            if (dflt !== undefined) return dflt;
+            throw e;
+          }
+        }
+        try {
+          return metaHookCall(gf, o, meta, name);
+        } catch (e) {
+          if (dflt === undefined || !isinstance(e, T.AttributeError)) throw e;
+          return dflt;
+        }
+      }
+    }
+    return typeGetattr(o, name, dflt);
+  }
   const t = typeOf(o);
   if (t.$customGet) {
     const ga = lookupType(t, "__getattribute__");
@@ -677,7 +704,14 @@ function descrGetOrGetattr(d: any, o: any, t: PyType, name: string): any {
   }
 }
 
-function typeGetattr(cls: PyType, name: string, dflt?: any): any {
+// (a metaclass's hook bound as CPython's slot binds it: a function with the
+// class, a descriptor through its __get__, another callable with (cls, name))
+function metaHookCall(f: any, cls: any, meta: any, name: string): any {
+  if (typeof f === "function") return f(cls, name);
+  const get = lookupType(typeOf(f), "__get__");
+  return get !== undefined ? callObj(get(f, cls, meta), [name]) : callObj(f, [cls, name]);
+}
+export function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   const meta = (cls as any).$meta ?? T.type;
   const md = lookupType(meta, name);
   if (md !== undefined && isDataDescriptor(md)) return descrGet(md, cls, meta);
@@ -1299,8 +1333,12 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void; isinstance: (x: any, spec: any) => boolean; issubclass: (c: any, spec: any) => boolean } = {
   typeCall: null,
+  // (isinstance() and issubclass()'s whole protocol, builtins.ts; never
+  // through the replaceable builtins)
+  isinstance: () => false,
+  issubclass: () => false,
   // (a generator's handled exception, as it resumes; one thrown into a
   // generator: the traceback bookkeeping, index.ts)
   excResumed: () => {},

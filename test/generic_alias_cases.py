@@ -195,3 +195,124 @@ class N5(E2(), E2(), int):
 
 
 t(lambda: (len(seen_bases), seen_bases[0] is seen_bases[1], type(seen_bases[0]), len(seen_bases[0]), N5.__bases__))
+
+
+# @sagebrush-astra's review probes of a71b3d50 (CORR-A71-1..6)
+
+def show(name, f):
+    try:
+        print(name, repr(f()))
+    except Exception as e:
+        print(name, type(e).__name__, str(e))
+
+show('isinstance union early', lambda: isinstance(1, int | list[int]))
+show('issubclass union early', lambda: issubclass(int, int | list[int]))
+show('isinstance union late', lambda: isinstance(1, list[int] | int))
+show('generic basic', lambda: (list[int], list[int].__origin__, list[int].__args__))
+show('nongeneric', lambda: int[str])
+
+seen = []
+class Entry:
+    def __mro_entries__(self, bases):
+        seen.append(bases)
+        return ()
+e1, e2 = Entry(), Entry()
+class C(e1, e2, int): pass
+show('original bases identity', lambda: (seen[0] is seen[1], C.__orig_bases__ is seen[0], len(C.__orig_bases__)))
+print('original bases elements', C.__orig_bases__[0] is e1, C.__orig_bases__[1] is e2)
+
+calls = []
+class Param:
+    @property
+    def __typing_subst__(self):
+        calls.append('subst')
+        return lambda x: x
+    def __repr__(self): return 'Param'
+p = Param()
+a = types.GenericAlias(list, p)
+show('parameters first', lambda: a.__parameters__)
+show('parameters second', lambda: a.__parameters__)
+show('parameters cache', lambda: (calls, a.__parameters__ is a.__parameters__))
+mutable = [p]
+b = types.GenericAlias(list, mutable)
+show('parameters mutation before', lambda: b.__parameters__)
+mutable.clear()
+show('parameters mutation after', lambda: b.__parameters__)
+
+class LS(list): pass
+show('list subclass repr', lambda: types.GenericAlias(list, LS([int, str])))
+show('list subclass params', lambda: types.GenericAlias(list, LS([p])).__parameters__)
+
+class Dynamic(type):
+    def __getattribute__(cls, name):
+        if name == '__class_getitem__': return lambda x: ('dynamic', x)
+        return super().__getattribute__(name)
+class D(metaclass=Dynamic): pass
+show('dynamic class getitem', lambda: D[int])
+
+class Meta(type):
+    def __getattribute__(cls, name):
+        if name == '__module__': return 'shown'
+        if name == '__qualname__': return 'Name'
+        return super().__getattribute__(name)
+class Named(metaclass=Meta): pass
+show('class argument repr', lambda: list[Named])
+
+class SetAttr:
+    def __setattr__(self, name, value): raise ValueError('reject setattr')
+show('orig class setattr error', lambda: isinstance(types.GenericAlias(SetAttr, int)(), SetAttr))
+
+class GA(types.GenericAlias): pass
+show('subclass reduce', lambda: GA(list, int).__reduce__()[0] is GA)
+show('subclass copy', lambda: __import__('copy').copy(GA(list, int)).__class__ is GA)
+show('unpack alias', lambda: tuple(list[int]))
+show('unpack args', lambda: tuple(list[int])[0].__unpacked__)
+
+show('constructor missing', lambda: types.GenericAlias(list))
+show('constructor extra', lambda: types.GenericAlias(list, int, str))
+show('alias args identity', lambda: a.__args__ is a.__args__)
+
+
+# (a failed first __parameters__ computation is retried, not kept)
+class Flaky:
+    n = 0
+
+    @property
+    def __typing_subst__(self):
+        Flaky.n += 1
+        if Flaky.n == 1:
+            raise ValueError("first")
+        return lambda x: x
+
+    def __repr__(self):
+        return "Flaky"
+
+
+fl = types.GenericAlias(list, Flaky())
+show("parameters retry 1", lambda: fl.__parameters__)
+show("parameters retry 2", lambda: (fl.__parameters__, Flaky.n))
+show("parameters retry 3", lambda: (fl.__parameters__, Flaky.n))
+# (unpacking: a starred alias)
+st = next(iter(tuple[int, ...]))
+show("starred", lambda: (st, st.__unpacked__, st.__typing_unpacked_tuple_args__, st == next(iter(tuple[int, ...])), st == tuple[int, ...], list[int].__typing_unpacked_tuple_args__))
+show("starred list", lambda: [*list[int]])
+# (a metaclass __getattr__ and __class_getitem__ = None)
+class MG(type):
+    def __getattr__(cls, name):
+        if name == "__class_getitem__":
+            return lambda x: ("getattr", x)
+        raise AttributeError(name)
+
+
+class CG(metaclass=MG):
+    pass
+
+
+class CN:
+    __class_getitem__ = None
+
+
+show("metaclass getattr", lambda: (CG[int], CG.missing if False else None))
+show("class_getitem None", lambda: CN[int])
+show("union issubclass abc", lambda: issubclass(list, collections.abc.Iterable | int))
+show("union isinstance late", lambda: isinstance("s", int | str | list[int]))

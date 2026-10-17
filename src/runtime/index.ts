@@ -725,7 +725,8 @@ export function classNamespace(name: string, bases: any[], kwNames: string[], kw
   if (bc !== defaultBuildClass) return new Map();
   const ub = Ty.updateBases(bases);
   if (ub !== bases) {
-    (bases as any).$orig = bases.slice();
+    // (__orig_bases__: the very tuple the __mro_entries__ calls were given)
+    (bases as any).$orig = (ub as any).$orig;
     bases.splice(0, bases.length, ...ub);
   }
   return Ty.classNamespace(name, bases, kwNames, kwValues);
@@ -743,7 +744,7 @@ export function classLocals(ns: Map<string, any> | Ty.PreparedNs): any {
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any> | Ty.PreparedNs, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   const orig = (bases as any).$orig;
-  if (orig !== undefined) ns.set("__orig_bases__", tuple(orig));
+  if (orig !== undefined) ns.set("__orig_bases__", orig);
   const cls = Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
   // CPython's __build_class__: type.__new__ must have set the class cell
   // (a metaclass may drop __classcell__ on the way)
