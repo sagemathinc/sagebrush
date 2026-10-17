@@ -43,6 +43,14 @@ export async function digestHex(bytes: ArrayBuffer | Uint8Array): Promise<string
   return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Told each chunk fetched from the site and installed (its file, lib/...):
+// the page has the service worker keep it, which a chunk fetched before the
+// service worker controlled the page (a first visit) went past (web/sw.js)
+let onInstalled: ((file: string) => void) | null = null;
+export function onChunkInstalled(f: (file: string) => void) {
+  onInstalled = f;
+}
+
 // Install a chunk whose bytes were checked: only its own group's files and
 // modules (by the manifest), so a chunk can't stand in for another group's.
 function install(group: string, kind: Kind, bytes: Uint8Array) {
@@ -55,6 +63,12 @@ function install(group: string, kind: Kind, bytes: Uint8Array) {
     for (const [key, m] of Object.entries<any>(c.modules ?? {})) if (m && M.files[m.path] === group) precompiled.modules[key] = m;
   }
   installed.add(group + "." + kind);
+  // (not a downloaded file's own copy: web/runner, files mode)
+  if (!g.__SB_FILES__) {
+    try {
+      onInstalled?.(M.chunks[group][kind]!.file);
+    } catch {}
+  }
 }
 
 function fetchSync(url: string): Uint8Array {
