@@ -2318,8 +2318,11 @@ method(dict, "setdefault", (d: PyDict, k: any, dflt: any = null) => {
 method(dict, "pop", (d: PyDict, k: any, dflt: any = undefined) => {
   // (an empty dict's: the default or KeyError, the key never hashed, as
   // CPython's dict_pop)
-  const kh = d.$m.size === 0 ? undefined : dictKeyHash(d, k);
-  const v = d.$m.size === 0 ? undefined : dictGet(d, k, kh);
+  // (but a class namespace's dict refuses a key other than a str even
+  // when empty, daybreak2's HARD-E4A-1)
+  const empty = d.$m.size === 0 && (d as any).$strOnly !== true;
+  const kh = empty ? undefined : dictKeyHash(d, k);
+  const v = empty ? undefined : dictGet(d, k, kh);
   if (v === undefined) {
     if (dflt !== undefined) return dflt;
     throw markRaised(T.KeyError(k));

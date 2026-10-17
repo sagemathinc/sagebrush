@@ -40,6 +40,23 @@ test("a class namespace's dict refuses a non-str key before touching it", () => 
   ].join("\n");
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
   assert.equal(got, "['a'] []\n");
+  // (an empty namespace too, through pop, which never hashes a key of an
+  // empty dict: refused all the same)
+  const empty = [
+    "class M(type):",
+    "    def __new__(m, name, bases, ns):",
+    "        ns.clear()",
+    "        for op in (lambda: ns.pop(object(), 0), lambda: ns.pop(object()), lambda: ns.pop(1, 0)):",
+    "            try: print(op())",
+    "            except NotImplementedError as e: print('NotImplementedError', e)",
+    "            except KeyError as e: print('KeyError', e)",
+    "        print({}.pop([], 0))",
+    "        return super().__new__(m, name, bases, {})",
+    "class C(metaclass=M):",
+    "    a = 1",
+  ].join("\n");
+  const refused = "NotImplementedError a key other than a str in a class's __classdict__ is not supported yet\n";
+  assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", empty], { encoding: "utf8" }), refused.repeat(3) + "0\n");
   // (and many refused writes leave no state behind)
   require(__dirname + "/../src/compile.js");
   const Ty = require(__dirname + "/../src/runtime/types.js");
