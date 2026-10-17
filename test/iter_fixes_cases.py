@@ -364,3 +364,46 @@ class GI:
 
 gen = g()
 t('iter generator identity', lambda: (iter(GI()) is gen, type(iter(GI())).__name__))
+
+# astra's HOLD on b3fca8d2: the iterators' constructors by position only,
+# keywords ignored (CORR-B3F-1); a new deque made past a subclass's
+# __getattr__ (CORR-B3F-2)
+for f in (lambda: T(), lambda: T(deque('ab'), 1, 2), lambda: list(T(deque('abcd'), index=2)), lambda: list(R(deque('abcd'), index=2)),
+          lambda: list(T(deque('abcd'), 1, foo=3)), lambda: T(deque=deque('a')), lambda: R(), lambda: list(T(deque('ab'), True))):
+    t('iterator args', f)
+
+
+class Hooked:
+    def __index__(self):
+        print('index hook')
+        return 1
+
+
+t('iterator keyword hook', lambda: list(T(deque('ab'), index=Hooked())))
+calls = []
+
+
+class GA(deque):
+    def __getattr__(self, n):
+        calls.append(n)
+        raise ValueError(n)
+
+
+class GF(deque):
+    def __getattr__(self, n):
+        calls.append(n)
+        return 7
+
+
+t('getattr subclass', lambda: (list(GA([1, 2])), list(GA()), list(GF([3])), calls))
+t('getattr subclass reinit', lambda: (lambda d: (lambda it: (d.__init__([5, 6]), next(it, 'x')))(iter(d)))(GA([1, 2])))
+
+
+def sub(base):
+    class S(base):
+        pass
+    return 'made'
+
+
+t('iterator types no base', lambda: sub(T))
+t('reverse iterator types no base', lambda: sub(R))

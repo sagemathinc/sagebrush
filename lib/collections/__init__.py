@@ -45,15 +45,25 @@ def _dlen(d):
     return len(d._l) + len(d._r)
 
 
+_deque_iterators_sealed = False
+
+
 class _deque_iterator:
     # (as CPython's dequeiter: the deque's mutation count when it was made,
     # a change of it a RuntimeError; reading by position, so reverse() and
     # item assignment, which change no count, are seen: astra3 A28)
     __slots__ = ("_d", "_i", "_n", "_state", "_step")
 
-    def __new__(cls, d, index=0):
+    def __new__(cls, *args, **kwargs):
         # (as CPython's dequeiter_new: a deque, and how many of its items
-        # are taken already, CORR-28A-4)
+        # are taken already, CORR-28A-4; by position only, keywords
+        # ignored, as its PyArg_ParseTuple, CORR-B3F-1)
+        if not args:
+            raise TypeError("function takes at least 1 argument (0 given)")
+        if len(args) > 2:
+            raise TypeError("function takes at most 2 arguments (%d given)" % len(args))
+        d = args[0]
+        index = args[1] if len(args) > 1 else 0
         if not isinstance(d, deque):
             raise TypeError("argument 1 must be collections.deque, not %s" % type(d).__name__)
         index = _ssize(index)
@@ -61,6 +71,12 @@ class _deque_iterator:
         for _ in range(min(index, it._n)):
             next(it)
         return it
+
+    def __init_subclass__(cls, **kwargs):
+        # (CPython's iterator types are no base types)
+        if _deque_iterators_sealed:
+            raise TypeError("type 'collections.%s' is not an acceptable base type" % cls.__mro__[1].__name__)
+        super().__init_subclass__(**kwargs)
 
     @classmethod
     def _make(cls, d):
@@ -104,6 +120,7 @@ class _deque_reverse_iterator(_deque_iterator):
 
 
 _deque_reverse_iterator.__module__ = "collections"
+_deque_iterators_sealed = True
 
 
 def _same(item, x):
@@ -127,8 +144,10 @@ class deque:
                 raise ValueError("maxlen must be non-negative")
         # (as CPython's deque_init: a new deque's count starts at 0; a deque
         # made again is cleared, which counts, then extended, CORR-28A-2)
+        # (whether its storage exists, read past any subclass __getattr__,
+        # CORR-B3F-2)
         try:
-            self._state
+            object.__getattribute__(self, "_state")
         except AttributeError:
             self._l = []
             self._r = []
