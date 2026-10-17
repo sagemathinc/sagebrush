@@ -657,6 +657,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       submitBar();
     }, 200);
   });
+  // (the id a send awaits the answer to, and the timer that offers Send again: one of each)
+  let awaiting: string | null = null, lateTimer = 0;
   async function send() {
     const ch = host.answers;
     if (sendBtn.disabled || !ch) return;
@@ -668,15 +670,24 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const pa = pageAnswers();
     if (g !== loadGen || destroyed || !pa || pa.missing.length || sub?.state === "sending") { submitBar(); return; }
     const key = subKey(pa), id = sub && sub.key === key && sub.state !== "received" ? sub.id : uuid();
-    const mine: Sent = { id, key, state: "sending" };
+    const mine: Sent = sub?.id === id ? sub : { id, key, state: "sending" };
+    mine.state = "sending";
     sub = mine;
     submitBar();
-    const late = window.setTimeout(() => { if (sub === mine && mine.state === "sending") { mine.state = "late"; submitBar(); } }, sendAgainMs());
-    const r = await ch.submit(id, { page: pa.page, answers: pa.answers, notes: pa.notes, comment: comment.value });
-    clearTimeout(late);
+    clearTimeout(lateTimer);
+    lateTimer = window.setTimeout(() => { if (sub === mine && mine.state === "sending") { mine.state = "late"; submitBar(); } }, sendAgainMs());
+    const answer = ch.submit(id, { page: pa.page, answers: pa.answers, notes: pa.notes, comment: comment.value });
+    // (sent again: the channel's one promise of that id, which a send already awaits)
+    if (awaiting === id) return;
+    awaiting = id;
+    const r = await answer;
+    if (awaiting === id) awaiting = null;
     if (sub !== mine || destroyed) return;
+    clearTimeout(lateTimer);
     if ("received" in r) mine.state = "received";
-    else { mine.state = "refused"; mine.message = r.refused; }
+    else if ("refused" in r) { mine.state = "refused"; mine.message = r.refused; }
+    // (given up on, unanswered: Send again sends it again)
+    else mine.state = "late";
     submitBar();
   }
   sendBtn.onclick = () => { send().catch(fail); };

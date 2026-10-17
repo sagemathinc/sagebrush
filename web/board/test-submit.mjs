@@ -172,11 +172,19 @@ try {
   check(r1.ok && r1.submission.answers.q1 === "$S_3$" && r1.submission.notes.q2?.includes("$g \\in G$") && r1.submission.comment.includes("|G| = 6") && r1.submission.page.number === 1 && r1.submission.page.id === "p1", "the page, its answers, notes and comment, as given");
   check(!!(await until(() => frame(`${$("subsend")}.textContent === "Send again" && !${$("subsend")}.disabled`), 10000)), "no answer: Send again offered");
   await shot("submit-2-late.png");
+  // (a silent host, sent again and again: the same id each time, HARD-B21-1)
+  for (let k = 0; k < 3; k++) {
+    await frame(`${$("subsend")}.click()`);
+    await until(async () => (await sent("answers")).length === 2 + k);
+    await until(() => frame(`${$("subsend")}.textContent === "Send again" && !${$("subsend")}.disabled`), 10000);
+  }
+  subs = await sent("answers");
+  check(subs.length === 4 && subs.every((m) => m.id === subs[0].id), "a silent host, sent again three times: the same id each time");
   await top(`mode.submit = "refused"; mode.message = "The board changed: reload it."`);
   await frame(`${$("subsend")}.click()`);
-  check(!!(await until(async () => (await sent("answers")).length === 2)), "Send again sends");
+  check(!!(await until(async () => (await sent("answers")).length === 5)), "Send again sends");
   subs = await sent("answers");
-  check(subs[1].id === subs[0].id, "with the same id");
+  check(subs[4].id === subs[0].id, "with the same id");
   check(!!(await until(() => frame(`${$("substatus")}.textContent.includes("Not sent: The board changed: reload it. You can")`))), "refused: the host's words shown");
   check(await frame(`!${$("subsend")}.disabled`), "and the reader can send again");
   await shot("submit-3-refused.png");
@@ -186,9 +194,9 @@ try {
   await frame(`document.querySelectorAll('[data-ask="q1"] input[type=radio]')[1].click()`);
   await sleep(500);
   await frame(`${$("subsend")}.click()`);
-  check(!!(await until(async () => (await sent("answers")).length === 3)), "changed answers sent");
+  check(!!(await until(async () => (await sent("answers")).length === 6)), "changed answers sent");
   subs = await sent("answers");
-  check(subs[2].id !== subs[0].id && checkSubmission(posted, subs[2]).ok, "with a new id, passing the check");
+  check(subs[5].id !== subs[0].id && checkSubmission(posted, subs[5]).ok, "with a new id, passing the check");
   check(!!(await until(() => frame(`${$("substatus")}.textContent.includes("Received") && ${$("subsend")}.disabled && ${$("submitbtn")}.textContent.includes("Submitted")`))), "received: said, and Send disabled until something changes");
   await shot("submit-4-received.png");
   await frame(`${$("subclose")}.click()`);
