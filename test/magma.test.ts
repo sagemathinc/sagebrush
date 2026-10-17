@@ -1409,6 +1409,54 @@ test("a number put in a collection over Q[x] or Z[x] is a constant polynomial, a
   assert.match(out, /\nend\n$/);
 });
 
+test("a number put in a collection over a number field, a real field or a matrix space takes the universe's type, as Magma's (astra2 WA-012..014)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const nf = "P<t>:=PolynomialRing(Rationals()); U<a>:=NumberField(t^2-2); ", re = "U:=RealField(30); ";
+  const mz = "A:=Matrix(Integers(),2,2,[1,2,3,4]); U:=Parent(A); ", mq = "A:=Matrix(Rationals(),2,2,[1,2,3,4]); U:=Parent(A); ";
+  const src = [nf + "S:=[U|2]; Type(S[1]); Parent(S[1]) eq U;", nf + "S:=[U|]; Append(~S,1/2); Type(S[1]); S[1]*a;",
+    nf + "S:={U|}; Include(~S,-3); Type(Setseq(S)[1]);", nf + "S:=Sort([U|a]); Remove(~S,1); Append(~S,3); Type(S[1]);",
+    re + "S:=[U|2]; Type(S[1]);", re + "S:=[U|]; Append(~S,1/2); Type(S[1]);", re + "S:={U|-3}; Type(Setseq(S)[1]);",
+    mz + "S:=[U|2]; Type(S[1]); S[1];", mz + "S:=[U|]; Append(~S,0); S[1];", mq + "S:=[U|1/2]; S[1];",
+    mz + "S:=[U|1/2];", "A:=Matrix(Integers(),2,3,[1,2,3,4,5,6]); U:=Parent(A); S:=[U|2];"].join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (each as Magma 2.18 has it; 1/2 doesn't go into integer matrices, a
+  // number into no non-square matrix space)
+  assert.ok(out.startsWith("FldNumElt\ntrue\nFldNumElt\n1/2*a\nFldNumElt\nFldNumElt\nFldReElt\nFldReElt\nFldReElt\nAlgMatElt\n[2 0]\n[0 2]\n" +
+    "[0 0]\n[0 0]\n[1/2   0]\n[  0 1/2]\n"), out);
+  assert.equal((out.match(/Coerce failed for sequence element/g) ?? []).length, 2, out);
+  assert.match(out, /\nend\n$/);
+  // (and where the universe comes from an element: the number takes the
+  // element's parent, Append and S[i] := alike)
+  const el = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: [nf + "S:=[a]; Append(~S,2); Type(S[2]); S[2]*a;",
+    nf + "S:=[a]; S[2]:=1/2; Type(S[2]);", "P<x>:=PolynomialRing(Rationals()); S:=[x]; Append(~S,2); Type(S[2]); S[2] div 3;",
+    "P<x>:=PolynomialRing(Rationals()); S:=[x]; S[2]:=2; Type(S[2]);", "A:=Matrix(Integers(),2,2,[1,2,3,4]); S:=[A]; Append(~S,2); S[2];",
+    "A:=Matrix(Integers(),2,2,[1,2,3,4]); S:=[A]; S[2]:=3; S[2];", "S:=[RealField(30)!1]; Append(~S,2); Type(S[2]);",
+    nf + "S:=[a]; Index(S, a), Position([U|1,2], 2);"].join("\n") + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  assert.equal(el, "FldNumElt\n2*a\nFldNumElt\nRngUPolElt\n2/3\nRngUPolElt\n[2 0]\n[0 2]\n[3 0]\n[0 3]\nFldReElt\n1 2\nend\n", el);
+});
+
+test("Matrix checks its shape in Magma's words before it builds anything: no Python error, no silently shortened matrix", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = ["Matrix(Integers(),2,2,[1,2,3]);", "Matrix(Integers(),2,2,[1,2,3,4,5]);", "Matrix(2,2,[1,2,3]);", "Matrix(Rationals(),2,3,[1,2]);",
+    "Matrix([[1,2],[3]]);", "Matrix(Integers(),[[1,2],[3]]);", "Matrix([[1,2],[3,4],[5]]);", "Matrix(GF(7),2,2,[1,2,3]);", "Matrix(GF(7),2,2,[1,2,3,4,5]);",
+    "Matrix(GF(7),[[1,2],[3]]);", "Matrix(2,3,[]);", "Matrix(Integers(),2,2,[1/2,1,1,1]);"].join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (each as Magma 2.18 has it)
+  const want = ["Sequence should have length 4", "Sequence should have length 4", "Sequence should have length 4", "Sequence should have length 6",
+    "Element 2 of sequence does not have length 2", "Element 2 of sequence does not have length 2", "Element 3 of sequence does not have length 2",
+    "Sequence should have length 4", "Sequence should have length 4", "Element 2 of sequence does not have length 2", "Illegal null sequence",
+    "Cannot coerce sequence element 1 into the coefficient ring"];
+  // (a message longer than the line wraps, as Magma's does)
+  const got = out.split("Runtime error in 'Matrix': ").slice(1).map((m) => m.split("\n\n")[0].replace(/\s+/g, " ").trim());
+  assert.deepEqual(got, want, out);
+  assert.doesNotMatch(out, /ValueError|TypeError|Traceback/);
+  // (an empty sequence with a ring is the zero matrix, a finite field's too)
+  const z = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "Matrix(Integers(),2,2,[]);\nMatrix(GF(7),2,2,[]);\nMatrix(2,2,[1,2,3,4]);\n", encoding: "utf8" }).stdout as string;
+  assert.equal(z, "[0 0]\n[0 0]\n[0 0]\n[0 0]\n[1 2]\n[3 4]\n", z);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
