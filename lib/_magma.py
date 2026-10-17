@@ -4082,6 +4082,10 @@ def _str1(v, indent, col, tail):
     if isinstance(v, _smat.Matrix) and (v.nrows() == 0 or v.ncols() == 0):
         m, n = v.nrows(), v.ncols()
         return "Matrix with %d row%s and %d column%s" % (m, "" if m == 1 else "s", n, "" if n == 1 else "s"), False  # (as Magma prints one)
+    if isinstance(v, _smat.Matrix) and indent:
+        # (inside a collection: each row at the element's indentation, as
+        # Magma prints [M, M]; at the top level as before)
+        return ("\n" + " " * indent).join(_inline(v).split("\n")) + tail, True
     if isinstance(v, _smat.MatrixSpace_):
         # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
         # Sage's "Full MatrixSpace of ... dense matrices")
@@ -4130,10 +4134,13 @@ def _str1(v, indent, col, tail):
         step = 0 if _SPRINT[0] is not None else 4
         pad = " " * (indent + step)
         # (an undefined element prints as undef, as in a one-line sequence)
-        inner = [pad + ("undef" + ("," if k < len(raw) - 1 else "") if x is _UNDEF else _str(x, indent + step, None, "," if k < len(raw) - 1 else "")) for k, x in enumerate(raw)]
-        # (a matrix over a finite field is followed by an empty line, as
+        # (a multiset's element with its multiplicity after its last line,
+        # before the comma, as Magma prints {* a^^2, a + 1 *} one to a line)
+        mult = (lambda x: "^^%d" % v.keys[_key(x)][1] if v.keys[_key(x)][1] > 1 else "") if isinstance(v, MSet) and v.kind == "multi" else (lambda x: "")
+        inner = [pad + ("undef" + ("," if k < len(raw) - 1 else "") if x is _UNDEF else _str(x, indent + step, None, mult(x) + ("," if k < len(raw) - 1 else ""))) for k, x in enumerate(raw)]
+        # (a matrix is followed by an empty line, as
         # Magma prints a sequence of them)
-        body = "".join(t + ("\n\n" if isinstance(raw[k], _MFFMat) else "\n") for k, t in enumerate(inner[:-1])) + inner[-1]
+        body = "".join(t + ("\n\n" if isinstance(raw[k], (_MFFMat, _smat.Matrix)) else "\n") for k, t in enumerate(inner[:-1])) + inner[-1]
         return o.strip() + "\n" + body + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec) and any(isinstance(p, _MFFMat) for p in v.vals.values()):
         raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
