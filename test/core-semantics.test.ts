@@ -15,3 +15,12 @@ for (const name of ["core_semantics_cases.py", "core_datetime_cases.py", "core_o
     for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${name} line ${i + 1}`);
   });
 }
+
+// (adjacent \\uD800\\uDC00 escapes: two code points in CPython, which
+// Sagebrush's strings would merge into one; refused, CORR-D77-4)
+test("raw-unicode-escape refuses escaped surrogates that would merge", () => {
+  const code = "for b in (rb'\\uD800\\uDC00', rb'\\U0000D800\\U0000DC00', rb'\\uD800x\\uDC00', rb'\\U00010000'):\n    try: print(len(b.decode('raw-unicode-escape')))\n    except NotImplementedError as e: print('NotImplementedError', e)";
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
+  const refused = "NotImplementedError a lone high surrogate followed by a lone low surrogate would become one character in Sagebrush's strings; not supported";
+  assert.equal(got, `${refused}\n${refused}\n3\n1\n`);
+});

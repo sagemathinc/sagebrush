@@ -6,7 +6,7 @@ import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
-  bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
+  bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr,
 } from "./object";
 import * as O from "./ops";
@@ -302,11 +302,13 @@ method(getsetType, "__set__", (d: GetSet, o: any, v: any) => {
 });
 // A __slots__ entry: type `member_descriptor`, the value kept in the
 // instance's own runtime slot (a `$` key, never an attribute), as
-// CPython's member descriptors
+// CPython's member descriptors; each its own slot, so that a subclass's
+// slot of the same name as a base's is another (CORR-D77-1)
+let memberIds = 0;
 export class PyMember {
-  constructor(public owner: PyType, public name: string) {}
-  get key(): string {
-    return `$slot:${this.name}`;
+  key: string;
+  constructor(public owner: PyType, public name: string) {
+    this.key = `$slot:${++memberIds}:${name}`;
   }
 }
 const memberType = builtinType("member_descriptor", [object], () => raise(T.TypeError, "cannot create 'member_descriptor' instances"));
@@ -2306,20 +2308,23 @@ method(dict, "get", (d: PyDict, k: any, dflt: any = null) => {
   return v === undefined ? dflt : v;
 });
 method(dict, "setdefault", (d: PyDict, k: any, dflt: any = null) => {
-  const v = dictGet(d, k);
+  // (the key hashed once for both, as CPython's, CORR-D77-2)
+  const kh = dictKeyHash(d, k);
+  const v = dictGet(d, k, kh);
   if (v !== undefined) return v;
-  dictSet(d, k, dflt);
+  dictSet(d, k, dflt, kh);
   return dflt;
 });
 method(dict, "pop", (d: PyDict, k: any, dflt: any = undefined) => {
   // (an empty dict's: the default or KeyError, the key never hashed, as
   // CPython's dict_pop)
-  const v = d.$m.size === 0 ? undefined : dictGet(d, k);
+  const kh = d.$m.size === 0 ? undefined : dictKeyHash(d, k);
+  const v = d.$m.size === 0 ? undefined : dictGet(d, k, kh);
   if (v === undefined) {
     if (dflt !== undefined) return dflt;
     throw markRaised(T.KeyError(k));
   }
-  dictDelete(d, k);
+  dictDelete(d, k, kh);
   return v;
 });
 method(dict, "popitem", (d: PyDict) => {
@@ -3202,6 +3207,14 @@ getset(object, "__dict__", (o) => {
   // filename, winerror and filename2, the args then only the first two
   // once a filename is given; an exact BlockingIOError's numeric third
   // argument is characters_written instead)
+  // (characters_written as PyNumber_AsSsize_t converts it: an index, and a
+  // ValueError past the signed 64-bit range, CORR-D77-5)
+  const writtenOf = (v: any): any => {
+    const k = O.index(v);
+    const b = typeof k === "bigint" ? k : BigInt(k);
+    if (b < -(2n ** 63n) || b >= 2n ** 63n) raise(T.ValueError, `cannot fit '${typeName(v)}' into an index-sized integer`);
+    return k;
+  };
   method(T.OSError, "__init__", (self: any, ...args: any[]) => {
     self.args = tuple(args);
     self.errno = self.strerror = self.filename = null;
@@ -3211,7 +3224,7 @@ getset(object, "__dict__", (o) => {
       const f = args.length >= 3 ? args[2] : null;
       if (f !== null) {
         if (typeOf(self) === T.BlockingIOError && (O.isPyInt(unbox(f)) || O.isPyFloat(unbox(f)))) {
-          Object.defineProperty(self, "$written", { value: O.index(f), writable: true, configurable: true });
+          Object.defineProperty(self, "$written", { value: writtenOf(f), writable: true, configurable: true });
         } else {
           self.filename = f;
           if (args.length >= 5 && args[4] !== null) Object.defineProperty(self, "$filename2", { value: args[4], writable: true, configurable: true });
@@ -3222,7 +3235,13 @@ getset(object, "__dict__", (o) => {
     return null;
   });
   getset(T.OSError, "filename2", (self: any) => self.$filename2 ?? null, (self: any, v: any) => void Object.defineProperty(self, "$filename2", { value: v, writable: true, configurable: true }));
-  getset(T.BlockingIOError, "characters_written", (self: any) => self.$written ?? raise(T.AttributeError, "characters_written"), (self: any, v: any) => void Object.defineProperty(self, "$written", { value: O.index(v), writable: true, configurable: true }));
+  // (a C Py_ssize_t there: -1 is unset, as on reading, CORR-D77-5)
+  getset(
+    T.BlockingIOError,
+    "characters_written",
+    (self: any) => (self.$written === undefined || self.$written === -1 ? raise(T.AttributeError, "characters_written") : self.$written),
+    (self: any, v: any) => void Object.defineProperty(self, "$written", { value: writtenOf(v), writable: true, configurable: true }),
+  );
   method(T.OSError, "__str__", (self: any) => {
     if (self.errno === null || self.errno === undefined) return T.BaseException.$dict.get("__str__")(self);
     const f = self.filename !== null && self.filename !== undefined ? `: ${repr(self.filename)}${self.$filename2 !== undefined && self.$filename2 !== null ? ` -> ${repr(self.$filename2)}` : ""}` : "";
@@ -3800,4 +3819,11 @@ T.GenericAlias = genericAliasType;
     return callObj(getattr(copyreg(), "_reduce_ex"), [self, proto]);
   });
   void getstate;
+}
+
+// The dunders a builtin type defines as methods, not through its slot:
+// method_descriptor in CPython, not wrapper_descriptor (CORR-D77-3)
+for (const [t, name] of [[dict, "__getitem__"], [dict, "__contains__"], [list, "__getitem__"], [set, "__contains__"], [frozenset, "__contains__"]] as const) {
+  const f = t.$dict.get(name);
+  if (f !== undefined) f.$methodDescr = true;
 }

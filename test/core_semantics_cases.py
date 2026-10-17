@@ -181,3 +181,43 @@ r = pickle.loads(pickle.dumps(d, 4)); print(r.a, r.x)
 print(pickle.dumps(s, 4).hex())
 try: s.__reduce_ex__(1)
 except TypeError as e: print(e)
+
+# astra's HOLD on d77a5fe1: a subclass's slot of a base slot's name is
+# another slot (CORR-D77-1)
+class SA:
+    __slots__ = ('x',)
+class SB(SA):
+    __slots__ = ('x',)
+sb = SB()
+SA.x.__set__(sb, 1); SB.x.__set__(sb, 2)
+print(SA.x.__get__(sb), SB.x.__get__(sb))
+SB.x.__delete__(sb); print(SA.x.__get__(sb), hasattr(sb, 'x'))
+try: SB.x.__get__(sb)
+except AttributeError as e: print('AttributeError', e)
+# a str subclass key hashed once per operation (CORR-D77-2)
+calls = []
+class HKey(str):
+    def __hash__(self):
+        calls.append('hash')
+        return str.__hash__(self)
+    __eq__ = str.__eq__
+dd = {'x': 7}
+for op in (lambda: dd[HKey('x')], lambda: HKey('x') in dd, lambda: dd.get(HKey('x')), lambda: dd.setdefault(HKey('x'), 1), lambda: dd.pop(HKey('x')), lambda: dd.pop(HKey('y'), 0)):
+    calls.clear(); print(op(), calls)
+# the dunders builtin types define as methods (CORR-D77-3)
+for c, name in [(dict, '__getitem__'), (dict, '__contains__'), (list, '__getitem__'), (set, '__contains__'), (frozenset, '__contains__'), (str, '__contains__'), (int, '__add__'), (dict, 'get'), (list, '__setitem__')]:
+    print(c.__name__, name, type(getattr(c, name)).__name__)
+# BlockingIOError.characters_written: an index-sized integer, -1 unset (CORR-D77-5)
+for args in [(11, 'm', -1), (11, 'm', -2), (11, 'm', 0), (11, 'm', 2**63 - 1), (11, 'm', 2**63), (11, 'm', -2**63), (11, 'm', -2**63 - 1)]:
+    try:
+        e = BlockingIOError(*args)
+        print(args[2], e.characters_written)
+    except (AttributeError, ValueError) as x:
+        print(args[2], type(x).__name__, x)
+e = BlockingIOError(11, 'm')
+for v in (2**63, 2**63 - 1, -1):
+    try:
+        e.characters_written = v
+        print('set', v, e.characters_written)
+    except (AttributeError, ValueError) as x:
+        print('set', v, type(x).__name__, x)

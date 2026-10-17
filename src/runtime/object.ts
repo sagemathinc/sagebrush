@@ -259,8 +259,9 @@ export function typeOf(x: any): PyType {
       if (x.$dict !== undefined) return x.$meta ?? T.type;
       if (x.$self !== undefined) return T.method;
       // (a builtin type's method, unbound: CPython's method_descriptor, or
-      // wrapper_descriptor for a slot's dunder; types.ts)
-      if (x.$pyfn === true && x.$builtinMethod === true) return (SLOT_WRAPPERS.has(x.__name__) ? T.wrapper_descriptor : T.method_descriptor) ?? T.function;
+      // wrapper_descriptor for a slot's dunder, but for the few a type defines
+// as methods, $methodDescr; types.ts)
+      if (x.$pyfn === true && x.$builtinMethod === true) return (SLOT_WRAPPERS.has(x.__name__) && x.$methodDescr !== true ? T.wrapper_descriptor : T.method_descriptor) ?? T.function;
       return x.$pyfn === true ? T.function : T.builtin_function_or_method;
     case "object": {
       if (x === null) return T.NoneType;
@@ -1306,11 +1307,13 @@ function keyHash(d: PyDict, k: any): number {
     return raise(T.TypeError, `cannot use '${typeName(k)}' as a ${(d as any).$elem === true ? "set element" : "dict key"} (${msg})`);
   }
 }
-function numAlias(d: PyDict, k: any): any {
+// (h: k's hash, made once by the caller, as CPython hashes a key once per
+// operation, CORR-D77-2)
+function numAlias(d: PyDict, k: any, h: number): any {
   // (a str subclass key with its own __eq__ or __hash__ is the str key of
   // its value when it hashes as that str and the two compare equal, as
   // CPython's lookup compares them: K('ab') finds 'ab')
-  if (k instanceof PrimBox && typeof k.$v === "string" && d.$m.has(k.$v) && keyHash(d, k) === hooks.hash(k.$v) && hooks.eq(k.$v, k)) return k.$v;
+  if (k instanceof PrimBox && typeof k.$v === "string" && d.$m.has(k.$v) && h === hooks.hash(k.$v) && hooks.eq(k.$v, k)) return k.$v;
   if (!d.$hasNum) return undefined;
   let idx = d.$nidx;
   if (idx === null) {
@@ -1324,7 +1327,7 @@ function numAlias(d: PyDict, k: any): any {
       }
     }
   }
-  const l = idx.get(keyHash(d, k));
+  const l = idx.get(h);
   if (l !== undefined) for (const pk of l) if (hooks.eq(pk, k)) return pk;
   return undefined;
 }
@@ -1434,8 +1437,7 @@ function primitiveKey(k: any): any {
   return undefined;
 }
 
-function bucketEntry(d: PyDict, k: any, create: boolean): any {
-  const h = keyHash(d, k);
+function bucketEntry(d: PyDict, k: any, create: boolean, h: number = keyHash(d, k)): any {
   let list = d.$buckets?.get(h);
   if (list !== undefined) {
     for (const e of list) if (e.k === k || hooks.eq(e.k, k)) return e;
@@ -1455,7 +1457,17 @@ function strOnly(d: PyDict, k: any): void {
   if ((d as any).$strOnly === true && typeof k !== "string") raise(T.NotImplementedError, "a key other than a str in a class's __classdict__ is not supported yet");
 }
 
-export function dictGet(d: PyDict, k: any): any {
+// A key's hash for the dict operations below when it is an object key (one
+// hashed by Python code), else undefined: an operation made of two (get
+// then set, get then delete) hashes it once, as CPython's (CORR-D77-2);
+// a class namespace's dict refuses it first, unhashed
+export function dictKeyHash(d: PyDict, k: any): number | undefined {
+  if (typeof k === "string") return undefined;
+  strOnly(d, k);
+  return primitiveKey(k) !== undefined ? undefined : keyHash(d, k);
+}
+
+export function dictGet(d: PyDict, k: any, kh?: number): any {
   if (typeof k === "string") return d.$m.get(k);
   strOnly(d, k);
   const p = primitiveKey(k);
@@ -1465,18 +1477,14 @@ export function dictGet(d: PyDict, k: any): any {
     const e = bucketEntry(d, k, false);
     return e === undefined ? undefined : d.$m.get(e);
   }
-  if (d.$buckets === null) {
-    keyHash(d, k); // unhashable keys raise even on a miss
-    const a = numAlias(d, k);
-    return a === undefined ? undefined : d.$m.get(a);
-  }
-  const e = bucketEntry(d, k, false);
+  const h = kh ?? keyHash(d, k); // (unhashable keys raise even on a miss)
+  const e = d.$buckets === null ? undefined : bucketEntry(d, k, false, h);
   if (e !== undefined) return d.$m.get(e);
-  const a = numAlias(d, k);
+  const a = numAlias(d, k, h);
   return a === undefined ? undefined : d.$m.get(a);
 }
 
-export function dictSet(d: PyDict, k: any, v: any): void {
+export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
   if (typeof k === "string") {
     d.$m.set(k, v);
     return;
@@ -1499,17 +1507,18 @@ export function dictSet(d: PyDict, k: any, v: any): void {
     d.$m.set(p, v);
     return;
   }
-  if (d.$hasNum && (d.$buckets === null || bucketEntry(d, k, false) === undefined)) {
-    const a = numAlias(d, k);
+  const h = kh ?? keyHash(d, k);
+  if (d.$hasNum && (d.$buckets === null || bucketEntry(d, k, false, h) === undefined)) {
+    const a = numAlias(d, k, h);
     if (a !== undefined) {
       d.$m.set(a, v);
       return;
     }
   }
-  d.$m.set(bucketEntry(d, k, true), v);
+  d.$m.set(bucketEntry(d, k, true, h), v);
 }
 
-export function dictDelete(d: PyDict, k: any): boolean {
+export function dictDelete(d: PyDict, k: any, kh?: number): boolean {
   if (typeof k !== "string") strOnly(d, k);
   const p = primitiveKey(k);
   if (p !== undefined) {
@@ -1520,10 +1529,10 @@ export function dictDelete(d: PyDict, k: any): boolean {
     }
     if (typeof p === "string" || p === null || d.$buckets === null) return false;
   }
-  const e = d.$buckets === null ? undefined : bucketEntry(d, k, false);
+  const h = kh ?? keyHash(d, k);
+  const e = d.$buckets === null ? undefined : bucketEntry(d, k, false, h);
   if (e === undefined) {
-    keyHash(d, k);
-    const a = p === undefined ? numAlias(d, k) : undefined;
+    const a = p === undefined ? numAlias(d, k, h) : undefined;
     if (a !== undefined) {
       d.$orig?.delete(a);
       d.$nidx = null;
