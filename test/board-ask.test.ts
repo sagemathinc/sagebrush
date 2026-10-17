@@ -172,6 +172,35 @@ test("a question's decide as written: lint", () => {
   assert.deepEqual(p({ input: "text", decide: [{ name: "a-b-c", about: "x".repeat(2001) }] }).map((s) => s.split(":")[0]), ["error decide[0].about"]);
 });
 
+test("decideRequest: a decide written badly is refused, never cleaned into another; as board check refuses it (astra's CORR-F10-1)", () => {
+  const id = "8c6f0a5e-4d43-4b8e-9b0e-2f3c1a7d9e10";
+  const board = (decide: unknown) => JSON.stringify({ format: "sagebrush-board", version: 1, pages: [
+    { id: "p1", nodes: [{ id: "far", title: "On page 1" }] },
+    { id: "p2", nodes: [{ id: "t", kind: "ask", title: "T", text: "Why?", input: "text", decide }, { id: "n", title: "Here" }] }] });
+  const ask = (decide: unknown) => decideRequest({ text: board(decide), name: null, revision: null }, { sagebrush: "decide", version: 1, id, name: null, revision: null, page: { number: 2 }, item: "t", note: "because" });
+  const ok = [{ name: "valid-option-name", about: "fine", next: "n" }];
+  assert.equal(ask(ok).ok, true);
+  const cases: [unknown, RegExp][] = [
+    [[{ name: "valid-option-name" }, { name: 7 }], /decide\[1\]\.name/],
+    [[{ name: "valid-option-name", about: 7 }], /decide\[0\]\.about/],
+    [[{ name: "valid-option-name", next: "missing" }], /decide\[0\]\.next names no item/],
+    [[{ name: "valid-option-name", next: "far" }], /decide\[0\]\.next names no item/],
+    [[{ name: "valid-option-name", extra: 1 }], /doesn't know/],
+    [[{ name: "valid-option-name" }, { name: "valid-option-name" }], /twice/],
+    [["valid-option-name"], /decide\[0\] is not an object/],
+    [{ name: "valid-option-name" }, /not a list/],
+  ];
+  for (const [decide, why] of cases) {
+    const r = ask(decide);
+    assert.equal(r.ok, false, JSON.stringify(decide));
+    assert.match((r as any).message, why, JSON.stringify(decide));
+    assert.equal((r as any).id, id);
+    // (and board check refuses it too: the two agree)
+    assert.ok(checkText(board(decide)).problems.some((x) => x.level === "error"), "board check refuses " + JSON.stringify(decide));
+  }
+  assert.ok(!checkText(board(ok)).problems.some((x) => x.level === "error"));
+});
+
 test("board check: a decision's `next` names an item of the question's page", () => {
   const b = { format: "sagebrush-board", version: 1, nodes: [
     { id: "q", kind: "ask", text: "Q", input: "text", decide: [{ name: "a-b-c", next: "pairs" }, { name: "d-e-f", next: "nowhere" }] },
