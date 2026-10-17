@@ -67,6 +67,14 @@ function checkModuleArity(m: any) {
   }
 }
 
+// (None in sys.modules stops an import, as CPython's _find_and_load: a way
+// to make a module unimportable)
+function halted(name: string): never {
+  const e = T.ModuleNotFoundError(`import of ${name} halted; None in sys.modules`);
+  e.name = name;
+  throw e;
+}
+
 export function importModule(name: string): any {
   // (a module's name is never one of the runtime's own, checked before the
   // lookup so a pre-seeded sys.modules entry cannot smuggle one in: rule 6)
@@ -77,13 +85,20 @@ export function importModule(name: string): any {
     throw e;
   }
   const existing = dictGet(sysModules, name);
-  if (existing !== undefined) return existing;
+  if (existing !== undefined) return existing === null ? halted(name) : existing;
   const dot = name.lastIndexOf(".");
   if (dot > 0) {
+    // (a parent that is None in sys.modules is not imported again: as
+    // CPython's _find_and_load_unlocked, it has no __path__, so not a package)
+    if (dictGet(sysModules, name.slice(0, dot)) === null) {
+      const e = T.ModuleNotFoundError(`No module named '${name}'; '${name.slice(0, dot)}' is not a package`);
+      e.name = name;
+      throw e;
+    }
     importModule(name.slice(0, dot));
     // The parent's __init__ may have imported this module already.
     const now = dictGet(sysModules, name);
-    if (now !== undefined) return now;
+    if (now !== undefined) return now === null ? halted(name) : now;
   }
   // sys.meta_path finders (find_spec -> loader.create_module/exec_module)
   const mp = dictGet(sysModules, "sys")?.meta_path;

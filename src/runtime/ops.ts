@@ -1016,7 +1016,15 @@ export function contains(c: any, x: any): boolean {
   }
   const f = special(c, "__contains__");
   if (f !== undefined) return truth(f(c, x));
-  const it = iter(c);
+  // (no __contains__: a search of its iterator; a TypeError getting that
+  // iterator becomes CPython's _PySequence_IterSearch message)
+  let it;
+  try {
+    it = iter(c);
+  } catch (e) {
+    if (!isinstance(e, T.TypeError)) throw e;
+    raise(T.TypeError, `argument of type '${typeName(c)}' is not a container or iterable`);
+  }
   for (let v = it.$next(); v !== DONE; v = it.$next()) if (eqBool(v, x)) return true;
   return false;
 }
@@ -1525,12 +1533,18 @@ export function toArray(x: any): any[] {
   return out;
 }
 
-// `a, b = x`
+// `a, b = x`. Too many values: CPython 3.14 says how many only for an
+// exact list, tuple or dict, whose length it knows
+const tooMany = (x: any, n: number) => {
+  const t = typeOf(x);
+  const known = t === T.list || t === T.tuple || t === T.dict ? `, got ${len(x)}` : "";
+  return raise(T.ValueError, `too many values to unpack (expected ${n}${known})`);
+};
 export function unpack(x: any, n: number): any[] {
   if (Array.isArray(x)) {
     if (x.length === n) return x;
     if (x.length < n) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${x.length})`);
-    raise(T.ValueError, `too many values to unpack (expected ${n})`);
+    tooMany(x, n);
   }
   const it = iter(x);
   const out: any[] = [];
@@ -1539,7 +1553,7 @@ export function unpack(x: any, n: number): any[] {
     if (v === DONE) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${i})`);
     out.push(v);
   }
-  if (it.$next() !== DONE) raise(T.ValueError, `too many values to unpack (expected ${n})`);
+  if (it.$next() !== DONE) tooMany(x, n);
   return out;
 }
 // `a, *b, c = x` -> [a, [b...], c]
@@ -1728,13 +1742,25 @@ export function floatResult(x: any, r: any): number {
 
 // CPython's PySlice_GetIndicesEx: [start, step, count].
 // slice.indices(len): CPython's PySlice_AdjustIndices.
+// A slice index, as CPython's _PyEval_SliceIndex: None is dflt; an object
+// with __index__ (an int subclass by its own value) is that integer, clamped
+// to +-sys.maxsize, as PyNumber_AsSsize_t(v, NULL) does; anything else
+// (a str, a float) is TypeError, before any conversion
+export function sliceIndex(v: any, dflt: number): number {
+  if (v === null || v === undefined) return dflt;
+  const ok = isPyInt(v) || (v instanceof PrimBox && typeOf(v).$mro.includes(T.int) && shimName(v, "int") === null) || special(v, "__index__") !== undefined;
+  if (!ok) raise(T.TypeError, "slice indices must be integers or None or have an __index__ method");
+  const r = index(v);
+  return typeof r === "bigint" ? (r < 0n ? -Infinity : Infinity) : r;
+}
+
 export function sliceAdjust(s: PySlice, len: number): [number, number, number] {
-  const step = s.step === null ? 1 : Number(index(s.step));
+  const step = s.step === null ? 1 : sliceIndex(s.step, 1);
   if (step === 0) raise(T.ValueError, "slice step cannot be zero");
   const lo = step < 0 ? -1 : 0, hi = step < 0 ? len - 1 : len;
   const fix = (v: any, dflt: number) => {
     if (v === null) return dflt;
-    const n = Number(index(v));
+    const n = sliceIndex(v, dflt);
     if (n < 0) return Math.max(n + len, lo);
     return Math.min(n, hi);
   };
