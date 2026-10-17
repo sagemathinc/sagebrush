@@ -1924,6 +1924,9 @@ class RealNumberMP:
             # (a user's float subclass: Python float's power of its value,
             # no __float__ call, above 53 bits; refused below, as Sage)
             if R._prec < 53:
+                if float.__float__(n) == 0:
+                    # (x^0 = 1 before any coercion, as Sage, CORR-C9B-2)
+                    return R(1)
                 raise TypeError("unsupported operand parent(s) for ^: '%s' and '%s'" % (R, type(n)))
             return _cpow(float(self), float.__float__(n))
         if isinstance(n, RealNumberMP) and n._m == 0 and not n._special:
@@ -2010,6 +2013,17 @@ class RealNumberMP:
         if _user_float(b):
             # (a user's float subclass, as in __pow__)
             if self._R._prec < 53:
+                if float.__float__(b) == 0:
+                    # (a zero base, as Sage: 0^y in the field, a complex NaN
+                    # for y NaN, CORR-C9B-2)
+                    R = self._R
+                    if self._special == "nan":
+                        nan = float("nan")
+                        return ComplexField(R._prec)(nan, nan)
+                    if not self._special and self._m == 0:
+                        return R(1)
+                    pos = self._special == "+inf" or (not self._special and self._m > 0)
+                    return RealNumberMP(R, 0, 0) if pos else RealNumberMP(R, 0, 0, "+inf")
                 raise TypeError("unsupported operand parent(s) for ^: '%s' and '%s'" % (type(b), self._R))
             return _cpow(float.__float__(b), float(self))
         return self._R(b) ** self
