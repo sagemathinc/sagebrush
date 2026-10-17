@@ -75,3 +75,29 @@ show2('user float N',lambda:N(F(1.25),30))
 for name,v in [('RR',RR(2)),('big',RR(2)^2000),('R100',RealField(100)(2))]:
     show2(name+' str three args',lambda:v.str(10,5,False))
     show2(name+' str keyword',lambda:v.str(10,5,no_sci=False))
+# a precision is an int or a number with __int__ (not bytes, a string or an
+# object with only __index__); digits are a real number (not a string); N
+# reads a float subclass's own value (its __float__ is not called)
+class IndexOnly:
+    def __index__(self): return int(30)
+class IntOnly:
+    def __int__(self): return int(30)
+class FloatOnly:
+    def __float__(self): return float(30.9)
+for vn, v in [("RR", RR(2)), ("RDF", RDF(2)), ("R100", RealField(100)(2)), ("big", RR(2)^2000)]:
+    for pn, p in [("bytes", b"30"), ("bytearray", bytearray(b"30")), ("memoryview", memoryview(b"30")), ("index-only", IndexOnly()), ("int-only", IntOnly()), ("float-only", FloatOnly()), ("str", "30")]:
+        show2(vn + " prec " + pn, lambda: v.n(p))
+        show2(vn + " alias prec " + pn, lambda: v.numerical_approx(p))
+    for dn, d in [("str", "8.9"), ("bytes", b"8.9"), ("bytearray", bytearray(b"8.9")), ("frac", 8.9), ("index-only", IndexOnly()), ("float-only", FloatOnly())]:
+        show2(vn + " digits " + dn, lambda: v.n(digits=d))
+class V(float):
+    def __float__(self): return float(8)
+    def n(self, *a, **kw): return 99
+class W(float):
+    def __float__(self): raise RuntimeError("conversion")
+for x in [V(1.25), W(1.25)]:
+    show2(type(x).__name__ + " N", lambda: N(x, 30))
+    show2(type(x).__name__ + " N digits", lambda: N(x, digits=5))
+    show2(type(x).__name__ + " N 60", lambda: N(x, 60))
+for p in [0, 0.5, -0.5, "30", b"30", 53.9, 54.2, IntOnly(), IndexOnly()]:
+    show2("N plain " + repr(p) if not isinstance(p, (IntOnly, IndexOnly)) else "N plain " + type(p).__name__, lambda: N(float(2), p))

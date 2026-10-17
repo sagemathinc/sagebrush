@@ -517,3 +517,98 @@ big str three args !! TypeError str() takes at most 2 positional arguments (3 gi
 big str keyword -> '1.1481e602' str
 R100 str three args !! TypeError str() takes at most 2 positional arguments (3 given)
 R100 str keyword -> '2.0000e0' str
+RR prec bytes !! TypeError an integer is required
+RR alias prec bytes !! TypeError an integer is required
+RR prec bytearray !! TypeError an integer is required
+RR alias prec bytearray !! TypeError an integer is required
+RR prec memoryview !! TypeError an integer is required
+RR alias prec memoryview !! TypeError an integer is required
+RR prec index-only !! TypeError an integer is required
+RR alias prec index-only !! TypeError an integer is required
+RR prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RR alias prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RR prec float-only !! TypeError an integer is required
+RR alias prec float-only !! TypeError an integer is required
+RR prec str !! TypeError an integer is required
+RR alias prec str !! TypeError an integer is required
+RR digits str !! TypeError must be real number, not str
+RR digits bytes !! TypeError must be real number, not bytes
+RR digits bytearray !! TypeError must be real number, not bytearray
+RR digits frac -> 2.00000000 Real Field with 33 bits of precision
+RR digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RR digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 53 bits
+RDF prec bytes !! TypeError an integer is required
+RDF alias prec bytes !! TypeError an integer is required
+RDF prec bytearray !! TypeError an integer is required
+RDF alias prec bytearray !! TypeError an integer is required
+RDF prec memoryview !! TypeError an integer is required
+RDF alias prec memoryview !! TypeError an integer is required
+RDF prec index-only !! TypeError an integer is required
+RDF alias prec index-only !! TypeError an integer is required
+RDF prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RDF alias prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RDF prec float-only !! TypeError an integer is required
+RDF alias prec float-only !! TypeError an integer is required
+RDF prec str !! TypeError an integer is required
+RDF alias prec str !! TypeError an integer is required
+RDF digits str !! TypeError must be real number, not str
+RDF digits bytes !! TypeError must be real number, not bytes
+RDF digits bytearray !! TypeError must be real number, not bytearray
+RDF digits frac -> 2.00000000 Real Field with 33 bits of precision
+RDF digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RDF digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 53 bits
+R100 prec bytes !! TypeError an integer is required
+R100 alias prec bytes !! TypeError an integer is required
+R100 prec bytearray !! TypeError an integer is required
+R100 alias prec bytearray !! TypeError an integer is required
+R100 prec memoryview !! TypeError an integer is required
+R100 alias prec memoryview !! TypeError an integer is required
+R100 prec index-only !! TypeError an integer is required
+R100 alias prec index-only !! TypeError an integer is required
+R100 prec int-only -> 2.0000000 Real Field with 30 bits of precision
+R100 alias prec int-only -> 2.0000000 Real Field with 30 bits of precision
+R100 prec float-only !! TypeError an integer is required
+R100 alias prec float-only !! TypeError an integer is required
+R100 prec str !! TypeError an integer is required
+R100 alias prec str !! TypeError an integer is required
+R100 digits str !! TypeError must be real number, not str
+R100 digits bytes !! TypeError must be real number, not bytes
+R100 digits bytearray !! TypeError must be real number, not bytearray
+R100 digits frac -> 2.00000000 Real Field with 33 bits of precision
+R100 digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 100 bits
+R100 digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 100 bits
+big prec bytes !! TypeError an integer is required
+big alias prec bytes !! TypeError an integer is required
+big prec bytearray !! TypeError an integer is required
+big alias prec bytearray !! TypeError an integer is required
+big prec memoryview !! TypeError an integer is required
+big alias prec memoryview !! TypeError an integer is required
+big prec index-only !! TypeError an integer is required
+big alias prec index-only !! TypeError an integer is required
+big prec int-only -> 1.1481307e602 Real Field with 30 bits of precision
+big alias prec int-only -> 1.1481307e602 Real Field with 30 bits of precision
+big prec float-only !! TypeError an integer is required
+big alias prec float-only !! TypeError an integer is required
+big prec str !! TypeError an integer is required
+big alias prec str !! TypeError an integer is required
+big digits str !! TypeError must be real number, not str
+big digits bytes !! TypeError must be real number, not bytes
+big digits bytearray !! TypeError must be real number, not bytearray
+big digits frac -> 1.14813070e602 Real Field with 33 bits of precision
+big digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+big digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 53 bits
+V N -> 1.2500000 Real Field with 30 bits of precision
+V N digits -> 1.2500 Real Field with 20 bits of precision
+V N 60 -> 1.2500000000000000 Real Field with 60 bits of precision
+W N -> 1.2500000 Real Field with 30 bits of precision
+W N digits -> 1.2500 Real Field with 20 bits of precision
+W N 60 -> 1.2500000000000000 Real Field with 60 bits of precision
+N plain 0 !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+N plain 0.500000000000000 !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+N plain -0.500000000000000 !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+N plain '30' !! TypeError an integer is required
+N plain b'30' !! TypeError an integer is required
+N plain 53.9000000000000 -> 2.00000000000000 Real Field with 53 bits of precision
+N plain 54.2000000000000 !! TypeError cannot approximate to a precision of 54.2000000000000 bits, use at most 53 bits
+N plain IntOnly -> 2.0000000 Real Field with 30 bits of precision
+N plain IndexOnly !! TypeError an integer is required

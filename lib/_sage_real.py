@@ -31,7 +31,7 @@ def digits_to_prec(d):
         (54, 170)
     """
     # (a fractional d is not truncated, as Sage: 15.9 digits are 57 bits)
-    x = ((d if isinstance(d, int) else float(d)) + 1) * _LOG2_10
+    x = ((int(d) if isinstance(d, int) else _real_double(d)) + 1) * _LOG2_10
     return int(math.ceil(x - 1e-12))
 
 
@@ -2759,12 +2759,40 @@ def _digits(prec):
     return max(2, int(math.floor((prec - 1) * _LOG10_2 + 1e-12)))
 
 
-def _approx_prec(prec, own):
-    """The precision prec in bits as an integer (truncated, as Sage: 53.9 is
-    53), refused past the number's own precision own as Sage refuses it."""
-    if isinstance(prec, str):
+def _prec_int(prec):
+    """The precision prec in bits as an integer, as Sage admits it: an int,
+    or a number with __int__ (truncated: 53.9 is 53); a string, bytes or an
+    object with only __index__ raises TypeError."""
+    if isinstance(prec, int):
+        return int(prec)
+    if isinstance(prec, (str, bytes, bytearray, memoryview)) or getattr(type(prec), "__int__", None) is None:
         raise TypeError("an integer is required")
-    p = int(prec)
+    return int(prec)
+
+
+def _real_double(x):
+    """x as a double, as Sage reads a real argument (CPython's
+    PyFloat_AsDouble): a float's own value (a subclass's __float__ is not
+    called), else __float__, else __index__; a string or bytes raises
+    TypeError."""
+    if isinstance(x, float):
+        return float.__float__(x)
+    f = getattr(type(x), "__float__", None)
+    if f is not None:
+        r = f(x)
+        if not isinstance(r, float):
+            raise TypeError("%s.__float__ returned non-float (type %s)" % (type(x).__name__, type(r).__name__))
+        return float.__float__(r)
+    if getattr(type(x), "__index__", None) is not None:
+        import operator
+        return float(operator.index(x))
+    raise TypeError("must be real number, not %s" % type(x).__name__)
+
+
+def _approx_prec(prec, own):
+    """The precision prec in bits as an integer (_prec_int), refused past
+    the number's own precision own as Sage refuses it."""
+    p = _prec_int(prec)
     if p > own:
         raise TypeError(f"cannot approximate to a precision of {prec!r} bits, use at most {own} bits")
     return p
@@ -3610,8 +3638,12 @@ def N(x, prec=None, digits=None):
     from _sage_rdf import RealDoubleElement
     if isinstance(x, float) and not isinstance(x, (RealDoubleElement, RealNumber)):
         # (a Python float, or a subclass: a double, 53 bits as in Sage)
-        return RealField(_approx_prec(prec, 53))(float(x))
-    prec = int(prec)
+        # (its own double: a subclass's __float__ is not called; a Python
+        # float has at most 53 bits, a subclass is converted as it is, as
+        # in Sage)
+        p = _approx_prec(prec, 53) if type(x) is float else _prec_int(prec)
+        return RealField(p)(float.__float__(x))
+    prec = _prec_int(prec)
     s = getattr(x, "_s", None)
     if s is not None:
         v = evaluate(x, prec + 20)
