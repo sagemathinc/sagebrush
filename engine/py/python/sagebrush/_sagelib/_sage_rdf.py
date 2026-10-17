@@ -25,13 +25,19 @@ def _frepr(x):
 def _double(x):
     """float(x), with an integer or rational past the doubles as an infinity
     of its sign, as Sage converts it to RDF (float() raises OverflowError)."""
+    from fractions import Fraction
+    if isinstance(x, Fraction):
+        import _sage_real
+        _sage_real._rational_bits(x)
     try:
         return float(x)
     except OverflowError:
-        from fractions import Fraction
         if isinstance(x, (int, Fraction)):
             return float("inf") if x > 0 else float("-inf")
         raise
+
+
+_IPOW_BITS = 1 << 20
 
 
 def _ipow(x, n):
@@ -305,6 +311,10 @@ class RealDoubleElement(float):
         x = float(self)
         inf = float("inf")
         if isinstance(e, int) or type(e).__name__ == "Integer":
+            # (HARD-RRQ-3: past 2^20 bits, before int() copies it; any
+            # exponent past 2^64 gives 0, +-1, an infinity or NaN anyway)
+            if e.bit_length() > _IPOW_BITS:
+                raise NotImplementedError("RDF power: an integer exponent of more than %d bits is not available in sagebrush yet" % _IPOW_BITS)
             return RealDoubleElement(_ipow(x, int(e)))
         y = self._num(e)
         if y is None:

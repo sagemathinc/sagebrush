@@ -125,6 +125,14 @@ _EMIN = 1 - (1 << 62)
 _EXACT_BITS = 1 << 20
 
 
+def _rational_bits(q):
+    """Refuse a rational whose numerator or denominator has more than
+    _EXACT_BITS bits (HARD-RRQ-2): rounding it shifts and divides integers
+    of that size, before any result."""
+    if q.numerator.bit_length() > _EXACT_BITS or q.denominator.bit_length() > _EXACT_BITS:
+        raise NotImplementedError("a rational with more than %d bits in its numerator or denominator is not available as a real number in sagebrush yet" % _EXACT_BITS)
+
+
 def _range(R, m, e):
     """(m, e, special) for the rounded m 2^e (m != 0) in R's exponent range."""
     E = e + abs(m).bit_length()
@@ -1132,6 +1140,10 @@ def RealField(prec=53, sci_not=False, rnd="RNDN"):
     rnd = str(rnd)
     if rnd not in _RND:
         raise ValueError("rounding mode (=%s) must be one of %s" % (rnd, ", ".join(_RND)))
+    if prec > _EXACT_BITS:
+        # (HARD-RRQ-1: rounding to prec bits builds integers of that size;
+        # checked before the cache holds the field)
+        raise NotImplementedError("RealField(%d): a precision of more than %d bits is not available in sagebrush yet" % (prec, _EXACT_BITS))
     if prec == 53 and rnd == "RNDN":
         return _sa().RR
     key = (prec, rnd)
@@ -1397,6 +1409,7 @@ def _to_real(R, x, base=10):
         m, e = _round_q(x, 1, prec, rnd) if x else (0, 0)
         return RealNumberMP(R, m, e)
     if isinstance(x, _F):
+        _rational_bits(x)
         m, e = _round_q(x.numerator, x.denominator, prec, rnd) if x else (0, 0)
         return RealNumberMP(R, m, e)
     lit = getattr(x, "_lit", None)
