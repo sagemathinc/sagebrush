@@ -583,6 +583,8 @@ export function classMetaclass(bases: any[], kwNames: string[], kwValues: any[])
 // the original bases; the same array when none was replaced
 export function updateBases(bases: any[]): any[] {
   let out: any[] | null = null;
+  // (the original bases, one tuple for every __mro_entries__ call)
+  let orig: any = undefined;
   for (let i = 0; i < bases.length; i++) {
     const b = bases[i];
     let entries: any = undefined;
@@ -597,7 +599,7 @@ export function updateBases(bases: any[]): any[] {
       out?.push(b);
       continue;
     }
-    const r = callObj(entries, [tuple(bases)]);
+    const r = callObj(entries, [(orig ??= tuple(bases.slice()))]);
     if (!isinstance(r, T.tuple)) raise(T.TypeError, "__mro_entries__ must return a tuple");
     out ??= bases.slice(0, i);
     out.push(...r);
@@ -3101,16 +3103,18 @@ T.GenericAlias = genericAliasType;
     }
   };
   // (an item of the repr, as CPython's ga_repr_item: ... for Ellipsis, an
-  // alias's (anything with __origin__ and __args__) own repr, a list's items
-  // in brackets, a class or function by its __module__ and __qualname__,
-  // without "builtins.", anything else its repr)
+  // alias's (anything with __origin__ and __args__) own repr, a class or
+  // function by its __module__ and __qualname__, without "builtins.",
+  // anything else its repr; an argument that is a list, its items so in
+  // brackets, only at the top: a list in it is its repr, as
+  // ga_repr_items_list, so a list holding itself is [[...]] inside)
+  const argRepr = (t: any): string => (Array.isArray(t) && typeOf(t) === T.list ? `[${t.map(typeRepr).join(", ")}]` : typeRepr(t));
   const typeRepr = (t: any): string => {
     if (t === Ellipsis) return "...";
     if (isType(t)) {
       const m = typeModule(t);
       return m === "builtins" ? t.$qualname : `${str(m)}.${t.$qualname}`;
     }
-    if (Array.isArray(t) && typeOf(t) === T.list) return `[${t.map(typeRepr).join(", ")}]`;
     if (attr(t, "__origin__") !== undefined && attr(t, "__args__") !== undefined) return repr(t);
     const qn = attr(t, "__qualname__");
     if (qn === undefined) return repr(t);
@@ -3118,42 +3122,52 @@ T.GenericAlias = genericAliasType;
     if (m === undefined) return repr(t);
     return m === "builtins" ? str(qn) : `${str(m)}.${str(qn)}`;
   };
-  method(ga, "__repr__", (a: PyGenericAlias) => `${typeRepr(a.origin)}[${a.args.length ? a.args.map(typeRepr).join(", ") : "()"}]`);
+  method(ga, "__repr__", (a: PyGenericAlias) => `${typeRepr(a.origin)}[${a.args.length ? a.args.map(argRepr).join(", ") : "()"}]`);
   method(ga, "__getattribute__", (a: PyGenericAlias, name: string) => (OWN.has(name) ? genericGetattr(a, name, typeOf(a)) : getattr(a.origin, name)));
   getset(ga, "__origin__", (a) => a.origin);
   getset(ga, "__args__", (a) => tuple(a.args));
   getset(ga, "__unpacked__", () => false);
   getset(ga, "__typing_unpacked_tuple_args__", () => null);
-  // (the type variables among the args, nested ones too, in order: what
-  // has __typing_subst__, or an arg's own __parameters__)
-  const params = (args: any[], out: any[]): any[] => {
-    for (const t of args) {
+  // (the type variables among the args, nested ones too, in order, each
+  // once: what has __typing_subst__, or an arg's own __parameters__; lists
+  // and tuples descended without the JS stack, and one holding itself a
+  // RecursionError, as CPython's _Py_make_parameters, which recurses)
+  const params = (args: any[]): any[] => {
+    const out: any[] = [];
+    const have = new Set<any>();
+    const push = (p: any) => {
+      if (!have.has(p)) {
+        have.add(p);
+        out.push(p);
+      }
+    };
+    const path = new Set<any>([args]);
+    const stack: [any[], number][] = [[args, 0]];
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      if (top[1] >= top[0].length) {
+        path.delete(top[0]);
+        stack.pop();
+        continue;
+      }
+      const t = top[0][top[1]++];
       if (isType(t)) continue;
       if (Array.isArray(t) && (typeOf(t) === T.list || typeOf(t) === T.tuple)) {
-        params(t, out);
+        if (path.has(t)) raise(T.RecursionError, "maximum recursion depth exceeded in __parameter__ calculation");
+        path.add(t);
+        stack.push([t, 0]);
         continue;
       }
-      let subst: any = undefined;
-      try {
-        subst = getattr(t, "__typing_subst__");
-      } catch (e: any) {
-        if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
-      }
-      if (subst !== undefined) {
-        if (!out.includes(t)) out.push(t);
+      if (attr(t, "__typing_subst__") !== undefined) {
+        push(t);
         continue;
       }
-      let sub: any = undefined;
-      try {
-        sub = getattr(t, "__parameters__");
-      } catch (e: any) {
-        if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
-      }
-      if (sub !== undefined && isinstance(sub, T.tuple)) for (const p of sub) if (!out.includes(p)) out.push(p);
+      const sub = attr(t, "__parameters__");
+      if (sub !== undefined && isinstance(sub, T.tuple)) for (const p of sub) push(p);
     }
     return out;
   };
-  getset(ga, "__parameters__", (a) => tuple(params(a.args, [])));
+  getset(ga, "__parameters__", (a) => tuple(params(a.args)));
   method(ga, "__mro_entries__", (a: PyGenericAlias, _bases: any) => tuple([a.origin]));
   method(ga, "__eq__", (a: PyGenericAlias, o: any) => {
     if (!(o instanceof PyGenericAlias)) return NotImplemented;
@@ -3165,7 +3179,7 @@ T.GenericAlias = genericAliasType;
   method(ga, "__instancecheck__", (_a: any, _o: any) => raise(T.TypeError, "isinstance() argument 2 cannot be a parameterized generic"));
   method(ga, "__subclasscheck__", (_a: any, _o: any) => raise(T.TypeError, "issubclass() argument 2 cannot be a parameterized generic"));
   method(ga, "__getitem__", (a: PyGenericAlias, _k: any) => {
-    if (params(a.args, []).length === 0) raise(T.TypeError, `${repr(a)} is not a generic class`);
+    if (params(a.args).length === 0) raise(T.TypeError, `${repr(a)} is not a generic class`);
     raise(T.NotImplementedError, `substituting the type variables of ${repr(a)} is not supported yet`);
   });
   method(ga, "__reduce__", (a: PyGenericAlias) => tuple([ga, tuple([a.origin, tuple(a.args)])]));
