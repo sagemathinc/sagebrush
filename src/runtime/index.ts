@@ -940,6 +940,14 @@ function interrupted(): never {
 
 export const R: any = {
   $i: B.intrinsics,
+  // a compiled __annotate__'s format check, as CPython's (`format > 2`:
+  // only VALUE and VALUE_WITH_FAKE_GLOBALS; a non-number a TypeError)
+  annotateFormat: (f: any) => {
+    if (O.truth(O.gt(f, 2))) raise(T.NotImplementedError);
+  },
+  annotateSig: Obj.sig(["format"], { posonly: 1 }),
+  // whether a module's annotated statement i has run
+  annotIn: (s: any, i: number) => O.truth(O.contains(s, i)),
   /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
   host: null,
   INTR,
