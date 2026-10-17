@@ -97,6 +97,10 @@ try {
   // engine and Sage's part below, fetched by the page and handed through the
   // frame; web/lib-lazy.ts)
   ok((await run("import heapq\nprint(heapq.nsmallest(2, [3, 1, 2]))")).includes("[1, 2]"), "a library module imported later: its chunk through the frame");
+  // (a package's submodule under a library package: scipy is lib/'s, scipy.io
+  // @sagebrush/scipy-io's, found by its full name; its chunk through the frame)
+  const mat = (await run("import scipy.io as sio, numpy as np\nsio.savemat('t.mat', {'A': np.arange(4.)})\nprint(sio.loadmat('t.mat')['A'].tolist(), sio.__name__)")).trim();
+  ok(mat === "[[0.0, 1.0, 2.0, 3.0]] scipy.io", "a package's submodule imports (scipy.io, @sagebrush/scipy-io), savemat and loadmat: " + mat);
   // (changing the language of a notebook with code asks first: yes)
   await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change', {bubbles: true})); })()");
   await sleep(500);
