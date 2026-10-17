@@ -853,9 +853,12 @@ function caughtFrames(e: any): Frame[] {
   return frames.slice(at[0]);
 }
 
-function formatOne(e: any, caught = false): string {
+// (limit, as traceback's: the first `limit` frames, or with a negative one
+// the last -limit; null: all)
+function formatOne(e: any, caught = false, limit: number | null = null): string {
   let out = "";
-  const frames = caught ? caughtFrames(e) : framesOf(e);
+  let frames = caught ? caughtFrames(e) : framesOf(e);
+  if (limit !== null) frames = limit >= 0 ? frames.slice(0, limit) : frames.slice(Math.max(0, frames.length + limit));
   if (frames.length) {
     out += "Traceback (most recent call last):\n";
     for (const f of frames) {
@@ -876,13 +879,14 @@ function formatOne(e: any, caught = false): string {
   return out;
 }
 
-export function formatException(e: any, caught = false): string {
+export function formatException(e: any, caught = false, limit: number | null = null, chain = true): string {
   const parts: string[] = [];
   const seen = new Set<any>();
   let cur = e;
   while (cur !== null && cur !== undefined && !seen.has(cur)) {
     seen.add(cur);
-    parts.unshift(formatOne(cur, caught));
+    parts.unshift(formatOne(cur, caught, limit));
+    if (!chain) break;
     if (cur.__cause__ !== null && cur.__cause__ !== undefined) {
       parts.unshift("\nThe above exception was the direct cause of the following exception:\n\n");
       cur = cur.__cause__;
@@ -1023,27 +1027,89 @@ M.newBuiltinModule("traceback", (m) => {
   const exc = (a: any, b: any) => (b !== undefined && b !== null ? b : a);
   const lines = (s: string) => s.split(/(?<=\n)/).filter((l) => l.length);
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
-  fn("format_exception", (a: any, b: any = undefined, _tb: any = undefined, ..._r: any[]) => lines(formatException(exc(a, b))));
+  // format_exception(exc, /, value=, tb=, limit=None, chain=True, **kwargs),
+  // print_exception(exc, /, value=, tb=, limit=None, file=None, chain=True,
+  // **kwargs), format_exc(limit=None, chain=True) and print_exc(limit=None,
+  // file=None, chain=True), as CPython 3.14's: their arguments by position
+  // or keyword (exc only by position), limit's frames, chain, the file
+  // (kwargs: the two that take **kwargs accept any other name, as CPython's,
+  // which reads colorize: a true one isn't implemented, refused)
+  const parse = (name: string, params: string[], posOnly: number, pos: any[], names: string[] = [], values: any[] = [], kwargs = false) => {
+    const got: Record<string, any> = {};
+    if (pos.length > params.length) raise(T.TypeError, `${name}() takes from ${posOnly} to ${params.length} positional arguments but ${pos.length} were given`);
+    pos.forEach((v, i) => (got[params[i]] = v));
+    const extra: Record<string, any> = {};
+    names.forEach((k, i) => {
+      if (!params.includes(k) || params.indexOf(k) < posOnly) {
+        if (!kwargs) raise(T.TypeError, `${name}() got an unexpected keyword argument '${k}'`);
+        extra[k] = values[i];
+        return;
+      }
+      if (Object.hasOwn(got, k)) raise(T.TypeError, `${name}() got multiple values for argument '${k}'`);
+      got[k] = values[i];
+    });
+    for (let i = 0; i < posOnly; i++) if (!Object.hasOwn(got, params[i])) raise(T.TypeError, `${name}() missing 1 required positional argument: '${params[i]}'`);
+    if (Object.hasOwn(extra, "colorize") && O.truth(extra.colorize)) raise(T.NotImplementedError, `traceback.${name}(colorize=True) is not supported here`);
+    return got;
+  };
+  // (limit: None, then sys.tracebacklimit if it is set, as CPython's)
+  const limitOf = (v: any): number | null => {
+    if (v === undefined || v === null) {
+      const t = Obj.getattr(M.importModule("sys"), "tracebacklimit", null);
+      return t === null ? null : Math.max(0, Number(O.index(t)));
+    }
+    return Number(O.index(v));
+  };
+  const chainOf = (g: Record<string, any>) => (Object.hasOwn(g, "chain") ? O.truth(g.chain) : true);
+  // (the exception to format: value if given, else exc; both or neither of value and tb)
+  const target = (g: Record<string, any>) => {
+    const hasV = Object.hasOwn(g, "value"), hasT = Object.hasOwn(g, "tb");
+    if (hasV !== hasT) raise(T.ValueError, "Both or neither of value and tb must be given");
+    return hasV ? g.value : g.exc;
+  };
+  const text = (e: any, limit: number | null, chain: boolean) => (e === null || e === undefined ? "NoneType: None\n" : formatException(e, true, limit, chain));
+  // (to file, else the current sys.stderr; None: nothing; a write per line, as CPython's)
+  const emit = (s: string, file: any) => {
+    if (file === undefined || file === null) {
+      file = Obj.getattr(M.importModule("sys"), "stderr", null);
+      if (file === null) return null;
+    }
+    const w = Obj.getattr(file, "write");
+    for (const l of lines(s)) Obj.callObj(w, [l]);
+    return null;
+  };
+  const withKw = (name: string, params: string[], posOnly: number, impl: (g: Record<string, any>) => any, kwargs = false) => {
+    fn(name, (...pos: any[]) => impl(parse(name, params, posOnly, pos, [], [], kwargs)));
+    m[name].$kw = (pos: any[], names: string[], values: any[]) => impl(parse(name, params, posOnly, pos, names, values, kwargs));
+    m[name].$kwPos = true;
+  };
+  withKw("format_exception", ["exc", "value", "tb", "limit", "chain"], 1, (g) => {
+    const e = target(g);
+    return lines(text(e, limitOf(g.limit), chainOf(g)));
+  }, true);
   fn("format_exception_only", (a: any, b: any = undefined) => {
     const e = exc(a, b);
     const s = F.str(e);
     return [`${typeName(e)}${s ? ": " + s : ""}\n`];
   });
-  fn("print_exception", (a: any, b: any = undefined, ..._r: any[]) => (B.stderr.write(formatException(exc(a, b))), null));
+  withKw("print_exception", ["exc", "value", "tb", "limit", "file", "chain"], 1, (g) => {
+    const e = target(g);
+    return emit(text(e, limitOf(g.limit), chainOf(g)), g.file);
+  }, true);
   // (the exception being handled, as sys.exc_info() has it; None's line
-  // outside any; a frame limit isn't implemented, so it is refused)
+  // outside any; limit as format_exception's)
   const formatExc = (limit: any = null, chain: any = true) => {
-    if (limit !== null) raise(T.NotImplementedError, "traceback.format_exc(limit=...) is not supported here");
     const e = Obj.currentExc();
     if (e === null) return "NoneType: None\n";
-    return O.truth(chain) ? formatException(e, true) : formatOne(e, true);
+    return formatException(e, true, limitOf(limit), O.truth(chain));
   };
   const excSig = Obj.sig(["limit", "chain"]);
   const tooMany = (n: number) => raise(T.TypeError, `format_exc() takes from 0 to 2 positional arguments but ${n} were given`);
   fn("format_exc", (...a: any[]) => (a.length > 2 ? tooMany(a.length) : formatExc(a[0], a[1])));
   m.format_exc.$kw = (pos: any[], names: string[], values: any[]) => (pos.length > 2 ? tooMany(pos.length) : formatExc(...bindArgs("format_exc", excSig, pos, names, values)));
   m.format_exc.$kwPos = true;
-  fn("print_exc", (..._a: any[]) => null);
+  // (print_exc prints what format_exc returns)
+  withKw("print_exc", ["limit", "file", "chain"], 0, (g) => emit(formatExc(g.limit ?? null, Object.hasOwn(g, "chain") ? g.chain : true), g.file));
   fn("format_tb", (..._a: any[]) => []);
   fn("extract_tb", (..._a: any[]) => []);
   fn("extract_stack", (..._a: any[]) => []);
