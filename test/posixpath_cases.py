@@ -220,3 +220,70 @@ for label, o in [("IntPath(-1)", IntPath(-1)), ("IndexPath", IndexPath()), ("Ind
 # (realpath's strict: False as before; anything else is refused, apart)
 show("realpath strict=False", lambda: os.path.realpath("/a/../b", strict=False))
 show("realpath strict=0", lambda: os.path.realpath("/a/../b", strict=0))
+
+
+# ------------------------------------------------------------------ astra's CORR-E51-1
+# (a str or bytes subclass is a path, whatever __index__ it has: CPython never
+# asks it; a returned subclass the same. astra's battery)
+trace = []
+
+
+def tshow(label, f):
+    trace.clear()
+    try:
+        print(label, repr(f()), trace)
+    except Exception as e:
+        print(label, type(e).__name__, str(e).split("\n")[0], trace)
+
+
+class IS(str):
+    def __index__(self):
+        trace.append("index")
+        return -1
+
+    def __fspath__(self):
+        trace.append("fspath")
+        return "/nope"
+
+
+class IB(bytes):
+    def __index__(self):
+        trace.append("index")
+        return -1
+
+    def __fspath__(self):
+        trace.append("fspath")
+        return b"/nope"
+
+
+class NoneIndex(str):
+    __index__ = None
+
+
+class BadIndex2(str):
+    def __index__(self):
+        raise RuntimeError("index")
+
+
+class Returned:
+    def __init__(self, v):
+        self.v = v
+
+    def __fspath__(self):
+        trace.append("fspath")
+        return self.v
+
+
+for label, x in [("IS", IS("/dev/null")), ("IB", IB(b"/dev/null")), ("NoneIndex", NoneIndex("/dev/null")), ("BadIndex2", BadIndex2("/dev/null")),
+                 ("Returned IS", Returned(IS("/dev/null"))), ("Returned IB", Returned(IB(b"/dev/null")))]:
+    for f in ("exists", "isfile", "isdir", "lexists", "islink", "normpath", "splitroot"):
+        tshow("%s %s" % (label, f), lambda: getattr(os.path, f)(x))
+
+
+class IntOverride(int):
+    def __index__(self):
+        raise RuntimeError("int override")
+
+
+for x in [IntOverride(-1), IntOverride(-2 ** 31), IntOverride(2 ** 63)]:
+    tshow("IntOverride %d exists" % x, lambda: os.path.exists(x))
