@@ -423,16 +423,17 @@ export function constructPlain(cls: PyType, args: any[]): any {
   let nw = c.nw;
   let o: any;
   let init = c.init;
+  let sub: any = null;
   if (nw !== undefined && nw !== objectNew) {
     o = nw(cls, ...args);
     if (!isinstance(o, cls)) return o;
     // (an instance of a subclass is initialized by its own type's __init__,
     // as CPython's type.__call__ does: type(obj).__init__)
     const t = typeOf(o);
-    if (t !== cls) ({ init, nw } = subclassInit(t));
+    if (t !== cls) ({ init, nw, sub } = subclassInit(t));
   } else o = new cls.$ctor!();
   if (init === objectInit) {
-    if (args.length && (nw === undefined || nw === objectNew)) raise(T.TypeError, `${cls.$name}() takes no arguments`);
+    if (args.length && (nw === undefined || nw === objectNew)) noArgs(cls, sub);
   } else {
     const r = init(o, ...args);
     if (r !== null) raise(T.TypeError, `__init__() should return None, not '${typeName(r)}'`);
@@ -448,9 +449,23 @@ function constructKw(cls: PyType, pos: any[], names: string[], values: any[]): a
   return constructPlainKw(cls, pos, names, values);
 }
 
-// the __init__ and __new__ that decide how type(obj) is initialized
-function subclassInit(t: any): { init: any; nw: any } {
-  return { init: lookupType(t, "__init__"), nw: effectiveNew(lookupType(t, "__new__")) };
+// the __init__ and __new__ that decide how type(obj) is initialized. Its
+// __new__ is CPython's tp_new slot: the __new__ its MRO finds, but where
+// that is object.__new__, set by a class (`__new__ = object.__new__`), the
+// slot the type inherits from its first base (CORR-6AF-1).
+function tpNew(t: any): any {
+  const e = effectiveNew(lookupType(t, "__new__"));
+  if (e !== objectNew || t === T.object) return e;
+  const base = t.$bases?.[0];
+  return base === undefined ? objectNew : tpNew(base);
+}
+function subclassInit(t: any): { init: any; nw: any; sub: any } {
+  return { init: lookupType(t, "__init__"), nw: tpNew(t), sub: t };
+}
+// arguments object.__init__ can't take: CPython's object_new's message, or,
+// for a returned subclass (its __new__ already ran), object_init's
+function noArgs(cls: any, sub: any): never {
+  raise(T.TypeError, sub === null ? `${cls.$name}() takes no arguments` : `${sub.$name}.__init__() takes exactly one argument (the instance to initialize)`);
 }
 
 export function constructPlainKw(cls: PyType, pos: any[], names: string[], values: any[]): any {
@@ -458,14 +473,15 @@ export function constructPlainKw(cls: PyType, pos: any[], names: string[], value
   let nw = effectiveNew(lookupType(cls, "__new__"));
   let o: any;
   let init = lookupType(cls, "__init__");
+  let sub: any = null;
   if (nw !== undefined && nw !== objectNew) {
     o = callKw(nw, [cls, ...pos], names, values);
     if (!isinstance(o, cls)) return o;
     const t = typeOf(o);
-    if (t !== cls) ({ init, nw } = subclassInit(t));
+    if (t !== cls) ({ init, nw, sub } = subclassInit(t));
   } else o = new cls.$ctor!();
   if (init === objectInit) {
-    if (nw === undefined || nw === objectNew) raise(T.TypeError, `${cls.$name}() takes no arguments`);
+    if (nw === undefined || nw === objectNew) noArgs(cls, sub);
     return o;
   }
   const r = callKw(init, [o, ...pos], names, values);
@@ -1031,6 +1047,14 @@ ${ways}
 export const handledExceptions: any[] = [];
 export function excEnter(e: any): void {
   handledExceptions.push(e);
+  // (where it is caught, with the raise it belongs to: its traceback runs
+  // from this frame to where it was raised, as CPython's tb chain, however
+  // the stack changes after, CORR-6AF-2)
+  if (e !== null && typeof e === "object" && e.$tb !== undefined) {
+    const at: any = {};
+    Error.captureStackTrace(at, excEnter);
+    Object.defineProperty(e, "$caught", { value: { tb: e.$tb, at }, writable: true, enumerable: false, configurable: true });
+  }
 }
 // (by identity: a generator resumed outside the frame that ran it may not
 // have its entries on top)

@@ -23,3 +23,25 @@ test("traceback.format_exc(limit=...) is refused", () => {
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
   assert.equal(out.trim(), "refused traceback.format_exc(limit=...) is not supported here");
 });
+
+// Deeper than the JS frames kept, which frame caught an exception is
+// unknown: format_exc refuses, never printing its callers as its traceback
+// (CORR-6AF-2); shallower, the handler's two frames, as CPython's
+test("traceback.format_exc past the JS stack limit is refused, not guessed", () => {
+  const code = [
+    "import traceback",
+    "def leaf(): raise ValueError('leaf')",
+    "def handler():",
+    "    try: leaf()",
+    "    except ValueError: return traceback.format_exc()",
+    "def descend(n):",
+    "    if n: return descend(n - 1)",
+    "    return handler()",
+    "for n in [5, 400]:",
+    "    try: print(n, [l.split(', in ')[-1] for l in descend(n).splitlines() if l.startswith('  File ')])",
+    "    except NotImplementedError as e: print(n, 'refused:', e)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim().split("\n");
+  assert.equal(out[0], "5 ['handler', 'leaf']");
+  assert.match(out[1], /^400 refused: this traceback is deeper than the 200 JavaScript frames kept/);
+});

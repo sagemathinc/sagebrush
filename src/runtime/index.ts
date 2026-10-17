@@ -667,6 +667,11 @@ interface Frame {
 function framesOf(e: any): Frame[] {
   const holder = e.$tb;
   if (holder === undefined) return [];
+  return pyFrames(sitesOf(holder));
+}
+
+// a captured stack's call sites, innermost first
+function sitesOf(holder: any): any[] {
   const prev = (Error as any).prepareStackTrace;
   (Error as any).prepareStackTrace = (_: any, cs: any[]) => cs;
   let sites: any;
@@ -685,6 +690,11 @@ function framesOf(e: any): Frame[] {
       if (m) sites.push({ getFileName: () => m[2], getLineNumber: () => Number(m[3]), getFunctionName: () => m[1] ?? "" });
     }
   }
+  return sites;
+}
+
+// the Python frames among call sites, outermost first
+function pyFrames(sites: any[]): Frame[] {
   const frames: Frame[] = [];
   for (const cs of sites) {
     // Evaluated code (the browser build) has no file name, only a sourceURL.
@@ -699,21 +709,25 @@ function framesOf(e: any): Frame[] {
   return frames.reverse();
 }
 
-// The frames of an exception being handled, from the frame handling it on,
-// as its traceback has them in CPython: the frames it shares with the
-// current stack (`now`, outermost first) are its handler's callers, left
-// out. (Past the JS stack limit both lists lose outer frames, so then
-// nothing is left out.)
-function handledFrames(frames: Frame[], now: Frame[]): Frame[] {
-  if (frames.length >= Error.stackTraceLimit || now.length >= Error.stackTraceLimit) return frames;
-  let k = 0;
-  while (k < frames.length - 1 && k < now.length && frames[k].file === now[k].file && frames[k].name === now[k].name && frames[k].line === now[k].line) k++;
-  return frames.slice(k);
+// The frames of a caught exception's traceback, as CPython's: from the frame
+// that caught it (last, excEnter records where) to where it was raised. The
+// stack at the catch is the raise's own outer part, so the catching frame is
+// the raise's frame at that depth. Past the JS stack limit a captured stack
+// has lost its outer frames, and that depth is unknown: refused, not guessed.
+// An exception not caught since it was raised has its whole stack.
+function caughtFrames(e: any): Frame[] {
+  const c = e.$caught;
+  if (e.$tb === undefined || c === undefined || c.tb !== e.$tb) return framesOf(e);
+  const raised = sitesOf(e.$tb), at = sitesOf(c.at);
+  if (raised.length >= Error.stackTraceLimit || at.length >= Error.stackTraceLimit)
+    raise(T.NotImplementedError, `this traceback is deeper than the ${Error.stackTraceLimit} JavaScript frames kept: which frame caught the exception is unknown`);
+  const frames = pyFrames(raised);
+  return frames.slice(Math.max(0, pyFrames(at).length - 1));
 }
 
-function formatOne(e: any, now: Frame[] | null = null): string {
+function formatOne(e: any, caught = false): string {
   let out = "";
-  const frames = now === null ? framesOf(e) : handledFrames(framesOf(e), now);
+  const frames = caught ? caughtFrames(e) : framesOf(e);
   if (frames.length) {
     out += "Traceback (most recent call last):\n";
     for (const f of frames) {
@@ -734,13 +748,13 @@ function formatOne(e: any, now: Frame[] | null = null): string {
   return out;
 }
 
-export function formatException(e: any, now: Frame[] | null = null): string {
+export function formatException(e: any, caught = false): string {
   const parts: string[] = [];
   const seen = new Set<any>();
   let cur = e;
   while (cur !== null && cur !== undefined && !seen.has(cur)) {
     seen.add(cur);
-    parts.unshift(formatOne(cur, now));
+    parts.unshift(formatOne(cur, caught));
     if (cur.__cause__ !== null && cur.__cause__ !== undefined) {
       parts.unshift("\nThe above exception was the direct cause of the following exception:\n\n");
       cur = cur.__cause__;
@@ -894,8 +908,7 @@ M.newBuiltinModule("traceback", (m) => {
     if (limit !== null) raise(T.NotImplementedError, "traceback.format_exc(limit=...) is not supported here");
     const e = Obj.currentExc();
     if (e === null) return "NoneType: None\n";
-    const now = framesOf({ $tb: new Error() });
-    return O.truth(chain) ? formatException(e, now) : formatOne(e, now);
+    return O.truth(chain) ? formatException(e, true) : formatOne(e, true);
   };
   const excSig = Obj.sig(["limit", "chain"]);
   const tooMany = (n: number) => raise(T.TypeError, `format_exc() takes from 0 to 2 positional arguments but ${n} were given`);

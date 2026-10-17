@@ -114,3 +114,51 @@ class SortedKeyList(SortedList):
 show(lambda: (lambda s: (type(s).__name__, s._list))(SortedList([3, -5, 1], key=abs)))
 show(lambda: (lambda s: (type(s).__name__, s._list))(SortedList([3, -5, 1])))
 show(lambda: (lambda s: (type(s).__name__, s._list))(SortedKeyList([3, -5, 1], key=abs)))
+
+# CORR-6AF-1: the returned subclass sets __new__ = object.__new__, which
+# keeps the slot it inherits (Z's): Z's arguments are accepted, both ways
+class Z:
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(ZZ)
+class ZZ(Z):
+    __new__ = object.__new__
+show(lambda: type(Z(1)).__name__)
+show(lambda: type(Z(x=1)).__name__)
+show(lambda: type(Z()).__name__)
+show(lambda: type(type.__call__(Z, 1)).__name__)
+show(lambda: type(type.__call__(Z, x=1)).__name__)
+# ... and a type whose every __new__ up to object is object's takes none
+class Y:
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(YY)
+class YB:
+    __new__ = object.__new__
+class YY(YB, Y):
+    pass
+class W:
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(WW)
+class WW(W):
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(cls)
+show(lambda: type(Y(1)).__name__)
+show(lambda: type(W(1)).__name__)
+show(lambda: type(W(x=1)).__name__)
+
+# through a metaclass's __call__ and type.__call__
+events = []
+class Meta(type):
+    def __call__(cls, *args, **kwargs):
+        events.append(("meta", cls.__name__))
+        return super().__call__(*args, **kwargs)
+class MBase(metaclass=Meta):
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(MChild)
+    def __init__(self, *args, **kwargs):
+        events.append("wrong base")
+class MChild(MBase):
+    def __init__(self, *args, **kwargs):
+        events.append(("child", args, kwargs))
+for f in [lambda: MBase(1), lambda: MBase(x=2), lambda: type.__call__(MBase, 3), lambda: type.__call__(MBase, x=4)]:
+    show(lambda: (type(f()).__name__, events[:]))
+    events.clear()
