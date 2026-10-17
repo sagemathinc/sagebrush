@@ -16,12 +16,11 @@ test("re's \\b \\w \\s . and IGNORECASE, and complex products and quotients, as 
 });
 
 // What the translation cannot do faithfully it refuses, rather than
-// answering differently: scoped a, L and x flags (they were accepted and
-// ignored), and IGNORECASE backreferences in ASCII or bytes patterns (no JS
+// answering differently: scoped L and x flags (they were accepted and
+// ignored; a scoped a is supported, test/re_scoped_ascii_cases.py), and IGNORECASE backreferences in ASCII or bytes patterns (no JS
 // i flag there, CORR-BD8-1).
 test("unsupported scoped flags and ASCII IGNORECASE backreferences are refused (NotImplementedError)", () => {
   const cases = [
-    "re.fullmatch(r'(?a:\\w+)', 'é')",
     "re.fullmatch(r'(?x:a b)', 'ab')",
     "re.fullmatch(r'(?-x:a)', 'a', re.X)",
     "re.fullmatch(r'(a)\\1', 'aA', re.A | re.I)",
