@@ -613,3 +613,260 @@ F(3)**RDF(-2) -> 0.1111111111111111 float
 RDF(0).__pow__(F(2)) -> 0.0 float
 RDF(0)**F(2) -> 0.0 float
 F(2)**RDF(0) -> 1.0 float
+CC(2)^RealField(53)(3) -> 8.00000000000000 Complex Field with 53 bits of precision
+RealField(30)(0.000000000000000).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(0.000000000000000).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(0.000000000000000)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(0.000000000000000).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(-0.000000000000000).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-0.000000000000000).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-0.000000000000000)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-0.000000000000000).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(1.00000000000000).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(1.00000000000000).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(1.00000000000000)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(1.00000000000000).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(-1.00000000000000).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-1.00000000000000).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-1.00000000000000)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-1.00000000000000).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(2.00000000000000).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(2.00000000000000).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(2.00000000000000)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(2.00000000000000).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(nan).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(nan).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(nan)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(nan).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(inf).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(inf).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(inf)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(inf).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(-inf).__pow__(F(0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-inf).__pow__(F(-0)) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-inf)**F(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-inf).__pow__(F(2)) !! TypeError unsupported operand parent(s) for ^: 'Real Field with 30 bits of precision' and '<class '__main__.F'>'
+RealField(30)(-3).__rpow__(F(0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(-3) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-3).__rpow__(F(-0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(-3) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-3).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(-3) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-3).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(-3) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-2).__rpow__(F(0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(-2) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-2).__rpow__(F(-0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(-2) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-2).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(-2) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-2).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(-2) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-1).__rpow__(F(0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(-1) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-1).__rpow__(F(-0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(-1) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-1).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(-1) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-1).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(-1) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-0.500000000000000).__rpow__(F(0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(-0.500000000000000) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-0.500000000000000).__rpow__(F(-0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(-0.500000000000000) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-0.500000000000000).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(-0.500000000000000) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-0.500000000000000).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(-0.500000000000000) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-0).__rpow__(F(0.000000000000000)) -> 1.0000000 Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(-0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-0).__rpow__(F(-0.000000000000000)) -> 1.0000000 Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(-0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(-0).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(-0) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-0).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(-0) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(0).__rpow__(F(0.000000000000000)) -> 1.0000000 Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(0).__rpow__(F(-0.000000000000000)) -> 1.0000000 Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(0) -> 1.0000000 Real Field with 30 bits of precision
+RealField(30)(0).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(0) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(0).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(0) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(0.500000000000000).__rpow__(F(0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(0.500000000000000) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(0.500000000000000).__rpow__(F(-0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(0.500000000000000) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(0.500000000000000).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(0.500000000000000) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(0.500000000000000).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(0.500000000000000) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(2).__rpow__(F(0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(2) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(2).__rpow__(F(-0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(2) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(2).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(2) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(2).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(2) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(3).__rpow__(F(0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(3) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(3).__rpow__(F(-0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(3) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(3).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(3) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(3).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(3) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(nan).__rpow__(F(0.000000000000000)) -> NaN + NaN*I Complex Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(nan) -> NaN + NaN*I Complex Field with 30 bits of precision
+RealField(30)(nan).__rpow__(F(-0.000000000000000)) -> NaN + NaN*I Complex Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(nan) -> NaN + NaN*I Complex Field with 30 bits of precision
+RealField(30)(nan).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(nan) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(nan).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(nan) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(+inf).__rpow__(F(0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(+inf) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(+inf).__rpow__(F(-0.000000000000000)) -> 0.00000000 Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(+inf) -> 0.00000000 Real Field with 30 bits of precision
+RealField(30)(+inf).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(+inf) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(+inf).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(+inf) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-inf).__rpow__(F(0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(0.000000000000000)**RealField(30)(-inf) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-inf).__rpow__(F(-0.000000000000000)) -> +infinity Real Field with 30 bits of precision
+F(-0.000000000000000)**RealField(30)(-inf) -> +infinity Real Field with 30 bits of precision
+RealField(30)(-inf).__rpow__(F(1.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(1.00000000000000)**RealField(30)(-inf) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(30)(-inf).__rpow__(F(2.00000000000000)) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+F(2.00000000000000)**RealField(30)(-inf) !! TypeError unsupported operand parent(s) for ^: '<class '__main__.F'>' and 'Real Field with 30 bits of precision'
+RealField(100)(0.000000000000000).__pow__(F(0)) -> 1.0 float
+RealField(100)(0.000000000000000).__pow__(F(-0)) -> 1.0 float
+RealField(100)(0.000000000000000)**F(0) -> 1.0 float
+RealField(100)(0.000000000000000).__pow__(F(2)) -> 0.0 float
+RealField(100)(-0.000000000000000).__pow__(F(0)) -> 1.0 float
+RealField(100)(-0.000000000000000).__pow__(F(-0)) -> 1.0 float
+RealField(100)(-0.000000000000000)**F(0) -> 1.0 float
+RealField(100)(-0.000000000000000).__pow__(F(2)) -> 0.0 float
+RealField(100)(1.00000000000000).__pow__(F(0)) -> 1.0 float
+RealField(100)(1.00000000000000).__pow__(F(-0)) -> 1.0 float
+RealField(100)(1.00000000000000)**F(0) -> 1.0 float
+RealField(100)(1.00000000000000).__pow__(F(2)) -> 1.0 float
+RealField(100)(-1.00000000000000).__pow__(F(0)) -> 1.0 float
+RealField(100)(-1.00000000000000).__pow__(F(-0)) -> 1.0 float
+RealField(100)(-1.00000000000000)**F(0) -> 1.0 float
+RealField(100)(-1.00000000000000).__pow__(F(2)) -> 1.0 float
+RealField(100)(2.00000000000000).__pow__(F(0)) -> 1.0 float
+RealField(100)(2.00000000000000).__pow__(F(-0)) -> 1.0 float
+RealField(100)(2.00000000000000)**F(0) -> 1.0 float
+RealField(100)(2.00000000000000).__pow__(F(2)) -> 4.0 float
+RealField(100)(nan).__pow__(F(0)) -> 1.0 float
+RealField(100)(nan).__pow__(F(-0)) -> 1.0 float
+RealField(100)(nan)**F(0) -> 1.0 float
+RealField(100)(nan).__pow__(F(2)) -> nan float
+RealField(100)(inf).__pow__(F(0)) -> 1.0 float
+RealField(100)(inf).__pow__(F(-0)) -> 1.0 float
+RealField(100)(inf)**F(0) -> 1.0 float
+RealField(100)(inf).__pow__(F(2)) -> inf float
+RealField(100)(-inf).__pow__(F(0)) -> 1.0 float
+RealField(100)(-inf).__pow__(F(-0)) -> 1.0 float
+RealField(100)(-inf)**F(0) -> 1.0 float
+RealField(100)(-inf).__pow__(F(2)) -> inf float
+RealField(100)(-3).__rpow__(F(0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(0.000000000000000)**RealField(100)(-3) !! ZeroDivisionError zero to a negative power
+RealField(100)(-3).__rpow__(F(-0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(-0.000000000000000)**RealField(100)(-3) !! ZeroDivisionError zero to a negative power
+RealField(100)(-3).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(-3) -> 1.0 float
+RealField(100)(-3).__rpow__(F(2.00000000000000)) -> 0.125 float
+F(2.00000000000000)**RealField(100)(-3) -> 0.125 float
+RealField(100)(-2).__rpow__(F(0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(0.000000000000000)**RealField(100)(-2) !! ZeroDivisionError zero to a negative power
+RealField(100)(-2).__rpow__(F(-0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(-0.000000000000000)**RealField(100)(-2) !! ZeroDivisionError zero to a negative power
+RealField(100)(-2).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(-2) -> 1.0 float
+RealField(100)(-2).__rpow__(F(2.00000000000000)) -> 0.25 float
+F(2.00000000000000)**RealField(100)(-2) -> 0.25 float
+RealField(100)(-1).__rpow__(F(0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(0.000000000000000)**RealField(100)(-1) !! ZeroDivisionError zero to a negative power
+RealField(100)(-1).__rpow__(F(-0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(-0.000000000000000)**RealField(100)(-1) !! ZeroDivisionError zero to a negative power
+RealField(100)(-1).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(-1) -> 1.0 float
+RealField(100)(-1).__rpow__(F(2.00000000000000)) -> 0.5 float
+F(2.00000000000000)**RealField(100)(-1) -> 0.5 float
+RealField(100)(-0.500000000000000).__rpow__(F(0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(0.000000000000000)**RealField(100)(-0.500000000000000) !! ZeroDivisionError zero to a negative power
+RealField(100)(-0.500000000000000).__rpow__(F(-0.000000000000000)) !! ZeroDivisionError zero to a negative power
+F(-0.000000000000000)**RealField(100)(-0.500000000000000) !! ZeroDivisionError zero to a negative power
+RealField(100)(-0.500000000000000).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(-0.500000000000000) -> 1.0 float
+RealField(100)(-0.500000000000000).__rpow__(F(2.00000000000000)) -> 0.7071067811865476 float
+F(2.00000000000000)**RealField(100)(-0.500000000000000) -> 0.7071067811865476 float
+RealField(100)(-0).__rpow__(F(0.000000000000000)) -> 1.0 float
+F(0.000000000000000)**RealField(100)(-0) -> 1.0 float
+RealField(100)(-0).__rpow__(F(-0.000000000000000)) -> 1.0 float
+F(-0.000000000000000)**RealField(100)(-0) -> 1.0 float
+RealField(100)(-0).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(-0) -> 1.0 float
+RealField(100)(-0).__rpow__(F(2.00000000000000)) -> 1.0 float
+F(2.00000000000000)**RealField(100)(-0) -> 1.0 float
+RealField(100)(0).__rpow__(F(0.000000000000000)) -> 1.0 float
+F(0.000000000000000)**RealField(100)(0) -> 1.0 float
+RealField(100)(0).__rpow__(F(-0.000000000000000)) -> 1.0 float
+F(-0.000000000000000)**RealField(100)(0) -> 1.0 float
+RealField(100)(0).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(0) -> 1.0 float
+RealField(100)(0).__rpow__(F(2.00000000000000)) -> 1.0 float
+F(2.00000000000000)**RealField(100)(0) -> 1.0 float
+RealField(100)(0.500000000000000).__rpow__(F(0.000000000000000)) -> 0.0 float
+F(0.000000000000000)**RealField(100)(0.500000000000000) -> 0.0 float
+RealField(100)(0.500000000000000).__rpow__(F(-0.000000000000000)) -> 0.0 float
+F(-0.000000000000000)**RealField(100)(0.500000000000000) -> 0.0 float
+RealField(100)(0.500000000000000).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(0.500000000000000) -> 1.0 float
+RealField(100)(0.500000000000000).__rpow__(F(2.00000000000000)) -> 1.4142135623730951 float
+F(2.00000000000000)**RealField(100)(0.500000000000000) -> 1.4142135623730951 float
+RealField(100)(2).__rpow__(F(0.000000000000000)) -> 0.0 float
+F(0.000000000000000)**RealField(100)(2) -> 0.0 float
+RealField(100)(2).__rpow__(F(-0.000000000000000)) -> 0.0 float
+F(-0.000000000000000)**RealField(100)(2) -> 0.0 float
+RealField(100)(2).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(2) -> 1.0 float
+RealField(100)(2).__rpow__(F(2.00000000000000)) -> 4.0 float
+F(2.00000000000000)**RealField(100)(2) -> 4.0 float
+RealField(100)(3).__rpow__(F(0.000000000000000)) -> 0.0 float
+F(0.000000000000000)**RealField(100)(3) -> 0.0 float
+RealField(100)(3).__rpow__(F(-0.000000000000000)) -> -0.0 float
+F(-0.000000000000000)**RealField(100)(3) -> -0.0 float
+RealField(100)(3).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(3) -> 1.0 float
+RealField(100)(3).__rpow__(F(2.00000000000000)) -> 8.0 float
+F(2.00000000000000)**RealField(100)(3) -> 8.0 float
+RealField(100)(nan).__rpow__(F(0.000000000000000)) -> nan float
+F(0.000000000000000)**RealField(100)(nan) -> nan float
+RealField(100)(nan).__rpow__(F(-0.000000000000000)) -> nan float
+F(-0.000000000000000)**RealField(100)(nan) -> nan float
+RealField(100)(nan).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(nan) -> 1.0 float
+RealField(100)(nan).__rpow__(F(2.00000000000000)) -> nan float
+F(2.00000000000000)**RealField(100)(nan) -> nan float
+RealField(100)(+inf).__rpow__(F(0.000000000000000)) -> 0.0 float
+F(0.000000000000000)**RealField(100)(+inf) -> 0.0 float
+RealField(100)(+inf).__rpow__(F(-0.000000000000000)) -> 0.0 float
+F(-0.000000000000000)**RealField(100)(+inf) -> 0.0 float
+RealField(100)(+inf).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(+inf) -> 1.0 float
+RealField(100)(+inf).__rpow__(F(2.00000000000000)) -> inf float
+F(2.00000000000000)**RealField(100)(+inf) -> inf float
+RealField(100)(-inf).__rpow__(F(0.000000000000000)) -> inf float
+F(0.000000000000000)**RealField(100)(-inf) -> inf float
+RealField(100)(-inf).__rpow__(F(-0.000000000000000)) -> inf float
+F(-0.000000000000000)**RealField(100)(-inf) -> inf float
+RealField(100)(-inf).__rpow__(F(1.00000000000000)) -> 1.0 float
+F(1.00000000000000)**RealField(100)(-inf) -> 1.0 float
+RealField(100)(-inf).__rpow__(F(2.00000000000000)) -> 0.0 float
+F(2.00000000000000)**RealField(100)(-inf) -> 0.0 float

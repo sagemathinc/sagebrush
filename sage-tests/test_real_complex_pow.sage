@@ -53,3 +53,21 @@ for bn, B in bases:
         show("%s(%s).__pow__(F(%s))" % (bn, v, fv), lambda: B(v).__pow__(F(fv)))
         show("%s(%s)**F(%s)" % (bn, v, fv), lambda: B(v) ** F(fv))
         show("F(%s)**%s(%s)" % (fv, bn, v), lambda: F(fv) ** B(v))
+# CC to a RealField(p) power: Sage's is in the coarser complex field; only
+# 53 bits is available (any other precision is refused, as before)
+show("CC(2)^RealField(53)(3)", lambda: CC(2) ** RealField(53)(3))
+# a user's float subclass against a coarser field: x^0 is 1 and a zero
+# base follows 0^y, else refused; above 53 bits Python float's power
+fbv = [0.0, -0.0, 1.0, -1.0, 2.0, nan, inf, -inf]
+fev = [-3, -2, -1, -0.5, '-0', 0, 0.5, 2, 3, 'nan', '+inf', '-inf']
+for p in [30, 100]:
+    R = RealField(p)
+    for b in fbv:
+        show("RealField(%d)(%s).__pow__(F(0))" % (p, b), lambda: R(b).__pow__(F(0.0)))
+        show("RealField(%d)(%s).__pow__(F(-0))" % (p, b), lambda: R(b).__pow__(F(-0.0)))
+        show("RealField(%d)(%s)**F(0)" % (p, b), lambda: R(b) ** F(0.0))
+        show("RealField(%d)(%s).__pow__(F(2))" % (p, b), lambda: R(b).__pow__(F(2.0)))
+    for e in fev:
+        for b in [0.0, -0.0, 1.0, 2.0]:
+            show("RealField(%d)(%s).__rpow__(F(%s))" % (p, e, b), lambda: R(e).__rpow__(F(b)))
+            show("F(%s)**RealField(%d)(%s)" % (b, p, e), lambda: F(b) ** R(e))
