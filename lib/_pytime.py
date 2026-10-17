@@ -5,42 +5,38 @@ the host's clocks and zone (the builtin _time).
 from it, as CPython's time is a builtin module: a script named time.py does
 not hide it.)
 
-The host's zone: UTC unless the host gives one.
-- Under Node the TZ variable, as given, decides. In a browser, which has
-  none, the zone Intl reports is used, and "UTC" (or none) is the UTC host.
-- On a UTC host (TZ UTC, Etc/UTC, Etc/UCT, Etc/Universal or Etc/Zulu, or a
-  browser in UTC) and a GMT host (Etc/GMT, GMT0, Etc/GMT0, Etc/GMT+0,
-  Etc/GMT-0 or Etc/Greenwich), everything is exact. tm_isdst is 0, and the
-  abbreviation is "UTC" or "GMT", as glibc gives it.
-- A zone named as glibc reads one (TZ a name, or :name, that the host's
-  zoneinfo has a file for, which ICU's tzdata, under JavaScript's Date,
-  holds too), or the host's own zone where TZ is not set: the UTC offsets
-  are exact, from JavaScript's Date (ICU's
-  tzdata), so localtime()'s fields, tm_gmtoff, timezone, altzone and
-  daylight are exact. The rest is not known here yet (it needs tzdata's
-  flags and abbreviations, a later change):
-  - tm_isdst, in what localtime() returns, is a placeholder. Its repr is
+The host's zone, as glibc reads it (lib/_tzrules.py; matched against
+CPython 3.14 on glibc 2.39 zone by zone, no glibc source read):
+- Under Node: the zone file glibc would read (TZ as a name under TZDIR or
+  /usr/share/zoneinfo, as a path, or /etc/localtime where TZ is unset), or
+  the TZ value read as a POSIX TZ rule where it names no file; glibc's
+  readings of odd TZ values (a name with no file, an empty TZ) included.
+  localtime's fields, tm_isdst, tm_zone and tm_gmtoff, mktime (with the
+  offset glibc's mktime keeps from its last call, which decides a repeated
+  hour asked with isdst -1), timezone, altzone, daylight and tzname (as
+  CPython's init_timezone takes them), and strftime's %Z of a time tuple
+  with no zone (glibc's tzname as the last local time left it) are all as
+  CPython's there.
+- Refused, naming the TZ value (NotImplementedError from every local time,
+  and timezone, altzone, daylight and tzname then absent): a zone file that
+  is malformed or has leap seconds, a TZ rule glibc reads in a way not
+  matched here (malformed, out of range, or daylight saving without both
+  rules), TZ unset with no readable /etc/localtime, and a zone file a
+  sandbox will not let Sagebrush read.
+- In a browser, which has no zone files (until the pinned zone data comes),
+  as before: UTC where Intl reports it, exact; another zone's UTC offsets
+  from JavaScript's Date, exact (localtime's fields, tm_gmtoff, timezone,
+  altzone, daylight), and the rest refused, naming the zone:
+  - tm_isdst, in what localtime() returns, is a placeholder: its repr is
     "<unknown: ZONE>", and any other use (int, bool, comparison, hashing,
     format, arithmetic, pickling, comparing or hashing the struct_time
-    holding it) raises NotImplementedError naming the zone. Unpacking and
-    indexing just pass it along.
-  - tm_zone, tzname and strftime's %Z raise NotImplementedError naming the
-    zone. tzname is not in the module's dict there, so dir(time) and
-    `from time import *` lack it, unlike CPython, and hasattr(time,
-    'tzname') raises NotImplementedError rather than returning False.
-  - mktime() refuses an isdst of 0 or 1, and a local time the zone skips
-    or repeats: glibc's answer for those depends on its own state, so it
-    is not guessed.
-  - strftime's %s, which is mktime's, refuses likewise.
-- A TZDIR other than the system's /usr/share/zoneinfo (glibc reads zones
-  from it, and its files may hold anything: Date does not read them):
-  every local time is refused as below, naming TZDIR, whatever TZ is, UTC
-  and GMT and unset too.
-- Any other TZ (a POSIX rule such as "EST5EDT,M3.2.0,M11.1.0", a path to a
-  zoneinfo file, a name with no file or one Date does not take as given):
-  JavaScript's Date does not read it as glibc does, so localtime(), ctime(),
-  mktime(), timezone, altzone, daylight and tzname, and everything local
-  built on them, raise NotImplementedError naming TZ.
+    holding it) raises NotImplementedError. Unpacking and indexing just
+    pass it along.
+  - tm_zone, tzname and strftime's %Z raise NotImplementedError; tzname is
+    then not in the module's dict (dir(time) and `from time import *` lack
+    it), and hasattr(time, 'tzname') raises.
+  - mktime() refuses an isdst of 0 or 1, and a local time the zone skips or
+    repeats; strftime's %s likewise.
 - tzset() is refused: the host's zone is read once, at import.
 - strptime() is refused, naming what it lacks, until CPython's _strptime
   (which needs calendar, enum, locale and encodings) can run here.
@@ -54,51 +50,21 @@ from _operator import index as _index
 
 # ------------------------------------------------------------------ the zone
 
-_UTC_ZONES = {"UTC", "Etc/UTC", "Etc/UCT", "Etc/Universal", "Etc/Zulu"}
-_GMT_ZONES = {"Etc/GMT", "GMT0", "Etc/GMT0", "Etc/GMT+0", "Etc/GMT-0", "Etc/Greenwich"}
-_intl, _tzenv, _tzcanon, _tzfile, _tzhost, _tzdir = _time._zone()
-_bad = None  # (a TZ whose local times are not known here: why)
-if _tzenv is not None:
-    _name = _tzenv[1:] if _tzenv.startswith(":") else _tzenv
-    _abbr = "UTC" if _name in _UTC_ZONES else "GMT" if _name in _GMT_ZONES else None
-    _host = None if _abbr is not None else (_name or "''")
-    if _abbr is None:
-        if _name.startswith("/") or _name.startswith("."):
-            _bad = "a path to a zoneinfo file"
-        elif _tzcanon is None and _tzfile is not True:
-            _bad = "a POSIX TZ rule" if "," in _name or any("0" <= c <= "9" for c in _name) else "not a zone name known here"
-        elif _tzcanon is None:
-            _bad = "a zone ICU's tzdata does not hold"
-        elif _tzfile is not True:
-            _bad = "a name with no file in the host's zoneinfo"
-        elif _tzcanon != _tzhost:
-            _bad = "a zone JavaScript's Date does not take as given"
-        if _bad is not None:
-            _bad = ("time: the host's time zone TZ=%r (%s) is not available in Sagebrush yet: glibc reads it in a way "
-                    "JavaScript's Date does not, so its local times are refused, not guessed" % (_tzenv, _bad))
-elif _intl is None or _intl in ("UTC", "Etc/UTC", "Etc/Unknown"):
-    _abbr, _host = "UTC", None
-else:
-    _abbr, _host = None, _intl
-if _tzdir and _tzdir.rstrip("/") != "/usr/share/zoneinfo":
-    # (an empty TZDIR is glibc's default; any other directory's files are
-    # not read here, so no zone, UTC's neither, is known exact)
-    _abbr, _host = None, _host or "UTC"
-    _bad = ("time: the host's zoneinfo directory TZDIR=%r is not available in Sagebrush yet: glibc reads the "
-            "zone from its files, which JavaScript's Date does not, so local times are refused, not guessed" % _tzdir)
-del _intl, _tzenv, _tzcanon, _tzfile, _tzhost, _tzdir
+import _tzrules
 
 
-def _refuse(what):
-    if _bad is not None:
-        raise NotImplementedError(_bad)
-    raise NotImplementedError("%s is not known for the host's time zone %s here: it needs tzdata's "
-                              "daylight-saving flags and abbreviations, not yet in Sagebrush" % (what, _host))
+def _read(path):
+    """A zone file's bytes, or None where it cannot be read (glibc then reads
+    the TZ value as a rule); refused where a sandbox will not allow it."""
+    try:
+        return _time._read(path, _tzrules.MAX_FILE + 1)
+    except OSError as e:
+        raise _tzrules.ZoneUnsupported("%s cannot be read here (%s)" % (path, e)) from None
 
 
 class _UnknownDST:
-    """localtime()'s tm_isdst on a host zone whose flags are not known here:
-    shown by repr and str, refused on any other use."""
+    """localtime()'s tm_isdst in a browser's zone without zone data: shown by
+    repr and str, refused on any other use."""
     __slots__ = ()
 
     def _no(self, *args, **kwargs):
@@ -113,13 +79,66 @@ class _UnknownDST:
     __reduce__ = __reduce_ex__ = __copy__ = __deepcopy__ = __getstate__ = _no
 
     def __repr__(self):
-        return "<unknown: %s>" % _host
+        return "<unknown: %s>" % _zone.name
 
     __str__ = __repr__
 
 
 _UNKNOWN_DST = _UnknownDST()
 _UNKNOWN_ZONE = object()  # (a tm_zone that refuses when read)
+
+
+class _JSDateZone:
+    """A browser's zone, which has no zone files (until the pinned zone data
+    comes): its UTC offsets from JavaScript's Date (exact to the second);
+    its isdst flags and abbreviations not known here (placeholders, refused
+    on use)."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def find(self, t):
+        f = _time._local(t)
+        if f is None:
+            raise NotImplementedError("time: the host's time zone %s is known here only within JavaScript's dates "
+                                      "(about 271821 BC to AD 275760)" % self.name)
+        return f[6], _UNKNOWN_DST, _UNKNOWN_ZONE
+
+    def names_after(self, t, state):
+        return None
+
+
+def _host_zone():
+    """(the host's zone, None) or (None, why it is refused)."""
+    tz, tzdir, node, intl = _time._zone()
+    if node:
+        what = "TZ unset" if tz is None else "TZ=%r" % tz
+        if tzdir is not None:
+            what += ", TZDIR=%r" % tzdir
+        try:
+            return _tzrules.resolve(tz, tzdir, _read), None
+        except _tzrules.ZoneUnsupported as e:
+            return None, "time: the host's time zone (%s) is not available in Sagebrush: %s" % (what, e)
+    if intl is None or intl in ("UTC", "Etc/UTC", "Etc/Unknown"):
+        return _tzrules.utc_zone(), None
+    return _JSDateZone(intl), None
+
+
+_zone, _bad = _host_zone()
+_mk_last = 0  # (the offset glibc's mktime keeps from its last call)
+_names = ["UTC", "UTC"]  # (glibc's tzname: what %Z gives a time tuple with no zone, by isdst; None: not known)
+
+
+def _refuse(what=None):
+    if _bad is not None:
+        raise NotImplementedError(_bad)
+    raise NotImplementedError("%s is not known for the host's time zone %s here: it needs tzdata's "
+                              "daylight-saving flags and abbreviations, not yet in Sagebrush" % (what, _zone.name))
+
+
+def _jsdate():
+    return isinstance(_zone, _JSDateZone)
+
 
 # ------------------------------------------------------------------ struct_time
 
@@ -361,18 +380,17 @@ attributes only."""
     return _struct(_broken(n, 0), 0, "GMT", 0)
 
 
-def _offset(n):
-    """The host zone's UTC offset at UTC second n, refused outside the
-    instants JavaScript's Date holds."""
-    if _abbr is not None:
-        return 0
+def _local(n):
+    """(the broken-down fields, isdst, zone, gmtoff) of UTC second n in the
+    host's zone; glibc's tzname follows, as glibc's localtime sets it."""
+    global _names
     if _bad is not None:
-        raise NotImplementedError(_bad)
-    f = _time._local(n)
-    if f is None:
-        raise NotImplementedError("time: the host's time zone %s is known here only within JavaScript's dates "
-                                  "(about 271821 BC to AD 275760)" % _host)
-    return f[6]
+        _refuse()
+    _broken(n, 0)  # (glibc's range first)
+    off, isdst, abbr = _zone.find(n)
+    b = _broken(n, off)
+    _names = _zone.names_after(n, _names)
+    return b, isdst, abbr, off
 
 
 def localtime(seconds=None, /):
@@ -381,12 +399,8 @@ def localtime(seconds=None, /):
 
 Convert seconds since the Epoch to a time tuple expressing local time.
 When 'seconds' is not passed in, convert the current time instead."""
-    n = _time_t(time() if seconds is None else seconds)
-    if _abbr is not None:
-        return _struct(_broken(n, 0), 0, _abbr, 0)
-    _broken(n, 0)  # (glibc's range first)
-    off = _offset(n)
-    return _struct(_broken(n, off), _UNKNOWN_DST, _UNKNOWN_ZONE, off)
+    b, isdst, abbr, off = _local(_time_t(time() if seconds is None else seconds))
+    return _struct(b, isdst, abbr, off)
 
 
 # ------------------------------------------------------------------ tuples in
@@ -525,27 +539,48 @@ def _wall(tm):
 
 
 def _mktime(tm):
+    """glibc's mktime of tm (as lib/_tzrules.py has it), which keeps its
+    offset for the next call and, as glibc's localtime of the result does,
+    leaves glibc's tzname."""
+    global _mk_last, _names
     w = _wall(tm)
-    isdst = tm["isdst"]
     if _bad is not None:
-        raise NotImplementedError(_bad)
-    if _abbr is not None:
-        # (a zone with no daylight saving: glibc moves a requested
-        # daylight-saving time back an hour)
-        return w - 3600 if isdst > 0 else w
+        _refuse()
+    if _jsdate():
+        return _mktime_jsdate(w, tm["isdst"])
+    try:
+        t, last = _tzrules.mktime(_zone, w, tm["isdst"], _mk_last)
+    except OverflowError:
+        # (a skipped hour between times of the same isdst, asked for that
+        # isdst: glibc's mktime fails, leaving its tzname as one of the
+        # times it looked at, which is not matched here)
+        _names = None
+        raise OverflowError("mktime argument out of range") from None
+    except _tzrules.ZoneUnsupported as e:
+        raise NotImplementedError("time.mktime(): %s" % e) from None
+    if not _TIME_T_MIN <= t <= _TIME_T_MAX:
+        raise OverflowError("mktime argument out of range")
+    _mk_last = last
+    _names = _zone.names_after(t, _names)
+    return t
+
+
+def _mktime_jsdate(w, isdst):
+    """mktime in a browser's zone without zone data (S2's way): isdst -1 only,
+    a time the zone skips or repeats refused."""
     if isdst is _UNKNOWN_DST:
         _refuse("tm_isdst")
     if isdst >= 0:
         _refuse("mktime() with tm_isdst %d" % isdst)
     found = set()
     for probe in (w - 86400, w, w + 86400):
-        t = w - _offset(probe)
-        if t + _offset(t) == w:
+        t = w - _zone.find(probe)[0]
+        if t + _zone.find(t)[0] == w:
             found.add(t)
     if len(found) != 1:
         raise NotImplementedError("time.mktime(): %s is %s in the host's time zone %s; glibc's answer for it "
                                   "depends on its own state, so it is not guessed here"
-                                  % (_asctime_wall(w), "repeated" if found else "skipped", _host))
+                                  % (_asctime_wall(w), "repeated" if found else "skipped", _zone.name))
     t = found.pop()
     if not _TIME_T_MIN <= t <= _TIME_T_MAX:
         raise OverflowError("mktime argument out of range")
@@ -726,10 +761,16 @@ def _conversion(c, tm, pad, width, upcase, swapcase):
         if zone is _UNKNOWN_ZONE:
             _refuse("%Z")
         if zone is None:
+            # (a tuple with no zone: glibc's tzname, as the last local time
+            # left it)
             isdst = tm["isdst"]
-            if isdst is _UNKNOWN_DST or (isdst >= 0 and _abbr is None):
+            if isdst is _UNKNOWN_DST or (isdst >= 0 and (_bad is not None or _jsdate())):
                 _refuse("%Z")
-            zone = "" if isdst < 0 else _abbr
+            if isdst >= 0 and _names is None:
+                raise NotImplementedError("time.strftime(): %Z of a time tuple with no zone gives glibc's tzname as "
+                                          "the last local time left it, and a failed mktime() left it as it is not "
+                                          "known here; a localtime() or a successful mktime() sets it again")
+            zone = "" if isdst < 0 else _names[isdst]
         return _text(zone, width, pad, upcase, zone=True)
     if c == "z":
         if tm["isdst"] is not _UNKNOWN_DST and tm["isdst"] < 0:
@@ -872,30 +913,37 @@ the C library strftime function.
     return _strptime._strptime_time(string, format)
 
 
-# (timezone, altzone and daylight as CPython's init_timezone computes them:
-# localtime() of about now rounded down to a 365.25-day "year", and of half
-# a year later, their offsets swapped for the southern hemisphere)
+# (timezone, altzone, daylight and tzname as CPython's init_timezone computes
+# them: localtime() of about now rounded down to a 365.25-day "year", and of
+# half a year later, their offsets swapped for the southern hemisphere, the
+# names cut to 9 characters)
 def _init_timezone(now):
     YEAR = (365 * 24 + 6) * 3600
     t = (now // YEAR) * YEAR
-    jan = -_offset(t)
-    jul = -_offset(t + YEAR // 2)
+    _, _, janname, janoff = _local(t)
+    _, _, julname, juloff = _local(t + YEAR // 2)
+    jan, jul = -janoff, -juloff
+    if not _jsdate():
+        janname, julname = janname[:9], julname[:9]
     if jan < jul:
-        return jul, jan, int(jan != jul), (t + YEAR // 2, t)
-    return jan, jul, int(jan != jul), (t, t + YEAR // 2)
+        return jul, jan, int(jan != jul), (julname, janname)
+    return jan, jul, int(jan != jul), (janname, julname)
 
 
 if _bad is None:
-    timezone, altzone, daylight, _probes = _init_timezone(int(time()))
-if _abbr is not None:
-    tzname = (_abbr, _abbr)
+    timezone, altzone, daylight, tzname = _init_timezone(int(time()))
+    if _jsdate():
+        del tzname
 
 
 def __getattr__(name):
-    # (tzname where it is not known; timezone, altzone and daylight too
-    # where TZ is not available here: not in the module's dict, as tzname)
-    if name == "tzname" or (_bad is not None and name in ("timezone", "altzone", "daylight")):
-        _refuse(name)
+    # (where the host's zone is refused: timezone, altzone, daylight and
+    # tzname are not in the module's dict, and refuse, naming it; in a
+    # browser's zone without zone data, tzname alone)
+    if _bad is not None and name in ("timezone", "altzone", "daylight", "tzname"):
+        _refuse()
+    if name == "tzname" and _jsdate():
+        _refuse("tzname")
     raise AttributeError("module 'time' has no attribute '%s'" % name)
 
 

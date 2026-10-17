@@ -1,7 +1,8 @@
-# What time and datetime refuse on a host zone other than UTC or GMT
-# (lib/_pytime.py's docstring), run under TZ=Europe/Berlin and TZ=UTC by
-# test/stdlib-time-datetime.test.ts: each refusal a NotImplementedError naming
-# the zone, never a guess, and what still works.
+# time and datetime's local times on a host zone (lib/_pytime.py's
+# docstring), run under UTC and zones with daylight saving by
+# test/stdlib-time-datetime.test.ts and compared with CPython's output there:
+# tm_isdst, tm_zone, tzname, %Z, mktime's skipped and repeated hours, pickling
+# and comparing local struct_times. Only tzset and strptime refuse.
 import copy
 import datetime as D
 import pickle
@@ -37,7 +38,7 @@ for name, f in [("isdst == 0", lambda: lt.tm_isdst == 0), ("bool", lambda: bool(
                 ("datetime strptime", lambda: D.datetime.strptime("2020", "%Y")),
                 ("naive astimezone", lambda: D.datetime(2020, 7, 1, 12).astimezone(D.timezone.utc)),
                 ("astimezone no argument", lambda: D.datetime(2020, 7, 1, 12, tzinfo=D.timezone.utc).astimezone()),
-                ("beyond JS dates", lambda: time.localtime(10**14)),
+                ("far future", lambda: time.localtime(10**14)),
                 ("datetime fromtimestamp", lambda: D.datetime.fromtimestamp(0)),
                 ("timezone altzone daylight", lambda: (time.timezone, time.altzone, time.daylight))]:
     show(name, f)
@@ -45,3 +46,11 @@ ns = {}
 exec("from time import *", ns)
 print("import-star has tzname:", "tzname" in ns, "dir has tzname:", "tzname" in dir(time))
 print("gmtime zone:", time.gmtime(0).tm_zone, time.gmtime(0).tm_isdst)
+
+# (a skipped hour between times of the same isdst, asked for that isdst, in
+# Lord_Howe 1981: glibc's mktime fails; %Z of a zone-less tuple then refuses
+# in Sagebrush until a local time sets glibc's tzname again)
+if time.tzname == ("+1030", "+11"):
+    show("mktime of a same-isdst skipped hour", lambda: time.mktime((1981, 3, 1, 0, 15, 0, 0, 1, 0)))
+    time.localtime(0)
+    show("%Z after localtime", lambda: time.strftime("%Z", (2020, 1, 1, 0, 0, 0, 0, 1, 0)))
