@@ -1484,6 +1484,18 @@ test("a number put in a collection over a number field, a real field or a matrix
   assert.equal(good, "FldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nend\n", good);
   const mix = run("Z<u>:=PolynomialRing(Integers()); P<t>:=PolynomialRing(Rationals()); S:={u}; T:={t}; Exclude(~S,u); Exclude(~T,t); R:=S join T;");
   assert.ok(mix.replace(/\s+/g, " ").includes("a set operation on an emptied set of a structure's elements and this other set is not supported yet"), mix);
+  // (a declared empty universe that is the witness's own structure, and
+  // rationals into a real field or Q[y], keep it, as Magma's: checked
+  // against Magma 2.18, astra2's narrowing on a4d77d7b)
+  const own = ["P<y>:=PolynomialRing(Rationals()); U<c>:=NumberField(y^2-5); x:=c+1;", "U:=RealField(15); x:=U!2/7;", "U<y>:=PolynomialRing(Integers()); x:=y^2;",
+    "U<y>:=PolynomialRing(Rationals()); x:=y/3;", "x:=Matrix(Rationals(),3,3,[1..9]); U:=Parent(x);", "U:=GF(11); x:=U!5;"];
+  const types = ["FldNumElt", "FldReElt", "RngUPolElt", "RngUPolElt", "AlgMatElt", "FldFinElt"];
+  const decl = run(own.flatMap((u) => ["S join {U|}", "{U|} meet S", "S diff {U|}", "{U|} sdiff S"].map((e) => u + ` S:={x}; Exclude(~S,x); R:=${e}; Include(~R,3); v:=Setseq(R)[1]; Type(v); Parent(v) eq U;`)).join("\n"));
+  assert.equal(decl, types.map((t) => `${t}\ntrue\n`.repeat(4)).join("") + "end\n", decl);
+  const rat = run(["U:=RealField(15); x:=U!2/7; S:={x}; Exclude(~S,x); R:=S meet {2/3}; Include(~R,3); v:=Setseq(R)[1]; Type(v); Parent(v) eq U;",
+    "U<y>:=PolynomialRing(Rationals()); x:=y/3; S:={x}; Exclude(~S,x); R:=S join {2/3}; v:=Setseq(R)[1]; Type(v); Parent(v) eq U;",
+    "U<y>:=PolynomialRing(Rationals()); x:=y/3; S:={x}; Exclude(~S,x); R:={2/3} diff S; v:=Setseq(R)[1]; Type(v); v;"].join("\n"));
+  assert.equal(rat, "FldReElt\ntrue\nRngUPolElt\ntrue\nRngUPolElt\n2/3\nend\n", rat);
 });
 
 test("Matrix checks its shape in Magma's words before it builds anything: no Python error, no silently shortened matrix", () => {

@@ -3489,13 +3489,26 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
 
     def fits(w, r):
         # (an element the witness's universe certainly takes: an integer,
-        # one of its own structure, a rational into a number field)
+        # one of its own structure, a rational into a number field, a real
+        # field or polynomials over the rationals)
         if isinstance(r, int) and not isinstance(r, bool):
             return True
-        if nf(w) and isinstance(r, _Fraction):
+        if isinstance(r, _Fraction) and (nf(w) or isinstance(w, MReal) or (
+                isinstance(w, _sp.Polynomial) and w.parent().base_ring() == _sp.QQ)):
             return True
         k = _wit_key(w)
         return k is not None and k == _wit_key(r)
+
+    def own(w, d):
+        # (a declared universe that is the witness's own structure: {K | }
+        # for an emptied set of K's elements; a real field of its precision)
+        if isinstance(w, MReal):
+            return isinstance(d, RealField_) and d.prec == w.prec
+        try:
+            p = Parent(w)
+        except MagmaError:
+            return False
+        return p is d or _same_struct(p, d)
 
     unsupported = lambda: MagmaError("a set operation on an emptied set of a structure's elements and this other set is not supported yet", "'%s'" % op, True, pos)
     w = wa if wa is not None else wb
@@ -3513,6 +3526,8 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
             if d is not None and not (d is _ZZ):
                 if nf(w) and isinstance(d, _MFinField):
                     raise MagmaError(message, "'%s'" % op, True, pos)
+                if own(w, d):
+                    continue
                 raise unsupported()
             if d is None and _provenance(x) not in ("null", "int"):
                 raise unsupported()
