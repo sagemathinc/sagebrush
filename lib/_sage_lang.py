@@ -307,7 +307,10 @@ class RealNumber(float):
                     # (a user's float subclass: Python float's power, as
                     # Sage, its own value, no __float__ call, CORR-726-1)
                     if name == "__pow__":
-                        return NotImplemented
+                        # (computed here, not NotImplemented: a direct
+                        # RR(2).__pow__(F(3)) is 8.0 too, CORR-3FE-2)
+                        import _sage_real
+                        return _sage_real._cpow(float.__float__(self), float.__float__(o))
                     return float.__float__(o) ** float.__float__(self)
                 if isinstance(o, complex) or type(o).__name__ == "ComplexNumberMP":
                     # (a complex operand: the coarser complex field's power)
