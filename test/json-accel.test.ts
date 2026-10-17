@@ -17,20 +17,39 @@ test("json.dumps and json.loads give CPython's output, errors, positions and not
   for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], `${name} line ${i + 1}`);
 });
 
-// sage2's benchmark (30000 small dicts, 2.19 M characters): dumps and loads
-// each well under a second, where the pure-Python json took 0.7 and 0.55 s
-// on a quiet VM; the round trip equal
-test("json.dumps and json.loads of 30000 small dicts are fast", () => {
+// sage2's benchmark (30000 small dicts, 2.19 M characters), timed against
+// json's own pure-Python encoder and scanner in the same process, so that a
+// loaded host slows both alike: the best of 3 runs each, at least 3x faster
+// both ways (about 7x and 8x on a quiet VM), the outputs identical; the
+// pure-Python paths restored in a finally, checked after
+test("json.dumps and json.loads of 30000 small dicts are at least 3x json's pure-Python encoder and scanner", () => {
   const code = [
     "import json, time",
+    "import json.encoder as E, json.scanner as S",
     "x = [{'a': i, 'b': [i, str(i), i / 2], 'c': {'d': None, 'e': True}} for i in range(30000)]",
-    "for k in range(2):",
-    "    t = time.perf_counter(); s = json.dumps(x); t1 = time.perf_counter(); y = json.loads(s); t2 = time.perf_counter()",
-    "print(round(t1 - t, 3), round(t2 - t1, 3), y == x, len(s))",
+    "def best(f, n=3):",
+    "    r = None",
+    "    for _ in range(n):",
+    "        t = time.perf_counter(); v = f(); d = time.perf_counter() - t",
+    "        r = d if r is None or d < r else r",
+    "    return r, v",
+    "fd, s = best(lambda: json.dumps(x))",
+    "fl, y = best(lambda: json.loads(s))",
+    "ce, cs = E.c_make_encoder, S.make_scanner",
+    "try:",
+    "    E.c_make_encoder = None",
+    "    S.make_scanner = S.py_make_scanner",
+    "    dec = json.JSONDecoder()",
+    "    pd, ps = best(lambda: json.dumps(x))",
+    "    pl, py = best(lambda: dec.decode(s))",
+    "finally:",
+    "    E.c_make_encoder, S.make_scanner = ce, cs",
+    "assert E.c_make_encoder is not None and S.make_scanner is S.c_make_scanner is not None",
+    "print(round(pd / fd, 2), round(pl / fl, 2), y == x and py == x and ps == s, round(fd, 3), round(fl, 3), round(pd, 3), round(pl, 3))",
   ].join("\n");
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim().split(" ");
   assert.equal(out[2], "True");
-  assert.ok(Number(out[0]) < 0.35 && Number(out[1]) < 0.35, `dumps ${out[0]} s, loads ${out[1]} s`);
+  assert.ok(Number(out[0]) >= 3 && Number(out[1]) >= 3, `dumps ${out[0]}x (${out[3]} s vs ${out[5]} s), loads ${out[1]}x (${out[4]} s vs ${out[6]} s)`);
 });
 
 // The nesting budget (HARD-C0E-1): 40000 levels, the empty innermost one
