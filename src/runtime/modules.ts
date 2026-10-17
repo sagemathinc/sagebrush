@@ -525,12 +525,54 @@ newBuiltinModule("_time", (m) => {
   // int in 0..ZONE_READ_MAX, checked before anything is opened or allocated:
   // daybreak2's HARD-ZI-1)
   const ZONE_READ_MAX = (1 << 20) + 1;
-  const zoneReadLimit = (fname: string, limit: any): number => {
+  const zoneReadLimit = (fname: string, limit: any, most: number = ZONE_READ_MAX): number => {
     if (!O.isPyInt(limit) || typeof limit === "boolean") raise(T.TypeError, `_time.${fname}: the limit must be an int, not ${typeName(limit)}`);
     const n = typeof limit === "bigint" ? limit : BigInt(limit);
-    if (n < 0n || n > BigInt(ZONE_READ_MAX)) raise(T.ValueError, `_time.${fname}: the limit must be in 0..${ZONE_READ_MAX}, not ${n}`);
+    if (n < 0n || n > BigInt(most)) raise(T.ValueError, `_time.${fname}: the limit must be in 0..${most}, not ${n}`);
     return Number(n);
   };
+  // (zoneinfo's available_timezones walks TZPATH, which a user may set: one
+  // directory's names, at most limit of them, read one by one, so that a
+  // directory of millions of names is never listed whole. limit is an int
+  // in 0..ZONE_DIR_MAX (zoneinfo/_tzpath.py's bound + 1), checked first;
+  // os.listdir's OSError for what cannot be listed)
+  const ZONE_DIR_MAX = (1 << 16) + 1;
+  // (and at most chars characters of names in all: past them, None, before
+  // the name that would cross them is kept (daybreak2's HARD-TZB-1: names
+  // near NAME_MAX each). chars is an int in 0..ZONE_DIR_CHARS_MAX, zoneinfo/
+  // _tzpath.py's bound)
+  const ZONE_DIR_CHARS_MAX = 1 << 21;
+  fn(m, "_zonedir", (path: any, limit: any, chars: any) => {
+    const fs = require("fs");
+    const max = zoneReadLimit("_zonedir", limit, ZONE_DIR_MAX);
+    const maxChars = zoneReadLimit("_zonedir", chars, ZONE_DIR_CHARS_MAX);
+    const name = String(path);
+    let dir: any;
+    try {
+      dir = fs.opendirSync(at(name));
+      const out: string[] = [];
+      let used = 0;
+      while (out.length < max) {
+        const e = dir.readSync();
+        if (e === null) break;
+        used += e.name.length;
+        if (used > maxChars) return null;
+        out.push(e.name);
+      }
+      return out;
+    } catch (e: any) {
+      if (e?.$cls !== undefined) throw e;
+      if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
+      const cls = e?.code === "ENOENT" ? T.FileNotFoundError : e?.code === "EACCES" || e?.code === "EPERM" ? T.PermissionError : e?.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
+      throw markRaised(callObj(cls, [e?.errno ? -e.errno : 0, String(e?.message ?? e), path]));
+    } finally {
+      if (dir !== undefined) {
+        try {
+          dir.closeSync();
+        } catch {}
+      }
+    }
+  });
   // (a zone file's bytes, at most limit of them, as glibc reads one: None
   // where it cannot be read (missing, not permitted, a directory: glibc then
   // reads the TZ value as a rule), PermissionError where a sandbox refuses
