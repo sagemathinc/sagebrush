@@ -214,3 +214,16 @@ test("board try: the transitivity lesson (web/board/examples/teach-transitive.bo
   const ex = JSON.parse(run(["board", "try", f, "--json"]).stdout);
   assert.deepEqual(ex.checks.map((c: any) => [c.case_id, c.outcome]), [["example-q-c", "right"], ["example-q-h", "right"], ["example-q-stab", "right"], ["example-q-prim", "right"]]);
 });
+
+test("board try: a check whose value is a verdict object (the board check helpers'): right, wrong with its reason, or can't decide, an error told apart", () => {
+  const code = "class V:\n    def __init__(s, x):\n        s.x = x\n    def __sagebrush_verdict__(s):\n        if s.x == 'raise':\n            raise ValueError('bad')\n        return s.x";
+  const check = "V(True) if answer == 1 else V('it is $2$, not $1$') if answer == 2 else V({'undecided': 'no proof either way'}) if answer == 3 else V('raise') if answer == 4 else V(False) if answer == 6 else False if answer == 7 else V(5)";
+  const j = tryCases("verdicts", one(code, check), { checks: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ case_id: "c" + n, ask_id: "q", answer: n })), sequences: [{ ask_id: "q", answers: [6] }] });
+  // (a verdict of False is no verdict: an error, no attempt; a check whose plain value is False is wrong, as ever, CORR-04A-1)
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.undecided]), [["c1", "right", false], ["c2", "wrong", false], ["c3", "error", true], ["c4", "error", false], ["c5", "error", false], ["c6", "error", false], ["c7", "wrong", false]]);
+  assert.deepEqual([j.interaction[0].sequence, j.interaction[0].hints_shown, j.interaction[0].attempts_after_reload], [["error"], [], 0]);
+  assert.equal(j.checks[1].message, "it is $2$, not $1$");
+  assert.equal(j.checks[2].error, "could not decide: no proof either way");
+  assert.match(j.checks[3].error, /its verdict failed: ValueError: bad/);
+  assert.match(j.checks[4].error, /not True, a message or/);
+});
