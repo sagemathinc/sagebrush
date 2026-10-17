@@ -192,8 +192,10 @@ options don't fit. Read the note as the answer whenever it is there.
 A question can also check its answer, for a reader learning something. Its
 `check` is code in the board's language (Python and Sage boards, for now),
 run in the page when the reader presses **Check**. It sees the board's
-names (what its code items made) in a copy of its own, so it can't change
-them, with the answer as `answer`. The value of its last line is the
+names (what its code items made), with the answer as `answer`. Every check
+and every computed hint runs on the board's code freshly re-run, in a new
+interpreter, so what one changes never reaches another; nothing is
+certified as preserved. The value of its last line is the
 verdict: `True` (right), `False` (wrong), or a string (wrong, and the
 string, Markdown with math, is shown to say why). A check that fails or
 runs past `checkMs` milliseconds (default 2000, at most 10000) decides
@@ -225,6 +227,34 @@ an attempt, and a new answer clears `result`.
       "next": { "right": "transitive", "wrong": "orbits" }, "example": 4 },
     { "id": "transitive", "title": "Transitive", "text": "One orbit: $G$ is transitive." },
     { "id": "orbits", "title": "Orbits", "text": "The orbit of $1$ is every point $g(1)$." }
+  ]
+}
+```
+
+A question can also say what the reader's own words may show: its
+`decide` lists up to 32 things, each with a name that says what it means
+(words joined by hyphens, at least three, such as
+`confuses-transitive-with-two-transitive`), an optional `about` (Markdown
+that makes the name clearer) and an optional `next`. A host that shows the
+board can ask a model which of them the reader's words show, and the board
+sends the reader to that one's `next` (https://sagebrush.space/board-host-protocol.md,
+"Deciding"). The name carries the meaning, so write it for a reader who
+sees nothing else.
+
+```json
+{
+  "format": "sagebrush-board",
+  "version": 1,
+  "title": "Transitive",
+  "nodes": [
+    { "id": "mean", "kind": "ask", "input": "text", "title": "Transitive",
+      "text": "In your words: what does it mean for $G$ to act transitively?",
+      "decide": [
+        { "name": "confuses-transitive-with-two-transitive", "about": "Says any ordered pair of distinct points can be sent to any other, the two moved simultaneously by one group element.", "next": "pairs" },
+        { "name": "thinks-transitive-means-abelian", "next": "abelian" }
+      ] },
+    { "id": "pairs", "title": "2-transitive is more" },
+    { "id": "abelian", "title": "Transitive is not abelian" }
   ]
 }
 ```
@@ -411,10 +441,11 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `lines` | number | `text`: how many lines its field shows (default 1) |
 | `note` | string | the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered |
 | `answer` | string \| number \| boolean \| [string] | the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number |
-| `check` | string | code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` |
+| `check` | string | code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own that sees the board's names (the board's code runs again after it, so what it changes doesn't last); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` |
 | `checkMs` | number | the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) |
 | `hints` | [string \| computed hint] | hints, one more shown after each wrong attempt: Markdown, or `{ "code": ... }`, run as the check is, its value a string (Markdown) |
 | `next` | next | where to go after an attempt: the id of a note on this page, for `right` and for `wrong` |
+| `decide` | [decision] | what the reader's own words (`note`) may show, for the host to decide among (at most 32): each a self-describing name, such as a misconception, and where to go if it is the one (web/board-host-protocol.md, "Deciding") |
 | `example` | string \| number \| boolean \| [string] | an answer to try its check with (`sagebrush board try` runs it) |
 | `attempts` | number | how many times its answer was checked (written by Sagebrush) |
 | `wrongAttempts` | number | how many of those were wrong: one more hint is shown after each (written by Sagebrush) |
@@ -451,6 +482,16 @@ Where a question leads after an attempt: notes on its page, by id.
 |---|---|---|
 | `right` | string | the note to go to after a right answer |
 | `wrong` | string | the note to go to after a wrong one |
+
+### What a reader's words may show (in a question's `decide`)
+
+One of the things a reader's own words may show, which the host decides among.
+
+| field | type | meaning |
+|---|---|---|
+| `name` | string | required: what it is, in words joined by hyphens, at least three (`confuses-transitive-with-2-transitive`): the name says what it means |
+| `about` | string | Markdown that makes the name clearer (a rubric), if it needs that |
+| `next` | string | the id of an item on this page to go to when it is the one |
 
 ### A slide's card (`slide`)
 

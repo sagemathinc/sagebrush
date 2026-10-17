@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { askMarkdown, cleanDoc, layout, type DocAsk } from "../web/board/doc";
-import { answered, answerProblem, askProblems, asksOf, answerText, checkSubmission, stepProblem } from "../web/board/ask";
+import { answered, answerProblem, askProblems, asksOf, answerText, checkSubmission, decideRequest, stepProblem } from "../web/board/ask";
 import { checkText } from "../src/board-check";
 import { submissionProblem } from "../src/board-answers";
 
@@ -159,6 +159,87 @@ test("a question's check, hints and next as written: lint", () => {
   // (at most 10 hints: one Check computes no more, HARD-A19-1)
   assert.deepEqual(p({ input: "text", check: "True", hints: Array.from({ length: 11 }, (_, i) => `hint ${i}`) }), ["error hints: more than 10 hints: the board shows the first 10"]);
   assert.deepEqual(p({ input: "text", check: "True", hints: Array.from({ length: 10 }, (_, i) => `hint ${i}`) }), []);
+});
+
+test("a question's decide as written: lint", () => {
+  const p = (q: Partial<DocAsk> & { input: DocAsk["input"] }) => askProblems(ask(q)).map((x) => `${x.level} ${x.field}: ${x.message}`);
+  assert.deepEqual(p({ input: "text", decide: [{ name: "confuses-transitive-with-two-transitive", about: "pairs" }, { name: "thinks-it-means-abelian" }] }), []);
+  assert.deepEqual(p({ input: "text", decide: [{ name: "wrong" }, { name: "Two-Words-Only" }, { name: "has_underscore-in-it" }] }).map((s) => s.split(":")[0]), ["error decide[0].name", "error decide[1].name", "error decide[2].name"]);
+  assert.match(p({ input: "text", decide: [{ name: "wrong" }] })[0], /words of lowercase letters and digits joined by hyphens, at least three/);
+  assert.deepEqual(p({ input: "text", decide: [{ name: "a-b-c" }, { name: "a-b-c" }] }), ['error decide[1].name: "a-b-c" is in its decide twice: the host\'s decision names one']);
+  assert.deepEqual(p({ input: "text", decide: Array.from({ length: 33 }, (_, i) => ({ name: `option-number-${i}` })) }), ["error decide: more than 32 things to decide among"]);
+  assert.deepEqual(p({ input: "text", decide: [{ name: "a-b-" + "c".repeat(80) }] }).length, 1);
+  assert.deepEqual(p({ input: "text", decide: [{ name: "a-b-c", about: "x".repeat(2001) }] }).map((s) => s.split(":")[0]), ["error decide[0].about"]);
+});
+
+test("decideRequest: a decide written badly is refused, never cleaned into another; as board check refuses it (astra's CORR-F10-1)", () => {
+  const id = "8c6f0a5e-4d43-4b8e-9b0e-2f3c1a7d9e10";
+  const board = (decide: unknown) => JSON.stringify({ format: "sagebrush-board", version: 1, pages: [
+    { id: "p1", nodes: [{ id: "far", title: "On page 1" }] },
+    { id: "p2", nodes: [{ id: "t", kind: "ask", title: "T", text: "Why?", input: "text", decide }, { id: "n", title: "Here" }] }] });
+  const ask = (decide: unknown) => decideRequest({ text: board(decide), name: null, revision: null }, { sagebrush: "decide", version: 1, id, name: null, revision: null, page: { number: 2 }, item: "t", note: "because" });
+  const ok = [{ name: "valid-option-name", about: "fine", next: "n" }];
+  assert.equal(ask(ok).ok, true);
+  const cases: [unknown, RegExp][] = [
+    [[{ name: "valid-option-name" }, { name: 7 }], /decide\[1\]\.name/],
+    [[{ name: "valid-option-name", about: 7 }], /decide\[0\]\.about/],
+    [[{ name: "valid-option-name", next: "missing" }], /decide\[0\]\.next names no item/],
+    [[{ name: "valid-option-name", next: "far" }], /decide\[0\]\.next names no item/],
+    [[{ name: "valid-option-name", extra: 1 }], /doesn't know/],
+    [[{ name: "valid-option-name" }, { name: "valid-option-name" }], /twice/],
+    [["valid-option-name"], /decide\[0\] is not an object/],
+    [{ name: "valid-option-name" }, /not a list/],
+  ];
+  for (const [decide, why] of cases) {
+    const r = ask(decide);
+    assert.equal(r.ok, false, JSON.stringify(decide));
+    assert.match((r as any).message, why, JSON.stringify(decide));
+    assert.equal((r as any).id, id);
+    // (and board check refuses it too: the two agree)
+    assert.ok(checkText(board(decide)).problems.some((x) => x.level === "error"), "board check refuses " + JSON.stringify(decide));
+  }
+  assert.ok(!checkText(board(ok)).problems.some((x) => x.level === "error"));
+});
+
+test("board check: a decision's `next` names an item of the question's page", () => {
+  const b = { format: "sagebrush-board", version: 1, nodes: [
+    { id: "q", kind: "ask", text: "Q", input: "text", decide: [{ name: "a-b-c", next: "pairs" }, { name: "d-e-f", next: "nowhere" }] },
+    { id: "pairs", title: "Pairs" },
+  ] };
+  const got = checkText(JSON.stringify(b)).problems;
+  assert.deepEqual(got.map((x) => `${x.level} ${x.path}`), ["error nodes[0].decide[1].next"]);
+});
+
+test("decideRequest: the question and options are the posted board's; only the reader's words are the frame's", () => {
+  const text = JSON.stringify({ format: "sagebrush-board", version: 1, pages: [
+    { title: "One", nodes: [{ id: "x", title: "Other" }] },
+    { id: "p2", title: "Two", nodes: [
+      { id: "t", kind: "ask", title: "Transitive", text: "What does it mean?", input: "text", decide: [{ name: "confuses-transitive-with-two-transitive", about: "pairs", next: "n" }, { name: "thinks-it-means-abelian" }] },
+      { id: "plain", kind: "ask", text: "No decide", input: "text" },
+      { id: "badly", kind: "ask", text: "Bad", input: "text", decide: [{ name: "bad" }] },
+      { id: "n", title: "Pairs" }] }] });
+  const posted = { text, name: "t.board.json", revision: "r1" }, id = "8c6f0a5e-4d43-4b8e-9b0e-2f3c1a7d9e10";
+  const m = { sagebrush: "decide", version: 1, id, name: "t.board.json", revision: "r1", page: { number: 2, id: "p2" }, item: "t", note: "every pair to every pair",
+    prompt: "the frame's own question", options: [{ name: "the-frame-s-option" }], extra: 1 };
+  const ok = decideRequest(posted, m);
+  assert.deepEqual(ok, { ok: true, request: { id, name: "t.board.json", revision: "r1", page: { number: 2, id: "p2" }, item: "t", prompt: "Transitive\n\nWhat does it mean?",
+    options: [{ name: "confuses-transitive-with-two-transitive", about: "pairs" }, { name: "thinks-it-means-abelian" }], answer: "every pair to every pair" } });
+  const no = (x: any, re: RegExp) => { const r = decideRequest(posted, x); assert.equal(r.ok, false); assert.match((r as any).message, re); return r; };
+  assert.equal((no({ ...m, note: " \n " }, /says nothing/) as any).id, id);
+  no({ ...m, note: "x".repeat(10001) }, /at most 10000 characters/);
+  no({ ...m, item: "plain" }, /nothing to decide among/);
+  no({ ...m, item: "badly" }, /can't be decided as written/);
+  no({ ...m, item: "x" }, /no question on page 2/);
+  no({ ...m, page: { number: 3 } }, /not a page of the board/);
+  no({ ...m, page: { number: 2, id: "other" } }, /page id/);
+  no({ ...m, revision: "r0" }, /name and revision/);
+  no({ ...m, sagebrush: "answers" }, /not a request to decide/);
+  assert.equal(no({ ...m, id: "nope" }, /UUID/).hasOwnProperty("id"), false);
+  const deep: any = { ...m, note: "x", more: { a: { b: { c: { d: 1 } } } } };
+  no(deep, /nests at most 4 deep/);
+  const cyc: any = { ...m }; cyc.self = cyc;
+  no(cyc, /more than 10000 values|nests at most/);
+  no({ ...m, when: new Date() }, /plain JSON data/);
 });
 
 test("board check: `next` names an item of the question's page", () => {

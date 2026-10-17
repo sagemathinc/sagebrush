@@ -111,8 +111,8 @@ check(shaped("rect") === undefined && shaped("diamond") === 1, "a rectangle is n
 const examples = readdirSync(join(here, "examples")).filter((f) => /\.(json|md)$/.test(f) && f !== "index.json").map((f) => [f, boardFromText(readFileSync(join(here, "examples", f), "utf8"), f, () => {})]);
 const shape = (d) => {
   const out = [];
-  // (a canvas has no pen strokes, counted as left out, nor stickers: a sticker comes back as a card, a note)
-  const w = (ns, parent) => { for (const n of ns) { if (n.kind === "ink") continue; out.push([n.id.replace(/^p\d+-/, ""), parent?.replace(/^p\d+-/, "") ?? "", n.kind === "sticker" ? "note" : n.kind ?? "note", n.title ?? "", n.code ?? ""]); if (n.kind === "group") w(n.children, n.id); } };
+  // (a canvas has no pen strokes, counted as left out, nor stickers or questions: each comes back as a card, a note)
+  const w = (ns, parent) => { for (const n of ns) { if (n.kind === "ink") continue; out.push([n.id.replace(/^p\d+-/, ""), parent?.replace(/^p\d+-/, "") ?? "", n.kind === "sticker" || n.kind === "ask" ? "note" : n.kind ?? "note", n.title ?? "", n.code ?? ""]); if (n.kind === "group") w(n.children, n.id); } };
   for (let i = 0; i < pageCount(d); i++) w(pageView(d, i).nodes ?? [], null);
   return out.sort((a, b) => a[0].localeCompare(b[0]));
 };

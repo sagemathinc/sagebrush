@@ -28,7 +28,7 @@ const problems = [];
 
 // [file, interface]: the schema's definitions; BoardDoc is the document
 const DEFS = [
-  [DOC, "BoardDoc"], [DOC, "BoardPage"], [DOC, "DocNote"], [DOC, "DocGroup"], [DOC, "DocInk"], [DOC, "DocSticker"], [DOC, "DocAsk"], [DOC, "AskChoice"], [DOC, "AskHintCode"], [DOC, "AskNext"],
+  [DOC, "BoardDoc"], [DOC, "BoardPage"], [DOC, "DocNote"], [DOC, "DocGroup"], [DOC, "DocInk"], [DOC, "DocSticker"], [DOC, "DocAsk"], [DOC, "AskChoice"], [DOC, "AskHintCode"], [DOC, "AskNext"], [DOC, "AskDecide"],
   [DOC, "DocEdge"], [DOC, "DocStep"], [DOC, "SlideRect"], [DOC, "PageBackground"], ["web/board/images.ts", "ImageInfo"],
 ];
 const DEFINED = new Set(DEFS.map(([, n]) => n));
