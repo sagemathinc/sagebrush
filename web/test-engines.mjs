@@ -28,7 +28,10 @@ writeFileSync(entryFile, entry);
 const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
 const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "engines", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
 const bucket = await mf.getR2Bucket("ENGINES");
-for (const f of [...Object.keys(man.files), "manifest.json"]) await bucket.put(`engine/${id}/${f}`, readFileSync(join(dir, f)));
+// (as scripts/publish-engine.mjs puts it: the zone data only at the shared
+// lib/tzdata/, every other file under engine/<id>/)
+const SHARED = /^lib\/tzdata\//;
+for (const f of [...Object.keys(man.files), "manifest.json"]) await bucket.put(SHARED.test(f) ? f : `engine/${id}/${f}`, readFileSync(join(dir, f)));
 
 const get = (path, init) => mf.dispatchFetch(`https://sagebrush.test${path}`, init);
 for (const [f, d] of Object.entries(man.files)) {
@@ -99,6 +102,26 @@ await bucket.put("lib/tzdata/" + "0".repeat(64) + ".tzif", readFileSync(join(dir
 ok((await get("/lib/tzdata/" + "0".repeat(64) + ".tzif")).status === 404, "a zone file whose bytes don't have its name's hash: 404");
 ok((await get("/" + zone)).headers.get("content-type") === "application/octet-stream", "a zone file is served as bytes");
 ok((await get("/" + one, { method: "POST" })).status === 405, "a chunk: only GET and HEAD");
+// An engine's zone data from the shared lib/tzdata/ (each file uploaded
+// once, not with every engine): served only with the bytes its manifest
+// names; an engine published before that has its own copy, used when the
+// shared one is missing or not those bytes.
+const [zoneA, zoneB, zoneC] = zones.filter((f) => f.endsWith(".tzif"));
+const old = "e".repeat(20), bare = "d".repeat(20);
+for (const e of [old, bare]) await bucket.put(`engine/${e}/manifest.json`, readFileSync(join(dir, "manifest.json")));
+for (const z of [zoneA, zoneB]) await bucket.put(`engine/${old}/${z}`, readFileSync(join(dir, z)));
+const fromShared = await get(`/engine/${bare}/${zoneC}`);
+ok(fromShared.status === 200 && Buffer.from(await fromShared.arrayBuffer()).equals(readFileSync(join(dir, zoneC))) && fromShared.headers.get("content-type") === "application/octet-stream" && /immutable/.test(fromShared.headers.get("cache-control")), "an engine's zone file from the shared copy, byte for byte, with its manifest's headers");
+const ix = zones.find((f) => f.endsWith(".json"));
+ok(Buffer.from(await (await get(`/engine/${bare}/${ix}`)).arrayBuffer()).equals(readFileSync(join(dir, ix))), "the zone data's index from the shared copy");
+await bucket.put(zoneA, readFileSync(join(dir, zoneB)));
+await bucket.delete(zoneB);
+const a = await get(`/engine/${old}/${zoneA}`), b = await get(`/engine/${old}/${zoneB}`);
+ok(a.status === 200 && Buffer.from(await a.arrayBuffer()).equals(readFileSync(join(dir, zoneA))), "a shared copy with other bytes: the engine's own copy");
+ok(b.status === 200 && Buffer.from(await b.arrayBuffer()).equals(readFileSync(join(dir, zoneB))), "no shared copy: the engine's own copy");
+ok((await get(`/engine/${bare}/${zoneA}`)).status === 404 && (await get(`/engine/${bare}/${zoneB}`)).status === 404, "neither a shared copy with its bytes nor its own: 404");
+const h = await get(`/engine/${bare}/${zoneC}`, { method: "HEAD" });
+ok(h.status === 200 && h.headers.get("content-length") === String(man.files[zoneC].size), "HEAD of a shared zone file gives its size");
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
 process.exit(failures ? 1 : 0);
