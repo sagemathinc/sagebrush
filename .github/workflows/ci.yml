@@ -36,13 +36,15 @@ jobs:
         run: SAGEBRUSH_HARDENED=0 node --test dist/test/security.test.js
       - name: single-file bundle
         run: node scripts/build-cli.mjs
-      - name: the web page builds, and the npm packages in it are those in its notices
+      - name: the web page builds, the npm packages in it are those in its notices, and the app's page carries the worker's library chunks
         run: |
           bun web/build.ts
           git diff --exit-code web/js-dependencies.json
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
+          # (the desktop app's page: its worker's library chunks all there, as built)
+          node app/build-frontend.mjs
       - name: llms.txt and the board format page link only to pages the site serves, and the format's example renders
         run: node web/test-llms.mjs
       - name: shared collections (the share API and the files Worker in Miniflare; sharing from the page in headless Chrome)
