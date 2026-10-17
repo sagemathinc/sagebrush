@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -78,6 +78,10 @@ test("zoneinfo's bounds: header counts and files past _tzrules' refused in words
     copyFileSync(PINNED + "/Europe/London", join(dir, "Zone"));
     writeFileSync(join(dir, "big"), Buffer.concat([readFileSync(PINNED + "/Europe/London"), Buffer.alloc((1 << 20) + 1)]));
     execFileSync("mkfifo", [join(dir, "fifo")]);
+    // (a zone file that is there but cannot be read: open()'s PermissionError,
+    // as CPython's; not listed, as CPython's available_timezones skips it)
+    copyFileSync(PINNED + "/Europe/London", join(dir, "Unreadable"));
+    chmodSync(join(dir, "Unreadable"), 0);
     const out = sagebrush("zoneinfo_bounds_cases.py", { ZI_DIR: dir });
     assert.deepEqual(out.filter(Boolean), [
       "bounds 65536 256 1024 1048576",
@@ -91,12 +95,45 @@ test("zoneinfo's bounds: header counts and files past _tzrules' refused in words
       "a zone file -> None",
       `a file past MAX_FILE !! NotImplementedError zoneinfo: '${dir}/big' is past Sagebrush's bound of 1048576 bytes for a TZif file`,
       "a FIFO !! ZoneInfoNotFoundError 'No time zone found with key fifo'",
+      `a file not readable !! PermissionError [Errno 13] Permission denied: '${dir}/Unreadable'`,
       "available_timezones -> ['Zone', 'big']",
       "timedelta cache True 4096",
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// (daybreak2's HARD-ZI-1: _time._read and _time._tzfile are importable, so
+// their limit is checked before a file is opened or a buffer allocated: an
+// int in 0.._tzrules.MAX_FILE + 1; in a heap of 64 MB, which a 2**40-byte
+// buffer would not fit)
+test("_time._read and _time._tzfile called directly: a limit past _tzrules.MAX_FILE + 1, negative or not an int refused before any allocation", () => {
+  const code = [
+    "import _time, _tzrules",
+    "for f in (_time._read, _time._tzfile):",
+    "    for limit in (2 ** 40, 2 ** 70, _tzrules.MAX_FILE + 2, -1, 1.5, True, '4', None):",
+    "        try:",
+    "            f('/etc/hostname', limit)",
+    "            print('read')",
+    "        except (TypeError, ValueError) as e:",
+    "            print(type(e).__name__, e)",
+    "    print(len(f(" + JSON.stringify(PINNED + "/Europe/London") + ", _tzrules.MAX_FILE + 1)), len(f(" + JSON.stringify(PINNED + "/Europe/London") + ", 0)))",
+  ].join("\n");
+  const out = execFileSync(process.execPath, ["--max-old-space-size=64", __dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 60000 }).split("\n").filter(Boolean);
+  const size = readFileSync(PINNED + "/Europe/London").length;
+  const want = (f: string) => [
+    `ValueError _time.${f}: the limit must be in 0..1048577, not 1099511627776`,
+    `ValueError _time.${f}: the limit must be in 0..1048577, not 1180591620717411303424`,
+    `ValueError _time.${f}: the limit must be in 0..1048577, not 1048578`,
+    `ValueError _time.${f}: the limit must be in 0..1048577, not -1`,
+    `TypeError _time.${f}: the limit must be an int, not float`,
+    `TypeError _time.${f}: the limit must be an int, not bool`,
+    `TypeError _time.${f}: the limit must be an int, not str`,
+    `TypeError _time.${f}: the limit must be an int, not NoneType`,
+    `${size} 0`,
+  ];
+  assert.deepEqual(out, [...want("_read"), ...want("_tzfile")]);
 });
 
 test("the tzdata package: the pinned one's version as a browser; none under Node, as on CPython without it", () => {
