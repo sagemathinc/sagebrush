@@ -244,3 +244,26 @@ class LA(list):
     def __iter__(self): raise AttributeError("mine")
 for o in [DN(a=1), DI(b=2), LN([1]), LR([1]), LV([1]), TI((1,)), [LN()], LL([1]), LA([1])]:
     show(lambda: json.dumps(o))
+# CORR-C0E-3 (a7326e7d): offsets past 2**53 reported exactly; the
+# accelerator's argument binding
+sc = json.scanner.c_make_scanner(dec)
+for at in [9007199254740993, 10**18 + 1, 2**63 - 1, I()]:
+    for s in ["", "\U0001F600"]:
+        show(lambda: dec.raw_decode(s, at))
+        show(lambda: sc(s, at))
+        show(lambda: _json.scanstring(s, at))
+show(lambda: _json.scanstring('"x"', -2**63))
+show(lambda: sc("1", -2**63))
+enc = mk(None, None, json.encoder.encode_basestring, None, ":", ",", False, False, True)
+enci = mk(None, None, json.encoder.encode_basestring, "ab", ":", ",", False, False, True)
+enc0 = mk(None, None, json.encoder.encode_basestring, "", ":", ",", False, False, True)
+for f in [lambda: enc(1, None), lambda: enc(1), lambda: enc(), lambda: enc(1, 0, 2), lambda: enc(1, 2**63), lambda: enc(1, -1),
+          lambda: enc(1, 10**18 + 1), lambda: enc(1, _current_indent_level=0), lambda: enc(obj=1, _current_indent_level=0),
+          lambda: enc(1, 0, obj=1), lambda: enc(1, x=1), lambda: enc(_current_indent_level=I(), obj=[1]),
+          lambda: enci([1, [2]], -3), lambda: enci([1, [2]], -1), lambda: enci([1, [2]], 2), lambda: enci({"a": [1]}, -2),
+          lambda: enci([1], 2**40), lambda: enci([1], 2**63), lambda: enc0([1, [2]], 2**62), lambda: enc([1, [2]], 2**62),
+          lambda: sc(), lambda: sc("1"), lambda: sc("1", 0, 1), lambda: sc("1", x=0), lambda: sc("1", 0, idx=0),
+          lambda: sc("1", string="1"), lambda: sc(idx=0), lambda: sc(string="1", idx=0), lambda: sc(*["1"], **{"idx": 0}),
+          lambda: _json.scanstring(), lambda: _json.scanstring('"x"'), lambda: _json.scanstring('"x"', 1, True, 4),
+          lambda: _json.scanstring('"x"', 1, strict=False), lambda: _json.scanstring('"\x01"', 1, False)]:
+    show(f)
