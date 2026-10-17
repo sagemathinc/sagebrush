@@ -68,7 +68,9 @@ function install(group: string, kind: Kind, bytes: Uint8Array) {
       else if (Object.hasOwn(M.packages.files, path) && M.packages.files[path] === group) pkgSources[path] = text;
     }
   } else {
-    for (const [key, m] of Object.entries<any>(c.modules ?? {})) if (m && M.files[m.path] === group) precompiled.modules[key] = m;
+    // (a library file's, or a package file's: "pkg:<dir>/<path>", src/compile.ts)
+    const groupOf = (p: unknown) => (typeof p !== "string" ? undefined : p.startsWith("pkg:") ? (Object.hasOwn(M.packages.files, p.slice(4)) ? M.packages.files[p.slice(4)] : undefined) : Object.hasOwn(M.files, p) ? M.files[p] : undefined);
+    for (const [key, m] of Object.entries<any>(c.modules ?? {})) if (m && groupOf(m.path) === group) precompiled.modules[key] = m;
   }
   installed.add(group + "." + kind);
   // (not a downloaded file's own copy: web/runner, files mode)
