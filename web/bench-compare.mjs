@@ -24,6 +24,7 @@
 // the first-result time is from navigation, including this script's polling.
 //
 //   bun web/build.ts && node web/bench-compare.mjs --pyodide DIR [--runs 3] [--only json,loop] [--json out.json]
+//   node web/bench-compare.mjs --check out.json   (a saved run's results checked again)
 //   (DIR: Pyodide's distribution: pyodide.mjs, pyodide.asm.wasm,
 //   python_stdlib.zip, pyodide-lock.json, and the wheels of numpy and what
 //   it needs; CHROME=... for the browser)
@@ -44,6 +45,42 @@ const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const here = new URL(".", import.meta.url).pathname;
 const DIST = join(here, "dist");
+// The check of a run's results (also `--check FILE.json`, a saved run's):
+// every engine's print(1 + 1) and numpy check, and every execution,
+// warm-up and timed, of every workload in every cold start of both
+// engines, prints what Sagebrush's first warm-up printed, which is not empty
+// or an error; there are `reps` timed runs, each a finite non-negative time
+// (astra's TEST-272-1).  The problems found, or [].
+function check(results, names, reps) {
+  const bad = [];
+  const engines = ["Sagebrush", "Pyodide"];
+  for (const engine of engines) if (!Array.isArray(results?.[engine]) || !results[engine].length) bad.push(`${engine}: no cold starts`);
+  if (bad.length) return bad;
+  for (const engine of engines)
+    for (const r of results[engine]) {
+      if (r.cold?.out !== "2") bad.push(`${engine} print(1 + 1): ${r.cold?.out}`);
+      if (r.numpy?.out !== "45") bad.push(`${engine} numpy: ${r.numpy?.out}`);
+    }
+  for (const w of names) {
+    const want = results.Sagebrush[0].speed?.[w]?.out;
+    if (typeof want !== "string" || want === "" || /ERROR|Traceback/.test(want)) bad.push(`${w}: Sagebrush printed ${JSON.stringify(want)}`);
+    for (const engine of engines)
+      results[engine].forEach((r, i) => {
+        const s = r.speed?.[w];
+        if (!s || !Array.isArray(s.outs) || !Array.isArray(s.times) || s.outs.length !== reps || s.times.length !== reps) return void bad.push(`${w}: ${engine} cold start ${i + 1} lacks its ${reps} timed runs`);
+        if (s.out !== want) bad.push(`${w}: ${engine} cold start ${i + 1} warm-up printed ${JSON.stringify(s.out)}, not ${JSON.stringify(want)}`);
+        s.outs.forEach((o, k) => { if (o !== want) bad.push(`${w}: ${engine} cold start ${i + 1} timed run ${k + 1} printed ${JSON.stringify(o)}`); });
+        s.times.forEach((t, k) => { if (typeof t !== "number" || !Number.isFinite(t) || t < 0) bad.push(`${w}: ${engine} cold start ${i + 1} timed run ${k + 1} took ${t}`); });
+      });
+  }
+  return bad;
+}
+if (opt("--check")) {
+  const saved = JSON.parse(readFileSync(opt("--check"), "utf8"));
+  const bad = check(saved.results, Object.keys(saved.results?.Sagebrush?.[0]?.speed ?? {}), saved.reps);
+  console.log(bad.length ? "DIFFERENT OUTPUTS:\n  " + bad.join("\n  ") : "every execution printed the same result");
+  process.exit(bad.length ? 1 : 0);
+}
 const PYODIDE = opt("--pyodide");
 if (!PYODIDE || !existsSync(join(PYODIDE, "pyodide.mjs"))) throw new Error("--pyodide DIR: Pyodide's distribution (pyodide.mjs, pyodide.asm.wasm, python_stdlib.zip, pyodide-lock.json, wheels)");
 const RUNS = Number(opt("--runs") ?? 3);
@@ -215,26 +252,7 @@ console.log(`| import numpy: transferred / decoded | ${mb(S.numpyWire)} / ${mb(S
 console.log(`| import numpy: time | ${S.numpyMs} ms (${RS.numpy}) | ${P.numpyMs} ms (${RP.numpy}) |`);
 for (const w of Object.keys(WORKLOADS)) console.log(`| ${w} | ${S.speed[w]} ms (${RS.speed[w]}) | ${P.speed[w]} ms (${RP.speed[w]}) |`);
 // both must have printed the same thing (else the comparison is void)
-const bad = [];
-for (const [engine, rs] of Object.entries(results))
-  for (const r of rs) {
-    if (r.cold.out !== "2") bad.push(`${engine} print(1 + 1): ${r.cold.out}`);
-    if (r.numpy.out !== "45") bad.push(`${engine} numpy: ${r.numpy.out}`);
-  }
-// (every execution, warm-up and timed, of every cold start of both engines,
-// prints what Sagebrush's first warm-up printed; every timing is a finite
-// non-negative number: astra's TEST-272-1)
-for (const w of Object.keys(WORKLOADS)) {
-  const want = results.Sagebrush[0].speed[w].out;
-  if (typeof want !== "string" || want === "" || /ERROR|Traceback/.test(want)) bad.push(`${w}: Sagebrush printed ${JSON.stringify(want)}`);
-  for (const [engine, rs] of Object.entries(results))
-    rs.forEach((r, i) => {
-      const s = r.speed[w];
-      if (s.out !== want) bad.push(`${w}: ${engine} cold start ${i + 1} warm-up printed ${JSON.stringify(s.out)}, not ${JSON.stringify(want)}`);
-      s.outs.forEach((o, k) => { if (o !== want) bad.push(`${w}: ${engine} cold start ${i + 1} timed run ${k + 1} printed ${JSON.stringify(o)}`); });
-      s.times.forEach((t, k) => { if (typeof t !== "number" || !Number.isFinite(t) || t < 0) bad.push(`${w}: ${engine} cold start ${i + 1} timed run ${k + 1} took ${t}`); });
-    });
-}
+const bad = check(results, Object.keys(WORKLOADS), REPS);
 if (bad.length) console.log("DIFFERENT OUTPUTS:\n  " + bad.join("\n  "));
 if (opt("--json")) writeFileSync(opt("--json"), JSON.stringify({ when: new Date().toISOString(), runs: RUNS, reps: REPS, results, summary: { Sagebrush: S, Pyodide: P } }, null, 1) + "\n");
 process.exit(bad.length ? 1 : 0);
