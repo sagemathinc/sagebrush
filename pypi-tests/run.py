@@ -106,20 +106,34 @@ for name in names:
             if len(tar) > TAR_BYTES or z.unconsumed_tail:
                 problems.append("%s: past the %d bytes allowed uncompressed" % (a["url"], TAR_BYTES))
                 tar = None
-            t = tarfile.open(fileobj=io.BytesIO(tar), mode="r:") if tar is not None else None
-            if t is not None and len(t.getmembers()) > TAR_MEMBERS:
-                problems.append("%s: more than %d members" % (a["url"], TAR_MEMBERS))
-                t = None
-            for f, h in src["files"].items() if t is not None else ():
-                try:
-                    i = t.getmember(a["root"] + "/" + f)
-                except KeyError:
-                    i = None
-                # (a link is not followed: only a regular file of its own)
-                if i is None or not i.isfile() or i.size > MEMBER_BYTES:
-                    problems.append("%s/%s: not a regular file of at most %d bytes in the archive" % (a["root"], f, MEMBER_BYTES))
-                elif sha(t.extractfile(i).read(MEMBER_BYTES + 1)) != h:
-                    problems.append("upstream/%s is not the archive's %s/%s" % (f, a["root"], f))
+            # (one pass, as a stream: counted as it goes, refused past
+            # TAR_MEMBERS, each header dropped once read, and only the pinned
+            # members hashed, as they pass)
+            got, n = {}, 0
+            if tar is not None:
+                t = tarfile.open(fileobj=io.BytesIO(tar), mode="r|")
+                want = {a["root"] + "/" + f: f for f in src["files"]}
+                while True:
+                    i = t.next()
+                    if i is None:
+                        break
+                    n += 1
+                    if n > TAR_MEMBERS:
+                        problems.append("%s: more than %d members" % (a["url"], TAR_MEMBERS))
+                        break
+                    f = want.get(i.name)
+                    if f is not None:
+                        # (a link is not followed: only a regular file of its own)
+                        if f in got or not i.isfile() or i.size > MEMBER_BYTES:
+                            got[f] = None
+                        else:
+                            got[f] = sha(t.extractfile(i).read(MEMBER_BYTES + 1))
+                    t.members = []
+                for f, h in src["files"].items() if n <= TAR_MEMBERS else ():
+                    if got.get(f) is None:
+                        problems.append("%s/%s: not one regular file of at most %d bytes in the archive" % (a["root"], f, MEMBER_BYTES))
+                    elif got[f] != h:
+                        problems.append("upstream/%s is not the archive's %s/%s" % (f, a["root"], f))
     pkgdir = os.path.join(packages, "pypi-" + name.lower(), "py")
     env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0")
     cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], env)
