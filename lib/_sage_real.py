@@ -1853,11 +1853,14 @@ class RealNumberMP:
             return float(self) ** n
         x = self
         y = n if isinstance(n, RealNumberMP) else R(n)
+        # (a complex power is in the complex field of the lower precision:
+        # RealField(100)(-3.5)^RR(0.5) is in CC)
+        P = min(R._prec, n._R._prec if isinstance(n, RealNumberMP) else 53 if isinstance(n, float) else R._prec)
         if x._m < 0 and y._special:
             if y._special == "nan":
-                # (a complex NaN, in Sage's 53-bit CC whatever the field)
-                import _sage_matrix
-                return _sage_matrix.ComplexNumber(complex(float("nan"), float("nan")))
+                # (a complex NaN)
+                nan = float("nan")
+                return ComplexField(P)(nan, nan)
             # (|x| to an infinite power: no complex part, as Sage)
             a = -x
             return R(1) if a == 1 else a ** y
@@ -1866,9 +1869,7 @@ class RealNumberMP:
             # even power when y has trailing zero bits: no 2^e-bit integer)
             return (-x) ** y if y._e > 0 else x ** (y._m >> -y._e)
         if x._m < 0:
-            # a negative real to a real power: complex, in the complex field
-            # of the lower precision (RealField(100)(-3.5)^RR(0.5) is in CC)
-            P = min(R._prec, n._R._prec if isinstance(n, RealNumberMP) else 53 if isinstance(n, float) else R._prec)
+            # a negative real to a real power: complex
             return ComplexField(P)(x) ** ComplexField(P)(n if isinstance(n, (RealNumberMP, float)) else y)
         if x._special or y._special or not x._m or x == 1:
             return (y * x.log()).exp()
