@@ -1,0 +1,24 @@
+{
+  "project": "sortedcontainers",
+  "version": "2.4.0",
+  "archive": {
+    "url": "https://github.com/grantjenks/python-sortedcontainers/archive/refs/tags/v2.4.0.tar.gz",
+    "sha256": "70e22f4fd29b204f75f989e3c1e847aa1de267a028aab4233c0db783aaff78c1",
+    "root": "python-sortedcontainers-2.4.0/tests"
+  },
+  "license": "Apache-2.0",
+  "files": {
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "context.py": "161395f2b46619f9fa936d08819bad782dd95dee1b1d6278a0c9d0009df253c7",
+    "test_coverage_sorteddict.py": "258d161cec595580be3e4384e6aeaa8de00eea7270be22ef36b05ca0d7f1b684",
+    "test_coverage_sortedkeylist_modulo.py": "51f8fea5e627c545cd7ca1eab8a85ae68ca455877a399a7c800443617a78d77c",
+    "test_coverage_sortedkeylist_negate.py": "6a31c785acea51b49c7e337b9286277be7a6f7fd3d1dee2af29e97793bd52c54",
+    "test_coverage_sortedlist.py": "7d2f306f168fe8da7d946fc5e2a6d95a00e8bf5f3c17c835fd2aa46e3fee31e3",
+    "test_coverage_sortedset.py": "c9e275915607044875cb3cd9764e2229c14c5847eef6744a58fc76088962264c",
+    "test_stress_sorteddict.py": "862308b0f7eb8bf3c73ca813f5f12ebe6f0b5c6fb449c03e8e232d927683de70",
+    "test_stress_sortedkeylist.py": "726d7a16f986a60314b8826d3df43f533d691f894c43ae2f9806ca1d7bc7f39d",
+    "test_stress_sortedlist.py": "74b020504e745ae12ffc440e84ab8dc7951a582a78331439b87b71795457354c",
+    "test_stress_sortedset.py": "909ae842dec4540911dde4038e7bde472ee3050bce077ab8c5ce5f0127fa2c26"
+  },
+  "note": "Upstream's test suite at the release's tag (the PyPI sdist does not include it), copied unchanged; the benchmarks and plotting scripts are left out."
+}
