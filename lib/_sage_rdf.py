@@ -502,11 +502,8 @@ class RealDoubleElement(float):
         if prec is None and digits is None:
             return _sa().RR(float(self))
         import _sage_real
-        p = _sage_real.digits_to_prec(digits) if digits is not None else prec
-        # (as Sage: no more precision than a double's 53 bits)
-        if p > 53:
-            raise TypeError(f"cannot approximate to a precision of {p} bits, use at most 53 bits")
-        return _sage_real.N(float(self), prec, digits)
+        p = _sage_real._approx_prec(_sage_real.digits_to_prec(digits) if digits is not None else prec, 53)
+        return _sage_real.N(float(self), p)
 
     numerical_approx = N = n
 

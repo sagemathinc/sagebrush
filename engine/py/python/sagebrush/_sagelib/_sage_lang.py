@@ -355,9 +355,32 @@ class RealNumber(float):
         if prec is None and digits is None:
             return self
         import _sage_real
-        return _sage_real.RealField(_sage_real.digits_to_prec(digits) if digits is not None else prec)(float(self))
+        p = _sage_real._approx_prec(_sage_real.digits_to_prec(digits) if digits is not None else prec, 53)
+        mp = getattr(self, "_mp", None)
+        return _sage_real.RealField(p)(mp if mp is not None else float(self))
 
     numerical_approx = N = n
+
+    # (methods, as Sage's: float's real and imag attributes are not)
+    def real(self):
+        """The number itself.
+
+        EXAMPLES::
+
+            sage: RR(2).real(), (RR(2)^2000).real()
+            (2.00000000000000, 1.14813069527425e602)
+        """
+        return self
+
+    def imag(self):
+        """0, an Integer.
+
+        EXAMPLES::
+
+            sage: RR(2).imag(), (RR(2)^2000).imag()
+            (0, 0)
+        """
+        return 0
 
     def sqrt(self):
         """The square root.
@@ -658,17 +681,20 @@ class RealNumber(float):
         """
         return float(self) == 0
 
-    def str(self, digits=0, **kwds):
+    def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         """The decimal string (with digits significant digits).
 
         EXAMPLES::
 
-            sage: RR(1/3).str(), RR(1/3).str(digits=5)
-            ('0.33333333333333331', '0.33333')
+            sage: RR(1/3).str(), RR(1/3).str(digits=5), RR(1/3).str(10, 5)
+            ('0.33333333333333331', '0.33333', '0.33333')
         """
         import _sage_real
         from fractions import Fraction
-        return _sage_real._format(Fraction(float(self)), int(digits) if digits else 17)
+        _sage_real._str_supported("RR", base, e, skip_zeroes, args)
+        _sage_real._str_digits(digits, truncate)
+        D = int(digits) if digits else (_sage_real._digits(53) if truncate else 17)
+        return _sage_real._format(Fraction(float(self)), D, no_sci)
 
 
 class _RealLiteral(RealNumber):
@@ -739,13 +765,11 @@ class _RealBig(RealNumber):
     # subnormal) instead of the value: the value's, or an explicit refusal.
     # (float(), complex(), math and NumPy conversions round to a double,
     # as intended.)
-    @property
     def real(self):
         return self
 
-    @property
     def imag(self):
-        return RealNumber(0.0)
+        return 0
 
     def conjugate(self):
         return self
@@ -944,8 +968,9 @@ class _RealBig(RealNumber):
     def is_zero(self):
         return False
 
-    def str(self, digits=0, **kwds):
-        return self._mp.str(digits, **kwds) if digits else self._mp.str(**kwds)
+    def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
+        # (the MP real's str checks the arguments, as Sage's)
+        return self._mp.str(base, digits, *args, no_sci=no_sci, e=e, truncate=truncate, skip_zeroes=skip_zeroes)
 
 
 # (it is a RealNumber to the user: the same name in type())

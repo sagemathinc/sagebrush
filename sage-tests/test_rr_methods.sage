@@ -41,3 +41,37 @@ for nm, v in [("RR", RR(2)), ("RR 1/3", RR(1/3)), ("big", RR(2)^2000), ("sub", R
 show("RDF.str()", lambda: RDF(2).str())
 show("RDF(1/3).str()", lambda: RDF(1/3).str())
 show("RDF(-1e300).str()", lambda: RDF(-1e300).str())
+
+# n() truncates a fractional precision before comparing it with the
+# number's own (53.9 is 53); N does not call a float subclass's own n();
+# str()'s options after digits are keyword-only
+def show2(label, f):
+    try:
+        r = f(); print(label, "->", repr(r), r.parent() if hasattr(r, "parent") else type(r).__name__)
+    except Exception as e:
+        print(label, "!!", type(e).__name__, e)
+R = RealField(100)
+for nm, x in [("RR", RR(2)), ("RDF", RDF(2)), ("R100", R(2)), ("big", RR(2)^2000)]:
+    for pn, p in [("54.5", 54.5), ("53.9", 53.9), ("100.9", 100.9), ("101.5", 101.5), ("0.5", 0.5), ("'53'", '53'), ("107/2", 107/2), ("RDF(54.2)", RDF(54.2))]:
+        show2("%s.n(%s)" % (nm, pn), lambda: x.n(p))
+    for dn, d in [("15.9", 15.9), ("16", 16), ("15", 15), ("31", 31)]:
+        show2("%s.n(digits=%s)" % (nm, dn), lambda: x.n(digits=d))
+class F(float):
+    def n(self, *a, **k): return 99
+show2("N(F)", lambda: N(F(1.25), 30))
+show2("N(F) 53", lambda: N(F(1.25)))
+show2("N(RR)", lambda: N(RR(2), 30))
+show2("N(RDF,60)", lambda: N(RDF(2), 60))
+show2("N(RR,60)", lambda: N(RR(2), 60))
+show2("N(float 60)", lambda: N(float(2), 60))
+show2("N(big,30)", lambda: N(RR(2)^2000, 30))
+show2("N(R100,200)", lambda: N(R(2), 200))
+for name,v,p in [('RR',RR(2),53.9),('RDF',RDF(2),53.9),('R30',RealField(30)(2),30.9),('R100',RealField(100)(2),100.9)]:
+    show2(name+' fractional prec',lambda:v.n(p))
+    show2(name+' alias fractional prec',lambda:v.numerical_approx(p))
+class F(float):
+    def n(self,*args,**kw):return 99
+show2('user float N',lambda:N(F(1.25),30))
+for name,v in [('RR',RR(2)),('big',RR(2)^2000),('R100',RealField(100)(2))]:
+    show2(name+' str three args',lambda:v.str(10,5,False))
+    show2(name+' str keyword',lambda:v.str(10,5,no_sci=False))

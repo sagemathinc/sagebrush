@@ -446,3 +446,74 @@ R100.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is g
 RDF.str() -> '2.0' str
 RDF(1/3).str() -> '0.3333333333333333' str
 RDF(-1e300).str() -> '-1e+300' str
+RR.n(54.5) !! TypeError cannot approximate to a precision of 54.5000000000000 bits, use at most 53 bits
+RR.n(53.9) -> 2.00000000000000 Real Field with 53 bits of precision
+RR.n(100.9) !! TypeError cannot approximate to a precision of 100.900000000000 bits, use at most 53 bits
+RR.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 53 bits
+RR.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+RR.n('53') !! TypeError an integer is required
+RR.n(107/2) -> 2.00000000000000 Real Field with 53 bits of precision
+RR.n(RDF(54.2)) !! TypeError cannot approximate to a precision of 54.2 bits, use at most 53 bits
+RR.n(digits=15.9) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RR.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RR.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 53 bits
+RDF.n(54.5) !! TypeError cannot approximate to a precision of 54.5000000000000 bits, use at most 53 bits
+RDF.n(53.9) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF.n(100.9) !! TypeError cannot approximate to a precision of 100.900000000000 bits, use at most 53 bits
+RDF.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 53 bits
+RDF.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+RDF.n('53') !! TypeError an integer is required
+RDF.n(107/2) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF.n(RDF(54.2)) !! TypeError cannot approximate to a precision of 54.2 bits, use at most 53 bits
+RDF.n(digits=15.9) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RDF.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RDF.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RDF.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 53 bits
+R100.n(54.5) -> 2.00000000000000 Real Field with 54 bits of precision
+R100.n(53.9) -> 2.00000000000000 Real Field with 53 bits of precision
+R100.n(100.9) -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 100 bits
+R100.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+R100.n('53') !! TypeError an integer is required
+R100.n(107/2) -> 2.00000000000000 Real Field with 53 bits of precision
+R100.n(RDF(54.2)) -> 2.00000000000000 Real Field with 54 bits of precision
+R100.n(digits=15.9) -> 2.000000000000000 Real Field with 57 bits of precision
+R100.n(digits=16) -> 2.000000000000000 Real Field with 57 bits of precision
+R100.n(digits=15) -> 2.00000000000000 Real Field with 54 bits of precision
+R100.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 100 bits
+big.n(54.5) !! TypeError cannot approximate to a precision of 54.5000000000000 bits, use at most 53 bits
+big.n(53.9) -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.n(100.9) !! TypeError cannot approximate to a precision of 100.900000000000 bits, use at most 53 bits
+big.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 53 bits
+big.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+big.n('53') !! TypeError an integer is required
+big.n(107/2) -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.n(RDF(54.2)) !! TypeError cannot approximate to a precision of 54.2 bits, use at most 53 bits
+big.n(digits=15.9) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+big.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+big.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+big.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 53 bits
+N(F) -> 1.2500000 Real Field with 30 bits of precision
+N(F) 53 -> 1.25000000000000 Real Field with 53 bits of precision
+N(RR) -> 2.0000000 Real Field with 30 bits of precision
+N(RDF,60) !! TypeError cannot approximate to a precision of 60 bits, use at most 53 bits
+N(RR,60) !! TypeError cannot approximate to a precision of 60 bits, use at most 53 bits
+N(float 60) !! TypeError cannot approximate to a precision of 60 bits, use at most 53 bits
+N(big,30) -> 1.1481307e602 Real Field with 30 bits of precision
+N(R100,200) !! TypeError cannot approximate to a precision of 200 bits, use at most 100 bits
+RR fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+RR alias fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+RDF fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+RDF alias fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+R30 fractional prec -> 2.0000000 Real Field with 30 bits of precision
+R30 alias fractional prec -> 2.0000000 Real Field with 30 bits of precision
+R100 fractional prec -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 alias fractional prec -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+user float N -> 1.2500000 Real Field with 30 bits of precision
+RR str three args !! TypeError str() takes at most 2 positional arguments (3 given)
+RR str keyword -> '2.0000e0' str
+big str three args !! TypeError str() takes at most 2 positional arguments (3 given)
+big str keyword -> '1.1481e602' str
+R100 str three args !! TypeError str() takes at most 2 positional arguments (3 given)
+R100 str keyword -> '2.0000e0' str

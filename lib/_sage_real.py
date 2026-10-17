@@ -1137,7 +1137,7 @@ def RealField(prec=53, sci_not=False, rnd="RNDN"):
     """
     prec = int(prec)
     if prec < 1:
-        raise ValueError("prec (=%d) must be >= 1 and <= 2147483391" % prec)
+        raise ValueError("prec (=%d) must be >= 1 and <= 9223372036854775551" % prec)
     rnd = str(rnd)
     if rnd not in _RND:
         raise ValueError("rounding mode (=%s) must be one of %s" % (rnd, ", ".join(_RND)))
@@ -1638,7 +1638,7 @@ class RealNumberMP:
 
     __str__ = __repr__
 
-    def str(self, base=10, digits=0, no_sci=None, e=None, truncate=False, skip_zeroes=False):
+    def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         """The decimal string: all the digits needed to read the number back
         (1 + ceil(prec log10 2)), or digits digits.
 
@@ -1647,7 +1647,7 @@ class RealNumberMP:
             sage: RealField(100)(1/3).str(), RealField(100)(1/3).str(digits=5)
             ('0.33333333333333333333333333333346', '0.33333')
         """
-        _str_supported("RealField(%d)" % self._R._prec, base, e, skip_zeroes)
+        _str_supported("RealField(%d)" % self._R._prec, base, e, skip_zeroes, args)
         _str_digits(digits, truncate)
         if self._special:
             return {"+inf": "+infinity", "-inf": "-infinity", "nan": "NaN"}[self._special]
@@ -1740,10 +1740,8 @@ class RealNumberMP:
             prec = digits_to_prec(digits)
         if prec is None:
             prec = 53
-        # (as Sage: no more precision than the number's own)
-        if prec > self._R._prec:
-            raise TypeError(f"cannot approximate to a precision of {prec} bits, use at most {self._R._prec} bits")
-        return RealField(prec)(self) if int(prec) != 53 else _sa().RR(self)
+        prec = _approx_prec(prec, self._R._prec)
+        return RealField(prec)(self) if prec != 53 else _sa().RR(self)
 
     n = N = numerical_approx
 
@@ -2760,7 +2758,21 @@ def _digits(prec):
     return max(2, int(math.floor((prec - 1) * _LOG10_2 + 1e-12)))
 
 
-def _str_supported(field, base, e, skip_zeroes):
+def _approx_prec(prec, own):
+    """The precision prec in bits as an integer (truncated, as Sage: 53.9 is
+    53), refused past the number's own precision own as Sage refuses it."""
+    if isinstance(prec, str):
+        raise TypeError("an integer is required")
+    p = int(prec)
+    if p > own:
+        raise TypeError(f"cannot approximate to a precision of {prec!r} bits, use at most {own} bits")
+    return p
+
+
+def _str_supported(field, base, e, skip_zeroes, args=()):
+    # (as Sage: the options after digits are keyword-only)
+    if args:
+        raise TypeError("str() takes at most 2 positional arguments (%d given)" % (2 + len(args)))
     # (str()'s options that are not implemented here are refused, not
     # ignored: another base would print decimal digits as if they were its)
     if base != 10:
@@ -3591,7 +3603,14 @@ def N(x, prec=None, digits=None):
     """
     if digits is not None:
         prec = digits_to_prec(digits)
-    prec = int(prec or 53)
+    if prec is None:
+        prec = 53
+    from _sage_lang import RealNumber
+    from _sage_rdf import RealDoubleElement
+    if isinstance(x, float) and not isinstance(x, (RealDoubleElement, RealNumber)):
+        # (a Python float, or a subclass: a double, 53 bits as in Sage)
+        return RealField(_approx_prec(prec, 53))(float(x))
+    prec = int(prec)
     s = getattr(x, "_s", None)
     if s is not None:
         v = evaluate(x, prec + 20)
@@ -3602,7 +3621,7 @@ def N(x, prec=None, digits=None):
         return x.n(prec)
     # (an element of RR or RDF: its own n(), which refuses a precision past
     # its 53 bits, as Sage's N does)
-    if isinstance(x, float) and getattr(type(x), "n", None) is not None:
+    if isinstance(x, float):
         return x.n(prec)
     return RealField(prec)(x)
 
