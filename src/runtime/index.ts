@@ -277,9 +277,18 @@ export function reraise(): any {
       Error.captureStackTrace(tb, reraise);
       const sites = sitesOf(tb);
       const now = pyFrames(sites);
-      const frames = now.slice(0, -1).concat(inner);
+      let frames = now.slice(0, -1).concat(inner);
+      // (kept to the stack limit's frames too, its innermost, HARD-96A-1: past
+      // it, or with the stack itself cut, the record is cut, and format_exc
+      // refuses rather than show part of it)
+      const max = Error.stackTraceLimit;
+      let cut = sites.length >= max;
+      if (frames.length > max) {
+        frames = frames.slice(frames.length - max);
+        cut = true;
+      }
       Object.defineProperty(e, "$tb", { value: tb, writable: true, enumerable: false, configurable: true });
-      Object.defineProperty(e, "$reraised", { value: { tb, frames, cut: sites.length >= Error.stackTraceLimit }, writable: true, enumerable: false, configurable: true });
+      Object.defineProperty(e, "$reraised", { value: { tb, frames, cut }, writable: true, enumerable: false, configurable: true });
     }
   }
   return e;
