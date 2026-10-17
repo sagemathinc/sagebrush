@@ -8,7 +8,7 @@
 import { askOptions, cleanDoc, formatError, isBoard, pageCount, pageOf, type AskAnswer, type BoardDoc, type DocAsk, type DocNode } from "./doc";
 
 /** The bounds of answers and submissions (web/board-host-protocol.md). */
-export const ASK_LIMITS = { text: 10_000, comment: 10_000, options: 100, asks: 200, bytes: 65_536 } as const;
+export const ASK_LIMITS = { text: 10_000, comment: 10_000, options: 100, asks: 200, bytes: 65_536, hints: 10 } as const;
 /** A scale's values, at most (from its `min` to its `max`). */
 export const SCALE_MAX = 100;
 
@@ -131,6 +131,7 @@ export function askProblems(a: DocAsk, mode: string = "python"): AskProblem[] {
   const computed = (a.hints ?? []).some((h) => typeof h !== "string");
   if ((a.check !== undefined || computed) && mode !== "python" && mode !== "sage") err(a.check !== undefined ? "check" : "hints", `checks and computed hints run in Python and Sage boards (for now): this board's language is ${mode}`);
   if (a.check !== undefined && !a.check.trim()) err("check", "an empty check: it is code whose last line is true (right), false (wrong) or a message (wrong, saying why)");
+  if ((a.hints?.length ?? 0) > ASK_LIMITS.hints) err("hints", `more than ${ASK_LIMITS.hints} hints: the board shows the first ${ASK_LIMITS.hints}`);
   (a.hints ?? []).forEach((h, k) => { if (typeof h !== "string" && !h.code.trim()) err(`hints[${k}]`, "an empty computed hint: its code's last line is the hint's text"); });
   if (a.check === undefined) {
     if (a.hints?.length) warn("hints", "hints show one by one after wrong attempts, which a `check` decides: with no check, none shows");

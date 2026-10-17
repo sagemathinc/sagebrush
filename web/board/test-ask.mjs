@@ -272,6 +272,18 @@ try {
   await setK("3");
   await press(K(".board-ask-check"));
   check(await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'right'", 30000), "after a check out of time: checks run again");
+  // (one Check bounded as a whole: six computed hints that never end share
+  // the check's 2 x checkMs, not checkMs each, HARD-A19-1)
+  await ev(`${B}.edit((d) => { d.nodes.push({ id: "many", kind: "ask", input: "text", text: "Many hints", check: "False", checkMs: 1000, answer: "a", attempts: 5, result: "wrong",
+    hints: Array.from({ length: 6 }, () => ({ code: "while True:\\n    pass" })) }); }).then(() => 1)`);
+  await until(${JSON.stringify("!!document.querySelector('.board-ask[data-ask="many"] .board-ask-check')")}, 10000);
+  await ev("(() => { const it = window.board.item('many'); window.board.setCamera({ x: it.x - 40, y: it.y - 40, z: 1 }); window.board.render(); return 1; })()");
+  await sleep(300);
+  const t0 = Date.now();
+  await press('.board-ask[data-ask="many"] .board-ask-check');
+  await until("window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === 'many').attempts === 6", 30000);
+  const took = Date.now() - t0, manyText = await ev(q$('.board-ask[data-ask="many"]', ".textContent"));
+  check(took < 4500 && /this check's time ran out/.test(manyText), `one Check with six endless computed hints ends within its 2 s budget (${took} ms): ` + manyText.slice(0, 300));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
