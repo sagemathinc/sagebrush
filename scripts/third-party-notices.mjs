@@ -57,13 +57,20 @@ const PARTS = {
   turbo: () => "### Google's Turbo colormap (Apache-2.0)\n\nThe Turbo colormap's table (`_matlab_turbo.py`, which MATLAB programs' `turbo`\ninterpolates) is the 256-entry table published by Anton Mikhailov,\nCopyright 2019 Google LLC, under the Apache License 2.0 (LICENSE-APACHE),\nunchanged.",
 };
 
+// the curated PyPI packages (packages/pypi-*/, scripts/pypi-import.mjs):
+// their sections of NOTICE.md, in every package that carries the library
+const pypiBlock = notice.match(/<!-- pypi-packages:[^\n]*-->\n([\s\S]*?)\n<!-- \/pypi-packages -->/)?.[1] ?? "";
+const PYPI = pypiBlock.split(/\n(?=### )/).map((x) => x.trim()).filter((x) => x.startsWith("### "));
+PYPI.forEach((text, i) => (PARTS["pypi-" + i] = () => text));
+const PYPI_PARTS = PYPI.map((_, i) => "pypi-" + i);
+
 const PACKAGES = [
   { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["matplotlib", "smalljac", "psage", "cremona"], artistic: "engine/py" },
   { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "psage", "cpython"] },
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
   { file: "app/THIRD-PARTY-NOTICES-native.txt", what: "the desktop app's native code (app/src-tauri)", manifest: "app/src-tauri", crates: ["sagebrush-app"], parts: [], mpl: true, native: true },
-  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web", "sagebrush-raster"], parts: ["cpython", "numpy", "dragon4", "scipy", "matplotlib", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo", "dejavu"], artistic: "packages/sagebrush", web: true },
+  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web", "sagebrush-raster"], parts: ["cpython", "numpy", "dragon4", "scipy", "matplotlib", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo", "dejavu", ...PYPI_PARTS], artistic: "packages/sagebrush", web: true },
 ];
 
 const metas = new Map();

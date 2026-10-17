@@ -510,6 +510,12 @@ R.builtins.__pyjs_package_file__ = (p: any) => {
   const rel = repoPaths.get(String(p));
   return rel === undefined ? null : JSON.stringify([rel, mounted.get(String(p))]);
 };
+// (the registry as JSON, or null: the curated PyPI packages' search entries,
+// lib/_python_docsearch.py)
+R.builtins.__pyjs_package_registry__ = () => {
+  const reg = packageRegistry();
+  return reg === null ? null : JSON.stringify(reg);
+};
 /** Tests only: replace the registry (null: none). */
 export function setPackageRegistry(r: Registry | null): void {
   registry = r;
