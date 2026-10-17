@@ -62,3 +62,18 @@ print(hasattr([], "__imul__"), hasattr([], "__iadd__"))
 class I:
     def __index__(self): return 3
 a = [1]; b = a; a *= I(); print(b)
+
+# list's own __imul__ is its sequence slot: a subclass's __mul__ first, then in place
+class LN(list):
+    def __mul__(self, o):
+        return NotImplemented
+a = LN([1, 2]); b = a
+a *= 2
+print(a, b, a is b, type(a).__name__)
+class M(list):
+    def __mul__(self, o):
+        return 'm'
+    def __imul__(self, o):
+        return 'im'
+a = M([1]); a *= 3; print(a)
+a = [1]; b = a; a *= 2; print(a, b is a, [].__imul__(2))

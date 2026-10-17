@@ -851,7 +851,12 @@ export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
   // (a list subclass's own __mul__ too: CPython's in-place multiply tries
   // the subclass's __mul__ before repeating, CORR-970-1)
-  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && !overrides(a, "__mul__") && repeatCount(b) !== undefined) {
+  // (list's own __imul__ is its sequence slot, tried after __mul__ is)
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && overrides(a, "__mul__")) {
+    const r = special(a, "__mul__")!(a, b);
+    if (r !== NotImplemented) return r;
+  }
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) {
     const r = repeatArray(a, repeatCount(b)!);
     a.length = 0;
     for (const v of r) a.push(v);
