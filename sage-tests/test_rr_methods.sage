@@ -101,3 +101,25 @@ for x in [V(1.25), W(1.25)]:
     show2(type(x).__name__ + " N 60", lambda: N(x, 60))
 for p in [0, 0.5, -0.5, "30", b"30", 53.9, 54.2, IntOnly(), IndexOnly()]:
     show2("N plain " + repr(p) if not isinstance(p, (IntOnly, IndexOnly)) else "N plain " + type(p).__name__, lambda: N(float(2), p))
+# a precision is converted once (an __int__ called once); an int subclass's
+# precision is its value; digits are a real number, its __float__ bound as
+# Python binds a special method (staticmethod, classmethod)
+class Static:
+    __float__=staticmethod(lambda:float(8.9))
+class Class:
+    __float__=classmethod(lambda cls:float(8.9))
+class Index:
+    def __index__(self):return int(8)
+class FloatInt(int):
+    def __float__(self):return float(8.9)
+class IntInt(int):
+    def __int__(self):return int(20)
+for name,d in [('static',Static()),('class',Class()),('index',Index()),('int-float',FloatInt(2)),('int-int',IntInt(2))]:
+    show2('digits '+name,lambda:RealField(100)(2).n(digits=d))
+show2('prec int-int',lambda:RR(2).n(IntInt(30)))
+calls=[]
+class Changing:
+    def __int__(self):
+     calls.append('int');return int(20+len(calls)*10)
+for name,f in [('float',lambda p:N(float(2),p)),('RR',lambda p:N(RR(2),p)),('RDF',lambda p:N(RDF(2),p)),('int',lambda p:N(2,p)),('method',lambda p:RR(2).n(p))]:
+    calls.clear();show2('changing '+name,lambda:f(Changing()));print('calls',calls)
