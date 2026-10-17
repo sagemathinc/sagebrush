@@ -21,6 +21,10 @@
 //   bun web/build.ts && node web/measure-load.mjs [--url URL] [--mode python,sage] [--repeat] [--json out.json]
 //   (--repeat: then a second visit with the same profile, its caches kept)
 //   (CHROME=... for the browser; --self-test checks the trace analysis)
+//   (--then sage: after Python's first result, the notebook is switched to
+//   Sage and a Sage cell run: how long that first Sage result takes, its
+//   library fetched then, and whether and when the page said "loading
+//   Sage…"; --screenshot DIR saves the page as it says so, and at the result)
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
@@ -36,6 +40,8 @@ const CELLS = { python: "print(1 + 1)", sage: "factor(2^32 + 1)", matlab: "disp(
 const WANT = { python: "2", sage: "641 * 6700417", matlab: "2", magma: "2" };
 const modes = (opt("--mode") ?? "python,sage,matlab,magma").split(",");
 const REPEAT = args.includes("--repeat");
+const THEN = opt("--then");
+const SHOTS = opt("--screenshot");
 const here = new URL(".", import.meta.url).pathname;
 const COMPRESSIBLE = /^(text\/|application\/(javascript|json|wasm|manifest\+json)|image\/svg)/;
 
@@ -155,6 +161,8 @@ async function measure(mode, url) {
     const out = (await ev(`${cell}.querySelector('.out').textContent`)) ?? "";
     // (the trace's clock: a mark at the result, as a console.timeStamp)
     await ev(`console.timeStamp('sb-first-result')`);
+    let then = null;
+    if (THEN && first) then = await switchTo(THEN);
     // settled: nothing in flight and no network event for 3 s (at most 2 min)
     const tSettle = Date.now();
     lastNet = Date.now();
@@ -171,7 +179,37 @@ async function measure(mode, url) {
     const stuck = stats.settled.inFlight.urls;
     const settledCleanly = stats.settled.inFlight.requests === 0 && !timedOut;
     events.length = 0;
-    return { ready, ok: done && out.includes(WANT[mode]), out: out.slice(0, 200), ms: { ready: tReady, firstResult: tResult, settle: Date.now() - tSettle }, settledCleanly, ...(settledCleanly ? {} : { stuck }), ...stats };
+    return { ready, ok: done && out.includes(WANT[mode]), out: out.slice(0, 200), ms: { ready: tReady, firstResult: tResult, settle: Date.now() - tSettle }, settledCleanly, ...(settledCleanly ? {} : { stuck }), ...(then ? { then } : {}), ...stats };
+    };
+    // --then: the notebook switched to another mode, one cell run there
+    const shot = async (name) => {
+      if (!SHOTS) return;
+      const r = await send("Page.captureScreenshot", { format: "png" }, page);
+      if (r?.data) writeFileSync(join(SHOTS, `${mode}-then-${THEN}-${name}.png`), Buffer.from(r.data, "base64"));
+    };
+    const switchTo = async (to) => {
+      await ev(`(() => { const m = document.querySelector('#mode'); m.value = ${JSON.stringify(to)}; m.dispatchEvent(new Event('change')); })()`);
+      await sleep(300);
+      const k = await ev(`(() => { document.querySelector('#add').click(); return document.querySelectorAll('.cell').length; })()`);
+      const c = `document.querySelectorAll('.cell')[${k - 1}]`;
+      const t = Date.now();
+      await ev(`(() => { const c = ${c}; const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(CELLS[to])}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
+      let shown = null, shownFor = 0, shotTaken = false, cellSaid = false;
+      while (Date.now() - t < 180000) {
+        const s = await ev(`({ status: document.querySelector('#status')?.textContent ?? '', cell: ${c}.querySelector('.time')?.textContent ?? '', done: /\\[\\d+\\]/.test(${c}.querySelector('.n').textContent) })`);
+        if (/^loading /.test(s.status)) cellSaid ||= /^loading /.test(s.cell);
+        if (/^loading /.test(s.status)) {
+          shown ??= Date.now() - t;
+          shownFor = Date.now() - t - shown;
+          if (!shotTaken) { shotTaken = true; await shot("loading"); }
+        }
+        if (s.done) break;
+        await sleep(25);
+      }
+      const ms = Date.now() - t;
+      const out = (await ev(`${c}.querySelector('.out').textContent`)) ?? "";
+      await shot("result");
+      return { mode: to, ok: out.includes(WANT[to]), ms, loadingShownAt: shown, loadingShownFor: shown === null ? 0 : shownFor, onTheCell: cellSaid, status: await ev("document.querySelector('#status')?.textContent") };
     };
     const cold = await visit(true);
     // --repeat: the same profile visits again (its HTTP cache and service
@@ -289,6 +327,7 @@ for (const mode of modes) {
   const r = await measure(mode, opt("--url"));
   results.push(r);
   console.log(`${mode}: ${r.ok ? "ok" : "FAILED (" + JSON.stringify(r.out) + ")"}, ready ${r.ms.ready} ms, first result ${r.ms.firstResult} ms${r.settledCleanly ? "" : " (NOT SETTLED: still in flight " + JSON.stringify(r.stuck) + ")"}`);
+  if (r.then) console.log(`  then ${r.then.mode}: ${r.then.ok ? "ok" : "FAILED"}, first ${r.then.mode} result ${r.then.ms} ms; "loading…" ${r.then.loadingShownAt === null ? "not shown" : `shown at ${r.then.loadingShownAt} ms for ${r.then.loadingShownFor} ms${r.then.onTheCell ? ", on the cell too" : ""}`}; status after: ${JSON.stringify(r.then.status)}`);
   for (const [when, s] of [["by first result", r.atResult], ["settled", r.settled]])
     console.log(`  ${when}: ${s.requests} requests finished, ${mb(s.wire)} wire, ${mb(s.decoded)} decoded` + (s.inFlight.requests ? `; ${s.inFlight.requests} still loading (${mb(s.inFlight.wireSoFar)} received)` : "") + `; CPU ms ${JSON.stringify(s.cpuMs)}`);
   if (r.repeat) {

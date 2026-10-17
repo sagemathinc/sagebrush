@@ -27,12 +27,17 @@ const MAX_SIDE = 2400, MAX_BYTES = 2_000_000;
 
 const DB = "sagebrush-board-images", STORE = "blobs";
 let dbp: Promise<IDBDatabase | null> | null = null;
+// (after an open that failed, how long before one is tried again: each use in
+// between is no store at once, rather than waiting its own 3 s, as outcache)
+const OPEN_RETRY_MS = 30_000;
+let failedAt = -Infinity;
 function db(): Promise<IDBDatabase | null> {
+  if (!dbp && Date.now() - failedAt < OPEN_RETRY_MS) return Promise.resolve(null);
   return (dbp ??= new Promise((resolve) => {
     try {
       // (bounded, web/board/idb-open.ts: one that never opens is no store, as none at all is)
-      // (one that didn't open: none now, and tried again by a later use)
-      openDb(DB, 1, (d) => d.createObjectStore(STORE), () => { dbp = null; }).then(resolve, () => { dbp = null; resolve(null); });
+      // (one that didn't open: none now, and tried again by a use after OPEN_RETRY_MS)
+      openDb(DB, 1, (d) => d.createObjectStore(STORE), () => { dbp = null; }).then(resolve, () => { dbp = null; failedAt = Date.now(); resolve(null); });
     } catch {
       resolve(null); // (no IndexedDB here: an exported file opened from disk, say; pictures are kept in memory)
     }

@@ -1,7 +1,7 @@
 # Engines by their content
 
 An **engine** is what runs code in the browser:
-- the worker (`sagebrush-worker.js`), the WebAssembly engine and the precompiled library;
+- the worker (`sagebrush-worker.js`), the WebAssembly engine and the Python library's chunks (`lib/`: sources and precompiled code, web/lib-chunks.mts);
 - the notebook module, the reactive notebook's analyzer and the 3D viewer;
 - the runner's page.
 
@@ -16,6 +16,7 @@ An **engine** is what runs code in the browser:
   - `headers` is what each file is served with: its type, and for the runner's page its Content-Security-Policy (no network) and cross-origin isolation.
 - **`web/dist/engine/latest.json`** (`{id, api}`) is the deployed engine, a static file of the site, cached for a minute.
 - **`scripts/publish-engine.mjs`** uploads a new engine to R2 (the `sagebrush-releases` bucket, under `engine/<id>/`), manifest last. An id already there is left alone if its manifest is this one (its files never change); if it is another, the script fails rather than leave the old one served. It runs before each deploy of the site.
+- **The Python library's chunks** (`lib/<group>.<kind>.<hash>.json`, web/lib-chunks.mts) are also uploaded to R2 at `lib/<name>`, a namespace by content that is never cleared. A deploy replaces the site's own `lib/`, but a page opened before it keeps running its worker, which may first import one of its build's chunks hours later. The site's Worker serves a chunk its files no longer have from there, after checking that its bytes have the hash in its name (web/engines.ts `handleLibChunk`; web/test-pwa-update.mjs; HARD-813-1).
 - **`web/engines.ts`** is the site Worker's route for `/engine/<id>/<file>`. It serves the file from R2 with the manifest's headers, plus:
   - `Cache-Control: immutable`;
   - `Access-Control-Allow-Origin: *`, so pages and downloaded files anywhere can read it;
@@ -32,7 +33,7 @@ An **engine** is what runs code in the browser:
 A board downloaded as one HTML file can embed the engine. A `file://` page is never cross-origin isolated, so there is no SharedArrayBuffer and so no broker.
 
 `RunnerWorker` in files mode (`new RunnerWorker(null, {files})`):
-- the page hands the frame the worker's script, the engine and the precompiled library;
+- the page hands the frame the worker's script, the engine and the library's chunks;
 - the frame is a `srcdoc` of its own, sandboxed with an opaque origin, whose policy allows no network but its own `blob:` URLs;
 - it makes `blob:` URLs of the files, and the worker reads them through `__SB_FILES__`;
 - with no interrupt flag, Stop restarts the worker.
