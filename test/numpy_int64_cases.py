@@ -68,3 +68,9 @@ show("big and", lambda: np.array([2**62 + 2**40]) & np.array([2**40]))
 show("big compare", lambda: np.array([2**62]) == 2**62)
 show("big exact create", lambda: np.array([2**62, -2**63, 2**53]))
 show("astype big float", lambda: np.array([2.0**62, -2.0**63]).astype(np.int64))
+# (a Python int past any dtype, in arithmetic and comparisons: NumPy's
+# OverflowError, never a host error)
+for big in (10**1000, -10**1000, 2**64, -2**63 - 1, 10**20):
+    for lab, f in (("add", lambda b=big: np.array([1]) + b), ("eq", lambda b=big: np.array([1]) == b), ("lt", lambda b=big: np.array([1]) < b),
+                   ("mul", lambda b=big: np.array([1.5]) * b), ("radd", lambda b=big: b + np.array([1])), ("u64", lambda b=big: np.array([1], np.uint64) + b)):
+        show("huge %s %s" % (lab, "+" if big > 0 else "-"), f)

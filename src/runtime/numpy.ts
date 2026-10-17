@@ -173,11 +173,17 @@ function promote(a: DType, b: DType): DType {
 }
 
 // A Python scalar's dtype and value, if x is one ("weak": it adapts to arrays).
-type Weak = { kind: "b" | "i" | "f" | "c"; v: number; im?: number; dt: DType | null; inexact?: boolean };
+// (big: a Python int's exact value, when it is a bigint)
+type Weak = { kind: "b" | "i" | "f" | "c"; v: number; im?: number; dt: DType | null; inexact?: boolean; big?: bigint };
 function pyScalar(x: any): Weak | null {
   if (typeof x === "boolean") return { kind: "b", v: +x, dt: null };
   if (typeof x === "number") return Number.isInteger(x) ? { kind: "i", v: x, dt: null } : { kind: "f", v: x, dt: null };
-  if (typeof x === "bigint") return { kind: "i", v: Number(x), dt: null, inexact: BigInt(Number(x)) !== x };
+  if (typeof x === "bigint") {
+    // (one past a double's range is Infinity: inexact, without converting
+    // back; the range checks name it later)
+    const n = Number(x);
+    return { kind: "i", v: n, dt: null, inexact: !Number.isFinite(n) || BigInt(n) !== x, big: x };
+  }
   if (x instanceof Obj.FloatBox) return { kind: "f", v: x.v, dt: null };
   if (x instanceof PyComplex) return { kind: "c", v: x.re, im: x.im, dt: typeDtypes.get(Obj.typeOf(x)) ?? null };
   if (x instanceof Obj.PrimBox) {
@@ -576,11 +582,31 @@ function fill(out: NDArray, x: any) {
 }
 
 // NumPy 2: a Python int that does not fit the array's integer type is an error.
-// (and, with int64 or uint64, one a double holds exactly: Sagebrush's are
-// doubles, so a nearby double would answer for it, in a comparison too)
+// (first, as NumPy 2's: one no C long holds, OverflowError "Python int too
+// large to convert to C long" (uint64 takes its own range); then the
+// dtype's range; with int64 or uint64, one a double holds exactly:
+// Sagebrush's are doubles. A comparison takes any int, exactly: bigCompare)
+const I64MIN = -(2n ** 63n), I64MAX = 2n ** 63n - 1n, U64MAX = 2n ** 64n - 1n;
 function checkWeak(dt: DType, w: Weak) {
+  if (w.big !== undefined && (dt.kind === "u" && dt.itemsize === 8 ? w.big < I64MIN || w.big > U64MAX : w.big < I64MIN || w.big > I64MAX)) raise(T.OverflowError, "Python int too large to convert to C long");
   checkPyInt(dt, w.v);
   if (isWide(dt) && w.inexact) wideRefuse(dt);
+}
+const CMP_OPS: Record<string, (a: bigint, b: bigint) => boolean> = {
+  equal: (a, b) => a === b, not_equal: (a, b) => a !== b, less: (a, b) => a < b,
+  less_equal: (a, b) => a <= b, greater: (a, b) => a > b, greater_equal: (a, b) => a >= b,
+};
+// (an integer array compared with a Python int a double does not hold
+// exactly, or past int64: element by element, exactly, as NumPy 2)
+function bigCompare(op: string, A: { arr: NDArray; weak: Weak | null }, B: { arr: NDArray; weak: Weak | null }): NDArray {
+  const left = A.weak === null, arr = left ? A.arr : B.arr, big = (left ? B.weak : A.weak)!.big!;
+  const f = CMP_OPS[op];
+  const res = empty(arr.shape, D.bool), od = res.data, d = arr.data;
+  loop1(arr.shape, arr.strides, arr.offset, (p, k) => {
+    const x = BigInt(d[p]);
+    od[k] = +(left ? f(x, big) : f(big, x));
+  });
+  return res;
 }
 function checkPyInt(dt: DType, v: number) {
   const rg = RANGE[dt.name];
@@ -1099,6 +1125,13 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   if (op.startsWith("bitwise") || op.endsWith("_shift")) {
     if (ct.kind === "f" || ct.kind === "c") raise(T.TypeError, `ufunc '${op}' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''`);
   }
+  // (a Python int past what a double or int64 holds, against an integer
+  // array: compared exactly; in arithmetic with a float, NumPy's error)
+  if (CMP_OPS[op] && !out) {
+    const w = A.weak ?? B.weak, o = A.weak ? B : A;
+    if (w && w.kind === "i" && w.big !== undefined && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b") && (w.inexact || w.big < I64MIN || w.big > I64MAX)) return bigCompare(op, A, B);
+  }
+  for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && ct.kind === "f") raise(T.OverflowError, "int too large to convert to float");
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
   if (op === "power" && ct.kind === "b") ct = D.int8;
