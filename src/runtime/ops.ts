@@ -1065,8 +1065,10 @@ export function len(x: any): number {
   if (x instanceof PyBytes) return x.n;
   const f = special(x, "__len__");
   if (f !== undefined) {
-    const n = f(x);
-    if (!isPyInt(n)) raise(T.TypeError, `'${typeName(n)}' object cannot be interpreted as an integer`);
+    // (the result as CPython's slot_sq_length takes it: through the index
+    // protocol, an int subclass as its own value)
+    const r = f(x);
+    const n = isPyInt(r) ? r : index(r);
     if (n < 0) raise(T.ValueError, "__len__() should return >= 0");
     if (typeof n === "bigint") {
       if (n > 9223372036854775807n) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
@@ -1078,26 +1080,33 @@ export function len(x: any): number {
 }
 
 // The size list(x) presizes for, as CPython's PyObject_LengthHint after
-// taking x's iterator: len(x), or, where it raises TypeError,
-// __length_hint__ (TypeError and NotImplemented: no guess). Called for its
-// errors: anything else __len__ or __length_hint__ raises, a hint that is
-// not an int, negative or past a C ssize_t, and a guess too large to
-// allocate (a MemoryError: past a JS array's length here). Only a
-// Python-level __len__ or __length_hint__ can do any of that, so builtins
-// are not asked.
+// taking x's iterator: len(x), or, where x has no __len__ or it raises
+// TypeError, __length_hint__ (looked up only then; TypeError and
+// NotImplemented: no guess). Called for its errors: anything else either
+// raises, len's result through the index protocol (len()), a hint that is
+// not an int (an int subclass is its own value), negative or past a C
+// ssize_t, and a guess too large to allocate (a MemoryError: past a JS
+// array's length here). A type whose __len__ and __length_hint__ are both
+// absent or builtin types' (which cannot raise there) is not asked.
+const builtinSlot = (t: any, name: string): boolean => {
+  for (const c of t.$mro) if (c.$dict?.has(name)) return c.$ctor === null;
+  return true;
+};
 export function lengthHint(x: any): void {
   if (x === null || typeof x !== "object") return;
-  const lf = special(x, "__len__"), hf = special(x, "__length_hint__");
-  if (lf?.$pyfn !== true && hf?.$pyfn !== true) return;
+  const t: any = typeOf(x);
+  if (builtinSlot(t, "__len__") && builtinSlot(t, "__length_hint__")) return;
   let n: number | bigint | undefined;
-  if (lf !== undefined) {
+  if (special(x, "__len__") !== undefined) {
     try {
       n = len(x);
     } catch (e: any) {
       if (!isExc(e, T.TypeError)) throw e;
     }
   }
-  if (n === undefined && hf !== undefined) {
+  if (n === undefined) {
+    const hf = special(x, "__length_hint__");
+    if (hf === undefined) return;
     let v: any;
     try {
       v = hf(x);
@@ -1106,13 +1115,15 @@ export function lengthHint(x: any): void {
       throw e;
     }
     if (v === NotImplemented) return;
-    if (!isPyInt(v)) raise(T.TypeError, `__length_hint__ must be an integer, not ${typeName(v)}`);
-    const b = BigInt(v);
+    let b: bigint;
+    if (isPyInt(v)) b = BigInt(v);
+    else if (v instanceof PrimBox && typeOf(v).$mro.includes(T.int) && shimName(v, "int") === null) b = BigInt(v.$v);
+    else raise(T.TypeError, `__length_hint__ must be an integer, not ${typeName(v)}`);
     if (b > 9223372036854775807n || b < -9223372036854775808n) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
     if (b < 0n) raise(T.ValueError, "__length_hint__() should return >= 0");
     n = b;
   }
-  if (n !== undefined && BigInt(n) > 4294967295n) raise(T.MemoryError);
+  if (BigInt(n) > 4294967295n) raise(T.MemoryError);
 }
 
 const HASH_MOD = (1n << 61n) - 1n;
