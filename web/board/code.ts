@@ -16,7 +16,7 @@ export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed"
 /** A question's check, or a computed hint, as run (BoardCode.exclusive): its value, or why it has none. */
 export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean }
 /** What a Check is given to run (BoardCode.exclusive). */
-export interface CheckOps { evaluate: (code: string, answer: unknown, ms: number) => Promise<Evaluated>; refresh: (ms: number) => Promise<boolean> }
+export interface CheckOps { evaluate: (code: string, answer: unknown, ms: number, by?: number) => Promise<Evaluated>; refresh: (ms: number) => Promise<boolean> }
 
 /** Where a board's code engine comes from (design/engines.md): its notebook
  * module, the interpreter's worker, the reactive notebook's analyzer, and
@@ -542,11 +542,11 @@ export class BoardCode {
    * after each evaluation (the coordinator's rule for CORR-A19-1); each
    * step is bounded, so the queue is. */
   exclusive<T>(f: (ops: CheckOps) => Promise<T>): Promise<T> {
-    return this.queued(() => f({ evaluate: (code, answer, ms) => this.evaluateNow(code, answer, ms), refresh: (ms) => this.refreshNow(ms) }));
+    return this.queued(() => f({ evaluate: (code, answer, ms, by) => this.evaluateNow(code, answer, ms, by), refresh: (ms) => this.refreshNow(ms) }));
   }
-  private async evaluateNow(code: string, answer: unknown, ms: number): Promise<Evaluated> {
+  private async evaluateNow(code: string, answer: unknown, ms: number, by?: number): Promise<Evaluated> {
     if (!(await this.ready) || !this.kernel) return { ok: false, error: "the interpreter is not running" };
-    return this.kernel.evaluate(code, answer, this.mode, ms);
+    return this.kernel.evaluate(code, answer, this.mode, ms, by);
   }
   private async refreshNow(ms: number): Promise<boolean> {
     if (!(await this.ready)) return false;

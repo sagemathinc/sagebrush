@@ -195,12 +195,13 @@ export class WorkerKernel {
 
   /**
    * A board question's check, or a computed hint (src/notebook-session.ts
-   * `evaluate`): `code` run in a copy of the board's names with `answer`
-   * bound; resolves to its verdict ({ok, value | error, timedOut?}).  Within
-   * `ms` (else interrupted: out of time).  Not a run of the notebook's: not
-   * in the journal.
+   * `evaluate`): `code` run seeing the board's names, with `answer` bound;
+   * resolves to its verdict ({ok, value | error, timedOut?}).  Within `ms` of
+   * its start (else interrupted: out of time), and all of it, its wait to be
+   * taken up too, by `by` (an absolute Date.now deadline) if given, else
+   * that wait within 30 s.  Not a run of the notebook's: not in the journal.
    */
-  evaluate(code, answer, mode, ms) {
+  evaluate(code, answer, mode, ms, by) {
     return new Promise((resolve) => {
       if (!this.worker) return resolve({ ok: false, error: "the interpreter is not running" });
       const id = this.nextId++;
@@ -209,7 +210,12 @@ export class WorkerKernel {
       const nothing = () => {};
       this.pending.set(id, {
         // (its deadline from when it starts: not while the board's own code still runs before it)
-        start: () => { clearTimeout(waiting); if (ms > 0 && !timer) timer = setTimeout(() => { over = true; this.interrupt(); }, ms); },
+        start: () => {
+          clearTimeout(waiting);
+          // (within `ms` of its start, and by `by` if given)
+          const left = by === undefined ? ms : Math.min(ms, by - Date.now());
+          if (ms > 0 && !timer) timer = setTimeout(() => { over = true; this.interrupt(); }, Math.max(0, left));
+        },
         out: nothing, display: nothing, interact: nothing, clear: nothing,
         done: (_ms, x) => {
           if (over) return finish({ ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true });
@@ -218,8 +224,11 @@ export class WorkerKernel {
         stopped: () => finish(over ? { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true } : { ok: false, error: "the interpreter stopped" }),
       });
       this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" });
-      // (an interpreter that never takes it up: given up after evaluateStartMs, HARD-729-1)
-      waiting = setTimeout(() => { this.pending.delete(id); finish({ ok: false, error: "the interpreter did not take it up" }); }, evaluateStartMs());
+      // (an interpreter that never takes it up: given up after evaluateStartMs,
+      // or at `by`, an absolute deadline (Date.now) for the whole of it, the
+      // caller's remaining allowance, HARD-729-1)
+      const pickup = by === undefined ? evaluateStartMs() : Math.max(0, by - Date.now());
+      waiting = setTimeout(() => { this.pending.delete(id); finish({ ok: false, error: "the interpreter did not take it up" }); }, pickup);
     });
   }
 
