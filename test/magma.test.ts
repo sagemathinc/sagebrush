@@ -1858,3 +1858,36 @@ test("a square product of matrices not square is of a module of matrices, as Mag
     assert.ok(o.includes(m) && o.endsWith("end "), e + o);
   }
 });
+
+test("a power of an integer or rational matrix is admitted by the size of its entries before it computes (HARD-CA8-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (repeated squaring bounds the number of products, not their size:
+  // [2 0; 0 2]^(10^9) has entries of 10^9 bits; refused before any
+  // squaring, a negative power too; small powers as Magma's)
+  const t0 = Date.now();
+  const src = "M:=Matrix(Integers(),2,2,[2,0,0,2]); X:=M^(10^9);\nX:=M^(-10^9);\nN:=Matrix(Rationals(),3,3,[1/2,1,2,3,5/3,8,13,21,34]); X:=N^(10^7);\n" +
+    "M:=Matrix(Integers(),2,2,[1,1,1,0]); (M^100)[1][1]; (M^-3)[1][1]; Type(M^100);\nA:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(B^3); (B^3)[1][1];\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a power of a \d by \d matrix whose entries could have more than 2097152 bits \(8388608 in all\)/g) ?? []).length, 3, r.stdout);
+  assert.ok(r.stdout.endsWith("573147844013817084101\n-1\nAlgMatElt\nModMatRngElt\n110264\nend\n"), r.stdout);
+  assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
+});
+
+test("a negative power of an integer matrix needs a unit determinant and stays integral; a module of matrices has a zero but no one (CORR-CA8-1, CORR-CA8-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's; astra2 on ca8e1e20)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["A:=Matrix(Integers(),2,3,[1,0,0,0,1,0]); B:=A*Transpose(A); X:=B^-1; Type(X); X;", "M:=Matrix(Integers(),2,2,[1,1,0,1]); X:=M^-1; X; Type(X); Parent(X);", "M:=Matrix(Rationals(),2,2,[1,2,3,4]); M^-1;", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); S:=[B]; Remove(~S,1); Type(&+S); &+S;", "A:=Matrix(Rationals(),2,3,[1..6]); B:=A*Transpose(A); S:=[B]; Remove(~S,1); Type(&+S);"].join("\n"));
+  assert.equal(ok, "ModMatRngElt\n[1 0]\n[0 1]\n[ 1 -1]\n[ 0  1]\nAlgMatElt\nFull Matrix Algebra of degree 2 over Integer Ring\n[  -2    1]\n[ 3/2 -1/2]\nModMatRngElt\n[0 0]\n[0 0]\nModMatFldElt\nend\n", ok);
+  for (const [e, m] of [["A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); X:=B^-1;", "Runtime error in '^': Argument 1 is not invertible"],
+    ["M:=Matrix(Integers(),2,2,[2,0,0,1]); X:=M^-2;", "Runtime error in '^': Argument 1 is not invertible"],
+    ["M:=Matrix(Rationals(),2,2,[1,2,2,4]); X:=M^-1;", "Runtime error in '^': Argument 1 is not invertible"],
+    ["A:=Matrix(Rationals(),2,3,[1..6]); B:=A*Transpose(A); S:=[B]; Remove(~S,1); X:=&*S;", "Runtime error in '&*': Universe has no one element"]]) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + o);
+  }
+});

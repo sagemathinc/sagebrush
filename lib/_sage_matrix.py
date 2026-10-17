@@ -478,6 +478,11 @@ def _sqrt_content(e):
         return sa.sqrt(e)
 
 
+# (a power's entries and all of them together, in bits: HARD-CA8-1)
+_POW_ENTRY_BITS = 1 << 21
+_POW_TOTAL_BITS = 1 << 23
+
+
 class MatrixSpace_:
     """The space of m x n matrices over a ring.
 
@@ -1294,8 +1299,37 @@ class Matrix:
         # wrong precedence; the Sage preparser (and pyjs) make it a power
         raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
 
+    def _pow_admit(self, e):
+        """Refuse self ** e, over ZZ or QQ, before any squaring, when its
+        entries could have more than _POW_ENTRY_BITS bits, or all of them
+        together more than _POW_TOTAL_BITS: each entry of A^e has at most
+        |e| (b + log2 d + 1) bits, b the largest entry's (numerator's or
+        denominator's) and d the dimension; for e < 0, d times that for the
+        inverse's entries first (HARD-CA8-1: repeated squaring bounds the
+        number of products, not their size).  Finite fields and Z/mZ are
+        bounded by their modulus and not here."""
+        if e in (0, 1) or self._base not in (_sa().ZZ, _sa().QQ):
+            return
+        d = self.nrows()
+        b = 1
+        for r in self._rows:
+            for x in r:
+                try:
+                    q = _F(x)
+                except (TypeError, ValueError):
+                    return  # (not a rational entry: not bounded here)
+                b = max(b, abs(q.numerator).bit_length(), q.denominator.bit_length())
+        per = b + d.bit_length() + 1
+        if e < 0:
+            per *= d
+        bits = abs(e) * per
+        if bits > _POW_ENTRY_BITS or bits * d * d > _POW_TOTAL_BITS:
+            raise NotImplementedError("a power of a %d by %d matrix whose entries could have more than %d bits (%d in all)"
+                                      % (d, d, _POW_ENTRY_BITS, _POW_TOTAL_BITS))
+
     def __pow__(self, e):
         e = int(e)
+        self._pow_admit(e)
         if e < 0:
             return self.inverse() ** (-e)
         r = identity_matrix(self._base, self.nrows())
