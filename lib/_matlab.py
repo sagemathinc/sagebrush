@@ -517,6 +517,8 @@ def _arith_class(a, b, name):
             # (an integer combines only with its own class or with double: int8(3) + single(1.5)
             # is an error in MATLAB, though Octave computes it)
             raise _err("Integers can only be combined with integers of the same class, or scalar doubles.", "MATLAB:mixedClasses")
+        # (an integer with a double array is computed elementwise, as Octave does; MATLAB's page on
+        # integer arithmetic names only a scalar double, so a MATLAB-confirmed check may revisit it)
         return ca if ia else cb
     if ca == "single" or cb == "single":
         return "single"
