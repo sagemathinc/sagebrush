@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+import zlib
 
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
@@ -30,6 +31,14 @@ args = [a for a in sys.argv[1:] if not a.startswith("-")]
 verbose = "-v" in sys.argv
 names = args or sorted(d for d in os.listdir(here) if os.path.exists(os.path.join(here, d, "SOURCE.json")))
 sha = lambda b: hashlib.sha256(b).hexdigest()
+# (--fetch's ceilings, checked before the work they bound: the archive as
+# downloaded, and each pinned member, read only if a regular file)
+ARCHIVE_BYTES = 64 << 20
+MEMBER_BYTES = 16 << 20
+TAR_BYTES = 256 << 20
+TAR_MEMBERS = 20000
+# (a pinned test file is a plain name in upstream/: no directory, no dot-dot)
+FILE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\.py$")
 
 
 def run(cmd, env=None):
@@ -55,7 +64,11 @@ for name in names:
     # (the test files are the pinned ones, and only those)
     up = os.path.join(d, "upstream")
     have = sorted(f for f in os.listdir(up) if f != "__pycache__")
-    problems = []
+    problems = ["SOURCE.json pins %r, not a plain .py name" % f for f in src["files"] if not FILE_NAME.match(f)]
+    if problems:
+        print("%s: FAILED\n  %s" % (name, "\n  ".join(problems)))
+        bad = 1
+        continue
     if have != sorted(src["files"]):
         problems.append("upstream/ has %s, SOURCE.json pins %s" % (have, sorted(src["files"])))
     for f, h in src["files"].items():
@@ -64,14 +77,31 @@ for name in names:
             problems.append("upstream/%s is not the pinned file" % f)
     if "--fetch" in sys.argv:
         a = src["archive"]
-        data = urllib.request.urlopen(a["url"], timeout=60).read()
-        if sha(data) != a["sha256"]:
+        data = urllib.request.urlopen(a["url"], timeout=60).read(ARCHIVE_BYTES + 1)
+        if len(data) > ARCHIVE_BYTES:
+            problems.append("%s: past the %d bytes allowed" % (a["url"], ARCHIVE_BYTES))
+        elif sha(data) != a["sha256"]:
             problems.append("%s: SHA-256 %s, not the pinned %s" % (a["url"], sha(data), a["sha256"]))
         else:
-            t = tarfile.open(fileobj=io.BytesIO(data))
-            for f, h in src["files"].items():
-                m = t.extractfile(a["root"] + "/" + f)
-                if m is None or sha(m.read()) != h:
+            # (gunzipped here, to at most TAR_BYTES, then read as a plain tar)
+            z = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            tar = z.decompress(data, TAR_BYTES + 1)
+            if len(tar) > TAR_BYTES or z.unconsumed_tail:
+                problems.append("%s: past the %d bytes allowed uncompressed" % (a["url"], TAR_BYTES))
+                tar = None
+            t = tarfile.open(fileobj=io.BytesIO(tar), mode="r:") if tar is not None else None
+            if t is not None and len(t.getmembers()) > TAR_MEMBERS:
+                problems.append("%s: more than %d members" % (a["url"], TAR_MEMBERS))
+                t = None
+            for f, h in src["files"].items() if t is not None else ():
+                try:
+                    i = t.getmember(a["root"] + "/" + f)
+                except KeyError:
+                    i = None
+                # (a link is not followed: only a regular file of its own)
+                if i is None or not i.isfile() or i.size > MEMBER_BYTES:
+                    problems.append("%s/%s: not a regular file of at most %d bytes in the archive" % (a["root"], f, MEMBER_BYTES))
+                elif sha(t.extractfile(i).read(MEMBER_BYTES + 1)) != h:
                     problems.append("upstream/%s is not the archive's %s/%s" % (f, a["root"], f))
     pkgdir = os.path.join(root, "packages", "pypi-" + name.lower(), "py")
     env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0")

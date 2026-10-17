@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { crc32, deflateRawSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -61,6 +62,133 @@ test("pypi-import: each wheel that isn't one pinned, pure-Python, permissively l
   assert.match(derive(wheel("nolicense.whl", { "demo/__init__.py": "X = 1\n" })), /^ERROR .*no license file/);
   assert.match(derive(wheel("meta.whl", good, { metadata: "Metadata-Version: 2.1\nName: demo\nVersion: 9.9.9\n" })), /^ERROR .*METADATA is demo 9\.9\.9, not demo 1\.0\.0/);
   assert.match(derive(wheel("outside.whl", { ...good, "demo-1.0.0.dist-info/top_level.txt": "demo\n", "other.py": "Z = 3\n" })), /^ERROR .*other\.py is outside its top-level names \(demo\)/);
+});
+
+// (a zip made byte by byte, as an attacker could: each entry's name as
+// given, its data stored or deflated, and its declared size, CRC and local
+// header offset overridable; then the central directory and its end)
+type Entry = { name: string | Buffer; data: Buffer; method?: 0 | 8; usize?: number; crc?: number; local?: number };
+function rawZip(entries: Entry[], eocd: { count?: number; cdOffset?: number; cdSize?: number } = {}): Buffer {
+  const parts: Buffer[] = [], cd: Buffer[] = [];
+  let off = 0;
+  for (const e of entries) {
+    const name = Buffer.isBuffer(e.name) ? e.name : Buffer.from(e.name);
+    const method = e.method ?? 8, body = method === 8 ? deflateRawSync(e.data) : e.data;
+    const crc = e.crc ?? crc32(e.data), usize = e.usize ?? e.data.length;
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(method, 8);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(body.length, 18); lh.writeUInt32LE(usize, 22); lh.writeUInt16LE(name.length, 26);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(method, 10);
+    ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(body.length, 20); ch.writeUInt32LE(usize, 24); ch.writeUInt16LE(name.length, 28);
+    ch.writeUInt32LE(e.local ?? off, 42);
+    parts.push(lh, name, body);
+    cd.push(ch, name);
+    off += 30 + name.length + body.length;
+  }
+  const cdBuf = Buffer.concat(cd), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(eocd.count ?? entries.length, 8); end.writeUInt16LE(eocd.count ?? entries.length, 10);
+  end.writeUInt32LE(eocd.cdSize ?? cdBuf.length, 12); end.writeUInt32LE(eocd.cdOffset ?? off, 16);
+  return Buffer.concat([...parts, cdBuf, end]);
+}
+const script = pathToFileURL(join(repo, "scripts", "pypi-import.mjs")).href;
+// (JavaScript run against the importer's exports, its last value printed, or "ERROR " and the message)
+function importer(body: string): string {
+  const js = `import * as P from ${JSON.stringify(script)}; import { readFileSync } from "node:fs";
+try { console.log(JSON.stringify(await (async () => { ${body} })())); } catch (e) { console.log("ERROR " + e.message); }`;
+  return execFileSync(process.execPath, ["--input-type=module", "-e", js], { encoding: "utf8" }).trim();
+}
+let nzip = 0;
+function unzipOf(buf: Buffer, limits = ""): string {
+  const path = join(dir, `raw-${nzip++}.zip`);
+  writeFileSync(path, buf);
+  return importer(`const z = P.unzip(readFileSync(${JSON.stringify(path)})${limits ? `, { ...P.LIMITS, ${limits} }` : ""}); return [...z.keys()];`);
+}
+const py = (name: string, text = "X = 1\n"): Entry => ({ name, data: Buffer.from(text) });
+
+test("pypi-import: a zip entry's name must be a canonical relative path, or the archive is refused (HARD-PYPI-1)", () => {
+  assert.equal(unzipOf(rawZip([py("demo/__init__.py"), { name: "demo/", data: Buffer.alloc(0), method: 0 }])), JSON.stringify(["demo/__init__.py"]));
+  for (const [name, why] of [
+    ["demo/../../victim.py", /component/],
+    ["../victim.py", /component/],
+    ["demo/./x.py", /component/],
+    ["demo//x.py", /component/],
+    ["/etc/victim.py", /is absolute/],
+    ["C:/victim.py", /names a drive/],
+    ["demo\\..\\..\\victim.py", /has a backslash/],
+    [Buffer.from("demo/x.py\0.txt"), /control character/],
+    [Buffer.from([0x64, 0xff, 0x2e, 0x70, 0x79]), /not UTF-8/],
+    ["", /is empty/],
+  ] as const) assert.match(unzipOf(rawZip([py("demo/__init__.py"), py(name as any)])), new RegExp("^ERROR .*" + why.source), String(name));
+  // (and through derive, with a wheel Python's zipfile makes, as a build tool could)
+  const w = wheel("dotdot.whl", { "demo/__init__.py": "X = 1\n", "demo/../../victim.py": "import os\n", ...LIC });
+  assert.match(derive(w), /^ERROR .*"demo\/\.\.\/\.\.\/victim\.py" has an empty, "\." or "\.\." component/);
+});
+
+test("pypi-import: writing and checking a package stay under its directory, refusing a path out and a symbolic link (HARD-PYPI-1)", () => {
+  const top = mkdtempSync(join(tmpdir(), "sb-tree-")), pk = join(top, "packages");
+  mkdirSync(pk);
+  const m = `{ name: "@sagebrush/pypi-demo" }`;
+  // (a key that leaves the package: refused before anything is removed or written)
+  mkdirSync(join(pk, "pypi-demo"));
+  writeFileSync(join(pk, "pypi-demo", "known.json"), "{}");
+  for (const f of ["py/demo/../../victim.py", "../victim.py", "/tmp/victim.py"]) {
+    assert.match(importer(`P.writeTree(${JSON.stringify(pk)}, "pypi-demo", new Map([["py/demo/__init__.py", Buffer.from("X = 1")], [${JSON.stringify(f)}, Buffer.from("bad")]]), ${m}); return "written";`), /^ERROR /, f);
+    assert.match(importer(`return P.compareTree(${JSON.stringify(pk)}, "pypi-demo", new Map([[${JSON.stringify(f)}, Buffer.from("bad")]]), ${m});`), /^ERROR /, f);
+  }
+  assert.equal(existsSync(join(top, "victim.py")) || existsSync(join(pk, "victim.py")), false);
+  assert.equal(existsSync(join(pk, "pypi-demo", "known.json")), true);
+  for (const d of ["..", "../packages-x", "pypi-demo/../.."]) assert.match(importer(`P.writeTree(${JSON.stringify(pk)}, ${JSON.stringify(d)}, new Map(), ${m}); return "written";`), /^ERROR .*outside/, d);
+  // (the package's directory, or a directory in it, a symbolic link elsewhere)
+  const elsewhere = mkdtempSync(join(tmpdir(), "sb-elsewhere-"));
+  symlinkSync(elsewhere, join(pk, "pypi-link"));
+  assert.match(importer(`P.writeTree(${JSON.stringify(pk)}, "pypi-link", new Map([["py/x.py", Buffer.from("X")]]), ${m}); return "written";`), /^ERROR .*a symbolic link/);
+  assert.equal(existsSync(join(elsewhere, "py")), false);
+  mkdirSync(join(pk, "pypi-inner"));
+  symlinkSync(elsewhere, join(pk, "pypi-inner", "py"));
+  assert.match(importer(`P.writeTree(${JSON.stringify(pk)}, "pypi-inner", new Map([["py/x.py", Buffer.from("X")]]), ${m}); return "written";`), /^ERROR .*a symbolic link/);
+  assert.match(importer(`return P.compareTree(${JSON.stringify(pk)}, "pypi-inner", new Map(), ${m});`), /^ERROR .*a symbolic link/);
+  assert.equal(existsSync(join(elsewhere, "x.py")), false);
+  // (and a good tree is written, then found as written)
+  assert.equal(importer(`P.writeTree(${JSON.stringify(pk)}, "pypi-demo", new Map([["py/demo/__init__.py", Buffer.from("X = 1")]]), ${m}); return P.compareTree(${JSON.stringify(pk)}, "pypi-demo", new Map([["py/demo/__init__.py", Buffer.from("X = 1")]]), ${m});`), "[]");
+  assert.equal(existsSync(join(pk, "pypi-demo", "known.json")), true);
+});
+
+test("pypi-import: sizes and counts past fixed ceilings are refused before inflating, and bad records fail cleanly (HARD-PYPI-2)", () => {
+  const zeros = Buffer.alloc(2 << 20);
+  // (declared past the per-entry ceiling: refused from the directory alone)
+  assert.match(unzipOf(rawZip([{ name: "demo/big.py", data: Buffer.from("X"), usize: (16 << 20) + 1 }])), /^ERROR .*demo\/big\.py: 16777217 bytes uncompressed, past the 16777216 allowed/);
+  // (declared small, inflating to more: stopped at the declared size)
+  assert.match(unzipOf(rawZip([{ name: "demo/liar.py", data: Buffer.alloc(100000), usize: 10 }])), /^ERROR .*demo\/liar\.py: inflates past its declared size/);
+  // (a deflate bomb: 2 MiB of zeros in a few KB, past the ratio)
+  assert.match(unzipOf(rawZip([{ name: "demo/bomb.py", data: zeros }])), /^ERROR .*demo\/bomb\.py: compressed \d+ to 1, past the 100 allowed/);
+  // (in all, and how many: against smaller ceilings, the same checks)
+  assert.match(unzipOf(rawZip([py("demo/a.py", "A".repeat(600)), py("demo/b.py", "B".repeat(600))]), "totalBytes: 1000"), /^ERROR .*past the 1000 bytes allowed uncompressed in all/);
+  assert.match(unzipOf(rawZip([py("demo/a.py"), py("demo/b.py"), py("demo/c.py")]), "entries: 2"), /^ERROR .*3 entries, past the 2 allowed/);
+  assert.match(unzipOf(rawZip([py("demo/a.py")]), "wheelBytes: 50"), /^ERROR .*bytes, past the 50 allowed/);
+  // (truncated, or records pointing outside the archive)
+  const good = rawZip([py("demo/a.py"), py("demo/b.py")]);
+  assert.equal(unzipOf(good), JSON.stringify(["demo/a.py", "demo/b.py"]));
+  assert.match(unzipOf(good.subarray(0, good.length - 30)), /^ERROR bad zip archive/);
+  assert.match(unzipOf(good.subarray(0, 10)), /^ERROR bad zip archive: too short/);
+  assert.match(unzipOf(rawZip([py("demo/a.py")], { cdOffset: 1 << 30 })), /^ERROR .*central directory is outside the archive/);
+  assert.match(unzipOf(rawZip([py("demo/a.py")], { cdSize: 1 << 20 })), /^ERROR .*central directory is outside the archive/);
+  assert.match(unzipOf(rawZip([py("demo/a.py")], { count: 2 })), /^ERROR .*central directory entry 1 is truncated or missing/);
+  assert.match(unzipOf(rawZip([py("demo/a.py"), { ...py("demo/b.py"), local: 1 << 30 }])), /^ERROR .*demo\/b\.py: its local header is truncated or missing/);
+  assert.match(unzipOf(rawZip([py("demo/a.py"), { ...py("demo/b.py"), local: 0 }])), /^ERROR .*demo\/b\.py: its local header names another file/);
+  assert.match(unzipOf(rawZip([{ ...py("demo/a.py"), crc: 1 }])), /^ERROR .*demo\/a\.py: corrupt \(size or CRC\)/);
+  assert.match(unzipOf(rawZip([{ ...py("demo/a.py"), method: 0, usize: 3 }])), /^ERROR .*demo\/a\.py: stored, but 6 bytes for 3/);
+  assert.match(unzipOf(rawZip([py("demo/a.py"), py("demo/a.py")])), /^ERROR .*demo\/a\.py: twice in the archive/);
+});
+
+test("pypi-import: a download past its ceiling is refused as it streams, and before, if Content-Length says so (HARD-PYPI-2)", () => {
+  // (a stream that would never end: refused once past the ceiling, having read just past it)
+  assert.equal(importer(`let n = 0; const body = new ReadableStream({ pull(c) { n++; c.enqueue(new Uint8Array(1000)); } });
+    try { await P.boundedBody(new Response(body), 5000, "x"); return "read"; } catch (e) { return [e.message, n <= 8]; }`), JSON.stringify(["x: past the 5000 bytes allowed", true]));
+  assert.equal(importer(`let pulled = false; const body = new ReadableStream({ pull(c) { pulled = true; c.enqueue(new Uint8Array(10)); c.close(); } }, { highWaterMark: 0 });
+    try { await P.boundedBody(new Response(body, { headers: { "content-length": "999999" } }), 5000, "x"); return "read"; } catch (e) { return [e.message, pulled]; }`), JSON.stringify(["x: 999999 bytes, past the 5000 allowed", false]));
+  assert.equal(importer(`return (await P.boundedBody(new Response(new Uint8Array(5000)), 5000, "x")).length;`), "5000");
 });
 
 test("the committed curated packages are as their pinned wheels have them (scripts/pypi-import.mjs --check)", { skip: !process.env.SAGEBRUSH_PYPI_CHECK && "needs the network or a wheel cache: set SAGEBRUSH_PYPI_CHECK=1 (CI runs it as its own step)" }, () => {
