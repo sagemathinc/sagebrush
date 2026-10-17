@@ -63,9 +63,11 @@
       }
     ],
     "differs": [
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "It accepts some inputs Octave refuses: cumprod('abc') gives double 1x3 [97 9506 941094].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "prod",
       "cumsum"
@@ -99,9 +101,11 @@
       }
     ],
     "differs": [
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "It accepts some inputs Octave refuses: cumsum('abc') gives double 1x3 [97 195 294].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "sum",
       "cumprod",
@@ -133,7 +137,10 @@
     ],
     "differs": [
       "The 'ComparisonMethod' option is refused.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "max(A, B) with complex values is refused.",
+      "It refuses some inputs Octave accepts, e.g. max(1 + 2i, [3 2]).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -164,7 +171,9 @@
     "differs": [
       "The 'Weights' option is refused.",
       "'native' with a logical array is refused.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "It accepts some inputs Octave refuses: mean([1 2; 3 4], true) gives double 1x2 [2 3].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -182,7 +191,7 @@
     "kind": "function",
     "signature": "M = median(A)\nM = median(A, dim)\nM = median(A, vecdim)\nM = median(A, 'all')\nM = median(___, nanflag)",
     "summary": "The median of an array's elements: the middle value once sorted, or the mean of the two middle values.",
-    "doc": "By default a NaN makes the median NaN; `'omitnan'` leaves NaN elements out. The median of an integer class is in that class. `median([])` is NaN.",
+    "doc": "By default a NaN makes the median NaN; `'omitnan'` leaves NaN elements out. The median of an integer class is in that class. `median([])` is NaN. Logical input gives a logical median.",
     "examples": [
       {
         "code": "median([3 1 2 10])",
@@ -194,9 +203,12 @@
       }
     ],
     "differs": [
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "The median of logical data whose two middle values differ is refused, and char input is refused.",
+      "It accepts some inputs Octave refuses: median([]) gives double 1x1 NaN.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "mean",
       "mode"
@@ -228,7 +240,11 @@
     ],
     "differs": [
       "The 'ComparisonMethod' option is refused.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "min(A, B) with complex values is refused.",
+      "It refuses some inputs Octave accepts, e.g. min(1 + 2i, 3).",
+      "It accepts some inputs Octave refuses: min('abc', 3) gives double 1x3 [3 3 3].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -260,9 +276,13 @@
       }
     ],
     "differs": [
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "Char input is refused.",
+      "On some inputs its answer differs from Octave's: mode(zeros(1, 0)) gives double 1x1 NaN where Octave gives double 1x0 [].",
+      "It refuses some inputs Octave accepts, e.g. mode(1 + 2i).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "mean",
       "median",
@@ -325,8 +345,10 @@
     "differs": [
       "A weight vector w is refused.",
       "The second output, the mean ([S, M] = std(...)), is not supported.",
-      "Integer-class input is accepted (MATLAB refuses it) and computed in double.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "It refuses some inputs Octave accepts, e.g. std([2 4 4 4 5 5 7 9], '').",
+      "It accepts some inputs Octave refuses: std([2 4 4 4 5 5 7 9], true) gives double 1x1 2.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -391,8 +413,10 @@
     "differs": [
       "A weight vector w is refused.",
       "The second output, the mean, is not supported.",
-      "Integer-class input is accepted (MATLAB refuses it) and computed in double.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "It refuses some inputs Octave accepts, e.g. var([1 2 3 4], '').",
+      "It accepts some inputs Octave refuses: var([1 2 3 4], true) gives double 1x1 1.25.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [

@@ -4,7 +4,7 @@
     "kind": "function",
     "signature": "k = find(X)\nk = find(X, n)\nk = find(X, n, direction)\n[row, col] = find(___)\n[row, col, v] = find(___)",
     "summary": "The indices of the nonzero elements of an array: all of them, or the first or last n, as linear indices or rows and columns.",
-    "doc": "`direction` is `'first'` (the default) or `'last'`. A row vector gives a row of indices, any other array a column. `v` holds the nonzero values. No nonzero element gives an empty array.",
+    "doc": "`direction` is `'first'` (the default) or `'last'`. A row vector gives a row of indices, any other array a column. `v` holds the nonzero values. No nonzero element gives an empty array. A scalar zero gives [], as find's page says.",
     "examples": [
       {
         "code": "find([0 4 0 7])",

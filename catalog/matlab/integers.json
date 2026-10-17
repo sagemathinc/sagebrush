@@ -21,7 +21,9 @@
     ],
     "differs": [
       "Values of magnitude 2^53 or more are refused, including intmax('int64') and int64(Inf): Sagebrush's 64-bit integers are exact only below 2^53, so a value past it is not shown rounded.",
-      "Complex int64 values are refused."
+      "Complex int64 values are refused.",
+      "It refuses some inputs Octave accepts, e.g. int64(Inf).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [

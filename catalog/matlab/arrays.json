@@ -44,9 +44,11 @@
       }
     ],
     "differs": [
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "It accepts some inputs Octave refuses: eye([]) gives double 0x0 [].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "zeros",
       "diag"
@@ -93,7 +95,10 @@
     "differs": [
       "Integer-class endpoints (linspace(int8(0), int8(10), 3)) are refused rather than given a guessed class.",
       "Endpoints must be scalars: the vector form linspace([0 1], [1 2], n) is refused.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "Infinite or NaN endpoints are refused: linspace's page does not give the result.",
+      "It refuses some inputs Octave accepts, e.g. linspace(NaN, 1, 5).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -171,7 +176,9 @@
       }
     ],
     "differs": [
-      "A count of 0 (repmat([1 2], 0, 1)) is an error, where MATLAB gives an empty array."
+      "A count of 0 (repmat([1 2], 0, 1)) is an error, where MATLAB gives an empty array.",
+      "It accepts some inputs Octave refuses: repmat([1 2], 2, uint8(200)) gives double 2x400 [1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1 2 1....",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
