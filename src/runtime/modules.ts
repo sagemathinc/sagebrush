@@ -2,7 +2,7 @@
 
 import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
+import { T, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
@@ -376,7 +376,7 @@ newBuiltinModule("sys", (m) => {
   fn(m, "getrecursionlimit", () => limit);
   fn(m, "setrecursionlimit", (n: any) => ((limit = Number(n)), null));
   fn(m, "exit", (code: any = undefined) => {
-    throw code === undefined ? T.SystemExit() : T.SystemExit(code);
+    throw markRaised(code === undefined ? T.SystemExit() : T.SystemExit(code));
   });
   fn(m, "intern", (s: string) => s);
   fn(m, "audit", (..._a: any[]) => null);
@@ -1146,9 +1146,9 @@ function chdir(p: string) {
 newBuiltinModule("_fs", (m) => {
   const fs = require("fs");
   const oserr = (e: any, path: string): never => {
-    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]);
+    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
-    throw callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : String(e.message), path]);
+    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : String(e.message), path]));
   };
   fn(m, "read", (path: string) => {
     try {
@@ -1185,9 +1185,9 @@ newBuiltinModule("os", (m) => {
   const fs = require("fs");
   const nodeOs = require("os");
   const oserr = (e: any, path: any): never => {
-    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]);
+    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EEXIST" ? T.FileExistsError : e.code === "EACCES" || e.code === "EPERM" ? T.PermissionError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
-    throw callObj(cls, [e.errno ? -e.errno : 0, String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]);
+    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]));
   };
   const wrap = (name: string, f: (...a: any[]) => any) =>
     fn(m, name, (...a: any[]) => {
