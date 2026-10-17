@@ -626,6 +626,8 @@ export function formatError(d: any, o: { reader?: string; remedy?: string } = {}
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
+// (the "spring" layout: how far apart linked items' edges are drawn to, spring.ts `length`)
+const SPRING_LENGTH = GAP * 1.5;
 // (a group's size as a person made it: a positive number of units, at most a large board's)
 const groupSide = (v: unknown) => { const n = num(v); return n !== undefined && n > 0 && n <= 100000 ? n : undefined; };
 /** A group's padding, and its title's height (its members' origin is below them). */
@@ -1034,7 +1036,7 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
   } else if (kind === "spring" && nodes.length) {
     // (web/graph/spring.ts, the board's seed: the same board, the same
     // places, on every runtime; past its caps, null: laid out as a graph)
-    const p = springLayout(nodes.map((n) => ({ id: n.id, w: n.w, h: n.h })), links.map(([a, b]) => [a, b] as [string, string]), { seed, gap: GAP });
+    const p = springLayout(nodes.map((n) => ({ id: n.id, w: n.w, h: n.h })), links.map(([a, b]) => [a, b] as [string, string]), { seed, gap: GAP, length: SPRING_LENGTH });
     for (const [id, q] of p ?? graph(nodes, links, dir)) out.set(id, q);
   } else {
     for (const [id, p] of graph(nodes, links, dir)) out.set(id, p);
