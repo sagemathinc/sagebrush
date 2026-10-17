@@ -49,6 +49,10 @@ Copyright (c) 2001 Python Software Foundation. See
   `collections.abc`, as CPython's does, and its `ChainMap`, `UserDict`,
   `UserList` and `UserString` are CPython 3.14's (`UserString.maketrans` a
   `staticmethod`).
+- `lib/_string.py`: CPython 3.14's `_string` module, a C module there
+  (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
+  `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
+  Python, for `lib/string/__init__.py` (CPython 3.14's, unchanged).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
 - `lib/textwrap.py`: CPython 3.14's `Lib/textwrap.py`, changed: `wrap()`
