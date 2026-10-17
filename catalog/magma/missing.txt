@@ -1,6 +1,5 @@
 aInvariants
 AssignNames
-CharacteristicPolynomial
 ClassGroup
 ClassNumber
 Codomain
@@ -10,7 +9,6 @@ CuspForms
 CuspidalSubspace
 Decomposition
 Denominator
-Determinant
 Dimension
 DimensionCuspFormsGamma0
 DimensionNewCuspFormsGamma0
@@ -43,7 +41,6 @@ IsUnit
 IsZero
 jInvariant
 LLL
-Matrix
 MaximalOrder
 Maximum
 MinimalPolynomial
@@ -71,7 +68,6 @@ qExpansion
 QuadraticField
 Quotrem
 Random
-Rank
 RationalField
 Rationals
 Regulator
@@ -88,7 +84,6 @@ SumOfDivisors
 TorsionSubgroup
 Trace
 TraceOfFrobenius
-Transpose
 Type
 UnitGroup
 UnitRank

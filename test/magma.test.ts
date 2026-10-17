@@ -996,16 +996,217 @@ test("the intrinsics agents reached for refuse as Magma does, and a missing one 
   assert.doesNotMatch(out, /Error: |Traceback/);
   assert.match(out, /\nend\n$/);
   // Sagebrush's own refusals, in words
-  const own = run("Integers(1);\nSolution(Matrix(Rationals(), 2, 2, [1, 2, 2, 4]), Vector(Rationals(), [1, 2]));\nP<x> := PolynomialRing(GF(5));\n" +
+  const own = run("Integers(1);\nSolution(Matrix(Rationals(), 2, 2, [1, 2, 2, 4]), Vector(Rationals(), [1, 2]));\n" +
     "G := Graph<3 | [ {1, 2} ]>;\nLegendreSymbol(3, 7);\n\"end\";\n");
   // (long messages wrap at 80 columns: compared unwrapped)
   assert.ok(own.replace(/\s+/g, " ").includes("Integers(1), the zero ring, is not supported yet"), own);
   assert.ok(own.replace(/\s+/g, " ").includes("Solution of a system with more than one solution is not supported yet"), own);
   // (a missing function's refusal names what to use instead: agents read refusals)
-  assert.ok(own.replace(/\s+/g, " ").includes("PolynomialRing over a FldFin (not the integers or the rationals) is not supported yet; instead: Sage mode, R.<x> = GF(5)[]"), own);
   assert.ok(own.replace(/\s+/g, " ").includes("Graph< ... > is not supported yet; instead: Sage mode's Graph"), own);
   assert.ok(own.replace(/\s+/g, " ").includes("'LegendreSymbol' is a Magma intrinsic not implemented in Sagebrush; instead: Modexp(n, (m - 1) div 2, m)"), own);
   assert.match(own, /\nend\n$/);
+});
+
+test("polynomials over a finite field refuse what Magma refuses, in its words, and what Sagebrush doesn't do yet, in words", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [statement, where, what Magma says] (checked against Magma 2.18)
+  const cases = [
+    ["x + y;", "'+'", "Arguments are not compatible\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    ["f div 0;", "'div'", "Division by zero"],
+    ["x/0;", "'/'", "Argument 2 is not a unit"],
+    ["Roots(R!0);", "'Roots'", "Argument 1 is not non-zero"],
+    ["Factorization(R!0);", "'Factorization'", "Argument 1 is not non-zero"],
+    ["x + GF(5)!1;", "'+'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldFinElt"],
+    ["x^-1;", "'^'", "Argument 2 (-1) should be >= 0"],
+    ["#R;", "'#'", "Cardinality is infinite or not feasibly computable"],
+    ["x + 0.5;", "'+'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldReElt"],
+    ["x^(1/2);", "'^'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    ["x + 1/7;", "'+'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldRatElt"],
+    ["f(3);", "'@'", "Bad argument types\nArgument types given: RngIntElt, RngUPolElt[FldFin]"],
+    ["Evaluate(f, GF(5)!1);", "'Evaluate'", "Incompatible rings"],
+    ["Evaluate(f, 1/2);", "'Evaluate'", "Incompatible rings"],
+    ["LeadingCoefficient(R!0);", "'LeadingCoefficient'", "Argument 1 is not non-zero"],
+    ["R.2;", "'.'", "Value for name index (2) should be in the range [1..1]"],
+    ["1/2 in R;", "'in'", "Bad argument types"],
+    ["x eq GF(5)!1;", "'eq'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldFinElt"],
+    ["2^x;", "'^'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    // (every argument's type checked, nested ones too: CORR-53E-1, -2, -4, -5)
+    ["Coefficient(x, 1/1);", "'Coefficient'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldRatElt"],
+    ["LeadingCoefficient(R);", "'LeadingCoefficient'", "Bad argument types\nArgument types given: RngUPol[FldFin]"],
+    ["IsZero(R);", "'IsZero'", "Bad argument types\nArgument types given: RngUPol[FldFin]"],
+    ["Coefficients(R);", "'Coefficients'", "Bad argument types\nArgument types given: RngUPol[FldFin]"],
+    ["#x;", "'#'", "Bad argument types\nArgument types given: RngUPolElt[FldFin]"],
+    ["Gcd(<x>);", "'Gcd'", "Bad argument types\nArgument types given: Tup"],
+    ["PolynomialRing(GF(5)) eq PolynomialRing(GF(7));", "'eq'", "Arguments are not compatible\nArgument types given: RngUPol[FldFin], RngUPol[FldFin]"],
+    ["PolynomialRing(GF(5)) eq PolynomialRing(GF(25));", "'eq'", "Arguments are not compatible\nArgument types given: RngUPol[FldFin], RngUPol[FldFin]"],
+    ["x eq y;", "'eq'", "Arguments are not compatible\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    ["[x, 1/2];", "[ ... ]", "No valid universe containing all elements"],
+    // (AssignNames: a procedure of one name, checked: CORR-53E-1)
+    ["AssignNames(~R, [\"t\", \"u\"]);", "'AssignNames'", "Argument 2 must have length 1"],
+    ["AssignNames(~R, []);", "'AssignNames'", "Argument 2 must have length 1"],
+    ["AssignNames(~R, [1]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[RngIntElt]"],
+    ["AssignNames(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
+    // (whatever the container, whichever argument is a reference, however
+    // the procedure is reached: checked as the call is made, CORR-53E-1)
+    ["AssignNames(~R, <\"t\">);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, Tup"],
+    ["AssignNames(~R, 1);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, RngIntElt"],
+    ["AssignNames(~R, {\"t\"});", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SetEnum[MonStgElt]"],
+    ["names := [\"t\"]; AssignNames(R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt] ~"],
+    ["AssignNames(~R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt] ~"],
+    ["an := AssignNames; an(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
+    ["(AssignNames)(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
+  ];
+  // what Sagebrush doesn't do yet: refused in words, never computed wrongly
+  const own = [
+    ["x lt x^2;", "ordering of polynomials and matrices is not supported yet"],
+    ["x/(x+1);", "dividing polynomials over a finite field (rational functions) is not supported yet"],
+    ["x + z;", "arithmetic of a polynomial over a finite field and a RngUPolElt is not supported yet"],
+    ["Discriminant(f);", "Discriminant of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["Resultant(f, x);", "Resultant of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["{x};", "a set of polynomials over a finite field (or of their rings) is not supported yet"],
+    ["T<u> := PolynomialRing(GF(49)); x + u;", "arithmetic of polynomials over two finite fields of one characteristic is not supported yet"],
+    ["IsSquare([x]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["Sort([x, x^2]);", "Sort of a polynomial over a finite field (or its ring) is not supported yet"],
+    // (wherever they are in the arguments: CORR-53E-2)
+    ["IsSquare([[], [x]]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["IsSquare([<1>, <x>]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["IsSquare([[[[[[[[[[x]]]]]]]]]]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["RF := recformat<v>; r := rec<RF | v := x>; IsSquare(r);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["Gcd([[], [x]]);", "Gcd of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["IsZero([x]);", "IsZero of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["d := x; for i in [1..40] do d := [d]; end for; IsSquare(d);", "IsSquare of a value too large or too deep for Sagebrush to check"],
+    ["Evaluate(x, d);", "Evaluate of a value too large or too deep for Sagebrush to check"],
+    ["Gcd(x, d);", "Gcd of a value too large or too deep for Sagebrush to check"],
+  ];
+  const src = "R<x> := PolynomialRing(GF(7)); S<y> := PolynomialRing(GF(5)); Z<z> := PolynomialRing(Integers()); f := x^2 + 1;\n" +
+    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nType(names); x;\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (the refused AssignNames left x's name, and names a sequence)
+  assert.match(out, /\nSeqEnum\nx\nend\n$/);
+  assert.doesNotMatch(out, /_FFUnseen/);
+  // (long messages wrap at 80 columns: compared unwrapped)
+  const flat = out.replace(/\s+/g, " ");
+  for (const [stmt, where, said] of cases)
+    assert.ok(flat.includes(`Runtime error in ${where}: ${said.replace(/\s+/g, " ")}`), `${stmt}\n${out}`);
+  for (const [stmt, said] of own)
+    assert.ok(flat.includes(said), `${stmt}\n${out}`);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  assert.match(out, /\nend\n$/);
+});
+
+test("matrices over a finite field refuse what Magma refuses, in its words, and what Sagebrush doesn't do yet, in words", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [statement, where, what Magma says] (checked against Magma 2.18)
+  const cases = [
+    ["A + B;", "'+'", "Bad argument types\nArgument types given: AlgMatElt[FldFin], ModMatFldElt[FldFin]"],
+    ["B * A;", "'*'", "Arguments have incompatible degrees"],
+    ["S^-1;", "'^'", "Argument 1 is not invertible"],
+    ["Matrix(F, 2, 2, [1, 2, 3, 1/5]);", "'Matrix'", "Cannot coerce sequence element 4 into the coefficient ring"],
+    ["Matrix(F, 2, 2, [1, 2, 3]);", "'Matrix'", "Sequence should have length 4"],
+    ["Matrix(F, [[1, 2], [3]]);", "'Matrix'", "Element 2 of sequence does not have length 2"],
+    ["A + Matrix(GF(7), 2, 2, [1, 2, 3, 4]);", "'+'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], AlgMatElt[FldFin]"],
+    ["A * GF(7)!1;", "'*'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], FldFinElt"],
+    ["A * 0.5;", "'*'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], FldReElt"],
+    ["A^(1/2);", "'^'", "Bad argument types\nArgument types given: AlgMatElt[FldFin], AlgMatElt[FldFin]"],
+    ["A eq B;", "'eq'", "Arguments have incompatible degrees"],
+    ["A[1,2] := 1/5;", ":=", "RHS cannot be coerced into the coefficient ring"],
+    ["A[3,1] := 1;", ":=", "Matrix row index is not in the range [1 .. 2]"],
+    ["A[1,3] := 1;", ":=", "Matrix column index is not in the range [1 .. 2]"],
+    ["A[<1,2>] := 1;", ":=", "Bad matrix row index type"],
+    ["A[3,1];", "'[]'", "Index 1 (3) should be in the range [1 .. 2]"],
+    ["Determinant(B);", "'Determinant'", "Argument 1 is not square"],
+    // (every argument's type checked, nested ones too; collections take one
+    // universe: CORR-53E-1 .. -5)
+    ["#A[1];", "'#'", "Bad argument types\nArgument types given: ModTupFldElt[FldFin]"],
+    ["#A;", "'#'", "Bad argument types\nArgument types given: AlgMatElt[FldFin]"],
+    ["Reverse(A[1]);", "'Reverse'", "Bad argument types\nArgument types given: ModTupFldElt[FldFin]"],
+    ["[A, 1/2];", "[ ... ]", "No valid universe containing all elements"],
+    ["[A, Matrix(GF(7), 2, 2, [1, 2, 3, 4])];", "[ ... ]", "No valid universe containing all elements"],
+    ["[A, Matrix(F, 1, 2, [1, 2])];", "[ ... ]", "No valid universe containing all elements"],
+    ["A eq Matrix(GF(7), 2, 2, [1, 2, 3, 4]);", "'eq'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], AlgMatElt[FldFin]"],
+    ["Parent(A) eq Parent(Matrix(GF(7), 2, 2, [1, 2, 3, 4]));", "'eq'", "Arguments are not compatible\nArgument types given: AlgMat[FldFin], AlgMat[FldFin]"],
+  ];
+  const own = [
+    ["A + Matrix(Integers(), 2, 2, [1, 2, 3, 4]);", "arithmetic of a matrix over a finite field and a AlgMatElt is not supported yet"],
+    ["Matrix(F, 0, 0, []);", "a matrix with no rows or no columns is not supported yet"],
+    ["ElementaryDivisors(A);", "ElementaryDivisors of a matrix or vector over a finite field is not supported yet"],
+    ["EchelonForm(A);", "EchelonForm of a matrix or vector over a finite field is not supported yet"],
+    ["{A};", "a set of matrices or vectors over a finite field is not supported yet"],
+    ["A lt A;", "ordering of polynomials and matrices is not supported yet"],
+    ["Matrix(GF(1031, 2), 1, 2, [1, 2]);", "Matrix over a finite field of more than 1048576 elements, not a prime field, is not supported yet"],
+    ["A[1] * B[1];", "this arithmetic of vectors over a finite field is not supported yet"],
+    ["Determinant(A[1]);", "Determinant of a matrix or vector over a finite field is not supported yet"],
+    ["Trace(A[1]);", "Trace of a matrix or vector over a finite field is not supported yet"],
+    ["Gcd([A]);", "Gcd of a matrix or vector over a finite field is not supported yet"],
+    ["[Parent(A) | 1, 2];", "a collection over a matrix or vector space over a finite field is not supported yet"],
+    ["<A, 1>;", "printing a tuple or record holding a matrix over a finite field is not supported yet"],
+    ["RF := recformat<v>; r := rec<RF | v := A>; r;", "printing a tuple or record holding a matrix over a finite field is not supported yet"],
+    ["IsSquare([[], [A]]);", "IsSquare of a matrix or vector over a finite field is not supported yet"],
+    ["IsZero([A]);", "IsZero of a matrix or vector over a finite field is not supported yet"],
+  ];
+  const src = "F := GF(5); A := Matrix(F, 2, 2, [1, 2, 3, 4]); B := Matrix(F, 2, 3, [1, 2, 3, 4, 5, 6]); S := Matrix(F, 2, 2, [1, 2, 2, 4]);\n" +
+    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nA;\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  const flat = out.replace(/\s+/g, " ");
+  for (const [stmt, where, said] of cases)
+    assert.ok(flat.includes(`Runtime error in ${where}: ${said.replace(/\s+/g, " ")}`), `${stmt}\n${out}`);
+  for (const [stmt, said] of own)
+    assert.ok(flat.includes(said), `${stmt}\n${out}`);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  // (the refused writes left A as it was)
+  assert.match(out, /\n\[1 2\]\n\[3 4\]\nend\n$/);
+});
+
+test("matrix arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..40000]; Matrix(F, [r : i in [1..40000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+    "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
+  assert.equal((out.match(/a product of matrices over a finite field of more than 2000000 entry products is not supported yet/g) ?? []).length, 2, r.stdout);
+  for (const what of ["Determinant", "Rank", "a power", "CharacteristicPolynomial"])
+    assert.ok(out.includes(`${what} of matrices over a finite field of more than 2000000 entry products is not supported yet`), what + r.stdout);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  assert.match(r.stdout, /\n150\n1\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
+    "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
+    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^40000 + x, 39999);\n" +
+    // (each step within the allowance, the fold past it: HARD-53E-1)
+    "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
+    "Degree(x^40000); #Factorization(x^200 + x + 1);\n" +
+    // (the guard's walk: one budget for a call's arguments together, and one
+    // for the run, HARD-F42-1)
+    "S := [[\"a\" : i in [1..30]] : j in [1..10000]]; IsEmpty(S); Gcd(S, S, S, S);\n" +
+    "T := [[\"a\" : i in [1..1000]] : j in [1..40]]; for k in [1..300] do b := IsEmpty(T); end for;\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
+  assert.match(out, /Factorization of a polynomial over a finite field of degree more than 1000 is not supported yet/);
+  assert.match(out, /Factorization of a polynomial of degree 70 over this finite field is not supported yet/);
+  assert.match(out, /IsIrreducible of a polynomial of degree 70 over this finite field is not supported yet/);
+  for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
+    assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  assert.match(r.stdout, /\n40000\n\d+\nfalse\n/);
+  assert.ok(out.includes("Gcd of a value too large or too deep for Sagebrush to check"), r.stdout);
+  assert.ok(out.includes("IsEmpty: Sagebrush's checks of arguments for polynomials and matrices over finite fields reached their limit for this run"), r.stdout);
+  assert.match(r.stdout, /\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
@@ -1071,7 +1272,6 @@ test("a matrix's entry A[i, j] is read and assigned as Magma does, also of a mat
     ["Matrix column index is not in the range [1 .. 2]", 1], ["Illegal number of indices", 1], ["Bad matrix column index type", 1]] as const)
     assert.equal(out.split("Runtime error in :=: " + said + "\n").length - 1, n, said + out);
   assert.ok(out.includes("[1 2]\n[3 4]\n"), out);  // (unchanged by the refused writes)
-  assert.ok(out.replace(/\s+/g, " ").includes("Matrix over a finite field is not supported yet; instead: Sage mode"), out);
   // (an entry is one number: it printed the whole matrix before)
   assert.match(out, /\n-5\nend\n$/);
 });

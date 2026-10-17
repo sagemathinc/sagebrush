@@ -1,4 +1,6 @@
 {
+ "lib/_magma.py: _ffm_new :: constructor :: _sffmat.FFMatrix(F.K, rows)": 1,
+ "lib/_magma.py: _ffmat_op :: constructor :: _sffmat.FFMatrix(F.K, [[c if i == j else F.K(0) for j in range(n)] for i in range(n)])": 1,
  "lib/_sage_expr.py: integrate :: constructor :: Vector(integrate(e, *args, **kw) for e in f)": 1,
  "lib/_sage_ffmat.py: FFMatrix.__add__ :: call :: zip(A._rows, o._rows)": 1,
  "lib/_sage_ffmat.py: FFMatrix.__add__ :: call :: zip(r, s)": 1,

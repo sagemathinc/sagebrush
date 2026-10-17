@@ -1,0 +1,23 @@
+// matrices over finite fields: printing, entries, arithmetic, linear algebra
+F := GF(5); A := Matrix(F, 2, 2, [1, 2, 3, 4]); A; Type(A); Parent(A);
+Determinant(A); Rank(A); A^-1; A*A; A + A; 3*A; A^2; Transpose(A); A^0; A^-2; A - A; -A;
+A[1,2]; A[2]; Type(A[1]); Parent(A[1]); Type(A[1,1]); A[1][2];
+B := Matrix(F, 2, 3, [1, 2, 3, 4, 5, 6]); B; Parent(B); Type(B); B[2]; Rank(B); Transpose(B);
+A*B; 2*A; A*2; A*F!2; A/2; A + 1; A - 1; 1 - A; A + A^-1;
+A eq A; A eq 2*A; A ne A; A eq 2; Matrix(F, 2, 2, [2, 0, 0, 2]) eq 2;
+Nrows(B); Ncols(B); NumberOfRows(A); NumberOfColumns(B); Trace(A);
+CharacteristicPolynomial(A); Parent(CharacteristicPolynomial(A));
+A[1] * A; A[1] + A[2]; A[1] - A[2]; 3 * A[1]; A[2][1]; A[1] eq A[1];
+Matrix(F, 2, 2, [F!1, 2, 3, 4]); Matrix(F, 2, 2, [1/2, 2, 3, 4]); Matrix(F, [[1, 2], [3, 4]]);
+A[1,2] := 7; A; A[2][1] := 1/2; A; G := A; A[1,1] := 0; G; A;
+C := Matrix(GF(7), 3, 3, [1,2,3,4,5,6,7,8,9]); C; Determinant(C); Rank(C);
+Matrix(GF(2), 2, 2, [1, 0, 1, 1])^-1;
+K<w> := GF(4); M := Matrix(K, 2, 2, [w, 1, 0, w^2]); M; Determinant(M); M^-1;
+L<u> := GF(9); N := Matrix(L, 3, 3, [u, 1, 0, u^2, 2, u^7, 0, 0, 1]); N; Determinant(N); N^-1; N*N; Trace(N);
+Matrix(GF(7), 2, 2, [1,2,3,4]) * Matrix(GF(7), 2, 2, [0,1,1,0]);
+D := Matrix(GF(101), 2, 2, [100, 3, 57, 2]); D; D^-1; Matrix(GF(101), 2, 2, [1, 2, 3, 4]); D[1];
+Matrix(GF(11), 1, 2, [10, 1]); Matrix(L, 1, 2, [1, 2]); Matrix(L, 1, 2, [1, u])[1];
+A := Matrix(GF(5), 2, 2, [1, 2, 3, 4]); [A, A]; [A, GF(5)!2]; [[A]]; Type([A, 1][2]); [A, 1][2];
+V := Matrix(GF(5), 1, 2, [1, 2]); [V, V]; [A[1], A[2]];
+P := PolynomialRing(GF(5)); CharacteristicPolynomial(A); R<t> := PolynomialRing(GF(5)); CharacteristicPolynomial(A); Parent(CharacteristicPolynomial(A)) eq R;
+"end";
