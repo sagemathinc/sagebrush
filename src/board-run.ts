@@ -247,6 +247,9 @@ export function otherLanguage(doc: BoardDoc): string | null {
  * (lib/_sb_check.py), or why there is none. */
 export type Evaluate = (code: string, answer: unknown, ms: number) => Promise<{ ok: boolean; value?: unknown; error?: string; timedOut: boolean }>;
 
+// (how long an item may wait for the interpreter to begin it, beyond its own time)
+const START_GRACE_MS = 60_000;
+
 export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate: Evaluate, run: BoardRun) => Promise<void>): Promise<BoardRun> {
   const mode = doc.mode ?? "python";
   const other = otherLanguage(doc);
@@ -294,22 +297,33 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
     const send = (msg: any, on: (m: any) => void, limit = Infinity) => new Promise<{ ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }>((resolve) => {
       if (dead || !worker) return resolve({ ms: 0, error: true, timedOut: false, dead: true });
       const id = nextId++;
-      let timedOut = false, timer: any = null, kill: any = null;
+      let timedOut = false, timer: any = null, kill: any = null, started = false;
       sinks.set(id, (m) => {
+        // (its time from its start, as the interpreter says it begins: not
+        // while the interpreter itself starts, which a loaded machine makes
+        // slow for the first item)
+        if (m.start && limit < Infinity && limit > 0 && !started) { started = true; clearTimeout(timer); timer = setTimeout(over, limit); }
         if (!m.done && !m.skipped) return on(m);
         sinks.delete(id);
         clearTimeout(timer);
         clearTimeout(kill);
         resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       });
-      if (limit < Infinity && limit > 0) timer = setTimeout(() => {
-        // over its time: interrupted (KeyboardInterrupt), and if it does not stop, the interpreter stopped
+      // over its time: interrupted (KeyboardInterrupt), and if it does not stop, the interpreter stopped
+      const over = () => {
         timedOut = true;
         if (intr) { Atomics.store(intr, 1, id); Atomics.store(intr, 0, 1); }
         kill = setTimeout(() => { dead = `the interpreter was stopped: ${label(msg.cell)} did not stop when interrupted`; worker?.terminate(); }, 2000);
-      }, limit);
+      };
+      // (until it starts, its time and START_GRACE_MS more: an interpreter that never begins it is still stopped)
+      // (never past the longest wait a timer can have, which --timeout may already be: past it a timer fires at once)
+      if (limit < Infinity && limit > 0) timer = setTimeout(over, Math.min(limit + START_GRACE_MS, 2 ** 31 - 1));
       worker.postMessage({ id, code: msg.code, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg.opts });
     });
+    // (the interpreter warmed up first, untimed but for START_GRACE_MS: its
+    // parser, Sage's one-time load, its first imports; so no item's time
+    // pays for them, which a loaded machine makes long)
+    if (worker && !dead) await send({ cell: "warm-up", code: "", opts: {} }, () => {}, START_GRACE_MS);
     const timedOut = new Set<string>();
     const syntax = new Map<string, string>(); // (syntax errors, as the interpreter says them)
     const states = new Map<string, CellState>(); // (each item's last state, as the scheduler says it)
