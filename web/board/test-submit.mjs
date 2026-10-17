@@ -31,8 +31,9 @@ const BOARD = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Tr
   { id: "p1", title: "Questions", nodes: [
     { id: "q1", kind: "ask", title: "Which group acts transitively?", text: "On $\\{1, 2, 3\\}$:", input: "radio", options: ["$S_3$", "$\\langle (1\\,2) \\rangle$"] },
     { id: "q2", kind: "ask", title: "Why?", text: "Say in your own words what **transitive** means here.", input: "check", options: ["Every point can reach every other"], required: true,
-      decide: [{ name: "confuses-transitive-with-two-transitive", about: "Transitive asks only that one $g$ takes $x$ to $y$, not that pairs go to pairs.", next: "n1" }, { name: "says-every-point-reaches-every-other" }] },
+      decide: [{ name: "confuses-transitive-with-two-transitive", about: "Transitive asks only that one $g$ takes $x$ to $y$, not that pairs go to pairs.", next: "n1" }, { name: "says-every-point-reaches-every-other", next: "s1" }] },
     { id: "n1", text: "**Transitive vs 2-transitive.** $G$ acts transitively when for all $x, y$ some $g$ has $g x = y$." },
+    { id: "s1", kind: "sticker", emoji: "⭐", x: 900, y: 40 },
   ] },
   { id: "p2", title: "Notes", nodes: [{ id: "n2", text: "Nothing to answer here." }] },
 ] });
@@ -203,12 +204,18 @@ try {
   const d1 = decideRequest(posted, (await sent("decide"))[0]);
   check(d1.ok && d1.request.item === "q2" && d1.request.answer.includes("$g \\in G$"), "and it passes the host's check, the reader's words its answer" + (d1.ok ? "" : ": " + d1.message));
   check(!!(await until(() => frame(`${fb}?.textContent.includes("Your words suggest") && !!${fb}.querySelector('.katex') && !!${fb}.querySelector('a.board-ref[href="#n1"]')`))), "an option: its about shown, typeset, with its next");
+  // (the link says where it goes: the item's title or first line, never its id)
+  const linkText = () => frame(`${fb}.querySelector('a.board-ref').textContent`);
+  check(await linkText() === "→ Transitive vs 2-transitive. G acts transitively when for…", "its next link says the item's first line, its Markdown and math signs dropped, cut short: " + JSON.stringify(await linkText()));
   check(!!(await until(() => frame(`(() => { const card = ${fb}.closest(".board-item"); return card.scrollHeight <= card.clientHeight + 1; })()`), 10000)), "and its card as tall as what it now shows");
   // (nothing over it: the tour's caption at the bottom never covers what the card now shows)
   const uncovered = (sel) => `(() => { const el = ${sel}; if (!el) return false; const r = el.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.width > 0 && r.bottom <= innerHeight && !!at && (at === el || el.contains(at)); })()`;
   check(!!(await until(() => frame(uncovered(`${fb}.querySelector('a.board-ref')`)), 10000)), "its next link is visible, nothing over it (elementFromPoint at its center)");
   check(!!(await until(() => frame(uncovered(`document.querySelector('[data-ask="q2"] .board-ask-req')`)), 10000)), "and so is the question's \"required\"");
   await shot("submit-5-decided.png");
+  await top(`mode.decide = "says-every-point-reaches-every-other"`);
+  await frame(`${fb}.querySelector('button').click()`);
+  check(!!(await until(() => frame(`${fb}?.querySelector('a.board-ref[href="#s1"]')?.textContent === "→ Go to the next step"`))), "a next item with no title or text: \"Go to the next step\", not its id");
   await top(`mode.decide = null`);
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => frame(`${fb}?.textContent.includes("didn't match any of the ideas")`))), "none: said honestly, and that submitting still reaches the board's maker");

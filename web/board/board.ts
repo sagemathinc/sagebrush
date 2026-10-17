@@ -664,7 +664,7 @@ export class Board {
         const l = document.createElement("a");
         l.className = "board-ref";
         l.href = "#" + o.next;
-        l.textContent = "→ " + (this.linkLabel?.("#" + o.next) ?? o.next);
+        l.textContent = "→ " + (this.linkLabel?.("#" + o.next) ?? "Go to the next step");
         box.append(l);
       }
     }
@@ -726,7 +726,7 @@ export class Board {
       const l = document.createElement("a");
       l.className = "board-ref";
       l.href = "#" + to;
-      l.textContent = "→ " + (this.linkLabel?.("#" + to) ?? to);
+      l.textContent = "→ " + (this.linkLabel?.("#" + to) ?? "Go to the next step");
       box.append(l);
     }
     return box;

@@ -921,10 +921,20 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // `#item-id`, `#page-id/item-id`) in a note's ref, its text, the caption:
   // a click goes there, a move of the reader's (round 0's 15); one naming
   // nothing does nothing (the address is the tour's)
+  // (an item's link says what it goes to: its title, or its text's first
+  // line (its math's source, its Markdown dropped), cut short; never its id)
+  const NEXT_STEP = "Go to the next step", LABEL_MAX = 60;
+  const firstLine = (text: string) => {
+    const line = text.split("\n").find((l) => l.trim()) ?? "";
+    const plain = plainTitle(line.replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|`|^\s*(?:#+|>|[-+*])\s+/g, "")).replace(/\s+/g, " ").trim();
+    if (plain.length <= LABEL_MAX) return plain;
+    const cut = plain.slice(0, LABEL_MAX), at = cut.lastIndexOf(" ");
+    return (at > LABEL_MAX / 2 ? cut.slice(0, at) : cut) + "…";
+  };
   board.linkLabel = (ref) => {
     const l = doc && boardLink(doc, pageIx, ref);
     if (!l) return null;
-    if (l.item) { const it = (function find(ns: DocNode[]): DocNode | undefined { for (const x of ns) { if (x.id === l.item) return x; if (x.kind === "group") { const y = find(x.children); if (y) return y; } } })(pageView(doc!, l.page).nodes ?? []); return plainTitle((it as { title?: string })?.title ?? "") || l.item; }
+    if (l.item) { const it = (function find(ns: DocNode[]): DocNode | undefined { for (const x of ns) { if (x.id === l.item) return x; if (x.kind === "group") { const y = find(x.children); if (y) return y; } } })(pageView(doc!, l.page).nodes ?? []); const n = it as { title?: string; text?: string } | undefined; return plainTitle(n?.title ?? "") || firstLine(n?.text ?? "") || NEXT_STEP; }
     return pageOf(doc!, l.page).title || (pageCount(doc!) > 1 ? `Page ${l.page + 1}` : doc!.title || "the start");
   };
   on(root, "click", (e: MouseEvent) => {
