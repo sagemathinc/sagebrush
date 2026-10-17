@@ -504,3 +504,5 @@ try:
     coro.send(None)
 except StopIteration as e:
     print(e.value)
+import array
+print(seq(array.array("i", [1, 2])), seq(array.array("b")), keys(collections.ChainMap({"x": 0, "y": 9})))
