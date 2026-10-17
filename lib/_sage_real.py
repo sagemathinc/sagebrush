@@ -1812,6 +1812,60 @@ class RealNumberMP:
     def __truediv__(self, o): return self._binop(o, "/")
     def __rtruediv__(self, o): return self._binop(o, "/", True)
 
+    # ---- %, // and divmod, as Sage: % is the remainder to the nearest
+    # quotient in the coarser field (_mp_remainder); // is refused; divmod
+    # is (x / y, 0), its zero in the left operand's field.  Against a
+    # double, a finer field is the double's (a Python float's floor
+    # remainder and quotient; RDF has no %, its // is its division)
+    def _divlike(self, o, op, rev):
+        from _sage_rdf import RealDoubleElement
+        if self._R._prec > 53 and type(o) is float:
+            a, b = (o, float(self)) if rev else (float(self), o)
+            return a % b if op == "%" else a // b if op == "//" else divmod(a, b)
+        if self._R._prec > 53 and isinstance(o, RealDoubleElement):
+            if op == "%":
+                raise TypeError("unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'")
+            q = _sa().RDF(self) / o
+            return q if op == "//" else (q, self._R(0))
+        if type(o) in (float, bool) and op != "%":
+            # (a Python float or bool: refused by type, as Sage's; an int
+            # is an Integer here)
+            t = "'%s'" % type(o).__name__
+            raise TypeError("unsupported operand type(s) for //: %s and %s" % ((t, "'sage.rings.real_mpfr.RealNumber'") if rev else ("'sage.rings.real_mpfr.RealNumber'", t)))
+        b, R = self._other(o)
+        if b is None:
+            return NotImplemented
+        if op == "//":
+            raise TypeError("unsupported operand parent(s) for //: '%s' and '%s'" % (R, R))
+        a = self if self._R is R else _to_real(R, self)
+        if b._R is not R:
+            b = _to_real(R, b)
+        if rev:
+            a, b = b, a
+        rr = R._prec == 53 and R._rnd == "RNDN" and not R._rr_internal
+        if op == "%":
+            r = _mp_remainder(a, b, R)
+            return _sa().RR(r) if rr else r
+        if not b._special and not b._m:
+            raise ZeroDivisionError("")
+        q = self._binop(o, "/", rev)
+        # (the zero in the left operand's field: an RR number's, or this
+        # one's; an integer or rational's, the quotient's)
+        if not rev:
+            z = self._R(0)
+        elif isinstance(o, float):
+            z = _sa().RR(0)
+        else:
+            z = q.parent()(0)
+        return q, z
+
+    def __mod__(self, o): return self._divlike(o, "%", False)
+    def __rmod__(self, o): return self._divlike(o, "%", True)
+    def __floordiv__(self, o): return self._divlike(o, "//", False)
+    def __rfloordiv__(self, o): return self._divlike(o, "//", True)
+    def __divmod__(self, o): return self._divlike(o, "divmod", False)
+    def __rdivmod__(self, o): return self._divlike(o, "divmod", True)
+
     def __neg__(self):
         if self._special:
             return RealNumberMP(self._R, 0, 0, {"+inf": "-inf", "-inf": "+inf"}.get(self._special, "nan"))
@@ -2765,6 +2819,60 @@ def _mp_integral(m, e):
     if e >= 0:
         return True
     return -e <= abs(m).bit_length() and m & ((1 << -e) - 1) == 0
+
+
+def _remainder_dyadic(ma, ea, mb, eb):
+    """The remainder of a = ma 2^ea by b = mb 2^eb (both nonzero) to the
+    nearest quotient, ties to an even one (IEEE's and MPFR's remainder, as
+    Sage's %), exactly: (m, e), m possibly 0, with the sign of a.  The
+    quotient's bits are never formed: a far larger a is reduced modulo 2|b|
+    with a modular power of 2, and a far smaller a is its own remainder."""
+    sa = -1 if ma < 0 else 1
+    A, B = abs(ma), abs(mb)
+    if ea + A.bit_length() < eb + B.bit_length() - 1:
+        # |a| < |b| / 2
+        return ma, ea
+    e = min(ea, eb)
+    # (eb - e is at most A's bit length + 1 here: Y is bounded)
+    Y = B << (eb - e)
+    if ea > e:
+        R2 = A % (2 * Y) * pow(2, ea - e, 2 * Y) % (2 * Y)
+    else:
+        R2 = A % (2 * Y)
+    # R2 = q Y + r with the quotient's parity q, r in [0, Y)
+    odd = R2 >= Y
+    r = R2 - Y if odd else R2
+    if 2 * r > Y or (2 * r == Y and odd):
+        r -= Y
+    return sa * r, e
+
+
+def _mp_remainder(a, b, R):
+    """a % b for numbers a, b of the field R, as Sage: the remainder to the
+    nearest quotient (exact, so in R); NaN for an infinite a, a zero b or a
+    NaN, a itself for an infinite b or a zero a."""
+    if a._special == "nan" or b._special == "nan" or a._special or (not b._special and not b._m):
+        return RealNumberMP(R, 0, 0, "nan")
+    if b._special or not a._m:
+        return a
+    m, e = _remainder_dyadic(a._m, a._e, b._m, b._e)
+    if not m:
+        return RealNumberMP(R, 0, 0)
+    return RealNumberMP(R, *_round_int(m, e, R._prec, R._rnd))
+
+
+def _double_remainder(a, b):
+    """a % b for doubles, as Sage's RR: _mp_remainder's rules, a zero
+    remainder with the sign of a."""
+    inf = float("inf")
+    if a != a or b != b or a in (inf, -inf) or b == 0:
+        return float("nan")
+    if b in (inf, -inf) or a == 0:
+        return a
+    na, da = a.as_integer_ratio()
+    nb, db = b.as_integer_ratio()
+    m, e = _remainder_dyadic(na, 1 - da.bit_length(), nb, 1 - db.bit_length())
+    return math.ldexp(float(m), e) if m else math.copysign(0.0, a)
 
 
 def _cpow(x, y):

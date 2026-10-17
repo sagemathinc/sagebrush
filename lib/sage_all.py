@@ -1207,6 +1207,10 @@ def _real_kind(x):
 def _real_qq(x):
     """The exact rational value of a real number x, as Sage converts it."""
     import math
+    mp = getattr(x, "_mp", None)
+    if mp is not None:
+        # (an RR element past the doubles: its exact value, not its float)
+        return QQ(mp.exact_rational())
     if isinstance(x, float) and not math.isfinite(x):
         raise ValueError("cannot convert NaN or infinity to rational number")
     try:
