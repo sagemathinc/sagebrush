@@ -1824,3 +1824,20 @@ test("&+ and &* of an empty collection: its universe's zero and one, Magma's err
     assert.ok(bad.includes(m), m + bad);
   assert.equal(bad.split("Illegal null sequence").length - 1, 2, bad);
 });
+
+test("a multiset operation whose coerced elements would coincide is refused, not miscounted (WA-028)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (Magma 2.18: GF(5)'s emptied {* *} join {* 1, 6, 11 *} is {* 1 *}, a
+  // count Sagebrush doesn't model: refused; without such a coincidence
+  // the counts are Magma's; astra2's WA-028)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  for (const e of ["F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,6,11*}; R:=S join T;", "F:=GF(5); T:={*1,6,11*}; R:={*F|*} join T;",
+    "F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,6,11*}; R:=S sdiff T;", "F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,6,11*}; R:=T diff S;"]) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes("a multiset operation where different elements coincide in the universe is not supported yet") && o.endsWith("end "), e + o);
+  }
+  const ok = run(["F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,1*}; R:=S join T; #R;", "P<x>:=PolynomialRing(Rationals()); K<c>:=NumberField(x^2-5); S:={*c*}; Exclude(~S,c); T:={*1,1*}; R:=S join T; #R;",
+    "R:={*1,1*} join {*1*}; #R;"].join("\n"));
+  assert.equal(ok, "2\n2\n3\nend\n", ok);
+});
