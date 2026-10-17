@@ -805,8 +805,49 @@ for (const w of ["UserWarning", "DeprecationWarning", "PendingDeprecationWarning
 
 const isInt = Number.isInteger;
 
+// A str as int(), float() and complex() read it, CPython's
+// _PyUnicode_TransformDecimalAndSpaceToASCII: each non-ASCII Unicode decimal
+// digit (Nd) its ASCII digit, each non-ASCII whitespace character
+// (str.isspace) a space, anything else non-ASCII "?", which no literal has.
+// (Then only ASCII whitespace is stripped, as CPython's Py_ISSPACE: not
+// \x1c-\x1f, nor U+FEFF.)
+const NON_ASCII_SPACE = /[\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
+// (Unicode 16's decimal digits, CPython 3.14's: the engine's, but for those
+// a later Unicode added, Unicode 17's U+11DE0..U+11DE9)
+const ND = /^(?![\u{11DE0}-\u{11DE9}])\p{Nd}$/u;
+const ndValues = new Map<number, number>();
+// (a digit's value is its place in its block: Unicode's decimal digits come
+// in runs of whole sets of ten, 0 to 9)
+function ndValue(ch: string): number {
+  if (!ND.test(ch)) return -1;
+  const c = ch.codePointAt(0)!;
+  let v = ndValues.get(c);
+  if (v === undefined) {
+    let z = c;
+    while (ND.test(String.fromCodePoint(z - 1))) z--;
+    v = (c - z) % 10;
+    ndValues.set(c, v);
+  }
+  return v;
+}
+export function asciiNumeral(s: string): string {
+  if (!/[^\x00-\x7f]/.test(s)) return s;
+  let out = "", n = 0;
+  for (const ch of s) {
+    if ((++n & 65535) === 0) O.pollInterrupt();
+    if (ch.charCodeAt(0) < 128) out += ch;
+    else if (NON_ASCII_SPACE.test(ch)) out += " ";
+    else {
+      const d = ndValue(ch);
+      out += d < 0 ? "?" : String.fromCharCode(48 + d);
+    }
+  }
+  return out;
+}
+export const stripAscii = (s: string): string => s.replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, "");
+
 function parseIntLiteral(s: string, base: number): number | bigint | undefined {
-  let t = s.trim();
+  let t = stripAscii(s);
   let neg = false;
   if (t[0] === "+" || t[0] === "-") {
     neg = t[0] === "-";
@@ -814,16 +855,22 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
   }
   const prefixes: Record<string, number> = { "0x": 16, "0o": 8, "0b": 2 };
   const pre = t.slice(0, 2).toLowerCase();
+  let prefixed = false;
   if (base === 0) {
     if (pre in prefixes) {
       base = prefixes[pre];
       t = t.slice(2);
+      prefixed = true;
     } else {
       base = 10;
       if (/^0+[1-9_]/.test(t)) return undefined;
     }
-  } else if (pre in prefixes && prefixes[pre] === base) t = t.slice(2);
-  if (t.startsWith("_")) t = t.slice(1);
+  } else if (pre in prefixes && prefixes[pre] === base) {
+    t = t.slice(2);
+    prefixed = true;
+  }
+  // (an underscore may follow a base prefix, as in 0x_1f: not start a number)
+  if (prefixed && t.startsWith("_")) t = t.slice(1);
   const pow2 = (base & (base - 1)) === 0;
   // (Sagebrush's own ceiling, before the text is scanned or copied: even
   // with an underscore between every two digits it has too many)
@@ -858,7 +905,7 @@ export function intCall(x: any = 0, base: any = undefined): any {
     if (typeof x !== "string" && !(x instanceof PyBytes)) raise(T.TypeError, "int() can't convert non-string with explicit base");
     const b = Number(base);
     if (b !== 0 && (b < 2 || b > 36)) raise(T.ValueError, "int() base must be >= 2 and <= 36, or 0");
-    const s = typeof x === "string" ? x : Buffer.from(x.a.subarray(0, x.n)).toString("latin1");
+    const s = typeof x === "string" ? asciiNumeral(x) : Buffer.from(x.a.subarray(0, x.n)).toString("latin1");
     const v = parseIntLiteral(s, b);
     // (the repr cut at 200 characters, as CPython's %.200R)
     if (v === undefined) raise(T.ValueError, `invalid literal for int() with base ${b}: ${repr(x).slice(0, 200)}`);
@@ -945,7 +992,7 @@ getset(int, "numerator", plainInt);
 getset(int, "denominator", () => 1);
 
 function parseFloatLiteral(s: string): number | undefined {
-  const t = s.trim().toLowerCase().replace(/(?<=\d)_(?=\d)/g, "");
+  const t = stripAscii(asciiNumeral(s)).toLowerCase().replace(/(?<=\d)_(?=\d)/g, "");
   if (/^[+-]?(inf|infinity)$/.test(t)) return t[0] === "-" ? -Infinity : Infinity;
   if (/^[+-]?nan$/.test(t)) return NaN;
   if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/.test(t)) return undefined;
@@ -1301,11 +1348,12 @@ method(S, "title", (s: string) => {
 });
 const allMatch = (re: RegExp) => (s: string) => s.length > 0 && [...s].every((c) => re.test(c));
 method(S, "isdigit", allMatch(/\p{Nd}|[²³¹]/u));
-method(S, "isdecimal", allMatch(/\p{Nd}/u));
+method(S, "isdecimal", allMatch(ND));
 method(S, "isnumeric", allMatch(/\p{N}/u));
 method(S, "isalpha", allMatch(/\p{L}/u));
 method(S, "isalnum", allMatch(/[\p{L}\p{N}]/u));
-method(S, "isspace", allMatch(/[\s\x1c-\x1f\x85]/));
+// (CPython's whitespace exactly: JS's \s has U+FEFF too, which isn't)
+method(S, "isspace", allMatch(/[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/));
 method(S, "isascii", (s: string) => /^[\x00-\x7f]*$/.test(s));
 method(S, "isupper", (s: string) => /\p{Lu}/u.test(s) && !/\p{Ll}/u.test(s));
 method(S, "islower", (s: string) => /\p{Ll}/u.test(s) && !/\p{Lu}/u.test(s));
