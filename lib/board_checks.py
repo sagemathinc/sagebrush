@@ -515,7 +515,7 @@ def _by_intervals(answer, expected, qr, qb, prec):
         return _right()
     if ad[0] > thi:
         mid = (ad[0] + ad[1]) / 2
-        return _wrong("off by about %s, more than the tolerance" % _sci_exact(mid))
+        return _wrong("off by about %s, more than the tolerance" % _sci_exact(mid, rounded=True))
     return None
 
 
@@ -584,10 +584,11 @@ def _infinite(v):
     return str(v) in ("+Infinity", "-Infinity", "Infinity")
 
 
-def _sci_exact(q, root=False):
+def _sci_exact(q, root=False, rounded=False):
     """a non-negative Fraction (its square root, with root) for a reason, to
-    3 significant digits (truncated), however small or large: integer
-    arithmetic, no underflow to 0, no overflow."""
+    3 significant digits (truncated, or with rounded the nearest, half up),
+    however small or large: integer arithmetic, no underflow to 0, no
+    overflow."""
     n, d = q.numerator, q.denominator
     if n == 0:
         return "$0$"
@@ -606,6 +607,14 @@ def _sci_exact(q, root=False):
             k -= 1
         else:
             break
+    if rounded and not root:
+        # (the remainder past the third digit: half or more rounds up)
+        den = d if k >= 0 else d * 10 ** (-k)
+        r = (n * 10 ** k if k >= 0 else n) - v * den
+        if 2 * r >= den:
+            v += 1
+            if v == 1000:
+                v, k = 100, k - 1
     exp = 2 - k
     digits = str(v).rstrip("0") or "0"
     mant = digits[0] + ("." + digits[1:] if len(digits) > 1 else "")
