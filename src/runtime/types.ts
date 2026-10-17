@@ -2008,7 +2008,9 @@ method(S, "__len__", (s: string) => SP.cpLen(s));
 method(S, "__contains__", (s: string, x: any) => O.contains(s, x));
 method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
 method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? SP.glue(s, x) : NotImplemented));
-method(S, "__mul__", (s: string, x: any) => (O.isPyInt(x) ? SP.repeatChecked(s, Math.max(0, Number(x))) : NotImplemented));
+// (a builtin sequence's own repeat takes an index, else a TypeError, never
+// NotImplemented, as CPython's wrapper of its sq_repeat)
+method(S, "__mul__", (s: string, x: any) => SP.repeatChecked(s, O.ssizeCount(x)));
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
@@ -2229,7 +2231,8 @@ const seqOps = (cls: PyType, isTuple: boolean) => {
   method(cls, "__contains__", (a: any[], x: any) => O.arrContains(a, x));
   method(cls, "__iter__", (a: any[]) => new O.ListIter(a));
   method(cls, "__repr__", (a: any[]) => seqRepr(a));
-  method(cls, "__mul__", (a: any[], n: any) => (O.isPyInt(n) ? O.mul(isTuple ? tuple(a.slice()) : a.slice(), n) : NotImplemented));
+  method(cls, "__mul__", (a: any[], n: any) => O.repeatArray(a, O.ssizeCount(n)));
+  method(cls, "__rmul__", (a: any[], n: any) => O.repeatArray(a, O.ssizeCount(n)));
 };
 seqOps(list, false);
 seqOps(tupleType, true);
@@ -2241,10 +2244,7 @@ method(list, "__iadd__", (a: any[], b: any) => {
 });
 // (in place, as CPython's list_inplace_repeat: the count through __index__,
 // so an alias sees it; [1] *= Index() made a new list)
-method(list, "__imul__", (a: any[], n: any) => {
-  if (lookupType(typeOf(n), "__index__") === undefined) raise(T.TypeError, `can't multiply sequence by non-int of type '${typeName(n)}'`);
-  return O.listInplaceRepeat(a, n);
-});
+method(list, "__imul__", (a: any[], n: any) => O.listInplaceRepeat(a, n, true));
 method(list, "__add__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? [...a, ...b] : NotImplemented));
 list.$dict.set("__hash__", null);
 
@@ -2726,6 +2726,8 @@ for (const bt of [bytesType, bytearray]) {
   method(bt, "decode", (b: PyBytes, encoding: any = "utf-8", errors: any = "strict") => decode(b, encoding, errors), sig(["self", "encoding", "errors"]));
   method(bt, "hex", (b: PyBytes, sep: any = undefined, bps: any = undefined) => bytesHex(b.a.subarray(0, b.n), sep, bps));
   method(bt, "__len__", (b: PyBytes) => b.n);
+  method(bt, "__mul__", (b: PyBytes, n: any) => O.repeatBytes(b, O.ssizeCount(n)));
+  method(bt, "__rmul__", (b: PyBytes, n: any) => O.repeatBytes(b, O.ssizeCount(n)));
   method(bt, "__iter__", (b: PyBytes) => new O.BytesIter(b));
   method(bt, "__getitem__", (b: PyBytes, k: any) => O.getitem(b, k));
   method(bt, "__repr__", (b: PyBytes) => repr(b));
@@ -3327,7 +3329,7 @@ getset(object, "__dict__", (o) => {
   method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) <= 0 : NotImplemented));
   method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) > 0 : NotImplemented));
   method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) >= 0 : NotImplemented));
-  method(S, "__rmul__", (s: string, x: any) => (O.isPyInt(unbox(x)) ? SP.repeatChecked(s, Math.max(0, Number(unbox(x)))) : NotImplemented));
+  method(S, "__rmul__", (s: string, x: any) => SP.repeatChecked(s, O.ssizeCount(unbox(x))));
 }
 
 // int, float, str: the subclass instance boxes the value.
