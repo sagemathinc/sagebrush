@@ -996,7 +996,9 @@ def _spring_pos(G, vs, iterations):
     import _graph_spring as sp
     ids = {v: "v%d" % i for i, v in enumerate(vs)}
     nodes = [(ids[v], 20, 20, None) for v in vs]
-    edges = [(ids[u], ids[v]) for u, v, _ in G.edges(sort=False) if u != v]
+    # (the edges in plot's order, sorted: the canvas view lays them out
+    # again in that order, and the layout depends on it)
+    edges = [(ids[u], ids[v]) for u, v, _ in G.edges(sort=True) if u != v]
     out = sp.spring_layout(nodes, edges, 0, iterations)
     if out is None:
         raise NotImplementedError("a spring layout of a graph this large is not supported in Sagebrush "
@@ -1013,6 +1015,11 @@ def _bounded(items, budget, what):
     if len(out) > budget:
         raise NotImplementedError("Graph.plot: %s of more than %d items is not supported in Sagebrush" % (what, budget))
     return out
+
+
+def _sa_plot():
+    import sage_plot
+    return sage_plot
 
 
 def _plot_graph(G, options):
@@ -1038,11 +1045,13 @@ def _plot_graph(G, options):
         raise NotImplementedError("Graph.plot layout %r is not supported in Sagebrush (only 'spring' and 'circular')" % (layout,))
     if pos is None and layout is None and G._pos is not None and all(v in G._pos for v in vs):
         pos = G._pos
+    pos_from_spring = False
     if pos is None or layout is not None:
         if layout == "circular":
             pos = _circle(vs)
         else:
             pos = _spring_pos(G, vs, options.get("iterations"))
+            pos_from_spring = True
     missing = [v for v in vs if v not in pos]
     if missing:
         raise ValueError("vertex %r has no position" % (missing[0],))
@@ -1175,7 +1184,54 @@ def _plot_graph(G, options):
     if options.get("graph_border"):
         g._set({"frame": True})
     g._set(gopts)
-    return g
+    # (the same picture as data, for the notebook's canvas view of it,
+    # web/graph/view.ts: vertices by index, positions with y up)
+    from _graphics import to_color
+    colour = {}
+    for c, p in groups:
+        for v in p:
+            colour[v] = to_color(c, "#fec7b8")
+    at = {v: i for i, v in enumerate(vs)}
+    label_of = (lambda v: labels.get(v) if isinstance(labels, dict) else labels(v) if callable(labels) else str(v)) if labels else (lambda v: None)
+    data = {
+        "format": 1,
+        "directed": bool(G._directed),
+        "nodes": [{"label": None if label_of(v) is None else str(label_of(v)), "x": pos[v][0], "y": pos[v][1],
+                   "color": colour.get(v, "#fec7b8")} for v in vs],
+        "edges": [{"s": at[u], "t": at[v], "color": to_color(colour_of.get(i, edge_color), "black"),
+                   "label": str(l) if options.get("edge_labels") else None} for i, (u, v, l) in enumerate(edges)],
+        "radius": r, "thickness": float(thickness), "dash": style, "loop": loop, "offset": off,
+        "label_background": to_color(background) if background else None,
+        "spring": pos_from_spring,
+        "range": [mm["xmin"] - pad, mm["xmax"] + pad, mm["ymin"] - pad, mm["ymax"] + pad],
+    }
+    return GraphPlot(g, data)
+
+
+GRAPH_MIME = "application/vnd.sagebrush.graph+json"
+
+
+class GraphPlot(_sa_plot().Graphics):
+    """A graph's picture (Graph.plot): Graphics, and the graph as data, which
+    the notebook draws on a canvas whose vertices can be dragged and laid
+    out again (web/graph/view.ts); the SVG stays for saving and agents.
+    Added to other graphics, it is plain Graphics.
+
+    EXAMPLES::
+
+        sage: P = graphs.CycleGraph(3).plot(); type(P).__name__, len(P._graph["nodes"])
+        ('GraphPlot', 3)
+    """
+
+    def __init__(self, g, data):
+        super().__init__(g._primitives)
+        self._options = dict(g._options)
+        self._graph = data
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        import json
+        return {GRAPH_MIME: json.dumps(self._graph, separators=(",", ":")), "image/svg+xml": self._svg(),
+                "text/plain": repr(self)}
 
 
 class Graph(GenericGraph):
