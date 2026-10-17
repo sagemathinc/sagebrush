@@ -29,20 +29,27 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
     for (const c of m[1]) flags |= { a: A, i: I, L, m: M, s: S, u: U, x: X }[c]!;
     p = p.slice(m[0].length);
   }
-  const ascii = (flags & A) !== 0 || bytes;
+  // (ASCII matching, \w \d \s \b and IGNORECASE: the pattern's, or a
+  // scoped group's own, (?a:...), as the flags in force say)
+  const asc = () => (cur & A) !== 0 || bytes;
   const verbose = (flags & X) !== 0;
   let out = "";
   let i = 0;
   let inClass = false;
   let classStart = false;
-  const W = ascii ? "a-zA-Z0-9_" : "\\p{L}\\p{N}_";
-  const D = ascii ? "0-9" : "\\p{Nd}";
-  const SP = ascii ? " \\t\\n\\r\\f\\v" : SPACE;
+  const Wf = () => (asc() ? "a-zA-Z0-9_" : "\\p{L}\\p{N}_");
+  const Df = () => (asc() ? "0-9" : "\\p{Nd}");
+  const SPf = () => (asc() ? " \\t\\n\\r\\f\\v" : SPACE);
   // The flags in force (a scoped group's own, inside it), and the class
   // being read: where it starts in out, whether it is negated, and the sets
   // of the \S \W \D in it (JS cannot negate a set inside a class)
   let cur = flags;
   const scopes: number[] = [];
+  // (whether JS's i is in force here: the regex's flag, then each scoped
+  // group's (?i:...) or (?-i:...); an ASCII scope writes cases out instead,
+  // so in one under IGNORECASE it is off)
+  let jsI = (flags & I) !== 0 && !((flags & A) !== 0 || bytes);
+  const jsScopes: boolean[] = [];
   let classAt = 0, classNeg = false;
   let negSets: string[] = [];
   // A literal character under IGNORECASE (JS's i flag folds by Unicode, so
@@ -50,7 +57,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
   // both cases, CORR-BD8-1), escaped or not (CORR-BD8-2)
   const lit = (ch: string, src: string): string => {
     if (cur & I) {
-      if (ascii) {
+      if (asc()) {
         if (/^[A-Za-z]$/.test(ch)) return `[${ch.toLowerCase()}${ch.toUpperCase()}]`;
       } else if (ch === "I" || ch === "i" || ch === "\u0130" || ch === "\u0131") return `[${DOTTED_I}]`;
     }
@@ -60,9 +67,9 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
     const pos = out.slice(classAt + (classNeg ? 2 : 1));
     out = out.slice(0, classAt);
     const has = (ch: string) =>
-      (pos !== "" && new RegExp(`[${pos}]`, "u" + (cur & I && !ascii ? "i" : "")).test(ch)) || negSets.some((n) => !new RegExp(`[${n}]`, "u").test(ch));
+      (pos !== "" && new RegExp(`[${pos}]`, "u" + (cur & I && !asc() ? "i" : "")).test(ch)) || negSets.some((n) => !new RegExp(`[${n}]`, "u").test(ch));
     let body = pos;
-    if (cur & I && ascii) {
+    if (cur & I && asc()) {
       // (each ASCII letter the class holds, in both cases)
       for (let k = 0; k < 26; k++) {
         const lo = String.fromCharCode(97 + k), up = String.fromCharCode(65 + k);
@@ -104,34 +111,34 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
           out += inClass ? "" : "$";
           continue;
         case "w":
-          out += inClass ? W : `[${W}]`;
+          out += inClass ? Wf() : `[${Wf()}]`;
           continue;
         case "W":
-          if (inClass) negSets.push(W);
-          else out += `[^${W}]`;
+          if (inClass) negSets.push(Wf());
+          else out += `[^${Wf()}]`;
           continue;
         case "d":
-          out += inClass ? D : `[${D}]`;
+          out += inClass ? Df() : `[${Df()}]`;
           continue;
         case "D":
-          if (inClass) negSets.push(D);
-          else out += `[^${D}]`;
+          if (inClass) negSets.push(Df());
+          else out += `[^${Df()}]`;
           continue;
         case "s":
-          out += inClass ? SP : `[${SP}]`;
+          out += inClass ? SPf() : `[${SPf()}]`;
           continue;
         case "S":
-          if (inClass) negSets.push(SP);
-          else out += `[^${SP}]`;
+          if (inClass) negSets.push(SPf());
+          else out += `[^${SPf()}]`;
           continue;
         // (word boundaries by \w's own characters: JS's \b knows only ASCII)
         case "b":
           if (inClass) out += "\\x08";
-          else out += ascii ? "\\b" : `(?:(?<=[${W}])(?![${W}])|(?<![${W}])(?=[${W}]))`;
+          else out += asc() ? "\\b" : `(?:(?<=[${Wf()}])(?![${Wf()}])|(?<![${Wf()}])(?=[${Wf()}]))`;
           continue;
         case "B":
           if (inClass) raise(ReError, "bad escape \\B");
-          out += ascii ? "\\B" : `(?:(?<=[${W}])(?=[${W}])|(?<![${W}])(?![${W}]))`;
+          out += asc() ? "\\B" : `(?:(?<=[${Wf()}])(?=[${Wf()}])|(?<![${Wf()}])(?![${Wf()}]))`;
           continue;
         case "n":
         case "t":
@@ -185,7 +192,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         }
         const num = /^\d?/.exec(p.slice(i))![0];
         i += num.length;
-        if (!inClass && ascii && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
+        if (!inClass && asc() && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
         out += inClass ? "" : `\\${d}${num}`;
         continue;
       }
@@ -245,6 +252,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         continue;
       case ")":
         cur = scopes.pop() ?? cur;
+        jsI = jsScopes.pop() ?? jsI;
         out += c;
         i++;
         continue;
@@ -274,12 +282,13 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
           let g: RegExpExecArray | null;
           if ((g = /^\(\?P<([A-Za-z_]\w*)>/.exec(rest))) {
             scopes.push(cur);
+            jsScopes.push(jsI);
             out += `(?<${g[1]}>`;
             i += g[0].length;
             continue;
           }
           if ((g = /^\(\?P=([A-Za-z_]\w*)\)/.exec(rest))) {
-            if (ascii && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
+            if (asc() && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
             out += `\\k<${g[1]}>`;
             i += g[0].length;
             continue;
@@ -290,17 +299,23 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
           }
           if ((g = /^\(\?([aiLmsux]*)(?:-([imsx]+))?:/.exec(rest)) && (g[1] || g[2])) {
             // scoped flags: m and s are this translation's own (^, $ and .);
-            // i is JS's modifier, and is in force for the class rules too
-            // (a, L and x in a scope are not implemented: refused, not ignored;
+            // i is JS's modifier, and is in force for the class rules too;
+            // a makes the group's \w \d \s \b and IGNORECASE ASCII's
+            // (string.Template's (?a:[_a-z][_a-z0-9]*))
+            // (L and x in a scope are not implemented: refused, not ignored;
             // u is a str pattern's default, and refused inside an ASCII one,
-            // CORR-6A0-1)
-            if (/[aLx]/.test(g[1] + (g[2] ?? "")) || (ascii && g[1].includes("u"))) raise(T.NotImplementedError, `scoped flags (?${g[1]}${g[2] ? "-" + g[2] : ""}:...) are not supported`);
+            // CORR-6A0-1, or beside a, which CPython refuses too)
+            if (/[Lx]/.test(g[1] + (g[2] ?? "")) || (asc() && g[1].includes("u"))) raise(T.NotImplementedError, `scoped flags (?${g[1]}${g[2] ? "-" + g[2] : ""}:...) are not supported`);
+            if (g[1].includes("a") && g[1].includes("u")) raise(ReError, `bad inline flags: flags 'a', 'u' and 'L' are incompatible at position ${i + 2 + g[1].length}`);
             scopes.push(cur);
-            for (const f of g[1]) if (f === "i" || f === "m" || f === "s") cur |= { i: I, m: M, s: S }[f]!;
+            jsScopes.push(jsI);
+            for (const f of g[1]) if (f === "i" || f === "m" || f === "s" || f === "a") cur |= { i: I, m: M, s: S, a: A }[f]!;
             for (const f of g[2] ?? "") if (f === "i" || f === "m" || f === "s") cur &= ~{ i: I, m: M, s: S }[f]!;
-            // (in ASCII and bytes patterns IGNORECASE is written out, lit)
-            const on = g[1].includes("i") && !ascii ? "i" : "", off = (g[2] ?? "").includes("i") && !ascii ? "-i" : "";
-            out += on || off ? `(?${on}${off}:` : "(?:";
+            // (JS's i as this group needs it: on for a Unicode IGNORECASE,
+            // off in an ASCII one, which lit and closeClass write out)
+            const want = (cur & I) !== 0 && !asc();
+            out += want === jsI ? "(?:" : want ? "(?i:" : "(?-i:";
+            jsI = want;
             i += g[0].length;
             continue;
           }
@@ -309,6 +324,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
           if (/^\(\?[aiLmsux]+\)/.test(rest)) raise(ReError, "global flags not at the start of the expression");
         }
         scopes.push(cur);
+        jsScopes.push(jsI);
         out += c;
         i++;
         continue;

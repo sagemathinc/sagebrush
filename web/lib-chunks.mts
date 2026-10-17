@@ -67,8 +67,10 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
   const tops = new Map<string, string>();
   for (const path of Object.keys(lib).sort()) {
     const g = groupOf(path, sets);
-    // (two top-level names that would share a group's name: never silently merged)
-    const top = path.split("/")[0].replace(/\.py$/, "");
+    // (two top-level names that would share a group's name: never silently
+    // merged, but for a private module and its public twin, _string and
+    // string, which are imported together)
+    const top = path.split("/")[0].replace(/\.py$/, "").replace(/^_(?!_)/, "");
     if (g.startsWith("mod-") && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
     tops.set(g, top);
     files[path] = g;
