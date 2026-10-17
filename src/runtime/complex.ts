@@ -174,9 +174,10 @@ function parseComplex(s: string): PyComplex {
   // up to a non-ASCII character that is neither a digit nor a space, after
   // which the string is just malformed)
   let t = Ty.stripAscii(Ty.asciiNumeral(s));
-  const head = t.split("\0")[0];
+  const stop = t.indexOf("\0");
+  const head = stop < 0 ? t : t.slice(0, stop);
   if (/(?<!\d)_|_(?!\d)/.test(head)) raise(T.ValueError, `could not convert string to complex: ${repr(s)}`);
-  if (head.length < t.length) bad();
+  if (stop >= 0) bad();
   t = t.replace(/_/g, "");
   if (t.startsWith("(") && t.endsWith(")")) t = Ty.stripAscii(t.slice(1, -1));
   const num = "(?:(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?|inf(?:inity)?|nan)";
