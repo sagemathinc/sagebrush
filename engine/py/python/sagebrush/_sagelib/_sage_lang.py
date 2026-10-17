@@ -184,6 +184,16 @@ class RealNumber(float):
         sage: x / 10, float(x), RR(2)^-1074 / 3
         (1.00000000000000e308, inf, 1.64688548613749e-324)
 
+    % is the remainder to the nearest quotient (ties to an even one), // is
+    refused, divmod is (x / y, 0) and x / 0 is IEEE's, as Sage::
+
+        sage: RR(7) % 2, RR(10)^400 % 3, RR(1) / 0, divmod(RR(7), 2)
+        (-1.00000000000000, 0.000000000000000, +infinity, (3.50000000000000, 0.000000000000000))
+        sage: RR(2)^1100 // 3
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of precision'
+
     Where sagebrush has no MP value, an error, never a double's infinity or
     zero (Sage has values for these)::
 
@@ -199,10 +209,6 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: the value of erfc(30) in RR (the doubles give 0.0): erfc at more than 53 bits is not available in sagebrush yet
-        sage: B % 3  # sagebrush only
-        Traceback (most recent call last):
-        ...
-        NotImplementedError: % with an RR element past the doubles is not available in sagebrush yet
         sage: zeta(RR(-261.5))  # sagebrush only
         Traceback (most recent call last):
         ...
@@ -211,10 +217,6 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: the sine and cosine of a number of magnitude 2^3321929 (above 2^65536) are not available in sagebrush yet
-        sage: RR(2)^1100 // 3  # sagebrush only
-        Traceback (most recent call last):
-        ...
-        NotImplementedError: // and divmod with an RR element past the doubles are not available in sagebrush yet
         sage: (-RR(2)^2200)^RR(0.5)  # sagebrush only
         Traceback (most recent call last):
         ...
