@@ -622,8 +622,11 @@ def arrow(tailpoint, headpoint, **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
+    # (arrowshorten: Sage's, in points, half taken off each end; the head
+    # clearance Graph.plot leaves for a vertex's marker is its own, in pixels)
     o = {"color": _color(p), "thickness": p.pop("thickness", p.pop("width", 2)) * 0.9,
-         "head_shorten": float(p.pop("arrowshorten", 0)), "linestyle": p.pop("linestyle", "-")}
+         "shorten": float(p.pop("arrowshorten", 0)) * 100 / 72, "head_shorten": float(p.pop("_head_clearance", 0)),
+         "linestyle": p.pop("linestyle", "-")}
     return Graphics([Arrow(tailpoint, headpoint, **o)], **gopts)
 
 

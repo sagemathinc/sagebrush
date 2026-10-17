@@ -45,6 +45,38 @@ assert _rects() == _rects(edge_labels_background='transparent') + 1, (_rects(), 
 svg = DiGraph([(0, 1), (1, 0)]).plot(pos={0: (0, 0), 1: (1, 0)})._svg()
 ys = sorted({m for m in re.findall(r'<path d="M[-0-9.]+ ([-0-9.]+)L', svg)})
 assert len(ys) >= 2 and abs(float(ys[0]) - float(ys[-1])) > 5, ys
+# astra's CORR-896: callables (1), vertex_colors over partition (2),
+# unhashable labels (3), loop_size the radius (4), arrowshorten at both
+# ends (5), text backgrounds with any alignment and rotation (6)
+from _graphics import to_color
+G3 = Graph([(0, 1, 'x'), (1, 2, 'y')])
+p3 = {0: (0, 0), 1: (4, 0), 2: (4, 2)}
+svg = G3.plot(pos=p3, vertex_labels=lambda v: 'VERTEX' + str(v))._svg()
+assert all('VERTEX%d' % i in svg for i in range(3)), "CORR-896-1 labels"
+svg = G3.plot(pos=p3, color_by_label=lambda l: 'green')._svg()
+assert svg.count('stroke="%s"' % to_color('green')) == 2, "CORR-896-1 colours"
+svg = G3.plot(pos=p3, partition=[[0, 1, 2]], vertex_colors={'blue': [0, 1, 2]})._svg()
+assert svg.count('fill="%s"' % to_color('blue')) == 3 and 'fill="#ff0000"' not in svg, "CORR-896-2"
+print(repr(Graph([(0, 1, [1, 2])]).plot()), repr(Graph([(0, 1, [1, 2])]).plot(color_by_label={'a': 'red'}, edge_labels=True)))
+try:
+    Graph([(0, 1, [1, 2])]).plot(color_by_label=True)
+except NotImplementedError as e:
+    print("refused:", e)
+L2 = Graph([(0, 0)], loops=True).plot(pos={0: (0, 0)}, loop_size=0.2)
+ring = [q for q in L2 if q.kind == "line" and len(q.xs) == 49][0]
+assert abs((max(ring.xs) - min(ring.xs)) / 2 - 0.2) < 1e-9 and abs((max(ring.ys) - min(ring.ys)) / 2 - 0.2) < 1e-9, "CORR-896-4"
+assert min(abs(math.hypot(x, y)) for x, y in zip(ring.xs, ring.ys)) < 0.02, "CORR-896-4: the loop passes by its vertex"
+def _shaft(svg):
+    m = re.search(r'<path d="M([-0-9.]+) [-0-9.]+L([-0-9.]+) [-0-9.]+" stroke', svg)
+    tip = re.search(r'<path d="M([-0-9.]+) [-0-9.]+L[-0-9.]+ [-0-9.]+L[-0-9.]+ [-0-9.]+Z" fill', svg)
+    return float(m.group(1)), float(tip.group(1))
+t0, h0 = _shaft(arrow((0, 0), (1, 0))._svg())
+t1, h1 = _shaft(arrow((0, 0), (1, 0), arrowshorten=20)._svg())
+assert abs((t1 - t0) - 20 * 100 / 72 / 2) < 0.02 and abs((h0 - h1) - 20 * 100 / 72 / 2) < 0.02, ("CORR-896-5", t0, t1, h0, h1)
+for kw in [dict(), dict(rotation=45), dict(horizontal_alignment='left'), dict(horizontal_alignment='right'), dict(vertical_alignment='top'), dict(vertical_alignment='bottom')]:
+    with_bg = text('hello', (0, 0), background_color='yellow', **kw)._svg()
+    assert with_bg.count('<rect') == text('hello', (0, 0), **kw)._svg().count('<rect') + 1, ("CORR-896-6", kw)
+    assert ('rotate(' in with_bg.split('<rect')[-1].split('/>')[0]) == ('rotation' in kw), ("CORR-896-6 rotation", kw)
 # edge_style
 assert 'stroke-dasharray' in Graph([(0, 1)]).plot(edge_style='dashed')._svg()
 for bad in [dict(vertex_shape='s'), dict(layout='planar'), dict(heights={0: [0]}), dict(by_component=False)]:

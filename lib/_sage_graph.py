@@ -1055,21 +1055,36 @@ def _plot_graph(G, options):
     if style is None:
         raise ValueError("edge_style must be 'solid', 'dashed', 'dotted' or 'dashdot', not %r" % (options.get("edge_style"),))
     edges = G.edges(sort=True)
+    # (colours by the edge's index in edges: a label need not be hashable,
+    # CORR-896-3)
     colour_of = {}
     cbl = options.get("color_by_label")
     if cbl:
         if isinstance(cbl, dict):
-            colour_of = {(u, v, l): cbl[l] for u, v, l in edges if l in cbl}
+            for i, (_, _, l) in enumerate(edges):
+                try:
+                    if l in cbl:
+                        colour_of[i] = cbl[l]
+                except TypeError:
+                    pass
+        elif callable(cbl):
+            # (a function of the label, as Sage's, CORR-896-1)
+            for i, (_, _, l) in enumerate(edges):
+                colour_of[i] = cbl(l)
         else:
-            labels = _sorted({l for _, _, l in edges})
-            pal = dict(zip(labels, _rainbow(len(labels))))
-            colour_of = {(u, v, l): pal[l] for u, v, l in edges}
+            try:
+                distinct = {l for _, _, l in edges}
+            except TypeError:
+                raise NotImplementedError("Graph.plot color_by_label=True with unhashable edge labels is not supported in Sagebrush "
+                                          "(give a dict or a function of the label)")
+            pal = dict(zip(_sorted(distinct), _rainbow(len(distinct))))
+            colour_of = {i: pal[l] for i, (_, _, l) in enumerate(edges)}
     # (the edges indexed once; every item read counted, HARD-856-2)
     index = {}
-    for e in edges:
-        index[(e[0], e[1])] = e
+    for i, e in enumerate(edges):
+        index[(e[0], e[1])] = i
         if not G._directed:
-            index[(e[1], e[0])] = e
+            index[(e[1], e[0])] = i
     budget = [sp.MAX_EDGES]
     for c, es in _bounded((options.get("edge_colors") or {}).items(), sp.MAX_EDGES, "edge_colors"):
         got = _bounded(es, budget[0], "edge_colors")
@@ -1095,17 +1110,19 @@ def _plot_graph(G, options):
         L = math.hypot(x1 - x0, y1 - y0) or 1.0
         nx, ny = -(y1 - y0) / L * off, (x1 - x0) / L * off
         return (x0 + nx, y0 + ny), (x1 + nx, y1 + ny)
-    for e in edges:
+    for i, e in enumerate(edges):
         u, v, _ = e
-        c = colour_of.get(e, edge_color)
+        c = colour_of.get(i, edge_color)
         if u == v:
+            # (a circle of radius loop_size through the vertex, up and to
+            # its left, CORR-896-4)
             x, y = pos[u]
-            cx, cy, rr = x - loop, y + loop, loop * math.sqrt(2)
+            cx, cy, rr = x - loop / math.sqrt(2), y + loop / math.sqrt(2), loop
             g += sa.line([(cx + rr * math.cos(2 * math.pi * k / 48), cy + rr * math.sin(2 * math.pi * k / 48)) for k in range(49)],
                          color=c, thickness=thickness, linestyle=style)
         elif G._directed:
             a, b = ends(u, v)
-            g += sa.arrow(a, b, color=c, thickness=thickness, arrowshorten=r + 1, linestyle=style)
+            g += sa.arrow(a, b, color=c, thickness=thickness, _head_clearance=r + 1, linestyle=style)
         else:
             g += sa.line([pos[u], pos[v]], color=c, thickness=thickness, linestyle=style)
     # (every member read counted, repeats and others too, HARD-856-3)
@@ -1116,11 +1133,12 @@ def _plot_graph(G, options):
         left[0] -= len(got)
         return got
     groups = []
-    if options.get("partition") is not None:
+    # (explicit vertex_colors win over partition, as in Sage, CORR-896-2)
+    if options.get("vertex_colors") is not None:
+        groups = [(c, members(p, "vertex_colors")) for c, p in _bounded(options["vertex_colors"].items(), sp.MAX_NODES, "vertex_colors")]
+    elif options.get("partition") is not None:
         parts = [members(p, "partition") for p in _bounded(options["partition"], sp.MAX_NODES, "partition")]
         groups = list(zip(_rainbow(len(parts)), parts))
-    elif options.get("vertex_colors") is not None:
-        groups = [(c, members(p, "vertex_colors")) for c, p in _bounded(options["vertex_colors"].items(), sp.MAX_NODES, "vertex_colors")]
     coloured = {v for _, p in groups for v in p}
     rest = [v for v in vs if v not in coloured]
     if rest or not groups:
@@ -1131,7 +1149,8 @@ def _plot_graph(G, options):
     labels = options.get("vertex_labels", True)
     if labels:
         for v in vs:
-            t = labels.get(v) if isinstance(labels, dict) else str(v)
+            # (a dict, a function of the vertex, CORR-896-1, or True)
+            t = labels.get(v) if isinstance(labels, dict) else labels(v) if callable(labels) else str(v)
             if t is not None:
                 g += sa.text(str(t), pos[v], color="black", zorder=3)
     # (on Sage's white, so that the line under a label does not cross it)
@@ -1142,7 +1161,7 @@ def _plot_graph(G, options):
         for u, v, l in edges:
             if u == v:
                 x, y = pos[u]
-                xy = (x - 2 * loop, y + 2 * loop)
+                xy = (x - math.sqrt(2) * loop, y + math.sqrt(2) * loop)
             else:
                 a, b = ends(u, v)
                 xy = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
