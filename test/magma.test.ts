@@ -1047,6 +1047,15 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["AssignNames(~R, []);", "'AssignNames'", "Argument 2 must have length 1"],
     ["AssignNames(~R, [1]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[RngIntElt]"],
     ["AssignNames(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
+    // (whatever the container, whichever argument is a reference, however
+    // the procedure is reached: checked as the call is made, CORR-53E-1)
+    ["AssignNames(~R, <\"t\">);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, Tup"],
+    ["AssignNames(~R, 1);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, RngIntElt"],
+    ["AssignNames(~R, {\"t\"});", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SetEnum[MonStgElt]"],
+    ["names := [\"t\"]; AssignNames(R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt] ~"],
+    ["AssignNames(~R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt] ~"],
+    ["an := AssignNames; an(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
+    ["(AssignNames)(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
   ];
   // what Sagebrush doesn't do yet: refused in words, never computed wrongly
   const own = [
@@ -1067,12 +1076,15 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["Gcd([[], [x]]);", "Gcd of a polynomial over a finite field (or its ring) is not supported yet"],
     ["IsZero([x]);", "IsZero of a polynomial over a finite field (or its ring) is not supported yet"],
     ["d := x; for i in [1..40] do d := [d]; end for; IsSquare(d);", "IsSquare of a value too large or too deep for Sagebrush to check"],
+    ["Evaluate(x, d);", "Evaluate of a value too large or too deep for Sagebrush to check"],
+    ["Gcd(x, d);", "Gcd of a value too large or too deep for Sagebrush to check"],
   ];
   const src = "R<x> := PolynomialRing(GF(7)); S<y> := PolynomialRing(GF(5)); Z<z> := PolynomialRing(Integers()); f := x^2 + 1;\n" +
-    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nx;\n\"end\";\n";
+    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nType(names); x;\n\"end\";\n";
   const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
-  // (the refused AssignNames left x's name)
-  assert.match(out, /\nx\nend\n$/);
+  // (the refused AssignNames left x's name, and names a sequence)
+  assert.match(out, /\nSeqEnum\nx\nend\n$/);
+  assert.doesNotMatch(out, /_FFUnseen/);
   // (long messages wrap at 80 columns: compared unwrapped)
   const flat = out.replace(/\s+/g, " ");
   for (const [stmt, where, said] of cases)
@@ -1175,7 +1187,11 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
     "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^40000 + x, 39999);\n" +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^40000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+    "Degree(x^40000); #Factorization(x^200 + x + 1);\n" +
+    // (the guard's walk: one budget for a call's arguments together, and one
+    // for the run, HARD-F42-1)
+    "S := [[\"a\" : i in [1..30]] : j in [1..10000]]; IsEmpty(S); Gcd(S, S, S, S);\n" +
+    "T := [[\"a\" : i in [1..1000]] : j in [1..40]]; for k in [1..300] do b := IsEmpty(T); end for;\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
@@ -1186,7 +1202,10 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n40000\n\d+\nend\n$/);
+  assert.match(r.stdout, /\n40000\n\d+\nfalse\n/);
+  assert.ok(out.includes("Gcd of a value too large or too deep for Sagebrush to check"), r.stdout);
+  assert.ok(out.includes("IsEmpty: Sagebrush's checks of arguments for polynomials and matrices over finite fields reached their limit for this run"), r.stdout);
+  assert.match(r.stdout, /\nend\n$/);
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 

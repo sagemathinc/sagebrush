@@ -833,7 +833,7 @@ class Parser {
       this.expect(";");
       this.declareGlobal(g.py);
       this.emit(`${g.py} = _m._first(${e})`);
-      this.emit(`_m.AssignNames(${g.py}, ${JSON.stringify(g.names)})`);
+      this.emit(`_m._assign_gen_names(${g.py}, ${JSON.stringify(g.names)})`);
       g.gens!.forEach((x, k) => { this.declareGlobal(x); this.emit(`${x} = _m._gen(${g.py}, ${k + 1})`); });
       return;
     }
@@ -1289,14 +1289,15 @@ class Parser {
     return b;
   }
 
-  args(close: string): { code: string; refs: Target[] } {
-    const pos: string[] = [], opts: string[] = [], refs: Target[] = [];
+  args(close: string): { code: string; refs: Target[]; refPos: number[] } {
+    const pos: string[] = [], opts: string[] = [], refs: Target[] = [], refPos: number[] = [];
     if (!this.at(close) && !this.at(":")) {
       do {
         if (this.eat("~")) {
           const t = this.tryLhs();
           if (!t) this.fail("expected a variable after '~'");
           refs.push(t);
+          refPos.push(pos.length);
           pos.push(t.read);
         } else pos.push(this.expr());
       } while (this.eat(","));
@@ -1308,7 +1309,7 @@ class Parser {
         else opts.push(`${name}=True`);
       } while (this.eat(","));
     }
-    return { code: [...pos, ...opts].join(", "), refs };
+    return { code: [...pos, ...opts].join(", "), refs, refPos };
   }
 
   postfix(): string {
@@ -1329,12 +1330,10 @@ class Parser {
           if (!this.refSink) this.fail("reference arguments (~x) are only allowed in a procedure call statement");
           this.refSink.push(...a.refs);
         }
-        if (a.refs.length) e = `${e}(${a.code})`; // a procedure statement's call
-        else if (e === "AssignNames") {
-          // (a procedure only, AssignNames(~R, names): called as a function it
-          // is Magma's Bad argument types)
-          e = `_m._assign_names_value(${a.code})`;
-        } else {
+        // a procedure statement's call: the callee is told which arguments
+        // are references (_m._refcall), as AssignNames checks them
+        if (a.refs.length) e = `_m._refcall(${e}, [${a.refPos.join(", ")}], ${a.code})`;
+        else {
           const call = `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);

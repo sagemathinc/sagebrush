@@ -4678,29 +4678,55 @@ def PolynomialRing(R, n=1):
     return _sp.PolynomialRing_(base, "$.1")
 
 
-def _assign_names_value(*args):
-    """AssignNames(R, names) as a function (without ~): Magma has no such
-    signature (checked against Magma 2.18)."""
-    raise _bad_types("AssignNames", args)
+# The procedure call being made with reference arguments (f(~x, y)), as the
+# translator emits it: (the callee, the positions passed by reference),
+# for the procedures that check them (AssignNames).
+_REFCALL = [None]
 
 
-def AssignNames(R, names):
-    # a procedure (AssignNames(~R, names)): returns R, the new value of ~R
-    if isinstance(R, _MFFPolyRing) and isinstance(names, (MSeq, MRange)):
-        # (a user's call: one name, a string, as Magma checks it; R<x> :=
-        # passes a list of its own)
-        bad = MagmaError("Bad argument types\nArgument types given: %s ~, %s" % (_ext_type(R), _ext_type(names)), "'AssignNames'", True)
-        if isinstance(names, MRange):
-            raise bad
-        if len(names) != 1:
-            raise _arg_error("AssignNames", "Argument 2 must have length 1")
-        if not isinstance(names[0], str) or isinstance(names[0], _Cat):
-            raise bad
+def _refcall(f, refs, *args, **kw):
+    """f(*args) called as a procedure statement, the arguments at refs by
+    reference."""
+    old = _REFCALL[0]
+    _REFCALL[0] = (f, tuple(refs))
+    try:
+        return f(*args, **kw)
+    finally:
+        _REFCALL[0] = old
+
+
+def _assign_gen_names(R, names):
+    """R<x, ...> := ...: the generators' names (a list of strings)."""
     if isinstance(R, _sp.PolynomialRing_) and names:
         R._name = names[0]
     elif hasattr(R, "_magma_names"):
         R._magma_names(names)
     return R
+
+
+def AssignNames(*args):
+    """AssignNames(~R, names): a procedure, R by reference (checked as the
+    call is made, whatever the procedure's name there, before any effect:
+    called as a function, or with another argument by reference, it is
+    Magma's Bad argument types); over a finite field one name, a string.
+    Checked against Magma 2.18."""
+    rc = _REFCALL[0]
+    me = globals().get("AssignNames")
+    refs = rc[1] if rc is not None and rc[0] is me else ()
+    bad = lambda: MagmaError("Bad argument types\nArgument types given: " + ", ".join(
+        _ext_type(a) + (" ~" if k in refs else "") for k, a in enumerate(args)), "'AssignNames'", True)
+    if refs != (0,) or len(args) != 2:
+        raise bad()
+    R, names = args
+    if isinstance(R, _MFFPolyRing):
+        if not isinstance(names, MSeq):
+            raise bad()
+        if len(names) != 1:
+            raise _arg_error("AssignNames", "Argument 2 must have length 1")
+        if not isinstance(names[0], str) or isinstance(names[0], _Cat):
+            raise bad()
+        return _assign_gen_names(R, [names[0]])
+    return _assign_gen_names(R, names)
 
 
 def _poly_parts(f):
@@ -7893,23 +7919,32 @@ def _ffm_elim(A, name):
 _FFALL = (_MFFPoly, _MFFPolyRing, _MFFMat, _MFFVec, _MFFMatSpace, _MFFVecSpace)
 
 
-# The guard's walk through an intrinsic's arguments for these values: at
-# most this many values visited and this deep, else the call is refused in
-# words (what it can't see it doesn't certify absent, CORR-53E-2).
+# The guard's walk through an intrinsic's arguments for these values, once
+# for each call (its result serves the signatures and the refusal's words):
+# at most _FF_SCAN_NODES values visited for one call, all its arguments
+# together, and _FF_SCAN_RUN in a whole run (a loop calling an intrinsic on
+# the same large nested collection is bounded too); at most _FF_SCAN_DEPTH
+# deep.  Past a bound the call is refused in words: what the walk didn't
+# see it doesn't certify absent (CORR-53E-2, HARD-F42-1).
 _FF_SCAN_NODES = 10 ** 6
+_FF_SCAN_RUN = [10 ** 7]
 _FF_SCAN_DEPTH = 32
 
 
+_SCAN_ATOMS = (int, str, _Fraction)
+
+
 class _FFUnseen(Exception):
-    """The guard's walk ran past its bounds."""
+    """The guard's walk ran past a bound ("call" or "run")."""
 
 
-def _ff_held(a):
-    """The polynomial, matrix or vector over a finite field (or such a
-    structure) a is or holds, or None: itself, or anywhere in its
-    sequences, tuples, records and lists.  A sequence whose universe is the
-    integers, the rationals or a finite field holds none and isn't walked
-    (sets hold none: their keys refuse them).  _FFUnseen past the bounds."""
+def _ff_scan(args):
+    """For each argument, the polynomial, matrix or vector over a finite
+    field (or such a structure) it is or holds, or None: itself, or anywhere
+    in its sequences, tuples, records and lists.  A sequence whose universe
+    is the integers, the rationals or a finite field holds none and isn't
+    walked (sets hold none: their keys refuse them).  _FFUnseen past the
+    bounds."""
     left = [_FF_SCAN_NODES]
 
     def walk(x, d):
@@ -7923,17 +7958,33 @@ def _ff_held(a):
             if u is _ZZ or u is _QQ or inf is _ZZ or inf is _QQ or isinstance(u, _MFinField):
                 return None
         if d >= _FF_SCAN_DEPTH:
-            raise _FFUnseen()
-        for y in (x.vals.values() if rec else x):
-            left[0] -= 1
-            if left[0] < 0:
-                raise _FFUnseen()
+            raise _FFUnseen("call")
+        items = x.vals.values() if rec else x
+        n = len(items)
+        left[0] -= n
+        _FF_SCAN_RUN[0] -= n
+        if left[0] < 0:
+            raise _FFUnseen("call")
+        if _FF_SCAN_RUN[0] < 0:
+            raise _FFUnseen("run")
+        for y in items:
+            if isinstance(y, _SCAN_ATOMS):
+                continue  # (numbers and strings, without a call each)
             h = walk(y, d + 1)
             if h is not None:
                 return h
         return None
 
-    return walk(a, 0)
+    return [walk(a, 0) for a in args]
+
+
+# The scan of the call being admitted (_ff_admit_args): one per argument.
+_FF_CUR = [None]
+
+
+def _held(k):
+    h = _FF_CUR[0]
+    return h[k] if h is not None and k < len(h) else None
 
 
 def _ff_scalar(a):
@@ -7965,8 +8016,8 @@ _FF_SIGS = {
     "Factorization": _P1, "Factorisation": _P1,
     "Coefficient": lambda a: len(a) == 2 and isinstance(a[0], _MFFPoly) and _int(a[1]),
     "Derivative": lambda a: 1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _int(a[1])),
-    "Evaluate": lambda a: (len(a) == 2 and isinstance(a[0], _MFFPoly) and (isinstance(a[1], _MFFPoly) or _ff_held(a[1]) is None)) or None,
-    "Roots": lambda a: (1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _ff_held(a[1]) is None)) or None,
+    "Evaluate": lambda a: (len(a) == 2 and isinstance(a[0], _MFFPoly) and (isinstance(a[1], _MFFPoly) or _held(1) is None)) or None,
+    "Roots": lambda a: (1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _held(1) is None)) or None,
     "Quotrem": _ff_poly_or_scalars,
     # (of a matrix, or of a sequence of them, Magma has these: refused in words)
     "IsZero": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN + (MSeq, MTuple)) for x in a) else False),
@@ -7979,7 +8030,7 @@ _FF_SIGS = {
 for _n in ("Gcd", "GCD", "GreatestCommonDivisor", "Lcm", "LCM", "LeastCommonMultiple"):
     # (of matrices Magma says its ring has no Gcd: refused in words)
     _FF_SIGS[_n] = lambda a: _ff_poly_or_scalars(a) or (None if any(isinstance(x, (_MFFPoly,) + _FFLIN) or
-                                                                 (isinstance(x, MSeq) and _ff_held(x) is not None) for x in a) else False)
+                                                                 (isinstance(x, MSeq) and _held(k) is not None) for k, x in enumerate(a)) else False)
 for _n in ("Parent", "Type", "ISA", "Sprint", "Sprintf"):
     _FF_SIGS[_n] = lambda a: True
 for _n in ("Append", "Include", "Exclude", "Insert", "Index", "Position", "Reverse"):
@@ -8001,7 +8052,7 @@ def _ff_admit_args(name, args, kw):
         return
     if ok is False:
         raise _bad_types(name, args)
-    held = [h for h in (_ff_held(a) for a in args) if h is not None]
+    held = [h for h in (_FF_CUR[0] or []) if h is not None]
     if not any(isinstance(h, _FFALL[2:]) for h in held):
         raise MagmaError("%s of a polynomial over a finite field (or its ring) is not supported yet" % name, "'%s'" % name)
     raise MagmaError("%s of a matrix or vector over a finite field is not supported yet" % name, "'%s'" % name)
@@ -8306,14 +8357,21 @@ def _guarded(name, f):
     def intrinsic(*args, **kw):
         if name not in _FF_PLAIN:
             try:
-                held = any(_ff_held(a) is not None for a in args)
-            except _FFUnseen:
+                held = _ff_scan(args)
+            except _FFUnseen as e:
+                if e.args and e.args[0] == "run":
+                    raise MagmaError("%s: Sagebrush's checks of arguments for polynomials and matrices over finite fields reached their "
+                                     "limit for this run; this call is not supported" % name, "'%s'" % name)
                 raise MagmaError("%s of a value too large or too deep for Sagebrush to check (for polynomials and matrices over finite "
                                  "fields) is not supported yet" % name, "'%s'" % name)
-            if held:
+        else:
+            held = [a if isinstance(a, _FFALL) else None for a in args]
+        if any(h is not None for h in held):
+            _FF_CUR[0] = held
+            try:
                 _ff_admit_args(name, args, kw)
-        elif any(isinstance(a, _FFALL) for a in args):
-            _ff_admit_args(name, args, kw)
+            finally:
+                _FF_CUR[0] = None
         for i, a in enumerate(args):
             if i in ints and isinstance(a, _Fraction):
                 raise _bad_types(name, args)
