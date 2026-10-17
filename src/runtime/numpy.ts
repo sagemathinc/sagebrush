@@ -1561,6 +1561,30 @@ function moveAxisToEnd(a: NDArray, ax: number): NDArray {
   return transpose(a, order);
 }
 
+// One product in dtype rt, as NumPy's multiply loop: a float32 rounded at
+// each step (1e-30 * 1e-30 underflows there); an integer wrapped exactly
+// to its width (2**40 * 2**40 is 0 in int64), from the exact product when a
+// double cannot hold it; an int64 or uint64 result a double cannot hold
+// exactly (Sagebrush's int64 arrays are doubles) refused
+function mulIn(rt: DType, what: string): (p: number, x: number) => number {
+  if (rt === D.float32) return (p, x) => Math.fround(p * x);
+  if (rt.kind !== "i" && rt.kind !== "u") return (p, x) => p * x;
+  const bits = rt.itemsize * 8, signed = rt.kind === "i";
+  return (p, x) => {
+    const r = p * x;
+    if (!Number.isSafeInteger(r)) {
+      const b = BigInt(Math.trunc(p)) * BigInt(Math.trunc(x));
+      const wb = signed ? BigInt.asIntN(bits, b) : BigInt.asUintN(bits, b);
+      const w = Number(wb);
+      if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`);
+      return w;
+    }
+    if (bits === 64) return r;
+    if (bits === 32) return signed ? r | 0 : r >>> 0;
+    return signed ? (r << (32 - bits)) >> (32 - bits) : r & ((1 << bits) - 1);
+  };
+}
+
 function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray {
   if (axis === null || axis === undefined) a = ravel(a);
   if (a.ndim === 1 && a.isC() && (dtype === null || dtype === undefined) && a.dt.kind === "f") {
@@ -1598,10 +1622,11 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   }
   // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
   if (a.dt.cplx) raise(T.TypeError, `${isProd ? "cumprod" : "cumsum"}: a complex array accumulated in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
+  const mul = mulIn(rt, "cumprod");
   loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
     let acc = isProd ? 1 : 0;
     for (let i = 0; i < n; i++) {
-      acc = i === 0 ? t.data[p] : isProd ? acc * t.data[p + i * st] : acc + t.data[p + i * st];
+      acc = i === 0 ? t.data[p] : isProd ? mul(acc, t.data[p + i * st]) : acc + t.data[p + i * st];
       acc = castNum(rt, acc);
       o.data[q + i * ost] = acc;
     }
@@ -2630,7 +2655,10 @@ newBuiltinModule("_numpy", (m) => {
     // (complex: real and imaginary parts multiplied together; a real fold
     // read only the real parts)
     if (x.dt.cplx || rt.cplx) return finish(complexProd(x, axesArg(axis, x.ndim), !!keepdims, rt), axis, !!keepdims);
-    return finish(reduceAxes(x, axesArg(axis, x.ndim), !!keepdims, rt, 1, (p, v) => p * v), axis, !!keepdims);
+    // (in rt, as NumPy's multiply loop: the elements first cast to a float
+    // rt, each product rounded to it or wrapped to its integer width)
+    const src = rt !== x.dt && rt.kind === "f" ? copy(x, rt) : x;
+    return finish(reduceAxes(src, axesArg(axis, x.ndim), !!keepdims, rt, 1, mulIn(rt, "prod")), axis, !!keepdims);
   });
   fn("amax", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true));
   fn("amin", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false));
