@@ -43,8 +43,10 @@ jobs:
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
-          # (the desktop app's page: its worker's library chunks all there, as built)
-          node app/build-frontend.mjs
+          # (the desktop app's page: its worker's library chunks and zone data all
+          # there, as built (app/build-frontend.mjs), and its check refusing what
+          # does not match; a `node web/` line, so the VM CI runs it too)
+          node web/test-app-frontend.mjs
       - name: llms.txt and the board format page link only to pages the site serves, and the format's example renders
         run: node web/test-llms.mjs
       - name: shared collections (the share API and the files Worker in Miniflare; sharing from the page in headless Chrome)
