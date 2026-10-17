@@ -3321,9 +3321,25 @@ class ComplexNumber(complex):
     def __neg__(self):
         return ComplexNumber(-complex(self))
 
-    def __pow__(self, e):
+    def __pow__(self, e, mod=None):
+        # (pow(z, e, m): Sage's CC ignores the modulus)
         _cc(e)
+        if type(e).__name__ == "RealNumberMP" and e._R._prec != 53:
+            # (Sage's power is in the coarser complex field: not available,
+            # refused as before rather than rounded into CC, CORR-C9B-1)
+            raise TypeError("unable to convert %r to a real number" % complex(self))
         return ComplexNumber(complex(self) ** e)
+
+    def __float__(self):
+        # (as Sage: NaN for a NaN real part, the real part for a zero
+        # imaginary part, else refused)
+        z = complex(self)
+        if z.real != z.real or z.imag == 0:
+            return z.real
+        raise TypeError("unable to convert %r to float; use abs() or real_part() as desired" % (self,))
+
+    def __int__(self):
+        raise TypeError("can't convert complex to int; use int(abs(z))")
 
     def __rpow__(self, b):
         return ComplexNumber(_cc(b) ** complex(self))
@@ -3423,7 +3439,10 @@ class ComplexField_:
                 # (Python's complex() accepts digit separators, Sage does
                 # not; '1_0e-400j' also slipped past the range check)
                 raise ValueError("given string %r is not a complex number" % (x.replace("j", "I"),))
-        z = complex(re) + complex(im) * 1j
+        # (re + im i by parts: complex(im) * 1j made a NaN or infinite
+        # imaginary part NaN + NaN j, spoiling the real part)
+        a, b = complex(re), complex(im)
+        z = complex(a.real - b.imag if b.imag else a.real, a.imag + b.real if a.imag else b.real)
         # (CC's numbers are doubles: CC('1e400') was +infinity, CC('1e-400') 0)
         for x in (re, im):
             if _beyond_doubles(x):

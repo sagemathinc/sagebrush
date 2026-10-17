@@ -357,6 +357,14 @@ class RealDoubleElement(float):
         return RealDoubleElement(abs(float(self)))
 
     def __pow__(self, e, mod=None):
+        if mod is not None:
+            # (as Sage's RDF: never a power that drops the modulus)
+            raise TypeError("the 3-argument version of pow() is not supported")
+        import _sage_real
+        if _sage_real._user_float(e):
+            # (a user's float subclass: Python float's power of its value,
+            # no __float__ call, as Sage, CORR-3FE-2)
+            return _sage_real._cpow(float.__float__(self), float.__float__(e))
         x = float(self)
         inf = float("inf")
         if isinstance(e, int) or type(e).__name__ == "Integer":
@@ -370,6 +378,13 @@ class RealDoubleElement(float):
             return e.parent()(self) ** e
         y = self._num(e)
         if y is None:
+            if isinstance(e, complex) or type(e).__name__ == "ComplexNumberMP":
+                # (a complex exponent: the coarser complex field's, not a
+                # real power through float(), CORR-726-2)
+                import _sage_real
+                return _sage_real._real_complex_pow(self, 53, e)
+            if type(e).__name__ == "ComplexDoubleElement":
+                return NotImplemented
             y = float(e)
         if x == 0:
             # (0.0 or -0.0 itself for a positive or NaN exponent)
@@ -394,7 +409,14 @@ class RealDoubleElement(float):
         except OverflowError:
             return RealDoubleElement(inf)
 
-    def __rpow__(self, b):
+    def __rpow__(self, b, mod=None):
+        if mod is not None:
+            # (RDF's reflected power refuses a modulus, CORR-726-4)
+            raise TypeError("the 3-argument version of pow() is not supported")
+        if isinstance(b, complex):
+            # (a Python complex base: Python's complex power, CORR-3FE-1)
+            import _sage_real
+            return _sage_real._real_complex_pow(self, 53, b, True)
         return RDF(b) ** self
 
     def sqrt(self, extend=True, all=False):
@@ -813,9 +835,14 @@ class ComplexDoubleElement:
         return self._z
 
     def __float__(self):
-        if self._z.imag:
-            raise TypeError("unable to convert %r to float" % (self,))
+        # (as Sage's CDF: its real part when the imaginary part is 0; NaN
+        # printed as nan in the message)
+        if self._z.imag != 0:
+            raise TypeError("unable to convert %s to float; use abs() or real_part() as desired" % repr(self).replace("NaN", "nan"))
         return self._z.real
+
+    def __int__(self):
+        raise TypeError("can't convert complex to int; use int(abs(z))")
 
     def __hash__(self):
         return hash(self._z)
@@ -860,6 +887,8 @@ class ComplexDoubleElement:
         return ComplexDoubleElement._of(-self._z)
 
     def __pow__(self, e, mod=None):
+        if mod is not None:
+            raise TypeError("the 3-argument version of pow() is not supported")
         z = self._z
         if z == 0:
             return ComplexDoubleElement(0.0, 0.0)
