@@ -2,7 +2,8 @@
 // - dist/index.js: one ES module, web/board/index.ts and what it imports
 //   (the stylesheets inside, as text), for browsers;
 // - dist/index.d.ts: its types (tsc), from dist/types;
-// - dist/submission.js and .d.ts: a host's check of a board's answers
+// - dist/submission.js and .d.ts: a host's check of a board's answers, and
+//   of a request to decide what a reader's own words show
 //   (web/board/ask.ts checkSubmission, web/board-host-protocol.md), alone,
 //   so that a host takes it without the board.
 // What a board loads only when it needs it (the notebook's engine for code
@@ -44,7 +45,7 @@ const tsc = Bun.spawnSync([join(root, "node_modules", ".bin", "tsc"), "--ignoreC
   join(root, "web", "board", "text-imports.d.ts"), join(root, "web", "board", "index.ts"), join(root, "web", "board", "ask.ts")], { stdout: "inherit", stderr: "inherit" });
 if (tsc.exitCode !== 0) process.exit(1);
 writeFileSync(join(dist, "index.d.ts"), 'export * from "./types/board/index";\n');
-writeFileSync(join(dist, "submission.d.ts"), 'export { checkSubmission, type Posted, type Checked, type Submission } from "./types/board/ask";\n');
+writeFileSync(join(dist, "submission.d.ts"), 'export { checkSubmission, decideRequest, type Posted, type Checked, type Submission, type Deciding, type DecideRequest } from "./types/board/ask";\n');
 
 const size = (await Bun.file(join(dist, "index.js")).arrayBuffer()).byteLength;
 const subSize = (await Bun.file(join(dist, "submission.js")).arrayBuffer()).byteLength;

@@ -758,6 +758,13 @@ export const BOARD_SCHEMA = {
      "$ref": "#/$defs/AskNext",
      "description": "where to go after an attempt: the id of a note on this page, for `right` and for `wrong`"
     },
+    "decide": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/AskDecide"
+     },
+     "description": "what the reader's own words (`note`) may show, for the host to decide among (at most 32): each a self-describing name, such as a misconception, and where to go if it is the one (web/board-host-protocol.md, \"Deciding\")"
+    },
     "example": {
      "anyOf": [
       {
@@ -886,6 +893,28 @@ export const BOARD_SCHEMA = {
      "description": "the note to go to after a wrong one"
     }
    },
+   "additionalProperties": false
+  },
+  "AskDecide": {
+   "type": "object",
+   "description": "One of the things a reader's own words may show, which the host decides among.",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "required: what it is, in words joined by hyphens, at least three (`confuses-transitive-with-2-transitive`): the name says what it means"
+    },
+    "about": {
+     "type": "string",
+     "description": "Markdown that makes the name clearer (a rubric), if it needs that"
+    },
+    "next": {
+     "type": "string",
+     "description": "the id of an item on this page to go to when it is the one"
+    }
+   },
+   "required": [
+    "name"
+   ],
    "additionalProperties": false
   },
   "DocEdge": {

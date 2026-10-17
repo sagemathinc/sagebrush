@@ -168,6 +168,55 @@ Sagebrush provides the check as a function of the board's text and the
 message, so that every host checks the same way. It goes in the
 `sagebrush-board` package, built with the Submit bar.
 
+## Deciding
+
+A question can list what the reader's own words may show, in its `decide`
+(web/board-format.md): self-describing names such as
+`confuses-transitive-with-two-transitive`, each with an optional `about`
+that makes it clearer and an optional `next`, the item to go to. When the
+reader explains in their own words, the frame can ask the host which of
+these the words show. The host asks a model it chooses, and answers. The
+board then shows that option's `next` at once.
+
+A decision is not a submission. It goes to no agent and starts no turn.
+The frame keeps it, like an unsent answer, only while it is open. The reader's words still
+reach the agent only by Submit, as the question's note. The host may add
+its own record of what it decided, which it doesn't need the frame to tell
+it.
+
+On the channel:
+
+- From the frame: `{ sagebrush: "decide", version: 1, id, name, revision, page, item, note }`.
+  - `id`: `crypto.randomUUID()`, new for each request.
+  - `name`, `revision`, `page`: as in `answers`.
+  - `item`: the id of a question on that page that has a `decide`.
+  - `note`: the reader's words, at most 10,000 characters, not only spaces:
+    the question's note, or the answer of a `text` question.
+- From the host: `{ sagebrush: "decided", version: 1, id, option }`.
+  `option` is the `name` of one of the question's `decide` entries, or
+  `null` when none of them fits.
+- From the host: `{ sagebrush: "refused", version: 1, id, message }`, as for
+  a submission: the frame shows `message`.
+
+The host checks a request as it checks a submission: plain JSON data, at
+most 64 KiB and nested at most 4 deep, `name` and `revision` those posted on
+the channel, `page` a page of that board, `item` a question of that page
+with a `decide` that `sagebrush board check` accepts. **The question and its
+options come from the board posted on that channel, never from the
+message.** Only `note` is the frame's. Sagebrush provides this check as
+`decideRequest(posted, message)` in `sagebrush-board/submission`. It returns
+`{ ok: true, request: { id, name, revision, page, item, prompt, options, answer } }`,
+where `prompt` is the question's title and text (Markdown), `options` is
+`[{ name, about? }]`, and `answer` is the note. Otherwise it returns
+`{ ok: false, id?, message }`. Every host then asks its model the same
+thing.
+
+The host's model reads the reader's words as data, not instructions: the
+words decide among the options and do nothing else. The host answers only
+with a name from `options`, or `null`, and limits how often a channel may
+ask. A request costs the user's allowance, so the frame sends one only when
+the reader asks for it.
+
 ## Delivery
 
 A submission goes to the agent that published the board, in the thread
@@ -313,6 +362,7 @@ function openChannel(me) {
 - Ask items, `sb board answers` and the controls are built in the order of
   /scratch/sagebrush-reviews/boards-both-ways-plan.md.
 - The nonce, the channel, `revision`, `answers`, `received`, `refused` and
-  `checkSubmission` are new. test/board-host-protocol.test.ts runs the
+  `checkSubmission` are new. So are `decide`, `decided` and `decideRequest`;
+  the frame sends `decide` once it has the Submit bar. test/board-host-protocol.test.ts runs the
   example host above against simulated frames, a navigated one too. Until the frame supports them, it ignores the
   port and `revision`, and shows no Submit.

@@ -223,6 +223,25 @@ an attempt, and a new answer clears `result`.
 }
 ```
 
+A question can also say what the reader's own words may show: its
+`decide` lists up to 32 things, each with a name that says what it means
+(words joined by hyphens, at least three, such as
+`confuses-transitive-with-two-transitive`), an optional `about` (Markdown
+that makes the name clearer) and an optional `next`. A host that shows the
+board can ask a model which of them the reader's words show, and the board
+sends the reader to that one's `next` (https://sagebrush.space/board-host-protocol.md,
+"Deciding"). The name carries the meaning, so write it for a reader who
+sees nothing else.
+
+```json
+{ "id": "mean", "kind": "ask", "input": "text", "title": "Transitive",
+  "text": "In your words: what does it mean for $G$ to act transitively?",
+  "decide": [
+    { "name": "confuses-transitive-with-two-transitive", "about": "Says every pair goes to every pair.", "next": "pairs" },
+    { "name": "thinks-transitive-means-abelian", "next": "abelian" }
+  ] }
+```
+
 `sagebrush board check FILE` lints these (a check in another language, an
 empty one, `next` naming no item of the page). `sagebrush board try FILE
 --json` runs every question's check, with its `example` or with `--case
@@ -409,6 +428,7 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `checkMs` | number | the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) |
 | `hints` | [string \| computed hint] | hints, one more shown after each wrong attempt: Markdown, or `{ "code": ... }`, run as the check is, its value a string (Markdown) |
 | `next` | next | where to go after an attempt: the id of a note on this page, for `right` and for `wrong` |
+| `decide` | [decision] | what the reader's own words (`note`) may show, for the host to decide among (at most 32): each a self-describing name, such as a misconception, and where to go if it is the one (web/board-host-protocol.md, "Deciding") |
 | `example` | string \| number \| boolean \| [string] | an answer to try its check with (`sagebrush board try` runs it) |
 | `attempts` | number | how many times its answer was checked (written by Sagebrush) |
 | `wrongAttempts` | number | how many of those were wrong: one more hint is shown after each (written by Sagebrush) |
@@ -445,6 +465,16 @@ Where a question leads after an attempt: notes on its page, by id.
 |---|---|---|
 | `right` | string | the note to go to after a right answer |
 | `wrong` | string | the note to go to after a wrong one |
+
+### What a reader's words may show (in a question's `decide`)
+
+One of the things a reader's own words may show, which the host decides among.
+
+| field | type | meaning |
+|---|---|---|
+| `name` | string | required: what it is, in words joined by hyphens, at least three (`confuses-transitive-with-2-transitive`): the name says what it means |
+| `about` | string | Markdown that makes the name clearer (a rubric), if it needs that |
+| `next` | string | the id of an item on this page to go to when it is the one |
 
 ### A slide's card (`slide`)
 

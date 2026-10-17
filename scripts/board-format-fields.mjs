@@ -36,12 +36,13 @@ const SECTIONS = [
   ["web/board/doc.ts", "AskChoice", "An option (in a question's `options`)"],
   ["web/board/doc.ts", "AskHintCode", "A computed hint (in a question's `hints`)"],
   ["web/board/doc.ts", "AskNext", "Where a question leads (its `next`)"],
+  ["web/board/doc.ts", "AskDecide", "What a reader's words may show (in a question's `decide`)"],
   ["web/board/doc.ts", "SlideRect", "A slide's card (`slide`)"],
   ["web/board/doc.ts", "PageBackground", "A background (`background`)"],
   ["web/board/images.ts", "ImageInfo", "A picture (in `images`)"],
 ];
 // (a type that is a section: named as the section's item)
-const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", DocSticker: "sticker", DocInk: "ink", DocAsk: "question", AskChoice: "option", AskHintCode: "computed hint", AskNext: "next" };
+const NAMES = { DocNode: "item", DocNote: "note", DocGroup: "group", DocEdge: "edge", DocStep: "step", BoardPage: "page", SlideRect: "card", PageBackground: "background", ImageInfo: "picture", DocSticker: "sticker", DocInk: "ink", DocAsk: "question", AskChoice: "option", AskHintCode: "computed hint", AskNext: "next", AskDecide: "decision" };
 // (a type Sagebrush writes, whose fields a writer never does: written as `object`)
 const OPAQUE = new Set(["Preview"]);
 
