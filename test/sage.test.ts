@@ -145,10 +145,13 @@ test("an algebraic number converts to RR, RealField(p), float, CC and n() correc
 test("an algebraic number's conversion checks its digit cap before asking the root engine (HARD-883-1)", () => {
   // (RealField(10^7)(sqrt(2)) asked the engine for 3010315 digits and leaked
   // its ValueError; the cap is now checked first, and a doubling stops at it)
-  const src = "for p in (10^7, 400000):\n try:\n  RealField(p)(AA(2).sqrt())\n except ArithmeticError as e:\n  print(type(e).__name__, e)\nprint(RealField(3000)(AA(2).sqrt()).str()[:12], RealField(2000)(AA(1/3)).str()[:8])\n";
+  // (RealField(10^7) itself is now refused first, past the precision limit:
+  // HARD-RRQ-1)
+  const src = "for p in (10^7, 400000):\n try:\n  RealField(p)(AA(2).sqrt())\n except (ArithmeticError, NotImplementedError) as e:\n  print(type(e).__name__, e)\nprint(RealField(3000)(AA(2).sqrt()).str()[:12], RealField(2000)(AA(1/3)).str()[:8])\n";
   const t = Date.now();
   assert.equal(cli("--sage", "-c", src),
-    "ArithmeticError the approximation did not converge within 99995 digits\n".repeat(2) + "1.4142135623 0.333333\n");
+    "NotImplementedError RealField(10000000): a precision past the limit of 1048576 bits is not available in sagebrush yet\n" +
+    "ArithmeticError the approximation did not converge within 99995 digits\n" + "1.4142135623 0.333333\n");
   assert.ok(Date.now() - t < 30000);
 });
 
