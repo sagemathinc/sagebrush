@@ -291,14 +291,15 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   // come later: said so).
   function evaluate(m: any, host: any): string {
     const e = m.evaluate ?? {}, finish = (error: string | null) => {
-      run(`import _sb_check, json as _j\n_sb_check.finish(_j.loads(${JSON.stringify(JSON.stringify(error))}))\ndel _j\n`, host, "exec", "<check>");
+      // (by expressions only: no name bound or deleted where the board's names are, a board's _j or _sb_check its own, astra's CORR-AE0-1)
+      run(`__import__("_sb_check").finish(__import__("json").loads(${JSON.stringify(JSON.stringify(error))}))\n`, host, "exec", "<check>");
       return String(R.getattr(R.importModule("_sb_check"), "out"));
     };
     if (m.magma || m.matlab) return finish("a question's check runs in Python and Sage boards (Magma and MATLAB come later)");
     if (typeof e.code !== "string") return finish("no code");
     let answer: string;
     try { answer = JSON.stringify(e.answer ?? null); } catch { return finish("its answer is not JSON data"); }
-    if (!run(`import _sb_check\n_sb_check.prepare(${JSON.stringify(answer)})\n`, host, "exec", "<check>")) return finish("its answer could not be given to it");
+    if (!run(`__import__("_sb_check").prepare(${JSON.stringify(answer)})\n`, host, "exec", "<check>")) return finish("its answer could not be given to it");
     // (the value of its last expression kept: an expression statement at its end assigned to __sb_value__)
     const keep = (t: any) => {
       const last = t.body?.[t.body.length - 1];
