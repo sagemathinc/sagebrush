@@ -9,12 +9,8 @@ BOM = BOM_UTF16 = BOM_UTF16_LE
 BOM_UTF32 = BOM_UTF32_LE
 
 
-def encode(obj, encoding="utf-8", errors="strict"):
-    return obj.encode(encoding, errors)
-
-
-def decode(obj, encoding="utf-8", errors="strict"):
-    return bytes(obj).decode(encoding, errors)
+# (_codecs's, as CPython's: a pickle names _codecs.encode)
+from _codecs import encode, decode
 
 
 class CodecInfo(tuple):

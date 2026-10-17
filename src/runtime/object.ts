@@ -234,6 +234,17 @@ export const DONE: any = Object.freeze({ done: true });
 export const NotImplemented: any = Object.create(null);
 export const Ellipsis: any = Object.create(null);
 
+// The dunders CPython's builtin types give through their slots
+// (typeobject.c slotdefs): their methods are wrapper_descriptors
+export const SLOT_WRAPPERS = new Set(
+  ("__getattribute__ __getattr__ __setattr__ __delattr__ __repr__ __str__ __hash__ __call__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ " +
+    "__iter__ __next__ __get__ __set__ __delete__ __init__ __del__ __await__ __aiter__ __anext__ __add__ __radd__ __sub__ __rsub__ " +
+    "__mul__ __rmul__ __mod__ __rmod__ __divmod__ __rdivmod__ __pow__ __rpow__ __neg__ __pos__ __abs__ __bool__ __invert__ " +
+    "__lshift__ __rlshift__ __rshift__ __rrshift__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __int__ __float__ __index__ " +
+    "__iadd__ __isub__ __imul__ __imod__ __ipow__ __ilshift__ __irshift__ __iand__ __ixor__ __ior__ __truediv__ __rtruediv__ " +
+    "__floordiv__ __rfloordiv__ __itruediv__ __ifloordiv__ __matmul__ __rmatmul__ __imatmul__ __len__ __getitem__ __setitem__ " +
+    "__delitem__ __contains__ __buffer__ __release_buffer__").split(" "),
+);
 export function typeOf(x: any): PyType {
   switch (typeof x) {
     case "number":
@@ -247,6 +258,9 @@ export function typeOf(x: any): PyType {
     case "function":
       if (x.$dict !== undefined) return x.$meta ?? T.type;
       if (x.$self !== undefined) return T.method;
+      // (a builtin type's method, unbound: CPython's method_descriptor, or
+      // wrapper_descriptor for a slot's dunder; types.ts)
+      if (x.$pyfn === true && x.$builtinMethod === true) return (SLOT_WRAPPERS.has(x.__name__) ? T.wrapper_descriptor : T.method_descriptor) ?? T.function;
       return x.$pyfn === true ? T.function : T.builtin_function_or_method;
     case "object": {
       if (x === null) return T.NoneType;
@@ -262,8 +276,10 @@ export function typeOf(x: any): PyType {
   throw new Error(`internal error: ${String(x)} is not a Python value`);
 }
 
+// (a lib class standing for a CPython C type: its tp_name, _pyjs_types.c_name)
 export function typeName(x: any): string {
-  return typeOf(x).$name;
+  const t: any = typeOf(x);
+  return t.$tpName ?? t.$name;
 }
 
 export function isinstance(x: any, cls: PyType): boolean {
@@ -581,8 +597,9 @@ export function putAttr(o: any, name: string, v: any): void {
 
 // Instances with an attribute dict: objects created from a Python class or a
 // module, never runtime-internal objects.
+// (a class whose __slots__ give its instances none: $noDict, types.ts)
 export function hasInstanceDict(o: any): boolean {
-  return o !== null && typeof o === "object" && o.$cls !== undefined && o.$cls.$ctor !== null;
+  return o !== null && typeof o === "object" && o.$cls !== undefined && o.$cls.$ctor !== null && o.$cls.$noDict !== true;
 }
 
 // d, found on t for the instance o.  (None is JS null, which a
@@ -699,7 +716,7 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any, hook
     raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'${missingHint(own, name)}`);
   }
   if (dflt !== undefined) return dflt;
-  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'${missingHint(lookupType(t, "__sagebrush_missing__"), name)}`);
+  raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object has no attribute '${name}'${missingHint(lookupType(t, "__sagebrush_missing__"), name)}`);
 }
 
 // What a library class or module of Sagebrush's adds to the AttributeError
@@ -768,9 +785,13 @@ export function selfChecked(f: any): any {
     if (self === undefined) raise(T.TypeError, `unbound method ${cls.$name}.${f.__name__}() needs an argument`);
     if (!isinstance(self, cls)) raise(T.TypeError, `descriptor '${f.__name__}' for '${cls.$name}' objects doesn't apply to a '${typeName(self)}' object`);
   };
+  // (int's, float's and str's own methods take a subclass instance, a box,
+  // by its value, as CPython's: str.__eq__(K('ab'), 'ab'), or a class
+  // body's __hash__ = str.__hash__)
+  const prim = cls === T.int || cls === T.float || cls === T.str;
   const c: any = function (self: any, ...args: any[]) {
     check(self);
-    return f(self, ...args);
+    return f(prim && self instanceof PrimBox ? self.$v : self, ...args);
   };
   // (its name, signature, qualname, ...; not the raw function's own keyword
   // adapter, nor anything leading back to the raw function)
@@ -781,12 +802,14 @@ export function selfChecked(f: any): any {
   if (kw !== undefined) {
     c.$kw = (pos: any[], names: string[], values: any[]) => {
       check(pos[0]);
+      if (prim && pos[0] instanceof PrimBox) pos = [pos[0].$v, ...pos.slice(1)];
       return kw(pos, names, values);
     };
   } else if (f.$sig !== undefined) {
     c.$kw = (pos: any[], names: string[], values: any[]) => {
       const a = bindArgs(f.__name__, f.$sig, pos, names, values);
       check(a[0]);
+      if (prim && a[0] instanceof PrimBox) a[0] = a[0].$v;
       return (f.$raw ?? f)(...a);
     };
     c.$kwPos = true;
@@ -838,8 +861,8 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
     else (o.$attrs ??= new Map()).set(name, v);
     return;
   }
-  if (d !== undefined) raise(T.AttributeError, `'${t.$name}' object attribute '${name}' is read-only`);
-  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}' and no __dict__ for setting new attributes`);
+  if (d !== undefined) raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object attribute '${name}' is read-only`);
+  raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object has no attribute '${name}' and no __dict__ for setting new attributes`);
 }
 
 export const objectSetattr = pyfn(function __setattr__(o: any, name: string, v: any) {
@@ -878,7 +901,7 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
     delete o[name];
     return;
   }
-  raise(T.AttributeError, `'${t.$name}' object has no attribute '${name}'`);
+  raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object has no attribute '${name}'`);
 }
 
 // ------------------------------------------------------------------ inline caches
@@ -944,7 +967,7 @@ function setattrMiss(o: any, name: string, v: any, S: any): void {
   if (o !== null && typeof o === "object" && o.$cls !== undefined) {
     const cls: PyType = o.$cls;
     // (never a runtime slot or a layout's own implementation field: not cached, so the fast path never writes one)
-    if (!cls.$customSet && cls.$ctor !== null && !reservedName(name) && !(cls.$impl !== undefined && cls.$impl.has(name))) {
+    if (!cls.$customSet && cls.$ctor !== null && (cls as any).$noDict !== true && !reservedName(name) && !(cls.$impl !== undefined && cls.$impl.has(name))) {
       const d = lookupType(cls, name);
       if (d === undefined || !isDataDescriptor(d)) {
         S.c = cls;
@@ -1271,7 +1294,23 @@ export class PyDict {
 }
 
 // The numeric primitive key in `d` equal to the object key `k`, if any.
+// A dict key's (a set element's) hash: an exact TypeError from it becomes
+// CPython 3.14's "cannot use 'list' as a dict key (unhashable type:
+// 'list')" (dict_unhashable_type; a set's dict is marked $elem)
+function keyHash(d: PyDict, k: any): number {
+  try {
+    return hooks.hash(k);
+  } catch (e: any) {
+    if (e === null || typeof e !== "object" || e.$cls !== T.TypeError) throw e;
+    const msg = callObj(lookupType(typeOf(e), "__str__"), [e]);
+    return raise(T.TypeError, `cannot use '${typeName(k)}' as a ${(d as any).$elem === true ? "set element" : "dict key"} (${msg})`);
+  }
+}
 function numAlias(d: PyDict, k: any): any {
+  // (a str subclass key with its own __eq__ or __hash__ is the str key of
+  // its value when it hashes as that str and the two compare equal, as
+  // CPython's lookup compares them: K('ab') finds 'ab')
+  if (k instanceof PrimBox && typeof k.$v === "string" && d.$m.has(k.$v) && keyHash(d, k) === hooks.hash(k.$v) && hooks.eq(k.$v, k)) return k.$v;
   if (!d.$hasNum) return undefined;
   let idx = d.$nidx;
   if (idx === null) {
@@ -1285,7 +1324,7 @@ function numAlias(d: PyDict, k: any): any {
       }
     }
   }
-  const l = idx.get(hooks.hash(k));
+  const l = idx.get(keyHash(d, k));
   if (l !== undefined) for (const pk of l) if (hooks.eq(pk, k)) return pk;
   return undefined;
 }
@@ -1396,7 +1435,7 @@ function primitiveKey(k: any): any {
 }
 
 function bucketEntry(d: PyDict, k: any, create: boolean): any {
-  const h = hooks.hash(k);
+  const h = keyHash(d, k);
   let list = d.$buckets?.get(h);
   if (list !== undefined) {
     for (const e of list) if (e.k === k || hooks.eq(e.k, k)) return e;
@@ -1427,7 +1466,7 @@ export function dictGet(d: PyDict, k: any): any {
     return e === undefined ? undefined : d.$m.get(e);
   }
   if (d.$buckets === null) {
-    hooks.hash(k); // unhashable keys raise even on a miss
+    keyHash(d, k); // unhashable keys raise even on a miss
     const a = numAlias(d, k);
     return a === undefined ? undefined : d.$m.get(a);
   }
@@ -1483,7 +1522,7 @@ export function dictDelete(d: PyDict, k: any): boolean {
   }
   const e = d.$buckets === null ? undefined : bucketEntry(d, k, false);
   if (e === undefined) {
-    hooks.hash(k);
+    keyHash(d, k);
     const a = p === undefined ? numAlias(d, k) : undefined;
     if (a !== undefined) {
       d.$orig?.delete(a);

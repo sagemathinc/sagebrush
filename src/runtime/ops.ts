@@ -1719,9 +1719,16 @@ export function unpackEx(x: any, before: number, after: number): any[] {
 // ------------------------------------------------------------------ sets
 
 // A set is a dict whose values are all `true`.
+// (a set's elements: a dict's keys, marked for the unhashable-element
+// message, object.ts keyHash)
+const elemDict = (): PyDict => {
+  const d = new PyDict();
+  (d as any).$elem = true;
+  return d;
+};
 export class PySet {
   declare $cls: any;
-  $d = new PyDict();
+  $d = elemDict();
   $frozen = false;
 }
 export function newSet(items?: any, frozen = false): PySet {

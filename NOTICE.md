@@ -61,6 +61,11 @@ Copyright (c) 2001 Python Software Foundation. See
   Python, for `lib/string/__init__.py` (CPython 3.14's, unchanged).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
+- `lib/pickle.py`: CPython 3.14's `Lib/pickle.py`, changed: protocol 4's
+  `STACK_GLOBAL` memoizes the module name by module (and, in `builtins`, by
+  function or type), as CPython's identity of those strings, which
+  Sagebrush's strings do not have, makes it (`_save_module_name`); its
+  exceptions are `lib/_pickle.py`'s, as CPython's are its accelerator's.
 - `lib/textwrap.py`: CPython 3.14's `Lib/textwrap.py`, changed: `wrap()`
   (and so `fill()` and `shorten()`) refuses text with characters beyond
   U+FFFF, which Sagebrush's strings count as two.
