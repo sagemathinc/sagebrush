@@ -7,7 +7,7 @@ import {
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -97,6 +97,7 @@ function exactAttrName(name: any): string {
 }
 method(object, "__getattribute__", (self: any, name: any) => genericGetattr(self, exactAttrName(name), typeOf(self), undefined, false));
 method(object, "__delattr__", (self: any, name: string) => {
+  notForType(self, "__delattr__");
   genericDelattr(self, name, typeOf(self));
   return null;
 }).$genericDelattr = true;
@@ -121,6 +122,8 @@ type.$customGet = true;
 // then the metaclass's other attributes), what a metaclass's
 // super().__getattribute__ reaches; never __getattr__ (the slot calls that)
 method(type, "__getattribute__", (c: any, name: any) => typeGetattr(c, exactAttrName(name)));
+type.$dict.set("__setattr__", typeSetattr);
+type.$dict.set("__delattr__", typeDelattr);
 getset(type, "__name__", (c) => c.$name, (c, v) => void (c.$name = v));
 getset(type, "__qualname__", (c) => c.$qualname, (c, v) => void (c.$qualname = v));
 // (a class's __module__: its dict's, but not its instances' __module__
