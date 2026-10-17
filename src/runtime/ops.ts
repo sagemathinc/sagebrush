@@ -648,14 +648,25 @@ function floatPow(x: number, y: number): any {
 }
 function powMod(a: any, b: any, m: any): any {
   if (!(isPyInt(a) && isPyInt(b) && isPyInt(m))) {
-    // ternary pow calls the base's __pow__(exp, mod), as CPython does (only
-    // ints are refused outright)
-    const f = isPyInt(a) || typeof a === "number" ? undefined : special(a, "__pow__");
-    if (f !== undefined) {
-      const r = settle(f, f(a, b, m));
-      if (r !== NotImplemented) return r;
+    // CPython's ternary_op: the base's type, then the exponent's and the
+    // modulus's where they differ: an int NotImplemented (not all are ints),
+    // a float its TypeError, another type's __pow__(exp, mod) only for the
+    // base (a class's ternary slot answers only as the left operand)
+    const seen: PyType[] = [];
+    for (const [i, x] of [a, b, m].entries()) {
+      const t = typeOf(x);
+      if (seen.includes(t)) continue;
+      seen.push(t);
+      if (isPyInt(x)) continue;
+      if (isPyFloat(x)) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
+      if (i !== 0) continue;
+      const f = special(a, "__pow__");
+      if (f !== undefined) {
+        const r = settle(f, f(a, b, m));
+        if (r !== NotImplemented) return r;
+      }
     }
-    raise(T.TypeError, isPyInt(a) || typeof a === "number" ? "pow() 3rd argument not allowed unless all arguments are integers" : `unsupported operand type(s) for ** or pow(): '${typeName(a)}', '${typeName(b)}', '${typeName(m)}'`);
+    raise(T.TypeError, `unsupported operand type(s) for ** or pow(): '${typeName(a)}', '${typeName(b)}', '${typeName(m)}'`);
   }
   let base = big(a), e = big(b), n = big(m);
   if (n === 0n) raise(T.ValueError, "pow() 3rd argument cannot be 0");
