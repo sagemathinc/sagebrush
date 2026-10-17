@@ -1153,6 +1153,9 @@ class _RealField:
         """
         if isinstance(x, _RealBig):
             return x
+        if isinstance(x, _Fraction):
+            import _sage_real
+            _sage_real._rational_bits(x)
         try:
             f = float(x)
         except OverflowError:
