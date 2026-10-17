@@ -16,6 +16,7 @@ validate() mirrors catalog/schema.json, so the check needs no JSON Schema
 library and runs wherever Sagebrush does.
 """
 
+import builtins as _builtins
 import json as _json
 import os as _os
 import sys as _sys
@@ -320,9 +321,9 @@ def _span(lines, first):
 
 
 def source_url(obj, ref):
-    """The GitHub link to the lines of lib/ that define obj, at the commit
-    ref: .../blob/REF/lib/FILE#Lstart-Lend; None for what is not Python of
-    lib/ (the runtime's own functions, in TypeScript)"""
+    """The GitHub link to the lines of lib/ (or of a package, packages/) that
+    define obj, at the commit ref: .../blob/REF/lib/FILE#Lstart-Lend; None
+    for what is neither (the runtime's own functions, in TypeScript)"""
     obj = getattr(obj, "__wrapped__", obj)
     code = getattr(obj, "__code__", None)
     if code is not None:
@@ -335,16 +336,23 @@ def source_url(obj, ref):
     if not isinstance(path, str) or not isinstance(first, int) or first < 1:
         return None
     libdir = _os.path.dirname(_os.path.abspath(__file__))
-    if not path.startswith(libdir + "/"):
-        return None
-    rel = path[len(libdir) + 1:]
-    text = _lib_text(rel)
+    if path.startswith(libdir + "/"):
+        rel = path[len(libdir) + 1:]
+        text = _lib_text(rel)
+        rel = "lib/" + rel
+    else:
+        # (a package's module: its file in packages/, src/compile.ts)
+        reader = getattr(_builtins, "__pyjs_package_file__", None)
+        found = reader(path) if reader is not None else None
+        if found is None:
+            return None
+        rel, text = _json.loads(found)
     if text is None:
         return None
     lines = text.split("\n")
     if first > len(lines):
         return None
-    return "%s/blob/%s/lib/%s#L%d-L%d" % (REPO, ref, rel, first, _span(lines, first))
+    return "%s/blob/%s/%s#L%d-L%d" % (REPO, ref, rel, first, _span(lines, first))
 
 
 def _module(name, group):
