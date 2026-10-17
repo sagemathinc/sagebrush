@@ -513,7 +513,9 @@ def _arith_class(a, b, name):
         if c in ("cell", "struct", "function_handle", "string"):
             raise _err("Operator '%s' is not supported for operands of type '%s'." % (_OPSYM.get(name, name), c), "MATLAB:UndefinedFunction")
     if ia or ib:
-        if ia and ib and ca != cb:
+        if (ia and ib and ca != cb) or "single" in (ca, cb):
+            # (an integer combines only with its own class or with double: int8(3) + single(1.5)
+            # is an error in MATLAB, though Octave computes it)
             raise _err("Integers can only be combined with integers of the same class, or scalar doubles.", "MATLAB:mixedClasses")
         return ca if ia else cb
     if ca == "single" or cb == "single":
@@ -535,7 +537,10 @@ def _broadcast(f, A, B):
 
 def _elementwise(a, b, f, name):
     cls = _arith_class(a, b, name)
-    if f is _mul and cls == "single":
+    if f is _mul and cls == "single" and "double" not in (class_(a), class_(b)):
+        # (single by single: single arithmetic at each step. With a double operand, MATLAB
+        # converts the single to double, computes in double and makes the result single, so the
+        # product's parts are rounded once, by _finish)
         f = _mul_single
     r = _broadcast(f, _farr(a, name), _farr(b, name))
     return _finish(r, cls)
@@ -1050,12 +1055,12 @@ def _cmp(a, b, f, name):
         c = class_(v)
         if c in ("cell", "struct", "function_handle"):
             raise _err("Operator '%s' is not supported for operands of type '%s'." % (_OPSYM[name], c), "MATLAB:UndefinedFunction")
+    # (MATLAB compares numeric values without losing precision to a conversion, as eq's and lt's
+    # pages say: a single is compared as the double it exactly is, so single(0.1) == 0.1 is
+    # false. Every other class is exact in double too: Sagebrush refuses int64 and uint64 values
+    # of 2^53 or more, so those it holds are)
     A = _farr(a, name)
     B = _farr(b, name)
-    if "single" in (class_(a), class_(b)) and not (class_(a) in _INTS or class_(b) in _INTS):
-        # (mixed single and double: computed in single)
-        A = A.astype(np.complex64 if A.dtype.kind == "c" else np.float32)
-        B = B.astype(np.complex64 if B.dtype.kind == "c" else np.float32)
     if A.dtype.kind == "c" or B.dtype.kind == "c":
         if name not in ("eq", "ne"):
             A = A.real
@@ -9301,6 +9306,7 @@ def _isequal2(a, b, nan_equal):
         return False
     if _dims(a) != _dims(b):
         return False
+    # (a single is compared as the double it exactly is)
     A = _farr(a)
     B = _farr(b)
     if nan_equal:
