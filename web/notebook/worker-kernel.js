@@ -38,7 +38,11 @@ const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 // fetched its first chunks past it, so offline they would be missing.  Told
 // to the service worker once it controls the page; nothing to do if it
 // already did at load (every fetch then went through it).
-const sw = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+// (reading it throws in an opaque origin: a sandboxed frame, web/board's)
+let sw;
+try {
+  sw = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+} catch {}
 const controlledAtLoad = !!sw?.controller;
 const unkept = new Set();
 function flushChunks() {
