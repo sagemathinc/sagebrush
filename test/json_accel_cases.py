@@ -124,9 +124,10 @@ def longer(o):
     l2.append(4)
     return "X"
 show(lambda: json.dumps(l2, default=longer))
-# nesting: 40000 levels pass both ways, as in CPython; far deeper is a
-# RecursionError (CPython's message there names its C stack, so only the
-# type is compared)
+# nesting: 40000 levels pass both ways, as in CPython. (Far deeper, CPython's
+# result depends on its host's C stack: 100000 levels are a RecursionError on
+# our VMs and pass on GitHub's runners, so Sagebrush's own fixed limit is
+# tested in json-accel.test.ts, not compared here.)
 show(lambda: len(json.loads("[" * 40000 + "]" * 40000)) == 1)
 deep = []
 for _ in range(39999):
@@ -138,20 +139,6 @@ deep = {}
 for _ in range(9999):
     deep = {"a": deep}
 show(lambda: len(json.dumps(deep)))
-for s in ["[" * 100000 + "]" * 100000, '{"a":' * 100000 + "1" + "}" * 100000]:
-    try:
-        json.loads(s)
-        print("no error")
-    except RecursionError:
-        print("RecursionError")
-deep = []
-for _ in range(100000):
-    deep = [deep]
-try:
-    json.dumps(deep)
-    print("no error")
-except RecursionError as e:
-    print("RecursionError", e.__notes__[0])
 # CORR-C0E-1: a float subclass's stored value, not its __float__
 class F(float):
     def __float__(self): return float("inf")
