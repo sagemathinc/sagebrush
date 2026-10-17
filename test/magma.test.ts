@@ -1393,6 +1393,22 @@ test("an image under a map whose codomain gives no universe Sagebrush has is ref
   assert.ok(div.includes("Runtime error in 'div': Bad argument types\nArgument types given: FldRatElt, FldRatElt"), div);
 });
 
+test("a number put in a collection over Q[x] or Z[x] is a constant polynomial, as Magma's", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const q = "U:=PolynomialRing(Rationals()); ", z = "U:=PolynomialRing(Integers()); ";
+  const src = [q + "f:=map<Integers()->U|x:->x>; S:=Setseq(f({2})); Type(S[1]); S[1] div 3;", q + "S:=[U|]; Append(~S,2); Type(S[1]); S[1] div 3;",
+    z + "S:=[U|]; Append(~S,2); Type(S[1]);", q + "S:={U|}; Include(~S,2); Type(Setseq(S)[1]);", q + "S:=[U|2]; Type(S[1]); S[1] div 3;",
+    z + "S:=[U|2]; Type(S[1]);", q + "S:=[U|]; Append(~S,1/2); S[1]*2;", "P<t>:=PolynomialRing(Rationals()); S:=[P|t]; Append(~S,3); Index(S,3);",
+    z + "S:=[U|]; Append(~S,1/2);", z + "S:=[U|1/2];"].join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (each as Magma 2.18 has it; 1/2 doesn't go into Z[x])
+  assert.ok(out.startsWith("RngUPolElt\n2/3\nRngUPolElt\n2/3\nRngUPolElt\nRngUPolElt\nRngUPolElt\n2/3\nRngUPolElt\n1\n2\n"), out);
+  assert.match(out.replace(/\s+/g, " "), /Runtime error in 'Append': Cannot coerce element into the universe/);
+  assert.match(out.replace(/\s+/g, " "), /Coerce failed for sequence element/);
+  assert.match(out, /\nend\n$/);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
