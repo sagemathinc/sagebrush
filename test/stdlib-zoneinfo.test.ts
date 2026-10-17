@@ -136,6 +136,124 @@ test("_time._read and _time._tzfile called directly: a limit past _tzrules.MAX_F
   assert.deepEqual(out, [...want("_read"), ...want("_tzfile")]);
 });
 
+// (daybreak2's follow-up to HARD-ZI-1: available_timezones walks a TZPATH a
+// user may choose, so its walk has a budget of names across all of TZPATH,
+// each directory read at most that many names at a time (_time._zonedir);
+// past it, a refusal in words, never a partial set)
+test("available_timezones: budgets of names and of characters (names read, directories pending, keys kept) across all of TZPATH, refused past them, each directory read only as far as they allow", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-zoneinfo-walk-"));
+  try {
+    // two roots: a/ with 2 zones and a directory of 1 more (5 names in all),
+    // b/ with 1 zone and 1 file that is not one (2 names)
+    for (const d of ["a", "a/Sub", "b"]) mkdirSync(join(dir, d));
+    for (const f of ["a/One", "a/Two", "a/Sub/Three", "b/Four"]) copyFileSync(PINNED + "/Europe/London", join(dir, f));
+    writeFileSync(join(dir, "a/notes.txt"), "not a zone");
+    writeFileSync(join(dir, "b/x"), "x");
+    // (the big one: 65537 names, one past the default bound)
+    mkdirSync(join(dir, "big"));
+    for (let i = 0; i <= 65536; i++) writeFileSync(join(dir, "big", "f" + i), "");
+    // (characters: one zone whose name is 200 characters, its key too, so 400
+    // in all; and 11000 names of 200 characters, past the default 2097152)
+    mkdirSync(join(dir, "long"));
+    copyFileSync(PINNED + "/Europe/London", join(dir, "long", "z".repeat(200)));
+    mkdirSync(join(dir, "empty"));
+    mkdirSync(join(dir, "wide"));
+    for (let i = 0; i < 11000; i++) writeFileSync(join(dir, "wide", String(i).padStart(200, "w")), "");
+    const code = [
+      "import zoneinfo, zoneinfo._tzpath as T",
+      `d = ${JSON.stringify(dir)}`,
+      "zoneinfo.reset_tzpath([d + '/a', d + '/b'])",
+      // (2 roots and 7 names: 9)
+      "for bound in (9, 8, 6):",
+      "    T._MAX_ENTRIES = bound",
+      "    try: print(bound, sorted(zoneinfo.available_timezones()))",
+      "    except NotImplementedError as e: print(bound, e)",
+      "T._MAX_ENTRIES = 1 << 16",
+      "zoneinfo.reset_tzpath([d + '/big'])",
+      "try: zoneinfo.available_timezones()",
+      "except NotImplementedError as e: print('big', e)",
+      "zoneinfo.reset_tzpath([d + '/long'])",
+      // (the root's own characters, then 400)
+      "for chars in (400, 399, 199):",
+      "    T._MAX_CHARS = len(d + '/long') + chars",
+      "    try: print(chars, [len(k) for k in zoneinfo.available_timezones()])",
+      "    except NotImplementedError as e: print(chars, str(e).replace(str(T._MAX_CHARS), 'root+%d' % chars))",
+      "T._MAX_CHARS = 1 << 21",
+      "zoneinfo.reset_tzpath([d + '/wide'])",
+      "try: zoneinfo.available_timezones()",
+      "except NotImplementedError as e: print('wide', e)",
+      // (daybreak2's HARD-TZB-2: roots spend too, missing or empty ones included)
+      "T._MAX_ENTRIES = 5",
+      "for roots in (['/nonexistent-%d' % i for i in range(5)], ['/nonexistent-%d' % i for i in range(6)], [d + '/a/Sub'] * 2 + ['/nonexistent'] * 3, [d + '/empty'] * 6):",
+      "    zoneinfo.reset_tzpath(roots)",
+      "    try: print(len(roots), sorted(zoneinfo.available_timezones()))",
+      "    except NotImplementedError as e: print(len(roots), e)",
+      "T._MAX_ENTRIES = 1 << 16",
+      "T._MAX_CHARS = 30",
+      "zoneinfo.reset_tzpath(['/' + 'x' * 30])",
+      "try: zoneinfo.available_timezones()",
+      "except NotImplementedError as e: print('long root', e)",
+    ].join("\n");
+    const out = run(process.execPath, ["--max-old-space-size=128", __dirname + "/../src/cli.js", "-c", code], {}).filter(Boolean);
+    assert.deepEqual(out, [
+      "9 ['Four', 'One', 'Sub/Three', 'Two']",
+      "8 zoneinfo: available_timezones() past Sagebrush's bound of 8 names on TZPATH",
+      "6 zoneinfo: available_timezones() past Sagebrush's bound of 6 names on TZPATH",
+      "big zoneinfo: available_timezones() past Sagebrush's bound of 65536 names on TZPATH",
+      "400 [200]",
+      // (the key's 200 cross what the name left)
+      "399 zoneinfo: available_timezones() past Sagebrush's bound of root+399 characters of names on TZPATH",
+      // (the name itself crosses them, as _zonedir reads it)
+      "199 zoneinfo: available_timezones() past Sagebrush's bound of root+199 characters of names on TZPATH",
+      "wide zoneinfo: available_timezones() past Sagebrush's bound of 2097152 characters of names on TZPATH",
+      "5 []",
+      "6 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      // (a/Sub twice: 2 roots and 1 name each, then a missing one: 5 spent, the next refused)
+      "5 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      "6 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      "long root zoneinfo: available_timezones() past Sagebrush's bound of 30 characters of names on TZPATH",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("_time._zonedir called directly: at most limit names and chars characters (None past them); a limit past its bound, negative or not an int refused before anything is read", () => {
+  const code = [
+    "import _time",
+    `names = _time._zonedir(${JSON.stringify(PINNED + "/Europe")}, 3, 1000)`,
+    "print(len(names), all(isinstance(n, str) for n in names), _time._zonedir('/', 0, 1000))",
+    // (Europe's names are longer than 5 characters in all: None)
+    `print(_time._zonedir(${JSON.stringify(PINNED + "/Europe")}, 100, 5))`,
+    "for limit in (2 ** 40, 65538, -1, 1.5, True, None):",
+    "    try: _time._zonedir('/', limit, 10); print('listed')",
+    "    except (TypeError, ValueError) as e: print(type(e).__name__, e)",
+    "for chars in (2 ** 40, 2 ** 21 + 1, -1, 'x'):",
+    "    try: _time._zonedir('/', 1, chars); print('listed')",
+    "    except (TypeError, ValueError) as e: print(type(e).__name__, e)",
+    `for p in ('/nonexistent-zonedir', ${JSON.stringify(PINNED + "/Europe/London")}):`,
+    "    try: _time._zonedir(p, 5, 100)",
+    "    except OSError as e: print(type(e).__name__)",
+  ].join("\n");
+  const out = run(process.execPath, ["--max-old-space-size=64", __dirname + "/../src/cli.js", "-c", code], {}).filter(Boolean);
+  assert.deepEqual(out, [
+    "3 True []",
+    "None",
+    "ValueError _time._zonedir: the limit must be in 0..65537, not 1099511627776",
+    "ValueError _time._zonedir: the limit must be in 0..65537, not 65538",
+    "ValueError _time._zonedir: the limit must be in 0..65537, not -1",
+    "TypeError _time._zonedir: the limit must be an int, not float",
+    "TypeError _time._zonedir: the limit must be an int, not bool",
+    "TypeError _time._zonedir: the limit must be an int, not NoneType",
+    "ValueError _time._zonedir: the limit must be in 0..2097152, not 1099511627776",
+    "ValueError _time._zonedir: the limit must be in 0..2097152, not 2097153",
+    "ValueError _time._zonedir: the limit must be in 0..2097152, not -1",
+    "TypeError _time._zonedir: the limit must be an int, not str",
+    "FileNotFoundError",
+    "NotADirectoryError",
+  ]);
+});
+
 test("the tzdata package: the pinned one's version as a browser; none under Node, as on CPython without it", () => {
   const code = "import tzdata\nprint(tzdata.IANA_VERSION, tzdata.__version__, sorted(n for n in dir(tzdata) if not n.startswith('__')))";
   const as = (env: Record<string, string>) => run(process.execPath, [__dirname + "/../src/cli.js", "-c", code], env).filter(Boolean);
