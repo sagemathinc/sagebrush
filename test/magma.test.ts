@@ -1192,7 +1192,10 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  assert.equal((out.match(/a matrix of more than \d+ entries(, rows or columns)? is not supported yet/g) ?? []).length, 2, r.stdout);
+  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 40000
+  // rows of 40000, fewer rows than the bound, by their entries)
+  assert.equal((out.match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 1, r.stdout);
+  assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
   assert.equal((out.match(/a product of matrices over a finite field of more than 2000000 entry products is not supported yet/g) ?? []).length, 2, r.stdout);
   for (const what of ["Determinant", "Rank", "a power", "CharacteristicPolynomial"])
@@ -1448,6 +1451,33 @@ test("a number put in a collection over a number field, a real field or a matrix
     nf + "S:=[a]; Remove(~S,1); S:=Reverse(S); Append(~S,2); Type(S[1]);", "A:=Matrix(Integers(),2,2,[1,2,3,4]); S:=[A]; Remove(~S,1); Append(~S,2); S[1];",
     "P<x>:=PolynomialRing(Rationals()); S:=[x]; Remove(~S,1); Append(~S,2); Type(S[1]);"].join("\n"));
   assert.equal(em, "FldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\n[2 0]\n[0 2]\nRngUPolElt\nend\n", em);
+  // (a written empty {} with no universe drops it, in a meet or first in
+  // a diff; every other set operation keeps it: checked against Magma
+  // 2.18, astra2 on 0118f5a5)
+  const ops = ["S meet {}", "{} meet S", "{} diff S", "S diff {}", "S meet {1}", "{1} meet S", "S diff {1}", "S meet {Integers()|}",
+    "{Integers()|} diff S", "S join {}", "{} join S", "S sdiff {}", "{} sdiff S"];
+  const so = run(ops.map((e) => nf + `S:={a}; Exclude(~S,a); T:=${e}; Include(~T,2); Type(Setseq(T)[1]);`).join("\n"));
+  assert.equal(so, "RngIntElt\nRngIntElt\nRngIntElt\n" + "FldNumElt\n".repeat(10) + "end\n", so);
+  // (the three that drop it, over six universes: astra2's grid, CORR-0118-1)
+  const us = [nf + "x:=a;", "x:=RealField(10)!1;", "P<t>:=PolynomialRing(Integers()); x:=t;", "P<t>:=PolynomialRing(Rationals()); x:=t;",
+    "x:=Matrix(Integers(),2,2,[1,2,3,4]);", "x:=GF(7)!3;"];
+  const grid = run(us.flatMap((u) => ["S meet {}", "{} meet S", "{} diff S"].map((e) => u + ` S:={x}; Exclude(~S,x); T:=${e}; Include(~T,2); v:=Setseq(T)[1]; Type(v); v div 3;`)).join("\n"));
+  assert.equal(grid, "RngIntElt\n0\n".repeat(18) + "end\n", grid);
+  // (two emptied sets of different number fields, or one and a set Magma
+  // finds no universe with, are Magma's error, never the left one's field;
+  // integers and rationals go into it; a mix Magma resolves by a larger
+  // structure, Z[u] with Q[t], refused, not guessed: astra CORR-011-1)
+  const two = "P<t>:=PolynomialRing(Rationals()); K<a>:=NumberField(t^2-2); L<b>:=NumberField(t^2-3); S:={a}; T:={b}; Exclude(~S,a); Exclude(~T,b); ";
+  const bad = ["join", "meet", "diff", "sdiff"].flatMap((op) => [`R:=S ${op} T;`, `R:=T ${op} S;`]).concat(["R:=S join {b};", "R:={b} diff S;", "R:=S meet {b};", "R:=S join {GF(7)|};"]);
+  for (const e of bad) {
+    const o = run(two + e).replace(/\s+/g, " ");
+    assert.ok(/Runtime error in '(join|meet|diff|sdiff)': No valid universe containing all elements/.test(o) && o.endsWith("end "), e + o);
+  }
+  const good = run(["R:=S join S; Include(~R,2); Type(Setseq(R)[1]);", "R:=S join {1}; Include(~R,2); Type(Setseq(R)[1]);", "R:=S join {1/2}; Type(Setseq(R)[1]);",
+    "R:=T sdiff {1}; Type(Setseq(R)[1]);"].map((e) => two + e).join("\n"));
+  assert.equal(good, "FldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nend\n", good);
+  const mix = run("Z<u>:=PolynomialRing(Integers()); P<t>:=PolynomialRing(Rationals()); S:={u}; T:={t}; Exclude(~S,u); Exclude(~T,t); R:=S join T;");
+  assert.ok(mix.replace(/\s+/g, " ").includes("a set operation on an emptied set of a structure's elements and this other set is not supported yet"), mix);
 });
 
 test("Matrix checks its shape in Magma's words before it builds anything: no Python error, no silently shortened matrix", () => {
@@ -1478,10 +1508,11 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
   assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
   // (a matrix with no rows or no columns keeps both numbers, and prints
   // as Magma's, astra2 WA-024)
-  const zw = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "M:=Matrix(Integers(),0,3,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Integers(),3,0,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Rationals(),0,0,[]); M;\nNcols(Matrix(GF(7),0,3,[]));\n", encoding: "utf8" }).stdout as string;
+  const zw = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "M:=Matrix(Integers(),0,3,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Integers(),3,0,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Rationals(),0,0,[]); M;\nNcols(Matrix(GF(7),0,3,[]));\nMatrix(Integers(),1,0,[]);\nMatrix(Rationals(),0,1,[]);\n", encoding: "utf8" }).stdout as string;
   // (over a finite field Magma has 3 columns too; not modelled, refused)
   assert.ok(zw.startsWith("0 3\nMatrix with 0 rows and 3 columns\n3 0\nMatrix with 3 rows and 0 columns\nMatrix with 0 rows and 0 columns\n"), zw);
   assert.ok(zw.replace(/\s+/g, " ").includes("a matrix with no rows or no columns is not supported yet"), zw);
+  assert.ok(zw.endsWith("Matrix with 1 row and 0 columns\nMatrix with 0 rows and 1 column\n"), zw);
 });
 
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
