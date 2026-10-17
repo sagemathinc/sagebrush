@@ -1375,10 +1375,10 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(at(path)) && fs.statSync(at(path)).isDirectory()));
   // (CPython's path_converter, for os.path (lib/posixpath.py): a path argument
   // of stat ("stat", allowFd), lstat ("lstat"), or posix._path_normpath and
-  // _path_splitroot_ex (not strict). In its order: an int, or an object with
-  // __index__, is a file descriptor where allowFd (the int is returned,
-  // _fd_converter's OverflowError past a C int); then a str or bytes, a
-  // subclass's payload taken as it is, no method of it called; then
+  // _path_splitroot_ex (not strict). In its order: a str or bytes, a
+  // subclass's payload taken as it is, no method of it called; else an int,
+  // or an object with __index__, is a file descriptor where allowFd (the int
+  // is returned, _fd_converter's OverflowError past a C int); else
   // __fspath__, looked up on the type and bound to the object as a special
   // method is, whose result must be a str or bytes; anything else is
   // fname's TypeError. Strict: a str must encode to the file system's UTF-8
@@ -1387,7 +1387,10 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "path", (p: any, fname: any, allowFd: any, strict: any) => {
     const name = String(fname);
     const fdOk = O.truth(allowFd);
-    if (fdOk && (O.isPyInt(p) || lookupType(typeOf(p), "__index__") !== undefined)) {
+    // (a str or bytes, a subclass's too, is a path before anything else: its
+    // __index__ is never asked; astra's CORR-E51-1)
+    const isPath = isinstance(p, T.str) || isinstance(p, T.bytes);
+    if (fdOk && !isPath && (O.isPyInt(p) || lookupType(typeOf(p), "__index__") !== undefined)) {
       const n = O.index(p);
       if (n > 2147483647) raise(T.OverflowError, "fd is greater than maximum");
       if (n < -2147483648) raise(T.OverflowError, "fd is less than minimum");
