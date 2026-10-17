@@ -11,7 +11,9 @@
 #                          can't be), `answer` bound; a fingerprint of
 #                          __main__ taken
 #   finish(error)          the verdict as JSON, in `out`, with whether
-#                          __main__ is as it was (`scope_preserved`)
+#                          __main__ is as it was (`preserved`: everything
+#                          its names hold compared, inside objects too; None
+#                          with `reason` when that can't be said)
 
 import copy as _copy
 import json as _json
@@ -24,8 +26,11 @@ isolated = True
 out = ""
 _before = None
 
-# (what is shared, not copied: code and modules, which a check reads)
+# (what is shared, not copied: code and modules, which a check reads; a
+# function of the board's still changes the board's names, which the
+# fingerprint then shows)
 _SHARED = (_types.ModuleType, _types.FunctionType, _types.BuiltinFunctionType, _types.MethodType, type)
+reason = None
 
 
 def mark():
@@ -39,27 +44,101 @@ def _own(k, v):
     return not (_base.get(k) == id(v) or isinstance(v, _SHARED) or k.startswith("__"))
 
 
-def _fingerprint():
-    """The board's names and what they hold, as text (None: one can't be said)."""
-    main = _sys.modules["__main__"].__dict__
-    parts = []
-    for k in sorted(main):
-        v = main[k]
-        if not _own(k, v):
-            continue
+class _Unknown(Exception):
+    pass
+
+
+_SCALARS = (bool, int, float, complex, str, bytes, type(None))
+_LIMIT = 200000
+
+
+def _fp(v, out, seen, depth):
+    """What `v` holds, as text appended to `out`, looking inside lists,
+    dicts, sets, arrays and objects' attributes: a change anywhere in it
+    changes the text.  _Unknown when that can't be said (an iterator, which
+    can't be read without moving it; too large; too deep)."""
+    if len(out) > _LIMIT:
+        raise _Unknown("the board's values are too large to compare")
+    t = type(v)
+    if t in _SCALARS:
+        out.append(repr(v))
+        return
+    if id(v) in seen:
+        out.append("<seen %d>" % seen[id(v)])
+        return
+    if depth > 40:
+        raise _Unknown("the board's values nest too deep to compare")
+    seen[id(v)] = len(seen)
+    if isinstance(v, _SHARED):
+        out.append("<%s %s>" % (t.__name__, getattr(v, "__qualname__", getattr(v, "__name__", ""))))
+        return
+    if hasattr(v, "__next__") or isinstance(v, (_types.GeneratorType, _types.CoroutineType)):
+        raise _Unknown("%s is an iterator, whose state can't be read without moving it" % t.__name__)
+    tob = getattr(v, "tobytes", None)
+    if tob is not None and hasattr(v, "shape") and hasattr(v, "dtype"):
         try:
-            parts.append((k, type(v).__name__, repr(v)))
+            out.append("<array %s %s %s>" % (v.dtype, v.shape, tob().hex()))
+            return
         except Exception:
-            return None
-    return parts
+            pass
+    if isinstance(v, (list, tuple)):
+        out.append(t.__name__ + "[")
+        for x in v:
+            _fp(x, out, seen, depth + 1)
+        out.append("]")
+        return
+    if isinstance(v, dict):
+        out.append(t.__name__ + "{")
+        for k in sorted(v, key=repr):
+            out.append(repr(k) + ":")
+            _fp(v[k], out, seen, depth + 1)
+        out.append("}")
+        return
+    if isinstance(v, (set, frozenset)):
+        out.append(t.__name__ + repr(sorted(repr(x) for x in v)))
+        return
+    try:
+        out.append(t.__name__ + ":" + repr(v))
+    except Exception:
+        raise _Unknown("a %s can't be shown" % t.__name__)
+    d = getattr(v, "__dict__", None)
+    if isinstance(d, dict):
+        _fp(d, out, seen, depth + 1)
+    for k in getattr(t, "__slots__", ()) if isinstance(getattr(t, "__slots__", ()), (tuple, list)) else ():
+        if hasattr(v, k):
+            out.append("." + k)
+            _fp(getattr(v, k), out, seen, depth + 1)
+
+
+def _fingerprint():
+    """The board's names and everything they hold, as text; None, with
+    `reason`, when that can't be said."""
+    global reason
+    main = _sys.modules["__main__"].__dict__
+    out, seen = [], {}
+    try:
+        for k in sorted(main):
+            v = main[k]
+            if not _own(k, v):
+                continue
+            out.append(k + "=")
+            _fp(v, out, seen, 0)
+    except _Unknown as e:
+        reason = str(e)
+        return None
+    except Exception as e:
+        reason = "the board's values can't be compared (%s)" % type(e).__name__
+        return None
+    return "\x00".join(out)
 
 
 def prepare(answer_json):
-    global ns, isolated, _before
+    global ns, isolated, _before, reason
     main = _sys.modules["__main__"].__dict__
     ns = _types.ModuleType("__check__")
     d = ns.__dict__
     isolated = True
+    reason = None
     memo = {}
     for k, v in main.items():
         if k in ("__name__", "__spec__", "__loader__", "__file__"):
@@ -72,16 +151,18 @@ def prepare(answer_json):
         except Exception:
             d[k] = v
             isolated = False
+    # (the verdict slot the check's own: never one the board's code left, CORR-A19-3)
+    d.pop("__sb_value__", None)
     d["answer"] = _json.loads(answer_json)
     _before = _fingerprint()
 
 
 def finish(error=None):
-    """The verdict, as JSON in `out`: {ok, value | error, isolated, preserved}."""
+    """The verdict, as JSON in `out`: {ok, value | error, isolated, preserved, reason}."""
     global out, ns
-    after = _fingerprint()
+    after = _fingerprint() if _before is not None else None
     preserved = None if _before is None or after is None else _before == after
-    r = {"isolated": isolated, "preserved": preserved}
+    r = {"isolated": isolated, "preserved": preserved, "reason": reason if preserved is None else None}
     if error is not None:
         r.update(ok=False, error=error)
     else:

@@ -274,9 +274,9 @@ try {
   check(await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'right'", 30000), "after a check out of time: checks run again");
   // (one Check bounded as a whole: six computed hints that never end share
   // the check's 2 x checkMs, not checkMs each, HARD-A19-1)
-  await ev(`${B}.edit((d) => { d.nodes.push({ id: "many", kind: "ask", input: "text", text: "Many hints", check: "False", checkMs: 1000, answer: "a", attempts: 5, result: "wrong",
+  await ev(`${B}.edit((d) => { d.nodes.push({ id: "many", kind: "ask", input: "text", text: "Many hints", check: "False", checkMs: 1000, answer: "a", attempts: 5, wrongAttempts: 5, result: "wrong",
     hints: Array.from({ length: 6 }, () => ({ code: "while True:\\n    pass" })) }); }).then(() => 1)`);
-  await until(${JSON.stringify("!!document.querySelector('.board-ask[data-ask="many"] .board-ask-check')")}, 10000);
+  await until(`!!document.querySelector('.board-ask[data-ask="many"] .board-ask-check')`, 10000);
   await ev("(() => { const it = window.board.item('many'); window.board.setCamera({ x: it.x - 40, y: it.y - 40, z: 1 }); window.board.render(); return 1; })()");
   await sleep(300);
   const t0 = Date.now();
@@ -284,6 +284,32 @@ try {
   await until("window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === 'many').attempts === 6", 30000);
   const took = Date.now() - t0, manyText = await ev(q$('.board-ask[data-ask="many"]', ".textContent"));
   check(took < 4500 && /this check's time ran out/.test(manyText), `one Check with six endless computed hints ends within its 2 s budget (${took} ms): ` + manyText.slice(0, 300));
+  // (right twice: no hint, which only wrong attempts reveal, CORR-A19-5)
+  await ev(`${B}.edit((d) => { d.nodes.push({ id: "rr", kind: "ask", input: "number", text: "Right twice", check: "answer > 0", hints: ["HINT-A", "HINT-B", "HINT-C"] }); }).then(() => 1)`);
+  await until(`!!document.querySelector('.board-ask[data-ask="rr"] .board-ask-check')`, 10000);
+  await ev("(() => { const it = window.board.item('rr'); window.board.setCamera({ x: it.x - 40, y: it.y - 40, z: 1 }); window.board.render(); return 1; })()");
+  await sleep(300);
+  const rr = () => node("rr");
+  for (const v of ["1", "2"]) {
+    await ev(`(() => { const n = ${q$('.board-ask[data-ask="rr"] input[type=number]')}; n.value = ${JSON.stringify(v)}; return 1; })()`);
+    await press('.board-ask[data-ask="rr"] .board-ask-check');
+    await until(`window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === 'rr').answer === ${v}`, 30000);
+    await sleep(300);
+  }
+  const rrq = await rr();
+  check(rrq.attempts === 2 && rrq.result === "right" && !rrq.wrongAttempts && !/HINT-/.test(await ev(q$('.board-ask[data-ask="rr"]', ".textContent"))), "right twice: no hint shown: " + JSON.stringify(rrq));
+  // (the answer changed while its check runs: the completion is dropped, not written over it, CORR-A19-4)
+  await ev(`${B}.edit((d) => { d.nodes.push({ id: "pend", kind: "ask", input: "number", text: "Slow", check: "import time\\ntime.sleep(1.5)\\nanswer == 1", checkMs: 5000 }); }).then(() => 1)`);
+  await until(`!!document.querySelector('.board-ask[data-ask="pend"] .board-ask-check')`, 10000);
+  await ev("(() => { const it = window.board.item('pend'); window.board.setCamera({ x: it.x - 40, y: it.y - 40, z: 1 }); window.board.render(); return 1; })()");
+  await sleep(300);
+  await ev(`(() => { const n = ${q$('.board-ask[data-ask="pend"] input[type=number]')}; n.value = "1"; return 1; })()`);
+  await press('.board-ask[data-ask="pend"] .board-ask-check');
+  await sleep(300);
+  await ev(`${B}.edit((d) => { d.nodes.find((n) => n.id === "pend").answer = 2; }).then(() => 1)`);
+  await sleep(3000);
+  const pq = await node("pend");
+  check(pq.answer === 2 && pq.result === undefined && !pq.attempts, "an answer changed while its check ran: the old completion dropped: " + JSON.stringify(pq));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

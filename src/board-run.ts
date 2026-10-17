@@ -245,7 +245,7 @@ export function otherLanguage(doc: BoardDoc): string | null {
 /** A question's check or computed hint, run in the board's interpreter
  * once its code items have run (`sagebrush board try`): its verdict
  * (lib/_sb_check.py), or why there is none. */
-export type Evaluate = (code: string, answer: unknown, ms: number) => Promise<{ ok: boolean; value?: unknown; error?: string; isolated?: boolean; preserved?: boolean | null; timedOut: boolean }>;
+export type Evaluate = (code: string, answer: unknown, ms: number) => Promise<{ ok: boolean; value?: unknown; error?: string; isolated?: boolean; preserved?: boolean | null; reason?: string | null; timedOut: boolean }>;
 
 export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate: Evaluate, run: BoardRun) => Promise<void>): Promise<BoardRun> {
   const mode = doc.mode ?? "python";
@@ -414,7 +414,7 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
         if (r.timedOut) return { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true };
         if (r.dead || r.evaluated === undefined) return { ok: false, error: dead ?? "the interpreter stopped", timedOut: false };
         const v = JSON.parse(r.evaluated);
-        return { ok: !!v.ok, ...(v.ok ? { value: v.value } : { error: String(v.error) }), isolated: v.isolated !== false, preserved: v.preserved ?? null, timedOut: false };
+        return { ok: !!v.ok, ...(v.ok ? { value: v.value } : { error: String(v.error) }), isolated: v.isolated !== false, preserved: v.preserved ?? null, reason: typeof v.reason === "string" ? v.reason : null, timedOut: false };
       }, result);
     }
     return result;

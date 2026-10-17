@@ -99,6 +99,7 @@ bound(DOC, "if (!t || t.length > 16 || /[A-Za-z]|\\p{Cc}/u.test(t)) return undef
 bound(DOC, "hideCode: code !== undefined && n.hideCode === true");
 bound(DOC, "Number.isInteger(n.checkMs) && n.checkMs >= 1 && n.checkMs <= 10000");
 bound(DOC, "Number.isInteger(n.attempts) && n.attempts >= 0");
+bound(DOC, "Number.isInteger(n.wrongAttempts) && n.wrongAttempts >= 0");
 bound(DOC, "preview: code !== undefined ? cleanPreview(n.preview) : undefined");
 bound(DOC, "Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length)))");
 bound(DOC, "if (d?.version > VERSION)");
@@ -111,7 +112,7 @@ const FIELD_RULES = {
   "ImageInfo.src": { anyOf: [{ pattern: IMAGE_SRC, description: "an https: address" }, { pattern: DATA_URL, description: "a data: URL of a PNG, JPEG, GIF or WebP picture (base64)" }] },
   "ImageInfo.w": positive, "ImageInfo.h": positive, "SlideRect.w": positive, "SlideRect.h": positive,
   "DocInk.size": { exclusiveMinimum: 0, maximum: 200 }, "DocInk.opacity": { exclusiveMinimum: 0, exclusiveMaximum: 1 },
-  "DocInk.points": { minItems: 3 }, "DocAsk.checkMs": { type: "integer", minimum: 1, maximum: 10000 }, "DocAsk.attempts": { type: "integer", minimum: 0, maximum: Number.MAX_VALUE }, "DocSticker.w": { minimum: 8, maximum: 4000 },
+  "DocInk.points": { minItems: 3 }, "DocAsk.checkMs": { type: "integer", minimum: 1, maximum: 10000 }, "DocAsk.attempts": { type: "integer", minimum: 0, maximum: Number.MAX_VALUE }, "DocAsk.wrongAttempts": { type: "integer", minimum: 0, maximum: Number.MAX_VALUE }, "DocSticker.w": { minimum: 8, maximum: 4000 },
   // (a grid's columns: a whole number, at least 1)
   "DocGroup.columns": { type: "integer", minimum: 1, maximum: Number.MAX_VALUE }, "BoardPage.columns": { type: "integer", minimum: 1, maximum: Number.MAX_VALUE }, "BoardDoc.columns": { type: "integer", minimum: 1, maximum: Number.MAX_VALUE },
 };

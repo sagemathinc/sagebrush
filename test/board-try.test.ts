@@ -69,7 +69,7 @@ test("board try: each case checked from the board's state, its verdict, message,
   assert.equal(by.none.outcome, "error");
   assert.match(by.none.error, /not True, False or a message/);
   // (a check that changes the board through a function it shares: said, not hidden)
-  assert.equal(by.grow.scope_preserved, false);
+  assert.deepEqual([by.grow.outcome, by.grow.scope_preserved, by.grow.isolation], ["right", false, "copy"]);
   // hints: one record each, a computed one with the first wrong answer
   assert.deepEqual(j.hints.filter((h: any) => h.ask_id === "q1").map((h: any) => [h.index, h.rendered, h.error]), [[0, "Add them up.", null], [1, "You wrote 5.", null]]);
   // a sequence: wrong, wrong, right; the hints shown; its progress saved and read back
@@ -84,7 +84,7 @@ test("board try: a case whose names can't be copied runs alone; inline --case; c
   const j = JSON.parse(r.stdout);
   assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.isolation]), [["case-1", "right", "rerun"], ["case-2", "wrong", "rerun"]]);
   // refused: a case naming no question, a case_id twice, a case with neither answer nor note, no cases
-  const refuse = (cases: unknown, why: RegExp, status = 1) => { const x = run(["board", "try", f, "--cases", file("bad.json", cases)]); assert.equal(x.status, status, x.stderr); assert.match(x.stderr, why); };
+  const refuse = (cases: unknown, why: RegExp, status = 2) => { const x = run(["board", "try", f, "--cases", file("bad.json", cases)]); assert.equal(x.status, status, x.stderr); assert.match(x.stderr, why); };
   refuse({ checks: [{ case_id: "a", ask_id: "nope", answer: 1 }] }, /no question has the id "nope"/);
   refuse({ checks: [{ case_id: "a", ask_id: "q", answer: 1 }, { case_id: "a", ask_id: "q", answer: 2 }] }, /the case_id "a" is there twice/);
   refuse({ checks: [{ case_id: "a", ask_id: "q" }] }, /an answer, or a note/);
@@ -104,4 +104,59 @@ test("board try: with no cases, each question's example", () => {
   const r = run(["board", "try", file("ex.board.json", b), "--json"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout).checks.map((c: any) => [c.case_id, c.ask_id, c.outcome]), [["example-q", "q", "right"], ["example-w", "w", "wrong"]]);
+});
+
+// astra2's CORR-A19-1, -2: every evaluation starts from the board's state just after its code ran
+const one = (code: string, check: string, extra: any = {}) => ({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code }, { id: "q", kind: "ask", text: "Q", input: "number", check, ...extra }] });
+const tryCases = (name: string, board: unknown, cases: unknown) => {
+  const r = run(["board", "try", file(name + ".board.json", board), "--cases", file(name + ".cases.json", cases), "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+};
+
+test("board try: a helper's change to an object inside the board is seen; the next case starts from the board's state", () => {
+  const b = one("class Box:\n    pass\nb = Box()\nb.x = []\ndef grow():\n    b.x.append(1)\ndef size():\n    return len(b.x)", "grow() if answer == 1 else None\nsize() == 0 if answer == 0 else True");
+  const k = tryCases("object2", b, { checks: [{ case_id: "grow", ask_id: "q", answer: 1 }, { case_id: "size", ask_id: "q", answer: 0 }] });
+  assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["grow", "right", "copy", false], ["size", "right", "copy", true]]);
+});
+
+test("board try: a change the copy can't keep in (a method using the board's globals) is seen, and the board is run again before the next case", () => {
+  const b = one("xs = []\nclass C:\n    def add(self):\n        xs.append(1)\nc = C()", "c.add() if answer == 1 else None\nxs == [] if answer == 0 else True");
+  const j = tryCases("method", b, { checks: [{ case_id: "add", ask_id: "q", answer: 1 }, { case_id: "empty", ask_id: "q", answer: 0 }, { case_id: "again", ask_id: "q", answer: 0 }] });
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["add", "right", false], ["empty", "right", true], ["again", "right", true]]);
+});
+
+test("board try: a state that can't be copied: each check, hint and sequence answer from the board's state run afresh", () => {
+  const b = one("gen = (i for i in range(20))", "next(gen) == 0", { hints: [{ code: "str(next(gen))" }] });
+  const j = tryCases("gen", b, { checks: [{ case_id: "a", ask_id: "q", answer: 0 }, { case_id: "b", ask_id: "q", answer: 0 }], sequences: [{ ask_id: "q", answers: [0, 0] }, { ask_id: "q", answers: [0] }] });
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["a", "right", "rerun", null], ["b", "right", "rerun", null]]);
+  assert.match(j.checks[0].scope_preserved_reason, /iterator/);
+  assert.deepEqual(j.hints.map((h: any) => h.rendered), ["0"]);
+  assert.deepEqual(j.interaction.map((i: any) => i.sequence), [["right", "right"], ["right"]]);
+});
+
+test("board try: the verdict is the check's own (CORR-A19-3); a check's errors are no attempts (CORR-A19-6)", () => {
+  let j = tryCases("slot", one("__sb_value__ = True", "x = 1"), { checks: [{ case_id: "a", ask_id: "q", answer: 1 }] });
+  assert.deepEqual([j.checks[0].outcome, j.checks[0].raw_result], ["error", null]);
+  assert.match(j.checks[0].error, /doesn't end with an expression/);
+  j = tryCases("errs", one("n = 1", "1/0"), { sequences: [{ ask_id: "q", answers: [1, 2] }] });
+  assert.deepEqual([j.interaction[0].sequence, j.interaction[0].attempts_after_reload], [["error", "error"], 0]);
+});
+
+test("board try: the contract's edges: --json refusals are reports; --case beside sequences; the engine named", () => {
+  const f = file("edge.board.json", one("n = 2", "answer == n"));
+  // (a refusal with --json: a report, incomplete, with its error; exit 2 for cases, 1 for a board that can't be read)
+  let r = run(["board", "try", f, "--cases", file("dup.json", { checks: [{ case_id: "a", ask_id: "q", answer: 2 }, { case_id: "a", ask_id: "q", answer: 2 }] }), "--json"]);
+  assert.equal(r.status, 2);
+  let j = JSON.parse(r.stdout);
+  assert.deepEqual([j.schema_version, j.complete, typeof j.error, typeof j.board_sha256], [1, false, "string", "string"]);
+  r = run(["board", "try", file("notaboard.json", { hello: 1 }), "--json"]);
+  assert.equal(r.status, 1);
+  assert.equal(JSON.parse(r.stdout).complete, false);
+  // (--case beside a file of sequences only)
+  r = run(["board", "try", f, "--cases", file("seq.json", { sequences: [{ ask_id: "q", answers: [1, 2] }] }), "--case", "q=2", "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  j = JSON.parse(r.stdout);
+  assert.deepEqual([j.checks.map((c: any) => c.outcome), j.interaction[0].sequence], [["right"], ["wrong", "right"]]);
+  assert.match(j.runtime.engine, /^cli-[0-9a-f]{20}$/);
 });

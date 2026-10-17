@@ -199,7 +199,9 @@ computed with the reader's answer like the check. `next` sends the reader
 on: `{"right": "id", "wrong": "id"}` names an item of the question's page
 for each verdict. `example` is an answer for trying the check
 (`sagebrush board try`). The board keeps the verdict in `result` and the
-number of checked attempts in `attempts`; a new answer clears `result`.
+number of checked attempts in `attempts`, of them wrong in `wrongAttempts`
+(one hint shown for each); a check that fails or runs out of time isn't
+an attempt, and a new answer clears `result`.
 
 ```json
 {
@@ -409,6 +411,7 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `next` | next | where to go after an attempt: the id of a note on this page, for `right` and for `wrong` |
 | `example` | string \| number \| boolean \| [string] | an answer to try its check with (`sagebrush board try` runs it) |
 | `attempts` | number | how many times its answer was checked (written by Sagebrush) |
+| `wrongAttempts` | number | how many of those were wrong: one more hint is shown after each (written by Sagebrush) |
 | `result` | `"right"` \| `"wrong"` \| `"error"` | the last check's verdict: `right`, `wrong` or `error` (written by Sagebrush) |
 | `detail` | string | Markdown shown only when zoomed in |
 | `color` | string | a color |

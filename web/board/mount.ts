@@ -503,13 +503,21 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (viewing || !c || !a?.check) return;
     const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000;
     const until = Date.now() + Math.min(2 * ms, 20_000), left = () => Math.min(ms, until - Date.now());
+    // (what it ran on: a completion for another document, another engine, or
+    // a question whose answer or check changed meanwhile is dropped, CORR-A19-4)
+    // (the field checked may be saved meanwhile, as it loses its focus: that answer is the one checked, not another)
+    const loaded = loads, was = JSON.stringify(a.answer ?? null), checked = JSON.stringify(given);
+    const stale = () => {
+      const now = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask, ans = JSON.stringify(now?.answer ?? null);
+      return loads !== loaded || code !== c || !!viewing || !now || now.check !== a.check || (ans !== was && ans !== checked);
+    };
     board.askFeedback.set(id, { pending: true });
     redraw().catch(fail);
     const r = await c.evaluate(mode, a.check, given, ms);
     const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
     const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
     // (the hints shown after this attempt: the computed ones computed now, with the same answer)
-    const wrong = (a.attempts ?? 0) + (outcome === "wrong" ? 1 : 0);
+    const wrong = (a.wrongAttempts ?? 0) + (outcome === "wrong" ? 1 : 0);
     const hints: (string | null)[] = [];
     for (const [k, h] of (a.hints ?? []).slice(0, Math.min(wrong, ASK_LIMITS.hints)).entries()) {
       if (typeof h === "string") { hints[k] = null; continue; }
@@ -521,8 +529,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (kept when it was computed: one that failed may be computed again, with time again)
       if (got.ok && typeof got.value === "string") { if (hintTexts.size >= 1000) hintTexts.clear(); hintTexts.set(key, got.value); }
     }
+    if (stale()) { board.askFeedback.delete(id); redraw().catch(fail); return; }
     board.askFeedback.set(id, { message, hints });
-    if (viewing) return;
     await editor.attempt(id, given, outcome).catch(fail);
     redraw().catch(fail);
   };
