@@ -5,6 +5,17 @@ import { matlabToPython, MatlabSyntaxError, looksLikeMagma, lex, unparse } from 
 // the translation, without the line that records the source text
 const py = (src: string) => matlabToPython(src).split("\n").filter((l) => !l.includes("_m.begin(")).join("\n");
 
+
+// (the old-space limit for MATLAB tests run under a small heap: MATLAB mode itself needs
+// about 93 MiB to start, as it compiles lib/_matlab.py and its modules, so 96 MiB left only a
+// few MiB and failed under load; 128 MiB is for that. What a heap limit can show is narrow:
+// numeric arrays are stored outside V8's old space, and many refused results are small, so
+// the nchoosek, perms and xcorr tests check the refusals and their boundaries, not that
+// nothing was allocated first (a huge nchoosek, computed first, would still exhaust the
+// heap, a practical guard). The repmat test's 16-million-cell case is the one that shows a
+// result is refused before it is made: made, it would exhaust 128 MiB)
+const MATLAB_HEAP = "--max-old-space-size=128";
+
 test(".m files: Magma assigns with :=, MATLAB never does", () => {
   assert.equal(looksLikeMagma("x := 5;\nprint x;"), true);
   assert.equal(looksLikeMagma("R<x> := PolynomialRing(Rationals());\nFactorization(x^2-1);"), true);
@@ -2113,7 +2124,7 @@ test("nchoosek's N and K the same class or one double; unique's TreatMissingAsDi
   ].join("\n")), ["refused", "refused", "ran", "ran", "ran", "refused", "ran", "ran"]);
 });
 
-test("nchoosek refuses mixed classes and results past their class's range before computing the binomial, under a 96 MiB heap, and keeps exact results near the limits", () => {
+test("nchoosek refuses mixed classes and results past their class's range, and keeps exact results near the limits", () => {
   const { spawnSync } = require("node:child_process");
   const tryIt = (e: string) => `try, x = ${e}; disp(class(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 24))]), end`;
   const code = [
@@ -2126,7 +2137,7 @@ test("nchoosek refuses mixed classes and results past their class's range before
     "disp(num2str([nchoosek(realmax, 1) == realmax, nchoosek(2^1020, 1) == 2^1020, nchoosek(1e307, 1) == 1e307]))",
     "disp(nchoosek(30, 15)), disp(nchoosek(int8(10), 3)), disp(nchoosek(1e9, 1))",
   ].join("\n");
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+  const r = spawnSync(process.execPath, [MATLAB_HEAP, require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
@@ -2207,20 +2218,20 @@ test("a workspace function giving no value refuses an assignment; exist needs an
     "refused", "refused", "[2 1]"]);
 });
 
-test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects) before making it, under a 96 MiB heap, at the boundary for complex and a one-axis repeat", () => {
+test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects), at the boundary for complex and a one-axis repeat; a 16-million-cell result is refused before it is made (it would exhaust the 128 MiB heap)", () => {
   const { spawnSync } = require("node:child_process");
   const tryIt = (e: string) => `try, x = ${e}; disp(numel(x)), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 30))]), end`;
   const code = [
     tryIt("repmat(1, 100000, 100000)"), tryIt("repmat(1, 2001, 2000)"), tryIt("repmat('a', 1e9, 1)"), tryIt("repmat(true, [10 10 10 10 10 10 10 10])"),
-    tryIt("repmat({1}, 1000, 1000)"), tryIt("repmat(struct('a', 1), 1, 200001)"), tryIt("repmat(\"ab\", 500, 500)"), tryIt("repmat([1 2; 3 4], 1e300, 1e300)"),
+    tryIt("repmat({1}, 1000, 1000)"), tryIt("repmat({1}, 4000, 4000)"), tryIt("repmat(struct('a', 1), 1, 200001)"), tryIt("repmat(\"ab\", 500, 500)"), tryIt("repmat([1 2; 3 4], 1e300, 1e300)"),
     tryIt("repmat(1, 1000, 1000)"), tryIt("repmat({1}, 400, 500)"), tryIt("repmat([1 2], 0, 1e9)"),
     tryIt("repmat(1i, 1, 524288)"), tryIt("repmat(1i, 1, 524289)"), tryIt("repmat(1, 1, 1048576)"), tryIt("repmat(1, 1048577, 1)"),
   ].join("\n");
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+  const r = spawnSync(process.execPath, [MATLAB_HEAP, require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
-    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
+    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 16000000 e", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
     "524288", "refused: repmat: a result of 524289 ele", "1048576", "refused: repmat: a result of 1048577 el"]);
 });
 
@@ -2259,14 +2270,14 @@ test("a MATLAB function Sagebrush lacks is refused with the catalog's alternativ
     "[3 8 14 8 3]", "[3 8 14 8 3]", "xcorr: 'normalized' needs vectors that are finite and not all zero."]);
 });
 
-test("perms and xcorr are made within their limits, and refused past them, under a 96 MiB heap", () => {
+test("perms and xcorr are made within their limits, and refused past them", () => {
   const { spawnSync } = require("node:child_process");
   const tryIt = (e: string) => `try, x = ${e}; disp(mat2str(size(x))), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 24))]), end`;
   const code = [
     tryIt("perms(1:8)"), tryIt("perms(int8(1:9))"), tryIt("perms('abcdefghi')"), tryIt("perms(1:9)"), tryIt("perms(1:1e6)"),
     tryIt("xcorr([1 2], 499999)"), tryIt("xcorr([1 2], 500000)"), tryIt("xcorr([], [], 1e9)"), tryIt("xcorr(ones(1, 3000))"), tryIt("xcorr(ones(1, 4000))"),
   ].join("\n");
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+  const r = spawnSync(process.execPath, [MATLAB_HEAP, require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8", timeout: 120000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
