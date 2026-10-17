@@ -9,7 +9,7 @@
 // Positions are Python's, code points: a string with astral characters is
 // indexed through strpos.
 
-import { T, DONE, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
+import { T, DONE, positionalArray, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
 import { newBuiltinModule, importModule } from "./modules";
 import { mkfloat, iter, index, pollInterrupt } from "./ops";
 import { floatRepr, decimalOf, repr as pyRepr } from "./format";
@@ -71,14 +71,34 @@ const scanPoll = (i: number) => {
 };
 
 // A Py_ssize_t argument, as CPython's "n" converts it: the index protocol,
-// an OverflowError past 64 bits (CORR-C0E-3)
-function ssize(x: any): number {
+// an OverflowError past 64 bits (CORR-C0E-3); exact, a bigint past 2**53
+// (no string is that long: it is only ever reported back)
+function ssize(x: any): number | bigint {
   const v = index(x);
   if (typeof v === "bigint") {
     if (v > 9223372036854775807n || v < -9223372036854775808n) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
-    return Number(v);
+    return Number.isSafeInteger(Number(v)) ? Number(v) : v;
   }
   return v;
+}
+
+// A call's arguments bound as CPython's PyArg_ParseTupleAndKeywords binds
+// them, all required: too many in all, then each by position or name
+function bindAll(name: string, params: string[], pos: any[], names: string[], values: any[]): any[] {
+  const given = pos.length + names.length;
+  if (given > params.length) raise(T.TypeError, `${name}() takes at most ${params.length} arguments (${given} given)`);
+  return params.map((p, i) => {
+    if (i < pos.length) return pos[i];
+    const k = names.indexOf(p);
+    if (k < 0) raise(T.TypeError, `${name}() missing required argument '${p}' (pos ${i + 1})`);
+    return values[k];
+  });
+}
+function withArgs(name: string, params: string[], impl: (...a: any[]) => any): any {
+  const f = builtin((...a: any[]) => impl(...bindAll(name, params, a, [], [])), name);
+  f.$kw = (pos: any[], names: string[], values: any[]) => impl(...bindAll(name, params, pos, names, values));
+  f.$kwPos = true;
+  return f;
 }
 
 const HEX = "0123456789abcdef";
@@ -423,12 +443,20 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     }
   }
 
-  return builtin((o: any, _level: any) => {
+  return withArgs("_iterencode", ["obj", "_current_indent_level"], (o: any, _level: any) => {
+    // (the level as CPython's: a negative one is 0; with a nonempty indent,
+    // one too deep for a string a MemoryError)
+    const lv = ssize(_level);
+    let level = 0;
+    if (ind !== null && ind !== "" && !indBad) {
+      if (typeof lv === "bigint" || (lv + 1) * ind.length > 2 ** 28) raise(T.MemoryError);
+      level = Math.max(0, lv);
+    }
     out = "";
     stack.length = 0;
     seen.clear();
     try {
-      run(o, ssize(_level ?? 0));
+      run(o, level);
     } catch (e) {
       const pe = toPyExc(e);
       // (the notes, innermost first: each frame encoding an item when it was raised)
@@ -443,7 +471,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
       throw pe;
     }
     return tuple([out]);
-  }, "_iterencode");
+  });
 }
 
 function O_truth(x: any): boolean {
@@ -555,7 +583,7 @@ function makeScanner(ctx: any): any {
   const parseConstant = getattr(ctx, "parse_constant");
   const plainFloat = parseFloat === T.float, plainInt = parseInt === T.int;
 
-  return builtin((string: any, idx: any) => {
+  return withArgs("scan_once", ["string", "idx"], (string: any, idx: any) => {
     // (a str subclass read by its contents, CORR-C0E-4; idx by the index
     // protocol, and one at or past the end is the StopIteration's own value,
     // not clamped, CORR-C0E-3)
@@ -565,7 +593,7 @@ function makeScanner(ctx: any): any {
     if (i0 < 0) raise(T.ValueError, "idx cannot be negative");
     const p = SP.pairs(s);
     const n = s.length;
-    if (i0 >= (p === null ? n : SP.cpOf(p, n))) throw newException(T.StopIteration, [i0]);
+    if (typeof i0 === "bigint" || i0 >= (p === null ? n : SP.cpOf(p, n))) throw newException(T.StopIteration, [i0]);
     const start = p === null ? i0 : SP.unitOf(p, i0);
 
     const number = (i: number): [any, number] | null => {
@@ -718,7 +746,7 @@ function makeScanner(ctx: any): any {
     }
     const r: [any, number] = [v, i];
     return tuple([r[0], p === null ? r[1] : SP.cpOf(p, r[1])]);
-  }, "scan_once");
+  });
 }
 
 const M: any = {};
@@ -736,15 +764,23 @@ newBuiltinModule("_json", (m) => {
     if (!isinstance(s, T.str)) raise(T.TypeError, `first argument must be a string, not ${typeName(s)}`);
     return encodeUnicode(strOf(s));
   });
-  fn("scanstring", (s: any, end: any, strict: any = true) => {
+  // (positional only: CPython's messages for a wrong count or a keyword)
+  const scanstring = (s: any, end: any, strict: any = true) => {
     if (!isinstance(s, T.str)) raise(T.TypeError, `first argument must be a string, not ${typeName(s)}`);
     const str = strOf(s);
     const p = SP.pairs(str);
     const e = ssize(end);
-    if (e < 0 || e > (p === null ? str.length : SP.cpOf(p, str.length))) raise(T.ValueError, "end is out of bounds");
+    if (typeof e === "bigint" || e < 0 || e > (p === null ? str.length : SP.cpOf(p, str.length))) raise(T.ValueError, "end is out of bounds");
     const [v, u] = scanString(str, p === null ? e : SP.unitOf(p, e), O_truth(strict), p);
     return tuple([v, p === null ? u : SP.cpOf(p, u)]);
-  });
+  };
+  const scanArgs = (a: any[]) => {
+    if (a.length < 2) raise(T.TypeError, `scanstring() takes at least 2 arguments (${a.length} given)`);
+    if (a.length > 3) raise(T.TypeError, `scanstring() takes at most 3 arguments (${a.length} given)`);
+    return scanstring(a[0], a[1], a.length > 2 ? a[2] : true);
+  };
+  fn("scanstring", (...a: any[]) => scanArgs(a));
+  positionalArray(m.scanstring, scanArgs);
   fn("make_scanner", (ctx: any) => makeScanner(ctx));
   fn("make_encoder", (markers: any, dflt: any, encoder: any, indent: any, keySep: any, itemSep: any, sortKeys: any, skipKeys: any, allowNan: any) =>
     makeEncoder(markers, dflt, encoder, indent, keySep, itemSep, sortKeys, skipKeys, allowNan));
