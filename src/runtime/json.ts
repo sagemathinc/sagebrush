@@ -9,9 +9,9 @@
 // Positions are Python's, code points: a string with astral characters is
 // indexed through strpos.
 
-import { T, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
+import { T, DONE, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
 import { newBuiltinModule, importModule } from "./modules";
-import { mkfloat, toArray, index, pollInterrupt } from "./ops";
+import { mkfloat, iter, index, pollInterrupt } from "./ops";
 import { floatRepr, decimalOf, repr as pyRepr } from "./format";
 import * as SP from "./strpos";
 
@@ -25,6 +25,46 @@ function step() {
     steps = 0;
     pollInterrupt();
   }
+}
+// an iterable's items, polling (toArray's loop doesn't: a subclass's
+// __iter__ that never ends stops here, HARD-A73-1)
+// (a TypeError getting the iterator is CPython's `msg`, as its
+// PySequence_Fast and PyMapping_Items replace it)
+function collect(x: any, msg?: () => string): any[] {
+  const out: any[] = [];
+  let it: any;
+  try {
+    it = iter(x);
+  } catch (e) {
+    if (msg === undefined || !isinstance(toPyExc(e), T.TypeError)) throw e;
+    raise(T.TypeError, msg());
+  }
+  for (let v = it.$next(); v !== DONE; v = it.$next()) {
+    step();
+    out.push(v);
+  }
+  return out;
+}
+// a list or tuple subclass's items, from its own __iter__ (which must give
+// an iterator), as CPython's PySequence_Fast lists it
+function subclassItems(o: any): any[] {
+  const msg = () => "_iterencode_list needs a sequence";
+  let it: any;
+  try {
+    it = callObj(getattr(o, "__iter__"), []);
+  } catch (e) {
+    if (!isinstance(toPyExc(e), T.TypeError)) throw e;
+    raise(T.TypeError, msg());
+  }
+  // (an iterable that isn't an iterator: iter()'s TypeError)
+  let next = true;
+  try {
+    getattr(it, "__next__");
+  } catch {
+    next = false;
+  }
+  if (!next) raise(T.TypeError, msg());
+  return collect(it, msg);
 }
 const scanPoll = (i: number) => {
   if ((i & 4095) === 0) pollInterrupt();
@@ -199,7 +239,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     }
     const t = typeOf(o);
     if (t === T.list || t === T.tuple) return openList(o, o, level);
-    if (t.$mro.includes(T.list) || t.$mro.includes(T.tuple)) return openList(o, toArray(callObj(getattr(o, "__iter__"), [])), level);
+    if (t.$mro.includes(T.list) || t.$mro.includes(T.tuple)) return openList(o, subclassItems(o), level);
     if (t.$mro.includes(T.dict)) return openDict(o, level);
     enter(o);
     const n = callObj(dflt, [o]);
@@ -248,21 +288,25 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
         return;
       }
       items = [];
-      for (const [mk, v] of d.$m) items.push(tuple([dictKeyOf(d, mk), v]));
+      for (const [mk, v] of d.$m) {
+        step();
+        items.push(tuple([dictKeyOf(d, mk), v]));
+      }
     } else if (o instanceof PyDict && o.$m.size === 0) {
       // (an empty subclass instance is "{}", its items() not called, as
       // CPython's C encoder; a nonempty one's items() is, CORR-C0E-5)
       out += "{}";
       return;
     } else {
-      items = toArray(callObj(T.list, [callObj(getattr(o, "items"), [])]));
+      const r = callObj(getattr(o, "items"), []);
+      items = collect(r, () => `${typeName(o)}.items() returned a non-iterable (type ${typeName(r)})`);
       if (items.length === 0) {
         out += "{}";
         return;
       }
     }
     enter(o);
-    if (sortk) items = toArray(callObj(sorted, [items]));
+    if (sortk) items = collect(callObj(sorted, [items]));
     out += "{";
     let nl: string | null = null, sep = is;
     if (ind !== null) {
@@ -565,7 +609,10 @@ function makeScanner(ctx: any): any {
     const finishObject = (pairs: any[]): any => {
       if (pairsHook !== null) return callObj(pairsHook, [pairs]);
       const d = new PyDict();
-      for (const kv of pairs) dictSet(d, kv[0], kv[1]);
+      for (const kv of pairs) {
+        step();
+        dictSet(d, kv[0], kv[1]);
+      }
       return objectHook !== null ? callObj(objectHook, [d]) : d;
     };
     // an object's key and its ':' from the quote at i: the unit after ':' and spaces

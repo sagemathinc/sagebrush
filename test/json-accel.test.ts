@@ -104,8 +104,10 @@ test("Stop interrupts each of the accelerator's long loops", () => {
 });
 
 // ... and, from another thread as the notebook's Stop, within a deadline:
-// a huge flat loads and dumps, and a dumps whose default() keeps extending
-// the list being encoded (it never ends)
+// a huge flat loads and dumps, a huge object loads (its pairs made a dict),
+// a huge sorted dict dumps (its entries copied), a dumps whose default()
+// keeps extending the list being encoded, and list and dict subclasses
+// whose __iter__ or items() never ends (HARD-A73-1)
 function interruptAfter(setup: string, run: string, ms: number): Promise<string> {
   const w = new Worker(
     `
@@ -153,6 +155,17 @@ test("Stop interrupts a huge flat loads and dumps, and a default() that keeps th
     "    l.append(object())",
     "    return 1",
     "def forever(): json.dumps(l, default=more)",
+    "import itertools",
+    "o = '{' + ','.join(f'\"k{i}\": 0' for i in range(2_000_000)) + '}'",
+    "def objects(): json.loads(o)",
+    "d = {f'k{i}': 0 for i in range(2_000_000)}",
+    "def sorted_dumps(): json.dumps(d, sort_keys=True)",
+    "class L(list):",
+    "    def __iter__(self): return itertools.count()",
+    "class D(dict):",
+    "    def items(self): return itertools.repeat(('a', 1))",
+    "def endless_iter(): json.dumps(L([1]))",
+    "def endless_items(): json.dumps(D(a=1))",
   ].join("\n");
-  for (const run of ["loads", "dumps", "forever"]) assert.equal(await interruptAfter(setup, run, 20), "KeyboardInterrupt", run);
+  for (const run of ["loads", "dumps", "forever", "objects", "sorted_dumps", "endless_iter", "endless_items"]) assert.equal(await interruptAfter(setup, run, 20), "KeyboardInterrupt", run);
 });
