@@ -406,3 +406,14 @@
 .board-ask-error { color: #a60; }
 .board-ask-hint { font-size: 0.95em; padding: 2px 8px; border-left: 3px solid #e0c060; background: #fffbea; }
 .board-ask-message { font-size: 0.95em; }
+/* the host's proposal confirmed (Yes, No), or one of the options chosen */
+.board-ask-yesno { display: flex; gap: 8px; }
+.board-ask-yes, .board-ask-no { padding: 3px 16px; border: 1px solid #2a6f2f; border-radius: 6px; font: inherit; cursor: pointer; text-decoration: none; }
+.board-ask-yes { background: #2a6f2f; color: #fff; }
+.board-ask-no { background: #fff; color: #2a6f2f; }
+.board-ask-choices { display: flex; flex-direction: column; gap: 4px; }
+.board-ask-choice { display: block; text-align: left; padding: 4px 10px; border: 1px solid #2a6f2f55; border-radius: 6px; background: #fff; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
+.board-ask-choice:hover { background: #eef2ea; }
+.board-ask-own { font-style: italic; color: #556; }
+/* (the way to a chosen option's next step: a link in the card's own type, not the item's monospace link line) */
+.board-ask-decide a.board-ref { display: inline; margin: 0; font: inherit; text-decoration: underline; white-space: normal; }

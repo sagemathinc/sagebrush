@@ -471,6 +471,50 @@ try {
   await sleep(5000);
   const after = await byPage();
   check(after === before, "a Check running as the pages are reordered: dropped, neither page's q changed: " + after + " (before " + before + ")");
+  // (no host to ask what the reader's words show: the question's options
+  // offered at once, to choose from, and the reader's own words; William Oct 17)
+  await ev(`${B}.load(${JSON.stringify({ title: "No host", nodes: [
+    { id: "d", kind: "ask", input: "text", text: "What is an orbit?", decide: [{ name: "images", about: "The set $\\{g x\\}$ of images of $x$" }, { name: "subgroup", about: "A subgroup", next: "t" }] },
+    { id: "t", text: "**Orbits are not subgroups.**", x: 900, y: 0 },
+  ] })}).then(() => 1)`);
+  const D = '.board-ask[data-ask="d"] .board-ask-decide';
+  await until(`!!${q$(D)}`, 20000);
+  await show("d");
+  const offered = await ev(`(() => { const d = ${q$(D)}; return { asks: !!d.querySelector('.board-ask-check'), text: d.textContent, choices: [...d.querySelectorAll('.board-ask-choice')].map((c) => (c.getAttribute('href') ?? '') + '|' + c.textContent.trim()), math: !!d.querySelector('.board-ask-choice .katex') }; })()`);
+  check(!offered.asks && offered.text.includes("Which is closest to what you mean?") && offered.choices.length === 3 && offered.choices[1] === "#t|A subgroup" && offered.choices[2] === "|Something else: in my own words" && offered.math, "no host: no Get feedback, the options offered at once, typeset, and Something else: " + JSON.stringify(offered));
+  await press(D + " button.board-ask-choice");
+  check(await until(`${q$(D, ".textContent")}.includes("You chose: The set")`, 3000), "one without a next step chosen: said so: " + await ev(`${q$(D, ".textContent")}`));
+  await press(D + " .board-ask-clear");
+  check(await until(`${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 3000), "Choose again: the options again");
+  await press(D + " .board-ask-own");
+  check(await until(`${q$(D, ".textContent")}.includes("Something else: your own words stand") && document.activeElement === ${q$('.board-ask[data-ask="d"] details textarea')}`, 3000), "Something else: the reader's own words open, focused");
+  await type("A set of points");
+  await ev(`${q$('.board-ask[data-ask="d"] details textarea')}.dispatchEvent(new Event("change")), 1`);
+  await sleep(500);
+  check(await ev(`${q$(D, ".textContent")}.includes("Something else: your own words stand")`) && (await node("d")).note === "A set of points", "...and stays so as they write them, their words kept");
+  // a choice is of the question as it was when chosen: the question or its
+  // options changed (an edit, the API's here), it is gone, and so after an
+  // undo; never said of options not chosen (astra's CORR-E29-2)
+  await press(D + " .board-ask-clear");
+  await until(`${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 3000);
+  await press(D + " button.board-ask-choice");
+  await until(`${q$(D, ".textContent")}.includes("You chose: The set")`, 3000);
+  await ev(`${B}.edit((d) => { const n = d.nodes.find((x) => x.id === "d"); n.text = "Is the REPLACEMENT statement correct?"; n.decide[0].about = "Replacement answer NEVER selected"; }).then(() => 1)`);
+  const edited = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("REPLACEMENT") && !${q$(D, ".textContent")}.includes("You chose") && [...${q$(D)}.querySelectorAll('.board-ask-choice')].some((c) => c.textContent.includes("Replacement answer NEVER selected"))`, 5000);
+  check(edited, "the question and its option changed after a choice: the choice is gone, the new options offered: " + await ev(`${q$(D, ".textContent")}`));
+  await undoKey();
+  const undone = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("What is an orbit?") && !${q$(D, ".textContent")}.includes("You chose") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000);
+  check(undone, "...and after an undo, the old question back: no choice either, the options offered: " + await ev(`${q$('.board-ask[data-ask="d"]', ".textContent")}`));
+  // (a choice is of the words it was made with too: they changed by the API, it is gone; astra's CORR-548-1)
+  await press(D + " button.board-ask-choice");
+  await until(`${q$(D, ".textContent")}.includes("You chose: The set")`, 3000);
+  await ev(`${B}.edit((d) => { d.nodes.find((x) => x.id === "d").note = "API other words"; }).then(() => 1)`);
+  check(await until(`!${q$(D, ".textContent")}.includes("You chose") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000), "a choice, then the words changed by the API: gone, the options offered");
+  // (Something else too: of the question as it was)
+  await press(D + " .board-ask-own");
+  await until(`${q$(D, ".textContent")}.includes("Something else: your own words stand")`, 3000);
+  await ev(`${B}.edit((d) => { d.nodes.find((x) => x.id === "d").text = "What is a stabilizer?"; }).then(() => 1)`);
+  check(await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("stabilizer") && !${q$(D, ".textContent")}.includes("Something else: your own words stand") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000), "Something else chosen, then the question changed: gone, the options offered");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
