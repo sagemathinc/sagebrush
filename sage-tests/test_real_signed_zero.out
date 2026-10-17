@@ -1,0 +1,288 @@
+RR R(-0.0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R('-0') -> -0.000000000000000 Real Field with 53 bits of precision
+RR -R(0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(0)*-1 -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(-0)*5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(0)*-5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0*-5 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0*0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0+-0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0+0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR 0+-0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0-0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR 0-0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0--0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR x-x -> 0.000000000000000 Real Field with 53 bits of precision
+RR -x+x -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0+3 -> 3.00000000000000 Real Field with 53 bits of precision
+RR 0/-5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0/5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0/-5 -> 0.000000000000000 Real Field with 53 bits of precision
+RR 1/-0 -> -infinity Real Field with 53 bits of precision
+RR -1/-0 -> +infinity Real Field with 53 bits of precision
+RR 1/-inf -> -0.000000000000000 Real Field with 53 bits of precision
+RR -5/inf -> -0.000000000000000 Real Field with 53 bits of precision
+RR 1/R(-0) -> -infinity Real Field with 53 bits of precision
+RR -0^2 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0^-2 -> +infinity Real Field with 53 bits of precision
+RR -0^-3 -> -infinity Real Field with 53 bits of precision
+RR -0^0 -> 1.00000000000000 Real Field with 53 bits of precision
+RR -inf^-3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -inf^-2 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(3) -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(2) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(-3) -> -infinity Real Field with 53 bits of precision
+RR -0^R(0.5) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(-0.5) -> +infinity Real Field with 53 bits of precision
+RR -inf^R(-3) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(-2)^(-2^70) -> 0.000000000000000 Real Field with 53 bits of precision
+RR R(-2)^(-2^70-1) -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0%3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -3%3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR 3%-3 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -6%4 -> 2.00000000000000 Real Field with 53 bits of precision
+RR sqrt(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR abs(-0) -> 0.000000000000000 Real Field with 53 bits of precision
+RR sin(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR tan(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR atan(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR asin(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR sinh(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR tanh(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR exp(-0) -> 1.00000000000000 Real Field with 53 bits of precision
+RR cos(-0) -> 1.00000000000000 Real Field with 53 bits of precision
+RR log(-0) -> -infinity Real Field with 53 bits of precision
+RR float(-0) -> -0.0 float
+RR str(-0) -> '-0.000000000000000' str
+RR sign(-0) -> 0
+RR is_zero -> True
+RR ==0 -> True
+RR hash -> True
+RR RR(R(-0)) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R100(R(-0)) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+RR R30(R(-0)) -> -0.00000000 Real Field with 30 bits of precision
+RR QQ(-0) -> 0 Rational Field
+RR ZZ(-0) -> 0
+RR int(-0) -> 0
+RR -0<0 -> False
+RR -0.floor -> 0
+RR R(-0.5).round -> 0
+RR -0*inf -> NaN Real Field with 53 bits of precision
+RR -0+R(-1e-300) -> -1.00000000000000e-300 Real Field with 53 bits of precision
+RR R(-1e-300)*1e-300 -> -1.00000000000000e-600 Real Field with 53 bits of precision
+RR sqrt(-0)^2 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -(-0) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0*QQ(3) -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0*2 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0+QQ(0) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0-QQ(0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR 2*-0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0/QQ(2) -> -0.000000000000000 Real Field with 53 bits of precision
+RR QQ(1)/-0 -> -infinity Real Field with 53 bits of precision
+R30 R(-0.0) -> -0.00000000 Real Field with 30 bits of precision
+R30 R('-0') -> -0.00000000 Real Field with 30 bits of precision
+R30 -R(0) -> -0.00000000 Real Field with 30 bits of precision
+R30 R(0)*-1 -> -0.00000000 Real Field with 30 bits of precision
+R30 R(-0)*5 -> -0.00000000 Real Field with 30 bits of precision
+R30 R(0)*-5 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0*-5 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0*0 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0+-0 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0+0 -> 0.00000000 Real Field with 30 bits of precision
+R30 0+-0 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0-0 -> -0.00000000 Real Field with 30 bits of precision
+R30 0-0 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0--0 -> 0.00000000 Real Field with 30 bits of precision
+R30 x-x -> 0.00000000 Real Field with 30 bits of precision
+R30 -x+x -> 0.00000000 Real Field with 30 bits of precision
+R30 -0+3 -> 3.0000000 Real Field with 30 bits of precision
+R30 0/-5 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0/5 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0/-5 -> 0.00000000 Real Field with 30 bits of precision
+R30 1/-0 -> -infinity Real Field with 30 bits of precision
+R30 -1/-0 -> +infinity Real Field with 30 bits of precision
+R30 1/-inf -> -0.00000000 Real Field with 30 bits of precision
+R30 -5/inf -> -0.00000000 Real Field with 30 bits of precision
+R30 1/R(-0) -> -infinity Real Field with 30 bits of precision
+R30 -0^2 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^3 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0^-2 -> +infinity Real Field with 30 bits of precision
+R30 -0^-3 -> -infinity Real Field with 30 bits of precision
+R30 -0^0 -> 1.0000000 Real Field with 30 bits of precision
+R30 -inf^-3 -> -0.00000000 Real Field with 30 bits of precision
+R30 -inf^-2 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^R(3) -> -0.00000000 Real Field with 30 bits of precision
+R30 -0^R(2) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^R(-3) -> -infinity Real Field with 30 bits of precision
+R30 -0^R(0.5) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^R(-0.5) -> +infinity Real Field with 30 bits of precision
+R30 -inf^R(-3) -> -0.00000000 Real Field with 30 bits of precision
+R30 R(-2)^(-2^70) -> 0.00000000 Real Field with 30 bits of precision
+R30 R(-2)^(-2^70-1) -> -0.00000000 Real Field with 30 bits of precision
+R30 -0%3 -> -0.00000000 Real Field with 30 bits of precision
+R30 -3%3 -> -0.00000000 Real Field with 30 bits of precision
+R30 3%-3 -> 0.00000000 Real Field with 30 bits of precision
+R30 -6%4 -> 2.0000000 Real Field with 30 bits of precision
+R30 sqrt(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 abs(-0) -> 0.00000000 Real Field with 30 bits of precision
+R30 sin(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 tan(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 atan(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 asin(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 sinh(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 tanh(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 exp(-0) -> 1.0000000 Real Field with 30 bits of precision
+R30 cos(-0) -> 1.0000000 Real Field with 30 bits of precision
+R30 log(-0) -> -infinity Real Field with 30 bits of precision
+R30 float(-0) -> -0.0 float
+R30 str(-0) -> '-0.00000000' str
+R30 sign(-0) -> 0
+R30 is_zero -> True
+R30 ==0 -> True
+R30 hash -> True
+R30 sme -> (-1, 0, 0) tuple
+R30 RR(R(-0)) -> -0.000000000000000 Real Field with 53 bits of precision
+R30 R100(R(-0)) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R30 R30(R(-0)) -> -0.00000000 Real Field with 30 bits of precision
+R30 QQ(-0) -> 0 Rational Field
+R30 ZZ(-0) -> 0
+R30 int(-0) -> 0
+R30 -0<0 -> False
+R30 -0.floor -> 0
+R30 R(-0.5).round -> 0
+R30 R(-0.4).trunc -> 0
+R30 -0*inf -> NaN Real Field with 30 bits of precision
+R30 -0+R(-1e-300) -> -1.0000000e-300 Real Field with 30 bits of precision
+R30 R(-1e-300)*1e-300 -> -1.0000000e-600 Real Field with 30 bits of precision
+R30 -0.nan -> False
+R30 sqrt(-0)^2 -> 0.00000000 Real Field with 30 bits of precision
+R30 -(-0) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0*QQ(3) -> -0.00000000 Real Field with 30 bits of precision
+R30 -0*2 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0+QQ(0) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0-QQ(0) -> -0.00000000 Real Field with 30 bits of precision
+R30 2*-0 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0/QQ(2) -> -0.00000000 Real Field with 30 bits of precision
+R30 QQ(1)/-0 -> -infinity Real Field with 30 bits of precision
+R100 R(-0.0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R('-0') -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -R(0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(0)*-1 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(-0)*5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(0)*-5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*-5 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+-0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 0+-0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0-0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 0-0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0--0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 x-x -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -x+x -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+3 -> 3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 0/-5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0/5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0/-5 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 1/-0 -> -infinity Real Field with 100 bits of precision
+R100 -1/-0 -> +infinity Real Field with 100 bits of precision
+R100 1/-inf -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -5/inf -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 1/R(-0) -> -infinity Real Field with 100 bits of precision
+R100 -0^2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^-2 -> +infinity Real Field with 100 bits of precision
+R100 -0^-3 -> -infinity Real Field with 100 bits of precision
+R100 -0^0 -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 -inf^-3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -inf^-2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(2) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(-3) -> -infinity Real Field with 100 bits of precision
+R100 -0^R(0.5) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(-0.5) -> +infinity Real Field with 100 bits of precision
+R100 -inf^R(-3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(-2)^(-2^70) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(-2)^(-2^70-1) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0%3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -3%3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 3%-3 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -6%4 -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 sqrt(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 abs(-0) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 sin(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 tan(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 atan(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 asin(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 sinh(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 tanh(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 exp(-0) -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 cos(-0) -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 log(-0) -> -infinity Real Field with 100 bits of precision
+R100 float(-0) -> -0.0 float
+R100 str(-0) -> '-0.00000000000000000000000000000' str
+R100 sign(-0) -> 0
+R100 is_zero -> True
+R100 ==0 -> True
+R100 hash -> True
+R100 sme -> (-1, 0, 0) tuple
+R100 RR(R(-0)) -> -0.000000000000000 Real Field with 53 bits of precision
+R100 R100(R(-0)) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R30(R(-0)) -> -0.00000000 Real Field with 30 bits of precision
+R100 QQ(-0) -> 0 Rational Field
+R100 ZZ(-0) -> 0
+R100 int(-0) -> 0
+R100 -0<0 -> False
+R100 -0.floor -> 0
+R100 R(-0.5).round -> 0
+R100 R(-0.4).trunc -> 0
+R100 -0*inf -> NaN Real Field with 100 bits of precision
+R100 -0+R(-1e-300) -> -1.0000000000000000000000000000e-300 Real Field with 100 bits of precision
+R100 R(-1e-300)*1e-300 -> -1.0000000000000000000000000000e-600 Real Field with 100 bits of precision
+R100 -0.nan -> False
+R100 sqrt(-0)^2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -(-0) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*QQ(3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+QQ(0) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0-QQ(0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 2*-0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0/QQ(2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 QQ(1)/-0 -> -infinity Real Field with 100 bits of precision
+RNDN 3-3 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -3+3 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0+0 -> 0.00000000 Real Field with 30 bits of precision
+RNDN 0+-0 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0-(-0) -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0+-0 -> -0.00000000 Real Field with 30 bits of precision
+RNDN 0-0 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0*1 -> -0.00000000 Real Field with 30 bits of precision
+RNDN R(-1e-300)/2^(2^62) -> -0.00000000 Real Field with 30 bits of precision
+RNDZ 3-3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -3+3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0+0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ 0+-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0-(-0) -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ 0-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ R(-1e-300)/2^(2^62) -> -0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDU 3-3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -3+3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0+0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU 0+-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0-(-0) -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU 0-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU R(-1e-300)/2^(2^62) -> -0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDD 3-3 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -3+3 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0+0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD 0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0-(-0) -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD 0-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD R(-1e-300)/2^(2^62) -> -8.5096914e-1388255822130839284 Real Field with 30 bits of precision and rounding RNDD
