@@ -61,6 +61,7 @@ jobs:
           CHROME=google-chrome node web/test-runner-files.mjs
           CHROME=google-chrome node web/test-catalog.mjs
           CHROME=google-chrome node web/board/test-frame.mjs
+          CHROME=google-chrome bun web/board/test-submit.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
       - name: conformance (Node)
@@ -132,6 +133,7 @@ jobs:
           bun web/board/test-format.mjs
           bun web/notebook/test-kernel-evaluate.mjs
           bun web/board/test-canvas.mjs
+          bun web/board/test-channel.mjs
           bun web/board/test-merge.mjs
           bun web/board/test-cached-store.mjs
           bun web/board/test-syncdb.mjs

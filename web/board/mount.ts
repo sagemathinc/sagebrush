@@ -35,7 +35,8 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
-import { asksOf, ASK_LIMITS } from "./ask";
+import { answered, asksOf, ASK_LIMITS } from "./ask";
+import { uuid, type AnswerChannel } from "./channel";
 import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode, Evaluated } from "./code";
 import { BoardCodes } from "./codes";
@@ -138,6 +139,11 @@ export interface BoardHost {
   duplicate?(d: BoardDoc): void;
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
+  /** where the reader's answers go (web/board-host-protocol.md: a frame's
+   * channel to its host): a page with questions then has Submit, and a
+   * question with `decide`, "Get feedback on my words".  Read once the board
+   * is loaded (a frame's channel comes with its board) */
+  answers?: AnswerChannel | null;
 }
 
 // (its stylesheet, once a page, first: the page's own rules win; it goes
@@ -171,10 +177,11 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
+<div data-sbb="submit" hidden role="dialog" aria-label="Submit your answers"><div data-sbb="subhead"></div><label data-sbb="sublabel">A comment for whoever made this board (optional; math in $…$ is typeset)<textarea data-sbb="subcomment" rows="3" placeholder="Anything to add?"></textarea></label><div data-sbb="subpreview" class="board-text" hidden></div><div data-sbb="subrow"><button data-sbb="subsend">Send</button><button data-sbb="subclose">Close</button></div><div data-sbb="substatus" class="board-text" role="status" aria-live="polite"></div></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
 <dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
 <h4>Looking</h4><ul>
@@ -311,6 +318,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // answer to it is another than the one checked makes theirs stale, even
   // if a later one puts the first value back, CORR-A19-4)
   const checking = new Map<string, { given: string; stale: boolean }>();
+  // (the last submission of the Submit bar: its id, what it sent, and how
+  // it stands; and the answers given being kept, which a press awaits)
+  type Sent = { id: string; key: string; state: "sending" | "late" | "received" | "refused"; message?: string };
+  let sub: Sent | null = null;
+  let answering: Promise<unknown> = Promise.resolve();
+  // (each decision's question as it was asked: its page, its id and askSig then)
+  const decidedSigs = new Map<string, { page: number; id: string; sig: string | null }>();
   // The name of the shown document's output cache (outcache.ts): the host
   // store's, beside the document and not in it, since a document's seed is
   // portable and anyone can copy it (SEC-B88-1).  Another document shown
@@ -391,6 +405,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (over()) return false;
     if (!view && !replacing && doc !== again) return false;
     if (!view) {
+      // (each decision, pending or done, kept only while its page's
+      // question, as defined, has the words it was asked about: any other
+      // document (an edit, the API's, Undo, Redo) that changes them, or
+      // removes it, drops it, so that changing them back doesn't bring it
+      // back either, CORR-B21-1)
+      for (const [key, was] of decidedSigs) if (askSig(d, was.page, was.id) !== was.sig) { decidedSigs.delete(key); board.askDecided.delete(key); }
       if (checking.size) {
         // (another version of the board's code: every check running is for the code before, CORR-729-1)
         const codeKey = (x: BoardDoc | null) => (x ? JSON.stringify([x.mode ?? null, x.seed ?? null, codeOrder(x).map((c) => [c.id, c.mode, c.code])]) : "");
@@ -403,7 +423,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       }
       doc = d;
     }
+    board.onDecide = host.answers && !view ? decideWords : null;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
+    board.askScope = decidedKey(pageIx + 1, "");
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
     board.markdown = (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" });
     if (host.math && hasMath(JSON.stringify(d))) {
@@ -485,6 +507,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // order, or the format's name and version added, are no edit)
     if (original && originalKey?.[0] !== original) originalKey = [original, shownKey(cleanDoc(original))];
     $("revert").hidden = view || !original || originalKey![1] === shownKey(d);
+    submitBar();
     return true;
   }
   /** Draw again what is shown: the document, or the version being looked at (false: nothing drawn). */
@@ -504,7 +527,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // change; not in a version being looked at, which is not the document)
   const answer = (id: string, patch: { answer?: AskAnswer | null; note?: string | null }) => {
     if (viewing) return;
-    editor.answer(id, patch).catch(fail);
+    // (what the host decided was of the words before: gone with them)
+    // (pending too: its answer, when it comes, is to words no longer there, and dropped, CORR-B21-1)
+    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") { board.askDecided.delete(decidedKey(pageIx + 1, id)); decidedSigs.delete(decidedKey(pageIx + 1, id)); }
+    answering = editor.answer(id, patch).catch(fail);
   };
   board.onAnswer = answer;
   // (a question's answer checked: its check run in the board's interpreter,
@@ -571,20 +597,175 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (stale()) { board.askFeedback.delete(id); redraw().catch(fail); return; }
     board.askFeedback.set(id, { message, hints });
     await editor.attempt(id, given, outcome).catch(fail);
-    redraw().catch(fail);
+    redraw().then((drawn) => { if (drawn) board.keepClear(id); }).catch(fail);
   };
   const checked = host.code ? (id: string, given: AskAnswer) => { check(id, given).catch((e) => { board.askFeedback.delete(id); fail(e); }); } : null;
   board.onCheck = checked;
+
+  // The Submit bar, where the host takes answers (a frame's channel,
+  // web/board-host-protocol.md): the page's answers, the reader's own words
+  // and a comment, sent as one submission.  "Once": Send is disabled in its
+  // own click, until the host says received or refused; with no answer in
+  // 30 s it offers Send again, the same id; answers changed since,
+  // a new id.  And a question's words decided among its `decide` options,
+  // when the reader asks (the host's model), shown with the question.
+  // (the wait before Send again; a test's shorter one, as __sbEvaluateStartMs is for the kernel's)
+  const sendAgainMs = () => (globalThis as any).__sbSendAgainMs ?? 30_000;
+  const comment = $("subcomment") as HTMLTextAreaElement, sendBtn = $("subsend") as HTMLButtonElement;
+  // (the questions of the page shown, and what the reader gave them, as a submission sends them)
+  function pageAnswers() {
+    if (!doc) return null;
+    const n = pageIx + 1, qs = asksOf(doc).filter((q) => q.page === n);
+    const answers: Record<string, AskAnswer> = {}, notes: Record<string, string> = {}, missing: string[] = [];
+    for (const { ask: a } of qs) {
+      if (a.answer !== undefined) answers[a.id] = a.answer;
+      if (a.note?.trim()) notes[a.id] = a.note;
+      if (a.required && !answered(a)) missing.push(plainTitle(a.title || a.text || a.id).slice(0, 60));
+    }
+    const p = pageOf(doc, pageIx), many = !!doc.pages?.length;
+    const page = { number: n, ...(many && p.id ? { id: p.id } : {}), ...(many && p.title ? { title: p.title } : {}) };
+    return { page, answers, notes, count: qs.length, done: qs.filter((q) => answered(q.ask)).length, missing };
+  }
+  const subKey = (pa: NonNullable<ReturnType<typeof pageAnswers>>) => JSON.stringify([pa.page, pa.answers, pa.notes, comment.value]);
+  // (the bar as things stand: shown only with a channel and a page with questions, not over a version looked at)
+  function submitBar() {
+    const pa = host.answers && !viewing ? pageAnswers() : null;
+    const shown = !!pa && pa.count > 0;
+    $("submitbtn").hidden = !shown;
+    if (!shown) { $("submit").hidden = true; return; }
+    const same = !!sub && sub.key === subKey(pa!), long = comment.value.length > ASK_LIMITS.comment;
+    const status = $("substatus"), say = (md: string) => { status.innerHTML = markdown(md); typesetIn(status); };
+    $("subhead").textContent = `${pa!.count === 1 ? "The question" : `The ${pa!.count} questions`} on ${pageCount(doc!) > 1 ? `page ${pa!.page.number}` : "this board"}: ${pa!.done} answered.`;
+    $("submitbtn").textContent = sub?.state === "sending" ? "Sending…" : same && sub!.state === "received" ? "Submitted ✓" : "Submit";
+    sendBtn.textContent = sub && (sub.state === "late" || sub.state === "refused") && same ? "Send again" : "Send";
+    sendBtn.disabled = sub?.state === "sending" || (same && sub!.state === "received") || pa!.missing.length > 0 || long;
+    if (sub?.state === "sending") say("Sending…");
+    else if (long) say(`The comment is longer than ${ASK_LIMITS.comment} characters.`);
+    else if (pa!.missing.length) say(`**Answer the required questions first:** ${pa!.missing.map(esc).join("; ")}. A question answered in your own words counts.`);
+    else if (sub?.state === "late") say(same ? "No answer yet from the page this board is in. You can send again: it won't arrive twice." : "No answer yet about your last answers. Send to send these instead.");
+    else if (sub?.state === "received") say(same ? "**Received.** Whoever made this board has your answers." : "**Received** your earlier answers. You've changed them since: send to send these too.");
+    else if (sub?.state === "refused") say(`**Not sent:** ${esc(sentence(sub.message ?? "refused"))} ${same ? "You can send again, or change your answers first." : "Send to try with your answers as they are now."}`);
+    else say("");
+  }
+  // (a host's words, shown as text in Markdown: nothing in them formats or links)
+  const esc = (s: string) => s.replace(/[\\`*_[\]<>#!|~$]/g, "\\$&");
+  // (a host's words as a sentence: its own full stop, or one added)
+  const sentence = (s: string) => (/[.!?]$/.test(s.trim()) ? s.trim() : s.trim() + ".");
+  const typesetIn = (el: HTMLElement) => { if (board.typeset && hasMath(el.textContent ?? "")) board.typeset(el); };
+  // (the comment shown typeset under its field, as a question's words are, a moment after typing stops)
+  let commentSoon = 0;
+  comment.addEventListener("input", () => {
+    clearTimeout(commentSoon);
+    commentSoon = window.setTimeout(() => {
+      const pv = $("subpreview");
+      pv.hidden = !/\$[^$]+\$/.test(comment.value) || comment.value.length > ASK_LIMITS.comment;
+      if (!pv.hidden) {
+        pv.innerHTML = markdown(comment.value, { pixels: docPixels });
+        // (KaTeX loaded for the comment's math, if the board had none)
+        if (host.math) (mathModule ??= host.math()).then((m) => { if (pv.isConnected) m.typeset(pv); }).catch(() => {});
+      }
+      submitBar();
+    }, 200);
+  });
+  // (the id a send awaits the answer to, and the timer that offers Send again: one of each)
+  let awaiting: string | null = null, lateTimer = 0;
+  async function send() {
+    const ch = host.answers;
+    if (sendBtn.disabled || !ch) return;
+    // (disabled in this click, before anything else, Once)
+    sendBtn.disabled = true;
+    const g = loadGen;
+    // (an answer still being kept, as its field lost its focus to this press: sent with the rest)
+    await answering;
+    const pa = pageAnswers();
+    if (g !== loadGen || destroyed || !pa || pa.missing.length || sub?.state === "sending") { submitBar(); return; }
+    const key = subKey(pa), id = sub && sub.key === key && sub.state !== "received" ? sub.id : uuid();
+    const mine: Sent = sub?.id === id ? sub : { id, key, state: "sending" };
+    mine.state = "sending";
+    sub = mine;
+    submitBar();
+    clearTimeout(lateTimer);
+    lateTimer = window.setTimeout(() => { if (sub === mine && mine.state === "sending") { mine.state = "late"; submitBar(); } }, sendAgainMs());
+    const answer = ch.submit(id, { page: pa.page, answers: pa.answers, notes: pa.notes, comment: comment.value });
+    // (sent again: the channel's one promise of that id, which a send already awaits)
+    if (awaiting === id) return;
+    awaiting = id;
+    const r = await answer;
+    if (awaiting === id) awaiting = null;
+    if (sub !== mine || destroyed) return;
+    clearTimeout(lateTimer);
+    if ("received" in r) mine.state = "received";
+    else if ("refused" in r) { mine.state = "refused"; mine.message = r.refused; }
+    // (given up on, unanswered: Send again sends it again)
+    else mine.state = "late";
+    submitBar();
+  }
+  sendBtn.onclick = () => { send().catch(fail); };
+  $("submitbtn").onclick = () => {
+    const p = $("submit");
+    p.hidden = !p.hidden;
+    if (!p.hidden) { submitBar(); comment.focus(); }
+  };
+  $("subclose").onclick = () => { $("submit").hidden = true; };
+  // (a question's words decided among its options: the host asked, its answer shown with the question; stale (another document, other words) dropped)
+  // (a decision's key: its page and its question, whose id is the page's own, CORR-B21-2)
+  const decidedKey = (page: number, id: string) => `p${page}/${id}`;
+  // (a question's definition and words as a decision depends on them: its
+  // page, all of it but its answer, note, verdict, attempts and place, and
+  // its words; null if the page has no such question)
+  function askSig(d: BoardDoc, page: number, id: string): string | null {
+    if (page > pageCount(d)) return null;
+    const a = asksOf(d).find((q) => q.page === page && q.ask.id === id)?.ask;
+    if (!a) return null;
+    const { answer: _a, note: _n, result: _r, attempts: _t, wrongAttempts: _w, x: _x, y: _y, w: _ww, h: _h, ...def } = a as DocAsk & { x?: number; y?: number; w?: number; h?: number };
+    return JSON.stringify([pageOf(d, page - 1).id ?? null, def, wordsOf(a)]);
+  }
+  // (the words a question has now, as kept: its note, or a text question's answer)
+  const wordsOf = (a: DocAsk | undefined) => (a ? (a.note?.trim() ? a.note : a.input === "text" && typeof a.answer === "string" ? a.answer : "") : "");
+  const askOn = (page: number, id: string) => (doc ? asksOf(doc).find((q) => q.page === page && q.ask.id === id)?.ask : undefined);
+  const decide = async (id: string, words: string) => {
+    const ch = host.answers, pa = pageAnswers();
+    if (!ch || !pa || viewing) return;
+    const page = pa.page.number, key = decidedKey(page, id), g = loadGen, mark = { pending: true };
+    board.askDecided.set(key, mark);
+    redraw().catch(fail);
+    // (the words being kept first, as the field lost its focus to this press)
+    await answering;
+    if (board.askDecided.get(key) !== mark || !doc || wordsOf(askOn(page, id)) !== words) { if (board.askDecided.get(key) === mark) board.askDecided.delete(key); redraw().catch(fail); return; }
+    const sig = askSig(doc, page, id);
+    decidedSigs.set(key, { page, id, sig });
+    const r = await ch.decide(pa.page, id, words);
+    // (another document, or other words since: this answer is not theirs, dropped, CORR-B21-1)
+    if (g !== loadGen || destroyed || board.askDecided.get(key) !== mark) return;
+    const a = askOn(page, id);
+    if (!doc || askSig(doc, page, id) !== sig) { board.askDecided.delete(key); decidedSigs.delete(key); redraw().catch(fail); return; }
+    // (only a name of this question's own options, on its own page: anything else said so, never shown as the host's words)
+    const names = new Set(a?.decide?.map((o) => o.name) ?? []);
+    board.askDecided.set(key, "refused" in r ? { refused: r.refused } : r.option === null || names.has(r.option) ? { option: r.option } : { refused: "the answer was not one of this question's ideas" });
+    // (what it says, and where to go next, clear of the caption)
+    redraw().then((drawn) => { if (drawn && pageIx + 1 === page) board.keepClear(id); }).catch(fail);
+  };
+  // (set as each document is shown: a host's channel comes with its board)
+  function decideWords(id: string, words: string) {
+    decide(id, words).catch((e) => { board.askDecided.delete(decidedKey(pageIx + 1, id)); decidedSigs.delete(decidedKey(pageIx + 1, id)); fail(e); });
+  }
+  // (another document: what was sent and decided was the last one's)
+  function forgetAnswered() {
+    sub = null;
+    board.askDecided.clear();
+    decidedSigs.clear();
+  }
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
-  board.onAskResize = () => { redraw().catch(fail); };
+  // (and, grown, kept clear of the caption, which never covers it)
+  board.onAskResize = (id, grown) => { redraw().then((drawn) => { if (drawn && grown) board.keepClear(id); }).catch(fail); };
   board.onToggleCode = (id) => {
     if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
     if (!flipped.delete(id)) flipped.add(id);
     redraw().catch(fail);
   };
 
-  // (a question's height also as its fields are open, as far as it has grown (UI-448-2) and with what its check said)
-  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0, board.askFeedback.get(a.id) ?? null] : null; };
+  // (a question's height also as its fields are open, as far as it has grown (UI-448-2) and with what its check said, and what the host decided its words show)
+  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0, board.askFeedback.get(a.id) ?? null, board.askDecided.get(board.askScope + a.id) ?? null] : null; };
   const atLeastGrown = (n: MeasuredNote, h: number) => { const a = (n as { ask?: DocAsk }).ask; return a ? Math.max(h, board.askGrown.get(a.id) ?? 0) : h; };
   const heightKey = (n: MeasuredNote, w: number) => JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w, askState(n)]);
   const widthKey = (n: MeasuredNote, max: number) => JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
@@ -705,6 +886,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   async function load(d: BoardDoc, stored = false) {
     loads++;
     dirty.clear();
+    forgetAnswered();
     loadGen++;
     // (Find's matches were the old document's: gone, before its items are
     // drawn again, CORR-F33-1; its query asked of the new one once shown)
@@ -782,10 +964,20 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // `#item-id`, `#page-id/item-id`) in a note's ref, its text, the caption:
   // a click goes there, a move of the reader's (round 0's 15); one naming
   // nothing does nothing (the address is the tour's)
+  // (an item's link says what it goes to: its title, or its text's first
+  // line (its math's source, its Markdown dropped), cut short; never its id)
+  const NEXT_STEP = "Go to the next step", LABEL_MAX = 60;
+  const firstLine = (text: string) => {
+    const line = text.split("\n").find((l) => l.trim()) ?? "";
+    const plain = plainTitle(line.replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|`|^\s*(?:#+|>|[-+*])\s+/g, "")).replace(/\s+/g, " ").trim();
+    if (plain.length <= LABEL_MAX) return plain;
+    const cut = plain.slice(0, LABEL_MAX), at = cut.lastIndexOf(" ");
+    return (at > LABEL_MAX / 2 ? cut.slice(0, at) : cut) + "…";
+  };
   board.linkLabel = (ref) => {
     const l = doc && boardLink(doc, pageIx, ref);
     if (!l) return null;
-    if (l.item) { const it = (function find(ns: DocNode[]): DocNode | undefined { for (const x of ns) { if (x.id === l.item) return x; if (x.kind === "group") { const y = find(x.children); if (y) return y; } } })(pageView(doc!, l.page).nodes ?? []); return plainTitle((it as { title?: string })?.title ?? "") || l.item; }
+    if (l.item) { const it = (function find(ns: DocNode[]): DocNode | undefined { for (const x of ns) { if (x.id === l.item) return x; if (x.kind === "group") { const y = find(x.children); if (y) return y; } } })(pageView(doc!, l.page).nodes ?? []); const n = it as { title?: string; text?: string } | undefined; return plainTitle(n?.title ?? "") || firstLine(n?.text ?? "") || NEXT_STEP; }
     return pageOf(doc!, l.page).title || (pageCount(doc!) > 1 ? `Page ${l.page + 1}` : doc!.title || "the start");
   };
   on(root, "click", (e: MouseEvent) => {
@@ -1335,6 +1527,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     pageIx = 0;
     newOutputs(true);
+    forgetAnswered();
     writtenHere = host.store?.writtenHere?.(false) ?? false;
     // (another document: what the last one was still drawing (a page, an
     // edit) not shown over it, its reader's moves dropped, as for a load;
