@@ -1013,6 +1013,60 @@ def _keep_inf(t, v, first):
     wit = getattr(v, "_wit", None)
     if wit is not None:
         t._wit = wit
+    if getattr(v, "_null", False):
+        t._null = v._null  # (written empty with no universe, or a field's: the copy is too)
+
+
+def _carry(t, *srcs, mode="any"):
+    """t, a collection made from srcs (a conversion, a sort, a selection, a
+    cat or a set operation), keeping what they know of an empty one's
+    universe, as Magma's (checked against Magma 2.18): by default the
+    integers' if any has it (a range, a declared or fixed universe), else
+    written empty with no universe (_null) if all were ({} join
+    {Integers() | } has the integers, {} join {} none); "meet": none if
+    any had none ({Integers() | } meet {} has none); "first": none if the
+    first had none (diff: {} diff {1} has none, {1} diff {1} the
+    integers).  Only when every source is known (the integers' or written
+    empty): with another or an unknown universe among them t stays
+    unknown.  Only an empty
+    t takes them: a nonempty one infers its own.  Gcd and Lcm read them
+    (_null_int_collection)."""
+    if len(t) or getattr(t, "universe", None) is not None or getattr(t, "_inf", None) is not None:
+        return t
+    # (every source must be known, the integers' or written empty: one
+    # of unknown or another universe, {Rationals() | } join
+    # {Integers() | }, leaves t unknown, refused by Gcd and Lcm, never
+    # taken as the integers', astra2 on 76f3cb21)
+    ks = [_provenance(x) for x in srcs]
+    if not ks or any(k is None for k in ks):
+        return t
+    if mode == "meet" and "null" in ks:
+        t._null = True
+    elif mode == "first" and ks[0] == "null":
+        t._null = True
+    elif "field" in ks:
+        t._null = "field"  # (a field's elements: Magma's "GCD not defined for field")
+    elif "int" in ks:
+        t._inf = _ZZ
+    else:
+        t._null = True
+    return t
+
+
+def _provenance(s):
+    """What is known of the universe of the (empty) collection s: "int",
+    "null" (written empty, no universe), or None."""
+    if isinstance(s, MRange):
+        return "int"
+    u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
+    if u is _ZZ or (u is None and inf is _ZZ):
+        return "int"
+    mark = getattr(s, "_null", False)
+    if u is _QQ or isinstance(u, _MFinField) or (u is None and inf is _QQ) or mark == "field":
+        return "field"
+    if u is None and inf is None and mark is True:
+        return "null"
+    return None
 
 
 def _keep_wit(t, s):
@@ -1121,6 +1175,8 @@ def _settle(s):
     once: while nothing is defined a scan finds only holes.)"""
     if getattr(s, "_inf", None) is None:
         s._inf = _infer_from(s.items if isinstance(s, MSet) else s)
+    if s._inf is not None and getattr(s, "_null", False):
+        s._null = False  # (its elements fixed a universe: no longer null)
 
 
 def _admit_element(obj, val, pos):
@@ -1302,6 +1358,8 @@ def _as_seq(s):
     wit = getattr(s, "_wit", None)
     if wit is not None:
         t._wit = wit  # (CORR-47D-1)
+    if getattr(s, "_null", False) and inf is None:
+        t._null = s._null
     return t
 
 
@@ -1349,7 +1407,7 @@ def _index(s, i, pos=None):
             universe = _selection_universe(s, s) if isinstance(s, (MSeq, MRange)) else None
             if n == 0:
                 if (i.size() if isinstance(i, MRange) else len(i)) == 0:
-                    return _keep_wit(MSeq([], universe), s)
+                    return _carry(_keep_wit(MSeq([], universe), s), s)
                 if getattr(s, "universe", None) is None and isinstance(s, MSeq):
                     # (only an untyped empty sequence: for an empty range or
                     # an empty sequence with a universe, the selection is
@@ -1366,7 +1424,7 @@ def _index(s, i, pos=None):
                 out.append(s[j - 1])
             while out and out[-1] is _UNDEF:
                 out.pop()
-            return _keep_wit(MSeq(out, universe), s)
+            return _carry(_keep_wit(MSeq(out, universe), s), s)
         # (any index of an untyped empty sequence is "not defined"; a typed
         # one's is out of its range)
         _read_index(s.size() if isinstance(s, MRange) else len(s), i, pos, isinstance(s, (MSeq, list)) and getattr(s, "universe", None) is None)
@@ -3146,31 +3204,31 @@ def _cat(a, b, pos=None):
                 ok = d is not None and du is not None and _common(d, du) is None
             if not ok:
                 raise MagmaError("Incompatible sequences", "'cat'", True, pos)
-        return MSeq(list(a) + list(b), getattr(a, "universe", None) or getattr(b, "universe", None),
-                    getattr(a, "sample", None) or getattr(b, "sample", None))
+        return _carry(MSeq(list(a) + list(b), getattr(a, "universe", None) or getattr(b, "universe", None),
+                           getattr(a, "sample", None) or getattr(b, "sample", None)), a, b)
     raise _bad_types("cat", (a, b), pos)
 
 
 def _join(a, b, pos=None):
     _set_pair("join", a, b, pos, "No valid universe containing all elements")
     k = a.kind if a.kind == b.kind else "set"
-    return MSet(list(a) + list(b), k)
+    return _carry(MSet(list(a) + list(b), k), a, b)
 
 
 def _meet(a, b, pos=None):
     _set_pair("meet", a, b, pos, "No valid universe containing all elements")
-    return MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _carry(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), a, b, mode="meet")
 
 
 def _diff(a, b, pos=None):
     _set_pair("diff", a, b, pos, "No valid universe containing all elements")
-    return MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _carry(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), a, b, mode="first")
 
 
 def _sdiff(a, b, pos=None):
     _set_pair("sdiff", a, b, pos, "No valid universe containing all elements")
-    return MSet([x for x in a if not _cmpeq_in(x, b)] + [x for x in b if not _cmpeq_in(x, a)],
-                a.kind if a.kind == b.kind else "set")
+    return _carry(MSet([x for x in a if not _cmpeq_in(x, b)] + [x for x in b if not _cmpeq_in(x, a)],
+                       a.kind if a.kind == b.kind else "set"), a, b)
 
 
 def _reduce(op, s, pos=None):
@@ -5496,28 +5554,30 @@ def _null_int_collection(name, given):
     empty comprehension) "Illegal null set/sequence"; over the rationals or
     a finite field "GCD (LCM) not defined for field"; of polynomials
     refused in words.  An empty one made otherwise (Setseq, Sort, join, ...,
-    which carry no universe here) is taken as the integers', as before."""
+    ...) keeps what its sources knew (_carry); where nothing is known it is
+    refused in words, never 0 or 1."""
     s = given[0]
     if isinstance(s, MRange):
         return
     u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
     if u is _ZZ or inf is _ZZ:
         return
-    if u is None and getattr(s, "_null", False):
+    mark = getattr(s, "_null", False)
+    if u is None and mark is True:
         raise _arg_error(name, "Illegal null set/sequence")
-    if u is _QQ or inf is _QQ or isinstance(u, _MFinField):
+    if u is _QQ or inf is _QQ or isinstance(u, _MFinField) or mark == "field":
         raise _arg_error(name, "%s not defined for field" % name.upper())
     if isinstance(u, (_sp.PolynomialRing_, _MFFPolyRing)):
         raise MagmaError("%s of an empty collection of polynomials is not supported yet" % name, "'%s'" % name)
     if u is None:
-        return
+        raise MagmaError("%s of an empty collection whose universe Sagebrush doesn't know is not supported yet" % name, "'%s'" % name)
     raise _bad_types(name, given)
 
 
 def Gcd(*args):
     given = args
-    if len(args) > 2:
-        raise _bad_types("Gcd", args)  # (two arguments, or one sequence)
+    if len(args) > 2 or not args:
+        raise _bad_types("Gcd", args)  # (two arguments, or one sequence; none is Magma's error, never 0)
     if len(args) == 2:
         _no_rationals("Gcd", *args)
     if len(args) == 1:
@@ -5538,7 +5598,12 @@ def Gcd(*args):
         # (integers only, as Magma's: [RngIntElt] is SeqEnum[Cat], never a
         # Python error)
         raise _bad_types("Gcd", given)
-    return _sa.gcd(*args)
+    # (a fold over the integers: one of them too, Gcd([-5]) is 5, never a
+    # Python error, as Magma's)
+    g = 0
+    for a in args:
+        g = _math.gcd(g, int(a))
+    return g
 
 
 GCD = GreatestCommonDivisor = Gcd
@@ -5546,8 +5611,8 @@ GCD = GreatestCommonDivisor = Gcd
 
 def Lcm(*args):
     given = args
-    if len(args) > 2:
-        raise _bad_types("Lcm", args)
+    if len(args) > 2 or not args:
+        raise _bad_types("Lcm", args)  # (none is Magma's error, never 1)
     if len(args) == 1:
         if not isinstance(args[0], (MSeq, MRange, MSet)):
             raise _bad_types("Lcm", given)
@@ -5559,7 +5624,14 @@ def Lcm(*args):
         return _ffp_gcd(args, lcm=True)
     if not all(_int(a) or isinstance(a, _sp.Polynomial) for a in args):
         raise _bad_types("Lcm", given)
-    return _sa.lcm(*args)
+    if any(isinstance(a, _sp.Polynomial) for a in args):
+        return _sa.lcm(*args)
+    # (a fold, nonnegative, 0 with a 0 among them, as Magma's: Lcm([-5]) is 5)
+    l = 1
+    for a in args:
+        a = abs(int(a))
+        l = 0 if (l == 0 or a == 0) else l * a // _math.gcd(l, a)
+    return l
 
 
 LCM = LeastCommonMultiple = Lcm
@@ -6447,7 +6519,7 @@ class Perm(tuple):
 def Sort(s, f=None):
     items = list(s)
     if f is None:
-        return MSeq(sorted(items))
+        return _carry(MSeq(sorted(items)), s)
     import functools
     order = sorted(range(len(items)), key=functools.cmp_to_key(lambda i, j: f(items[i], items[j])))
     # the permutation taking positions in the result to positions in s
@@ -6480,7 +6552,7 @@ def IsEmpty(s):
 
 
 def Seqset(s):
-    return MSet(s)
+    return _carry(MSet(s), s)
 
 
 @_signature("Subsets", "SetEnum", ret="SetEnum")
@@ -6513,18 +6585,18 @@ def _subsets(S, k):
 
 
 def SetToSequence(s):
-    return MSeq(s.ordered() if isinstance(s, MSet) else s)
+    return _carry(MSeq(s.ordered() if isinstance(s, MSet) else s), s)
 
 
 Setseq = SetToSequence
 
 
 def SequenceToSet(s):
-    return MSet(s)
+    return _carry(MSet(s), s)
 
 
 def Set(s):
-    return MSet(s)
+    return _carry(MSet(s), s)
 
 
 def Eltseq(x):
