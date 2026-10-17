@@ -1062,6 +1062,12 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["Gcd(5);", "'Gcd'", "Bad argument types\nArgument types given: RngIntElt"],
     ["Gcd([1, 2], 3);", "'Gcd'", "Bad argument types\nArgument types given: SeqEnum[RngIntElt], RngIntElt"],
     ["Lcm([RngIntElt]);", "'Lcm'", "Bad argument types\nArgument types given: SeqEnum[Cat]"],
+    // (of nothing, no Gcd or Lcm: Magma's error, never 0 or 1)
+    ["Gcd([]);", "'Gcd'", "Illegal null set/sequence"],
+    ["Gcd({});", "'Gcd'", "Illegal null set/sequence"],
+    ["Lcm([]);", "'Lcm'", "Illegal null set/sequence"],
+    ["Lcm({});", "'Lcm'", "Illegal null set/sequence"],
+
     ["AssignNames(~R, {\"t\"});", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SetEnum[MonStgElt]"],
     ["names := [\"t\"]; AssignNames(R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt] ~"],
     ["AssignNames(~R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt] ~"],
@@ -1187,6 +1193,20 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
   assert.match(r.stdout, /\n150\n1\nend\n$/);
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("Gcd and Lcm of an empty collection: of the integers 0 and 1, of nothing Magma's error", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (checked against Magma 2.18: a range, a declared universe and a
+  // sequence emptied of its integers keep the integers; [] and {} have none)
+  const src = "Gcd([1..0]); Lcm([1..0]); Gcd([Integers() | ]); Lcm([Integers() | ]); Gcd({Integers() | });\n" +
+    "S := [1]; Exclude(~S, 1); Gcd(S); Lcm(S);\nGcd([]);\nLcm({});\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  assert.match(out, /^0\n1\n0\n1\n0\n0\n1\n/);
+  assert.ok(out.includes("Runtime error in 'Gcd': Illegal null set/sequence"), out);
+  assert.ok(out.includes("Runtime error in 'Lcm': Illegal null set/sequence"), out);
+  assert.match(out, /\nend\n$/);
 });
 
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {

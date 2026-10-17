@@ -5481,6 +5481,22 @@ def IsPrimePower(n):
     return False
 
 
+def _null_int_collection(name, given):
+    """An empty collection given to Gcd or Lcm: of the integers (a range, a
+    declared universe, or one emptied, its universe fixed) its Gcd is 0 and
+    Lcm 1, as Magma's; with no universe ([] or {}) Magma's "Illegal null
+    set/sequence", never 0 or 1; another universe Bad argument types."""
+    s = given[0]
+    if isinstance(s, MRange):
+        return
+    u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
+    if u is _ZZ or (u is None and inf is _ZZ):
+        return
+    if u is None and inf is None:
+        raise _arg_error(name, "Illegal null set/sequence")
+    raise _bad_types(name, given)
+
+
 def Gcd(*args):
     given = args
     if len(args) > 2:
@@ -5490,6 +5506,9 @@ def Gcd(*args):
     if len(args) == 1:
         if not isinstance(args[0], (MSeq, MRange, MSet)):
             raise _bad_types("Gcd", given)
+        if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
+            _null_int_collection("Gcd", given)
+            return 0
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args)
@@ -5515,6 +5534,9 @@ def Lcm(*args):
     if len(args) == 1:
         if not isinstance(args[0], (MSeq, MRange, MSet)):
             raise _bad_types("Lcm", given)
+        if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
+            _null_int_collection("Lcm", given)
+            return 1
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args, lcm=True)
