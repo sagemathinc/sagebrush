@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 // delattr, statements, augmented assignment), type's and object's own
 // called directly, compared with CPython 3.14 (test/metaclass_setattr_cases.py)
 const TEST = __dirname + "/../../test/";
-for (const name of ["metaclass_setattr_cases.py", "metaclass_setattr_96b_cases.py", "metaclass_setattr_96b_findings.py"]) test(`a metaclass's __setattr__ and __delattr__ as CPython's: ${name}`, () => {
+for (const name of ["metaclass_setattr_cases.py", "metaclass_setattr_96b_cases.py", "metaclass_setattr_96b_findings.py", "metaclass_setattr_088_cases.py"]) test(`a metaclass's __setattr__ and __delattr__ as CPython's: ${name}`, () => {
   const want = execFileSync("python3", [TEST + name], { encoding: "utf8" }).split("\n");
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", TEST + name], { encoding: "utf8" }).split("\n");
   for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${name} line ${i + 1}`);

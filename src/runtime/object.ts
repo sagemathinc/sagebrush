@@ -833,7 +833,10 @@ export function unboundFunction(d: any): any {
 function callSpecial(f: any, self: any, owner: any, args: any[]): any {
   if (typeof f === "function" && !isType(f) && f.$self === undefined && (typeOf(f) === T.function || f.$builtinMethod === true)) return f(self, ...args);
   const get = lookupType(typeOf(f), "__get__");
-  if (get !== undefined) return callObj(get(f, self, owner), args);
+  // (the __get__ called as CPython's slot_tp_descr_get: the raw one found on
+  // the descriptor's type, with (descriptor, receiver, owner), through the
+  // callable protocol: a staticmethod's function, a classmethod's TypeError)
+  if (get !== undefined) return callObj(callObj(get, [f, self, owner]), args);
   return callObj(f, args);
 }
 // A class's attribute set and deleted through its metaclass's own
