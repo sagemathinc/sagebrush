@@ -803,6 +803,7 @@ class ClassMap {
 function dictOver(m: Map<string, any>, cls: any): any {
   const d = new Obj.PyDict();
   (d as any).$m = new ClassMap(m, cls);
+  (d as any).$strOnly = true;
   return d;
 }
 // (one dict over a class body's namespace: its __classdict__'s, and the

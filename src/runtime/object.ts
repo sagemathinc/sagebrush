@@ -1409,8 +1409,16 @@ function bucketEntry(d: PyDict, k: any, create: boolean): any {
   return e;
 }
 
+// A dict over a class namespace (index.ts's ClassMap) takes str keys
+// only: any other is refused here, before its hash, its __eq__ or any of
+// the dict's own state is touched (daybreak2's HARD-E4A-1)
+function strOnly(d: PyDict, k: any): void {
+  if ((d as any).$strOnly === true && typeof k !== "string") raise(T.NotImplementedError, "a key other than a str in a class's __classdict__ is not supported yet");
+}
+
 export function dictGet(d: PyDict, k: any): any {
   if (typeof k === "string") return d.$m.get(k);
+  strOnly(d, k);
   const p = primitiveKey(k);
   if (p !== undefined) {
     const v = d.$m.get(p);
@@ -1434,6 +1442,7 @@ export function dictSet(d: PyDict, k: any, v: any): void {
     d.$m.set(k, v);
     return;
   }
+  strOnly(d, k);
   const p = primitiveKey(k);
   if (p !== undefined) {
     if (typeof p !== "string" && p !== null && d.$buckets !== null && !d.$m.has(p)) {
@@ -1462,6 +1471,7 @@ export function dictSet(d: PyDict, k: any, v: any): void {
 }
 
 export function dictDelete(d: PyDict, k: any): boolean {
+  if (typeof k !== "string") strOnly(d, k);
   const p = primitiveKey(k);
   if (p !== undefined) {
     d.$orig?.delete(p);
