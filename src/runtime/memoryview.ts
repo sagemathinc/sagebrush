@@ -196,5 +196,6 @@ Ty.getset(MV, "c_contiguous", (m: PyMemoryView) => m.step === 1);
 Ty.getset(MV, "f_contiguous", (m: PyMemoryView) => m.step === 1);
 Ty.getset(MV, "contiguous", (m: PyMemoryView) => m.step === 1);
 Ty.getset(MV, "released", (m: PyMemoryView) => m.released);
+MV.$dict.set("__class_getitem__", Ty.genericClassGetitem);
 builtins.memoryview = MV;
 O.bufferHooks.push((x) => (x instanceof PyMemoryView ? x.bytes() : undefined));

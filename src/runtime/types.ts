@@ -7,7 +7,7 @@ import {
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
@@ -107,7 +107,14 @@ const type = builtinType("type", [object], typeCall);
 type.$customGet = true;
 getset(type, "__name__", (c) => c.$name, (c, v) => void (c.$name = v));
 getset(type, "__qualname__", (c) => c.$qualname, (c, v) => void (c.$qualname = v));
-getset(type, "__module__", (c) => c.$dict.get("__module__") ?? c.$module, (c, v) => c.$dict.set("__module__", v));
+// (a class's __module__: its dict's, but not its instances' __module__
+// descriptor there, as `type`'s or a function type's own: then its builtin
+// module, as CPython's for a static type)
+export function typeModule(c: PyType): any {
+  const m = c.$dict.get("__module__");
+  return m === undefined || typeOf(m) === T.getset_descriptor ? c.$module : m;
+}
+getset(type, "__module__", typeModule, (c, v) => c.$dict.set("__module__", v));
 getset(type, "__mro__", (c) => tuple(c.$mro.slice()));
 getset(type, "__bases__", (c) => tuple(c.$bases.slice()));
 getset(type, "__base__", (c) => c.$bases[0] ?? null);
@@ -570,6 +577,32 @@ export function classMetaclass(bases: any[], kwNames: string[], kwValues: any[])
     else raise(T.TypeError, "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases");
   }
   return { meta: winner, kw };
+}
+// A class statement's bases as CPython's update_bases (PEP 560): each that
+// isn't a class and has __mro_entries__ replaced by the tuple that gives for
+// the original bases; the same array when none was replaced
+export function updateBases(bases: any[]): any[] {
+  let out: any[] | null = null;
+  for (let i = 0; i < bases.length; i++) {
+    const b = bases[i];
+    let entries: any = undefined;
+    if (!isType(b)) {
+      try {
+        entries = getattr(b, "__mro_entries__");
+      } catch (e: any) {
+        if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
+      }
+    }
+    if (entries === undefined) {
+      out?.push(b);
+      continue;
+    }
+    const r = callObj(entries, [tuple(bases)]);
+    if (!isinstance(r, T.tuple)) raise(T.TypeError, "__mro_entries__ must return a tuple");
+    out ??= bases.slice(0, i);
+    out.push(...r);
+  }
+  return out ?? bases;
 }
 // The namespace a class body runs in, before it runs: its metaclass's
 // __prepare__'s mapping, or for type's own a Map
@@ -3004,10 +3037,12 @@ export class PyUnion {
   constructor(public args: any[]) {}
 }
 export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => raise(T.TypeError, "cannot create 'types.UnionType' instances"));
+// (X | Y: the union, or NotImplemented; GenericAlias's | too)
+let unionOf: (a: any, b: any) => any;
 {
   const unionArg = (x: any): any[] | undefined => {
     if (x === null) return [T.NoneType];
-    if (isType(x)) return [x];
+    if (isType(x) || x instanceof PyGenericAlias) return [x];
     if (x instanceof PyUnion) return x.args;
     return undefined;
   };
@@ -3015,19 +3050,153 @@ export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => rai
     const x = unionArg(a), y = unionArg(b);
     if (x === undefined || y === undefined) return NotImplemented;
     const args: any[] = [];
-    for (const t of [...x, ...y]) if (!args.includes(t)) args.push(t);
+    // (an alias equal to one already there is a duplicate, as CPython's)
+    const same = (s: any, t: any) => s === t || (s instanceof PyGenericAlias && t instanceof PyGenericAlias && O.truth(O.eq(s, t)));
+    for (const t of [...x, ...y]) if (!args.some((s) => same(s, t))) args.push(t);
     return args.length === 1 ? args[0] : new PyUnion(args);
   };
+  unionOf = make;
   method(type, "__or__", (a: any, b: any) => make(a, b));
   method(type, "__ror__", (a: any, b: any) => make(b, a));
   method(unionType, "__or__", (a: any, b: any) => make(a, b));
   method(unionType, "__ror__", (a: any, b: any) => make(b, a));
-  method(unionType, "__repr__", (u: PyUnion) => u.args.map((t) => (t === T.NoneType ? "None" : t.$module === "builtins" ? t.$qualname : `${t.$module}.${t.$qualname}`)).join(" | "));
-  method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.includes(t)) : NotImplemented));
-  method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ O.id(t), 0));
-  method(unionType, "__instancecheck__", (u: PyUnion, x: any) => u.args.some((t) => isinstance(x, t)));
-  method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => u.args.some((t) => c.$mro.includes(t)));
+  method(unionType, "__repr__", (u: PyUnion) => u.args.map((t) => (t === T.NoneType ? "None" : t instanceof PyGenericAlias ? repr(t) : t.$module === "builtins" ? t.$qualname : `${t.$module}.${t.$qualname}`)).join(" | "));
+  // (a GenericAlias member: equal by value, hashed by value)
+  const same = (a: any, b: any) => a === b || (a instanceof PyGenericAlias && O.truth(O.eq(a, b)));
+  method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.some((x) => same(t, x))) : NotImplemented));
+  method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)), 0));
+  const noGeneric = (u: PyUnion, what: string) => {
+    if (u.args.some((t) => t instanceof PyGenericAlias)) raise(T.TypeError, `${what}() argument 2 cannot be a parameterized generic`);
+  };
+  method(unionType, "__instancecheck__", (u: PyUnion, x: any) => (noGeneric(u, "isinstance"), u.args.some((t) => isinstance(x, t))));
+  method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => (noGeneric(u, "issubclass"), u.args.some((t) => c.$mro.includes(t))));
   getset(unionType, "__args__", (u: PyUnion) => tuple(u.args));
+}
+
+// types.GenericAlias: list[int] and the like, as CPython's
+// Objects/genericaliasobject.c: __origin__ and __args__, CPython's repr,
+// equality and hash by value, the origin's other attributes, calling it
+// makes an origin instance (its __orig_class__ set), a base class through
+// __mro_entries__, never an isinstance() class. Substituting type variables
+// isn't done yet: refused.
+export class PyGenericAlias {
+  constructor(public origin: any, public args: any[]) {}
+}
+// (the __class_getitem__ of the builtins that are generic, as CPython 3.14's:
+// it makes the alias; memoryview's set by src/runtime/memoryview.ts)
+export const genericClassGetitem = new PyClassMethod(builtin((cls: any, item: any) => new PyGenericAlias(cls, isinstance(item, T.tuple) ? [...item] : [item]), "__class_getitem__"));
+export const genericAliasType = builtinTypeFor("GenericAlias", PyGenericAlias, "types", (origin: any, args: any) => new PyGenericAlias(origin, isinstance(args, T.tuple) ? [...args] : [args]));
+T.GenericAlias = genericAliasType;
+{
+  const ga = genericAliasType;
+  // (the names an alias answers itself; every other its origin's)
+  const OWN = new Set(["__class__", "__bases__", "__origin__", "__args__", "__unpacked__", "__parameters__", "__typing_unpacked_tuple_args__", "__mro_entries__", "__reduce_ex__", "__reduce__", "__copy__", "__deepcopy__"]);
+  // (an attribute, or undefined for an AttributeError)
+  const attr = (o: any, name: string): any => {
+    try {
+      return getattr(o, name);
+    } catch (e: any) {
+      if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
+      return undefined;
+    }
+  };
+  // (an item of the repr, as CPython's ga_repr_item: ... for Ellipsis, an
+  // alias's (anything with __origin__ and __args__) own repr, a list's items
+  // in brackets, a class or function by its __module__ and __qualname__,
+  // without "builtins.", anything else its repr)
+  const typeRepr = (t: any): string => {
+    if (t === Ellipsis) return "...";
+    if (isType(t)) {
+      const m = typeModule(t);
+      return m === "builtins" ? t.$qualname : `${str(m)}.${t.$qualname}`;
+    }
+    if (Array.isArray(t) && typeOf(t) === T.list) return `[${t.map(typeRepr).join(", ")}]`;
+    if (attr(t, "__origin__") !== undefined && attr(t, "__args__") !== undefined) return repr(t);
+    const qn = attr(t, "__qualname__");
+    if (qn === undefined) return repr(t);
+    const m = attr(t, "__module__");
+    if (m === undefined) return repr(t);
+    return m === "builtins" ? str(qn) : `${str(m)}.${str(qn)}`;
+  };
+  method(ga, "__repr__", (a: PyGenericAlias) => `${typeRepr(a.origin)}[${a.args.length ? a.args.map(typeRepr).join(", ") : "()"}]`);
+  method(ga, "__getattribute__", (a: PyGenericAlias, name: string) => (OWN.has(name) ? genericGetattr(a, name, typeOf(a)) : getattr(a.origin, name)));
+  getset(ga, "__origin__", (a) => a.origin);
+  getset(ga, "__args__", (a) => tuple(a.args));
+  getset(ga, "__unpacked__", () => false);
+  getset(ga, "__typing_unpacked_tuple_args__", () => null);
+  // (the type variables among the args, nested ones too, in order: what
+  // has __typing_subst__, or an arg's own __parameters__)
+  const params = (args: any[], out: any[]): any[] => {
+    for (const t of args) {
+      if (isType(t)) continue;
+      if (Array.isArray(t) && (typeOf(t) === T.list || typeOf(t) === T.tuple)) {
+        params(t, out);
+        continue;
+      }
+      let subst: any = undefined;
+      try {
+        subst = getattr(t, "__typing_subst__");
+      } catch (e: any) {
+        if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
+      }
+      if (subst !== undefined) {
+        if (!out.includes(t)) out.push(t);
+        continue;
+      }
+      let sub: any = undefined;
+      try {
+        sub = getattr(t, "__parameters__");
+      } catch (e: any) {
+        if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
+      }
+      if (sub !== undefined && isinstance(sub, T.tuple)) for (const p of sub) if (!out.includes(p)) out.push(p);
+    }
+    return out;
+  };
+  getset(ga, "__parameters__", (a) => tuple(params(a.args, [])));
+  method(ga, "__mro_entries__", (a: PyGenericAlias, _bases: any) => tuple([a.origin]));
+  method(ga, "__eq__", (a: PyGenericAlias, o: any) => {
+    if (!(o instanceof PyGenericAlias)) return NotImplemented;
+    return O.truth(O.eq(a.origin, o.origin)) && O.truth(O.eq(tuple(a.args), tuple(o.args)));
+  });
+  method(ga, "__hash__", (a: PyGenericAlias) => O.hashExact(a.origin) ^ O.hashExact(tuple(a.args)));
+  method(ga, "__or__", (a: any, b: any) => unionOf(a, b));
+  method(ga, "__ror__", (a: any, b: any) => unionOf(b, a));
+  method(ga, "__instancecheck__", (_a: any, _o: any) => raise(T.TypeError, "isinstance() argument 2 cannot be a parameterized generic"));
+  method(ga, "__subclasscheck__", (_a: any, _o: any) => raise(T.TypeError, "issubclass() argument 2 cannot be a parameterized generic"));
+  method(ga, "__getitem__", (a: PyGenericAlias, _k: any) => {
+    if (params(a.args, []).length === 0) raise(T.TypeError, `${repr(a)} is not a generic class`);
+    raise(T.NotImplementedError, `substituting the type variables of ${repr(a)} is not supported yet`);
+  });
+  method(ga, "__reduce__", (a: PyGenericAlias) => tuple([ga, tuple([a.origin, tuple(a.args)])]));
+  method(ga, "__dir__", (a: PyGenericAlias) => {
+    const names = new Set<string>([...O.toArray(callObj(hooks.importModule("builtins").dir, [a.origin])), ...OWN]);
+    return [...names].sort();
+  });
+  const call = (a: PyGenericAlias, pos: any[], names: string[], values: any[]) => {
+    const r = callKw(a.origin, pos, names, values);
+    try {
+      setattr(r, "__orig_class__", a);
+    } catch (e: any) {
+      const pe = toPyExc(e);
+      if (!isinstance(pe, T.AttributeError) && !isinstance(pe, T.TypeError)) throw e;
+    }
+    return r;
+  };
+  const callFn: any = method(ga, "__call__", (a: PyGenericAlias, ...pos: any[]) => call(a, pos, [], []));
+  // (by keyword: the receiver checked as method()'s own path checks it)
+  callFn.$kw = (pos: any[], names: string[], values: any[]) => {
+    if (!(pos[0] instanceof PyGenericAlias)) raise(T.TypeError, `descriptor '__call__' for 'types.GenericAlias' objects doesn't apply to a '${typeName(pos[0])}' object`);
+    return call(pos[0], pos.slice(1), names, values);
+  };
+  callFn.$kwPos = true;
+  // (subclassed by collections.abc's _CallableGenericAlias)
+  subclassable(ga, PyGenericAlias, ["origin", "args"]);
+  // (the builtins that are generic, as CPython 3.14's: their
+  // __class_getitem__ makes the alias)
+  for (const c of [T.list, T.tuple, T.dict, T.set, T.frozenset, T.enumerate, T.classmethod, T.staticmethod]) c.$dict.set("__class_getitem__", genericClassGetitem);
+  // (its __getattribute__ now in effect)
+  bumpVersion(ga);
 }
 
 // Pickling support as in CPython's Objects/typeobject.c (reduce_newobj).
