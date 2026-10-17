@@ -93,6 +93,9 @@ const consoleResult = await Bun.build(<any>{
 // Math in Markdown cells (KaTeX), loaded on first use.  (Markdown itself,
 // small and usually in the first cell, is part of the page script.)
 const mathResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
+// The canvas view of a graph's picture (web/graph/view.ts), loaded by the
+// notebook when Graph.plot's output first needs it
+const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "graph", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-graphview.js", target: "browser", format: "esm", minify: true });
 // The notebook as a component (web/notebook), for other pages: web/embed.
 const notebookResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true });
 // TimeTravel's history (web/notebook/history.js, with patchflow), loaded after the notebook
@@ -113,8 +116,8 @@ const analyzeResult = await Bun.build(<any>{
 });
 // A shared collection's page, /s/<id> (web/share/view.ts; design/sharing.md)
 const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult]];
-for (const r of [result, consoleResult, mathResult, notebookResult, historyResult, analyzeResult, shareResult]) {
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult]];
+for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -205,7 +208,7 @@ const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "te
 // (3: the Python library in chunks, lib/..., web/lib-chunks.mts)
 const ENGINE_API = 3;
 let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html", ...LIB_CHUNKS];
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "runner/index.html", ...LIB_CHUNKS];
 // (each one's name as the site's Worker serves engine files: web/engines.ts)
 for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new Error(`engine file ${f}: not a name web/engines.ts serves`);
 {
@@ -351,10 +354,10 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // mode's, when it is first used; offline, a module whose sources were
 // never fetched can't be imported, and one whose compiled code wasn't is
 // compiled from its source: src/compile.ts)
-const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
 const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + libManifestHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
@@ -382,7 +385,7 @@ mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // (the library's chunks)
 rmSync(join(here, "site", "public", "lib"), { recursive: true, force: true });
