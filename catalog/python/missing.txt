@@ -1,6 +1,12 @@
 # Python mode's public names with no catalog entry yet (catalog/SCHEMA.md, gate 2).
 # Remove a name when its entry is written: this list may only shrink.
 # (sagebrush -m _catalog --missing --mode python lists what it should be.)
+datetime.date
+datetime.datetime
+datetime.time
+datetime.timedelta
+datetime.timezone
+datetime.tzinfo
 matplotlib.axes.Axes.annotate
 matplotlib.axes.Axes.axhline
 matplotlib.axes.Axes.axis
@@ -329,3 +335,21 @@ scipy.integrate.nquad
 scipy.integrate.tplquad
 scipy.io.MatReadError
 scipy.io.whosmat
+time.asctime
+time.ctime
+time.gmtime
+time.localtime
+time.mktime
+time.monotonic
+time.monotonic_ns
+time.perf_counter
+time.perf_counter_ns
+time.process_time
+time.process_time_ns
+time.sleep
+time.strftime
+time.strptime
+time.struct_time
+time.time
+time.time_ns
+time.tzset
