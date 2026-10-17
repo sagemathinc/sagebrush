@@ -1304,6 +1304,30 @@ test("a collection made from one over a field stays over that field when integer
   assert.match(u, /^Rational Field\nFinite field of size 7\nFinite field of size 7\nend\n$/, u);
 });
 
+test("GCD, GreatestCommonDivisor, LCM, LeastCommonMultiple, XGCD and ExtendedGreatestCommonDivisor name themselves in their errors; Xgcd takes integers or polynomials", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = ["GCD();", "GreatestCommonDivisor([]);", "LCM({Rationals()|});", "LeastCommonMultiple(\"a\");", "GCD(1/2, 3);",
+    "LeastCommonMultiple([1/2]);", "GreatestCommonDivisor(12, 18), LCM(4, 6), LeastCommonMultiple([4, 6]), GCD({12, 18});",
+    "x := [4,6]; GCD(~x);", "a := 4; Gcd(~a, 6);", "x := [1/2]; LCM(~x);", "a := 4; Xgcd(~a, 6);",
+    "Xgcd(1/2, 3);", "XGCD(\"a\", 3);", "ExtendedGreatestCommonDivisor(1/2, 3);", "Xgcd(4/1, 6);", "Xgcd(4);",
+    "Xgcd(12, 18);", "Xgcd(0, 0);", "Xgcd(-4, 6);"].join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (each as Magma 2.18 has it: the name it was called by, "~" for an
+  // argument by reference, never a value for rationals)
+  for (const want of ["'GCD': Bad argument types\nArgument types given:\n", "'GreatestCommonDivisor': Illegal null set/sequence",
+    "'LCM': LCM not defined for field", "'LeastCommonMultiple': Bad argument types\nArgument types given: MonStgElt",
+    "'GCD': Bad argument types\nArgument types given: FldRatElt, FldRatElt", "'LeastCommonMultiple': LCM not defined for field",
+    "6 12 12 6\n", "'GCD': Bad argument types\nArgument types given: SeqEnum[RngIntElt] ~",
+    "'Gcd': Bad argument types\nArgument types given: RngIntElt ~, RngIntElt", "'LCM': Bad argument types\nArgument types given: SeqEnum[FldRatElt] ~",
+    "'Xgcd': Bad argument types\nArgument types given: RngIntElt ~, RngIntElt", "'XGCD': Bad argument types\nArgument types given: MonStgElt, RngIntElt",
+    "'ExtendedGreatestCommonDivisor': Bad argument types\nArgument types given: FldRatElt, FldRatElt", "'Xgcd': Bad argument types\nArgument types given: RngIntElt\n",
+    "6 -1 1\n0 0 0\n2 1 1\nend\n"])
+    assert.ok(out.includes(want), want + "\n---\n" + out);
+  assert.equal(out.split("'Xgcd': Bad argument types\nArgument types given: FldRatElt, FldRatElt").length - 1, 2, out);
+  assert.doesNotMatch(out, /1\/2 1 0|TypeError|Traceback/);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
