@@ -1332,7 +1332,7 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
   } catch (e: any) {
     if (isExc(e, T.StopIteration)) {
       hooks.genRaised(e);
-      const err = T.RuntimeError(g.$async ? "coroutine raised StopIteration" : "generator raised StopIteration");
+      const err = markRaised(T.RuntimeError(g.$async ? "coroutine raised StopIteration" : "generator raised StopIteration"));
       err.__cause__ = e;
       throw err;
     }

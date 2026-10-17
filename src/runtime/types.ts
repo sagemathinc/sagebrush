@@ -2248,7 +2248,7 @@ function iteratorType(name: string, jsClass: any, call?: (...a: any[]) => any): 
   method(t, "__next__", (it: any) => {
     O.lastStop.e = null;
     const v = it.$next();
-    if (v === DONE) throw O.lastStop.e ?? T.StopIteration();
+    if (v === DONE) throw O.lastStop.e ?? markRaised(T.StopIteration());
     return v;
   });
   return t;

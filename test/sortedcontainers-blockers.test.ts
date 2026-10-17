@@ -147,3 +147,42 @@ test("traceback.format_exc refuses frames it can't know: caught by the runtime, 
     "never raised ValueError: later",
   ]);
 });
+
+// The runtime's remaining direct raises are marked raised too (astra's sweep
+// on acc13bfb): a built-in iterator's __next__, sys.exit, PEP 479's
+// RuntimeError, a filesystem error, numpy.linalg's LinAlgError, a throw()
+// into a generator; and a cause made by Python code and never raised isn't
+test("every raise the runtime makes is marked raised; a never-raised exception isn't", () => {
+  const code = [
+    `const c = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
+    "Promise.resolve(c.initParser && c.initParser()).then(() => {",
+    "  c.R.importModule('sys').path.push(c.libDir());",
+    "  const m = c.execModule([",
+    "    'import sys, numpy as np',",
+    "    'out = {}',",
+    "    'def keep(name, f):',",
+    "    '    try: f()',",
+    "    '    except BaseException as e: out[name] = e',",
+    "    'keep(\"list_iterator\", lambda: iter([]).__next__())',",
+    "    'keep(\"sys.exit\", lambda: sys.exit(3))',",
+    "    'def g():',",
+    "    '    yield 1',",
+    "    '    next(iter([]))',",
+    "    'keep(\"pep479\", lambda: list(g()))',",
+    "    'keep(\"open\", lambda: open(\"/nonexistent/x\"))',",
+    "    'keep(\"linalg\", lambda: np.linalg.inv(np.zeros((2, 2))))',",
+    "    'def h():',",
+    "    '    yield 1',",
+    "    'gen = h(); next(gen)',",
+    "    'keep(\"throw\", lambda: gen.throw(KeyError(\"k\")))',",
+    "    'never = ValueError(\"never\")',",
+    "  ].join('\\n'), '<marks>', 'marks_test');",
+    "  const r = {};",
+    "  for (const [k, v] of m.out.$m) r[k] = v.$raised === true;",
+    "  r.never = m.never.$raised === true;",
+    "  console.log(JSON.stringify(r));",
+    "});",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8" }).trim());
+  assert.deepEqual(r, { list_iterator: true, "sys.exit": true, pep479: true, open: true, linalg: true, throw: true, never: false });
+});
