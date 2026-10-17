@@ -77,7 +77,8 @@ export const BOARD_SCHEMA = {
     "row",
     "column",
     "grid",
-    "graph"
+    "graph",
+    "spring"
    ],
    "description": "how the top-level items are laid out (default `graph`)"
   },
@@ -201,7 +202,8 @@ export const BOARD_SCHEMA = {
       "row",
       "column",
       "grid",
-      "graph"
+      "graph",
+      "spring"
      ],
      "description": "how the page's items are laid out (default `graph`)"
     },
@@ -421,9 +423,10 @@ export const BOARD_SCHEMA = {
       "row",
       "column",
       "grid",
-      "graph"
+      "graph",
+      "spring"
      ],
-     "description": "how its items are laid out (default `graph`: in layers along the edges among them)"
+     "description": "how its items are laid out (default `graph`: in layers along the edges among them; `spring`: pulled together along the edges, pushed apart elsewhere)"
     },
     "columns": {
      "type": "integer",

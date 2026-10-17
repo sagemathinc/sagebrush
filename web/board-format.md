@@ -40,7 +40,8 @@ authoritative.
 - **Structure, not coordinates.** Leave out `x`, `y`, `w` and `h`: the board
   lays items out by `layout` (`graph` by default, which places the edges'
   layers top to bottom, or left to right with `"direction": "LR"`; or `row`,
-  `column`, or `grid`, as square as can be unless `columns` says). An item keeps
+  `column`, `grid`, as square as can be unless `columns` says, or
+  `spring`). An item keeps
   `x`/`y` only once a person moves it.
 - **One language per board, usually.** `"mode"` is `"python"` (the default),
   `"sage"`, `"magma"` or `"matlab"`, and every code item uses it, unless the
@@ -89,6 +90,11 @@ well.
   between columns, so use them sparingly there.
 - **`row` and `column`.** Use them for a sequence read in one direction, and
   for arranging groups on a page.
+- **`spring`.** Use it for a network with no direction to read in: a graph
+  of relations, a web of concepts, a molecule. Linked items are pulled
+  together and every item pushes the others away, so clusters show. It is
+  deterministic: the same board gives the same places, varied by its
+  `seed`. Past 1500 items or 20000 edges, it falls back to `graph`.
 
 **Nest groups to shape a page.** A group lays out its own `children` by its
 own `layout`. The page lays out its top-level items, groups included, by
@@ -211,7 +217,7 @@ A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`).
 | `pages` | [page] | several pages; a document with pages has no `nodes`, `edges` or `steps` of its own |
 | `intro` | string | Markdown shown before the tour starts (with pages: on the first page, if it has no `intro` of its own) |
 | `refBase` | string | the base URL for `ref` links that are paths (e.g. a repository's blob URL) |
-| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how the top-level items are laid out (default `graph`) |
+| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` \| `"spring"` | how the top-level items are laid out (default `graph`) |
 | `columns` | number | as for a group |
 | `direction` | `"TB"` \| `"LR"` | as for a group |
 | `slide` | card | as for a page |
@@ -229,7 +235,7 @@ A page of a board: its own items, edges and tour.
 | `id` | string | needed by templates; unique among the pages |
 | `title` | string | the page's title (plain text) |
 | `intro` | string | Markdown shown before the page's tour (without it, the page's title is shown; on the first page, the document's `intro`) |
-| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how the page's items are laid out (default `graph`) |
+| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` \| `"spring"` | how the page's items are laid out (default `graph`) |
 | `columns` | number | as for a group |
 | `direction` | `"TB"` \| `"LR"` | as for a group |
 | `slide` | card | the card the page is arranged on, a slide, which Present shows |
@@ -275,7 +281,7 @@ A group: items laid out together, under a title. Groups nest; an edge may join a
 | `kind` | `"group"` | required: `"group"` |
 | `title` | string | a heading (plain text, math allowed) |
 | `text` | string | Markdown with math, under the title |
-| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` | how its items are laid out (default `graph`: in layers along the edges among them) |
+| `layout` | `"row"` \| `"column"` \| `"grid"` \| `"graph"` \| `"spring"` | how its items are laid out (default `graph`: in layers along the edges among them; `spring`: pulled together along the edges, pushed apart elsewhere) |
 | `columns` | number | `grid` layout: how many columns (default: as square as can be) |
 | `direction` | `"TB"` \| `"LR"` | `graph` layout: layers top to bottom (`TB`, the default) or left to right (`LR`) |
 | `children` | [item] | required: its items (notes, groups, stickers) |

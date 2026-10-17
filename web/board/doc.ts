@@ -11,6 +11,7 @@ import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
 import { inkOutline } from "./ink";
+import { springLayout } from "../graph/spring";
 
 // A stroke's outline, made once: by its id, size and points (a hash of
 // them), not again at each layout (5000 strokes: 90 ms each time).  At
@@ -94,8 +95,8 @@ export interface DocGroup {
   title?: string;
   /** Markdown with math, under the title */
   text?: string;
-  /** how its items are laid out (default `graph`: in layers along the edges among them) */
-  layout?: "row" | "column" | "grid" | "graph";
+  /** how its items are laid out (default `graph`: in layers along the edges among them; `spring`: pulled together along the edges, pushed apart elsewhere) */
+  layout?: "row" | "column" | "grid" | "graph" | "spring";
   /** `grid` layout: how many columns (default: as square as can be) */
   columns?: number;
   /** `graph` layout: layers top to bottom (`TB`, the default) or left to right (`LR`) */
@@ -442,7 +443,7 @@ const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : u
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? undefined : String(v));
 const one = <T extends string>(v: unknown, of: readonly T[]): T | undefined => (of.includes(v as T) ? (v as T) : undefined);
 const strip = <T extends object>(o: T): T => { for (const k of Object.keys(o)) if ((o as any)[k] === undefined) delete (o as any)[k]; return o; };
-const LAYOUTS = ["row", "column", "grid", "graph"] as const, DIRS = ["TB", "LR"] as const;
+const LAYOUTS = ["row", "column", "grid", "graph", "spring"] as const, DIRS = ["TB", "LR"] as const;
 export const ASK_INPUTS = ["check", "radio", "choice", "text", "number", "scale"] as const;
 // (an option: a string, or an object with a string value and, if any, a string label)
 const askOption = (o: any): AskOption | undefined =>
@@ -818,6 +819,8 @@ export function askNote(a: DocAsk): DocNote & { ask: DocAsk } {
  * edges, in world coordinates.
  */
 export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: boolean } = {}): { items: Item[]; edges: Edge[]; routing: Generator<void, void> } {
+  // (the "spring" layout's seed: the board's, its first 32 bits; none, 0)
+  const springSeed = typeof doc.seed === "string" && /^[0-9a-f]{8}/.test(doc.seed) ? parseInt(doc.seed.slice(0, 8), 16) : 0;
   if (doc.pages?.length) doc = pageView(doc, 0);
   const roots = doc.nodes ?? [];
   const items: Item[] = [];
@@ -871,7 +874,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       edges.flatMap((e) => {
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
         return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
-      }));
+      }), springSeed);
     // (a group's members start at its origin: all of them, strokes too, as
     // the editor keeps a group around its members, Editor.contain, UI-FD2-1;
     // but in a group a person sized, members placed stay where they are in
@@ -903,7 +906,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
     const a = memberOf(e.from, rootIds), b = memberOf(e.to, rootIds);
     return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
-  }));
+  }), springSeed);
 
   // absolute positions, and the items
   const place = (n: DocNode, x: number, y: number, depth: number, parent?: string) => {
@@ -1015,7 +1018,7 @@ type Link = [string, string, number];
 /** The width an edge's label takes (12 px text). */
 export const labelWidth = (e: { label?: string; hidden?: boolean }) => (e.label && !e.hidden ? e.label.length * 6.8 + 14 : 0);
 
-function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: Link[]): Map<string, { x: number; y: number }> {
+function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: Link[], seed = 0): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
   // (positioned boxes keep their places; the others are laid out among themselves)
   const nodes = all.filter((n) => !n.fixed && !n.ink), free = new Set(nodes.map((n) => n.id));
@@ -1028,6 +1031,11 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
     }
   } else if (kind === "grid") {
     for (const [id, p] of grid(nodes, Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length))))) out.set(id, p);
+  } else if (kind === "spring" && nodes.length) {
+    // (web/graph/spring.ts, the board's seed: the same board, the same
+    // places, on every runtime; past its caps, null: laid out as a graph)
+    const p = springLayout(nodes.map((n) => ({ id: n.id, w: n.w, h: n.h })), links.map(([a, b]) => [a, b] as [string, string]), { seed, gap: GAP });
+    for (const [id, q] of p ?? graph(nodes, links, dir)) out.set(id, q);
   } else {
     for (const [id, p] of graph(nodes, links, dir)) out.set(id, p);
   }
