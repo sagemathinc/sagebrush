@@ -1802,10 +1802,13 @@ function mulIn(rt: DType, what: string): (p: number, x: number) => number {
 // overflow and underflow): float32, float16 and complex64, rounded at
 // each step, in their logical order (NumPy's inner loop over one axis,
 // and its order for a C-contiguous array reduced whole); over several
-// axes of another layout NumPy's iterator reorders axes, flips strides
-// and buffers: refused, never a product in another order. Every other
-// dtype the memory traversal NumPy's follows there (the reduced axes
-// outermost-first by stride, a negative one reversed: astra CORR-76A-2)
+// axes of another layout NumPy's iterator reorders axes and buffers:
+// refused, never a product in another order. Every other dtype in the
+// order NumPy's reduction iterator visits them: the reduced axes
+// outermost-first by the size of their strides (ties in their own
+// order), each walked in its own direction, a negative stride not
+// reversed (the reduction's NPY_ITER_DONT_NEGATE_STRIDES: astra
+// CORR-76A-2, CORR-3D5-1)
 function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: number[]; rst: number[] } {
   if (rt === D.float32 || rt.name === "float16" || rt === D.complex64) {
     const rshape = ax.map((i) => a.shape[i]), rst = ax.map((i) => a.strides[i]);
@@ -1814,14 +1817,9 @@ function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: 
     }
     return { off: a.offset, rshape, rst };
   }
-  let off = a.offset;
-  const red = ax.map((i) => ({ n: a.shape[i], st: a.strides[i] }));
-  for (const r of red) if (r.st < 0 && r.n > 0) {
-    off += r.st * (r.n - 1);
-    r.st = -r.st;
-  }
-  red.sort((p, q) => q.st - p.st);
-  return { off, rshape: red.map((r) => r.n), rst: red.map((r) => r.st) };
+  const red = ax.map((i, k) => ({ n: a.shape[i], st: a.strides[i], k }));
+  red.sort((p, q) => Math.abs(q.st) - Math.abs(p.st) || p.k - q.k);
+  return { off: a.offset, rshape: red.map((r) => r.n), rst: red.map((r) => r.st) };
 }
 function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, hasInitial: boolean): NDArray {
   const nd = a.ndim;
