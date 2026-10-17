@@ -152,7 +152,7 @@ test("traceback.format_exc refuses frames it can't know: caught by the runtime, 
 // on acc13bfb): a built-in iterator's __next__, sys.exit, PEP 479's
 // RuntimeError, a filesystem error, numpy.linalg's LinAlgError, a throw()
 // into a generator; and a cause made by Python code and never raised isn't
-test("every raise the runtime makes is marked raised; a never-raised exception isn't", () => {
+test("the runtime's direct raises tested here (an iterator's __next__, sys.exit, PEP 479, open, linalg, a throw) are marked raised; a never-raised exception isn't", () => {
   const code = [
     `const c = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
     "Promise.resolve(c.initParser && c.initParser()).then(() => {",
