@@ -499,6 +499,26 @@ def _finish(r, cls):
     return _canon(_int_round(r, cls))
 
 
+def _single_values(M):
+    """M's values rounded to single, kept as a double (or complex double) array"""
+    if M.dtype.kind == "c":
+        return M.astype(np.complex64).astype(np.complex128)
+    return M.astype(np.float32).astype(np.float64)
+
+
+def _single_scalar(z):
+    """a real or complex number rounded to single (each part), as a Python number"""
+    if isinstance(z, (complex, np.complexfloating)):
+        a, b = np.array([z.real, z.imag], dtype=np.float32).tolist()
+        return complex(a, b)
+    return np.array([z], dtype=np.float32).tolist()[0]
+
+
+# (the most element steps conv, polyval or interp1 may do in single arithmetic: conv's
+# products, polyval's coefficients times points, interp1's queries times columns)
+_SINGLE_STEPS_WORK = 20_000_000
+
+
 def _float_class(*xs):
     """the class of a floating result computed from xs: single when any of them is, else double"""
     return "single" if any(class_(x) == "single" for x in xs) else "double"
@@ -7203,19 +7223,47 @@ def polyval_(nargout, p, x, S=None, mu=None):
             raise _err("polyval of %s input is not supported; it takes double or single values." % class_(v))
     c = _farr(p).reshape(-1)
     X = _farr(x)
+    cls = _float_class(p, x)
+    xs = class_(x) == "single"
+    if cls == "single" and c.size * X.size > _SINGLE_STEPS_WORK:
+        raise _err("polyval of a single polynomial with %d coefficients at %d points is not supported "
+                   "in Sagebrush: too much work." % (c.size, X.size))
     if mu is not None:
         m = _farr(mu).reshape(-1)
         if m.size != 2:
             raise _err("polyval: centerScale must be a two-element vector.")
-        X = (X - m[0]) / m[1]
+        if cls == "single":
+            # ((x - mu(1)) / mu(2), each step single when an operand is)
+            ms = class_(mu) == "single"
+            X = X - m[0]
+            if xs or ms:
+                X = _single_values(X)
+            X = X / m[1]
+            xs = xs or ms
+            if xs:
+                X = _single_values(X)
+        else:
+            X = (X - m[0]) / m[1]
     cplx = X.dtype.kind == "c" or c.dtype.kind == "c"
     y = np.zeros(X.shape, dtype=np.complex128 if cplx else np.float64)
+    if cls == "single":
+        # (single arithmetic at each step of Horner's rule, each step as the operators compute it:
+        # single by single in single, an operand that is double used at its own value and the
+        # step's result made single, so polyval of singles is the single Horner sum)
+        ps = class_(p) == "single"
+        if c.size:
+            y = y + c[0]
+            for a in c[1:]:
+                y = _single_values(_mul(y, X, ps and xs))
+                y = _single_values(y + a)
+                ps = True
+        return _finish(y, "single")
     if c.size:
         # (Horner's rule from the leading coefficient: polyval([1 0 -1], Inf) is Inf)
         y = y + c[0]
         for a in c[1:]:
             y = y * X + a
-    return _finish(y, _float_class(p, x))
+    return _finish(y, cls)
 
 
 @_bi("polyfit")
@@ -7302,7 +7350,27 @@ def poly_(r):
 def conv_(a, b, shape=None):
     A = _farr(a).reshape(-1)
     B = _farr(b).reshape(-1)
-    r = np.convolve(A, B) if A.size and B.size else np.zeros(max(A.size + B.size - 1, 0))
+    if _float_class(a, b) == "single" and A.size and B.size:
+        # (in single at each step: each output sums its products from the last of a's to the
+        # first, as a filter by a does; a product or sum is single when an operand is)
+        if A.size * B.size > _SINGLE_STEPS_WORK:
+            raise _err("conv of single vectors of %d and %d elements is not supported in Sagebrush: "
+                       "too much work." % (A.size, B.size))
+        both = class_(a) == "single" and class_(b) == "single"
+        cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
+        r = np.zeros(A.size + B.size - 1, dtype=np.complex128 if cplx else np.float64)
+        # (over the shorter vector: b's terms first to last add each output's products in the
+        # same order as a's terms last to first)
+        if B.size <= A.size:
+            for j in range(B.size):
+                prod = _single_values(_mul(A, B[j:j + 1], both))
+                r[j:j + A.size] = _single_values(r[j:j + A.size] + prod)
+        else:
+            for i in range(A.size - 1, -1, -1):
+                prod = _single_values(_mul(A[i:i + 1], B, both))
+                r[i:i + B.size] = _single_values(r[i:i + B.size] + prod)
+    else:
+        r = np.convolve(A, B) if A.size and B.size else np.zeros(max(A.size + B.size - 1, 0))
     s = "full" if shape is None else (_text(shape).lower() if _istext(shape) else None)
     if s == "same":
         st = B.size // 2
@@ -11285,11 +11353,13 @@ def _spline_slopes(x, y):
     return list(np.linalg.solve(A, r))
 
 
-def _hermite(x, y, d, q):
-    """the piecewise cubic with values y and slopes d at q (extrapolating with the end pieces)"""
-    n = len(x)
-    k = int(np.searchsorted(np.array(x), q, side="right")) - 1
-    k = min(max(k, 0), n - 2)
+def _hermite(x, y, d, q, k=None):
+    """the piecewise cubic with values y and slopes d at q (extrapolating with the end pieces);
+    k, when given, is q's piece"""
+    if k is None:
+        n = len(x)
+        k = int(np.searchsorted(np.array(x), q, side="right")) - 1
+        k = min(max(k, 0), n - 2)
     h = x[k + 1] - x[k]
     t = (q - x[k]) / h
     h00 = (1 + 2 * t) * (1 - t) ** 2
@@ -11297,6 +11367,13 @@ def _hermite(x, y, d, q):
     h01 = t * t * (3 - 2 * t)
     h11 = t * t * (t - 1)
     return h00 * y[k] + h10 * h * d[k] + h01 * y[k + 1] + h11 * h * d[k + 1]
+
+
+# (the most queries times columns interp1's cubic methods evaluate, one point at a time, and
+# the most samples times columns they set up slopes for; and the most n^3 times columns, for n
+# samples, of the spline's dense solves)
+_INTERP1_CUBIC_POINTS = 1_000_000
+_INTERP1_SPLINE_WORK = 1_000_000_000
 
 
 @_bs("interp1")
@@ -11313,7 +11390,7 @@ def interp1_n(*args):
             if t == "extrap":
                 extrap = "extrap"
             elif t == "makima":
-                raise _err("interp1: the 'makima' method is not supported in Sagebrush; 'pchip' and 'spline' are.")
+                raise _err("interp1: the 'makima' method is not supported in Sagebrush; for double values, 'pchip' and 'spline' are.")
             elif t == "pp":
                 raise _err("interp1: the piecewise polynomial form, interp1(..., 'pp'), is not supported in Sagebrush.")
             elif t in ("linear", "nearest", "next", "previous", "pchip", "cubic", "spline", "*linear", "*cubic"):
@@ -11333,6 +11410,12 @@ def interp1_n(*args):
         if class_(a) not in ("double", "single"):
             raise _err("interp1 of %s input is not supported; x, v and xq are double or single, as its page says." % class_(a))
     single = _float_class(*args[:3]) == "single"
+    # (which of x, v and xq are single: a step of the linear formula is single when an operand is)
+    x_single, v_single, q_single = (False, class_(args[0]) == "single", class_(args[1]) == "single") \
+        if len(args) == 2 else tuple(class_(a) == "single" for a in args[:3])
+    if single and method in ("pchip", "spline", "makima"):
+        raise _err("interp1's '%s' method with single values is not supported in Sagebrush: its slopes would "
+                   "have to be computed in single arithmetic at each step." % method)
     if len(args) == 2:
         v, xq = args
         n = _dims(v)[0] if not _isvec(v) else _numel(v)
@@ -11360,40 +11443,82 @@ def interp1_n(*args):
     Q = _farr(xq)
     if Q.dtype.kind == "c":
         raise _err("interp1 at complex query points is not supported in Sagebrush.")
-    qs = [float(t) for t in Q.reshape(-1)]
-    out = np.zeros((len(qs), V.shape[1]), dtype=V.dtype if V.dtype.kind == "c" else np.float64)
+    qs = Q.reshape(-1).astype(np.float64)
+    if single and qs.size * V.shape[1] > _SINGLE_STEPS_WORK:
+        raise _err("interp1 at %d query points for %d column%s of values is not supported in Sagebrush: "
+                   "too much work." % (qs.size, V.shape[1], "s" * (V.shape[1] != 1)))
+    cubic = method in ("pchip", "spline", "makima")
+    if cubic:
+        # (the slopes are set up one sample at a time, a complex column as two real ones, and a
+        # spline's solve is dense: n^2 entries and about n^3 steps for n samples)
+        cols = V.shape[1] * (2 if V.dtype.kind == "c" else 1)
+        if qs.size * V.shape[1] > _INTERP1_CUBIC_POINTS:
+            raise _err("interp1's '%s' method at %d query points for %d column%s of values is not supported "
+                       "in Sagebrush: too much work." % (method, qs.size, V.shape[1], "s" * (V.shape[1] != 1)))
+        if len(X) * cols > _INTERP1_CUBIC_POINTS:
+            raise _err("interp1's '%s' method with %d sample points for %d column%s of values is not "
+                       "supported in Sagebrush: too much work." % (method, len(X), V.shape[1], "s" * (V.shape[1] != 1)))
+        if method == "spline" and len(X) > 3 and len(X) ** 3 * cols > _INTERP1_SPLINE_WORK:
+            raise _err("interp1's 'spline' method with %d sample points for %d column%s of values is not "
+                       "supported in Sagebrush: its dense solve would be too much work." % (len(X), V.shape[1], "s" * (V.shape[1] != 1)))
+    out = np.zeros((qs.size, V.shape[1]), dtype=V.dtype if V.dtype.kind == "c" else np.float64)
     lo, hi = X[0], X[-1]
-    for j in range(V.shape[1]):
-        y = [V[k, j] for k in range(len(X))]
-        if method in ("pchip", "spline", "makima"):
-            if V.dtype.kind == "c":
-                dr = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.real for z in y])
-                di = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.imag for z in y])
-                d = [complex(a, b) for a, b in zip(dr, di)]
+    Xa = np.array(X)
+    nanq = qs != qs
+    outside = (qs < lo) | (qs > hi) | nanq
+    if extrap is not None and extrap != "extrap":
+        fill, fv = outside, _scalar(extrap)
+    else:
+        fill, fv = (outside if extrap != "extrap" and not cubic else np.zeros(qs.size, dtype=bool)), _math.nan
+    # (a NaN query that is not filled gives NaN; the rest are interpolated)
+    nan_left = nanq & ~fill
+    live = ~(fill | nan_left)
+    k = np.clip(np.searchsorted(Xa, qs, side="right") - 1, 0, len(X) - 2)
+    xk, xk1 = Xa[k], Xa[k + 1]
+    def lin(y0, y1):
+        if single:
+            # (the piece's slope times the query's distance from the piece's start, plus the
+            # start value; each step single when an operand is. Of the usual forms, this one
+            # alone matched Octave's results on queries chosen so that the forms all differ)
+            R = lambda z, on: _single_values(z) if on else z
+            sl = R(R(y1 - y0, v_single) / R(xk1 - xk, x_single), v_single or x_single)
+            dq = R(qs - xk, q_single or x_single)
+            return R(R(sl * dq, True) + y0, True)
+        t = (qs - xk) / (xk1 - xk)
+        return y0 + t * (y1 - y0)
+
+    # (every query is computed, and the filled ones replaced afterwards)
+    with np.errstate(all="ignore"):
+        for j in range(V.shape[1]):
+            col = V[:, j]
+            if cubic:
+                y = [col[t] for t in range(len(X))]
+                if V.dtype.kind == "c":
+                    dr = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.real for z in y])
+                    di = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.imag for z in y])
+                    d = [complex(a, b) for a, b in zip(dr, di)]
+                else:
+                    d = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [float(t) for t in y])
+                vals = np.zeros(qs.size, dtype=out.dtype)
+                for i in np.flatnonzero(live):
+                    vals[i] = _hermite(X, y, d, float(qs[i]), int(k[i]))
             else:
-                d = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [float(t) for t in y])
-        for i, q in enumerate(qs):
-            outside = q < lo or q > hi or q != q
-            if outside and extrap != "extrap" and method not in ("pchip", "spline", "makima") or (outside and extrap is not None and extrap != "extrap"):
-                out[i, j] = _math.nan if extrap is None else _scalar(extrap)
-                continue
-            if q != q:
-                out[i, j] = _math.nan
-                continue
-            if method in ("pchip", "spline", "makima"):
-                out[i, j] = _hermite(X, y, d, q)
-                continue
-            k = int(np.searchsorted(np.array(X), q, side="right")) - 1
-            k = min(max(k, 0), len(X) - 2)
-            if method == "nearest":
-                out[i, j] = y[k] if (q - X[k]) < (X[k + 1] - q) else y[k + 1]
-            elif method == "previous":
-                out[i, j] = y[k + 1] if q >= X[k + 1] else y[k]
-            elif method == "next":
-                out[i, j] = y[k] if q <= X[k] else y[k + 1]
-            else:
-                t = (q - X[k]) / (X[k + 1] - X[k])
-                out[i, j] = y[k] + t * (y[k + 1] - y[k])
+                yk, yk1 = col[k], col[k + 1]
+                if method == "nearest":
+                    vals = np.where((qs - xk) < (xk1 - qs), yk, yk1)
+                elif method == "previous":
+                    vals = np.where(qs >= xk1, yk1, yk)
+                elif method == "next":
+                    vals = np.where(qs <= xk, yk, yk1)
+                elif V.dtype.kind == "c":
+                    # (a complex v is interpolated in its real and imaginary parts separately, x
+                    # and xq being real: an Inf or NaN in one part leaves the other part as it is)
+                    vals = np.empty(qs.size, dtype=np.complex128)
+                    vals.real = lin(yk.real, yk1.real)
+                    vals.imag = lin(yk.imag, yk1.imag)
+                else:
+                    vals = lin(yk, yk1)
+            out[:, j] = np.where(fill, fv, np.where(nan_left, _math.nan, vals))
     r = _box(out.reshape(-1).reshape(Q.shape)) if vec else _unmat(out)
     # (a matrix of values: one column per column of v, a row per query; single if an input is)
     return _finish(_farr(r), "single") if single else r

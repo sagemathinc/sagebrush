@@ -2439,3 +2439,43 @@ test("inv, \\ and / refuse values that include Inf or NaN (no certified answer f
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [msg("inv"), msg("A linear solve (\\)"), msg("A linear solve (\\)"), msg("A linear solve (/)"), msg("A linear solve (\\)"), msg("A linear solve (\\)"),
     "[2 0]", "[0 2]", "[2 0]", "0", "[1;1]", "[Inf 1]", "[Inf 2]", "1", "1", "0", "1", "0"]);
 });
+
+test("interp1's pchip and spline methods with single values are refused (their slopes would need single arithmetic at each step); linear and nearest are not", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, y = interp1(single([1 2 3]), single([4 5 7]), single(1.5), 'pchip'); catch e, disp(e.message), end",
+    "try, y = interp1([1 2 3], single([4 5 7]), 2.5, 'spline'); catch e, disp(e.message), end",
+    "disp(class(interp1(single([1 2 3]), single([4 5 7]), single(1.5)))); disp(interp1(single([1 2 3]), single([4 5 7]), single(1.4), 'nearest'))",
+  ].join("\n")], { encoding: "utf8" });
+  const msg = (m: string) => "interp1's '" + m + "' method with single values is not supported in Sagebrush: its slopes would have to be computed in single arithmetic at each step.";
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [msg("pchip"), msg("spline"), "single", "4"]);
+});
+
+test("polyval, conv and interp1 in single: a double query distance stays double, the work is capped before the loops start (a large double interp1 is not), cubic setups are bounded, and makima's refusal points only at methods that work", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "y = interp1([0 2], single([0 3]), 1+2^-24); disp(sprintf('%s %.17g', class(y), y))",
+    "y = polyval(single([1 0]), single(3), [], [1 2]); disp(sprintf('%s %.17g', class(y), y))",
+    "try, y = conv(single(ones(1, 5000)), single(ones(1, 5000))); catch e, disp(e.message), end",
+    "try, y = polyval(single(ones(1, 5000)), single(ones(1, 5000))); catch e, disp(e.message), end",
+    "try, y = interp1([1 2], single(ones(2, 5000)), ones(1, 5000)); catch e, disp(e.message), end",
+    "try, y = interp1([1 2], ones(2, 1000), ones(1, 1001), 'pchip'); catch e, disp(e.message), end",
+    "try, y = interp1([1 2 3], [4 5 7], 1.5, 'makima'); catch e, disp(e.message), end",
+    "try, y = interp1(1:1001, 1:1001, 1.5, 'spline'); catch e, disp(e.message), end",
+    "try, y = interp1(1:1000, complex(1:1000, 1), 2.5, 'spline'); catch e, disp(e.message), end",
+    "try, y = interp1(1:1000001, 1:1000001, 2.5, 'pchip'); catch e, disp(e.message), end",
+    "disp(sprintf('%.6g', interp1(1:1000, (1:1000).^2, 2.5, 'spline')))",
+    "y = interp1([1 2], ones(2, 4500), 1.5 * ones(1, 4500)); disp(mat2str(size(y))); disp(y(4500, 4500))",
+    "c = conv(single(ones(1, 3)), single(ones(1, 4000))); disp(mat2str(double(c(1:4)))); disp(mat2str(interp1([1 2 3], [4 5 7], [0 1.5 NaN 3.5], 'linear', 9)))",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["single 1.5000001192092896", "single 1",
+    "conv of single vectors of 5000 and 5000 elements is not supported in Sagebrush: too much work.",
+    "polyval of a single polynomial with 5000 coefficients at 5000 points is not supported in Sagebrush: too much work.",
+    "interp1 at 5000 query points for 5000 columns of values is not supported in Sagebrush: too much work.",
+    "interp1's 'pchip' method at 1001 query points for 1000 columns of values is not supported in Sagebrush: too much work.",
+    "interp1: the 'makima' method is not supported in Sagebrush; for double values, 'pchip' and 'spline' are.",
+    "interp1's 'spline' method with 1001 sample points for 1 column of values is not supported in Sagebrush: its dense solve would be too much work.",
+    "interp1's 'spline' method with 1000 sample points for 1 column of values is not supported in Sagebrush: its dense solve would be too much work.",
+    "interp1's 'pchip' method with 1000001 sample points for 1 column of values is not supported in Sagebrush: too much work.",
+    "6.25", "[4500 4500]", "1", "[1 2 3 3]", "[9 4.5 9 9]"]);
+});
