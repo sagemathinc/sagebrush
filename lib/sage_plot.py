@@ -621,7 +621,8 @@ def arrow(tailpoint, headpoint, **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
-    o = {"color": _color(p), "thickness": p.pop("thickness", p.pop("width", 2)) * 0.9}
+    o = {"color": _color(p), "thickness": p.pop("thickness", p.pop("width", 2)) * 0.9,
+         "head_shorten": float(p.pop("arrowshorten", 0)), "linestyle": p.pop("linestyle", "-")}
     return Graphics([Arrow(tailpoint, headpoint, **o)], **gopts)
 
 
