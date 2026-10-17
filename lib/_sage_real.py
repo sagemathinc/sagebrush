@@ -30,7 +30,9 @@ def digits_to_prec(d):
         sage: digits_to_prec(15), digits_to_prec(50)  # sagebrush only
         (54, 170)
     """
-    x = (int(d) + 1) * _LOG2_10
+    # (a fractional d is not truncated, as Sage: 15.9 digits are 57 bits;
+    # d is read as a real number, an int subclass by its value)
+    x = (_real_double(d) + 1) * _LOG2_10
     return int(math.ceil(x - 1e-12))
 
 
@@ -363,12 +365,21 @@ def _format_big(m, e, D, no_sci=None, rnd="N"):
         W *= 2
 
 
+def _use_sci(no_sci, E):
+    # (str()'s no_sci, as Sage reads it: None or True, scientific notation
+    # for a decimal exponent of 6 or more, or -6 or less; another true value
+    # (1, 2), never; a false one (False, 0), always)
+    if no_sci is None or no_sci is True:
+        return E >= 6 or E <= -6
+    return not no_sci
+
+
 def _layout(N, E, D, neg, no_sci):
     """The digits N (D of them) of a number with decimal exponent E, laid
     out as Sage prints a RealNumber."""
     s = str(N)
     sign = "-" if neg else ""
-    if no_sci is False or (no_sci is None and (E >= 6 or E <= -6)) or (no_sci is not True and E > 300):
+    if _use_sci(no_sci, E):
         return sign + s[0] + "." + s[1:] + "e" + str(E)
     if E >= 0:
         if E + 1 >= D:
@@ -1136,7 +1147,7 @@ def RealField(prec=53, sci_not=False, rnd="RNDN"):
     """
     prec = int(prec)
     if prec < 1:
-        raise ValueError("prec (=%d) must be >= 1 and <= 2147483391" % prec)
+        raise ValueError("prec (=%d) must be >= 1 and <= 9223372036854775551" % prec)
     rnd = str(rnd)
     if rnd not in _RND:
         raise ValueError("rounding mode (=%s) must be one of %s" % (rnd, ", ".join(_RND)))
@@ -1642,7 +1653,7 @@ class RealNumberMP:
 
     __str__ = __repr__
 
-    def str(self, base=10, digits=0, no_sci=None, e=None, truncate=False, skip_zeroes=False):
+    def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         """The decimal string: all the digits needed to read the number back
         (1 + ceil(prec log10 2)), or digits digits.
 
@@ -1651,6 +1662,8 @@ class RealNumberMP:
             sage: RealField(100)(1/3).str(), RealField(100)(1/3).str(digits=5)
             ('0.33333333333333333333333333333346', '0.33333')
         """
+        _str_supported("RealField(%d)" % self._R._prec, base, e, skip_zeroes, args)
+        _str_digits(digits, truncate)
         if self._special:
             return {"+inf": "+infinity", "-inf": "-infinity", "nan": "NaN"}[self._special]
         D = int(digits) if digits else 1 + int(math.ceil(self._R._prec * _LOG10_2 - 1e-12))
@@ -1742,7 +1755,8 @@ class RealNumberMP:
             prec = digits_to_prec(digits)
         if prec is None:
             prec = 53
-        return RealField(prec)(self) if int(prec) != 53 else _sa().RR(self)
+        prec = _approx_prec(prec, self._R._prec)
+        return RealField(prec)(self) if prec != 53 else _sa().RR(self)
 
     n = N = numerical_approx
 
@@ -2789,6 +2803,105 @@ def _digits(prec):
     return max(2, int(math.floor((prec - 1) * _LOG10_2 + 1e-12)))
 
 
+def _prec_int(prec):
+    """The precision prec in bits as an integer, as Sage admits it: an int,
+    or a number with __int__ (truncated: 53.9 is 53); a string, bytes or an
+    object with only __index__ raises TypeError."""
+    if isinstance(prec, int):
+        # (an int's own value: a subclass's __int__ is not called, as Sage)
+        return int.__int__(prec)
+    if isinstance(prec, (str, bytes, bytearray, memoryview)) or getattr(type(prec), "__int__", None) is None:
+        raise TypeError("an integer is required")
+    return int(prec)
+
+
+def _real_double(x):
+    """x as a double, as Sage reads a real argument (CPython's
+    PyFloat_AsDouble): a float's own value (a subclass's __float__ is not
+    called), else __float__, else __index__; a string or bytes raises
+    TypeError."""
+    if isinstance(x, float):
+        return float.__float__(x)
+    f = _special(x, "__float__")
+    if f is not None:
+        r = f()
+        if not isinstance(r, float):
+            raise TypeError("%s.__float__ returned non-float (type %s)" % (type(x).__name__, type(r).__name__))
+        return float.__float__(r)
+    if _special(x, "__index__") is not None:
+        import operator
+        return float(operator.index(x))
+    raise TypeError("must be real number, not %s" % type(x).__name__)
+
+
+def _special(x, name):
+    """The special method name of x bound as Python binds one: looked up on
+    its type, then the descriptor's __get__ (a staticmethod or classmethod
+    too); None if the type has none."""
+    f = _type_lookup(type(x), name)
+    if f is None:
+        return None
+    get = _type_lookup(type(f), "__get__")
+    return get(f, x, type(x)) if get is not None else f
+
+
+_TYPE_MRO = type.__dict__["__mro__"]
+_TYPE_DICT = type.__dict__["__dict__"]
+
+
+def _type_lookup(t, name):
+    """name in the dicts of t's MRO, as the interpreter's slot lookup reads
+    it: type's own __mro__ and __dict__, so no metaclass __getattribute__ is
+    called (CORR-8C8-1)."""
+    # (type's own descriptors for both: a metaclass property named __mro__
+    # or __dict__ is not consulted either, CORR-93C-1)
+    for k in _TYPE_MRO.__get__(t, type):
+        d = _TYPE_DICT.__get__(k, type)
+        if name in d:
+            return d[name]
+    return None
+
+
+class _Bits(int):
+    """A precision converted once (sage_all.n): its value, named as it was
+    given in a refusal (54.2000000000000 bits, not 54)."""
+
+    def __new__(cls, p, shown):
+        o = int.__new__(cls, p)
+        o._shown = shown
+        return o
+
+    def __repr__(self):
+        return repr(self._shown)
+
+
+def _approx_prec(prec, own):
+    """The precision prec in bits as an integer (_prec_int), refused past
+    the number's own precision own as Sage refuses it."""
+    p = _prec_int(prec)
+    if p > own:
+        raise TypeError(f"cannot approximate to a precision of {prec!r} bits, use at most {own} bits")
+    return p
+
+
+def _str_supported(field, base, e, skip_zeroes, args=()):
+    # (as Sage: the options after digits are keyword-only)
+    if args:
+        raise TypeError("str() takes at most 2 positional arguments (%d given)" % (2 + len(args)))
+    # (str()'s options that are not implemented here are refused, not
+    # ignored: another base would print decimal digits as if they were its)
+    if base != 10:
+        raise NotImplementedError(f"{field} str() in base {base} is not available in sagebrush yet")
+    if e is not None or skip_zeroes:
+        raise NotImplementedError(f"{field} str() with e or skip_zeroes is not available in sagebrush yet")
+
+
+def _str_digits(digits, truncate):
+    # (as Sage)
+    if digits and truncate:
+        raise ValueError("cannot truncate when digits is given")
+
+
 def _format(q, D, no_sci=None, rnd="N"):
     """The rational q printed with D significant digits, as Sage prints a
     RealNumber (rounded to nearest, or toward +infinity "U" / -infinity
@@ -2817,7 +2930,7 @@ def _format(q, D, no_sci=None, rnd="N"):
         E += 1
     s = str(N)
     sign = "-" if neg else ""
-    if no_sci is False or (no_sci is None and (E >= 6 or E <= -6)) or (no_sci is not True and E > 300):
+    if _use_sci(no_sci, E):
         return sign + s[0] + "." + s[1:] + "e" + str(E)
     if E >= 0:
         if E + 1 >= D:
@@ -3605,7 +3718,18 @@ def N(x, prec=None, digits=None):
     """
     if digits is not None:
         prec = digits_to_prec(digits)
-    prec = int(prec or 53)
+    if prec is None:
+        prec = 53
+    from _sage_lang import RealNumber
+    from _sage_rdf import RealDoubleElement
+    if isinstance(x, float) and not isinstance(x, (RealDoubleElement, RealNumber)):
+        # (a Python float, or a subclass: a double, 53 bits as in Sage)
+        # (its own double: a subclass's __float__ is not called; a Python
+        # float has at most 53 bits, a subclass is converted as it is, as
+        # in Sage)
+        p = _approx_prec(prec, 53) if type(x) is float else _prec_int(prec)
+        return RealField(p)(float.__float__(x))
+    prec = _prec_int(prec)
     s = getattr(x, "_s", None)
     if s is not None:
         v = evaluate(x, prec + 20)
@@ -3613,6 +3737,10 @@ def N(x, prec=None, digits=None):
             return ComplexField(prec)(v) if prec != 53 else _sa().CC(complex(v))
         return RealField(prec)(v) if prec != 53 else _sa().RR(v)
     if isinstance(x, (RealNumberMP, ComplexNumberMP)):
+        return x.n(prec)
+    # (an element of RR or RDF: its own n(), which refuses a precision past
+    # its 53 bits, as Sage's N does)
+    if isinstance(x, float):
         return x.n(prec)
     return RealField(prec)(x)
 

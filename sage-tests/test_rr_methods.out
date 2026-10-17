@@ -1,0 +1,636 @@
+RR.real() -> 2.00000000000000 Real Field with 53 bits of precision
+RR.imag() -> 0 Integer Ring
+RR.n(2) -> 2.0 Real Field with 2 bits of precision
+RR.n(prec=2) -> 2.0 Real Field with 2 bits of precision
+RR.n(20) -> 2.0000 Real Field with 20 bits of precision
+RR.n(prec=20) -> 2.0000 Real Field with 20 bits of precision
+RR.n(30) -> 2.0000000 Real Field with 30 bits of precision
+RR.n(prec=30) -> 2.0000000 Real Field with 30 bits of precision
+RR.n(53) -> 2.00000000000000 Real Field with 53 bits of precision
+RR.n(prec=53) -> 2.00000000000000 Real Field with 53 bits of precision
+RR.n(54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR.n(prec=54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR.n(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+RR.n(prec=100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+RR.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+RR.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+RR.n(digits=1) -> 2.0 Real Field with 7 bits of precision
+RR.n(digits=5) -> 2.0000 Real Field with 20 bits of precision
+RR.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RR.n(digits=20) !! TypeError cannot approximate to a precision of 70 bits, use at most 53 bits
+RR.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RR.numerical_approx(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+N(RR, 100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+n(RR, digits=10) -> 2.000000000 Real Field with 37 bits of precision
+RR.str() -> '2.0000000000000000' str
+RR.str(10) -> '2.0000000000000000' str
+RR.str(10, 5) -> '2.0000' str
+RR.str(digits=5) -> '2.0000' str
+RR.str(base=10, digits=8) -> '2.0000000' str
+RR.str(no_sci=True) -> '2.0000000000000000' str
+RR.str(digits=5, no_sci=False) -> '2.0000e0' str
+RR * 2^17 str(no_sci=2) -> '262144.00000000000' str
+RR * 2^20 str(no_sci=2) -> '2097152.0000000000' str
+RR * 2^-16 str(no_sci=2) -> '0.000030517578125000000' str
+RR * 2^-17 str(no_sci=2) -> '0.000015258789062500000' str
+RR * 2^-20 str(no_sci=2) -> '0.0000019073486328125000' str
+RR * 2^200 str(no_sci=2) -> '321387608851798060000000000000000000000000000000000000000000' str
+RR * 2^17 str(no_sci=False) -> '2.6214400000000000e5' str
+RR * 2^20 str(no_sci=False) -> '2.0971520000000000e6' str
+RR * 2^-16 str(no_sci=False) -> '3.0517578125000000e-5' str
+RR * 2^-17 str(no_sci=False) -> '1.5258789062500000e-5' str
+RR * 2^-20 str(no_sci=False) -> '1.9073486328125000e-6' str
+RR * 2^200 str(no_sci=False) -> '3.2138760885179806e60' str
+RR * 2^17 str(no_sci=True) -> '262144.00000000000' str
+RR * 2^20 str(no_sci=True) -> '2.0971520000000000e6' str
+RR * 2^-16 str(no_sci=True) -> '0.000030517578125000000' str
+RR * 2^-17 str(no_sci=True) -> '0.000015258789062500000' str
+RR * 2^-20 str(no_sci=True) -> '1.9073486328125000e-6' str
+RR * 2^200 str(no_sci=True) -> '3.2138760885179806e60' str
+RR * 2^17 str(no_sci=None) -> '262144.00000000000' str
+RR * 2^20 str(no_sci=None) -> '2.0971520000000000e6' str
+RR * 2^-16 str(no_sci=None) -> '0.000030517578125000000' str
+RR * 2^-17 str(no_sci=None) -> '0.000015258789062500000' str
+RR * 2^-20 str(no_sci=None) -> '1.9073486328125000e-6' str
+RR * 2^200 str(no_sci=None) -> '3.2138760885179806e60' str
+RR * 2^17 str(no_sci=0) -> '2.6214400000000000e5' str
+RR * 2^20 str(no_sci=0) -> '2.0971520000000000e6' str
+RR * 2^-16 str(no_sci=0) -> '3.0517578125000000e-5' str
+RR * 2^-17 str(no_sci=0) -> '1.5258789062500000e-5' str
+RR * 2^-20 str(no_sci=0) -> '1.9073486328125000e-6' str
+RR * 2^200 str(no_sci=0) -> '3.2138760885179806e60' str
+RR * 2^17 str(no_sci=1) -> '262144.00000000000' str
+RR * 2^20 str(no_sci=1) -> '2097152.0000000000' str
+RR * 2^-16 str(no_sci=1) -> '0.000030517578125000000' str
+RR * 2^-17 str(no_sci=1) -> '0.000015258789062500000' str
+RR * 2^-20 str(no_sci=1) -> '0.0000019073486328125000' str
+RR * 2^200 str(no_sci=1) -> '321387608851798060000000000000000000000000000000000000000000' str
+RR.str(truncate=True) -> '2.00000000000000' str
+RR.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is given
+RR 1/3.real() -> 0.333333333333333 Real Field with 53 bits of precision
+RR 1/3.imag() -> 0 Integer Ring
+RR 1/3.n(2) -> 0.38 Real Field with 2 bits of precision
+RR 1/3.n(prec=2) -> 0.38 Real Field with 2 bits of precision
+RR 1/3.n(20) -> 0.33333 Real Field with 20 bits of precision
+RR 1/3.n(prec=20) -> 0.33333 Real Field with 20 bits of precision
+RR 1/3.n(30) -> 0.33333333 Real Field with 30 bits of precision
+RR 1/3.n(prec=30) -> 0.33333333 Real Field with 30 bits of precision
+RR 1/3.n(53) -> 0.333333333333333 Real Field with 53 bits of precision
+RR 1/3.n(prec=53) -> 0.333333333333333 Real Field with 53 bits of precision
+RR 1/3.n(54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR 1/3.n(prec=54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR 1/3.n(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+RR 1/3.n(prec=100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+RR 1/3.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+RR 1/3.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+RR 1/3.n(digits=1) -> 0.33 Real Field with 7 bits of precision
+RR 1/3.n(digits=5) -> 0.33333 Real Field with 20 bits of precision
+RR 1/3.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR 1/3.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RR 1/3.n(digits=20) !! TypeError cannot approximate to a precision of 70 bits, use at most 53 bits
+RR 1/3.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RR 1/3.numerical_approx(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+N(RR 1/3, 100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+n(RR 1/3, digits=10) -> 0.3333333333 Real Field with 37 bits of precision
+RR 1/3.str() -> '0.33333333333333331' str
+RR 1/3.str(10) -> '0.33333333333333331' str
+RR 1/3.str(10, 5) -> '0.33333' str
+RR 1/3.str(digits=5) -> '0.33333' str
+RR 1/3.str(base=10, digits=8) -> '0.33333333' str
+RR 1/3.str(no_sci=True) -> '0.33333333333333331' str
+RR 1/3.str(digits=5, no_sci=False) -> '3.3333e-1' str
+RR 1/3 * 2^17 str(no_sci=2) -> '43690.666666666664' str
+RR 1/3 * 2^20 str(no_sci=2) -> '349525.33333333331' str
+RR 1/3 * 2^-16 str(no_sci=2) -> '0.0000050862630208333331' str
+RR 1/3 * 2^-17 str(no_sci=2) -> '0.0000025431315104166665' str
+RR 1/3 * 2^-20 str(no_sci=2) -> '0.00000031789143880208332' str
+RR 1/3 * 2^200 str(no_sci=2) -> '535646014752996730000000000000000000000000000000000000000000' str
+RR 1/3 * 2^17 str(no_sci=False) -> '4.3690666666666664e4' str
+RR 1/3 * 2^20 str(no_sci=False) -> '3.4952533333333331e5' str
+RR 1/3 * 2^-16 str(no_sci=False) -> '5.0862630208333331e-6' str
+RR 1/3 * 2^-17 str(no_sci=False) -> '2.5431315104166665e-6' str
+RR 1/3 * 2^-20 str(no_sci=False) -> '3.1789143880208332e-7' str
+RR 1/3 * 2^200 str(no_sci=False) -> '5.3564601475299673e59' str
+RR 1/3 * 2^17 str(no_sci=True) -> '43690.666666666664' str
+RR 1/3 * 2^20 str(no_sci=True) -> '349525.33333333331' str
+RR 1/3 * 2^-16 str(no_sci=True) -> '5.0862630208333331e-6' str
+RR 1/3 * 2^-17 str(no_sci=True) -> '2.5431315104166665e-6' str
+RR 1/3 * 2^-20 str(no_sci=True) -> '3.1789143880208332e-7' str
+RR 1/3 * 2^200 str(no_sci=True) -> '5.3564601475299673e59' str
+RR 1/3 * 2^17 str(no_sci=None) -> '43690.666666666664' str
+RR 1/3 * 2^20 str(no_sci=None) -> '349525.33333333331' str
+RR 1/3 * 2^-16 str(no_sci=None) -> '5.0862630208333331e-6' str
+RR 1/3 * 2^-17 str(no_sci=None) -> '2.5431315104166665e-6' str
+RR 1/3 * 2^-20 str(no_sci=None) -> '3.1789143880208332e-7' str
+RR 1/3 * 2^200 str(no_sci=None) -> '5.3564601475299673e59' str
+RR 1/3 * 2^17 str(no_sci=0) -> '4.3690666666666664e4' str
+RR 1/3 * 2^20 str(no_sci=0) -> '3.4952533333333331e5' str
+RR 1/3 * 2^-16 str(no_sci=0) -> '5.0862630208333331e-6' str
+RR 1/3 * 2^-17 str(no_sci=0) -> '2.5431315104166665e-6' str
+RR 1/3 * 2^-20 str(no_sci=0) -> '3.1789143880208332e-7' str
+RR 1/3 * 2^200 str(no_sci=0) -> '5.3564601475299673e59' str
+RR 1/3 * 2^17 str(no_sci=1) -> '43690.666666666664' str
+RR 1/3 * 2^20 str(no_sci=1) -> '349525.33333333331' str
+RR 1/3 * 2^-16 str(no_sci=1) -> '0.0000050862630208333331' str
+RR 1/3 * 2^-17 str(no_sci=1) -> '0.0000025431315104166665' str
+RR 1/3 * 2^-20 str(no_sci=1) -> '0.00000031789143880208332' str
+RR 1/3 * 2^200 str(no_sci=1) -> '535646014752996730000000000000000000000000000000000000000000' str
+RR 1/3.str(truncate=True) -> '0.333333333333333' str
+RR 1/3.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is given
+big.real() -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.imag() -> 0 Integer Ring
+big.n(2) -> 1.1e602 Real Field with 2 bits of precision
+big.n(prec=2) -> 1.1e602 Real Field with 2 bits of precision
+big.n(20) -> 1.1481e602 Real Field with 20 bits of precision
+big.n(prec=20) -> 1.1481e602 Real Field with 20 bits of precision
+big.n(30) -> 1.1481307e602 Real Field with 30 bits of precision
+big.n(prec=30) -> 1.1481307e602 Real Field with 30 bits of precision
+big.n(53) -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.n(prec=53) -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.n(54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+big.n(prec=54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+big.n(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+big.n(prec=100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+big.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+big.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+big.n(digits=1) -> 1.1e602 Real Field with 7 bits of precision
+big.n(digits=5) -> 1.1481e602 Real Field with 20 bits of precision
+big.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+big.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+big.n(digits=20) !! TypeError cannot approximate to a precision of 70 bits, use at most 53 bits
+big.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+big.numerical_approx(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+N(big, 100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+n(big, digits=10) -> 1.148130695e602 Real Field with 37 bits of precision
+big.str() -> '1.1481306952742545e602' str
+big.str(10) -> '1.1481306952742545e602' str
+big.str(10, 5) -> '1.1481e602' str
+big.str(digits=5) -> '1.1481e602' str
+big.str(base=10, digits=8) -> '1.1481307e602' str
+big.str(no_sci=True) -> '1.1481306952742545e602' str
+big.str(digits=5, no_sci=False) -> '1.1481e602' str
+big * 2^17 str(no_sci=2) -> '150487786490987090000000000000000000000000000000000000000000' str
+big * 2^20 str(no_sci=2) -> '120390229192789670000000000000000000000000000000000000000000' str
+big * 2^-16 str(no_sci=2) -> '175190840953713150000000000000000000000000000000000000000000' str
+big * 2^-17 str(no_sci=2) -> '875954204768565770000000000000000000000000000000000000000000' str
+big * 2^-20 str(no_sci=2) -> '109494275596070720000000000000000000000000000000000000000000' str
+big * 2^200 str(no_sci=2) -> '184497489401772530000000000000000000000000000000000000000000' str
+big * 2^17 str(no_sci=False) -> '1.5048778649098709e607' str
+big * 2^20 str(no_sci=False) -> '1.2039022919278967e608' str
+big * 2^-16 str(no_sci=False) -> '1.7519084095371315e597' str
+big * 2^-17 str(no_sci=False) -> '8.7595420476856577e596' str
+big * 2^-20 str(no_sci=False) -> '1.0949427559607072e596' str
+big * 2^200 str(no_sci=False) -> '1.8449748940177253e662' str
+big * 2^17 str(no_sci=True) -> '1.5048778649098709e607' str
+big * 2^20 str(no_sci=True) -> '1.2039022919278967e608' str
+big * 2^-16 str(no_sci=True) -> '1.7519084095371315e597' str
+big * 2^-17 str(no_sci=True) -> '8.7595420476856577e596' str
+big * 2^-20 str(no_sci=True) -> '1.0949427559607072e596' str
+big * 2^200 str(no_sci=True) -> '1.8449748940177253e662' str
+big * 2^17 str(no_sci=None) -> '1.5048778649098709e607' str
+big * 2^20 str(no_sci=None) -> '1.2039022919278967e608' str
+big * 2^-16 str(no_sci=None) -> '1.7519084095371315e597' str
+big * 2^-17 str(no_sci=None) -> '8.7595420476856577e596' str
+big * 2^-20 str(no_sci=None) -> '1.0949427559607072e596' str
+big * 2^200 str(no_sci=None) -> '1.8449748940177253e662' str
+big * 2^17 str(no_sci=0) -> '1.5048778649098709e607' str
+big * 2^20 str(no_sci=0) -> '1.2039022919278967e608' str
+big * 2^-16 str(no_sci=0) -> '1.7519084095371315e597' str
+big * 2^-17 str(no_sci=0) -> '8.7595420476856577e596' str
+big * 2^-20 str(no_sci=0) -> '1.0949427559607072e596' str
+big * 2^200 str(no_sci=0) -> '1.8449748940177253e662' str
+big * 2^17 str(no_sci=1) -> '150487786490987090000000000000000000000000000000000000000000' str
+big * 2^20 str(no_sci=1) -> '120390229192789670000000000000000000000000000000000000000000' str
+big * 2^-16 str(no_sci=1) -> '175190840953713150000000000000000000000000000000000000000000' str
+big * 2^-17 str(no_sci=1) -> '875954204768565770000000000000000000000000000000000000000000' str
+big * 2^-20 str(no_sci=1) -> '109494275596070720000000000000000000000000000000000000000000' str
+big * 2^200 str(no_sci=1) -> '184497489401772530000000000000000000000000000000000000000000' str
+big.str(truncate=True) -> '1.14813069527425e602' str
+big.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is given
+sub.real() -> 7.90505033345994e-323 Real Field with 53 bits of precision
+sub.imag() -> 0 Integer Ring
+sub.n(2) -> 7.9e-323 Real Field with 2 bits of precision
+sub.n(prec=2) -> 7.9e-323 Real Field with 2 bits of precision
+sub.n(20) -> 7.9051e-323 Real Field with 20 bits of precision
+sub.n(prec=20) -> 7.9051e-323 Real Field with 20 bits of precision
+sub.n(30) -> 7.9050503e-323 Real Field with 30 bits of precision
+sub.n(prec=30) -> 7.9050503e-323 Real Field with 30 bits of precision
+sub.n(53) -> 7.90505033345994e-323 Real Field with 53 bits of precision
+sub.n(prec=53) -> 7.90505033345994e-323 Real Field with 53 bits of precision
+sub.n(54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+sub.n(prec=54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+sub.n(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+sub.n(prec=100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+sub.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+sub.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+sub.n(digits=1) -> 7.9e-323 Real Field with 7 bits of precision
+sub.n(digits=5) -> 7.9051e-323 Real Field with 20 bits of precision
+sub.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+sub.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+sub.n(digits=20) !! TypeError cannot approximate to a precision of 70 bits, use at most 53 bits
+sub.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+sub.numerical_approx(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+N(sub, 100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+n(sub, digits=10) -> 7.905050333e-323 Real Field with 37 bits of precision
+sub.str() -> '7.9050503334599447e-323' str
+sub.str(10) -> '7.9050503334599447e-323' str
+sub.str(10, 5) -> '7.9051e-323' str
+sub.str(digits=5) -> '7.9051e-323' str
+sub.str(base=10, digits=8) -> '7.9050503e-323' str
+sub.str(no_sci=True) -> '7.9050503334599447e-323' str
+sub.str(digits=5, no_sci=False) -> '7.9051e-323' str
+sub * 2^17 str(no_sci=2) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^20 str(no_sci=2) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^-16 str(no_sci=2) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^-17 str(no_sci=2) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^-20 str(no_sci=2) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^200 str(no_sci=2) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^17 str(no_sci=False) -> '1.0361307573072619e-317' str
+sub * 2^20 str(no_sci=False) -> '8.2890460584580950e-317' str
+sub * 2^-16 str(no_sci=False) -> '1.2062149556671058e-327' str
+sub * 2^-17 str(no_sci=False) -> '6.0310747783355291e-328' str
+sub * 2^-20 str(no_sci=False) -> '7.5388434729194114e-329' str
+sub * 2^200 str(no_sci=False) -> '1.2702926122619002e-262' str
+sub * 2^17 str(no_sci=True) -> '1.0361307573072619e-317' str
+sub * 2^20 str(no_sci=True) -> '8.2890460584580950e-317' str
+sub * 2^-16 str(no_sci=True) -> '1.2062149556671058e-327' str
+sub * 2^-17 str(no_sci=True) -> '6.0310747783355291e-328' str
+sub * 2^-20 str(no_sci=True) -> '7.5388434729194114e-329' str
+sub * 2^200 str(no_sci=True) -> '1.2702926122619002e-262' str
+sub * 2^17 str(no_sci=None) -> '1.0361307573072619e-317' str
+sub * 2^20 str(no_sci=None) -> '8.2890460584580950e-317' str
+sub * 2^-16 str(no_sci=None) -> '1.2062149556671058e-327' str
+sub * 2^-17 str(no_sci=None) -> '6.0310747783355291e-328' str
+sub * 2^-20 str(no_sci=None) -> '7.5388434729194114e-329' str
+sub * 2^200 str(no_sci=None) -> '1.2702926122619002e-262' str
+sub * 2^17 str(no_sci=0) -> '1.0361307573072619e-317' str
+sub * 2^20 str(no_sci=0) -> '8.2890460584580950e-317' str
+sub * 2^-16 str(no_sci=0) -> '1.2062149556671058e-327' str
+sub * 2^-17 str(no_sci=0) -> '6.0310747783355291e-328' str
+sub * 2^-20 str(no_sci=0) -> '7.5388434729194114e-329' str
+sub * 2^200 str(no_sci=0) -> '1.2702926122619002e-262' str
+sub * 2^17 str(no_sci=1) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^20 str(no_sci=1) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^-16 str(no_sci=1) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^-17 str(no_sci=1) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^-20 str(no_sci=1) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub * 2^200 str(no_sci=1) -> '0.0000000000000000000000000000000000000000000000000000000000' str
+sub.str(truncate=True) -> '7.90505033345994e-323' str
+sub.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is given
+RDF.real() -> 2.0 Real Double Field
+RDF.imag() -> 0.0 Real Double Field
+RDF.n(2) -> 2.0 Real Field with 2 bits of precision
+RDF.n(prec=2) -> 2.0 Real Field with 2 bits of precision
+RDF.n(20) -> 2.0000 Real Field with 20 bits of precision
+RDF.n(prec=20) -> 2.0000 Real Field with 20 bits of precision
+RDF.n(30) -> 2.0000000 Real Field with 30 bits of precision
+RDF.n(prec=30) -> 2.0000000 Real Field with 30 bits of precision
+RDF.n(53) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF.n(prec=53) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF.n(54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RDF.n(prec=54) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RDF.n(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+RDF.n(prec=100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+RDF.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+RDF.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 53 bits
+RDF.n(digits=1) -> 2.0 Real Field with 7 bits of precision
+RDF.n(digits=5) -> 2.0000 Real Field with 20 bits of precision
+RDF.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RDF.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RDF.n(digits=20) !! TypeError cannot approximate to a precision of 70 bits, use at most 53 bits
+RDF.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RDF.numerical_approx(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+N(RDF, 100) !! TypeError cannot approximate to a precision of 100 bits, use at most 53 bits
+n(RDF, digits=10) -> 2.000000000 Real Field with 37 bits of precision
+R30.real() -> 2.0000000 Real Field with 30 bits of precision
+R30.imag() -> 0 Integer Ring
+R30.n(2) -> 2.0 Real Field with 2 bits of precision
+R30.n(prec=2) -> 2.0 Real Field with 2 bits of precision
+R30.n(20) -> 2.0000 Real Field with 20 bits of precision
+R30.n(prec=20) -> 2.0000 Real Field with 20 bits of precision
+R30.n(30) -> 2.0000000 Real Field with 30 bits of precision
+R30.n(prec=30) -> 2.0000000 Real Field with 30 bits of precision
+R30.n(53) !! TypeError cannot approximate to a precision of 53 bits, use at most 30 bits
+R30.n(prec=53) !! TypeError cannot approximate to a precision of 53 bits, use at most 30 bits
+R30.n(54) !! TypeError cannot approximate to a precision of 54 bits, use at most 30 bits
+R30.n(prec=54) !! TypeError cannot approximate to a precision of 54 bits, use at most 30 bits
+R30.n(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 30 bits
+R30.n(prec=100) !! TypeError cannot approximate to a precision of 100 bits, use at most 30 bits
+R30.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 30 bits
+R30.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 30 bits
+R30.n(digits=1) -> 2.0 Real Field with 7 bits of precision
+R30.n(digits=5) -> 2.0000 Real Field with 20 bits of precision
+R30.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 30 bits
+R30.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 30 bits
+R30.n(digits=20) !! TypeError cannot approximate to a precision of 70 bits, use at most 30 bits
+R30.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 30 bits
+R30.numerical_approx(100) !! TypeError cannot approximate to a precision of 100 bits, use at most 30 bits
+N(R30, 100) !! TypeError cannot approximate to a precision of 100 bits, use at most 30 bits
+n(R30, digits=10) !! TypeError cannot approximate to a precision of 37 bits, use at most 30 bits
+R30.str() -> '2.0000000000' str
+R30.str(10) -> '2.0000000000' str
+R30.str(10, 5) -> '2.0000' str
+R30.str(digits=5) -> '2.0000' str
+R30.str(base=10, digits=8) -> '2.0000000' str
+R30.str(no_sci=True) -> '2.0000000000' str
+R30.str(digits=5, no_sci=False) -> '2.0000e0' str
+R30 * 2^17 str(no_sci=2) -> '262144.00000' str
+R30 * 2^20 str(no_sci=2) -> '2097152.0000' str
+R30 * 2^-16 str(no_sci=2) -> '0.000030517578125' str
+R30 * 2^-17 str(no_sci=2) -> '0.000015258789062' str
+R30 * 2^-20 str(no_sci=2) -> '0.0000019073486328' str
+R30 * 2^200 str(no_sci=2) -> '321387608850000000000000000000000000000000000000000000000000' str
+R30 * 2^17 str(no_sci=False) -> '2.6214400000e5' str
+R30 * 2^20 str(no_sci=False) -> '2.0971520000e6' str
+R30 * 2^-16 str(no_sci=False) -> '3.0517578125e-5' str
+R30 * 2^-17 str(no_sci=False) -> '1.5258789062e-5' str
+R30 * 2^-20 str(no_sci=False) -> '1.9073486328e-6' str
+R30 * 2^200 str(no_sci=False) -> '3.2138760885e60' str
+R30 * 2^17 str(no_sci=True) -> '262144.00000' str
+R30 * 2^20 str(no_sci=True) -> '2.0971520000e6' str
+R30 * 2^-16 str(no_sci=True) -> '0.000030517578125' str
+R30 * 2^-17 str(no_sci=True) -> '0.000015258789062' str
+R30 * 2^-20 str(no_sci=True) -> '1.9073486328e-6' str
+R30 * 2^200 str(no_sci=True) -> '3.2138760885e60' str
+R30 * 2^17 str(no_sci=None) -> '262144.00000' str
+R30 * 2^20 str(no_sci=None) -> '2.0971520000e6' str
+R30 * 2^-16 str(no_sci=None) -> '0.000030517578125' str
+R30 * 2^-17 str(no_sci=None) -> '0.000015258789062' str
+R30 * 2^-20 str(no_sci=None) -> '1.9073486328e-6' str
+R30 * 2^200 str(no_sci=None) -> '3.2138760885e60' str
+R30 * 2^17 str(no_sci=0) -> '2.6214400000e5' str
+R30 * 2^20 str(no_sci=0) -> '2.0971520000e6' str
+R30 * 2^-16 str(no_sci=0) -> '3.0517578125e-5' str
+R30 * 2^-17 str(no_sci=0) -> '1.5258789062e-5' str
+R30 * 2^-20 str(no_sci=0) -> '1.9073486328e-6' str
+R30 * 2^200 str(no_sci=0) -> '3.2138760885e60' str
+R30 * 2^17 str(no_sci=1) -> '262144.00000' str
+R30 * 2^20 str(no_sci=1) -> '2097152.0000' str
+R30 * 2^-16 str(no_sci=1) -> '0.000030517578125' str
+R30 * 2^-17 str(no_sci=1) -> '0.000015258789062' str
+R30 * 2^-20 str(no_sci=1) -> '0.0000019073486328' str
+R30 * 2^200 str(no_sci=1) -> '321387608850000000000000000000000000000000000000000000000000' str
+R30.str(truncate=True) -> '2.0000000' str
+R30.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is given
+R100.real() -> 0.33333333333333333333333333333 Real Field with 100 bits of precision
+R100.imag() -> 0 Integer Ring
+R100.n(2) -> 0.38 Real Field with 2 bits of precision
+R100.n(prec=2) -> 0.38 Real Field with 2 bits of precision
+R100.n(20) -> 0.33333 Real Field with 20 bits of precision
+R100.n(prec=20) -> 0.33333 Real Field with 20 bits of precision
+R100.n(30) -> 0.33333333 Real Field with 30 bits of precision
+R100.n(prec=30) -> 0.33333333 Real Field with 30 bits of precision
+R100.n(53) -> 0.333333333333333 Real Field with 53 bits of precision
+R100.n(prec=53) -> 0.333333333333333 Real Field with 53 bits of precision
+R100.n(54) -> 0.333333333333333 Real Field with 54 bits of precision
+R100.n(prec=54) -> 0.333333333333333 Real Field with 54 bits of precision
+R100.n(100) -> 0.33333333333333333333333333333 Real Field with 100 bits of precision
+R100.n(prec=100) -> 0.33333333333333333333333333333 Real Field with 100 bits of precision
+R100.n(200) !! TypeError cannot approximate to a precision of 200 bits, use at most 100 bits
+R100.n(prec=200) !! TypeError cannot approximate to a precision of 200 bits, use at most 100 bits
+R100.n(digits=1) -> 0.33 Real Field with 7 bits of precision
+R100.n(digits=5) -> 0.33333 Real Field with 20 bits of precision
+R100.n(digits=15) -> 0.333333333333333 Real Field with 54 bits of precision
+R100.n(digits=16) -> 0.3333333333333333 Real Field with 57 bits of precision
+R100.n(digits=20) -> 0.33333333333333333333 Real Field with 70 bits of precision
+R100.n(digits=30) !! TypeError cannot approximate to a precision of 103 bits, use at most 100 bits
+R100.numerical_approx(100) -> 0.33333333333333333333333333333 Real Field with 100 bits of precision
+N(R100, 100) -> 0.33333333333333333333333333333 Real Field with 100 bits of precision
+n(R100, digits=10) -> 0.3333333333 Real Field with 37 bits of precision
+R100.str() -> '0.33333333333333333333333333333346' str
+R100.str(10) -> '0.33333333333333333333333333333346' str
+R100.str(10, 5) -> '0.33333' str
+R100.str(digits=5) -> '0.33333' str
+R100.str(base=10, digits=8) -> '0.33333333' str
+R100.str(no_sci=True) -> '0.33333333333333333333333333333346' str
+R100.str(digits=5, no_sci=False) -> '3.3333e-1' str
+R100 * 2^17 str(no_sci=2) -> '43690.666666666666666666666666684' str
+R100 * 2^20 str(no_sci=2) -> '349525.33333333333333333333333347' str
+R100 * 2^-16 str(no_sci=2) -> '0.0000050862630208333333333333333333353' str
+R100 * 2^-17 str(no_sci=2) -> '0.0000025431315104166666666666666666677' str
+R100 * 2^-20 str(no_sci=2) -> '0.00000031789143880208333333333333333346' str
+R100 * 2^200 str(no_sci=2) -> '535646014752996758513987364113930000000000000000000000000000' str
+R100 * 2^17 str(no_sci=False) -> '4.3690666666666666666666666666684e4' str
+R100 * 2^20 str(no_sci=False) -> '3.4952533333333333333333333333347e5' str
+R100 * 2^-16 str(no_sci=False) -> '5.0862630208333333333333333333353e-6' str
+R100 * 2^-17 str(no_sci=False) -> '2.5431315104166666666666666666677e-6' str
+R100 * 2^-20 str(no_sci=False) -> '3.1789143880208333333333333333346e-7' str
+R100 * 2^200 str(no_sci=False) -> '5.3564601475299675851398736411393e59' str
+R100 * 2^17 str(no_sci=True) -> '43690.666666666666666666666666684' str
+R100 * 2^20 str(no_sci=True) -> '349525.33333333333333333333333347' str
+R100 * 2^-16 str(no_sci=True) -> '5.0862630208333333333333333333353e-6' str
+R100 * 2^-17 str(no_sci=True) -> '2.5431315104166666666666666666677e-6' str
+R100 * 2^-20 str(no_sci=True) -> '3.1789143880208333333333333333346e-7' str
+R100 * 2^200 str(no_sci=True) -> '5.3564601475299675851398736411393e59' str
+R100 * 2^17 str(no_sci=None) -> '43690.666666666666666666666666684' str
+R100 * 2^20 str(no_sci=None) -> '349525.33333333333333333333333347' str
+R100 * 2^-16 str(no_sci=None) -> '5.0862630208333333333333333333353e-6' str
+R100 * 2^-17 str(no_sci=None) -> '2.5431315104166666666666666666677e-6' str
+R100 * 2^-20 str(no_sci=None) -> '3.1789143880208333333333333333346e-7' str
+R100 * 2^200 str(no_sci=None) -> '5.3564601475299675851398736411393e59' str
+R100 * 2^17 str(no_sci=0) -> '4.3690666666666666666666666666684e4' str
+R100 * 2^20 str(no_sci=0) -> '3.4952533333333333333333333333347e5' str
+R100 * 2^-16 str(no_sci=0) -> '5.0862630208333333333333333333353e-6' str
+R100 * 2^-17 str(no_sci=0) -> '2.5431315104166666666666666666677e-6' str
+R100 * 2^-20 str(no_sci=0) -> '3.1789143880208333333333333333346e-7' str
+R100 * 2^200 str(no_sci=0) -> '5.3564601475299675851398736411393e59' str
+R100 * 2^17 str(no_sci=1) -> '43690.666666666666666666666666684' str
+R100 * 2^20 str(no_sci=1) -> '349525.33333333333333333333333347' str
+R100 * 2^-16 str(no_sci=1) -> '0.0000050862630208333333333333333333353' str
+R100 * 2^-17 str(no_sci=1) -> '0.0000025431315104166666666666666666677' str
+R100 * 2^-20 str(no_sci=1) -> '0.00000031789143880208333333333333333346' str
+R100 * 2^200 str(no_sci=1) -> '535646014752996758513987364113930000000000000000000000000000' str
+R100.str(truncate=True) -> '0.33333333333333333333333333333' str
+R100.str(digits=6, truncate=True) !! ValueError cannot truncate when digits is given
+RDF.str() -> '2.0' str
+RDF(1/3).str() -> '0.3333333333333333' str
+RDF(-1e300).str() -> '-1e+300' str
+RR.n(54.5) !! TypeError cannot approximate to a precision of 54.5000000000000 bits, use at most 53 bits
+RR.n(53.9) -> 2.00000000000000 Real Field with 53 bits of precision
+RR.n(100.9) !! TypeError cannot approximate to a precision of 100.900000000000 bits, use at most 53 bits
+RR.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 53 bits
+RR.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+RR.n('53') !! TypeError an integer is required
+RR.n(107/2) -> 2.00000000000000 Real Field with 53 bits of precision
+RR.n(RDF(54.2)) !! TypeError cannot approximate to a precision of 54.2 bits, use at most 53 bits
+RR.n(digits=15.9) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RR.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RR.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RR.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 53 bits
+RDF.n(54.5) !! TypeError cannot approximate to a precision of 54.5000000000000 bits, use at most 53 bits
+RDF.n(53.9) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF.n(100.9) !! TypeError cannot approximate to a precision of 100.900000000000 bits, use at most 53 bits
+RDF.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 53 bits
+RDF.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+RDF.n('53') !! TypeError an integer is required
+RDF.n(107/2) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF.n(RDF(54.2)) !! TypeError cannot approximate to a precision of 54.2 bits, use at most 53 bits
+RDF.n(digits=15.9) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RDF.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+RDF.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+RDF.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 53 bits
+R100.n(54.5) -> 2.00000000000000 Real Field with 54 bits of precision
+R100.n(53.9) -> 2.00000000000000 Real Field with 53 bits of precision
+R100.n(100.9) -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 100 bits
+R100.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+R100.n('53') !! TypeError an integer is required
+R100.n(107/2) -> 2.00000000000000 Real Field with 53 bits of precision
+R100.n(RDF(54.2)) -> 2.00000000000000 Real Field with 54 bits of precision
+R100.n(digits=15.9) -> 2.000000000000000 Real Field with 57 bits of precision
+R100.n(digits=16) -> 2.000000000000000 Real Field with 57 bits of precision
+R100.n(digits=15) -> 2.00000000000000 Real Field with 54 bits of precision
+R100.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 100 bits
+big.n(54.5) !! TypeError cannot approximate to a precision of 54.5000000000000 bits, use at most 53 bits
+big.n(53.9) -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.n(100.9) !! TypeError cannot approximate to a precision of 100.900000000000 bits, use at most 53 bits
+big.n(101.5) !! TypeError cannot approximate to a precision of 101.500000000000 bits, use at most 53 bits
+big.n(0.5) !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+big.n('53') !! TypeError an integer is required
+big.n(107/2) -> 1.14813069527425e602 Real Field with 53 bits of precision
+big.n(RDF(54.2)) !! TypeError cannot approximate to a precision of 54.2 bits, use at most 53 bits
+big.n(digits=15.9) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+big.n(digits=16) !! TypeError cannot approximate to a precision of 57 bits, use at most 53 bits
+big.n(digits=15) !! TypeError cannot approximate to a precision of 54 bits, use at most 53 bits
+big.n(digits=31) !! TypeError cannot approximate to a precision of 107 bits, use at most 53 bits
+N(F) -> 1.2500000 Real Field with 30 bits of precision
+N(F) 53 -> 1.25000000000000 Real Field with 53 bits of precision
+N(RR) -> 2.0000000 Real Field with 30 bits of precision
+N(RDF,60) !! TypeError cannot approximate to a precision of 60 bits, use at most 53 bits
+N(RR,60) !! TypeError cannot approximate to a precision of 60 bits, use at most 53 bits
+N(float 60) !! TypeError cannot approximate to a precision of 60 bits, use at most 53 bits
+N(big,30) -> 1.1481307e602 Real Field with 30 bits of precision
+N(R100,200) !! TypeError cannot approximate to a precision of 200 bits, use at most 100 bits
+RR fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+RR alias fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+RDF fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+RDF alias fractional prec -> 2.00000000000000 Real Field with 53 bits of precision
+R30 fractional prec -> 2.0000000 Real Field with 30 bits of precision
+R30 alias fractional prec -> 2.0000000 Real Field with 30 bits of precision
+R100 fractional prec -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 alias fractional prec -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+user float N -> 1.2500000 Real Field with 30 bits of precision
+RR str three args !! TypeError str() takes at most 2 positional arguments (3 given)
+RR str keyword -> '2.0000e0' str
+big str three args !! TypeError str() takes at most 2 positional arguments (3 given)
+big str keyword -> '1.1481e602' str
+R100 str three args !! TypeError str() takes at most 2 positional arguments (3 given)
+R100 str keyword -> '2.0000e0' str
+RR prec bytes !! TypeError an integer is required
+RR alias prec bytes !! TypeError an integer is required
+RR prec bytearray !! TypeError an integer is required
+RR alias prec bytearray !! TypeError an integer is required
+RR prec memoryview !! TypeError an integer is required
+RR alias prec memoryview !! TypeError an integer is required
+RR prec index-only !! TypeError an integer is required
+RR alias prec index-only !! TypeError an integer is required
+RR prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RR alias prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RR prec float-only !! TypeError an integer is required
+RR alias prec float-only !! TypeError an integer is required
+RR prec str !! TypeError an integer is required
+RR alias prec str !! TypeError an integer is required
+RR digits str !! TypeError must be real number, not str
+RR digits bytes !! TypeError must be real number, not bytes
+RR digits bytearray !! TypeError must be real number, not bytearray
+RR digits frac -> 2.00000000 Real Field with 33 bits of precision
+RR digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RR digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 53 bits
+RDF prec bytes !! TypeError an integer is required
+RDF alias prec bytes !! TypeError an integer is required
+RDF prec bytearray !! TypeError an integer is required
+RDF alias prec bytearray !! TypeError an integer is required
+RDF prec memoryview !! TypeError an integer is required
+RDF alias prec memoryview !! TypeError an integer is required
+RDF prec index-only !! TypeError an integer is required
+RDF alias prec index-only !! TypeError an integer is required
+RDF prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RDF alias prec int-only -> 2.0000000 Real Field with 30 bits of precision
+RDF prec float-only !! TypeError an integer is required
+RDF alias prec float-only !! TypeError an integer is required
+RDF prec str !! TypeError an integer is required
+RDF alias prec str !! TypeError an integer is required
+RDF digits str !! TypeError must be real number, not str
+RDF digits bytes !! TypeError must be real number, not bytes
+RDF digits bytearray !! TypeError must be real number, not bytearray
+RDF digits frac -> 2.00000000 Real Field with 33 bits of precision
+RDF digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+RDF digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 53 bits
+R100 prec bytes !! TypeError an integer is required
+R100 alias prec bytes !! TypeError an integer is required
+R100 prec bytearray !! TypeError an integer is required
+R100 alias prec bytearray !! TypeError an integer is required
+R100 prec memoryview !! TypeError an integer is required
+R100 alias prec memoryview !! TypeError an integer is required
+R100 prec index-only !! TypeError an integer is required
+R100 alias prec index-only !! TypeError an integer is required
+R100 prec int-only -> 2.0000000 Real Field with 30 bits of precision
+R100 alias prec int-only -> 2.0000000 Real Field with 30 bits of precision
+R100 prec float-only !! TypeError an integer is required
+R100 alias prec float-only !! TypeError an integer is required
+R100 prec str !! TypeError an integer is required
+R100 alias prec str !! TypeError an integer is required
+R100 digits str !! TypeError must be real number, not str
+R100 digits bytes !! TypeError must be real number, not bytes
+R100 digits bytearray !! TypeError must be real number, not bytearray
+R100 digits frac -> 2.00000000 Real Field with 33 bits of precision
+R100 digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 100 bits
+R100 digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 100 bits
+big prec bytes !! TypeError an integer is required
+big alias prec bytes !! TypeError an integer is required
+big prec bytearray !! TypeError an integer is required
+big alias prec bytearray !! TypeError an integer is required
+big prec memoryview !! TypeError an integer is required
+big alias prec memoryview !! TypeError an integer is required
+big prec index-only !! TypeError an integer is required
+big alias prec index-only !! TypeError an integer is required
+big prec int-only -> 1.1481307e602 Real Field with 30 bits of precision
+big alias prec int-only -> 1.1481307e602 Real Field with 30 bits of precision
+big prec float-only !! TypeError an integer is required
+big alias prec float-only !! TypeError an integer is required
+big prec str !! TypeError an integer is required
+big alias prec str !! TypeError an integer is required
+big digits str !! TypeError must be real number, not str
+big digits bytes !! TypeError must be real number, not bytes
+big digits bytearray !! TypeError must be real number, not bytearray
+big digits frac -> 1.14813070e602 Real Field with 33 bits of precision
+big digits index-only !! TypeError cannot approximate to a precision of 103 bits, use at most 53 bits
+big digits float-only !! TypeError cannot approximate to a precision of 106 bits, use at most 53 bits
+V N -> 1.2500000 Real Field with 30 bits of precision
+V N digits -> 1.2500 Real Field with 20 bits of precision
+V N 60 -> 1.2500000000000000 Real Field with 60 bits of precision
+W N -> 1.2500000 Real Field with 30 bits of precision
+W N digits -> 1.2500 Real Field with 20 bits of precision
+W N 60 -> 1.2500000000000000 Real Field with 60 bits of precision
+N plain 0 !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+N plain 0.500000000000000 !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+N plain -0.500000000000000 !! ValueError prec (=0) must be >= 1 and <= 9223372036854775551
+N plain '30' !! TypeError an integer is required
+N plain b'30' !! TypeError an integer is required
+N plain 53.9000000000000 -> 2.00000000000000 Real Field with 53 bits of precision
+N plain 54.2000000000000 !! TypeError cannot approximate to a precision of 54.2000000000000 bits, use at most 53 bits
+N plain IntOnly -> 2.0000000 Real Field with 30 bits of precision
+N plain IndexOnly !! TypeError an integer is required
+digits static -> 2.00000000 Real Field with 33 bits of precision
+digits class -> 2.00000000 Real Field with 33 bits of precision
+digits index -> 2.0000000 Real Field with 30 bits of precision
+digits int-float -> 2.00000000 Real Field with 33 bits of precision
+digits int-int -> 2.0 Real Field with 10 bits of precision
+prec int-int -> 2.0000000 Real Field with 30 bits of precision
+changing float -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing RR -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing RDF -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing int -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing method -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+digits descriptor -> 2.00000000 Real Field with 33 bits of precision
+['real-get']
+digits __mro__ property -> 2.00000000 Real Field with 33 bits of precision
+['real-get']
+digits __dict__ property -> 2.00000000 Real Field with 33 bits of precision
+['real-get']
