@@ -449,8 +449,9 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     const lv = ssize(_level);
     let level = 0;
     if (ind !== null && ind !== "" && !indBad) {
-      if (typeof lv === "bigint" || (lv + 1) * ind.length > 2 ** 28) raise(T.MemoryError);
-      level = Math.max(0, lv);
+      if (lv < 0) level = 0;
+      else if (typeof lv === "bigint" || (lv + 1) * ind.length > 2 ** 28) raise(T.MemoryError);
+      else level = lv;
     }
     out = "";
     stack.length = 0;
