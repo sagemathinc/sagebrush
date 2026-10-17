@@ -505,7 +505,7 @@ newBuiltinModule("_time", (m) => {
   // or None, TZ's zone name as Intl canonicalizes it or None where Intl
   // does not take it, whether the host's zoneinfo has a file for that name
   // or None where TZ is not a zone name, Intl's zone canonicalized the same
-  // way). Intl canonicalizes Etc/GMT and UCT to "UTC", whose glibc
+  // way, the TZDIR variable or None). Intl canonicalizes Etc/GMT and UCT to "UTC", whose glibc
   // abbreviations differ, so where TZ is set it decides; a browser has none)
   fn(m, "_zone", () => {
     let z: unknown;
@@ -537,7 +537,8 @@ newBuiltinModule("_time", (m) => {
       }
     }
     const host = typeof z === "string" && z !== "" ? z : null;
-    return tuple([host, typeof env === "string" ? env : null, canon, file, host === null ? null : canonical(host)]);
+    const tzdir = typeof process !== "undefined" ? process.env?.TZDIR : undefined;
+    return tuple([host, typeof env === "string" ? env : null, canon, file, host === null ? null : canonical(host), typeof tzdir === "string" ? tzdir : null]);
   });
   // (the host zone's local fields at a UTC second, from JS's Date (ICU's
   // tzdata): (year, month, day, hour, minute, second, utcoffset), the offset

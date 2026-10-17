@@ -32,6 +32,10 @@ The host's zone: UTC unless the host gives one.
     or repeats: glibc's answer for those depends on its own state, so it
     is not guessed.
   - strftime's %s, which is mktime's, refuses likewise.
+- A TZDIR other than the system's /usr/share/zoneinfo (glibc reads zones
+  from it, and its files may hold anything: Date does not read them):
+  every local time is refused as below, naming TZDIR, whatever TZ is, UTC
+  and GMT and unset too.
 - Any other TZ (a POSIX rule such as "EST5EDT,M3.2.0,M11.1.0", a path to a
   zoneinfo file, a name with no file or one Date does not take as given):
   JavaScript's Date does not read it as glibc does, so localtime(), ctime(),
@@ -50,7 +54,7 @@ from operator import index as _index
 
 _UTC_ZONES = {"UTC", "Etc/UTC", "Etc/UCT", "Etc/Universal", "Etc/Zulu"}
 _GMT_ZONES = {"Etc/GMT", "GMT0", "Etc/GMT0", "Etc/GMT+0", "Etc/GMT-0", "Etc/Greenwich"}
-_intl, _tzenv, _tzcanon, _tzfile, _tzhost = _time._zone()
+_intl, _tzenv, _tzcanon, _tzfile, _tzhost, _tzdir = _time._zone()
 _bad = None  # (a TZ whose local times are not known here: why)
 if _tzenv is not None:
     _name = _tzenv[1:] if _tzenv.startswith(":") else _tzenv
@@ -74,7 +78,13 @@ elif _intl is None or _intl in ("UTC", "Etc/UTC", "Etc/Unknown"):
     _abbr, _host = "UTC", None
 else:
     _abbr, _host = None, _intl
-del _intl, _tzenv, _tzcanon, _tzfile, _tzhost
+if _tzdir and _tzdir.rstrip("/") != "/usr/share/zoneinfo":
+    # (an empty TZDIR is glibc's default; any other directory's files are
+    # not read here, so no zone, UTC's neither, is known exact)
+    _abbr, _host = None, _host or "UTC"
+    _bad = ("time: the host's zoneinfo directory TZDIR=%r is not available in Sagebrush yet: glibc reads the "
+            "zone from its files, which JavaScript's Date does not, so local times are refused, not guessed" % _tzdir)
+del _intl, _tzenv, _tzcanon, _tzfile, _tzhost, _tzdir
 
 
 def _refuse(what):
