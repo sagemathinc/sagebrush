@@ -452,6 +452,15 @@ function mappingNamespace(m: any): any {
     },
   });
 }
+const NS_FRONT = Symbol("the locals of a layered namespace, as a namespace");
+// `from __future__ import annotations` at a module's top level: its
+// __annotations__ made only if its namespace (exec's locals, when separate)
+// has none, as CPython's SETUP_ANNOTATIONS; an existing mapping kept
+export function setupAnnotations(g: any): void {
+  const ns = g[NS_FRONT] ?? g;
+  const v = ns[NS_MAPPING] === true ? ns.__annotations__ : Object.prototype.hasOwnProperty.call(ns, "__annotations__") ? ns.__annotations__ : undefined;
+  if (v === undefined) g.__annotations__ = Obj.newDict();
+}
 // Reads see `front` then `back`; writes go to `front`.
 function layered(front: any, back: any): any {
   // (a mapping's binding: one __getitem__, not one for `in` and another)
@@ -461,7 +470,7 @@ function layered(front: any, back: any): any {
     return v !== undefined ? v : back[k];
   };
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === Obj.NS_DICT ? undefined : read(k)),
+    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === NS_FRONT ? front : k === Obj.NS_DICT ? undefined : read(k)),
     set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
     has: (_t, k) => k in front || k in back,
     // (del deletes from the locals only: unbound there, the NameError even
@@ -741,6 +750,70 @@ export function classModuleIn(ns: Map<string, any> | Ty.PreparedNs, g: any, b: a
 export function classLocals(ns: Map<string, any> | Ty.PreparedNs): any {
   return ns instanceof Ty.PreparedNs ? ns.m : localsDict([...ns.keys()], [...ns.values()]);
 }
+// A class body's __classdict__, CPython's implicit cell of its annotation
+// scopes (a types.CellType, stored in the namespace as __classdictcell__):
+// the body's namespace while it runs (a prepared one's mapping itself),
+// then the class's own dict, from type.__new__ on (types.ts), the same
+// object every time it is read
+class ClassMap {
+  // (a dict's store over a class namespace, str keys only. Once the class
+  // is made a write through it is refused: CPython's raw writes to a
+  // type's dict skip its attribute cache, which Sagebrush's own caches
+  // would not, so neither answer would be CPython's, astra CORR-2F0-2)
+  constructor(public m: Map<string, any>, public cls: any) {}
+  get size(): number {
+    return this.m.size;
+  }
+  keys() {
+    return this.m.keys();
+  }
+  values() {
+    return this.m.values();
+  }
+  entries() {
+    return this.m.entries();
+  }
+  [Symbol.iterator]() {
+    return this.m.entries();
+  }
+  get(k: any): any {
+    return typeof k === "string" ? this.m.get(k) : undefined;
+  }
+  has(k: any): boolean {
+    return typeof k === "string" && this.m.has(k);
+  }
+  private writable() {
+    if (this.cls) raise(T.NotImplementedError, `writing to the dict of class '${this.cls.$name}' through __classdict__ is not supported yet`);
+  }
+  set(k: any, v: any): this {
+    this.writable();
+    if (typeof k !== "string") raise(T.NotImplementedError, "a key other than a str in a class's __classdict__ is not supported yet");
+    this.m.set(k, v);
+    return this;
+  }
+  delete(k: any): boolean {
+    this.writable();
+    return typeof k === "string" && this.m.delete(k);
+  }
+  clear() {
+    this.writable();
+    this.m.clear();
+  }
+}
+function dictOver(m: Map<string, any>, cls: any): any {
+  const d = new Obj.PyDict();
+  (d as any).$m = new ClassMap(m, cls);
+  return d;
+}
+export const classDictCell = (ns: Map<string, any> | Ty.PreparedNs) => Ty.newCell(ns instanceof Ty.PreparedNs ? ns.m : dictOver(ns, null));
+export const classDict = (c: Ty.PyCell): any => c.v;
+// (the class made: its own dict, the same dict object when that is the
+// body's namespace)
+Ty.classDictHooks.bind = (c: Ty.PyCell, cls: any) => {
+  const m = cls.$dict, v = c.v;
+  if (v instanceof Obj.PyDict && (v as any).$m instanceof ClassMap && (v as any).$m.m === m) (v as any).$m.cls = cls;
+  else c.v = dictOver(m, cls);
+};
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any> | Ty.PreparedNs, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   const orig = (bases as any).$orig;
@@ -940,6 +1013,14 @@ function interrupted(): never {
 
 export const R: any = {
   $i: B.intrinsics,
+  // a compiled __annotate__'s format check, as CPython's (`format > 2`:
+  // only VALUE and VALUE_WITH_FAKE_GLOBALS; a non-number a TypeError)
+  annotateFormat: (f: any) => {
+    if (O.truth(O.gt(f, 2))) raise(T.NotImplementedError);
+  },
+  annotateSig: Obj.sig(["format"], { posonly: 1 }),
+  // whether a module's annotated statement i has run
+  annotIn: (s: any, i: number) => O.truth(O.contains(s, i)),
   /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
   host: null,
   INTR,
@@ -998,6 +1079,9 @@ export const R: any = {
   classNamespace,
   classModuleIn,
   classLocals,
+  setupAnnotations,
+  classDictCell,
+  classDict,
   classModule,
   unboundName,
   execIn,

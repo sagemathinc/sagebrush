@@ -181,6 +181,56 @@ getset(type, "__dict__", (c) => {
   return new MappingProxy(d);
 });
 getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.$dict.set("__doc__", v));
+// A class's annotations (PEP 649/749): its own __annotations__ if its body
+// set one, else those kept in __annotations_cache__, else what its
+// __annotate_func__ gives (the body's __annotate__), kept; a class made by
+// a class statement only (the builtins have none)
+const noAnnot = (c: any, name: string): never => raise(T.AttributeError, `type object '${c.$name}' has no attribute '${name}'`);
+const immutableAnnot = (c: any, name: string): never => raise(T.TypeError, `cannot set '${name}' attribute of immutable type '${c.$name}'`);
+// (none yet: None, kept as __annotate_func__, as CPython's type_get_annotate)
+getset(type, "__annotate__", (c) => {
+  if (!c.$heap) noAnnot(c, "__annotate__");
+  if (c.$dict.has("__annotate__")) return c.$dict.get("__annotate__");
+  if (!c.$dict.has("__annotate_func__")) {
+    c.$dict.set("__annotate_func__", null);
+    bumpVersion(c);
+  }
+  return c.$dict.get("__annotate_func__");
+}, (c, v) => {
+  if (!c.$heap) immutableAnnot(c, "__annotate__");
+  checkAnnotate(v);
+  c.$dict.set("__annotate_func__", v);
+  if (v !== null) c.$dict.delete("__annotations_cache__");
+  bumpVersion(c);
+}, () => raise(T.TypeError, "cannot delete __annotate__ attribute"));
+getset(type, "__annotations__", (c) => {
+  if (!c.$heap) noAnnot(c, "__annotations__");
+  if (c.$dict.has("__annotations__")) return c.$dict.get("__annotations__");
+  if (c.$dict.has("__annotations_cache__")) return c.$dict.get("__annotations_cache__");
+  const a = c.$dict.has("__annotate__") ? c.$dict.get("__annotate__") : (c.$dict.get("__annotate_func__") ?? null);
+  const d = a !== null && a !== undefined ? callAnnotate(a) : new PyDict();
+  c.$dict.set("__annotations_cache__", d);
+  bumpVersion(c);
+  return d;
+}, (c, v) => {
+  if (!c.$heap) immutableAnnot(c, "__annotations__");
+  c.$dict.delete("__annotations__");
+  c.$dict.set("__annotations_cache__", v);
+  dropAnnotate(c);
+}, (c) => {
+  // (what is kept deleted, and the provider with it: the next read {}, as
+  // CPython's type_set_annotations; nothing kept, AttributeError)
+  if (!c.$heap) immutableAnnot(c, "__annotations__");
+  if (c.$dict.has("__annotations__")) c.$dict.delete("__annotations__");
+  else if (c.$dict.has("__annotations_cache__")) c.$dict.delete("__annotations_cache__");
+  else raise(T.AttributeError, "__annotations__");
+  dropAnnotate(c);
+});
+function dropAnnotate(c: any): void {
+  c.$dict.delete("__annotate_func__");
+  c.$dict.delete("__annotate__");
+  bumpVersion(c);
+}
 method(type, "__repr__", (c: any) => repr(c));
 method(type, "mro", (c: any) => c.$mro.slice());
 method(type, "__subclasses__", (c: any) => c.$subclasses.slice());
@@ -381,6 +431,8 @@ superType.$customGet = true;
 // A cell, as CPython's: the class cell of a class whose methods use
 // __class__ or super() (the class body passes it to type.__new__ as
 // __classcell__), and types.CellType.
+// (src/runtime/index.ts: a __classdictcell__'s dict made the class's own)
+export const classDictHooks: { bind: ((c: PyCell, cls: PyType) => void) | null } = { bind: null };
 export class PyCell {
   constructor(public v: any = undefined) {}
 }
@@ -482,6 +534,38 @@ getset(fnType, "__dict__", (f) => {
   }
   return f.$dictView;
 });
+// Annotations as CPython 3.14's (PEP 649/749): a function's __annotate__,
+// called with VALUE (1) the first time __annotations__ is read, its dict
+// kept; setting __annotations__ drops __annotate__, setting a callable
+// __annotate__ drops the kept dict
+// (callable(), the runtime's own test: no rebinding of the builtin reaches it)
+const isCallable = (v: any): boolean => typeof v === "function" || lookupType(typeOf(v), "__call__") !== undefined;
+function checkAnnotate(v: any): void {
+  if (v === undefined) raise(T.TypeError, "__annotate__ cannot be deleted");
+  if (v !== null && !isCallable(v)) raise(T.TypeError, "__annotate__ must be callable or None");
+}
+function callAnnotate(a: any): PyDict {
+  const d = callObj(a, [1]);
+  if (!(d instanceof PyDict)) raise(T.TypeError, `__annotate__ returned non-dict of type '${typeName(d)}'`);
+  return d;
+}
+getset(fnType, "__annotate__", (f) => f.$annotate ?? null, (f, v) => {
+  checkAnnotate(v);
+  f.$annotate = v;
+  if (v !== null) f.$annotations = undefined;
+}, () => raise(T.TypeError, "__annotate__ cannot be deleted"));
+getset(fnType, "__annotations__", (f) => {
+  if (f.$annotations !== undefined && f.$annotations !== null) return f.$annotations;
+  const a = f.$annotate ?? null;
+  return (f.$annotations = a !== null ? callAnnotate(a) : new PyDict());
+}, (f, v) => {
+  if (v !== null && !(v instanceof PyDict)) raise(T.TypeError, "__annotations__ must be set to a dict object");
+  f.$annotations = v;
+  f.$annotate = null;
+}, (f) => {
+  f.$annotations = undefined;
+  f.$annotate = null;
+});
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
 method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
 // (f.__call__(...), and the same for builtins, bound methods and types:
@@ -530,6 +614,27 @@ method(moduleType, "__init__", (m: any, name: string, doc: any = null) => {
   m.__loader__ = null;
   m.__spec__ = null;
   return null;
+});
+// A module's annotations (PEP 649/749): its __annotations__ if set, else
+// what its __annotate__ gives (the module body's), kept in its namespace
+// (none yet: None, kept in its namespace, as CPython's module_get_annotate;
+// setting __annotations__ or deleting it makes it None)
+getset(moduleType, "__annotate__", (m) => (Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : (m.__annotate__ = null)), (m, v) => {
+  checkAnnotate(v);
+  m.__annotate__ = v;
+  if (v !== null) delete m.__annotations__;
+}, () => raise(T.TypeError, "cannot delete __annotate__ attribute"));
+getset(moduleType, "__annotations__", (m) => {
+  if (Object.prototype.hasOwnProperty.call(m, "__annotations__")) return m.__annotations__;
+  const a = Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : null;
+  return (m.__annotations__ = a !== null ? callAnnotate(a) : new PyDict());
+}, (m, v) => {
+  m.__annotations__ = v;
+  m.__annotate__ = null;
+}, (m) => {
+  if (!Object.prototype.hasOwnProperty.call(m, "__annotations__")) raise(T.AttributeError, "__annotations__");
+  delete m.__annotations__;
+  m.__annotate__ = null;
 });
 export function newModule(name: string): any {
   const m = new moduleType.$ctor!();
@@ -716,8 +821,23 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
     if (!(cell instanceof PyCell)) raise(T.TypeError, `__classcell__ must be a nonlocal cell, not ${repr(typeOf(cell))}`);
     ns.delete("__classcell__");
   }
+  // __classdictcell__: the cell of the body's __classdict__, its
+  // annotation scopes' view of the namespace, then the class's own dict,
+  // set here, before __set_name__ and __init_subclass__, as CPython's
+  const dcell = ns.get("__classdictcell__");
+  if (dcell !== undefined) {
+    if (!(dcell instanceof PyCell)) raise(T.TypeError, `__classdictcell__ must be a nonlocal cell, not ${repr(typeOf(dcell))}`);
+    ns.delete("__classdictcell__");
+  }
+  // (the body's __annotate__ is the class's __annotate_func__, as CPython's)
+  if (ns.has("__annotate__")) {
+    ns.set("__annotate_func__", ns.get("__annotate__"));
+    ns.delete("__annotate__");
+  }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
+  (cls as any).$heap = true;
   if (cell !== undefined) cell.v = cls;
+  if (dcell !== undefined) classDictHooks.bind!(dcell, cls);
   if (meta !== T.type) (cls as any).$meta = meta;
   cls.$qualname = ns.get("__qualname__");
   ns.delete("__qualname__");
