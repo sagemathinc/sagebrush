@@ -48,3 +48,29 @@ test("importlib.metadata: a curated package's pinned version; the rest of its AP
     "importlib.util ModuleNotFoundError No module named 'importlib.util'",
   ]);
 });
+
+// (the registry is read once per call, through a builtin anyone can
+// replace: a stateful reader's second answer is never what is parsed)
+test("importlib.metadata.version() calls the registry reader once per call (daybreak2's HOLD on c0f49426)", () => {
+  const code = [
+    "import builtins, json, importlib.metadata as md",
+    "real = builtins.__pyjs_package_registry__",
+    "calls = []",
+    "def reader():",
+    "    calls.append(1)",
+    "    return real() if len(calls) % 2 == 1 else json.dumps({'packages': {}})",
+    "builtins.__pyjs_package_registry__ = reader",
+    "def ask():",
+    "    try:",
+    "        return md.version('sortedcontainers')",
+    "    except md.PackageNotFoundError as e:",
+    "        return 'not found'",
+    "print(ask(), len(calls))",
+    "print(ask(), len(calls))",
+    "builtins.__pyjs_package_registry__ = lambda: None",
+    "print('no registry:', ask())",
+  ].join("\n");
+  // (the first call's one read is the real registry; the second call's one
+  // read is the empty one. Read twice, the first call would parse the empty one)
+  assert.deepEqual(cli(["-c", code]).trim().split("\n"), ["2.4.0 1", "not found 2", "no registry: not found"]);
+});
