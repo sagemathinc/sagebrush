@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { layout, straight } from "../web/board/doc";
+import { layout, pageView, straight } from "../web/board/doc";
 
 // The board's layouts (web/board/doc.ts arrange).
 const box = (id: string, h: number) => ({ id, text: id, w: 200, h });
@@ -84,4 +84,18 @@ test("straight(): none for boxes that touch or overlap along the line, or share 
   assert.equal(straight(r(0, 0), r(0, 0)), null, "the same centre");
   const d = straight(r(0, 0), r(300, 200))!;
   assert.ok(d.points[0] <= 100 && d.points[1] <= 50 && d.points[2] >= 300 && d.points[3] >= 200 && d.points[0] < d.points[2]);
+});
+
+test("spring on a page of several: laid out with the board's seed, as the browser and the SVG export lay a page out (through pageView; astra's CORR-874-1)", () => {
+  const nodes = ["a", "b", "c", "d", "e"].map((id) => box(id, 80));
+  const edges = [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"], ["e", "a"]].map(([from, to]) => ({ from, to }));
+  const seed = "9e".repeat(32);
+  const pages = { seed, pages: [{ id: "p1", layout: "spring", nodes, edges }, { id: "p2", nodes: [box("z", 80)] }] };
+  const xy = (d: any) => layout(d).items.map((it) => [it.id, it.x, it.y]);
+  const viaPage = xy(pageView(pages as any, 0));
+  assert.deepEqual(viaPage, xy({ seed, layout: "spring", nodes, edges }), "the page laid out as the one-page board with that seed");
+  assert.notDeepEqual(viaPage, xy({ layout: "spring", nodes, edges }), "not as with no seed");
+  // (and a spring group on that page alike)
+  const grouped = { seed, pages: [{ id: "p1", nodes: [{ id: "g", kind: "group", layout: "spring", children: nodes }], edges }, { id: "p2", nodes: [box("z", 80)] }] };
+  assert.deepEqual(xy(pageView(grouped as any, 0)), xy({ seed, nodes: [{ id: "g", kind: "group", layout: "spring", children: nodes }], edges }));
 });
