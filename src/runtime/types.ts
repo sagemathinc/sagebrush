@@ -2175,8 +2175,16 @@ method(list, "remove", (a: any[], x: any) => {
   }
   raise(T.ValueError, "list.remove(x): x not in list");
 });
+// (list.index's and tuple.index's start and stop as CPython's
+// _PyEval_SliceIndexNotNone: an int or an __index__, clamped; None and
+// anything else its TypeError)
+const boundNotNone = (v: any, dflt: number): number => {
+  if (v === undefined) return dflt;
+  if (v === null || !(O.isPyInt(v) || isinstance(v, T.int) || lookupType(typeOf(v), "__index__") !== undefined)) raise(T.TypeError, "slice indices must be integers or have an __index__ method");
+  return O.sliceIndex(v, dflt);
+};
 const seqIndexOf = (a: any[], x: any, start: any, end: any, what: string) => {
-  let lo = start === undefined ? 0 : Number(start), hi = end === undefined ? a.length : Number(end);
+  let lo = boundNotNone(start, 0), hi = boundNotNone(end, a.length);
   if (lo < 0) lo = Math.max(0, lo + a.length);
   if (hi < 0) hi += a.length;
   for (let i = lo; i < Math.min(hi, a.length); i++) if (O.eqBool(a[i], x)) return i;
@@ -2229,6 +2237,15 @@ method(list, "__setitem__", (a: any[], k: any, v: any) => (O.arrSet(a, k, v), nu
 method(list, "__delitem__", (a: any[], k: any) => (O.arrDel(a, k), null));
 method(list, "__iadd__", (a: any[], b: any) => {
   for (const v of O.toArray(b)) a.push(v);
+  return a;
+});
+// (in place, as CPython's list_inplace_repeat: the count through __index__,
+// so an alias sees it; [1] *= Index() made a new list)
+method(list, "__imul__", (a: any[], n: any) => {
+  if (lookupType(typeOf(n), "__index__") === undefined) raise(T.TypeError, `can't multiply sequence by non-int of type '${typeName(n)}'`);
+  const r: any[] = O.mul(a.slice(), O.index(n));
+  a.length = 0;
+  for (const v of r) a.push(v);
   return a;
 });
 method(list, "__add__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? [...a, ...b] : NotImplemented));

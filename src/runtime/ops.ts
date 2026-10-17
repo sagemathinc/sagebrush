@@ -312,6 +312,19 @@ export function binaryDunder(a: any, b: any, op: string): any {
       }
     }
   }
+  // (a sequence by anything its methods leave: CPython's sq_repeat, the
+  // count through __index__, else its TypeError)
+  if (op === "mul") {
+    const isSeq = (x: any) => Array.isArray(x) || typeof x === "string" || x instanceof PyBytes || (x instanceof PrimBox && typeof x.$v === "string");
+    const seq = isSeq(a) ? a : isSeq(b) ? b : undefined;
+    if (seq !== undefined) {
+      const n = seq === a ? b : a;
+      if (lookupType(typeOf(n), "__index__") === undefined) raise(T.TypeError, `can't multiply sequence by non-int of type '${typeName(n)}'`);
+      const k = index(n);
+      if (typeof k === "bigint" && (k > 9223372036854775807n || k < -9223372036854775808n)) raise(T.OverflowError, `cannot fit 'int' into an index-sized integer`);
+      return mul(seq instanceof PrimBox ? seq.$v : seq, k);
+    }
+  }
   raise(T.TypeError, `unsupported operand type(s) for ${sym}: '${ta.$name}' and '${tb.$name}'`);
 }
 
