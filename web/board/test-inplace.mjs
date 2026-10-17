@@ -197,6 +197,46 @@ try {
   await tab();
   await sleep(300);
   check((await code()).endsWith("\nissubclass\n    "), "Tab on an empty line indents: " + JSON.stringify(await code()));
+  // (more names than are listed, as numpy's: ↑/↓ and Enter choose among the
+  // ones listed, the rest said, astra's UI-7A6-1)
+  await toEnd();
+  await type("\nimport numpy as np\nclass K: pass\nfor i in range(600): setattr(K, 'a%d' % i, i)");
+  await key("Enter", { windowsVirtualKeyCode: 13, modifiers: 8 });
+  check(await until("window.sagebrush.board.outputs().then((os) => os[0]?.output === '42\\n1\\n')", 90000), "(numpy imported): " + JSON.stringify(await ev("window.sagebrush.board.outputs()")));
+  await toEnd();
+  await type("\nnp.");
+  await tab();
+  check(await until("document.querySelectorAll('.be-completer:not([hidden]) li[role=option]').length > 300 && !document.querySelector('.be-completer .be-comp-more')", 20000), "np.: all its names listed, over 300: " + await ev("document.querySelectorAll('.be-completer li[role=option]').length"));
+  await key("ArrowUp", { windowsVirtualKeyCode: 38 });
+  const up = await ev("(() => { const t = document.querySelector('.board-editing .be-code'), id = t.getAttribute('aria-activedescendant'), li = id && document.getElementById(id), sel = [...document.querySelectorAll('.be-completer li[aria-selected=true]')]; return { id, exists: !!li, selected: li?.getAttribute('aria-selected') === 'true', one: sel.length === 1 && sel[0] === li, last: li === [...document.querySelectorAll('.be-completer li[role=option]')].at(-1), text: li?.textContent }; })()");
+  check(up.exists && up.selected && up.one && up.last, "↑ from the first: the last one listed, selected and the active one: " + JSON.stringify(up));
+  await key("Enter", { windowsVirtualKeyCode: 13 });
+  check(await until(`document.querySelector('.board-editing .be-code').value.endsWith("\\nnp." + ${JSON.stringify(up.text ?? "?")})`, 3000), "...Enter puts in that one, as shown: " + JSON.stringify((await code()).slice(-30)));
+  // (more than are listed: 500, the rest said, and ↑ goes to the last listed)
+  await type("\nK.");
+  await tab();
+  check(await until("document.querySelectorAll('.be-completer:not([hidden]) li[role=option]').length === 500", 20000), "K.: 500 of its 600 names listed: " + await ev("document.querySelectorAll('.be-completer li[role=option]').length"));
+  const more = await ev("document.querySelector('.be-completer .be-comp-more')?.textContent ?? ''");
+  check(more === "100 more: type to narrow", "...the rest said: " + more);
+  await key("ArrowUp", { windowsVirtualKeyCode: 38 });
+  const up2 = await ev("(() => { const t = document.querySelector('.board-editing .be-code'), li = document.getElementById(t.getAttribute('aria-activedescendant') ?? ''); return { last: !!li && li === [...document.querySelectorAll('.be-completer li[role=option]')].at(-1), text: li?.textContent }; })()");
+  await key("Enter", { windowsVirtualKeyCode: 13 });
+  check(up2.last && await until(`document.querySelector('.board-editing .be-code').value.endsWith("\\nK." + ${JSON.stringify(up2.text ?? "?")})`, 3000), "...↑ from the first: the last listed, and Enter puts it in: " + JSON.stringify([up2, (await code()).slice(-12)]));
+  // a slow first index: a search Esc cancelled, or one the box was left
+  // during, doesn't come back when it arrives (astra's CORR-7A6-2)
+  await ev("(() => { const f = window.fetch; window.__fetch = f; window.fetch = (u, ...a) => String(u).includes('docs-index') ? new Promise((r) => setTimeout(() => r(f(u, ...a)), 2500)) : f(u, ...a); return 1; })()");
+  await ev("document.querySelector('.ip-bar .ip-docs-q').focus(), 1");
+  await type("factorial");
+  await sleep(200);
+  await key("Escape", { windowsVirtualKeyCode: 27 });
+  await type("factorial");
+  await sleep(200);
+  await toEnd();
+  await sleep(3500);
+  const late = await ev("(() => { const l = document.querySelector('.ip-docs-list'); return { hidden: l.hidden, items: l.querySelectorAll('li code').length, q: document.querySelector('.ip-docs-q').value, editing: window.board.editing }; })()");
+  check(late.hidden && late.items === 0 && late.editing === "c", "a slow index: the search cancelled by Esc, and the one left by leaving the box, don't show when it arrives: " + JSON.stringify(late));
+  await ev("window.fetch = window.__fetch, 1");
+  await ev("(() => { const q = document.querySelector('.ip-bar .ip-docs-q'); q.value = ''; return 1; })()");
   // the function search, on the toolbar while the code is edited: a function
   // chosen shows its documentation, and its examples go into the code
   check(await ev("(() => { const q = document.querySelector('.ip-bar .ip-docs-q'); return !!q && !!q.offsetParent && q.placeholder === 'Search functions'; })()"), "a code item's toolbar has the function search");

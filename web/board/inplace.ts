@@ -252,7 +252,10 @@ export class InPlace {
   // interpreter of the code's language completes the name before the caret;
   // one match, or a longer common prefix, is inserted; several are listed at
   // the caret, filtered as one types.
-  private comp: { ta: HTMLTextAreaElement; start: number; all: string[]; matches: string[]; sel: number; dot: number } | null = null;
+  // (`matches`: the ones listed, at most SHOWN of those that fit what is
+  // typed, `more` the rest: what ↑/↓, Enter and a press choose among is
+  // what is shown, astra's UI-7A6-1)
+  private comp: { ta: HTMLTextAreaElement; start: number; all: string[]; matches: string[]; more: number; sel: number; dot: number } | null = null;
   private completer: HTMLUListElement | null = null;
   private async tabComplete(ta: HTMLTextAreaElement, before: string) {
     const value = ta.value, pos = ta.selectionStart;
@@ -263,7 +266,7 @@ export class InPlace {
     for (const x of m.matches) while (!x.startsWith(common)) common = common.slice(0, -1);
     if (common.length > m.prefix.length) insertText(ta, common.slice(m.prefix.length));
     if (m.matches.length > 1) {
-      this.comp = { ta, start: pos - m.prefix.length, all: m.matches, matches: m.matches, sel: 0, dot: m.prefix.lastIndexOf(".") };
+      this.comp = { ta, start: pos - m.prefix.length, all: m.matches, matches: m.matches.slice(0, SHOWN), more: Math.max(0, m.matches.length - SHOWN), sel: 0, dot: m.prefix.lastIndexOf(".") };
       this.showCompleter();
     }
   }
@@ -279,13 +282,12 @@ export class InPlace {
       // (a press on one takes it; the focus stays in the code)
       ul.addEventListener("mousedown", (e) => {
         const li = (e.target as Element).closest("li");
-        if (!li) return;
         e.preventDefault();
-        this.acceptCompletion([...ul!.children].indexOf(li));
+        if (li?.getAttribute("role") === "option") this.acceptCompletion([...ul!.children].indexOf(li));
       });
       document.body.append(ul);
     }
-    ul.replaceChildren(...c.matches.slice(0, 200).map((m, i) => {
+    ul.replaceChildren(...c.matches.map((m, i) => {
       const li = document.createElement("li");
       li.setAttribute("role", "option");
       li.id = `be-comp-${i}`;
@@ -293,6 +295,13 @@ export class InPlace {
       li.textContent = m.slice(dot);
       return li;
     }));
+    if (c.more) {
+      const li = document.createElement("li");
+      li.className = "be-comp-more";
+      li.setAttribute("role", "presentation");
+      li.textContent = `${c.more} more: type to narrow`;
+      ul.append(li);
+    }
     ul.hidden = false;
     c.ta.setAttribute("aria-activedescendant", `be-comp-${c.sel}`);
     const r = caretRect(c.ta);
@@ -318,8 +327,10 @@ export class InPlace {
     if (!c) return;
     const word = c.ta.value.slice(c.start, c.ta.selectionStart);
     if (c.ta.selectionStart < c.start || !/^[\w.]*$/.test(word) || word.lastIndexOf(".") !== c.dot) return this.closeCompleter();
-    c.matches = c.all.filter((m) => m.startsWith(word));
-    if (!c.matches.length) return this.closeCompleter();
+    const fit = c.all.filter((m) => m.startsWith(word));
+    if (!fit.length) return this.closeCompleter();
+    c.matches = fit.slice(0, SHOWN);
+    c.more = fit.length - c.matches.length;
     c.sel = Math.min(c.sel, c.matches.length - 1);
     this.showCompleter();
   }
@@ -446,7 +457,8 @@ export class InPlace {
       if (!q) { list.hidden = true; found = []; return; }
       let idx: DocEntry[] | null = null;
       try { idx = await docs(this.language()); } catch { idx = null; }
-      if (n !== seq || this.ended) return;
+      // (another search since, Esc or the box left meanwhile: this one is not wanted, astra's CORR-7A6-2)
+      if (n !== seq || this.ended || input.value.trim() !== q || document.activeElement !== input) return;
       if (!idx) return note(`No function search for ${LANGUAGES[this.language()] ?? this.language()} here`);
       found = searchIndex(idx, q, 12);
       if (!found.length) return note("No function matches");
@@ -479,12 +491,13 @@ export class InPlace {
         e.preventDefault();
         e.stopPropagation();
         input.value = "";
+        seq++;
         list.hidden = true;
         found = [];
       }
     });
-    input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) list.hidden = true; }, 150));
-    input.addEventListener("focus", () => { if (found.length) list.hidden = false; });
+    input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) { seq++; list.hidden = true; } }, 150));
+    input.addEventListener("focus", () => { if (found.length) list.hidden = false; else if (input.value.trim()) void search(); });
     list.addEventListener("mousedown", (e) => {
       const li = (e.target as Element).closest("li");
       const i = li ? [...list.children].indexOf(li) : -1;
@@ -827,6 +840,8 @@ export class InPlace {
 // Where the board is clear of the top bar and the Edit toolbar (page coordinates).
 const clearTop = () => Math.max(48, document.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect().bottom ?? 0) + 6;
 
+// (the completions listed at most: the notebook's 500)
+const SHOWN = 500;
 const LANGUAGES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
