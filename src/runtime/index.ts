@@ -805,7 +805,16 @@ function dictOver(m: Map<string, any>, cls: any): any {
   (d as any).$m = new ClassMap(m, cls);
   return d;
 }
-export const classDictCell = (ns: Map<string, any> | Ty.PreparedNs) => Ty.newCell(ns instanceof Ty.PreparedNs ? ns.m : dictOver(ns, null));
+// (one dict over a class body's namespace: its __classdict__'s, and the
+// namespace a metaclass is given)
+const nsViews = new WeakMap<Map<string, any>, any>();
+const nsView = (ns: Map<string, any>) => {
+  let d = nsViews.get(ns);
+  if (d === undefined) nsViews.set(ns, (d = dictOver(ns, null)));
+  return d;
+};
+Ty.classDictHooks.view = nsView;
+export const classDictCell = (ns: Map<string, any> | Ty.PreparedNs) => Ty.newCell(ns instanceof Ty.PreparedNs ? ns.m : nsView(ns));
 export const classDict = (c: Ty.PyCell): any => c.v;
 // (the class made: its own dict, the same dict object when that is the
 // body's namespace)
