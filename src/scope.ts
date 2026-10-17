@@ -211,6 +211,8 @@ class Collector {
       case "AnnAssign": {
         if (st.value) this.expr(st.value);
         const t = st.target;
+        // (a module's or class's annotation of a name: compiled into its lazy __annotate__)
+        if (t.k === "Name" && st.simple && (this.s.kind === "module" || this.s.kind === "class")) this.annotation(st.annotation);
         // `(x): int`, not simple: x is neither annotated nor (without a value) bound
         if (t.k !== "Name" || !st.simple) {
           if (st.value || t.k !== "Name") this.bindTarget(t);
@@ -241,6 +243,8 @@ class Collector {
       case "FunctionDef":
         st.decorators.forEach((d) => this.expr(d));
         this.params(st.args);
+        // (its annotations, compiled in this scope into its lazy __annotate__)
+        st.annotations?.forEach(([, e]) => this.annotation(e));
         this.bind(st.name);
         return this.func(st, st.name, st.args, () => {
           if (st.isAsync) this.s.isAsync = this.s.isGenerator = true;
@@ -314,7 +318,9 @@ class Collector {
     if (e === null) return;
     switch (e.k) {
       case "Name":
-        this.mark(this.s, e.id, USE);
+        // (not in a lazy annotation: its own scope's use, later, as CPython's
+        // annotation scopes, so no use before a global declaration here)
+        if (this.annotating === 0) this.mark(this.s, e.id, USE);
         return;
       case "Const":
         return;
@@ -406,6 +412,18 @@ class Collector {
         if (s === this.s || s.kind !== "module") this.mark(s, e.target, BOUND);
         return this.expr(e.value);
       }
+    }
+  }
+
+  // A lazy annotation's expression: its nested scopes made, its names not
+  // this scope's uses
+  annotating = 0;
+  annotation(e: A.Expr) {
+    this.annotating++;
+    try {
+      this.expr(e);
+    } finally {
+      this.annotating--;
     }
   }
 

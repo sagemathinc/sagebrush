@@ -336,7 +336,7 @@ class Convert {
       case "AugAssign":
         return { k: "AugAssign", line, target: this.expr(s.target), op: this.binop(s.op._type), value: this.expr(s.value) };
       case "AnnAssign":
-        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple };
+        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple, annotation: this.expr(s.annotation) };
       case "Return":
         return { k: "Return", line, value: s.value ? this.expr(s.value) : null };
       case "If":
@@ -353,7 +353,7 @@ class Convert {
         return { k: "Pass", line };
       case "FunctionDef":
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), annotations: this.annotations(s) };
       case "ClassDef": {
         if (s.type_params.length) this.unsupported(s, "type parameters");
         return {
@@ -386,7 +386,7 @@ class Convert {
         return { k: "Delete", line, targets: s.targets.map((t: any) => this.expr(t)) };
       case "AsyncFunctionDef":
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true, annotations: this.annotations(s) };
       case "AsyncFor":
         return this.asyncFor(s);
       case "AsyncWith":
@@ -596,6 +596,24 @@ class Convert {
 
   keyword(k: any): A.Keyword {
     return { arg: k.arg ?? null, value: this.expr(k.value) };
+  }
+
+  // A def's annotations, in CPython's order: the parameters after the
+  // positional-only ones, the positional-only ones, *args, the keyword-only
+  // ones, **kwargs, the return (names mangled, as its keys are)
+  annotations(s: any): [string, A.Expr][] {
+    const a = s.args;
+    const out: [string, A.Expr][] = [];
+    const add = (p: any) => {
+      if (p && p.annotation) out.push([this.m(p.arg), this.expr(p.annotation)]);
+    };
+    a.args.forEach(add);
+    a.posonlyargs.forEach(add);
+    add(a.vararg);
+    a.kwonlyargs.forEach(add);
+    add(a.kwarg);
+    if (s.returns) out.push(["return", this.expr(s.returns)]);
+    return out;
   }
 
   params(a: any): A.Params {

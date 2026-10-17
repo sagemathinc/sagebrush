@@ -180,6 +180,45 @@ getset(type, "__dict__", (c) => {
   return new MappingProxy(d);
 });
 getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.$dict.set("__doc__", v));
+// A class's annotations (PEP 649/749): its own __annotations__ if its body
+// set one, else those kept in __annotations_cache__, else what its
+// __annotate_func__ gives (the body's __annotate__), kept; a class made by
+// a class statement only (the builtins have none)
+const noAnnot = (c: any, name: string): never => raise(T.AttributeError, `type object '${c.$name}' has no attribute '${name}'`);
+const immutableAnnot = (c: any, name: string): never => raise(T.TypeError, `cannot set '${name}' attribute of immutable type '${c.$name}'`);
+getset(type, "__annotate__", (c) => {
+  if (!c.$heap) noAnnot(c, "__annotate__");
+  if (c.$dict.has("__annotate__")) return c.$dict.get("__annotate__");
+  return c.$dict.get("__annotate_func__") ?? null;
+}, (c, v) => {
+  if (!c.$heap) immutableAnnot(c, "__annotate__");
+  checkAnnotate(v);
+  c.$dict.set("__annotate_func__", v);
+  if (v !== null) c.$dict.delete("__annotations_cache__");
+  bumpVersion(c);
+});
+getset(type, "__annotations__", (c) => {
+  if (!c.$heap) noAnnot(c, "__annotations__");
+  if (c.$dict.has("__annotations__")) return c.$dict.get("__annotations__");
+  if (c.$dict.has("__annotations_cache__")) return c.$dict.get("__annotations_cache__");
+  const a = c.$dict.has("__annotate__") ? c.$dict.get("__annotate__") : (c.$dict.get("__annotate_func__") ?? null);
+  const d = a !== null && a !== undefined ? callAnnotate(a) : new PyDict();
+  c.$dict.set("__annotations_cache__", d);
+  bumpVersion(c);
+  return d;
+}, (c, v) => {
+  if (!c.$heap) immutableAnnot(c, "__annotations__");
+  c.$dict.delete("__annotations__");
+  c.$dict.set("__annotations_cache__", v);
+  c.$dict.set("__annotate_func__", null);
+  bumpVersion(c);
+}, (c) => {
+  if (!c.$heap) raise(T.TypeError, `cannot delete '__annotations__' attribute of immutable type '${c.$name}'`);
+  if (c.$dict.has("__annotations__")) c.$dict.delete("__annotations__");
+  else if (c.$dict.has("__annotations_cache__")) c.$dict.delete("__annotations_cache__");
+  else raise(T.AttributeError, "__annotations__");
+  bumpVersion(c);
+});
 method(type, "__repr__", (c: any) => repr(c));
 method(type, "mro", (c: any) => c.$mro.slice());
 method(type, "__subclasses__", (c: any) => c.$subclasses.slice());
@@ -475,6 +514,38 @@ getset(fnType, "__dict__", (f) => {
   }
   return f.$dictView;
 });
+// Annotations as CPython 3.14's (PEP 649/749): a function's __annotate__,
+// called with VALUE (1) the first time __annotations__ is read, its dict
+// kept; setting __annotations__ drops __annotate__, setting a callable
+// __annotate__ drops the kept dict
+// (callable(), the runtime's own test: no rebinding of the builtin reaches it)
+const isCallable = (v: any): boolean => typeof v === "function" || lookupType(typeOf(v), "__call__") !== undefined;
+function checkAnnotate(v: any): void {
+  if (v === undefined) raise(T.TypeError, "__annotate__ cannot be deleted");
+  if (v !== null && !isCallable(v)) raise(T.TypeError, "__annotate__ must be callable or None");
+}
+function callAnnotate(a: any): PyDict {
+  const d = callObj(a, [1]);
+  if (!(d instanceof PyDict)) raise(T.TypeError, `__annotate__ returned non-dict of type '${typeName(d)}'`);
+  return d;
+}
+getset(fnType, "__annotate__", (f) => f.$annotate ?? null, (f, v) => {
+  checkAnnotate(v);
+  f.$annotate = v;
+  if (v !== null) f.$annotations = undefined;
+});
+getset(fnType, "__annotations__", (f) => {
+  if (f.$annotations !== undefined && f.$annotations !== null) return f.$annotations;
+  const a = f.$annotate ?? null;
+  return (f.$annotations = a !== null ? callAnnotate(a) : new PyDict());
+}, (f, v) => {
+  if (v !== null && !(v instanceof PyDict)) raise(T.TypeError, "__annotations__ must be set to a dict object");
+  f.$annotations = v;
+  f.$annotate = null;
+}, (f) => {
+  f.$annotations = undefined;
+  f.$annotate = null;
+});
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
 method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
 // (f.__call__(...), and the same for builtins, bound methods and types:
@@ -523,6 +594,23 @@ method(moduleType, "__init__", (m: any, name: string, doc: any = null) => {
   m.__loader__ = null;
   m.__spec__ = null;
   return null;
+});
+// A module's annotations (PEP 649/749): its __annotations__ if set, else
+// what its __annotate__ gives (the module body's), kept in its namespace
+getset(moduleType, "__annotate__", (m) => (Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : null), (m, v) => {
+  checkAnnotate(v);
+  m.__annotate__ = v;
+  if (v !== null) delete m.__annotations__;
+});
+getset(moduleType, "__annotations__", (m) => {
+  if (Object.prototype.hasOwnProperty.call(m, "__annotations__")) return m.__annotations__;
+  const a = Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : null;
+  return (m.__annotations__ = a !== null ? callAnnotate(a) : new PyDict());
+}, (m, v) => {
+  m.__annotations__ = v;
+}, (m) => {
+  if (!Object.prototype.hasOwnProperty.call(m, "__annotations__")) raise(T.AttributeError, "__annotations__");
+  delete m.__annotations__;
 });
 export function newModule(name: string): any {
   const m = new moduleType.$ctor!();
@@ -709,7 +797,13 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
     if (!(cell instanceof PyCell)) raise(T.TypeError, `__classcell__ must be a nonlocal cell, not ${repr(typeOf(cell))}`);
     ns.delete("__classcell__");
   }
+  // (the body's __annotate__ is the class's __annotate_func__, as CPython's)
+  if (ns.has("__annotate__")) {
+    ns.set("__annotate_func__", ns.get("__annotate__"));
+    ns.delete("__annotate__");
+  }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
+  (cls as any).$heap = true;
   if (cell !== undefined) cell.v = cls;
   if (meta !== T.type) (cls as any).$meta = meta;
   cls.$qualname = ns.get("__qualname__");
