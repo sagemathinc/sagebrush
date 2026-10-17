@@ -1787,7 +1787,12 @@ class RealNumberMP:
         b, R = self._other(o)
         if b is None:
             return NotImplemented
-        a = self
+        # (each operand is first rounded into the result's field, as Sage
+        # converts it, CORR-2F5-1: a 53-bit RR number added in RealField(30)
+        # is its 30-bit value)
+        a = self if self._R is R else _to_real(R, self)
+        if b._R is not R:
+            b = _to_real(R, b)
         if rev:
             a, b = b, a
         r = _arith(a, b, op, R)
@@ -1861,6 +1866,22 @@ class RealNumberMP:
             return float(self) ** n
         x = self
         y = n if isinstance(n, RealNumberMP) else R(n)
+        # (Sage's identities, whatever the operands' field: x^0 = 1 (NaN
+        # too), 1^y = 1 (an infinity or NaN too), CORR-2F5-2)
+        if not y._special and y._m == 0:
+            return R(1)
+        if not x._special and x == 1:
+            return R(1)
+        if x._special:
+            # an infinite or NaN base: an infinity for a positive exponent,
+            # 0 for a negative one (negative for -infinity to an odd one)
+            if x._special == "nan" or y._special == "nan":
+                return RealNumberMP(R, 0, 0, "nan")
+            pos = y._special == "+inf" or (not y._special and y._m > 0)
+            odd = not y._special and y._e <= 0 and y._m % (1 << -y._e) == 0 and (y._m >> -y._e) % 2 == 1
+            if not pos:
+                return RealNumberMP(R, 0, 0)
+            return RealNumberMP(R, 0, 0, "-inf" if x._special == "-inf" and odd else "+inf")
         # (a complex power is in the complex field of the lower precision:
         # RealField(100)(-3.5)^RR(0.5) is in CC)
         P = min(R._prec, n._R._prec if isinstance(n, RealNumberMP) else 53 if isinstance(n, float) else R._prec)
