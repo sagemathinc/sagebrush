@@ -1192,7 +1192,7 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.equal((out.match(/a matrix of more than \d+ entries(, rows or columns)? is not supported yet/g) ?? []).length, 2, r.stdout);
   assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
   assert.equal((out.match(/a product of matrices over a finite field of more than 2000000 entry products is not supported yet/g) ?? []).length, 2, r.stdout);
   for (const what of ["Determinant", "Rank", "a power", "CharacteristicPolynomial"])
@@ -1434,6 +1434,20 @@ test("a number put in a collection over a number field, a real field or a matrix
     "A:=Matrix(Integers(),2,2,[1,2,3,4]); S:=[A]; S[2]:=3; S[2];", "S:=[RealField(30)!1]; Append(~S,2); Type(S[2]);",
     nf + "S:=[a]; Index(S, a), Position([U|1,2], 2);"].join("\n") + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
   assert.equal(el, "FldNumElt\n2*a\nFldNumElt\nRngUPolElt\n2/3\nRngUPolElt\n[2 0]\n[0 2]\n[3 0]\n[0 3]\nFldReElt\n1 2\nend\n", el);
+  // (a real field's precision is kept, and an emptied collection keeps its
+  // element universe, through Sort, Reverse, Setseq and Seqset too: astra2
+  // on de17ca12)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const r10 = "U:=RealField(10); ";
+  const prec = run([r10 + "S:=[U|1/3]; Parent(S[1]) eq U; S[1];", r10 + "S:=[U|]; Append(~S,1/3); S[1];", r10 + "S:={U|2/3}; Setseq(S)[1];",
+    "S:=[RealField(10)!1]; Append(~S,1/3); S[2];", "S:=[RealField(10)!1]; S[2]:=2/3; S[2];", "S:=[RealField(10)!1]; Remove(~S,1); Append(~S,1/3); S[1];"].join("\n"));
+  assert.equal(prec, "true\n0.3333333333\n0.3333333333\n0.6666666667\n0.3333333333\n0.6666666667\n0.3333333333\nend\n", prec);
+  const em = run([nf + "S:=[a]; Remove(~S,1); Append(~S,2); Type(S[1]);", nf + "S:=[a]; Remove(~S,1); S:=Sort(S); Append(~S,2); Type(S[1]);",
+    nf + "S:=[a]; Exclude(~S,a); Append(~S,2); Type(S[1]);", nf + "S:={a}; Exclude(~S,a); Include(~S,2); Type(Setseq(S)[1]);",
+    nf + "S:={a}; Exclude(~S,a); T:=Setseq(S); Append(~T,2); Type(T[1]);", nf + "S:=[a]; Remove(~S,1); T:=Seqset(S); Include(~T,2); Type(Setseq(T)[1]);",
+    nf + "S:=[a]; Remove(~S,1); S:=Reverse(S); Append(~S,2); Type(S[1]);", "A:=Matrix(Integers(),2,2,[1,2,3,4]); S:=[A]; Remove(~S,1); Append(~S,2); S[1];",
+    "P<x>:=PolynomialRing(Rationals()); S:=[x]; Remove(~S,1); Append(~S,2); Type(S[1]);"].join("\n"));
+  assert.equal(em, "FldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\n[2 0]\n[0 2]\nRngUPolElt\nend\n", em);
 });
 
 test("Matrix checks its shape in Magma's words before it builds anything: no Python error, no silently shortened matrix", () => {
@@ -1455,6 +1469,19 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
   // (an empty sequence with a ring is the zero matrix, a finite field's too)
   const z = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "Matrix(Integers(),2,2,[]);\nMatrix(GF(7),2,2,[]);\nMatrix(2,2,[1,2,3,4]);\n", encoding: "utf8" }).stdout as string;
   assert.equal(z, "[0 0]\n[0 0]\n[0 0]\n[0 0]\n[1 2]\n[3 4]\n", z);
+  // (rows and columns are bounded too, before any row is made: a matrix
+  // with no columns has no entries but a row for each, HARD-DE1-1)
+  const t0 = Date.now();
+  const big = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "Matrix(Integers(),10^12,0,[]);\nMatrix(Rationals(),0,10^12,[]);\nMatrix(GF(7),10^12,0,[]);\nMatrix(GF(7),0,10^12,[]);\n\"end\";\n", encoding: "utf8", timeout: 60000 });
+  assert.equal(big.signal, null, big.stderr);
+  assert.equal((big.stdout.replace(/\s+/g, " ").match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 4, big.stdout);
+  assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
+  // (a matrix with no rows or no columns keeps both numbers, and prints
+  // as Magma's, astra2 WA-024)
+  const zw = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "M:=Matrix(Integers(),0,3,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Integers(),3,0,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Rationals(),0,0,[]); M;\nNcols(Matrix(GF(7),0,3,[]));\n", encoding: "utf8" }).stdout as string;
+  // (over a finite field Magma has 3 columns too; not modelled, refused)
+  assert.ok(zw.startsWith("0 3\nMatrix with 0 rows and 3 columns\n3 0\nMatrix with 3 rows and 0 columns\nMatrix with 0 rows and 0 columns\n"), zw);
+  assert.ok(zw.replace(/\s+/g, " ").includes("a matrix with no rows or no columns is not supported yet"), zw);
 });
 
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
