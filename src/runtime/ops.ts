@@ -409,8 +409,12 @@ function repeatCount(n: any): number | undefined {
     const m = lookupType(t, name);
     return m === lookupType(T.int, name) || m?.$unboxing === true;
   };
+  const orig = n;
   if (n instanceof PrimBox && typeOf(n).$mro.includes(T.int) && shimName(n, "int") === null && intsOwn(typeOf(n), "__mul__") && intsOwn(typeOf(n), "__rmul__")) n = n.$v;
   if (!isPyInt(n)) return undefined;
+  // (an index-sized count, as CPython's sequence repeat takes it: past it
+  // an OverflowError, before anything is made, LIMIT-COL-1)
+  if (typeof n === "bigint" && (n > 9223372036854775807n || n < -9223372036854775808n)) raise(T.OverflowError, `cannot fit '${typeName(orig)}' into an index-sized integer`);
   const k = Number(n);
   return k < 0 ? 0 : k;
 }
@@ -428,6 +432,11 @@ function mulSlow(a: any, b: any): any {
 }
 function repeatArray(a: any[], n: number): any[] {
   const len = a.length;
+  // (nothing to repeat, or no copies: no loop over the count, an empty
+  // sequence repeated 2**62 times is empty at once; a result past what an
+  // array holds is a MemoryError before it is made, as CPython's)
+  if (len === 0 || n <= 0) return (a as any).$t ? tuple([]) : [];
+  if (len * n > 4294967295) raise(T.MemoryError);
   const r = new Array(len * n);
   for (let i = 0; i < n; i++) for (let j = 0; j < len; j++) r[i * len + j] = a[j];
   return (a as any).$t ? tuple(r) : r;
@@ -847,6 +856,25 @@ export function isub(a: any, b: any): any {
   if (inplaceSets(a, b)) return setInplace(a, b, "sub");
   return inplace(a, b, "sub", "__isub__");
 }
+// list *= n as CPython's list_inplace_repeat: n an index-sized integer
+// (OverflowError past it, naming n's type); below 1 the list is emptied;
+// an empty list, or n of 1, is left as it is; else the repeat, a
+// MemoryError past what an array holds, before anything is copied
+// (daybreak2's LIMIT-COL-1)
+export function listInplaceRepeat(a: any[], n: any): any[] {
+  const k = index(n);
+  if (typeof k === "bigint" && (k > 9223372036854775807n || k < -9223372036854775808n)) raise(T.OverflowError, `cannot fit '${typeName(n)}' into an index-sized integer`);
+  const c = Number(k);
+  if (c < 1) {
+    a.length = 0;
+    return a;
+  }
+  if (a.length === 0 || c === 1) return a;
+  const r = repeatArray(a, c);
+  a.length = 0;
+  for (const v of r) a.push(v);
+  return a;
+}
 export function imul(a: any, b: any): any {
   if (typeof a === "number" && typeof b === "number") return mul(a, b);
   // (a list subclass's own __mul__ too: CPython's in-place multiply tries
@@ -856,12 +884,7 @@ export function imul(a: any, b: any): any {
     const r = special(a, "__mul__")!(a, b);
     if (r !== NotImplemented) return r;
   }
-  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) {
-    const r = repeatArray(a, repeatCount(b)!);
-    a.length = 0;
-    for (const v of r) a.push(v);
-    return a;
-  }
+  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && repeatCount(b) !== undefined) return listInplaceRepeat(a, b);
   return inplace(a, b, "mul", "__imul__");
 }
 export const itruediv = (a: any, b: any) => inplace(a, b, "truediv", "__itruediv__");

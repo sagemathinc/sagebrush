@@ -77,3 +77,42 @@ class M(list):
         return 'im'
 a = M([1]); a *= 3; print(a)
 a = [1]; b = a; a *= 2; print(a, b is a, [].__imul__(2))
+
+# list *= n: an index-sized integer, refused past it before anything is
+# made; empty lists and n below 1 at once (daybreak2's LIMIT-COL-1)
+class Huge:
+    def __index__(self):
+        return 10**100
+
+
+def rep(f):
+    try:
+        r = f()
+        return repr(r)[:40]
+    except Exception as e:
+        return type(e).__name__ + ': ' + str(e)
+
+
+def iadd_huge():
+    l = [1]
+    l *= 10**100
+    return l
+
+
+for label, f in [('empty imul huge', lambda: [].__imul__(10**100)), ('imul huge', lambda: [1].__imul__(10**100)),
+                 ('imul -huge', lambda: [1].__imul__(-10**100)), ('empty imul Huge', lambda: [].__imul__(Huge())),
+                 ('imul Huge', lambda: [1].__imul__(Huge())), ('imul 2**63', lambda: [1, 2].__imul__(2**63)),
+                 ('imul 2**63-1', lambda: [1, 2].__imul__(2**63 - 1)), ('empty imul 2**63-1', lambda: [].__imul__(2**63 - 1)),
+                 ('*= huge', iadd_huge), ('empty * 2**62', lambda: [] * 2**62), ('mul huge', lambda: [1] * 10**100),
+                 ('imul 0', lambda: [1, 2].__imul__(0)), ('imul -3', lambda: [1, 2].__imul__(-3)), ('imul 1', lambda: [1, 2].__imul__(1)),
+                 ('imul 3', lambda: [1, 2].__imul__(3)), ('tuple * 2**62', lambda: () * 2**62)]:
+    print(label, rep(f))
+def ba_imul_huge():
+    b = bytearray(b'a')
+    b *= 10**100
+    return b
+
+
+for label, f in [('str * huge', lambda: 'ab' * 10**100), ('bytes * huge', lambda: b'ab' * 10**100), ('huge * tuple', lambda: 10**100 * (1,)),
+                 ('str * -huge', lambda: 'ab' * -10**100), ('empty str * 2**62', lambda: '' * 2**62), ('bytearray *= huge', ba_imul_huge)]:
+    print(label, rep(f))
