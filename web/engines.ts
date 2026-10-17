@@ -12,6 +12,11 @@ export interface EnginesEnv { ENGINES?: { get(key: string): Promise<R2Obj | null
 interface Manifest { files: Record<string, { sha256: string; size: number; headers: Record<string, string> }> }
 
 const manifests = new Map<string, Manifest>();
+// (an engine's zone data, read from the shared lib/ key: handleEngines)
+const SHARED = /^lib\/tzdata\/(?:index-)?[0-9a-f]{64}\.(?:tzif|json)$/;
+// (the largest such file: the index is 50 kB, a zone file at most 5 kB)
+const SHARED_MAX = 1 << 20;
+const sha256Hex = async (bytes: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 // (ids with no manifest, briefly: each would cost an R2 read (HARD-CAC-5),
 // and one may be published at any time)
 const missing = new Map<string, number>();
@@ -62,9 +67,26 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   // (its own entries only: not "constructor" or the like, SEC-CAC-3)
   const entry = file === "manifest.json" ? { headers: { "Content-Type": "application/json" } } : man && Object.hasOwn(man.files, file) ? man.files[file] : undefined;
   if (!man || !entry) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
-  const o = await env.ENGINES.get(`engine/${id}/${file}`);
-  if (!o) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
-  const res = new Response(req.method === "HEAD" ? null : o.body, { headers: { ...entry.headers, ...COMMON, "Content-Length": String(o.size) } });
+  // (a zone file or the zone data's index: one copy for every engine, at the
+  // library's shared lib/ key, where scripts/publish-engine.mjs puts it once;
+  // served if its bytes have the manifest's SHA-256.  An engine published
+  // before that has its own copy too)
+  let body: ReadableStream | ArrayBuffer | null = null, size = 0;
+  // (its body read only if it has the manifest's size, at most SHARED_MAX:
+  // another object there is not read at all, HARD-TZU-2)
+  if (SHARED.test(file) && "sha256" in entry && entry.size <= SHARED_MAX) {
+    const s = await env.ENGINES.get(file);
+    if (s && s.size === entry.size) {
+      const bytes = await new Response(s.body).arrayBuffer();
+      if (bytes.byteLength === entry.size && (await sha256Hex(bytes)) === entry.sha256) [body, size] = [bytes, bytes.byteLength];
+    } else if (s) await s.body.cancel();
+  }
+  if (body === null) {
+    const o = await env.ENGINES.get(`engine/${id}/${file}`);
+    if (!o) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+    [body, size] = [o.body, o.size];
+  }
+  const res = new Response(req.method === "HEAD" ? null : body, { headers: { ...entry.headers, ...COMMON, "Content-Length": String(size) } });
   if (req.method === "GET" && cache) ctx.waitUntil(cache.put(key, res.clone()));
   return res;
 }
@@ -100,7 +122,7 @@ export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitU
   const o = await env.ENGINES.get(`lib/${name}`);
   if (!o) return none();
   const bytes = await new Response(o.body).arrayBuffer();
-  const sum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const sum = await sha256Hex(bytes);
   if (!sum.startsWith(hash)) return none();
   const type = m[3] === "tzif" ? "application/octet-stream" : "application/json";
   const res = new Response(req.method === "HEAD" ? null : bytes, { headers: { "Content-Type": type, ...COMMON, "Content-Length": String(bytes.byteLength) } });
