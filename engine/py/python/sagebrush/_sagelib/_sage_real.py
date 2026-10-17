@@ -1883,7 +1883,8 @@ class RealNumberMP:
             # an infinite base: an infinity for a positive exponent, 0 for a
             # negative one (negative for -infinity to an odd one)
             pos = y._special == "+inf" or (not y._special and y._m > 0)
-            odd = not y._special and y._e <= 0 and y._m % (1 << -y._e) == 0 and (y._m >> -y._e) % 2 == 1
+            # (bounded: a tiny exponent, e near -2^62, is no integer, HARD-FAB-1)
+            odd = not y._special and y._e <= 0 and _mp_integral(y._m, y._e) and (y._m >> -y._e) % 2 == 1
             if not pos:
                 return RealNumberMP(R, 0, 0)
             return RealNumberMP(R, 0, 0, "-inf" if x._special == "-inf" and odd else "+inf")
