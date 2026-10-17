@@ -43,8 +43,11 @@
         "expected": "\nans =\n\n    1.0000    2.7183\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "It accepts some inputs Octave refuses: exp('abc') gives double 1x3 [1.3383347192042695e+42 3.6379709476088047e+42 9.8890303....",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "log",
       "expm1"
@@ -92,8 +95,11 @@
         "expected": "\nans =\n\n   0.0000 + 3.1416i\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "It accepts some inputs Octave refuses: log('abc') gives double 1x3 [4.5747109785033828 4.5849674786705723 4.5951198501345898].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "exp",
       "log10",
@@ -121,9 +127,14 @@
       }
     ],
     "differs": [
-      "Complex arguments give an unclear error rather than MATLAB's message."
+      "Complex arguments give an unclear error rather than MATLAB's message.",
+      "An infinite divisor, mod(a, Inf), is refused: mod's page does not give its value.",
+      "On some inputs its answer differs from Octave's: mod([7 -7], uint8(200)) gives uint8 1x2 [7 193] where Octave gives uint8 1x2 [7 0].",
+      "It refuses some inputs Octave accepts, e.g. mod([7 -7], Inf).",
+      "It accepts some inputs Octave refuses: mod(true, 3) gives double 1x1 1.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
-    "status": "full",
+    "status": "partial",
     "see_also": [
       "rem",
       "floor"
@@ -137,15 +148,20 @@
     "kind": "function",
     "signature": "r = rem(a, b)",
     "summary": "The remainder after division, with the sign of the dividend: a - b*fix(a/b).",
-    "doc": "`rem(a, 0)` is a.",
+    "doc": "`rem(a, 0)` is NaN, as rem's page says.",
     "examples": [
       {
         "code": "rem([7 -7], 3)",
         "expected": "\nans =\n\n     1    -1\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "An infinite divisor, rem(a, Inf), is refused: rem's page does not give its value.",
+      "It refuses some inputs Octave accepts, e.g. rem([7 -7], Inf).",
+      "It accepts some inputs Octave refuses: rem(true, 3) gives double 1x1 1.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "mod",
       "fix"
@@ -203,8 +219,11 @@
         "expected": "\nans =\n\n   0.0000 + 2.0000i\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "It accepts some inputs Octave refuses: sqrt('abc') gives double 1x3 [9.8488578017961039 9.8994949366116654 9.9498743710661994].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "nthroot",
       "realsqrt",

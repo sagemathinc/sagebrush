@@ -1150,6 +1150,24 @@ def sc(v):
     raise _err("Operands to the logical AND (&&) and OR (||) operators must be convertible to logical scalar values. Use the ANY or ALL functions to reduce operands to logical scalar values.", "MATLAB:nonLogicalConditional")
 
 
+def _flag_arg(v, opt):
+    """an option's true or false: a real numeric or logical scalar"""
+    if _istext(v) or not _isnumlike(v) or _numel(v) != 1 or _arr(v).dtype.kind == "c" or _scalar(v) != _scalar(v):
+        raise _err("The value of '%s' must be a logical scalar (true or false)." % opt)
+    return bool(_scalar(v))
+
+
+def _isinstance_num(p):
+    """a real numeric or logical scalar"""
+    return type(p) is not complex and _isnumlike(p) and not _istext(p) and _numel(p) == 1 and _arr(p).dtype.kind != "c"
+
+
+def _need_float(x, name):
+    """refuse an input whose page lists only single and double"""
+    if class_(x) not in ("double", "single"):
+        raise _err("%s: the input must be of class double or single, not %s." % (name, class_(x)))
+
+
 def cond(v):
     """the condition of if and while: nonempty, and every element nonzero"""
     t = type(v)
@@ -1285,6 +1303,9 @@ def colon(a, b, c=None):
         elif k == "single" and cls == "double":
             cls = "single"
     ischar = type(start) is Char and type(stop) is Char
+    if not ischar and (type(start) is Char or type(stop) is Char):
+        # (colon's page lists char operands but not the class of a mixed range)
+        raise _err("A colon range with one char end point and one numeric one is not supported in Sagebrush; convert with double().")
     vals = _colon_values(_scalar(start), _scalar(step), _scalar(stop))
     arr = np.array(vals, dtype=np.float64).reshape((len(vals), 1))
     if ischar:
@@ -1296,6 +1317,8 @@ def colon(a, b, c=None):
 
 def frange(a, b):
     """the values of a:b for a for loop (without making the array)"""
+    if (type(a) is Char) != (type(b) is Char):
+        raise _err("A colon range with one char end point and one numeric one is not supported in Sagebrush; convert with double().")
     a = _scalar(a)
     b = _scalar(b)
     if a == _math.floor(a) and _math.isfinite(a) and b == b:
@@ -3739,8 +3762,9 @@ def _take_along(A, idx, axis):
     A2 = np.moveaxis(A, axis, -1)
     I2 = np.moveaxis(idx, axis, -1)
     shp = I2.shape
-    fa = A2.reshape((-1, A2.shape[-1]))
-    fi = I2.reshape((-1, shp[-1]))
+    # (explicit row counts: with an empty last axis, -1 is ambiguous)
+    fa = A2.reshape((int(np.prod(A2.shape[:-1])), A2.shape[-1]))
+    fi = I2.reshape((int(np.prod(shp[:-1])), shp[-1]))
     rows = np.arange(fa.shape[0]).reshape((-1, 1))
     out = fa[rows, fi].reshape(shp)
     return _contig(np.moveaxis(out, -1, axis))
@@ -3791,23 +3815,32 @@ def _dimsarg(args, fname):
         like = args.pop()
         args.pop()
         cls = class_(like)
-    while args and _istext(args[-1]):
+    if cls is None and args and _istext(args[-1]):
         cls = _text(args.pop()).lower()
+        if not cls:
+            raise _err("Unknown class ''.")
+    if any(_istext(a) for a in args):
+        raise _err("%s: the size inputs must be numeric." % fname)
     if not args:
         return (1, 1), cls
     if len(args) == 1:
-        a = _arr(args[0]).reshape(-1)
+        if _numel(args[0]) == 0:
+            # (an empty size vector: a 0-by-0 array)
+            return (0, 0), cls
+        a = _farr(args[0])
         if a.size == 1:
             n = max(0, _int_arg(args[0], "size"))
             return (n, n), cls
-        d = tuple(max(0, int(x)) for x in a)
+        # (a size vector: a row or column of integers)
+        if a.dtype.kind == "c" or sum(1 for k in _dims(args[0]) if k != 1) > 1 or not np.all(np.isfinite(a)) or not np.all(a == np.floor(a)):
+            raise _err("Size vector must be a row vector of integers.")
+        d = tuple(max(0, int(x)) for x in a.reshape(-1))
         return _canon_dims(d), cls
     d = []
     for v in args:
-        if _numel(v) == 0:
-            d.append(1)
-        else:
-            d.append(max(0, _int_arg(v, "size")))
+        if _numel(v) != 1:
+            raise _err("Size inputs must be scalars.")
+        d.append(max(0, _int_arg(v, "size")))
     return _canon_dims(d), cls
 
 
@@ -3970,6 +4003,8 @@ def intmin_(*a):
 
 @_bs("eye")
 def eye_(*args):
+    if args and not _istext(args[0]) and _numel(args[0]) > 2:
+        raise _err("N-dimensional arrays are not supported.")
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
@@ -4182,6 +4217,8 @@ def linspace_(a, b, n=100.0):
     if class_(a) in _INTS or class_(b) in _INTS:
         # (the page's endpoints are single or double: an integer class's result is not guessed)
         raise _err("linspace with integer-class endpoints is not supported in Sagebrush; convert them with double().")
+    if _numel(n) != 1 or _istext(n):
+        raise _err("linspace: N must be a scalar.")
     nv = _scalar(n)
     if nv != nv:
         return _math.nan
@@ -4191,6 +4228,9 @@ def linspace_(a, b, n=100.0):
     A, B = _farr(a).reshape(-1), _farr(b).reshape(-1)
     if A.size != 1 or B.size != 1:
         raise _err("Inputs must be scalars.")
+    if not (np.all(np.isfinite(A)) and np.all(np.isfinite(B))):
+        # (the page leaves infinite and NaN endpoints open: refused, not guessed)
+        raise _err("linspace with an infinite or NaN endpoint is not supported in Sagebrush.")
     cplx = A.dtype.kind == "c" or B.dtype.kind == "c"
     x1 = complex(A[0]) if cplx else float(A[0])
     x2 = complex(B[0]) if cplx else float(B[0])
@@ -4858,15 +4898,13 @@ def _mod(A, B):
         r = _fmod(A, q)
         r = np.where((r != 0) & ((r < 0) != (q < 0)), r + q, r)
         r = np.where(B == 0, A, r)
-        r = np.where(np.isinf(B) & np.isfinite(A), np.where((A == 0) | ((A > 0) == (B > 0)), A, B), r)
     return r
 
 
 def _rem(A, B):
     with np.errstate(divide="ignore", invalid="ignore"):
         r = _fmod(A, np.where(B == 0, 1.0, B))
-        r = np.where(B == 0, A, r)
-        return np.where(np.isinf(B) & np.isfinite(A), A, r)
+        return np.where(B == 0, _math.nan, r)
 
 
 @_bi("mod")
@@ -4877,26 +4915,31 @@ def mod_(nargout, a, b):
         if a != a or b != b or a in (_math.inf, -_math.inf):
             return _math.nan
         if b in (_math.inf, -_math.inf):
-            return a if (a == 0 or (a > 0) == (b > 0)) else b
+            # (mod's page gives mod(a, 0) but not an infinite divisor, where its formula
+            # a - m.*floor(a./m) is NaN: refused, not guessed)
+            raise _err("mod with an infinite divisor is not supported in Sagebrush.")
         r = _math.fmod(a, b)
         if r != 0 and (r < 0) != (b < 0):
             r += b
         return r
     if not isreal_(a) or not isreal_(b):
         raise _err("mod: complex arguments are not supported; the arguments must be real.")
+    if np.any(np.isinf(_farr(b))):
+        raise _err("mod with an infinite divisor is not supported in Sagebrush.")
     return _elementwise(a, b, _mod, "mod")
 
 
 @_bi("rem")
 def rem_(nargout, a, b):
+    # (rem's page: rem(a, 0) is NaN; an infinite divisor, which the page leaves open, is refused)
     if type(a) is float and type(b) is float:
-        if b == 0:
-            return a
-        if a != a or b != b or a in (_math.inf, -_math.inf):
-            return _math.nan
         if b in (_math.inf, -_math.inf):
-            return a
+            raise _err("rem with an infinite divisor is not supported in Sagebrush.")
+        if b == 0 or a != a or b != b or a in (_math.inf, -_math.inf):
+            return _math.nan
         return _math.fmod(a, b)
+    if isreal_(b) and np.any(np.isinf(_farr(b))):
+        raise _err("rem with an infinite divisor is not supported in Sagebrush.")
     if not isreal_(a) or not isreal_(b):
         raise _err("rem: complex arguments are not supported; the arguments must be real.")
     return _elementwise(a, b, _rem, "rem")
@@ -5223,11 +5266,19 @@ def _dim_arg(args, d, name=None):
             else:
                 flags.append(s)
         elif _numel(a) == 0:
-            continue
+            # (an empty dimension is none of the pages' forms)
+            raise _err("%s: the dimension must be a positive integer, not empty." % (name or "the reduction"))
         elif _numel(a) > 1:
-            dim = sorted(set(int(k) for k in _arr(a).reshape(-1)))
+            # (a vector of positive integer dimensions)
+            v = _farr(a)
+            ad = _dims(a)
+            if v.dtype.kind == "c" or sum(1 for k in ad if k != 1) > 1 or not np.all(v == np.floor(v)) or not np.all(v >= 1):
+                raise _err("%s: the dimensions must be a vector of positive integers." % (name or "the reduction"))
+            dim = sorted(set(int(k) for k in v.reshape(-1)))
         else:
             dim = _int_arg(a, "dimension")
+            if dim < 1:
+                raise _err("%s: the dimension must be a positive integer." % (name or "the reduction"))
     if dim is None:
         dim = _default_dim(d)
     return dim, flags
@@ -5297,11 +5348,27 @@ def sum_(x, *args):
     return _reduce(x, args, lambda A, ax: np.sum(A, axis=ax), "sum")
 
 
+def _prod_axis(A, ax):
+    """the product along axis ax, complex values multiplied as complex numbers"""
+    if A.dtype.kind != "c":
+        return np.prod(A, axis=ax)
+    B = np.moveaxis(A, ax, -1)
+    # (an explicit row count: with an empty axis, -1 is ambiguous)
+    flat = B.reshape((int(np.prod(B.shape[:-1])), B.shape[-1]))
+    out = []
+    for row in flat:
+        z = complex(1.0)
+        for v in row:
+            z *= complex(v)
+        out.append(z)
+    return np.array(out, dtype=np.complex128).reshape(B.shape[:-1])
+
+
 @_bs("prod")
 def prod_(x, *args):
     if _nan_flags(args):
-        return _reduce(x, args, lambda A, ax: np.prod(np.where(np.isnan(A), 1, A), axis=ax), "prod", 1.0)
-    return _reduce(x, args, lambda A, ax: np.prod(A, axis=ax), "prod", 1.0)
+        return _reduce(x, args, lambda A, ax: _prod_axis(np.where(np.isnan(A), 1, A), ax), "prod", 1.0)
+    return _reduce(x, args, lambda A, ax: _prod_axis(A, ax), "prod", 1.0)
 
 
 def _nanfull(A, ax):
@@ -5345,6 +5412,9 @@ def _csort(A, ax):
 
 @_bs("median")
 def median_(x, *args):
+    if class_(x) == "char":
+        # (median's page does not list char input)
+        raise _err("median of a char array is not supported in Sagebrush; convert it with double().")
     if _dims(x) == (0, 0) and not args:
         return _math.nan
 
@@ -5370,9 +5440,15 @@ def median_(x, *args):
         r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
         return np.where(np.any(np.isnan(A), axis=ax), _math.nan, r)
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
-    # the middle two rounded; logical and char give double)
+    # the middle two rounded; logical too, where the middle values agree; char gives double)
     cls = class_(x)
-    return _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    r = _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    if cls == "logical":
+        R = _arr(r)
+        if not np.all((R == 0) | (R == 1)):
+            raise _err("median of logical values whose middle values differ, or of an empty array, is not supported in Sagebrush.")
+        return _finish(R != 0, "logical")
+    return r
 
 
 @_bi("mode")
@@ -5382,12 +5458,14 @@ def mode_(nargout, x, *args):
     column; M keeps A's class"""
     if _arr(x).dtype.kind == "c":
         raise _err("mode of complex numbers is not supported in Sagebrush.")
+    if class_(x) == "char":
+        raise _err("mode of a char array is not supported in Sagebrush; convert it with double().")
     store = []
 
     def slices(A, ax):
         A2 = np.moveaxis(A, ax, -1)
         res = []
-        for row in A2.reshape((-1, A2.shape[-1])):
+        for row in A2.reshape((int(np.prod(A2.shape[:-1])), A2.shape[-1])):
             row = row[~np.isnan(row)]
             vals, counts = np.unique(row, return_counts=True)
             if vals.size:
@@ -5427,6 +5505,7 @@ def mode_(nargout, x, *args):
 
 
 def _var_impl(x, args, sq):
+    _need_float(x, "std" if sq else "var")
     w = 0
     rest = list(args)
     if args and not _istext(args[0]):
@@ -5506,12 +5585,15 @@ def all_(x, *args):
 def _cum(x, args, f, name):
     d = _dims(x)
     dim, flags = _dim_arg(args, d, name)
+    if dim == "all" or type(dim) is list:
+        # (the cumulative functions' dim is one positive integer: no 'all', no vecdim)
+        raise _err("%s: the dimension must be one positive integer." % name)
     cls = class_(x)
     oc = "double" if cls in ("logical", "char") else cls
     A = _farr(x, name)
     if "omitnan" in flags:
         A = np.where(np.isnan(A), 1.0 if name == "cumprod" else 0.0, A)
-    if dim == "all" or dim > A.ndim:
+    if dim > A.ndim:
         return _finish(A.copy(), oc)
     ax = A.ndim - dim
     if "reverse" in flags:
@@ -5828,8 +5910,19 @@ def _minmax(nargout, args, which):
         if fl not in ("omitnan", "includenan", "omitmissing", "includemissing", "linear", "all"):
             raise _err("%s: the option '%s' is not supported in Sagebrush." % (which, fl))
     nums = [a for a in args[1:] if not _istext(a)]
+    # (numbers come first: max(A, B), max(A, [], dim); then 'all' in dim's place, then flags)
+    pos = [k for k, a in enumerate(args[1:]) if not _istext(a)]
+    if pos and pos != list(range(len(pos))):
+        raise _err("%s: the arrays and the dimension must come before the options." % which)
+    if "all" in flags and not (len(args) >= 3 and not _istext(args[1]) and _numel(args[1]) == 0
+                               and _istext(args[2]) and _text(args[2]).lower() == "all"):
+        raise _err("%s: 'all' must be the third argument, after []: %s(A, [], 'all')." % (which, which))
     include = "includenan" in flags or "includemissing" in flags
+    if len(args) == 2 and not _istext(args[1]) and _numel(nums[0]) == 0:
+        raise _err("%s(A, []) needs a dimension: %s(A, [], dim)." % (which, which))
     if nums and _numel(nums[0]) > 0:
+        if len(nums) > 1:
+            raise _err("%s with two matrices to compare and a working dimension is not supported." % which.upper())
         a, b = args[0], nums[0]
         if type(a) is float and type(b) is float and not include:
             if a != a:
@@ -5837,7 +5930,9 @@ def _minmax(nargout, args, which):
             if b != b:
                 return a
             return (a if a >= b else b) if big else (a if a <= b else b)
-        cls = _arith_class(a, b, which)
+        if _farr(a).dtype.kind == "c" or _farr(b).dtype.kind == "c":
+            raise _err("%s of two arrays with complex values is not supported in Sagebrush." % which)
+        cls = "logical" if class_(a) == "logical" and class_(b) == "logical" else _arith_class(a, b, which)
         f = (np.maximum if big else np.minimum) if include else (np.fmax if big else np.fmin)
         return _finish(_broadcast(f, _farr(a), _farr(b)), cls)
     x = args[0]
@@ -5847,7 +5942,11 @@ def _minmax(nargout, args, which):
         dim = "all"
     elif len(nums) > 1:
         dv = nums[1]
-        dim = sorted(set(int(k) for k in _arr(dv).reshape(-1))) if _numel(dv) > 1 else _int_arg(dv)
+        v = _farr(dv)
+        if (v.size == 0 or v.dtype.kind == "c" or sum(1 for k in _dims(dv) if k != 1) > 1
+                or not np.all(v == np.floor(v)) or not np.all(v >= 1)):
+            raise _err("%s: the dimension must be a positive integer or a vector of them." % which)
+        dim = sorted(set(int(k) for k in v.reshape(-1))) if v.size > 1 else _int_arg(dv)
     cls = class_(x)
     A = _farr(x, which)
     if dim is None:
@@ -5888,7 +5987,8 @@ def _minmax(nargout, args, which):
     idx = np.where(np.all(nan, axis=ax), 0, idx)
     vals = _take_along(A2, np.expand_dims(idx, ax), ax)
     vals = _canon(_contig(vals.reshape(shape)))
-    oc = "double" if cls in ("logical", "char") else cls
+    # (logical stays logical, as in MATLAB; char gives double)
+    oc = "double" if cls == "char" else cls
     m = _finish(vals, oc)
     if nargout <= 1:
         return m
@@ -6041,6 +6141,9 @@ def find_(nargout, x, n=None, direction=None):
 
     def shaped(v):
         v = v.astype(np.float64)
+        if d == (1, 1) and v.size == 0:
+            # (a scalar zero gives [], as for an empty x)
+            return np.zeros((0, 0))
         return v.reshape((v.size, 1)) if row else v.reshape((1, v.size))
     if nargout <= 1:
         if d == (0, 0):
@@ -6052,7 +6155,7 @@ def find_(nargout, x, n=None, direction=None):
     out = [_box(shaped(i)), _box(shaped(j))]
     if nargout >= 3:
         vals = flat[nz]
-        out.append(_box(vals.reshape((vals.size, 1)) if row else vals.reshape((1, vals.size))))
+        out.append(_box(shaped(vals) if vals.size == 0 else vals.reshape((vals.size, 1)) if row else vals.reshape((1, vals.size))))
     return out
 
 
@@ -6111,17 +6214,28 @@ def trapz_(*args):
 @_bs("reshape")
 def reshape_(x, *args):
     n = _numel(x)
+    if not args:
+        raise _err("Not enough input arguments.")
     if len(args) == 1:
-        d = [int(v) for v in _arr(args[0]).reshape(-1)]
+        # (a size vector: two or more nonnegative integers)
+        v = _farr(args[0])
+        if v.dtype.kind == "c" or v.size < 2 or sum(1 for k in _dims(args[0]) if k != 1) > 1 or not np.all(np.isfinite(v)) or not np.all(v == np.floor(v)) or not np.all(v >= 0):
+            raise _err("Size vector must have at least two elements, each a nonnegative integer.")
+        d = [int(k) for k in v.reshape(-1)]
     else:
         d = []
         free = -1
         for k, v in enumerate(args):
-            if _numel(v) == 0:
+            if _numel(v) == 0 and not _istext(v):
+                if free >= 0:
+                    raise _err("Only one size input can be [].")
                 free = k
                 d.append(1)
             else:
-                d.append(_int_arg(v, "size"))
+                m = _int_arg(v, "size")
+                if m < 0:
+                    raise _err("Size arguments must be nonnegative integers.")
+                d.append(m)
         if free >= 0:
             rest = _prod(d)
             if rest == 0 or n % rest:
@@ -6424,6 +6538,9 @@ def _square(M):
 
 @_bs("inv")
 def inv_(x):
+    _need_float(x, "inv")
+    if type(x) is complex:
+        return 1.0 / x
     M = _mat(x)
     _square(M)
     try:
@@ -6431,6 +6548,9 @@ def inv_(x):
     except np.linalg.LinAlgError:
         # (MATLAB's: Inf throughout)
         warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
+        if M.shape == (1, 1):
+            # (a zero scalar: 1/x, whose sign follows the zero's)
+            return _unmat(np.full(M.shape, _math.copysign(_math.inf, float(M[0, 0].real)), dtype=M.dtype))
         return _unmat(np.full(M.shape, np.inf))
     _rcond_warning(M, Mi)
     return _unmat(Mi)
@@ -6443,6 +6563,8 @@ def pinv_(x):
 
 @_bs("det")
 def det_(x):
+    if type(x) is complex:
+        return x
     M = _mat(x)
     _square(M)
     if M.size == 0:
@@ -6481,6 +6603,7 @@ def rank_(x, tol=None):
 
 @_bs("norm")
 def norm_(x, p=None):
+    _need_float(x, "norm")
     M = _mat(x)
     vec = M.shape[0] == 1 or M.shape[1] == 1
     if p is not None and _istext(p):
@@ -6491,7 +6614,12 @@ def norm_(x, p=None):
             p = _math.inf
         else:
             raise _err("Unknown norm type.")
+    if p is not None and not _isinstance_num(p):
+        raise _err("norm: p must be a real scalar: 1, 2, Inf, -Inf, a positive number or 'fro'.")
     pv = 2.0 if p is None else _scalar(p)
+    if not (pv > 0 or pv == -_math.inf):
+        # (the page's p: a positive real number, Inf or -Inf)
+        raise _err("norm: p must be a positive real number, Inf or -Inf.")
     if vec:
         v = np.abs(M.reshape(-1))
         if v.size == 0:
@@ -6553,6 +6681,7 @@ def eig_(nargout, x, *args):
     conditioned B is refused too, for accuracy, by Sagebrush's rule
     cond(B)*eps > 1e-8; complex matrices are refused, Sagebrush's numpy
     having no complex eigenvalue routines yet"""
+    _need_float(x, "eig")
     A = _mat(x)
     _square(A)
     B, form, algo = None, None, None
@@ -6823,6 +6952,11 @@ def polyval_(nargout, p, x, S=None, mu=None):
     estimate delta is not computed"""
     if nargout >= 2:
         raise _err("[y, delta] = polyval(...): the error estimate delta is not supported in Sagebrush.")
+    if sum(1 for k in _dims(p) if k != 1) > 1:
+        raise _err("polyval: p must be a vector of coefficients.")
+    for v in (p, x):
+        if class_(v) not in ("double", "single", "logical"):
+            raise _err("polyval of %s input is not supported; it takes double or single values." % class_(v))
     c = _farr(p).reshape(-1)
     X = _farr(x)
     if mu is not None:
@@ -6830,26 +6964,35 @@ def polyval_(nargout, p, x, S=None, mu=None):
         if m.size != 2:
             raise _err("polyval: centerScale must be a two-element vector.")
         X = (X - m[0]) / m[1]
-    y = np.zeros(X.shape, dtype=np.complex128 if X.dtype.kind == "c" or c.dtype.kind == "c" else np.float64)
-    for a in c:
-        y = y * X + a
-    return _box(y)
+    cplx = X.dtype.kind == "c" or c.dtype.kind == "c"
+    y = np.zeros(X.shape, dtype=np.complex128 if cplx else np.float64)
+    if c.size:
+        # (Horner's rule from the leading coefficient: polyval([1 0 -1], Inf) is Inf)
+        y = y + c[0]
+        for a in c[1:]:
+            y = y * X + a
+    single = "single" in (class_(p), class_(x))
+    return _finish(y, "single") if single else _box(y)
 
 
 @_bi("polyfit")
 def polyfit_(nargout, x, y, n, *opts):
     """p (highest power first); [p,S]: S.R, S.df, S.normr; [p,S,mu]: fitted on (x - mu(1))/mu(2),
     with Normalize=true (the default with three outputs), mu = [0 1] with Normalize=false"""
+    _need_float(x, "polyfit")
+    _need_float(y, "polyfit")
     xv = _farr(x).reshape(-1)
     yv = _farr(y).reshape(-1)
     n = _int_arg(n)
+    if n < 0:
+        raise _err("polyfit: the degree n must be a nonnegative integer.")
     normalize = nargout >= 3
     if len(opts) % 2:
         raise _err("polyfit: name-value arguments must come in pairs.")
     for k in range(0, len(opts), 2):
         if not (_istext(opts[k]) and _text(opts[k]).lower() == "normalize"):
             raise _err("polyfit: the option %s is not supported in Sagebrush." % (_text(opts[k]) if _istext(opts[k]) else "given"))
-        normalize = bool(_scalar(opts[k + 1]))
+        normalize = _flag_arg(opts[k + 1], "Normalize")
     mu = None
     if nargout >= 3 and not normalize:
         mu = (0.0, 1.0)
@@ -6858,6 +7001,10 @@ def polyfit_(nargout, x, y, n, *opts):
         sd = float(np.sqrt(np.sum((xv - m) ** 2) / max(1, xv.size - 1)))
         mu = (m, sd)
         xv = (xv - m) / sd
+    if n + 1 > xv.size:
+        # (MATLAB warns that the polynomial is not unique and returns one of them; which one is not
+        # documented, so it is refused)
+        raise _err("polyfit with degree n of at least the number of points is not supported in Sagebrush: the polynomial is not unique.")
     V = np.array([[xi ** (n - k) for k in range(n + 1)] for xi in xv]).reshape((xv.size, n + 1))
     Q, R = np.linalg.qr(V)
     p = np.linalg.solve(R, Q.T @ yv)
@@ -7396,8 +7543,8 @@ def _fmt_items(args):
         elif t is bool:
             items.append(1.0 if a else 0.0)
         elif t is complex:
+            # (the formatting page: numeric conversions print only the real part)
             items.append(a.real)
-            items.append(a.imag)
         elif t is np.ndarray:
             A = a.reshape(-1)
             if A.dtype.kind == "c":
@@ -7455,8 +7602,8 @@ def _conv(m, item, width, prec):
     conv = m.group("conv")[-1]
     if conv in "bt":
         raise _err("The %%b and %%t conversion subtypes are not supported in Sagebrush.")
-    if conv in "diuoxXc" and type(item) is str:
-        return None  # (expanded by the caller)
+    if conv in "diuoxXcfFeEgG" and type(item) is str:
+        return None  # (expanded by the caller: a text's character codes under a numeric conversion)
     if conv == "s":
         if type(item) is str:
             return _pyspec(m, "s", width, prec) % item
@@ -7596,7 +7743,13 @@ def _sprintf(fmt, args):
 
 @_bs("sprintf")
 def sprintf_(fmt, *args):
-    return Char(_sprintf(_text(fmt), args)) if type(fmt) is not Str else Str(_sprintf(fmt.s, args))
+    if type(fmt) is Str:
+        return Str(_sprintf(fmt.s, args))
+    if not _istext(fmt):
+        raise _err("sprintf: the format must be text.")
+    r = _sprintf(_text(fmt), args)
+    # (nothing written: a 1-by-0 character vector, as sprintf gives)
+    return Char(r) if r else Char(np.zeros((0, 1)))
 
 
 _files = {}
@@ -7656,6 +7809,8 @@ def num2str_(x, f=None):
         # (num2str trims leading blanks, even with a field width)
         return _pad_rows(_trim_common(rows))
     prec = _int_arg(f) if f is not None else None
+    if prec is not None and prec < 1:
+        raise _err("num2str: the precision must be a positive integer.")
     A = _arr(x)
     cls = class_(x)
     if A.size == 1:
@@ -7924,6 +8079,9 @@ def newline_():
 
 @_bs("strcat")
 def strcat_(*args):
+    for a in args:
+        if not (_istext(a) or type(a) in (Char, Cell, StrArr)):
+            raise _err("strcat of a %s is not supported; its inputs are character arrays, cell arrays of character vectors or string arrays." % class_(a))
     if any(type(a) is Cell for a in args):
         n = max(len(a.a) for a in args if type(a) is Cell)
         shape = next(a.shape for a in args if type(a) is Cell and len(a.a) == n)
@@ -8103,6 +8261,11 @@ def _strrep_text(t, o, nw, budget=None):
 
 @_bs("strrep")
 def strrep_(s, old, new):
+    for a in (s, old, new):
+        if not (_istext(a) or type(a) in (Char, Cell, StrArr)):
+            raise _err("strrep of a %s is not supported; its inputs are text." % class_(a))
+        if type(a) is Cell and not all(type(e) is Char for e in a.a):
+            raise _err("strrep: a cell input must hold character vectors.")
     if type(old) is not Cell and type(new) is not Cell and type(old) is not StrArr and type(new) is not StrArr:
         o = _text(old)
         nw = _text(new)
@@ -8180,7 +8343,7 @@ def strsplit_(s, *args):
         k = _text(name).lower() if _istext(name) else None
         v = rest.pop(0)
         if k == "collapsedelimiters":
-            collapse = bool(cond(v))
+            collapse = _flag_arg(v, "CollapseDelimiters")
         elif k == "delimitertype" and _istext(v) and _text(v).lower() == "simple":
             pass
         elif k == "delimitertype" and _istext(v) and _text(v).lower() == "regularexpression":
@@ -8193,6 +8356,8 @@ def strsplit_(s, *args):
         delims = [" ", "\f", "\n", "\r", "\t", "\v"]
     else:
         delims = [_escapes(e) for e in delims]
+        if any(d == "" for d in delims):
+            raise _err("strsplit: an empty delimiter is not supported.")
     pat = "|".join(_re.escape(d) for d in sorted(delims, key=len, reverse=True))
     if collapse:
         pat = "(?:%s)+" % pat
@@ -8558,6 +8723,10 @@ def _regexp(nargout, s, pat, opts, flags):
                     return ""
                 items = [{k: Char(value(m, k)) for k in names} for m in (ms[:1] if once else ms)]
                 out.append(_struct1(items[0]) if once or len(items) == 1 else Struct(items, (1, len(items)), names))
+            elif not ms:
+                # (no match: a 0-by-0 structure array, with the expression's names as fields)
+                names = list(dict.fromkeys(nm for _, nm in _group_names(_text(pat), bool(rx.flags & _re.VERBOSE)))) if rx.groupindex else []
+                out.append(Struct([], (0, 0), names))
             else:
                 out.append(Struct([{}], (1, 1), []))
         elif w == "split":
@@ -8583,6 +8752,8 @@ def _regexp(nargout, s, pat, opts, flags):
 
 @_bs("cell")
 def cell_(*args):
+    if any(_istext(a) for a in args):
+        raise _err("cell takes sizes only: a text argument is not supported.")
     d, _ = _dimsarg(args, "cell")
     return Cell([_empty_double() for _ in range(_prod(d))], d)
 
@@ -8638,10 +8809,14 @@ def numfields_(s):
 
 @_bs("isfield")
 def isfield_(s, name):
+    # (isfield's page: false when S is not a structure, whatever FIELD is; a name that is no
+    # text is no field)
     if type(s) is not Struct:
-        return False if type(name) is not Cell else _box(np.zeros(_stored(name.shape), dtype=bool))
+        return False
     if type(name) is Cell:
         return _box(np.array([type(e) in (Char, Str) and _text(e) in s.fields for e in name.a], dtype=bool).reshape(_stored(name.shape)))
+    if not _istext(name):
+        return False
     return _text(name) in s.fields
 
 
@@ -8764,7 +8939,7 @@ def _uniform_opts(args):
         if _istext(a) and i + 1 < len(args) and _text(a).lower() in ("uniformoutput", "errorhandler"):
             k = _text(a).lower()
             if k == "uniformoutput":
-                uniform = bool(cond(args[i + 1]))
+                uniform = _flag_arg(args[i + 1], "UniformOutput")
             else:
                 handler = args[i + 1]
             i += 2
@@ -10900,11 +11075,18 @@ def interp1_n(*args):
             else:
                 raise _err("interp1: invalid interpolation method '%s'." % _text(a))
         else:
+            if _numel(a) != 1 or class_(a) not in ("double", "single") or _arr(a).dtype.kind == "c":
+                # (the page's extrapolation value is a real scalar)
+                raise _err("interp1: the extrapolation value must be a real double or single scalar in Sagebrush.")
             extrap = a
     if len(methods) > 1:
         raise _err("interp1: only one interpolation method may be given.")
     if methods:
         method = methods[0]
+    for a in args[:3]:
+        if class_(a) not in ("double", "single"):
+            raise _err("interp1 of %s input is not supported; x, v and xq are double or single, as its page says." % class_(a))
+    single = any(class_(a) == "single" for a in args[:3])
     if len(args) == 2:
         v, xq = args
         n = _dims(v)[0] if not _isvec(v) else _numel(v)
@@ -10930,6 +11112,8 @@ def interp1_n(*args):
     if any(X[k] == X[k + 1] for k in range(len(X) - 1)):
         raise _err("interp1: the grid vectors must contain unique points.")
     Q = _farr(xq)
+    if Q.dtype.kind == "c":
+        raise _err("interp1 at complex query points is not supported in Sagebrush.")
     qs = [float(t) for t in Q.reshape(-1)]
     out = np.zeros((len(qs), V.shape[1]), dtype=V.dtype if V.dtype.kind == "c" else np.float64)
     lo, hi = X[0], X[-1]
@@ -10964,10 +11148,9 @@ def interp1_n(*args):
             else:
                 t = (q - X[k]) / (X[k + 1] - X[k])
                 out[i, j] = y[k] + t * (y[k + 1] - y[k])
-    if vec:
-        return _box(out.reshape(-1).reshape(Q.shape))
-    # (a matrix of values: one column per column of v, a row per query)
-    return _unmat(out)
+    r = _box(out.reshape(-1).reshape(Q.shape)) if vec else _unmat(out)
+    # (a matrix of values: one column per column of v, a row per query; single if an input is)
+    return _finish(_farr(r), "single") if single else r
 
 
 @_bs("cond")
@@ -11594,6 +11777,25 @@ _PLOT_FNS = ("figure gcf gca groot clf cla close hold ishold subplot plot plot3 
              "histcounts discretize zticks zticklabels camlight lighting material light").split()
 for _n in _PLOT_FNS:
     _B[_n] = _lazy_plot(_n)
+
+
+def _keep_single(name):
+    """a built-in whose result is single for single input (det, inv, norm, var, std, as their
+    pages say): its double result made single"""
+    b = _B[name]
+    f = b.f
+
+    def g(nargout, *args):
+        r = f(nargout, *args)
+        if args and class_(args[0]) == "single" and type(r) is not list and class_(r) == "double":
+            return _finish(_farr(r), "single")
+        return r
+    g.__doc__ = getattr(f, "__doc__", None)
+    _B[name] = Builtin(g, name, (b.lo, b.hi))
+
+
+for _n in ("det", "inv", "norm", "var", "std"):
+    _keep_single(_n)
 
 
 def end_program():

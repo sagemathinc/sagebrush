@@ -4,7 +4,7 @@
     "kind": "function",
     "signature": "x = fzero(fun, x0)\nx = fzero(fun, x0, options)\n[x, fval, exitflag, output] = fzero(___)",
     "summary": "A root of a function of one variable, near a starting point or within an interval where the function changes sign.",
-    "doc": "With a scalar x0, fzero first searches for an interval around it with a sign change. `options` from `optimset` take 'TolX' and 'Display'. A function name in a character vector works too.",
+    "doc": "With a scalar x0, fzero first searches for an interval around it with a sign change. `options` from `optimset` take 'TolX' and 'Display'. A function name in a character vector works too. x0 is double or single.",
     "examples": [
       {
         "code": "fzero(@(x) x^2 - 2, 1)",
@@ -17,7 +17,9 @@
     ],
     "differs": [
       "The 'PlotFcns' option is refused.",
-      "Its last iterate can differ from MATLAB's in the final digits."
+      "Its last iterate can differ from MATLAB's in the final digits.",
+      "On some inputs its answer differs from Octave's: fzero('all', 1) gives printed 'fzero found no sign change: the search interval around 1 g... where Octave gives double 1x1 0.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -46,8 +48,11 @@
         "expected": "\nans =\n\n    1.7725\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "It refuses some inputs Octave accepts, e.g. integral(@(x) exp(-x.^2), 1 + 2i, Inf).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "integral2",
       "quadgk",
@@ -80,7 +85,10 @@
     "differs": [
       "The 'makima' method is refused.",
       "The piecewise polynomial form, pp = interp1(x, v, method, 'pp'), is refused.",
-      "Repeated or NaN sample points, and an unknown method, are refused."
+      "Repeated or NaN sample points, and an unknown method, are refused.",
+      "Complex query points are refused.",
+      "It refuses some inputs Octave accepts, e.g. interp1([1 2 3], [10 20 30], 1 + 2i).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -141,7 +149,10 @@
     ],
     "differs": [
       "Coefficients that are zero in exact arithmetic can show round-off (-0.0000).",
-      "Fewer points than coefficients, and mismatched lengths, give unclear errors rather than MATLAB's warning and message."
+      "Fewer points than coefficients is refused (MATLAB warns that the polynomial is not unique and returns one); mismatched lengths give an unclear error rather than MATLAB's message.",
+      "On some inputs its answer differs from Octave's: polyfit(1:5, [2.1 3.9 6.2 7.8 10.1], true) gives double 1x2 [1.9899999999999995 0.050000000000001425] where Octave gives double 1x1 6.0199999999999987.",
+      "It refuses some inputs Octave accepts, e.g. polyfit(1:5, [2.1 3.9 6.2 7.8 10.1], 7).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -170,7 +181,10 @@
       }
     ],
     "differs": [
-      "The error estimate delta ([y, delta] = polyval(p, x, S)) is refused."
+      "The error estimate delta ([y, delta] = polyval(p, x, S)) is refused.",
+      "It refuses some inputs Octave accepts, e.g. polyval([], 2).",
+      "It accepts some inputs Octave refuses: polyval(true, 2) gives double 1x1 1.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -206,7 +220,9 @@
       "The one-output form, the continued fraction as text, is refused: use [N, D] = rat(X).",
       "Complex X is refused.",
       "tol must be a real nonnegative scalar, and a tolerance the expansion can't reach (such as 0 for pi) is refused rather than missed.",
-      "The default tolerance, 1e-6 times norm(X(:), 1), counts only X's finite elements (Inf and NaN are left out of the norm)."
+      "The default tolerance, 1e-6 times norm(X(:), 1), counts only X's finite elements (Inf and NaN are left out of the norm).",
+      "It refuses some inputs Octave accepts, e.g. rat(0.75).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [

@@ -464,6 +464,9 @@ def fzero_(nargout, *args):
     check = _opt(options, "FunValCheck", "fzero") == "on"
     if type(x0) is _m.Char or not _m._isnumlike(x0) or _m._numel(x0) not in (1, 2):
         raise _err("fzero: x0 must be a real scalar or a two-element real vector.")
+    if _m.class_(x0) not in ("double", "single"):
+        # (the page's x0 is single or double)
+        raise _err("fzero: x0 must be of class double or single.")
     xa = _m._arr(x0).T.reshape(-1)
     if np.iscomplexobj(xa) and np.any(xa.imag != 0):
         raise _err("fzero: x0 must be real.")
