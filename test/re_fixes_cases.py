@@ -58,3 +58,16 @@ try:
     re.compile('(\n\n\\9')
 except re.PatternError as x:
     print(x, x.pos, x.lineno, x.colno)
+# astra's HOLD on 079989b6: zero repetitions are 0 wide, whatever the item
+# (CORR-079-1), in a look-behind and in every scan
+for p in [r'(?<=(?:a*){0})a', r'(?<=(?:a+){0})a', r'(?<=(a*){0})a', r'(?:a*){0}a*?', r'(a*){0}a*?', r'(?:(?:a*){0})a*?', r'a{0}a*?']:
+    print(p, re.findall(p, 'a'), [m.span() for m in re.finditer(p, 'a')], re.sub(p, 'X', 'a'), re.split(p, 'a'))
+# error positions in code points, the flags taken off counted (CORR-079-2)
+for pattern in ['\U0001f600(', '\U0001f600\\9', '(?i)\U0001f600[', '\U0001f600\n(', '(?x)\U0001f600 \U0001f600 )', '\U0001f600(?<\U0001f600']:
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        print(repr(pattern), e.pos, e.lineno, e.colno, str(e))
+# a repeat of a part that can match nothing, with a huge minimum: no
+# allocation by its count
+print(bool(re.compile('(?:a?){1000000000,}')), re.compile('(?:a?b?){4294967294}').groups)

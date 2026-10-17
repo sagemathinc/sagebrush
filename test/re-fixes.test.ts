@@ -31,3 +31,19 @@ test("re refuses, saying what, the patterns JS's RegExp would answer otherwise t
     "",
   ]);
 });
+
+// The analysis is linear in the pattern and never expands a repeat's
+// count (daybreak2's HARD-079-1): in a 64 MB heap, at once
+test("re's analysis of a pattern is linear in it, whatever its repeat counts (HARD-079-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const code = [
+    "import re, time",
+    "t = time.perf_counter()",
+    "for p in ['(?:a?){4294967294}', '(?:a?){4294967294,}', '(?:a?b?){1000000000,}', '(?:){0,1}' * 20000, '(?:' * 200 + '(a)' + ')+' * 200 + r'\\1', '(?:(x)|y)?' * 3000, '|'.join('w%d' % i for i in range(100000)), ''.join('(a)' for i in range(20000)) + r'\\20000']:",
+    "    print(re.compile(p).groups)",
+    "print(time.perf_counter() - t < 20)",
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--max-old-space-size=48", __dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "0\n0\n0\n0\n1\n3000\n0\n20000\nTrue\n");
+});

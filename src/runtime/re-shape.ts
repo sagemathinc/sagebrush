@@ -45,7 +45,7 @@ type Node = Base &
     | { t: "alt"; alts: Node[] }
     | { t: "group"; kind: Kind; open: string; body: Node; cap: number }
     | { t: "quant"; body: Node; min: number; max: number; lazy: boolean; q: string; rw?: "opt" | "tail" }
-    | { t: "atom"; src: string; width: number; caret: boolean; back: number }
+    | { t: "atom"; from: number; to: number; width: number; caret: boolean; back: number } // (its source: src.slice(from, to))
     | { t: "ref"; src: string; cap: number; name: string | null }
   );
 
@@ -58,7 +58,7 @@ export interface Shape {
   canConsume: boolean; // whether a match can be other than empty
   back: number; // how far before a position the pattern can look, code points
   caret: boolean; // whether the pattern has ^ (\A, or ^ without MULTILINE)
-  variant: () => string; // src with ^ never matching
+  variant: string; // src with ^ never matching
 }
 
 const PARSE = Symbol("unparsed");
@@ -86,9 +86,17 @@ function parse(src: string): { root: Node; names: string[] } | null {
     while (i < src.length && src[i] !== "|" && src[i] !== ")") {
       const a = atom();
       const q = quant();
-      items.push(q === null ? a : { t: "quant", body: a, ...q });
+      // (a run of characters, classes and escapes that each match one
+      // character is one atom, as wide as the run: a node per character
+      // would cost far more than the pattern itself)
+      const prev = items[items.length - 1];
+      if (q === null && a.t === "atom" && a.width === 1 && !a.caret && a.back === 0 && prev !== undefined && prev.t === "atom" && prev.width > 0 && !prev.caret && prev.back === 0) {
+        prev.to = a.to;
+        prev.width++;
+      } else items.push(q === null ? a : { t: "quant", body: a, ...q });
     }
-    return { t: "seq", items };
+    // (one item is the item itself: a node less for each branch)
+    return items.length === 1 ? items[0] : { t: "seq", items };
   };
   const quant = (): { min: number; max: number; lazy: boolean; q: string } | null => {
     const at = i;
@@ -111,9 +119,9 @@ function parse(src: string): { root: Node; names: string[] } | null {
     return { min: min!, max: max!, lazy, q: src.slice(at, i) };
   };
   const plain = (n: number, width: number, extra: Partial<{ caret: boolean; back: number }> = {}): Node => {
-    const s = src.slice(i, i + n);
+    const from = i;
     i += n;
-    return { t: "atom", src: s, width, caret: extra.caret ?? false, back: extra.back ?? 0 };
+    return { t: "atom", from, to: i, width, caret: extra.caret ?? false, back: extra.back ?? 0 };
   };
   const upTo = (ch: string): number => {
     const k = src.indexOf(ch, i);
@@ -191,6 +199,7 @@ function parse(src: string): { root: Node; names: string[] } | null {
   }
 }
 
+const FIXED: W[] = []; // (shared [k, k], never changed)
 // The widths (CPython's getwidth: look-arounds are 0 wide, a reference
 // as wide as its group), and look-behinds fixed-width, as _compiler wants.
 function widths(root: Node, capW: W[], badBehind: () => never): void {
@@ -198,7 +207,7 @@ function widths(root: Node, capW: W[], badBehind: () => never): void {
     let w: W;
     switch (n.t) {
       case "atom":
-        w = [n.width, n.width];
+        w = n.width < 64 ? (FIXED[n.width] ??= [n.width, n.width]) : [n.width, n.width];
         break;
       case "ref":
         w = capW[n.cap] ?? [0, Infinity];
@@ -224,7 +233,8 @@ function widths(root: Node, capW: W[], badBehind: () => never): void {
       }
       case "quant": {
         const v = go(n.body);
-        w = [v[0] * n.min, n.max === Infinity ? (v[1] > 0 ? Infinity : 0) : v[1] * n.max];
+        // (no repetition at all is 0 wide, whatever the item, CORR-079-1)
+        w = n.max === 0 ? [0, 0] : [v[0] * n.min, n.max === Infinity ? (v[1] > 0 ? Infinity : 0) : v[1] * n.max];
         break;
       }
     }
@@ -285,9 +295,11 @@ function order(n: Node): void {
         n.cnt = 2;
         n.el = false;
       } else {
-        // (m iterations, then sre's loop: X's ways in its order, then none)
+        // (m iterations, then sre's loop: X's ways in its order, then none;
+        // two iterations order as any number more do, so m up to MAXREPEAT
+        // costs nothing here)
         const loop: Base = { w: [0, Infinity], cnt: 2, el: x.el };
-        seqOrder(n, [...Array(n.min).fill(x), loop]);
+        seqOrder(n, [...Array(Math.min(n.min, 2)).fill(x), loop]);
       }
       return;
     }
@@ -303,66 +315,112 @@ function seqOrder(n: Base, items: Base[]): void {
     n.el = true;
     return;
   }
-  n.cnt = Math.min(2, items.reduce((k, x) => k * x.cnt!, 1));
-  n.el = items.every((x, j) => x.el && (x.cnt! < 2 || items.slice(j + 1).every((y) => y.w![1] === 0)));
-}
-
-// The groups a node can set (not those in a negative look-around)
-function caps(n: Node, out: number[] = []): number[] {
-  switch (n.t) {
-    case "seq":
-      n.items.forEach((x) => caps(x, out));
-      break;
-    case "alt":
-      n.alts.forEach((x) => caps(x, out));
-      break;
-    case "group":
-      if (n.kind === "nla" || n.kind === "nlb") break;
-      if (n.kind === "cap") out.push(n.cap);
-      caps(n.body, out);
-      break;
-    case "quant":
-      if (n.max > 0) caps(n.body, out);
-      break;
+  n.cnt = Math.min(2, items.reduce((k, x) => Math.min(2, k * x.cnt!), 1));
+  // (one pass from the right: whether every item after j is always empty,
+  // so linear in the items, daybreak2's HARD-079-1)
+  let el = true, restEmpty = true;
+  for (let j = items.length - 1; j >= 0 && el; j--) {
+    const x = items[j];
+    el = x.el! && (x.cnt! < 2 || restEmpty);
+    restEmpty = restEmpty && x.w![1] === 0;
   }
-  return out;
-}
-function allCaps(n: Node, out: number[] = []): number[] {
-  if (n.t === "seq") n.items.forEach((x) => allCaps(x, out));
-  else if (n.t === "alt") n.alts.forEach((x) => allCaps(x, out));
-  else if (n.t === "group") {
-    if (n.cap) out.push(n.cap);
-    allCaps(n.body, out);
-  } else if (n.t === "quant") allCaps(n.body, out);
-  return out;
+  n.el = el;
 }
 
-// The groups that have matched, whichever way a node matched, after it
-// (from those before it, D); with check, references are checked there
-function defined(n: Node, D: Set<number>, check: ((r: Node & { t: "ref" }, D: Set<number>) => void) | null): Set<number> {
+// Facts of each node, made once, bottom up (so that the analysis is linear
+// in the pattern, daybreak2's HARD-079-1): the first group it can set (not
+// one in a negative look-around), the first of those it may not set
+// (whichever way it matched), and whether it holds a reference
+interface Facts {
+  firstCap: number;
+  firstOpt: number;
+  hasRef: boolean;
+}
+const NO_FACTS: Facts = { firstCap: 0, firstOpt: 0, hasRef: false };
+function facts(n: Node): Facts {
+  const f = (n as any).$f as Facts | undefined;
+  if (f !== undefined) return f;
+  let r: Facts;
   switch (n.t) {
     case "atom":
-      return D;
+      return NO_FACTS;
     case "ref":
-      check?.(n, D);
-      return D;
+      r = { firstCap: 0, firstOpt: 0, hasRef: true };
+      break;
     case "seq":
-      for (const x of n.items) D = defined(x, D, check);
-      return D;
     case "alt": {
-      const ds = n.alts.map((a) => defined(a, D, check));
-      return new Set([...ds[0]].filter((g) => ds.every((d) => d.has(g))));
+      const xs = (n.t === "seq" ? n.items : n.alts).map(facts);
+      const firstCap = xs.find((x) => x.firstCap)?.firstCap ?? 0;
+      // (a branch's groups are its own: none is set by every branch)
+      const firstOpt = n.t === "alt" ? firstCap : (xs.find((x) => x.firstOpt)?.firstOpt ?? 0);
+      r = { firstCap, firstOpt, hasRef: xs.some((x) => x.hasRef) };
+      break;
     }
     case "group": {
-      const d = defined(n.body, D, check);
-      if (n.kind === "nla" || n.kind === "nlb") return D;
-      if (n.kind !== "cap") return d;
-      return new Set([...d, n.cap]);
+      const b = facts(n.body);
+      if (n.kind === "nla" || n.kind === "nlb") r = { firstCap: 0, firstOpt: 0, hasRef: b.hasRef };
+      else r = { firstCap: n.kind === "cap" ? n.cap : b.firstCap, firstOpt: b.firstOpt, hasRef: b.hasRef };
+      break;
     }
     case "quant": {
-      const d = defined(n.body, D, check);
-      return n.min > 0 && n.max > 0 ? d : D;
+      const b = facts(n.body);
+      if (n.max === 0) r = { firstCap: 0, firstOpt: 0, hasRef: b.hasRef };
+      else r = { firstCap: b.firstCap, firstOpt: n.min > 0 ? b.firstOpt : b.firstCap, hasRef: b.hasRef };
+      break;
     }
+  }
+  if (r.firstCap === 0 && r.firstOpt === 0 && !r.hasRef) r = NO_FACTS;
+  (n as any).$f = r;
+  return r;
+}
+
+// Every group in the parts of the pattern a rewrite copies, in one pass
+function copiedCaps(n: Node, inCopy: boolean, out: Set<number>): void {
+  if (n.t === "seq") n.items.forEach((x) => copiedCaps(x, inCopy, out));
+  else if (n.t === "alt") n.alts.forEach((x) => copiedCaps(x, inCopy, out));
+  else if (n.t === "group") {
+    if (inCopy && n.cap) out.add(n.cap);
+    copiedCaps(n.body, inCopy, out);
+  } else if (n.t === "quant") copiedCaps(n.body, inCopy || n.rw === "tail" || (n.rw === "opt" && n.min > 0), out);
+}
+
+// The groups that have matched wherever a reference is (A23): the groups
+// before, a layer for each part that may not match (its own groups added
+// to it alone), only for the parts that hold a reference
+class Defined {
+  own = new Set<number>();
+  constructor(public up: Defined | null) {}
+  has(g: number): boolean {
+    for (let d: Defined | null = this; d !== null; d = d.up) if (d.own.has(g)) return true;
+    return false;
+  }
+}
+function checkRefs(n: Node, D: Defined, check: (r: Node & { t: "ref" }, D: Defined) => void): void {
+  switch (n.t) {
+    case "atom":
+      return;
+    case "ref":
+      check(n, D);
+      return;
+    case "seq":
+      for (const x of n.items) checkRefs(x, D, check);
+      return;
+    case "alt":
+      // (a branch's groups are its own: none is set after every branch)
+      for (const a of n.alts) if (facts(a).hasRef) checkRefs(a, new Defined(D), check);
+      return;
+    case "group":
+      if (n.kind === "nla" || n.kind === "nlb") {
+        if (facts(n.body).hasRef) checkRefs(n.body, new Defined(D), check);
+        return;
+      }
+      checkRefs(n.body, D, check);
+      if (n.kind === "cap") D.own.add(n.cap);
+      return;
+    case "quant":
+      if (n.min > 0 && n.max > 0) checkRefs(n.body, D, check);
+      else if (facts(n.body).hasRef) checkRefs(n.body, new Defined(D), check);
+      return;
   }
 }
 
@@ -390,19 +448,17 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
       const x = n.body;
       if (n.max > 1) {
         // (A26: every group of a repeated item matches in each iteration)
-        const must = defined(x, new Set(), null);
-        const g = caps(x).find((k) => !must.has(k));
-        if (g !== undefined)
+        const g = facts(x).firstOpt;
+        if (g !== 0)
           refuse(`group ${g} may not match in every repetition of the repeated part of the pattern around it, and Sagebrush cannot keep its earlier match as CPython does: such a group is not supported yet`);
       }
       if (n.lazy || n.max <= n.min || x.w![0] > 0) return;
-      const hasCaps = caps(x).length > 0;
+      const hasCaps = facts(x).firstCap !== 0;
       if (behind && (hasCaps || !x.el)) refuse("inside a look-behind, repeating a part of the pattern that can match the empty string is not supported yet");
       if (n.max === n.min + 1) {
         if (hasCaps || !x.el) {
           n.rw = "opt";
           rewrites = true;
-          if (n.min > 0) allCaps(x).forEach((g) => copied.add(g));
         }
       } else if (!x.el)
         refuse("repeating a part of the pattern that can match the empty string before it tries to match text (such as (?:|a)* or (a*?)*) is not supported yet");
@@ -411,13 +467,13 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
           refuse("a group inside a part of the pattern that can match the empty string and repeats a bounded number of times ({m,n} with n > m + 1) is not supported yet");
         n.rw = "tail";
         rewrites = true;
-        allCaps(x).forEach((g) => copied.add(g));
       }
     }
   };
   visit(root, false);
   // (A23: a reference only to a group that has matched wherever it is)
-  defined(root, new Set(), (r, D) => {
+  copiedCaps(root, false, copied);
+  checkRefs(root, new Defined(null), (r, D) => {
     if (copied.has(r.cap)) refuse(`a reference to group ${r.cap}, which is inside a repeated part of the pattern that can match the empty string, is not supported yet`);
     if (!D.has(r.cap)) refuse(`a reference to group ${r.cap}, which may not have matched at that point, is not supported yet (CPython's match fails there, JavaScript's matches the empty string)`);
   });
@@ -441,7 +497,7 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
     }
   };
   back = look(root);
-  const emitted = (caretFail: boolean) => emit(root, names, caretFail);
+  const emitted = (caretFail: boolean) => emit(src, root, names, caretFail);
   const main = emitted(false);
   if (main.src.length > 16 * src.length + 4096) refuse("the pattern nests too many repeats of parts that can match the empty string");
   return {
@@ -453,7 +509,9 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
     canConsume: root.w![1] > 0,
     back,
     caret,
-    variant: () => emitted(true).src,
+    // (made now, and only for a pattern with ^, so that the tree is not
+    // kept with the pattern)
+    variant: caret ? emitted(true).src : main.src,
   };
 }
 
@@ -461,46 +519,71 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
 // (?:...) (JS's u mode repeats no assertion), and with caretFail ^ as
 // (?!) (for a match on a slice of the subject, where ^ is never at its
 // start); each JS group's Python group, and the order of the ")"s
-function emit(root: Node, names: string[], caretFail: boolean): { src: string; jsToPy: number[]; closeSeq: number[] } {
+function emit(src: string, root: Node, names: string[], caretFail: boolean): { src: string; jsToPy: number[]; closeSeq: number[] } {
   const jsToPy: number[] = [0];
   const closeSeq: number[] = [0];
   const pyToJs: number[] = [];
   let closes = 0;
-  const go = (n: Node, copy: boolean): string => {
+  // (into one array of pieces, joined once: no string per node)
+  const out: string[] = [];
+  const go = (n: Node, copy: boolean): void => {
     switch (n.t) {
       case "atom":
-        return n.caret && caretFail ? "(?!)" : n.src;
+        out.push(n.caret && caretFail ? "(?!)" : src.slice(n.from, n.to));
+        return;
       case "ref":
-        return n.name !== null ? n.src : `\\${pyToJs[n.cap]}`;
+        out.push(n.name !== null ? n.src : `\\${pyToJs[n.cap]}`);
+        return;
       case "seq":
-        return n.items.map((x) => go(x, copy)).join("");
+        for (const x of n.items) go(x, copy);
+        return;
       case "alt":
-        return n.alts.map((x) => go(x, copy)).join("|");
+        n.alts.forEach((x, k) => {
+          if (k) out.push("|");
+          go(x, copy);
+        });
+        return;
       case "group": {
-        if (n.kind !== "cap") return n.open + go(n.body, copy) + ")";
+        if (n.kind !== "cap") {
+          out.push(n.open);
+          go(n.body, copy);
+          out.push(")");
+          return;
+        }
         const j = jsToPy.length;
         jsToPy.push(n.cap);
         closeSeq.push(0);
         if (!copy) pyToJs[n.cap] = j;
-        const open = copy ? "(" : n.open;
-        const s = open + go(n.body, copy) + ")";
+        out.push(copy ? "(" : n.open);
+        go(n.body, copy);
+        out.push(")");
         closeSeq[j] = ++closes;
-        return s;
+        return;
       }
       case "quant": {
         const x = n.body;
-        const b = go(x, copy);
-        const wrap = x.t === "group" && x.kind !== "cap" && x.kind !== "nc" ? `(?:${b})` : b;
-        if (n.rw === undefined) return wrap + n.q;
-        if (n.rw === "opt" && n.min === 0) return `(?:${b}|)`;
-        const head = n.rw === "opt" ? `(?:${b}){${n.min}}` : `(?:${b})${n.q}`;
-        return head + `(?:${go(x, true)}|)`;
+        const wrap = n.rw !== undefined || (x.t === "group" && x.kind !== "cap" && x.kind !== "nc");
+        if (wrap) out.push("(?:");
+        go(x, copy);
+        if (n.rw === "opt" && n.min === 0) {
+          out.push("|)");
+          return;
+        }
+        if (wrap) out.push(")");
+        if (n.rw === undefined) {
+          out.push(n.q);
+          return;
+        }
+        out.push(n.rw === "opt" ? `{${n.min}}` : n.q, "(?:");
+        go(x, true);
+        out.push("|)");
+        return;
       }
     }
   };
   void names;
-  const src = go(root, false);
-  return { src, jsToPy, closeSeq };
+  go(root, false);
+  return { src: out.join(""), jsToPy, closeSeq };
 }
 
 // A JS match as Python's groups: each Python group the last of its JS
