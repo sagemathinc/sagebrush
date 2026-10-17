@@ -316,11 +316,22 @@ function exact64(d: DType, b: bigint): number | undefined {
   return BigInt(n) === w ? n : undefined;
 }
 // r: op's result for x and y as computed in doubles
+// (the one fast case: a signed add, subtract or multiply whose inputs and
+// result are all safe integers, exact as correctly rounded; everything
+// else, uint64 always, exactly in BigInt and certified)
+const FAST_WIDE = new Set(["add", "subtract", "multiply"]);
 function wideExact(d: DType, op: string, r: number, x: number, y: number): number {
-  if (Number.isSafeInteger(r) && Number.isSafeInteger(x) && Number.isSafeInteger(y)) return r;
+  if (d.kind === "i" && FAST_WIDE.has(op) && Number.isSafeInteger(r) && Number.isSafeInteger(x) && Number.isSafeInteger(y)) return r;
   const g = BIG_OPS[op];
   if (g === undefined || !Number.isInteger(x) || !Number.isInteger(y)) return wideRefuse(d);
   return exact64(d, g(BigInt(x), BigInt(y))) ?? wideRefuse(d);
+}
+function allNonNeg(a: NDArray): boolean {
+  let ok = true;
+  loop1(a.shape, a.strides, a.offset, (p) => {
+    if (a.data[p] < 0) ok = false;
+  });
+  return ok;
 }
 function allSafe(a: NDArray): boolean {
   const d = a.data;
@@ -493,6 +504,9 @@ function assign(out: NDArray, src: NDArray) {
   const dt = out.dt;
   if (src.dt.cplx) {
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castNum(dt, sd[2 * q])));
+  } else if (isWide(dt) && isWide(src.dt) && src.dt !== dt) {
+    // (int64 <-> uint64: NumPy's wrap, certified)
+    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = exact64(dt, BigInt(sd[q])) ?? wideRefuse(dt)));
   } else if (dt.kind === "f" || dt.ctor !== Float64Array && dt.kind !== "b" && src.dt.isInt) {
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[q]));
   } else {
@@ -614,7 +628,38 @@ function checkPyInt(dt: DType, v: number) {
   if (dt.kind === "u" && v < 0) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
 }
 
+// The one admission of a Python value into int64 or uint64 storage
+// (creation, assignment, full, NumPy scalars): the ORIGINAL value checked:
+// an integer (an __index__ or __int__ object's integer, before any float)
+// within the dtype (NumPy's OverflowError) and one a double holds exactly
+// (else refused); a float through castNum (finite, truncated, in range)
+function admitWide(v: any, dt: DType): number {
+  if (typeof v === "boolean") return +v;
+  if (typeof v === "number") {
+    if (!Number.isInteger(v)) return castNum(dt, v);
+    if (dt.kind === "u" && v < 0) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    return v + 0;
+  }
+  if (typeof v === "bigint") {
+    const lo = dt.kind === "u" ? 0n : -(2n ** 63n), hi = dt.kind === "u" ? 2n ** 64n - 1n : 2n ** 63n - 1n;
+    if (v < lo || v > hi) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    const n = Number(v);
+    return BigInt(n) === v ? n : wideRefuse(dt);
+  }
+  if (v instanceof Obj.FloatBox) return castNum(dt, v.v);
+  const u = Obj.unbox(v);
+  if (u !== v) return admitWide(u, dt);
+  if (v !== null && typeof v === "object" && v.$npscalar !== undefined) return admitWide(v.$npscalar, dt);
+  if (v instanceof PyComplex) raise(T.TypeError, "can't convert complex to float");
+  for (const name of ["__index__", "__int__"]) {
+    if (Obj.lookupType(Obj.typeOf(v), name) !== undefined) return admitWide(name === "__index__" ? O.index(v) : Ty.intCall(v), dt);
+  }
+  const f = Ty.floatCallSafe(v);
+  if (f === undefined) return raise(T.TypeError, `int() argument must be a string, a bytes-like object or a real number, not '${typeName(v)}'`);
+  return castNum(dt, f);
+}
 function toNum(v: any, dt?: DType): number {
+  if (dt && isWide(dt)) return admitWide(v, dt);
   if (typeof v === "number") {
     if (dt && dt.isInt && Number.isInteger(v)) checkPyInt(dt, v);
     return v;
@@ -905,7 +950,8 @@ function getitem(a: NDArray, key: any): any {
 function setitem(a: NDArray, key: any, value: any) {
   writable(a);
   const r = resolveIndex(a, key);
-  const src = value instanceof NDArray ? value : operand(value).arr;
+  // (a Python value into int64/uint64 through the admission, its original)
+  const src = value instanceof NDArray ? value : isWide(a.dt) ? fromPy(value, a.dt) : operand(value).arr;
   if ("view" in r) return assign(r.view, src);
   const tmp = empty(r.shape, a.dt);
   assign(tmp, src);
@@ -1145,7 +1191,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   // kernel's result is checked after, and redone there if it left the safe
   // range, which needs the operands intact)
   const wide = isWide(rt) && spec.out === undefined;
-  if ((!out || tryOut) && !(wide && (out || (op !== "add" && op !== "subtract"))) && !ct.cplx && FAST_EXPR[op] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
+  if ((!out || tryOut) && !(wide && (out || rt.kind !== "i" || (op !== "add" && op !== "subtract"))) && !ct.cplx && FAST_EXPR[op] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
       && (rt.kind !== "b" || spec.out === "bool") && !(rt.kind === "b" && spec.out !== "bool")) {
     const n = prod(shape);
     const aScalar = a.ndim === 0, bScalar = b.ndim === 0;
@@ -1156,11 +1202,11 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
       const av = aScalar ? a.data[a.offset] : 0, bv = bScalar ? b.data[b.offset] : 0;
       // operands of different storage types (int8 + float64 ...) read fine as numbers
       fastKernel(op, kind)(a.data, a.offset, av, b.data, b.offset, bv, res.data, n);
-      if (!wide || allSafe(res)) return res;
+      if (!wide || (allSafe(res) && allSafe(a) && allSafe(b))) return res;
     } else if (shape.length >= 1 && n > 0) {
       const res = out ?? empty(shape, rt);
       stridedKernel(op)(a.data, a.offset, bstrides(a, shape), b.data, b.offset, bstrides(b, shape), res.data, shape);
-      if (!wide || allSafe(res)) return res;
+      if (!wide || (allSafe(res) && allSafe(a) && allSafe(b))) return res;
     }
   }
   const res = out ?? empty(shape, rt);
@@ -1359,13 +1405,16 @@ const UN_BIG: Record<string, (a: bigint) => bigint> = { negative: (a) => -a, pos
 export function unary(op: string, x: any): any {
   const r = unaryRaw(op, x);
   if (r instanceof NDArray && isWide(r.dt)) {
+    // (signed, safe inputs and results: exact; else UN_BIG's exact form,
+    // wrapped and certified (-uint64(1) is 2**64 - 1, refused); another
+    // operation only with safe inputs and results, unsigned ones >= 0)
     const a = operand(x).arr;
-    if (!allSafe(r) || (isWide(a.dt) && !allSafe(a))) {
-      const g = UN_BIG[op];
-      if (g === undefined) wideRefuse(r.dt);
+    const safe = allSafe(r) && allSafe(a);
+    const g = UN_BIG[op];
+    if (g !== undefined && !(safe && r.dt.kind === "i" && op !== "square")) {
       const od = r.data;
       loop1(a.shape, a.strides, a.offset, (p, k) => (od[k] = exact64(r.dt, g(BigInt(a.data[p]))) ?? wideRefuse(r.dt)));
-    }
+    } else if (g === undefined && (!safe || (r.dt.kind === "u" && !allNonNeg(r)))) wideRefuse(r.dt);
   }
   return r;
 }
@@ -1598,7 +1647,7 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
 // np.array([[1e-200, 1e200], [1e-200, 1e200]], dtype=complex).T NumPy gives
 // 1+0j and this 0j (as the real fold does for a real array), a known
 // traversal-order limitation.
-function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType): NDArray {
+function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: [number, number] | null = null): NDArray {
   // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
   if (a.dt.cplx && !rt.cplx) raise(T.TypeError, `prod: a complex array multiplied in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
   const nd = a.ndim;
@@ -1615,8 +1664,10 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
   for (let r = 0; r < rows; r++) {
     // (from the first element, as NumPy's reduction: 1 only for none)
     const k0 = 2 * (base0 + r * rn);
-    let re = rn ? d[k0] : 1, im = rn ? d[k0 + 1] : 0;
-    for (let i = 1; i < rn; i++) {
+    // (initial= starts the product, as NumPy's)
+    let re = init ? init[0] : rn ? d[k0] : 1, im = init ? init[1] : rn ? d[k0 + 1] : 0;
+    if (init && f32) [re, im] = [Math.fround(re), Math.fround(im)];
+    for (let i = init ? 0 : 1; i < rn; i++) {
       const k = 2 * (base0 + r * rn + i), xr = d[k], xi = d[k + 1];
       [re, im] = [re * xr - im * xi, re * xi + im * xr];
       if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
@@ -1725,6 +1776,45 @@ function mulIn(rt: DType, what: string): (p: number, x: number) => number {
     if (bits === 32) return signed ? r | 0 : r >>> 0;
     return signed ? (r << (32 - bits)) >> (32 - bits) : r & ((1 << bits) - 1);
   };
+}
+
+// numpy.prod of a real array: each output the product of its reduced
+// elements in NumPy's iterator order, their memory order (the reduced axes
+// by decreasing stride, a negative stride walked forward), from 1 (or
+// initial: it starts the product, as NumPy's), each element cast to rt and
+// each product rounded or wrapped as mulIn
+function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, hasInitial: boolean): NDArray {
+  const nd = a.ndim;
+  const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
+  const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
+  const outShape = keep.map((i) => a.shape[i]);
+  const out = empty(outShape, rt);
+  // (the reduced axes outermost-first by stride; a negative one reversed)
+  let off = a.offset;
+  const red = ax.map((i) => ({ n: a.shape[i], st: a.strides[i] }));
+  for (const r of red) if (r.st < 0 && r.n > 0) {
+    off += r.st * (r.n - 1);
+    r.st = -r.st;
+  }
+  red.sort((p, q) => q.st - p.st);
+  const rshape = red.map((r) => r.n), rst = red.map((r) => r.st);
+  const mul = mulIn(rt, "prod");
+  const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : v);
+  const d = a.data, od = out.data;
+  const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]);
+  loop1(kshape, kst, off, (p0, k) => {
+    let acc = init, first = !hasInitial;
+    loop1(rshape, rst, p0, (p) => {
+      const v = cast(d[p]);
+      // (as NumPy's reduction: the first element copied, then multiplied)
+      if (first) {
+        acc = v;
+        first = false;
+      } else acc = mul(acc, v);
+    });
+    od[k] = castNum(rt, acc);
+  });
+  return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
 }
 
 function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray {
@@ -2731,7 +2821,7 @@ newBuiltinModule("_numpy", (m) => {
     const v = operand(value);
     const dt = dtype !== null ? toDtype(dtype) : v.weak ? scalarDtype(v.weak) : v.arr.dt;
     const a = empty(shapeArg(shape), dt);
-    assign(a, v.arr);
+    assign(a, isWide(dt) && !(value instanceof NDArray) ? fromPy(value, dt) : v.arr);
     return a;
   });
   fn("arange", (start: any, stop: any = null, step: any = null, dtype: any = null) => {
@@ -2746,6 +2836,19 @@ newBuiltinModule("_numpy", (m) => {
     if (st === 0) raise(T.ZeroDivisionError, "division by zero");
     const n = Math.max(0, Math.ceil((s1 - s0) / st));
     const dt = dtype !== null ? toDtype(dtype) : isint ? D.int64 : D.float64;
+    // (an integer progression into int64/uint64: computed exactly, each
+    // value admitted: arange(2**53, 2**53 + 4) never rounds)
+    if (isint && isWide(dt)) {
+      const big = (w: Weak) => w.big ?? BigInt(w.v);
+      const [b0, b1, bs] = ws.map((w) => big(w!));
+      const span = b1 - b0;
+      const nb = span <= 0n === bs > 0n ? 0n : (span + bs - (bs > 0n ? 1n : -1n)) / bs;
+      if (nb > 2n ** 32n) raise(T.MemoryError);
+      const N = Number(nb < 0n ? 0n : nb);
+      const out = empty([N], dt);
+      for (let i = 0; i < N; i++) out.data[i] = admitWide(b0 + BigInt(i) * bs, dt);
+      return out;
+    }
     const a = empty([n], dt);
     for (let i = 0; i < n; i++) a.data[i] = castNum(dt, s0 + i * st);
     return a;
@@ -2788,11 +2891,10 @@ newBuiltinModule("_numpy", (m) => {
         const A = { arr: { dt: wa.dt ?? scalarDtype(wa) } as NDArray, weak: wa.dt ? null : wa };
         const B = { arr: { dt: wb.dt ?? scalarDtype(wb) } as NDArray, weak: wb.dt ? null : wb };
         let ct = resultType(A, B);
-        if (ct.kind === "f" || (ct.isInt && ct.ctor === Float64Array && op !== "power" && op !== "multiply" && op !== "left_shift")) {
-          for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
-          if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
+        // (floats only: integers take binary()'s checked kernel)
+        if (ct.kind === "f") {
           const rt = spec.out === "bool" ? D.bool : ct;
-          const f = ct.isInt ? (spec.int ?? spec.f) : spec.f;
+          const f = spec.f;
           const v = castNum(rt, f(wa.v, wb.v));
           return pyScalarOf(rt, [v], 0);
         }
@@ -2808,16 +2910,18 @@ newBuiltinModule("_numpy", (m) => {
     if (a.dt !== D.float64 || !a.isC() || a.size === 0) return null;
     return 0 + pairwiseSqDev(a.data, a.offset, a.size, toNum(m));
   });
-  fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => {
+  fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, initial: any = null) => {
     const x = asarray(a);
     const rt = dtype !== null ? toDtype(dtype) : sumType(x.dt);
+
     // (complex: real and imaginary parts multiplied together; a real fold
     // read only the real parts)
-    if (x.dt.cplx || rt.cplx) return finish(complexProd(x, axesArg(axis, x.ndim), !!keepdims, rt), axis, !!keepdims);
-    // (in rt, as NumPy's multiply loop: the elements first cast to a float
-    // rt, each product rounded to it or wrapped to its integer width)
-    const src = rt !== x.dt && rt.kind === "f" ? copy(x, rt) : x;
-    return finish(reduceAxes(src, axesArg(axis, x.ndim), !!keepdims, rt, 1, mulIn(rt, "prod")), axis, !!keepdims);
+    if (x.dt.cplx || rt.cplx) return finish(complexProd(x, axesArg(axis, x.ndim), !!keepdims, rt, initial === null ? null : toC(initial)), axis, !!keepdims);
+    // (in rt, as NumPy's multiply loop: each element cast to rt, each product
+    // rounded to it or wrapped to its integer width; from initial, in the
+    // reduced elements' memory order: prodReduce)
+    const init = initial === null ? 1 : rt.isInt ? toNum(initial, rt) : castNum(rt, toNum(initial));
+    return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null), axis, !!keepdims);
   });
   fn("amax", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true));
   fn("amin", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false));
