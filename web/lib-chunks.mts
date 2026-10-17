@@ -18,8 +18,10 @@
 // matlab-more, magma-more) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
 // "-").  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
-// pkg-<name>, its files by "<name>/<path>", and the manifest carries the
-// packages' registry (src/compile.ts checks each file against it).  A chunk's file name has its content's
+// pkg-<name>, its files by "<name>/<path>", with its compiled code too if a
+// mode's start imports it (recorded as "pkg:<name>/<path>"), and in that
+// mode's start then; the manifest carries the packages' registry
+// (src/compile.ts checks each file against it).  A chunk's file name has its content's
 // SHA-256, and the manifest the whole hash, which the worker checks before it
 // uses one (design/security.md, SEC-8D6-1: a cached copy is origin storage).
 import { createHash } from "node:crypto";
@@ -71,11 +73,23 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     files[path] = g;
     (src.get(g) ?? src.set(g, {}).get(g)!)[path] = lib[path];
   }
+  // (a package's files: one group, its file by "<dir>/<path>")
+  const pkgFiles: Record<string, string> = {};
+  const pkgGroups = new Map<string, Record<string, string>>();
+  for (const key of Object.keys(packages.files).sort()) {
+    const g = "pkg-" + key.split("/")[0];
+    if (src.has(g)) throw new Error(`library chunks: ${g} is a library group's name too`);
+    pkgFiles[key] = g;
+    (pkgGroups.get(g) ?? pkgGroups.set(g, {}).get(g)!)[key] = packages.files[key];
+  }
+  // (a recorded module's group: a library file's, or a package file's,
+  // "pkg:<dir>/<path>" in the recording, src/compile.ts precompiledPath)
+  const groupOfPath = (p: string): string | undefined => (p.startsWith("pkg:") ? (Object.hasOwn(pkgFiles, p.slice(4)) ? pkgFiles[p.slice(4)] : undefined) : Object.hasOwn(files, p) ? files[p] : undefined);
   for (const r of Object.values(recordings))
     for (const [key, m] of Object.entries(r.modules)) {
-      // (compiled from the library's own file: anything else is not used)
-      if (lib[m.path] === undefined) continue;
-      const g = files[m.path];
+      // (compiled from the library's or a package's own file: anything else is not used)
+      const g = groupOfPath(m.path);
+      if (g === undefined) continue;
       (pre.get(g) ?? pre.set(g, {}).get(g)!)[key] = m;
     }
   const chunks = new Map<string, Buffer>();
@@ -91,23 +105,17 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     const modules = pre.get(g);
     refs[g] = { src: put(g, "src", { files: f }), ...(modules ? { pre: put(g, "pre", { modules: Object.fromEntries(Object.entries(modules).sort((a, b) => a[0].localeCompare(b[0]))) }) } : {}) };
   }
-  // (a package's files: one group, sources only)
-  const pkgFiles: Record<string, string> = {};
-  const pkgGroups = new Map<string, Record<string, string>>();
-  for (const key of Object.keys(packages.files).sort()) {
-    const g = "pkg-" + key.split("/")[0];
-    pkgFiles[key] = g;
-    (pkgGroups.get(g) ?? pkgGroups.set(g, {}).get(g)!)[key] = packages.files[key];
+  for (const [g, f] of [...pkgGroups].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const modules = pre.get(g);
+    refs[g] = { src: put(g, "src", { files: f }), ...(modules ? { pre: put(g, "pre", { modules: Object.fromEntries(Object.entries(modules).sort((a, b) => a[0].localeCompare(b[0]))) }) } : {}) };
   }
-  for (const [g, f] of pkgGroups) {
-    if (refs[g]) throw new Error(`library chunks: ${g} is a library group's name too`);
-    refs[g] = { src: put(g, "src", { files: f }) };
-  }
+  // (a mode's start: the library's groups in START_ORDER, then the packages' it imported)
+  const rank = (g: string) => (g.startsWith("pkg-") ? START_ORDER.length : START_ORDER.indexOf(g as any));
   const modes: Record<string, string[]> = {};
   for (const m of ["sage", "matlab", "magma"]) {
     if (!sets[m]) continue;
-    const gs = new Set([...sets[m]].map((p) => files[p]).filter((g) => g !== undefined));
-    modes[m] = [...gs].sort((a, b) => START_ORDER.indexOf(a as any) - START_ORDER.indexOf(b as any));
+    const gs = new Set([...sets[m]].map(groupOfPath).filter((g): g is string => g !== undefined));
+    modes[m] = [...gs].sort((a, b) => rank(a) - rank(b));
   }
   return { manifest: { build, files, chunks: refs, modes, packages: { registry: packages.registry, files: pkgFiles } }, chunks };
 }

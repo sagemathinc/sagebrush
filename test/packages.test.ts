@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,8 +34,9 @@ function fixture(pkgs: Record<string, { root?: string; modules: string[]; files:
 }
 
 // Run `code` in a fresh runtime (a package is mounted once per process) with
-// this registry and packages directory; its output, or the exception's last line
-function run(code: string, registry: any, packages: string, extraPath: string[] = []): Promise<string> {
+// this registry and packages directory (and `pre`, the build's precompiled
+// code, __SAGEBRUSH_PRECOMPILED__); its output, or the exception's last line
+function run(code: string, registry: any, packages: string, extraPath: string[] = [], pre: any = null): Promise<string> {
   const w = new Worker(
     `
     const { parentPort, workerData } = require("node:worker_threads");
@@ -43,6 +44,11 @@ function run(code: string, registry: any, packages: string, extraPath: string[] 
     const c = require(workerData.dist + "/src/compile.js");
     Promise.resolve(c.initParser && c.initParser()).then(() => {
       c.setPackageRegistry(workerData.registry);
+      if (workerData.pre) {
+        // (the running build's id: the table's, unless the test says otherwise)
+        globalThis.__SAGEBRUSH_BUILD_ID__ = workerData.pre.runningBuild ?? workerData.pre.build;
+        globalThis.__SAGEBRUSH_PRECOMPILED__ = workerData.pre;
+      }
       const path = c.R.importModule("sys").path;
       for (const p of workerData.extraPath) path.push(p);
       path.push(c.libDir());
@@ -55,7 +61,7 @@ function run(code: string, registry: any, packages: string, extraPath: string[] 
       }
     });
     `,
-    { eval: true, workerData: { dist: DIST, code, registry, packages, extraPath } },
+    { eval: true, workerData: { dist: DIST, code, registry, packages, extraPath, pre } },
   );
   return new Promise((resolve, reject) => {
     w.once("message", (m) => (w.terminate(), resolve(m)));
@@ -143,6 +149,30 @@ test("a dotted name is a package's only under a package: a parent without __path
     w.once("error", reject);
   });
   assert.deepEqual(got, [null, "S = 'sub'\n"]);
+});
+
+test("a package's module uses the build's compiled code made from its checked bytes, at its own package path, and no other", async () => {
+  const f = fixture({ "demo-mod": { modules: ["demomod"], files: { "py/demomod.py": "WHO = 'source'\n" } } });
+  // (compiled code that says it was used: a module function, as src/emit.ts makes)
+  const entry = (path: string) => ({ build: "t", modules: { "py|demomod": { path, code: "(function ($g, R) { $g.WHO = 'precompiled'; })", lineMap: [] } } });
+  const code = "import demomod\nprint(demomod.WHO)\n";
+  assert.equal(await run(code, f.registry, f.dir, [], entry("pkg:demo-mod/py/demomod.py")), "precompiled\n");
+  // (another path: a library file's, another package's, another file's)
+  for (const other of ["demomod.py", "pkg:other/py/demomod.py", "pkg:demo-mod/py/other.py"]) assert.equal(await run(code, f.registry, f.dir, [], entry(other)), "source\n", other);
+  // (another build's: the table is build u's, this is build t)
+  assert.equal(await run(code, f.registry, f.dir, [], { ...entry("pkg:demo-mod/py/demomod.py"), build: "u", runningBuild: "t" }), "source\n");
+  // (a user's own demomod.py first on sys.path: not the package's, so never its compiled code)
+  const mine = mkdtempSync(join(tmpdir(), "sb-premine-"));
+  writeFileSync(join(mine, "demomod.py"), "WHO = 'mine'\n");
+  assert.equal(await run(code, f.registry, f.dir, [mine], entry("pkg:demo-mod/py/demomod.py")), "mine\n");
+});
+
+test("the build's recording of a mode's start records a package's module at its package path (SAGEBRUSH_PRECOMPILE_OUT)", () => {
+  const out = join(mkdtempSync(join(tmpdir(), "sb-rec-")), "rec.json");
+  execFileSync(process.execPath, [join(DIST, "src", "cli.js"), "-c", "import _cremona_small"], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: out, SAGEBRUSH_NO_COMPILE_CACHE: "1" }, encoding: "utf8", timeout: 120000 });
+  const rec = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(rec.modules["py|_cremona_small"]?.path, "pkg:cremona-small/py/_cremona_small.py");
+  assert.equal(typeof rec.modules["py|_cremona_small"].code, "string");
 });
 
 test("the catalog links a package's function to its file in packages/", async () => {
