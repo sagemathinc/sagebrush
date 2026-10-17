@@ -530,7 +530,14 @@ newBuiltinModule("_time", (m) => {
     const max = Number(limit);
     let fd: number | undefined;
     try {
-      fd = fs.openSync(p, "r");
+      // (never blocking: a FIFO or another special file named by TZ or TZDIR
+      // would hang a plain open or read. A symbolic link is followed, as
+      // glibc follows it, and its target checked: a directory is as glibc
+      // reads one (None); anything but a regular file is refused)
+      fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const st = fs.fstatSync(fd);
+      if (st.isDirectory()) return null;
+      if (!st.isFile()) throw markRaised(callObj(T.OSError, [0, "not a regular file", String(path)]));
       const buf = new Uint8Array(max);
       let n = 0;
       while (n < max) {
@@ -540,6 +547,7 @@ newBuiltinModule("_time", (m) => {
       }
       return new PyBytes(buf.slice(0, n));
     } catch (e: any) {
+      if (e?.$cls !== undefined) throw e;
       if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], String(path)]));
       if (["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM", "ELOOP", "ENAMETOOLONG"].includes(e?.code)) return null;
       throw markRaised(callObj(T.OSError, [e?.errno ? -e.errno : 0, String(e?.message ?? e), String(path)]));

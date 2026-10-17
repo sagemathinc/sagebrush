@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 // apart from CPython.
 const TEST = __dirname + "/../../test/";
 const run = (cmd: string, args: string[], tz: string, more: Record<string, string> = {}) =>
-  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TZ: tz, ...more }, maxBuffer: 64 << 20 }).split("\n");
+  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TZ: tz, ...more }, maxBuffer: 64 << 20, timeout: 120000 }).split("\n");
 const sagebrush = (file: string, tz: string, more: Record<string, string> = {}) => run(process.execPath, [__dirname + "/../src/cli.js", TEST + file], tz, more);
 const cpython = (file: string, tz: string, more: Record<string, string> = {}) => run("python3", [TEST + file], tz, more);
 function same(file: string, tz: string) {
@@ -112,6 +112,34 @@ test("time_tz_forms_cases.py under a TZDIR of its own: CPython's output", () => 
     copyFileSync("/usr/share/zoneinfo/America/New_York", dir + "/UTC");
     for (const tz of ["America/New_York", "UTC", "Etc/GMT", "", "Missing/Zone"])
       assert.deepEqual(sagebrush("time_tz_forms_cases.py", tz, { TZDIR: dir }), cpython("time_tz_forms_cases.py", tz, { TZDIR: dir }), tz);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+// (a TZ naming a special file: glibc's open or read of a FIFO would block
+// (CPython's import hangs), /dev/zero reads without end; here the zone file
+// is opened without blocking, fstat'ed, and anything but a regular file or a
+// directory is refused at once, naming it: daybreak2's HARD-CA7-1. Only
+// Sagebrush runs, with a deadline. A directory reads as glibc reads one, as
+// no file: CPython's output)
+test("time_tz_forms_cases.py under TZ naming a FIFO or /dev/zero: refused at once, never blocking", () => {
+  const dir = mkdtempSync(tmpdir() + "/sagebrush-fifo-");
+  try {
+    execFileSync("mkfifo", [dir + "/zone"]);
+    for (const tz of [dir + "/zone", ":" + dir + "/zone", "/dev/zero"]) {
+      const got = sagebrush("time_tz_forms_cases.py", tz);
+      const local = got.filter((l) => LOCAL.test(l));
+      assert.equal(local.length, 19, tz);
+      for (const l of local) assert.ok(l.includes(" raises NotImplementedError time: the host's time zone (TZ='" + tz + "') is not available in Sagebrush: ") && l.includes("not a regular file"), l);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+test("time_tz_forms_cases.py under TZ naming a directory: CPython's output", () => {
+  const dir = mkdtempSync(tmpdir() + "/sagebrush-tzdir-");
+  try {
+    assert.deepEqual(sagebrush("time_tz_forms_cases.py", dir), cpython("time_tz_forms_cases.py", dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
