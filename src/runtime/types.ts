@@ -1104,6 +1104,16 @@ method(T.bool, "__repr__", (x: any) => (x ? "True" : "False"));
 
 const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, errors: any = undefined) => {
   if (encoding !== undefined && x instanceof PyBytes) return decode(x, encoding, errors);
+  // (a __str__ returning a str subclass instance gives that instance, as
+  // CPython's PyObject_Str; str's own __str__ gives an exact copy)
+  if (x !== null && typeof x === "object" && !(x instanceof FloatBox)) {
+    const f = lookupType(typeOf(x), "__str__");
+    if (f !== undefined) {
+      const r = f(x);
+      if (typeof r === "string" || r instanceof StrLayout) return r;
+      raise(T.TypeError, `__str__ returned non-string (type ${typeName(r)})`);
+    }
+  }
   return str(x);
 });
 S.$kw = (pos, names, values) => S(...bindArgs("str", sig(["object", "encoding", "errors"]), pos, names, values));
@@ -1551,7 +1561,8 @@ method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
 method(S, "__hash__", (s: any) => O.hashAny(unbox(s)));
-method(S, "__str__", (s: string) => s);
+// (an exact str, of a subclass's too: its overrides gone, as CPython's)
+method(S, "__str__", (s: any) => (s instanceof StrLayout ? s.$v : s));
 method(S, "__getnewargs__", (s: any) => tuple([unbox(s)]));
 method(S, "__repr__", (s: string) => repr(s));
 method(S, "__format__", (s: string, spec: string) => format(s, spec));
@@ -2711,9 +2722,14 @@ hooks.primProxy = (base: PyType): PyType => {
 };
 for (const [P, L] of [[int, IntLayout], [float, FloatLayout], [S, StrLayout]] as const) {
   P.$jsBase = L;
-  // (a subclass's instance boxes the value)
+  // (a subclass's instance boxes the value: the exact one, as CPython's
+  // unicode_subtype_new copies it, when P gave a subclass instance, as
+  // str() does for a __str__ returning one, CORR-B14-1; never a box in a
+  // box)
   const box = (cls: any, v: any) => {
     if (cls === P) return v;
+    if (v instanceof PrimBox) v = v.$v;
+    if (v instanceof PrimBox) throw new Error(`internal: a boxed ${P.$name} inside a ${cls.$name}`);
     const o = new cls.$ctor!();
     o.$v = v;
     return o;
