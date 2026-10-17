@@ -75,3 +75,13 @@ test("an RDF integer power with an exponent past 2^20 bits is refused (HARD-RRQ-
     "2^70 ok RealDoubleElement\n" +
     "0.0 -1.0 +infinity\n");
 });
+
+test("a negative base to the smallest positive exponent builds no 2^-e-bit integer (HARD-FAB-1)", () => {
+  // (RealField(30, 'RNDU')(2)^(-2^61) is 2^(EMIN - 1), exponent near -2^62:
+  // whether it is an integer was decided with 1 << -e)
+  const r = run(
+    "R = RealField(30, rnd='RNDU')\ny = R(2)^(-(2^61))\nprint(y > 0, y < 2^-1000)\n" +
+    "z = R(-2)^y\nprint(z.parent())\n");
+  assert.equal(r.status, 0, r.stderr.slice(-400));
+  assert.equal(r.stdout, "True True\nComplex Field with 30 bits of precision\n");
+});
