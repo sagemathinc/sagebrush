@@ -1863,7 +1863,7 @@ class RealNumberMP:
         if R._prec > 53 and isinstance(n, RealDoubleElement):
             return _sa().RDF(self) ** n
         if R._prec > 53 and type(n) is float:
-            return float(self) ** n
+            return _cpow(float(self), n)
         x = self
         y = n if isinstance(n, RealNumberMP) else R(n)
         # (Sage's identities, whatever the operands' field: x^0 = 1 (NaN
@@ -1872,19 +1872,21 @@ class RealNumberMP:
             return R(1)
         if not x._special and x == 1:
             return R(1)
+        # (a complex power is in the complex field of the lower precision:
+        # RealField(100)(-3.5)^RR(0.5) is in CC)
+        P = min(R._prec, n._R._prec if isinstance(n, RealNumberMP) else 53 if isinstance(n, float) else R._prec)
+        if x._special == "nan" or y._special == "nan":
+            # (no real power: Sage's is a complex NaN, in that field)
+            nan = float("nan")
+            return ComplexField(P)(nan, nan)
         if x._special:
-            # an infinite or NaN base: an infinity for a positive exponent,
-            # 0 for a negative one (negative for -infinity to an odd one)
-            if x._special == "nan" or y._special == "nan":
-                return RealNumberMP(R, 0, 0, "nan")
+            # an infinite base: an infinity for a positive exponent, 0 for a
+            # negative one (negative for -infinity to an odd one)
             pos = y._special == "+inf" or (not y._special and y._m > 0)
             odd = not y._special and y._e <= 0 and y._m % (1 << -y._e) == 0 and (y._m >> -y._e) % 2 == 1
             if not pos:
                 return RealNumberMP(R, 0, 0)
             return RealNumberMP(R, 0, 0, "-inf" if x._special == "-inf" and odd else "+inf")
-        # (a complex power is in the complex field of the lower precision:
-        # RealField(100)(-3.5)^RR(0.5) is in CC)
-        P = min(R._prec, n._R._prec if isinstance(n, RealNumberMP) else 53 if isinstance(n, float) else R._prec)
         if x._m < 0 and y._special:
             if y._special == "nan":
                 # (a complex NaN)
@@ -1927,7 +1929,7 @@ class RealNumberMP:
     def __rpow__(self, b):
         if self._R._prec > 53 and type(b) is float:
             # (a Python float base to a finer field's power: a float, as Sage)
-            return b ** float(self)
+            return _cpow(b, float(self))
         return self._R(b) ** self
 
     # ---- comparison
@@ -2762,6 +2764,30 @@ def _mp_integral(m, e):
     if e >= 0:
         return True
     return -e <= abs(m).bit_length() and m & ((1 << -e) - 1) == 0
+
+
+def _cpow(x, y):
+    """x ** y for Python floats as Sage computes it: 0.0 to -infinity is
+    +infinity (Python raises ZeroDivisionError), to a finite negative power
+    ZeroDivisionError "zero to a negative power"; -infinity to a power is
+    real (C's pow), an overflow an infinity; a negative finite base to a
+    fractional power is Python's complex number, as in Sage."""
+    inf = float("inf")
+    # (y an odd integer: the sign of a negative base survives)
+    odd = -inf < y < inf and y == math.floor(y) and math.fmod(y, 2) != 0
+    if x == -inf and y == y and y != 0:
+        if y > 0:
+            return -inf if odd else inf
+        return -0.0 if odd else 0.0
+    try:
+        return x ** y
+    except ZeroDivisionError:
+        # (Sage: an error for a finite negative power, +infinity for -infinity)
+        if y > -inf:
+            raise ZeroDivisionError("zero to a negative power") from None
+        return inf
+    except OverflowError:
+        return -inf if x < 0 and odd else inf
 
 
 def _arith(a, b, op, R):
