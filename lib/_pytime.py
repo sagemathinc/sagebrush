@@ -48,7 +48,9 @@ The host's zone: UTC unless the host gives one.
 import _time
 from _time import perf_counter, perf_counter_ns, monotonic, monotonic_ns, time, time_ns, process_time, process_time_ns
 import math as _math
-from operator import index as _index
+# (_operator, not operator: the same index, without operator.py's cost on
+# every first `import time`)
+from _operator import index as _index
 
 # ------------------------------------------------------------------ the zone
 
