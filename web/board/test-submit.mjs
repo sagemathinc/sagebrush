@@ -239,8 +239,12 @@ try {
   check(!!(await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand") && document.activeElement === document.querySelector('[data-ask="q2"] details textarea') && document.querySelector('[data-ask="q2"] details').open`))), "Something else: said, the reader's own words open and focused");
   await shot("submit-5d-own.png");
   check((await sent("decide")).length === 1, "...and nothing more asked of the host");
+  // (other words written: Something else stands; then Choose again: the options, whatever the host said of the words before, astra's UI-E29-1)
+  await frame(`(() => { const w = document.querySelector('[data-ask="q2"] details textarea'); w.value = "Each $x$ goes to each $y$ under some $g \\in G$."; w.dispatchEvent(new Event("change")); })()`);
+  await sleep(800);
+  check(await frame(`${fb}.textContent.includes("Something else: your own words stand")`), "...it stands as other words are written");
   await frame(`${fb}.querySelector('.board-ask-clear').click()`);
-  check(!!(await until(async () => (await choices()).length === 3)), "Choose again: the options again");
+  check(!!(await until(async () => (await choices()).length === 3)) && (await sent("decide")).length === 1, "Choose again, after other words: the options again, nothing asked of the host: " + JSON.stringify(await choices()));
   // a choice with a next step: there, and said
   const cam0 = await frame(`JSON.stringify(window.board.camera)`);
   await frame(`${fb}.querySelector('a.board-ask-choice[href="#n1"]').click()`);
