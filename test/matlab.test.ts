@@ -2421,3 +2421,21 @@ test("a matrix product with an Inf or NaN is refused (dense, sparse, mixed and m
     "A negative matrix power of values that include Inf or NaN is not supported in Sagebrush: it is inv(A), whose result for them is not certified.",
     "1", "1", "1", "1", refused, refused, "single", "[37 54;81 118]", refused, "-2.6367796834847468e-16 -4.163336342344337e-16", "0.11100000888109207", "single 1.0000001192092896", "single", "1", "1"]);
 });
+
+test("inv, \\ and / refuse values that include Inf or NaN (no certified answer for them); scalars and finite systems are unchanged; isequaln compares complex parts with NaN equal to NaN", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, x = inv([Inf 2; 3 4]); catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4] \\ [1; 2]; catch e, disp(e.message), end",
+    "try, x = [1 2; 3 4] \\ [NaN; 2]; catch e, disp(e.message), end",
+    "try, x = [1 2] / [Inf 2; 3 4]; catch e, disp(e.message), end",
+    "try, x = sparse([Inf 2; 3 4]) \\ [1; 2]; catch e, disp(e.message), end",
+    "try, x = [NaN; 1] \\ [1; 2]; catch e, disp(e.message), end",
+    "disp(mat2str(size([Inf 2; 3 4] \\ zeros(2, 0)))); disp(mat2str(size(zeros(0, 2) / [Inf 3; 2 4]))); disp(mat2str(size(sparse([Inf 2; 3 4]) \\ zeros(2, 0))))",
+    "disp(inv(Inf)); disp(mat2str([2 0; 0 4] \\ [2; 4])); disp(mat2str([Inf 2] / 2)); disp(mat2str(4 \\ [Inf 8]))",
+    "disp(isequaln(complex(1, NaN), complex(1, NaN))); disp(isequaln(single(complex(1, NaN)), complex(1, NaN))); disp(isequaln(complex(NaN, 1), complex(NaN, 2))); disp(isequaln([NaN 1], [NaN 1])); disp(isequal(complex(1, NaN), complex(1, NaN)))",
+  ].join("\n")], { encoding: "utf8" });
+  const msg = (what: string) => what + " of values that include Inf or NaN is not supported in Sagebrush: its result for them is not certified. Solve with finite values.";
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [msg("inv"), msg("A linear solve (\\)"), msg("A linear solve (\\)"), msg("A linear solve (/)"), msg("A linear solve (\\)"), msg("A linear solve (\\)"),
+    "[2 0]", "[0 2]", "[2 0]", "0", "[1;1]", "[Inf 1]", "[Inf 2]", "1", "1", "0", "1", "0"]);
+});
