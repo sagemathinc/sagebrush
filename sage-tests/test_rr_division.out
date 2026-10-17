@@ -1,0 +1,500 @@
+RR(7)%RR(2) -> -1.00000000000000 Real Field with 53 bits of precision
+RR(7)%int(2) -> -1.00000000000000 Real Field with 53 bits of precision
+RDF(7)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(7)%R30(2) -> -1.0000000 Real Field with 30 bits of precision
+RR(5)%RR(2) -> 1.00000000000000 Real Field with 53 bits of precision
+RR(5)%int(2) -> 1.00000000000000 Real Field with 53 bits of precision
+RDF(5)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(5)%R30(2) -> 1.0000000 Real Field with 30 bits of precision
+RR(-7)%RR(2) -> 1.00000000000000 Real Field with 53 bits of precision
+RR(-7)%int(2) -> 1.00000000000000 Real Field with 53 bits of precision
+RDF(-7)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(-7)%R30(2) -> 1.0000000 Real Field with 30 bits of precision
+RR(7)%RR(-2) -> -1.00000000000000 Real Field with 53 bits of precision
+RR(7)%int(-2) -> -1.00000000000000 Real Field with 53 bits of precision
+RDF(7)%RDF(-2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(7)%R30(-2) -> -1.0000000 Real Field with 30 bits of precision
+RR(5.50000000000000)%RR(2) -> -0.500000000000000 Real Field with 53 bits of precision
+RR(5.50000000000000)%int(2) -> -0.500000000000000 Real Field with 53 bits of precision
+RDF(5.50000000000000)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(5.50000000000000)%R30(2) -> -0.50000000 Real Field with 30 bits of precision
+RR(1)%RR(3) -> 1.00000000000000 Real Field with 53 bits of precision
+RR(1)%int(3) -> 1.00000000000000 Real Field with 53 bits of precision
+RDF(1)%RDF(3) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(1)%R30(3) -> 1.0000000 Real Field with 30 bits of precision
+RR(2)%RR(3) -> -1.00000000000000 Real Field with 53 bits of precision
+RR(2)%int(3) -> -1.00000000000000 Real Field with 53 bits of precision
+RDF(2)%RDF(3) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(2)%R30(3) -> -1.0000000 Real Field with 30 bits of precision
+RR(-2)%RR(3) -> 1.00000000000000 Real Field with 53 bits of precision
+RR(-2)%int(3) -> 1.00000000000000 Real Field with 53 bits of precision
+RDF(-2)%RDF(3) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(-2)%R30(3) -> 1.0000000 Real Field with 30 bits of precision
+RR(6)%RR(4) -> -2.00000000000000 Real Field with 53 bits of precision
+RR(6)%int(4) -> -2.00000000000000 Real Field with 53 bits of precision
+RDF(6)%RDF(4) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(6)%R30(4) -> -2.0000000 Real Field with 30 bits of precision
+RR(10)%RR(4) -> 2.00000000000000 Real Field with 53 bits of precision
+RR(10)%int(4) -> 2.00000000000000 Real Field with 53 bits of precision
+RDF(10)%RDF(4) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(10)%R30(4) -> 2.0000000 Real Field with 30 bits of precision
+RR(1.00000000000000e300)%RR(3) -> 0.000000000000000 Real Field with 53 bits of precision
+RR(1.00000000000000e300)%int(3) -> 0.000000000000000 Real Field with 53 bits of precision
+RDF(1.00000000000000e300)%RDF(3) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(1.00000000000000e300)%R30(3) -> 0.00000000 Real Field with 30 bits of precision
+RR(1.00000000000000e-300)%RR(3) -> 1.00000000000000e-300 Real Field with 53 bits of precision
+RR(1.00000000000000e-300)%int(3) -> 1.00000000000000e-300 Real Field with 53 bits of precision
+RDF(1.00000000000000e-300)%RDF(3) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(1.00000000000000e-300)%R30(3) -> 1.0000000e-300 Real Field with 30 bits of precision
+RR(0.100000000000000)%RR(0.0300000000000000) -> 0.0100000000000000 Real Field with 53 bits of precision
+RR(0.100000000000000)%int(0.0300000000000000) -> NaN Real Field with 53 bits of precision
+RDF(0.100000000000000)%RDF(0.0300000000000000) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(0.100000000000000)%R30(0.0300000000000000) -> 0.010000000 Real Field with 30 bits of precision
+RR(-0.000000000000000)%RR(2) -> -0.000000000000000 Real Field with 53 bits of precision
+RR(-0.000000000000000)%int(2) -> -0.000000000000000 Real Field with 53 bits of precision
+RDF(-0.000000000000000)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RR(0)%RR(2) -> 0.000000000000000 Real Field with 53 bits of precision
+RR(0)%int(2) -> 0.000000000000000 Real Field with 53 bits of precision
+RDF(0)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(0)%R30(2) -> 0.00000000 Real Field with 30 bits of precision
+RR(3)%RR(inf) -> 3.00000000000000 Real Field with 53 bits of precision
+RR(3)%int(inf) -> 3.00000000000000 Real Field with 53 bits of precision
+RDF(3)%RDF(inf) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(3)%R30(inf) -> 3.0000000 Real Field with 30 bits of precision
+RR(-3)%RR(inf) -> -3.00000000000000 Real Field with 53 bits of precision
+RR(-3)%int(inf) -> -3.00000000000000 Real Field with 53 bits of precision
+RDF(-3)%RDF(inf) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(-3)%R30(inf) -> -3.0000000 Real Field with 30 bits of precision
+RR(inf)%RR(2) -> NaN Real Field with 53 bits of precision
+RR(inf)%int(2) -> NaN Real Field with 53 bits of precision
+RDF(inf)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(inf)%R30(2) -> NaN Real Field with 30 bits of precision
+RR(NaN)%RR(2) -> NaN Real Field with 53 bits of precision
+RR(NaN)%int(2) -> NaN Real Field with 53 bits of precision
+RDF(NaN)%RDF(2) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(NaN)%R30(2) -> NaN Real Field with 30 bits of precision
+RR(2)%RR(NaN) -> NaN Real Field with 53 bits of precision
+RR(2)%int(NaN) -> NaN Real Field with 53 bits of precision
+RDF(2)%RDF(NaN) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R30(2)%R30(NaN) -> NaN Real Field with 30 bits of precision
+RR(1)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(1)/int(0) -> +infinity Real Field with 53 bits of precision
+R30(1)/R30(0) -> +infinity Real Field with 30 bits of precision
+RDF(1)/RDF(0) -> +infinity Real Double Field
+int(1)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(-1)/RR(0) -> -infinity Real Field with 53 bits of precision
+RR(-1)/int(0) -> -infinity Real Field with 53 bits of precision
+R30(-1)/R30(0) -> -infinity Real Field with 30 bits of precision
+RDF(-1)/RDF(0) -> -infinity Real Double Field
+int(1)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(0)/RR(0) -> NaN Real Field with 53 bits of precision
+RR(0)/int(0) -> NaN Real Field with 53 bits of precision
+R30(0)/R30(0) -> NaN Real Field with 30 bits of precision
+RDF(0)/RDF(0) -> NaN Real Double Field
+int(1)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(1)/RR(-0) -> -infinity Real Field with 53 bits of precision
+RR(1)/int(-0) -> -infinity Real Field with 53 bits of precision
+RDF(1)/RDF(-0) -> -infinity Real Double Field
+int(1)/RR(-0) -> -infinity Real Field with 53 bits of precision
+RR(inf)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(inf)/int(0) -> +infinity Real Field with 53 bits of precision
+R30(inf)/R30(0) -> +infinity Real Field with 30 bits of precision
+RDF(inf)/RDF(0) -> +infinity Real Double Field
+int(1)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(NaN)/RR(0) -> NaN Real Field with 53 bits of precision
+RR(NaN)/int(0) -> NaN Real Field with 53 bits of precision
+R30(NaN)/R30(0) -> NaN Real Field with 30 bits of precision
+RDF(NaN)/RDF(0) -> NaN Real Double Field
+int(1)/RR(0) -> +infinity Real Field with 53 bits of precision
+RR(1)/RR(inf) -> 0.000000000000000 Real Field with 53 bits of precision
+RR(1)/int(inf) -> 0.000000000000000 Real Field with 53 bits of precision
+R30(1)/R30(inf) -> 0.00000000 Real Field with 30 bits of precision
+RDF(1)/RDF(inf) -> 0.0 Real Double Field
+int(1)/RR(inf) -> 0.000000000000000 Real Field with 53 bits of precision
+RR(inf)/RR(inf) -> NaN Real Field with 53 bits of precision
+RR(inf)/int(inf) -> NaN Real Field with 53 bits of precision
+R30(inf)/R30(inf) -> NaN Real Field with 30 bits of precision
+RDF(inf)/RDF(inf) -> NaN Real Double Field
+int(1)/RR(inf) -> 0.000000000000000 Real Field with 53 bits of precision
+divmod(RR(7),RR(2)) -> (3.50000000000000, 0.000000000000000) tuple
+divmod(RR(7),2) -> (3.50000000000000, 0.000000000000000) tuple
+RR(7)//RR(2) !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+RR(7)//2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+RR(7)//float(2) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+7//RR(2) !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+float(7)//RR(2) !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+R30(7)//R30(2) !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+int7 % RR2 -> -1.00000000000000 Real Field with 53 bits of precision
+int7 // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(int7,RR2) -> (3.50000000000000, 0.000000000000000) tuple
+int7 / RR2 -> 3.50000000000000 Real Field with 53 bits of precision
+int7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+int7 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(int7,R30_2) -> (3.5000000, 0.00000000) tuple
+int7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+int7 % R100_2 -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+int7 // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 100 bits of precision' and 'Real Field with 100 bits of
+divmod(int7,R100_2) -> (3.5000000000000000000000000000, 0.00000000000000000000000000000) tuple
+int7 / R100_2 -> 3.5000000000000000000000000000 Real Field with 100 bits of precision
+int7 % RDF2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+int7 // RDF2 -> 3.5 Real Double Field
+divmod(int7,RDF2) -> (3.5, 0) tuple
+int7 / RDF2 -> 3.5 Real Double Field
+int7 % RRbig -> 7.00000000000000 Real Field with 53 bits of precision
+int7 // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(int7,RRbig) -> (5.29472392617287e-477, 0.000000000000000) tuple
+int7 / RRbig -> 5.29472392617287e-477 Real Field with 53 bits of precision
+int7 % RR0 -> NaN Real Field with 53 bits of precision
+int7 // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(int7,RR0) !! ZeroDivisionError 
+int7 / RR0 -> +infinity Real Field with 53 bits of precision
+ZZ7 % RR2 -> -1.00000000000000 Real Field with 53 bits of precision
+ZZ7 // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(ZZ7,RR2) -> (3.50000000000000, 0.000000000000000) tuple
+ZZ7 / RR2 -> 3.50000000000000 Real Field with 53 bits of precision
+ZZ7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+ZZ7 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(ZZ7,R30_2) -> (3.5000000, 0.00000000) tuple
+ZZ7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+ZZ7 % R100_2 -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+ZZ7 // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 100 bits of precision' and 'Real Field with 100 bits of
+divmod(ZZ7,R100_2) -> (3.5000000000000000000000000000, 0.00000000000000000000000000000) tuple
+ZZ7 / R100_2 -> 3.5000000000000000000000000000 Real Field with 100 bits of precision
+ZZ7 % RDF2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+ZZ7 // RDF2 -> 3.5 Real Double Field
+divmod(ZZ7,RDF2) -> (3.5, 0) tuple
+ZZ7 / RDF2 -> 3.5 Real Double Field
+ZZ7 % RRbig -> 7.00000000000000 Real Field with 53 bits of precision
+ZZ7 // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(ZZ7,RRbig) -> (5.29472392617287e-477, 0.000000000000000) tuple
+ZZ7 / RRbig -> 5.29472392617287e-477 Real Field with 53 bits of precision
+ZZ7 % RR0 -> NaN Real Field with 53 bits of precision
+ZZ7 // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(ZZ7,RR0) !! ZeroDivisionError 
+ZZ7 / RR0 -> +infinity Real Field with 53 bits of precision
+QQ7/2 % RR2 !! ZeroDivisionError inverse of Mod(0, 2) does not exist
+QQ7/2 // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(QQ7/2,RR2) -> (7/4, 0) tuple
+QQ7/2 / RR2 -> 1.75000000000000 Real Field with 53 bits of precision
+QQ7/2 % R30_2 !! ZeroDivisionError inverse of Mod(0, 2) does not exist
+QQ7/2 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(QQ7/2,R30_2) -> (7/4, 0) tuple
+QQ7/2 / R30_2 -> 1.7500000 Real Field with 30 bits of precision
+QQ7/2 % R100_2 !! ZeroDivisionError inverse of Mod(0, 2) does not exist
+QQ7/2 // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 100 bits of precision' and 'Real Field with 100 bits of
+divmod(QQ7/2,R100_2) -> (7/4, 0) tuple
+QQ7/2 / R100_2 -> 1.7500000000000000000000000000 Real Field with 100 bits of precision
+QQ7/2 % RDF2 !! ZeroDivisionError inverse of Mod(0, 2) does not exist
+QQ7/2 // RDF2 -> 1.75 Real Double Field
+divmod(QQ7/2,RDF2) -> (7/4, 0) tuple
+QQ7/2 / RDF2 -> 1.75 Real Double Field
+QQ7/2 % RRbig !! ZeroDivisionError inverse of Mod(2, 13220708194808066791763681046575772844658992507282981218378372212809863913889720894700070944
+QQ7/2 // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(QQ7/2,RRbig) -> (7/2644141638961613358352736209315154568931798501456596243675674442561972782777944178940014188841094297015213506975780043406366821558680813172403115265389031909207791964965258508484983321944740748010274385626209712660489472016348735025516927553950004812072462303770985561915972719668876085734211135691510089666359091952485442441694647322759885421011242197485710984687805098420550398679227628431566806578803499411769460218076431268895421576451300407067668440410084471746940006039552, 0) tuple
+QQ7/2 / RRbig -> 2.64736196308644e-477 Real Field with 53 bits of precision
+QQ7/2 % RR0 !! ZeroDivisionError Rational modulo by zero
+QQ7/2 // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(QQ7/2,RR0) !! ZeroDivisionError rational division by zero
+QQ7/2 / RR0 -> +infinity Real Field with 53 bits of precision
+float7 % RR2 -> -1.00000000000000 Real Field with 53 bits of precision
+float7 // RR2 !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+divmod(float7,RR2) !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+float7 / RR2 -> 3.50000000000000 Real Field with 53 bits of precision
+float7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+float7 // R30_2 !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+divmod(float7,R30_2) !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+float7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+float7 % R100_2 -> 1.0 float
+float7 // R100_2 -> 3.0 float
+divmod(float7,R100_2) -> (3.0, 1.0) tuple
+float7 / R100_2 -> 3.5 float
+float7 % RDF2 !! TypeError unsupported operand type(s) for %: 'float' and 'sage.rings.real_double_element_gsl.RealDoubleElement_gsl'
+float7 // RDF2 -> 3.5 Real Double Field
+divmod(float7,RDF2) !! TypeError unsupported operand type(s) for %: 'float' and 'sage.rings.real_double_element_gsl.RealDoubleElement_gsl'
+float7 / RDF2 -> 3.5 Real Double Field
+float7 % RRbig -> 7.00000000000000 Real Field with 53 bits of precision
+float7 // RRbig !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+divmod(float7,RRbig) !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+float7 / RRbig -> 5.29472392617287e-477 Real Field with 53 bits of precision
+float7 % RR0 -> NaN Real Field with 53 bits of precision
+float7 // RR0 !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+divmod(float7,RR0) !! TypeError unsupported operand type(s) for //: 'float' and 'sage.rings.real_mpfr.RealNumber'
+float7 / RR0 -> +infinity Real Field with 53 bits of precision
+RDF7 % RR2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // RR2 -> 3.5 Real Double Field
+divmod(RDF7,RR2) -> (3.5, 0) tuple
+RDF7 / RR2 -> 3.5 Real Double Field
+RDF7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+RDF7 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(RDF7,R30_2) -> (3.5, 0) tuple
+RDF7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+RDF7 % R100_2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // R100_2 -> 3.5 Real Double Field
+divmod(RDF7,R100_2) -> (3.5, 0) tuple
+RDF7 / R100_2 -> 3.5 Real Double Field
+RDF7 % RDF2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // RDF2 -> 3.5 Real Double Field
+divmod(RDF7,RDF2) -> (3.5, 0) tuple
+RDF7 / RDF2 -> 3.5 Real Double Field
+RDF7 % int2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // int2 -> 3.5 Real Double Field
+divmod(RDF7,int2) -> (3.5, 0) tuple
+RDF7 / int2 -> 3.5 Real Double Field
+RDF7 % float2 !! TypeError unsupported operand type(s) for %: 'sage.rings.real_double_element_gsl.RealDoubleElement_gsl' and 'float'
+RDF7 // float2 -> 3.5 Real Double Field
+divmod(RDF7,float2) -> (3.5, 0) tuple
+RDF7 / float2 -> 3.5 Real Double Field
+RDF7 % QQ3/2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // QQ3/2 -> 4.666666666666667 Real Double Field
+divmod(RDF7,QQ3/2) -> (4.666666666666667, 0) tuple
+RDF7 / QQ3/2 -> 4.666666666666667 Real Double Field
+RDF7 % RRbig !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // RRbig -> 0.0 Real Double Field
+divmod(RDF7,RRbig) -> (0.0, 0) tuple
+RDF7 / RRbig -> 0.0 Real Double Field
+RDF7 % RR0 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF7 // RR0 -> +infinity Real Double Field
+divmod(RDF7,RR0) -> (+infinity, 0) tuple
+RDF7 / RR0 -> +infinity Real Double Field
+RR7 % RR2 -> -1.00000000000000 Real Field with 53 bits of precision
+RR7 // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,RR2) -> (3.50000000000000, 0.000000000000000) tuple
+RR7 / RR2 -> 3.50000000000000 Real Field with 53 bits of precision
+RR7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+RR7 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(RR7,R30_2) -> (3.5000000, 0.000000000000000) tuple
+RR7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+RR7 % R100_2 -> -1.00000000000000 Real Field with 53 bits of precision
+RR7 // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,R100_2) -> (3.50000000000000, 0.000000000000000) tuple
+RR7 / R100_2 -> 3.50000000000000 Real Field with 53 bits of precision
+RR7 % RDF2 -> -1.00000000000000 Real Field with 53 bits of precision
+RR7 // RDF2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,RDF2) -> (3.50000000000000, 0.000000000000000) tuple
+RR7 / RDF2 -> 3.50000000000000 Real Field with 53 bits of precision
+RR7 % int2 -> -1.00000000000000 Real Field with 53 bits of precision
+RR7 // int2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,int2) -> (3.50000000000000, 0.000000000000000) tuple
+RR7 / int2 -> 3.50000000000000 Real Field with 53 bits of precision
+RR7 % float2 -> -1.00000000000000 Real Field with 53 bits of precision
+RR7 // float2 !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+divmod(RR7,float2) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+RR7 / float2 -> 3.50000000000000 Real Field with 53 bits of precision
+RR7 % QQ3/2 -> -0.500000000000000 Real Field with 53 bits of precision
+RR7 // QQ3/2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,QQ3/2) -> (4.66666666666667, 0.000000000000000) tuple
+RR7 / QQ3/2 -> 4.66666666666667 Real Field with 53 bits of precision
+RR7 % RRbig -> 7.00000000000000 Real Field with 53 bits of precision
+RR7 // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,RRbig) -> (5.29472392617287e-477, 0.000000000000000) tuple
+RR7 / RRbig -> 5.29472392617287e-477 Real Field with 53 bits of precision
+RR7 % RR0 -> NaN Real Field with 53 bits of precision
+RR7 // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RR7,RR0) !! ZeroDivisionError 
+RR7 / RR0 -> +infinity Real Field with 53 bits of precision
+R30_7 % RR2 -> -1.0000000 Real Field with 30 bits of precision
+R30_7 // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,RR2) -> (3.5000000, 0.00000000) tuple
+R30_7 / RR2 -> 3.5000000 Real Field with 30 bits of precision
+R30_7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+R30_7 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,R30_2) -> (3.5000000, 0.00000000) tuple
+R30_7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+R30_7 % R100_2 -> -1.0000000 Real Field with 30 bits of precision
+R30_7 // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,R100_2) -> (3.5000000, 0.00000000) tuple
+R30_7 / R100_2 -> 3.5000000 Real Field with 30 bits of precision
+R30_7 % RDF2 -> -1.0000000 Real Field with 30 bits of precision
+R30_7 // RDF2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,RDF2) -> (3.5000000, 0.00000000) tuple
+R30_7 / RDF2 -> 3.5000000 Real Field with 30 bits of precision
+R30_7 % int2 -> -1.0000000 Real Field with 30 bits of precision
+R30_7 // int2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,int2) -> (3.5000000, 0.00000000) tuple
+R30_7 / int2 -> 3.5000000 Real Field with 30 bits of precision
+R30_7 % float2 -> -1.0000000 Real Field with 30 bits of precision
+R30_7 // float2 !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+divmod(R30_7,float2) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+R30_7 / float2 -> 3.5000000 Real Field with 30 bits of precision
+R30_7 % QQ3/2 -> -0.50000000 Real Field with 30 bits of precision
+R30_7 // QQ3/2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,QQ3/2) -> (4.6666667, 0.00000000) tuple
+R30_7 / QQ3/2 -> 4.6666667 Real Field with 30 bits of precision
+R30_7 % RRbig -> 7.0000000 Real Field with 30 bits of precision
+R30_7 // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,RRbig) -> (5.2947239e-477, 0.00000000) tuple
+R30_7 / RRbig -> 5.2947239e-477 Real Field with 30 bits of precision
+R30_7 % RR0 -> NaN Real Field with 30 bits of precision
+R30_7 // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R30_7,RR0) !! ZeroDivisionError 
+R30_7 / RR0 -> +infinity Real Field with 30 bits of precision
+R100_7 % RR2 -> -1.00000000000000 Real Field with 53 bits of precision
+R100_7 // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(R100_7,RR2) -> (3.50000000000000, 0.00000000000000000000000000000) tuple
+R100_7 / RR2 -> 3.50000000000000 Real Field with 53 bits of precision
+R100_7 % R30_2 -> -1.0000000 Real Field with 30 bits of precision
+R100_7 // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(R100_7,R30_2) -> (3.5000000, 0.00000000000000000000000000000) tuple
+R100_7 / R30_2 -> 3.5000000 Real Field with 30 bits of precision
+R100_7 % R100_2 -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100_7 // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 100 bits of precision' and 'Real Field with 100 bits of
+divmod(R100_7,R100_2) -> (3.5000000000000000000000000000, 0.00000000000000000000000000000) tuple
+R100_7 / R100_2 -> 3.5000000000000000000000000000 Real Field with 100 bits of precision
+R100_7 % RDF2 !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+R100_7 // RDF2 -> 3.5 Real Double Field
+divmod(R100_7,RDF2) -> (3.5, 0.00000000000000000000000000000) tuple
+R100_7 / RDF2 -> 3.5 Real Double Field
+R100_7 % int2 -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100_7 // int2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 100 bits of precision' and 'Real Field with 100 bits of
+divmod(R100_7,int2) -> (3.5000000000000000000000000000, 0.00000000000000000000000000000) tuple
+R100_7 / int2 -> 3.5000000000000000000000000000 Real Field with 100 bits of precision
+R100_7 % float2 -> 1.0 float
+R100_7 // float2 -> 3.0 float
+divmod(R100_7,float2) -> (3.0, 1.0) tuple
+R100_7 / float2 -> 3.5 float
+R100_7 % QQ3/2 -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+R100_7 // QQ3/2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 100 bits of precision' and 'Real Field with 100 bits of
+divmod(R100_7,QQ3/2) -> (4.6666666666666666666666666667, 0.00000000000000000000000000000) tuple
+R100_7 / QQ3/2 -> 4.6666666666666666666666666667 Real Field with 100 bits of precision
+R100_7 % RRbig -> 7.00000000000000 Real Field with 53 bits of precision
+R100_7 // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(R100_7,RRbig) -> (5.29472392617287e-477, 0.00000000000000000000000000000) tuple
+R100_7 / RRbig -> 5.29472392617287e-477 Real Field with 53 bits of precision
+R100_7 % RR0 -> NaN Real Field with 53 bits of precision
+R100_7 // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(R100_7,RR0) !! ZeroDivisionError 
+R100_7 / RR0 -> +infinity Real Field with 53 bits of precision
+RRbig % RR2 -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig // RR2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,RR2) -> (6.79149264524693e330, 0.000000000000000) tuple
+RRbig / RR2 -> 6.79149264524693e330 Real Field with 53 bits of precision
+RRbig % R30_2 -> 0.00000000 Real Field with 30 bits of precision
+RRbig // R30_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(RRbig,R30_2) -> (6.7914926e330, 0.000000000000000) tuple
+RRbig / R30_2 -> 6.7914926e330 Real Field with 30 bits of precision
+RRbig % R100_2 -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig // R100_2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,R100_2) -> (6.79149264524693e330, 0.000000000000000) tuple
+RRbig / R100_2 -> 6.79149264524693e330 Real Field with 53 bits of precision
+RRbig % RDF2 -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig // RDF2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,RDF2) -> (6.79149264524693e330, 0.000000000000000) tuple
+RRbig / RDF2 -> 6.79149264524693e330 Real Field with 53 bits of precision
+RRbig % int2 -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig // int2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,int2) -> (6.79149264524693e330, 0.000000000000000) tuple
+RRbig / int2 -> 6.79149264524693e330 Real Field with 53 bits of precision
+RRbig % float2 -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig // float2 !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+divmod(RRbig,float2) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'float'
+RRbig / float2 -> 6.79149264524693e330 Real Field with 53 bits of precision
+RRbig % QQ3/2 -> -0.500000000000000 Real Field with 53 bits of precision
+RRbig // QQ3/2 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,QQ3/2) -> (9.05532352699591e330, 0.000000000000000) tuple
+RRbig / QQ3/2 -> 9.05532352699591e330 Real Field with 53 bits of precision
+RRbig % RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig // RRbig !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,RRbig) -> (1.02740224580617e-146, 0.000000000000000) tuple
+RRbig / RRbig -> 1.02740224580617e-146 Real Field with 53 bits of precision
+RRbig % RR0 -> NaN Real Field with 53 bits of precision
+RRbig // RR0 !! TypeError unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of p
+divmod(RRbig,RR0) !! ZeroDivisionError 
+RRbig / RR0 -> +infinity Real Field with 53 bits of precision
+RR7 // bool !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+RR7 rfloordiv bool !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+divmod(RR7,bool) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+rdivmod(RR7,bool) !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+RR7 % bool -> 0.000000000000000 Real Field with 53 bits of precision
+RR7 rmod bool -> 1.00000000000000 Real Field with 53 bits of precision
+RR7lit // bool !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
+RR7lit rfloordiv bool !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealLiteral'
+divmod(RR7lit,bool) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
+rdivmod(RR7lit,bool) !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealLiteral'
+RR7lit % bool -> 0.000000000000000 Real Field with 53 bits of precision
+RR7lit rmod bool -> 1.00000000000000 Real Field with 53 bits of precision
+R30_7 // bool !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+R30_7 rfloordiv bool !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+divmod(R30_7,bool) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+rdivmod(R30_7,bool) !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+R30_7 % bool -> 0.00000000 Real Field with 30 bits of precision
+R30_7 rmod bool -> 1.0000000 Real Field with 30 bits of precision
+R100_7 // bool !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+R100_7 rfloordiv bool !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+divmod(R100_7,bool) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+rdivmod(R100_7,bool) !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+R100_7 % bool -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100_7 rmod bool -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+RRbig // bool !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+RRbig rfloordiv bool !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+divmod(RRbig,bool) !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealNumber' and 'bool'
+rdivmod(RRbig,bool) !! TypeError unsupported operand type(s) for //: 'bool' and 'sage.rings.real_mpfr.RealNumber'
+RRbig % bool -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig rmod bool -> 1.00000000000000 Real Field with 53 bits of precision
+RDF7 // bool -> 7.0 Real Double Field
+RDF7 rfloordiv bool -> 0.14285714285714285 Real Double Field
+divmod(RDF7,bool) -> (7.0, 0) tuple
+rdivmod(RDF7,bool) !! TypeError unsupported operand type(s) for %: 'bool' and 'sage.rings.real_double_element_gsl.RealDoubleElement_gsl'
+RDF7 % bool !! TypeError unsupported operand type(s) for %: 'sage.rings.real_double_element_gsl.RealDoubleElement_gsl' and 'bool'
+RDF7 rmod bool !! TypeError unsupported operand type(s) for %: 'bool' and 'sage.rings.real_double_element_gsl.RealDoubleElement_gsl'
+RR('-0') -> -0.000000000000000 Real Field with 53 bits of precision
+1/RR('-0') -> -infinity Real Field with 53 bits of precision
+RDF('-0') -> -0.0 Real Double Field
+RR(-0.0r) -> -0.000000000000000 Real Field with 53 bits of precision
+literal 5.50000000000000 // True !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
+literal 7.00000000000000 // True !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
+literal 1.00000000000000e300 // True !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
+divmod(R30(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R30(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R30(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R30(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(nan),RDF(-0.0)) !! ZeroDivisionError 
+R30(2).__rfloordiv__(RDF(7)) !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+R30(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R30(2).__rmod__(RDF(7)) -> -1.0000000 Real Field with 30 bits of precision
+RDF(7)//R30(2) !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(RDF(7),R30(2)) -> (3.5, 0) tuple
+divmod(R53(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R53(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R53(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R53(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(nan),RDF(-0.0)) !! ZeroDivisionError 
+R53(2).__rfloordiv__(RDF(7)) -> 3.5 Real Double Field
+R53(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R53(2).__rmod__(RDF(7)) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF(7)//R53(2) -> 3.5 Real Double Field
+divmod(RDF(7),R53(2)) -> (3.5, 0) tuple
+divmod(R54(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R54(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R54(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R54(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(nan),RDF(-0.0)) !! ZeroDivisionError 
+R54(2).__rfloordiv__(RDF(7)) -> 3.5 Real Double Field
+R54(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R54(2).__rmod__(RDF(7)) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF(7)//R54(2) -> 3.5 Real Double Field
+divmod(RDF(7),R54(2)) -> (3.5, 0) tuple
+divmod(R100(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R100(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R100(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R100(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(nan),RDF(-0.0)) !! ZeroDivisionError 
+R100(2).__rfloordiv__(RDF(7)) -> 3.5 Real Double Field
+R100(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R100(2).__rmod__(RDF(7)) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF(7)//R100(2) -> 3.5 Real Double Field
+divmod(RDF(7),R100(2)) -> (3.5, 0) tuple
+RR(-0) % RRbig -> '-0x0.0p+0' str
+RR(-0) % 2 -> '-0x0.0p+0' str
+-(RR(2)^1100) % (RR(2)^1100) -> '-0x0.0p+0' str
