@@ -1062,11 +1062,17 @@ def _carry(t, *srcs, mode="any"):
     (_null_int_collection)."""
     if not len(t) and getattr(t, "_wit", None) is None:
         # (an emptied source's element, which stands for its universe,
-        # goes with the empty result: Sort, Setseq, Seqset of it, _remember)
-        for x in srcs:
-            if getattr(x, "_wit", None) is not None:
-                t._wit = x._wit
-                break
+        # goes with the empty result: Sort, Setseq, Seqset of it, _remember;
+        # but not past a written empty {} with no universe, in a meet or
+        # first in a diff: S meet {}, {} meet S, {} diff S have none, as
+        # Magma's; {Integers() | } diff S, S meet {1} keep it, astra2 on
+        # 0118f5a5)
+        blank = lambda x: getattr(x, "_wit", None) is None and _provenance(x) == "null"
+        if not ((mode == "meet" and any(blank(x) for x in srcs)) or (mode == "first" and srcs and blank(srcs[0]))):
+            for x in srcs:
+                if getattr(x, "_wit", None) is not None:
+                    t._wit = x._wit
+                    break
     if len(t) or getattr(t, "universe", None) is not None or getattr(t, "_inf", None) is not None:
         return t
     # (every source must be known, the integers' or written empty: one
@@ -3342,10 +3348,99 @@ def _pair_universe(op, a, b, pos, message):
     return None
 
 
+def _wit_key(x):
+    """What identifies the structure of the element x, for comparing the
+    witnesses of emptied sets: a polynomial ring or number field itself, a
+    real field's precision, else how its parent prints."""
+    if isinstance(x, (_sp.Polynomial, _snf.NumberFieldElement)):
+        return ("P", id(x.parent()))
+    if isinstance(x, MReal):
+        return ("R", x.prec)
+    try:
+        return ("S", repr(Parent(x)))
+    except MagmaError:
+        return None
+
+
+def _wit_set_result(t, op, a, b, pos, message, mode):
+    """t, the set a op b, when a or b is an emptied set keeping its
+    universe by a witness element (_remember): Magma's error where the
+    other operand's universe is incompatible with it; the witness's
+    universe where every other operand is of it, holds integers only, is
+    the integers', or is written empty {}; anything else refused, not
+    guessed (checked against Magma 2.18, astra and astra2 on 0118f5a5).
+    None when neither has one."""
+    wa, wb = (getattr(x, "_wit", None) if not x.items else None for x in (a, b))
+    if wa is None and wb is None:
+        return None
+    nf = lambda x: isinstance(x, _snf.NumberFieldElement)
+
+    def incompatible(w, r):
+        # (only what Magma was seen to reject: another number field, a
+        # polynomial or real with a number field, finite fields of two
+        # characteristics)
+        if nf(w) and nf(r):
+            return w.parent() is not r.parent()
+        if nf(w) or nf(r):
+            return isinstance(r if nf(w) else w, (_sp.Polynomial, MReal))
+        return _is_ff(w) and _is_ff(r) and _ffwrap(w.parent()).p != _ffwrap(r.parent()).p
+
+    def fits(w, r):
+        # (an element the witness's universe certainly takes: an integer,
+        # one of its own structure, a rational into a number field)
+        if isinstance(r, int) and not isinstance(r, bool):
+            return True
+        if nf(w) and isinstance(r, _Fraction):
+            return True
+        k = _wit_key(w)
+        return k is not None and k == _wit_key(r)
+
+    unsupported = lambda: MagmaError("a set operation on an emptied set of a structure's elements and this other set is not supported yet", "'%s'" % op, True, pos)
+    w = wa if wa is not None else wb
+    for x, wx in ((a, wa), (b, wb)):
+        r = wx
+        if wx is None:
+            if x.items:
+                for y in x.items:
+                    if incompatible(w, y):
+                        raise MagmaError(message, "'%s'" % op, True, pos)
+                    if not fits(w, y):
+                        raise unsupported()
+                continue
+            d = getattr(x, "universe", None)
+            if d is not None and not (d is _ZZ):
+                if nf(w) and isinstance(d, _MFinField):
+                    raise MagmaError(message, "'%s'" % op, True, pos)
+                raise unsupported()
+            if d is None and _provenance(x) not in ("null", "int"):
+                raise unsupported()
+            continue
+        if incompatible(w, r):
+            raise MagmaError(message, "'%s'" % op, True, pos)
+        if not fits(w, r):
+            raise unsupported()
+    blank = lambda x: not x.items and getattr(x, "_wit", None) is None and _provenance(x) == "null"
+    if (mode == "meet" and (blank(a) or blank(b))) or (mode == "first" and blank(a)):
+        return None  # (S meet {}, {} diff S: no universe, as Magma's; _carry)
+    if not len(t):
+        t._wit = w
+        return t
+    items = []
+    for y in (list(t) if t.kind == "multi" else t.items):
+        z = _elt_into(y, w)
+        if z is None or z is _NOCOERCE:
+            raise unsupported()
+        items.append(z)
+    return MSet(items, t.kind)
+
+
 def _set_result(t, op, a, b, pos, message, mode="any"):
     """t, the set a op b, over the universe Magma's has (_pair_universe),
     its elements coerced into it; an empty one keeps what is known of its
     universe as _carry has it."""
+    r = _wit_set_result(t, op, a, b, pos, message, mode)
+    if r is not None:
+        return r
     u = _pair_universe(op, a, b, pos, message)
     if not len(t) or u is None:
         return _carry(t, a, b, mode=mode)
@@ -3985,7 +4080,8 @@ def _str1(v, indent, col, tail):
         import _magma_docsearch
         return _magma_docsearch.intrinsic_text(v.__name__), False
     if isinstance(v, _smat.Matrix) and (v.nrows() == 0 or v.ncols() == 0):
-        return "Matrix with %d rows and %d columns" % (v.nrows(), v.ncols()), False  # (as Magma prints one)
+        m, n = v.nrows(), v.ncols()
+        return "Matrix with %d row%s and %d column%s" % (m, "" if m == 1 else "s", n, "" if n == 1 else "s"), False  # (as Magma prints one)
     if isinstance(v, _smat.MatrixSpace_):
         # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
         # Sage's "Full MatrixSpace of ... dense matrices")
