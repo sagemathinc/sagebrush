@@ -75,3 +75,20 @@ print(parse_expression('1e-3'), parse_expression('2e3'), parse_expression('1.2e+
 for bad in ['2e3x', '1e5000']:
     try: parse_expression(bad); print("not refused", bad)
     except ValueError as e: print("ValueError:", str(e)[:80])
+# the 30-digit bound counts the mantissa's digits, the exponent aside (HARD-502-1)
+print(bool(parse_expression('9' * 30) == 10^30 - 1), bool(parse_expression('1.' + '0' * 28 + '1e5') == (1 + 10^-29) * 10^5), bool(parse_expression('.' + '1' * 30) == (10^30 - 1) / 9 / 10^30))
+for bad in ['9' * 31, '1.' + '0' * 29 + '1', '1' * 31 + 'e2', '.' + '1' * 31]:
+    try: parse_expression(bad); print("not refused", len(bad))
+    except ValueError as e: print("ValueError:", e)
+# astra2's CORR-502: a Sage real is exact (its dyadic rational); an inexact
+# value too near the boundary, or overflowing a float, is undecided
+R = RealField(200)
+show(close(R(1) + R(2)^(-100), 0, abs=1)); show(close(pi, 0, abs=float(pi))); x = R(10)^400; show(close(x, 2*x, abs=0))
+show(close(R(1)/3, QQ(1)/3, abs=0)); show(close(pi, 3.14159, abs=1e-5)); show(close(pi, 3, abs=1)); show(close(CC(1, 2), CC(1, 2), abs=0))
+# astra's: a tiny Sage real is not 0; a tiny negative Sage-real tolerance is refused (CORR-502-3)
+show(close(R(2)^-2000, R(0), abs=0))
+try: close(R(0), R(0), abs=-R(2)^-2000)
+except ValueError as e: print("ValueError:", e)
+show(close(sqrt(2), 1.4142135623730951, abs=1e-15)); show(close(sqrt(2), 1.4142135623730951, abs=1e-17)); show(close(pi, 3.14159, abs=1e-6))
+try: close(pi, 3, abs=pi/100)
+except ValueError as e: print("ValueError:", e)
