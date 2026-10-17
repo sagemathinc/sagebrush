@@ -53,7 +53,13 @@ authoritative.
 - **Code is reactive.** A note with `code` is a code item. Its output is shown
   under it, and items that use a name it defines rerun when it changes, as in
   a reactive notebook. Code runs in the reader's browser, in a sandbox with no
-  network, so keep each item quick.
+  network, so keep each item quick. `sagebrush board run FILE --timeout S`
+  runs a board's code outside the browser, each item for at most `S`
+  seconds from when the interpreter begins it. The whole run takes at most
+  $122 + n \cdot (62 + S)$ seconds for $n$ runs (an item, or the check of
+  an item's syntax error): 60 s for the interpreter to start, 60 s and 2 s
+  to stop for it to warm up, and for each run 60 s to be begun, `S` to
+  run, and 2 s to stop.
 - **Math** is `$...$` and `$$...$$` (KaTeX) in `text`, `detail`, `intro` and
   `say`, and in the titles of notes and groups (not in the board's or a page's
   `title`, which are plain text). In JSON, write a backslash as `\\`.

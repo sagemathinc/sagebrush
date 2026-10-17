@@ -46,7 +46,14 @@ const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--figures
   output, or its error; the exit status is 1 if an item failed, has an
   error, was not run or ran out of time
   --json            the report as JSON
-  --timeout S       the seconds an item may run (default 60); longer is an error
+  --timeout S       the seconds an item may run (default 60), from when the
+                    interpreter begins it; longer is an error. The
+                    interpreter has at most 60 s to start and 60 s to warm
+                    up, and an item at most 60 s to be begun; what runs out
+                    of time is interrupted, and the interpreter stopped 2 s
+                    later if it doesn't stop. So the run takes at most
+                    122 + (number of runs) x (62 + S) seconds, a run being
+                    an item, or the check of an item's syntax error
   --figures DIR     save each item's figures (plots, pictures) in DIR, as
                     ITEM-1.svg and so on (never over a file that is there);
                     the report says each figure's size and what it shows
@@ -247,6 +254,12 @@ export function otherLanguage(doc: BoardDoc): string | null {
  * (lib/_sb_check.py), or why there is none. */
 export type Evaluate = (code: string, answer: unknown, ms: number) => Promise<{ ok: boolean; value?: unknown; error?: string; undecided?: boolean; timedOut: boolean }>;
 
+// (how long an item may wait for the interpreter to begin it, and the
+// interpreter's warm-up at most, from posting to its end)
+const START_GRACE_MS = 60_000;
+// (never past the longest wait a timer can have, which --timeout may already be: past it a timer fires at once)
+const clamp = (ms: number) => Math.min(ms, 2 ** 31 - 1);
+
 export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate: Evaluate, run: BoardRun) => Promise<void>): Promise<BoardRun> {
   const mode = doc.mode ?? "python";
   const other = otherLanguage(doc);
@@ -282,8 +295,10 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       worker.stdout.resume();
       worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
       await new Promise<void>((resolve, reject) => {
+        // (its start bounded too: one that isn't ready in START_GRACE_MS is stopped, and is dead)
+        const late = setTimeout(() => { dead ??= `the interpreter did not start within ${START_GRACE_MS / 1000} s`; void worker?.terminate(); resolve(); }, START_GRACE_MS);
         worker!.on("message", (m: any) => {
-          if (m.ready) { intr = new Int32Array(m.$intr); return resolve(); }
+          if (m.ready) { clearTimeout(late); intr = new Int32Array(m.$intr); return resolve(); }
           sinks.get(m.id)?.(m);
         });
         worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
@@ -291,25 +306,38 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       });
     }
     // (one run: code with its options; its messages to `on`; resolves when it is done)
-    const send = (msg: any, on: (m: any) => void, limit = Infinity) => new Promise<{ ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }>((resolve) => {
+    // (`limit`: its time from when the interpreter begins it, after at most
+    // START_GRACE_MS waiting to be begun; `absolute`: all of it, waiting
+    // included, within `limit` from when it is posted, never reset)
+    const send = (msg: any, on: (m: any) => void, limit = Infinity, absolute = false) => new Promise<{ ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }>((resolve) => {
       if (dead || !worker) return resolve({ ms: 0, error: true, timedOut: false, dead: true });
       const id = nextId++;
-      let timedOut = false, timer: any = null, kill: any = null;
+      let timedOut = false, timer: any = null, kill: any = null, started = false;
       sinks.set(id, (m) => {
+        // (its time from its start, as the interpreter says it begins: not
+        // while the interpreter itself starts, which a loaded machine makes
+        // slow for the first item)
+        if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); }
         if (!m.done && !m.skipped) return on(m);
         sinks.delete(id);
         clearTimeout(timer);
         clearTimeout(kill);
         resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       });
-      if (limit < Infinity && limit > 0) timer = setTimeout(() => {
-        // over its time: interrupted (KeyboardInterrupt), and if it does not stop, the interpreter stopped
+      // over its time: interrupted (KeyboardInterrupt), and if it does not stop, the interpreter stopped
+      const over = () => {
         timedOut = true;
         if (intr) { Atomics.store(intr, 1, id); Atomics.store(intr, 0, 1); }
         kill = setTimeout(() => { dead = `the interpreter was stopped: ${label(msg.cell)} did not stop when interrupted`; worker?.terminate(); }, 2000);
-      }, limit);
+      };
+      // (until it starts, START_GRACE_MS at most: an interpreter that never begins it is still stopped)
+      if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS);
       worker.postMessage({ id, code: msg.code, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg.opts });
     });
+    // (the interpreter warmed up first, untimed but for START_GRACE_MS: its
+    // parser, Sage's one-time load, its first imports; so no item's time
+    // pays for them, which a loaded machine makes long)
+    if (worker && !dead) await send({ cell: "warm-up", code: "", opts: {} }, () => {}, START_GRACE_MS, true);
     const timedOut = new Set<string>();
     const syntax = new Map<string, string>(); // (syntax errors, as the interpreter says them)
     const states = new Map<string, CellState>(); // (each item's last state, as the scheduler says it)
@@ -403,7 +431,9 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
         worker.stdout.resume();
         worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
         await new Promise<void>((resolve, reject) => {
-          worker!.on("message", (m: any) => { if (m.ready) { intr = new Int32Array(m.$intr); return resolve(); } sinks.get(m.id)?.(m); });
+        // (its start bounded too: one that isn't ready in START_GRACE_MS is stopped, and is dead)
+        const late = setTimeout(() => { dead ??= `the interpreter did not start within ${START_GRACE_MS / 1000} s`; void worker?.terminate(); resolve(); }, START_GRACE_MS);
+          worker!.on("message", (m: any) => { if (m.ready) { clearTimeout(late); intr = new Int32Array(m.$intr); return resolve(); } sinks.get(m.id)?.(m); });
           worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); });
           worker!.on("exit", () => { dead ??= "the interpreter stopped"; for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
         });
