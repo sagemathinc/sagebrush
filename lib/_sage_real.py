@@ -125,6 +125,14 @@ _EMIN = 1 - (1 << 62)
 _EXACT_BITS = 1 << 20
 
 
+def _rational_bits(q):
+    """Refuse a rational whose numerator or denominator has more than
+    _EXACT_BITS bits (HARD-RRQ-2): rounding it shifts and divides integers
+    of that size, before any result."""
+    if q.numerator.bit_length() > _EXACT_BITS or q.denominator.bit_length() > _EXACT_BITS:
+        raise NotImplementedError("a rational with more than %d bits in its numerator or denominator is not available as a real number in sagebrush yet" % _EXACT_BITS)
+
+
 def _range(R, m, e):
     """(m, e, special) for the rounded m 2^e (m != 0) in R's exponent range."""
     E = e + abs(m).bit_length()
@@ -1132,6 +1140,10 @@ def RealField(prec=53, sci_not=False, rnd="RNDN"):
     rnd = str(rnd)
     if rnd not in _RND:
         raise ValueError("rounding mode (=%s) must be one of %s" % (rnd, ", ".join(_RND)))
+    if prec > _EXACT_BITS:
+        # (HARD-RRQ-1: rounding to prec bits builds integers of that size;
+        # checked before the cache holds the field)
+        raise NotImplementedError("RealField(%d): a precision past the limit of %d bits is not available in sagebrush yet" % (prec, _EXACT_BITS))
     if prec == 53 and rnd == "RNDN":
         return _sa().RR
     key = (prec, rnd)
@@ -1397,6 +1409,7 @@ def _to_real(R, x, base=10):
         m, e = _round_q(x, 1, prec, rnd) if x else (0, 0)
         return RealNumberMP(R, m, e)
     if isinstance(x, _F):
+        _rational_bits(x)
         m, e = _round_q(x.numerator, x.denominator, prec, rnd) if x else (0, 0)
         return RealNumberMP(R, m, e)
     lit = getattr(x, "_lit", None)
@@ -1831,11 +1844,33 @@ class RealNumberMP:
             return RealNumberMP(R, m, e)
         if isinstance(n, RealNumberMP) and n._m == 0 and not n._special:
             return R(1)
+        # (as Sage: an RDF exponent makes the power RDF's, a Python float's
+        # a Python float; any other real exponent goes to the base's field)
+        from _sage_rdf import RealDoubleElement
+        if isinstance(n, RealDoubleElement):
+            return _sa().RDF(self) ** n
+        if type(n) is float:
+            return float(self) ** n
         x = self
         y = n if isinstance(n, RealNumberMP) else R(n)
+        # (a complex power is in the complex field of the lower precision:
+        # RealField(100)(-3.5)^RR(0.5) is in CC)
+        P = min(R._prec, n._R._prec if isinstance(n, RealNumberMP) else 53 if isinstance(n, float) else R._prec)
+        if x._m < 0 and y._special:
+            if y._special == "nan":
+                # (a complex NaN)
+                nan = float("nan")
+                return ComplexField(P)(nan, nan)
+            # (|x| to an infinite power: no complex part, as Sage)
+            a = -x
+            return R(1) if a == 1 else a ** y
+        if x._m < 0 and not y._special and _mp_integral(y._m, y._e):
+            # a negative real to an integral real power: real, as Sage (an
+            # even power when y has trailing zero bits: no 2^e-bit integer)
+            return (-x) ** y if y._e > 0 else x ** (y._m >> -y._e)
         if x._m < 0:
             # a negative real to a real power: complex
-            return ComplexField(R._prec)(x) ** ComplexField(R._prec)(y)
+            return ComplexField(P)(x) ** ComplexField(P)(n if isinstance(n, (RealNumberMP, float)) else y)
         if x._special or y._special or not x._m or x == 1:
             return (y * x.log()).exp()
         # exp(y log x), correctly rounded (Ziv): an error d in y log x is a
@@ -2687,6 +2722,14 @@ class RealNumberMP:
             2.0000000
         """
         return self
+
+
+def _mp_integral(m, e):
+    """Whether m 2^e is an integer, without a 2^-e-bit integer: a nonzero
+    value below 1 (-e past m's bits; e may be near -2^62) is not."""
+    if e >= 0:
+        return True
+    return -e <= abs(m).bit_length() and m & ((1 << -e) - 1) == 0
 
 
 def _arith(a, b, op, R):
