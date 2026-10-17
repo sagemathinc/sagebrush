@@ -5,7 +5,7 @@
 import { T, FloatBox, NotImplemented, PyBytes, raise, typeName, tuple, unbox, typeOf, lookupType, bindArgs, sig, pyfn } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
-import { floatRepr, format, repr } from "./format";
+import { floatRepr, formatComplex, repr } from "./format";
 import { newBuiltinModule } from "./modules";
 import * as FD from "./fdlibm";
 import * as CR from "./crmath";
@@ -356,10 +356,7 @@ Ty.subclassable(complexType, PyComplex, ["re", "im"]);
   M("__format__", (a: any, spec: string) => {
     const c = new PyComplex(...toC(a)!);
     if (spec === "") return complexRepr(c);
-    const m = /^(.*?)([eEfFgGn%]?)$/.exec(spec)!;
-    const re = format(O.mkfloat(c.re), m[1].replace(/^[<>=^]?/, "") + (m[2] || "g"));
-    const im = format(O.mkfloat(c.im), "+" + m[1].replace(/^[<>=^]?[-+ ]?/, "") + (m[2] || "g"));
-    return `${m[2] ? "" : "("}${re}${im}j${m[2] ? "" : ")"}`;
+    return formatComplex(c.re, c.im, spec);
   });
   M("conjugate", (a: any) => new PyComplex(toC(a)![0], -toC(a)![1]));
   M("__complex__", (a: any) => new PyComplex(...toC(a)!));
