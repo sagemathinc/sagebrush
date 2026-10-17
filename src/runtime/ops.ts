@@ -1737,7 +1737,7 @@ export class ProtoIter {
     }
   }
 }
-class GetitemIter {
+export class GetitemIter {
   i = 0;
   constructor(public o: any, public gi: any) {}
   $next(): any {

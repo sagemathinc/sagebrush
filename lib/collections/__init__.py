@@ -40,11 +40,67 @@ def _slice_index(v):
     return _index(v)
 
 
+class _deque_iterator:
+    # (as CPython's dequeiter: the deque's mutation count when it was made,
+    # a change of it a RuntimeError; reading by position, so reverse() and
+    # item assignment, which change no count, are seen: astra3 A28)
+    __slots__ = ("_d", "_i", "_n", "_state", "_step")
+
+    def __init__(self, d, reverse=False):
+        self._d = d
+        self._n = len(d)
+        self._i = self._n - 1 if reverse else 0
+        self._step = -1 if reverse else 1
+        self._state = d._state
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        d = self._d
+        # (the reverse one ends once its count is out, the error raised once;
+        # the forward one checks the deque first, every time, as CPython's)
+        if self._n == 0 and self._step < 0:
+            raise StopIteration
+        if d._state != self._state:
+            self._n = 0
+            raise RuntimeError("deque mutated during iteration")
+        if self._n == 0:
+            raise StopIteration
+        i = self._i
+        self._i = i + self._step
+        self._n -= 1
+        return d._get(i)
+
+    def __length_hint__(self):
+        return self._n
+
+
+_deque_iterator.__module__ = "collections"
+
+
+class _deque_reverse_iterator(_deque_iterator):
+    __slots__ = ()
+
+    def __init__(self, d):
+        super().__init__(d, True)
+
+
+_deque_reverse_iterator.__module__ = "collections"
+
+
+def _same(item, x):
+    # (CPython's PyObject_RichCompareBool: identity first)
+    return item is x or bool(item == x)
+
+
 class deque:
     """Two stacks: _l holds the left part reversed, _r the right part, so
-    both ends and indexing are O(1) (amortized)."""
+    both ends and indexing are O(1) (amortized). _state counts the
+    mutations CPython's deque counts (its deque->state), for the
+    iterators."""
 
-    __slots__ = ("_l", "_r", "_maxlen")
+    __slots__ = ("_l", "_r", "_maxlen", "_state")
 
     def __init__(self, iterable=(), maxlen=None):
         if maxlen is not None:
@@ -55,6 +111,7 @@ class deque:
         self._l = []
         self._r = []
         self._maxlen = maxlen
+        self._state = 0
         self.extend(iterable)
 
     @property
@@ -73,12 +130,17 @@ class deque:
     def _set(self, items):
         self._l = []
         self._r = items
+        self._state += 1
+
+    def _get(self, i):
+        nl = len(self._l)
+        return self._l[nl - 1 - i] if i < nl else self._r[i - nl]
 
     def __iter__(self):
-        return iter(self._items())
+        return _deque_iterator(self)
 
     def __reversed__(self):
-        return iter(self._items()[::-1])
+        return _deque_reverse_iterator(self)
 
     def __repr__(self):
         if self._maxlen is None:
@@ -112,8 +174,17 @@ class deque:
 
     __hash__ = None
 
+    # (count, in, index and remove walk the deque as it is, compare with
+    # identity first, and stop on a mutation by a comparison, as CPython's:
+    # a RuntimeError, but an IndexError for remove, astra3 A31)
     def __contains__(self, x):
-        return x in self._l or x in self._r
+        n, state = len(self), self._state
+        for i in range(n):
+            if _same(self._get(i), x):
+                return True
+            if self._state != state:
+                raise RuntimeError("deque mutated during iteration")
+        return False
 
     def _index(self, i):
         if not isinstance(i, int):
@@ -126,9 +197,7 @@ class deque:
         return i
 
     def __getitem__(self, i):
-        i = self._index(i)
-        nl = len(self._l)
-        return self._l[nl - 1 - i] if i < nl else self._r[i - nl]
+        return self._get(self._index(i))
 
     def __setitem__(self, i, v):
         i = self._index(i)
@@ -146,11 +215,13 @@ class deque:
 
     def append(self, x):
         self._r.append(x)
+        self._state += 1
         if self._maxlen is not None and len(self) > self._maxlen:
             self.popleft()
 
     def appendleft(self, x):
         self._l.append(x)
+        self._state += 1
         if self._maxlen is not None and len(self) > self._maxlen:
             self.pop()
 
@@ -161,6 +232,7 @@ class deque:
             k = (len(self._l) + 1) // 2
             self._r = self._l[:k][::-1]
             self._l = self._l[k:]
+        self._state += 1
         return self._r.pop()
 
     def popleft(self):
@@ -170,21 +242,33 @@ class deque:
             k = (len(self._r) + 1) // 2
             self._l = self._r[:k][::-1]
             self._r = self._r[k:]
+        self._state += 1
         return self._l.pop()
 
     def extend(self, iterable):
         if iterable is self:
             iterable = list(iterable)
+        # (a deque of maxlen 0 takes nothing, and is not changed, as CPython's)
+        if self._maxlen == 0:
+            for x in iterable:
+                pass
+            return
         for x in iterable:
             self.append(x)
 
     def extendleft(self, iterable):
         if iterable is self:
             iterable = list(iterable)
+        if self._maxlen == 0:
+            for x in iterable:
+                pass
+            return
         for x in iterable:
             self.appendleft(x)
 
     def clear(self):
+        if self._l or self._r:
+            self._state += 1
         self._l = []
         self._r = []
 
@@ -194,16 +278,28 @@ class deque:
     __copy__ = copy
 
     def count(self, x):
-        return self._l.count(x) + self._r.count(x)
+        n, state, k = len(self), self._state, 0
+        for i in range(n):
+            k += _same(self._get(i), x)
+            if self._state != state:
+                raise RuntimeError("deque mutated during iteration")
+        return k
 
     def index(self, x, start=0, stop=_sys.maxsize):
         # (start and stop as CPython's: slice indices, through __index__)
         start, stop = _slice_index(start), _slice_index(stop)
-        items = self._items()
-        try:
-            return items.index(x, start, stop)
-        except ValueError:
-            raise ValueError("%r is not in deque" % (x,)) from None
+        n, state = len(self), self._state
+        if start < 0:
+            start = max(start + n, 0)
+        if stop < 0:
+            stop = max(stop + n, 0)
+        stop = min(stop, n)
+        for i in range(start, stop):
+            if _same(self._get(i), x):
+                return i
+            if self._state != state:
+                raise RuntimeError("deque mutated during iteration")
+        raise ValueError("deque.index(x): x not in deque")
 
     def insert(self, i, x):
         # (the index converted first, then the size checked, as CPython's)
@@ -215,14 +311,18 @@ class deque:
         self._set(items)
 
     def remove(self, x):
-        items = self._items()
-        try:
-            items.remove(x)
-        except ValueError:
-            raise ValueError("deque.remove(x): x not in deque") from None
-        self._set(items)
+        n, state = len(self), self._state
+        for i in range(n):
+            found = _same(self._get(i), x)
+            if self._state != state:
+                raise IndexError("deque mutated during iteration")
+            if found:
+                del self[i]
+                return
+        raise ValueError("deque.remove(x): x not in deque")
 
     def reverse(self):
+        # (no mutation count: an iterator goes on, reading the items reversed)
         self._l, self._r = self._r, self._l
 
     def rotate(self, n=1):
@@ -230,10 +330,13 @@ class deque:
         k = len(self)
         if k <= 1:
             return
+        # (a count even for rotate(0), as CPython's _deque_rotate)
         n %= k
         if n:
             items = self._items()
             self._set(items[-n:] + items[:-n])
+        else:
+            self._state += 1
 
     def __add__(self, other):
         if not isinstance(other, deque):
@@ -255,6 +358,9 @@ class deque:
 
     def __imul__(self, n):
         items = self._items() * n
+        # (an empty deque, or a repeat by 1, is not changed, as CPython's)
+        if len(items) == len(self):
+            return self
         self.clear()
         self.extend(items)
         return self

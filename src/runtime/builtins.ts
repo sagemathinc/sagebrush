@@ -139,25 +139,23 @@ function printImpl(args: any[], sep: any, end: any, file: any, flush: any) {
 };
 
 function minmax(name: string, args: any[], key: any, dflt: any, wantMax: boolean): any {
-  let items: any[];
-  if (args.length === 1) items = O.toArray(args[0]);
-  else if (args.length === 0) raise(T.TypeError, `${name} expected at least 1 argument, got 0`);
-  else items = args;
+  if (args.length === 0) raise(T.TypeError, `${name} expected at least 1 argument, got 0`);
   // (a default only with one iterable, as CPython's min_max: astra3 A10)
   if (args.length > 1 && dflt !== undefined) raise(T.TypeError, `Cannot specify a default for ${name}() with multiple positional arguments`);
-  if (items.length === 0) {
-    if (dflt !== undefined) return dflt;
-    raise(T.ValueError, `${name}() iterable argument is empty`);
-  }
-  let best = items[0];
-  let bestKey = key === null || key === undefined ? best : callObj(key, [best]);
-  for (let i = 1; i < items.length; i++) {
-    const v = items[i];
+  // (one item at a time, its key made and compared before the next is
+  // taken, as CPython's min_max: astra3 A32)
+  const NONE = {};
+  let best: any = NONE, bestKey: any;
+  O.forEach(args.length === 1 ? args[0] : args, (v) => {
     const k = key === null || key === undefined ? v : callObj(key, [v]);
-    if (O.truth(wantMax ? O.gt(k, bestKey) : O.lt(k, bestKey))) {
+    if (best === NONE || O.truth(wantMax ? O.gt(k, bestKey) : O.lt(k, bestKey))) {
       best = v;
       bestKey = k;
     }
+  });
+  if (best === NONE) {
+    if (dflt !== undefined) return dflt;
+    raise(T.ValueError, `${name}() iterable argument is empty`);
   }
   return best;
 }
@@ -450,7 +448,10 @@ function iterImpl(x: any, sentinel: any = undefined): any {
     return new CallableIter(x, sentinel);
   }
   if (x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator") return x;
-  return O.iter(x);
+  // (an object's own iterator, the one its __iter__ returned, as
+  // CPython's: iter(it) is it, type(iter(d)) its type, not a wrapper)
+  const it = O.iter(x);
+  return it instanceof O.ProtoIter ? it.o : it;
 }
 
 class CallableIter {
