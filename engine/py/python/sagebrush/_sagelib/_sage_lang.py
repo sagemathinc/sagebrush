@@ -1736,121 +1736,9 @@ def _install_int_methods(sa):
     pyjs); under CPython, which cannot extend int, an Integer subclass of
     int with those methods, returned for sage_all.Integer."""
 
-    def isqrt_exact(n):
-        r = _m.isqrt(n)
-        return r if r * r == n else sa.sqrt(n)
-
-    def nth_root(n, k, truncate_mode=False):
-        # exact (integer Newton's method: a float root was wrong past 2^53
-        # and overflowed past 2^1024), and an even root of a negative
-        # number is an error, as in Sage (-4 had the root -2)
-        k = int(k)
-        if k < 1:
-            raise ValueError("k=%d must be positive" % k)
-        if n < 0 and k % 2 == 0:
-            raise ValueError("cannot take even root of negative number")
-        a = abs(int(n))
-        if a < 2 or k == 1:
-            c = a
-        else:
-            c = 1 << -(-a.bit_length() // k)
-            while True:
-                d = ((k - 1) * c + a // c ** (k - 1)) // k
-                if d >= c:
-                    break
-                c = d
-        exact = c ** k == a
-        r = -c if n < 0 else c
-        if truncate_mode:
-            return r, exact
-        if not exact:
-            sfx = "th" if 10 <= k % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(k % 10, "th")
-            raise ValueError("%d is not a %d%s power" % (n, k, sfx))
-        return r
-
-    def binary(n):
-        return bin(n)[2:] if n >= 0 else "-" + bin(n)[3:]
-
-    def int_str(n, base=10):
-        if base == 10:
-            return int.__repr__(n)
-        digs = "0123456789abcdefghijklmnopqrstuvwxyz"
-        if n == 0:
-            return "0"
-        s, m = "", abs(n)
-        while m:
-            s = digs[m % base] + s
-            m //= base
-        return ("-" if n < 0 else "") + s
-
-    def is_squarefree(n):
-        return all(e == 1 for _, e in sa.factor(abs(n))) if n else False
-
-    def prime_divisors(n):
-        return [p for p, _ in sa.factor(abs(n))]
-
-    def quo_rem(a, b):
-        return (a // b, a % b)
-
-    def ndigits(n, base=10):
-        return len(sa.digits(abs(n), base)) if n else 0
-
-    methods = {
-        "factor": lambda n, proof=None, **k: sa.factor(n, proof=proof),
-        "is_prime": lambda n, proof=None: sa.is_prime(n, proof=proof),
-        "is_pseudoprime": lambda n: sa.is_prime(n),
-        "is_prime_power": lambda n: sa.is_prime_power(n),
-        "is_square": lambda n: sa.is_square(n),
-        "is_squarefree": is_squarefree,
-        "is_even": lambda n: n % 2 == 0,
-        "is_odd": lambda n: n % 2 == 1,
-        "is_one": lambda n: n == 1,
-        "is_zero": lambda n: n == 0,
-        "is_unit": lambda n: n in (1, -1),
-        "is_integral": lambda n: True,
-        "sqrt": isqrt_exact,
-        "isqrt": lambda n: _m.isqrt(n),
-        "nth_root": nth_root,
-        "digits": lambda n, base=10: sa.digits(n, base),
-        "ndigits": ndigits,
-        "divisors": lambda n: sa.divisors(n),
-        "number_of_divisors": lambda n: sa.number_of_divisors(n),
-        "prime_divisors": prime_divisors,
-        "prime_factors": prime_divisors,
-        "next_prime": lambda n, proof=None: sa.next_prime(n, proof=proof),
-        "previous_prime": lambda n, proof=None: sa.previous_prime(n, proof=proof),
-        "next_probable_prime": lambda n: sa.next_prime(n),
-        "binomial": lambda n, k: sa.binomial(n, k),
-        "factorial": lambda n: sa.factorial(n),
-        "binary": binary,
-        "str": int_str,
-        "nbits": lambda n: abs(n).bit_length(),
-        "popcount": lambda n: bin(n).count("1"),
-        "abs": lambda n: abs(n),
-        "inverse_mod": lambda n, m: sa.inverse_mod(n, m),
-        "powermod": lambda n, k, m: pow(n, k, m),
-        "gcd": lambda n, m: sa.gcd(n, m),
-        "lcm": lambda n, m: sa.lcm(n, m),
-        "xgcd": lambda n, m: sa.xgcd(n, m),
-        "mod": lambda n, m: n % m,
-        "quo_rem": quo_rem,
-        "valuation": lambda n, p: sa.oo if (sa._valuation_base(p) and n == 0) else sa.valuation(n, p),
-        "euler_phi": lambda n: sa.euler_phi(n),
-        "sigma": lambda n, k=1: sa.sigma(n, k),
-        "moebius": lambda n: sa.moebius(n),
-        # (at the precision asked: it was ignored, the systematic review's
-        # API-F5)
-        "n": lambda n, prec=None, digits=None: _int_n(n, prec, digits),
-        "N": lambda n, prec=None, digits=None: _int_n(n, prec, digits),
-        "numerical_approx": lambda n, prec=None, digits=None: _int_n(n, prec, digits),
-        "parent": lambda n: sa.ZZ,
-        "floor": lambda n: n,
-        "ceil": lambda n: n,
-        "round": lambda n: n,
-        "squarefree_part": lambda n: sa.prod([p for p, e in sa.factor(abs(n)) if e % 2]) * (1 if n > 0 else -1),
-        "kronecker": lambda n, b: sa.kronecker_symbol(n, b),
-        "multiplicative_order": None,
-    }
+    # (the methods themselves, with their help and examples: _sage_integer)
+    import _sage_integer
+    methods = dict(_sage_integer.METHODS)
     try:
         import _sbengine
     except ImportError:
@@ -1858,15 +1746,13 @@ def _install_int_methods(sa):
     _sbengine.extend_type(int, "numerator", property(lambda n: _CallableInt(n)))
     _sbengine.extend_type(int, "denominator", property(lambda n: _CallableInt(1)))
     for name, f in methods.items():
-        if f is None:
-            continue
-        f.__name__ = name
         _sbengine.extend_type(int, name, f)
 
 
 def _integer_class(sa, methods):
     """Sage's Integer for CPython: an int with Sage's methods, closed under
     arithmetic; a / b and negative powers give Rationals, as in Sage."""
+    import functools
 
     def wrap(r):
         return Integer(r) if type(r) is int else r
@@ -1919,13 +1805,20 @@ def _integer_class(sa, methods):
         g.__name__ = name
         setattr(Integer, name, g)
 
+    @functools.wraps(methods["str"])
     def int_str(n, base=10):
         return methods["str"](int(n), base)
 
+    def method(f):
+        @functools.wraps(f)
+        def m(self, *a, **k):
+            return wrap(f(int(self), *a, **k))
+        return m
+
     for name, f in methods.items():
-        if f is None or name == "str":
+        if name == "str":
             continue
-        setattr(Integer, name, (lambda f: lambda self, *a, **k: wrap(f(int(self), *a, **k)))(f))
+        setattr(Integer, name, method(f))
     Integer.str = int_str
     Integer.__module__ = "sagebrush.sage"
     Integer.__qualname__ = Integer.__name__ = "Integer"
