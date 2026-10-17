@@ -8,7 +8,9 @@
 import { askOptions, cleanDoc, formatError, isBoard, pageCount, pageOf, type AskAnswer, type BoardDoc, type DocAsk, type DocNode } from "./doc";
 
 /** The bounds of answers and submissions (web/board-host-protocol.md). */
-export const ASK_LIMITS = { text: 10_000, comment: 10_000, options: 100, asks: 200, bytes: 65_536, hints: 10 } as const;
+export const ASK_LIMITS = { text: 10_000, comment: 10_000, options: 100, asks: 200, bytes: 65_536, decide: 32, decideName: 80, about: 2000, hints: 10 } as const;
+/** A decision's name: words of lowercase letters and digits joined by hyphens, at least three, so that it says what it means. */
+export const DECIDE_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+){2,}$/;
 /** A scale's values, at most (from its `min` to its `max`). */
 export const SCALE_MAX = 100;
 
@@ -140,6 +142,17 @@ export function askProblems(a: DocAsk, mode: string = "python"): AskProblem[] {
     if (a.example !== undefined) warn("example", "`example` is an answer for trying the `check` (`sagebrush board try`), and there is none");
   }
   if (a.example !== undefined) { const why = answerProblem(a, a.example); if (why) err("example", why.replace(/^its answer/, "its example")); }
+  // what the reader's words may show, which the host decides among
+  if (a.decide) {
+    if (a.decide.length > ASK_LIMITS.decide) err("decide", `more than ${ASK_LIMITS.decide} things to decide among`);
+    const seen = new Set<string>();
+    a.decide.forEach((o, k) => {
+      if (!DECIDE_NAME.test(o.name) || o.name.length > ASK_LIMITS.decideName) err(`decide[${k}].name`, `${show(o.name)} is not a name that says what it means: words of lowercase letters and digits joined by hyphens, at least three (such as "confuses-transitive-with-2-transitive"), at most ${ASK_LIMITS.decideName} characters`);
+      if (seen.has(o.name)) err(`decide[${k}].name`, `${show(o.name)} is in its decide twice: the host's decision names one`);
+      seen.add(o.name);
+      if (o.about !== undefined && o.about.length > ASK_LIMITS.about) err(`decide[${k}].about`, `longer than ${ASK_LIMITS.about} characters: the name says what it means, \`about\` only makes it clearer`);
+    });
+  }
   if (a.result !== undefined && a.answer === undefined) err("result", "a verdict with no answer: the verdict is the answer's");
   return out;
 }
@@ -240,20 +253,105 @@ export interface Submission {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // (a board's questions, read once for each text posted: kept with that
 // text, and read again if the posted object now has another, HARD-A6E-2)
-const boards = new WeakMap<Posted, { text: string; d: BoardDoc | string }>();
+const boards = new WeakMap<Posted, { text: string; d: BoardDoc | string; raw: unknown }>();
 function boardOf(posted: Posted): BoardDoc | string {
+  return boardAndRaw(posted).d;
+}
+// (the board as cleanDoc leaves it, and as it was written: what a decision
+// is checked against, before any cleaning, CORR-F10-1)
+function boardAndRaw(posted: Posted): { d: BoardDoc | string; raw: unknown } {
   const kept = boards.get(posted);
-  if (kept && kept.text === posted.text) return kept.d;
-  let d: BoardDoc | string;
+  if (kept && kept.text === posted.text) return kept;
+  let d: BoardDoc | string, raw: unknown = null;
   try {
-    const raw = JSON.parse(posted.text);
+    raw = JSON.parse(posted.text);
     const bad = raw && typeof raw === "object" && !Array.isArray(raw) ? formatError(raw) : "not a board";
     d = bad ? `the board posted can't take answers: ${bad}` : isBoard(raw) ? cleanDoc(raw) : "the board posted can't take answers: it is not a board";
   } catch {
     d = "the board posted has no questions (it is not a board's JSON)";
   }
-  boards.set(posted, { text: posted.text, d });
-  return d;
+  boards.set(posted, { text: posted.text, d, raw });
+  return { d, raw };
+}
+
+/** Why a question's `decide`, as written in the board's JSON (before any
+ * cleaning), can't be decided among, or null: a list of at most 32
+ * objects, each with a name that says what it means (once), `about` a
+ * string of at most 2000 characters if given, `next` the id of an item of
+ * the question's page if given.  What `sagebrush board check` refuses,
+ * refused here, never cleaned into something else (astra's CORR-F10-1). */
+export function rawDecideProblem(decide: unknown, pageIds: Set<string>): string | null {
+  if (!Array.isArray(decide)) return "its decide is not a list";
+  if (decide.length > ASK_LIMITS.decide) return `more than ${ASK_LIMITS.decide} things to decide among`;
+  const seen = new Set<string>();
+  for (const [k, o] of decide.entries()) {
+    const at = `decide[${k}]`;
+    if (!isObj(o)) return `${at} is not an object`;
+    for (const key of Object.keys(o)) if (!["name", "about", "next"].includes(key)) return `${at} has a field it doesn't know, ${JSON.stringify(key.slice(0, 40))}`;
+    if (typeof o.name !== "string" || !DECIDE_NAME.test(o.name) || o.name.length > ASK_LIMITS.decideName) return `${at}.name is not a name that says what it means`;
+    if (seen.has(o.name)) return `${at}.name ${JSON.stringify(o.name)} is there twice`;
+    seen.add(o.name);
+    if (o.about !== undefined && (typeof o.about !== "string" || o.about.length > ASK_LIMITS.about)) return `${at}.about is not a string of at most ${ASK_LIMITS.about} characters`;
+    if (o.next !== undefined && (typeof o.next !== "string" || !pageIds.has(o.next))) return `${at}.next names no item of the question's page`;
+  }
+  return null;
+}
+
+/** Page `n` (from 1) of a board as written: its items, groups' members too, by id; and the question `id` among them (several: null). */
+function rawPage(raw: unknown, n: number, id: string): { ids: Set<string>; ask: Record<string, any> | null; count: number } {
+  const ids = new Set<string>();
+  let ask: Record<string, any> | null = null, count = 0;
+  const pages = isObj(raw) && Array.isArray(raw.pages) ? raw.pages : [raw];
+  const page = pages[n - 1];
+  // (bounded by the posted board's own size: each item once)
+  const walk = (ns: unknown) => {
+    if (!Array.isArray(ns)) return;
+    for (const x of ns) {
+      if (!isObj(x) || x.id == null) continue;
+      const xid = String(x.id);
+      ids.add(xid);
+      if (x.kind === "ask" && xid === id) { ask = x; count++; }
+      if (x.kind === "group") walk(x.children);
+    }
+  };
+  if (isObj(page)) walk(page.nodes);
+  return { ids, ask, count };
+}
+
+/** Why `m` is not plain JSON data of at most 64 KiB (as UTF-8) nested at
+ * most 4 deep, or null: walked without recursion before anything reads it,
+ * since structured clone carries cycles and other types.  Values counted as
+ * they are found, before a container's are taken, and its characters as a
+ * lower bound of its size: a wide or long one refused before anything the
+ * size of it is made (HARD-A6E-1).  `what`: "submission", as it says. */
+function plainProblem(m: unknown, what: string): string | null {
+  const MAX = 10_000, tooMany = `a ${what} has more than 10000 values`, tooBig = `a ${what} is at most ${ASK_LIMITS.bytes / 1024} KiB`, plain = `a ${what} is plain JSON data`;
+  const stack: [unknown, number][] = [[m, 1]];
+  let found = 1, chars = 0;
+  while (stack.length) {
+    const [v, depth] = stack.pop()!;
+    if (typeof v === "string") { if ((chars += v.length) > ASK_LIMITS.bytes) return tooBig; continue; }
+    if (v === null || typeof v === "boolean") continue;
+    if (typeof v === "number") { if (!Number.isFinite(v)) return `a ${what}'s numbers are finite`; continue; }
+    if (depth > 4) return `a ${what} nests at most 4 deep`;
+    if (Array.isArray(v)) {
+      if (Object.getPrototypeOf(v) !== Array.prototype) return plain;
+      if ((found += v.length) > MAX) return tooMany;
+      for (let i = 0; i < v.length; i++) stack.push([v[i], depth + 1]);
+      continue;
+    }
+    if (typeof v !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(v))) return plain;
+    // (its own keys one at a time, never a list of them all: its prototype is Object's or none)
+    for (const k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (++found > MAX) return tooMany;
+      if ((chars += k.length) > ASK_LIMITS.bytes) return tooBig;
+      stack.push([(v as any)[k], depth + 1]);
+    }
+  }
+  let bytes: number;
+  try { bytes = new TextEncoder().encode(JSON.stringify(m)).length; } catch { return plain; }
+  return bytes > ASK_LIMITS.bytes ? tooBig : null;
 }
 
 /**
@@ -267,38 +365,8 @@ function boardOf(posted: Posted): BoardDoc | string {
 export function checkSubmission(posted: Posted, m: unknown): Checked {
   const id = isObj(m) && typeof m.id === "string" && UUID.test(m.id) ? m.id : undefined;
   const no = (message: string): Checked => ({ ok: false, ...(id ? { id } : {}), message });
-  // (plain JSON, walked without recursion before anything reads it:
-  // structured clone carries cycles and other types.  Values counted as
-  // they are found, before a container's are taken, and its characters as
-  // a lower bound of its size: a wide or long one refused before anything
-  // the size of it is made, HARD-A6E-1)
-  const MAX = 10_000, tooMany = "a submission has more than 10000 values", tooBig = `a submission is at most ${ASK_LIMITS.bytes / 1024} KiB`;
-  const stack: [unknown, number][] = [[m, 1]];
-  let found = 1, chars = 0;
-  while (stack.length) {
-    const [v, depth] = stack.pop()!;
-    if (typeof v === "string") { if ((chars += v.length) > ASK_LIMITS.bytes) return no(tooBig); continue; }
-    if (v === null || typeof v === "boolean") continue;
-    if (typeof v === "number") { if (!Number.isFinite(v)) return no("a submission's numbers are finite"); continue; }
-    if (depth > 4) return no("a submission nests at most 4 deep");
-    if (Array.isArray(v)) {
-      if (Object.getPrototypeOf(v) !== Array.prototype) return no("a submission is plain JSON data");
-      if ((found += v.length) > MAX) return no(tooMany);
-      for (let i = 0; i < v.length; i++) stack.push([v[i], depth + 1]);
-      continue;
-    }
-    if (typeof v !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(v))) return no("a submission is plain JSON data");
-    // (its own keys one at a time, never a list of them all: its prototype is Object's or none)
-    for (const k in v) {
-      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
-      if (++found > MAX) return no(tooMany);
-      if ((chars += k.length) > ASK_LIMITS.bytes) return no(tooBig);
-      stack.push([(v as any)[k], depth + 1]);
-    }
-  }
-  let bytes: number;
-  try { bytes = new TextEncoder().encode(JSON.stringify(m)).length; } catch { return no("a submission is plain JSON data"); }
-  if (bytes > ASK_LIMITS.bytes) return no(`a submission is at most ${ASK_LIMITS.bytes / 1024} KiB`);
+  const bad = plainProblem(m, "submission");
+  if (bad) return no(bad);
   if (!isObj(m) || m.sagebrush !== "answers" || m.version !== 1) return no("not a submission");
   if (!id) return no("a submission's id is a UUID");
   if ((m.name ?? null) !== (posted.name ?? null) || (m.revision ?? null) !== (posted.revision ?? null)) return no("a submission's name and revision are those of the board posted on its channel");
@@ -314,4 +382,67 @@ export function checkSubmission(posted: Posted, m: unknown): Checked {
   const own = (o: any) => Object.fromEntries(Object.keys(o ?? {}).map((k) => [k, o[k]]));
   return { ok: true, submission: { id, name: m.name ?? null, revision: m.revision ?? null, page: { number: n, ...(typeof m.page.id === "string" ? { id: m.page.id } : {}), ...(typeof m.page.title === "string" ? { title: m.page.title } : {}) },
     answers: own(m.answers), notes: own(m.notes), comment: typeof m.comment === "string" ? m.comment : "" } };
+}
+
+/** What a host asks its model, as decideRequest returns it: only these fields. */
+export interface DecideRequest {
+  /** the request's id (a UUID): what `decided` or `refused` names */
+  id: string;
+  name: string | null;
+  revision: string | null;
+  page: { number: number; id?: string; title?: string };
+  /** the question's id */
+  item: string;
+  /** the question, from the board posted: its title and text, as Markdown */
+  prompt: string;
+  /** what to decide among, from the board posted: each one's name, and what makes it clearer */
+  options: { name: string; about?: string }[];
+  /** the reader's own words, the one thing from the frame */
+  answer: string;
+}
+export type Deciding = { ok: true; request: DecideRequest } | { ok: false; id?: string; message: string };
+
+/**
+ * A host's check of a frame's request to decide what a reader's own words
+ * show (web/board-host-protocol.md, "Deciding"), against the board it
+ * posted on that channel: plain JSON data, at most 64 KiB, every field as
+ * the protocol says, a question of that page with a `decide`, and words
+ * that are not only spaces.  Ok: the request for the host's model, whose
+ * question and options are the posted board's, never the message's.  Not:
+ * why, and its id if it had a valid one (to say `refused`).
+ */
+export function decideRequest(posted: Posted, m: unknown): Deciding {
+  const id = isObj(m) && typeof m.id === "string" && UUID.test(m.id) ? m.id : undefined;
+  const no = (message: string): Deciding => ({ ok: false, ...(id ? { id } : {}), message });
+  const bad = plainProblem(m, "request to decide");
+  if (bad) return no(bad);
+  if (!isObj(m) || m.sagebrush !== "decide" || m.version !== 1) return no("not a request to decide");
+  if (!id) return no("a request to decide has a UUID as its id");
+  if ((m.name ?? null) !== (posted.name ?? null) || (m.revision ?? null) !== (posted.revision ?? null)) return no("a request to decide has the name and revision of the board posted on its channel");
+  if (!isObj(m.page)) return no("a request to decide has a page, an object");
+  const { d, raw } = boardAndRaw(posted);
+  if (typeof d === "string") return no(d);
+  const n = m.page.number;
+  if (!Number.isInteger(n) || n < 1 || n > pageCount(d)) return no(`its page.number is not a page of the board (from 1 to ${pageCount(d)})`);
+  const p = pageOf(d, n - 1), many = !!d.pages?.length;
+  if (m.page.id !== undefined && m.page.id !== (many ? p.id : undefined)) return no("its page id is not its page's");
+  if (m.page.title !== undefined && m.page.title !== (many ? p.title : undefined)) return no("its page title is not its page's");
+  if (typeof m.item !== "string") return no("its item is a question's id");
+  const found = asksOf(d).filter((q) => q.page === n && q.ask.id === m.item);
+  if (found.length !== 1) return no(found.length ? `two questions on page ${n} have the id ${JSON.stringify(m.item.slice(0, 60))}` : `${JSON.stringify(m.item.slice(0, 60))} is no question on page ${n}`);
+  const a = found[0].ask;
+  // (its decide as written, before cleanDoc: refused as board check refuses it, never cleaned into another list)
+  const written = rawPage(raw, n, a.id);
+  if (written.count !== 1 || !written.ask) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} is not one question of page ${n} as written`);
+  if (written.ask.decide === undefined || (Array.isArray(written.ask.decide) && !written.ask.decide.length)) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} has nothing to decide among (no \`decide\`)`);
+  const badly = rawDecideProblem(written.ask.decide, written.ids);
+  if (badly) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} can't be decided as written (${badly}): sagebrush board check says what to fix`);
+  if (!a.decide?.length) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} has nothing to decide among (no \`decide\`)`);
+  const wrong = askProblems(a).find((x) => x.level === "error" && x.field.startsWith("decide"));
+  if (wrong) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} can't be decided as written (${wrong.field}: ${wrong.message}): sagebrush board check says what to fix`);
+  if (typeof m.note !== "string" || m.note.length > ASK_LIMITS.text) return no(`its note is a string of at most ${ASK_LIMITS.text} characters`);
+  if (!m.note.trim()) return no("its note says nothing: the reader's own words decide");
+  const prompt = [a.title, a.text].filter((x): x is string => !!x?.trim()).join("\n\n");
+  return { ok: true, request: { id, name: m.name ?? null, revision: m.revision ?? null, page: { number: n, ...(typeof m.page.id === "string" ? { id: m.page.id } : {}), ...(typeof m.page.title === "string" ? { title: m.page.title } : {}) },
+    item: a.id, prompt, options: a.decide.map((o) => ({ name: o.name, ...(o.about !== undefined ? { about: o.about } : {}) })), answer: m.note } };
 }
