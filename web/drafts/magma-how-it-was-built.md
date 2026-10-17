@@ -7,7 +7,9 @@
 
 On these pages, "Magma" means the programming language only. Sagebrush's
 Magma mode is an independent implementation of that language. It was
-written from Magma's public documentation, and its behaviour was checked by
+written from Magma's public documentation (for names, signatures and
+meaning; none of its text or examples was copied), and its behaviour was
+checked by
 running Magma 2.18-5 as a black box: giving it inputs and reading its
 outputs. It contains no code from the Magma computer algebra system, is not
 derived from Magma's source code, and was written without reading it.
@@ -53,9 +55,11 @@ language, and a small part of the second, on top of its own mathematics.
 
 The work followed fixed rules, kept for the whole project:
 
-- **What was used.** Magma's Handbook (its public documentation), published
-  mathematics papers, and Magma 2.18-5 as a black box: a program goes in,
-  printed output comes out, and only the output is looked at.
+- **What was used.** Magma's Handbook (its public documentation), for the
+  names of the intrinsics, their signatures and their documented meaning;
+  published mathematics papers; and Magma 2.18-5 as a black box: a program
+  goes in, printed output comes out, and only the output is looked at. No
+  text or example from the Handbook was copied into Sagebrush.
 - **What was never used.** Magma's source code. The installed copy of
   Magma that served as the black box ships much of its library as source
   files; they were never opened, listed, searched or copied, for any
