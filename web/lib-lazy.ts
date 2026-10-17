@@ -137,7 +137,7 @@ g.__SAGEBRUSH_PACKAGES__ = { registry: M.packages.registry, files: pkgFiles };
 // they are needed, each checked against its SHA-256 (the index's in the
 // manifest, the file's in the index).
 let tzIndex: Record<string, string> | null = null;
-g.__SAGEBRUSH_TZDATA__ = (zone: string): Uint8Array | null => {
+const loadTzIndex = (): Record<string, string> => {
   const ref = M.tzdata;
   if (!ref) throw new Error("this worker carries no zone data");
   if (tzIndex === null) {
@@ -149,6 +149,12 @@ g.__SAGEBRUSH_TZDATA__ = (zone: string): Uint8Array | null => {
     if (index?.format !== "sagebrush-tzdata" || typeof index.zones !== "object") throw new Error("not a zone data index");
     tzIndex = index.zones as Record<string, string>;
   }
+  return tzIndex;
+};
+// (the zones' names, for zoneinfo's available_timezones and its tzdata package)
+g.__SAGEBRUSH_TZDATA_ZONES__ = (): string[] => Object.keys(loadTzIndex());
+g.__SAGEBRUSH_TZDATA__ = (zone: string): Uint8Array | null => {
+  const tzIndex = loadTzIndex();
   if (!Object.hasOwn(tzIndex, zone)) return null;
   const sha = tzIndex[zone];
   const url = chunkUrl(`lib/tzdata/${sha}.tzif`);

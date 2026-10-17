@@ -555,6 +555,78 @@ newBuiltinModule("_time", (m) => {
       if (fd !== undefined) fs.closeSync(fd);
     }
   });
+  // (zoneinfo's io.open(path, "rb") of a zone file on TZPATH, as bytes: at
+  // most limit of them, never blocking (a FIFO), a symbolic link followed;
+  // open()'s errors, CPython's words: FileNotFoundError, PermissionError,
+  // IsADirectoryError for a directory, ...; NotImplementedError for a file
+  // that is not a regular one, which CPython would block on or read without
+  // end)
+  fn(m, "_tzfile", (path: any, limit: any) => {
+    const fs = require("fs");
+    const name = String(path);
+    const max = Number(limit);
+    const STRERROR: Record<string, [number, string]> = {
+      ENOENT: [2, "No such file or directory"],
+      EACCES: [13, "Permission denied"],
+      EPERM: [1, "Operation not permitted"],
+      EISDIR: [21, "Is a directory"],
+      ENOTDIR: [20, "Not a directory"],
+      ELOOP: [40, "Too many levels of symbolic links"],
+      ENAMETOOLONG: [36, "File name too long"],
+      EMFILE: [24, "Too many open files"],
+      EIO: [5, "Input/output error"],
+    };
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(at(name), fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const st = fs.fstatSync(fd);
+      if (st.isDirectory()) throw markRaised(callObj(T.OSError, [21, "Is a directory", path]));
+      if (!st.isFile()) throw markRaised(callObj(T.NotImplementedError, [`zoneinfo: ${JSON.stringify(name)} is not a regular file, which Sagebrush does not read as a zone file`]));
+      const buf = new Uint8Array(max);
+      let n = 0;
+      while (n < max) {
+        const k = fs.readSync(fd, buf, n, max - n, null);
+        if (k === 0) break;
+        n += k;
+      }
+      return new PyBytes(buf.slice(0, n));
+    } catch (e: any) {
+      if (e?.$cls !== undefined) throw e;
+      if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
+      const known = STRERROR[e?.code];
+      // (OSError(errno, strerror, filename) is the subclass the errno names)
+      if (known) throw markRaised(callObj(T.OSError, [known[0], known[1], path]));
+      throw markRaised(callObj(T.OSError, [e?.errno ? -e.errno : 0, String(e?.message ?? e), path]));
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+    }
+  });
+  // (the pinned zone data's zone names, as tzdata's zones file lists them:
+  // web/lib-lazy.ts's __SAGEBRUSH_TZDATA_ZONES__ in a browser, the files under
+  // SAGEBRUSH_TIME_PINNED_DIR in the tests of that way under Node)
+  fn(m, "_pinned_zones", () => {
+    const hook = (globalThis as any).__SAGEBRUSH_TZDATA_ZONES__;
+    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    try {
+      if (typeof hook === "function") return tuple((hook() as string[]).map((z) => z));
+      if (typeof dir === "string") {
+        const fs = require("fs");
+        const out: string[] = [];
+        const walk = (rel: string) => {
+          for (const f of fs.readdirSync(rel ? dir + "/" + rel : dir).sort()) {
+            const r = rel ? rel + "/" + f : f;
+            if (fs.statSync(dir + "/" + r).isDirectory()) walk(r);
+            else out.push(r);
+          }
+        };
+        walk("");
+        return tuple(out);
+      }
+    } catch (e: any) {
+      throw markRaised(callObj(T.OSError, [0, String(e?.message ?? e)]));
+    }
+    throw markRaised(callObj(T.OSError, [0, "there is no pinned zone data here"]));
+  });
   // (in a browser, which has no zone files: the pinned zone data's file for
   // a zone (web/lib-lazy.ts's __SAGEBRUSH_TZDATA__, each file checked against
   // its SHA-256), or None where the pinned data has no such zone; OSError
