@@ -44,6 +44,7 @@ if d:
     show("a zone file", lambda: ZoneInfo.no_cache("Zone").utcoffset(None))
     show("a file past MAX_FILE", lambda: ZoneInfo.no_cache("big"))
     show("a FIFO", lambda: ZoneInfo.no_cache("fifo"))
+    show("a file not readable", lambda: ZoneInfo.no_cache("Unreadable"))
     show("available_timezones", lambda: sorted(zoneinfo.available_timezones()))
 
 from _zoneinfo import _TIMEDELTA_CACHE, _TIMEDELTA_CACHE_MAX
