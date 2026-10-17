@@ -1270,6 +1270,47 @@ test("an empty collection made with one of another or an unknown universe is nev
   assert.doesNotMatch(none, /^[01]$/m);
 });
 
+test("a collection made from one over a field stays over that field when integers are put in and taken out (Gcd, Lcm, set operations)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  // (Magma's "GCD not defined for field" after an integer is put in and
+  // taken out, never 0 or 1; nonempty too, astra2 on 0f235472)
+  const fields: string[] = [];
+  for (const F of ["Rationals()", "GF(7)"])
+    for (const f of ["Gcd", "Lcm"])
+      fields.push(`S:=Setseq({${F}|});Append(~S,1);Remove(~S,1);${f}(S);`, `S:=Seqset([${F}|]);Include(~S,1);Exclude(~S,1);${f}(S);`,
+        `S:=Sort([${F}|]);S[1]:=1;Remove(~S,1);${f}(S);`, `S:=Setseq({${F}|});Append(~S,2);${f}(S);`);
+  fields.push("Gcd([1/2, 1/3]);", "Gcd([GF(7) | 1, 2]);", "Gcd({Rationals() | } join {4, 6});",
+    "X:={Integers()|} join {Rationals()|};Include(~X,1);Exclude(~X,1);Gcd(X);");
+  const out = run(fields.join("\n")), flat = out.replace(/\s+/g, " ");
+  assert.equal((flat.match(/Runtime error in '(Gcd|Lcm)': (GCD|LCM) not defined for field/g) ?? []).length, fields.length, out);
+  assert.doesNotMatch(out, /^\d+$/m);
+  assert.match(out, /\nend\n$/);
+  // (what is put in goes into the field, as Magma's)
+  const universes = run("S:=Setseq({GF(7)|}); Append(~S,2); S[1]+5;\nS:=Sort([GF(7)|]);S[1]:=10;S;\n" +
+    "S:=Sort([Rationals()|]); S[1]:=4; Universe(S);\nT:={Rationals()|} join {Integers()|}; Include(~T,2); Universe(T);\n" +
+    "T:={GF(7)|} meet {Integers()|}; Include(~T,2); Universe(T);\nX:={GF(7)|} join {4,11}; X, Universe(X);\n" +
+    "X:={4,11} diff {GF(7)|}; X;\nX:={@ GF(7)| @} join {@ 9, 2, 3 @}; X;\nX:={Integers()|} join {1/2}; Universe(X);\n" +
+    "X:={Integers()|} join {Integers()|}; Include(~X,6); Include(~X,4); Gcd(X);");
+  assert.match(universes, /^0\n\[ 3 \]\nRational Field\nRational Field\nFinite field of size 7\n\{ 4 \}\nFinite field of size 7\n\{ 4 \}\n\{@ 2, 3 @\}\nRational Field\n2\nend\n$/, universes);
+  // (two fields, or the rationals and a finite field, meet in none: Magma's error)
+  // (an emptied one keeps the universe inferred for it: E's is the
+  // rationals', CORR-148-1)
+  const E = "E:={1/2}; Exclude(~E,1/2); ";
+  const clash = ["{GF(7)|} join {GF(5)|};", "{Rationals()|} meet {GF(7)|};", "{GF(7)|} diff {Rationals()|};", "{GF(7)|} join {1/2};",
+    "Gcd({Rationals()|} join {GF(7)|});", E + "Universe(E join {GF(7)|2});", E + "Universe({GF(7)|2} join E);",
+    E + "Universe(E sdiff {GF(7)|2});", E + "Characteristic(Universe({GF(7)|2} diff E));",
+    "E:=[1/2]; Exclude(~E,1/2); F:=Seqset(E); Universe(F join {GF(7)|2});"];
+  const c = run(clash.join("\n")).replace(/\s+/g, " ");
+  assert.equal((c.match(/Runtime error in '(join|meet|diff|sdiff)': No valid universe containing all elements/g) ?? []).length, clash.length, c);
+  assert.doesNotMatch(c, /Finite field of size 7|^7$/m);
+  // (with the integers' it goes into the rationals; an empty one only
+  // written empty, or of the integers, into the field)
+  const u = run(E + "Universe(E join {Integers()|2});\nE:={4}; Exclude(~E,4); Universe(E join {GF(7)|2});\nUniverse({} join {GF(7)|2});");
+  assert.match(u, /^Rational Field\nFinite field of size 7\nFinite field of size 7\nend\n$/, u);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
