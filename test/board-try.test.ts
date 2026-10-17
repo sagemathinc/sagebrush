@@ -10,7 +10,7 @@ import { join } from "node:path";
 const cli = join(__dirname, "..", "src", "cli.js");
 const dir = mkdtempSync(join(tmpdir(), "sb-board-try-"));
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
-const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", cwd: dir, timeout: 180_000 });
+const run = (args: string[], env: Record<string, string> = {}) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", cwd: dir, timeout: 180_000, env: { ...process.env, ...env } });
 const file = (name: string, d: unknown) => { const f = join(dir, name); writeFileSync(f, JSON.stringify(d)); return f; };
 // (a report's checks and sequences, with each one's error: what an assertion says when it fails, so a failure says why)
 const why = (j: any) => JSON.stringify({ checks: (j.checks ?? []).map((c: any) => [c.case_id, c.outcome, c.error, c.timed_out]), interaction: j.interaction, code: j.code });
@@ -126,6 +126,23 @@ test("board try: a check's checkMs is its own, from its start: a fresh interpret
   const b = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "n = 2" }, q("q"), q("s")] };
   const j = tryCases("fresh-start", b, { checks: [{ case_id: "a", ask_id: "q", answer: 2 }, { case_id: "b", ask_id: "q", answer: 2 }, { case_id: "c", ask_id: "s", answer: 2 }, { case_id: "d", ask_id: "s", answer: 3 }] });
   assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome]), [["a", "right"], ["b", "right"], ["c", "right"], ["d", "wrong"]], why(j));
+  // (the warm-up before any of the board's code: a board that makes the checks' first run slow, once,
+  // pays it in its check's checkMs, never in the warm-up's 60 s; daybreak2's HARD-AE0-1)
+  const slow = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "import _sb_check, time\n_prep = _sb_check.prepare\n_once = []\ndef _slow(a):\n    if not _once:\n        _once.append(1)\n        t = time.time()\n        while time.time() - t < 1.5:\n            pass\n    return _prep(a)\n_sb_check.prepare = _slow" }, { id: "q", kind: "ask", text: "Q", input: "number", check: "answer == 2", checkMs: 300 }] };
+  const t = tryCases("fresh-start-tamper", slow, { checks: [{ case_id: "a", ask_id: "q", answer: 2 }] });
+  assert.deepEqual(t.checks.map((c: any) => [c.case_id, c.outcome, c.timed_out]), [["a", "error", true]], why(t));
+  // (the board's names as the check sees them: j and json, the name the evaluator imports, the board's own;
+  // _j is its cell's own, as names starting with _ are, so no check sees it, as before; astra's CORR-AE0-1 repro)
+  const names = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "_j = 42\nj = 42\njson = 7" }, { id: "q", kind: "ask", text: "Q", input: "number", check: "j == 42 and json == 7 and answer == 1", checkMs: 3000 }, { id: "p", kind: "ask", text: "P", input: "number", check: "_j == 42", checkMs: 3000 }] };
+  const nj = tryCases("fresh-start-names", names, { checks: [{ case_id: "a", ask_id: "q", answer: 1 }, { case_id: "b", ask_id: "q", answer: 2 }, { case_id: "local", ask_id: "p", answer: 1 }] });
+  assert.deepEqual(nj.checks.map((c: any) => [c.case_id, c.outcome]), [["a", "right"], ["b", "wrong"], ["local", "error"]], why(nj));
+  assert.match(nj.checks[2].error, /NameError: name '_j' is not defined/, why(nj));
+  // (a warm-up that fails: the interpreter refused, saying so, its checks not run)
+  const f = file("fresh-start-fail.board.json", { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "n = 2" }, { id: "q", kind: "ask", text: "Q", input: "number", check: "answer == n" }] });
+  const r = run(["board", "try", f, "--case", "q=2", "--json"], { SAGEBRUSH_TEST_CHECK_WARMUP: "False" });
+  const fj = JSON.parse(r.stdout);
+  assert.deepEqual(fj.checks.map((c: any) => [c.case_id, c.outcome]), [["case-1", "error"]], why(fj));
+  assert.match(fj.checks[0].error, /could not run a question's check \(its warm-up failed\)/, why(fj));
   // (and a board with no code: its interpreter warmed up all the same)
   const k = tryCases("fresh-start-nocode", { format: "sagebrush-board", version: 1, nodes: [{ id: "q", kind: "ask", text: "Q", input: "number", check: "answer == 2", checkMs: 300 }] }, { checks: [{ case_id: "a", ask_id: "q", answer: 2 }, { case_id: "b", ask_id: "q", answer: 1 }] });
   assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome]), [["a", "right"], ["b", "wrong"]], why(k));
