@@ -604,6 +604,8 @@ export function updateBases(bases: any[]): any[] {
     out ??= bases.slice(0, i);
     out.push(...r);
   }
+  // (the original bases tuple kept on the new array, for __orig_bases__)
+  if (out !== null) (out as any).$orig = orig;
   return out ?? bases;
 }
 // The namespace a class body runs in, before it runs: its metaclass's
@@ -3067,11 +3069,11 @@ let unionOf: (a: any, b: any) => any;
   const same = (a: any, b: any) => a === b || (a instanceof PyGenericAlias && O.truth(O.eq(a, b)));
   method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.some((x) => same(t, x))) : NotImplemented));
   method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)), 0));
-  const noGeneric = (u: PyUnion, what: string) => {
-    if (u.args.some((t) => t instanceof PyGenericAlias)) raise(T.TypeError, `${what}() argument 2 cannot be a parameterized generic`);
-  };
-  method(unionType, "__instancecheck__", (u: PyUnion, x: any) => (noGeneric(u, "isinstance"), u.args.some((t) => isinstance(x, t))));
-  method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => (noGeneric(u, "issubclass"), u.args.some((t) => c.$mro.includes(t))));
+  // (each member in order through the whole protocol, stopping at the
+  // first that holds, as isinstance() with a tuple: an alias raises only
+  // when it is reached)
+  method(unionType, "__instancecheck__", (u: PyUnion, x: any) => u.args.some((t) => hooks.isinstance(x, t)));
+  method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => u.args.some((t) => hooks.issubclass(c, t)));
   getset(unionType, "__args__", (u: PyUnion) => tuple(u.args));
 }
 
@@ -3082,12 +3084,20 @@ let unionOf: (a: any, b: any) => any;
 // __mro_entries__, never an isinstance() class. Substituting type variables
 // isn't done yet: refused.
 export class PyGenericAlias {
+  // (starred: *list[int], what unpacking an alias gives; params: the
+  // computed __parameters__, kept once computed)
+  starred = false;
+  params: any[] | undefined = undefined;
   constructor(public origin: any, public args: any[]) {}
 }
 // (the __class_getitem__ of the builtins that are generic, as CPython 3.14's:
 // it makes the alias; memoryview's set by src/runtime/memoryview.ts)
 export const genericClassGetitem = new PyClassMethod(builtin((cls: any, item: any) => new PyGenericAlias(cls, isinstance(item, T.tuple) ? [...item] : [item]), "__class_getitem__"));
-export const genericAliasType = builtinTypeFor("GenericAlias", PyGenericAlias, "types", (origin: any, args: any) => new PyGenericAlias(origin, isinstance(args, T.tuple) ? [...args] : [args]));
+export const genericAliasType = builtinTypeFor("GenericAlias", PyGenericAlias, "types", (...a: any[]) => {
+  if (a.length !== 2) raise(T.TypeError, `GenericAlias expected 2 arguments, got ${a.length}`);
+  const [origin, args] = a;
+  return new PyGenericAlias(origin, isinstance(args, T.tuple) ? [...args] : [args]);
+});
 T.GenericAlias = genericAliasType;
 {
   const ga = genericAliasType;
@@ -3109,25 +3119,28 @@ T.GenericAlias = genericAliasType;
   // brackets, only at the top: a list in it is its repr, as
   // ga_repr_items_list, so a list holding itself is [[...]] inside)
   const argRepr = (t: any): string => (Array.isArray(t) && typeOf(t) === T.list ? `[${t.map(typeRepr).join(", ")}]` : typeRepr(t));
+  // (a class too through its attributes: a metaclass may answer them)
   const typeRepr = (t: any): string => {
     if (t === Ellipsis) return "...";
-    if (isType(t)) {
-      const m = typeModule(t);
-      return m === "builtins" ? t.$qualname : `${str(m)}.${t.$qualname}`;
-    }
     if (attr(t, "__origin__") !== undefined && attr(t, "__args__") !== undefined) return repr(t);
     const qn = attr(t, "__qualname__");
     if (qn === undefined) return repr(t);
     const m = attr(t, "__module__");
-    if (m === undefined) return repr(t);
+    if (m === undefined || m === null) return repr(t);
     return m === "builtins" ? str(qn) : `${str(m)}.${str(qn)}`;
   };
-  method(ga, "__repr__", (a: PyGenericAlias) => `${typeRepr(a.origin)}[${a.args.length ? a.args.map(argRepr).join(", ") : "()"}]`);
+  method(ga, "__repr__", (a: PyGenericAlias) => `${a.starred ? "*" : ""}${typeRepr(a.origin)}[${a.args.length ? a.args.map(argRepr).join(", ") : "()"}]`);
   method(ga, "__getattribute__", (a: PyGenericAlias, name: string) => (OWN.has(name) ? genericGetattr(a, name, typeOf(a)) : getattr(a.origin, name)));
   getset(ga, "__origin__", (a) => a.origin);
   getset(ga, "__args__", (a) => tuple(a.args));
-  getset(ga, "__unpacked__", () => false);
-  getset(ga, "__typing_unpacked_tuple_args__", () => null);
+  getset(ga, "__unpacked__", (a) => a.starred);
+  getset(ga, "__typing_unpacked_tuple_args__", (a) => (a.starred && a.origin === T.tuple ? tuple(a.args) : null));
+  // (unpacking, *list[int]: one starred alias, as CPython's ga_iter)
+  method(ga, "__iter__", (a: PyGenericAlias) => {
+    const s = new PyGenericAlias(a.origin, a.args);
+    s.starred = true;
+    return O.iter([s]);
+  });
   // (the type variables among the args, nested ones too, in order, each
   // once: what has __typing_subst__, or an arg's own __parameters__; lists
   // and tuples descended without the JS stack, and one holding itself a
@@ -3152,7 +3165,7 @@ T.GenericAlias = genericAliasType;
       }
       const t = top[0][top[1]++];
       if (isType(t)) continue;
-      if (Array.isArray(t) && (typeOf(t) === T.list || typeOf(t) === T.tuple)) {
+      if (Array.isArray(t) && (isinstance(t, T.list) || isinstance(t, T.tuple))) {
         if (path.has(t)) raise(T.RecursionError, "maximum recursion depth exceeded in __parameter__ calculation");
         path.add(t);
         stack.push([t, 0]);
@@ -3167,10 +3180,13 @@ T.GenericAlias = genericAliasType;
     }
     return out;
   };
-  getset(ga, "__parameters__", (a) => tuple(params(a.args)));
+  // (computed once, when first asked for and it succeeds, then kept)
+  const paramsOf = (a: PyGenericAlias): any[] => (a.params ??= tuple(params(a.args)));
+  getset(ga, "__parameters__", paramsOf);
   method(ga, "__mro_entries__", (a: PyGenericAlias, _bases: any) => tuple([a.origin]));
   method(ga, "__eq__", (a: PyGenericAlias, o: any) => {
     if (!(o instanceof PyGenericAlias)) return NotImplemented;
+    if (a.starred !== o.starred) return false;
     return O.truth(O.eq(a.origin, o.origin)) && O.truth(O.eq(tuple(a.args), tuple(o.args)));
   });
   method(ga, "__hash__", (a: PyGenericAlias) => O.hashExact(a.origin) ^ O.hashExact(tuple(a.args)));
@@ -3179,10 +3195,14 @@ T.GenericAlias = genericAliasType;
   method(ga, "__instancecheck__", (_a: any, _o: any) => raise(T.TypeError, "isinstance() argument 2 cannot be a parameterized generic"));
   method(ga, "__subclasscheck__", (_a: any, _o: any) => raise(T.TypeError, "issubclass() argument 2 cannot be a parameterized generic"));
   method(ga, "__getitem__", (a: PyGenericAlias, _k: any) => {
-    if (params(a.args).length === 0) raise(T.TypeError, `${repr(a)} is not a generic class`);
+    if (paramsOf(a).length === 0) raise(T.TypeError, `${repr(a)} is not a generic class`);
     raise(T.NotImplementedError, `substituting the type variables of ${repr(a)} is not supported yet`);
   });
-  method(ga, "__reduce__", (a: PyGenericAlias) => tuple([ga, tuple([a.origin, tuple(a.args)])]));
+  // (by its own type: a subclass's instance copies as one)
+  method(ga, "__reduce__", (a: PyGenericAlias) => {
+    if (a.starred) raise(T.NotImplementedError, `reducing an unpacked alias (${repr(a)}) is not supported yet`);
+    return tuple([typeOf(a), tuple([a.origin, tuple(a.args)])]);
+  });
   method(ga, "__dir__", (a: PyGenericAlias) => {
     const names = new Set<string>([...O.toArray(callObj(hooks.importModule("builtins").dir, [a.origin])), ...OWN]);
     return [...names].sort();
