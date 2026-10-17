@@ -24,7 +24,11 @@ export type Expr =
   | { k: "Yield"; line: number; value: Expr | null }
   | { k: "Await"; line: number; value: Expr }
   | { k: "YieldFrom"; line: number; value: Expr }
-  | { k: "NamedExpr"; line: number; target: string; value: Expr };
+  | { k: "NamedExpr"; line: number; target: string; value: Expr }
+  // a runtime operation the front end lowers to (match's, async for/with's):
+  // R.$i[name], called with args, or its value when args is null; no Python
+  // name, so no user binding can replace it
+  | { k: "Intrinsic"; line: number; name: string; args: Expr[] | null };
 
 export type Constant =
   | { t: "int"; v: bigint }

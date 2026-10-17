@@ -461,3 +461,46 @@ for src in ["match x:\n case {f'{x}': 1}: pass", "match x:\n case {'a': 1, **r}:
         print("ok")
     except SyntaxError as e:
         print("SyntaxError", e.msg, e.lineno, e.offset)
+
+
+# the front end's operations are no names: user locals with the builtins'
+# names async for and async with once called don't change them
+class ACM:
+    async def __aenter__(self):
+        return "entered"
+
+    async def __aexit__(self, t, v, tb):
+        print("exit", t.__name__ if t else None)
+        return True
+
+
+class AIt:
+    def __init__(self):
+        self.n = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        self.n += 1
+        if self.n > 2:
+            raise StopAsyncIteration
+        return self.n
+
+
+async def hygiene():
+    type = BaseException = StopAsyncIteration = None
+    out = []
+    async with ACM() as e:
+        out.append(e)
+        raise KeyError("suppressed")
+    async for v in AIt():
+        out.append(v)
+    return out
+
+
+coro = hygiene()
+try:
+    coro.send(None)
+except StopIteration as e:
+    print(e.value)

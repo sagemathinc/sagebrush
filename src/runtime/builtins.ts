@@ -606,14 +606,15 @@ const anextImpl = (x: any) => {
 };
 define("aiter", aiterImpl, [1, 1]);
 define("anext", anextImpl, [1, 2]);
-define("__pyjs_aiter__", aiterImpl, [1, 1]);
 
 // match statements (frontend.ts lowers them): CPython's MATCH_SEQUENCE,
-// MATCH_KEYS and MATCH_CLASS, each checking and unpacking a subject for a
-// pattern's subpatterns, or giving None when it doesn't match.
-// isinstance as the builtin is: an ABC's __instancecheck__ (collections.abc
-// for sequences and mappings, as CPython's Py_TPFLAGS_SEQUENCE/MAPPING,
-// which register and subclassing set).
+// MATCH_MAPPING, MATCH_KEYS and MATCH_CLASS, each checking a subject, then
+// extracting what a pattern's subpatterns need, as CPython's compiler
+// stages them. Intrinsics (R.$i): no Python name reaches them.
+// A subject is a sequence or a mapping by its real type (not __class__),
+// as CPython's Py_TPFLAGS_SEQUENCE/MAPPING: the builtins that have the flag
+// and their subclasses, and what collections.abc's Sequence and Mapping
+// count by inheritance or register(); str, bytes and bytearray never.
 let abcs: { Sequence: any; Mapping: any } | null = null;
 const abcOf = () => {
   if (abcs === null) {
@@ -622,111 +623,163 @@ const abcOf = () => {
   }
   return abcs;
 };
-const pyIsinstance = (x: any, cls: any): boolean => callObj(builtins.isinstance, [x, cls]) === true;
-// (str, bytes and bytearray are sequences, but not to a sequence pattern)
-const matchSequence = (s: any): boolean => {
-  if (Array.isArray(s)) return true;
-  if (s === null || typeof s !== "object" || s instanceof PyBytes) return false;
-  if (isinstance(s, T.str) || isinstance(s, T.bytes) || isinstance(s, T.bytearray)) return false;
-  return pyIsinstance(s, abcOf().Sequence);
+const pyIssubclass = (t: any, cls: any): boolean => callObj(builtins.issubclass, [t, cls]) === true;
+const SEQ_NAMES = new Set(["list", "tuple", "range", "memoryview", "deque", "array"]);
+const NOT_SEQ = new Set(["str", "bytes", "bytearray", "dict"]);
+const isSequence = (s: any): boolean => {
+  const t = typeOf(s);
+  if (t === T.list || t === T.tuple) return true;
+  for (const c of t.$mro) {
+    if (SEQ_NAMES.has(c.$name) && (c.$module === "builtins" || c.$module === "collections" || c.$module === "array")) return true;
+    if (NOT_SEQ.has(c.$name) && c.$module === "builtins") return false;
+  }
+  return pyIssubclass(t, abcOf().Sequence);
 };
-const matchMapping = (s: any): boolean => s instanceof PyDict || (s !== null && typeof s === "object" && pyIsinstance(s, abcOf().Mapping));
-define("__pyjs_match_seq__", (s: any, fixed: number, star: number) => {
-  if (!matchSequence(s)) return null;
-  const n = O.len(s);
-  if (star < 0 ? n !== fixed : n < fixed) return null;
-  const items = Array.isArray(s) ? s : O.toArray(s);
-  if (items.length !== n) raise(T.ValueError, items.length > n ? `too many values to unpack (expected ${n})` : `not enough values to unpack (expected ${n}, got ${items.length})`);
-  if (star < 0) return items;
-  const after = fixed - star;
-  return [...items.slice(0, star), items.slice(star, items.length - after), ...items.slice(items.length - after)];
-}, [3, 3]);
-define("__pyjs_match_map__", (s: any, keys: any[], rest: boolean) => {
-  if (!matchMapping(s)) return null;
-  if (O.len(s) < keys.length) return null;
-  const seen = new PyDict();
-  const dummy = {};
-  const get = keys.length ? getattr(s, "get") : null;
+const isMapping = (s: any): boolean => {
+  const t = typeOf(s);
+  if (t === T.dict) return true;
+  for (const c of t.$mro) if ((c.$name === "dict" && c.$module === "builtins") || c.$name === "mappingproxy") return true;
+  return pyIssubclass(t, abcOf().Mapping);
+};
+// the values a fixed-length or starred sequence pattern takes, by iterating
+// the subject once (CPython's UNPACK_SEQUENCE and UNPACK_EX; an exact list
+// or tuple by its items, copied)
+const unpackAll = (s: any): any[] => {
+  const t = typeOf(s);
+  if (t === T.list || t === T.tuple) return s.slice();
   const out: any[] = [];
-  for (const k of keys) {
-    if (dictGet(seen, k) !== undefined) raise(T.ValueError, `mapping pattern checks duplicate key (${repr(k)})`);
-    dictSet(seen, k, true);
-    const v = callObj(get, [k, dummy]);
-    if (v === dummy) return null;
-    out.push(v);
-  }
-  if (rest) {
-    const d = new PyDict();
-    callObj(getattr(d, "update"), [s]);
-    for (const k of keys) callObj(getattr(d, "pop"), [k, null]);
-    out.push(d);
-  }
+  const it = O.iter(s);
+  for (let v = it.$next(); v !== DONE; v = it.$next()) out.push(v);
   return out;
-}, [3, 3]);
+};
 // (the types whose one positional subpattern is the subject itself,
 // CPython's Py_TPFLAGS_MATCH_SELF, which their subclasses inherit)
 const MATCH_SELF = ["bool", "bytearray", "bytes", "dict", "float", "frozenset", "int", "list", "set", "str", "tuple"];
-define("__pyjs_match_class__", (s: any, cls: any, npos: number, kw: string[]) => {
-  if (!isType(cls)) raise(T.TypeError, "called match pattern must be a class");
-  if (!pyIsinstance(s, cls)) return null;
-  const name = (cls as any).$name;
-  const names: (string | null)[] = [];
-  if (npos > 0) {
-    let ma: any = undefined;
-    try {
-      ma = getattr(cls, "__match_args__");
-    } catch (e: any) {
-      if (!isinstance(e, T.AttributeError)) throw e;
+const ONLY_WILDCARDS: any[] = Object.freeze([]) as any;
+export const intrinsics: any = {
+  // size: the sequence pattern's subpatterns, its star among them (or -1);
+  // mode 0: values unpacked; 1: a wildcard star, the others by index
+  // (CPython's subscripts, from the end after the star); 2: only wildcards,
+  // nothing taken
+  match_seq(s: any, size: number, star: number, mode: number): any {
+    if (!isSequence(s)) return null;
+    if (star < 0) {
+      if (O.len(s) !== size) return null;
+    } else if (size - 1 > 0 && O.len(s) < size - 1) return null;
+    if (mode === 2) return ONLY_WILDCARDS;
+    if (mode === 1) {
+      const out: any[] = [];
+      for (let i = 0; i < size; i++) out.push(i === star ? null : O.getitem(s, i < star ? i : i - size));
+      return out;
     }
-    if (ma === undefined) {
-      const self = (cls as any).$mro.some((c: any) => MATCH_SELF.includes(c.$name) && c === (T as any)[c.$name]);
-      const allowed = self ? 1 : 0;
-      if (npos > allowed) raise(T.TypeError, `${name}() accepts ${allowed} positional sub-pattern${allowed === 1 ? "" : "s"} (${npos} given)`);
-      names.push(null);
-    } else {
-      if (!isinstance(ma, T.tuple)) raise(T.TypeError, `${name}.__match_args__ must be a tuple (got ${typeName(ma)})`);
-      if (npos > ma.length) raise(T.TypeError, `${name}() accepts ${ma.length} positional sub-pattern${ma.length === 1 ? "" : "s"} (${npos} given)`);
-      for (let i = 0; i < npos; i++) {
-        const a = ma[i];
-        // (exact strs, as CPython's PyUnicode_CheckExact)
-        if (typeof a !== "string") raise(T.TypeError, `__match_args__ elements must be strings (got ${typeName(a)})`);
-        names.push(a);
+    const items = unpackAll(s);
+    if (star < 0) {
+      if (items.length !== size) raise(T.ValueError, items.length > size ? `too many values to unpack (expected ${size})` : `not enough values to unpack (expected ${size}, got ${items.length})`);
+      return items;
+    }
+    const fixed = size - 1, after = size - 1 - star;
+    if (items.length < fixed) raise(T.ValueError, `not enough values to unpack (expected at least ${fixed}, got ${items.length})`);
+    return [...items.slice(0, star), items.slice(star, items.length - after), ...items.slice(items.length - after)];
+  },
+  // a mapping, with at least n items (none asked when n is 0)
+  match_map(s: any, n: number): boolean {
+    return isMapping(s) && (n === 0 || O.len(s) >= n);
+  },
+  // the keys' values, by the mapping's get() looked up once, or None
+  match_keys(s: any, keys: any[]): any {
+    const seen = new PyDict();
+    const dummy = {};
+    const get = getattr(s, "get");
+    const out: any[] = [];
+    for (const k of keys) {
+      if (dictGet(seen, k) !== undefined) raise(T.ValueError, `mapping pattern checks duplicate key (${repr(k)})`);
+      dictSet(seen, k, true);
+      const v = callObj(get, [k, dummy]);
+      if (v === dummy) return null;
+      out.push(v);
+    }
+    return out;
+  },
+  // **rest: a new dict of the subject's items but the keys, made only once
+  // the other subpatterns have matched
+  match_rest(s: any, keys: any[]): any {
+    const d = new PyDict();
+    callObj(getattr(d, "update"), [s]);
+    for (const k of keys) callObj(getattr(d, "__delitem__"), [k]);
+    return d;
+  },
+  match_class(s: any, cls: any, npos: number, kw: string[]): any {
+    if (!isType(cls)) raise(T.TypeError, "called match pattern must be a class");
+    if (callObj(builtins.isinstance, [s, cls]) !== true) return null;
+    const name = (cls as any).$name;
+    const seen = new Set<string>();
+    const out: any[] = [];
+    let missing = false;
+    // (each attribute in order: its name checked, then looked up; a missing
+    // one fails the match at once, as CPython's match_class_attr)
+    const attr = (a: string): void => {
+      if (seen.has(a)) raise(T.TypeError, `${name}() got multiple sub-patterns for attribute ${repr(a)}`);
+      seen.add(a);
+      try {
+        out.push(getattr(s, a));
+      } catch (e: any) {
+        if (!isinstance(e, T.AttributeError)) throw e;
+        missing = true;
+      }
+    };
+    if (npos > 0) {
+      let ma: any = undefined;
+      try {
+        ma = getattr(cls, "__match_args__");
+      } catch (e: any) {
+        if (!isinstance(e, T.AttributeError)) throw e;
+      }
+      if (ma === undefined) {
+        const self = (cls as any).$mro.some((c: any) => MATCH_SELF.includes(c.$name) && c === (T as any)[c.$name]);
+        const allowed = self ? 1 : 0;
+        if (npos > allowed) raise(T.TypeError, `${name}() accepts ${allowed} positional sub-pattern${allowed === 1 ? "" : "s"} (${npos} given)`);
+        out.push(s);
+      } else {
+        if (typeOf(ma) !== T.tuple) raise(T.TypeError, `${name}.__match_args__ must be a tuple (got ${typeName(ma)})`);
+        if (npos > ma.length) raise(T.TypeError, `${name}() accepts ${ma.length} positional sub-pattern${ma.length === 1 ? "" : "s"} (${npos} given)`);
+        for (let i = 0; i < npos && !missing; i++) {
+          const a = ma[i];
+          // (exact strs, as CPython's PyUnicode_CheckExact)
+          if (typeof a !== "string") raise(T.TypeError, `__match_args__ elements must be strings (got ${typeName(a)})`);
+          attr(a);
+        }
       }
     }
-  }
-  const seen = new Set<string | null>(names);
-  for (const a of kw) {
-    if (seen.has(a)) raise(T.TypeError, `${name}() got multiple sub-patterns for attribute ${repr(a)}`);
-    seen.add(a);
-    names.push(a);
-  }
-  const out: any[] = [];
-  for (const a of names) {
-    if (a === null) {
-      out.push(s);
-      continue;
+    for (const a of kw) {
+      if (missing) break;
+      attr(a);
     }
-    try {
-      out.push(getattr(s, a));
-    } catch (e: any) {
-      if (isinstance(e, T.AttributeError)) return null;
-      throw e;
-    }
-  }
-  return out;
-}, [4, 4]);
-define("__pyjs_match_true__", (..._a: any[]) => true);
-define("__pyjs_anext__", anextImpl, [1, 1]);
-define("__pyjs_aenter__", (m: any) => {
+    return missing ? null : out;
+  },
+  match_true: (..._a: any[]) => true,
+  // async for / async with (frontend.ts)
+  aiter: (x: any) => aiterImpl(x),
+  anext: (x: any) => anextImpl(x),
+  aenter: (m: any) => aenterImpl(m),
+  aexit: (m: any) => aexitImpl(m),
+  type: (x: any) => typeOf(x),
+  get BaseException() {
+    return T.BaseException;
+  },
+  get StopAsyncIteration() {
+    return T.StopAsyncIteration;
+  },
+};
+const aenterImpl = (m: any) => {
   const f = Ty.lookupDunder(m, "__aenter__");
   if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the asynchronous context manager protocol`);
   return f(m);
-}, [1, 1]);
-define("__pyjs_aexit__", (m: any) => {
+};
+const aexitImpl = (m: any) => {
   const f = Ty.lookupDunder(m, "__aexit__");
   if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the asynchronous context manager protocol (missed __aexit__ method)`);
   return builtin((t: any, v: any, tb: any) => f(m, t, v, tb), "__aexit__");
-}, [1, 1]);
+};
 define("next", nextImpl, [1, 2]);
 define("any", anyImpl);
 define("all", allImpl);
