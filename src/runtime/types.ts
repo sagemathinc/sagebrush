@@ -122,8 +122,14 @@ type.$customGet = true;
 // then the metaclass's other attributes), what a metaclass's
 // super().__getattribute__ reaches; never __getattr__ (the slot calls that)
 method(type, "__getattribute__", (c: any, name: any) => typeGetattr(c, exactAttrName(name)));
-type.$dict.set("__setattr__", typeSetattr);
-type.$dict.set("__delattr__", typeDelattr);
+// (type's own __setattr__ and __delattr__, the metaclass hooks' default)
+for (const f of [typeSetattr, typeDelattr] as any[]) {
+  f.$builtinMethod = true;
+  f.$owner = type;
+  f.__qualname__ = `type.${f.__name__}`;
+  f.$selfChecked = f; // (it checks its receiver itself, CPython's wording)
+  type.$dict.set(f.__name__, f);
+}
 getset(type, "__name__", (c) => c.$name, (c, v) => void (c.$name = v));
 getset(type, "__qualname__", (c) => c.$qualname, (c, v) => void (c.$qualname = v));
 // (a class's __module__: its dict's, but not its instances' __module__
