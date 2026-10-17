@@ -1045,7 +1045,16 @@ def _carry(t, *srcs, mode="any"):
     elif mode == "first" and ks[0] == "null":
         t._null = True
     elif "field" in ks:
-        t._null = "field"  # (a field's elements: Magma's "GCD not defined for field")
+        # (the field itself, as Magma's result has it: what is put in later
+        # goes into it, and it stays a field's, astra2 on 0f235472; two
+        # different fields, or one not known, only the mark: refused)
+        f = _one_field([x for x, k in zip(srcs, ks) if k == "field"])
+        if f is _QQ and all(getattr(x, "universe", None) is None for x in srcs):
+            t._inf = _QQ
+        elif f is not None:
+            t.universe = f
+        else:
+            t._null = "field"  # (a field's elements: Magma's "GCD not defined for field")
     elif "int" in ks:
         t._inf = _ZZ
     else:
@@ -1055,18 +1064,36 @@ def _carry(t, *srcs, mode="any"):
 
 def _provenance(s):
     """What is known of the universe of the (empty) collection s: "int",
-    "null" (written empty, no universe), or None."""
+    "field", "null" (written empty, no universe), or None."""
     if isinstance(s, MRange):
         return "int"
     u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
+    mark = getattr(s, "_null", False)
+    if mark == "field":
+        return "field"  # (before what its integers inferred: a field's still)
     if u is _ZZ or (u is None and inf is _ZZ):
         return "int"
-    mark = getattr(s, "_null", False)
-    if u is _QQ or isinstance(u, _MFinField) or (u is None and inf is _QQ) or mark == "field":
+    if u is _QQ or isinstance(u, _MFinField) or (u is None and inf is _QQ):
         return "field"
     if u is None and inf is None and mark is True:
         return "null"
     return None
+
+
+def _one_field(srcs):
+    """The field (the rationals or a finite field) of the collections srcs,
+    each of a field's provenance, if they have one and it is known, else
+    None."""
+    f = None
+    for s in srcs:
+        u = getattr(s, "universe", None)
+        g = u if u is _QQ or isinstance(u, _MFinField) else _QQ if u is None and getattr(s, "_inf", None) is _QQ else None
+        if g is None:
+            return None
+        if f is not None and not (g is f or (isinstance(g, _MFinField) and isinstance(f, _MFinField) and g.q == f.q)):
+            return None
+        f = g
+    return f
 
 
 def _keep_wit(t, s):
@@ -1175,8 +1202,10 @@ def _settle(s):
     once: while nothing is defined a scan finds only holes.)"""
     if getattr(s, "_inf", None) is None:
         s._inf = _infer_from(s.items if isinstance(s, MSet) else s)
-    if s._inf is not None and getattr(s, "_null", False):
+    if s._inf is not None and getattr(s, "_null", False) is True:
         s._null = False  # (its elements fixed a universe: no longer null)
+    # (a field's mark stays: an integer put in doesn't make it the
+    # integers', astra2 on 0f235472; Gcd and Lcm refuse it)
 
 
 def _admit_element(obj, val, pos):
@@ -1358,8 +1387,9 @@ def _as_seq(s):
     wit = getattr(s, "_wit", None)
     if wit is not None:
         t._wit = wit  # (CORR-47D-1)
-    if getattr(s, "_null", False) and inf is None:
-        t._null = s._null
+    mark = getattr(s, "_null", False)
+    if mark == "field" or (mark and inf is None):
+        t._null = mark  # (a field's mark even once integers are in it)
     return t
 
 
@@ -3168,6 +3198,64 @@ def _set_pair(op, a, b, pos, message):
         raise MagmaError(message, "'%s'" % op, True, pos)
 
 
+def _same_struct(u, v):
+    return u is v or (isinstance(u, _MFinField) and isinstance(v, _MFinField) and u.q == v.q) or (
+        _udesc(u) is not None and _udesc(u) == _udesc(v))
+
+
+def _pair_universe(op, a, b, pos, message):
+    """The universe of the result of a set operation on a and b, at least
+    one made with a structure ({Rationals() | }), as Magma's (checked
+    against Magma 2.18): the one structure both go into, the integers going
+    into the rationals and a finite field ({Integers() | } join {GF(7) | }
+    is over GF(7)), elements of one made without going into the other's
+    ({GF(7) | } join {4, 11} is { 4 } over GF(7), {Integers() | } join
+    {1/2} over the rationals); two fields, or rationals and a finite field,
+    meet in none: Magma's error.  None where Sagebrush doesn't know it (the
+    result then is as it was, its universe from its elements)."""
+    da, db = (getattr(x, "universe", None) for x in (a, b))
+    da, db = (d if d is not None and (_is_struct(d) or isinstance(d, _MFinField)) else None for d in (da, db))
+    if da is None and db is None:
+        return None
+    field = lambda d: d is _QQ or isinstance(d, _MFinField)
+    if da is not None and db is not None:
+        if _same_struct(da, db):
+            return da
+        if field(da) and field(db):
+            raise MagmaError(message, "'%s'" % op, True, pos)
+        if da is _ZZ and field(db) or db is _ZZ and field(da):
+            return db if da is _ZZ else da
+        return None
+    d, other = (da, b) if da is not None else (db, a)
+    w = _infer_from(other.items)
+    if w is None or w is _ZZ:
+        return d
+    if w is _QQ:
+        if d is _ZZ or d is _QQ:
+            return _QQ
+        if isinstance(d, _MFinField):
+            raise MagmaError(message, "'%s'" % op, True, pos)
+    return None
+
+
+def _set_result(t, op, a, b, pos, message, mode="any"):
+    """t, the set a op b, over the universe Magma's has (_pair_universe),
+    its elements coerced into it; an empty one keeps what is known of its
+    universe as _carry has it."""
+    u = _pair_universe(op, a, b, pos, message)
+    if not len(t) or u is None:
+        return _carry(t, a, b, mode=mode)
+    items = []
+    for x in (list(t) if t.kind == "multi" else t.items):
+        y = _coerce_struct(x, u)
+        if y is None:
+            return t  # (elements Sagebrush can't coerce into it: as they are)
+        if y is _NOCOERCE:
+            raise MagmaError(message, "'%s'" % op, True, pos)
+        items.append(y)
+    return MSet(items, t.kind, u)
+
+
 def _subset(a, b, pos=None, op="subset"):
     _set_pair(op, a, b, pos, "Arguments 1 and 2 have incompatible universal sets")
     return all(_cmpeq_in(x, b) for x in a)
@@ -3212,23 +3300,25 @@ def _cat(a, b, pos=None):
 def _join(a, b, pos=None):
     _set_pair("join", a, b, pos, "No valid universe containing all elements")
     k = a.kind if a.kind == b.kind else "set"
-    return _carry(MSet(list(a) + list(b), k), a, b)
+    return _set_result(MSet(list(a) + list(b), k), "join", a, b, pos, "No valid universe containing all elements")
 
 
 def _meet(a, b, pos=None):
     _set_pair("meet", a, b, pos, "No valid universe containing all elements")
-    return _carry(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), a, b, mode="meet")
+    return _set_result(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "meet", a, b, pos,
+                       "No valid universe containing all elements", mode="meet")
 
 
 def _diff(a, b, pos=None):
     _set_pair("diff", a, b, pos, "No valid universe containing all elements")
-    return _carry(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), a, b, mode="first")
+    return _set_result(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "diff", a, b, pos,
+                       "No valid universe containing all elements", mode="first")
 
 
 def _sdiff(a, b, pos=None):
     _set_pair("sdiff", a, b, pos, "No valid universe containing all elements")
-    return _carry(MSet([x for x in a if not _cmpeq_in(x, b)] + [x for x in b if not _cmpeq_in(x, a)],
-                       a.kind if a.kind == b.kind else "set"), a, b)
+    return _set_result(MSet([x for x in a if not _cmpeq_in(x, b)] + [x for x in b if not _cmpeq_in(x, a)],
+                            a.kind if a.kind == b.kind else "set"), "sdiff", a, b, pos, "No valid universe containing all elements")
 
 
 def _reduce(op, s, pos=None):
@@ -5560,9 +5650,10 @@ def _null_int_collection(name, given):
     if isinstance(s, MRange):
         return
     u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
+    mark = getattr(s, "_null", False)
+    _field_collection(name, s)
     if u is _ZZ or inf is _ZZ:
         return
-    mark = getattr(s, "_null", False)
     if u is None and mark is True:
         raise _arg_error(name, "Illegal null set/sequence")
     if u is _QQ or inf is _QQ or isinstance(u, _MFinField) or mark == "field":
@@ -5572,6 +5663,17 @@ def _null_int_collection(name, given):
     if u is None:
         raise MagmaError("%s of an empty collection whose universe Sagebrush doesn't know is not supported yet" % name, "'%s'" % name)
     raise _bad_types(name, given)
+
+
+def _field_collection(name, s):
+    """A collection over a field (the rationals or a finite field, declared
+    or carried: what is put in later stays the field's) given to Gcd or
+    Lcm, empty or not: Magma's "GCD (LCM) not defined for field" (checked
+    against Magma 2.18), never a fold of integers put in it."""
+    u = getattr(s, "universe", None)
+    if u is _QQ or isinstance(u, _MFinField) or getattr(s, "_null", False) == "field" or (
+            u is None and not isinstance(s, MRange) and _infer_from(s.items if isinstance(s, MSet) else s) is _QQ):
+        raise _arg_error(name, "%s not defined for field" % name.upper())  # (inferred too: Gcd([1/2, 1/3]))
 
 
 def Gcd(*args):
@@ -5586,6 +5688,7 @@ def Gcd(*args):
         if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
             _null_int_collection("Gcd", given)
             return 0
+        _field_collection("Gcd", args[0])
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args)
@@ -5619,6 +5722,7 @@ def Lcm(*args):
         if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
             _null_int_collection("Lcm", given)
             return 1
+        _field_collection("Lcm", args[0])
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args, lcm=True)
