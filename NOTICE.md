@@ -277,7 +277,8 @@ Agreement.
 ### Dragon4 (MIT, Ryan Juckett's, as NumPy has it)
 
 `src/runtime/numpy.ts` (`dragon4Positional`, `dragon4Scientific` and their
-digit rules) follows NumPy's `numpy/_core/src/multiarray/dragon4.c`: the
+digit rules, and `shortestF32`, a float32's shortest digits by Dragon4's
+unique mode) follows NumPy's `numpy/_core/src/multiarray/dragon4.c`: the
 formatting of `FormatPositional` and `FormatScientific` (NumPy's rewrite,
 BSD 3-Clause as above) and the digits `Dragon4` produces (cutoffs,
 `min_digits`, rounding half to even, carries), which is Ryan Juckett's
