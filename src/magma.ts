@@ -1330,7 +1330,11 @@ class Parser {
           this.refSink.push(...a.refs);
         }
         if (a.refs.length) e = `${e}(${a.code})`; // a procedure statement's call
-        else {
+        else if (e === "AssignNames") {
+          // (a procedure only, AssignNames(~R, names): called as a function it
+          // is Magma's Bad argument types)
+          e = `_m._assign_names_value(${a.code})`;
+        } else {
           const call = `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);
