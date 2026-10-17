@@ -699,9 +699,21 @@ function framesOf(e: any): Frame[] {
   return frames.reverse();
 }
 
-function formatOne(e: any): string {
+// The frames of an exception being handled, from the frame handling it on,
+// as its traceback has them in CPython: the frames it shares with the
+// current stack (`now`, outermost first) are its handler's callers, left
+// out. (Past the JS stack limit both lists lose outer frames, so then
+// nothing is left out.)
+function handledFrames(frames: Frame[], now: Frame[]): Frame[] {
+  if (frames.length >= Error.stackTraceLimit || now.length >= Error.stackTraceLimit) return frames;
+  let k = 0;
+  while (k < frames.length - 1 && k < now.length && frames[k].file === now[k].file && frames[k].name === now[k].name && frames[k].line === now[k].line) k++;
+  return frames.slice(k);
+}
+
+function formatOne(e: any, now: Frame[] | null = null): string {
   let out = "";
-  const frames = framesOf(e);
+  const frames = now === null ? framesOf(e) : handledFrames(framesOf(e), now);
   if (frames.length) {
     out += "Traceback (most recent call last):\n";
     for (const f of frames) {
@@ -722,13 +734,13 @@ function formatOne(e: any): string {
   return out;
 }
 
-export function formatException(e: any): string {
+export function formatException(e: any, now: Frame[] | null = null): string {
   const parts: string[] = [];
   const seen = new Set<any>();
   let cur = e;
   while (cur !== null && cur !== undefined && !seen.has(cur)) {
     seen.add(cur);
-    parts.unshift(formatOne(cur));
+    parts.unshift(formatOne(cur, now));
     if (cur.__cause__ !== null && cur.__cause__ !== undefined) {
       parts.unshift("\nThe above exception was the direct cause of the following exception:\n\n");
       cur = cur.__cause__;
@@ -876,7 +888,20 @@ M.newBuiltinModule("traceback", (m) => {
     return [`${typeName(e)}${s ? ": " + s : ""}\n`];
   });
   fn("print_exception", (a: any, b: any = undefined, ..._r: any[]) => (B.stderr.write(formatException(exc(a, b))), null));
-  fn("format_exc", (..._a: any[]) => "NoneType: None\n");
+  // (the exception being handled, as sys.exc_info() has it; None's line
+  // outside any; a frame limit isn't implemented, so it is refused)
+  const formatExc = (limit: any = null, chain: any = true) => {
+    if (limit !== null) raise(T.NotImplementedError, "traceback.format_exc(limit=...) is not supported here");
+    const e = Obj.currentExc();
+    if (e === null) return "NoneType: None\n";
+    const now = framesOf({ $tb: new Error() });
+    return O.truth(chain) ? formatException(e, now) : formatOne(e, now);
+  };
+  const excSig = Obj.sig(["limit", "chain"]);
+  const tooMany = (n: number) => raise(T.TypeError, `format_exc() takes from 0 to 2 positional arguments but ${n} were given`);
+  fn("format_exc", (...a: any[]) => (a.length > 2 ? tooMany(a.length) : formatExc(a[0], a[1])));
+  m.format_exc.$kw = (pos: any[], names: string[], values: any[]) => (pos.length > 2 ? tooMany(pos.length) : formatExc(...bindArgs("format_exc", excSig, pos, names, values)));
+  m.format_exc.$kwPos = true;
   fn("print_exc", (..._a: any[]) => null);
   fn("format_tb", (..._a: any[]) => []);
   fn("extract_tb", (..._a: any[]) => []);
