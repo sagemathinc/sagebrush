@@ -46,9 +46,11 @@ from fractions import Fraction as _Fraction
 
 VERSION = 1
 MODES = ("python", "sage", "magma", "matlab")
-# an encoded value's bounds: its JSON (UTF-8), an array's or a matrix's
-# elements, nesting, a string's characters, a polynomial's exponents
-LIMITS = {"bytes": 16 * 2 ** 20, "elements": 10 ** 7, "depth": 32, "string": 2 ** 20, "exponent": 10 ** 6}
+# an encoded value's bounds: its JSON (UTF-8 bytes), an array's or a matrix's
+# elements, nesting, a string's characters, a polynomial's exponents, and
+# an integer's decimal digits (each part of a rational, each matrix entry,
+# each coefficient: CPython's own default bound for int <-> str, HARD-695-1)
+LIMITS = {"bytes": 16 * 2 ** 20, "elements": 10 ** 7, "depth": 32, "string": 2 ** 20, "exponent": 10 ** 6, "digits": 4300}
 # (the largest integer a double holds exactly, with every one below it)
 _EXACT_DOUBLE = 2 ** 53
 _NAME = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -61,6 +63,33 @@ class SbxError(ValueError):
 
 def _err(msg):
     return SbxError(msg)
+
+
+# (the bits of the largest integer of LIMITS["digits"] digits, and one more)
+_DIGIT_BITS = int(LIMITS["digits"] * 3.3219280948873626) + 1
+
+
+def _too_many_digits():
+    return _err("an integer of more than %d digits, more than sbx carries: export it as a string, str(n)" % LIMITS["digits"])
+
+
+def _dtext(n):
+    """an integer's decimal text, of at most LIMITS["digits"] digits (else refused, before it is made)"""
+    n = int(n)
+    if n.bit_length() > _DIGIT_BITS:
+        raise _too_many_digits()
+    try:
+        t = str(n)
+    except ValueError:
+        raise _too_many_digits()
+    if len(t) - (t[0] == "-") > LIMITS["digits"]:
+        raise _too_many_digits()
+    return t
+
+
+def _digits_ok(t):
+    """whether decimal text (an integer, or a rational's p/q) has at most LIMITS["digits"] digits in each part"""
+    return all(len(part.lstrip("-")) <= LIMITS["digits"] for part in t.split("/"))
 
 
 def _mod(name):
@@ -109,12 +138,12 @@ def _ring_name(R):
 
 
 def _int(v):
-    return {"t": "int", "v": str(int(v))}
+    return {"t": "int", "v": _dtext(v)}
 
 
 def _rat(f):
     n, d = f.numerator, f.denominator
-    return {"t": "rat", "v": str(n) if d == 1 else "%d/%d" % (n, d)}
+    return {"t": "rat", "v": _dtext(n) if d == 1 else "%s/%s" % (_dtext(n), _dtext(d))}
 
 
 def _fl(x):
@@ -131,9 +160,9 @@ def _exact(x):
     if isinstance(x, bool):
         raise _err("a matrix entry is a number, not a bool")
     if isinstance(x, int):
-        return str(x)
+        return _dtext(x)
     if isinstance(x, _Fraction):
-        return str(x.numerator) if x.denominator == 1 else "%d/%d" % (x.numerator, x.denominator)
+        return _dtext(x.numerator) if x.denominator == 1 else "%s/%s" % (_dtext(x.numerator), _dtext(x.denominator))
     raise _err("a matrix over ZZ or QQ has an entry of type %s" % _tname(x))
 
 
@@ -245,7 +274,7 @@ def _array(a, mode, budget):
     elif dtype == "int64":
         if k == "u" and any(x >= 2 ** 63 for x in flat):
             raise _err("an unsigned array with entries past 2^63 - 1 can't be exported as int64")
-        v = [str(int(x)) for x in flat]
+        v = [_dtext(x) for x in flat]
     elif dtype == "complex128":
         v = [[_fl(complex(x).real), _fl(complex(x).imag)] for x in flat]
     else:
@@ -261,7 +290,7 @@ def _poly_text(terms):
             continue
         mono = "*".join(("%s^%d" % (n, e) if e > 1 else n) for n, e in exps if e)
         a = abs(c)
-        ct = str(a.numerator) if a.denominator == 1 else "%d/%d" % (a.numerator, a.denominator)
+        ct = _dtext(a.numerator) if a.denominator == 1 else "%s/%s" % (_dtext(a.numerator), _dtext(a.denominator))
         body = mono if (mono and a == 1) else (ct + "*" + mono if mono else ct)
         sign = "-" if c < 0 else "+"
         out.append((sign, body))
@@ -419,9 +448,15 @@ def decode(data, mode="python", as_=None):
     if as_ not in (None, "double"):
         raise _err('an import converts only "as": "double"')
     _check(data, 1, _Budget())
-    if as_ == "double":
-        data = _to_double(data)
-    return _DEC[mode](data)
+    try:
+        if as_ == "double":
+            data = _to_double(data)
+        return _DEC[mode](data)
+    except SbxError:
+        raise
+    except (ValueError, OverflowError, ArithmeticError) as e:
+        # (anything the checks didn't foresee: refused as sbx refuses, never the interpreter's own error, HARD-695-1)
+        raise _err("the value can't be read here: %s" % str(e)[:200])
 
 
 def _num(x, what):
@@ -443,8 +478,10 @@ def _check(x, depth, budget):
     budget.take(1)
     t = x["t"]
     if t in ("int", "rat"):
-        if not isinstance(x.get("v"), str) or not (_INT if t == "int" else _RAT).match(x["v"]) or len(x["v"]) > LIMITS["string"]:
+        if not isinstance(x.get("v"), str) or len(x["v"]) > LIMITS["string"] or not (_INT if t == "int" else _RAT).match(x["v"]):
             raise _err("not sbx: %s's v is its decimal text" % ("an int" if t == "int" else "a rat"))
+        if not _digits_ok(x["v"]):
+            raise _too_many_digits()
         if t == "rat" and "/" in x["v"]:
             n, d = x["v"].split("/")
             if _Fraction(int(n), int(d)).denominator != int(d):
@@ -496,15 +533,18 @@ def _check(x, depth, budget):
                 raise _err("not sbx: a matrix's ring is ZZ or QQ")
             pat = _INT if x["ring"] == "ZZ" else _RAT
             for e in v:
-                if not isinstance(e, str) or not pat.match(e):
+                if not isinstance(e, str) or len(e) > LIMITS["string"] or not pat.match(e):
                     raise _err("not sbx: a matrix over %s has entries like %s" % (x["ring"], "\"3\"" if x["ring"] == "ZZ" else "\"-3/4\""))
+                if not _digits_ok(e):
+                    raise _too_many_digits()
         else:
             dt = x.get("dtype")
             for e in v:
                 if dt == "float64":
                     _num(e, "a float64 entry")
                 elif dt == "int64":
-                    if not isinstance(e, str) or not _INT.match(e) or not -2 ** 63 <= int(e) < 2 ** 63:
+                    # (20 characters at most, before int(): -9223372036854775808)
+                    if not isinstance(e, str) or len(e) > 20 or not _INT.match(e) or not -2 ** 63 <= int(e) < 2 ** 63:
                         raise _err("not sbx: an int64 entry is the decimal text of a 64-bit integer")
                 elif dt == "complex128":
                     if not (isinstance(e, list) and len(e) == 2):
@@ -569,12 +609,16 @@ def parse_poly(text, names, ring="QQ"):
             num, name, op = tok
             if num:
                 take()
+                if len(num) > LIMITS["digits"]:
+                    raise _too_many_digits()
                 if seen_factor:
                     raise bad("has a number after a variable in a term")
                 c = _Fraction(int(num))
                 if peek() is not None and peek()[2] == "/":
                     take()
                     d = take()
+                    if d is not None and d[0] and len(d[0]) > LIMITS["digits"]:
+                        raise _too_many_digits()
                     if d is None or not d[0] or int(d[0]) == 0:
                         raise bad("has a / not followed by a nonzero integer")
                     c = c / int(d[0])
@@ -589,7 +633,8 @@ def parse_poly(text, names, ring="QQ"):
                     d = take()
                     if d is None or not d[0]:
                         raise bad("has a ^ not followed by a whole number")
-                    e = int(d[0])
+                    # (more digits than the bound's: past it, before int())
+                    e = int(d[0]) if len(d[0]) <= 7 else LIMITS["exponent"] + 1
                 exps[index[name]] += e
                 if exps[index[name]] > LIMITS["exponent"]:
                     raise _err("a polynomial with an exponent over %d, more than sbx carries" % LIMITS["exponent"])
@@ -875,7 +920,10 @@ def dumps(value, mode="python"):
 
 def loads(text, mode="python", as_=None):
     """sbx text as a value of `mode`'s"""
-    if len(text) > LIMITS["bytes"]:
+    # (in UTF-8 bytes, as dumps measures it: a character is 1 to 4 of them, HARD-695-2)
+    if not isinstance(text, str):
+        raise _err("not sbx: sbx is text")
+    if len(text) > LIMITS["bytes"] or len(text.encode("utf-8", "surrogatepass")) > LIMITS["bytes"]:
         raise _err("more than %d MB of sbx" % (LIMITS["bytes"] // 2 ** 20))
     try:
         d = _json.loads(text)

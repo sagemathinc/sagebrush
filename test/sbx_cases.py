@@ -113,4 +113,50 @@ try:
     print("FAIL", "10^400 as a double")
 except _sbx.SbxError as err:
     print("ok  ", "refused 10^400 as a double:", err)
+# decimal digits bounded before anything converts them, and refused as sbx
+# refuses, never the interpreter's own error (daybreak2's HARD-695-1)
+D = _sbx.LIMITS.get("digits", 4300)
+big, ok = "1" + "0" * D, "9" * D
+for label, data, as_ in [
+    ("an int", {"t": "int", "v": big}, None),
+    ("a negative int", {"t": "int", "v": "-" + big}, None),
+    ("a rat's numerator", {"t": "rat", "v": big + "/3"}, None),
+    ("a rat's denominator", {"t": "rat", "v": "1/" + big}, None),
+    ("a ZZ matrix entry", {"t": "matrix", "ring": "ZZ", "shape": [2], "v": ["1", big]}, None),
+    ("a QQ matrix entry", {"t": "matrix", "ring": "QQ", "shape": [1, 1], "v": ["1/" + big]}, None),
+    ("an int as a double", {"t": "int", "v": big}, "double"),
+    ("a QQ matrix entry as a double", {"t": "matrix", "ring": "QQ", "shape": [1], "v": [big + "/7"]}, "double"),
+    ("a poly's coefficient", {"t": "poly", "ring": "QQ", "vars": ["x"], "v": big + "*x + 1"}, None),
+    ("a poly's denominator", {"t": "poly", "ring": "QQ", "vars": ["x"], "v": "1/" + big + "*x"}, None),
+    ("a poly's exponent of many digits", {"t": "poly", "ring": "QQ", "vars": ["x"], "v": "x^" + big}, None),
+    ("an int64 entry of many digits", {"t": "array", "dtype": "int64", "shape": [1], "v": [big]}, None),
+]:
+    try:
+        _sbx.decode(data, as_=as_)
+        print("FAIL", "digits: read", label)
+    except _sbx.SbxError as err:
+        print("ok  ", "digits: refused", label + ":", str(err)[:120])
+    except Exception as err:
+        print("FAIL", "digits:", label, "escaped as", type(err).__name__)
+# (exactly the bound: read, and as a double too)
+for data in [{"t": "int", "v": ok}, {"t": "rat", "v": ok + "/" + ok[:-1] + "8"}, {"t": "matrix", "ring": "QQ", "shape": [1], "v": ["-" + ok + "/7"]}]:
+    v = _sbx.decode(data)
+    print("ok  " if json.dumps(_sbx.encode(v)) == json.dumps(_sbx.encode(_sbx.decode(_sbx.encode(v)))) else "FAIL", "digits: exactly", D, "read and sent back", data["t"])
+for v in [10 ** D, -(10 ** D), Fraction(1, 10 ** D), [10 ** (D + 50)]]:
+    try:
+        _sbx.encode(v)
+        print("FAIL", "digits: encoded", type(v).__name__)
+    except _sbx.SbxError as err:
+        print("ok  ", "digits: not encoded", type(v).__name__ + ":", str(err)[:80])
+print("ok  " if _sbx.encode(10 ** D - 1)["v"] == ok else "FAIL", "digits: 10^%d - 1 encoded" % D)
+
+# loads bounded in UTF-8 bytes, as dumps is: 6 Mi characters of 3 bytes each refused before parsing (HARD-695-2)
+wide = '{"sbx": 1, "value": {"t": "str", "v": "' + "€" * (6 * 2 ** 20) + '"}}'
+try:
+    _sbx.loads(wide)
+    print("FAIL", "loads: 18 MiB of UTF-8 read")
+except _sbx.SbxError as err:
+    print("ok  ", "loads: %d characters, %d UTF-8 bytes, refused:" % (len(wide), len(wide.encode("utf-8"))), err)
+narrow = '{"sbx": 1, "value": {"t": "str", "v": "' + "€" * 1000 + '"}}'
+print("ok  " if _sbx.loads(narrow) == "€" * 1000 else "FAIL", "loads: non-ASCII within the bound read")
 print("done")
