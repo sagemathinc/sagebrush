@@ -420,13 +420,17 @@ export function constructPlain(cls: PyType, args: any[]): any {
   if (cls.$ctor === null) return cls(...args);
   let c = (cls as any).$ni;
   if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: effectiveNew(lookupType(cls, "__new__")), init: lookupType(cls, "__init__") };
-  const nw = c.nw;
+  let nw = c.nw;
   let o: any;
+  let init = c.init;
   if (nw !== undefined && nw !== objectNew) {
     o = nw(cls, ...args);
     if (!isinstance(o, cls)) return o;
+    // (an instance of a subclass is initialized by its own type's __init__,
+    // as CPython's type.__call__ does: type(obj).__init__)
+    const t = typeOf(o);
+    if (t !== cls) ({ init, nw } = subclassInit(t));
   } else o = new cls.$ctor!();
-  const init = c.init;
   if (init === objectInit) {
     if (args.length && (nw === undefined || nw === objectNew)) raise(T.TypeError, `${cls.$name}() takes no arguments`);
   } else {
@@ -444,15 +448,22 @@ function constructKw(cls: PyType, pos: any[], names: string[], values: any[]): a
   return constructPlainKw(cls, pos, names, values);
 }
 
+// the __init__ and __new__ that decide how type(obj) is initialized
+function subclassInit(t: any): { init: any; nw: any } {
+  return { init: lookupType(t, "__init__"), nw: effectiveNew(lookupType(t, "__new__")) };
+}
+
 export function constructPlainKw(cls: PyType, pos: any[], names: string[], values: any[]): any {
   if (cls.$ctor === null) return callKw(cls, pos, names, values);
-  const nw = effectiveNew(lookupType(cls, "__new__"));
+  let nw = effectiveNew(lookupType(cls, "__new__"));
   let o: any;
+  let init = lookupType(cls, "__init__");
   if (nw !== undefined && nw !== objectNew) {
     o = callKw(nw, [cls, ...pos], names, values);
     if (!isinstance(o, cls)) return o;
+    const t = typeOf(o);
+    if (t !== cls) ({ init, nw } = subclassInit(t));
   } else o = new cls.$ctor!();
-  const init = lookupType(cls, "__init__");
   if (init === objectInit) {
     if (nw === undefined || nw === objectNew) raise(T.TypeError, `${cls.$name}() takes no arguments`);
     return o;
