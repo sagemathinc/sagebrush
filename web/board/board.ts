@@ -368,6 +368,19 @@ export class Board {
     return { x: (x0 + x1) / 2 - (i.left + w / 2) / z, y: (y0 + y1) / 2 - (i.top + h / 2) / z, z };
   }
 
+  /** Keep item `id` clear of the bars over the board (the insets: the top
+   * bar, the tour's caption): moved up just enough that its bottom is above
+   * the caption, never so far that its top goes under the top bar; its
+   * zoom kept.  For a card grown under the caption (a question's feedback). */
+  keepClear(id: string) {
+    const it = this.byId.get(id);
+    if (!it) return;
+    const H = this.canvas.height / this.dpr, i = this.insets, c = this.camera, m = 8;
+    const below = (it.y + it.h - c.y) * c.z - (H - i.bottom - m), room = (it.y - c.y) * c.z - (i.top + m);
+    const dy = Math.min(below, room);
+    if (below > 0 && dy > 0) this.flyTo({ ...c, y: c.y + dy / c.z });
+  }
+
   /** The bounds of the items with these ids (all items when none are given). */
   bounds(ids?: string[]) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -724,7 +737,7 @@ export class Board {
   /** Questions grown past their measured height: as tall as their open field, its preview, or a field made taller by hand needs. */
   askGrown = new Map<string, number>();
   /** A question's card needs another height: lay out again (mount.ts). */
-  onAskResize: (() => void) | null = null;
+  onAskResize: ((id: string, grown: boolean) => void) | null = null;
 
   /** A question's controls (doc.ts DocAsk), each answer given at once to
    * onAnswer: a choice when it is made, a text or a number when it is left
@@ -748,7 +761,7 @@ export class Board {
         const card = box.closest<HTMLElement>(".board-item");
         if (!card || !card.isConnected) return;
         const need = card.scrollHeight + (card.offsetHeight - card.clientHeight);
-        if (need > card.offsetHeight + 1) { this.askGrown.set(id, need); this.onAskResize?.(); }
+        if (need > card.offsetHeight + 1) { this.askGrown.set(id, need); this.onAskResize?.(id, true); }
       });
     };
     // (a text with math in it: shown typeset under its field as it is typed,
@@ -875,7 +888,7 @@ export class Board {
     words.open = !!a.note || this.askOpen.has(id);
     words.ontoggle = () => {
       if (words.open) { this.askOpen.add(id); grow(); }
-      else if (this.askOpen.delete(id)) { this.askGrown.delete(id); this.onAskResize?.(); }
+      else if (this.askOpen.delete(id)) { this.askGrown.delete(id); this.onAskResize?.(id, false); }
     };
     const sum = document.createElement("summary");
     sum.textContent = "In your own words";

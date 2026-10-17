@@ -587,7 +587,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (stale()) { board.askFeedback.delete(id); redraw().catch(fail); return; }
     board.askFeedback.set(id, { message, hints });
     await editor.attempt(id, given, outcome).catch(fail);
-    redraw().catch(fail);
+    redraw().then((drawn) => { if (drawn) board.keepClear(id); }).catch(fail);
   };
   const checked = host.code ? (id: string, given: AskAnswer) => { check(id, given).catch((e) => { board.askFeedback.delete(id); fail(e); }); } : null;
   board.onCheck = checked;
@@ -700,7 +700,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (only a name of the question's own options: anything else said so, never shown as the host's words)
     const names = new Set((doc && asksOf(doc).find((q) => q.ask.id === id)?.ask.decide?.map((o) => o.name)) ?? []);
     board.askDecided.set(id, "refused" in r ? { refused: r.refused } : r.option === null || names.has(r.option) ? { option: r.option } : { refused: "the answer was not one of this question's ideas" });
-    redraw().catch(fail);
+    // (what it says, and where to go next, clear of the caption)
+    redraw().then((drawn) => { if (drawn) board.keepClear(id); }).catch(fail);
   };
   // (another document: what was sent and decided was the last one's)
   function forgetAnswered() {
@@ -712,7 +713,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     decide(id, words).catch((e) => { board.askDecided.delete(id); fail(e); });
   }
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
-  board.onAskResize = () => { redraw().catch(fail); };
+  // (and, grown, kept clear of the caption, which never covers it)
+  board.onAskResize = (id, grown) => { redraw().then((drawn) => { if (drawn && grown) board.keepClear(id); }).catch(fail); };
   board.onToggleCode = (id) => {
     if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
     if (!flipped.delete(id)) flipped.add(id);

@@ -204,6 +204,10 @@ try {
   check(d1.ok && d1.request.item === "q2" && d1.request.answer.includes("$g \\in G$"), "and it passes the host's check, the reader's words its answer" + (d1.ok ? "" : ": " + d1.message));
   check(!!(await until(() => frame(`${fb}?.textContent.includes("Your words suggest") && !!${fb}.querySelector('.katex') && !!${fb}.querySelector('a.board-ref[href="#n1"]')`))), "an option: its about shown, typeset, with its next");
   check(!!(await until(() => frame(`(() => { const card = ${fb}.closest(".board-item"); return card.scrollHeight <= card.clientHeight + 1; })()`), 10000)), "and its card as tall as what it now shows");
+  // (nothing over it: the tour's caption at the bottom never covers what the card now shows)
+  const uncovered = (sel) => `(() => { const el = ${sel}; if (!el) return false; const r = el.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.width > 0 && r.bottom <= innerHeight && !!at && (at === el || el.contains(at)); })()`;
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('a.board-ref')`)), 10000)), "its next link is visible, nothing over it (elementFromPoint at its center)");
+  check(!!(await until(() => frame(uncovered(`document.querySelector('[data-ask="q2"] .board-ask-req')`)), 10000)), "and so is the question's \"required\"");
   await shot("submit-5-decided.png");
   await top(`mode.decide = null`);
   await frame(`${fb}.querySelector('button').click()`);
