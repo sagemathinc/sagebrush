@@ -118,14 +118,19 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     if (typeof r !== "string") raise(T.TypeError, `encoder() must return a string, not ${typeName(r)}`);
     return r;
   };
-  // (the separators str, or subclasses read by contents, as make_encoder's
-  // "U" arguments, CORR-C0E-2; an indent that isn't one refused where CPython's
-  // encoder first adds it to a str)
+  // (the separators str, as make_encoder's "U" arguments, CORR-C0E-2; a
+  // subclass's str() written each time it is, as CPython's C encoder does,
+  // but read by contents where an indent's newline is added to the item
+  // separator; an indent that isn't a str refused where CPython's encoder
+  // first adds it to one)
   const sepOf = (x: any, n: number): string => {
     if (!isinstance(x, T.str)) raise(T.TypeError, `make_encoder() argument ${n} must be str, not ${x === null ? "None" : typeName(x)}`);
     return strOf(x);
   };
   const ks = sepOf(keySep, 5), is = sepOf(itemSep, 6);
+  const ksObj = typeof keySep === "string" ? null : keySep, isObj = typeof itemSep === "string" ? null : itemSep;
+  const strCall = (x: any): string => strOf(callObj(T.str, [x]));
+  const sepText = (f: Frame): string => (isObj !== null && f.nl === null ? strCall(isObj) : f.sep);
   const indBad = indent !== null && !isinstance(indent, T.str);
   const ind: string | null = indent === null ? null : indBad ? "" : strOf(indent);
   const indent1 = () => {
@@ -292,7 +297,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
       }
       if (f.kind === LIST) {
         if (f.i < f.items.length) {
-          if (f.i) out += f.sep;
+          if (f.i) out += sepText(f);
           const v = f.items[f.i++];
           f.inValue = true;
           value(v, f.level);
@@ -325,14 +330,15 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
           if (key.length <= 64) {
             let t = keyText.get(key);
             if (t === undefined) {
-              t = enc(key) + ks;
+              t = ksObj === null ? enc(key) + ks : enc(key);
               if (keyText.size < 4096) keyText.set(key, t);
             }
             if (f.key === undefined) {
               if (f.nl !== null) out += f.nl;
-            } else out += f.sep;
+            } else out += sepText(f);
             f.key = key;
             out += t;
+            if (ksObj !== null) out += strCall(ksObj);
             f.inValue = true;
             value(it[1], f.level);
             wrote = true;
@@ -356,10 +362,10 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
         }
         if (f.key === undefined) {
           if (f.nl !== null) out += f.nl;
-        } else out += f.sep;
+        } else out += sepText(f);
         f.key = key;
         out += enc(k);
-        out += ks;
+        out += ksObj === null ? ks : strCall(ksObj);
         f.inValue = true;
         value(it[1], f.level);
         wrote = true;
