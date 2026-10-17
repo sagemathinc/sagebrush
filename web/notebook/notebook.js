@@ -309,9 +309,9 @@ export function createNotebook(root, opts = {}) {
   // A graph's picture (Graph.plot): a canvas whose vertices can be dragged
   // (web/graph/view.ts, loaded on first use) over the SVG, which stays
   let graphView = null;
-  function mountGraph(fig, graphText) {
+  function mountGraph(fig, graph) {
     graphView ??= import(asset("sagebrush-graphview.js")).then(() => window.SagebrushGraphView);
-    graphView.then((v) => v?.mount(fig, graphText)).catch(() => {});
+    graphView.then((v) => v?.mount(fig, graph)).catch(() => {});
   }
   let mathModule = null;
   const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")));
@@ -402,8 +402,9 @@ export function createNotebook(root, opts = {}) {
       mount3d(fig, b[SCENE3D]);
       return;
     }
-    // (as text, or as JSON when an .ipynb file kept it as JSON)
-    const graph = typeof b[GRAPH] === "string" ? b[GRAPH] : b[GRAPH] && typeof b[GRAPH] === "object" ? JSON.stringify(b[GRAPH]) : null;
+    // (as text, or as JSON when an .ipynb file kept it as JSON: passed as it
+    // is, the view checks its size or its fields before reading it, HARD-4D6-1)
+    const graph = typeof b[GRAPH] === "string" || (b[GRAPH] && typeof b[GRAPH] === "object") ? b[GRAPH] : null;
     if (svg && graph !== null) {
       fig.classList.add("plotgraph");
       fig.sbBundle = { [GRAPH]: graph, "image/svg+xml": b["image/svg+xml"], "text/plain": b["text/plain"] ?? "graph" };
