@@ -549,10 +549,70 @@ try {
       await ev("document.querySelector('[data-sbb=helpdlg]').close(), 1");
       await ev("document.querySelector('[data-sbb=menubtn]').click(), document.querySelector('[data-sbb=helpitem]').click(), 1");
       check((await helpOpen()) && await ev("document.querySelector('[data-sbb=menu]').hidden"), "B5: ⋯'s Help opens it, the menu closed");
-      await ev("document.querySelector('[data-sbb=helpdlg]').close(), 1");
+      // (a click outside it, on the backdrop, closes it; one inside, or a
+      // press inside released outside (selecting its text), doesn't: William, Oct 17)
+      {
+        const box = await ev("(() => { const r = document.querySelector('[data-sbb=helpdlg]').getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; })()");
+        const click = async (x, y, x2 = x, y2 = y) => { await mouse("mousePressed", x, y); await mouse("mouseMoved", x2, y2); await mouse("mouseReleased", x2, y2, { buttons: 0 }); await sleep(200); };
+        await click((box.l + box.r) / 2, box.t + 20);
+        check(await helpOpen(), "Help: a click inside it leaves it open");
+        await click((box.l + box.r) / 2, box.t + 20, 5, 5);
+        check(await helpOpen(), "Help: a press inside it released outside (selecting its text) leaves it open");
+        await click(5, 5);
+        check(!(await helpOpen()), "Help: a click outside it, on the backdrop, closes it (William, Oct 17)");
+      }
+      await ev("document.querySelector('[data-sbb=helpdlg]').open && document.querySelector('[data-sbb=helpdlg]').close(), 1");
       // the toolbar (Edit mode only): the default tools; connecting by taps;
       // a note added, then cancelled; choosing this board's tools
       check(await ev("!document.querySelector('.board-toolbar').hidden"), "the toolbar shows in Edit");
+      // (the board drawn again, by edits, keeps the toolbar's buttons: rebuilt
+      // under the pointer, "⋯" lost its hover and flickered, William Oct 17)
+      {
+        // (a person who chose their tools (⋯'s checkboxes), kept in this browser: each drawing read them
+        // again, a new list, and rebuilt the buttons; here the default ones, so that what follows sees them)
+        await ev("window.__tbTitle = window.sagebrush.board.snapshot().doc.title ?? null, 1");
+        await ev("localStorage.setItem('sagebrush-board-tools', JSON.stringify([...document.querySelectorAll('.board-toolbar [data-tool]')].map((b) => b.dataset.tool))), 1");
+        await ev("window.sagebrush.board.edit((d) => { d.title = 'Redrawn'; }).then(() => 1)");
+        await sleep(300);
+        const before = await ev("(window.__tbMore = document.querySelector('.board-toolbar .tb-more'), window.__tbFirst = document.querySelector('.board-toolbar [data-tool]'), 1)");
+        for (let k = 0; k < 3; k++) await ev(`window.sagebrush.board.edit((d) => { d.title = "Redrawn ${k}"; }).then(() => 1)`);
+        await sleep(300);
+        check(before && await ev("document.querySelector('.board-toolbar .tb-more') === window.__tbMore && document.querySelector('.board-toolbar [data-tool]') === window.__tbFirst"), "the board drawn again (three edits): the toolbar's buttons, ⋯ too, the same elements, not rebuilt under the pointer");
+        // (the four edits undone, as Ctrl+Z does: the board, and what later checks undo, as they were)
+        for (let k = 0; k < 4; k++) { await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))"); await sleep(250); }
+        check(await ev("(window.sagebrush.board.snapshot().doc.title ?? null) === window.__tbTitle"), "...and the four edits undone");
+        await ev("localStorage.removeItem('sagebrush-board-tools'), 1");
+      }
+      // (its buttons' tooltips drawn in the page, below them, never the browser's
+      // title tooltip, which some Linux desktops open under the pointer, a flicker; William Oct 17)
+      {
+        check(await ev("[...document.querySelectorAll('.board-toolbar > button')].every((b) => !b.hasAttribute('title') && b.dataset.tip)"), "the toolbar's buttons: no title (no browser tooltip), each a tip of its own");
+        const m = await ev("(() => { const r = document.querySelector('.board-toolbar .tb-more').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, b: r.bottom }; })()");
+        await mouse("mouseMoved", m.x, m.y);
+        await sleep(1000);
+        const tipOf = (sel) => ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}), t = document.querySelector('.sbb .board-tip'), br = b.getBoundingClientRect(), root = t?.parentElement.getBoundingClientRect(), r = t?.getBoundingClientRect(); return t && { shown: !t.hidden && r.width > 0, text: t.textContent, pe: getComputedStyle(t).pointerEvents, hover: b.matches(':hover'), below: r.top >= br.bottom, inside: r.left >= Math.max(root.left, 0) && r.right <= Math.min(root.right, innerWidth), x: [Math.round(r.left), Math.round(r.right)], w: innerWidth }; })()`);
+        const tip = await tipOf(".board-toolbar .tb-more");
+        check(tip?.shown && /Every tool/.test(tip.text) && tip.pe === "none" && tip.hover && tip.below && tip.inside, "⋯ hovered: its tip shows, below it, within the board, taking no pointer, the button still hovered: " + JSON.stringify(tip));
+        await mouse("mouseMoved", 5, 400);
+        await sleep(100);
+        check(await ev("document.querySelector('.sbb .board-tip').hidden"), "...and goes when the pointer leaves");
+        // (on a narrow screen the first and last buttons' tips stay within the board, astra's UI-158-1)
+        for (const width of [390, 320]) {
+          await send("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
+          await sleep(300);
+          for (const sel of [".board-toolbar [data-tool]", ".board-toolbar .tb-more"]) {
+            const c = await ev(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+            await mouse("mouseMoved", c.x, c.y);
+            await sleep(900);
+            const t = await tipOf(sel);
+            check(t?.shown && t.inside && t.below, `at ${width} px, the ${sel.includes("more") ? "last (⋯)" : "first"} button's tip is within the board: ` + JSON.stringify(t));
+            await mouse("mouseMoved", 5, 400);
+            await sleep(100);
+          }
+        }
+        await send("Emulation.clearDeviceMetricsOverride");
+        await sleep(300);
+      }
       const tools = () => ev("[...document.querySelectorAll('.board-toolbar [data-tool]')].map((b) => b.dataset.tool).join()");
       check((await tools()) === "note,code,image,group,connect,draw", `the default tools: ${await tools()}`);
       await ev("window.board.focus(['b', 'c'], true)");

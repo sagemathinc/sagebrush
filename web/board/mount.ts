@@ -474,6 +474,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
     // the button and an open menu's row (on document.body), is told now)
     codeMode = d.mode ?? "python";
+    for (const el of root.querySelectorAll<HTMLElement>(".board-toolbar [data-tool=code][data-tip]")) el.dataset.tip = codeTitle(codeMode);
     for (const el of [...root.querySelectorAll<HTMLElement>("[data-tool=code][title]"), ...document.querySelectorAll<HTMLElement>(".board-toolbar-panel [data-tool=code][title]")]) el.title = codeTitle(codeMode);
     // (a template's under the page's own)
     const under = underlay(d, pageIx, { items, edges });
@@ -486,7 +487,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the page's slide and background, or its template's)
     const look = lookOf(d, pageIx);
     board.backdrop = look.slide || look.background ? { slide: look.slide, ...look.background } : null;
-    toolbar.tools.value = d.tools ?? defaultTools();
+    // (only when they are other tools: a new list each drawing rebuilt the
+    // toolbar's buttons under the pointer, so "⋯" flickered as it was hovered)
+    const tools = d.tools ?? defaultTools();
+    if (JSON.stringify(tools) !== JSON.stringify(toolbar.tools.value)) toolbar.tools.value = tools;
     shownPage = pageIx;
     const gen = ++routingGen;
     routed = false;
@@ -1308,6 +1312,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const help = () => { const h = $("helpdlg") as HTMLDialogElement; if (!h.open) h.showModal(); };
   $("help").onclick = help;
   $("helpitem").onclick = help; // (the menu closes, as at any click)
+  // (a dialog that only shows something, Help and Examples: a click outside
+  // it, on its backdrop, closes it, as Esc does; a press that starts inside
+  // it, selecting its text, and ends outside doesn't (William, Oct 17).  The
+  // dialogs with fields to fill in close only by their buttons or Esc)
+  const closeOnBackdrop = (d: HTMLDialogElement) => {
+    let fromOutside = false;
+    const outside = (e: MouseEvent) => { const r = d.getBoundingClientRect(); return e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom); };
+    on(d, "pointerdown", (e: PointerEvent) => { fromOutside = outside(e); });
+    on(d, "click", (e: MouseEvent) => { if (fromOutside && outside(e)) d.close(); fromOutside = false; });
+  };
+  closeOnBackdrop($("helpdlg") as HTMLDialogElement);
+  closeOnBackdrop($("exdlg") as HTMLDialogElement);
   $("examples").onclick = async () => {
     const list = $("exlist");
     try {
