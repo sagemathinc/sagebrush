@@ -95,3 +95,102 @@ def caller():
 
 
 print(caller(), end="")
+
+
+# CORR-6AF-2: each exception's frames run from where it was caught to
+# where it was raised, however the stack has changed since
+def show(label):
+    print("==", label)
+    print(traceback.format_exc(), end="")
+
+
+def caught():
+    try:
+        1 / 0
+    except ZeroDivisionError as e:
+        return e
+
+
+old = caught()
+try:
+    raise ValueError("later") from old
+except ValueError:
+    show("stored cause")
+
+
+def reraiser():
+    try:
+        1 / 0
+    except ZeroDivisionError:
+        raise
+
+
+try:
+    reraiser()
+except ZeroDivisionError:
+    show("bare reraise")
+
+
+def generator():
+    try:
+        1 / 0
+    except ZeroDivisionError:
+        yield "pause"
+        yield traceback.format_exc()
+
+
+g = generator()
+print(next(g))
+print("== resumed generator")
+print(next(g), end="")
+
+
+def resume_elsewhere(gen):
+    return next(gen)
+
+
+g = generator()
+next(g)
+print("== resumed from another function")
+print(resume_elsewhere(g), end="")
+try:
+    try:
+        raise ValueError("suppressed")
+    except ValueError:
+        raise TypeError("only") from None
+except TypeError:
+    show("suppressed cause")
+
+
+def context_in_callee():
+    try:
+        {}[1]
+    except KeyError:
+        int("y")
+
+
+try:
+    context_in_callee()
+except ValueError:
+    show("context raised in a callee")
+
+
+def leaf():
+    raise ValueError("leaf")
+
+
+def handler():
+    try:
+        leaf()
+    except ValueError:
+        return report()
+
+
+def descend(n):
+    if n:
+        return descend(n - 1)
+    return handler()
+
+
+for n in [0, 10, 30]:
+    print("depth", n, [line.split(", in ")[-1] for line in descend(n).splitlines() if line.startswith("  File ")])
