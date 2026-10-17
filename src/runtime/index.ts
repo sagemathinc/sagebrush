@@ -1056,10 +1056,18 @@ M.newBuiltinModule("traceback", (m) => {
   // (limit as CPython's StackSummary takes it: None, then sys.tracebacklimit,
   // a negative one 0; then limit >= 0 decides, by Python's own comparison,
   // between islice's stop (an integer 0 <= x <= sys.maxsize) and deque's
-  // maxlen -limit (an int, at most sys.maxsize), with their errors; the
+  // maxlen -limit (an int or int subclass, within ssize_t, non-negative),
+  // with their errors; the
   // exact integer checked before it becomes a JS number, astra's CORR-484-3)
   const MAXSIZE = 9223372036854775807n;
-  const asInt = (x: any): bigint | null => (typeof x === "boolean" ? BigInt(x ? 1 : 0) : O.isPyInt(x) ? BigInt(O.index(x)) : null);
+  // (an int or int subclass, by its payload, not its __index__ or __int__,
+  // as PyLong_AsSsize_t reads it; null for anything else)
+  const asInt = (x: any): bigint | null =>
+    O.isPyInt(x)
+      ? BigInt(O.index(x))
+      : x instanceof Obj.PrimBox && Obj.typeOf(x).$mro.includes(T.int) && O.shimName(x, "int") === null
+        ? BigInt(x.$v)
+        : null;
   const limitOf = (v: any): number | null => {
     let lim = v;
     if (lim === undefined || lim === null) {
@@ -1078,10 +1086,11 @@ M.newBuiltinModule("traceback", (m) => {
       if (n < 0n || n > MAXSIZE) return bad();
       return Number(n);
     }
-    const m = O.neg(lim);
-    const n = asInt(m);
+    // (deque's maxlen: an int, within ssize_t either way, then non-negative)
+    const n = asInt(O.neg(lim));
     if (n === null) raise(T.TypeError, "an integer is required");
-    if (n! > MAXSIZE) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    if (n! > MAXSIZE || n! < -MAXSIZE - 1n) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    if (n! < 0n) raise(T.ValueError, "maxlen must be non-negative");
     return -Number(n);
   };
   const chainOf = (g: Record<string, any>) => (Object.hasOwn(g, "chain") ? O.truth(g.chain) : true);
