@@ -239,8 +239,6 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // get_ipython(), also a builtin in a notebook (Jupyter's exports call
     // get_ipython().run_line_magic): lib/_pyjs_magic.py's shell
     R.loader.exec(GET_IPYTHON, host, "exec", "<init>");
-    // (the names there are before a board's code runs: a check shares them, never copies them)
-    R.loader.exec("import _sb_check\n_sb_check.mark()\n", host, "exec", "<init>");
     return { main, host };
   })();
 
