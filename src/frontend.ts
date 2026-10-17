@@ -63,7 +63,8 @@ const LITERALISH = new Set(["Constant", "Attribute", "UnaryOp", "BinOp"]);
 interface MatchCtx {
   n: number;
   temps: Map<string, string>; // captured name -> its temp
-  bound: Set<string>; // names this pattern (alternative) binds so far
+  bound: Set<string>; // names this pattern (or this alternative) binds so far
+  outer: Set<string>[]; // the enclosing patterns' names, around or-alternatives
   order: string[]; // the captured names, in first-capture order
 }
 // a literal mapping key, for the duplicate check: as Python's set sees it
@@ -321,7 +322,7 @@ class Convert {
     const subj = `$s${n}`;
     const tests: (A.Expr | null)[] = [];
     s.cases.forEach((c: any, i: number) => {
-      const ctx: MatchCtx = { n, temps: new Map(), bound: new Set(), order: [] };
+      const ctx: MatchCtx = { n, temps: new Map(), bound: new Set(), outer: [], order: [] };
       const allow = !!c.guard || i === s.cases.length - 1;
       const parts: A.Expr[] = [];
       const t = this.pattern(c.pattern, this.name(subj, line), ctx, allow);
@@ -361,7 +362,7 @@ class Convert {
   capture(p: any, name: string, value: A.Expr, ctx: MatchCtx): A.Expr {
     const line = p.lineno;
     const nm = this.m(name);
-    if (ctx.bound.has(nm)) this.matchError(p, `multiple assignments to name '${name}' in pattern`);
+    if (ctx.bound.has(nm) || ctx.outer.some((o) => o.has(nm))) this.matchError(p, `multiple assignments to name '${name}' in pattern`);
     ctx.bound.add(nm);
     if (!ctx.temps.has(nm)) {
       ctx.temps.set(nm, `$c${ctx.n}_${ctx.temps.size}`);
@@ -405,18 +406,23 @@ class Convert {
         return and([t, p.name ? this.capture(p, p.name, subj, ctx) : null]);
       }
       case "MatchOr": {
-        const outer = new Set(ctx.bound);
+        // (each alternative's own names apart, the enclosing ones consulted
+        // as they are: linear in the pattern, not alternatives x names)
+        const saved = ctx.bound;
+        ctx.outer.push(saved);
         let first: Set<string> | null = null;
         const alts: A.Expr[] = [];
         p.patterns.forEach((alt: any, j: number) => {
-          ctx.bound = new Set(outer);
+          ctx.bound = new Set();
           const t = this.pattern(alt, subj, ctx, j === p.patterns.length - 1 ? allow : false);
-          const mine = new Set([...ctx.bound].filter((x) => !outer.has(x)));
+          const mine = ctx.bound;
           if (first === null) first = mine;
           else if (mine.size !== first.size || [...mine].some((x) => !first!.has(x))) this.matchError(p, "alternative patterns bind different names");
           alts.push(t ?? { k: "Const", line, value: { t: "bool", v: true } });
         });
-        ctx.bound = new Set([...outer, ...first!]);
+        ctx.outer.pop();
+        ctx.bound = saved;
+        for (const x of first!) saved.add(x);
         return { k: "BoolOp", line, op: "or", values: alts };
       }
       case "MatchSequence": {
@@ -446,8 +452,10 @@ class Convert {
       }
       case "MatchClass": {
         const kw: string[] = p.kwd_attrs;
+        const seenKw = new Set<string>();
         kw.forEach((a, j) => {
-          if (kw.indexOf(a) !== j) this.matchError(p.kwd_patterns[j], `attribute name repeated in class pattern: ${a}`);
+          if (seenKw.has(a)) this.matchError(p.kwd_patterns[j], `attribute name repeated in class pattern: ${a}`);
+          seenKw.add(a);
         });
         const names: A.Expr = { k: "Tuple", line, elts: kw.map((a) => ({ k: "Const", line, value: { t: "str", v: a } }) as A.Expr) };
         const [t, test] = unpacked("__pyjs_match_class__", [subj, this.expr(p.cls), { k: "Const", line, value: { t: "int", v: BigInt(p.patterns.length) } }, names]);

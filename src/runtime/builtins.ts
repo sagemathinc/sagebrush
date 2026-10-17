@@ -694,8 +694,10 @@ define("__pyjs_match_class__", (s: any, cls: any, npos: number, kw: string[]) =>
       }
     }
   }
+  const seen = new Set<string | null>(names);
   for (const a of kw) {
-    if (names.includes(a)) raise(T.TypeError, `${name}() got multiple sub-patterns for attribute ${repr(a)}`);
+    if (seen.has(a)) raise(T.TypeError, `${name}() got multiple sub-patterns for attribute ${repr(a)}`);
+    seen.add(a);
     names.push(a);
   }
   const out: any[] = [];
