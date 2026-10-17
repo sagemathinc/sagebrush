@@ -623,18 +623,20 @@ export class Board {
   // (an item's content as drawn: a question's whole definition, and whether it
   // can be answered now, CORR-448-1, CORR-448-3)
   private keyOf(it: Item): string {
-    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify([it.ask, this.askFeedback.get(it.ask.id) ?? null, !!this.onCheck, this.askDecided.get(it.ask.id) ?? null, !!this.onDecide]) + (this.onAnswer ? "+" : "-") : "");
+    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify([it.ask, this.askFeedback.get(it.ask.id) ?? null, !!this.onCheck, this.askDecided.get(this.askScope + it.ask.id) ?? null, !!this.onDecide]) + (this.onAnswer ? "+" : "-") : "");
   }
   /** Ask the host which of a question's `decide` options the reader's words show (mount.ts); none: no host to ask. */
   onDecide: ((id: string, words: string) => void) | null = null;
   /** What the host decided each question's words show (mount.ts): `pending` while it is asked; `option` a name of its decide, or null for none; `refused`, why it couldn't. */
   askDecided = new Map<string, { pending?: boolean; option?: string | null; refused?: string }>();
+  /** The page shown, as askDecided's keys begin with it ("p2/"): a question's id is its page's own (CORR-B21-2). */
+  askScope = "";
 
   // (the reader's words decided among the question's options: a button, then what the host said)
   private askDecideEl(a: DocAsk, id: string, words: () => string): HTMLElement {
     const box = document.createElement("div");
     box.className = "board-ask-decide";
-    const fb = this.askDecided.get(id);
+    const fb = this.askDecided.get(this.askScope + id);
     const b = document.createElement("button");
     b.type = "button";
     b.className = "board-ask-check";
