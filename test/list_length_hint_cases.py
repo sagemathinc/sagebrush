@@ -99,3 +99,29 @@ for v, label in ((N(None), 'N raising'), (N(3), 'N(3)'), (N(-1), 'N(-1)'), (N(2*
     C3 = type('C', (), {'__iter__': it, '__len__': lambda self: v})
     show('len result ' + label, lambda: list(C3()))
     show('len() of ' + label, lambda: len(C3()))
+
+# ---- astra's CORR-5FC-1: binding the hint (a descriptor's __get__) raises
+# through, TypeError too; only a TypeError from calling it means no guess
+def raise_(e): raise e
+for label, hint in [
+        ('property raising TypeError on binding', property(lambda self: raise_(TypeError('hint bind')))),
+        ('property raising RuntimeError on binding', property(lambda self: raise_(RuntimeError('hint bind')))),
+        ('property giving a callable raising TypeError', property(lambda self: (lambda: raise_(TypeError('hint call'))))),
+        ('property giving a callable returning 3', property(lambda self: (lambda: 3))),
+        ('property giving None', property(lambda self: None)),
+        ('None', None),
+        ('a class whose call raises TypeError', Raiser),
+        ('staticmethod raising TypeError', staticmethod(lambda: raise_(TypeError('static')))),
+        ('classmethod raising TypeError', classmethod(lambda cls: raise_(TypeError('cm')))),
+]:
+    show('hint ' + label, lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': hint})()))
+class Getter:
+    calls = 0
+    def __get__(self, obj, typ):
+        Getter.calls += 1
+        if obj is None: return self
+        return lambda: 2
+show('hint descriptor bound once', lambda: (list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': Getter()})()), Getter.calls))
+show('hint a builtin function (len)', lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': len})()))
+show('hint a builtin type (int)', lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': int})()))
+show('hint a builtin bound method returning 3', lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': (3).__int__})()))
