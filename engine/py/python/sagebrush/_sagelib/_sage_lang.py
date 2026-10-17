@@ -834,6 +834,9 @@ class _RealBig(RealNumber):
 
     def _bin(op, rev=False):
         def g(self, o):
+            if type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+                # (a coarser field's number: the result in that field, as Sage)
+                return NotImplemented
             m = _rr_operand(o)
             if m is None:
                 if isinstance(o, complex):
@@ -1017,6 +1020,8 @@ def _rr_arith(a, b, op):
     return _sage_real._arith(a, b, op, _rr_mp())
 
 
+# (arithmetic and the reflected method of the other operand)
+_RR_REFLECT = {"__add__": "__radd__", "__radd__": "__add__", "__sub__": "__rsub__", "__rsub__": "__sub__", "__mul__": "__rmul__", "__rmul__": "__mul__", "__truediv__": "__rtruediv__", "__rtruediv__": "__truediv__"}
 # (the operations whose rational operand RealNumber converts to RR)
 _RR_Q_OPS = frozenset(("__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__", "__truediv__", "__rtruediv__", "__pow__", "__rpow__"))
 _RR_EXACT_ZERO_OPS = ("__add__", "__radd__", "__sub__", "__rsub__", "__mod__", "__rmod__")
@@ -1059,6 +1064,9 @@ def _rr_slow(name, x, a):
     if not a:
         return _rr_from_mp({"__neg__": lambda v: -v, "__pos__": lambda v: v, "__abs__": abs}[name](mx))
     o = a[0]
+    if name in _RR_REFLECT and type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+        # (a coarser field's number: the result in that field, as Sage)
+        return getattr(o, _RR_REFLECT[name])(x)
     if name in ("__pow__", "__rpow__"):
         if name == "__pow__" and (isinstance(o, int) or type(o).__name__ == "Integer"):
             return _rr_from_mp(mx ** int(o))
