@@ -3381,6 +3381,16 @@ class ComplexNumberMP:
     def _latex_(self):
         return repr(self).replace("*I", "i")
 
+    def __float__(self):
+        # (as Sage: NaN for a NaN real part, the real part for a zero
+        # imaginary part, else refused)
+        if self._re._special == "nan" or (not self._im._special and not self._im._m):
+            return float(self._re)
+        raise TypeError("unable to convert %r to float; use abs() or real_part() as desired" % (self,))
+
+    def __int__(self):
+        raise TypeError("can't convert complex to int; use int(abs(z))")
+
     def __complex__(self):
         return complex(float(self._re), float(self._im))
 

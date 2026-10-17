@@ -357,6 +357,9 @@ class RealDoubleElement(float):
         return RealDoubleElement(abs(float(self)))
 
     def __pow__(self, e, mod=None):
+        if mod is not None:
+            # (as Sage's RDF: never a power that drops the modulus)
+            raise TypeError("the 3-argument version of pow() is not supported")
         x = float(self)
         inf = float("inf")
         if isinstance(e, int) or type(e).__name__ == "Integer":
@@ -394,7 +397,15 @@ class RealDoubleElement(float):
         except OverflowError:
             return RealDoubleElement(inf)
 
-    def __rpow__(self, b):
+    def __rpow__(self, b, mod=None):
+        if mod is not None:
+            # (an integer base takes an integral exponent, as Sage's
+            # Integer does; otherwise refused, as RDF's pow)
+            if isinstance(b, int) and not isinstance(b, bool):
+                if not float(self).is_integer():
+                    raise TypeError("cannot convert non-integral float to integer")
+                return pow(b, int(self), mod)
+            raise TypeError("the 3-argument version of pow() is not supported")
         return RDF(b) ** self
 
     def sqrt(self, extend=True, all=False):
@@ -802,9 +813,14 @@ class ComplexDoubleElement:
         return self._z
 
     def __float__(self):
-        if self._z.imag:
-            raise TypeError("unable to convert %r to float" % (self,))
+        # (as Sage's CDF: its real part when the imaginary part is 0; NaN
+        # printed as nan in the message)
+        if self._z.imag != 0:
+            raise TypeError("unable to convert %s to float; use abs() or real_part() as desired" % repr(self).replace("NaN", "nan"))
         return self._z.real
+
+    def __int__(self):
+        raise TypeError("can't convert complex to int; use int(abs(z))")
 
     def __hash__(self):
         return hash(self._z)
@@ -849,6 +865,8 @@ class ComplexDoubleElement:
         return ComplexDoubleElement._of(-self._z)
 
     def __pow__(self, e, mod=None):
+        if mod is not None:
+            raise TypeError("the 3-argument version of pow() is not supported")
         z = self._z
         if z == 0:
             return ComplexDoubleElement(0.0, 0.0)
