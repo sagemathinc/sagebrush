@@ -474,7 +474,7 @@ class MRange:
 class MSet:
     """A Magma set (also indexed sets {@ @} and multisets {* *})."""
 
-    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf", "_null")
+    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf", "_null", "_wit")
 
     def __init__(self, it=(), kind="set", universe=None):
         self.items, self.keys, self.kind, self.universe, self.range = [], {}, kind, universe, None
@@ -1029,6 +1029,23 @@ def _keep_inf(t, v, first):
         t._null = v._null  # (written empty with no universe, or a field's: the copy is too)
 
 
+def _remember(s):
+    """s is about to lose elements: one of them is kept (_wit) when it is
+    an element of a structure the collection's universe isn't otherwise
+    known by (a number field, a real field, a polynomial ring, a matrix
+    space, a finite field, Integers(m)), so that s emptied keeps its
+    universe, as Magma's: S := [a]; Remove(~S, 1); Append(~S, 2) puts in
+    a number field element (astra2 on de17ca12)."""
+    if getattr(s, "universe", None) is not None or getattr(s, "_wit", None) is not None:
+        return
+    for y in (s.items if isinstance(s, MSet) else s):
+        if y is _UNDEF:
+            continue
+        if isinstance(y, (_snf.NumberFieldElement, MReal, _sp.Polynomial, _MFFPoly, _smat.Matrix, _MResElt) + _FFLIN) or _is_ff(y):
+            s._wit = y
+        return
+
+
 def _carry(t, *srcs, mode="any"):
     """t, a collection made from srcs (a conversion, a sort, a selection, a
     cat or a set operation), keeping what they know of an empty one's
@@ -1043,6 +1060,13 @@ def _carry(t, *srcs, mode="any"):
     unknown.  Only an empty
     t takes them: a nonempty one infers its own.  Gcd and Lcm read them
     (_null_int_collection)."""
+    if not len(t) and getattr(t, "_wit", None) is None:
+        # (an emptied source's element, which stands for its universe,
+        # goes with the empty result: Sort, Setseq, Seqset of it, _remember)
+        for x in srcs:
+            if getattr(x, "_wit", None) is not None:
+                t._wit = x._wit
+                break
     if len(t) or getattr(t, "universe", None) is not None or getattr(t, "_inf", None) is not None:
         return t
     # (every source must be known, the integers' or written empty: one
@@ -1272,6 +1296,17 @@ def _coerce_struct(x, u):
     return None if d is None else _into(x, d, u)
 
 
+def _elt_ring(c):
+    """The structure the element c belongs to, for _into: a polynomial's
+    or a number field element's parent, a real's field (its precision);
+    None for others."""
+    if isinstance(c, (_sp.Polynomial, _snf.NumberFieldElement)):
+        return c.parent()
+    if isinstance(c, MReal):
+        return RealField_(c.prec)
+    return None
+
+
 def _elt_into(x, c):
     """x as an element of the parent of the element c, or _NOCOERCE; None
     where Sagebrush doesn't know how Magma coerces into it."""
@@ -1286,7 +1321,7 @@ def _elt_into(x, c):
     if d is not None and d[0] != "elt":
         if (d[0] == "Z" or d[0] == "Q") and _is_ff(x):
             return _coerce_struct(x, _ZZ if d[0] == "Z" else _QQ)
-        return _into(x, d, c.parent() if isinstance(c, (_sp.Polynomial, _snf.NumberFieldElement)) else None)
+        return _into(x, d, _elt_ring(c))
     if type(x) is type(c) and (not hasattr(c, "parent") or x.parent() is c.parent()):
         return x
     return None
@@ -3120,7 +3155,10 @@ def _universe(s, fixed=False):
     if isinstance(s, MRange):
         return ("struct", _ZZ) if fixed else (("elt", s.a) if len(s) else None)
     if isinstance(s, MSet):
-        return ("elt", s.items[0]) if s.items else None
+        if s.items:
+            return ("elt", s.items[0])
+        wit = getattr(s, "_wit", None)  # (an emptied set's, _remember)
+        return ("elt", wit) if wit is not None else None
     if len(s):
         y = s[0] if s[0] is not _UNDEF or not isinstance(s, MSeq) else _first_defined(s)
         if y is not None:
@@ -3946,6 +3984,8 @@ def _str1(v, indent, col, tail):
         # Sagebrush's summary (not a Python function's repr)
         import _magma_docsearch
         return _magma_docsearch.intrinsic_text(v.__name__), False
+    if isinstance(v, _smat.Matrix) and (v.nrows() == 0 or v.ncols() == 0):
+        return "Matrix with %d rows and %d columns" % (v.nrows(), v.ncols()), False  # (as Magma prints one)
     if isinstance(v, _smat.MatrixSpace_):
         # (a matrix's parent: Magma's matrix algebra or R/KMatrixSpace, not
         # Sage's "Full MatrixSpace of ... dense matrices")
@@ -6577,7 +6617,10 @@ def _into(x, d, ring):
     if t == "Q":
         return _qelt(x) if num else _NOCOERCE
     if t == "R":
-        return MReal.of(x) if num or isinstance(x, MReal) else _NOCOERCE
+        # (at the field's precision: [RealField(10) | 1/3] holds a real of
+        # 10 digits, never the default 30, astra2 on de17ca12)
+        prec = ring.prec if isinstance(ring, RealField_) else None
+        return MReal.of(x, prec) if num or isinstance(x, MReal) else _NOCOERCE
     if t in ("ZX", "QX"):
         if num:
             if t == "ZX" and _Fraction(x).denominator != 1:
@@ -6660,7 +6703,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
             if y is None:
                 y = _NOCOERCE
         elif de is not None:
-            y = _into(x, de, e.parent() if isinstance(e, (_sp.Polynomial, _snf.NumberFieldElement)) else None)
+            y = _into(x, de, _elt_ring(e))
         else:
             kx, ke = _eq_kind(x), _eq_kind(e)
             ok = ((kx == ke == "struct" and _struct_cat(x) == _struct_cat(e))
@@ -6708,9 +6751,11 @@ def Exclude(s, x):
     x = _lift("Exclude", s, x)
     if isinstance(s, MSet):
         t = _own(s)
+        _remember(t)
         t.remove(x)
         return t
     s = _own(_as_seq(s))
+    _remember(s)
     for k, y in enumerate(s):
         if _cmpeq(x, y):
             del s[k]
@@ -6721,6 +6766,7 @@ def Exclude(s, x):
 def Remove(s, i):
     s = _own(s) if isinstance(s, MSeq) else MSeq(s)
     _check_index(len(s), i)
+    _remember(s)
     del s[i - 1]
     return s
 
@@ -7833,7 +7879,8 @@ def _submatrix(A, i, j, p, q):
 
 
 def _mmat(M):
-    return _MMatrix(M._base, M._rows)
+    # (its number of columns too: a matrix with no rows keeps it, WA-024)
+    return _MMatrix(M._base, M._rows, M.ncols())
 
 
 def Matrix(*args):
@@ -7854,8 +7901,10 @@ def Matrix(*args):
             raise _bad_types("Matrix", ((R,) if R is not None else ()) + tuple(args))
         if m < 0 or n < 0:
             raise MagmaError("a matrix with a negative number of rows or columns is not supported yet", "'Matrix'")
-        if m * n > _COLLECT_MAX:
-            raise MagmaError("a matrix of more than %d entries is not supported yet" % _COLLECT_MAX, "'Matrix'")
+        if m * n > _COLLECT_MAX or max(m, n) > _COLLECT_MAX:
+            # (rows and columns bounded too: a matrix with no columns has no
+            # entries but still a row for each, HARD-DE1-1)
+            raise MagmaError("a matrix of more than %d entries, rows or columns is not supported yet" % _COLLECT_MAX, "'Matrix'")
         k = size(ent)
         if k == 0:
             # (an empty sequence: with a ring, the zero matrix; without
@@ -7868,8 +7917,14 @@ def Matrix(*args):
         else:
             ent = list(ent)
         rows = [ent[i * n:(i + 1) * n] for i in range(m)]
+        if m == 0 or n == 0:
+            # (no rows or no columns: both numbers kept, as Magma's,
+            # Matrix(Integers(), 0, 3, []) has 3 columns, astra2 WA-024)
+            return _MMatrix(base if base is not None else _sa.ZZ, rows, n)
     elif len(args) == 1 and isinstance(args[0], (MSeq, list)):
         Q = args[0]
+        if len(Q) > _COLLECT_MAX:
+            raise MagmaError("a matrix of more than %d entries, rows or columns is not supported yet" % _COLLECT_MAX, "'Matrix'")
         if any(not isinstance(r, (MSeq, MRange, list)) for r in Q):
             raise _bad_types("Matrix", ((R,) if R is not None else ()) + tuple(args))
         w = size(Q[0]) if len(Q) else 0
@@ -8090,8 +8145,10 @@ def _ffm_matrix(F, args):
             raise _bad_types("Matrix", (F,) + tuple(args))
         if m < 0 or n < 0:
             raise err("Argument %d (%d) should be >= 0" % ((2, m) if m < 0 else (3, n)))
-        if m * n > _COLLECT_MAX:
-            raise MagmaError("a matrix of more than %d entries is not supported yet" % _COLLECT_MAX, "'Matrix'")
+        if m * n > _COLLECT_MAX or max(m, n) > _COLLECT_MAX:
+            # (rows and columns bounded too: a matrix with no columns has no
+            # entries but still a row for each, HARD-DE1-1)
+            raise MagmaError("a matrix of more than %d entries, rows or columns is not supported yet" % _COLLECT_MAX, "'Matrix'")
         # (its length first: a long range is never expanded)
         k = Q.size() if isinstance(Q, MRange) else len(Q)
         if k != m * n and k != 0:
@@ -8107,6 +8164,8 @@ def _ffm_matrix(F, args):
         if any(not isinstance(r, (MSeq, MRange, list)) for r in Q):
             raise _bad_types("Matrix", (F,) + tuple(args))
         size = lambda r: r.size() if isinstance(r, MRange) else len(r)
+        if len(Q) > _COLLECT_MAX:
+            raise MagmaError("a matrix of more than %d entries, rows or columns is not supported yet" % _COLLECT_MAX, "'Matrix'")
         n = size(Q[0]) if len(Q) else 0
         for k, r in enumerate(Q):
             if size(r) != n:
