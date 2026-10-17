@@ -62,6 +62,19 @@ try {
   ok(await ev("(() => { const c = document.querySelector('.cell.markdown:not(.rendered)') ?? [...document.querySelectorAll('.cell.markdown')].at(-1); const hl = c.querySelector('.mb-edit pre'); return !!hl && (!!hl.querySelector('.hp') || !!hl.querySelector('.hk')); })()"), "the Markdown being edited is highlighted (the block written in)");
   await ev("(() => { const ta = [...document.querySelectorAll('.cell.markdown textarea')].at(-1); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', ctrlKey: true, bubbles: true})); })()");
   await until("[...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')");
+  // the toolbar stays in view as the notebook scrolls (William, Oct 17): Run all, the
+  // function search and the File menu a press away at the bottom of a long notebook
+  {
+    await ev("document.querySelector('main').insertAdjacentHTML('beforeend', '<div id=\"__tall\" style=\"height: 4000px\"></div>'), scrollTo(0, document.body.scrollHeight), 1");
+    await sleep(300);
+    const s = await ev("(() => { const bar = document.querySelector('.bar').getBoundingClientRect(), run = document.querySelector('#runall').getBoundingClientRect(), q = document.querySelector('#docsearch').getBoundingClientRect(); const at = document.elementFromPoint(run.x + run.width / 2, run.y + run.height / 2); return { scrolled: scrollY > 1000, top: Math.round(bar.top), run: at === document.querySelector('#runall') || document.querySelector('#runall').contains(at), q: q.top >= 0 && q.bottom <= bar.bottom + 1, stuck: document.querySelector('.bar').classList.contains('stuck') }; })()");
+    ok(s.scrolled && s.top === 0 && s.run && s.q && s.stuck, "scrolled far down, the toolbar stays at the top: Run all pressable, the function search in view: " + JSON.stringify(s));
+    await ev("document.querySelector('#filebtn').click(), 1");
+    const m = await ev("(() => { const b = document.querySelector('#filebtn').getBoundingClientRect(), r = document.querySelector('#filemenu').getBoundingClientRect(); return { open: !document.querySelector('#filemenu').hidden, below: Math.round(r.top - b.bottom), inView: r.top >= 0 && r.top < innerHeight }; })()");
+    ok(m.open && m.below === 4 && m.inView, "...and its File menu opens under its button, in view: " + JSON.stringify(m));
+    await ev("document.querySelector('#filebtn').click(), document.querySelector('#__tall').remove(), scrollTo(0, 0), 1");
+    await sleep(200);
+  }
   let out = await runCode("import os\nwith open('data.txt', 'w') as f:\n    f.write('hello from python')\nos.makedirs('sub/dir', exist_ok=True)\nopen('sub/dir/x.csv', 'w').write('a,b\\n1,2\\n')\nprint(sorted(os.listdir('.')), os.path.exists('sub/dir/x.csv'), os.path.getsize('data.txt'))");
   ok(out.includes("['data.txt', 'sub'] True 17"), "open() and os work: " + out.trim());
   await ev("document.querySelector('#nbname').value = 'My research'; document.querySelector('#nbname').dispatchEvent(new Event('input'))");
