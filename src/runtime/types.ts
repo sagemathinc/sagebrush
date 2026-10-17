@@ -424,6 +424,8 @@ superType.$customGet = true;
 // A cell, as CPython's: the class cell of a class whose methods use
 // __class__ or super() (the class body passes it to type.__new__ as
 // __classcell__), and types.CellType.
+// (src/runtime/index.ts: a __classdictcell__'s dict made the class's own)
+export const classDictHooks: { bind: ((c: PyCell, cls: PyType) => void) | null } = { bind: null };
 export class PyCell {
   constructor(public v: any = undefined) {}
 }
@@ -812,6 +814,14 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
     if (!(cell instanceof PyCell)) raise(T.TypeError, `__classcell__ must be a nonlocal cell, not ${repr(typeOf(cell))}`);
     ns.delete("__classcell__");
   }
+  // __classdictcell__: the cell of the body's __classdict__, its
+  // annotation scopes' view of the namespace, then the class's own dict,
+  // set here, before __set_name__ and __init_subclass__, as CPython's
+  const dcell = ns.get("__classdictcell__");
+  if (dcell !== undefined) {
+    if (!(dcell instanceof PyCell)) raise(T.TypeError, `__classdictcell__ must be a nonlocal cell, not ${repr(typeOf(dcell))}`);
+    ns.delete("__classdictcell__");
+  }
   // (the body's __annotate__ is the class's __annotate_func__, as CPython's)
   if (ns.has("__annotate__")) {
     ns.set("__annotate_func__", ns.get("__annotate__"));
@@ -820,6 +830,7 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
   (cls as any).$heap = true;
   if (cell !== undefined) cell.v = cls;
+  if (dcell !== undefined) classDictHooks.bind!(dcell, cls);
   if (meta !== T.type) (cls as any).$meta = meta;
   cls.$qualname = ns.get("__qualname__");
   ns.delete("__qualname__");

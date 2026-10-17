@@ -1,3 +1,6 @@
+# astra's lazy-annotations 4c7ab32d findings; its setdefault on a made
+# class's __classdict__ is a read here (such writes are refused, CORR-2F0-2:
+# test/annotations-review.test.ts)
 def case(label, src):
  print(label)
  try: exec(src, {'__name__':'probe'})
@@ -6,7 +9,7 @@ def case(label, src):
 case('stable classdict', """class C:
  a: __classdict__ is __classdict__
  b: locals()['__classdict__'] is __classdict__
- def f(x: __classdict__.setdefault('added',12), y: __classdict__.get('added')):pass
+ def f(x: __classdict__.get('added',12), y: __classdict__.get('added')):pass
 print(C.__annotations__,C.f.__annotations__)
 """)
 case('nested classdict', """class C:

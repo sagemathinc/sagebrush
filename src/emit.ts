@@ -1140,9 +1140,9 @@ export class Emitter {
     this.line = st.line;
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
+    if (scope.classDictName) this.w(`$ns.set("__classdictcell__", ${scope.classDictName});`);
     const made = `classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc})`;
-    // (the __classdict__ cell then the class's own dict, as CPython's type_new sets it)
-    this.w(cdc ? `return R.classDictBind(${cdc}, ${made});` : `return ${made};`);
+    this.w(`return ${made};`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));

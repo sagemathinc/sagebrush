@@ -18,3 +18,27 @@ for (const name of readdirSync(DIR).filter((f) => f.endsWith(".py")).sort()) {
     for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${name} line ${i + 1}`);
   });
 }
+
+// (astra CORR-2F0-2: a write through a made class's __classdict__ is
+// refused: CPython's skips the type's attribute cache, so after a warmed
+// lookup its class and dict disagree, which Sagebrush's caches would not
+// reproduce)
+test("a write through a made class's __classdict__ is refused", () => {
+  const src = `
+class E:
+    value = 1
+    def f(x: __classdict__): pass
+def read(): return E.value
+for _ in range(20): read()
+d = E.f.__annotate__(1)['x']
+for w in (lambda: d.__setitem__('value', 2), lambda: d.setdefault('added', 12), lambda: d.pop('value'), lambda: d.clear(), lambda: d.update(a=1)):
+    try:
+        w()
+        print('written')
+    except NotImplementedError as e:
+        print(type(e).__name__, '__classdict__' in str(e))
+print(read(), d['value'], vars(E)['value'], 'added' in d)
+`;
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" }).trimEnd().split("\n");
+  assert.deepEqual(out, [...Array(5).fill("NotImplementedError True"), "1 1 1 False"]);
+});

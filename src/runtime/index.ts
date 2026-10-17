@@ -751,13 +751,15 @@ export function classLocals(ns: Map<string, any> | Ty.PreparedNs): any {
   return ns instanceof Ty.PreparedNs ? ns.m : localsDict([...ns.keys()], [...ns.values()]);
 }
 // A class body's __classdict__, CPython's implicit cell of its annotation
-// scopes: one dict, the body's namespace while it runs (a prepared one's
-// mapping itself), then the class's own dict, as type_new sets the cell;
-// the same object every time it is read
+// scopes (a types.CellType, stored in the namespace as __classdictcell__):
+// the body's namespace while it runs (a prepared one's mapping itself),
+// then the class's own dict, from type.__new__ on (types.ts), the same
+// object every time it is read
 class ClassMap {
-  // (a dict's store over a class namespace: str keys only, the class's
-  // caches invalidated by each change, as a type's dict through
-  // __classdict__)
+  // (a dict's store over a class namespace, str keys only. Once the class
+  // is made a write through it is refused: CPython's raw writes to a
+  // type's dict skip its attribute cache, which Sagebrush's own caches
+  // would not, so neither answer would be CPython's, astra CORR-2F0-2)
   constructor(public m: Map<string, any>, public cls: any) {}
   get size(): number {
     return this.m.size;
@@ -780,46 +782,38 @@ class ClassMap {
   has(k: any): boolean {
     return typeof k === "string" && this.m.has(k);
   }
+  private writable() {
+    if (this.cls) raise(T.NotImplementedError, `writing to the dict of class '${this.cls.$name}' through __classdict__ is not supported yet`);
+  }
   set(k: any, v: any): this {
+    this.writable();
     if (typeof k !== "string") raise(T.NotImplementedError, "a key other than a str in a class's __classdict__ is not supported yet");
     this.m.set(k, v);
-    if (this.cls) Obj.bumpVersion(this.cls);
     return this;
   }
   delete(k: any): boolean {
-    const r = typeof k === "string" && this.m.delete(k);
-    if (r && this.cls) Obj.bumpVersion(this.cls);
-    return r;
+    this.writable();
+    return typeof k === "string" && this.m.delete(k);
   }
   clear() {
+    this.writable();
     this.m.clear();
-    if (this.cls) Obj.bumpVersion(this.cls);
   }
 }
-export class ClassDictCell {
-  d: any = null;
-  constructor(public ns: Map<string, any> | Ty.PreparedNs) {}
-}
-export const classDictCell = (ns: Map<string, any> | Ty.PreparedNs) => new ClassDictCell(ns);
 function dictOver(m: Map<string, any>, cls: any): any {
   const d = new Obj.PyDict();
   (d as any).$m = new ClassMap(m, cls);
   return d;
 }
-export function classDict(c: ClassDictCell): any {
-  if (c.d === null) c.d = c.ns instanceof Ty.PreparedNs ? c.ns.m : dictOver(c.ns, null);
-  return c.d;
-}
-// (the class made: the cell its dict's, the same dict object when that is
-// the body's namespace; returns the class)
-export function classDictBind(c: ClassDictCell, cls: any): any {
-  if (!Obj.isType(cls)) return cls;
-  const m = cls.$dict;
-  if (c.d !== null && (c.d as any).$m instanceof ClassMap && (c.d as any).$m.m === m) (c.d as any).$m.cls = cls;
-  else c.d = dictOver(m, cls);
-  c.ns = m;
-  return cls;
-}
+export const classDictCell = (ns: Map<string, any> | Ty.PreparedNs) => Ty.newCell(ns instanceof Ty.PreparedNs ? ns.m : dictOver(ns, null));
+export const classDict = (c: Ty.PyCell): any => c.v;
+// (the class made: its own dict, the same dict object when that is the
+// body's namespace)
+Ty.classDictHooks.bind = (c: Ty.PyCell, cls: any) => {
+  const m = cls.$dict, v = c.v;
+  if (v instanceof Obj.PyDict && (v as any).$m instanceof ClassMap && (v as any).$m.m === m) (v as any).$m.cls = cls;
+  else c.v = dictOver(m, cls);
+};
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any> | Ty.PreparedNs, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   const orig = (bases as any).$orig;
@@ -1088,7 +1082,6 @@ export const R: any = {
   setupAnnotations,
   classDictCell,
   classDict,
-  classDictBind,
   classModule,
   unboundName,
   execIn,
