@@ -299,12 +299,21 @@ A text answer (`"input": "text"`) is a string. The helpers read strings with par
 A reason reports one bounded difference ("it is missing $2$", "item 3 is $4$, not $3$", "they differ at $x = 1/2$"). For a small answer that can show much of the expected one.
 
 ```json
-{ "id": "roots", "kind": "ask", "input": "text", "text": "The roots of $x^2 - 5x + 6$?",
-  "check": "same_set(answer, [2, 3])", "example": "{2, 3}" }
-{ "id": "area", "kind": "ask", "input": "number", "text": "The area of the unit disk, to 4 places?",
-  "check": "close(answer, pi, abs=5e-5)", "example": 3.1416 }
-{ "id": "expand", "kind": "ask", "input": "text", "text": "Expand $(x + 1)^2$.",
-  "check": "symbolic_equal(answer, (x + 1)^2)", "example": "x^2 + 2x + 1" }
+{
+  "format": "sagebrush-board",
+  "version": 1,
+  "title": "Check helpers",
+  "mode": "sage",
+  "layout": "column",
+  "nodes": [
+    { "id": "roots", "kind": "ask", "input": "text", "text": "The roots of $x^2 - 5x + 6$?",
+      "check": "same_set(answer, [2, 3])", "example": "{2, 3}" },
+    { "id": "area", "kind": "ask", "input": "number", "text": "The area of the unit disk, to 4 places?",
+      "check": "close(answer, pi, abs=5e-5)", "example": 3.1416 },
+    { "id": "expand", "kind": "ask", "input": "text", "text": "Expand $(x + 1)^2$.",
+      "check": "symbolic_equal(answer, (x + 1)^2)", "example": "x^2 + 2x + 1" }
+  ]
+}
 ```
 
 `sagebrush board check FILE` lints these (a check in another language, an
