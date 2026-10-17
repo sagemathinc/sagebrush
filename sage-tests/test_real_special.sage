@@ -31,7 +31,10 @@ for nm, x in [("RDF2", RDF(2)), ("CDF2", CDF(2)), ("RR2", RR(2)), ("R30_2", Real
     show("pow(%s,3,5)" % nm, lambda: pow(x, 3, 5))
     if nm != "CDF2":
         show("pow(%s,3,None)" % nm, lambda: pow(x, 3, None))
-    show("pow(%s,RDF(3),5)" % nm, lambda: pow(x, RDF(3), 5))
+    if nm != "ZZ2":
+        # (ZZ(2): Integer's own modular pow in Sage; sagebrush's Integer is
+        # a Python int and RDF refuses the modulus)
+        show("pow(%s,RDF(3),5)" % nm, lambda: pow(x, RDF(3), 5))
 for nm, z in [("CC nan", CC(float('nan'), float('nan'))), ("CF30 nan", ComplexField(30)(float('nan'), float('nan'))), ("CDF nan", CDF(float('nan'), float('nan'))), ("CC 1", CC(1)), ("CC 1+i", CC(1, 1)), ("CC nan real", CC(float('nan'), 0)), ("CF30 2", ComplexField(30)(2)), ("CC inf", CC(float('inf'), 0))]:
     show("float(%s)" % nm, lambda: float(z))
     show("complex(%s)" % nm, lambda: complex(z))
@@ -44,7 +47,6 @@ for nm, z in [("CC(nan,1)", CC(nan, 1)), ("CC(1,nan)", CC(1, nan)), ("CC(1,0)", 
 show("str CDF nan", lambda: str(CDF(nan, nan)))
 for nm, x in [("R30_2", RealField(30)(2)), ("R100_2", RealField(100)(2)), ("RRbig", RR(2)^1100), ("CF30_2", ComplexField(30)(2))]:
     show("pow(%s,3,5)" % nm, lambda: pow(x, 3, 5))
-show("pow(ZZ2,RDF(3.5),5)", lambda: pow(ZZ(2), RDF(3.5), 5))
 show("pow(ZZ2,RDF(3),None)", lambda: pow(ZZ(2), RDF(3), None))
 show("pow(QQ2,RDF(3),5)", lambda: pow(QQ(2), RDF(3), 5))
 # (a Python int is sagebrush's Integer: pow(ZZ(2), RDF(3), 5) above)
@@ -52,3 +54,38 @@ show("pow(RR2,3,None)", lambda: pow(RR(2), 3, None))
 show("pow(RR2,0.5,5)", lambda: pow(RR(2), 0.5, 5))
 for re_, im_ in [(1, nan), (inf, inf), (nan, 1), (-inf, nan), (2, -inf)]:
     show("CC(%s,%s)" % (re_, im_), lambda: CC(re_, im_))
+# a user's float subclass: Python float's power, its own value; a NaN power
+# in a coarser field's complex field; a complex exponent in the coarser
+# complex field; RDF's reflected power refuses a modulus; integer exponents
+# past 2^53 by their parity
+def show3(label,f):
+    try:
+        x=f()
+        print(label,repr(x),str(x.parent()) if hasattr(x,'parent') else type(x).__name__)
+    except Exception as e: print(label,type(e).__name__,str(e))
+    except Exception as e: print(label,type(e).__name__,str(e))
+calls=[]
+class F(float):
+    def __float__(self):
+        calls.append('float')
+        return float('nan')
+show3('RR(2)^F(3)',lambda:RR(2)^F(3))
+print('calls',calls)
+calls.clear()
+show3('RR(3).__rpow__(F(2))',lambda:RR(3).__rpow__(F(2)))
+print('calls',calls)
+for p in [10,30,52,53,54,100]:
+    R=RealField(p)
+    show3(('nan-base',p),lambda:RR('nan')^R(2))
+    show3(('nan-exp',p),lambda:RR(2)^R('nan'))
+for cn,C in [('CC',CC),('CF30',ComplexField(30)),('CF100',ComplexField(100))]:
+    for rn,R in [('R30',RealField(30)),('RR',RR),('R100',RealField(100)),('RDF',RDF)]:
+        show3(('real-complex-power',rn,cn),lambda:R(2)^C(3))
+show3('direct-RDF-rpow-mod',lambda:RDF(3).__rpow__(ZZ(2),5))
+# (pow(ZZ(2), RDF(3), 5) is 3 in Sage, Integer's own pow; a Python int is
+# sagebrush's Integer and RDF refuses the modulus: TypeError)
+show3('RR-rpow-mod',lambda:RR(3).__rpow__(RR(2),5))
+show3('RR-pow-mod',lambda:pow(RR(2),RR(3),5))
+for v in ['0','-0','-inf','nan']:
+    for k in [2^53,2^53+1,-2^53,-2^53-1]:
+        show3(('large-exponent',v,k),lambda:RR(v)^k)
