@@ -2674,9 +2674,14 @@ hooks.primProxy = (base: PyType): PyType => {
 };
 for (const [P, L] of [[int, IntLayout], [float, FloatLayout], [S, StrLayout]] as const) {
   P.$jsBase = L;
-  // (a subclass's instance boxes the value)
+  // (a subclass's instance boxes the value: the exact one, as CPython's
+  // unicode_subtype_new copies it, when P gave a subclass instance, as
+  // str() does for a __str__ returning one, CORR-B14-1; never a box in a
+  // box)
   const box = (cls: any, v: any) => {
     if (cls === P) return v;
+    if (v instanceof PrimBox) v = v.$v;
+    if (v instanceof PrimBox) throw new Error(`internal: a boxed ${P.$name} inside a ${cls.$name}`);
     const o = new cls.$ctor!();
     o.$v = v;
     return o;

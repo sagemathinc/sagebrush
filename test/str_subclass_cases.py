@@ -22,3 +22,17 @@ for f in [lambda: str(W("x")), lambda: type(str(W("x"))).__name__, lambda: str._
         print(repr(f()))
     except Exception as e:
         print(type(e).__name__, e)
+# CORR-B14-1: a str subclass made from an object whose __str__ returns
+# another subclass's instance holds the exact characters, by every path
+class Inner(str): pass
+class LongInner(str):
+    def __len__(self): return 999
+class Outer(str): pass
+class Source:
+    def __init__(self, cls): self.cls = cls
+    def __str__(self): return self.cls("abc")
+for inner in [Inner, LongInner]:
+    for make in [lambda: Outer(Source(inner)), lambda: Outer(object=Source(inner)), lambda: str.__new__(Outer, Source(inner))]:
+        x = make()
+        print(type(x).__name__, x == "abc", len(x), x.upper(), "".join([x, "!"]), type(str.__str__(x)).__name__, repr(x), x + "d", hash(x) == hash("abc"))
+print(type(str(Source(Inner))).__name__, type(str(Source(LongInner))).__name__, len(str(Source(LongInner))))
