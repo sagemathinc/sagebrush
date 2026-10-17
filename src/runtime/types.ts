@@ -808,7 +808,8 @@ const isInt = Number.isInteger;
 // A str as int(), float() and complex() read it, CPython's
 // _PyUnicode_TransformDecimalAndSpaceToASCII: each non-ASCII Unicode decimal
 // digit (Nd) its ASCII digit, each non-ASCII whitespace character
-// (str.isspace) a space, anything else non-ASCII "?", which no literal has.
+// (str.isspace) a space, anything else non-ASCII NUL, which no literal has
+// (and which ends complex()'s underscore check, as in CPython).
 // (Then only ASCII whitespace is stripped, as CPython's Py_ISSPACE: not
 // \x1c-\x1f, nor U+FEFF.)
 const NON_ASCII_SPACE = /[\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
@@ -839,7 +840,7 @@ export function asciiNumeral(s: string): string {
     else if (NON_ASCII_SPACE.test(ch)) out += " ";
     else {
       const d = ndValue(ch);
-      out += d < 0 ? "?" : String.fromCharCode(48 + d);
+      out += d < 0 ? "\0" : String.fromCharCode(48 + d);
     }
   }
   return out;
@@ -863,7 +864,8 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
       prefixed = true;
     } else {
       base = 10;
-      if (/^0+[1-9_]/.test(t)) return undefined;
+      // (a leading 0 only in a zero: 0_0 and 00 are 0, 01 and 00_1 invalid)
+      if (t[0] === "0" && !/^0+(_0+)*$/.test(t)) return undefined;
     }
   } else if (pre in prefixes && prefixes[pre] === base) {
     t = t.slice(2);
