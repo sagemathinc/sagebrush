@@ -256,6 +256,43 @@ try {
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other")`))), "page 1's q2 decided again, on its new words");
 
+  // (the document changed by any path, the API's here, as Undo and Redo do:
+  // a decision kept only while the question, as defined, has the words it
+  // was asked about; astra's CORR-B21-1 at 8e31c0a2)
+  const words = `document.querySelector('[data-ask="q2"] details textarea')`;
+  const editQ2 = (body) => frame(`window.sagebrush.board.edit((d) => { const n = d.pages[0].nodes.find((x) => x.id === "q2"); ${body} }).then(() => 1)`);
+  // (only the choice changed: the decision stays)
+  await frame(`document.querySelector('[data-ask="q2"] input[type=checkbox]').click()`);
+  await sleep(800);
+  check(await frame(`${fb}.textContent.includes("says every point reaches every other")`), "only the choice changed, the words and the question the same: the decision stays");
+  // (1) done, then the words changed by the API: gone
+  await editQ2(`n.note = "API NEW WORDS";`);
+  check(!!(await until(() => frame(`${words}.value === "API NEW WORDS" && !${fb}.textContent.includes("Your words suggest")`))), "a decision done, its words changed by the API: gone");
+  // (2) pending, the words changed and changed back (ABA): its answer dropped
+  await top(`window.held = null; mode.decide = "hold"`);
+  await frame(`${fb}.querySelector('button').click()`);
+  check(!!(await until(() => top("!!window.held"))), "(a request for API NEW WORDS, held)");
+  await editQ2(`n.note = "API temporary words";`);
+  await until(() => frame(`${words}.value === "API temporary words"`));
+  await editQ2(`n.note = "API NEW WORDS";`);
+  await until(() => frame(`${words}.value === "API NEW WORDS"`));
+  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: held.id, option: "says-every-point-reaches-every-other" })`);
+  await sleep(1500);
+  check(await frame(`!${fb}.textContent.includes("Your words suggest") && ${fb}.querySelector('button').textContent === "Get feedback on my words"`), "a decision pending, its words changed and changed back: its answer dropped");
+  // (3) pending, the question changed (its words the same): its answer dropped
+  await top(`window.held = null`);
+  await frame(`${fb}.querySelector('button').click()`);
+  check(!!(await until(() => top("!!window.held"))), "(another request, held)");
+  await editQ2(`n.text = "NEW QUESTION: explain a stabilizer instead.";`);
+  await until(() => frame(`document.querySelector('[data-ask="q2"]').textContent.includes("NEW QUESTION")`));
+  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: held.id, option: "confuses-transitive-with-two-transitive" })`);
+  await sleep(1500);
+  check(await frame(`!${fb}.textContent.includes("Your words suggest") && !${fb}.textContent.includes("not one of")`), "a decision pending, the question's text changed: its answer dropped");
+  // (and decided again, on these words and this question, for what follows)
+  await top(`mode.decide = "says-every-point-reaches-every-other"`);
+  await frame(`${fb}.querySelector('button').click()`);
+  check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other")`))), "decided again, on the question and words as they are now");
+
   // a page with no questions: no Submit
   await frame(`document.querySelector('[data-sbb="pgnext"]').click()`);
   check(!!(await until(() => frame(`${$("submitbtn")}.hidden`))), "a page with no questions has no Submit");

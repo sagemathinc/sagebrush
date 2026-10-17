@@ -323,6 +323,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   type Sent = { id: string; key: string; state: "sending" | "late" | "received" | "refused"; message?: string };
   let sub: Sent | null = null;
   let answering: Promise<unknown> = Promise.resolve();
+  // (each decision's question as it was asked: its page, its id and askSig then)
+  const decidedSigs = new Map<string, { page: number; id: string; sig: string | null }>();
   // The name of the shown document's output cache (outcache.ts): the host
   // store's, beside the document and not in it, since a document's seed is
   // portable and anyone can copy it (SEC-B88-1).  Another document shown
@@ -403,6 +405,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (over()) return false;
     if (!view && !replacing && doc !== again) return false;
     if (!view) {
+      // (each decision, pending or done, kept only while its page's
+      // question, as defined, has the words it was asked about: any other
+      // document (an edit, the API's, Undo, Redo) that changes them, or
+      // removes it, drops it, so that changing them back doesn't bring it
+      // back either, CORR-B21-1)
+      for (const [key, was] of decidedSigs) if (askSig(d, was.page, was.id) !== was.sig) { decidedSigs.delete(key); board.askDecided.delete(key); }
       if (checking.size) {
         // (another version of the board's code: every check running is for the code before, CORR-729-1)
         const codeKey = (x: BoardDoc | null) => (x ? JSON.stringify([x.mode ?? null, x.seed ?? null, codeOrder(x).map((c) => [c.id, c.mode, c.code])]) : "");
@@ -521,7 +529,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (viewing) return;
     // (what the host decided was of the words before: gone with them)
     // (pending too: its answer, when it comes, is to words no longer there, and dropped, CORR-B21-1)
-    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") board.askDecided.delete(decidedKey(pageIx + 1, id));
+    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") { board.askDecided.delete(decidedKey(pageIx + 1, id)); decidedSigs.delete(decidedKey(pageIx + 1, id)); }
     answering = editor.answer(id, patch).catch(fail);
   };
   board.onAnswer = answer;
@@ -702,6 +710,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (a question's words decided among its options: the host asked, its answer shown with the question; stale (another document, other words) dropped)
   // (a decision's key: its page and its question, whose id is the page's own, CORR-B21-2)
   const decidedKey = (page: number, id: string) => `p${page}/${id}`;
+  // (a question's definition and words as a decision depends on them: its
+  // page, all of it but its answer, note, verdict, attempts and place, and
+  // its words; null if the page has no such question)
+  function askSig(d: BoardDoc, page: number, id: string): string | null {
+    if (page > pageCount(d)) return null;
+    const a = asksOf(d).find((q) => q.page === page && q.ask.id === id)?.ask;
+    if (!a) return null;
+    const { answer: _a, note: _n, result: _r, attempts: _t, wrongAttempts: _w, x: _x, y: _y, w: _ww, h: _h, ...def } = a as DocAsk & { x?: number; y?: number; w?: number; h?: number };
+    return JSON.stringify([pageOf(d, page - 1).id ?? null, def, wordsOf(a)]);
+  }
   // (the words a question has now, as kept: its note, or a text question's answer)
   const wordsOf = (a: DocAsk | undefined) => (a ? (a.note?.trim() ? a.note : a.input === "text" && typeof a.answer === "string" ? a.answer : "") : "");
   const askOn = (page: number, id: string) => (doc ? asksOf(doc).find((q) => q.page === page && q.ask.id === id)?.ask : undefined);
@@ -713,12 +731,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     redraw().catch(fail);
     // (the words being kept first, as the field lost its focus to this press)
     await answering;
-    if (board.askDecided.get(key) !== mark) return;
+    if (board.askDecided.get(key) !== mark || !doc || wordsOf(askOn(page, id)) !== words) { if (board.askDecided.get(key) === mark) board.askDecided.delete(key); redraw().catch(fail); return; }
+    const sig = askSig(doc, page, id);
+    decidedSigs.set(key, { page, id, sig });
     const r = await ch.decide(pa.page, id, words);
     // (another document, or other words since: this answer is not theirs, dropped, CORR-B21-1)
     if (g !== loadGen || destroyed || board.askDecided.get(key) !== mark) return;
     const a = askOn(page, id);
-    if (wordsOf(a) !== words) { board.askDecided.delete(key); redraw().catch(fail); return; }
+    if (!doc || askSig(doc, page, id) !== sig) { board.askDecided.delete(key); decidedSigs.delete(key); redraw().catch(fail); return; }
     // (only a name of this question's own options, on its own page: anything else said so, never shown as the host's words)
     const names = new Set(a?.decide?.map((o) => o.name) ?? []);
     board.askDecided.set(key, "refused" in r ? { refused: r.refused } : r.option === null || names.has(r.option) ? { option: r.option } : { refused: "the answer was not one of this question's ideas" });
@@ -727,12 +747,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   // (set as each document is shown: a host's channel comes with its board)
   function decideWords(id: string, words: string) {
-    decide(id, words).catch((e) => { board.askDecided.delete(decidedKey(pageIx + 1, id)); fail(e); });
+    decide(id, words).catch((e) => { board.askDecided.delete(decidedKey(pageIx + 1, id)); decidedSigs.delete(decidedKey(pageIx + 1, id)); fail(e); });
   }
   // (another document: what was sent and decided was the last one's)
   function forgetAnswered() {
     sub = null;
     board.askDecided.clear();
+    decidedSigs.clear();
   }
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
   // (and, grown, kept clear of the caption, which never covers it)
