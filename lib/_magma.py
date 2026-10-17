@@ -420,7 +420,7 @@ def _define_top(g, name, f):
 class MSeq(list):
     """A Magma sequence: 1-based, printed [ 1, 2, 3 ]."""
 
-    __slots__ = ("universe", "sample", "_inf", "_wit")
+    __slots__ = ("universe", "sample", "_inf", "_wit", "_null")
 
     def __init__(self, it=(), universe=None, sample=None):
         list.__init__(self, it)
@@ -474,7 +474,7 @@ class MRange:
 class MSet:
     """A Magma set (also indexed sets {@ @} and multisets {* *})."""
 
-    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf")
+    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf", "_null")
 
     def __init__(self, it=(), kind="set", universe=None):
         self.items, self.keys, self.kind, self.universe, self.range = [], {}, kind, universe, None
@@ -726,6 +726,8 @@ def _seq(items, universe=None):
     t = MSeq(_as_inferred(items, inf), universe)
     if universe is None:
         t._inf = inf  # (Magma fixes it as the sequence is made)
+        if not items:
+            t._null = True  # (written empty, [] or an empty comprehension: no universe)
     return t
 
 
@@ -747,30 +749,36 @@ def _set_universe(items):
     return items
 
 
-def _set(items, universe=None):
+def _set(items, universe=None, derived=False):
     items = _into_universe(list(items), universe, "set")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "set", universe)
     if universe is None:
         m._inf = inf
+        if not items and not derived:
+            m._null = True  # (written empty, {} or an empty comprehension: no universe)
     return m
 
 
-def _iset(items, universe=None):
+def _iset(items, universe=None, derived=False):
     items = _into_universe(list(items), universe, "indexed")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "indexed", universe)
     if universe is None:
         m._inf = inf
+        if not items and not derived:
+            m._null = True  # (written empty, {} or an empty comprehension: no universe)
     return m
 
 
-def _mset(items, universe=None):
+def _mset(items, universe=None, derived=False):
     items = _into_universe(list(items), universe, "multi")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "multi", universe)
     if universe is None:
         m._inf = inf
+        if not items and not derived:
+            m._null = True  # (written empty, {} or an empty comprehension: no universe)
     return m
 
 
@@ -1834,7 +1842,7 @@ class MMap:
     def __call__(self, x):
         if isinstance(x, MSet) and not _in(x, self.dom):
             # the image of a set of elements
-            return _set([self(y) for y in x.ordered()])
+            return _set([self(y) for y in x.ordered()], derived=True)
         if self.parts is not None:
             return self.parts[1](self.parts[0](x))
         if self.inverse_of is not None:
@@ -1955,7 +1963,7 @@ def Inverse(f):
 def Image(f):
     """The image of a map given by its graph."""
     if isinstance(f, MMap) and f.graph is not None:
-        return _set([b for _, b in f.graph])
+        return _set([b for _, b in f.graph], derived=True)
     raise MagmaError("Image of this map is not supported yet", "'Image'")
 
 
@@ -5482,18 +5490,27 @@ def IsPrimePower(n):
 
 
 def _null_int_collection(name, given):
-    """An empty collection given to Gcd or Lcm: of the integers (a range, a
-    declared universe, or one emptied, its universe fixed) its Gcd is 0 and
-    Lcm 1, as Magma's; with no universe ([] or {}) Magma's "Illegal null
-    set/sequence", never 0 or 1; another universe Bad argument types."""
+    """An empty collection given to Gcd or Lcm, as Magma's (checked against
+    Magma 2.18): of the integers (a range, a declared universe, one emptied)
+    its Gcd is 0 and Lcm 1; written empty with no universe ([], {}, an
+    empty comprehension) "Illegal null set/sequence"; over the rationals or
+    a finite field "GCD (LCM) not defined for field"; of polynomials
+    refused in words.  An empty one made otherwise (Setseq, Sort, join, ...,
+    which carry no universe here) is taken as the integers', as before."""
     s = given[0]
     if isinstance(s, MRange):
         return
     u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
-    if u is _ZZ or (u is None and inf is _ZZ):
+    if u is _ZZ or inf is _ZZ:
         return
-    if u is None and inf is None:
+    if u is None and getattr(s, "_null", False):
         raise _arg_error(name, "Illegal null set/sequence")
+    if u is _QQ or inf is _QQ or isinstance(u, _MFinField):
+        raise _arg_error(name, "%s not defined for field" % name.upper())
+    if isinstance(u, (_sp.PolynomialRing_, _MFFPolyRing)):
+        raise MagmaError("%s of an empty collection of polynomials is not supported yet" % name, "'%s'" % name)
+    if u is None:
+        return
     raise _bad_types(name, given)
 
 
