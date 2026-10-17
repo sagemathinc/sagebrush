@@ -492,6 +492,24 @@ try {
   await ev(`${q$('.board-ask[data-ask="d"] details textarea')}.dispatchEvent(new Event("change")), 1`);
   await sleep(500);
   check(await ev(`${q$(D, ".textContent")}.includes("Something else: your own words stand")`) && (await node("d")).note === "A set of points", "...and stays so as they write them, their words kept");
+  // a choice is of the question as it was when chosen: the question or its
+  // options changed (an edit, the API's here), it is gone, and so after an
+  // undo; never said of options not chosen (astra's CORR-E29-2)
+  await press(D + " .board-ask-clear");
+  await until(`${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 3000);
+  await press(D + " button.board-ask-choice");
+  await until(`${q$(D, ".textContent")}.includes("You chose: The set")`, 3000);
+  await ev(`${B}.edit((d) => { const n = d.nodes.find((x) => x.id === "d"); n.text = "Is the REPLACEMENT statement correct?"; n.decide[0].about = "Replacement answer NEVER selected"; }).then(() => 1)`);
+  const edited = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("REPLACEMENT") && !${q$(D, ".textContent")}.includes("You chose") && [...${q$(D)}.querySelectorAll('.board-ask-choice')].some((c) => c.textContent.includes("Replacement answer NEVER selected"))`, 5000);
+  check(edited, "the question and its option changed after a choice: the choice is gone, the new options offered: " + await ev(`${q$(D, ".textContent")}`));
+  await undoKey();
+  const undone = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("What is an orbit?") && !${q$(D, ".textContent")}.includes("You chose") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000);
+  check(undone, "...and after an undo, the old question back: no choice either, the options offered: " + await ev(`${q$('.board-ask[data-ask="d"]', ".textContent")}`));
+  // (Something else too: of the question as it was)
+  await press(D + " .board-ask-own");
+  await until(`${q$(D, ".textContent")}.includes("Something else: your own words stand")`, 3000);
+  await ev(`${B}.edit((d) => { d.nodes.find((x) => x.id === "d").text = "What is a stabilizer?"; }).then(() => 1)`);
+  check(await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("stabilizer") && !${q$(D, ".textContent")}.includes("Something else: your own words stand") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000), "Something else chosen, then the question changed: gone, the options offered");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

@@ -630,6 +630,8 @@ export class Board {
   }
   /** Ask the host which of a question's `decide` options the reader's words show (mount.ts); none: no host to ask. */
   onDecide: ((id: string, words: string) => void) | null = null;
+  /** The reader chose among a question's options, or asked for them again (mount.ts binds it to the question as it is). */
+  onChoose: ((id: string) => void) | null = null;
   private askFocus: string | null = null; // (a question whose own words get the focus when it is next drawn)
   /** What the host decided each question's words show (mount.ts): `pending` while it is asked; `option` a name of its decide, or null for none; `refused`, why it couldn't. */
   askDecided = new Map<string, { pending?: boolean; option?: string | null; refused?: string; list?: boolean; chosen?: string }>();  // (and the reader's answer to it: `list`, No pressed; `chosen`, the option they confirmed or chose, "" their own words)
@@ -651,6 +653,7 @@ export class Board {
       const cur = this.askDecided.get(key) ?? {};
       if (!this.askDecided.has(key)) this.askDecided.set(key, cur);
       Object.assign(cur, patch);
+      this.onChoose?.(id);
       this.onAskResize?.(id, true, true);
     };
     // (an option with no `about`: its name as words, a sentence's capital first)
@@ -719,7 +722,8 @@ export class Board {
     if (fb?.refused !== undefined) md(`**Couldn't get feedback:** ${esc(fb.refused)}${/[.!?]$/.test(fb.refused.trim()) ? "" : "."} Choose what is closest yourself:`);
     else if (fb?.option === null) md("Your words didn't match any of the ideas this question looks for. Which is closest to what you mean?");
     else if (proposed) md("Then which is closest to what you mean?");
-    else if (!this.onDecide) md("Which is closest to what you mean?");
+    // (asked for again, Choose again, whatever the host said before, or nothing: astra's UI-E29-1)
+    else if (!this.onDecide || fb?.list) md("Which is closest to what you mean?");
     else return box;
     const list = document.createElement("div");
     list.className = "board-ask-choices";
