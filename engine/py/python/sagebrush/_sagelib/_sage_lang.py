@@ -1979,7 +1979,7 @@ def _make_proof():
         True
     """
     import types as _types
-    m = _types.ModuleType("sage.structure.proof.all")
+    m = _types.ModuleType("sage.structure.proof.all", _make_proof.__doc__)
     flags = {k: True for k in ("arithmetic", "elliptic_curve", "linear_algebra", "number_field", "polynomial", "other")}
 
     def flag(name):
