@@ -2831,12 +2831,23 @@ getset(object, "__dict__", (o) => {
           // (a bytes-like argument held as its live view, a bytearray's
           // export counted, until every argument is converted: a later
           // __index__ may write into it, not resize it, as CPython's Py_buffer)
+          // (a memoryview's or array's bytes are a copy, with no export
+          // held: one taken before an argument whose conversion runs Python
+          // code, which could write into or release its exporter, is
+          // refused, never an answer from the copy, astra CORR-3C7-5)
           const out = args.slice();
           const held: any[] = [];
+          let copied = false;
+          // (an int or int subclass is taken by its value, a builtin
+          // buffer by its bytes: only another object's __index__ or
+          // __buffer__ runs Python code)
+          const runsCode = (a: any, k: string) =>
+            k === "i" || k === "t" ? !(typeof a === "number" || typeof a === "bigint" || typeof a === "boolean" || typeOf(a).$mro.includes(T.int)) : k === "c" ? false : !(a instanceof PyBytes) && (typeOf(a) as any).$heap === true;
           try {
             const one = (i: number) => {
               const a = args[i], k = (kinds[i] ?? "*").replace("!", "");
               if (a === undefined || k === "*" || (k === "b?" && a === null)) return;
+              if (copied && runsCode(a, k)) raise(T.NotImplementedError, `${typeName(self)}.${name}() with a memoryview or array argument before one converted by Python code is not supported yet`);
               if (k === "i") out[i] = AC.ssizeArg(a);
               else if (k === "t") out[i] = AC.cIntArg(a);
               else if (k === "c") out[i] = String.fromCharCode(AC.byteCharArg(name, `argument ${i + 1}`, a));
@@ -2845,7 +2856,7 @@ getset(object, "__dict__", (o) => {
                 if (a instanceof PyByteArray) {
                   a.$exports++;
                   held.push(a);
-                }
+                } else if (!(a instanceof PyBytes)) copied = true;
               }
             };
             for (let i = 0; i < args.length; i++) if (!(kinds[i] ?? "").endsWith("!")) one(i);

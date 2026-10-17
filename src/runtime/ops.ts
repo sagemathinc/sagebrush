@@ -646,32 +646,89 @@ function floatPow(x: number, y: number): any {
   if (!Number.isFinite(r) && Number.isFinite(x) && Number.isFinite(y)) raise(T.OverflowError, "(34, 'Numerical result out of range')");
   return mkfloat(r);
 }
+// A type's nb_power slot, as CPython's: int's, float's or complex's own
+// (a subclass that defines neither __pow__ nor __rpow__ inherits it), or
+// a class's slot_nb_power ("py") when its __pow__ or __rpow__ is another
+// (the runtime's hidden layout classes, which carry their base's dunders,
+// skipped)
+function powDunder(t: any, name: string): any {
+  for (const c of t.$mro) if (!c.$hidden && c.$dict.has(name)) return c.$dict.get(name);
+  return undefined;
+}
+function powSlot(t: any): string | undefined {
+  const p = powDunder(t, "__pow__"), r = powDunder(t, "__rpow__");
+  if (p === undefined && r === undefined) return undefined;
+  for (const [name, bt] of [["int", T.int], ["float", T.float], ["complex", T.complex]] as const) {
+    if (p === bt.$dict.get("__pow__") && r === bt.$dict.get("__rpow__")) return name;
+  }
+  return "py";
+}
+// One slot's call with a modulus: float's refuses before anything (its
+// float_pow); complex's once both convert to complex ("complex modulo");
+// int's passes on (not all three are ints here); a class's as CPython
+// 3.14's slot_nb_power: the exponent's __rpow__ first only when its type
+// is a subtype of the base's that overrides it (method_is_overloaded),
+// then the base's __pow__, then the exponent's __rpow__
+function powSlotCall(slot: string, a: any, b: any, m: any): any {
+  // (an int, float or complex subclass's instance counts as its base's)
+  const isA = (x: any, t: any) => typeOf(x).$mro.includes(t);
+  const intLike = (x: any) => isPyInt(x) || isA(x, T.int);
+  const num = (x: any) => intLike(x) || isPyFloat(x) || isA(x, T.float) || isA(x, T.complex);
+  if (slot === "float") raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
+  if (slot === "complex") return num(a) && num(b) ? raise(T.ValueError, "complex modulo") : NotImplemented;
+  if (slot === "int") {
+    const v = (x: any) => (x instanceof PrimBox ? x.$v : x);
+    return intLike(a) && intLike(b) && intLike(m) ? powMod(v(a), v(b), v(m)) : NotImplemented;
+  }
+  const ta = typeOf(a), tb = typeOf(b);
+  let other = ta !== tb && powSlot(tb) === "py";
+  // (an inherited int, float or complex method is that type's own slot:
+  // float's refuses, as its wrapper's float_pow)
+  const call = (o: any, name: string, x: any) => {
+    const f = special(o, name);
+    if (f === undefined) return NotImplemented;
+    for (const [bs, bt] of [["int", T.int], ["float", T.float], ["complex", T.complex]] as const) if (powDunder(typeOf(o), name) === bt.$dict.get(name)) return powSlotCall(bs, a, b, m);
+    return settle(f, f(o, x, m));
+  };
+  if (powSlot(ta) === "py") {
+    if (other && tb.$mro.includes(ta) && powDunder(tb, "__rpow__") !== powDunder(ta, "__rpow__")) {
+      const r = call(b, "__rpow__", a);
+      if (r !== NotImplemented) return r;
+      other = false;
+    }
+    const r = call(a, "__pow__", b);
+    if (r !== NotImplemented || ta === tb) return r;
+  }
+  return other ? call(b, "__rpow__", a) : NotImplemented;
+}
 function powMod(a: any, b: any, m: any): any {
   if (!(isPyInt(a) && isPyInt(b) && isPyInt(m))) {
-    // CPython 3.14's ternary_op: the base's __pow__(exp, mod), the
-    // exponent's __rpow__(base, mod) (first when its type is a subtype of
-    // the base's), each NotImplemented passing on; int's and float's own
-    // (an int NotImplemented unless all are ints, a float CPython's
-    // TypeError once base and exponent are numbers); then the modulus's
-    // type, which a float's refuses the same way
+    // CPython 3.14's ternary_op over each type's nb_power slot (powSlot):
+    // the base's, then the exponent's when it differs (first when the
+    // exponent's type is a subtype of the base's), then the modulus's when
+    // it differs from both, each NotImplemented passing on
     const ta = typeOf(a), tb = typeOf(b), tm = typeOf(m);
-    const pa = special(a, "__pow__");
-    let rb = tb !== ta ? special(b, "__rpow__") : undefined;
-    if (rb !== undefined && tb.$mro.includes(ta)) {
-      const r = settle(rb, rb(b, a, m));
-      if (r !== NotImplemented) return r;
-      rb = undefined;
-    }
-    if (pa !== undefined) {
-      const r = settle(pa, pa(a, b, m));
-      if (r !== NotImplemented) return r;
-    }
-    if (rb !== undefined) {
-      const r = settle(rb, rb(b, a, m));
+    const sv = powSlot(ta);
+    let sw = tb !== ta ? powSlot(tb) : undefined;
+    if (sw === sv) sw = undefined;
+    if (sv !== undefined) {
+      if (sw !== undefined && tb.$mro.includes(ta)) {
+        const r = powSlotCall(sw, a, b, m);
+        if (r !== NotImplemented) return r;
+        sw = undefined;
+      }
+      const r = powSlotCall(sv, a, b, m);
       if (r !== NotImplemented) return r;
     }
-    const num = (x: any) => isPyInt(x) || isPyFloat(x);
-    if (tm !== ta && tm !== tb && isPyFloat(m) && num(a) && num(b)) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
+    if (sw !== undefined) {
+      const r = powSlotCall(sw, a, b, m);
+      if (r !== NotImplemented) return r;
+    }
+    const sz = powSlot(tm);
+    if (sz !== undefined && sz !== sv && sz !== sw) {
+      const r = powSlotCall(sz, a, b, m);
+      if (r !== NotImplemented) return r;
+    }
     raise(T.TypeError, `unsupported operand type(s) for ** or pow(): '${typeName(a)}', '${typeName(b)}', '${typeName(m)}'`);
   }
   let base = big(a), e = big(b), n = big(m);
