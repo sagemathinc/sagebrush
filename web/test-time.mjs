@@ -26,12 +26,16 @@ const CELL = [
   "print(time.strftime('%Z %z', time.localtime(1700000000)), time.strftime('%Z', (2020, 1, 1, 0, 0, 0, 0, 1, 1)))",
   "print(time.mktime((2020, 11, 1, 1, 30, 0, 0, 1, -1)), time.mktime((2020, 3, 8, 2, 30, 0, 0, 1, 1)))",
   "print(datetime.datetime.fromtimestamp(1604210400), datetime.datetime(2020, 7, 1, 12).astimezone())",
+  // (zoneinfo over the pinned tzdata as the tzdata package: the index's zones,
+  // each zone's file fetched as it is first used)
+  "import zoneinfo",
+  "print(len(zoneinfo.available_timezones()), [(z.utcoffset(datetime.datetime(2026, 7, 1)), z.tzname(datetime.datetime(2026, 1, 1))) for z in map(zoneinfo.ZoneInfo, ['Europe/London', 'Australia/Lord_Howe', 'America/Sao_Paulo'])])",
 ].join("\n");
 const SHOWN = CELL.split("\n").filter((l) => l.startsWith("print")).length;
 
 async function inZone(tz) {
   // (CPython over the same pinned files: what the page must print)
-  const want = execFileSync("python3", ["-c", CELL.replace("import _time", "import time as _time")], { encoding: "utf8", env: { ...process.env, TZ: tz, TZDIR: join(here, "..", "tzdata", "zoneinfo") } }).trim();
+  const want = execFileSync("python3", ["-c", CELL.replace("import _time", "import time as _time")], { encoding: "utf8", env: { ...process.env, TZ: tz, TZDIR: join(here, "..", "tzdata", "zoneinfo"), PYTHONTZPATH: join(here, "..", "tzdata", "zoneinfo") } }).trim();
   let port = Number(process.env.CDP_PORT) || 0;
   const profile = mkdtempSync(join(tmpdir(), "sb-time-"));
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", env: { ...process.env, TZ: tz } });

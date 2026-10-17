@@ -520,14 +520,25 @@ newBuiltinModule("_time", (m) => {
     const str = (v: unknown) => (typeof v === "string" ? v : null);
     return tuple([str(env?.TZ), str(env?.TZDIR), node, typeof z === "string" && z !== "" ? z : null]);
   });
+  // (the most a zone file read may ask for: _tzrules.MAX_FILE + 1, the most
+  // any caller needs. _read and _tzfile are importable, so a limit is an
+  // int in 0..ZONE_READ_MAX, checked before anything is opened or allocated:
+  // daybreak2's HARD-ZI-1)
+  const ZONE_READ_MAX = (1 << 20) + 1;
+  const zoneReadLimit = (fname: string, limit: any): number => {
+    if (!O.isPyInt(limit) || typeof limit === "boolean") raise(T.TypeError, `_time.${fname}: the limit must be an int, not ${typeName(limit)}`);
+    const n = typeof limit === "bigint" ? limit : BigInt(limit);
+    if (n < 0n || n > BigInt(ZONE_READ_MAX)) raise(T.ValueError, `_time.${fname}: the limit must be in 0..${ZONE_READ_MAX}, not ${n}`);
+    return Number(n);
+  };
   // (a zone file's bytes, at most limit of them, as glibc reads one: None
   // where it cannot be read (missing, not permitted, a directory: glibc then
   // reads the TZ value as a rule), PermissionError where a sandbox refuses
   // the read outright, OSError for anything else)
   fn(m, "_read", (path: any, limit: any) => {
     const fs = require("fs");
+    const max = zoneReadLimit("_read", limit);
     const p = at(String(path));
-    const max = Number(limit);
     let fd: number | undefined;
     try {
       // (never blocking: a FIFO or another special file named by TZ or TZDIR
@@ -554,6 +565,82 @@ newBuiltinModule("_time", (m) => {
     } finally {
       if (fd !== undefined) fs.closeSync(fd);
     }
+  });
+  // (zoneinfo's io.open(path, "rb") of a zone file on TZPATH, as bytes: at
+  // most limit of them, never blocking (a FIFO), a symbolic link followed;
+  // open()'s errors, CPython's words: FileNotFoundError, PermissionError,
+  // IsADirectoryError for a directory, ...; NotImplementedError for a file
+  // that is not a regular one, which CPython would block on or read without
+  // end)
+  fn(m, "_tzfile", (path: any, limit: any) => {
+    const fs = require("fs");
+    const max = zoneReadLimit("_tzfile", limit);
+    const name = String(path);
+    // (errno, strerror and the OSError subclass CPython's OSError makes of
+    // that errno, named here: Sagebrush's OSError(errno, ...) stays OSError)
+    const STRERROR: Record<string, [number, string, any]> = {
+      ENOENT: [2, "No such file or directory", T.FileNotFoundError],
+      EACCES: [13, "Permission denied", T.PermissionError],
+      EPERM: [1, "Operation not permitted", T.PermissionError],
+      EISDIR: [21, "Is a directory", T.IsADirectoryError],
+      ENOTDIR: [20, "Not a directory", T.NotADirectoryError ?? T.OSError],
+      ELOOP: [40, "Too many levels of symbolic links", T.OSError],
+      ENAMETOOLONG: [36, "File name too long", T.OSError],
+      EMFILE: [24, "Too many open files", T.OSError],
+      EIO: [5, "Input/output error", T.OSError],
+    };
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(at(name), fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const st = fs.fstatSync(fd);
+      if (st.isDirectory()) throw markRaised(callObj(T.IsADirectoryError, [21, "Is a directory", path]));
+      if (!st.isFile()) throw markRaised(callObj(T.NotImplementedError, [`zoneinfo: ${JSON.stringify(name)} is not a regular file, which Sagebrush does not read as a zone file`]));
+      const buf = new Uint8Array(max);
+      let n = 0;
+      while (n < max) {
+        const k = fs.readSync(fd, buf, n, max - n, null);
+        if (k === 0) break;
+        n += k;
+      }
+      return new PyBytes(buf.slice(0, n));
+    } catch (e: any) {
+      if (e?.$cls !== undefined) throw e;
+      if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
+      const known = STRERROR[e?.code];
+      // (OSError(errno, strerror, filename) is the subclass the errno names)
+      if (known) throw markRaised(callObj(known[2], [known[0], known[1], path]));
+      throw markRaised(callObj(T.OSError, [e?.errno ? -e.errno : 0, String(e?.message ?? e), path]));
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+    }
+  });
+  // (the pinned zone data's zone names, as tzdata's zones file lists them:
+  // web/lib-lazy.ts's __SAGEBRUSH_TZDATA_ZONES__ in a browser, the files under
+  // SAGEBRUSH_TIME_PINNED_DIR in the tests of that way under Node)
+  fn(m, "_pinned_zones", () => {
+    const hook = (globalThis as any).__SAGEBRUSH_TZDATA_ZONES__;
+    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    try {
+      if (typeof hook === "function") return tuple((hook() as string[]).map((z) => z));
+      if (typeof dir === "string") {
+        const fs = require("fs");
+        const out: string[] = [];
+        const walk = (rel: string) => {
+          for (const f of fs.readdirSync(rel ? dir + "/" + rel : dir).sort()) {
+            const r = rel ? rel + "/" + f : f;
+            // (a symbolic link is not followed: no cycle; a test hook's)
+            const st = fs.lstatSync(dir + "/" + r);
+            if (st.isDirectory()) walk(r);
+            else if (st.isFile()) out.push(r);
+          }
+        };
+        walk("");
+        return tuple(out);
+      }
+    } catch (e: any) {
+      throw markRaised(callObj(T.OSError, [0, String(e?.message ?? e)]));
+    }
+    throw markRaised(callObj(T.OSError, [0, "there is no pinned zone data here"]));
   });
   // (in a browser, which has no zone files: the pinned zone data's file for
   // a zone (web/lib-lazy.ts's __SAGEBRUSH_TZDATA__, each file checked against
