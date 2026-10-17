@@ -257,8 +257,32 @@ export function withExit(m: any): (t: any, v: any, tb: any) => any {
 
 // A bare `raise` outside any except clause of its own function: the
 // exception being handled, as in CPython, if a caller is handling one.
+// A bare `raise`. The exception's traceback, from the frame that caught it,
+// goes on outward from the frame re-raising it, as CPython's: its frames now
+// are the stack's at the raise, but for the frame re-raising it, which
+// CPython doesn't add (in a helper the handler calls too), then those it had
+// from where it was caught in. (A generator resumed elsewhere since the
+// catch has new callers.) Where the frames it had can't be told, it keeps
+// its stack, as before.
 export function reraise(): any {
-  return Obj.currentExc() ?? Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
+  const e = Obj.currentExc();
+  if (e === null) return Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
+  if (e.$tb !== undefined && e.$caught !== undefined && e.$caught.tb === e.$tb) {
+    let inner: Frame[] | null = null;
+    try {
+      inner = caughtFrames(e);
+    } catch {}
+    if (inner !== null) {
+      const tb: any = {};
+      Error.captureStackTrace(tb, reraise);
+      const sites = sitesOf(tb);
+      const now = pyFrames(sites);
+      const frames = now.slice(0, -1).concat(inner);
+      Object.defineProperty(e, "$tb", { value: tb, writable: true, enumerable: false, configurable: true });
+      Object.defineProperty(e, "$reraised", { value: { tb, frames, cut: sites.length >= Error.stackTraceLimit }, writable: true, enumerable: false, configurable: true });
+    }
+  }
+  return e;
 }
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
@@ -662,12 +686,21 @@ interface Frame {
   line: number;
   name: string;
   text: string;
+  fn: string; // which function: its compiled script and position there
 }
 
+// The frames an exception was raised through, outermost first, and whether
+// the JS stack limit may have cut outer ones off; after a bare re-raise, the
+// frames reraise recorded
+function raisedFrames(e: any): { frames: Frame[]; cut: boolean } {
+  if (e.$tb === undefined) return { frames: [], cut: false };
+  const r = e.$reraised;
+  if (r !== undefined && r.tb === e.$tb) return r;
+  const sites = sitesOf(e.$tb);
+  return { frames: pyFrames(sites), cut: sites.length >= Error.stackTraceLimit };
+}
 function framesOf(e: any): Frame[] {
-  const holder = e.$tb;
-  if (holder === undefined) return [];
-  return pyFrames(sitesOf(holder));
+  return raisedFrames(e).frames;
 }
 
 // a captured stack's call sites, innermost first
@@ -704,29 +737,36 @@ function pyFrames(sites: any[]): Frame[] {
     let name = String(cs.getFunctionName() ?? "");
     name = name.endsWith("$$") ? name.slice(0, -2) : name === "module$$" || name === "" ? "<module>" : name;
     if (name === "module") name = "<module>";
-    frames.push({ file: info.filename, line: pyLine, name, text: (info.lines[pyLine - 1] ?? "").trim() });
+    const at = cs.getEnclosingLineNumber?.();
+    const fn = at === undefined ? `${info.filename}:${name}` : `${info.filename}:${at}:${cs.getEnclosingColumnNumber?.()}`;
+    frames.push({ file: info.filename, line: pyLine, name, text: (info.lines[pyLine - 1] ?? "").trim(), fn });
   }
   return frames.reverse();
 }
 
 // The frames of a handled exception's traceback, as CPython's: from the
-// frame that caught it (last, excEnter records where) to where it was
-// raised. The stack at the catch is the raise's own outer part, so the
-// catching frame is the raise's frame at that depth. Past the JS stack
-// limit a captured stack has lost its outer frames, and that depth is
-// unknown; caught before the traceback module was imported, where is
-// unknown: both refused, not guessed. (Every exception format_exc shows,
-// the chain's too, was caught or passed through a finally; one never
-// raised has no frames.)
+// frame that caught it (excEnter records which function that was) to where
+// it was raised, however the stack has changed since. Refused, not guessed,
+// where that frame can't be told: the function isn't among the raise's
+// frames, or is there more than once (recursion through the handler), or
+// the JS stack limit may have cut the raise's outer frames off. (Every
+// exception format_exc shows, the chain's too, was caught or passed through
+// a finally; one never raised has no frames.)
 function caughtFrames(e: any): Frame[] {
-  const c = e.$caught;
   if (e.$tb === undefined) return [];
-  if (c === undefined || c.tb !== e.$tb) raise(T.NotImplementedError, "this exception was caught before the traceback module was imported: where is unknown");
-  const raised = sitesOf(e.$tb), at = sitesOf(c.at);
-  if (raised.length >= Error.stackTraceLimit || at.length >= Error.stackTraceLimit)
-    raise(T.NotImplementedError, `this traceback is deeper than the ${Error.stackTraceLimit} JavaScript frames kept: which frame caught the exception is unknown`);
-  const frames = pyFrames(raised);
-  return frames.slice(Math.max(0, pyFrames(at).length - 1));
+  const { frames, cut } = raisedFrames(e);
+  const c = e.$caught;
+  const unknown = (why: string) => raise(T.NotImplementedError, `which frame caught this exception is unknown: ${why}`);
+  if (c === undefined || c.tb !== e.$tb) unknown("it was not caught since it was raised");
+  const near = pyFrames(sitesOf(c.at));
+  const catcher = near[near.length - 1];
+  if (catcher === undefined) unknown("it was not caught in Python code");
+  if (cut) unknown(`its traceback is deeper than the ${Error.stackTraceLimit} JavaScript frames kept`);
+  const at: number[] = [];
+  frames.forEach((f, i) => f.fn === catcher.fn && at.push(i));
+  if (at.length === 0) unknown(`${catcher.name} caught it, but is not among the frames it was raised through`);
+  if (at.length > 1) unknown(`${catcher.name}, which caught it, is ${at.length} of the frames it was raised through (recursion through the handler)`);
+  return frames.slice(at[0]);
 }
 
 function formatOne(e: any, caught = false): string {
@@ -896,7 +936,6 @@ export const R: any = {
 
 // A small traceback module over the runtime's own traceback formatting.
 M.newBuiltinModule("traceback", (m) => {
-  Obj.catches.recorded = true;
   const exc = (a: any, b: any) => (b !== undefined && b !== null ? b : a);
   const lines = (s: string) => s.split(/(?<=\n)/).filter((l) => l.length);
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));

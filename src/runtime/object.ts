@@ -1047,16 +1047,23 @@ ${ways}
 export const handledExceptions: any[] = [];
 // Where each exception is caught, with the raise it belongs to: its
 // traceback runs from that frame to where it was raised, as CPython's tb
-// chain, however the stack changes after (CORR-6AF-2). Capturing the stack
-// costs about as much as the raise's own capture, so it is done only once
-// the traceback module, which reads it, is imported.
-export const catches = { recorded: false };
+// chain, however the stack changes after (CORR-6AF-2). Only the catching
+// frame is needed, so only the top JS frames are captured (a whole stack
+// costs as much as the raise's own capture); a later catch replaces the
+// record, one per exception. Runtime-internal catches (StopIteration ending
+// a loop, getattr's default...) don't come here: only compiled except,
+// finally and with do.
+const CATCH_FRAMES = 1;
 export function excEnter(e: any): void {
   handledExceptions.push(e);
-  if (catches.recorded && e !== null && typeof e === "object" && e.$tb !== undefined) {
+  if (e !== null && typeof e === "object" && e.$tb !== undefined) {
     const at: any = {};
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = CATCH_FRAMES;
     Error.captureStackTrace(at, excEnter);
-    Object.defineProperty(e, "$caught", { value: { tb: e.$tb, at }, writable: true, enumerable: false, configurable: true });
+    Error.stackTraceLimit = limit;
+    if (e.$caught === undefined) Object.defineProperty(e, "$caught", { value: { tb: e.$tb, at }, writable: true, enumerable: false, configurable: true });
+    else e.$caught = { tb: e.$tb, at };
   }
 }
 // (by identity: a generator resumed outside the frame that ran it may not
