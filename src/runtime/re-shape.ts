@@ -387,12 +387,25 @@ function copiedCaps(n: Node, inCopy: boolean, out: Set<number>): void {
 // The groups that have matched wherever a reference is (A23): the groups
 // before, a layer for each part that may not match (its own groups added
 // to it alone), only for the parts that hold a reference
+// (one set, with what each layer added undone when it ends: a layer is
+// a part of the recursion, so lookups are O(1) however deep, daybreak2's
+// HOLD on 61a5b305)
 class Defined {
-  own = new Set<number>();
-  constructor(public up: Defined | null) {}
+  private set = new Set<number>();
+  private log: number[] = [];
   has(g: number): boolean {
-    for (let d: Defined | null = this; d !== null; d = d.up) if (d.own.has(g)) return true;
-    return false;
+    return this.set.has(g);
+  }
+  add(g: number): void {
+    if (!this.set.has(g)) {
+      this.set.add(g);
+      this.log.push(g);
+    }
+  }
+  layer(f: () => void): void {
+    const mark = this.log.length;
+    f();
+    while (this.log.length > mark) this.set.delete(this.log.pop()!);
   }
 }
 function checkRefs(n: Node, D: Defined, check: (r: Node & { t: "ref" }, D: Defined) => void): void {
@@ -407,19 +420,19 @@ function checkRefs(n: Node, D: Defined, check: (r: Node & { t: "ref" }, D: Defin
       return;
     case "alt":
       // (a branch's groups are its own: none is set after every branch)
-      for (const a of n.alts) if (facts(a).hasRef) checkRefs(a, new Defined(D), check);
+      for (const a of n.alts) if (facts(a).hasRef) D.layer(() => checkRefs(a, D, check));
       return;
     case "group":
       if (n.kind === "nla" || n.kind === "nlb") {
-        if (facts(n.body).hasRef) checkRefs(n.body, new Defined(D), check);
+        if (facts(n.body).hasRef) D.layer(() => checkRefs(n.body, D, check));
         return;
       }
       checkRefs(n.body, D, check);
-      if (n.kind === "cap") D.own.add(n.cap);
+      if (n.kind === "cap") D.add(n.cap);
       return;
     case "quant":
       if (n.min > 0 && n.max > 0) checkRefs(n.body, D, check);
-      else if (facts(n.body).hasRef) checkRefs(n.body, new Defined(D), check);
+      else if (facts(n.body).hasRef) D.layer(() => checkRefs(n.body, D, check));
       return;
   }
 }
@@ -473,7 +486,7 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
   visit(root, false);
   // (A23: a reference only to a group that has matched wherever it is)
   copiedCaps(root, false, copied);
-  checkRefs(root, new Defined(null), (r, D) => {
+  checkRefs(root, new Defined(), (r, D) => {
     if (copied.has(r.cap)) refuse(`a reference to group ${r.cap}, which is inside a repeated part of the pattern that can match the empty string, is not supported yet`);
     if (!D.has(r.cap)) refuse(`a reference to group ${r.cap}, which may not have matched at that point, is not supported yet (CPython's match fails there, JavaScript's matches the empty string)`);
   });
@@ -497,9 +510,13 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
     }
   };
   back = look(root);
-  const emitted = (caretFail: boolean) => emit(src, root, names, caretFail);
+  // (the source written within a bound, checked as it is written: a nest
+  // of rewritten repeats doubles at each level, daybreak2's HOLD on
+  // 61a5b305)
+  const budget = 16 * src.length + 4096;
+  const tooBig = () => refuse("the pattern nests too many repeats of parts that can match the empty string");
+  const emitted = (caretFail: boolean) => emit(src, root, names, caretFail, budget, tooBig);
   const main = emitted(false);
-  if (main.src.length > 16 * src.length + 4096) refuse("the pattern nests too many repeats of parts that can match the empty string");
   return {
     src: main.src,
     groups,
@@ -519,13 +536,24 @@ export function shape(src: string, refuse: (msg: string) => never, patternError:
 // (?:...) (JS's u mode repeats no assertion), and with caretFail ^ as
 // (?!) (for a match on a slice of the subject, where ^ is never at its
 // start); each JS group's Python group, and the order of the ")"s
-function emit(src: string, root: Node, names: string[], caretFail: boolean): { src: string; jsToPy: number[]; closeSeq: number[] } {
+function emit(src: string, root: Node, names: string[], caretFail: boolean, budget: number, tooBig: () => never): { src: string; jsToPy: number[]; closeSeq: number[] } {
   const jsToPy: number[] = [0];
   const closeSeq: number[] = [0];
   const pyToJs: number[] = [];
   let closes = 0;
-  // (into one array of pieces, joined once: no string per node)
-  const out: string[] = [];
+  // (into one array of pieces, joined once: no string per node; their
+  // length counted as they come, refused past the budget)
+  const pieces: string[] = [];
+  let size = 0;
+  const out = {
+    push(...xs: string[]) {
+      for (const x of xs) {
+        size += x.length;
+        if (size > budget) tooBig();
+        pieces.push(x);
+      }
+    },
+  };
   const go = (n: Node, copy: boolean): void => {
     switch (n.t) {
       case "atom":
@@ -583,7 +611,7 @@ function emit(src: string, root: Node, names: string[], caretFail: boolean): { s
   };
   void names;
   go(root, false);
-  return { src: out.join(""), jsToPy, closeSeq };
+  return { src: pieces.join(""), jsToPy, closeSeq };
 }
 
 // A JS match as Python's groups: each Python group the last of its JS

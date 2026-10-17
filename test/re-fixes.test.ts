@@ -42,8 +42,16 @@ test("re's analysis of a pattern is linear in it, whatever its repeat counts (HA
     "for p in ['(?:a?){4294967294}', '(?:a?){4294967294,}', '(?:a?b?){1000000000,}', '(?:){0,1}' * 20000, '(?:' * 200 + '(a)' + ')+' * 200 + r'\\1', '(?:(x)|y)?' * 3000, '|'.join('w%d' % i for i in range(100000)), ''.join('(a)' for i in range(20000)) + r'\\20000']:",
     "    print(re.compile(p).groups)",
     "print(time.perf_counter() - t < 20)",
+    // (a nest of rewritten repeats, each doubling: refused as it is
+    // written, not after; references deep in optional parts, O(1) each)
+    "p = '(a?)'",
+    "for _ in range(60): p = '(?:' + p + '){1,2}'",
+    "try: re.compile(p)",
+    "except NotImplementedError as e: print('NotImplementedError', e)",
+    "print(re.compile('(a)' + '(?:' * 200 + r'\\1' * 20000 + ')?' * 200).groups)",
+    "print(time.perf_counter() - t < 20)",
   ].join("\n");
   const r = spawnSync(process.execPath, ["--max-old-space-size=48", __dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "0\n0\n0\n0\n1\n3000\n0\n20000\nTrue\n");
+  assert.equal(r.stdout, "0\n0\n0\n0\n1\n3000\n0\n20000\nTrue\nNotImplementedError the pattern nests too many repeats of parts that can match the empty string\n1\nTrue\n");
 });
