@@ -55,3 +55,23 @@ for bad in ['__import__("os")', 'x.__class__', '2^(10^10)', '(' * 200 + 'x' + ')
     try: parse_expression(bad); print("not refused", bad[:20])
     except ValueError as e: print("ValueError:", str(e)[:70])
 print(parse_expression('x^(10^10)'))
+# astra2's CORR-230: exact through complex values; a tiny negative tolerance
+# refused; reasons for tiny and huge differences
+show(close(9007199254740993, complex(9007199254740992), abs=0))
+show(close(Fraction(1, 10**400), 0j, abs=0))
+show(close(1 + 2j, Fraction(1) + 2j, abs=0)); show(close(3 + 4j, 0, abs=5)); show(close(3 + 4j, 0, abs=Fraction(49, 10)))
+try: close(2, 2, abs=Fraction(-1, 10**400))
+except ValueError as e: print("ValueError:", e)
+try: close(2, 2, rel=complex(1, 0))
+except ValueError as e: print("ValueError:", e)
+show(close(Fraction(1, 10**400), 0, abs=0)); show(close(10**400, 0, abs=0)); show(close(10**400, 10**400 + 1, rel=10**-401))
+# inexact comparisons that floats can't resolve: undecided, not right
+show(close(2^60 + 1, 2^60 + RR(0), abs=0)); show(close(pi, 3.141592653589793, abs=0)); show(close(10^400, pi, abs=1))
+# astra's: never right from a lossy difference or from infinity
+show(close(pi + QQ(1)/10^20, pi, abs=QQ(1)/10^30)); show(close(RealField(200)(1) + 2^-100, 1, abs=1e-40))
+show(close(complex(-1e308, 1e308), complex(1e308, -1e308), rel=1.5))
+# scientific literals read alike by both parsers; an ambiguous one refused
+print(parse_expression('1e-3'), parse_expression('2e3'), parse_expression('1.2e+3'), parse_expression('2e'), parse_number('1.2e+3'))
+for bad in ['2e3x', '1e5000']:
+    try: parse_expression(bad); print("not refused", bad)
+    except ValueError as e: print("ValueError:", str(e)[:80])
