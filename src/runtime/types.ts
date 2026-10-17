@@ -1539,10 +1539,13 @@ method(S, "islower", (s: string) => /\p{Ll}/u.test(s) && !/\p{Lu}/u.test(s));
 method(S, "isidentifier", (s: string) => /^[\p{L}\p{Nl}_][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}]*$/u.test(s));
 method(S, "isprintable", (s: string) => [...s].every((c) => c === " " || !/[\p{C}\p{Z}]/u.test(c)));
 method(S, "istitle", (s: string) => /\p{L}/u.test(s) && s === S.$dict.get("title")(s));
+// (the result's length in UTF-16 units checked first: s's, and the padding's
+// code points times the fill's units, an astral fill two each)
 function padTo(s: string, w: any, fill: string, where: string): string {
-  if (w <= SP.cpLen(s)) return s;
-  AC.allocStr(w);
-  const n = Number(w) - SP.cpLen(s);
+  const cp = SP.cpLen(s);
+  if (w <= cp) return s;
+  AC.allocStr(s.length + (Number(w) - cp) * fill.length);
+  const n = Number(w) - cp;
   // (the fill meets s: no lone surrogates joined, SP.glue)
   if (where === "l") return SP.glue(s, fill.repeat(n));
   if (where === "r") return SP.glue(fill.repeat(n), s);
@@ -1557,7 +1560,7 @@ method(S, "rjust", (s: string, w: any, fill: any = " ") => padTo(s, AC.ssizeArg(
 method(S, "zfill", (s: string, w: any) => {
   const sign = s[0] === "-" || s[0] === "+" ? s[0] : "";
   const wv = AC.ssizeArg(w);
-  if (wv > SP.cpLen(s)) AC.allocStr(wv);
+  if (wv > SP.cpLen(s)) AC.allocStr(s.length + (Number(wv) - SP.cpLen(s)));
   const n = Number(wv) - SP.cpLen(s);
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
@@ -1710,11 +1713,27 @@ method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict")
 method(S, "expandtabs", (s: string, ts: any = 8) => {
   let out = "", col = 0;
   const n = AC.cIntArg(ts);
+  // (the result's whole length counted first, without building it: a tab's
+  // spaces and every other character's units, suffix too)
+  {
+    let units = 0, c0 = 0;
+    for (const c of s) {
+      if (c === "\t") {
+        const k = n > 0 ? n - (c0 % n) : 0;
+        units += k;
+        c0 += k;
+        if (units > AC.MAX_STR) AC.allocStr(units);
+      } else {
+        units += c.length;
+        c0 = c === "\n" || c === "\r" ? 0 : c0 + 1;
+      }
+    }
+    AC.allocStr(units);
+  }
   const seams: number[] = []; // (a tab expanded to nothing joins its neighbours: SP.checkSeams)
   for (const c of s) {
     if (c === "\t") {
       const k = n > 0 ? n - (col % n) : 0;
-      AC.allocStr(out.length + k);
       if (k === 0) seams.push(out.length);
       out += " ".repeat(k);
       col += k;
