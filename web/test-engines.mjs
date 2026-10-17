@@ -79,7 +79,9 @@ for (const f of chunks) await bucket.put(f, readFileSync(join(dir, f)));
 for (const f of chunks) {
   const r = await get("/" + f);
   ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(readFileSync(join(dir, f))), `/${f}: the chunk, byte for byte`);
-  ok(r.headers.get("content-type") === "application/json" && /immutable/.test(r.headers.get("cache-control")) && r.headers.get("access-control-allow-origin") === "*" && r.headers.get("x-content-type-options") === "nosniff", `/${f}: JSON, immutable, CORS *, nosniff`);
+  // (a zone file is bytes; every other chunk is JSON)
+  const [type, kind] = f.endsWith(".tzif") ? ["application/octet-stream", "bytes"] : ["application/json", "JSON"];
+  ok(r.headers.get("content-type") === type && /immutable/.test(r.headers.get("cache-control")) && r.headers.get("access-control-allow-origin") === "*" && r.headers.get("x-content-type-options") === "nosniff", `/${f}: ${kind}, immutable, CORS *, nosniff`);
 }
 // (bytes that are not the ones its name says: not served; nor a name of
 // another shape, nor a chunk R2 doesn't have)
@@ -89,6 +91,13 @@ ok((await get("/" + forged)).status === 404, "a chunk whose bytes don't have its
 await bucket.put("lib/Bad_Name.src.0000000000000000.json", "{}");
 ok((await get("/lib/Bad_Name.src.0000000000000000.json")).status === 418 && (await get("/lib/x.src.123.json")).status === 418 && (await get("/lib/../engine/latest.json")).status === 418, "names of another shape are not the route's");
 ok((await get("/lib/nothing.src.0123456789abcdef.json")).status === 404, "a chunk R2 doesn't have: 404");
+// (the pinned zone data's files, web/tzdata-chunks.mts: by their whole SHA-256)
+const zones = chunks.filter((f) => f.startsWith("lib/tzdata/"));
+ok(zones.some((f) => /^lib\/tzdata\/index-[0-9a-f]{64}\.json$/.test(f)) && zones.filter((f) => f.endsWith(".tzif")).length > 300, `(the engine has the zone data: ${zones.length} files)`);
+const zone = zones.find((f) => f.endsWith(".tzif"));
+await bucket.put("lib/tzdata/" + "0".repeat(64) + ".tzif", readFileSync(join(dir, zone)));
+ok((await get("/lib/tzdata/" + "0".repeat(64) + ".tzif")).status === 404, "a zone file whose bytes don't have its name's hash: 404");
+ok((await get("/" + zone)).headers.get("content-type") === "application/octet-stream", "a zone file is served as bytes");
 ok((await get("/" + one, { method: "POST" })).status === 405, "a chunk: only GET and HEAD");
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);

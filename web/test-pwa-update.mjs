@@ -15,7 +15,7 @@
 //
 //   bun web/build.ts && node web/test-pwa-update.mjs      (CHROME=... for the browser)
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -36,7 +36,8 @@ export default { async fetch(req, env, ctx) { return (await handleLibChunk(req, 
 const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
 const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "site", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
 const bucket = await mf.getR2Bucket("ENGINES");
-const chunks = readdirSync(join(here, "dist", "lib"));
+// (with the pinned zone data's files, in lib/tzdata/)
+const chunks = readdirSync(join(here, "dist", "lib"), { recursive: true }).filter((f) => statSync(join(here, "dist", "lib", f)).isFile());
 for (const f of chunks) if (!f.startsWith("matlab")) await bucket.put("lib/" + f, readFileSync(join(here, "dist", "lib", f)));
 
 const upstream = await freePort();

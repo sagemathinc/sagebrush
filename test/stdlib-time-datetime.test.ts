@@ -44,47 +44,40 @@ for (const tz of ["America/New_York", "Europe/Dublin", "Australia/Lord_Howe", "A
   "EST5EDT,M3.2.0,M11.1.0", "IST-1GMT0,M10.5.0,M3.5.0/1", "<+1030>-10:30<+11>-11,M10.1.0,M4.1.0", "CEX0<-0330>-2,48/+25,M1.1.2/-1", "MCN-5JRKA,M11.3.1,M11.3.2"])
   test(`time_zone_sweep_cases.py: CPython's output under TZ=${tz}`, () => same("time_zone_sweep_cases.py", tz));
 
-// (in a browser, which has no zone files (until the pinned zone data comes):
-// S2's way, unchanged, run under Node as a browser. UTC: all as CPython's but
-// for tzset and strptime, which refuse here)
-const NO_FILES = { SAGEBRUSH_TIME_NO_ZONE_FILES: "1" };
-test("as a browser, time_jsdate_cases.py under TZ=UTC: CPython's output, but tzset and strptime refuse", () => {
-  const want = cpython("time_jsdate_cases.py", "UTC"), got = sagebrush("time_jsdate_cases.py", "UTC", NO_FILES);
-  const refused = /^(tzset|strptime|datetime strptime) /;
-  assert.deepEqual(got.filter((l) => !refused.test(l)), want.filter((l) => !refused.test(l)));
-  const lines = got.filter((l) => refused.test(l));
-  assert.deepEqual(lines.map((l) => l.replace(/ raises NotImplementedError .*/, "")), ["tzset", "strptime", "datetime strptime"]);
-});
+const LOCAL = /^(localtime|ctime|fromtimestamp|date\.fromtimestamp|timezone|altzone|daylight|mktime|timestamp|now type|localtime type) /;
 
-// (on another zone: tm_isdst a placeholder refused on any use but repr and
-// str, tm_zone, tzname and %Z refused, mktime refusing isdst 0 or 1 and a
-// skipped or repeated time, tzname out of dir() and import-star; each a
-// NotImplementedError naming the zone; the rest working)
-test("as a browser, time_jsdate_cases.py under TZ=Europe/Berlin: each refusal names the zone, the rest works", () => {
-  const out = sagebrush("time_jsdate_cases.py", "Europe/Berlin", NO_FILES);
-  const line = (label: string) => out.find((l) => l.startsWith(label + " ")) ?? `(no ${label})`;
-  assert.equal(line("repr"), "repr -> time.struct_time(tm_year=1970, tm_mon=1, tm_mday=1, tm_hour=1, tm_min=0, tm_sec=0, tm_wday=3, tm_yday=1, tm_isdst=<unknown: Europe/Berlin>)");
-  assert.equal(line("fields"), "fields -> ((1970, 1, 1, 1, 0, 0, 3, 1), 3600)");
-  assert.equal(line("unpacked, indexed"), "unpacked, indexed -> (1970, 1, '<unknown: Europe/Berlin>')");
-  assert.equal(line("str of isdst"), "str of isdst -> <unknown: Europe/Berlin>");
-  for (const label of ["isdst == 0", "bool", "int", "hash", "format", "f-string", "arithmetic", "struct == struct", "struct hash", "struct <", "pickle", "copy", "strftime %s", "mktime struct"])
-    assert.match(line(label), /raises NotImplementedError tm_isdst is not known for the host's time zone Europe\/Berlin here/, label);
-  for (const [label, what] of [["tm_zone", "tm_zone"], ["tzname", "tzname"], ["hasattr tzname", "tzname"], ["strftime %Z", "%Z"], ["strftime %Z now", "%Z"], ["strftime %Z tuple", "%Z"], ["naive astimezone", "tm_zone"], ["astimezone no argument", "tm_zone"]])
-    assert.match(line(label), new RegExp(`raises NotImplementedError ${what} is not known for the host's time zone Europe/Berlin here`), label);
-  assert.match(line("mktime isdst 0"), /raises NotImplementedError mktime\(\) with tm_isdst 0 is not known for the host's time zone Europe\/Berlin/);
-  assert.match(line("mktime isdst 1"), /raises NotImplementedError mktime\(\) with tm_isdst 1 is not known/);
-  assert.match(line("mktime skipped"), /raises NotImplementedError time\.mktime\(\): 2020-03-29 02:30:00 is skipped in the host's time zone Europe\/Berlin/);
-  assert.match(line("mktime repeated"), /raises NotImplementedError time\.mktime\(\): 2020-10-25 02:30:00 is repeated in the host's time zone Europe\/Berlin/);
-  assert.match(line("beyond JS dates"), /raises NotImplementedError time: the host's time zone Europe\/Berlin is known here only within JavaScript's dates/);
-  assert.match(line("tzset"), /raises NotImplementedError time\.tzset\(\)/);
-  assert.match(line("strptime"), /raises NotImplementedError strptime needs CPython's _strptime, which needs the calendar module/);
-  assert.match(line("datetime strptime"), /raises NotImplementedError strptime needs CPython's _strptime/);
-  assert.equal(line("mktime plain"), "mktime plain -> 1577876400.0");
-  assert.equal(line("strftime %Y %z"), "strftime %Y %z -> 1970 +0100");
-  assert.equal(line("asctime"), "asctime -> Thu Jan  1 01:00:00 1970");
-  assert.equal(line("datetime fromtimestamp"), "datetime fromtimestamp -> 1970-01-01 01:00:00");
-  assert.equal(line("import-star has tzname:"), "import-star has tzname: False dir has tzname: False");
-  assert.equal(line("gmtime zone:"), "gmtime zone: GMT 0");
+// (in a browser, which has no zone files: the zone Intl names, from the
+// pinned zone data (tzdata/), checked against Date's offset now; run under
+// Node as a browser (SAGEBRUSH_TIME_NO_ZONE_FILES=1, its Intl following TZ),
+// the pinned files read from the repository (SAGEBRUSH_TIME_PINNED_DIR, as the
+// worker's fetch would give them), and compared with CPython reading the same
+// files (TZDIR): glibc reads the pinned data as it reads its own)
+const PINNED = __dirname + "/../../tzdata/zoneinfo";
+const BROWSER = { SAGEBRUSH_TIME_NO_ZONE_FILES: "1", SAGEBRUSH_TIME_PINNED_DIR: PINNED };
+for (const tz of ["America/New_York", "Europe/Dublin", "Australia/Lord_Howe", "Asia/Kolkata", "Pacific/Apia"])
+  for (const file of ["time_zone_cases.py", "time_zone_sweep_cases.py"])
+    test(`as a browser, ${file} under ${tz}: CPython's output with the pinned zone data`, () => {
+      assert.deepEqual(sagebrush(file, tz, BROWSER), cpython(file, tz, { TZDIR: PINNED }));
+    });
+test("as a browser, in UTC: CPython's output, no zone data fetched", () => {
+  assert.deepEqual(sagebrush("time_zone_cases.py", "UTC", { SAGEBRUSH_TIME_NO_ZONE_FILES: "1" }), cpython("time_zone_cases.py", "UTC"));
+});
+// (refused, naming the zone: no pinned data to be had, and pinned data whose
+// offset now is not the browser's Date's (New York's name with UTC's file))
+test("as a browser, with no pinned data or pinned data Date disagrees with: local times refuse, naming the zone", () => {
+  const dir = mkdtempSync(tmpdir() + "/sagebrush-pinned-");
+  try {
+    mkdirSync(dir + "/America");
+    copyFileSync(PINNED + "/Etc/UTC", dir + "/America/New_York");
+    for (const [more, why] of [[{ SAGEBRUSH_TIME_NO_ZONE_FILES: "1" }, "the pinned zone data cannot be had here"], [{ SAGEBRUSH_TIME_NO_ZONE_FILES: "1", SAGEBRUSH_TIME_PINNED_DIR: dir }, "the pinned zone data gives it UTC offset 0 s now, the browser's Date -1"]] as const) {
+      const got = sagebrush("time_tz_forms_cases.py", "America/New_York", more);
+      const local = got.filter((l) => LOCAL.test(l));
+      assert.equal(local.length, 19);
+      for (const l of local) assert.ok(l.includes(" raises NotImplementedError time: the browser's time zone America/New_York is not available in Sagebrush: " + why), l);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // (astra's CORR-09B-3: a TZ rule, or a zone file's footer, evaluated as glibc
@@ -171,7 +164,6 @@ for (const tzdir of ["/usr/share/zoneinfo", "/usr/share/zoneinfo/", ""])
 
 // (TZ values glibc reads in ways not matched here: refused, naming them,
 // every local time; UTC and the rest as CPython's)
-const LOCAL = /^(localtime|ctime|fromtimestamp|date\.fromtimestamp|timezone|altzone|daylight|mktime|timestamp|now type|localtime type) /;
 for (const tz of ["ABC5DEF", "ABC5DEF,M3.2.0", "EST5EDT,M13.1.0,M11.1.0", "ABC5 ", "ABC5DEF,M3.2.0,M11.1.0x"])
   test(`time_tz_forms_cases.py under TZ=${JSON.stringify(tz)}: local times refuse, naming TZ; the rest as CPython's`, () => {
     const want = cpython("time_tz_forms_cases.py", tz), got = sagebrush("time_tz_forms_cases.py", tz);
