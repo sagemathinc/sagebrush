@@ -1804,3 +1804,23 @@ test("a zero cyclotomic element still decides a literal's universe; another fiel
     assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
   }
 });
+
+test("&+ and &* of an empty collection: its universe's zero and one, Magma's error with none (WA-027)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (checked against Magma 2.18: a declared universe's, the integers', an
+  // emptied one's; written empty, Magma's error; astra2's WA-027)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["S:=[RealField(15)|]; x:=&+S; x; Type(x); Parent(x);", "S:=[RealField(15)|]; x:=&*S; x;", "S:={RealField(15)|}; Type(&+S);",
+    "P<y>:=PolynomialRing(Rationals()); K<c>:=NumberField(y^2-5); S:=[K|]; x:=&+S; x; Type(x); Parent(x) eq K; Type(&*S);",
+    "P<y>:=PolynomialRing(Rationals()); S:=[P|]; Type(&+S); &*S;", "S:=[Rationals()|]; Type(&+S);", "S:=[GF(5)|]; x:=&*S; x; Type(x);",
+    "M:=Matrix(Integers(),2,3,[1..6]); S:=[Parent(M)|]; &+S;", "M:=Matrix(Integers(),2,2,[1..4]); S:=[Parent(M)|]; &*S;",
+    "S:=[RealField(15)!1]; Remove(~S,1); x:=&+S; x;", "P<y>:=PolynomialRing(Rationals()); K<c>:=NumberField(y^2-5); S:=[c]; Remove(~S,1); Type(&+S);",
+    "S:=[Integers(6)|]; Type(&+S);", "S:=[1/2]; Remove(~S,1); Type(&+S);", "&+[Integers()|]; &*[1..0]; S:=[1]; Remove(~S,1); &+S;"].join("\n"));
+  assert.equal(ok, "0.000000000000000\nFldReElt\nReal field of precision 15\n1.00000000000000\nFldReElt\n0\nFldNumElt\ntrue\nFldNumElt\n" +
+    "RngUPolElt\n1\nFldRatElt\n1\nFldFinElt\n[0 0 0]\n[0 0 0]\n[1 0]\n[0 1]\n0.000000000000000\nFldNumElt\nRngIntResElt\nFldRatElt\n0\n1\n0\nend\n", ok);
+  const bad = run(["&+[];", "&*{};", "&+[x : x in [1..0]];", "M:=Matrix(Integers(),2,3,[1..6]); S:=[Parent(M)|]; x:=&*S;"].join("\n")).replace(/\s+/g, " ");
+  for (const m of ["Runtime error in '&+': Illegal null sequence", "Runtime error in '&*': Illegal null set", "Runtime error in '&*': Universe has no one element"])
+    assert.ok(bad.includes(m), m + bad);
+  assert.equal(bad.split("Illegal null sequence").length - 1, 2, bad);
+});
