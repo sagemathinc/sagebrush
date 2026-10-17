@@ -825,9 +825,22 @@ export function unboundFunction(d: any): any {
   return d.$owner !== undefined ? selfChecked(d) : d;
 }
 
+// A class's attribute set and deleted through its metaclass's own
+// __setattr__ and __delattr__ when it has one, as CPython's type slots
+// (type's own: typeSetattr, typeDelattr)
 export function setattr(o: any, name: string, v: any): void {
   if (reservedName(name)) reservedAttr(o, name);
-  if (isType(o)) return setTypeAttr(o, name, v);
+  if (isType(o)) {
+    const meta = typeOf(o);
+    if (meta !== T.type) {
+      const sa = lookupType(meta, "__setattr__");
+      if (sa !== undefined && sa !== typeSetattr) {
+        sa(o, name, v);
+        return;
+      }
+    }
+    return setTypeAttr(o, name, v);
+  }
   const t = typeOf(o);
   if (t.$customSet) {
     const sa = lookupType(t, "__setattr__");
@@ -866,15 +879,45 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
   raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object has no attribute '${name}' and no __dict__ for setting new attributes`);
 }
 
+// (object's on a class is CPython's hackcheck TypeError: a class's
+// attributes are type's to set)
+export function notForType(o: any, fn: string): void {
+  if (isType(o)) raise(T.TypeError, `can't apply this ${fn} to ${typeName(o)} object`);
+}
 export const objectSetattr = pyfn(function __setattr__(o: any, name: string, v: any) {
+  notForType(o, "__setattr__");
   if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   genericSetattr(o, name, v, typeOf(o));
   return null;
 }, "__setattr__");
 
+// type.__setattr__ and type.__delattr__ (types.ts puts them on type)
+const typeAttrName = (fn: string, c: any, name: any): string => {
+  if (!isType(c)) raise(T.TypeError, `descriptor '${fn}' requires a 'type' object but received a '${typeName(c)}'`);
+  if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
+  return name;
+};
+export const typeSetattr = pyfn(function __setattr__(c: any, name: any, v: any) {
+  setTypeAttr(c, typeAttrName("__setattr__", c, name), v);
+  return null;
+}, "__setattr__");
+export const typeDelattr = pyfn(function __delattr__(c: any, name: any) {
+  delTypeAttr(c, typeAttrName("__delattr__", c, name));
+  return null;
+}, "__delattr__");
 export function delattr(o: any, name: string): void {
   if (reservedName(name)) reservedAttr(o, name);
-  if (isType(o)) return delTypeAttr(o, name);
+  if (isType(o)) {
+    const meta = typeOf(o);
+    if (meta !== T.type) {
+      const dl = lookupType(meta, "__delattr__");
+      if (dl !== undefined && dl !== typeDelattr) {
+        dl(o, name);
+        return;
+      }
+    }
+    return delTypeAttr(o, name);
+  }
   const t = typeOf(o);
   const dl = lookupType(t, "__delattr__");
   if (dl !== undefined && dl.$genericDelattr !== true) {
