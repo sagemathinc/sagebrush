@@ -31,6 +31,11 @@ function hashEnd(h) {
 // (a display bundle with its keys in order)
 const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 
+// (how long a check may wait for the interpreter to take it up: what runs
+// before it is the board's code, which has its own bounds)
+// (a test may set less: globalThis.__sbEvaluateStartMs)
+const evaluateStartMs = () => Number(globalThis.__sbEvaluateStartMs) || 30_000;
+
 export class WorkerKernel {
   static count = 0;
   /**
@@ -199,12 +204,12 @@ export class WorkerKernel {
     return new Promise((resolve) => {
       if (!this.worker) return resolve({ ok: false, error: "the interpreter is not running" });
       const id = this.nextId++;
-      let timer = null, over = false;
-      const finish = (r) => { clearTimeout(timer); resolve(r); };
+      let timer = null, over = false, waiting = null;
+      const finish = (r) => { clearTimeout(timer); clearTimeout(waiting); resolve(r); };
       const nothing = () => {};
       this.pending.set(id, {
         // (its deadline from when it starts: not while the board's own code still runs before it)
-        start: () => { if (ms > 0 && !timer) timer = setTimeout(() => { over = true; this.interrupt(); }, ms); },
+        start: () => { clearTimeout(waiting); if (ms > 0 && !timer) timer = setTimeout(() => { over = true; this.interrupt(); }, ms); },
         out: nothing, display: nothing, interact: nothing, clear: nothing,
         done: (_ms, x) => {
           if (over) return finish({ ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true });
@@ -213,6 +218,8 @@ export class WorkerKernel {
         stopped: () => finish(over ? { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true } : { ok: false, error: "the interpreter stopped" }),
       });
       this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" });
+      // (an interpreter that never takes it up: given up after evaluateStartMs, HARD-729-1)
+      waiting = setTimeout(() => { this.pending.delete(id); finish({ ok: false, error: "the interpreter did not take it up" }); }, evaluateStartMs());
     });
   }
 
