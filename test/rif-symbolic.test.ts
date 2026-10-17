@@ -17,5 +17,8 @@ test("RealIntervalField(prec)(sqrt(2)) and friends are as tight as prec, and con
     "True",
     "True",
     "NotImplementedError",
+    "True",
+    "200 True",
+    "2000 True",
   ]);
 });
