@@ -971,12 +971,24 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
     return { x0: it.x, y0: it.y, x1: it.x + Math.min(it.w, w), y1: it.inner.y - 10 };
   };
   const reqs: RouteRequest[] = [];
+  // (the edges drawn straight, spring containers': their points and label)
+  const lines = new Map<string, { points: number[]; label: { x: number; y: number } }>();
   let made = 0;
   for (const e of edges) {
     // (between frames, a large board's every 32: each scans the page)
     if (++made % 32 === 0) yield;
     const A = ancestors(e.from), B = ancestors(e.to);
     if (A.has(e.to) || B.has(e.from)) continue; // a group and its member: no line
+    // the smallest group holding both: its layout's axis
+    let common: string | undefined;
+    for (const p of A) if (B.has(p)) { common = p; break; }
+    const container = common ? groups.get(common)! : doc;
+    // (in a "spring" container: a straight line between the two boxes, as
+    // William chose; laid out by no layer direction, it has no axis to bend along)
+    if (container.layout === "spring") {
+      const line = straight(rect(e.from), rect(e.to));
+      if (line) { lines.set(e.id, line); continue; }
+    }
     const obstacles: Rect[] = [];
     const scan = (ns: DocNode[]) => {
       for (const n of ns) {
@@ -991,10 +1003,7 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
       }
     };
     scan(roots);
-    // the smallest group holding both: its layout's axis
-    let common: string | undefined;
-    for (const p of A) if (B.has(p)) { common = p; break; }
-    const axis = axisOf(common ? groups.get(common)! : doc);
+    const axis = axisOf(container);
     reqs.push({ id: e.id, a: rect(e.from), b: rect(e.to), obstacles, axis, label: e.label ? { w: e.label.length * 6.8 + 14, h: 20 } : undefined });
   }
   const keepClear = items.filter((it) => it.kind === "note").map((it) => ({ x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }) as Rect);
@@ -1002,12 +1011,34 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
   const routes = yield* routeSteps(reqs, keepClear);
   // (all at once: an edge keeps the route it was given until now, if any)
   for (const e of edges) {
-    const r = routes.get(e.id);
+    const r = routes.get(e.id) ?? lines.get(e.id);
     delete e.points; delete e.lx; delete e.ly;
     if (!r) continue;
     e.points = r.points;
     if (r.label) { e.lx = r.label.x; e.ly = r.label.y; }
   }
+}
+
+/** A straight edge from box `a` to box `b`: the segment between their
+ * centres, from where it leaves `a` to where it enters `b`, so an
+ * arrowhead touches the box; its label at the segment's middle.  Null when
+ * there is no such segment (the boxes overlap, or share a centre): the edge
+ * is then routed as any other. */
+export function straight(a: Rect, b: Rect): { points: number[]; label: { x: number; y: number } } | null {
+  const ca = [(a.x0 + a.x1) / 2, (a.y0 + a.y1) / 2], cb = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const dx = cb[0] - ca[0], dy = cb[1] - ca[1];
+  if (!(Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9)) return null;
+  // (how far along from centre c, towards (sx, sy), the box's border is: the nearer of its two crossings)
+  const out = (r: Rect, c: number[], sx: number, sy: number) => {
+    const tx = Math.abs(sx) > 1e-9 ? ((sx > 0 ? r.x1 : r.x0) - c[0]) / sx : Infinity;
+    const ty = Math.abs(sy) > 1e-9 ? ((sy > 0 ? r.y1 : r.y0) - c[1]) / sy : Infinity;
+    return Math.min(tx, ty);
+  };
+  const ta = out(a, ca, dx, dy), tb = 1 - out(b, cb, -dx, -dy);
+  // (the boxes meet or overlap along the line: no segment between them)
+  if (!(ta < tb)) return null;
+  const p = [ca[0] + dx * ta, ca[1] + dy * ta, ca[0] + dx * tb, ca[1] + dy * tb];
+  return { points: p, label: { x: (p[0] + p[2]) / 2, y: (p[1] + p[3]) / 2 } };
 }
 
 // (`ink`: a pen stroke, which takes no part in the layout: where it was

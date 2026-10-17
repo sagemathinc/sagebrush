@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { layout } from "../web/board/doc";
+import { layout, straight } from "../web/board/doc";
 
 // The board's layouts (web/board/doc.ts arrange).
 const box = (id: string, h: number) => ({ id, text: id, w: 200, h });
@@ -44,4 +44,44 @@ test("spring: linked items near each other, none closer than the gap, the same p
   assert.notDeepEqual(seeded.map((it) => [it.x, it.y]), one.map((it) => [it.x, it.y]));
   const g = layout({ nodes: [{ id: "g", kind: "group", layout: "spring", children: nodes }], edges } as any).items;
   assert.ok(g.filter((it) => it.id !== "g").every((it) => Number.isFinite(it.x) && Number.isFinite(it.y)));
+});
+
+test("spring: its edges straight, from box to box, touching each (the arrowhead at the border); other layouts keep their routes", () => {
+  const nodes = ["a", "b", "c", "d"].map((id) => box(id, 80));
+  const edges = [["a", "b"], ["b", "c"], ["c", "d"], ["d", "a"]].map(([from, to]) => ({ from, to, label: from + to }));
+  const onBorder = (it: any, x: number, y: number) => {
+    const inside = x >= it.x - 1e-6 && x <= it.x + it.w + 1e-6 && y >= it.y - 1e-6 && y <= it.y + it.h + 1e-6;
+    const edge = [Math.abs(x - it.x), Math.abs(x - it.x - it.w), Math.abs(y - it.y), Math.abs(y - it.y - it.h)].some((d) => d < 1e-6);
+    return inside && edge;
+  };
+  const run = (d: any) => { const r = layout(d); for (const _ of r.routing); return r; };
+  const { items, edges: out } = run({ layout: "spring", nodes, edges });
+  for (const e of out as any[]) {
+    const a = at(items, e.from), b = at(items, e.to), p = e.points;
+    assert.equal(p.length, 4, `${e.id}: one straight segment`);
+    assert.ok(onBorder(a, p[0], p[1]) && onBorder(b, p[2], p[3]), `${e.id}: from ${e.from}'s border to ${e.to}'s`);
+    // (along the line between the centres)
+    const ca = [a.x + a.w / 2, a.y + a.h / 2], cb = [b.x + b.w / 2, b.y + b.h / 2];
+    const cross = (q: number[]) => (cb[0] - ca[0]) * (q[1] - ca[1]) - (cb[1] - ca[1]) * (q[0] - ca[0]);
+    assert.ok(Math.abs(cross([p[0], p[1]])) < 1e-6 && Math.abs(cross([p[2], p[3]])) < 1e-6, `${e.id}: on the centres' line`);
+    assert.ok(Math.abs(e.lx - (p[0] + p[2]) / 2) < 1e-6 && Math.abs(e.ly - (p[1] + p[3]) / 2) < 1e-6, `${e.id}: its label at the middle`);
+  }
+  // (a graph keeps its routed edges: each segment along an axis)
+  const g = run({ layout: "graph", nodes, edges }).edges as any[];
+  for (const e of g) for (let i = 0; i + 3 < e.points.length; i += 2) assert.ok(e.points[i] === e.points[i + 2] || e.points[i + 1] === e.points[i + 3], `${e.id}: routed along the axes in a graph`);
+  // (a spring group's edges straight; an edge from inside it to outside routed as any other)
+  const inGroup = run({ layout: "column", nodes: [{ id: "s", kind: "group", layout: "spring", children: nodes }, box("out", 80)], edges: [...edges, { from: "a", to: "out" }] }).edges as any[];
+  assert.ok(inGroup.filter((e) => e.to !== "out").every((e) => e.points.length === 4));
+  const across = inGroup.find((e) => e.to === "out");
+  for (let i = 0; i + 3 < across.points.length; i += 2) assert.ok(across.points[i] === across.points[i + 2] || across.points[i + 1] === across.points[i + 3], "an edge leaving the spring group: routed");
+});
+
+test("straight(): none for boxes that touch or overlap along the line, or share a centre", () => {
+  const r = (x0: number, y0: number, w = 100, h = 50) => ({ x0, y0, x1: x0 + w, y1: y0 + h });
+  assert.deepEqual(straight(r(0, 0), r(200, 0))?.points, [100, 25, 200, 25]);
+  assert.equal(straight(r(0, 0), r(50, 10)), null, "overlapping");
+  assert.equal(straight(r(0, 0), r(100, 0)), null, "touching");
+  assert.equal(straight(r(0, 0), r(0, 0)), null, "the same centre");
+  const d = straight(r(0, 0), r(300, 200))!;
+  assert.ok(d.points[0] <= 100 && d.points[1] <= 50 && d.points[2] >= 300 && d.points[3] >= 200 && d.points[0] < d.points[2]);
 });
