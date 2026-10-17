@@ -123,3 +123,20 @@ class Changing:
      calls.append('int');return int(20+len(calls)*10)
 for name,f in [('float',lambda p:N(float(2),p)),('RR',lambda p:N(RR(2),p)),('RDF',lambda p:N(RDF(2),p)),('int',lambda p:N(2,p)),('method',lambda p:RR(2).n(p))]:
     calls.clear();show2('changing '+name,lambda:f(Changing()));print('calls',calls)
+# a __float__ descriptor's __get__ is its type's own, not one a metaclass
+# __getattribute__ makes up
+calls = []
+class Meta(type):
+    def __getattribute__(cls, name):
+        if name == '__get__':
+            calls.append('meta-get')
+            return lambda *args: lambda *args: float(18.9)
+        return super().__getattribute__(name)
+class Desc(metaclass=Meta):
+    def __get__(self, obj, owner):
+        calls.append('real-get')
+        return lambda *args: float(8.9)
+class V:
+    __float__ = Desc()
+show2("digits descriptor", lambda: RealField(100)(2).n(digits=V()))
+print(calls)
