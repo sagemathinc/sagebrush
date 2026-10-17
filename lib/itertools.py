@@ -13,15 +13,6 @@ def count(start=0, step=1):
         n += step
 
 
-def repeat(obj, times=None):
-    if times is None:
-        while True:
-            yield obj
-    else:
-        for i in range(times):
-            yield obj
-
-
 import operator as _operator
 
 _NULL = object()
@@ -362,6 +353,65 @@ def _ssize(x):
     if not -9223372036854775808 <= x <= 9223372036854775807:
         raise OverflowError("Python int too large to convert to C ssize_t")
     return x
+
+
+class repeat:
+    """repeat(object [,times]) -> create an iterator which returns the object
+for the specified number of times.  If not specified, returns the object
+endlessly."""
+
+    # (as CPython's: times a Py_ssize_t, given or not (None is no count:
+    # a TypeError), a negative one none; its repr shows what is left)
+    __slots__ = ("_obj", "_cnt")
+
+    def __new__(cls, *args, **kwargs):
+        # (object and times by position or by name, as CPython's
+        # PyArg_ParseTupleAndKeywords "O|n:repeat" reads them)
+        if len(args) + len(kwargs) > 2:
+            raise TypeError("repeat() takes at most 2 arguments (%d given)" % (len(args) + len(kwargs)))
+        # (each parameter in turn, then any other keyword, as its order)
+        names = ("object", "times")
+        for i in range(len(args)):
+            if names[i] in kwargs:
+                raise TypeError("argument for repeat() given by name ('%s') and position (%d)" % (names[i], i + 1))
+        if args:
+            object = args[0]
+        elif "object" in kwargs:
+            object = kwargs["object"]
+        else:
+            raise TypeError("repeat() missing required argument 'object' (pos 1)")
+        for k in kwargs:
+            if k not in names:
+                raise TypeError("repeat() got an unexpected keyword argument '%s'" % k)
+        times = args[1] if len(args) > 1 else kwargs.get("times", _NULL)
+        self = super().__new__(cls)
+        self._obj = object
+        if times is _NULL:
+            self._cnt = -1
+        else:
+            n = _ssize(times)
+            self._cnt = n if n > 0 else 0
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._cnt == 0:
+            raise StopIteration
+        if self._cnt > 0:
+            self._cnt -= 1
+        return self._obj
+
+    def __repr__(self):
+        if self._cnt == -1:
+            return "%s(%r)" % (type(self).__name__, self._obj)
+        return "%s(%r, %d)" % (type(self).__name__, self._obj, self._cnt)
+
+    def __length_hint__(self):
+        if self._cnt == -1:
+            raise TypeError("len() of unsized object")
+        return self._cnt
 
 
 def product(*args, repeat=1):

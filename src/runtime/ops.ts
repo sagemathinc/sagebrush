@@ -280,39 +280,126 @@ export const subT = (a: any, b: any, w: number): any => reuse("sub", a, b, w) ??
 export const mulT = (a: any, b: any, w: number): any => reuse("mul", a, b, w) ?? mul(a, b);
 export const truedivT = (a: any, b: any, w: number): any => reuse("truediv", a, b, w) ?? truediv(a, b);
 
+// (a builtin sequence's own __mul__, __rmul__ or __imul__: in CPython its
+// sequence slot, sq_repeat or sq_inplace_repeat, not a numeric one, so
+// left out of the numeric multiply and tried after it, unless a subclass
+// has a __mul__ or __rmul__ of its own, below)
+function seqBase(x: any): PyType | undefined {
+  if (typeof x === "string" || (x instanceof PrimBox && typeof x.$v === "string")) return T.str;
+  if (Array.isArray(x)) return (x as any).$t ? T.tuple : T.list;
+  if (x instanceof PyByteArray) return T.bytearray;
+  if (x instanceof PyBytes) return T.bytes;
+  return undefined;
+}
+function nativeSeqMethod(x: any, name: string): boolean {
+  const base = seqBase(x);
+  if (base === undefined) return false;
+  // (a str subclass's: str's, or the unboxing proxy's wrapper of it; a
+  // class body's `__mul__ = list.__mul__`: the self-checking form Python
+  // holds of it, the same descriptor, CORR-57F-1)
+  const m = lookupType(typeOf(x), name), b = lookupType(base, name);
+  return m === b || (b !== undefined && m === b.$selfChecked) || m?.$unboxing === true;
+}
+// Has a builtin sequence's type CPython's sequence repeat, sq_repeat? Only
+// if it keeps the builtin's __mul__ and __rmul__: one of its own instead
+// makes its multiply numeric, nb_multiply, that calls the two methods it
+// has (the builtin's among them), and no repeat after
+export function seqRepeats(x: any): boolean {
+  return nativeSeqMethod(x, "__mul__") && nativeSeqMethod(x, "__rmul__");
+}
+// CPython's sequence_repeat: the count an index (else "can't multiply
+// sequence by non-int"), index-sized (else OverflowError, naming its
+// type), then the sequence's own repeat, without going back to the
+// operator's dispatch (CORR-72B-3)
+function seqCount(n: any): Count {
+  if (lookupType(typeOf(n), "__index__") === undefined) raise(T.TypeError, `can't multiply sequence by non-int of type '${typeName(n)}'`);
+  return ssizeCount(n);
+}
+// The count a builtin sequence's own __mul__, __rmul__ or __imul__ takes,
+// as CPython's wrapper of its slot: an index (else "cannot be interpreted
+// as an integer"), index-sized, below 0 none
+export function ssizeCount(n: any): Count {
+  const k = index(n);
+  if (typeof k === "bigint" && (k > 9223372036854775807n || k < -9223372036854775808n)) raise(T.OverflowError, `cannot fit '${typeName(n)}' into an index-sized integer`);
+  return exactCount(k);
+}
+// A repeat count, never below 0: a number while it is exact, else the
+// bigint itself, so a length past Py_ssize_t is told from one within it
+// exactly (sys.maxsize as a number is 2**63; daybreak2's LIMIT-51B-2)
+export type Count = number | bigint;
+function exactCount(k: number | bigint): Count {
+  if (k < 0) return 0;
+  return typeof k === "bigint" && k <= 9007199254740991n ? Number(k) : k;
+}
+// s * n as CPython's unicode_repeat: a length past Py_ssize_t an
+// OverflowError, one past what a JS string holds a MemoryError, both
+// before anything is made
+export function strRepeat(s: string, n: Count): string {
+  if (s.length === 0 || n <= 0) return "";
+  if (n === 1) return s;
+  if (BigInt(SP.cpLen(s)) * BigInt(n) > SSIZE_MAX) raise(T.OverflowError, "repeated string is too long");
+  if (typeof n === "bigint" || s.length * n > 536870888) raise(T.MemoryError);
+  return SP.repeatChecked(s, n);
+}
+function seqRepeat(seq: any, n: any): any {
+  const c = seqCount(n);
+  if (seq instanceof PrimBox) seq = seq.$v;
+  if (typeof seq === "string") return strRepeat(seq, c);
+  if (Array.isArray(seq)) return repeatArray(seq, c);
+  return repeatBytes(seq, c);
+}
 export function binaryDunder(a: any, b: any, op: string): any {
   const [name, rname, sym] = OPS[op];
   const ta = typeOf(a), tb = typeOf(b);
+  const r = binaryNumeric(a, b, op);
+  if (r !== NotImplemented) return r;
+  // (then a sequence's repeat, if its type keeps the builtin sequence's
+  // __mul__ and __rmul__: the left operand's, else the right's, as
+  // CPython's PyNumber_Multiply; a subclass that overrides either has none)
+  if (op === "mul") {
+    if (seqRepeats(a)) return seqRepeat(a, b);
+    if (seqRepeats(b)) return seqRepeat(b, a);
+  }
+  raise(T.TypeError, `unsupported operand type(s) for ${sym}: '${ta.$name}' and '${tb.$name}'`);
+}
+// The numeric part of a binary operator: the methods, in CPython's order,
+// NotImplemented if they all decline
+function binaryNumeric(a: any, b: any, op: string): any {
+  const [name, rname] = OPS[op];
+  const ta = typeOf(a), tb = typeOf(b);
+  const seqMul = op === "mul";
+  const left = (x: any) => (seqMul && seqRepeats(x) ? undefined : special(x, name));
+  const right = (x: any) => (seqMul && seqRepeats(x) ? undefined : special(x, rname));
   // As CPython's slot: the override test first (it may run user code that
   // replaces a method), then each method fetched when it is called.
   if (ta !== tb && tb.$mro.includes(ta) && (lookupType(tb, rname) !== undefined || lookupType(tb, name) !== undefined)
       && overloaded(ta, tb, rname)) {
     // A subclass's reflected method gets priority.
-    const fb = special(b, rname);
+    const fb = right(b);
     if (fb !== undefined) {
       const r = settle(fb, fb(b, a));
       if (r !== NotImplemented) return r;
     }
-    const fa = special(a, name);
+    const fa = left(a);
     if (fa !== undefined) {
       const r2 = settle(fa, fa(a, b));
       if (r2 !== NotImplemented) return r2;
     }
   } else {
-    const fa = special(a, name);
+    const fa = left(a);
     if (fa !== undefined) {
       const r = settle(fa, fa(a, b));
       if (r !== NotImplemented) return r;
     }
     if (ta !== tb) {
-      const fb = special(b, rname);
+      const fb = right(b);
       if (fb !== undefined) {
         const r = settle(fb, fb(b, a));
         if (r !== NotImplemented) return r;
       }
     }
   }
-  raise(T.TypeError, `unsupported operand type(s) for ${sym}: '${ta.$name}' and '${tb.$name}'`);
+  return NotImplemented;
 }
 
 function inplace(a: any, b: any, op: string, iname: string): any {
@@ -388,7 +475,7 @@ export function mul(a: any, b: any): any {
   }
   return mulSlow(a, b);
 }
-function repeatCount(n: any): number | undefined {
+function repeatCount(n: any): Count | undefined {
   // (an int subclass that keeps int's __mul__ and __rmul__ repeats by its
   // own value, as CPython's sequence repetition: [0] * J(2) is [0, 0])
   // (int's own: int's, or the unboxing proxy's wrapper of it, types.ts)
@@ -396,31 +483,51 @@ function repeatCount(n: any): number | undefined {
     const m = lookupType(t, name);
     return m === lookupType(T.int, name) || m?.$unboxing === true;
   };
+  const orig = n;
   if (n instanceof PrimBox && typeOf(n).$mro.includes(T.int) && shimName(n, "int") === null && intsOwn(typeOf(n), "__mul__") && intsOwn(typeOf(n), "__rmul__")) n = n.$v;
   if (!isPyInt(n)) return undefined;
-  const k = Number(n);
-  return k < 0 ? 0 : k;
+  // (an index-sized count, as CPython's sequence repeat takes it: past it
+  // an OverflowError, before anything is made, LIMIT-COL-1)
+  if (typeof n === "bigint" && (n > 9223372036854775807n || n < -9223372036854775808n)) raise(T.OverflowError, `cannot fit '${typeName(orig)}' into an index-sized integer`);
+  return exactCount(typeof n === "boolean" ? +n : n);
 }
 function mulSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) * big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x * y);
-  if (typeof a === "string" && repeatCount(b) !== undefined) return SP.repeatChecked(a, repeatCount(b)!);
-  if (typeof b === "string" && repeatCount(a) !== undefined) return SP.repeatChecked(b, repeatCount(a)!);
-  if (Array.isArray(a) && !overrides(a, "__mul__") && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
-  if (Array.isArray(b) && !overrides(b, "__rmul__") && repeatCount(a) !== undefined) return repeatArray(b, repeatCount(a)!);
-  if (a instanceof PyBytes && repeatCount(b) !== undefined) return repeatBytes(a, repeatCount(b)!);
-  if (b instanceof PyBytes && repeatCount(a) !== undefined) return repeatBytes(b, repeatCount(a)!);
+  if (typeof a === "string" && repeatCount(b) !== undefined) return strRepeat(a, repeatCount(b)!);
+  if (typeof b === "string" && repeatCount(a) !== undefined) return strRepeat(b, repeatCount(a)!);
+  if (Array.isArray(a) && seqRepeats(a) && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
+  // (a sequence's repeat only if its type keeps the builtin's __mul__ and
+  // __rmul__, its sequence slot; a subclass's own either goes through
+  // dispatch)
+  if (Array.isArray(b) && seqRepeats(b) && repeatCount(a) !== undefined) return repeatArray(b, repeatCount(a)!);
+  if (a instanceof PyBytes && seqRepeats(a) && repeatCount(b) !== undefined) return repeatBytes(a, repeatCount(b)!);
+  if (b instanceof PyBytes && seqRepeats(b) && repeatCount(a) !== undefined) return repeatBytes(b, repeatCount(a)!);
   return binaryDunder(a, b, "mul");
 }
-function repeatArray(a: any[], n: number): any[] {
+export function repeatArray(a: any[], n: Count): any[] {
   const len = a.length;
+  // (nothing to repeat, or no copies: no loop over the count, an empty
+  // sequence repeated 2**62 times is empty at once; a result past what an
+  // array holds is a MemoryError before it is made, as CPython's)
+  if (len === 0 || n <= 0) return (a as any).$t ? tuple([]) : [];
+  if (typeof n === "bigint" || len * n > 4294967295) raise(T.MemoryError);
   const r = new Array(len * n);
   for (let i = 0; i < n; i++) for (let j = 0; j < len; j++) r[i * len + j] = a[j];
   return (a as any).$t ? tuple(r) : r;
 }
 
-function repeatBytes(a: PyBytes, n: number): PyBytes {
+export function repeatBytes(a: PyBytes, n: Count): PyBytes {
+  // (a result past what a buffer holds: a MemoryError before it is made;
+  // past an index-sized length, bytes's OverflowError, as CPython's, the
+  // length exact)
+  if (n < 0) n = 0;
+  if (a.n > 0 && (typeof n === "bigint" || n > Math.floor(4294967295 / a.n))) {
+    if (!(a instanceof PyByteArray) && BigInt(a.n) * BigInt(n) > SSIZE_MAX) raise(T.OverflowError, "repeated bytes are too long");
+    raise(T.MemoryError);
+  }
+  n = Number(n);
   const total = a.n * n;
   const r = new Uint8Array(total);
   if (total > 0) {
@@ -834,17 +941,65 @@ export function isub(a: any, b: any): any {
   if (inplaceSets(a, b)) return setInplace(a, b, "sub");
   return inplace(a, b, "sub", "__isub__");
 }
-export function imul(a: any, b: any): any {
-  if (typeof a === "number" && typeof b === "number") return mul(a, b);
-  // (a list subclass's own __mul__ too: CPython's in-place multiply tries
-  // the subclass's __mul__ before repeating, CORR-970-1)
-  if (Array.isArray(a) && (a as any).$t !== true && !overrides(a, "__imul__") && !overrides(a, "__mul__") && repeatCount(b) !== undefined) {
-    const r = repeatArray(a, repeatCount(b)!);
+// list *= n as CPython's list_inplace_repeat: n an index-sized integer
+// (OverflowError past it, naming n's type); below 1 the list is emptied;
+// an empty list, or n of 1, is left as it is; else the repeat, a
+// MemoryError past what an array holds, before anything is copied
+// (daybreak2's LIMIT-COL-1)
+// (the count converted first: what its __index__ does to the list is
+// then repeated, CORR-72B-1; list.__imul__ called itself converts it as
+// its slot's wrapper, "cannot be interpreted as an integer")
+export function listInplaceRepeat(a: any[], n: any, direct = false): any[] {
+  const c = direct ? ssizeCount(n) : seqCount(n);
+  if (c < 1) {
     a.length = 0;
-    for (const v of r) a.push(v);
     return a;
   }
-  return inplace(a, b, "mul", "__imul__");
+  if (a.length === 0 || c === 1) return a;
+  const r = repeatArray(a, c);
+  a.length = 0;
+  for (const v of r) a.push(v);
+  return a;
+}
+// bytearray *= n as CPython's bytearray_irepeat: in place, the count
+// converted first; a length past Py_ssize_t a MemoryError; then a resize
+// refused under an export, before the new contents are made (a size it
+// already has is no resize, so no export check; daybreak2's LIMIT-51B-1)
+export function bytearrayInplaceRepeat(b: PyByteArray, n: any, direct = false): PyByteArray {
+  const c = direct ? ssizeCount(n) : seqCount(n);
+  if (c === 1) return b;
+  const size = BigInt(b.n) * BigInt(c);
+  if (size > SSIZE_MAX) raise(T.MemoryError);
+  if (size !== BigInt(b.n)) checkResizable(b);
+  const r = repeatBytes(b, c);
+  b.a = r.a;
+  b.n = r.n;
+  return b;
+}
+// x *= n as CPython's PyNumber_InPlaceMultiply: an __imul__ of x's own
+// (not a builtin sequence's), then the numeric multiply (a list
+// subclass's own __mul__, CORR-970-1, the right operand's __rmul__,
+// CORR-72B-2), then list's or bytearray's in-place repeat, else a
+// sequence's repeat, of
+// the left operand, else of the right one
+export function imul(a: any, b: any): any {
+  if (typeof a === "number" && typeof b === "number") return mul(a, b);
+  // (an exact list by an int: no method can intervene)
+  if (Array.isArray(a) && (a as any).$cls === undefined && (a as any).$t !== true && typeof b === "number") return listInplaceRepeat(a, b);
+  if (!nativeSeqMethod(a, "__imul__")) {
+    const f = special(a, "__imul__");
+    if (f !== undefined) {
+      const r = f(a, b);
+      if (r !== NotImplemented) return r;
+    }
+  }
+  const r = binaryNumeric(a, b, "mul");
+  if (r !== NotImplemented) return r;
+  if (Array.isArray(a) && (a as any).$t !== true && nativeSeqMethod(a, "__imul__")) return listInplaceRepeat(a, b);
+  if (a instanceof PyByteArray && nativeSeqMethod(a, "__imul__")) return bytearrayInplaceRepeat(a, b);
+  if (seqRepeats(a)) return seqRepeat(a, b);
+  if (seqRepeats(b)) return seqRepeat(b, a);
+  raise(T.TypeError, `unsupported operand type(s) for *=: '${typeOf(a).$name}' and '${typeOf(b).$name}'`);
 }
 export const itruediv = (a: any, b: any) => inplace(a, b, "truediv", "__itruediv__");
 export const ifloordiv = (a: any, b: any) => (typeof a === "number" && typeof b === "number" ? floordiv(a, b) : inplace(a, b, "floordiv", "__ifloordiv__"));
