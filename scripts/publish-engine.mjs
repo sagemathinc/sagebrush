@@ -25,6 +25,15 @@ const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
 const env = { ...process.env, NO_COLOR: "1", CF_SEND_TELEMETRY: "false" };
 const cf = (...args) => execFileSync("cf", args, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 });
 
+// (the Python library's chunks also at lib/<name>, one namespace by content
+// that is never cleared, where the site's Worker finds a chunk a deploy took
+// out of the site's own lib/ for a page opened before it: web/engines.ts
+// handleLibChunk.  An existing one has these bytes: its name is its hash.
+// First, so an engine published before this was added gets them too.)
+for (const f of Object.keys(man.files).filter((f) => f.startsWith("lib/"))) {
+  console.log(`${apply ? "upload" : "would upload"} ${f}`);
+  if (apply) cf("r2", "objects", "put", f, "--bucket-name", BUCKET, "--file", join(dir, f), "--content-type", "application/json");
+}
 // (absent only when R2 says so: any other failure stops here)
 let published = null;
 try {

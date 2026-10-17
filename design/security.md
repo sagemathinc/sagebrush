@@ -305,6 +305,20 @@ keeps the page's bytes without its headers, as a redirect, and with a
 Refresh, and checks none of them is served, with the browser's HTTP cache
 cleared so only the service worker can answer.
 
+Since the load budget's split (web/lib-chunks.mts, web/lib-lazy.ts), the
+browser's worker no longer embeds the Python library: it and the precompiled
+modules come in chunks (a group of library files' sources, or their compiled
+code), fetched when a mode starts or a module is first imported. Each chunk
+is code, checked the same way: the worker carries the manifest (each chunk's
+SHA-256, and which group each library file belongs to), installs a chunk only
+if its bytes have that hash, and takes from it only its own group's files and
+modules, so a chunk can't stand in for another. The sources are required (an
+import of a module whose chunk can't be fetched or fails the check is an
+error that says so); the compiled code is used when it is there. The service
+worker keeps chunks under LAZY, verified like the rest; the runner's page
+fetches only engine files and chunk names (lib/<group>.<kind>.<hash>.json)
+for its worker. web/test-pwa.mjs rewrites a kept chunk of compiled code.
+
 ## Tests
 
 - **test/safe-html.test.ts:** about 55 XSS payloads, including mutation-XSS

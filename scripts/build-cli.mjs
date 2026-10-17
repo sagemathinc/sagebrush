@@ -43,6 +43,9 @@ const notices = ["LICENSE-MIT", "LICENSE-APACHE", "cdn/LICENSE-CPython.txt", "LI
 // (scripts/build-id.mjs: the compiler, runtime and library, hashed)
 const buildId = computeBuildId(root, lib);
 writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
+// (the same without the library, for the browser's worker, which fetches it
+// in chunks: web/lib-lazy.ts)
+writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
 // first written or read: src/runtime/raster.ts)

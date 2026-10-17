@@ -2,10 +2,11 @@
 // installs as an app.  web/build.ts fills in VERSION and SHELL.
 //
 // The app's own files (SHELL, kept when this script installs; LAZY, kept the
-// first time they are fetched online through it: the engine and the
-// documentation indexes, which not every visit needs) are fetched
-// network-first, so a deploy shows up at once, with the kept copy when
-// offline; those whose URLs have a content hash (?h=) are cache-first.  A cached response keeps its headers, so the
+// first time they are fetched online through it: the engine, the
+// documentation indexes and the Python library's chunks, which not every
+// visit needs) are fetched network-first, so a deploy shows up at once, with
+// the kept copy when offline; those whose URLs have a content hash (?h=, or
+// a library chunk's name: lib/<group>.<kind>.<hash>.json) are cache-first.  A cached response keeps its headers, so the
 // page stays cross-origin isolated offline (Stop keeps its variables).
 // Everything else (the Atlas, demos, data a notebook fetches) is not cached.
 //
@@ -76,7 +77,7 @@ self.addEventListener("fetch", (ev) => {
   // the page itself (with any ?open=... or #share link): the cached "./" when offline
   const page = req.mode === "navigate" && (url.pathname === scope.pathname || url.pathname === scope.pathname + "index.html");
   if (!page && !shellPaths.has(url.pathname)) return;
-  if (url.searchParams.has("h")) {
+  if (url.searchParams.has("h") || /\/lib\/[\w.-]+\.[0-9a-f]{16}\.json$/.test(url.pathname)) {
     ev.respondWith((async () => (await kept(req, url.pathname)) ?? fetchAndKeep(req))());
     return;
   }

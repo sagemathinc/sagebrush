@@ -1,9 +1,11 @@
 // bun web/build.ts  ->  web/dist/{index.html, llms.txt, sagebrush-worker.js, sagebrush-console.js,
 //                                sagebrush-math.js, katex/, sagebrush-engine.wasm, sagebrush-raster.wasm}
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
-// web/shims, the Python library is embedded, the Unicode name table is not.
-import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync } from "node:fs";
+// web/shims, the Python library is fetched in chunks (lib/), and the
+// Unicode name table is left out.
+import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 const here = import.meta.dir;
 const shims: Record<string, string> = {
@@ -17,29 +19,51 @@ const engineHash = engineSha256.slice(0, 16);
 // first time a PNG is written or read
 const rasterSha256 = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-raster.wasm"))).digest("hex");
 // The bundled compiler and library (build/cli, scripts/build-cli.mjs) must be
-// the current sources': the worker embeds that library, and the library
-// compiled ahead below is compiled by that bundle.
+// the current sources': the library's chunks below hold that library, and
+// its modules compiled ahead by that bundle.
 const { buildId: currentBuildId } = await import("../scripts/build-id.mjs");
 const buildId = /__SAGEBRUSH_BUILD_ID__ = "([0-9a-f]+)"/.exec(readFileSync(join(here, "..", "build", "cli", "lib.gen.js"), "utf8"))?.[1];
 if (buildId !== currentBuildId(join(here, ".."))) throw new Error("build/cli is not the current sources' build: run node scripts/build-cli.mjs first");
-// Library modules compiled ahead (src/compile.ts, precompiled): Sage mode's
-// start, and the modules scientific notebooks import first, compiled by the
-// CLI built from the same sources, so the worker does not compile 2 MB of
-// Python at every page load.  Made before the worker, which carries the
-// file's SHA-256 and uses it only if the bytes it fetched have it
-// (design/security.md, SEC-8D6-1: a cached copy is origin storage).
+// The Python library, in chunks fetched when they are first needed
+// (web/lib-chunks.mts, web/lib-lazy.ts), with the modules each mode's start
+// compiles compiled ahead (src/compile.ts, precompiled) by the CLI built from
+// the same sources, so the worker does not compile 2 MB of Python at every
+// page load.  Made before the worker, which carries their manifest: each
+// chunk's SHA-256, checked before it is used (design/security.md, SEC-8D6-1:
+// a cached copy is origin storage).
 mkdirSync(join(here, "dist"), { recursive: true });
-const prePath = join(here, "dist", "sagebrush-precompiled.json");
-rmSync(prePath, { force: true });
-for (const args of [["--sage", "-c", "pass"], ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"]]) {
-  const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: prePath, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
-  if (r.exitCode !== 0) throw new Error(`precompiling the library: ${r.stderr.toString().slice(0, 500)}`);
-}
-if (JSON.parse(readFileSync(prePath, "utf8")).build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
-const precompiledHash = new Bun.CryptoHasher("sha256").update(readFileSync(prePath)).digest("hex");
+// (each mode's start, recorded apart: the library's chunks are made from
+// them, web/lib-chunks.mts)
+const STARTS: Record<string, string[]> = {
+  py: ["-c", "import json, re, math, fractions, collections, random, itertools, functools"],
+  sci: ["-c", "import numpy, matplotlib.pyplot, scipy.io, k3d, ipywidgets"],
+  sage: ["--sage", "-c", "pass"],
+  matlab: ["--matlab", "-c", "1;"],
+  magma: ["--magma", "-c", "1;"],
+};
+const recDir = mkdtempSync(join(tmpdir(), "sagebrush-precompile-"));
+const recordings: Record<string, any> = {};
+await Promise.all(Object.entries(STARTS).map(async ([mode, args]) => {
+  const out = join(recDir, mode + ".json");
+  const p = Bun.spawn(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: out, SAGEBRUSH_NO_COMPILE_CACHE: "1" }, stdout: "ignore", stderr: "pipe" });
+  if ((await p.exited) !== 0) throw new Error(`precompiling the library (${mode}): ${(await new Response(p.stderr).text()).slice(0, 500)}`);
+  recordings[mode] = JSON.parse(readFileSync(out, "utf8"));
+  if (recordings[mode].build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
+}));
+rmSync(recDir, { recursive: true, force: true });
+const { libChunks } = await import("./lib-chunks.mts");
+const { libFiles } = await import("../scripts/build-id.mjs");
+const { manifest: libManifest, chunks: libChunkFiles } = libChunks(libFiles(join(here, "..")), recordings, buildId);
+rmSync(join(here, "dist", "lib"), { recursive: true, force: true });
+mkdirSync(join(here, "dist", "lib"), { recursive: true });
+for (const [f, bytes] of libChunkFiles) writeFileSync(join(here, "dist", f), bytes);
+const LIB_CHUNKS = [...libChunkFiles.keys()];
+console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifest.chunks).map(([g, c]) => `${g} ${(c.src.size / 1e3).toFixed(0)}+${((c.pre?.size ?? 0) / 1e3).toFixed(0)} kB`).join(", "));
+// (the manifest, in the worker: web/lib-lazy.ts)
+const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
 const result = await Bun.build(<any>{
   metafile: true,
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_PRECOMPILED_HASH__: JSON.stringify(precompiledHash) },
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest) },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
@@ -178,9 +202,12 @@ const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "te
 // in the manifest, which the site's Worker serves them with.  `api` is the version of the interface between a page
 // and these files (WorkerKernel, RunnerWorker, the worker's messages): a page
 // uses another engine only if its api is the same.
-const ENGINE_API = 2;
+// (3: the Python library in chunks, lib/..., web/lib-chunks.mts)
+const ENGINE_API = 3;
 let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-precompiled.json", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html"];
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "runner/index.html", ...LIB_CHUNKS];
+// (each one's name as the site's Worker serves engine files: web/engines.ts)
+for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new Error(`engine file ${f}: not a name web/engines.ts serves`);
 {
   const { runnerPolicy } = await import("./csp-policy.mts");
   const { engineIdText } = await import("./engine-id.mts");
@@ -320,15 +347,15 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // notebook needs to start and run offline.  LAZY is kept once it is used
 // online (fetched under the service worker, verified by its digest like the
 // shell): the engine (only some code needs it), the documentation
-// indexes (only the search box does), and the precompiled library: the
-// worker fetches it as it starts, and the install fetched and decoded its
-// 15 MB a second time (from the HTTP cache) in the same first visit.
-// Without it, offline, modules compile from source (src/compile.ts)
+// indexes (only the search box does), and the Python library's chunks (a
+// mode's, when it is first used; offline, a module whose sources were
+// never fetched can't be imported, and one whose compiled code wasn't is
+// compiled from its source: src/compile.ts)
 const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
-const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, `sagebrush-precompiled.json?h=${precompiledHash.slice(0, 16)}`];
+const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
-shellHash.update(engineHash + precompiledHash);
+shellHash.update(engineHash + libManifestHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
 // response it makes, with this status and these headers, never the kept
@@ -355,8 +382,11 @@ mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sagebrush-precompiled.json", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+// (the library's chunks)
+rmSync(join(here, "site", "public", "lib"), { recursive: true, force: true });
+cpSync(join(here, "dist", "lib"), join(here, "site", "public", "lib"), { recursive: true });
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 await import("./build-articles.ts");
 // every page's Content-Security-Policy, in _headers (web/csp.ts)

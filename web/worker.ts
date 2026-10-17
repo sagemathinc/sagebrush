@@ -33,10 +33,12 @@ const FILES: Record<string, string> | undefined = (globalThis as any).__SB_FILES
 declare const __SB_RASTER_HASH__: string;
 (globalThis as any).__SAGEBRUSH_RASTER_URL__ = FILES ? FILES["sagebrush-raster.wasm"] : new URL("sagebrush-raster.wasm?h=" + __SB_RASTER_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_RASTER_SHA256__ = __SB_RASTER_HASH__;
-import "../build/cli/lib.gen.js";
+// (the build's id, version and notices; the library itself is fetched in
+// chunks, web/lib-lazy.ts, which must come before src/compile)
+import "../build/cli/lib-meta.gen.js";
+import { prefetchMode } from "./lib-lazy";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
-import { sha256Hex } from "../src/runtime/sha256";
 import { notebookSession } from "../src/notebook-session";
 
 // The files each run reads and writes (the reactive notebook's file edges):
@@ -100,39 +102,19 @@ function setBroker(b: { ctrl: SharedArrayBuffer; data: SharedArrayBuffer }) {
   brokerSet();
 }
 
-// The library modules compiled when the site was built (src/compile.ts,
-// precompiled; web/build.ts), fetched as the worker starts: a Sage run waits
-// for them (Sage mode's start compiled 2 MB of Python, over a second), other
-// code uses them once they are here.  It is code, and a cached copy is the
-// origin's storage, which any script of the origin can write: it is used only
-// if its bytes have the SHA-256 this worker was built with (design/security.md,
-// SEC-8D6-1).  Without them, modules compile as before.
-declare const __SB_PRECOMPILED_HASH__: string;
-async function digestHex(bytes: ArrayBuffer): Promise<string> {
-  const subtle = (globalThis as any).isSecureContext ? globalThis.crypto?.subtle : undefined;
-  if (!subtle) return sha256Hex(new Uint8Array(bytes));
-  const h = new Uint8Array(await subtle.digest("SHA-256", bytes));
-  return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-const precompiled = (async () => {
-  try {
-    const url = FILES?.["sagebrush-precompiled.json"] ?? new URL("sagebrush-precompiled.json?h=" + __SB_PRECOMPILED_HASH__.slice(0, 16), BASE).href;
-    let bytes: ArrayBuffer;
-    if (BROKERED) {
-      await brokered;
-      bytes = fetchSync(url).slice().buffer;
-    } else {
-      const r = await fetch(url);
-      if (!r.ok) return;
-      bytes = await r.arrayBuffer();
-    }
-    // (the native digest where there is one: a 15 MB file took 130 ms in the
-    // synchronous JS SHA-256, 11 ms natively; the runner's worker is not a
-    // secure context, so no crypto.subtle there: the synchronous one)
-    if ((await digestHex(bytes)) !== __SB_PRECOMPILED_HASH__) return;
-    (globalThis as any).__SAGEBRUSH_PRECOMPILED__ = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {}
-})();
+// A mode's library (web/lib-lazy.ts), fetched the first time it runs (a run
+// waits for it; the page says "loading Sage…" if that takes a while), or
+// when it is checked (without waiting).
+const fetchBytes = async (url: string): Promise<ArrayBuffer | Uint8Array> => {
+  if (BROKERED) {
+    await brokered;
+    return fetchSync(url).slice();
+  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.arrayBuffer();
+};
+const libLoading = (what: string | null) => postMessage({ libLoading: what });
 
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
@@ -140,7 +122,11 @@ self.onmessage = async (ev: MessageEvent) => {
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
   if (m.mount) return mount(m.mount);
-  if (m.sage) await precompiled;
+  const mode = m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : null;
+  if (mode) {
+    const p = prefetchMode(mode, fetchBytes, libLoading);
+    if (m.code !== undefined) await p;
+  }
   await session.handle(m);
 };
 // The interrupt flag, shared with the page when it is cross-origin isolated
