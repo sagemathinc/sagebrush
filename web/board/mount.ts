@@ -550,7 +550,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       const evaluate = (code: string, within: number, by?: number) => { dirty.add(mode); return ops.evaluate(code, given, within, by); };
       const r: Evaluated = (await reset(REFRESH_MS)) ? await evaluate(test, ms) : { ok: false, error: `the board's code didn't finish running again within ${REFRESH_MS / 1000} s, so it wasn't checked` };
       const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
-      const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
+      const message = !r.ok ? (r.undecided ? "The check could not decide: " : "The check failed: ") + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
       // (the hints shown after this attempt: the computed ones computed now, with the same answer)
       const until = Date.now() + Math.min(2 * ms, 20_000), left = () => Math.min(ms, until - Date.now());
       const wrong = (a.wrongAttempts ?? 0) + (outcome === "wrong" ? 1 : 0);
