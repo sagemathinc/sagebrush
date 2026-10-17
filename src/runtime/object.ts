@@ -825,6 +825,17 @@ export function unboundFunction(d: any): any {
   return d.$owner !== undefined ? selfChecked(d) : d;
 }
 
+// A special method found on a type, called for self as CPython's
+// vectorcall_method: a function (or a builtin type's method) with self
+// first; another object with a __get__ (staticmethod, classmethod, a
+// descriptor) bound by it to self and owner, then called with the rest; any
+// other callable with the rest (astra CORR-96B-1)
+function callSpecial(f: any, self: any, owner: any, args: any[]): any {
+  if (typeof f === "function" && !isType(f) && f.$self === undefined && (typeOf(f) === T.function || f.$builtinMethod === true)) return f(self, ...args);
+  const get = lookupType(typeOf(f), "__get__");
+  if (get !== undefined) return callObj(get(f, self, owner), args);
+  return callObj(f, args);
+}
 // A class's attribute set and deleted through its metaclass's own
 // __setattr__ and __delattr__ when it has one, as CPython's type slots
 // (type's own: typeSetattr, typeDelattr)
@@ -835,7 +846,7 @@ export function setattr(o: any, name: string, v: any): void {
     if (meta !== T.type) {
       const sa = lookupType(meta, "__setattr__");
       if (sa !== undefined && sa !== typeSetattr) {
-        sa(o, name, v);
+        callSpecial(sa, o, meta, [name, v]);
         return;
       }
     }
@@ -845,7 +856,7 @@ export function setattr(o: any, name: string, v: any): void {
   if (t.$customSet) {
     const sa = lookupType(t, "__setattr__");
     if (sa !== undefined && sa !== objectSetattr) {
-      sa(o, name, v);
+      callSpecial(sa, o, t, [name, v]);
       return;
     }
   }
@@ -884,12 +895,25 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
 export function notForType(o: any, fn: string): void {
   if (isType(o)) raise(T.TypeError, `can't apply this ${fn} to ${typeName(o)} object`);
 }
-export const objectSetattr = pyfn(function __setattr__(o: any, name: string, v: any) {
+// (a slot wrapper's arguments, as CPython's: the receiver, then exactly n
+// more, checked before anything is read or changed, astra CORR-96B-2)
+export function slotArgs(fn: string, owner: string, a: ArrayLike<any>, n: number, receiver?: (x: any) => void): void {
+  if (a.length === 0) raise(T.TypeError, `descriptor '${fn}' of '${owner}' object needs an argument`);
+  receiver?.(a[0]);
+  if (a.length - 1 !== n) raise(T.TypeError, n === 2 ? `${fn} expected 2 arguments, got ${a.length - 1}` : `expected 1 argument, got ${a.length - 1}`);
+}
+// (keywords refused with a slot wrapper's message)
+export function noKeywords(f: any): any {
+  f.$kw = (pos: any[], names: string[], values: any[]) => (names.length ? raise(T.TypeError, `wrapper ${f.__name__}() takes no keyword arguments`) : f(...pos));
+  return f;
+}
+export const objectSetattr = noKeywords(pyfn(function __setattr__(o: any, name: string, v: any) {
+  slotArgs("__setattr__", "object", arguments, 2);
   notForType(o, "__setattr__");
   if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   genericSetattr(o, name, v, typeOf(o));
   return null;
-}, "__setattr__");
+}, "__setattr__"));
 
 // type.__setattr__ and type.__delattr__ (types.ts puts them on type)
 const typeAttrName = (fn: string, c: any, name: any): string => {
@@ -897,14 +921,19 @@ const typeAttrName = (fn: string, c: any, name: any): string => {
   if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   return name;
 };
-export const typeSetattr = pyfn(function __setattr__(c: any, name: any, v: any) {
+const typeReceiver = (fn: string) => (c: any) => {
+  if (!isType(c)) raise(T.TypeError, `descriptor '${fn}' requires a 'type' object but received a '${typeName(c)}'`);
+};
+export const typeSetattr = noKeywords(pyfn(function __setattr__(c: any, name: any, v: any) {
+  slotArgs("__setattr__", "type", arguments, 2, typeReceiver("__setattr__"));
   setTypeAttr(c, typeAttrName("__setattr__", c, name), v);
   return null;
-}, "__setattr__");
-export const typeDelattr = pyfn(function __delattr__(c: any, name: any) {
+}, "__setattr__"));
+export const typeDelattr = noKeywords(pyfn(function __delattr__(c: any, name: any) {
+  slotArgs("__delattr__", "type", arguments, 1, typeReceiver("__delattr__"));
   delTypeAttr(c, typeAttrName("__delattr__", c, name));
   return null;
-}, "__delattr__");
+}, "__delattr__"));
 export function delattr(o: any, name: string): void {
   if (reservedName(name)) reservedAttr(o, name);
   if (isType(o)) {
@@ -912,7 +941,7 @@ export function delattr(o: any, name: string): void {
     if (meta !== T.type) {
       const dl = lookupType(meta, "__delattr__");
       if (dl !== undefined && dl !== typeDelattr) {
-        dl(o, name);
+        callSpecial(dl, o, meta, [name]);
         return;
       }
     }
@@ -921,7 +950,7 @@ export function delattr(o: any, name: string): void {
   const t = typeOf(o);
   const dl = lookupType(t, "__delattr__");
   if (dl !== undefined && dl.$genericDelattr !== true) {
-    dl(o, name);
+    callSpecial(dl, o, t, [name]);
     return;
   }
   genericDelattr(o, name, t);
