@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 // asserts the rest).
 const TEST = __dirname + "/../../test/";
 const CLI = __dirname + "/../src/cli.js";
-test("Graph.plot: positions, the spring layout, colours, arrows; other options refused", () => {
+test("Graph.plot: positions, the spring layout, colours, arrows; other options, and graphs and option streams past the caps, refused", () => {
   const out = execFileSync(process.execPath, [CLI, "--sage", TEST + "graph_plot_cases.sage"], { encoding: "utf8", timeout: 120000 });
   assert.deepEqual(out.trim().split("\n"), [
     "Graphics object consisting of 9 graphics primitives",
@@ -24,7 +24,16 @@ test("Graph.plot: positions, the spring layout, colours, arrows; other options r
     "refused: Graph.plot option 'by_component' is not supported in Sagebrush",
     "ValueError: edge_style must be 'solid', 'dashed', 'dotted' or 'dashdot', not 'wavy'",
     "refused: Graph.show3d is not supported in Sagebrush",
-    "refused: a spring layout of a graph this large is not supported in Sagebrush (at most 1500 vertices and 20000 edges)",
+    "refused: a picture of a graph this large is not supported in Sagebrush (at most 1500 vertices and 20000 edges)",
+    "refused: a picture of a graph this large is not supported in Sagebrush (at most 1500 vertices and 20000 edges)",
+    "refused: a picture of a graph this large is not supported in Sagebrush (at most 1500 vertices and 20000 edges)",
+    "refused (stored positions): a picture of a graph this large is not supported in Sagebrush (at most 1500 vertices and 20000 edges)",
+    "refused: Graph.plot: edge_colors of more than 20000 items is not supported in Sagebrush",
+    "refused: Graph.plot: partition of more than 1500 items is not supported in Sagebrush",
+    "refused: Graph.plot: partition of more than 1500 items is not supported in Sagebrush",
+    "refused: Graph.plot: vertex_colors of more than 1500 items is not supported in Sagebrush",
+    "refused: Graph.plot: edge_colors of more than 20000 items is not supported in Sagebrush",
+    "Graphics object consisting of 7 graphics primitives",
     "ok",
   ]);
 });

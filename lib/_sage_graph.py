@@ -1004,9 +1004,26 @@ def _spring_pos(G, vs, iterations):
     return {v: ((out[ids[v]][0] + 10) / 64, -(out[ids[v]][1] + 10) / 64) for v in vs}
 
 
+def _bounded(items, budget, what):
+    """The items, read one at a time: at most budget of them (repeats and
+    ones that name nothing count too), else refused, so that an endless
+    iterable is refused rather than read forever (HARD-856-2/3)."""
+    import itertools
+    out = list(itertools.islice(iter(items), budget + 1))
+    if len(out) > budget:
+        raise NotImplementedError("Graph.plot: %s of more than %d items is not supported in Sagebrush" % (what, budget))
+    return out
+
+
 def _plot_graph(G, options):
     import math
+    import _graph_spring as sp
     sa = _sa()
+    # (one admission for every layout, given positions too: a primitive per
+    # edge, a loop a 49-point line, a text per label, HARD-856-1)
+    if G.order() > sp.MAX_NODES or G.size() > sp.MAX_EDGES:
+        raise NotImplementedError("a picture of a graph this large is not supported in Sagebrush "
+                                  "(at most %d vertices and %d edges)" % (sp.MAX_NODES, sp.MAX_EDGES))
     from sage_plot import GRAPHICS_OPTIONS
     options = dict(options)
     gopts = {k: options.pop(k) for k in list(options) if k in GRAPHICS_OPTIONS}
@@ -1047,11 +1064,20 @@ def _plot_graph(G, options):
             labels = _sorted({l for _, _, l in edges})
             pal = dict(zip(labels, _rainbow(len(labels))))
             colour_of = {(u, v, l): pal[l] for u, v, l in edges}
-    for c, es in (options.get("edge_colors") or {}).items():
-        for e in es:
-            for u, v, l in edges:
-                if (u, v) == tuple(e[:2]) or (not G._directed and (v, u) == tuple(e[:2])):
-                    colour_of[(u, v, l)] = c
+    # (the edges indexed once; every item read counted, HARD-856-2)
+    index = {}
+    for e in edges:
+        index[(e[0], e[1])] = e
+        if not G._directed:
+            index[(e[1], e[0])] = e
+    budget = [sp.MAX_EDGES]
+    for c, es in _bounded((options.get("edge_colors") or {}).items(), sp.MAX_EDGES, "edge_colors"):
+        got = _bounded(es, budget[0], "edge_colors")
+        budget[0] -= len(got)
+        for e in got:
+            hit = index.get((e[0], e[1]))
+            if hit is not None:
+                colour_of[hit] = c
     size = options.get("vertex_size", 200)
     r = math.sqrt(float(size)) * 0.9
     loop = float(options.get("loop_size", 0.075))
@@ -1068,12 +1094,19 @@ def _plot_graph(G, options):
             g += sa.arrow(pos[u], pos[v], color=c, thickness=thickness, arrowshorten=r + 1, linestyle=style)
         else:
             g += sa.line([pos[u], pos[v]], color=c, thickness=thickness, linestyle=style)
+    # (every member read counted, repeats and others too, HARD-856-3)
+    left = [sp.MAX_NODES]
+
+    def members(p, what):
+        got = _bounded(p, left[0], what)
+        left[0] -= len(got)
+        return got
     groups = []
     if options.get("partition") is not None:
-        parts = [list(p) for p in options["partition"]]
+        parts = [members(p, "partition") for p in _bounded(options["partition"], sp.MAX_NODES, "partition")]
         groups = list(zip(_rainbow(len(parts)), parts))
     elif options.get("vertex_colors") is not None:
-        groups = [(c, list(p)) for c, p in options["vertex_colors"].items()]
+        groups = [(c, members(p, "vertex_colors")) for c, p in _bounded(options["vertex_colors"].items(), sp.MAX_NODES, "vertex_colors")]
     coloured = {v for _, p in groups for v in p}
     rest = [v for v in vs if v not in coloured]
     if rest or not groups:
