@@ -52,3 +52,34 @@ for bad in [5, None]:
         except TypeError as e:
             print("TypeError", e)
 
+
+# a str subclass's own __len__, __getitem__, __iter__ and __str__ are not
+# read: the string's characters are (astra's CORR-484-1)
+class Short(str):
+    def __len__(self):
+        return 0
+
+
+class Indexed(str):
+    def __getitem__(self, key):
+        return "bad"
+
+    def __iter__(self):
+        return iter("bad")
+
+
+class Stringy(str):
+    def __str__(self):
+        return "{other}"
+
+
+for C in (Short, Indexed, Stringy):
+    print(C.__name__, list(_string.formatter_parser(C("{x}"))))
+    first, rest = _string.formatter_field_name_split(C("a[0].b"))
+    print(C.__name__, first, type(first).__name__, list(rest))
+# (positional only, as the C functions)
+for f in (_string.formatter_parser, _string.formatter_field_name_split):
+    try:
+        f(format_string="{x}") if f is _string.formatter_parser else f(field_name="a")
+    except TypeError as e:
+        print("keyword refused:", type(e).__name__)

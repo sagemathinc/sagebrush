@@ -73,3 +73,19 @@ class Strict(string.Formatter):
 show("subclass", lambda: Strict().format("{a!u} {b}", a="x", b="y"))
 show("subclass unused", lambda: Strict().format("{a}", a=1, extra=2))
 
+
+# Formatter over a str subclass with its own __len__ or __getitem__: the
+# string's characters (astra's CORR-484-1)
+class Short(str):
+    def __len__(self):
+        return 0
+
+
+class Indexed(str):
+    def __getitem__(self, key):
+        return "bad"
+
+
+show("subclass __len__", lambda: string.Formatter().format(Short("{x}"), x="value"))
+show("subclass __getitem__", lambda: string.Formatter().format(Indexed("{x}!"), x="value"))
+show("subclass field name", lambda: string.Formatter().format("{0[k]}", {Short("k"): 1, "k": 2}))

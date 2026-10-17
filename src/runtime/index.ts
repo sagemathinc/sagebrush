@@ -854,17 +854,15 @@ function caughtFrames(e: any): Frame[] {
 }
 
 // (limit, as traceback's: the first `limit` frames, or with a negative one
-// the last -limit; null: all)
-function formatOne(e: any, caught = false, limit: number | null = null): string {
-  let out = "";
+// the last -limit; null: all). The items CPython's format_exception lists:
+// the header, one per frame, the exception's line)
+function formatOne(e: any, caught = false, limit: number | null = null): string[] {
+  const out: string[] = [];
   let frames = caught ? caughtFrames(e) : framesOf(e);
   if (limit !== null) frames = limit >= 0 ? frames.slice(0, limit) : frames.slice(Math.max(0, frames.length + limit));
   if (frames.length) {
-    out += "Traceback (most recent call last):\n";
-    for (const f of frames) {
-      out += `  File "${f.file}", line ${f.line}, in ${f.name}\n`;
-      if (f.text) out += `    ${f.text}\n`;
-    }
+    out.push("Traceback (most recent call last):\n");
+    for (const f of frames) out.push(`  File "${f.file}", line ${f.line}, in ${f.name}\n` + (f.text ? `    ${f.text}\n` : ""));
   }
   const t = Obj.typeOf(e);
   let msg: string;
@@ -875,12 +873,16 @@ function formatOne(e: any, caught = false, limit: number | null = null): string 
     msg = "<exception str() failed>";
   }
   const mod = t.$module === "builtins" || t.$module === "__main__" ? "" : t.$module + ".";
-  out += `${mod}${t.$qualname}${msg ? ": " + msg : ""}\n`;
+  out.push(`${mod}${t.$qualname}${msg ? ": " + msg : ""}\n`);
   return out;
 }
 
 export function formatException(e: any, caught = false, limit: number | null = null, chain = true): string {
-  const parts: string[] = [];
+  return formatExceptionItems(e, caught, limit, chain).join("");
+}
+
+export function formatExceptionItems(e: any, caught = false, limit: number | null = null, chain = true): string[] {
+  const parts: string[][] = [];
   const seen = new Set<any>();
   let cur = e;
   while (cur !== null && cur !== undefined && !seen.has(cur)) {
@@ -888,14 +890,14 @@ export function formatException(e: any, caught = false, limit: number | null = n
     parts.unshift(formatOne(cur, caught, limit));
     if (!chain) break;
     if (cur.__cause__ !== null && cur.__cause__ !== undefined) {
-      parts.unshift("\nThe above exception was the direct cause of the following exception:\n\n");
+      parts.unshift(["\nThe above exception was the direct cause of the following exception:\n\n"]);
       cur = cur.__cause__;
     } else if (cur.__context__ !== null && cur.__context__ !== undefined && cur.__suppress_context__ !== true) {
-      parts.unshift("\nDuring handling of the above exception, another exception occurred:\n\n");
+      parts.unshift(["\nDuring handling of the above exception, another exception occurred:\n\n"]);
       cur = cur.__context__;
     } else break;
   }
-  return parts.join("");
+  return parts.flat();
 }
 
 // Sage mode: `/` on two ints is an exact rational (sage_all.Rational).
@@ -1025,7 +1027,6 @@ export const R: any = {
 // A small traceback module over the runtime's own traceback formatting.
 M.newBuiltinModule("traceback", (m) => {
   const exc = (a: any, b: any) => (b !== undefined && b !== null ? b : a);
-  const lines = (s: string) => s.split(/(?<=\n)/).filter((l) => l.length);
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   // format_exception(exc, /, value=, tb=, limit=None, chain=True, **kwargs),
   // print_exception(exc, /, value=, tb=, limit=None, file=None, chain=True,
@@ -1052,30 +1053,72 @@ M.newBuiltinModule("traceback", (m) => {
     if (Object.hasOwn(extra, "colorize") && O.truth(extra.colorize)) raise(T.NotImplementedError, `traceback.${name}(colorize=True) is not supported here`);
     return got;
   };
-  // (limit: None, then sys.tracebacklimit if it is set, as CPython's)
+  // (limit as CPython's StackSummary takes it: None, then sys.tracebacklimit,
+  // a negative one 0; then limit >= 0 decides, by Python's own comparison,
+  // between islice's stop (an integer 0 <= x <= sys.maxsize) and deque's
+  // maxlen -limit (an int, at most sys.maxsize), with their errors; the
+  // exact integer checked before it becomes a JS number, astra's CORR-484-3)
+  const MAXSIZE = 9223372036854775807n;
+  const asInt = (x: any): bigint | null => (typeof x === "boolean" ? BigInt(x ? 1 : 0) : O.isPyInt(x) ? BigInt(O.index(x)) : null);
   const limitOf = (v: any): number | null => {
-    if (v === undefined || v === null) {
-      const t = Obj.getattr(M.importModule("sys"), "tracebacklimit", null);
-      return t === null ? null : Math.max(0, Number(O.index(t)));
+    let lim = v;
+    if (lim === undefined || lim === null) {
+      lim = Obj.getattr(M.importModule("sys"), "tracebacklimit", null);
+      if (lim === null) return null;
+      if (O.truth(O.lt(lim, 0))) lim = 0;
     }
-    return Number(O.index(v));
+    if (O.truth(O.ge(lim, 0))) {
+      const bad = () => raise(T.ValueError, "Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.");
+      let n: bigint;
+      try {
+        n = BigInt(O.index(lim));
+      } catch {
+        return bad();
+      }
+      if (n < 0n || n > MAXSIZE) return bad();
+      return Number(n);
+    }
+    const m = O.neg(lim);
+    const n = asInt(m);
+    if (n === null) raise(T.TypeError, "an integer is required");
+    if (n! > MAXSIZE) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    return -Number(n);
   };
   const chainOf = (g: Record<string, any>) => (Object.hasOwn(g, "chain") ? O.truth(g.chain) : true);
-  // (the exception to format: value if given, else exc; both or neither of value and tb)
+  // (the exception: value if given, else exc; both or neither of value and
+  // tb. A tb can't be honored here: this runtime has no traceback objects
+  // (sys.exc_info()[2] and __traceback__ are None), so an explicit tb is
+  // refused; None only where it drops nothing, an exception with no frames,
+  // as one never raised: astra's CORR-484-2)
+  const frameless = (e: any) => {
+    if (e === null || typeof e !== "object") return true;
+    try {
+      return caughtFrames(e).length === 0;
+    } catch {
+      return false;
+    }
+  };
   const target = (g: Record<string, any>) => {
     const hasV = Object.hasOwn(g, "value"), hasT = Object.hasOwn(g, "tb");
     if (hasV !== hasT) raise(T.ValueError, "Both or neither of value and tb must be given");
-    return hasV ? g.value : g.exc;
+    const e = hasV ? g.value : g.exc;
+    if (hasT && (g.tb !== null || !frameless(e)))
+      raise(T.NotImplementedError, "traceback objects are not supported here (sys.exc_info()[2] and __traceback__ are None): pass the exception alone, format_exception(e)");
+    return e;
   };
-  const text = (e: any, limit: number | null, chain: boolean) => (e === null || e === undefined ? "NoneType: None\n" : formatException(e, true, limit, chain));
-  // (to file, else the current sys.stderr; None: nothing; a write per line, as CPython's)
-  const emit = (s: string, file: any) => {
+  const text = (e: any, limit: number | null, chain: boolean) => (e === null || e === undefined ? ["NoneType: None\n"] : formatExceptionItems(e, true, limit, chain));
+  // (to file, else the current sys.stderr; None: nothing; per item, a write
+  // of it and of "", as CPython's print(item, file=file, end=""))
+  const emit = (items: string[], file: any) => {
     if (file === undefined || file === null) {
       file = Obj.getattr(M.importModule("sys"), "stderr", null);
       if (file === null) return null;
     }
     const w = Obj.getattr(file, "write");
-    for (const l of lines(s)) Obj.callObj(w, [l]);
+    for (const l of items) {
+      Obj.callObj(w, [l]);
+      Obj.callObj(w, [""]);
+    }
     return null;
   };
   const withKw = (name: string, params: string[], posOnly: number, impl: (g: Record<string, any>) => any, kwargs = false) => {
@@ -1085,7 +1128,7 @@ M.newBuiltinModule("traceback", (m) => {
   };
   withKw("format_exception", ["exc", "value", "tb", "limit", "chain"], 1, (g) => {
     const e = target(g);
-    return lines(text(e, limitOf(g.limit), chainOf(g)));
+    return text(e, limitOf(g.limit), chainOf(g));
   }, true);
   fn("format_exception_only", (a: any, b: any = undefined) => {
     const e = exc(a, b);
@@ -1097,18 +1140,17 @@ M.newBuiltinModule("traceback", (m) => {
     return emit(text(e, limitOf(g.limit), chainOf(g)), g.file);
   }, true);
   // (the exception being handled, as sys.exc_info() has it; None's line
-  // outside any; limit as format_exception's)
+  // outside any; limit as format_exception's, checked even then, as CPython)
   const formatExc = (limit: any = null, chain: any = true) => {
-    const e = Obj.currentExc();
-    if (e === null) return "NoneType: None\n";
-    return formatException(e, true, limitOf(limit), O.truth(chain));
+    const lim = limitOf(limit);
+    return text(Obj.currentExc(), lim, O.truth(chain));
   };
   const excSig = Obj.sig(["limit", "chain"]);
   const tooMany = (n: number) => raise(T.TypeError, `format_exc() takes from 0 to 2 positional arguments but ${n} were given`);
-  fn("format_exc", (...a: any[]) => (a.length > 2 ? tooMany(a.length) : formatExc(a[0], a[1])));
-  m.format_exc.$kw = (pos: any[], names: string[], values: any[]) => (pos.length > 2 ? tooMany(pos.length) : formatExc(...bindArgs("format_exc", excSig, pos, names, values)));
+  fn("format_exc", (...a: any[]) => (a.length > 2 ? tooMany(a.length) : formatExc(a[0], a[1]).join("")));
+  m.format_exc.$kw = (pos: any[], names: string[], values: any[]) => (pos.length > 2 ? tooMany(pos.length) : formatExc(...bindArgs("format_exc", excSig, pos, names, values)).join(""));
   m.format_exc.$kwPos = true;
-  // (print_exc prints what format_exc returns)
+  // (print_exc prints what format_exc returns, a write per item)
   withKw("print_exc", ["limit", "file", "chain"], 0, (g) => emit(formatExc(g.limit ?? null, Object.hasOwn(g, "chain") ? g.chain : true), g.file));
   fn("format_tb", (..._a: any[]) => []);
   fn("extract_tb", (..._a: any[]) => []);
