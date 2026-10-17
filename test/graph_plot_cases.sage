@@ -54,9 +54,32 @@ try:
     G.show3d()
 except NotImplementedError as e:
     print("refused:", e)
-# a graph beyond the spring layout's caps is refused, not drawn wrong
+# a graph beyond the caps is refused, not drawn wrong, whatever its layout
+# (HARD-856-1)
+import itertools
+B = Graph(1501)
+for kw in [{}, dict(layout='circular'), dict(pos={v: (v, 0) for v in range(1501)})]:
+    try:
+        B.plot(**kw)
+        print("not refused", list(kw))
+    except NotImplementedError as e:
+        print("refused:", e)
+B.set_pos({v: (v, 0) for v in range(1501)})
 try:
-    Graph(1501).plot()
+    B.plot()
 except NotImplementedError as e:
-    print("refused:", e)
+    print("refused (stored positions):", e)
+# endless or too many items in the colour options are refused, not read
+# forever (HARD-856-2, HARD-856-3)
+T = Graph([(0, 1), (1, 2)])
+for kw in [dict(edge_colors={'red': itertools.repeat((0, 1))}), dict(partition=[itertools.count()]),
+           dict(partition=itertools.repeat([0])), dict(vertex_colors={'red': itertools.count()}),
+           dict(edge_colors={'red': [(0, 1)] * 20001})]:
+    try:
+        T.plot(**kw)
+        print("not refused", list(kw))
+    except NotImplementedError as e:
+        print("refused:", e)
+# within them, repeats are fine
+print(repr(T.plot(edge_colors={'red': [(0, 1)] * 100}, partition=[[0, 0, 2], [1]])))
 print("ok")
