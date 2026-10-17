@@ -30,7 +30,8 @@ export class Pos {
 // once, and at most one such string is kept alive).
 const SHORT = 256;
 const CACHE_UNITS = 1 << 23;
-const cache = new Map<string, Pos | null>();
+type Entry = { key: string; p: Pos | null };
+const cache = new Map<string, Entry>();
 let cachedUnits = 0;
 let bigKey: string | null = null;
 let bigVal: Pos | null = null;
@@ -69,30 +70,97 @@ function scan(s: string): Pos | null {
   return n ? new Pos(s, c, n) : null;
 }
 
-// The surrogate-pair index of s, or null if it has none.
+// The probes a lookup makes, for the tests: each comparison here of two
+// strings of the same length (which can be full), failed or not, and each
+// cache lookup that finds the string, as one, whatever Map.get compares
+// inside it; and lookups, the cache lookups made, found or not.
+export const probes = { n: 0, lookups: 0 };
+
+// An equal string that is another object becomes the one every reference
+// here holds (lastKey, bigKey, its index's s, its cache key): one body is
+// kept alive, not two equal ones (HARD-3F4-1), and the next comparisons are
+// of pointers.  Where it was found says which of them hold it, so they are
+// assigned, not compared again (HARD-3F4-2).  A new object costs at most
+// two comparisons here, each at most its length: with lastKey, which can
+// fail late when it is as long and differs near the end, then with bigKey
+// (not again when it is lastKey); and one cache lookup, at most CACHE_UNITS
+// units (HARD-3F4-3, HARD-F67-1): V8's Map compares only the resident keys
+// with the same hash, each at most once and at most its length, and the
+// keys hold at most CACHE_UNITS units; and one pass hashing s, at most
+// len(s) per new object (V8 keeps a string's hash after the first), only
+// for a string that can be cached: a longer one is never looked up there
+// (HARD-ABC-1).  Then its asks compare pointers.
 let lastKey: string | null = null;
 let lastVal: Pos | null = null;
+let lastBig = false; // lastKey is bigKey
+let lastEntry: Entry | null = null; // lastKey's cache entry
+let lastTouched = false; // lastKey was asked about again since it was found
+
+// The surrogate-pair index of s, or null if it has none.
 export function pairs(s: string): Pos | null {
   if (s.length < SHORT) return SURROGATE.test(s) ? scan(s) : null;
   // (the string last asked about first: a loop over one string compares
-  // its pointer, not its contents)
-  if (s === lastKey) return lastVal;
-  const p = longPairs(s);
+  // its pointer, not its contents; an equal string that is another object is
+  // compared in full at most once here (with lastKey, above), then kept as the key, so the next asks about it
+  // compare pointers again: json.loads of a new json.dumps result took a
+  // full comparison per character)
+  if (lastKey !== null && s.length === lastKey.length) probes.n++;
+  if (s === lastKey) {
+    lastKey = s;
+    if (lastBig) bigKey = s;
+    if (lastVal !== null) lastVal.s = s;
+    lastTouched = true;
+    return lastVal;
+  }
+  // (the cache entry of the string asked about before is re-keyed by the
+  // object last asked about, deleting its own key, a pointer comparison, and
+  // made the most recently used: until then the old key is a second body of
+  // at most CACHE_UNITS >> 3 units)
+  if (lastEntry !== null && lastTouched) {
+    cache.delete(lastEntry.key);
+    lastEntry.key = lastKey!;
+    cache.set(lastKey!, lastEntry);
+  }
+  // (and the string last asked about forgotten before s is looked up: a
+  // scan that Stop interrupts leaves no last string whose slots are no
+  // longer known, PERF-DA5-1)
+  const wasBig = lastBig;
+  lastKey = null;
+  lastVal = null;
+  lastBig = false;
+  lastEntry = null;
+  lastTouched = false;
+  const p = longPairs(s, wasBig);
   lastKey = s;
   return (lastVal = p);
 }
-function longPairs(s: string): Pos | null {
-  if (s === bigKey) return bigVal;
-  const hit = cache.get(s);
+// (wasBig: lastKey, just found unequal to s, is bigKey; lastBig and
+// lastEntry are set only once s is found or indexed)
+function longPairs(s: string, wasBig: boolean): Pos | null {
+  if (!wasBig && bigKey !== null && s.length === bigKey.length) probes.n++;
+  if (!wasBig && s === bigKey) {
+    bigKey = s;
+    if (bigVal !== null) bigVal.s = s;
+    lastBig = true;
+    return bigVal;
+  }
+  const big = s.length > CACHE_UNITS >> 3;
+  const hit = big ? undefined : (probes.lookups++, cache.get(s));
   if (hit !== undefined) {
-    cache.delete(s);
+    probes.n++;
+    // (re-inserted under the new object, which the index then holds too)
+    cache.delete(hit.key);
+    hit.key = s;
     cache.set(s, hit);
-    return hit;
+    if (hit.p !== null) hit.p.s = s;
+    lastEntry = hit;
+    return hit.p;
   }
   const p = scan(s);
-  if (s.length > CACHE_UNITS >> 3) {
+  if (big) {
     bigKey = s;
     bigVal = p;
+    lastBig = true;
     return p;
   }
   while (cachedUnits + s.length > CACHE_UNITS) {
@@ -100,8 +168,10 @@ function longPairs(s: string): Pos | null {
     cache.delete(old);
     cachedUnits -= old.length;
   }
-  cache.set(s, p);
+  const e = { key: s, p };
+  cache.set(s, e);
   cachedUnits += s.length;
+  lastEntry = e;
   return p;
 }
 

@@ -102,3 +102,125 @@ test("joining a lone high surrogate to a lone low one is refused, not read as on
   const got = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trimEnd().split("\n");
   cases.forEach(([e, want], i) => assert.equal(got[i], want, e));
 });
+
+// An equal string that is another object (each json.dumps result) costs one
+// full comparison with the string last indexed, not one per position:
+// json.loads of a new dumps was 25 times slower from its second call on
+// (sage2's report, perf-json-loads-slowdown)
+test("indexing a new string equal to the last one indexed is not slower: json.loads of each new json.dumps", () => {
+  const code = [
+    "import json, time",
+    "data = [[i, str(i)] for i in range(20000)]",
+    "ts = []",
+    "for k in range(3):",
+    "    s = json.dumps(data)",
+    "    a = time.time(); json.loads(s); ts.append(time.time() - a)",
+    "print(ts[0], max(ts[1:]))",
+  ].join("\n");
+  const [first, later] = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 120000 }).trim().split(" ").map(Number);
+  // (generous: a loaded machine; the bug was 25x)
+  assert.ok(later < Math.max(first * 5, 1.0), `first ${first} s, later ${later} s`);
+});
+
+// ... and once adopted, the old equal string is not kept alive: the cache
+// holds one body of a huge string, not two (HARD-3F4-1). Two 20-million-unit
+// strings with a pair (the cache's big entry), the first dropped once the
+// second is indexed: the heap keeps about one of them.
+// The same after a scan of another string that Stop interrupts
+// (PERF-DA5-1): the interrupted ask leaves no last string behind.
+for (const interrupted of [false, true])
+test(`adopting an equal string keeps one body of it alive, not two${interrupted ? ", after an interrupted scan" : ""}`, () => {
+  const code = [
+    `const { INTR } = require(${JSON.stringify(__dirname + "/../src/runtime/interrupt.js")});`,
+    `const rt = require(${JSON.stringify(__dirname + "/../src/runtime/index.js")});`,
+    `const sp = require(${JSON.stringify(__dirname + "/../src/runtime/strpos.js")});`,
+    "const collect = globalThis.gc, heap = () => (collect(), collect(), process.memoryUsage().heapUsed);",
+    "const N = 20_000_000;",
+    "const base = heap();",
+    "let a = 'x'.repeat(N) + '\\u{1F600}';",
+    "sp.pairs(a);",
+    ...(interrupted ? [
+      "INTR[0] = 1;",
+      "let stopped = false;",
+      "try { sp.pairs('\\u{1F600}' + 'z'.repeat(2_000_000)); } catch (e) { stopped = rt.formatException(e).includes('KeyboardInterrupt'); }",
+      "if (!stopped) throw new Error('not interrupted');",
+    ] : []),
+    "let b = ('y' + 'x'.repeat(N - 1)).replace('y', 'x') + '\\u{1F600}';",  // (equal to a, another object)
+    "if (a !== b) throw new Error('not equal');",
+    "sp.pairs(b); sp.pairs(b);",
+    // (V8 keeps the last regular expression's subject, RegExp.input: scan's
+    // search of a; another match lets go of it, as any later re call does)
+    "/x/.test('x');",
+    "a = null;",
+    "const one = heap() - base;",
+    "console.log(JSON.stringify({ one, body: 2 * N }));",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["--expose-gc", "-e", code], { encoding: "utf8", timeout: 120000 }).trim());
+  // (one body is 2N bytes, two-byte for the pair; two would be 4N)
+  assert.ok(r.one < 1.5 * r.body, `kept ${r.one} bytes for a ${r.body}-byte string`);
+});
+
+// ... and probed at most twice: where the string was found says which
+// references hold it, so they are assigned, not compared again
+// (HARD-3F4-2). Each new equal object, found as the string last indexed, as
+// the big entry or in the cache, takes one probe; found after another
+// string as long, differing only at its end (A, B, a new A), two: the
+// failed comparison with B, then the comparison or cache lookup that finds
+// A (HARD-3F4-3; a cache lookup is one probe, whatever Map.get compares
+// inside it, HARD-F67-1). And,
+// timed, indexing a new equal 20-million-unit string costs about one
+// comparison of two of them.
+test("a new equal string takes at most two probes, a comparison with the last string and one lookup, wherever it is found", () => {
+  const code = [
+    `const sp = require(${JSON.stringify(__dirname + "/../src/runtime/strpos.js")});`,
+    // (a new flat object equal to the last one made of length N)
+    "const make = (N, end = 'x') => ('y' + 'x'.repeat(N - 2) + end + '\\u{1F600}').replace('y', 'x');",
+    "const other = 'z'.repeat(1000) + '\\u{1F600}';",
+    "const counts = {};",
+    "const count = (k, s) => { const n = sp.probes.n; sp.pairs(s); (counts[k] ??= []).push(sp.probes.n - n); };",
+    "const lookups = {};",
+    "for (const [k, N] of [['big', 2_000_000], ['cached', 300_000]]) {",
+    "  const l0 = sp.probes.lookups;",
+    "  count(k + ' new', make(N));",
+    "  for (let i = 0; i < 3; i++) count(k + ' last', make(N));",
+    "  for (let i = 0; i < 3; i++) { sp.pairs(other); count(k + ' found', make(N)); count(k + ' last', make(N)); }",
+    "  for (let i = 0; i < 3; i++) { sp.pairs(make(N, 'a')); sp.pairs(make(N, 'b')); count(k + ' after B', make(N, 'a')); }",
+    // (other, cached, is looked up each time it is asked about after another)
+    "  lookups[k] = sp.probes.lookups - l0;",
+    "}",
+    // (the cache's worst case: 26 keys as long, differing only at the end;
+    // a new copy of the last costs at most what all of them do, timed
+    // against one comparison of two of them)
+    "const W = 300_000, keys = [...'abcdefghijklmnopqrstuvwxyz'];",
+    "for (const c of keys) sp.pairs(make(W, c));",
+    "const wt = [], wu = [];",
+    "for (let i = 0; i < 7; i++) {",
+    "  const a = make(W, 'z'), b = make(W, 'z');",
+    "  let t0 = process.hrtime.bigint(); if (a !== b) throw new Error('not equal'); wt.push(Number(process.hrtime.bigint() - t0));",
+    "  sp.pairs(other);",
+    "  t0 = process.hrtime.bigint(); sp.pairs(b); wu.push(Number(process.hrtime.bigint() - t0));",
+    "}",
+    "const worst = { compare: Math.min(...wt), pairs: Math.min(...wu), keys: keys.length };",
+    "const N = 20_000_000, t = [], u = [];",
+    "for (let i = 0; i < 7; i++) {",
+    "  const a = make(N), b = make(N);",
+    "  let t0 = process.hrtime.bigint(); if (a !== b) throw new Error('not equal'); t.push(Number(process.hrtime.bigint() - t0));",
+    "  sp.pairs(a);",
+    "  t0 = process.hrtime.bigint(); sp.pairs(b); u.push(Number(process.hrtime.bigint() - t0));",
+    "}",
+    "console.log(JSON.stringify({ counts, lookups, worst, compare: Math.min(...t), pairs: Math.min(...u.slice(1)) }));",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 120000 }).trim());
+  assert.deepEqual(r.counts, {
+    "big new": [0], "big last": [1, 1, 1, 1, 1, 1], "big found": [1, 1, 1], "big after B": [1, 1, 1],
+    "cached new": [0], "cached last": [1, 1, 1, 1, 1, 1], "cached found": [1, 1, 1], "cached after B": [2, 2, 2],
+  });
+  assert.ok(r.pairs < 2 * r.compare, `indexing a new equal string took ${r.pairs} ns, one comparison ${r.compare} ns`);
+  // (a string too long for the cache is never looked up in it, so neither
+  // hashed there, HARD-ABC-1: the big loop's lookups are only other's 3;
+  // the cached loop's 14 are each ask that is not of the last string)
+  assert.deepEqual(r.lookups, { big: 3, cached: 14 });
+  // (at most two comparisons of our own and the cache's keys, each one length)
+  assert.ok(r.worst.pairs < (2 + r.worst.keys) * r.worst.compare, `the cache's worst case took ${r.worst.pairs} ns, one comparison ${r.worst.compare} ns`);
+  console.log(`cache worst case: ${(r.worst.pairs / r.worst.compare).toFixed(1)} comparisons' time`);
+});
