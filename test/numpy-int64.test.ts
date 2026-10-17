@@ -22,8 +22,14 @@ test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never r
     "np.array([2**53 + 1])", "np.array([3]) ** 50", "np.array([3]) ** 40", "np.array([1]) + 2**60", "np.array([1]) + (2**60 + 1)",
     "np.prod(np.array([3**20, 3**20, 3]))", "np.cumprod(np.array([3**20, 3**20, 3]))", "np.array([1e20]).astype(np.int64)",
     "np.array([float('nan')]).astype(np.int64)", "np.array([-1]).astype(np.uint64)", "np.array([3], np.uint64) - np.array([5], np.uint64)",
-    "np.square(np.array([2**31 + 1]))", "np.array([1]) & (2**60 + 1)", "np.array([2**62]) == 2**62 + 1", "np.array([2**62 + 1])",
+    "np.square(np.array([2**31 + 1]))", "np.array([1]) & (2**60 + 1)", "np.array([2**62 + 1])",
     "np.sum(np.array([2**62, 2**62, 1]))", "~np.array([2**62])", "np.array([2**62]) // np.array([3])",
+    // (astra's review of 6ae79e89)
+    "np.int64(2**53) + np.int64(1)", "np.add(np.int64(2**53), np.int64(1))", "np.int64(2**62) // 3", "np.sum(np.array([2**53]), initial=1)",
+    "np.array([2**53], np.uint64) + np.array([1], np.uint64)", "(lambda a: a.__setitem__(0, 2**53 + 1))(np.zeros(3, dtype=np.int64))",
+    "(lambda a: a.__setitem__(slice(None), 2**53 + 1))(np.zeros(3, dtype=np.int64))", "np.full(2, 2**53 + 1)", "np.full(2, 2**53 + 1, dtype=np.int64)",
+    "np.arange(2**53, 2**53 + 4)", "np.array([2**53]) == np.int64(2**53 + 1)", "np.array([0]) + np.int64(2**53 + 1)",
+    "-np.array([1], np.uint64)", "np.array([type('I', (), {'__int__': lambda s: 2**53 + 1, '__float__': lambda s: 2.0**53})()], dtype=np.int64)",
   ];
   const src = "import numpy as np\n" + cases.map((c) => `try:\n    print(repr(${c}))\nexcept NotImplementedError as e:\n    print(type(e).__name__, e)`).join("\n");
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" }).trimEnd().split("\n");

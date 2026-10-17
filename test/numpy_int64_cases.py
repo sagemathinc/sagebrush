@@ -74,3 +74,53 @@ for big in (10**1000, -10**1000, 2**64, -2**63 - 1, 10**20):
     for lab, f in (("add", lambda b=big: np.array([1]) + b), ("eq", lambda b=big: np.array([1]) == b), ("lt", lambda b=big: np.array([1]) < b),
                    ("mul", lambda b=big: np.array([1.5]) * b), ("radd", lambda b=big: b + np.array([1])), ("u64", lambda b=big: np.array([1], np.uint64) + b)):
         show("huge %s %s" % (lab, "+" if big > 0 else "-"), f)
+# (@sagebrush-astra's review of 6ae79e89: the results a double holds, and
+# NumPy's errors, compared; the rest refused in test/numpy-int64.test.ts)
+show("scalar mod", lambda: np.int64(2**62) % 7)
+show("scalar mod 2", lambda: np.int64(-2**62) % np.int64(7))
+show("scalar add exact", lambda: np.int64(2**52) + np.int64(2**51))
+show("big remainder", lambda: np.array([-8000000000000001]) % 3100000000000001)
+show("big floordiv exact", lambda: np.array([-8000000000000001]) // 3100000000000001)
+show("lshift neg", lambda: np.array([8]) << -1)
+show("rshift neg", lambda: np.array([8]) >> -1)
+show("rshift neg negative", lambda: np.array([-8]) >> -1)
+show("rshift 64", lambda: (np.array([-8]) >> 64, np.array([8]) >> 70))
+show("too big add", lambda: np.array([0]) + 2**63)
+show("too big mul", lambda: np.array([0]) * 2**63)
+show("too big u64", lambda: np.array([0], np.uint64) + 2**64)
+show("too big 2**100", lambda: np.array([0]) + 2**100)
+show("compare 10**400", lambda: (np.array([0]) < 10**400, np.array([0]) > -10**400, np.array([5]) == 10**400))
+show("uint64 neg small", lambda: (lambda a: (a.dtype, a.tolist()))(-np.array([0], np.uint64)))
+show("assign exact", lambda: (lambda a: (a.__setitem__(0, 2**62), a.tolist())[1])(np.zeros(3, dtype=np.int64)))
+show("full exact", lambda: np.full(2, 2**62).tolist())
+show("arange exact", lambda: np.arange(2**53, 2**53 + 8, 2).tolist())
+show("arange neg step", lambda: np.arange(2**62, 2**62 - 3 * 2**60, -2**60).tolist())
+show("int64 scalar exact", lambda: (np.int64(2**62), np.int64(-2**63)))
+show("u64 to i64 wrap", lambda: np.array([2**63], np.uint64).astype(np.int64))
+show("i64 to u64 wrap", lambda: np.array([-2**63]).astype(np.uint64))
+class IntOnly:
+    def __int__(self):
+        return 2**62
+    def __float__(self):
+        return 2.0**61
+show("__int__ honored", lambda: np.array([IntOnly()], dtype=np.int64).tolist())
+show("sum initial exact", lambda: np.sum(np.array([2**52]), initial=2**52))
+# (float32 prod: NumPy's iterator order and initial= placement)
+f = np.float32
+a = np.array([[1e-30, 1e30], [1e-30, 1e30]], f)
+show("f32 prod T", lambda: np.prod(a.T))
+show("f32 prod T axis0", lambda: np.prod(a.T, axis=0))
+show("f32 prod T axis1", lambda: np.prod(a.T, axis=1))
+show("f32 prod F", lambda: np.prod(np.asfortranarray(a)))
+show("f32 prod neg stride", lambda: np.prod(a[::-1, ::-1]))
+show("f32 prod initial", lambda: np.prod(np.array([1e-30, 1e-30, 1e30], f), initial=1e30))
+show("f32 prod initial axis", lambda: np.prod(a, axis=1, initial=1e30))
+show("f32 prod initial empty", lambda: np.prod(np.array([], f), initial=3))
+show("i64 prod initial", lambda: np.prod(np.array([2**20, 2**20]), initial=2**20))
+b = (np.arange(24, dtype=f).reshape(2, 3, 4) + 1.1) * np.float32(0.37)
+# (float(): NumPy's float32 scalar repr is not Sagebrush's yet, separately)
+show("f32 prod 3d", lambda: (float(np.prod(b)), float(np.prod(b.transpose(2, 0, 1))), np.prod(b, axis=(0, 2)), np.prod(b.transpose(1, 2, 0), axis=1)))
+show("compare inexact int", lambda: (np.array([2**62]) == 2**62 + 1, np.array([2**62]) < 2**62 + 1, np.array([2**53]) != 2**53 + 1))
+show("int scalars", lambda: (np.int64(5), np.int8(-128), np.uint8(255), np.int64(2**62), np.uint64(2**63), np.int32(3.7), np.int64(np.int8(7)), np.int64([1, 2])))
+for v, t in ((300, np.int8), (-1, np.uint8), (2**63, np.int64), (2**64, np.uint64), (-1, np.uint64)):
+    show("int scalar %r %s" % (v, t.__name__), lambda v=v, t=t: t(v))

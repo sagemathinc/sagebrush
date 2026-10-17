@@ -198,9 +198,22 @@ def _intrepr(name):
 
 _INT_NAMES = ("int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64")
 _g = globals()
+
+
+def _int_new(cls, value=0):
+    # (np.int64(x) as array creation makes it: the dtype's range, NumPy's
+    # OverflowError, and for int64/uint64 the runtime's exactness check;
+    # a sequence an array, as NumPy's)
+    if type(value) is int and (value < -2**63 or value > (2**64 - 1 if cls.__name__ == "uint64" else 2**63 - 1)):
+        # (the scalar's own conversion, before the dtype's bounds)
+        raise OverflowError("Python int too large to convert to C long")
+    r = array(value, dtype=cls)
+    return r if r.ndim else r[()]
+
+
 for _name in _INT_NAMES:
     _base = unsignedinteger if _name.startswith("u") else signedinteger
-    _cls = type(_name, (int, _base), {"__slots__": (), "__repr__": _intrepr(_name),
+    _cls = type(_name, (int, _base), {"__slots__": (), "__repr__": _intrepr(_name), "__new__": _int_new,
                                      "__str__": int.__repr__, "__hash__": int.__hash__})
     _arith(_cls)
     _g[_name] = _cls
@@ -1064,9 +1077,8 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=
 
 
 def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
-    r = _np.prod(asarray(a), axis, keepdims, dtype)
-    if initial is not None:
-        r = r * initial
+    # (initial starts the product, as NumPy's reduction: not a last factor)
+    r = _np.prod(asarray(a), axis, keepdims, dtype, initial)
     return _out(r, out)
 
 
