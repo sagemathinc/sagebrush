@@ -236,12 +236,21 @@ sends the reader to that one's `next` (https://sagebrush.space/board-host-protoc
 sees nothing else.
 
 ```json
-{ "id": "mean", "kind": "ask", "input": "text", "title": "Transitive",
-  "text": "In your words: what does it mean for $G$ to act transitively?",
-  "decide": [
-    { "name": "confuses-transitive-with-two-transitive", "about": "Says every pair goes to every pair.", "next": "pairs" },
-    { "name": "thinks-transitive-means-abelian", "next": "abelian" }
-  ] }
+{
+  "format": "sagebrush-board",
+  "version": 1,
+  "title": "Transitive",
+  "nodes": [
+    { "id": "mean", "kind": "ask", "input": "text", "title": "Transitive",
+      "text": "In your words: what does it mean for $G$ to act transitively?",
+      "decide": [
+        { "name": "confuses-transitive-with-two-transitive", "about": "Says any ordered pair of distinct points can be sent to any other, the two moved simultaneously by one group element.", "next": "pairs" },
+        { "name": "thinks-transitive-means-abelian", "next": "abelian" }
+      ] },
+    { "id": "pairs", "title": "2-transitive is more" },
+    { "id": "abelian", "title": "Transitive is not abelian" }
+  ]
+}
 ```
 
 `sagebrush board check FILE` lints these (a check in another language, an
