@@ -21,10 +21,11 @@
 import { FILES_RUNNER } from "./files-runner.js";
 
 // the files the runner may have the page fetch for its worker: the engine,
-// the PNG module (fetched when Python first writes or reads a PNG) and the
-// Python library's chunks (web/lib-lazy.ts), each checked by its SHA-256 in
-// the worker
-const OWN = /\/(sagebrush-(engine\.wasm|raster\.wasm)|lib\/[\w.-]+\.[0-9a-f]{16}\.json)$/;
+// the PNG module (fetched when Python first writes or reads a PNG), the
+// Python library's chunks (web/lib-lazy.ts) and the pinned zone data's index
+// and zone files (web/tzdata-chunks.mts), each checked by its SHA-256 in the
+// worker
+const OWN = /\/(sagebrush-(engine\.wasm|raster\.wasm)|lib\/[\w.-]+\.[0-9a-f]{16}\.json|lib\/tzdata\/(index-[0-9a-f]{64}\.json|[0-9a-f]{64}\.tzif))$/;
 
 // Files mode: the runner for a page that has the engine's files itself (a
 // board downloaded as one HTML file).  A file:// page is never cross-origin

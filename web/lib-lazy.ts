@@ -131,6 +131,33 @@ for (const [path, group] of Object.entries(M.packages.files))
   });
 g.__SAGEBRUSH_PACKAGES__ = { registry: M.packages.registry, files: pkgFiles };
 
+// The pinned zone data (web/tzdata-chunks.mts), for the browser's time
+// (lib/_pytime.py, through _time._pinned): a zone's TZif file, or null where
+// the pinned data has none; the index and the file are fetched the first time
+// they are needed, each checked against its SHA-256 (the index's in the
+// manifest, the file's in the index).
+let tzIndex: Record<string, string> | null = null;
+g.__SAGEBRUSH_TZDATA__ = (zone: string): Uint8Array | null => {
+  const ref = M.tzdata;
+  if (!ref) throw new Error("this worker carries no zone data");
+  if (tzIndex === null) {
+    const url = chunkUrl(ref.file);
+    if (url === null) throw new Error("the zone data is not in this file's engine");
+    const bytes = fetchSync(url);
+    if (sha256Hex(bytes) !== ref.sha256) throw new Error("the zone data's index is not the one this worker was built with");
+    const index = JSON.parse(new TextDecoder().decode(bytes));
+    if (index?.format !== "sagebrush-tzdata" || typeof index.zones !== "object") throw new Error("not a zone data index");
+    tzIndex = index.zones as Record<string, string>;
+  }
+  if (!Object.hasOwn(tzIndex, zone)) return null;
+  const sha = tzIndex[zone];
+  const url = chunkUrl(`lib/tzdata/${sha}.tzif`);
+  if (url === null) throw new Error("the zone data is not in this file's engine");
+  const bytes = fetchSync(url);
+  if (sha256Hex(bytes) !== sha) throw new Error(`the zone data's ${zone} is not the one this worker was built with`);
+  return bytes;
+};
+
 const MODE_NAMES: Record<string, string> = { sage: "Sage", matlab: "MATLAB", magma: "Magma" };
 const pending = new Map<string, Promise<void>>();
 /** Fetch the groups mode `mode` starts with, if not here yet; `loading` is

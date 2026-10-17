@@ -58,7 +58,14 @@ const { manifest: libManifest, chunks: libChunkFiles } = libChunks(libFiles(join
 rmSync(join(here, "dist", "lib"), { recursive: true, force: true });
 mkdirSync(join(here, "dist", "lib"), { recursive: true });
 for (const [f, bytes] of libChunkFiles) writeFileSync(join(here, "dist", f), bytes);
-const LIB_CHUNKS = [...libChunkFiles.keys()];
+// (the pinned zone data, for the browser's time: web/tzdata-chunks.mts)
+const { tzdataChunks } = await import("./tzdata-chunks.mts");
+const tz = tzdataChunks(join(here, ".."));
+libManifest.tzdata = tz.ref;
+mkdirSync(join(here, "dist", "lib", "tzdata"), { recursive: true });
+for (const [f, bytes] of tz.files) writeFileSync(join(here, "dist", f), bytes);
+console.log(`zone data: tzdata ${tz.ref.version}, ${tz.files.size - 1} zone files (${([...tz.files.values()].reduce((n, b) => n + b.length, 0) / 1e3).toFixed(0)} kB), index ${(tz.ref.size / 1e3).toFixed(0)} kB`);
+const LIB_CHUNKS = [...libChunkFiles.keys(), ...tz.files.keys()];
 console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifest.chunks).map(([g, c]) => `${g} ${(c.src.size / 1e3).toFixed(0)}+${((c.pre?.size ?? 0) / 1e3).toFixed(0)} kB`).join(", "));
 // (the manifest, in the worker: web/lib-lazy.ts)
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
@@ -197,7 +204,7 @@ copyFileSync(join(here, "viewer3d.js"), join(here, "dist", "sagebrush-viewer3d.j
 mkdirSync(join(here, "dist", "runner"), { recursive: true });
 copyFileSync(join(here, "runner", "index.html"), join(here, "dist", "runner", "index.html"));
 const { scriptHashes } = await import("./csp.ts");
-const MIME: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript", json: "application/json", wasm: "application/wasm", css: "text/css", woff2: "font/woff2", png: "image/png", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
+const MIME: Record<string, string> = { tzif: "application/octet-stream", html: "text/html; charset=utf-8", js: "text/javascript", json: "application/json", wasm: "application/wasm", css: "text/css", woff2: "font/woff2", png: "image/png", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
 // The engine, by its content (design/engines.md): what runs code, published
 // at sagebrush.space/engine/<id>/ and kept forever (scripts/publish-engine.mjs),
 // so that a board or notebook saved with one can keep running with it (an
