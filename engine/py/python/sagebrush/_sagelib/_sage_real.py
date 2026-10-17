@@ -1917,6 +1917,9 @@ class RealNumberMP:
             # correctly rounded, by bracketed binary powering (any n)
             m, e = _pow_round(self._m, self._e, n, R._prec, R._rnd)
             return RealNumberMP(R, m, e)
+        if isinstance(n, (complex, ComplexNumberMP)) and type(n).__name__ != "ComplexDoubleElement":
+            # (a complex exponent: the coarser complex field's, CORR-726-2)
+            return _real_complex_pow(self, R._prec, n)
         if isinstance(n, RealNumberMP) and n._m == 0 and not n._special:
             return R(1)
         # (as Sage: against a double the coarser wins: an RDF exponent makes
@@ -2882,6 +2885,17 @@ def _double_remainder(a, b):
     nb, db = b.as_integer_ratio()
     m, e = _remainder_dyadic(na, 1 - da.bit_length(), nb, 1 - db.bit_length())
     return math.ldexp(float(m), e) if m else math.copysign(0.0, a)
+
+
+def _real_complex_pow(x, prec, z, rev=False):
+    """x^z (z^x if rev) for a real x of precision prec and a CC or
+    ComplexField(q) number z, as Sage: in the complex field of the lower
+    precision (RealField(30)(2)^CC(3) is in ComplexField(30), RDF(2)^CC(3)
+    in CC), CORR-726-2."""
+    q = z._C._prec if isinstance(z, ComplexNumberMP) else 53
+    C = ComplexField(min(prec, q))
+    a, b = C(x), C(z)
+    return b ** a if rev else a ** b
 
 
 def _cpow(x, y):

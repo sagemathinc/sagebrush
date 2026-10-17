@@ -211,7 +211,6 @@ pow(CC2,3,None) -> 8.00000000000000 Complex Field with 53 bits of precision
 pow(CC2,RDF(3),5) -> 8.00000000000000 Complex Field with 53 bits of precision
 pow(ZZ2,3,5) -> 3 Integer Ring
 pow(ZZ2,3,None) -> 8 Integer Ring
-pow(ZZ2,RDF(3),5) -> 3 Integer Ring
 pow(QQ2,3,5) !! TypeError the 3-argument version of pow() is not supported
 pow(QQ2,3,None) -> 8 Rational Field
 pow(QQ2,RDF(3),5) !! TypeError the 3-argument version of pow() is not supported
@@ -268,7 +267,6 @@ pow(R30_2,3,5) -> 8.0000000 Real Field with 30 bits of precision
 pow(R100_2,3,5) -> 8.0000000000000000000000000000 Real Field with 100 bits of precision
 pow(RRbig,3,5) -> 2.50602668467732e993 Real Field with 53 bits of precision
 pow(CF30_2,3,5) -> 8.0000000 Complex Field with 30 bits of precision
-pow(ZZ2,RDF(3.5),5) !! TypeError cannot convert non-integral float to integer
 pow(ZZ2,RDF(3),None) -> 7.999999999999998 Real Double Field
 pow(QQ2,RDF(3),5) !! TypeError the 3-argument version of pow() is not supported
 pow(RR2,3,None) -> 8.00000000000000 Real Field with 53 bits of precision
@@ -278,3 +276,50 @@ CC(inf,inf) -> +infinity + +infinity*I Complex Field with 53 bits of precision
 CC(nan,1) -> NaN + 1.00000000000000*I Complex Field with 53 bits of precision
 CC(-inf,nan) -> -infinity + NaN*I Complex Field with 53 bits of precision
 CC(2,-inf) -> 2.00000000000000 - +infinity*I Complex Field with 53 bits of precision
+RR(2)^F(3) 8.0 float
+calls []
+RR(3).__rpow__(F(2)) 8.0 float
+calls []
+('nan-base', 10) NaN + NaN*I Complex Field with 10 bits of precision
+('nan-exp', 10) NaN + NaN*I Complex Field with 10 bits of precision
+('nan-base', 30) NaN + NaN*I Complex Field with 30 bits of precision
+('nan-exp', 30) NaN + NaN*I Complex Field with 30 bits of precision
+('nan-base', 52) NaN + NaN*I Complex Field with 52 bits of precision
+('nan-exp', 52) NaN + NaN*I Complex Field with 52 bits of precision
+('nan-base', 53) NaN + NaN*I Complex Field with 53 bits of precision
+('nan-exp', 53) NaN + NaN*I Complex Field with 53 bits of precision
+('nan-base', 54) NaN + NaN*I Complex Field with 53 bits of precision
+('nan-exp', 54) NaN + NaN*I Complex Field with 53 bits of precision
+('nan-base', 100) NaN + NaN*I Complex Field with 53 bits of precision
+('nan-exp', 100) NaN + NaN*I Complex Field with 53 bits of precision
+('real-complex-power', 'R30', 'CC') 8.0000000 Complex Field with 30 bits of precision
+('real-complex-power', 'RR', 'CC') 8.00000000000000 Complex Field with 53 bits of precision
+('real-complex-power', 'R100', 'CC') 8.00000000000000 Complex Field with 53 bits of precision
+('real-complex-power', 'RDF', 'CC') 8.00000000000000 Complex Field with 53 bits of precision
+('real-complex-power', 'R30', 'CF30') 8.0000000 Complex Field with 30 bits of precision
+('real-complex-power', 'RR', 'CF30') 8.0000000 Complex Field with 30 bits of precision
+('real-complex-power', 'R100', 'CF30') 8.0000000 Complex Field with 30 bits of precision
+('real-complex-power', 'RDF', 'CF30') 8.0000000 Complex Field with 30 bits of precision
+('real-complex-power', 'R30', 'CF100') 8.0000000 Complex Field with 30 bits of precision
+('real-complex-power', 'RR', 'CF100') 8.00000000000000 Complex Field with 53 bits of precision
+('real-complex-power', 'R100', 'CF100') 8.0000000000000000000000000000 Complex Field with 100 bits of precision
+('real-complex-power', 'RDF', 'CF100') 8.00000000000000 Complex Field with 53 bits of precision
+direct-RDF-rpow-mod TypeError the 3-argument version of pow() is not supported
+RR-rpow-mod 8.00000000000000 Real Field with 53 bits of precision
+RR-pow-mod 8.00000000000000 Real Field with 53 bits of precision
+('large-exponent', '0', 9007199254740992) 0.000000000000000 Real Field with 53 bits of precision
+('large-exponent', '0', 9007199254740993) 0.000000000000000 Real Field with 53 bits of precision
+('large-exponent', '0', -9007199254740992) +infinity Real Field with 53 bits of precision
+('large-exponent', '0', -9007199254740993) +infinity Real Field with 53 bits of precision
+('large-exponent', '-0', 9007199254740992) 0.000000000000000 Real Field with 53 bits of precision
+('large-exponent', '-0', 9007199254740993) -0.000000000000000 Real Field with 53 bits of precision
+('large-exponent', '-0', -9007199254740992) +infinity Real Field with 53 bits of precision
+('large-exponent', '-0', -9007199254740993) -infinity Real Field with 53 bits of precision
+('large-exponent', '-inf', 9007199254740992) +infinity Real Field with 53 bits of precision
+('large-exponent', '-inf', 9007199254740993) -infinity Real Field with 53 bits of precision
+('large-exponent', '-inf', -9007199254740992) 0.000000000000000 Real Field with 53 bits of precision
+('large-exponent', '-inf', -9007199254740993) -0.000000000000000 Real Field with 53 bits of precision
+('large-exponent', 'nan', 9007199254740992) NaN + NaN*I Complex Field with 53 bits of precision
+('large-exponent', 'nan', 9007199254740993) NaN + NaN*I Complex Field with 53 bits of precision
+('large-exponent', 'nan', -9007199254740992) NaN + NaN*I Complex Field with 53 bits of precision
+('large-exponent', 'nan', -9007199254740993) NaN + NaN*I Complex Field with 53 bits of precision

@@ -373,6 +373,13 @@ class RealDoubleElement(float):
             return e.parent()(self) ** e
         y = self._num(e)
         if y is None:
+            if isinstance(e, complex) or type(e).__name__ == "ComplexNumberMP":
+                # (a complex exponent: the coarser complex field's, not a
+                # real power through float(), CORR-726-2)
+                import _sage_real
+                return _sage_real._real_complex_pow(self, 53, e)
+            if type(e).__name__ == "ComplexDoubleElement":
+                return NotImplemented
             y = float(e)
         if x == 0:
             # (0.0 or -0.0 itself for a positive or NaN exponent)
@@ -399,12 +406,7 @@ class RealDoubleElement(float):
 
     def __rpow__(self, b, mod=None):
         if mod is not None:
-            # (an integer base takes an integral exponent, as Sage's
-            # Integer does; otherwise refused, as RDF's pow)
-            if isinstance(b, int) and not isinstance(b, bool):
-                if not float(self).is_integer():
-                    raise TypeError("cannot convert non-integral float to integer")
-                return pow(b, int(self), mod)
+            # (RDF's reflected power refuses a modulus, CORR-726-4)
             raise TypeError("the 3-argument version of pow() is not supported")
         return RDF(b) ** self
 
