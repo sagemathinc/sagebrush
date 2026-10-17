@@ -1959,7 +1959,17 @@ class MMap:
             u = _image_universe(self.cod, not items)
             if u is None:
                 raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
-            t = _set(items, derived=True)
+            # (its elements as the universe's: an integer image into the
+            # rationals is a rational, Type FldRatElt, never an integer
+            # labelled with the rationals, CORR-CBA-1; one Sagebrush can't
+            # coerce is refused)
+            ys = []
+            for y in items:
+                z = _coerce_struct(y, u)
+                if z is None or z is _NOCOERCE:
+                    raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
+                ys.append(z)
+            t = _set(ys, derived=True)
             t.universe = u
             return t
         if self.parts is not None:
@@ -6735,7 +6745,8 @@ def Sort(s, f=None):
     import functools
     order = sorted(range(len(items)), key=functools.cmp_to_key(lambda i, j: f(items[i], items[j])))
     # the permutation taking positions in the result to positions in s
-    return _multi([MSeq(items[i] for i in order), Perm(i + 1 for i in order)])
+    # (keeping a declared universe as the default sort does, CORR-CBA-2)
+    return _multi([_carry(MSeq((items[i] for i in order), _declared(s)), s), Perm(i + 1 for i in order)])
 
 
 def _index_of(name, s, x):
