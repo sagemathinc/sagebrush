@@ -1014,7 +1014,7 @@ def _keep_inf(t, v, first):
     if wit is not None:
         t._wit = wit
     if getattr(v, "_null", False):
-        t._null = True  # (written empty with no universe: the copy is too)
+        t._null = v._null  # (written empty with no universe, or a field's: the copy is too)
 
 
 def _carry(t, *srcs, mode="any"):
@@ -1024,18 +1024,31 @@ def _carry(t, *srcs, mode="any"):
     integers' if any has it (a range, a declared or fixed universe), else
     written empty with no universe (_null) if all were ({} join
     {Integers() | } has the integers, {} join {} none); "meet": none if
-    any had none ({Integers() | } meet {} has none); "first": the first's
-    (diff: {} diff {1} has none, {1} diff {1} the integers).  Only an empty
+    any had none ({Integers() | } meet {} has none); "first": none if the
+    first had none (diff: {} diff {1} has none, {1} diff {1} the
+    integers).  Only when every source is known (the integers' or written
+    empty): with another or an unknown universe among them t stays
+    unknown.  Only an empty
     t takes them: a nonempty one infers its own.  Gcd and Lcm read them
     (_null_int_collection)."""
     if len(t) or getattr(t, "universe", None) is not None or getattr(t, "_inf", None) is not None:
         return t
-    ks = [_provenance(x) for x in (srcs[:1] if mode == "first" else srcs)]
+    # (every source must be known, the integers' or written empty: one
+    # of unknown or another universe, {Rationals() | } join
+    # {Integers() | }, leaves t unknown, refused by Gcd and Lcm, never
+    # taken as the integers', astra2 on 76f3cb21)
+    ks = [_provenance(x) for x in srcs]
+    if not ks or any(k is None for k in ks):
+        return t
     if mode == "meet" and "null" in ks:
         t._null = True
+    elif mode == "first" and ks[0] == "null":
+        t._null = True
+    elif "field" in ks:
+        t._null = "field"  # (a field's elements: Magma's "GCD not defined for field")
     elif "int" in ks:
         t._inf = _ZZ
-    elif ks and all(k == "null" for k in ks):
+    else:
         t._null = True
     return t
 
@@ -1048,7 +1061,10 @@ def _provenance(s):
     u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
     if u is _ZZ or (u is None and inf is _ZZ):
         return "int"
-    if u is None and inf is None and getattr(s, "_null", False):
+    mark = getattr(s, "_null", False)
+    if u is _QQ or isinstance(u, _MFinField) or (u is None and inf is _QQ) or mark == "field":
+        return "field"
+    if u is None and inf is None and mark is True:
         return "null"
     return None
 
@@ -1343,7 +1359,7 @@ def _as_seq(s):
     if wit is not None:
         t._wit = wit  # (CORR-47D-1)
     if getattr(s, "_null", False) and inf is None:
-        t._null = True
+        t._null = s._null
     return t
 
 
@@ -5546,9 +5562,10 @@ def _null_int_collection(name, given):
     u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
     if u is _ZZ or inf is _ZZ:
         return
-    if u is None and getattr(s, "_null", False):
+    mark = getattr(s, "_null", False)
+    if u is None and mark is True:
         raise _arg_error(name, "Illegal null set/sequence")
-    if u is _QQ or inf is _QQ or isinstance(u, _MFinField):
+    if u is _QQ or inf is _QQ or isinstance(u, _MFinField) or mark == "field":
         raise _arg_error(name, "%s not defined for field" % name.upper())
     if isinstance(u, (_sp.PolynomialRing_, _MFFPolyRing)):
         raise MagmaError("%s of an empty collection of polynomials is not supported yet" % name, "'%s'" % name)
@@ -5559,8 +5576,8 @@ def _null_int_collection(name, given):
 
 def Gcd(*args):
     given = args
-    if len(args) > 2:
-        raise _bad_types("Gcd", args)  # (two arguments, or one sequence)
+    if len(args) > 2 or not args:
+        raise _bad_types("Gcd", args)  # (two arguments, or one sequence; none is Magma's error, never 0)
     if len(args) == 2:
         _no_rationals("Gcd", *args)
     if len(args) == 1:
@@ -5594,8 +5611,8 @@ GCD = GreatestCommonDivisor = Gcd
 
 def Lcm(*args):
     given = args
-    if len(args) > 2:
-        raise _bad_types("Lcm", args)
+    if len(args) > 2 or not args:
+        raise _bad_types("Lcm", args)  # (none is Magma's error, never 1)
     if len(args) == 1:
         if not isinstance(args[0], (MSeq, MRange, MSet)):
             raise _bad_types("Lcm", given)

@@ -1239,6 +1239,30 @@ test("an empty collection keeps what is known of its universe through copies, co
   assert.match(out, /\nend\n$/);
 });
 
+test("an empty collection made with one of another or an unknown universe is never taken as the integers' (Gcd, Lcm refuse)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (a known field's among them: Magma's "GCD not defined for field";
+  // an unknown one: refused in words; never 0 or 1, astra2 CORR-76F-1)
+  const cases = ["Gcd({Rationals() | } join {Integers() | });", "Lcm({Rationals() | } join {Integers() | });",
+    "Gcd({Integers() | } diff {Rationals() | });", "Gcd({Integers() | } meet {GF(7) | });",
+    "Gcd({Integers() | } sdiff {Rationals() | });",
+    "Gcd(Seqset(Sort([Rationals() | ])) join {Integers() | });", "Gcd({} join {Rationals() | });",
+    "Gcd(Setseq({Rationals() | }));", "Gcd([GF(7) | ] cat []);", "Gcd({Rationals() | } diff {});"];
+  const nulls = ["Gcd({Rationals() | } meet {});", "Gcd({} diff {Rationals() | });"];
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: [...cases, ...nulls].join("\n") + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const flat = out.replace(/\s+/g, " ");
+  assert.equal((flat.match(/Runtime error in '(Gcd|Lcm)': (GCD|LCM) not defined for field/g) ?? []).length, cases.length, out);
+  assert.equal(out.split("Runtime error in 'Gcd': Illegal null set/sequence").length - 1, nulls.length, out);
+  assert.doesNotMatch(out, /^[01]$/m);
+  assert.match(out, /\nend\n$/);
+  // (no arguments: Magma's Bad argument types, never 0 or 1)
+  const none = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "Gcd();\nLcm();\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  for (const name of ["Gcd", "Lcm"])
+    assert.ok(none.includes(`Runtime error in '${name}': Bad argument types\nArgument types given:\n`), none);
+  assert.doesNotMatch(none, /^[01]$/m);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
