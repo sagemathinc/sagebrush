@@ -14,7 +14,7 @@ import type { BoardMode } from "./doc";
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
 /** A question's check, or a computed hint, as run (BoardCode.evaluate): its value, or why it has none. */
-export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean }
+export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean; isolated?: boolean; preserved?: boolean | null; reason?: string | null }
 
 /** Where a board's code engine comes from (design/engines.md): its notebook
  * module, the interpreter's worker, the reactive notebook's analyzer, and
@@ -531,6 +531,23 @@ export class BoardCode {
   runAll(): Promise<any> {
     return this.queued(async () => {
       if (!(await this.ready)) return null;
+      this.release(null);
+      this.started = true;
+      const report = await this.nb.runAll().finally(() => this.changed());
+      this.ran(report);
+      return report;
+    });
+  }
+  /** The board's state as its code leaves it, made again: a new
+   * interpreter, and every item run in it.  After a check that may have
+   * changed the board's names (one not shown unchanged: CORR-A19-1). */
+  refresh(): Promise<any> {
+    return this.queued(async () => {
+      if (!(await this.ready)) return null;
+      const k = this.kernel, ready = new Promise<void>((resolve) => { const off = k.on("ready", () => { off(); resolve(); }); });
+      k.restart("");
+      await ready;
+      if (this.closed) return null;
       this.release(null);
       this.started = true;
       const report = await this.nb.runAll().finally(() => this.changed());

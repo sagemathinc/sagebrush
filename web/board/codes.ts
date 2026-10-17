@@ -176,6 +176,10 @@ export class BoardCodes {
     const e = this.engine(mode);
     return e ? e.evaluate(code, answer, ms) : Promise.resolve({ ok: false, error: this.error ?? "no interpreter for this language" });
   }
+  /** A language's interpreter made again, the board's code run in it (BoardCode.refresh). */
+  refresh(mode: BoardMode) {
+    return this.engines.get(mode)?.refresh() ?? Promise.resolve(null);
+  }
   close() {
     for (const e of this.engines.values()) e.close();
     this.engines.clear();

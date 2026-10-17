@@ -310,6 +310,24 @@ try {
   await sleep(3000);
   const pq = await node("pend");
   check(pq.answer === 2 && pq.result === undefined && !pq.attempts, "an answer changed while its check ran: the old completion dropped: " + JSON.stringify(pq));
+  // (a check that changes the board's own state, through its function: the
+  // board's code is run again, in a new interpreter, before the next check
+  // runs; it starts from the state the code leaves, CORR-A19-1)
+  await ev(`${B}.load(${JSON.stringify({ title: "Fresh", layout: "grid", columns: 2, nodes: [
+    { id: "s", code: "class Box:\n    pass\nb = Box()\nb.n = 0\ndef bump():\n    b.n += 1\n    return b.n" },
+    { id: "f", kind: "ask", input: "number", text: "Bump", check: "bump() == answer" },
+  ] })}).then(() => 1)`);
+  await until(`!!document.querySelector('.board-ask[data-ask="f"] .board-ask-check')`, 20000);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(500);
+  for (const k of [1, 2]) {
+    await ev(`(() => { const n = ${q$('.board-ask[data-ask="f"] input[type=number]')}; n.value = "1"; return 1; })()`);
+    await press('.board-ask[data-ask="f"] .board-ask-check');
+    await until(`window.sagebrush.board.snapshot().doc.nodes[1].attempts === ${k}`, 30000);
+    await sleep(300);
+  }
+  const fq = await node("f");
+  check(fq.attempts === 2 && fq.result === "right" && !fq.wrongAttempts, "a check that changed the board's state: the next one starts fresh (bump() is 1 again): " + JSON.stringify(fq));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

@@ -37,7 +37,7 @@
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
 import { asksOf, ASK_LIMITS } from "./ask";
 import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
-import type { BoardCode } from "./code";
+import type { BoardCode, Evaluated } from "./code";
 import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
@@ -513,7 +513,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     };
     board.askFeedback.set(id, { pending: true });
     redraw().catch(fail);
-    const r = await c.evaluate(mode, a.check, given, ms);
+    // (each evaluation that may have changed the board's names, not shown
+    // unchanged: the board's code run again in a new interpreter, before
+    // anything else runs, CORR-A19-1)
+    let changed = false;
+    const seen = (x: Evaluated) => { if (!(x.ok && x.isolated !== false && x.preserved === true)) changed = true; return x; };
+    const r = seen(await c.evaluate(mode, a.check, given, ms));
     const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
     const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
     // (the hints shown after this attempt: the computed ones computed now, with the same answer)
@@ -524,11 +529,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       const key = JSON.stringify([id, h.code, given]), kept = hintTexts.get(key);
       if (kept !== undefined) { hints[k] = kept; continue; }
       if (left() < 1) { hints[k] = "(this hint was not computed: this check's time ran out)"; continue; }
-      const got = await c.evaluate(mode, h.code, given, left());
+      const got = seen(await c.evaluate(mode, h.code, given, left()));
       hints[k] = got.ok && typeof got.value === "string" ? got.value : "(this hint could not be computed: " + (got.ok ? "it gave no text" : got.error ?? "it could not run") + ")";
       // (kept when it was computed: one that failed may be computed again, with time again)
       if (got.ok && typeof got.value === "string") { if (hintTexts.size >= 1000) hintTexts.clear(); hintTexts.set(key, got.value); }
     }
+    if (changed) c.refresh(mode).catch((e) => console.warn("board: the code run again after a check:", e));
     if (stale()) { board.askFeedback.delete(id); redraw().catch(fail); return; }
     board.askFeedback.set(id, { message, hints });
     await editor.attempt(id, given, outcome).catch(fail);
