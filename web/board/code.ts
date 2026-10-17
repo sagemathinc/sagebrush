@@ -515,8 +515,9 @@ export class BoardCode {
    * queue, no sync, run or other Check between its steps, given what it
    * needs without queueing again: `evaluate` (a check or computed hint,
    * WorkerKernel.evaluate, within `ms`) and `refresh` (a new interpreter,
-   * every item run in it, within `ms`: else what still runs is interrupted,
-   * false).  A check may change the board's names, so a Check refreshes
+   * every item run in it, the new interpreter's start included, within
+   * `ms`: else false, and what still runs is interrupted, which takes up to
+   * 2 s more before the interpreter is restarted instead).  A check may change the board's names, so a Check refreshes
    * after each evaluation (the coordinator's rule for CORR-A19-1); each
    * step is bounded, so the queue is. */
   exclusive<T>(f: (ops: CheckOps) => Promise<T>): Promise<T> {
@@ -528,17 +529,25 @@ export class BoardCode {
   }
   private async refreshNow(ms: number): Promise<boolean> {
     if (!(await this.ready)) return false;
-    const k = this.kernel, ready = new Promise<void>((resolve) => { const off = k.on("ready", () => { off(); resolve(); }); });
+    // (the whole of it within `ms`: the new interpreter's start too, which
+    // may never come, HARD-729-1; past it, its listener is gone and false)
+    const until = Date.now() + Math.max(0, ms);
+    const k = this.kernel;
+    let off = () => {}, timer: ReturnType<typeof setTimeout> | undefined;
+    const ready = new Promise<boolean>((resolve) => {
+      off = k.on("ready", () => resolve(true));
+      timer = setTimeout(() => resolve(false), Math.max(0, until - Date.now()));
+    });
     k.restart("");
-    await ready;
-    if (this.closed) return false;
+    const started = await ready.finally(() => { off(); clearTimeout(timer); });
+    if (!started || this.closed) return false;
     this.release(null);
     this.started = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const run = this.nb.runAll().finally(() => this.changed());
-    const over = new Promise<"over">((res) => { timer = setTimeout(() => res("over"), Math.max(0, ms)); });
+    const over = new Promise<"over">((res) => { timer = setTimeout(() => res("over"), Math.max(0, until - Date.now())); });
     const got = await Promise.race([run, over]).finally(() => clearTimeout(timer));
     if (got === "over") {
+      // (what still runs interrupted: within 2 s, else the interpreter restarted, WorkerKernel.interrupt)
       this.interrupt();
       this.ran(await run.catch(() => null));
       return false;
@@ -546,6 +555,7 @@ export class BoardCode {
     this.ran(got);
     return true;
   }
+
 
   /** Resolves when what was asked for has run (syncs, and what they started). */
   async idle(): Promise<void> {
