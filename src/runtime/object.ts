@@ -1045,12 +1045,15 @@ ${ways}
 // A generator's entries are its own: genStep moves them off when it pauses
 // and back when it resumes, as CPython keeps them in each frame.
 export const handledExceptions: any[] = [];
+// Where each exception is caught, with the raise it belongs to: its
+// traceback runs from that frame to where it was raised, as CPython's tb
+// chain, however the stack changes after (CORR-6AF-2). Capturing the stack
+// costs about as much as the raise's own capture, so it is done only once
+// the traceback module, which reads it, is imported.
+export const catches = { recorded: false };
 export function excEnter(e: any): void {
   handledExceptions.push(e);
-  // (where it is caught, with the raise it belongs to: its traceback runs
-  // from this frame to where it was raised, as CPython's tb chain, however
-  // the stack changes after, CORR-6AF-2)
-  if (e !== null && typeof e === "object" && e.$tb !== undefined) {
+  if (catches.recorded && e !== null && typeof e === "object" && e.$tb !== undefined) {
     const at: any = {};
     Error.captureStackTrace(at, excEnter);
     Object.defineProperty(e, "$caught", { value: { tb: e.$tb, at }, writable: true, enumerable: false, configurable: true });

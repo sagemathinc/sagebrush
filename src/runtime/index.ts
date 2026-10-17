@@ -709,15 +709,19 @@ function pyFrames(sites: any[]): Frame[] {
   return frames.reverse();
 }
 
-// The frames of a caught exception's traceback, as CPython's: from the frame
-// that caught it (last, excEnter records where) to where it was raised. The
-// stack at the catch is the raise's own outer part, so the catching frame is
-// the raise's frame at that depth. Past the JS stack limit a captured stack
-// has lost its outer frames, and that depth is unknown: refused, not guessed.
-// An exception not caught since it was raised has its whole stack.
+// The frames of a handled exception's traceback, as CPython's: from the
+// frame that caught it (last, excEnter records where) to where it was
+// raised. The stack at the catch is the raise's own outer part, so the
+// catching frame is the raise's frame at that depth. Past the JS stack
+// limit a captured stack has lost its outer frames, and that depth is
+// unknown; caught before the traceback module was imported, where is
+// unknown: both refused, not guessed. (Every exception format_exc shows,
+// the chain's too, was caught or passed through a finally; one never
+// raised has no frames.)
 function caughtFrames(e: any): Frame[] {
   const c = e.$caught;
-  if (e.$tb === undefined || c === undefined || c.tb !== e.$tb) return framesOf(e);
+  if (e.$tb === undefined) return [];
+  if (c === undefined || c.tb !== e.$tb) raise(T.NotImplementedError, "this exception was caught before the traceback module was imported: where is unknown");
   const raised = sitesOf(e.$tb), at = sitesOf(c.at);
   if (raised.length >= Error.stackTraceLimit || at.length >= Error.stackTraceLimit)
     raise(T.NotImplementedError, `this traceback is deeper than the ${Error.stackTraceLimit} JavaScript frames kept: which frame caught the exception is unknown`);
@@ -892,6 +896,7 @@ export const R: any = {
 
 // A small traceback module over the runtime's own traceback formatting.
 M.newBuiltinModule("traceback", (m) => {
+  Obj.catches.recorded = true;
   const exc = (a: any, b: any) => (b !== undefined && b !== null ? b : a);
   const lines = (s: string) => s.split(/(?<=\n)/).filter((l) => l.length);
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));

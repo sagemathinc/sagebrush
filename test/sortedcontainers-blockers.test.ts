@@ -45,3 +45,23 @@ test("traceback.format_exc past the JS stack limit is refused, not guessed", () 
   assert.equal(out[0], "5 ['handler', 'leaf']");
   assert.match(out[1], /^400 refused: this traceback is deeper than the 200 JavaScript frames kept/);
 });
+
+// Where an exception is caught is recorded only once traceback is imported
+// (the record costs a stack capture per catch); one caught before is
+// refused, not given its callers' frames
+test("traceback.format_exc of an exception caught before traceback was imported is refused", () => {
+  const code = [
+    "def caught():",
+    "    try: 1 / 0",
+    "    except ZeroDivisionError as e: return e",
+    "old = caught()",
+    "import traceback",
+    "try: raise ValueError('later') from old",
+    "except ValueError:",
+    "    try: traceback.format_exc()",
+    "    except NotImplementedError as e: print('refused:', e)",
+    "    print(traceback.format_exc(chain=False).splitlines()[-1])",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim().split("\n");
+  assert.deepEqual(out, ["refused: this exception was caught before the traceback module was imported: where is unknown", "ValueError: later"]);
+});
