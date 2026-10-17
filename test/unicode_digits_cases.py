@@ -44,3 +44,14 @@ for s in ["_1", "1_", "1__0", "0x_1f", "0_x1f", "_0x1f", "0b_1", "1_0", "1_0.5",
 # str.isdecimal and str.isspace: CPython's characters
 print([hex(c) for c in range(0x110000) if chr(c).isspace()])
 print("﻿".isspace(), "\x1c".isspace(), "ᇞ0".isdecimal(), "\U00011de0".isdecimal(), "١٢".isdecimal())
+# a leading zero in base 0, and complex()'s underscore errors before and
+# after a non-ASCII character
+for s in ["0_0", "00", "0_0_0", "0__0", "00_1", "0_1", "٠_٠", "-0_0", " 0_0 ", "0_", "_0"]:
+    print(repr(s), t(lambda: int(s, 0)), t(lambda: int(s)))
+for s in ["é_1", "é1", "1_é", "_1", "1__2j", "é", "1é", "?_1", "x_1", "1_x", "é1_2", "1_2é", "1é_2", "1_é2", "é_", "_é", "1_　", "　_1", "٠_x", "x_٠"]:
+    print(repr(s), t(lambda: complex(s)))
+# NULs and invalid non-ASCII characters around underscores: complex()'s two
+# errors as CPython's
+for s in ["1_0\x00", "10\x00", "\x001_0", "1\x00_0", "1_\x000", "_\x00", "\x00", "1\x00é", "é\x00_1", "1_0\x00é", "1\x00",
+          "0_0\x00", "0_1\x00", "1_1\x00", "1_2é", "1_2é_3", "é_", "1é_2", " 1_0\x00 ", "1_0j\x00"]:
+    print(repr(s), t(lambda: complex(s)), t(lambda: int(s, 0)), t(lambda: float(s)))
