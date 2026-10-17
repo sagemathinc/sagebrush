@@ -1,0 +1,87 @@
+uint8 1x1 0
+int8 1x1 127
+int16 1x1 -7
+uint16 2x1 [0;6]
+single 1x2 [1.5 1.5]
+double 1x2 [-1 1]
+int8 0x2 []
+double 1x2 [-1 1]
+double 1x4 [-1.5707963267948966 0 1.5707963267948966 3.1415926535897931]
+double 1x2 [1 -1]
+double 1x4 [4 3 1 2]
+double 4x1 [-2.3561944901923448;-0.78539816339744828;0.78539816339744828;2.3561944901923448]
+double 1x4 [3 2 1 4]
+double 1x1 -3.1415926535897931
+double 1x1 -2
+double 1x1 -3.1415926535897931
+double 1x1 -Inf
+double 1x1 3.1415926535897931
+double 1x2 [-0 0]
+logical 1x1 true
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 2x1 [false;true]
+single 1x1 1
+single 1x3 [1 3 2]
+single 1x1 4
+single 1x1 4
+single 1x1 3.5
+single 1x1 3.5
+single 1x1 3.5
+single 1x1 1
+single 2x2 [1 0;0 1]
+single 1x1 5
+double 1x1 -1.5707963267948966
+double 1x1 1.5707963267948966
+double 1x1 1
+double 1x1 4
+double 2x1 [0.78539816339744828;2.3561944901923448]
+single 1x1 1
+single 1x1 2
+single 1x1 1-2i
+single 1x1 1.5707963705062866
+single 1x1 0
+single 1x3 [100000000 100000000 0]
+single 1x1 0
+single 1x3 [1.0000000031710769e-30 0 0]
+single 1x1 Inf
+single 1x1 6
+single 1x1 11
+single 1x1 11
+single 1x3 [0 0 1]
+single 1x1 0.70710676908493042
+single 1x1 0.5
+single 1x1 2
+single 2x1 [1;1]
+char 1x6 ['single']
+single 2x2 [1 0;0 1]
+char 1x6 ['single']
+char 1x6 ['single']
+single 2x1 [2;3]
+single 1x1 1
+char 1x6 ['single']
+single 1x2 [1.5 -0.5]
+double 1x1 5
+double 1x2 [1.5 -0.5]
+double 1x1 1
+double 1x1 1
+double 1x1 11
+double 2x1 [1;1]
+single 1x1 2
+single 1x1 1
+single 2x2 [1 0;0 1]
+double 1x1 0
+double 1x1 Inf
+double 1x1 -Inf
+double 1x1 2
+single 1x1 0
+single 1x1 -Inf+Infi
+single 1x1 NaN+Infi
+single 1x1 Inf+NaNi
+logical 1x1 true
+double 1x1 Inf+Infi
+double 1x1 NaN+Infi
+double 1x1 NaN+Infi
+single 1x1 Inf+Infi
+logical 1x1 false

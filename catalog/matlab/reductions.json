@@ -64,6 +64,7 @@
     ],
     "differs": [
       "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "Single running products accumulate in single precision, from the first element on.",
       "It accepts some inputs Octave refuses: cumprod('abc') gives double 1x3 [97 9506 941094].",
       "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
@@ -102,6 +103,7 @@
     ],
     "differs": [
       "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "Single running sums accumulate in single precision, from the first element on.",
       "It accepts some inputs Octave refuses: cumsum('abc') gives double 1x3 [97 195 294].",
       "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
@@ -315,7 +317,8 @@
     ],
     "differs": [
       "'native' with a char array is refused.",
-      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
+      "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported.",
+      "A single product accumulates in single precision, as MATLAB's does, but in Sagebrush's order: MATLAB does not document its order, so the last bits of a long single product can differ."
     ],
     "status": "full",
     "see_also": [
@@ -382,7 +385,8 @@
     ],
     "differs": [
       "Tables and timetables, durations and datetimes, and gpuArray inputs are not supported.",
-      "'native' with a char array is refused, as MATLAB refuses it."
+      "'native' with a char array is refused, as MATLAB refuses it.",
+      "A single sum accumulates in single precision, as MATLAB's does, but in Sagebrush's order: MATLAB does not document its order, so the last bits of a long single sum can differ."
     ],
     "status": "partial",
     "see_also": [

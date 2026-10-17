@@ -408,7 +408,6 @@ print
 profile
 psi
 pwd
-qr
 quad
 quadgk
 quantile
