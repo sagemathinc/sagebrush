@@ -111,6 +111,40 @@ test("a dotted name is a package's by its full name, run with its own __path__ (
   assert.equal(await run(code, f.registry, f.dir, [mine]), "leaf 1 True\n");
 });
 
+test("a dotted name is a package's only under a package: a parent without __path__ has no submodules (astra's HOLD on 40c6b962)", async () => {
+  const f = fixture({ "demo-sub": { modules: ["demoparent.sub", "demopkg.sub"], files: { "py/demoparent/sub.py": "import builtins\nbuiltins.RAN = True\n", "py/demopkg/sub.py": "S = 'sub'\n" } } });
+  const mine = mkdtempSync(join(tmpdir(), "sb-notpkg-"));
+  // (the user's own demoparent: a plain module)
+  writeFileSync(join(mine, "demoparent.py"), "X = 1\n");
+  // (and a genuine package whose __path__ is empty)
+  mkdirSync(join(mine, "demopkg"));
+  writeFileSync(join(mine, "demopkg", "__init__.py"), "__path__ = []\n");
+  const code = "try:\n    import demoparent.sub\nexcept ModuleNotFoundError as e:\n    print(e.name, '|', e)\nimport builtins, demoparent, sys\nprint(hasattr(builtins, 'RAN'), hasattr(demoparent, 'sub'), 'demoparent.sub' in sys.modules)\nimport demopkg.sub\nprint(demopkg.sub.S, demopkg.__path__)\n";
+  assert.equal(await run(code, f.registry, f.dir, [mine]), "demoparent.sub | No module named 'demoparent.sub'; 'demoparent' is not a package\nFalse False False\nsub []\n");
+  // (-m too: findModuleSource)
+  const w = new Worker(
+    `
+    const { parentPort, workerData } = require("node:worker_threads");
+    process.env.SAGEBRUSH_PACKAGES = workerData.packages;
+    const c = require(workerData.dist + "/src/compile.js");
+    Promise.resolve(c.initParser && c.initParser()).then(() => {
+      c.setPackageRegistry(workerData.registry);
+      const path = c.R.importModule("sys").path;
+      path.push(workerData.mine);
+      path.push(c.libDir());
+      const r = c.findModuleSource("demoparent.sub"), ok = c.findModuleSource("demopkg.sub");
+      parentPort.postMessage([r, ok && ok[0]]);
+    });
+    `,
+    { eval: true, workerData: { dist: DIST, registry: f.registry, packages: f.dir, mine } },
+  );
+  const got = await new Promise((resolve, reject) => {
+    w.once("message", (m) => (w.terminate(), resolve(m)));
+    w.once("error", reject);
+  });
+  assert.deepEqual(got, [null, "S = 'sub'\n"]);
+});
+
 test("the catalog links a package's function to its file in packages/", async () => {
   const f = fixture({ "demo-mod": { modules: ["demomod"], files: { "py/demomod.py": "X = 1\n\ndef f():\n    return 1\n" } } });
   const out = await run("import demomod, _catalog\nprint(_catalog.source_url(demomod.f, 'REF').split('/blob/')[1])\n", f.registry, f.dir);
