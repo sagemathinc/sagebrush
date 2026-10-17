@@ -360,6 +360,11 @@ class RealDoubleElement(float):
         if mod is not None:
             # (as Sage's RDF: never a power that drops the modulus)
             raise TypeError("the 3-argument version of pow() is not supported")
+        import _sage_real
+        if _sage_real._user_float(e):
+            # (a user's float subclass: Python float's power of its value,
+            # no __float__ call, as Sage, CORR-3FE-2)
+            return _sage_real._cpow(float.__float__(self), float.__float__(e))
         x = float(self)
         inf = float("inf")
         if isinstance(e, int) or type(e).__name__ == "Integer":
@@ -408,6 +413,10 @@ class RealDoubleElement(float):
         if mod is not None:
             # (RDF's reflected power refuses a modulus, CORR-726-4)
             raise TypeError("the 3-argument version of pow() is not supported")
+        if isinstance(b, complex):
+            # (a Python complex base: Python's complex power, CORR-3FE-1)
+            import _sage_real
+            return _sage_real._real_complex_pow(self, 53, b, True)
         return RDF(b) ** self
 
     def sqrt(self, extend=True, all=False):

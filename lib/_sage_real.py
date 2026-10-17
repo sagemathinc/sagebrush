@@ -1920,6 +1920,12 @@ class RealNumberMP:
         if isinstance(n, (complex, ComplexNumberMP)) and type(n).__name__ != "ComplexDoubleElement":
             # (a complex exponent: the coarser complex field's, CORR-726-2)
             return _real_complex_pow(self, R._prec, n)
+        if _user_float(n):
+            # (a user's float subclass: Python float's power of its value,
+            # no __float__ call, above 53 bits; refused below, as Sage)
+            if R._prec < 53:
+                raise TypeError("unsupported operand parent(s) for ^: '%s' and '%s'" % (R, type(n)))
+            return _cpow(float(self), float.__float__(n))
         if isinstance(n, RealNumberMP) and n._m == 0 and not n._special:
             return R(1)
         # (as Sage: against a double the coarser wins: an RDF exponent makes
@@ -1997,6 +2003,15 @@ class RealNumberMP:
         if self._R._prec > 53 and type(b) is float:
             # (a Python float base to a finer field's power: a float, as Sage)
             return _cpow(b, float(self))
+        if isinstance(b, complex):
+            # (a Python complex base: Python's complex power above 53 bits,
+            # the coarser complex field's below, CORR-3FE-1)
+            return _real_complex_pow(self, self._R._prec, b, True)
+        if _user_float(b):
+            # (a user's float subclass, as in __pow__)
+            if self._R._prec < 53:
+                raise TypeError("unsupported operand parent(s) for ^: '%s' and '%s'" % (type(b), self._R))
+            return _cpow(float.__float__(b), float(self))
         return self._R(b) ** self
 
     # ---- comparison
@@ -2887,15 +2902,72 @@ def _double_remainder(a, b):
     return math.ldexp(float(m), e) if m else math.copysign(0.0, a)
 
 
+def _user_float(o):
+    """o is a float subclass that is none of Sage's real types (a user's
+    class): Sage computes with its value, never calling its __float__."""
+    if not isinstance(o, float) or type(o) is float:
+        return False
+    import _sage_lang
+    from _sage_rdf import RealDoubleElement
+    return not isinstance(o, (_sage_lang.RealNumber, RealDoubleElement))
+
+
+def _cparts(v):
+    """(v is zero, v's parts are finite) for a CC or ComplexField number,
+    from its parts (no double conversion: 1e-1000000 is no zero)."""
+    if isinstance(v, ComplexNumberMP):
+        re, im = v._re, v._im
+        return (not re._special and not re._m and not im._special and not im._m), not (re._special or im._special)
+    c = complex(v)
+    return c == 0, math.isfinite(c.real) and math.isfinite(c.imag)
+
+
+_CPOW_SCALE_MAX = 512
+
+
+def _cpow_scale(a, b):
+    """The larger part of b log a in magnitude (a nonzero, finite), before
+    any powering."""
+    if isinstance(a, ComplexNumberMP):
+        w = a.log() * b
+        return max(abs(float(w._re)), abs(float(w._im)))
+    import cmath
+    w = complex(b) * cmath.log(complex(a))
+    return max(abs(w.real), abs(w.imag))
+
+
 def _real_complex_pow(x, prec, z, rev=False):
     """x^z (z^x if rev) for a real x of precision prec and a CC or
     ComplexField(q) number z, as Sage: in the complex field of the lower
     precision (RealField(30)(2)^CC(3) is in ComplexField(30), RDF(2)^CC(3)
-    in CC), CORR-726-2."""
+    in CC), CORR-726-2. A Python complex z against 53 bits or more is
+    Python's complex power, as Sage (RR(2)^complex(3,0) is (8+0j)),
+    CORR-3FE-1."""
+    import _sage_matrix
+    if isinstance(z, complex) and not isinstance(z, _sage_matrix.ComplexNumber) and prec >= 53:
+        c = complex(float.__float__(x) if isinstance(x, float) else float(x), 0.0)
+        a, b = (z, c) if rev else (c, z)
+        if b != 0 and any(math.isinf(t) for t in (a.real, a.imag, b.real, b.imag)):
+            # (Python's errors for these, OverflowError or ZeroDivisionError,
+            # differ from sagebrush's complex power: refused)
+            raise NotImplementedError("a complex power of an infinite number is not available in sagebrush yet")
+        return a ** b
     q = z._C._prec if isinstance(z, ComplexNumberMP) else 53
     C = ComplexField(min(prec, q))
     a, b = C(x), C(z)
-    return b ** a if rev else a ** b
+    if rev:
+        a, b = b, a
+    (za, fa), (zb, fb) = _cparts(a), _cparts(b)
+    if za or not (fa and fb):
+        # (Sage's x^z = exp(z log x): a zero base, or an infinite or NaN
+        # part, is a complex NaN, x^0 too, CORR-3FE-3)
+        nan = float("nan")
+        return C(nan, nan)
+    if _cpow_scale(a, b) >= _CPOW_SCALE_MAX:
+        # (exp(z log x) past the doubles, or a huge phase: Sage's infinities,
+        # signed zeros and reduced phases there are not reproduced)
+        raise NotImplementedError("a complex power with |z log x| of %d or more is not available in sagebrush yet" % _CPOW_SCALE_MAX)
+    return a ** b
 
 
 def _cpow(x, y):
