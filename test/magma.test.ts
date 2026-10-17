@@ -1031,6 +1031,17 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["1/2 in R;", "'in'", "Bad argument types"],
     ["x eq GF(5)!1;", "'eq'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldFinElt"],
     ["2^x;", "'^'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    // (every argument's type checked, nested ones too: CORR-53E-1, -2, -4, -5)
+    ["Coefficient(x, 1/1);", "'Coefficient'", "Bad argument types\nArgument types given: RngUPolElt[FldFin], FldRatElt"],
+    ["LeadingCoefficient(R);", "'LeadingCoefficient'", "Bad argument types\nArgument types given: RngUPol[FldFin]"],
+    ["IsZero(R);", "'IsZero'", "Bad argument types\nArgument types given: RngUPol[FldFin]"],
+    ["Coefficients(R);", "'Coefficients'", "Bad argument types\nArgument types given: RngUPol[FldFin]"],
+    ["#x;", "'#'", "Bad argument types\nArgument types given: RngUPolElt[FldFin]"],
+    ["Gcd(<x>);", "'Gcd'", "Bad argument types\nArgument types given: Tup"],
+    ["PolynomialRing(GF(5)) eq PolynomialRing(GF(7));", "'eq'", "Arguments are not compatible\nArgument types given: RngUPol[FldFin], RngUPol[FldFin]"],
+    ["PolynomialRing(GF(5)) eq PolynomialRing(GF(25));", "'eq'", "Arguments are not compatible\nArgument types given: RngUPol[FldFin], RngUPol[FldFin]"],
+    ["x eq y;", "'eq'", "Arguments are not compatible\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
+    ["[x, 1/2];", "[ ... ]", "No valid universe containing all elements"],
   ];
   // what Sagebrush doesn't do yet: refused in words, never computed wrongly
   const own = [
@@ -1040,7 +1051,9 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["Discriminant(f);", "Discriminant of a polynomial over a finite field (or its ring) is not supported yet"],
     ["Resultant(f, x);", "Resultant of a polynomial over a finite field (or its ring) is not supported yet"],
     ["{x};", "a set of polynomials over a finite field (or of their rings) is not supported yet"],
-    ["S2<t> := PolynomialRing(GF(7)); x + t;", "arithmetic of polynomials of two polynomial rings over finite fields is not supported yet"],
+    ["T<u> := PolynomialRing(GF(49)); x + u;", "arithmetic of polynomials over two finite fields of one characteristic is not supported yet"],
+    ["IsSquare([x]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["Sort([x, x^2]);", "Sort of a polynomial over a finite field (or its ring) is not supported yet"],
   ];
   const src = "R<x> := PolynomialRing(GF(7)); S<y> := PolynomialRing(GF(5)); Z<z> := PolynomialRing(Integers()); f := x^2 + 1;\n" +
     [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\n\"end\";\n";
@@ -1077,6 +1090,16 @@ test("matrices over a finite field refuse what Magma refuses, in its words, and 
     ["A[<1,2>] := 1;", ":=", "Bad matrix row index type"],
     ["A[3,1];", "'[]'", "Index 1 (3) should be in the range [1 .. 2]"],
     ["Determinant(B);", "'Determinant'", "Argument 1 is not square"],
+    // (every argument's type checked, nested ones too; collections take one
+    // universe: CORR-53E-1 .. -5)
+    ["#A[1];", "'#'", "Bad argument types\nArgument types given: ModTupFldElt[FldFin]"],
+    ["#A;", "'#'", "Bad argument types\nArgument types given: AlgMatElt[FldFin]"],
+    ["Reverse(A[1]);", "'Reverse'", "Bad argument types\nArgument types given: ModTupFldElt[FldFin]"],
+    ["[A, 1/2];", "[ ... ]", "No valid universe containing all elements"],
+    ["[A, Matrix(GF(7), 2, 2, [1, 2, 3, 4])];", "[ ... ]", "No valid universe containing all elements"],
+    ["[A, Matrix(F, 1, 2, [1, 2])];", "[ ... ]", "No valid universe containing all elements"],
+    ["A eq Matrix(GF(7), 2, 2, [1, 2, 3, 4]);", "'eq'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], AlgMatElt[FldFin]"],
+    ["Parent(A) eq Parent(Matrix(GF(7), 2, 2, [1, 2, 3, 4]));", "'eq'", "Arguments are not compatible\nArgument types given: AlgMat[FldFin], AlgMat[FldFin]"],
   ];
   const own = [
     ["A + Matrix(Integers(), 2, 2, [1, 2, 3, 4]);", "arithmetic of a matrix over a finite field and a AlgMatElt is not supported yet"],
@@ -1087,6 +1110,11 @@ test("matrices over a finite field refuse what Magma refuses, in its words, and 
     ["A lt A;", "ordering of polynomials and matrices is not supported yet"],
     ["Matrix(GF(1031, 2), 1, 2, [1, 2]);", "Matrix over a finite field of more than 1048576 elements, not a prime field, is not supported yet"],
     ["A[1] * B[1];", "this arithmetic of vectors over a finite field is not supported yet"],
+    ["Determinant(A[1]);", "Determinant of a matrix or vector over a finite field is not supported yet"],
+    ["Trace(A[1]);", "Trace of a matrix or vector over a finite field is not supported yet"],
+    ["Gcd([A]);", "Gcd of a matrix or vector over a finite field is not supported yet"],
+    ["[Parent(A) | 1, 2];", "a collection over a matrix or vector space over a finite field is not supported yet"],
+    ["<A, 1>;", "printing a tuple or record holding a matrix over a finite field is not supported yet"],
   ];
   const src = "F := GF(5); A := Matrix(F, 2, 2, [1, 2, 3, 4]); B := Matrix(F, 2, 3, [1, 2, 3, 4, 5, 6]); S := Matrix(F, 2, 2, [1, 2, 2, 4]);\n" +
     [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nA;\n\"end\";\n";

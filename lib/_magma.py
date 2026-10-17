@@ -651,6 +651,8 @@ def _into_universe(items, universe, kind):
     universes keep their items as before."""
     if isinstance(universe, _MResRing) or (universe is None and any(isinstance(x, _MResElt) for x in items)):
         return _res_items(items, universe, kind)
+    if isinstance(universe, (_MFFMatSpace, _MFFVecSpace)):
+        raise MagmaError("a collection over a matrix or vector space over a finite field is not supported yet", _UNIVERSE_FAIL[kind])
     if isinstance(universe, _MFFPolyRing):
         # (a polynomial ring over a finite field: each item coerced, as R!x)
         out = []
@@ -716,6 +718,8 @@ def _seq(items, universe=None):
         _ff_universe(items, "[ ... ]")
         if any(isinstance(x, _MFFPoly) for x in items):
             items = _ffp_items(items)
+        elif any(isinstance(x, _FFLIN) for x in items):
+            items = _ffm_items(items)
     else:
         items = _into_universe(items, universe, "seq")
     inf = _infer_from(items) if universe is None else None
@@ -1170,6 +1174,9 @@ def _elt_into(x, c):
         return _coerce_struct(x, _ffwrap(c.parent()))
     if isinstance(c, _MFFPoly):
         return _coerce_struct(x, c.R)
+    if isinstance(c, _FFLIN):
+        y = _ffm_like(c, x)
+        return _NOCOERCE if y is None else y
     d = _desc(c)
     if d is not None and d[0] != "elt":
         if (d[0] == "Z" or d[0] == "Q") and _is_ff(x):
@@ -3766,9 +3773,17 @@ def _str1(v, indent, col, tail):
         pad = " " * (indent + step)
         # (an undefined element prints as undef, as in a one-line sequence)
         inner = [pad + ("undef" + ("," if k < len(raw) - 1 else "") if x is _UNDEF else _str(x, indent + step, None, "," if k < len(raw) - 1 else "")) for k, x in enumerate(raw)]
-        return o.strip() + "\n" + "\n".join(inner) + "\n" + " " * indent + c.strip(), False
+        # (a matrix over a finite field is followed by an empty line, as
+        # Magma prints a sequence of them)
+        body = "".join(t + ("\n\n" if isinstance(raw[k], _MFFMat) else "\n") for k, t in enumerate(inner[:-1])) + inner[-1]
+        return o.strip() + "\n" + body + "\n" + " " * indent + c.strip(), False
     if isinstance(v, MRec):
         return v._str(indent, tail), True
+    if isinstance(v, _MFFMat):
+        # (its rows under one another, at the indentation it is printed at)
+        return ("\n" + " " * indent).join(repr(v).split("\n")) + tail, True
+    if isinstance(v, (MTuple, MRec)) and any(isinstance(p, _MFFMat) for p in (v if isinstance(v, MTuple) else v.vals.values())):
+        raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
     if isinstance(v, MTuple) and any(_multiline(p) for p in v):
@@ -4654,7 +4669,7 @@ def PolynomialRing(R, n=1):
     if n != 1 or isinstance(n, bool):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
     if isinstance(R, _MFinField):
-        return _MFFPolyRing(R)
+        return _ffpoly_ring(R)
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
@@ -4871,8 +4886,11 @@ class _MFFPolyRing:
 
     def _magma_eq(self, o, op):
         if isinstance(o, _MFFPolyRing):
-            # (two rings over one field are equal, as Magma has it)
-            return o.F is self.F
+            # (one ring for each field; those of two fields are not
+            # compatible, as Magma says, GF(5)'s and GF(25)'s too)
+            if o is self:
+                return True
+            raise MagmaError("Arguments are not compatible\nArgument types given: RngUPol[FldFin], RngUPol[FldFin]", "'%s'" % op, True)
         raise MagmaError("comparison of a polynomial ring over a finite field with this is not supported yet", "'%s'" % op, True)
 
     def _const(self, x):
@@ -4934,6 +4952,16 @@ class _MFFPolyRing:
         return _MFFPoly(self, p)
 
 
+def _ffpoly_ring(F):
+    """PolynomialRing(F): one ring for each finite field, as Magma's (two
+    calls give the identical ring, and naming its variable again renames
+    it everywhere; CharacteristicPolynomial's is it too)."""
+    R = getattr(F, "_polyring", None)
+    if R is None:
+        R = F._polyring = _MFFPolyRing(F)
+    return R
+
+
 def _ffp_ext(R):
     return 1 if R.F.n == 1 else _FFPOLY_EXT
 
@@ -4958,6 +4986,9 @@ class _MFFPoly:
 
     def _magma_degree(self):
         return self.p.degree()
+
+    def _magma_card(self):
+        raise _bad_types("#", [self])
 
     def __repr__(self):
         c = self.p._c
@@ -5011,6 +5042,11 @@ def _ffp_items(items):
         if x is _UNDEF or (isinstance(x, _MFFPoly) and x.R is R):
             out.append(x)
             continue
+        if isinstance(x, _MFFPoly) and x.R.F.p != R.F.p:
+            raise MagmaError("No valid universe containing all elements", "[ ... ]")
+        if isinstance(x, _Fraction):
+            # (Magma's universe of polynomials takes no rationals)
+            raise MagmaError("No valid universe containing all elements", "[ ... ]")
         p = None if isinstance(x, _MFFPoly) else R._lift(x)
         if p is None:
             raise MagmaError("a sequence of polynomials over a finite field and a %s is not supported yet" % _type_of(x), "[ ... ]")
@@ -5056,7 +5092,7 @@ def _ffpoly_check(op, a, b, pos):
             return
         if y.R.F.p != F.p:
             raise _incompatible("C", o, a, b, pos)
-        raise unsupported("arithmetic of polynomials of two polynomial rings over finite fields")
+        raise unsupported("arithmetic of polynomials over two finite fields of one characteristic")
     if o == "/" and not left:
         raise unsupported("dividing by a polynomial over a finite field (rational functions)")
     if _int(y):
@@ -5125,7 +5161,7 @@ def _ffpoly_eq(a, b, op, pos):
     if isinstance(y, _MFFPoly) and y.R is not x.R:
         if y.R.F.p != x.R.F.p:
             raise _incompatible("C", op, a, b, pos)
-        raise MagmaError("comparison of polynomials of two polynomial rings over finite fields is not supported yet", "'%s'" % op, True, pos)
+        raise MagmaError("comparison of polynomials over two finite fields of one characteristic is not supported yet", "'%s'" % op, True, pos)
     q = x.R._lift(y)
     if q is not None:
         return q._c == x.p._c
@@ -5266,15 +5302,6 @@ def _ffp_derivative(f, k):
             break
         p = p.derivative()
     return _MFFPoly(f.R, p)
-
-
-# The intrinsics taught polynomials over a finite field (and their rings):
-# any other refuses them in words (_guarded), never a wrong answer.
-_FFPOLY_TAUGHT = frozenset(
-    "Degree Coefficients Coefficient LeadingCoefficient Evaluate Derivative IsIrreducible Roots Factorization "
-    "Factorisation Gcd GCD GreatestCommonDivisor Lcm LCM LeastCommonMultiple Quotrem IsZero IsOne Parent Type ISA "
-    "Sprint Sprintf Append Include Exclude Insert Index Position Reverse AssignNames Characteristic BaseRing "
-    "CoefficientRing".split())
 
 
 # ------------------------------------------------------------------ integers
@@ -6212,7 +6239,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
                 raise MagmaError("No equality algorithm for sequence elements", "'%s'" % name)
             return x
         de = _desc(e)
-        if _is_ff(e) or isinstance(e, _MFFPoly) or (_is_ff(x) and de in (("Z",), ("Q",))):
+        if _is_ff(e) or isinstance(e, (_MFFPoly,) + _FFLIN) or (_is_ff(x) and de in (("Z",), ("Q",))):
             # (a finite field's elements: Magma's coercion, CORR-9348-1)
             y = _elt_into(x, e)
             if y is None:
@@ -6657,7 +6684,7 @@ def CharacteristicPolynomial(T):
         # (in a new polynomial ring, its variable unnamed: $.1, as Magma's)
         _ffm_square(T, "CharacteristicPolynomial")
         _ffm_elim(T, "CharacteristicPolynomial")
-        R = _MFFPolyRing(T.F)
+        R = _ffpoly_ring(T.F)
         return _MFFPoly(R, R.P(T.M.charpoly()))
     if isinstance(T, _HeckeOp):
         return HeckePolynomial(T.M, T.p)
@@ -7433,7 +7460,11 @@ class _MFFMatSpace:
 
     def _magma_eq(self, o, op):
         if isinstance(o, _MFFMatSpace):
-            return (o.F, o.m, o.n) == (self.F, self.m, self.n)
+            if o.F is self.F:
+                return (o.m, o.n) == (self.m, self.n)
+            if o.F.p != self.F.p and self.m == self.n and o.m == o.n:
+                raise MagmaError("Arguments are not compatible\nArgument types given: AlgMat[FldFin], AlgMat[FldFin]", "'%s'" % op, True)
+            raise MagmaError("comparison of matrix spaces over two finite fields is not supported yet", "'%s'" % op, True)
         raise MagmaError("comparison of a matrix space over a finite field with this is not supported yet", "'%s'" % op, True)
 
 
@@ -7446,7 +7477,9 @@ class _MFFVecSpace:
 
     def _magma_eq(self, o, op):
         if isinstance(o, _MFFVecSpace):
-            return (o.F, o.n) == (self.F, self.n)
+            if o.F is not self.F:
+                raise MagmaError("comparison of vector spaces over two finite fields is not supported yet", "'%s'" % op, True)
+            return o.n == self.n
         raise MagmaError("comparison of a vector space over a finite field with this is not supported yet", "'%s'" % op, True)
 
 
@@ -7486,8 +7519,8 @@ class _MFFVec:
     def _magma_parent(self):
         return _MFFVecSpace(self.F, len(self.v))
 
-    def __len__(self):
-        return len(self.v)
+    def _magma_card(self):
+        raise _bad_types("#", [self])
 
     __hash__ = None
 
@@ -7523,6 +7556,9 @@ class _MFFMat:
     def _magma_parent(self):
         return _MFFMatSpace(self.F, self.nrows(), self.ncols())
 
+    def _magma_card(self):
+        raise _bad_types("#", [self])
+
     def _magma_index(self, i):
         if not _int_index(i):
             raise MagmaError("Bad argument types", "'[]'", True)
@@ -7533,6 +7569,44 @@ class _MFFMat:
         return _MFFMat(self.F, -self.M)
 
     __hash__ = None
+
+
+def _ffm_like(c, x):
+    """x as an element of the parent of c (a matrix or vector over a finite
+    field), or None: one of its shape over its field; for a square
+    matrix, a scalar as the scalar matrix (Magma coerces 1 into the
+    identity)."""
+    if isinstance(c, _MFFMat):
+        if isinstance(x, _MFFMat):
+            return x if x.F is c.F and (x.nrows(), x.ncols()) == (c.nrows(), c.ncols()) else None
+        k = None if isinstance(x, _FFLIN) else _ffm_scalar(c.F, x)
+        if k is None or not c.is_square():
+            return None
+        n, z = c.nrows(), c.F.K(0)
+        return _ffm_new(c.F, [[k if i == j else z for j in range(n)] for i in range(n)])
+    if isinstance(x, _MFFVec) and x.F is c.F and len(x.v) == len(c.v):
+        return x
+    return None
+
+
+def _ffm_items(items):
+    """The elements of a sequence holding matrices or vectors over a finite
+    field: all of one shape over one field (scalars made scalar matrices),
+    as Magma's universe takes them; anything else refused in words."""
+    c = next(x for x in items if isinstance(x, _FFLIN))
+    out = []
+    for x in items:
+        if isinstance(x, _Fraction):
+            raise MagmaError("No valid universe containing all elements", "[ ... ]")
+        y = x if x is _UNDEF else _ffm_like(c, x)
+        if y is None and type(x) is type(c) and (x.F.p != c.F.p or x.F is c.F):
+            # (another characteristic, or another shape: no common universe)
+            raise MagmaError("No valid universe containing all elements", "[ ... ]")
+        if y is None:
+            raise MagmaError("a sequence of matrices or vectors over a finite field and a %s (another shape, field or type) is not supported yet"
+                             % _type_of(x), "[ ... ]")
+        out.append(y)
+    return out
 
 
 _FFLIN = (_MFFMat, _MFFVec)
@@ -7630,13 +7704,13 @@ def _ffmat_check(op, a, b, pos):
         if o in ("+", "-") and isinstance(u, _MFFVec) and isinstance(w, _MFFVec):
             if u.F is not w.F:
                 raise unsupported("arithmetic of vectors over two finite fields")
-            if len(u) != len(w):
+            if len(u.v) != len(w.v):
                 raise _bad_types(op, (a, b), pos)
             return
         if o == "*" and isinstance(u, _MFFVec) and isinstance(w, _MFFMat):
             if u.F is not w.F:
                 raise unsupported("arithmetic of a vector and a matrix over two finite fields")
-            if len(u) != w.nrows():
+            if len(u.v) != w.nrows():
                 raise MagmaError("Arguments have incompatible degrees", "'*'", True, pos)
             return
         if o == "*" and _ffm_scalar(F, w if left else u) is not None:
@@ -7691,10 +7765,10 @@ def _ffmat_op(o, a, b, pos):
         if isinstance(a, _MFFVec) and isinstance(b, _MFFVec):
             return _MFFVec(a.F, [s + t if o == "+" else s - t for s, t in zip(a.v, b.v)])
         if isinstance(a, _MFFVec) and isinstance(b, _MFFMat):
-            _ffm_admit(len(a) * b.ncols(), a.F, "a product", "'*'")
+            _ffm_admit(len(a.v) * b.ncols(), a.F, "a product", "'*'")
             rows = b.M._rows
             z = a.F.K(0)
-            return _MFFVec(a.F, [sum((a.v[i] * rows[i][j] for i in range(len(a))), z) for j in range(b.ncols())])
+            return _MFFVec(a.F, [sum((a.v[i] * rows[i][j] for i in range(len(a.v))), z) for j in range(b.ncols())])
         u = a if isinstance(a, _MFFVec) else b
         c = _ffm_scalar(u.F, b if u is a else a)
         return _MFFVec(u.F, [c * t for t in u.v])
@@ -7737,11 +7811,14 @@ def _ffmat_eq(a, b, op, pos):
     if isinstance(a, _MFFVec) and isinstance(b, _MFFVec):
         if a.F is not b.F:
             raise MagmaError("comparison of vectors over two finite fields is not supported yet", "'%s'" % op, True, pos)
-        if len(a) != len(b):
+        if len(a.v) != len(b.v):
             raise MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % (_ext_type(a), _ext_type(b)), "'%s'" % op, True, pos)
         return a.v == b.v
     if isinstance(a, _MFFMat) and isinstance(b, _MFFMat):
         if a.F is not b.F:
+            if a.F.p != b.F.p:
+                raise _incompatible("C", op, a, b, pos)
+            # (Magma compares them in a field containing both)
             raise MagmaError("comparison of matrices over two finite fields is not supported yet", "'%s'" % op, True, pos)
         if (a.nrows(), a.ncols()) != (b.nrows(), b.ncols()):
             raise MagmaError("Arguments have incompatible degrees", "'%s'" % op, True, pos)
@@ -7793,11 +7870,90 @@ def _ffm_elim(A, name):
     _ffm_admit(n * m * min(n, m), A.F, name, "'%s'" % name)
 
 
-# The intrinsics taught matrices and vectors over a finite field: any other
-# refuses them in words (_guarded).
-_FFMAT_TAUGHT = frozenset(
-    "Determinant Rank Transpose Trace NumberOfRows NumberOfColumns Nrows Ncols CharacteristicPolynomial Parent Type ISA "
-    "Sprint Sprintf Append Include Exclude Insert Index Position Reverse".split())
+# ------------------------------------------------------------------ finite fields' structures at intrinsics
+
+_FFALL = (_MFFPoly, _MFFPolyRing, _MFFMat, _MFFVec, _MFFMatSpace, _MFFVecSpace)
+
+
+def _ff_held(a, depth=0):
+    """The polynomial, matrix or vector over a finite field (or such a
+    structure) a is or holds, or None: itself, a tuple's part, or a
+    sequence's elements (seen in its first defined element, which stands for
+    all of them: _ffp_items and _ffm_items put them in one universe)."""
+    if isinstance(a, _FFALL):
+        return a
+    if depth > 8:
+        return None
+    if isinstance(a, MTuple):
+        return next((y for y in (_ff_held(x, depth + 1) for x in a) if y is not None), None)
+    if isinstance(a, MSeq):
+        c = _first_defined(a)
+        return None if c is None else _ff_held(c, depth + 1)
+    return None
+
+
+def _ff_scalar(a):
+    return _int(a) or _is_ff(a) or isinstance(a, _Fraction)
+
+
+def _ff_poly_or_scalars(args):
+    """Gcd, Lcm and Quotrem: polynomials and scalars, a polynomial among
+    them; or (Gcd, Lcm) one sequence of polynomials."""
+    if len(args) == 1 and isinstance(args[0], MSeq):
+        return isinstance(_first_defined(args[0]), _MFFPoly)
+    return len(args) == 2 and all(isinstance(a, _MFFPoly) or _ff_scalar(a) for a in args) and any(isinstance(a, _MFFPoly) for a in args)
+
+
+def _ff_collection(args):
+    return bool(args) and (isinstance(args[0], (MSeq, MSet, MRange)) or type(args[0]).__name__ == "MList")
+
+
+_P1 = lambda a: len(a) == 1 and isinstance(a[0], _MFFPoly)
+# (a vector given where a matrix goes: Magma reads it as a matrix of one
+# row, Determinant(A[1]) is "not square", not modelled: refused in words)
+_M1 = lambda a: (len(a) == 1 and isinstance(a[0], _MFFMat)) or (None if any(isinstance(x, _MFFVec) for x in a) else False)
+# Each intrinsic taught these structures, with what it takes: True if the
+# arguments are of a signature it has, False if Magma has none for them
+# ("Bad argument types"), None if Magma has one Sagebrush doesn't (refused
+# in words).  An intrinsic not listed refuses them in words.
+_FF_SIGS = {
+    "Degree": _P1, "Coefficients": _P1, "LeadingCoefficient": _P1, "IsIrreducible": _P1,
+    "Factorization": _P1, "Factorisation": _P1,
+    "Coefficient": lambda a: len(a) == 2 and isinstance(a[0], _MFFPoly) and _int(a[1]),
+    "Derivative": lambda a: 1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _int(a[1])),
+    "Evaluate": lambda a: (len(a) == 2 and isinstance(a[0], _MFFPoly) and (isinstance(a[1], _MFFPoly) or _ff_held(a[1]) is None)) or None,
+    "Roots": lambda a: (1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _ff_held(a[1]) is None)) or None,
+    "Quotrem": _ff_poly_or_scalars,
+    "IsZero": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN) for x in a) else False),
+    "IsOne": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN) for x in a) else False),
+    "Characteristic": lambda a: (len(a) == 1 and isinstance(a[0], _MFFPolyRing)) or None,
+    "AssignNames": lambda a: bool(a) and isinstance(a[0], _MFFPolyRing),
+    "Determinant": _M1, "Rank": _M1, "Transpose": _M1, "NumberOfRows": _M1, "NumberOfColumns": _M1,
+    "Nrows": _M1, "Ncols": _M1, "CharacteristicPolynomial": _M1, "Trace": lambda a: _M1(a) or None,
+}
+for _n in ("Gcd", "GCD", "GreatestCommonDivisor", "Lcm", "LCM", "LeastCommonMultiple"):
+    # (of matrices Magma says its ring has no Gcd: refused in words)
+    _FF_SIGS[_n] = lambda a: _ff_poly_or_scalars(a) or (None if any(isinstance(x, (_MFFPoly,) + _FFLIN) or
+                                                                 (isinstance(x, MSeq) and _ff_held(x) is not None) for x in a) else False)
+for _n in ("Parent", "Type", "ISA", "Sprint", "Sprintf"):
+    _FF_SIGS[_n] = lambda a: True
+for _n in ("Append", "Include", "Exclude", "Insert", "Index", "Position", "Reverse"):
+    _FF_SIGS[_n] = _ff_collection
+
+
+def _ff_admit_args(name, args, kw):
+    """The argument guard for polynomials, matrices and vectors over finite
+    fields (and their structures), wherever they are in the arguments."""
+    sig = _FF_SIGS.get(name)
+    ok = sig(args) if sig is not None and not kw else None
+    if ok:
+        return
+    if ok is False:
+        raise _bad_types(name, args)
+    held = [h for h in (_ff_held(a) for a in args) if h is not None]
+    if not any(isinstance(h, _FFALL[2:]) for h in held):
+        raise MagmaError("%s of a polynomial over a finite field (or its ring) is not supported yet" % name, "'%s'" % name)
+    raise MagmaError("%s of a matrix or vector over a finite field is not supported yet" % name, "'%s'" % name)
 
 
 def HermiteForm(M):
@@ -8097,10 +8253,8 @@ def _guarded(name, f):
     ints = _INT_ARGS.get(name, ())
 
     def intrinsic(*args, **kw):
-        if name not in _FFPOLY_TAUGHT and any(isinstance(a, (_MFFPoly, _MFFPolyRing)) for a in args):
-            raise MagmaError("%s of a polynomial over a finite field (or its ring) is not supported yet" % name, "'%s'" % name)
-        if name not in _FFMAT_TAUGHT and any(isinstance(a, _FFLINALL) for a in args):
-            raise MagmaError("%s of a matrix or vector over a finite field is not supported yet" % name, "'%s'" % name)
+        if any(_ff_held(a) is not None for a in args):
+            _ff_admit_args(name, args, kw)
         for i, a in enumerate(args):
             if i in ints and isinstance(a, _Fraction):
                 raise _bad_types(name, args)
