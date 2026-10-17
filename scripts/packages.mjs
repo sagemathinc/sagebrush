@@ -20,7 +20,7 @@
 //              LICENSE* and NOTICE* files)
 //   requires   other packages (not used yet), catalog (null; not used yet)
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,12 +32,17 @@ const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*)$/;
 // (a relative path inside the package: no "..", no absolute or odd names)
 const safePath = (p) => typeof p === "string" && p !== "" && !p.startsWith("/") && p.split("/").every((s) => s !== "" && s !== "." && s !== ".." && /^[A-Za-z0-9_.-]+$/.test(s));
 
-function walk(dir, base = dir, out = []) {
+// A package's files, by path in it.  A symbolic link anywhere is refused,
+// looked at before it is followed: it could pin a file outside the package,
+// lead out of it, or loop (daybreak2's HARD-40C-1).
+function walk(dir, bad, base = dir, out = []) {
   for (const f of readdirSync(dir).sort()) {
-    const p = join(dir, f);
-    if (statSync(p).isDirectory()) {
-      if (f !== "__pycache__") walk(p, base, out);
-    } else out.push(relative(base, p));
+    const p = join(dir, f), st = lstatSync(p);
+    if (st.isSymbolicLink()) bad(`${relative(base, p)} is a symbolic link (a package's files are its own)`);
+    if (st.isDirectory()) {
+      if (f !== "__pycache__") walk(p, bad, base, out);
+    } else if (st.isFile()) out.push(relative(base, p));
+    else bad(`${relative(base, p)} is not a file or a directory`);
   }
   return out;
 }
@@ -49,10 +54,13 @@ export function readPackages(root) {
   const lib = join(root, "lib");
   for (const dir of existsSync(pdir) ? readdirSync(pdir).sort() : []) {
     const at = join(pdir, dir);
-    if (!statSync(at).isDirectory() || !existsSync(join(at, "sagebrush.json"))) continue;
     const bad = (why) => {
       throw new Error(`packages/${dir}: ${why}`);
     };
+    const st = lstatSync(at);
+    if (st.isSymbolicLink() && existsSync(join(at, "sagebrush.json"))) bad("is a symbolic link (a package is a directory of packages/)");
+    if (!st.isDirectory() || !existsSync(join(at, "sagebrush.json"))) continue;
+    if (lstatSync(join(at, "sagebrush.json")).isSymbolicLink()) bad("sagebrush.json is a symbolic link");
     const raw = readFileSync(join(at, "sagebrush.json"));
     let m;
     try {
@@ -73,7 +81,7 @@ export function readPackages(root) {
     if (m.wasm !== undefined) bad("wasm is not supported yet");
     if (!m.files || typeof m.files !== "object" || Array.isArray(m.files)) bad("files must map each file to its SHA-256");
     // (every file pinned, and only files that are there)
-    const present = walk(at).filter((f) => !DOCS.test(f));
+    const present = walk(at, bad).filter((f) => !DOCS.test(f));
     for (const f of present) if (!Object.hasOwn(m.files, f)) bad(`${f} is not in files (every file is pinned)`);
     const pins = {};
     for (const [f, sum] of Object.entries(m.files).sort((a, b) => a[0].localeCompare(b[0]))) {
