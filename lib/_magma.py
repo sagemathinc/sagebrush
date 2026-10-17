@@ -5236,9 +5236,17 @@ def _ffp_gcd(args, lcm=False):
         if p is None:
             raise _bad_types(name, args)
         ps.append(p)
+    # (the whole fold admitted at once, before any step: a Gcd's running
+    # degree never exceeds the first's, an Lcm's the sum so far, HARD-53E-1)
+    work, run = 0, max(ps[0].degree(), 1)
+    for p in ps[1:]:
+        d = max(p.degree(), 1)
+        work += run * d * (2 if lcm else 1)
+        if lcm:
+            run += d
+    _ffp_admit(work, R, "a %s" % name, name)
     g = ps[0]
     for p in ps[1:]:
-        _ffp_admit(max(g.degree(), 1) * max(p.degree(), 1) * (2 if lcm else 1), R, "a %s" % name, name)
         if lcm:
             if not g._c or not p._c:
                 g = R.P([])
@@ -7551,20 +7559,26 @@ def _ffm_matrix(F, args):
             raise err("Argument %d (%d) should be >= 0" % ((2, m) if m < 0 else (3, n)))
         if m * n > _COLLECT_MAX:
             raise MagmaError("a matrix of more than %d entries is not supported yet" % _COLLECT_MAX, "'Matrix'")
-        ent = list(Q)
-        if len(ent) != m * n:
+        # (its length first: a long range is never expanded)
+        if (Q.size() if isinstance(Q, MRange) else len(Q)) != m * n:
             raise err("Sequence should have length %d" % (m * n))
+        ent = list(Q)
         rows = [ent[i * n:(i + 1) * n] for i in range(m)]
     elif len(args) == 1 and isinstance(args[0], (MSeq, list)):
-        rows = [list(r) if isinstance(r, (MSeq, MRange, list)) else None for r in args[0]]
-        if any(r is None for r in rows):
+        # (the rows' lengths read, and their total admitted, before any row
+        # is copied: one long row shared by many costs nothing until then,
+        # HARD-53E-2)
+        Q = args[0]
+        if any(not isinstance(r, (MSeq, MRange, list)) for r in Q):
             raise _bad_types("Matrix", (F,) + tuple(args))
-        n = len(rows[0]) if rows else 0
-        for k, r in enumerate(rows):
-            if len(r) != n:
+        size = lambda r: r.size() if isinstance(r, MRange) else len(r)
+        n = size(Q[0]) if len(Q) else 0
+        for k, r in enumerate(Q):
+            if size(r) != n:
                 raise err("Element %d of sequence does not have length %d" % (k + 1, n))
-        if len(rows) * n > _COLLECT_MAX:
+        if len(Q) * n > _COLLECT_MAX:
             raise MagmaError("a matrix of more than %d entries is not supported yet" % _COLLECT_MAX, "'Matrix'")
+        rows = [list(r) for r in Q]
         m = len(rows)
     else:
         raise MagmaError("Matrix over a finite field with these arguments is not supported yet", "'Matrix'")

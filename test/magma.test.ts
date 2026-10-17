@@ -1105,12 +1105,13 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const t0 = Date.now();
-  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..40000]; Matrix(F, [r : i in [1..40000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
     "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  assert.match(out, /a matrix of more than \d+ entries is not supported yet/);
+  assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 2, r.stdout);
+  assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
   assert.equal((out.match(/a product of matrices over a finite field of more than 2000000 entry products is not supported yet/g) ?? []).length, 2, r.stdout);
   for (const what of ["Determinant", "Rank", "a power", "CharacteristicPolynomial"])
     assert.ok(out.includes(`${what} of matrices over a finite field of more than 2000000 entry products is not supported yet`), what + r.stdout);
@@ -1126,6 +1127,8 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
     "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^40000 + x, 39999);\n" +
+    // (each step within the allowance, the fold past it: HARD-53E-1)
+    "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
     "Degree(x^40000); #Factorization(x^200 + x + 1);\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
   assert.equal(r.signal, null, r.stderr);
@@ -1134,7 +1137,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   assert.match(out, /Factorization of a polynomial over a finite field of degree more than 1000 is not supported yet/);
   assert.match(out, /Factorization of a polynomial of degree 70 over this finite field is not supported yet/);
   assert.match(out, /IsIrreducible of a polynomial of degree 70 over this finite field is not supported yet/);
-  for (const what of ["a product", "a Gcd", "a derivative"])
+  for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
   assert.match(r.stdout, /\n40000\n\d+\nend\n$/);
