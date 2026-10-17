@@ -709,11 +709,18 @@ class Arrow(Primitive):
         dx, dy = b[0] - a[0], b[1] - a[1]
         L = math.hypot(dx, dy) or 1.0
         ux, uy = dx / L, dy / L
+        # (head_shorten: the head stops that many pixels short, at the
+        # edge of a graph's vertex marker)
+        cut = min(float(o.get("head_shorten", 0)), L)
+        if cut:
+            b = (b[0] - ux * cut, b[1] - uy * cut)
         hl, hw = 4 + 3 * w, 2 + 1.6 * w
         bx, by = b[0] - ux * hl, b[1] - uy * hl
         head = "M%s %sL%s %sL%s %sZ" % (_fmt(b[0]), _fmt(b[1]), _fmt(bx - uy * hw), _fmt(by + ux * hw), _fmt(bx + uy * hw), _fmt(by - ux * hw))
-        return '<path d="M%s %sL%s %s" stroke="%s" stroke-width="%s"/><path d="%s" fill="%s"/>' % (
-            _fmt(a[0]), _fmt(a[1]), _fmt(bx), _fmt(by), c, _fmt(w), head, c)
+        dash = DASHES.get(o.get("linestyle", "-"), None)
+        return '<path d="M%s %sL%s %s" stroke="%s" stroke-width="%s"%s/><path d="%s" fill="%s"/>' % (
+            _fmt(a[0]), _fmt(a[1]), _fmt(bx), _fmt(by), c, _fmt(w),
+            ' stroke-dasharray="%s"' % dash if dash else "", head, c)
 
     def describe(self):
         return "arrow from (%s, %s) to (%s, %s)" % (_num(self.tail[0]), _num(self.tail[1]), _num(self.head[0]), _num(self.head[1]))
