@@ -8,13 +8,20 @@
 //   - numpy: what importing it adds, and how long that takes.
 //   - Speed: a few workloads, each run 5 times after a warm-up run in the
 //     same session (the median, in ms, timed inside the page).  Every
-//     workload prints a result, and both engines must print the same one.
+//     execution of every workload, warm-up and timed, in every cold start
+//     of both engines, must print what Sagebrush's first warm-up printed,
+//     and every timing must be a finite number; else the run fails.
 //
-// Sagebrush runs in its Web Worker (web/dist/sagebrush-worker.js, the
-// notebook's own worker, without the notebook page around it); Pyodide on
-// the page's main thread, as its documentation starts it.  Bytes are
-// counted by this script's server, not the browser: nothing is cached
-// between the cold starts.
+// The pages are minimal interpreter pages, not the notebook: Sagebrush in
+// its Web Worker (web/dist/sagebrush-worker.js, the notebook's own worker),
+// Pyodide on the page's main thread, as its quickstart starts it.  Each cold
+// start is a fresh browser profile (no browser cache); the server is this
+// one local server throughout, and one discarded priming session per engine
+// comes first, so its compressed copies (brotli 5, made once per file) and
+// the OS file cache exist before anything is timed; then the engines
+// alternate.  Bytes are the response bodies this server sent (compressed
+// where compressible), not HTTP overhead.  Times are local and end to end:
+// the first-result time is from navigation, including this script's polling.
 //
 //   bun web/build.ts && node web/bench-compare.mjs --pyodide DIR [--runs 3] [--only json,loop] [--json out.json]
 //   (DIR: Pyodide's distribution: pyodide.mjs, pyodide.asm.wasm,
@@ -149,10 +156,14 @@ async function session(page) {
     const speed = {};
     for (const [name, code] of Object.entries(WORKLOADS)) {
       const warm = await ev(`run(${JSON.stringify(code)})`);
-      const times = [];
-      for (let i = 0; i < REPS; i++) times.push((await ev(`run(${JSON.stringify(code)})`)).ms);
-      times.sort((a, b) => a - b);
-      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim() };
+      // (every timed run's output kept: each must equal the warm-up's)
+      const timed = [];
+      for (let i = 0; i < REPS; i++) {
+        const r = await ev(`run(${JSON.stringify(code)})`);
+        timed.push({ ms: r?.ms, out: r?.out?.trim() });
+      }
+      const times = timed.map((t) => t.ms).sort((a, b) => a - b);
+      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out) };
       step(`${name}: ${speed[name].ms} ms`);
     }
     ws.close();
@@ -171,12 +182,13 @@ function take() {
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
 const mb = (x) => (x / 1e6).toFixed(2);
-const results = {};
-for (const [engine, page] of [["Sagebrush", "/sagebrush.html"], ["Pyodide", "/pyodide.html"]]) {
-  const runs = [];
-  for (let i = 0; i < RUNS; i++) runs.push(await session(page));
-  results[engine] = runs;
-}
+// (one discarded priming session per engine first, so the server's
+// compressed copies and the OS file cache exist before anything is timed;
+// then the engines alternate, one cold start each, RUNS times)
+const ENGINES = [["Sagebrush", "/sagebrush.html"], ["Pyodide", "/pyodide.html"]];
+for (const [, page] of ENGINES) await session(page);
+const results = { Sagebrush: [], Pyodide: [] };
+for (let i = 0; i < RUNS; i++) for (const [engine, page] of ENGINES) results[engine].push(await session(page));
 server.close();
 const row = (engine) => {
   const rs = results[engine];
@@ -188,13 +200,20 @@ const row = (engine) => {
   };
 };
 const S = row("Sagebrush"), P = row("Pyodide");
+// (min-max over the cold starts, beside each median)
+const span = (xs) => `${Math.round(Math.min(...xs))}-${Math.round(Math.max(...xs))}`;
+const ranges = (engine) => {
+  const rs = results[engine];
+  return { ready: span(rs.map((r) => r.cold.readyMs)), first: span(rs.map((r) => r.cold.firstResultMs)), numpy: span(rs.map((r) => r.numpy.ms)), speed: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, span(rs.map((r) => r.speed[w].ms))])) };
+};
+const RS = ranges("Sagebrush"), RP = ranges("Pyodide");
 console.log(`| | Sagebrush | Pyodide |\n|---|---|---|`);
 console.log(`| cold start, transferred / decoded | ${mb(S.coldWire)} / ${mb(S.coldDecoded)} MB | ${mb(P.coldWire)} / ${mb(P.coldDecoded)} MB |`);
-console.log(`| interpreter ready | ${S.readyMs} ms | ${P.readyMs} ms |`);
-console.log(`| first print(1 + 1) result, from navigation | ${S.firstResultMs} ms | ${P.firstResultMs} ms |`);
+console.log(`| interpreter ready | ${S.readyMs} ms (${RS.ready}) | ${P.readyMs} ms (${RP.ready}) |`);
+console.log(`| first print(1 + 1) result, from navigation | ${S.firstResultMs} ms (${RS.first}) | ${P.firstResultMs} ms (${RP.first}) |`);
 console.log(`| import numpy: transferred / decoded | ${mb(S.numpyWire)} / ${mb(S.numpyDecoded)} MB | ${mb(P.numpyWire)} / ${mb(P.numpyDecoded)} MB |`);
-console.log(`| import numpy: time | ${S.numpyMs} ms | ${P.numpyMs} ms |`);
-for (const w of Object.keys(WORKLOADS)) console.log(`| ${w} | ${S.speed[w]} ms | ${P.speed[w]} ms |`);
+console.log(`| import numpy: time | ${S.numpyMs} ms (${RS.numpy}) | ${P.numpyMs} ms (${RP.numpy}) |`);
+for (const w of Object.keys(WORKLOADS)) console.log(`| ${w} | ${S.speed[w]} ms (${RS.speed[w]}) | ${P.speed[w]} ms (${RP.speed[w]}) |`);
 // both must have printed the same thing (else the comparison is void)
 const bad = [];
 for (const [engine, rs] of Object.entries(results))
@@ -202,9 +221,19 @@ for (const [engine, rs] of Object.entries(results))
     if (r.cold.out !== "2") bad.push(`${engine} print(1 + 1): ${r.cold.out}`);
     if (r.numpy.out !== "45") bad.push(`${engine} numpy: ${r.numpy.out}`);
   }
+// (every execution, warm-up and timed, of every cold start of both engines,
+// prints what Sagebrush's first warm-up printed; every timing is a finite
+// non-negative number: astra's TEST-272-1)
 for (const w of Object.keys(WORKLOADS)) {
-  const a = results.Sagebrush[0].speed[w].out, b = results.Pyodide[0].speed[w].out;
-  if (a !== b) bad.push(`${w}: Sagebrush ${JSON.stringify(a)}, Pyodide ${JSON.stringify(b)}`);
+  const want = results.Sagebrush[0].speed[w].out;
+  if (typeof want !== "string" || want === "" || /ERROR|Traceback/.test(want)) bad.push(`${w}: Sagebrush printed ${JSON.stringify(want)}`);
+  for (const [engine, rs] of Object.entries(results))
+    rs.forEach((r, i) => {
+      const s = r.speed[w];
+      if (s.out !== want) bad.push(`${w}: ${engine} cold start ${i + 1} warm-up printed ${JSON.stringify(s.out)}, not ${JSON.stringify(want)}`);
+      s.outs.forEach((o, k) => { if (o !== want) bad.push(`${w}: ${engine} cold start ${i + 1} timed run ${k + 1} printed ${JSON.stringify(o)}`); });
+      s.times.forEach((t, k) => { if (typeof t !== "number" || !Number.isFinite(t) || t < 0) bad.push(`${w}: ${engine} cold start ${i + 1} timed run ${k + 1} took ${t}`); });
+    });
 }
 if (bad.length) console.log("DIFFERENT OUTPUTS:\n  " + bad.join("\n  "));
 if (opt("--json")) writeFileSync(opt("--json"), JSON.stringify({ when: new Date().toISOString(), runs: RUNS, reps: REPS, results, summary: { Sagebrush: S, Pyodide: P } }, null, 1) + "\n");
