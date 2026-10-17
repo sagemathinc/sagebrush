@@ -48,12 +48,12 @@ const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--figures
   --json            the report as JSON
   --timeout S       the seconds an item may run (default 60), from when the
                     interpreter begins it; longer is an error. The
-                    interpreter first warms up (at most 60 s), and an item
-                    may wait at most 60 s to be begun; one out of time is
-                    interrupted, and the interpreter stopped 2 s later if it
-                    doesn't stop. So the run takes at most
-                    60 + (number of runs) x (60 + S + 2) seconds, a run
-                    being an item, or the check of an item's syntax error
+                    interpreter has at most 60 s to start and 60 s to warm
+                    up, and an item at most 60 s to be begun; what runs out
+                    of time is interrupted, and the interpreter stopped 2 s
+                    later if it doesn't stop. So the run takes at most
+                    122 + (number of runs) x (62 + S) seconds, a run being
+                    an item, or the check of an item's syntax error
   --figures DIR     save each item's figures (plots, pictures) in DIR, as
                     ITEM-1.svg and so on (never over a file that is there);
                     the report says each figure's size and what it shows
@@ -295,8 +295,10 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       worker.stdout.resume();
       worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
       await new Promise<void>((resolve, reject) => {
+        // (its start bounded too: one that isn't ready in START_GRACE_MS is stopped, and is dead)
+        const late = setTimeout(() => { dead ??= `the interpreter did not start within ${START_GRACE_MS / 1000} s`; void worker?.terminate(); resolve(); }, START_GRACE_MS);
         worker!.on("message", (m: any) => {
-          if (m.ready) { intr = new Int32Array(m.$intr); return resolve(); }
+          if (m.ready) { clearTimeout(late); intr = new Int32Array(m.$intr); return resolve(); }
           sinks.get(m.id)?.(m);
         });
         worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
@@ -429,7 +431,9 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
         worker.stdout.resume();
         worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
         await new Promise<void>((resolve, reject) => {
-          worker!.on("message", (m: any) => { if (m.ready) { intr = new Int32Array(m.$intr); return resolve(); } sinks.get(m.id)?.(m); });
+        // (its start bounded too: one that isn't ready in START_GRACE_MS is stopped, and is dead)
+        const late = setTimeout(() => { dead ??= `the interpreter did not start within ${START_GRACE_MS / 1000} s`; void worker?.terminate(); resolve(); }, START_GRACE_MS);
+          worker!.on("message", (m: any) => { if (m.ready) { clearTimeout(late); intr = new Int32Array(m.$intr); return resolve(); } sinks.get(m.id)?.(m); });
           worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); });
           worker!.on("exit", () => { dead ??= "the interpreter stopped"; for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
         });
