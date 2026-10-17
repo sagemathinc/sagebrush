@@ -36,8 +36,16 @@ function patternError(msg: string, pattern: any = null, pos: number | null = nul
 function translate(p: string, flags: number, bytes = false, pattern: any = null): { src: string; flags: number; groups: number } {
   // (positions in errors are the pattern's own: base is the length of the
   // leading flags taken off p)
+  // (pos counts code points, as CPython's: at is a UTF-16 offset into p,
+  // after the flags taken off, CORR-079-2)
   let base = 0;
-  const perr = (msg: string, at: number): never => patternError(msg, pattern, base + at);
+  const whole = p;
+  const perr = (msg: string, at: number): never => {
+    const u = base + at;
+    let cp = 0;
+    for (let k = 0; k < u && k < whole.length; k++) if ((whole.charCodeAt(k) & 0xfc00) !== 0xdc00 || k === 0 || (whole.charCodeAt(k - 1) & 0xfc00) !== 0xd800) cp++;
+    return patternError(msg, pattern, cp + Math.max(0, u - whole.length));
+  };
   // Leading global inline flags: (?aiLmsux), as CPython's _parse_flags
   // reads them: L only in a bytes pattern, u only in a str one, and one of
   // a, u and L in each group (a and u in two groups: fix_flags, later)
@@ -440,7 +448,7 @@ function translate(p: string, flags: number, bytes = false, pattern: any = null)
           }
           if (p[i + 2] === "<") {
             if (i + 3 >= p.length) perr("unexpected end of pattern", p.length);
-            perr(`unknown extension ?<${p[i + 3]}`, i + 1);
+            perr(`unknown extension ?<${String.fromCodePoint(p.codePointAt(i + 3)!)}`, i + 1);
           }
           if (/[aiLmsux-]/.test(p[i + 2] ?? "")) {
             // (flags, read as CPython's _parse_flags reads them, for its
@@ -511,8 +519,8 @@ function translate(p: string, flags: number, bytes = false, pattern: any = null)
           if (p[i + 2] === "(") raise(T.NotImplementedError, "conditional groups, (?(1)...|...), are not supported");
           if (p[i + 2] === ">") raise(T.NotImplementedError, "atomic groups, (?>...), are not supported");
           if (i + 2 >= p.length) perr("unexpected end of pattern", p.length);
-          if (p[i + 2] === "P") perr(i + 3 >= p.length ? "unexpected end of pattern" : `unknown extension ?P${p[i + 3]}`, i + 3 >= p.length ? p.length : i + 1);
-          perr(`unknown extension ?${p[i + 2]}`, i + 1);
+          if (p[i + 2] === "P") perr(i + 3 >= p.length ? "unexpected end of pattern" : `unknown extension ?P${String.fromCodePoint(p.codePointAt(i + 3)!)}`, i + 3 >= p.length ? p.length : i + 1);
+          perr(`unknown extension ?${String.fromCodePoint(p.codePointAt(i + 2)!)}`, i + 1);
         } else {
           ngroups++;
           open.add(ngroups);
@@ -597,7 +605,7 @@ export class PyPattern {
     const key = `${k}${j > 0 && sh.caret ? "^" : ""}`;
     let rx = this.nonEmpty.get(key);
     if (rx === undefined) {
-      const src = j > 0 && sh.caret ? sh.variant() : sh.src;
+      const src = j > 0 && sh.caret ? sh.variant : sh.src;
       rx = new RegExp(`(?:${src})(?<!^[\\s\\S]{${k}})`, this.jf.replace("g", "y"));
       // (one per distance from the start within the look-behind's reach,
       // and one past it: a long look-behind's are not all kept)
