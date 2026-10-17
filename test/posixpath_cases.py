@@ -94,3 +94,129 @@ if d:
     for f in ["exists", "lexists", "isfile", "isdir", "islink"]:
         for v in [None, 1.5, P(5), "", b""]:
             show("%s(%r)" % (f, v if not isinstance(v, P) else "P(5)"), lambda: getattr(os.path, f)(v))
+
+# ------------------------------------------------------------------ astra's CORR-9C4-1..5
+# (a str or bytes subclass's payload taken as it is where CPython's C
+# converters take it: no override of it runs)
+class Slice(str):
+    def __getitem__(self, key):
+        raise RuntimeError("slice hook")
+
+
+class Falsy(str):
+    def __bool__(self):
+        return False
+
+
+class Decode(bytes):
+    def decode(self, *a, **kw):
+        raise RuntimeError("decode hook")
+
+
+for f in ["exists", "lexists", "isfile", "isdir", "islink"]:
+    show("%s(S('/dev/null'))" % f, lambda: getattr(os.path, f)(S("/dev/null")))
+    show("%s(Decode(b'/dev/null'))" % f, lambda: getattr(os.path, f)(Decode(b"/dev/null")))
+    show("%s(B(b'/dev/null'))" % f, lambda: getattr(os.path, f)(B(b"/dev/null")))
+show("normpath(Slice('/a/../b'))", lambda: os.path.normpath(Slice("/a/../b")))
+show("splitroot(Slice('//a/b'))", lambda: os.path.splitroot(Slice("//a/b")))
+show("normpath(Falsy('/a/../b'))", lambda: os.path.normpath(Falsy("/a/../b")))
+show("normpath(Falsy(''))", lambda: os.path.normpath(Falsy("")))
+show("normpath type of S", lambda: type(os.path.normpath(S("a//b"))).__name__)
+show("normpath type of B", lambda: type(os.path.normpath(B(b"a//b"))).__name__)
+show("fspath keeps S", lambda: type(os.fspath(S("a"))).__name__)
+
+
+# (a descriptor __fspath__: bound to the object once, as a special method)
+trace = []
+
+
+class Des:
+    def __get__(self, obj, owner):
+        trace.append(obj is None)
+        return lambda: "/dev/null"
+
+
+class DP:
+    __fspath__ = Des()
+
+
+class SM:
+    __fspath__ = staticmethod(lambda: "/dev/null")
+
+
+class CM:
+    @classmethod
+    def __fspath__(cls):
+        return "/dev/" + "null"
+
+
+class Inst:
+    pass
+
+
+inst = Inst()
+inst.__fspath__ = lambda: "/dev/null"
+for label, o in [("Des", DP()), ("staticmethod", SM()), ("classmethod", CM()), ("instance attribute", inst)]:
+    for f in ["normpath", "splitroot", "exists", "islink", "isabs", "basename"]:
+        show("%s(%s)" % (f, label), lambda: getattr(os.path, f)(o))
+    show("fspath(%s)" % label, lambda: os.fspath(o))
+    show("join(%s, 'x')" % label, lambda: os.path.join(o, "x"))
+print("descriptor trace", trace)
+
+
+# (what __fspath__ raises: OSError and ValueError mean False in the five
+# predicates; anything else propagates)
+class Raises:
+    def __init__(self, e):
+        self.e = e
+
+    def __fspath__(self):
+        raise self.e
+
+
+for e in [ValueError("path conversion"), FileNotFoundError(2, "no"), OSError("plain"), UnicodeEncodeError("utf-8", "x", 0, 1, "no"), TypeError("t"), RuntimeError("r"), KeyError("k")]:
+    for f in ["exists", "lexists", "isfile", "isdir", "islink"]:
+        show("%s(Raises(%s))" % (f, type(e).__name__), lambda: getattr(os.path, f)(Raises(e)))
+    show("normpath(Raises(%s))" % type(e).__name__, lambda: os.path.normpath(Raises(e)))
+
+
+# (stat takes a file descriptor first: an int or an object with __index__,
+# before any __fspath__; lstat takes none)
+class IntPath(int):
+    def __fspath__(self):
+        return "/dev/null"
+
+
+class IndexPath:
+    def __index__(self):
+        return -1
+
+    def __fspath__(self):
+        return "/dev/null"
+
+
+class IndexOnly:
+    def __index__(self):
+        return -1
+
+
+class BigIndex:
+    def __index__(self):
+        return 2 ** 40
+
+
+class BadIndex:
+    def __index__(self):
+        return "x"
+
+
+for label, o in [("IntPath(-1)", IntPath(-1)), ("IndexPath", IndexPath()), ("IndexOnly", IndexOnly()), ("-1", -1), ("-2**31", -2 ** 31),
+                 ("2**40", 2 ** 40), ("-2**40", -2 ** 40), ("BigIndex", BigIndex()), ("BadIndex", BadIndex()), ("2**70", 2 ** 70)]:
+    for f in ["exists", "lexists", "isfile", "isdir", "islink"]:
+        show("%s(%s)" % (f, label), lambda: getattr(os.path, f)(o))
+for label, o in [("IntPath(-1)", IntPath(-1)), ("IndexPath", IndexPath()), ("IndexOnly", IndexOnly())]:
+    show("normpath(%s)" % label, lambda: os.path.normpath(o))
+
+# (realpath's strict: False as before; anything else is refused, apart)
+show("realpath strict=False", lambda: os.path.realpath("/a/../b", strict=False))
+show("realpath strict=0", lambda: os.path.realpath("/a/../b", strict=0))
