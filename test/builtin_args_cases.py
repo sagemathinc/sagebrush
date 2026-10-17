@@ -158,3 +158,100 @@ for v in (-1, 10**30, 0x110000, 0x10FFFF, 65, 0, True, -(10**30), 2**63):
 t("A14 '%c' float", lambda: "%c" % 65.0)
 t("A14 '%c' str", lambda: ("%c" % "a", "%c" % "ab"))
 t("A14 b'%c'", lambda: (b"%c" % 65, b"%c" % 256, b"%c" % -1, b"%c" % b"a"))
+
+
+# @sagebrush-astra's review probe of 3c703280 (CORR-3C7-1..5)
+def show(label, f):
+    try: print(label, repr(f()))
+    except Exception as e: print(label, type(e).__name__, str(e))
+
+for kind in (bytes, bytearray):
+    for name in ('find', 'rfind', 'index', 'rindex', 'count'):
+        events = []
+        class Index:
+            def __init__(self, label, value): self.label, self.value = label, value
+            def __index__(self):
+                events.append(self.label)
+                return self.value
+        show(kind.__name__ + '.' + name, lambda: getattr(kind(b'abca'), name)(b'a', Index('start', 1), Index('end', 4)))
+        print('events', events)
+
+class Changing:
+    def __init__(self): self.n = 0
+    def __index__(self):
+        self.n += 1
+        return self.n - 1
+show('changing find index', lambda: b'abc'.find(b'a', Changing()))
+
+events = []
+class Start:
+    def __index__(self): events.append('index'); return 3
+class Iterable:
+    def __iter__(self): events.append('iter'); return iter(['x'])
+show('enumerate order', lambda: list(enumerate(Iterable(), Start())))
+print('enumerate events', events)
+show('enumerate None kw', lambda: list(enumerate(['x'], start=None)))
+show('enumerate None pos', lambda: list(enumerate(['x'], None)))
+
+for value in ('abc', b'abc', bytearray(b'abc')):
+    for name, args in [('ljust',(-10**100,)), ('zfill',(-10**100,)), ('expandtabs',(2**32+1,)), ('split',(None,10**100)), ('replace',(value[:1],value[1:2],10**100))]:
+        show(type(value).__name__+'.'+name+' bound',lambda value=value,name=name,args=args:getattr(value,name)(*args))
+
+class R:
+    def __rpow__(self, base, mod=None): return ('reflected',base,mod)
+show('pow exponent reflected',lambda:pow(2,R(),5))
+class A:
+    def __pow__(self, other, mod=None): return NotImplemented
+class B(A):
+    def __rpow__(self, other, mod=None): return ('subtype reflected',mod)
+show('pow subtype reflected',lambda:pow(A(),B(),5))
+class F(float):
+    def __pow__(self, other, mod=None): return ('float custom',other,mod)
+show('pow float subtype',lambda:pow(F(2),3,5))
+show('pow ordinary',lambda:pow(2,3,5))
+show('pow float refusal',lambda:pow(2.0,3,5))
+
+old=bytearray(b'a')
+class Mutate:
+    def __index__(self): old[0]=98; return 1
+show('replace mutable old during count',lambda:b'abc'.replace(old,b'x',Mutate()))
+new=bytearray(b'x')
+class MutateNew:
+    def __index__(self): new[0]=121; return 1
+show('replace mutable new during count',lambda:b'abc'.replace(b'a',new,MutateNew()))
+
+for spec in ('z', 'z.2f', '+#c', '.2d', 'G', '%'):
+    show('format int '+spec,lambda spec=spec:format(1,spec))
+for spec in ('0<10', '0^10', '#', '+12', 'z', 'z.2f'):
+    show('format complex '+spec,lambda spec=spec:format(complex(-0.0,1.25),spec))
+
+
+# (daybreak2's HARD-3C7-1: Py_ssize_t and C int arguments within their
+# bounds, CPython's OverflowError past them, promptly; a width past what can
+# be allocated a MemoryError (bytes: "byte string is too large" at the
+# Py_ssize_t limit), never a host error or a hang)
+class Big:
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        return self.v
+
+
+for s in ("x", b"x", bytearray(b"x")):
+    n = type(s).__name__
+    for v in (10**100, -10**100, 2**63, 2**63 - 1, -2**63, -2**63 - 1, 2**62, 2**40):
+        for m in ("ljust", "rjust", "center", "zfill"):
+            t("HARD %s.%s(%d)" % (n, m, v), lambda s=s, v=v, m=m: getattr(s, m)(v))
+        t("HARD %s.ljust(Big(%d))" % (n, v), lambda s=s, v=v: s.ljust(Big(v)))
+    for v in (2**31, 2**31 - 1, -2**31, -2**31 - 1, 10**100):
+        t("HARD %s.expandtabs(%d)" % (n, v), lambda s=s, v=v: s.expandtabs(v))
+        t("HARD %s.expandtabs(Big(%d))" % (n, v), lambda s=s, v=v: s.expandtabs(Big(v)))
+    for v in (10**100, 2**63, -2**63 - 1, 2**63 - 1, -2**63, -10**100):
+        t("HARD %s.split(%d)" % (n, v), lambda s=s, v=v: s.split(None, v))
+        t("HARD %s.rsplit(%d)" % (n, v), lambda s=s, v=v: s.rsplit(None, v))
+        t("HARD %s.replace(%d)" % (n, v), lambda s=s, v=v: s.replace(s[:1], s[:1], v))
+# (daybreak2's LIMIT-3C7-2: a very long fill refused without walking it)
+t("LIMIT long fill", lambda: "x".ljust(5, "ab" * 10**6))
+t("LIMIT long fill str", lambda: "x".center(1, "\U0001f600" * 10**6))
+t("LIMIT one astral fill", lambda: "x".center(3, "\U0001f600"))

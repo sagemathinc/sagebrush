@@ -1381,7 +1381,7 @@ method(S, "join", (sep: string, items: any) => {
 // (maxsplit through __index__, converted before sep is looked at, as
 // CPython's clinic does)
 method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
-  const m = Number(AC.indexArg(maxsplit));
+  const m = Number(AC.ssizeArg(maxsplit));
   if (sep === null) return splitWhitespace(s, m);
   if (typeof sep !== "string") raise(T.TypeError, `must be str or None, not ${typeName(sep)}`);
   if (sep === "") raise(T.ValueError, "empty separator");
@@ -1390,7 +1390,7 @@ method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
   return parts;
 }, sig(["self", "sep", "maxsplit"]));
 method(S, "rsplit", (s: string, sep: any = null, maxsplit: any = -1) => {
-  const m = Number(AC.indexArg(maxsplit));
+  const m = Number(AC.ssizeArg(maxsplit));
   if (sep === null) return m < 0 ? splitWhitespace(s, -1) : rsplitWhitespace(s, m);
   needStr(sep, "must be str or None");
   if (sep === "") raise(T.ValueError, "empty separator");
@@ -1417,7 +1417,7 @@ method(S, "rstrip", (s: string, chars: any = null) => stripChars(s, chars, false
 method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
   needStr(a, "replace() argument 1 must be str");
   needStr(b, "replace() argument 2 must be str");
-  let c = Number(AC.indexArg(count));
+  let c = Number(AC.ssizeArg(count));
   // (matches on code-point boundaries, and no lone surrogates joined: SP)
   if (c < 0 && a !== "") return SP.joinChecked(SP.split(s, a), b);
   if (c < 0) c = Infinity;
@@ -1540,8 +1540,9 @@ method(S, "isidentifier", (s: string) => /^[\p{L}\p{Nl}_][\p{L}\p{Nl}\p{Mn}\p{Mc
 method(S, "isprintable", (s: string) => [...s].every((c) => c === " " || !/[\p{C}\p{Z}]/u.test(c)));
 method(S, "istitle", (s: string) => /\p{L}/u.test(s) && s === S.$dict.get("title")(s));
 function padTo(s: string, w: any, fill: string, where: string): string {
-  const n = Number(w) - [...s].length;
-  if (n <= 0) return s;
+  if (w <= SP.cpLen(s)) return s;
+  AC.allocStr(w);
+  const n = Number(w) - SP.cpLen(s);
   // (the fill meets s: no lone surrogates joined, SP.glue)
   if (where === "l") return SP.glue(s, fill.repeat(n));
   if (where === "r") return SP.glue(fill.repeat(n), s);
@@ -1550,12 +1551,14 @@ function padTo(s: string, w: any, fill: string, where: string): string {
 }
 // (the width through __index__, then the fill character checked, padding
 // needed or not: astra3 A08)
-method(S, "center", (s: string, w: any, fill: any = " ") => padTo(s, AC.indexArg(w), AC.fillCharArg(fill), "c"));
-method(S, "ljust", (s: string, w: any, fill: any = " ") => padTo(s, AC.indexArg(w), AC.fillCharArg(fill), "l"));
-method(S, "rjust", (s: string, w: any, fill: any = " ") => padTo(s, AC.indexArg(w), AC.fillCharArg(fill), "r"));
+method(S, "center", (s: string, w: any, fill: any = " ") => padTo(s, AC.ssizeArg(w), AC.fillCharArg(fill), "c"));
+method(S, "ljust", (s: string, w: any, fill: any = " ") => padTo(s, AC.ssizeArg(w), AC.fillCharArg(fill), "l"));
+method(S, "rjust", (s: string, w: any, fill: any = " ") => padTo(s, AC.ssizeArg(w), AC.fillCharArg(fill), "r"));
 method(S, "zfill", (s: string, w: any) => {
   const sign = s[0] === "-" || s[0] === "+" ? s[0] : "";
-  const n = Number(AC.indexArg(w)) - SP.cpLen(s);
+  const wv = AC.ssizeArg(w);
+  if (wv > SP.cpLen(s)) AC.allocStr(wv);
+  const n = Number(wv) - SP.cpLen(s);
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
 // str.translate and str.maketrans, as CPython's (their messages included);
@@ -1706,11 +1709,12 @@ method(S, "removesuffix", (s: string, p: any) => ((p = AC.strArg("removesuffix",
 method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict") => encode(s, encoding, errors), sig(["self", "encoding", "errors"]));
 method(S, "expandtabs", (s: string, ts: any = 8) => {
   let out = "", col = 0;
-  const n = Number(AC.indexArg(ts));
+  const n = AC.cIntArg(ts);
   const seams: number[] = []; // (a tab expanded to nothing joins its neighbours: SP.checkSeams)
   for (const c of s) {
     if (c === "\t") {
       const k = n > 0 ? n - (col % n) : 0;
+      AC.allocStr(out.length + k);
       if (k === 0) seams.push(out.length);
       out += " ".repeat(k);
       col += k;
@@ -2510,11 +2514,17 @@ export class Enumerate {
     return r;
   }
 }
-// (start an integer through __index__, as CPython's enumerate_new: astra3 A12)
-const enumerate = iteratorType("enumerate", Enumerate, (x: any, start: any = 0) => new Enumerate(O.iter(x), O.index(start)));
+// (start an integer through __index__, converted before the iterable's
+// iterator is asked for, as CPython's enumerate_new; an explicit None is
+// refused, by keyword too: astra3 A12)
+const enumNew = (x: any, start: any): Enumerate => {
+  const i = start === undefined ? 0 : O.index(start);
+  return new Enumerate(O.iter(x), i);
+};
+const enumerate = iteratorType("enumerate", Enumerate, (x: any, start: any = undefined) => enumNew(x, start));
 enumerate.$kw = (pos, names, values) => {
   const [x, start] = bindArgs("enumerate", sig(["iterable", "start"]), pos, names, values);
-  return new Enumerate(O.iter(x), O.index(start ?? 0));
+  return enumNew(x, start);
 };
 
 export class Zip {
@@ -2749,16 +2759,14 @@ getset(object, "__dict__", (o) => {
     return x;
   };
   const latinOf = (b: Uint8Array): string => Buffer.from(b.buffer, b.byteOffset, b.length).toString("latin1");
-  // (the methods' arguments by kind: b bytes-like, b? bytes-like or None, c
-  // a fill byte, * as it is)
   // (the methods' arguments by kind, converted in CPython's clinic order: b
-  // bytes-like, b? bytes-like or None, c a fill byte, i an integer through
-  // __index__, * as it is; a kind ending in ! after all the others, as an
+  // bytes-like, b? bytes-like or None, c a fill byte, i a Py_ssize_t, t a C
+  // int (a tab size), * as it is; a kind ending in ! after all the others, as an
   // object the method itself converts: split's sep after maxsplit)
   const BYTES_ARGS: Record<string, string[]> = {
     split: ["b?!", "i"], rsplit: ["b?!", "i"], strip: ["b?"], lstrip: ["b?"], rstrip: ["b?"], partition: ["b"], rpartition: ["b"],
     replace: ["b", "b", "i"], removeprefix: ["b"], removesuffix: ["b"], center: ["i", "c"], ljust: ["i", "c"], rjust: ["i", "c"],
-    zfill: ["i"], expandtabs: ["i"], splitlines: ["*"],
+    zfill: ["i"], expandtabs: ["t"], splitlines: ["*"],
   };
   const names = ["split", "rsplit", "strip", "lstrip", "rstrip", "partition", "rpartition", "replace", "index", "rindex", "find", "rfind", "count", "startswith", "endswith", "upper", "lower", "splitlines", "center", "ljust", "rjust", "zfill", "isdigit", "isalpha", "isspace", "isalnum", "isupper", "islower", "title", "capitalize", "swapcase", "removeprefix", "removesuffix", "expandtabs", "join"];
   for (const [bt, Cls] of [[T.bytes, PyBytes], [T.bytearray, PyByteArray]] as const) {
@@ -2801,25 +2809,43 @@ getset(object, "__dict__", (o) => {
         // fill byte, None where it means the default; astra3 A08, A09)
         const kinds = BYTES_ARGS[name];
         if (kinds !== undefined) {
+          // (a bytes-like argument held as its live view, a bytearray's
+          // export counted, until every argument is converted: a later
+          // __index__ may write into it, not resize it, as CPython's Py_buffer)
           const out = args.slice();
-          const one = (i: number) => {
-            const a = args[i], k = (kinds[i] ?? "*").replace("!", "");
-            if (a === undefined || k === "*" || (k === "b?" && a === null)) return;
-            if (k === "i") out[i] = AC.indexArg(a);
-            else if (k === "c") out[i] = String.fromCharCode(AC.byteCharArg(name, `argument ${i + 1}`, a));
-            else out[i] = latinOf(AC.bufferArg(a));
-          };
-          for (let i = 0; i < args.length; i++) if (!(kinds[i] ?? "").endsWith("!")) one(i);
-          for (let i = 0; i < args.length; i++) if ((kinds[i] ?? "").endsWith("!")) one(i);
+          const held: any[] = [];
+          try {
+            const one = (i: number) => {
+              const a = args[i], k = (kinds[i] ?? "*").replace("!", "");
+              if (a === undefined || k === "*" || (k === "b?" && a === null)) return;
+              if (k === "i") out[i] = AC.ssizeArg(a);
+              else if (k === "t") out[i] = AC.cIntArg(a);
+              else if (k === "c") out[i] = String.fromCharCode(AC.byteCharArg(name, `argument ${i + 1}`, a));
+              else {
+                out[i] = AC.bufferArg(a);
+                if (a instanceof PyByteArray) {
+                  a.$exports++;
+                  held.push(a);
+                }
+              }
+            };
+            for (let i = 0; i < args.length; i++) if (!(kinds[i] ?? "").endsWith("!")) one(i);
+            for (let i = 0; i < args.length; i++) if ((kinds[i] ?? "").endsWith("!")) one(i);
+            for (let i = 0; i < out.length; i++) if (out[i] instanceof Uint8Array) out[i] = latinOf(out[i]);
+          } finally {
+            for (const a of held) a.$exports--;
+          }
+          // (a bytes object past Py_ssize_t's limit: CPython's _PyBytes_FromSize)
+          if (Cls === PyBytes && kinds[0] === "i" && name !== "split" && name !== "rsplit" && out[0] !== undefined && BigInt(out[0]) > 2n ** 63n - 34n) raise(T.OverflowError, "byte string is too large");
           const r = f(latin(self), ...out);
           if (Cls === PyBytes && typeof r === "string" && r.length === self.n && /strip|just|center|zfill|remove/.test(name)) return self;
           return back(r, Cls);
         }
-        // (find, rfind, index, rindex and count: start and end first, as
-        // slice indices, then the subject: an int byte or bytes-like; index's
-        // and rindex's "subsection not found")
+        // (find, rfind, index, rindex and count: start and end first, each
+        // converted once, as slice indices, then the subject: an int byte or
+        // bytes-like; index's and rindex's "subsection not found")
         if (intArg) {
-          for (const a of args.slice(1)) if (a !== undefined) O.sliceIndexExact(a);
+          const idx = args.slice(1).map((a) => (a === undefined ? a : O.sliceIndexExact(a)));
           const a = args[0];
           let sub: string;
           if (O.isPyInt(a)) {
@@ -2832,11 +2858,11 @@ getset(object, "__dict__", (o) => {
             sub = latinOf(b);
           }
           if (name === "index" || name === "rindex") {
-            const j = S.$dict.get(name === "index" ? "find" : "rfind")(latin(self), sub, ...args.slice(1));
+            const j = S.$dict.get(name === "index" ? "find" : "rfind")(latin(self), sub, ...idx);
             if (j < 0) raise(T.ValueError, "subsection not found");
             return j;
           }
-          return f(latin(self), sub, ...args.slice(1));
+          return f(latin(self), sub, ...idx);
         }
         const conv = args.map((a, i) => {
           // (find, rfind, index, rindex and count: after the subject, start
