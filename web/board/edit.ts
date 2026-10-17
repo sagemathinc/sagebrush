@@ -991,6 +991,7 @@ export class Editor {
       if (n?.kind !== "ask" || answerProblem(n, answer)) return;
       n.answer = answer;
       if (result !== "error") n.attempts = (n.attempts ?? 0) + 1;
+      if (result === "wrong") n.wrongAttempts = (n.wrongAttempts ?? 0) + 1;
       n.result = result;
     });
   }

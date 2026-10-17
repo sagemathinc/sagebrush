@@ -209,6 +209,8 @@ export interface DocAsk {
   example?: AskAnswer;
   /** how many times its answer was checked (written by Sagebrush) */
   attempts?: number;
+  /** how many of those were wrong: one more hint is shown after each (written by Sagebrush) */
+  wrongAttempts?: number;
   /** the last check's verdict: `right`, `wrong` or `error` (written by Sagebrush) */
   result?: AskResult;
   /** Markdown shown only when zoomed in */
@@ -561,7 +563,7 @@ export function cleanDoc(d: any): BoardDoc {
         check: typeof n.check === "string" ? n.check : undefined, checkMs: Number.isInteger(n.checkMs) && n.checkMs >= 1 && n.checkMs <= 10000 ? n.checkMs : undefined,
         hints: Array.isArray(n.hints) ? n.hints.filter((h: unknown) => typeof h === "string" || (!!h && typeof h === "object" && typeof (h as any).code === "string")).map((h: any) => (typeof h === "string" ? h : { code: h.code })) : undefined,
         next: n.next && typeof n.next === "object" && !Array.isArray(n.next) ? strip({ right: typeof n.next.right === "string" ? n.next.right : undefined, wrong: typeof n.next.wrong === "string" ? n.next.wrong : undefined }) : undefined,
-        example: askAnswer(n.example), attempts: Number.isInteger(n.attempts) && n.attempts >= 0 ? n.attempts : undefined, result: one(n.result, ["right", "wrong", "error"] as const), detail: str(n.detail),
+        example: askAnswer(n.example), attempts: Number.isInteger(n.attempts) && n.attempts >= 0 ? n.attempts : undefined, wrongAttempts: Number.isInteger(n.wrongAttempts) && n.wrongAttempts >= 0 ? n.wrongAttempts : undefined, result: one(n.result, ["right", "wrong", "error"] as const), detail: str(n.detail),
         color: safeColor(n.color), x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
     }
     // (kind "code": the code items of documents before every note could have code)

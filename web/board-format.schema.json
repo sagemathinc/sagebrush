@@ -783,6 +783,12 @@
      "maximum": 1.7976931348623157e+308,
      "description": "how many times its answer was checked (written by Sagebrush)"
     },
+    "wrongAttempts": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 1.7976931348623157e+308,
+     "description": "how many of those were wrong: one more hint is shown after each (written by Sagebrush)"
+    },
     "result": {
      "enum": [
       "right",

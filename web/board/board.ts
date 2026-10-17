@@ -656,7 +656,8 @@ export class Board {
       if (fb?.message) md(fb.message, "board-text board-ask-message");
     }
     // the hints: one more after each wrong attempt (a computed one once Check has run it)
-    const wrong = Math.max(0, (a.attempts ?? 0) - (a.result === "right" ? 1 : 0));
+    // (one hint for each wrong attempt: a right one reveals none, CORR-A19-5)
+    const wrong = a.wrongAttempts ?? 0;
     (a.hints ?? []).slice(0, Math.min(wrong, ASK_LIMITS.hints)).forEach((h, k) => {
       const shown = typeof h === "string" ? h : fb?.hints?.[k] ?? null;
       md(shown === null ? "_A hint from your answer: press Check to see it._" : `**Hint ${k + 1}.** ${shown}`, "board-text board-ask-hint");

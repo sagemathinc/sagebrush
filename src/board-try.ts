@@ -28,7 +28,7 @@ import { cleanDoc, formatError, isBoard, type AskAnswer, type BoardDoc, type Doc
 import { asksOf, ASK_LIMITS } from "../web/board/ask";
 import { checkText, FILE_MAX, readBounded } from "./board-check";
 import { CLI_READER } from "./board-cli";
-import { runBoard, type Evaluate } from "./board-run";
+import { runBoard, type BoardRun, type Evaluate } from "./board-run";
 import { oneLine } from "./terminal-text";
 
 const USAGE = `usage: sagebrush board try FILE [--cases CASES.json | --case 'ID=JSON' ...] [--json] [--timeout S]
@@ -45,8 +45,10 @@ const USAGE = `usage: sagebrush board try FILE [--cases CASES.json | --case 'ID=
   --json        the report as JSON (else a summary)
   --timeout S   the most seconds the whole run may take (default 600)
   The exit status is 0 when every case could be tried, 1 if the board
-  can't be read or a case names no question, 2 for a wrong command line,
-  3 if the run ran out of time (the report then says "complete": false).
+  can't be read, 2 for a wrong command line or cases that can't be tried
+  as given (a case_id twice, a question that isn't there), 3 if the run
+  ran out of time.  With --json, a refusal and a run out of time are
+  reports too, with "complete": false and the "error".
 `;
 
 const say = (msg: string) => process.stderr.write(`sagebrush board try: ${oneLine(msg)}\n`);
@@ -82,7 +84,7 @@ export function readCases(raw: unknown, asks: Map<string, DocAsk>): { checks: Ch
 }
 
 /** This sagebrush: its version, its build, and the commit it was built from when that is known. */
-function runtime(): { version: string; build: string | null; commit: string | null } {
+function runtime(): { version: string; engine: string | null; build: string | null; commit: string | null } {
   const g = globalThis as any;
   let commit: string | null = process.env.SAGEBRUSH_COMMIT && /^[0-9a-f]{40}$/.test(process.env.SAGEBRUSH_COMMIT) ? process.env.SAGEBRUSH_COMMIT : null;
   if (!commit) {
@@ -93,16 +95,20 @@ function runtime(): { version: string; build: string | null; commit: string | nu
       if (/^[0-9a-f]{40}$/.test(sha) && !dirty) commit = sha;
     } catch {}
   }
-  return { version: g.__SAGEBRUSH_VERSION__ ?? "dev", build: g.__SAGEBRUSH_BUILD_ID__ ?? null, commit };
+  // (the engine: this CLI, by its entry file's SHA-256, first 20 hex digits; a release's CLI is one file)
+  let engine: string | null = null;
+  try { engine = "cli-" + createHash("sha256").update(readFileSync(require.main?.filename ?? process.argv[1])).digest("hex").slice(0, 20); } catch {}
+  return { version: g.__SAGEBRUSH_VERSION__ ?? "dev", engine, build: g.__SAGEBRUSH_BUILD_ID__ ?? null, commit };
 }
 
-type Verdict = { outcome: "right" | "wrong" | "error"; raw: unknown; message: string | null; error: string | null; timedOut: boolean; preserved: boolean | null; isolated: boolean };
+type Verdict = { outcome: "right" | "wrong" | "error"; raw: unknown; message: string | null; error: string | null; timedOut: boolean; preserved: boolean | null; reason: string | null; isolated: boolean };
 async function verdict(ev: Evaluate, a: DocAsk, answer: unknown): Promise<Verdict> {
-  if (a.check === undefined) return { outcome: "error", raw: null, message: null, error: "the question has no check", timedOut: false, preserved: null, isolated: true };
+  if (a.check === undefined) return { outcome: "error", raw: null, message: null, error: "the question has no check", timedOut: false, preserved: null, reason: "no check ran", isolated: true };
   const r = await ev(a.check, answer, a.checkMs ?? 2000);
-  if (!r.ok) return { outcome: "error", raw: null, message: null, error: r.error ?? "it failed", timedOut: r.timedOut, preserved: r.preserved ?? null, isolated: r.isolated !== false };
+  const why = r.preserved === null || r.preserved === undefined ? r.reason ?? (r.timedOut ? "it ran out of time, so the board's state was not compared" : "the board's state was not compared") : null;
+  if (!r.ok) return { outcome: "error", raw: null, message: null, error: r.error ?? "it failed", timedOut: r.timedOut, preserved: r.preserved ?? null, reason: why, isolated: r.isolated !== false };
   const v = r.value;
-  return { outcome: v === true ? "right" : "wrong", raw: v, message: typeof v === "string" ? v : null, error: null, timedOut: false, preserved: r.preserved ?? null, isolated: r.isolated !== false };
+  return { outcome: v === true ? "right" : "wrong", raw: v, message: typeof v === "string" ? v : null, error: null, timedOut: false, preserved: r.preserved ?? null, reason: why, isolated: r.isolated !== false };
 }
 
 /** The `board try` command; returns the exit code. */
@@ -126,20 +132,27 @@ export async function boardTry(argv: string[]): Promise<number> {
   if (file === null) { process.stderr.write(USAGE); return 2; }
   if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 86400) { say("--timeout takes a number of seconds, more than 0 and at most 86400"); return 2; }
 
+  // (refused before anything runs: said, and with --json a report saying so, incomplete)
+  let sha: string | null = null;
+  const refuse = (status: 1 | 2, msg: string) => {
+    say(msg);
+    if (json) process.stdout.write(JSON.stringify({ schema_version: 1, complete: false, error: msg, board_sha256: sha, runtime: runtime(), validation: null, code: [], checks: [], hints: [], interaction: [] }, null, 2) + "\n");
+    return status;
+  };
   // the board: its exact bytes, read and checked
   let bytes: Buffer, raw: any, doc: BoardDoc;
   try {
     const b = readBounded(file, FILE_MAX);
     if (b === null) throw new Error(`too large for the board to open (at most ${FILE_MAX / 2 ** 20} MB)`);
     bytes = b;
+    sha = createHash("sha256").update(bytes).digest("hex");
     raw = JSON.parse(bytes.toString("utf8"));
     const bad = isObj(raw) ? formatError(raw, CLI_READER) : "not a board: a board is a JSON object";
     if (bad) throw new Error(bad);
     if (!isBoard(raw)) throw new Error("not a board: a document needs nodes (or pages of them)");
     doc = cleanDoc(raw);
   } catch (e: any) {
-    say(`${file}: ${e?.message ?? e}`);
-    return 1;
+    return refuse(1, `${file}: ${e?.message ?? e}`);
   }
   const asks = new Map<string, DocAsk>();
   for (const q of asksOf(doc)) if (!asks.has(q.ask.id)) asks.set(q.ask.id, q.ask);
@@ -151,17 +164,20 @@ export async function boardTry(argv: string[]): Promise<number> {
       if (c === null) throw new Error("the cases file is past 64 MB");
       given = JSON.parse(c.toString("utf8"));
     } else given = { checks: inline.length ? [] : [...asks.values()].filter((a) => a.example !== undefined).map((a) => ({ case_id: `example-${a.id}`, ask_id: a.id, answer: a.example })) };
+    // (--case beside a file of sequences only: its checks begin here)
+    if (inline.length && isObj(given) && given.checks === undefined) given.checks = [];
+    if (inline.length && !(isObj(given) && Array.isArray(given.checks))) throw new Error("its checks are a list");
     for (const [k, [id, v]] of inline.entries()) (given as any).checks.push({ case_id: `case-${k + 1}`, ask_id: id, answer: JSON.parse(v) });
   } catch (e: any) {
-    say(`the cases: ${e?.message ?? e}`);
-    return 2;
+    return refuse(2, `the cases: ${e?.message ?? e}`);
   }
+  // (cases that can't be tried as given, a case_id twice, a question that isn't there: refused before anything runs, exit 2 as agreed)
   const cases = readCases(given, asks);
-  if (typeof cases === "string") { say(cases); return 1; }
-  if (casesFile === null && !inline.length && !cases.checks.length) { say("nothing to try: no question has an `example`; give --case or --cases"); process.stderr.write(USAGE); return 2; }
+  if (typeof cases === "string") return refuse(2, cases);
+  if (casesFile === null && !inline.length && !cases.checks.length) { process.stderr.write(USAGE); return refuse(2, "nothing to try: no question has an `example`; give --case or --cases"); }
 
   const report: any = {
-    schema_version: 1, complete: false, board_sha256: createHash("sha256").update(bytes).digest("hex"), runtime: runtime(),
+    schema_version: 1, complete: false, board_sha256: sha, runtime: runtime(),
     validation: { ok: true, errors: [] as string[] }, code: [] as any[], checks: [] as any[], hints: [] as any[], interaction: [] as any[],
   };
   const problems = checkText(bytes.toString("utf8")).problems.filter((p) => p.level === "error");
@@ -171,13 +187,29 @@ export async function boardTry(argv: string[]): Promise<number> {
   let outOfTime = false;
   const deadline = new Promise<"timeout">((r) => setTimeout(() => { outOfTime = true; r("timeout"); }, timeout * 1000).unref());
   const work = (async () => {
-    // (a case run again in an interpreter of its own: the board's code, then its check)
-    const alone = async (a: DocAsk, answer: unknown): Promise<Verdict> => {
-      let v: Verdict | null = null;
-      await runBoard(doc, 60, async (ev) => { v = await verdict(ev, a, answer); });
-      return v ?? { outcome: "error", raw: null, message: null, error: "the interpreter could not run it", timedOut: false, preserved: null, isolated: true };
+    // Every evaluation (a case's check, a hint, a sequence's answer) starts
+    // from the board's state just after its code ran.  One that ran on a
+    // copy and left the board's names as they were keeps the interpreter;
+    // any other (no copy could be made, a change, a state that can't be
+    // compared, an error, a deadline) makes the next one start in a fresh
+    // interpreter, the board's code run again (astra2's CORR-A19-1, -2).
+    type Session = { ev: Evaluate; run: BoardRun; close: () => Promise<void> };
+    const open = () => new Promise<Session>((ready, fail) => {
+      let release!: () => void;
+      const released = new Promise<void>((r) => (release = r));
+      const done = runBoard(doc, 60, async (ev, run) => { ready({ ev, run, close: async () => { release(); await done.catch(() => {}); } }); await released; });
+      done.then(() => fail(new Error("the board's code could not be run")), fail);
+    });
+    let session = await open(), dirty = false;
+    const ev: Evaluate = async (code, answer, ms) => {
+      if (dirty) { await session.close(); session = await open(); dirty = false; }
+      const r = await session.ev(code, answer, ms);
+      if (!(r.ok && r.isolated !== false && r.preserved === true)) dirty = true;
+      return r;
     };
-    await runBoard(doc, 60, async (ev, run) => {
+    try {
+    {
+      const run = session.run;
       report.code = run.list.map((r) => ({ id: r.id, ok: r.status === "ok", error: r.status === "ok" ? null : r.error ?? r.status, timed_out: r.status === "timeout" }));
       // each case: its answer checked (none: in words), from the board's state
       const firstWrong = new Map<string, unknown>();
@@ -185,13 +217,15 @@ export async function boardTry(argv: string[]): Promise<number> {
         if (outOfTime) return;
         const a = asks.get(c.ask_id)!, note = typeof c.note === "string" ? c.note : null;
         if (c.answer === undefined) {
-          report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: null, note, outcome: "in words", raw_result: null, message: null, error: null, timed_out: false, check_invoked: false, scope_preserved: null, isolation: null, note_preserved: note !== null, next: null });
+          report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: null, note, outcome: "in words", raw_result: null, message: null, error: null, timed_out: false, check_invoked: false, scope_preserved: null, scope_preserved_reason: "no check ran", isolation: null, note_preserved: note !== null, next: null });
           continue;
         }
-        let v = await verdict(ev, a, c.answer), isolation = "copy";
-        if (!v.isolated) { v = await alone(a, c.answer); isolation = "rerun"; }
+        // ("copy": checked on a copy of the board's names; "rerun": no copy
+        // could be made, so checked on the board's state itself, fresh, and
+        // the board's code run again before the next)
+        const v = await verdict(ev, a, c.answer), isolation = v.isolated ? "copy" : "rerun";
         if (v.outcome === "wrong" && !firstWrong.has(c.ask_id)) firstWrong.set(c.ask_id, c.answer);
-        report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: c.answer, note, outcome: v.outcome, raw_result: v.outcome === "error" ? null : v.raw, message: v.message, error: v.error, timed_out: v.timedOut, check_invoked: true, scope_preserved: v.preserved, isolation, note_preserved: note !== null || null, next: v.outcome === "right" ? a.next?.right ?? null : v.outcome === "wrong" ? a.next?.wrong ?? null : null });
+        report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: c.answer, note, outcome: v.outcome, raw_result: v.outcome === "error" ? null : v.raw, message: v.message, error: v.error, timed_out: v.timedOut, check_invoked: true, scope_preserved: v.preserved, scope_preserved_reason: v.reason, isolation, note_preserved: note !== null || null, next: v.outcome === "right" ? a.next?.right ?? null : v.outcome === "wrong" ? a.next?.wrong ?? null : null });
       }
       // each hint, as shown: a computed one with its question's first wrong answer
       for (const [id, a] of asks) {
@@ -210,14 +244,15 @@ export async function boardTry(argv: string[]): Promise<number> {
         let attempts = 0, wrong = 0, result: string | null = null, last: unknown = null;
         for (const answer of s.answers) {
           const v = await verdict(ev, a, answer);
-          attempts++;
+          // (an error is the check's, not the reader's attempt: not counted, as the board doesn't, CORR-A19-6)
+          if (v.outcome !== "error") attempts++;
           result = v.outcome;
           last = answer;
           outcomes.push(v.outcome);
           if (v.outcome === "wrong") { wrong++; for (let k = 0; k < Math.min(wrong, a.hints?.length ?? 0, ASK_LIMITS.hints); k++) if (!shown.includes(k)) shown.push(k); }
         }
         const copy = JSON.parse(bytes.toString("utf8"));
-        setProgress(copy, s.ask_id, { answer: last, attempts, result });
+        setProgress(copy, s.ask_id, { answer: last, attempts, wrongAttempts: wrong, result });
         const dir = mkdtempSync(join(tmpdir(), "sagebrush-try-"));
         let back: DocAsk | undefined;
         try {
@@ -228,7 +263,10 @@ export async function boardTry(argv: string[]): Promise<number> {
         }
         report.interaction.push({ ask_id: s.ask_id, sequence: outcomes, hints_shown: shown, attempts_after_reload: back?.attempts ?? null, result_after_reload: back?.result ?? null, answer_preserved_after_reload: JSON.stringify(back?.answer) === JSON.stringify(last) });
       }
-    });
+    }
+    } finally {
+      await session.close();
+    }
     return "done" as const;
   })();
   const how = await Promise.race([work, deadline]);
@@ -247,7 +285,7 @@ export async function boardTry(argv: string[]): Promise<number> {
 }
 
 /** A question's progress written into a board's raw JSON, as the board keeps it. */
-function setProgress(raw: any, id: string, p: { answer: unknown; attempts: number; result: string | null }) {
+function setProgress(raw: any, id: string, p: { answer: unknown; attempts: number; wrongAttempts: number; result: string | null }) {
   const walk = (ns: unknown): boolean => {
     if (!Array.isArray(ns)) return false;
     for (const n of ns) {
@@ -256,6 +294,7 @@ function setProgress(raw: any, id: string, p: { answer: unknown; attempts: numbe
       if (n.kind === "ask" && String(n.id) === id) {
         n.answer = p.answer as AskAnswer;
         n.attempts = p.attempts;
+        n.wrongAttempts = p.wrongAttempts;
         if (p.result) n.result = p.result;
         return true;
       }
