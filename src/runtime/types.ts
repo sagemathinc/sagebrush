@@ -1759,11 +1759,16 @@ export function strFormat(s: string, args: any[], kw: any): string {
 
 // ------------------------------------------------------------------ list, tuple
 
-// (a list or tuple subclass's instance is copied through its iterator, its
-// own __iter__ if it has one, as CPython's list_extend does)
-const list = builtinType("list", [object], (x: any = undefined) =>
-  x === undefined ? [] : O.toArray(Array.isArray(x) && typeOf(x) !== list && typeOf(x) !== tupleType ? O.iter(x) : x),
-);
+// (anything but an exact list or tuple is copied through its iterator, its
+// own __iter__ if it has one, after which its length hint is asked, as
+// CPython's list_extend does)
+const list = builtinType("list", [object], (x: any = undefined) => {
+  if (x === undefined) return [];
+  if (Array.isArray(x) && (typeOf(x) === list || typeOf(x) === tupleType)) return O.toArray(x);
+  const it = O.iter(x);
+  O.lengthHint(x);
+  return O.toArray(it);
+});
 // (tuple(x) is x itself only for an exact tuple: a subclass's instance is
 // copied into a new exact tuple through its iterator, its own __iter__ if
 // it has one, as CPython's tuple_new does)
