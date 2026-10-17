@@ -71,7 +71,7 @@ interface MatchCtx {
 // A literal mapping key folded to its value (a signed number or a complex
 // literal too: the grammar allows nothing else), for the duplicate check;
 // undefined for an attribute lookup.
-type Lit = { t: "num"; re: bigint | number; im: number | null } | { t: "str"; v: string } | { t: "bytes"; v: number[] } | { t: "none" } | { t: "bool"; v: boolean };
+type Lit = { t: "overflow" } | { t: "num"; re: bigint | number; im: number | null } | { t: "str"; v: string } | { t: "bytes"; v: number[] } | { t: "none" } | { t: "bool"; v: boolean };
 function foldLiteral(k: any): Lit | undefined {
   switch (k._type) {
     case "Constant": {
@@ -93,15 +93,19 @@ function foldLiteral(k: any): Lit | undefined {
       const l = foldLiteral(k.left), r = foldLiteral(k.right);
       if (l === undefined || r === undefined || l.t !== "num" || r.t !== "num" || r.im === null) return undefined;
       const sign = k.op._type === "Sub" ? -1 : 1;
-      // (a complex number's parts are floats: its real part converted)
-      return { t: "num", re: typeof l.re === "bigint" ? Number(l.re) : l.re, im: (l.im ?? 0) + sign * r.im };
+      // (a complex number's parts are floats: its real part converted; an
+      // int too big for a float overflows there, and CPython's folding
+      // leaves no literal)
+      const re = typeof l.re === "bigint" ? Number(l.re) : l.re;
+      if (typeof l.re === "bigint" && !Number.isFinite(re)) return { t: "overflow" };
+      return { t: "num", re, im: (l.im ?? 0) + sign * r.im };
     }
   }
   return undefined;
 }
 // a key as Python's set sees it: equal numbers (1, 1.0, True, 1+0j; -0.0
 // and 0) one key; a NaN equal to nothing
-function literalKey(v: Lit): string | null {
+function literalKey(v: Exclude<Lit, { t: "overflow" }>): string | null {
   const real = (x: bigint | number): string | null => {
     if (typeof x === "bigint") return "n:" + x;
     if (x !== x) return null;
@@ -143,7 +147,7 @@ function strRepr(v: string): string {
   }
   return out + q;
 }
-function literalRepr(v: Lit): string {
+function literalRepr(v: Exclude<Lit, { t: "overflow" }>): string {
   switch (v.t) {
     case "none": return "None";
     case "bool": return v.v ? "True" : "False";
@@ -555,6 +559,7 @@ class Convert {
           // == compares numbers; attribute lookups aren't checked here)
           const v = foldLiteral(k);
           if (v === undefined) continue;
+          if (v.t === "overflow") this.matchError(p, "mapping pattern keys may only match literals and attribute lookups");
           const key = literalKey(v);
           if (key !== null && seen.has(key)) this.matchError(p, `mapping pattern checks duplicate key (${literalRepr(v)})`);
           if (key !== null) seen.add(key);
