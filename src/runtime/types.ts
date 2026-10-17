@@ -933,9 +933,15 @@ method(int, "to_bytes", (x: any, length: any = 1, byteorder: string = "big", sig
   if (byteorder === "little") a.reverse();
   return new PyBytes(a);
 }, sig(["self", "length", "byteorder"], { kwonly: ["signed"] }));
-getset(int, "real", (x) => +x);
+// (the int itself, a plain one: a bool's 0 or 1, a subclass's value; a
+// big int as it is, which + cannot convert)
+const plainInt = (x: any) => {
+  const v = typeof x === "object" && x !== null ? x.valueOf() : x;
+  return typeof v === "bigint" ? v : +v;
+};
+getset(int, "real", plainInt);
 getset(int, "imag", () => 0);
-getset(int, "numerator", (x) => +x);
+getset(int, "numerator", plainInt);
 getset(int, "denominator", () => 1);
 
 function parseFloatLiteral(s: string): number | undefined {
