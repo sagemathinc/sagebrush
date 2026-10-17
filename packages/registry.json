@@ -1,7 +1,8 @@
 {
   "format": 1,
   "modules": {
-    "_cremona_small": "@sagebrush/cremona-small@0.1.0"
+    "_cremona_small": "@sagebrush/cremona-small@0.1.0",
+    "sortedcontainers": "@sagebrush/pypi-sortedcontainers@2.4.0"
   },
   "packages": {
     "@sagebrush/cremona-small@0.1.0": {
@@ -10,6 +11,28 @@
       "manifest_sha256": "c6ba837360d549c96dfc3a24acc8570e6b714689c29ca645e2d38d185307f471",
       "files": {
         "py/_cremona_small.py": "9e23de6f201a2ccc0eef91d017c2eb2323f589b97144a648a4b40b5b0a38d707"
+      }
+    },
+    "@sagebrush/pypi-sortedcontainers@2.4.0": {
+      "dir": "pypi-sortedcontainers",
+      "root": "py",
+      "manifest_sha256": "d0b4313a7100fba47e391083a3bff33afb157bd1e4764c0a94451e5a2f688034",
+      "files": {
+        "py/sortedcontainers/__init__.py": "5ff5f92ee463bdeefb2b0b8942b0d44aed13f39e7d61ca28c106c09e3b8ced31",
+        "py/sortedcontainers/sorteddict.py": "cdae4b9c43593063c89ff25912bd12d2d0d77c4b3126c7c49da9e1ea52e54d93",
+        "py/sortedcontainers/sortedlist.py": "af003574cf1c7b4f5e6f60cc8cb39f1e88a4842c7f45f9399ee13f352b1faf72",
+        "py/sortedcontainers/sortedset.py": "e51236094246326d62837f9d85b3abcc397c68fa8378f92824f428ab444e4bb3"
+      },
+      "pypi": {
+        "project": "sortedcontainers",
+        "version": "2.4.0",
+        "known": [
+          {
+            "test": "test_coverage_sorteddict.test_ref_counts",
+            "error": "AttributeError",
+            "reason": "gc.get_objects is not available: Sagebrush runs on a JavaScript engine, whose heap cannot be listed; the test counts CPython references, not what sortedcontainers computes"
+          }
+        ]
       }
     }
   }

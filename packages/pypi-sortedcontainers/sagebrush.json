@@ -1,0 +1,32 @@
+{
+  "name": "@sagebrush/pypi-sortedcontainers",
+  "version": "2.4.0",
+  "sagebrush": ">=0.5 <0.6",
+  "modes": [
+    "python"
+  ],
+  "python": {
+    "root": "py",
+    "modules": [
+      "sortedcontainers"
+    ]
+  },
+  "files": {
+    "py/sortedcontainers/__init__.py": "5ff5f92ee463bdeefb2b0b8942b0d44aed13f39e7d61ca28c106c09e3b8ced31",
+    "py/sortedcontainers/sorteddict.py": "cdae4b9c43593063c89ff25912bd12d2d0d77c4b3126c7c49da9e1ea52e54d93",
+    "py/sortedcontainers/sortedlist.py": "af003574cf1c7b4f5e6f60cc8cb39f1e88a4842c7f45f9399ee13f352b1faf72",
+    "py/sortedcontainers/sortedset.py": "e51236094246326d62837f9d85b3abcc397c68fa8378f92824f428ab444e4bb3"
+  },
+  "requires": [],
+  "catalog": null,
+  "source": {
+    "pypi": {
+      "project": "sortedcontainers",
+      "version": "2.4.0",
+      "filename": "sortedcontainers-2.4.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl",
+      "sha256": "a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0",
+      "license": "Apache-2.0"
+    }
+  }
+}
