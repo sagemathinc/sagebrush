@@ -7,7 +7,7 @@ import {
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr,
 } from "./object";
 import * as O from "./ops";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
@@ -84,7 +84,7 @@ method(object, "__format__", (self: any, spec: string) => {
   if (spec !== "") raise(T.TypeError, `unsupported format string passed to ${typeName(self)}.__format__`);
   return str(self);
 });
-method(object, "__getattribute__", (self: any, name: string) => genericGetattr(self, name, typeOf(self)));
+method(object, "__getattribute__", (self: any, name: string) => genericGetattr(self, name, typeOf(self), undefined, false));
 method(object, "__delattr__", (self: any, name: string) => {
   genericDelattr(self, name, typeOf(self));
   return null;
@@ -105,6 +105,11 @@ function typeCall(...args: any[]): any {
 }
 const type = builtinType("type", [object], typeCall);
 type.$customGet = true;
+// type.__getattribute__: type's own lookup (CPython's type_getattro: the
+// metaclass's data descriptors, the class's MRO through __get__(None, cls),
+// then the metaclass's other attributes), what a metaclass's
+// super().__getattribute__ reaches; never __getattr__ (the slot calls that)
+method(type, "__getattribute__", (c: any, name: string) => typeGetattr(c, name));
 getset(type, "__name__", (c) => c.$name, (c, v) => void (c.$name = v));
 getset(type, "__qualname__", (c) => c.$qualname, (c, v) => void (c.$qualname = v));
 // (a class's __module__: its dict's, but not its instances' __module__

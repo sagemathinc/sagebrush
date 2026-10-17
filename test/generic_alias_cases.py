@@ -316,3 +316,70 @@ show("metaclass getattr", lambda: (CG[int], CG.missing if False else None))
 show("class_getitem None", lambda: CN[int])
 show("union issubclass abc", lambda: issubclass(list, collections.abc.Iterable | int))
 show("union isinstance late", lambda: isinstance("s", int | str | list[int]))
+
+
+# @sagebrush-astra's review probe of 621a4691 (CORR-621-1, 2): metaclass hooks
+# Ordinary class attributes under different metaclass hook bindings.
+events=[]
+class Hooked(type):
+    def __getattribute__(cls,name):
+        events.append(('ga',name))
+        if name=='virtual':return 42
+        if name=='bad':raise ValueError('hook failure')
+        return super().__getattribute__(name)
+    def __getattr__(cls,name):
+        events.append(('gf',name))
+        if name=='fallback':return 43
+        raise AttributeError(name)
+    @property
+    def prop(cls):return 'property'
+class HC(metaclass=Hooked):
+    real=41
+for name in ['real','virtual','prop','fallback','missing','bad']:
+    events.clear();show('ordinary '+name,lambda:getattr(HC,name,'default'));print('events',events)
+class Child(HC):pass
+events.clear();show('inherited meta hook',lambda:Child.real);print('events',events)
+class StaticMeta(type):
+    @staticmethod
+    def __getattribute__(name):return ('static',name)
+class SC(metaclass=StaticMeta):pass
+show('static hook',lambda:SC.value)
+class ClassMeta(type):
+    @classmethod
+    def __getattribute__(meta,name):return ('class',meta is ClassMeta,name)
+class CC(metaclass=ClassMeta):pass
+show('class hook',lambda:CC.value)
+class Descriptor:
+    def __get__(self,obj,owner):
+        return lambda name:('descriptor',obj is DC,owner is DescMeta,name)
+class DescMeta(type):__getattribute__=Descriptor()
+class DC(metaclass=DescMeta):pass
+show('descriptor hook',lambda:DC.value)
+class Callable:
+    def __call__(self,*args):return ('callable',len(args),args[-1])
+class CallableMeta(type):__getattribute__=Callable()
+class NC(metaclass=CallableMeta):pass
+show('non-descriptor hook',lambda:NC.value)
+class CallableFallback(type):__getattr__=Callable()
+class NF(metaclass=CallableFallback):pass
+show('non-descriptor fallback',lambda:NF.value)
+class ObjectMeta(type):__getattribute__=object.__getattribute__
+class OC(metaclass=ObjectMeta):value=99
+show('object hook class field',lambda:OC.value)
+show('object hook type field',lambda:OC.__name__)
+class Missing(type):
+    def __getattribute__(cls,name):raise AttributeError('attribute first')
+    def __getattr__(cls,name):raise AttributeError('fallback last')
+class MC(metaclass=Missing):pass
+show('both missing default',lambda:getattr(MC,'value','default'))
+show('both missing error',lambda:getattr(MC,'value'))
+class Exploding(type):
+    def __getattribute__(cls,name):raise ValueError('not absent')
+class EC(metaclass=Exploding):pass
+show('error never default',lambda:getattr(EC,'value','default'))
+# Alias own attrs and dynamic class attributes continue to coexist.
+show('ordinary alias origin',lambda:types.GenericAlias(HC,int).__origin__ is HC)
+show('alias forwarded attribute',lambda:types.GenericAlias(HC,int).virtual)
+star=next(iter(tuple[int,...]))
+show('star iteration again',lambda:(repr(next(iter(star))),next(iter(star)).__unpacked__))
+show('star nested',lambda:list[star])

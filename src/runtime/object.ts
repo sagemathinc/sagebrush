@@ -651,15 +651,20 @@ export function getattr(o: any, name: string, dflt?: any): any {
   return genericGetattr(o, name, t, dflt);
 }
 
-export function genericGetattr(o: any, name: string, t: PyType, dflt?: any): any {
+// (hook false: object.__getattribute__ itself, CPython's
+// PyObject_GenericGetAttr, which never calls __getattr__; the slot does,
+// once. A class as the object: its own __dict__ is its instance dict, read
+// raw)
+export function genericGetattr(o: any, name: string, t: PyType, dflt?: any, hook = true): any {
   if (reservedName(name)) return getattr(o, name, dflt);
   const d = lookupType(t, name);
+  const ownDict = isType(o) ? o.$dict.has(name) : hasInstanceDict(o) && ownAttr(o, name);
   // A data descriptor without __get__ yields to the instance dict.
-  if (d !== undefined && isDataDescriptor(d) && (lookupType(typeOf(d), "__get__") !== undefined || !(hasInstanceDict(o) && ownAttr(o, name)))) return descrGetOrGetattr(d, o, t, name);
-  if (hasInstanceDict(o) && ownAttr(o, name)) return o[name];
+  if (d !== undefined && isDataDescriptor(d) && (lookupType(typeOf(d), "__get__") !== undefined || !ownDict)) return hook ? descrGetOrGetattr(d, o, t, name) : descrGet(d, o, t);
+  if (ownDict) return isType(o) ? o.$dict.get(name) : o[name];
   if (typeof o === "function" && o.$attrs !== undefined && o.$attrs.has(name)) return o.$attrs.get(name);
-  if (d !== undefined) return descrGetOrGetattr(d, o, t, name);
-  const gf = lookupType(t, "__getattr__");
+  if (d !== undefined) return hook ? descrGetOrGetattr(d, o, t, name) : descrGet(d, o, t);
+  const gf = hook ? lookupType(t, "__getattr__") : undefined;
   if (gf !== undefined) return callGetattrHook(gf, o, name, dflt);
   if (t.$name === "module" && hasInstanceDict(o) && typeof o.__name__ === "string") {
     // PEP 562: a module-level __getattr__ answers for missing attributes
@@ -704,12 +709,13 @@ function descrGetOrGetattr(d: any, o: any, t: PyType, name: string): any {
   }
 }
 
-// (a metaclass's hook bound as CPython's slot binds it: a function with the
-// class, a descriptor through its __get__, another callable with (cls, name))
+// (a metaclass's hook called as CPython's call_attribute: a function with
+// the class, a descriptor bound through its __get__, another callable with
+// the name alone)
 function metaHookCall(f: any, cls: any, meta: any, name: string): any {
   if (typeof f === "function") return f(cls, name);
   const get = lookupType(typeOf(f), "__get__");
-  return get !== undefined ? callObj(get(f, cls, meta), [name]) : callObj(f, [cls, name]);
+  return get !== undefined ? callObj(get(f, cls, meta), [name]) : callObj(f, [name]);
 }
 export function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   const meta = (cls as any).$meta ?? T.type;
