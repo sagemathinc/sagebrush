@@ -198,3 +198,19 @@ test("board try: the contract's edges: --json refusals are reports; --case besid
   assert.deepEqual([j.checks.map((c: any) => c.outcome), j.interaction[0].sequence], [["right"], ["wrong", "right"]]);
   assert.match(j.runtime.engine, /^cli-[0-9a-f]{20}$/);
 });
+
+test("board try: the transitivity lesson (web/board/examples/teach-transitive.board.json), its examples right, wrong answers said, hints computed", () => {
+  const f = __dirname + "/../../web/board/examples/teach-transitive.board.json";
+  const r = run(["board", "try", f, "--case", 'q-c="no"', "--case", "q-h=1", "--case", "q-stab=4", "--case", 'q-prim="yes"', "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.deepEqual(j.code.map((c: any) => [c.id, c.ok]), [["groups", true]]);
+  assert.deepEqual(j.checks.map((c: any) => [c.ask_id, c.outcome, c.next]), [["q-c", "wrong", "intro"], ["q-h", "wrong", "intro"], ["q-stab", "wrong", "stab"], ["q-prim", "wrong", "blocks"]]);
+  assert.match(j.checks[0].message, /where can \$1\$ not go/);
+  assert.match(j.checks[2].message, /4 is not \$24 \/ 4\$/);
+  const hint = (id: string, i: number) => j.hints.find((h: any) => h.ask_id === id && h.index === i)?.rendered;
+  assert.equal(hint("q-h", 1), "The orbit of $1$ is $\\{1, 2\\}$, and the orbit of $3$ is $\\{3, 4\\}$.");
+  assert.match(hint("q-prim", 0), /^Try \$\\\{1, 3\\\}\$/);
+  const ex = JSON.parse(run(["board", "try", f, "--json"]).stdout);
+  assert.deepEqual(ex.checks.map((c: any) => [c.case_id, c.outcome]), [["example-q-c", "right"], ["example-q-h", "right"], ["example-q-stab", "right"], ["example-q-prim", "right"]]);
+});
