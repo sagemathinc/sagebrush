@@ -20,8 +20,9 @@ Copyright (c) 2001 Python Software Foundation. See
   changed (the PSF License's clause 3 on derivative works): the types of an
   async generator and of a frame's locals, which Sagebrush does not have, are
   placeholder classes. `lib/collections/__init__.py` makes it
-  `collections.abc`, as CPython's does, and its `ChainMap`, `UserDict`,
-  `UserList` and `UserString` are CPython 3.14's (`UserString.maketrans` a
+  `collections.abc`, as CPython's does, and its `Counter` (with the
+  pure-Python `_count_elements`), `ChainMap`, `UserDict`, `UserList` and
+  `UserString` are CPython 3.14's (`UserString.maketrans` a
   `staticmethod`).
 - `lib/importlib/__init__.py`: CPython 3.14's `Lib/importlib/__init__.py`'s
   `import_module`, `invalidate_caches` and `reload`'s argument checks, with
