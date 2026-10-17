@@ -11,3 +11,4 @@ export { boardFromText, fromMermaid, toMermaid, toMermaidMarkdown } from "./merm
 export { fromCocalcBoard, isCocalcBoard, leftOut } from "./cocalc";
 export { fromCanvas, toCanvas, isCanvas, canvasLeftOut, type Canvas } from "./canvas";
 export { BlockEditor, splitBlocks, joinBlocks, kindOf, type Block, type BlockEditorOptions } from "./blocks";
+export { answerChannel, type AnswerChannel, type Answers, type PageRef, type SubmitResult, type DecideResult } from "./channel";

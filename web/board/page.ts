@@ -34,6 +34,7 @@ import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
+import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
 
 const q = new URLSearchParams(location.search);
@@ -172,11 +173,21 @@ const ref = file ? engineRef() : null;
 // (nothing the first board's code did reaches it: ISO-A75-2), which says
 // ready again: its parent answers each ready with the board to show.
 // Opened on its own, it shows an empty board that says what it is for.
+//
+// A host that takes answers (web/board-host-protocol.md) loads the frame
+// with a nonce in its address, #sb-nonce=N: the frame removes it from the
+// address at once and says it in its first ready, and takes a port only
+// with the first board, only if it was given one.  On that port go the
+// Submit bar's answers and the questions' requests to decide (channel.ts).
 let fromParentDoc: (d: { doc: BoardDoc; notice: string }) => void = () => {};
 const parentDoc = new Promise<{ doc: BoardDoc; notice: string }>((r) => (fromParentDoc = r));
+let answers: AnswerChannel | null = null;
 if (fromParent) {
-  // (nothing it says is secret: to any parent)
-  const say = (m: { sagebrush: string; message?: string }) => parent.postMessage({ ...m, version: 1 }, "*");
+  // (nothing it says is secret: to any parent; the nonce only once)
+  const said = /^#sb-nonce=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(location.hash);
+  let nonce: string | null = said ? said[1] : null;
+  if (said) try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+  const say = (m: { sagebrush: string; message?: string; nonce?: string }) => parent.postMessage({ ...m, version: 1 }, "*");
   if (parent === window) fromParentDoc({ doc: { title: "Board", nodes: [] }, notice: "**This page shows a board another site's page gives it.** To open a board, go to [sagebrush.space/board](https://sagebrush.space/board/)." });
   else {
     let first = true;
@@ -191,11 +202,18 @@ if (fromParent) {
         say({ sagebrush: "error", message: String(err?.message ?? err) });
         return;
       }
-      if (first) fromParentDoc({ doc, notice });
-      else location.reload();
+      if (first) {
+        // (its channel: the port given with it, to a frame given a nonce; name and revision echoed as posted)
+        const port = e.ports?.[0], revision = m.revision === undefined || m.revision === null ? null : typeof m.revision === "string" && m.revision.length <= 200 ? m.revision : undefined;
+        if (port && given && revision !== undefined) answers = answerChannel(port, typeof m.name === "string" ? m.name : null, revision);
+        host.answers = answers;
+        fromParentDoc({ doc, notice });
+      } else location.reload();
       first = false;
     });
-    say({ sagebrush: "ready" });
+    const given = nonce !== null;
+    say({ sagebrush: "ready", ...(nonce ? { nonce } : {}) });
+    nonce = null;
   }
 }
 
@@ -233,7 +251,11 @@ const host: BoardHost = {
       return { doc, original, notice };
     },
     // (refused by storage: said, HARD-7F9-1)
+    // (a frame keeps nothing, by design, and has no storage to keep it in:
+    // its answers are kept while it is open, and sent by Submit; nothing to
+    // say, web/board-host-protocol.md "Unsent answers")
     save(d) {
+      if (fromParent) return;
       if (unsaved) throw new Error(STORAGE_REFUSED);
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }
       if (local && !listLocal(source.slice(6), d)) throw new Error(STORAGE_REFUSED);
