@@ -11,6 +11,7 @@ import * as M from "./modules";
 import * as Arr from "./array";
 import "./struct";
 import "./zlib";
+import "./json";
 import "./memoryview";
 import "./re";
 import "./numpy";
