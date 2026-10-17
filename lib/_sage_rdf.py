@@ -316,6 +316,9 @@ class RealDoubleElement(float):
             if e.bit_length() > _IPOW_BITS:
                 raise NotImplementedError("RDF power: an integer exponent of more than %d bits is not available in sagebrush yet" % _IPOW_BITS)
             return RealDoubleElement(_ipow(x, int(e)))
+        if type(e).__name__ == "RealNumberMP" and e.parent().precision() < 53:
+            # (a coarser field's exponent: the power in that field, as Sage)
+            return e.parent()(self) ** e
         y = self._num(e)
         if y is None:
             y = float(e)

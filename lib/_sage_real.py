@@ -1777,6 +1777,13 @@ class RealNumberMP:
         return None, None
 
     def _binop(self, o, op, rev=False):
+        if self._R._prec > 53 and isinstance(o, float) and (type(o) is float or type(o).__name__ == "RealDoubleElement"):
+            # (a double against a finer field: the double's arithmetic, a
+            # Python float or RDF's, as Sage: RealField(100)(2) + 0.5r is
+            # the float 2.5)
+            a = float(self) if type(o) is float else _sa().RDF(self)
+            x, y = (o, a) if rev else (a, o)
+            return x + y if op == "+" else x - y if op == "-" else x * y if op == "*" else x / y
         b, R = self._other(o)
         if b is None:
             return NotImplemented
@@ -1844,12 +1851,13 @@ class RealNumberMP:
             return RealNumberMP(R, m, e)
         if isinstance(n, RealNumberMP) and n._m == 0 and not n._special:
             return R(1)
-        # (as Sage: an RDF exponent makes the power RDF's, a Python float's
-        # a Python float; any other real exponent goes to the base's field)
+        # (as Sage: against a double the coarser wins: an RDF exponent makes
+        # a finer base's power RDF's, a Python float's a Python float; any
+        # other real exponent goes to the base's field)
         from _sage_rdf import RealDoubleElement
-        if isinstance(n, RealDoubleElement):
+        if R._prec > 53 and isinstance(n, RealDoubleElement):
             return _sa().RDF(self) ** n
-        if type(n) is float:
+        if R._prec > 53 and type(n) is float:
             return float(self) ** n
         x = self
         y = n if isinstance(n, RealNumberMP) else R(n)
@@ -1896,6 +1904,9 @@ class RealNumberMP:
         return _ziv_eval(R, fn, limit=4096, overflow=True, exact=exact)
 
     def __rpow__(self, b):
+        if self._R._prec > 53 and type(b) is float:
+            # (a Python float base to a finer field's power: a float, as Sage)
+            return b ** float(self)
         return self._R(b) ** self
 
     # ---- comparison
@@ -2748,13 +2759,17 @@ def _arith(a, b, op, R):
         ea, eb = a._e, b._e
         ta = ea + a._m.bit_length() if a._m > 0 else ea + (-a._m).bit_length()
         tb = eb + abs(mb).bit_length()
-        if ta - tb > p + 8 or tb - ta > p + 8:
+        # (q: the result's precision or an operand's, if wider: a 53-bit RR
+        # number in RealField(30); "far" is measured in the widest, so the
+        # larger operand's last bit is well above the smaller one)
+        q = max(p, abs(a._m).bit_length(), abs(mb).bit_length())
+        if ta - tb > q + 8 or tb - ta > q + 8:
             # one operand is far below the other's last bit: a sticky bit
             if ta > tb:
                 big, be, small = a._m, ea, mb
             else:
                 big, be, small = mb, eb, a._m
-            shift = p + 10 - abs(big).bit_length()
+            shift = q + 10 - abs(big).bit_length()
             M = (big << (shift + 3)) + (1 if small > 0 else -1)
             m, e = _round_q(M, 1, p, rnd, be - shift - 3)
             return RealNumberMP(R, m, e)
