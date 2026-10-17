@@ -4539,7 +4539,9 @@ def _elt_type(s):
         return "FldRatElt"
     types = []
     for y in _iter(s):
-        t = _ext_type(y)
+        # (a category in a sequence is Cat, its own type Cat[RngIntElt]:
+        # SeqEnum[Cat], as Magma's)
+        t = "Cat" if isinstance(y, _Cat) else _ext_type(y)
         if t not in types:
             types.append(t)
     if not types:
@@ -4562,9 +4564,13 @@ def _bad_types(name, args, pos=None):
     if name.endswith(":="):
         # x +:= y: Magma doesn't list the types
         return MagmaError("Bad argument types", "'%s'" % name, True, pos)
+    # (an argument given by reference, f(~x), is marked "~", as Magma's:
+    # the procedure call being made is that intrinsic's, _refcall)
+    rc = _REFCALL[0]
+    refs = rc[1] if rc is not None and rc[0] is globals().get(name) else ()
     # (no arguments: "Argument types given:" ends the line, as Magma's)
     return MagmaError("Bad argument types\nArgument types given:" + "".join(
-        (", " if i else " ") + _ext_type(a) for i, a in enumerate(args)), "'%s'" % name, True, pos)
+        (", " if i else " ") + _ext_type(a) + (" ~" if i in refs else "") for i, a in enumerate(args)), "'%s'" % name, True, pos)
 
 
 # ------------------------------------------------------------------ signatures
@@ -4719,12 +4725,12 @@ def AssignNames(*args):
         raise bad()
     R, names = args
     if isinstance(R, _MFFPolyRing):
-        if not isinstance(names, MSeq):
+        # (a sequence of strings, then of one: [1, 2] is Bad argument types,
+        # ["t", "u"] and [] "must have length 1", as Magma's)
+        if not isinstance(names, MSeq) or any(not isinstance(c, str) or isinstance(c, _Cat) for c in names):
             raise bad()
         if len(names) != 1:
             raise _arg_error("AssignNames", "Argument 2 must have length 1")
-        if not isinstance(names[0], str) or isinstance(names[0], _Cat):
-            raise bad()
         return _assign_gen_names(R, [names[0]])
     return _assign_gen_names(R, names)
 
@@ -5476,11 +5482,14 @@ def IsPrimePower(n):
 
 
 def Gcd(*args):
+    given = args
     if len(args) > 2:
         raise _bad_types("Gcd", args)  # (two arguments, or one sequence)
     if len(args) == 2:
         _no_rationals("Gcd", *args)
     if len(args) == 1:
+        if not isinstance(args[0], (MSeq, MRange, MSet)):
+            raise _bad_types("Gcd", given)
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args)
@@ -5489,6 +5498,10 @@ def Gcd(*args):
         for a in args[1:]:
             g = g.gcd(a)
         return g
+    if not all(_int(a) for a in args):
+        # (integers only, as Magma's: [RngIntElt] is SeqEnum[Cat], never a
+        # Python error)
+        raise _bad_types("Gcd", given)
     return _sa.gcd(*args)
 
 
@@ -5496,12 +5509,17 @@ GCD = GreatestCommonDivisor = Gcd
 
 
 def Lcm(*args):
+    given = args
     if len(args) > 2:
         raise _bad_types("Lcm", args)
     if len(args) == 1:
+        if not isinstance(args[0], (MSeq, MRange, MSet)):
+            raise _bad_types("Lcm", given)
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args, lcm=True)
+    if not all(_int(a) or isinstance(a, _sp.Polynomial) for a in args):
+        raise _bad_types("Lcm", given)
     return _sa.lcm(*args)
 
 
