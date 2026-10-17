@@ -674,10 +674,31 @@ def power(a, b):
     return _elementwise(a, b, _pow, "power")
 
 
+def _matprod_finite(*vals):
+    """refuse a matrix product (not a scalar's) of values that include Inf or NaN: where Inf and
+    NaN appear in such a product depends on how it is computed (the order of its terms, and which
+    zero terms are skipped), which MathWorks documents as varying between implementations, and
+    for complex values numpy's differs from Octave's. Every matrix product calls this: dense,
+    sparse or mixed, and mpower's. A product without terms (an empty result, or an inner
+    dimension of 0) computes nothing, so it is not refused"""
+    if len(vals) == 2:
+        (m, k), (k2, n) = _dims(vals[0])[:2], _dims(vals[1])[:2]
+        if m == 0 or k == 0 or n == 0:
+            return
+    for v in vals:
+        x = v.pr if type(v) is Sparse else _farr(v, "mtimes")
+        if not np.all(np.isfinite(x)):
+            raise _err("Matrix multiplication of values that include Inf or NaN is not supported in Sagebrush: "
+                       "where Inf and NaN appear in the result depends on how the product is computed. "
+                       "Multiply finite values, or write the sums out with .* and sum.")
+
+
 def mtimes(a, b):
     if type(a) is float and type(b) is float:
         return a * b
     if type(a) is Sparse or type(b) is Sparse:
+        if not (_isscalar(a) or _isscalar(b)):
+            _matprod_finite(a, b)
         return _sp.binop("mtimes", a, b)
     if _isscalar(a) or _isscalar(b):
         return _elementwise(a, b, _mul, "mtimes")
@@ -688,6 +709,7 @@ def mtimes(a, b):
         raise _err("Arguments must be 2-D, or at least one argument must be scalar. Use TIMES (.*) for elementwise multiplication.")
     if A.shape[0] != B.shape[1]:
         raise _err("Incorrect dimensions for matrix multiplication. Check that the number of columns in the first matrix matches the number of rows in the second matrix. To operate on each element of the matrix individually, use TIMES (.*) for elementwise multiplication.", "MATLAB:innerdim")
+    _matprod_finite(A, B)
     # (stored transposed: (A B)^T = B^T A^T)
     return _finish(np.matmul(B, A), cls)
 
@@ -991,6 +1013,9 @@ def mrdivide(a, b):
 def mpower(a, b):
     if type(a) is float and type(b) is float:
         return power(a, b)
+    if type(b) is Sparse and _isscalar(b) and not _isscalar(a):
+        # (a sparse scalar exponent is its value: A^sparse(2) is A^2, with A^2's checks)
+        b = _sp.full(b)
     if type(a) is Sparse or type(b) is Sparse:
         return _sp.binop("mpower", a, b)
     if _isscalar(a) and _isscalar(b):
@@ -1002,18 +1027,54 @@ def mpower(a, b):
     if A.shape[0] != A.shape[1]:
         raise _err("Incorrect dimensions for raising a matrix to a power. Check that the matrix is square and the power is a scalar. To operate on each element of the matrix individually, use POWER (.^) for elementwise power.")
     p = _scalar(b)
+    if p == 1:
+        # (A^1 is A itself, Inf and NaN included: not eye(n) * A)
+        return _finish(_farr(_unmat(A)), cls)
     if p == _math.floor(p):
         p = int(p)
         if p < 0:
-            A = _mat(_unmat(_solve(A, np.eye(A.shape[0]))))
+            # (A^-1 is inv(A), as mpower's page says: inv's result, singular warning included.
+            # inv's answer for Inf or NaN parts is not certified, so such powers are refused)
+            if not np.all(np.isfinite(A)):
+                raise _err("A negative matrix power of values that include Inf or NaN is not supported in Sagebrush: "
+                           "it is inv(A), whose result for them is not certified.")
+            if A.dtype.kind == "c":
+                # (inv refuses a complex matrix here, as numpy.linalg does: an invertible one's
+                # inverse is the solve the parent took, a singular one gets inv's answer)
+                if _lu_factors(A) is None:
+                    warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
+                    A = np.full(A.shape, np.inf, dtype=A.dtype)
+                else:
+                    A = _mat(_unmat(_solve(A, np.eye(A.shape[0]))))
+            else:
+                A = _mat(inv_(_unmat(A)))
             p = -p
-        R = np.eye(A.shape[0], dtype=A.dtype)
+        if cls == "single":
+            # (a chain of * on singles holds single values, so each product's operands are checked
+            # as the singles they would be: an overflow (or an inverse past single's range) is
+            # refused as the chain refuses it. The arithmetic itself keeps the values as they are)
+            rnd = lambda M: M.astype(np.complex64 if M.dtype.kind == "c" else np.float32)
+        else:
+            rnd = lambda M: M
+
+        def mul(X, Y):
+            _matprod_finite(rnd(X), rnd(Y))
+            return X @ Y
+        # (by squaring; the first factor is taken as it is, so that A^1 is A and A^-1 is inv(A).
+        # Each product is refused for Inf or NaN as mtimes's is, so an Inf in A, in a singular A's
+        # inverse or from an overflowing square stops it)
+        R = None
         while p:
             if p & 1:
-                R = R @ A
-            A = A @ A
+                R = A if R is None else mul(R, A)
             p >>= 1
+            if p:
+                A = mul(A, A)
+        if R is None:
+            R = np.eye(A.shape[0], dtype=A.dtype)
         return _finish(_farr(_unmat(R)), cls)
+    # (a fractional power is a product of A's eigenvectors, so it is refused as products are)
+    _matprod_finite(A)
     w, V = np.linalg._eig(A)
     R = V @ np.diag(w.astype(np.complex128) ** p) @ np.linalg.inv(V)
     return _finish(_farr(_unmat(R)), cls)
