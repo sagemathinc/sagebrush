@@ -207,6 +207,8 @@ if (fromParent) {
         const port = e.ports?.[0], revision = m.revision === undefined || m.revision === null ? null : typeof m.revision === "string" && m.revision.length <= 200 ? m.revision : undefined;
         if (port && given && revision !== undefined) answers = answerChannel(port, typeof m.name === "string" ? m.name : null, revision);
         host.answers = answers;
+        // (the page gone: what waits for the host settled, the port closed)
+        addEventListener("pagehide", () => answers?.close());
         fromParentDoc({ doc, notice });
       } else location.reload();
       first = false;
