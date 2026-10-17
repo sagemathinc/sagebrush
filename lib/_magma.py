@@ -5480,11 +5480,13 @@ def _ffp_is_irreducible(f):
     return len(F) == 1 and F[0][1] == 1
 
 
-def _ffp_gcd(args, lcm=False):
+def _ffp_gcd(args, lcm=False, name=None):
     """Gcd (or Lcm) of polynomials of one ring over a finite field (integers
-    and the field's elements among them): monic, as Magma's."""
+    and the field's elements among them): monic, as Magma's.  name: the
+    one it was called by (GCD, LeastCommonMultiple, ...)."""
     R = next(a.R for a in args if isinstance(a, _MFFPoly))
-    name = "Lcm" if lcm else "Gcd"
+    canon = "Lcm" if lcm else "Gcd"
+    name = name or canon
     ps = []
     for a in args:
         p = R._lift(a)
@@ -5499,7 +5501,7 @@ def _ffp_gcd(args, lcm=False):
         work += run * d * (2 if lcm else 1)
         if lcm:
             run += d
-    _ffp_admit(work, R, "a %s" % name, name)
+    _ffp_admit(work, R, "a %s" % canon, name)
     g = ps[0]
     for p in ps[1:]:
         if lcm:
@@ -5670,12 +5672,19 @@ def _null_int_collection(name, given):
     if u is None and mark is True:
         raise _arg_error(name, "Illegal null set/sequence")
     if u is _QQ or inf is _QQ or isinstance(u, _MFinField) or mark == "field":
-        raise _arg_error(name, "%s not defined for field" % name.upper())
+        raise _arg_error(name, "%s not defined for field" % _gcd_word(name))
     if isinstance(u, (_sp.PolynomialRing_, _MFFPolyRing)):
         raise MagmaError("%s of an empty collection of polynomials is not supported yet" % name, "'%s'" % name)
     if u is None:
         raise MagmaError("%s of an empty collection whose universe Sagebrush doesn't know is not supported yet" % name, "'%s'" % name)
     raise _bad_types(name, given)
+
+
+def _gcd_word(name):
+    """GCD or LCM, as Magma's field error has it whichever name the
+    intrinsic was called by (LeastCommonMultiple: "LCM not defined for
+    field")."""
+    return "LCM" if name in ("Lcm", "LCM", "LeastCommonMultiple") else "GCD"
 
 
 def _field_collection(name, s):
@@ -5686,25 +5695,36 @@ def _field_collection(name, s):
     u = getattr(s, "universe", None)
     if u is _QQ or isinstance(u, _MFinField) or getattr(s, "_null", False) == "field" or (
             u is None and not isinstance(s, MRange) and _infer_from(s.items if isinstance(s, MSet) else s) is _QQ):
-        raise _arg_error(name, "%s not defined for field" % name.upper())  # (inferred too: Gcd([1/2, 1/3]))
+        raise _arg_error(name, "%s not defined for field" % _gcd_word(name))  # (inferred too: Gcd([1/2, 1/3]))
 
 
-def Gcd(*args):
+def _function_only(name, args):
+    """An intrinsic that is a function only, called as a procedure with an
+    argument by reference (GCD(~x);): Magma's Bad argument types, that
+    argument marked "~" (checked against Magma 2.18), never the function's
+    value or its other errors."""
+    rc = _REFCALL[0]
+    if rc is not None and rc[1] and rc[0] is globals().get(name):
+        raise _bad_types(name, args)
+
+
+def _gcd(name, args):
+    _function_only(name, args)
     given = args
     if len(args) > 2 or not args:
-        raise _bad_types("Gcd", args)  # (two arguments, or one sequence; none is Magma's error, never 0)
+        raise _bad_types(name, args)  # (two arguments, or one sequence; none is Magma's error, never 0)
     if len(args) == 2:
-        _no_rationals("Gcd", *args)
+        _no_rationals(name, *args)
     if len(args) == 1:
         if not isinstance(args[0], (MSeq, MRange, MSet)):
-            raise _bad_types("Gcd", given)
+            raise _bad_types(name, given)
         if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
-            _null_int_collection("Gcd", given)
+            _null_int_collection(name, given)
             return 0
-        _field_collection("Gcd", args[0])
+        _field_collection(name, args[0])
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
-        return _ffp_gcd(args)
+        return _ffp_gcd(args, name=name)
     if any(isinstance(a, _sp.Polynomial) for a in args):
         g = args[0]
         for a in args[1:]:
@@ -5713,7 +5733,7 @@ def Gcd(*args):
     if not all(_int(a) for a in args):
         # (integers only, as Magma's: [RngIntElt] is SeqEnum[Cat], never a
         # Python error)
-        raise _bad_types("Gcd", given)
+        raise _bad_types(name, given)
     # (a fold over the integers: one of them too, Gcd([-5]) is 5, never a
     # Python error, as Magma's)
     g = 0
@@ -5722,25 +5742,35 @@ def Gcd(*args):
     return g
 
 
-GCD = GreatestCommonDivisor = Gcd
+def Gcd(*args):
+    return _gcd("Gcd", args)
 
 
-def Lcm(*args):
+def GCD(*args):
+    return _gcd("GCD", args)
+
+
+def GreatestCommonDivisor(*args):
+    return _gcd("GreatestCommonDivisor", args)
+
+
+def _lcm(name, args):
+    _function_only(name, args)
     given = args
     if len(args) > 2 or not args:
-        raise _bad_types("Lcm", args)  # (none is Magma's error, never 1)
+        raise _bad_types(name, args)  # (none is Magma's error, never 1)
     if len(args) == 1:
         if not isinstance(args[0], (MSeq, MRange, MSet)):
-            raise _bad_types("Lcm", given)
+            raise _bad_types(name, given)
         if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
-            _null_int_collection("Lcm", given)
+            _null_int_collection(name, given)
             return 1
-        _field_collection("Lcm", args[0])
+        _field_collection(name, args[0])
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
-        return _ffp_gcd(args, lcm=True)
+        return _ffp_gcd(args, lcm=True, name=name)
     if not all(_int(a) or isinstance(a, _sp.Polynomial) for a in args):
-        raise _bad_types("Lcm", given)
+        raise _bad_types(name, given)
     if any(isinstance(a, _sp.Polynomial) for a in args):
         return _sa.lcm(*args)
     # (a fold, nonnegative, 0 with a 0 among them, as Magma's: Lcm([-5]) is 5)
@@ -5751,15 +5781,47 @@ def Lcm(*args):
     return l
 
 
-LCM = LeastCommonMultiple = Lcm
+def Lcm(*args):
+    return _lcm("Lcm", args)
 
 
-def Xgcd(a, b):
+def LCM(*args):
+    return _lcm("LCM", args)
+
+
+def LeastCommonMultiple(*args):
+    return _lcm("LeastCommonMultiple", args)
+
+
+def _xgcd(name, args):
+    """Xgcd(a, b) of two integers or polynomials, as Magma's: a rational
+    among them (an integral one too) is Magma's Bad argument types naming
+    both FldRatElt, as anything else not an integer or a polynomial
+    (checked against Magma 2.18), never a value; of a sequence (Magma's
+    other signature) refused in words."""
+    _function_only(name, args)
+    if len(args) == 1 and isinstance(args[0], (MSeq, MSet, MRange)):
+        raise MagmaError("%s of a sequence is not supported yet" % name, "'%s'" % name)
+    if len(args) != 2:
+        raise _bad_types(name, args)
+    a, b = args
+    _no_rationals(name, a, b)
+    if not all(_int(x) or isinstance(x, _sp.Polynomial) for x in args):
+        raise _bad_types(name, args)
     g, s, t = _sa.xgcd(a, b)
     return _multi([g, s, t])
 
 
-XGCD = ExtendedGreatestCommonDivisor = Xgcd
+def Xgcd(*args):
+    return _xgcd("Xgcd", args)
+
+
+def XGCD(*args):
+    return _xgcd("XGCD", args)
+
+
+def ExtendedGreatestCommonDivisor(*args):
+    return _xgcd("ExtendedGreatestCommonDivisor", args)
 
 
 def Quotrem(a, b):
