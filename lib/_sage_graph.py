@@ -79,6 +79,7 @@ class GenericGraph:
                 self.add_edge(u, v, l)
             if not name:
                 self._name = data._name
+            self._pos = None if data._pos is None else dict(data._pos)
             return
         if isinstance(data, int):
             for v in range(data):
@@ -729,49 +730,79 @@ class GenericGraph:
         GenericGraph.__init__(H, self)
         return H
 
-    def show(self, *args, **kwds):
-        """Display the graph (a picture in the notebook; nothing here).
+    def show(self, **options):
+        """Show the graph's picture (plot's options, and the picture's:
+        figsize, title, ...).
 
         EXAMPLES::
 
-            sage: graphs.CycleGraph(4).show()  # sagebrush only
+            sage: graphs.CycleGraph(4).show()  # random
         """
-        return None
+        from sage_plot import GRAPHICS_OPTIONS
+        gopts = {k: options.pop(k) for k in list(options) if k in GRAPHICS_OPTIONS}
+        self.plot(**options).show(**gopts)
 
     def show3d(self, *args, **kwds):
-        """Show a 3d picture (nothing here).
+        """Show a 3d picture (not supported).
 
         EXAMPLES::
 
-            sage: graphs.CycleGraph(4).show3d()  # sagebrush only
+            sage: graphs.CycleGraph(4).show3d()
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Graph.show3d is not supported in Sagebrush
         """
-        return None
+        raise NotImplementedError("Graph.show3d is not supported in Sagebrush")
 
-    def plot(self, *args, **kwds):
-        """A picture of the graph: vertices on a circle (or the given
-        positions), edges as lines.
+    def get_pos(self):
+        """The vertices' positions, {vertex: (x, y)}, or None if there are none.
+
+        EXAMPLES::
+
+            sage: graphs.CycleGraph(4).get_pos()[0]
+            (0.0, 1.0)
+            sage: Graph([(0, 1)]).get_pos() is None
+            True
+        """
+        return None if self._pos is None else dict(self._pos)
+
+    def set_pos(self, pos):
+        """Set the vertices' positions, {vertex: (x, y)}.
+
+        EXAMPLES::
+
+            sage: G = Graph([(0, 1)]); G.set_pos({0: (0, 0), 1: (1, 0)}); G.get_pos()
+            {0: (0, 0), 1: (1, 0)}
+        """
+        self._pos = None if pos is None else dict(pos)
+
+    def plot(self, **options):
+        """A picture of the graph: at its positions if it has them for every
+        vertex (a named graph's), else a spring layout; edges as lines
+        (arrows for a directed graph), loops as small circles.
+
+        Options: layout ('spring' or 'circular'), pos, iterations, save_pos,
+        vertex_labels, vertex_size, vertex_color, vertex_colors, partition,
+        edge_color, edge_colors, edge_style, edge_thickness, edge_labels,
+        edge_labels_background, color_by_label, loop_size, graph_border, and the picture's (figsize,
+        title, ...).  Others are refused.  Sagebrush's spring layout is its
+        own (web/graph/spring.ts), the same every time; Sage's is random, so
+        the positions differ.
 
         EXAMPLES::
 
             sage: graphs.CycleGraph(4).plot()
             Graphics object consisting of 9 graphics primitives
+            sage: digraphs.Circuit(3).plot(edge_labels=True)
+            Graphics object consisting of 10 graphics primitives
+            sage: Graph([(0, 1), (1, 2)]).plot(partition=[[0, 2], [1]])
+            Graphics object consisting of 7 graphics primitives
+            sage: Graph([(0, 1)]).plot(vertex_shape='s')
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: Graph.plot option 'vertex_shape' is not supported in Sagebrush
         """
-        import math
-        sa = _sa()
-        vs = self.vertices(sort=True)
-        n = len(vs)
-        pos = self._pos or {v: (math.cos(2 * math.pi * i / max(n, 1) + math.pi / 2), math.sin(2 * math.pi * i / max(n, 1) + math.pi / 2)) for i, v in enumerate(vs)}
-        g = sa.Graphics()
-        for u, v, _ in self.edges(sort=True):
-            g += sa.line([pos[u], pos[v]], color="black")
-        g += sa.points([pos[v] for v in vs], size=200, color="#fec7b8", zorder=2)
-        for v in vs:
-            g += sa.text(str(v), pos[v], color="black", zorder=3)
-        if kwds.get("edge_labels"):
-            for u, v, l in self.edges(sort=True):
-                g += sa.text(str(l), ((pos[u][0] + pos[v][0]) / 2, (pos[u][1] + pos[v][1]) / 2), color="black", zorder=3)
-        g.axes(False)
-        return g
+        return _plot_graph(self, options)
 
     def set_latex_options(self, **kwds):
         """Options for LaTeX output (ignored here).
@@ -940,6 +971,211 @@ def _isomorphism(G, H, labels):
         return {v: m[v] for v in sorted(m)}
     except Exception:
         return dict(m)
+
+
+_PLOT_OPTIONS = {"layout", "pos", "iterations", "save_pos", "vertex_labels", "vertex_size",
+                 "vertex_color", "vertex_colors", "partition", "edge_color", "edge_colors",
+                 "edge_style", "edge_thickness", "edge_labels", "color_by_label", "loop_size",
+                 "graph_border", "edge_labels_background"}
+
+
+def _rainbow(n):
+    """Sage's rainbow(n): n colours of evenly spaced hue, full saturation and value."""
+    import colorsys
+    out = []
+    for i in range(n):
+        r, g, b = colorsys.hsv_to_rgb(i / n, 1.0, 1.0)
+        out.append("#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255)))
+    return out
+
+
+def _spring_pos(G, vs, iterations):
+    """{vertex: (x, y)} from lib/_graph_spring.py (web/graph/spring.ts's
+    layout, bit for bit): vertices as 20-unit boxes, scaled so that an edge
+    is about one unit long, y up."""
+    import _graph_spring as sp
+    ids = {v: "v%d" % i for i, v in enumerate(vs)}
+    nodes = [(ids[v], 20, 20, None) for v in vs]
+    edges = [(ids[u], ids[v]) for u, v, _ in G.edges(sort=False) if u != v]
+    out = sp.spring_layout(nodes, edges, 0, iterations)
+    if out is None:
+        raise NotImplementedError("a spring layout of a graph this large is not supported in Sagebrush "
+                                  "(at most %d vertices and %d edges)" % (sp.MAX_NODES, sp.MAX_EDGES))
+    return {v: ((out[ids[v]][0] + 10) / 64, -(out[ids[v]][1] + 10) / 64) for v in vs}
+
+
+def _bounded(items, budget, what):
+    """The items, read one at a time: at most budget of them (repeats and
+    ones that name nothing count too), else refused, so that an endless
+    iterable is refused rather than read forever (HARD-856-2/3)."""
+    import itertools
+    out = list(itertools.islice(iter(items), budget + 1))
+    if len(out) > budget:
+        raise NotImplementedError("Graph.plot: %s of more than %d items is not supported in Sagebrush" % (what, budget))
+    return out
+
+
+def _plot_graph(G, options):
+    import math
+    import _graph_spring as sp
+    sa = _sa()
+    # (one admission for every layout, given positions too: a primitive per
+    # edge, a loop a 49-point line, a text per label, HARD-856-1)
+    if G.order() > sp.MAX_NODES or G.size() > sp.MAX_EDGES:
+        raise NotImplementedError("a picture of a graph this large is not supported in Sagebrush "
+                                  "(at most %d vertices and %d edges)" % (sp.MAX_NODES, sp.MAX_EDGES))
+    from sage_plot import GRAPHICS_OPTIONS
+    options = dict(options)
+    gopts = {k: options.pop(k) for k in list(options) if k in GRAPHICS_OPTIONS}
+    for k in options:
+        if k not in _PLOT_OPTIONS:
+            raise NotImplementedError("Graph.plot option %r is not supported in Sagebrush" % k)
+    vs = G.vertices(sort=True)
+    n = len(vs)
+    layout = options.get("layout")
+    pos = options.get("pos")
+    if layout not in (None, "spring", "circular"):
+        raise NotImplementedError("Graph.plot layout %r is not supported in Sagebrush (only 'spring' and 'circular')" % (layout,))
+    if pos is None and layout is None and G._pos is not None and all(v in G._pos for v in vs):
+        pos = G._pos
+    if pos is None or layout is not None:
+        if layout == "circular":
+            pos = _circle(vs)
+        else:
+            pos = _spring_pos(G, vs, options.get("iterations"))
+    missing = [v for v in vs if v not in pos]
+    if missing:
+        raise ValueError("vertex %r has no position" % (missing[0],))
+    pos = {v: (float(pos[v][0]), float(pos[v][1])) for v in vs}
+    if options.get("save_pos"):
+        G._pos = dict(pos)
+    edge_color = options.get("edge_color", "black")
+    thickness = options.get("edge_thickness", 1)
+    style = {"solid": "-", "dashed": "--", "dotted": ":", "dashdot": "-."}.get(options.get("edge_style", "solid"))
+    if style is None:
+        raise ValueError("edge_style must be 'solid', 'dashed', 'dotted' or 'dashdot', not %r" % (options.get("edge_style"),))
+    edges = G.edges(sort=True)
+    # (colours by the edge's index in edges: a label need not be hashable,
+    # CORR-896-3)
+    colour_of = {}
+    cbl = options.get("color_by_label")
+    if cbl:
+        if isinstance(cbl, dict):
+            for i, (_, _, l) in enumerate(edges):
+                try:
+                    if l in cbl:
+                        colour_of[i] = cbl[l]
+                except TypeError:
+                    pass
+        elif callable(cbl):
+            # (a function of the label, as Sage's, CORR-896-1)
+            for i, (_, _, l) in enumerate(edges):
+                colour_of[i] = cbl(l)
+        else:
+            try:
+                distinct = {l for _, _, l in edges}
+            except TypeError:
+                raise NotImplementedError("Graph.plot color_by_label=True with unhashable edge labels is not supported in Sagebrush "
+                                          "(give a dict or a function of the label)")
+            pal = dict(zip(_sorted(distinct), _rainbow(len(distinct))))
+            colour_of = {i: pal[l] for i, (_, _, l) in enumerate(edges)}
+    # (the edges indexed once; every item read counted, HARD-856-2)
+    index = {}
+    for i, e in enumerate(edges):
+        index[(e[0], e[1])] = i
+        if not G._directed:
+            index[(e[1], e[0])] = i
+    budget = [sp.MAX_EDGES]
+    for c, es in _bounded((options.get("edge_colors") or {}).items(), sp.MAX_EDGES, "edge_colors"):
+        got = _bounded(es, budget[0], "edge_colors")
+        budget[0] -= len(got)
+        for e in got:
+            hit = index.get((e[0], e[1]))
+            if hit is not None:
+                colour_of[hit] = c
+    size = options.get("vertex_size", 200)
+    r = math.sqrt(float(size)) * 0.9
+    loop = float(options.get("loop_size", 0.075))
+    g = sa.Graphics()
+    # (a directed edge whose reverse is an edge too: each drawn a little to
+    # its left, so that the two arrows and their labels are apart; by 1.2%
+    # of the layout's extent, within a vertex's marker at the default size)
+    xs, ys = [p[0] for p in pos.values()] or [0.0], [p[1] for p in pos.values()] or [0.0]
+    off = 0.012 * max(max(xs) - min(xs), max(ys) - min(ys), 1e-9)
+
+    def ends(u, v):
+        if not (G._directed and (v, u) in index):
+            return pos[u], pos[v]
+        (x0, y0), (x1, y1) = pos[u], pos[v]
+        L = math.hypot(x1 - x0, y1 - y0) or 1.0
+        nx, ny = -(y1 - y0) / L * off, (x1 - x0) / L * off
+        return (x0 + nx, y0 + ny), (x1 + nx, y1 + ny)
+    for i, e in enumerate(edges):
+        u, v, _ = e
+        c = colour_of.get(i, edge_color)
+        if u == v:
+            # (a circle of radius loop_size through the vertex, up and to
+            # its left, CORR-896-4)
+            x, y = pos[u]
+            cx, cy, rr = x - loop / math.sqrt(2), y + loop / math.sqrt(2), loop
+            g += sa.line([(cx + rr * math.cos(2 * math.pi * k / 48), cy + rr * math.sin(2 * math.pi * k / 48)) for k in range(49)],
+                         color=c, thickness=thickness, linestyle=style)
+        elif G._directed:
+            a, b = ends(u, v)
+            g += sa.arrow(a, b, color=c, thickness=thickness, _head_clearance=r + 1, linestyle=style)
+        else:
+            g += sa.line([pos[u], pos[v]], color=c, thickness=thickness, linestyle=style)
+    # (every member read counted, repeats and others too, HARD-856-3)
+    left = [sp.MAX_NODES]
+
+    def members(p, what):
+        got = _bounded(p, left[0], what)
+        left[0] -= len(got)
+        return got
+    groups = []
+    # (explicit vertex_colors win over partition, as in Sage, CORR-896-2)
+    if options.get("vertex_colors") is not None:
+        groups = [(c, members(p, "vertex_colors")) for c, p in _bounded(options["vertex_colors"].items(), sp.MAX_NODES, "vertex_colors")]
+    elif options.get("partition") is not None:
+        parts = [members(p, "partition") for p in _bounded(options["partition"], sp.MAX_NODES, "partition")]
+        groups = list(zip(_rainbow(len(parts)), parts))
+    coloured = {v for _, p in groups for v in p}
+    rest = [v for v in vs if v not in coloured]
+    if rest or not groups:
+        groups = [(options.get("vertex_color", "#fec7b8"), rest)] + groups
+    for c, p in groups:
+        if p:
+            g += sa.points([pos[v] for v in p], size=size, color=c, zorder=2)
+    labels = options.get("vertex_labels", True)
+    if labels:
+        for v in vs:
+            # (a dict, a function of the vertex, CORR-896-1, or True)
+            t = labels.get(v) if isinstance(labels, dict) else labels(v) if callable(labels) else str(v)
+            if t is not None:
+                g += sa.text(str(t), pos[v], color="black", zorder=3)
+    # (on Sage's white, so that the line under a label does not cross it)
+    background = options.get("edge_labels_background", "white")
+    if background == "transparent":
+        background = None
+    if options.get("edge_labels"):
+        for u, v, l in edges:
+            if u == v:
+                x, y = pos[u]
+                xy = (x - math.sqrt(2) * loop, y + math.sqrt(2) * loop)
+            else:
+                a, b = ends(u, v)
+                xy = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+            g += sa.text(str(l), xy, color="black", zorder=3, background_color=background)
+    g.axes(False)
+    g.set_aspect_ratio(1)
+    # (a margin, so that the vertices at the edge are whole)
+    mm = g.get_minmax_data()
+    pad = 0.1 * max(mm["xmax"] - mm["xmin"], mm["ymax"] - mm["ymin"], 1)
+    g.set_axes_range(mm["xmin"] - pad, mm["xmax"] + pad, mm["ymin"] - pad, mm["ymax"] + pad)
+    if options.get("graph_border"):
+        g._set({"frame": True})
+    g._set(gopts)
+    return g
 
 
 class Graph(GenericGraph):
@@ -1231,6 +1467,15 @@ class DiGraph(GenericGraph):
 
 # ------------------------------------------------------------------ generators
 
+def _circle(vs, r=1.0, start=0):
+    """{vertex: (x, y)}: vs on a circle of radius r, the first at the top,
+    counterclockwise (rounded, so that the top is (0.0, r), not 6e-17)."""
+    import math
+    n = len(vs)
+    return {v: (round(r * math.cos(math.pi / 2 + 2 * math.pi * i / max(n, 1)), 12) + 0.0,
+                round(r * math.sin(math.pi / 2 + 2 * math.pi * i / max(n, 1)), 12) + 0.0) for i, v in enumerate(vs)}
+
+
 class _GraphGenerators:
     """graphs: constructors of common graphs.
 
@@ -1258,7 +1503,7 @@ class _GraphGenerators:
             [(0, 1), (0, 4), (1, 2), (2, 3), (3, 4)]
         """
         n = int(n)
-        return self._make("Cycle graph", n, [(i, (i + 1) % n) for i in range(n)] if n > 2 else [(i, i + 1) for i in range(n - 1)])
+        return self._make("Cycle graph", n, [(i, (i + 1) % n) for i in range(n)] if n > 2 else [(i, i + 1) for i in range(n - 1)], _circle(range(n)))
 
     def PathGraph(self, n):
         """The path on n vertices.
@@ -1280,7 +1525,7 @@ class _GraphGenerators:
             6
         """
         n = int(n)
-        return self._make("Complete graph", n, [(i, j) for i in range(n) for j in range(i + 1, n)])
+        return self._make("Complete graph", n, [(i, j) for i in range(n) for j in range(i + 1, n)], _circle(range(n)))
 
     def StarGraph(self, n):
         """The star with n leaves.
@@ -1291,7 +1536,7 @@ class _GraphGenerators:
             [(0, 1), (0, 2), (0, 3)]
         """
         n = int(n)
-        return self._make("Star graph", n + 1, [(0, i) for i in range(1, n + 1)])
+        return self._make("Star graph", n + 1, [(0, i) for i in range(1, n + 1)], {0: (0.0, 0.0), **_circle(range(1, n + 1))})
 
     def WheelGraph(self, n):
         """The wheel: a hub joined to a cycle on n - 1 vertices.
@@ -1303,7 +1548,8 @@ class _GraphGenerators:
         """
         n = int(n)
         m = n - 1
-        return self._make("Wheel graph", n, [(0, i) for i in range(1, n)] + [(1 + i, 1 + (i + 1) % m) for i in range(m)])
+        return self._make("Wheel graph", n, [(0, i) for i in range(1, n)] + [(1 + i, 1 + (i + 1) % m) for i in range(m)],
+                          {0: (0.0, 0.0), **_circle(range(1, n))} if n > 0 else None)
 
     def CompleteBipartiteGraph(self, p, q):
         """K_{p,q}.
@@ -1314,8 +1560,10 @@ class _GraphGenerators:
             6
         """
         p, q = int(p), int(q)
-        G = self._make("Complete bipartite graph of order %d+%d" % (p, q), p + q, [(i, p + j) for i in range(p) for j in range(q)])
-        return G
+        # (the parts in two rows, the first above)
+        pos = {i: (float(i - (p - 1) / 2), 1.0) for i in range(p)}
+        pos.update({p + j: (float(j - (q - 1) / 2), 0.0) for j in range(q)})
+        return self._make("Complete bipartite graph of order %d+%d" % (p, q), p + q, [(i, p + j) for i in range(p) for j in range(q)], pos)
 
     def ChvatalGraph(self):
         """The Chvatal graph: 4-regular, triangle-free, chromatic number 4.
@@ -1337,7 +1585,8 @@ class _GraphGenerators:
             [3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
         """
         e = [(i, (i + 1) % 5) for i in range(5)] + [(i, i + 5) for i in range(5)] + [(5 + i, 5 + (i + 2) % 5) for i in range(5)]
-        return self._make("Petersen graph", 10, e)
+        # (the outer pentagon and the inner pentagram)
+        return self._make("Petersen graph", 10, e, {**_circle(range(5)), **_circle(range(5, 10), 0.5)})
 
     def HouseGraph(self):
         """The house: a square with a roof.

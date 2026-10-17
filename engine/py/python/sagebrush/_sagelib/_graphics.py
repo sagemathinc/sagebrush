@@ -678,7 +678,20 @@ class Text(Primitive):
         base = {"top": "hanging", "bottom": "auto", "center": "middle", "baseline": "auto"}.get(o.get("vertical_alignment", "center"), "middle")
         color = to_color(o.get("color"))
         rot = o.get("rotation", 0)
-        return '<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
+        # (background_color: a box behind the text, as wide as its
+        # characters at about 0.6 em each, placed by the same alignment and
+        # turned by the same rotation, CORR-896-6)
+        box = ""
+        bg = to_color(o.get("background_color"))
+        if bg:
+            fs = float(o.get("fontsize", 11))
+            w, hh = 0.6 * fs * len(self.string) + 4, fs + 2
+            x0 = {"start": p[0] - 2, "end": p[0] - w + 2}.get(anchor, p[0] - w / 2)
+            y0 = {"hanging": p[1] - 1, "auto": p[1] - fs * 0.8 - 1}.get(base, p[1] - hh / 2)
+            box = '<rect x="%s" y="%s" width="%s" height="%s" fill="%s"%s/>' % (
+                _fmt(x0), _fmt(y0), _fmt(w), _fmt(hh), _esc(bg),
+                ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "")
+        return box + '<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
             _fmt(p[0]), _fmt(p[1]), _fmt(o.get("fontsize", 11)), anchor, base,
             ' fill="%s"' % _esc(color) if color else "",
             ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "",
@@ -709,11 +722,23 @@ class Arrow(Primitive):
         dx, dy = b[0] - a[0], b[1] - a[1]
         L = math.hypot(dx, dy) or 1.0
         ux, uy = dx / L, dy / L
+        # (shorten: pixels taken off, half at each end, Sage's arrowshorten;
+        # head_shorten: the head stops that many more short, at the edge of
+        # a graph's vertex marker)
+        half = min(float(o.get("shorten", 0)) / 2, L / 2)
+        if half:
+            a = (a[0] + ux * half, a[1] + uy * half)
+            b = (b[0] - ux * half, b[1] - uy * half)
+        cut = min(float(o.get("head_shorten", 0)), max(L - 2 * half, 0))
+        if cut:
+            b = (b[0] - ux * cut, b[1] - uy * cut)
         hl, hw = 4 + 3 * w, 2 + 1.6 * w
         bx, by = b[0] - ux * hl, b[1] - uy * hl
         head = "M%s %sL%s %sL%s %sZ" % (_fmt(b[0]), _fmt(b[1]), _fmt(bx - uy * hw), _fmt(by + ux * hw), _fmt(bx + uy * hw), _fmt(by - ux * hw))
-        return '<path d="M%s %sL%s %s" stroke="%s" stroke-width="%s"/><path d="%s" fill="%s"/>' % (
-            _fmt(a[0]), _fmt(a[1]), _fmt(bx), _fmt(by), c, _fmt(w), head, c)
+        dash = DASHES.get(o.get("linestyle", "-"), None)
+        return '<path d="M%s %sL%s %s" stroke="%s" stroke-width="%s"%s/><path d="%s" fill="%s"/>' % (
+            _fmt(a[0]), _fmt(a[1]), _fmt(bx), _fmt(by), c, _fmt(w),
+            ' stroke-dasharray="%s"' % dash if dash else "", head, c)
 
     def describe(self):
         return "arrow from (%s, %s) to (%s, %s)" % (_num(self.tail[0]), _num(self.tail[1]), _num(self.head[0]), _num(self.head[1]))

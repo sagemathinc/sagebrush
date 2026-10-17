@@ -547,7 +547,8 @@ def text(string, xy, **options):
     gopts, p = _split(options)
     o = {"fontsize": p.pop("fontsize", 11), "color": p.pop("color", p.pop("rgbcolor", None)),
          "horizontal_alignment": p.pop("horizontal_alignment", "center"),
-         "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0)}
+         "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0),
+         "background_color": p.pop("background_color", None)}
     return Graphics([Text(_tex(string), xy[0], xy[1], **o)], **gopts)
 
 
@@ -621,7 +622,11 @@ def arrow(tailpoint, headpoint, **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
-    o = {"color": _color(p), "thickness": p.pop("thickness", p.pop("width", 2)) * 0.9}
+    # (arrowshorten: Sage's, in points, half taken off each end; the head
+    # clearance Graph.plot leaves for a vertex's marker is its own, in pixels)
+    o = {"color": _color(p), "thickness": p.pop("thickness", p.pop("width", 2)) * 0.9,
+         "shorten": float(p.pop("arrowshorten", 0)) * 100 / 72, "head_shorten": float(p.pop("_head_clearance", 0)),
+         "linestyle": p.pop("linestyle", "-")}
     return Graphics([Arrow(tailpoint, headpoint, **o)], **gopts)
 
 
