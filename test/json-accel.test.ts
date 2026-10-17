@@ -19,33 +19,39 @@ test("json.dumps and json.loads give CPython's output, errors, positions and not
 
 // sage2's benchmark (30000 small dicts, 2.19 M characters), timed against
 // json's own pure-Python encoder and scanner in the same process, so that a
-// loaded host slows both alike: the best of 3 runs each, at least 3x faster
-// both ways (about 7x and 8x on a quiet VM), the outputs identical; the
-// pure-Python paths restored in a finally, checked after
+// loaded host slows both alike: 5 rounds, each timing the accelerator and
+// the pure-Python path in turn (dumps, then loads), so that a stretch of
+// load falls on both; the best of the 5 each, at least 3x faster both ways
+// (about 7x and 8x on a quiet VM), the outputs identical every round; the
+// pure-Python encoder switched on only around its own runs, in a finally,
+// and checked off after
 test("json.dumps and json.loads of 30000 small dicts are at least 3x json's pure-Python encoder and scanner", () => {
   const code = [
     "import json, time",
     "import json.encoder as E, json.scanner as S",
     "x = [{'a': i, 'b': [i, str(i), i / 2], 'c': {'d': None, 'e': True}} for i in range(30000)]",
-    "def best(f, n=3):",
-    "    r = None",
-    "    for _ in range(n):",
-    "        t = time.perf_counter(); v = f(); d = time.perf_counter() - t",
-    "        r = d if r is None or d < r else r",
-    "    return r, v",
-    "fd, s = best(lambda: json.dumps(x))",
-    "fl, y = best(lambda: json.loads(s))",
     "ce, cs = E.c_make_encoder, S.make_scanner",
-    "try:",
-    "    E.c_make_encoder = None",
-    "    S.make_scanner = S.py_make_scanner",
-    "    dec = json.JSONDecoder()",
-    "    pd, ps = best(lambda: json.dumps(x))",
-    "    pl, py = best(lambda: dec.decode(s))",
-    "finally:",
-    "    E.c_make_encoder, S.make_scanner = ce, cs",
-    "assert E.c_make_encoder is not None and S.make_scanner is S.c_make_scanner is not None",
-    "print(round(pd / fd, 2), round(pl / fl, 2), y == x and py == x and ps == s, round(fd, 3), round(fl, 3), round(pd, 3), round(pl, 3))",
+    "def pure(f):",
+    "    try:",
+    "        E.c_make_encoder = None",
+    "        S.make_scanner = S.py_make_scanner",
+    "        return f()",
+    "    finally:",
+    "        E.c_make_encoder, S.make_scanner = ce, cs",
+    "def timed(f):",
+    "    t = time.perf_counter(); v = f(); return time.perf_counter() - t, v",
+    "pdec = pure(json.JSONDecoder)",
+    "best = [None] * 4",
+    "same = True",
+    "for _ in range(5):",
+    "    r = [timed(lambda: json.dumps(x)), pure(lambda: timed(lambda: json.dumps(x)))]",
+    "    s = r[0][1]",
+    "    r += [timed(lambda: json.loads(s)), timed(lambda: pdec.decode(s))]",
+    "    same = same and r[1][1] == s and r[2][1] == x and r[3][1] == x",
+    "    best = [d if b is None or d < b else b for b, (d, _) in zip(best, r)]",
+    "fd, pd, fl, pl = best",
+    "assert E.c_make_encoder is not None and S.make_scanner is S.c_make_scanner is not None and getattr(pdec.scan_once, '__module__', None) == 'json.scanner'",
+    "print(round(pd / fd, 2), round(pl / fl, 2), same, round(fd, 3), round(fl, 3), round(pd, 3), round(pl, 3))",
   ].join("\n");
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim().split(" ");
   assert.equal(out[2], "True");
