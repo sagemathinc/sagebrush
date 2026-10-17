@@ -628,3 +628,5 @@ changing int -> 2.0000000 Real Field with 30 bits of precision
 calls ['int']
 changing method -> 2.0000000 Real Field with 30 bits of precision
 calls ['int']
+digits descriptor -> 2.00000000 Real Field with 33 bits of precision
+['real-get']

@@ -2795,11 +2795,21 @@ def _special(x, name):
     """The special method name of x bound as Python binds one: looked up on
     its type, then the descriptor's __get__ (a staticmethod or classmethod
     too); None if the type has none."""
-    for k in type(x).__mro__:
-        if name in k.__dict__:
-            f = k.__dict__[name]
-            get = getattr(type(f), "__get__", None)
-            return get(f, x, type(x)) if get is not None else f
+    f = _type_lookup(type(x), name)
+    if f is None:
+        return None
+    get = _type_lookup(type(f), "__get__")
+    return get(f, x, type(x)) if get is not None else f
+
+
+def _type_lookup(t, name):
+    """name in the dicts of t's MRO, as the interpreter's slot lookup reads
+    it: type's own __mro__ and __dict__, so no metaclass __getattribute__ is
+    called (CORR-8C8-1)."""
+    for k in type.__getattribute__(t, "__mro__"):
+        d = type.__getattribute__(k, "__dict__")
+        if name in d:
+            return d[name]
     return None
 
 
