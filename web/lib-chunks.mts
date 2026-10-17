@@ -39,6 +39,8 @@ export type LibManifest = {
   modes: Record<string, string[]>;
   /** the packages' registry, and each package file ("<dir>/<path>") -> its group */
   packages: { registry: unknown; files: Record<string, string> };
+  /** the pinned zone data's index (web/tzdata-chunks.mts), for a browser's time */
+  tzdata?: ChunkRef & { version: string };
 };
 export type Packages = { registry: { packages: Record<string, { dir: string }> }; files: Record<string, string> };
 

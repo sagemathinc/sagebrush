@@ -23,20 +23,12 @@ CPython 3.14 on glibc 2.39 zone by zone, no glibc source read):
   matched here (malformed, out of range, or daylight saving without both
   rules), TZ unset with no readable /etc/localtime, and a zone file a
   sandbox will not let Sagebrush read.
-- In a browser, which has no zone files (until the pinned zone data comes),
-  as before: UTC where Intl reports it, exact; another zone's UTC offsets
-  from JavaScript's Date, exact (localtime's fields, tm_gmtoff, timezone,
-  altzone, daylight), and the rest refused, naming the zone:
-  - tm_isdst, in what localtime() returns, is a placeholder: its repr is
-    "<unknown: ZONE>", and any other use (int, bool, comparison, hashing,
-    format, arithmetic, pickling, comparing or hashing the struct_time
-    holding it) raises NotImplementedError. Unpacking and indexing just
-    pass it along.
-  - tm_zone, tzname and strftime's %Z raise NotImplementedError; tzname is
-    then not in the module's dict (dir(time) and `from time import *` lack
-    it), and hasattr(time, 'tzname') raises.
-  - mktime() refuses an isdst of 0 or 1, and a local time the zone skips or
-    repeats; strftime's %s likewise.
+- In a browser, which has no zone files: the zone Intl names, from the zone
+  data Sagebrush pins (tzdata/, the PyPI tzdata wheel's files, as
+  scripts/tzdata-import.mjs has them), its file fetched when time is first
+  imported and checked against its SHA-256, then read as above; refused,
+  naming the zone, where the pinned data has no such zone or its UTC offset
+  now is not JavaScript Date's (the browser's own idea of the zone).
 - tzset() is refused: the host's zone is read once, at import.
 - strptime() is refused, naming what it lacks, until CPython's _strptime
   (which needs calendar, enum, locale and encodings) can run here.
@@ -62,52 +54,6 @@ def _read(path):
         raise _tzrules.ZoneUnsupported("%s cannot be read here (%s)" % (path, e)) from None
 
 
-class _UnknownDST:
-    """localtime()'s tm_isdst in a browser's zone without zone data: shown by
-    repr and str, refused on any other use."""
-    __slots__ = ()
-
-    def _no(self, *args, **kwargs):
-        _refuse("tm_isdst")
-
-    __int__ = __index__ = __float__ = __bool__ = __hash__ = __format__ = _no
-    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = _no
-    __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = __truediv__ = __rtruediv__ = _no
-    __floordiv__ = __rfloordiv__ = __mod__ = __rmod__ = __pow__ = __rpow__ = __divmod__ = __rdivmod__ = _no
-    __neg__ = __pos__ = __abs__ = __invert__ = __round__ = __trunc__ = __floor__ = __ceil__ = _no
-    __and__ = __rand__ = __or__ = __ror__ = __xor__ = __rxor__ = __lshift__ = __rlshift__ = __rshift__ = __rrshift__ = _no
-    __reduce__ = __reduce_ex__ = __copy__ = __deepcopy__ = __getstate__ = _no
-
-    def __repr__(self):
-        return "<unknown: %s>" % _zone.name
-
-    __str__ = __repr__
-
-
-_UNKNOWN_DST = _UnknownDST()
-_UNKNOWN_ZONE = object()  # (a tm_zone that refuses when read)
-
-
-class _JSDateZone:
-    """A browser's zone, which has no zone files (until the pinned zone data
-    comes): its UTC offsets from JavaScript's Date (exact to the second);
-    its isdst flags and abbreviations not known here (placeholders, refused
-    on use)."""
-
-    def __init__(self, name):
-        self.name = name
-
-    def find(self, t):
-        f = _time._local(t)
-        if f is None:
-            raise NotImplementedError("time: the host's time zone %s is known here only within JavaScript's dates "
-                                      "(about 271821 BC to AD 275760)" % self.name)
-        return f[6], _UNKNOWN_DST, _UNKNOWN_ZONE
-
-    def names_after(self, t, state):
-        return None
-
-
 def _host_zone():
     """(the host's zone, None) or (None, why it is refused)."""
     tz, tzdir, node, intl = _time._zone()
@@ -121,7 +67,26 @@ def _host_zone():
             return None, "time: the host's time zone (%s) is not available in Sagebrush: %s" % (what, e)
     if intl is None or intl in ("UTC", "Etc/UTC", "Etc/Unknown"):
         return _tzrules.utc_zone(), None
-    return _JSDateZone(intl), None
+    what = "time: the browser's time zone %s is not available in Sagebrush: " % intl
+    try:
+        data = _time._pinned(intl)
+    except OSError as e:
+        return None, what + "the pinned zone data cannot be had here (%s)" % e
+    if data is None:
+        return None, what + "the pinned zone data has no such zone"
+    try:
+        zone = _tzrules.parse_tzif(data)
+    except _tzrules.ZoneUnsupported as e:
+        return None, what + str(e)
+    # (the pinned data's offset now, against the browser's own: a zone the
+    # browser has changed since, or calls by another name, is refused)
+    now = int(time())
+    date = _time._local(now)
+    pinned = zone.find(now)[0]
+    if date is None or date[6] != pinned:
+        return None, what + ("the pinned zone data gives it UTC offset %d s now, the browser's Date %s"
+                             % (pinned, "none" if date is None else "%d s" % date[6]))
+    return zone, None
 
 
 _zone, _bad = _host_zone()
@@ -129,15 +94,8 @@ _mk_last = 0  # (the offset glibc's mktime keeps from its last call)
 _names = ["UTC", "UTC"]  # (glibc's tzname: what %Z gives a time tuple with no zone, by isdst; None: not known)
 
 
-def _refuse(what=None):
-    if _bad is not None:
-        raise NotImplementedError(_bad)
-    raise NotImplementedError("%s is not known for the host's time zone %s here: it needs tzdata's "
-                              "daylight-saving flags and abbreviations, not yet in Sagebrush" % (what, _zone.name))
-
-
-def _jsdate():
-    return isinstance(_zone, _JSDateZone)
+def _refuse():
+    raise NotImplementedError(_bad)
 
 
 # ------------------------------------------------------------------ struct_time
@@ -166,10 +124,7 @@ class _Extra(_Field):
     def __get__(self, obj, cls=None):
         if obj is None:
             return self
-        v = obj._extra[self.i]
-        if v is _UNKNOWN_ZONE:
-            _refuse("tm_zone")
-        return v
+        return obj._extra[self.i]
 
 
 class struct_time(tuple):
@@ -227,43 +182,8 @@ class struct_time(tuple):
     def __repr__(self):
         return "time.struct_time(%s)" % ", ".join("%s=%r" % (k, v) for k, v in zip(_FIELDS, self))
 
-    def _check(self):
-        if tuple.__getitem__(self, 8) is _UNKNOWN_DST:
-            _refuse("tm_isdst")
-
-    def __eq__(self, other):
-        self._check()
-        return tuple.__eq__(self, other)
-
-    def __ne__(self, other):
-        self._check()
-        return tuple.__ne__(self, other)
-
-    def __lt__(self, other):
-        self._check()
-        return tuple.__lt__(self, other)
-
-    def __le__(self, other):
-        self._check()
-        return tuple.__le__(self, other)
-
-    def __gt__(self, other):
-        self._check()
-        return tuple.__gt__(self, other)
-
-    def __ge__(self, other):
-        self._check()
-        return tuple.__ge__(self, other)
-
-    def __hash__(self):
-        self._check()
-        return tuple.__hash__(self)
-
     def __reduce__(self):
-        self._check()
         zone, gmtoff = self._extra
-        if zone is _UNKNOWN_ZONE:
-            _refuse("tm_zone")
         return (struct_time, (tuple(self), {"tm_zone": zone, "tm_gmtoff": gmtoff}))
 
     def __replace__(self, /, **kwargs):
@@ -435,14 +355,14 @@ def _tmarg(t, fn):
     v = []
     for i in range(9):
         x = tuple.__getitem__(t, i)
-        v.append(x if i == 8 and x is _UNKNOWN_DST else _cint(x))
+        v.append(_cint(x))
     if v[0] < _INT_MIN + 1900:
         raise OverflowError("year out of range")
     tm = {"year": v[0] - 1900, "mon": v[1] - 1, "mday": v[2], "hour": v[3], "min": v[4], "sec": v[5],
           "wday": _cmod7(_cwrap(v[6] + 1)), "yday": v[7] - 1, "isdst": v[8], "zone": None, "gmtoff": 0}
     if type(t) is struct_time:
         zone, gmtoff = t._extra
-        if zone is not None and zone is not _UNKNOWN_ZONE:
+        if zone is not None:
             # (PyUnicode_AsUTF8: a str, without lone surrogates)
             if not issubclass(type(zone), str):
                 raise TypeError("bad argument type for built-in operation")
@@ -549,8 +469,6 @@ def _mktime(tm):
     w = _wall(tm)
     if _bad is not None:
         _refuse()
-    if _jsdate():
-        return _mktime_jsdate(w, tm["isdst"])
     try:
         t, last = _tzrules.mktime(_zone, w, tm["isdst"], _mk_last)
     except OverflowError:
@@ -566,34 +484,6 @@ def _mktime(tm):
     _mk_last = last
     _names = _zone.names_after(t, _names)
     return t
-
-
-def _mktime_jsdate(w, isdst):
-    """mktime in a browser's zone without zone data (S2's way): isdst -1 only,
-    a time the zone skips or repeats refused."""
-    if isdst is _UNKNOWN_DST:
-        _refuse("tm_isdst")
-    if isdst >= 0:
-        _refuse("mktime() with tm_isdst %d" % isdst)
-    found = set()
-    for probe in (w - 86400, w, w + 86400):
-        t = w - _zone.find(probe)[0]
-        if t + _zone.find(t)[0] == w:
-            found.add(t)
-    if len(found) != 1:
-        raise NotImplementedError("time.mktime(): %s is %s in the host's time zone %s; glibc's answer for it "
-                                  "depends on its own state, so it is not guessed here"
-                                  % (_asctime_wall(w), "repeated" if found else "skipped", _zone.name))
-    t = found.pop()
-    if not _TIME_T_MIN <= t <= _TIME_T_MAX:
-        raise OverflowError("mktime argument out of range")
-    return t
-
-
-def _asctime_wall(w):
-    days, rem = divmod(w, 86400)
-    y, m, d = _from_days(days)
-    return "%04d-%02d-%02d %02d:%02d:%02d" % (y, m, d, rem // 3600, rem // 60 % 60, rem % 60)
 
 
 def mktime(time_tuple, /):
@@ -761,14 +651,12 @@ def _conversion(c, tm, pad, width, upcase, swapcase):
         return _text("\t", width, pad)
     if c == "Z":
         zone = tm["zone"]
-        if zone is _UNKNOWN_ZONE:
-            _refuse("%Z")
         if zone is None:
             # (a tuple with no zone: glibc's tzname, as the last local time
             # left it)
             isdst = tm["isdst"]
-            if isdst is _UNKNOWN_DST or (isdst >= 0 and (_bad is not None or _jsdate())):
-                _refuse("%Z")
+            if isdst >= 0 and _bad is not None:
+                _refuse()
             if isdst >= 0 and _names is None:
                 raise NotImplementedError("time.strftime(): %Z of a time tuple with no zone gives glibc's tzname as "
                                           "the last local time left it, and a failed mktime() left it as it is not "
@@ -776,7 +664,7 @@ def _conversion(c, tm, pad, width, upcase, swapcase):
             zone = "" if isdst < 0 else _names[isdst]
         return _text(zone, width, pad, upcase, zone=True)
     if c == "z":
-        if tm["isdst"] is not _UNKNOWN_DST and tm["isdst"] < 0:
+        if tm["isdst"] < 0:
             return ""  # (nothing at all, whatever the width)
         diff = tm["gmtoff"]
         sign = "-" if diff < 0 else "+"
@@ -842,8 +730,7 @@ the C library strftime function.
     else:
         tm = _tmarg(time_tuple, "strftime")
         _checktm(tm)
-    if tm["isdst"] is not _UNKNOWN_DST:
-        tm["isdst"] = max(-1, min(1, tm["isdst"]))
+    tm["isdst"] = max(-1, min(1, tm["isdst"]))
     return _strftime(format, tm)
 
 
@@ -926,8 +813,7 @@ def _init_timezone(now):
     _, _, janname, janoff = _local(t)
     _, _, julname, juloff = _local(t + YEAR // 2)
     jan, jul = -janoff, -juloff
-    if not _jsdate():
-        janname, julname = janname[:9], julname[:9]
+    janname, julname = janname[:9], julname[:9]
     if jan < jul:
         return jul, jan, int(jan != jul), (julname, janname)
     return jan, jul, int(jan != jul), (janname, julname)
@@ -935,18 +821,13 @@ def _init_timezone(now):
 
 if _bad is None:
     timezone, altzone, daylight, tzname = _init_timezone(int(time()))
-    if _jsdate():
-        del tzname
 
 
 def __getattr__(name):
     # (where the host's zone is refused: timezone, altzone, daylight and
-    # tzname are not in the module's dict, and refuse, naming it; in a
-    # browser's zone without zone data, tzname alone)
+    # tzname are not in the module's dict, and refuse, naming it)
     if _bad is not None and name in ("timezone", "altzone", "daylight", "tzname"):
         _refuse()
-    if name == "tzname" and _jsdate():
-        _refuse("tzname")
     raise AttributeError("module 'time' has no attribute '%s'" % name)
 
 

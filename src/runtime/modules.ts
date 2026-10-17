@@ -555,8 +555,35 @@ newBuiltinModule("_time", (m) => {
       if (fd !== undefined) fs.closeSync(fd);
     }
   });
-  // (in a browser, which has no zone files (S2's way until pinned zone data
-  // comes): the host zone's local fields at a UTC second, from JS's Date (ICU's
+  // (in a browser, which has no zone files: the pinned zone data's file for
+  // a zone (web/lib-lazy.ts's __SAGEBRUSH_TZDATA__, each file checked against
+  // its SHA-256), or None where the pinned data has no such zone; OSError
+  // where it cannot be had. Under Node as a browser, for the tests of that
+  // way: SAGEBRUSH_TIME_PINNED_DIR's file, a tzdata/zoneinfo directory)
+  fn(m, "_pinned", (zone: any) => {
+    const name = String(zone);
+    const hook = (globalThis as any).__SAGEBRUSH_TZDATA__;
+    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    try {
+      if (typeof hook === "function") {
+        const b = hook(name);
+        return b === null ? null : new PyBytes(new Uint8Array(b));
+      }
+      if (typeof dir === "string" && /^[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)*$/.test(name)) {
+        const fs = require("fs");
+        try {
+          return new PyBytes(new Uint8Array(fs.readFileSync(dir + "/" + name)));
+        } catch (e: any) {
+          if (e?.code === "ENOENT") return null;
+          throw e;
+        }
+      }
+    } catch (e: any) {
+      throw markRaised(callObj(T.OSError, [0, String(e?.message ?? e)]));
+    }
+    throw markRaised(callObj(T.OSError, [0, "there is no pinned zone data here"]));
+  });
+  // (the host zone's UTC offset at a UTC second, from JS's Date (ICU's
   // tzdata): (year, month, day, hour, minute, second, utcoffset), the offset
   // in whole seconds from the fields themselves, as Date's own offset is in
   // minutes; None outside the instants a Date holds)
