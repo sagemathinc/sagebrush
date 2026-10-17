@@ -87,6 +87,23 @@ test("as a browser, time_jsdate_cases.py under TZ=Europe/Berlin: each refusal na
   assert.equal(line("gmtime zone:"), "gmtime zone: GMT 0");
 });
 
+// (astra's CORR-09B-3: a TZ rule, or a zone file's footer, evaluated as glibc
+// does from year -5,000,000 to 5,000,000 (matched to 5,880,000, where glibc's
+// day count overflows); past that refused, naming the years)
+for (const tz of ["EST5EDT,M3.2.0,M11.1.0", "Australia/Sydney", "<+1030>-10:30<+11>-11,M10.1.0,M4.1.0"])
+  test(`time_far_cases.py under TZ=${tz}: CPython's output to year 5,000,000, refused past it`, () => {
+    const want = cpython("time_far_cases.py", tz), got = sagebrush("time_far_cases.py", tz);
+    const beyond = /^beyond /;
+    assert.deepEqual(got.filter((l) => !beyond.test(l)), want.filter((l) => !beyond.test(l)));
+    // (past the years: refused where the rule decides; a time before a zone
+    // file's first transition has no rule, and is CPython's)
+    const refusal = /raises NotImplementedError time: a TZ rule's daylight saving in year -?\d+, past the years matched here \(-5000000 to 5000000\)/;
+    const wantFar = want.filter((l) => beyond.test(l)), far = got.filter((l) => beyond.test(l));
+    assert.equal(far.length, 4);
+    far.forEach((l, i) => assert.ok(l === wantFar[i] || refusal.test(l), l));
+    assert.ok(refusal.test(far[0]) && refusal.test(far[1]), "year 10,000,000 refused");
+  });
+
 // (glibc's tzname after a failed mktime: refused in Sagebrush until a local
 // time sets it again; the failure itself and the rest as CPython's)
 test("time_tzname_after_failure_case.py under TZ=Australia/Lord_Howe: %Z refuses right after the failed mktime", () => {
@@ -102,7 +119,10 @@ test("time_tzname_after_failure_case.py under TZ=Australia/Lord_Howe: %Z refuses
 // TZ, a TZDIR, which holds anything (astra's files: New York's name with
 // UTC's data, UTC's name with New York's), written out as the system's or not)
 for (const tz of [":America/New_York", "America/New_York", "EST5EDT,M3.2.0/2,M11.1.0/2", "/usr/share/zoneinfo/America/New_York",
-  ":/usr/share/zoneinfo/America/New_York", "UTC+05", "", "Foo/Bar", ":", "XYZ", "<+05>-5", "ABC25"])
+  ":/usr/share/zoneinfo/America/New_York", "UTC+05", "", "Foo/Bar", ":", "XYZ", "<+05>-5", "ABC25",
+  // (astra's CORR-09B-1/2: an offset's digits as glibc reads them, past 9 of
+  // them and past 16 bits; a quoted name ASCII only)
+  "ABC0000000005", "ABC4294967301", "ABC65541", "ABC18446744073709551621", "ABC5:0000000003", "<ÉÉÉ>5", "<A_B>5", "<AB1>5"])
   test(`time_tz_forms_cases.py: CPython's output under TZ=${JSON.stringify(tz)}`, () => same("time_tz_forms_cases.py", tz));
 test("time_tz_forms_cases.py under a TZDIR of its own: CPython's output", () => {
   const dir = mkdtempSync(tmpdir() + "/sagebrush-tzdir-");

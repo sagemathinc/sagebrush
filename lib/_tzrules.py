@@ -161,7 +161,8 @@ def _name(s, i):
         if j < 0:
             return None
         name = s[i + 1:j]
-        if len(name) < 3 or not all(c.isalnum() or c in "+-" for c in name):
+        # (ASCII letters and digits, "+" and "-" only, as glibc takes them)
+        if len(name) < 3 or not all("A" <= c <= "Z" or "a" <= c <= "z" or "0" <= c <= "9" or c in "+-" for c in name):
             return None
         return name, j + 1
     j = i
@@ -172,39 +173,44 @@ def _name(s, i):
     return s[i:j], j
 
 
-def _number(s, i, limit):
+def _number(s, i):
+    """The digits at s[i:] (any number of them: a TZ value is at most
+    MAX_PATH characters) as an int, and the next index; None if none."""
     j = i
     while j < len(s) and "0" <= s[j] <= "9":
         j += 1
-    if j == i or j - i > 9:
+    if j == i:
         return None
     return int(s[i:j]), j
 
 
 def _hms(s, i, hours_max, clamp):
     """[+-]hh[:mm[:ss]] at s[i:]: (signed seconds, next index), or None.
-    With clamp, each part is cut to glibc's 24, 59 and 59 (as seen); else
-    a part past hours_max, 59 or 59 is refused."""
+    With clamp (an offset), each part as glibc reads it (as seen): its
+    digits' value, at most 2**64 - 1, then kept to 16 bits (65541 is 5),
+    then cut to 24, 59 and 59. Else (a rule's time) a part past
+    hours_max, 59 or 59 is refused."""
     sign = 1
     if i < len(s) and s[i] in "+-":
         sign = -1 if s[i] == "-" else 1
         i += 1
-    r = _number(s, i, 0)
+    r = _number(s, i)
     if r is None:
         return None
     h, i = r
     m = sec = 0
     if i < len(s) and s[i] == ":":
-        r = _number(s, i + 1, 0)
+        r = _number(s, i + 1)
         if r is None:
             return None
         m, i = r
         if i < len(s) and s[i] == ":":
-            r = _number(s, i + 1, 0)
+            r = _number(s, i + 1)
             if r is None:
                 return None
             sec, i = r
     if clamp:
+        h, m, sec = (min(v, 2**64 - 1) % 65536 for v in (h, m, sec))
         h, m, sec = min(h, 24), min(m, 59), min(sec, 59)
     elif h > hours_max or m > 59 or sec > 59:
         raise ZoneUnsupported("a TZ rule time out of range")
@@ -214,7 +220,7 @@ def _hms(s, i, hours_max, clamp):
 def _date_rule(s, i):
     """Jn, n or Mm.w.d with an optional /time, at s[i:]."""
     if i < len(s) and s[i] == "J":
-        r = _number(s, i + 1, 0)
+        r = _number(s, i + 1)
         if r is None or not 1 <= r[0] <= 365:
             raise ZoneUnsupported("a TZ rule's Julian day out of range or missing")
         rule, i = ("J", r[0]), r[1]
@@ -222,7 +228,7 @@ def _date_rule(s, i):
         parts = []
         j = i + 1
         for k in range(3):
-            r = _number(s, j, 0)
+            r = _number(s, j)
             if r is None:
                 raise ZoneUnsupported("a TZ rule's Mm.w.d incomplete")
             parts.append(r[0])
@@ -236,7 +242,7 @@ def _date_rule(s, i):
             raise ZoneUnsupported("a TZ rule's Mm.w.d out of range")
         rule, i = ("M", m, w, d), j
     else:
-        r = _number(s, i, 0)
+        r = _number(s, i)
         if r is None or not 0 <= r[0] <= 365:
             raise ZoneUnsupported("a TZ rule's day out of range or missing")
         rule, i = ("n", r[0]), r[1]
@@ -285,6 +291,11 @@ def parse_posix(s):
     return Rule(std, -off, dst, -doff, start, end)
 
 
+# (the years a TZ rule is evaluated for: matched against glibc from -5,000,000
+# to 5,880,000, where its day count overflows)
+RULE_YEARS = 5_000_000
+
+
 def _rule_day(rule, y):
     """Days since 1970-01-01 of a rule's date in year y."""
     if rule[0] == "J":
@@ -324,7 +335,13 @@ class Rule:
         end comes before its start, none where it comes after."""
         if self.dst is None:
             return self.std_off, 0, self.std
-        s, e = self.changes(_year_of(t // 86400))
+        y = _year_of(t // 86400)
+        if not -RULE_YEARS <= y <= RULE_YEARS:
+            # (glibc's changes past about year 5,880,000 are not the rules'
+            # (its day count overflows, as seen): not matched here)
+            raise ZoneUnsupported("a TZ rule's daylight saving in year %d, past the years matched here (%d to %d)"
+                                  % (y, -RULE_YEARS, RULE_YEARS))
+        s, e = self.changes(y)
         if s == e:
             raise ZoneUnsupported("a TZ rule whose daylight saving starts and ends at the same instant")
         if t < 0:
