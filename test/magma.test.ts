@@ -1051,6 +1051,23 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     // the procedure is reached: checked as the call is made, CORR-53E-1)
     ["AssignNames(~R, <\"t\">);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, Tup"],
     ["AssignNames(~R, 1);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, RngIntElt"],
+    // (the generic checks mark references too; types before lengths)
+    ["AssignNames(~R, \"t\");", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, MonStgElt"],
+    ["AssignNames(~R, true);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, BoolElt"],
+    ["AssignNames(~R, [\"t\"], 1);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt], RngIntElt"],
+    ["AssignNames(~R, [1, 2]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[RngIntElt]"],
+    ["AssignNames(~R);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~"],
+    ["Gcd([RngIntElt]);", "'Gcd'", "Bad argument types\nArgument types given: SeqEnum[Cat]"],
+    ["Gcd(RngIntElt);", "'Gcd'", "Bad argument types\nArgument types given: Cat[RngIntElt]"],
+    ["Gcd(5);", "'Gcd'", "Bad argument types\nArgument types given: RngIntElt"],
+    ["Gcd([1, 2], 3);", "'Gcd'", "Bad argument types\nArgument types given: SeqEnum[RngIntElt], RngIntElt"],
+    ["Lcm([RngIntElt]);", "'Lcm'", "Bad argument types\nArgument types given: SeqEnum[Cat]"],
+    // (of nothing, no Gcd or Lcm: Magma's error, never 0 or 1)
+    ["Gcd([]);", "'Gcd'", "Illegal null set/sequence"],
+    ["Gcd({});", "'Gcd'", "Illegal null set/sequence"],
+    ["Lcm([]);", "'Lcm'", "Illegal null set/sequence"],
+    ["Lcm({});", "'Lcm'", "Illegal null set/sequence"],
+
     ["AssignNames(~R, {\"t\"});", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SetEnum[MonStgElt]"],
     ["names := [\"t\"]; AssignNames(R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt] ~"],
     ["AssignNames(~R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt] ~"],
@@ -1176,6 +1193,29 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
   assert.match(r.stdout, /\n150\n1\nend\n$/);
   assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
+test("Gcd and Lcm of an empty collection: of the integers 0 and 1, of nothing Magma's error", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (checked against Magma 2.18: a range, a declared universe and a
+  // sequence emptied of its integers keep the integers; [] and {} have none)
+  // (made empty otherwise, by Setseq, Sort, join, meet or diff, the
+  // integers' too: CORR-A1A-1)
+  const src = "Gcd([1..0]); Lcm([1..0]); Gcd([Integers() | ]); Lcm([Integers() | ]); Gcd({Integers() | });\n" +
+    "S := [1]; Exclude(~S, 1); Gcd(S); Lcm(S);\n" +
+    "Gcd(Setseq({Integers() | })); Lcm(Seqset([Integers() | ])); Gcd(Sort([Integers() | ])); Lcm({Integers() | } join {Integers() | });\n" +
+    "Gcd({Integers() | } meet {Integers() | }); Lcm({1} diff {1});\n" +
+    "Gcd([]);\nLcm({});\nGcd([ x : x in [1..5] | x gt 9 ]);\nLcm({ x : x in [1..5] | x gt 9 });\n" +
+    "Gcd([Rationals() | ]);\nLcm([GF(5) | ]);\nP<t> := PolynomialRing(Integers()); Gcd([P | ]);\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  assert.match(out, /^0\n1\n0\n1\n0\n0\n1\n0\n1\n0\n1\n0\n1\n/);
+  assert.equal(out.split("Runtime error in 'Gcd': Illegal null set/sequence").length - 1, 2, out);
+  assert.equal(out.split("Runtime error in 'Lcm': Illegal null set/sequence").length - 1, 2, out);
+  assert.ok(out.includes("Runtime error in 'Gcd': GCD not defined for field"), out);
+  assert.ok(out.includes("Runtime error in 'Lcm': LCM not defined for field"), out);
+  assert.ok(out.replace(/\s+/g, " ").includes("Gcd of an empty collection of polynomials is not supported yet"), out);
+  assert.match(out, /\nend\n$/);
 });
 
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
