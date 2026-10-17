@@ -37,7 +37,30 @@ test("posixpath_cases.py: CPython's output; a file name that is not UTF-8 refuse
   }
 });
 
-test("os.path's file system functions of a file descriptor: refused, not read as a path", () => {
-  const out = run(process.execPath, [__dirname + "/../src/cli.js", "-c", "import os.path\nfor f in ('exists', 'isfile', 'isdir'):\n    try: getattr(os.path, f)(1)\n    except NotImplementedError as e: print(f, e)"], {});
-  assert.deepEqual(out.filter(Boolean), ["exists", "isfile", "isdir"].map((f) => `${f} os.path functions of a file descriptor are not supported in Sagebrush`));
+test("os.path's file system functions of a file descriptor (an int, an int subclass, __index__, a bool): refused, not read as a path; realpath(strict=True) refused", () => {
+  const code = [
+    "import os.path",
+    "class IntPath(int):",
+    "    def __fspath__(self): return '/dev/null'",
+    "class IndexPath:",
+    "    def __index__(self): return 3",
+    "    def __fspath__(self): return '/dev/null'",
+    "for f in ('exists', 'isfile', 'isdir'):",
+    "    for v in (1, IntPath(3), IndexPath(), True):",
+    "        try: print(f, getattr(os.path, f)(v))",
+    "        except NotImplementedError as e: print(f, e)",
+    "for f in ('lexists', 'islink'):",
+    "    print(f, getattr(os.path, f)(IntPath(3)), getattr(os.path, f)(IndexPath()))",
+    "try: os.path.realpath('/nowhere/a', strict=True)",
+    "except NotImplementedError as e: print('realpath', e)",
+  ].join("\n");
+  const out = run(process.execPath, [__dirname + "/../src/cli.js", "-c", code], {});
+  const refused = "os.path functions of a file descriptor are not supported in Sagebrush";
+  assert.deepEqual(out.filter(Boolean), [
+    ...["exists", "isfile", "isdir"].flatMap((f) => [1, 2, 3, 4].map(() => `${f} ${refused}`)),
+    // (lstat takes no descriptor: their __fspath__, /dev/null)
+    "lexists True True",
+    "islink False False",
+    "realpath os.path.realpath(strict=...) is not supported in Sagebrush",
+  ]);
 });

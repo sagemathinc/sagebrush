@@ -59,13 +59,11 @@ def _check_arg_types(funcname, *args):
 
 # Sagebrush: posix._path_normpath and posix._path_splitroot_ex, which
 # CPython's normpath and splitroot are, convert their argument as C path
-# arguments are converted, with their own message
+# arguments are converted (_fs.path: a str or bytes subclass's payload as it
+# is, no method of it called; __fspath__ bound as a special method), with
+# their own message
 def _cpath(fname, p):
-    if isinstance(p, (str, bytes)):
-        return p
-    if hasattr(type(p), "__fspath__"):
-        return os.fspath(p)
-    raise TypeError(f"{fname}: path should be string, bytes or os.PathLike, not {type(p).__name__}")
+    return _fs.path(p, fname, False, False)
 
 
 def _get_sep(path):
@@ -319,6 +317,9 @@ def abspath(path):
 def realpath(filename, *, strict=False):
     """Return the canonical path of the specified filename, eliminating any
 symbolic links encountered in the path."""
+    if strict:
+        # (strict's checks of each component are not made here: astra's CORR-9C4-5)
+        raise NotImplementedError("os.path.realpath(strict=...) is not supported in Sagebrush")
     return abspath(filename)
 
 
@@ -427,26 +428,21 @@ def commonprefix(m):
 # not there). Sagebrush: through _fs, with the path as str.
 
 def _ask(f, path, call):
-    # (call: "stat", which also takes a file descriptor, or "lstat"; their
-    # TypeError for what is no path)
-    if not isinstance(path, (str, bytes)):
-        if hasattr(type(path), "__fspath__"):
-            path = os.fspath(path)
-        elif call == "stat" and isinstance(path, int):
-            raise NotImplementedError("os.path functions of a file descriptor are not supported in Sagebrush")
-        elif call == "stat":
-            raise TypeError("stat: path should be string, bytes, os.PathLike or integer, not %s" % type(path).__name__)
-        else:
-            raise TypeError("lstat: path should be string, bytes or os.PathLike, not %s" % type(path).__name__)
-    path = _fsdecode(path)
-    if "\0" in path:
+    # (call: "stat", which takes a file descriptor too, or "lstat". The path
+    # converted as theirs (_fs.path), inside genericpath's boundary: OSError
+    # and ValueError mean False, as from stat itself)
+    try:
+        path = _fs.path(path, call, call == "stat", True)
+    except (OSError, ValueError):
         return False
+    if isinstance(path, int):
+        if path < 0:
+            # (stat of a negative descriptor: EBADF, an OSError)
+            return False
+        raise NotImplementedError("os.path functions of a file descriptor are not supported in Sagebrush")
+    path = _fsdecode(path)
     for c in path:
-        if "\ud800" <= c <= "\udfff":
-            if not "\udc80" <= c <= "\udcff":
-                # (a surrogate surrogateescape cannot encode: CPython's stat
-                # fails with UnicodeEncodeError, a ValueError, so False)
-                return False
+        if "\udc80" <= c <= "\udcff":
             # (a byte of a name that is not UTF-8: _fs takes paths as text)
             raise NotImplementedError("os.path functions of a file name that is not UTF-8 are not supported in Sagebrush")
     return f(path)
