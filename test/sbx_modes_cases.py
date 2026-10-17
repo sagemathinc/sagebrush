@@ -90,7 +90,7 @@ def expect(e, mode):
         return e
 
 
-def roundtrip(label, value, source):
+def roundtrip(label, value, source, override=None):
     try:
         e = _sbx.encode(value, source)
     except _sbx.SbxError as err:
@@ -99,7 +99,7 @@ def roundtrip(label, value, source):
     text = _sbx.dumps(value, source)
     report(json.loads(text)["value"] == e, label, "dumps as it encodes")
     for target in _sbx.MODES:
-        want = expect(e, target)
+        want = (override or {}).get(target, expect(e, target))
         try:
             got = _sbx.encode(_sbx.loads(text, target), target)
         except _sbx.SbxError as err:
@@ -124,7 +124,10 @@ for label, v in [
     ("a complex array", np.array([[1 + 2j, 3j]])), ("a bool array", np.array([True, False])), ("a 3-d array", np.arange(24.0).reshape((2, 3, 4))),
     ("a 1-element array", np.array([2.5])), ("an int64 1x1 array", np.array([[7]], dtype=np.int64)),
 ]:
-    roundtrip("Python " + label, v, "python")
+    # (a list of kinds Magma can't put in one sequence: refused there, CORR-695-3)
+    roundtrip("Python " + label, v, "python", {"magma": Exception("universe")} if label == "a list" else None)
+roundtrip("Python a list of integers and rationals", [1, Fraction(1, 3), [2]], "python", {"magma": Exception("universe")})
+roundtrip("Python a list of an integer and a rational", [1, Fraction(1, 3)], "python", {"magma": {"t": "list", "v": [{"t": "rat", "v": "1"}, {"t": "rat", "v": "1/3"}]}})
 
 # ---- Sage's
 x, y = S.PolynomialRing(S.QQ, "x,y").gens()
@@ -151,10 +154,11 @@ w = R.gen()
 for label, v in [
     ("an integer", 10 ** 20), ("a rational", S.QQ(5) / 3), ("a real a double holds", M.MReal.of(1.5)),
     ("a matrix over the integers", M.Matrix(M.Integers(), [[1, 2], [3, 4]])), ("a matrix over the rationals", M.Matrix(M.Rationals(), [[S.QQ(1) / 3, 1]])),
-    ("a sequence", M.MSeq([1, 2, 3])), ("a tuple", M.MTuple((1, "a"))), ("a polynomial", w ** 2 - 2),
+    ("a sequence", M.MSeq([1, 2, 3])), ("a polynomial", w ** 2 - 2),
     ("a matrix of reals", M.Matrix([[M.MReal.of(1.5), M.MReal.of(2)], [M.MReal.of(3), M.MReal.of(4)]])),
 ]:
     roundtrip("Magma " + label, v, "magma")
+roundtrip("Magma a tuple", M.MTuple((1, "a")), "magma", {"magma": Exception("universe")})
 refused("Magma a real of RealField(30) a double can't hold", M.MReal.of(S.QQ(1) / 3, 30), "magma", "RealField(15)")
 refused("Magma a polynomial in an unnamed variable", M.PolynomialRing(M.Rationals()).gen(), "magma", "name the ring's variables")
 
@@ -166,7 +170,7 @@ for label, v in [
     ("a char row", L.Char("hello")), ("a string", L.Str("hi")), ("a cell row", L.Cell([1.0, L.Char("a")], (1, 2))),
     ("a struct", L._struct1({"a": 1.0, "b": L.Char("x")})), ("a string array", L.StrArr(["a", "b"], (1, 2))),
 ]:
-    roundtrip("MATLAB " + label, v, "matlab")
+    roundtrip("MATLAB " + label, v, "matlab", {"magma": Exception("universe")} if label == "a cell row" else None)
 e = _sbx.encode(A, "matlab")
 report(e["shape"] == [2, 3] and e["v"] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "MATLAB [1 2 3; 4 5 6] is sent as MATLAB shows it, 2 by 3, row-major:", json.dumps(e))
 back = _sbx.decode({"t": "array", "dtype": "float64", "shape": [2, 3], "v": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}, "matlab")
@@ -190,6 +194,35 @@ for label, data, target, words in [
         report(False, label, "was read")
     except _sbx.SbxError as err:
         report(words in str(err), label, "refused:", err)
+# ---- Magma's sequences: one universe, exact coercions, or refused as Magma refuses (astra's CORR-695-3)
+def seq(items):
+    return _sbx.decode(_sbx.encode(items), "magma")
+for label, items in [("an integer and a string", [1, "a"]), ("a bool and an integer", [True, 1]), ("an integer and a double", [1, 2.5]), ("a rational and a double", [Fraction(1, 2), 0.5]), ("sequences of an integer and of a string", [[1], ["a"]])]:
+    try:
+        seq(items)
+        report(False, "Magma sequence of", label, "was made")
+    except _sbx.SbxError as err:
+        report("valid universe" in str(err), "Magma sequence of", label, "refused:", err)
+a = seq([1, Fraction(1, 3)])
+report([str(M.Type(z)) for z in a] == ["FldRatElt", "FldRatElt"], "[1, 1/3] in Magma: the integer coerced into Q, exactly:", [str(M.Type(z)) for z in a], list(a))
+a = seq([[1, 2], [Fraction(1, 3)], []])
+report([str(M.Type(z)) for z in a[0]] == ["FldRatElt", "FldRatElt"] and len(a[2]) == 0, "[[1, 2], [1/3], []] in Magma: the inner sequences in one universe, Q")
+a = seq([2.5, 0.125])
+report(all(isinstance(z, M.MReal) for z in a), "a sequence of doubles in Magma: reals")
+
+# ---- empty matrices: their shape and parent kept, or refused (astra's CORR-695-2)
+for data in [{"t": "matrix", "ring": "QQ", "shape": [0, 3], "v": []}, {"t": "matrix", "ring": "ZZ", "shape": [3, 0], "v": []}, {"t": "array", "dtype": "int64", "shape": [0, 3], "v": []}, {"t": "array", "dtype": "float64", "shape": [0, 0], "v": []}, {"t": "array", "dtype": "float64", "shape": [2, 0], "v": []}]:
+    try:
+        _sbx.decode(data, "magma")
+        report(False, "an empty %s %s into Magma was made" % (data["t"], data["shape"]))
+    except _sbx.SbxError as err:
+        report("empty matrix" in str(err), "an empty %s %s into Magma: refused:" % (data["t"], data["shape"]), err)
+    if data["t"] == "matrix" or data["dtype"] != "float64":
+        got = _sbx.encode(_sbx.decode(data, "sage"), "sage")
+        report(got["shape"] == data["shape"], "the same into Sage: its shape kept,", got["shape"])
+    got = _sbx.encode(_sbx.decode(data, "matlab", as_="double"), "matlab")
+    report(got.get("shape") == data["shape"], "the same into MATLAB (as doubles): its shape kept,", got.get("shape"))
+
 v = _sbx.decode({"t": "rat", "v": "1/3"}, "matlab", as_="double")
 report(type(v) is float and v == 1 / 3, "a rational into MATLAB as a double:", repr(v))
 v = _sbx.decode({"t": "matrix", "ring": "QQ", "shape": [1, 2], "v": ["1/2", "3"]}, "matlab", as_="double")

@@ -57,6 +57,17 @@ for text, names, ring in [("x^2 - 3/4*y", ["x", "y"], "QQ"), ("-x + 1", ["x"], "
         print("ok  ", "poly", repr(text), "->", str(p), sorted((str(c), e) for c, e in p.terms()), "->", json.dumps(_sbx.encode(p), sort_keys=True))
     except _sbx.SbxError as err:
         print("ok  ", "poly", repr(text), "refused:", err)
+# (a sign or a * with nothing after it: refused, never read as 1 (astra's CORR-695-1))
+for text in ["x+", "+", "-", "x-", "x*", "3/4*", "x^2 + ", "x * ", "- x + "]:
+    try:
+        p = _sbx.decode({"t": "poly", "ring": "QQ", "vars": ["x", "y"], "v": text})
+        print("FAIL", "poly", repr(text), "read as", str(p))
+    except _sbx.SbxError as err:
+        print("ok  ", "poly", repr(text), "refused:", err)
+for text, want in [("5", "5"), ("-x", "-x"), ("x*x*y", "x^2*y"), ("3/4*x", "3/4*x"), ("-3/4", "-3/4"), ("+x - y", "x - y"), ("x*y*x - 2*y*x*x", "-x^2*y")]:
+    p = _sbx.decode({"t": "poly", "ring": "QQ", "vars": ["x", "y"], "v": text})
+    got = _sbx.encode(p)["v"]
+    print("ok  " if got == want else "FAIL", "poly", repr(text), "->", got)
 for text in ["x^", "x**2", "__import__('os')", "x + + y", "3/0*x", "1/2*x", "x y", "z", "x^2000000", "2(x)", ""]:
     try:
         _sbx.decode({"t": "poly", "ring": "ZZ", "vars": ["x", "y"], "v": text})

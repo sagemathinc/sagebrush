@@ -602,6 +602,8 @@ def parse_poly(text, names, ring="QQ"):
         coef = _Fraction(1)
         exps = [0] * len(names)
         seen_factor = False
+        # (a term is one factor or more, joined by *: a sign or a * with no factor after it is refused, never read as 1, CORR-695-1)
+        need = True
         while True:
             tok = peek()
             if tok is None:
@@ -641,11 +643,15 @@ def parse_poly(text, names, ring="QQ"):
             else:
                 raise bad("has %r where a number or a variable belongs" % op)
             seen_factor = seen_factor or bool(name)
+            need = False
             tok = peek()
             if tok is not None and tok[2] == "*":
                 take()
+                need = True
                 continue
             break
+        if need:
+            raise bad("has a + - or * with no number or variable after it")
         if ring == "ZZ" and coef.denominator != 1:
             raise bad("has a rational coefficient over ZZ")
         key = tuple(exps)
@@ -825,24 +831,29 @@ def _dec_magma(x):
     if t in ("bool", "str"):
         return x["v"]
     if t == "list":
-        return M.MSeq([_dec_magma(y) for y in x["v"]])
+        return _magma_seq([_dec_magma(y) for y in x["v"]])
     if t == "dict":
         raise _err("a dict can't be imported in Magma mode yet: import its keys and values as two sequences")
     # (an array's or a matrix's shape checked by _check before this: at most
     # LIMITS["elements"] entries, and as many as it says, so each Matrix
     # made here is bounded)
+    # (an empty matrix keeps its shape and parent in Magma, which Magma
+    # mode's Matrix doesn't yet: refused, never made 0 x 0 or over the
+    # integers, CORR-695-2)
+    if t in ("array", "matrix") and len(x["shape"]) == 2 and 0 in x["shape"]:
+        raise _err("an empty matrix (%d x %d) can't be imported in Magma mode yet" % tuple(x["shape"]))
     if t == "array":
         dt, shape = x["dtype"], x["shape"]
         if len(shape) not in (1, 2) or dt in ("complex128", "bool"):
             raise _err("an array of %s%s can't be imported in Magma mode yet" % (dt, "" if len(shape) in (1, 2) else " with %d dimensions" % len(shape)))
         flat = [int(e) for e in x["v"]] if dt == "int64" else [M.MReal.of(_float(e), _MAGMA_DOUBLE_DIGITS) if _math.isfinite(_float(e)) else _bad_real(e) for e in x["v"]]
         if len(shape) == 1:
-            return M.MSeq(flat)
+            return _magma_seq(flat)
         return M.Matrix(M.Integers(), _rows(shape, flat)) if dt == "int64" else M.Matrix(_rows(shape, flat))
     if t == "matrix":
         flat = [int(e) for e in x["v"]] if x["ring"] == "ZZ" else [S.QQ(_Fraction(e)) for e in x["v"]]
         if len(x["shape"]) == 1:
-            return M.MSeq(flat)
+            return _magma_seq(flat)
         return M.Matrix(M.Integers() if x["ring"] == "ZZ" else M.Rationals(), _rows(x["shape"], flat))
     if t == "poly":
         if len(x["vars"]) != 1:
@@ -855,6 +866,76 @@ def _dec_magma(x):
             p = p + (int(c) if c.denominator == 1 else S.QQ(c)) * g ** e
         return p
     raise _err("no tag %r" % t)
+
+
+def _magma_universe(v):
+    """the universe a value of Magma's goes in, as _magma_seq unifies them:
+    "Z", "Q", "R", "B", "S", ("seq", u) (u None: an empty sequence), or
+    another type's name with its parent's"""
+    import _magma as M
+    if isinstance(v, bool):
+        return "B"
+    if isinstance(v, int):
+        return "Z"
+    if isinstance(v, _Fraction):
+        return "Q"
+    if isinstance(v, M.MReal):
+        return ("R", v.prec)
+    if isinstance(v, str):
+        return "S"
+    if isinstance(v, M.MSeq):
+        return ("seq", _unify([_magma_universe(y) for y in v]))
+    parent = v.parent() if hasattr(v, "parent") else None
+    return (str(M.Type(v)), str(parent))
+
+
+class _NoUniverse(Exception):
+    pass
+
+
+def _unify(us):
+    """the common universe of these, or _NoUniverse: equal ones; Z with Q is
+    Q (an integer coerced exactly); sequences by their elements'; an empty
+    sequence goes with any.  Never exact into real: that would round"""
+    out = None
+    for u in us:
+        out = u if out is None else _unify2(out, u)
+    return out
+
+
+def _unify2(a, b):
+    if a == b:
+        return a
+    if {a, b} == {"Z", "Q"}:
+        return "Q"
+    if isinstance(a, tuple) and isinstance(b, tuple) and a[0] == "seq" and b[0] == "seq":
+        if a[1] is None:
+            return b
+        if b[1] is None:
+            return a
+        return ("seq", _unify2(a[1], b[1]))
+    raise _NoUniverse()
+
+
+def _coerce(v, u):
+    """v in universe u, exactly: an integer into Q, a sequence's elements into its universe"""
+    import _magma as M
+    if u == "Q" and isinstance(v, int) and not isinstance(v, bool):
+        return _sage().QQ(v)
+    if isinstance(u, tuple) and u[0] == "seq" and isinstance(v, M.MSeq) and u[1] is not None:
+        return M.MSeq([_coerce(y, u[1]) for y in v])
+    return v
+
+
+def _magma_seq(items):
+    """a sequence, as Magma makes one: its elements in one universe, coerced
+    exactly into it, or refused as Magma refuses them (CORR-695-3)"""
+    import _magma as M
+    try:
+        u = _unify([_magma_universe(y) for y in items])
+    except _NoUniverse:
+        raise _err("Could not find a valid universe for the sequence: its elements are of kinds Magma can't put in one sequence (or only by rounding exact values into reals)")
+    return M.MSeq([_coerce(y, u) for y in items])
 
 
 def _bad_real(e):
