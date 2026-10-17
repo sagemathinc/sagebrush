@@ -17,12 +17,8 @@ for (const name of ["new_init_cases.py", "traceback_exc_cases.py", "traceback_la
     for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${name} line ${i + 1}`);
   });
 
-// format_exc's frame limit isn't implemented: refused, not ignored
-test("traceback.format_exc(limit=...) is refused", () => {
-  const code = "import traceback\ntry:\n    1/0\nexcept ZeroDivisionError:\n    try:\n        traceback.format_exc(1)\n    except NotImplementedError as e:\n        print('refused', e)\n";
-  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
-  assert.equal(out.trim(), "refused traceback.format_exc(limit=...) is not supported here");
-});
+// (format_exc's limit=, print_exc and the other keyword arguments:
+// test/stdlib-string-traceback.test.ts)
 
 // Deeper than the JS frames kept, which frame caught an exception is
 // unknown: format_exc refuses, never printing its callers as its traceback

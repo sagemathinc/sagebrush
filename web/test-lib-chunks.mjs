@@ -44,5 +44,12 @@ ok(manifest.packages.files["scipy-io/py/scipy/io/matlab.py"] === "pkg-scipy-io",
 // (without packages: the library's chunks and modes as before)
 const plain = libChunks(lib, { py: recordings.py, matlab: rec({ "py|core": mod("core.py"), "py|_matlab": mod("_matlab.py") }) }, "b");
 ok(JSON.stringify(plain.manifest.modes.matlab) === JSON.stringify(["core", "matlab"]) && JSON.stringify(manifest.modes.matlab) === JSON.stringify(["core", "matlab", "pkg-scipy-io"]), "without packages, the library's start as before; with them, the same plus the package's: " + JSON.stringify([plain.manifest.modes.matlab, manifest.modes.matlab]));
+// (a private module and its public twin share a group; other names that
+// would share one are an error)
+const twins = libChunks({ "string/__init__.py": "import _string\n", "_string.py": "X = 1\n", "core.py": "" }, { py: rec({}) }, "b");
+ok(twins.manifest.files["_string.py"] === "mod-string" && twins.manifest.files["string/__init__.py"] === "mod-string", "_string and string: one group, mod-string");
+let clash = "";
+try { libChunks({ "a_b.py": "", "a-b.py": "" }, { py: rec({}) }, "b"); } catch (e) { clash = String(e.message); }
+ok(/would both be mod-a-b/.test(clash), "two other names that would share a group are refused: " + clash);
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);
