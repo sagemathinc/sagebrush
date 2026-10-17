@@ -91,3 +91,15 @@ for name, b in [('C', c64), ('T', c64.T), ('F', np.asfortranarray(c64))]:
     show('complex64 ' + name + ' axis 0', lambda: np.prod(b, axis=0).tolist())
     show('complex64 ' + name + ' axis 1', lambda: np.prod(b, axis=1).tolist())
 show('complex64 C whole', lambda: np.prod(c64).item())
+# (the coordinator's CI after the 54ee33f4 merge: an int64 or uint64 scalar
+# holds its Python int exactly; minimum, maximum and clip with a Python int
+# a double does not hold compare exactly, as MATLAB's int64(uint64(2^53 - 1)))
+show('scalar exact', lambda: (np.int64(9007199254740993), np.uint64(18446744073709551615), np.int64(-2**63), round(np.int64(9007199254740993), -1)))
+for g in (lambda: np.int64(2**63), lambda: np.uint64(-1), lambda: np.uint64(2**64), lambda: np.int64(-2**63 - 1)):
+    show('scalar out of range', g)
+ua = np.array([0, 5, 2**53 - 1], np.uint64)
+show('clip uint64', lambda: np.clip(ua, 0, 2**63 - 1))
+show('minimum uint64', lambda: np.minimum(ua, 2**63 - 1))
+show('clip int64', lambda: np.clip(np.array([-5, 5], np.int64), -2**63, 2**63 - 1))
+show('minimum too big', lambda: np.minimum(ua, 2**64))
+show('clip astype', lambda: np.clip(ua, 0, 2**63 - 1).astype(np.int64))

@@ -53,6 +53,7 @@ test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never r
     "np.array([2**53], np.uint64) + np.array([1], np.uint64)", "(lambda a: a.__setitem__(0, 2**53 + 1))(np.zeros(3, dtype=np.int64))",
     "(lambda a: a.__setitem__(slice(None), 2**53 + 1))(np.zeros(3, dtype=np.int64))", "np.full(2, 2**53 + 1)", "np.full(2, 2**53 + 1, dtype=np.int64)",
     "np.arange(2**53, 2**53 + 4)", "np.array([2**53]) == np.int64(2**53 + 1)", "np.array([0]) + np.int64(2**53 + 1)",
+    "np.array([np.int64(2**53 + 1)])", "np.maximum(np.array([0], np.uint64), 2**63 - 1)", "np.int64(2**53 + 1) + 1",
     "-np.array([1], np.uint64)", "np.array([type('B', (), {'__int__': lambda s: 2**53 + 1, '__index__': lambda s: 7})()], dtype=np.int64)", "np.array([type('I', (), {'__int__': lambda s: 2**53 + 1, '__float__': lambda s: 2.0**53})()], dtype=np.int64)",
   ];
   const src = "import numpy as np\n" + cases.map((c) => `try:\n    print(repr(${c}))\nexcept NotImplementedError as e:\n    print(type(e).__name__, e)`).join("\n");
