@@ -785,15 +785,25 @@ def _matrix_op(name, a, b, cls, keep):
         if p == _math.floor(p) and p >= 0:
             if a.m != a.n:
                 raise _err("Incorrect dimensions for raising a matrix to a power. Check that the matrix is square and the power is a scalar. To operate on each element of the matrix individually, use POWER (.^) for elementwise power.")
-            k = np.arange(a.n, dtype=_I)
-            R = make(a.n, a.n, k, k, np.ones(a.n))
+            # (by squaring from A itself, so that A^1 is A; each product is refused for Inf or
+            # NaN as mtimes's is, so an Inf in A or from an overflowing square stops it)
+            R = None
             A = a
             p = int(p)
             while p:
                 if p & 1:
-                    R = _matmul(R, A)
-                A = _matmul(A, A)
+                    if R is None:
+                        R = A
+                    else:
+                        _m._matprod_finite(R, A)
+                        R = _matmul(R, A)
                 p >>= 1
+                if p:
+                    _m._matprod_finite(A, A)
+                    A = _matmul(A, A)
+            if R is None:
+                k = np.arange(a.n, dtype=_I)
+                R = make(a.n, a.n, k, k, np.ones(a.n))
             return _cast(R, cls)
     r = getattr(_m, name)(full(a), full(b))
     return _finish(from_full(r) if keep and _m._isnumlike(r) else r, cls)
