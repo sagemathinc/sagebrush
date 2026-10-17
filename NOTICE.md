@@ -37,6 +37,12 @@ Copyright (c) 2001 Python Software Foundation. See
   `collections.abc`, as CPython's does, and its `ChainMap`, `UserDict`,
   `UserList` and `UserString` are CPython 3.14's (`UserString.maketrans` a
   `staticmethod`).
+- `lib/importlib/__init__.py`: CPython 3.14's `Lib/importlib/__init__.py`'s
+  `import_module`, `invalidate_caches` and `reload`'s argument checks, with
+  `_bootstrap._sanity_check` and `_bootstrap._resolve_name`, ported over
+  Sagebrush's own import system; `lib/importlib/metadata/__init__.py`:
+  CPython 3.14's `PackageNotFoundError`, `version()` and name normalization,
+  over Sagebrush's package registry.
 - `lib/_string.py`: CPython 3.14's `_string` module, a C module there
   (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
   `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
