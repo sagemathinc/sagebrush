@@ -42,3 +42,11 @@ for p in [30,52]:
         show3(str((p,name,'1^inf')),lambda:R(1)^T('inf'))
         show3(str((p,name,'1^nan')),lambda:R(1)^T('nan'))
     show3(str((p,'RDF(-inf)^2')),lambda:RDF('-inf')^R(2))
+# a finite power past the doubles against a Python float raises
+# OverflowError, as Sage (not an infinity)
+for p in (54, 100):
+    R = RealField(p)
+    for nm, f in [("R(1e200)^3.0", lambda: R('1e200') ^ float(3)), ("1e200^R(3)", lambda: float('1e200') ^ R(3)),
+                  ("R(-1e200)^3.0", lambda: R('-1e200') ^ float(3)), ("-1e200^R(3)", lambda: float('-1e200') ^ R(3)),
+                  ("R(1e200)^-inf", lambda: R('1e200') ^ float('-inf')), ("R(-inf)^3.0", lambda: R('-inf') ^ float(3))]:
+        show("%d %s" % (p, nm), f)
