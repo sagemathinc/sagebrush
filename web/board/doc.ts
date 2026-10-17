@@ -426,7 +426,8 @@ export function refLabel(ref: string): string {
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, mode: d.mode, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  // (the seed too: a page's spring layout is the board's, every page alike, CORR-874-1)
+  return { title: d.title, mode: d.mode, seed: d.seed, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */
