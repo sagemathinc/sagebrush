@@ -1,4 +1,4 @@
-# Copied unchanged from CPython 3.14 Lib/pickle.py (PSF License; see cdn/LICENSE-CPython.txt).
+# CPython 3.14's Lib/pickle.py (PSF License; see cdn/LICENSE-CPython.txt), changed: _save_module_name, the exceptions from _pickle (NOTICE.md).
 """Create portable serialized representations of Python objects.
 
 See module copyreg for a mechanism for registering custom picklers.
@@ -70,27 +70,8 @@ HIGHEST_PROTOCOL = 5
 # includes it.
 DEFAULT_PROTOCOL = 5
 
-class PickleError(Exception):
-    """A common base class for the other pickling exceptions."""
-    pass
-
-class PicklingError(PickleError):
-    """This exception is raised when an unpicklable object is passed to the
-    dump() method.
-
-    """
-    pass
-
-class UnpicklingError(PickleError):
-    """This exception is raised when there is a problem unpickling an object,
-    such as a security violation.
-
-    Note that other exceptions may also be raised during unpickling, including
-    (but not necessarily limited to) AttributeError, EOFError, ImportError,
-    and IndexError.
-
-    """
-    pass
+# (Sagebrush: _pickle's, as CPython's, whose accelerator provides them)
+from _pickle import PickleError, PicklingError, UnpicklingError
 
 # An instance of _Stop is raised by Unpickler.load_stop() in response to
 # the STOP opcode, passing the object that is the result of unpickling.
@@ -1180,7 +1161,7 @@ class _Pickler:
                 return
 
         if self.proto >= 4:
-            self.save(module_name)
+            self._save_module_name(module_name, obj)
             self.save(name)
             write(STACK_GLOBAL)
         elif '.' in name:
@@ -1206,6 +1187,28 @@ class _Pickler:
             self._save_toplevel_by_name(module_name, name)
 
         self.memoize(obj)
+
+    def _save_module_name(self, module_name, obj):
+        # (Sagebrush: a str has no identity of its own to memoize by, so the
+        # module name a STACK_GLOBAL saves is memoized as CPython's objects
+        # would be: one str per module, but in builtins its functions' and
+        # its types' are two, so a pickle of len then str names 'builtins'
+        # twice, as CPython's)
+        key = ("$module", module_name, module_name == "builtins" and isinstance(obj, type))
+        x = self.memo.get(key)
+        if x is not None:
+            self.write(self.get(x[0]))
+            return
+        encoded = module_name.encode('utf-8', 'surrogatepass')
+        n = len(encoded)
+        if n <= 0xff:
+            self.write(SHORT_BINUNICODE + pack("<B", n) + encoded)
+        else:
+            self.write(BINUNICODE + pack("<I", n) + encoded)
+        if not self.fast:
+            idx = len(self.memo)
+            self.write(self.put(idx))
+            self.memo[key] = idx, module_name
 
     def _save_toplevel_by_name(self, module_name, name):
         if self.proto >= 3:

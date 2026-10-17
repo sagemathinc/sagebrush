@@ -1199,6 +1199,13 @@ newBuiltinModule("math", (m) => {
 // own MRO and dicts, raw, with no descriptor, metaclass property or
 // __getattribute__ consulted (lib/io.py's special-method lookup).
 newBuiltinModule("_pyjs_types", (m) => {
+  // (a lib class standing for one of CPython's C types: its messages name
+  // it as that type's tp_name does, 'datetime.date', object.ts typeName)
+  m.c_name = builtin((tp: any, name: any) => {
+    if (typeof name !== "string" || !isType(tp)) raise(T.TypeError, "c_name(type, str)");
+    (tp as any).$tpName = name;
+    return null;
+  }, "c_name");
   // (found, value): (False, None) when no class in the MRO has it
   m.lookup = builtin((tp: any, name: any) => {
     if (typeof name !== "string" || !isType(tp)) raise(T.TypeError, "lookup(type, str)");
