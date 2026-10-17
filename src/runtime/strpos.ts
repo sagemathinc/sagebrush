@@ -73,8 +73,8 @@ function scan(s: string): Pos | null {
 // The probes a lookup makes, for the tests: each comparison here of two
 // strings of the same length (which can be full), failed or not, and each
 // cache lookup that finds the string, as one, whatever Map.get compares
-// inside it.
-export const probes = { n: 0 };
+// inside it; and lookups, the cache lookups made, found or not.
+export const probes = { n: 0, lookups: 0 };
 
 // An equal string that is another object becomes the one every reference
 // here holds (lastKey, bigKey, its index's s, its cache key): one body is
@@ -86,7 +86,10 @@ export const probes = { n: 0 };
 // (not again when it is lastKey); and one cache lookup, at most CACHE_UNITS
 // units (HARD-3F4-3, HARD-F67-1): V8's Map compares only the resident keys
 // with the same hash, each at most once and at most its length, and the
-// keys hold at most CACHE_UNITS units.  Then its asks compare pointers.
+// keys hold at most CACHE_UNITS units; and one pass hashing s, at most
+// len(s) per new object (V8 keeps a string's hash after the first), only
+// for a string that can be cached: a longer one is never looked up there
+// (HARD-ABC-1).  Then its asks compare pointers.
 let lastKey: string | null = null;
 let lastVal: Pos | null = null;
 let lastBig = false; // lastKey is bigKey
@@ -141,7 +144,8 @@ function longPairs(s: string, wasBig: boolean): Pos | null {
     lastBig = true;
     return bigVal;
   }
-  const hit = cache.get(s);
+  const big = s.length > CACHE_UNITS >> 3;
+  const hit = big ? undefined : (probes.lookups++, cache.get(s));
   if (hit !== undefined) {
     probes.n++;
     // (re-inserted under the new object, which the index then holds too)
@@ -153,7 +157,7 @@ function longPairs(s: string, wasBig: boolean): Pos | null {
     return hit.p;
   }
   const p = scan(s);
-  if (s.length > CACHE_UNITS >> 3) {
+  if (big) {
     bigKey = s;
     bigVal = p;
     lastBig = true;
