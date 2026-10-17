@@ -528,9 +528,14 @@ newBuiltinModule("_time", (m) => {
     u.setUTCHours(f[3], f[4], f[5], 0);
     return tuple([f[0], f[1] + 1, f[2], f[3], f[4], f[5], Math.round((u.getTime() - n * 1000) / 1000)]);
   });
+  // (time.sleep checks its argument as CPython's does; this, which anyone
+  // can import, still waits only a finite time a PyTime_t can hold)
   fn(m, "sleep", (s: any) => {
-    const ms = O.fv(s)! * 1000;
-    if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    const v = O.fv(s);
+    if (v === undefined) raise(T.TypeError, `'${typeName(s)}' object cannot be interpreted as an integer or float`);
+    if (!(Math.abs(v) <= 9223372036)) raise(T.OverflowError, "timestamp out of range for C PyTime_t");
+    if (v < 0) raise(T.ValueError, "sleep length must be non-negative");
+    if (v > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, v * 1000);
     return null;
   });
 });

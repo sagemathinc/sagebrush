@@ -735,16 +735,23 @@ def sleep(seconds, /):
 
 Delay execution for a given number of seconds.  The argument may be
 a floating-point number for subsecond precision."""
+    # (as CPython 3.14.8's _PyTime_FromSecondsObject: the seconds as int64
+    # nanoseconds, checked before anything waits, then the sign: daybreak2's
+    # HARD-DCB-1, a huge request never reaches the host's wait)
     if isinstance(seconds, float):
         if seconds != seconds:
             raise ValueError("Invalid value NaN (not a number)")
-        if seconds in (float("inf"), float("-inf")):
+        if not (-9.223372036854775808e18 <= seconds * 1e9 <= 9.223372036854775807e18):
             raise OverflowError("timestamp out of range for C PyTime_t")
     else:
         try:
             seconds = _index(seconds)
         except TypeError:
-            raise TypeError("'%s' object cannot be interpreted as an integer or float" % type(seconds).__name__) from None
+            t = type(seconds)
+            name = t.__qualname__ if t.__module__ == "builtins" else "%s.%s" % (t.__module__, t.__qualname__)
+            raise TypeError("'%s' object cannot be interpreted as an integer or float" % name) from None
+        if not -2**63 <= seconds * 10**9 <= 2**63 - 1:
+            raise OverflowError("timestamp out of range for C PyTime_t")
     if seconds < 0:
         raise ValueError("sleep length must be non-negative")
     _time.sleep(seconds)
