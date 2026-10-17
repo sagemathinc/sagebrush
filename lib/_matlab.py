@@ -11325,8 +11325,9 @@ def _pchip_slopes(x, y):
     return d
 
 
-def _spline_slopes(x, y):
-    """the not-a-knot cubic spline's first derivatives"""
+def _spline_slopes(x, y, dense=None):
+    """the not-a-knot cubic spline's first derivatives (dense(), when given, is called before a
+    dense solve, to admit its work)"""
     n = len(x)
     if n == 2:
         s = (y[1] - y[0]) / (x[1] - x[0])
@@ -11339,20 +11340,27 @@ def _spline_slopes(x, y):
         return [d0 - c * h0, d0 + c * h0, d1 + c * h1]
     h = [x[k + 1] - x[k] for k in range(n - 1)]
     delta = [(y[k + 1] - y[k]) / h[k] for k in range(n - 1)]
-    A = np.zeros((n, n))
-    r = np.zeros(n)
-    A[0, 0] = h[1]
-    A[0, 1] = h[0] + h[1]
+    sub, diag, sup, r = [0.0] * n, [0.0] * n, [0.0] * n, [0.0] * n
+    diag[0], sup[0] = h[1], h[0] + h[1]
     r[0] = ((h[0] + 2 * (h[0] + h[1])) * h[1] * delta[0] + h[0] ** 2 * delta[1]) / (h[0] + h[1])
     for k in range(1, n - 1):
-        A[k, k - 1] = h[k]
-        A[k, k] = 2 * (h[k - 1] + h[k])
-        A[k, k + 1] = h[k - 1]
+        sub[k], diag[k], sup[k] = h[k], 2 * (h[k - 1] + h[k]), h[k - 1]
         r[k] = 3 * (h[k] * delta[k - 1] + h[k - 1] * delta[k])
-    A[n - 1, n - 2] = h[-1] + h[-2]
-    A[n - 1, n - 1] = h[-2]
+    sub[n - 1], diag[n - 1] = h[-1] + h[-2], h[-2]
     r[n - 1] = (h[-1] ** 2 * delta[-2] + (2 * (h[-2] + h[-1]) + h[-1]) * h[-2] * delta[-1]) / (h[-2] + h[-1])
-    return list(np.linalg.solve(A, r))
+    # (the system is tridiagonal: solved in its band, with numpy.linalg.solve's values, unless
+    # an entry is not finite, whose dense results are kept)
+    if all(_math.isfinite(v) for band in (sub, diag, sup) for v in band):
+        import _matlab_numeric
+        return _matlab_numeric._tridiag_solve(sub, diag, sup, r)
+    if dense is not None:
+        dense()
+    A = np.zeros((n, n))
+    A[0, 0], A[0, 1] = diag[0], sup[0]
+    for k in range(1, n - 1):
+        A[k, k - 1], A[k, k], A[k, k + 1] = sub[k], diag[k], sup[k]
+    A[n - 1, n - 2], A[n - 1, n - 1] = sub[n - 1], diag[n - 1]
+    return list(np.linalg.solve(A, np.array(r)))
 
 
 def _hermite(x, y, d, q, k=None):
@@ -11373,9 +11381,12 @@ def _hermite(x, y, d, q, k=None):
 
 # (the most queries times columns interp1's cubic methods evaluate, one point at a time, and
 # the most samples times columns they set up slopes for; and the most n^3 times columns, for n
-# samples, of the spline's dense solves)
+# samples, of the spline's dense solves, made only when its system has an entry that is not
+# finite)
 _INTERP1_CUBIC_POINTS = 1_000_000
 _INTERP1_SPLINE_WORK = 1_000_000_000
+# (and the most samples times columns of a spline, whose setup and banded solve are slower)
+_INTERP1_SPLINE_SETUP = 200_000
 
 
 @_bs("interp1")
@@ -11451,16 +11462,20 @@ def interp1_n(*args):
                    "too much work." % (qs.size, V.shape[1], "s" * (V.shape[1] != 1)))
     cubic = method in ("pchip", "spline", "makima")
     if cubic:
-        # (the slopes are set up one sample at a time, a complex column as two real ones, and a
-        # spline's solve is dense: n^2 entries and about n^3 steps for n samples)
+        # (the slopes are set up one sample at a time, a complex column as two real ones; a
+        # spline's tridiagonal system is solved in its band, but densely when an entry is not
+        # finite: n^2 entries and about n^3 steps for n samples, admitted by dense() below)
         cols = V.shape[1] * (2 if V.dtype.kind == "c" else 1)
         if qs.size * V.shape[1] > _INTERP1_CUBIC_POINTS:
             raise _err("interp1's '%s' method at %d query points for %d column%s of values is not supported "
                        "in Sagebrush: too much work." % (method, qs.size, V.shape[1], "s" * (V.shape[1] != 1)))
-        if len(X) * cols > _INTERP1_CUBIC_POINTS:
+        if len(X) * cols > (_INTERP1_SPLINE_SETUP if method == "spline" else _INTERP1_CUBIC_POINTS):
             raise _err("interp1's '%s' method with %d sample points for %d column%s of values is not "
                        "supported in Sagebrush: too much work." % (method, len(X), V.shape[1], "s" * (V.shape[1] != 1)))
-        if method == "spline" and len(X) > 3 and len(X) ** 3 * cols > _INTERP1_SPLINE_WORK:
+
+    def dense():
+        # (a spline whose system has an entry that is not finite is solved densely: its work)
+        if len(X) ** 3 * cols > _INTERP1_SPLINE_WORK:
             raise _err("interp1's 'spline' method with %d sample points for %d column%s of values is not "
                        "supported in Sagebrush: its dense solve would be too much work." % (len(X), V.shape[1], "s" * (V.shape[1] != 1)))
     out = np.zeros((qs.size, V.shape[1]), dtype=V.dtype if V.dtype.kind == "c" else np.float64)
@@ -11496,11 +11511,11 @@ def interp1_n(*args):
             if cubic:
                 y = [col[t] for t in range(len(X))]
                 if V.dtype.kind == "c":
-                    dr = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.real for z in y])
-                    di = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [z.imag for z in y])
+                    dr = _pchip_slopes(X, [z.real for z in y]) if method == "pchip" else _spline_slopes(X, [z.real for z in y], dense)
+                    di = _pchip_slopes(X, [z.imag for z in y]) if method == "pchip" else _spline_slopes(X, [z.imag for z in y], dense)
                     d = [complex(a, b) for a, b in zip(dr, di)]
                 else:
-                    d = (_pchip_slopes if method == "pchip" else _spline_slopes)(X, [float(t) for t in y])
+                    d = _pchip_slopes(X, [float(t) for t in y]) if method == "pchip" else _spline_slopes(X, [float(t) for t in y], dense)
                 vals = np.zeros(qs.size, dtype=out.dtype)
                 for i in np.flatnonzero(live):
                     vals[i] = _hermite(X, y, d, float(qs[i]), int(k[i]))

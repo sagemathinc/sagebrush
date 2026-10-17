@@ -2472,8 +2472,8 @@ test("polyval, conv and interp1 in single: a double query distance stays double,
     "try, y = interp1([1 2], single(ones(2, 5000)), ones(1, 5000)); catch e, disp(e.message), end",
     "try, y = interp1([1 2], ones(2, 1000), ones(1, 1001), 'pchip'); catch e, disp(e.message), end",
     "try, y = interp1([1 2 3], [4 5 7], 1.5, 'makima'); catch e, disp(e.message), end",
-    "try, y = interp1(1:1001, 1:1001, 1.5, 'spline'); catch e, disp(e.message), end",
-    "try, y = interp1(1:1000, complex(1:1000, 1), 2.5, 'spline'); catch e, disp(e.message), end",
+    "try, y = interp1([1:1000 Inf], 1:1001, 1.5, 'spline'); catch e, disp(e.message), end",
+    "try, y = interp1([1:999 Inf], complex(1:1000, 1), 2.5, 'spline'); catch e, disp(e.message), end",
     "try, y = interp1(1:1000001, 1:1000001, 2.5, 'pchip'); catch e, disp(e.message), end",
     "disp(sprintf('%.6g', interp1(1:1000, (1:1000).^2, 2.5, 'spline')))",
     "y = interp1([1 2], ones(2, 4500), 1.5 * ones(1, 4500)); disp(mat2str(size(y))); disp(y(4500, 4500))",
@@ -2491,13 +2491,13 @@ test("polyval, conv and interp1 in single: a double query distance stays double,
     "6.25", "[4500 4500]", "1", "[1 2 3 3]", "[9 4.5 9 9]"]);
 });
 
-test("spline and pchip refuse, before setting up slopes, more data sites times rows than they can set up and splines whose dense solve would be too much work", () => {
+test("spline and pchip refuse, before setting up slopes, more data sites times rows than they can set up, and splines whose dense solve (with a site that is not finite) would be too much work", () => {
   const { execFileSync } = require("node:child_process");
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
-    "try, y = spline(1:1001, 1:1001, 1.5); catch e, disp(e.message), end",
-    "try, y = spline(1:1000, complex(1:1000, 1), 1.5); catch e, disp(e.message), end",
-    "try, y = spline(1:1001, [0 1:1001 0], 1.5); catch e, disp(e.message), end",
-    "try, y = spline(1:800, [1:800; 1:800], 1.5); catch e, disp(e.message), end",
+    "try, y = spline([1:1000 Inf], 1:1001, 1.5); catch e, disp(e.message), end",
+    "try, y = spline([1:999 Inf], complex(1:1000, 1), 1.5); catch e, disp(e.message), end",
+    "try, y = spline([1:1000 Inf], [0 1:1001 0], 1.5); catch e, disp(e.message), end",
+    "try, y = spline([1:799 Inf], [1:800; 1:800], 1.5); catch e, disp(e.message), end",
     "try, y = pchip(1:1000001, 1:1000001, 2.5); catch e, disp(e.message), end",
     "try, y = pchip(1:500001, [1:500001; 1:500001], 2.5); catch e, disp(e.message), end",
     "try, y = spline(1:3, 1:4, 2); catch e, disp(e.message), end",
@@ -2509,4 +2509,44 @@ test("spline and pchip refuse, before setting up slopes, more data sites times r
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [msg("spline", 1001, "1 row", true), msg("spline", 1000, "1 row", true),
     msg("spline", 1001, "1 row", true), msg("spline", 800, "2 rows", true), msg("pchip", 1000001, "1 row", false), msg("pchip", 500001, "2 rows", false),
     "The number of sites, 3, is incompatible with the number of values, 4.", "6.25", "6.25", "2.5", "[2.5 7]"]);
+});
+
+test("spline and interp1's spline solve their tridiagonal system in its band, with numpy.linalg.solve's values: large splines are made, and a system with a site that is not finite is still solved densely", () => {
+  const { execFileSync } = require("node:child_process");
+  const path = require("node:path");
+  const cli = path.join(__dirname, "..", "src", "cli.js");
+  // (the banded solve against the dense one, value for value, on systems that pivot)
+  const exact = execFileSync(process.execPath, [cli, "-c", [
+    "import random, numpy as np, _matlab_numeric as mn",
+    "random.seed(3)",
+    "differ = swapped = 0",
+    "for t in range(400):",
+    "    n = random.randint(2, 30)",
+    "    sc = lambda: random.choice([1.0, 1e-8, 1e8, 3.7]) * random.uniform(-1, 1)",
+    "    sub, diag, sup, r = [sc() for _ in range(n)], [sc() for _ in range(n)], [sc() for _ in range(n)], [sc() for _ in range(n)]",
+    "    sub[0] = sup[-1] = 0.0",
+    "    if t % 9 == 0: r[random.randrange(n)] = float('inf')",
+    "    A = np.zeros((n, n))",
+    "    for k in range(n):",
+    "        A[k, k] = diag[k]",
+    "        if k: A[k, k - 1] = sub[k]",
+    "        if k + 1 < n: A[k, k + 1] = sup[k]",
+    "    swapped += any(abs(sub[k + 1]) > abs(diag[k]) for k in range(n - 1))",
+    "    differ += [repr(float(v)) for v in np.linalg.solve(A, np.array(r))] != [repr(v) for v in mn._tridiag_solve(sub, diag, sup, r)]",
+    "print(differ, swapped > 300)",
+  ].join("\n")], { encoding: "utf8", cwd: path.join(__dirname, "..", "..", "lib") }).trim();
+  assert.equal(exact, "0 True");
+  const out = execFileSync(process.execPath, [cli, "--matlab", "-c", [
+    "disp(interp1(1:1001, 1:1001, 1.5, 'spline')), disp(interp1(1:1000, complex(1:1000, 1), 2.5, 'spline'))",
+    "disp(spline(1:1001, 1:1001, 1.5)), disp(sprintf('%.4f ', spline(1:800, [1:800; 1:800], 1.5))), disp(sprintf('%.4f', spline(1:1001, [0 1:1001 0], 1.5)))",
+    "x = linspace(0, 10, 100000); disp(abs(spline(x, sin(x), 2.5) - sin(2.5)) < 1e-9), disp(max(abs(interp1(x, sin(x), [2.5 7.25], 'spline') - sin([2.5 7.25]))) < 1e-9)",
+    "try, y = spline([1:5 Inf], 1:6, 2.5); catch e, disp(e.message), end",
+    "try, y = spline(1:200001, 1:200001, 2.5); catch e, disp(e.message), end",
+    "try, y = interp1(1:100001, [1:100001; 1:100001]', 2.5, 'spline'); catch e, disp(e.message), end",
+    "try, y = pchip(1:200001, 1:200001, [2.5 7]); disp(mat2str(y)), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""),
+    ["1.5000", "2.5000 + 1.0000i", "1.5000", "1.5000 1.5000", "1.3415", "1", "1", "Singular matrix",
+    "spline with 200001 data sites for 1 row of values is not supported in Sagebrush: too much work.",
+    "interp1's 'spline' method with 100001 sample points for 2 columns of values is not supported in Sagebrush: too much work.", "[2.5 7]"]);
 });
