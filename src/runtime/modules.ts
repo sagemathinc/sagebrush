@@ -1373,6 +1373,58 @@ newBuiltinModule("_fs", (m) => {
   };
   fn(m, "exists", (path: string) => quiet(() => fs.existsSync(at(path))));
   fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(at(path)) && fs.statSync(at(path)).isDirectory()));
+  // (CPython's path_converter, for os.path (lib/posixpath.py): a path argument
+  // of stat ("stat", allowFd), lstat ("lstat"), or posix._path_normpath and
+  // _path_splitroot_ex (not strict). In its order: a str or bytes, a
+  // subclass's payload taken as it is, no method of it called; else an int,
+  // or an object with __index__, is a file descriptor where allowFd (the int
+  // is returned, _fd_converter's OverflowError past a C int); else
+  // __fspath__, looked up on the type and bound to the object as a special
+  // method is, whose result must be a str or bytes; anything else is
+  // fname's TypeError. Strict: a str must encode to the file system's UTF-8
+  // with surrogateescape (UnicodeEncodeError), and a NUL is a ValueError.
+  // The result is the exact str or bytes: astra's CORR-9C4-1, -2, -4)
+  fn(m, "path", (p: any, fname: any, allowFd: any, strict: any) => {
+    const name = String(fname);
+    const fdOk = O.truth(allowFd);
+    // (a str or bytes, a subclass's too, is a path before anything else: its
+    // __index__ is never asked; astra's CORR-E51-1)
+    const isPath = isinstance(p, T.str) || isinstance(p, T.bytes);
+    if (fdOk && !isPath && (O.isPyInt(p) || lookupType(typeOf(p), "__index__") !== undefined)) {
+      const n = O.index(p);
+      if (n > 2147483647) raise(T.OverflowError, "fd is greater than maximum");
+      if (n < -2147483648) raise(T.OverflowError, "fd is less than minimum");
+      return Number(n);
+    }
+    let o = p;
+    if (!isinstance(o, T.str) && !isinstance(o, T.bytes)) {
+      const f = O.lookupSpecial(p, "__fspath__");
+      if (f === undefined) raise(T.TypeError, `${name}: path should be string, bytes${fdOk ? ", os.PathLike or integer" : " or os.PathLike"}, not ${typeName(p)}`);
+      o = f(p);
+      if (!isinstance(o, T.str) && !isinstance(o, T.bytes)) raise(T.TypeError, `expected ${typeName(p)}.__fspath__() to return str or bytes, not ${typeName(o)}`);
+    }
+    if (isinstance(o, T.str)) {
+      const s: string = typeof o === "string" ? o : unbox(o);
+      if (O.truth(strict)) {
+        for (let i = 0; i < s.length; i++) {
+          const c = s.charCodeAt(i);
+          if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { i++; continue; }
+          if (c >= 0xd800 && c <= 0xdfff && !(c >= 0xdc80 && c <= 0xdcff)) throw markRaised(callObj(T.UnicodeEncodeError, ["utf-8", s, i, i + 1, "surrogates not allowed"]));
+        }
+        if (s.includes("\0")) raise(T.ValueError, `${name}: embedded null character in path`);
+      }
+      return s;
+    }
+    const data = new Uint8Array(O.bufferOf(o)!);
+    if (O.truth(strict) && data.includes(0)) raise(T.ValueError, `${name}: embedded null character in path`);
+    return new PyBytes(data);
+  });
+  // (posixpath's isfile, islink and lexists, as CPython's stat and lstat
+  // answer them: a regular file (a symbolic link followed); a symbolic link;
+  // anything there, a dangling link included)
+  fn(m, "isfile", (path: string) => quiet(() => fs.statSync(at(path)).isFile()));
+  fn(m, "islink", (path: string) => quiet(() => fs.lstatSync(at(path)).isSymbolicLink()));
+  fn(m, "lexists", (path: string) => quiet(() => (fs.lstatSync(at(path)), true)));
 });
 
 // ------------------------------------------------------------------ os
@@ -1435,10 +1487,16 @@ newBuiltinModule("os", (m) => {
   fn(m, "cpu_count", () => nodeOs.cpus().length);
   fn(m, "urandom", (n: any) => new PyBytes(new Uint8Array(require("crypto").randomBytes(Number(n)))));
   fn(m, "fspath", (p: any) => {
-    if (typeof p === "string" || p instanceof PyBytes) return p;
-    const f = Ty.lookupDunder(p, "__fspath__");
+    // (a str or bytes, subclasses included, as it is; a bytearray is neither)
+    if (isinstance(p, T.str) || isinstance(p, T.bytes)) return p;
+    // (looked up on the type and bound to the object once, as a special
+    // method is: astra's CORR-9C4-2)
+    const f = O.lookupSpecial(p, "__fspath__");
     if (f === undefined) raise(T.TypeError, `expected str, bytes or os.PathLike object, not ${typeName(p)}`);
-    return f(p);
+    // (what __fspath__ returns must be a str or bytes, subclasses included)
+    const r = f(p);
+    if (!isinstance(r, T.str) && !isinstance(r, T.bytes)) raise(T.TypeError, `expected ${typeName(p)}.__fspath__() to return str or bytes, not ${typeName(r)}`);
+    return r;
   });
   m.path = importModule("posixpath");
   dictSet(sysModules, "os.path", m.path);
