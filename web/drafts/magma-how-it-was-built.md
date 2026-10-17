@@ -1,4 +1,4 @@
-<!-- description: How Sagebrush implements the Magma language, clean room: a translator to Python, Magma's values and universes modelled from public documentation, every behaviour checked against Magma 2.18-5 run only as a black box, and a rule to refuse rather than guess. -->
+<!-- description: How Sagebrush implements the Magma language, clean room: a translator to Python, Magma's values and universes modelled from public documentation, behaviour checked, input by input, against Magma 2.18-5 run only as a black box, and a rule to refuse rather than guess. -->
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code, tests, coverage measurements and review history of the Sagebrush project, led by William Stein (SageMath, Inc.). DRAFT: not linked or published; publishing is William's decision. -->
 # How Sagebrush's Magma mode was built
 
@@ -43,8 +43,8 @@ t^3 + 3*t^2 + 3*t + 1
 The rest of this page describes how that was achieved, how it was checked,
 and how much of Magma is not there. In short: Magma programs are translated
 to Python and run on a runtime library that models Magma's values and its
-printing. Every behaviour was compared with what Magma 2.18-5 prints for
-the same input. Where Sagebrush can't be sure of Magma's answer, it says so
+printing. Behaviour was compared, on the inputs tried, with what Magma
+2.18-5 prints for the same input. Where Sagebrush can't be sure of Magma's answer, it says so
 instead of guessing.
 
 ## 1. A language, built clean room
@@ -143,7 +143,8 @@ Some of the rules found by probing were not obvious:
 - The image of a set under a map is over the map's codomain, even when the
   image is empty. For a map into a set (rather than a ring), a nonempty
   image is over the set's universe, but an empty one is over the set
-  itself.
+  itself, a universe Sagebrush doesn't model, so Sagebrush refuses to make
+  that empty image.
 - A number put in a sequence over $\mathbb{Q}[x]$ becomes a constant
   polynomial: after `Append(~S, 2)`, `S[1] div 3` is $2/3$.
 
@@ -168,9 +169,10 @@ also uses. Magma mode adds Magma's semantics and printing on top.
 
 ## 4. Checking against Magma
 
-Every behaviour was checked by running the same input through Magma 2.18-5
-and through Sagebrush and comparing what they print. This happens at
-several levels:
+Behaviour was checked by running the same input through Magma 2.18-5 and
+through Sagebrush and comparing what they print. A check covers the inputs
+that were tried, not every possible program. It happens at several
+levels:
 
 - **Probes.** A change starts with a list of cases (for example, every way
   a collection can end up empty, and what `Gcd` does with each). The list
@@ -183,9 +185,11 @@ several levels:
 - **Help examples.** Each of the 172 intrinsics in Magma mode's help has at
   least one example: 178 in all. In CI, each example runs in a fresh
   session and must print exactly what it shows. Magma's own output for the
-  same input, recorded once, must also be identical. So help can't show a
-  wrong answer, or one that has gone stale.
-- **Review.** Every change was reviewed by two independent reviewers: one
+  same input, recorded once, must also be identical. So an example in help
+  can't show output that differs from Magma's for that input, or go
+  stale.
+- **Review.** Each change in the work described here was reviewed by two
+  independent reviewers: one
   for correctness, who ran their own probes against Magma, the change and
   its parent, and one for limits and robustness. A change that made any
   previously correct result wrong, or produced a plausible wrong answer,
@@ -206,12 +210,17 @@ and says so in words.** Some examples:
   supported yet`.
 - An empty collection whose universe Sagebrush doesn't know, given to
   `Gcd`: a refusal, never a guessed 0 or 1.
-- Work beyond a stated bound: a comprehension of more than a fixed number
-  of elements, a polynomial of very high degree over a finite field, or a
-  range endpoint with too many digits. Each is refused before the work is
-  started, so a program can't exhaust the browser's memory.
+- Work beyond a stated bound. Where the size of the work can be known in
+  advance (a range endpoint with too many digits, a polynomial of very high
+  degree over a finite field), it is refused before the work starts.
+  Elsewhere the bound is checked as the work proceeds: a comprehension is
+  stopped when it passes a fixed number of elements, after evaluating
+  those elements. The bounds are there to keep a program within the
+  browser's memory, but they are checks on known paths, not a guarantee
+  for every program.
 
-Where Sagebrush does answer, the answer is meant to be Magma's. A refusal
+Where Sagebrush does answer, the answer is meant to be Magma's, and on the
+inputs tested it is. A refusal
 is a known gap. A different answer is a bug.
 
 ## 6. What is not there
@@ -221,13 +230,19 @@ Measured honestly:
 
 - **Names.** Magma's Handbook documents about 5,600 intrinsics. Magma mode
   provides 172 of them.
-- **Use.** Counting how many of the Handbook's 2,260 examples call each
-  intrinsic, 27 of the 50 most-used are provided, and the provided ones
-  account for about a third of all intrinsic calls in those examples.
+- **Use.** For each intrinsic, we counted the Handbook examples (out of
+  2,260) whose code calls it at least once; this counts presence in an
+  example, not how often the call runs. 51 intrinsics appear in at least 39
+  examples (three tie for 50th place at 39), and 27 of those 51 are
+  provided. Of the 13,500 (example, intrinsic) presences in all, 4,521
+  (33.5%) are of provided intrinsics.
 - **The Handbook's examples as a whole.** The last full measurement
-  (`design/magma-coverage.md`) ran every Handbook example under both
-  systems. Only a few percent of their outputs matched byte for byte,
-  mostly because an example calls something Sagebrush doesn't have.
+  (`design/magma-coverage.md`, 14 October 2026, Sagebrush commit
+  `5c95913e`) ran every Handbook example under both systems. Of 11,292
+  output cells that Magma prints the same way on two runs, 300 (2.7%)
+  matched byte for byte. Of the 2,260 examples, 14 (0.6%) matched
+  completely. Most failures are an example calling something Sagebrush
+  doesn't have.
   Commonly used but missing: projective spaces and schemes, function
   fields, free and dihedral groups, root data and Lie algebras,
   differential operator rings, L-series, and general vector spaces.
