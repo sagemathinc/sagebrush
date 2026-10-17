@@ -351,7 +351,8 @@ class _Parser:
         S = self.S
         kind, v = self.take()
         if kind == "num":
-            if len(v) > 36:
+            # (30 digits in the mantissa, the exponent aside, HARD-502-1)
+            if sum(c.isdigit() for c in v.split("e")[0].split("E")[0]) > 30:
                 raise ValueError("parse_expression: a number of more than 30 digits")
             q = parse_number(v)
             return S.SR(S.Integer(q) if isinstance(q, int) else S.QQ(q.numerator) / S.QQ(q.denominator))
@@ -410,7 +411,7 @@ def close(answer, expected, rel=None, abs=None):
 
         sage: from board_checks import *
         sage: close(3.14159, pi, rel=1e-5).ok, close(3.14, pi, rel=1e-5).verdict()
-        (True, 'off by $0.00159$ (relative $0.000507$), more than the tolerance')
+        (True, 'off by about $0.00159$, more than the tolerance')
         sage: close(1, 1.05, abs=0.1).ok
         True
         sage: close(1, 2)
@@ -420,77 +421,167 @@ def close(answer, expected, rel=None, abs=None):
     """
     if rel is None and abs is None:
         raise ValueError("close: give a tolerance, rel= or abs=")
-    # (each tolerance checked as it is, before any conversion: a tiny
-    # negative one must not round to -0.0, CORR-230-2)
+    # (each tolerance exact, its sign checked as it is, before anything
+    # else: a tiny negative one must not round to -0.0, CORR-230-2)
     tols = []
     for t in (rel, abs):
         if t is None:
-            tols.append((Fraction(0), 0.0))
+            tols.append(Fraction(0))
             continue
-        q = _rational(t)
-        if q is not None:
-            if q < 0:
-                raise ValueError("close: a tolerance is a finite number, at least 0")
-            tols.append((q, float(q) if q < 10 ** 300 else math.inf))
-            continue
-        f = _number(t, "close: a tolerance")
-        if isinstance(f, complex) or not (f >= 0 and math.isfinite(f)):
+        q = _exact_complex(t)
+        if q is None or q[1] != 0 or isinstance(t, bool):
+            raise ValueError("close: a tolerance is a finite real number (an int, a fraction, a float or a Sage real), at least 0")
+        if q[0] < 0:
             raise ValueError("close: a tolerance is a finite number, at least 0")
-        tols.append((None, f))
+        tols.append(q[0])
+    qr, qb = tols
     if isinstance(answer, str):
         answer = parse_number(answer)
     if isinstance(expected, str):
         expected = parse_number(expected)
-    # (exactly, when both are numbers with rational parts, complex ones too:
-    # |d|^2 <= max(rel^2 |e|^2, abs^2), nothing rounded, CORR-230-1)
+    # (nan and infinities: only values that are one, never a finite number
+    # a float could not hold, CORR-502-2)
+    if _nan(answer):
+        return _wrong("it is not a number")
+    if _nan(expected):
+        return Verdict(None, "the expected value is not a number")
+    ia, ie = _infinite(answer), _infinite(expected)
+    if ia or ie:
+        if ia and ie:
+            try:
+                same = complex(answer) == complex(expected)
+            except Exception:
+                return Verdict(None, "the check could not compare these infinities")
+            return _right() if same else _wrong("it is %s, not %s" % (_inf(complex(answer)), _inf(complex(expected))))
+        return _wrong("it is %s, not %s" % ("infinite" if ia else "finite", "finite" if ia else "infinite"))
+    # (exactly, when both are numbers with rational parts, complex ones too,
+    # Sage reals as the dyadic rationals they are: |d|^2 <= max(rel^2 |e|^2,
+    # abs^2), nothing rounded, CORR-230-1, CORR-502-1)
     qa, qe = _exact_complex(answer), _exact_complex(expected)
-    if qa is not None and qe is not None and tols[0][0] is not None and tols[1][0] is not None:
-        (qr, _), (qb, _) = tols
+    if qa is not None and qe is not None:
         dr, di = qa[0] - qe[0], qa[1] - qe[1]
         d2, e2 = dr * dr + di * di, qe[0] * qe[0] + qe[1] * qe[1]
         if d2 <= max(qr * qr * e2, qb * qb):
             return _right()
         return _wrong("off by %s%s, more than the tolerance" % (
             _sci_exact(d2, root=True), " (relative %s)" % _sci_exact(d2 / e2, root=True) if e2 else ""))
-    # (inexactly: an irrational or a Sage real on one side; a value floats
-    # can't hold, or a right verdict finer than floats can resolve, is
-    # undecided rather than a lossy right, CORR-230-1)
-    r, a = tols[0][1], tols[1][1]
+    # (something not a number is refused, as before: the check decides nothing)
+    for v, what in ((answer, "the answer"), (expected, "the expected value")):
+        if _exact_complex(v) is None:
+            try:
+                _number(v, "close: " + what)
+            except OverflowError:
+                pass
+    # (an irrational real, pi or sqrt(2): a certified enclosure, right only
+    # if all of |d| is within the tolerance, wrong only if all of it is
+    # beyond; else undecided)
+    for prec in (128, 1024):
+        got = _by_intervals(answer, expected, qr, qb, prec)
+        if got is not None:
+            return got
+    return Verdict(None, "the check could not decide whether these are close")
+
+
+def _nan(v):
+    if isinstance(v, float):
+        return v != v
+    if isinstance(v, complex):
+        return v.real != v.real or v.imag != v.imag
+    f = getattr(v, "is_NaN", None)
     try:
-        x = _number(answer, "close: the answer")
-        e = _number(expected, "close: the expected value")
-    except OverflowError:
-        return Verdict(None, "the numbers are too large to compare with an inexact value")
-    nan = lambda z: (z.real != z.real or z.imag != z.imag) if isinstance(z, complex) else z != z
-    if nan(x):
-        return _wrong("it is not a number")
-    if nan(e):
-        return Verdict(None, "the expected value is not a number")
-    inf = lambda z: math.isinf(z.real) or math.isinf(z.imag) if isinstance(z, complex) else math.isinf(z)
-    if inf(x) or inf(e):
-        return _right() if x == e else _wrong("it is %s, not %s" % (_inf(x), _inf(e)))
-    d = builtins_abs(x - e)
-    tol = max(r * builtins_abs(e), a)
-    if not (math.isfinite(d) and math.isfinite(tol)):
-        return Verdict(None, "the numbers are too large to compare with an inexact value")
-    if d <= tol:
-        if tol < 4 * 2.220446049250313e-16 * max(builtins_abs(x), builtins_abs(e)):
-            return Verdict(None, "the tolerance is finer than the inexact value's precision")
+        return bool(f()) if callable(f) else False
+    except Exception:
+        return False
+
+
+def _by_intervals(answer, expected, qr, qb, prec):
+    """close's verdict from enclosures at prec bits (Sage), or None when they
+    are too wide to decide (or there are none)."""
+    try:
+        import sage_all as S
+        RIF = S.RealIntervalField(prec)
+        a = RIF(answer if _exact_complex(answer) is None else _qq(S, _exact_complex(answer)))
+        e = RIF(expected if _exact_complex(expected) is None else _qq(S, _exact_complex(expected)))
+        d = a - e
+        dl, dh = _iv(d)
+        el, eh = _iv(e)
+    except Exception:
+        return None
+    # |d| and |e| as exact intervals
+    ad = (Fraction(0) if dl <= 0 <= dh else min(builtins_abs(dl), builtins_abs(dh)), max(builtins_abs(dl), builtins_abs(dh)))
+    ae = (Fraction(0) if el <= 0 <= eh else min(builtins_abs(el), builtins_abs(eh)), max(builtins_abs(el), builtins_abs(eh)))
+    tlo, thi = max(qr * ae[0], qb), max(qr * ae[1], qb)
+    if ad[1] <= tlo:
         return _right()
-    rd = d / builtins_abs(e) if e != 0 else None
-    return _wrong("off by %s%s, more than the tolerance" % (
-        _sci(d), " (relative %s)" % _sci(rd) if rd is not None else ""))
+    if ad[0] > thi:
+        mid = (ad[0] + ad[1]) / 2
+        return _wrong("off by about %s, more than the tolerance" % _sci_exact(mid))
+    return None
+
+
+def _qq(S, q):
+    if q[1] != 0:
+        raise TypeError("complex")
+    return S.QQ(q[0].numerator) / S.QQ(q[0].denominator)
+
+
+def _iv(x):
+    """an interval's endpoints as exact Fractions"""
+    lo, hi = x.lower(), x.upper()
+    return _rational(lo.exact_rational()), _rational(hi.exact_rational())
 
 
 def _exact_complex(v):
     """v as exact (real, imaginary) Fractions: an int, Fraction, finite
-    float, complex of finite parts, or Sage rational; else None."""
+    float, complex of finite parts, Sage rational, or a finite Sage real or
+    complex number (exactly the dyadic rational it is); else None."""
     if isinstance(v, complex):
         if not (math.isfinite(v.real) and math.isfinite(v.imag)):
             return None
         return (Fraction(v.real), Fraction(v.imag))
     q = _rational(v)
-    return None if q is None else (q, Fraction(0))
+    if q is not None:
+        return (q, Fraction(0))
+    if isinstance(v, (int, float, str, bool)):
+        return None
+    re_im = None
+    if callable(getattr(v, "exact_rational", None)):
+        re_im = (v, None)
+    elif callable(getattr(v, "real", None)) and callable(getattr(v, "imag", None)) and type(v).__name__.startswith("Complex"):
+        try:
+            re_im = (v.real(), v.imag())
+        except Exception:
+            return None
+    if re_im is None:
+        return None
+    out = []
+    for part in re_im:
+        if part is None:
+            out.append(Fraction(0))
+            continue
+        if _infinite(part) or getattr(part, "is_NaN", lambda: False)():
+            return None
+        try:
+            r = _rational(part.exact_rational())
+        except Exception:
+            return None
+        if r is None:
+            return None
+        out.append(r)
+    return tuple(out)
+
+
+def _infinite(v):
+    """whether v is an infinity itself (not a finite number a float can't hold)"""
+    if isinstance(v, (float, complex)):
+        return math.isinf(v.real) or math.isinf(v.imag) if isinstance(v, complex) else math.isinf(v)
+    f = getattr(v, "is_infinity", None)
+    if callable(f):
+        try:
+            return bool(f())
+        except Exception:
+            return False
+    return str(v) in ("+Infinity", "-Infinity", "Infinity")
 
 
 def _sci_exact(q, root=False):
