@@ -107,7 +107,8 @@ node web/bench-compare.mjs --pyodide DIR --runs 5 --json out.json
 
 `DIR` holds Pyodide's distribution (`pyodide.mjs`, `pyodide.asm.wasm`,
 `python_stdlib.zip`, `pyodide-lock.json`) and the numpy wheel. The script
-exits with an error if any execution printed something different. The raw
+exits with an error if any execution printed something different, and
+`node web/bench-compare.mjs --check FILE.json` checks a saved run again. The raw
 data of the run above, with every cold start's and every timed run's time
 and output, is
 [`articles/performance/data/sagebrush-pyodide-2026-10-17.json`](https://github.com/sagemathinc/sagebrush/blob/master/articles/performance/data/sagebrush-pyodide-2026-10-17.json).
