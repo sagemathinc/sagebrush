@@ -30,7 +30,8 @@ def digits_to_prec(d):
         sage: digits_to_prec(15), digits_to_prec(50)  # sagebrush only
         (54, 170)
     """
-    x = (int(d) + 1) * _LOG2_10
+    # (a fractional d is not truncated, as Sage: 15.9 digits are 57 bits)
+    x = ((d if isinstance(d, int) else float(d)) + 1) * _LOG2_10
     return int(math.ceil(x - 1e-12))
 
 
