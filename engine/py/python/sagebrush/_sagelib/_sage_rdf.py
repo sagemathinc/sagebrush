@@ -559,9 +559,20 @@ class RealDoubleElement(float):
         if prec is None and digits is None:
             return _sa().RR(float(self))
         import _sage_real
-        return _sage_real.N(float(self), prec, digits)
+        p = _sage_real._approx_prec(_sage_real.digits_to_prec(digits) if digits is not None else prec, 53)
+        return _sage_real.N(float(self), p)
 
     numerical_approx = N = n
+
+    def str(self):
+        """The number as printed.
+
+        EXAMPLES::
+
+            sage: RDF(2).str(), RDF(1/3).str()
+            ('2.0', '0.3333333333333333')
+        """
+        return repr(self)
 
     def __hash__(self):
         return float.__hash__(self)
