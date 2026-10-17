@@ -268,6 +268,21 @@
 /* TimeTravel's bar: a slider over the versions, when, Revert, ✕ */
 [data-sbb=tt] { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3; width: min(720px, calc(100% - 24px)); box-sizing: border-box; display: flex; gap: 10px; align-items: center; background: rgba(255, 255, 255, .97); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 8px 12px; }
 [data-sbb=tt][hidden] { display: none; }
+/* Submit (a host that takes answers): a button in the top bar, and its panel under it, at the right */
+[data-sbb=submitbtn] { background: #2a6f2f !important; color: #fff; border-color: #2a6f2f !important; font-weight: 600; white-space: nowrap; }
+[data-sbb=submitbtn][hidden] { display: none; }
+[data-sbb=submit] { position: absolute; right: 12px; top: 48px; z-index: 5; width: min(420px, calc(100% - 24px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); padding: 12px; font-size: 14px; }
+[data-sbb=submit][hidden] { display: none; }
+[data-sbb=subhead] { font-weight: 600; }
+[data-sbb=sublabel] { display: flex; flex-direction: column; gap: 4px; color: #556; font-size: 13px; }
+[data-sbb=subcomment] { font: inherit; font-size: 14px; color: #222; resize: vertical; border: 1px solid rgba(0, 0, 0, .25); border-radius: 6px; padding: 6px 8px; }
+[data-sbb=subpreview] { border-left: 3px solid #d8e3d3; padding: 2px 8px; color: #333; }
+[data-sbb=subpreview][hidden] { display: none; }
+[data-sbb=subrow] { display: flex; gap: 8px; }
+[data-sbb=subsend]:not(:disabled) { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
+[data-sbb=substatus] { color: #333; }
+[data-sbb=substatus] p { margin: 0; }
+.sbb.sbb-present :is([data-sbb=submitbtn], [data-sbb=submit]) { display: none !important; }
 /* Find (mount.ts, find.ts): a small bar at the top right, under the top bar; the item it shows outlined, its words marked */
 [data-sbb=find] { position: absolute; top: 48px; right: 12px; z-index: 4; display: flex; gap: 2px; align-items: center; background: rgba(255, 255, 255, .97); border: 1px solid rgba(0, 0, 0, .14); border-radius: 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .12); padding: 4px 4px 4px 10px; }
 [data-sbb=find][hidden] { display: none; }
