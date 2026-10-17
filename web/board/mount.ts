@@ -307,6 +307,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let original: BoardDoc | null = null;
   // (documents loaded: a preview computed for one is not kept in another)
   let loads = 0;
+  // (the checks running, by question: any version of the document whose
+  // answer to it is another than the one checked makes theirs stale, even
+  // if a later one puts the first value back, CORR-A19-4)
+  const checking = new Map<string, { given: string; stale: boolean }>();
   // The name of the shown document's output cache (outcache.ts): the host
   // store's, beside the document and not in it, since a document's seed is
   // portable and anyone can copy it (SEC-B88-1).  Another document shown
@@ -386,7 +390,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     await images.ensure(Object.keys(d.images ?? {}));
     if (over()) return false;
     if (!view && !replacing && doc !== again) return false;
-    if (!view) doc = d;
+    if (!view) {
+      if (checking.size) {
+        // (another version of the board's code: every check running is for the code before, CORR-729-1)
+        const codeKey = (x: BoardDoc | null) => (x ? JSON.stringify([x.mode ?? null, x.seed ?? null, codeOrder(x).map((c) => [c.id, c.mode, c.code])]) : "");
+        if (codeKey(doc) !== codeKey(d)) for (const run of checking.values()) run.stale = true;
+        const was = new Map(doc ? asksOf(doc).map((q) => [q.ask.id, JSON.stringify(q.ask.answer ?? null)]) : []);
+        for (const q of asksOf(d)) {
+          const run = checking.get(q.ask.id), now = JSON.stringify(q.ask.answer ?? null);
+          if (run && now !== was.get(q.ask.id) && now !== run.given) run.stale = true;
+        }
+      }
+      doc = d;
+    }
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
     board.markdown = (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" });
@@ -492,49 +508,65 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   board.onAnswer = answer;
   // (a question's answer checked: its check run in the board's interpreter,
-  // in a copy of the board's names, with a deadline; the verdict kept with
-  // the answer, the check's words and the hints shown so far only here.
-  // One Check is bounded as a whole: the check and its computed hints share
-  // 2 x checkMs, at most 20 s; a computed hint is computed once for an
-  // answer, HARD-A19-1)
-  const hintTexts = new Map<string, string>();
+  // with a deadline; the verdict kept with the answer, the check's words and
+  // the hints shown so far only here.  One Check runs alone in its
+  // language's interpreter, no sync, run or other Check between its steps:
+  // the board's code run again in a new interpreter if anything was
+  // evaluated there since it last was; then the check; then, before each
+  // computed hint, the code run again, so the hint sees the state the code
+  // leaves, not the check's; and once more at the end, so that what runs
+  // next does too (the coordinator's rule for CORR-A19-1).  Each step is
+  // bounded: a run of the code REFRESH_MS, the check checkMs, and the
+  // computed hints, with the runs before them, share 2 x checkMs, at most
+  // 20 s (HARD-A19-1, HARD-729-1).)
+  const REFRESH_MS = 60_000;
+  // (the languages where something was evaluated since the board's code last ran in a new interpreter)
+  const dirty = new Set<BoardMode>();
   const check = async (id: string, given: AskAnswer) => {
     const c = engine(), a = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask;
     if (viewing || !c || !a?.check) return;
-    const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000;
-    const until = Date.now() + Math.min(2 * ms, 20_000), left = () => Math.min(ms, until - Date.now());
+    const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000, test = a.check;
     // (what it ran on: a completion for another document, another engine, or
     // a question whose answer or check changed meanwhile is dropped, CORR-A19-4)
     // (the field checked may be saved meanwhile, as it loses its focus: that answer is the one checked, not another)
-    const loaded = loads, was = JSON.stringify(a.answer ?? null), checked = JSON.stringify(given);
+    // (and the board's code it ran with: a result for code since changed, as an edit, is dropped too, CORR-729-1)
+    const codeOf = (d: BoardDoc | null) => (d ? JSON.stringify([d.mode ?? null, d.seed ?? null, codeOrder(d).map((x) => [x.id, x.mode, x.code])]) : "");
+    const loaded = loads, was = JSON.stringify(a.answer ?? null), checked = JSON.stringify(given), ranWith = codeOf(doc);
+    const run = { given: checked, stale: false };
+    checking.set(id, run);
     const stale = () => {
       const now = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask, ans = JSON.stringify(now?.answer ?? null);
-      return loads !== loaded || code !== c || !!viewing || !now || now.check !== a.check || (ans !== was && ans !== checked);
+      return run.stale || loads !== loaded || code !== c || !!viewing || !now || now.check !== a.check || (ans !== was && ans !== checked) || codeOf(doc) !== ranWith;
     };
     board.askFeedback.set(id, { pending: true });
     redraw().catch(fail);
-    // (each evaluation that may have changed the board's names, not shown
-    // unchanged: the board's code run again in a new interpreter, before
-    // anything else runs, CORR-A19-1)
-    let changed = false;
-    const seen = (x: Evaluated) => { if (!(x.ok && x.isolated !== false && x.preserved === true)) changed = true; return x; };
-    const r = seen(await c.evaluate(mode, a.check, given, ms));
-    const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
-    const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
-    // (the hints shown after this attempt: the computed ones computed now, with the same answer)
-    const wrong = (a.wrongAttempts ?? 0) + (outcome === "wrong" ? 1 : 0);
-    const hints: (string | null)[] = [];
-    for (const [k, h] of (a.hints ?? []).slice(0, Math.min(wrong, ASK_LIMITS.hints)).entries()) {
-      if (typeof h === "string") { hints[k] = null; continue; }
-      const key = JSON.stringify([id, h.code, given]), kept = hintTexts.get(key);
-      if (kept !== undefined) { hints[k] = kept; continue; }
-      if (left() < 1) { hints[k] = "(this hint was not computed: this check's time ran out)"; continue; }
-      const got = seen(await c.evaluate(mode, h.code, given, left()));
-      hints[k] = got.ok && typeof got.value === "string" ? got.value : "(this hint could not be computed: " + (got.ok ? "it gave no text" : got.error ?? "it could not run") + ")";
-      // (kept when it was computed: one that failed may be computed again, with time again)
-      if (got.ok && typeof got.value === "string") { if (hintTexts.size >= 1000) hintTexts.clear(); hintTexts.set(key, got.value); }
-    }
-    if (changed) c.refresh(mode).catch((e) => console.warn("board: the code run again after a check:", e));
+    const done = await c.exclusive(mode, async (ops) => {
+      const reset = async (within: number) => {
+        if (!dirty.has(mode)) return true;
+        const ok = within > 0 && (await ops.refresh(Math.min(REFRESH_MS, within)));
+        if (ok) dirty.delete(mode);
+        return ok;
+      };
+      const evaluate = (code: string, within: number) => { dirty.add(mode); return ops.evaluate(code, given, within); };
+      const r: Evaluated = (await reset(REFRESH_MS)) ? await evaluate(test, ms) : { ok: false, error: `the board's code didn't finish running again within ${REFRESH_MS / 1000} s, so it wasn't checked` };
+      const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
+      const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
+      // (the hints shown after this attempt: the computed ones computed now, with the same answer)
+      const until = Date.now() + Math.min(2 * ms, 20_000), left = () => Math.min(ms, until - Date.now());
+      const wrong = (a.wrongAttempts ?? 0) + (outcome === "wrong" ? 1 : 0);
+      const hints: (string | null)[] = [];
+      for (const [k, h] of (a.hints ?? []).slice(0, Math.min(wrong, ASK_LIMITS.hints)).entries()) {
+        if (typeof h === "string") { hints[k] = null; continue; }
+        if (left() < 1 || !(await reset(until - Date.now())) || left() < 1) { hints[k] = "(this hint was not computed: this check's time ran out)"; continue; }
+        const got = await evaluate(h.code, left());
+        hints[k] = got.ok && typeof got.value === "string" ? got.value : "(this hint could not be computed: " + (got.ok ? "it gave no text" : got.error ?? "it could not run") + ")";
+      }
+      await reset(REFRESH_MS);
+      return { outcome, message, hints } as const;
+    });
+    if (!done) { checking.delete(id); board.askFeedback.delete(id); redraw().catch(fail); return; }
+    const { outcome, message, hints } = done;
+    if (checking.get(id) === run) checking.delete(id);
     if (stale()) { board.askFeedback.delete(id); redraw().catch(fail); return; }
     board.askFeedback.set(id, { message, hints });
     await editor.attempt(id, given, outcome).catch(fail);
@@ -671,6 +703,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
   async function load(d: BoardDoc, stored = false) {
     loads++;
+    dirty.clear();
     loadGen++;
     // (Find's matches were the old document's: gone, before its items are
     // drawn again, CORR-F33-1; its query asked of the new one once shown)

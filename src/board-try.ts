@@ -3,19 +3,19 @@
 // would answer them, for an evaluator (the teaching boards' grader:
 // /scratch/sagebrush-eval/teaching/FORMAT.md).  The board is validated and
 // its code items run as `board run` runs them; then each case's answer is
-// checked by its question's check (lib/_sb_check.py: a copy of the board's
-// names, `answer` bound), each hint rendered, and each sequence of answers
-// applied to a copy of the board as a reader would, its progress written to
-// a file and read back.  The report is JSON whose fields are the grader's.
+// checked by its question's check (lib/_sb_check.py: the board's names,
+// `answer` bound), each hint rendered, and each sequence of answers applied
+// to a copy of the board as a reader would, its progress written to a file
+// and read back.  The report is JSON whose fields are the grader's.
 //
-// Each case starts from the state the board's code left: the check runs in
-// a deep copy of the board's names.  A case whose names can't all be copied
-// is run again in an interpreter of its own, the board's code run there
-// first ("isolation": "rerun").  A note without an answer is not checked
-// ("in words").  The exit status: 0 when every case could be tried (each
-// one's own failure is in its record), 1 when the board can't be read or a
-// case refers to no question, 2 for a wrong command line, 3 when the run
-// was out of time (with what was observed, "complete": false).
+// Every evaluation (a case's check, a hint, each answer of a sequence) runs
+// in an interpreter of its own, the board's code run there first, so each
+// starts from the state the code leaves ("isolation": "rerun";
+// "scope_preserved": null, as it is not compared).  A note without an answer
+// is not checked ("in words").  The exit status: 0 when every case could be
+// tried (each one's own failure is in its record), 1 when the board can't be
+// read, 2 for a wrong command line or cases that can't be tried as given, 3
+// when the run was out of time (with what was observed, "complete": false).
 //
 // Loaded only for `board try` (src/board-cli.ts).
 
@@ -54,6 +54,7 @@ const USAGE = `usage: sagebrush board try FILE [--cases CASES.json | --case 'ID=
 const say = (msg: string) => process.stderr.write(`sagebrush board try: ${oneLine(msg)}\n`);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 export const CASES_MAX = 10_000;
+const FRESH = "not compared: each evaluation runs in an interpreter of its own, after the board's code";
 
 interface CheckCase { case_id: string; ask_id: string; answer?: unknown; note?: string }
 interface Sequence { ask_id: string; answers: unknown[] }
@@ -101,14 +102,13 @@ function runtime(): { version: string; engine: string | null; build: string | nu
   return { version: g.__SAGEBRUSH_VERSION__ ?? "dev", engine, build: g.__SAGEBRUSH_BUILD_ID__ ?? null, commit };
 }
 
-type Verdict = { outcome: "right" | "wrong" | "error"; raw: unknown; message: string | null; error: string | null; timedOut: boolean; preserved: boolean | null; reason: string | null; isolated: boolean };
+type Verdict = { outcome: "right" | "wrong" | "error"; raw: unknown; message: string | null; error: string | null; timedOut: boolean };
 async function verdict(ev: Evaluate, a: DocAsk, answer: unknown): Promise<Verdict> {
-  if (a.check === undefined) return { outcome: "error", raw: null, message: null, error: "the question has no check", timedOut: false, preserved: null, reason: "no check ran", isolated: true };
+  if (a.check === undefined) return { outcome: "error", raw: null, message: null, error: "the question has no check", timedOut: false };
   const r = await ev(a.check, answer, a.checkMs ?? 2000);
-  const why = r.preserved === null || r.preserved === undefined ? r.reason ?? (r.timedOut ? "it ran out of time, so the board's state was not compared" : "the board's state was not compared") : null;
-  if (!r.ok) return { outcome: "error", raw: null, message: null, error: r.error ?? "it failed", timedOut: r.timedOut, preserved: r.preserved ?? null, reason: why, isolated: r.isolated !== false };
+  if (!r.ok) return { outcome: "error", raw: null, message: null, error: r.error ?? "it failed", timedOut: r.timedOut };
   const v = r.value;
-  return { outcome: v === true ? "right" : "wrong", raw: v, message: typeof v === "string" ? v : null, error: null, timedOut: false, preserved: r.preserved ?? null, reason: why, isolated: r.isolated !== false };
+  return { outcome: v === true ? "right" : "wrong", raw: v, message: typeof v === "string" ? v : null, error: null, timedOut: false };
 }
 
 /** The `board try` command; returns the exit code. */
@@ -187,12 +187,10 @@ export async function boardTry(argv: string[]): Promise<number> {
   let outOfTime = false;
   const deadline = new Promise<"timeout">((r) => setTimeout(() => { outOfTime = true; r("timeout"); }, timeout * 1000).unref());
   const work = (async () => {
-    // Every evaluation (a case's check, a hint, a sequence's answer) starts
-    // from the board's state just after its code ran.  One that ran on a
-    // copy and left the board's names as they were keeps the interpreter;
-    // any other (no copy could be made, a change, a state that can't be
-    // compared, an error, a deadline) makes the next one start in a fresh
-    // interpreter, the board's code run again (astra2's CORR-A19-1, -2).
+    // Every evaluation (a case's check, a hint, a sequence's answer) runs in
+    // an interpreter of its own, the board's code run in it first: what one
+    // check does to the board's values never reaches another (the
+    // coordinator's rule for CORR-A19-1; astra2's CORR-A19-2).
     type Session = { ev: Evaluate; run: BoardRun; close: () => Promise<void> };
     const open = () => new Promise<Session>((ready, fail) => {
       let release!: () => void;
@@ -203,9 +201,8 @@ export async function boardTry(argv: string[]): Promise<number> {
     let session = await open(), dirty = false;
     const ev: Evaluate = async (code, answer, ms) => {
       if (dirty) { await session.close(); session = await open(); dirty = false; }
-      const r = await session.ev(code, answer, ms);
-      if (!(r.ok && r.isolated !== false && r.preserved === true)) dirty = true;
-      return r;
+      dirty = true;
+      return session.ev(code, answer, ms);
     };
     try {
     {
@@ -220,12 +217,10 @@ export async function boardTry(argv: string[]): Promise<number> {
           report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: null, note, outcome: "in words", raw_result: null, message: null, error: null, timed_out: false, check_invoked: false, scope_preserved: null, scope_preserved_reason: "no check ran", isolation: null, note_preserved: note !== null, next: null });
           continue;
         }
-        // ("copy": checked on a copy of the board's names; "rerun": no copy
-        // could be made, so checked on the board's state itself, fresh, and
-        // the board's code run again before the next)
-        const v = await verdict(ev, a, c.answer), isolation = v.isolated ? "copy" : "rerun";
+        // ("rerun": in an interpreter of its own, the board's code run first; whether the board's names were left as they were is not said)
+        const v = await verdict(ev, a, c.answer), isolation = "rerun";
         if (v.outcome === "wrong" && !firstWrong.has(c.ask_id)) firstWrong.set(c.ask_id, c.answer);
-        report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: c.answer, note, outcome: v.outcome, raw_result: v.outcome === "error" ? null : v.raw, message: v.message, error: v.error, timed_out: v.timedOut, check_invoked: true, scope_preserved: v.preserved, scope_preserved_reason: v.reason, isolation, note_preserved: note !== null || null, next: v.outcome === "right" ? a.next?.right ?? null : v.outcome === "wrong" ? a.next?.wrong ?? null : null });
+        report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: c.answer, note, outcome: v.outcome, raw_result: v.outcome === "error" ? null : v.raw, message: v.message, error: v.error, timed_out: v.timedOut, check_invoked: true, scope_preserved: null, scope_preserved_reason: FRESH, isolation, note_preserved: note !== null || null, next: v.outcome === "right" ? a.next?.right ?? null : v.outcome === "wrong" ? a.next?.wrong ?? null : null });
       }
       // each hint, as shown: a computed one with its question's first wrong answer
       for (const [id, a] of asks) {

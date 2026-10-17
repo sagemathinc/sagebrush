@@ -20,10 +20,11 @@
 //      {id, interact, values}     an @interact control changed: rerun it
 //      {id, evaluate: {code, answer}, sage?, magma?, matlab?, seed?}  a board
 //                                 question's check, or a computed hint
-//                                 (lib/_sb_check.py): `code` run in a copy of
-//                                 the board's names with `answer` (JSON) bound;
+//                                 (lib/_sb_check.py): `code` run seeing the
+//                                 board's names, with `answer` (JSON) bound;
 //                                 `done` then has `evaluated`, its verdict as
-//                                 JSON {ok, value | error, isolated, preserved}
+//                                 JSON {ok, value | error}; the caller runs
+//                                 the board's code again after it
 //      {id, check, sage?, magma?, matlab?}  -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
 // Out: {id, start}, then any of
@@ -370,7 +371,6 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     } else {
       if (m.sage && !sageLoaded) {
         run("from sage_all import *\n", main, "exec", "<sage>");
-        run("import _sb_check\n_sb_check.mark()\n", host, "exec", "<sage>");
         sageLoaded = true;
         t0 = performance.now();
       }

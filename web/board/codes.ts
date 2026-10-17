@@ -9,7 +9,7 @@
 // the language of the items it names.
 
 import type { BoardMode } from "./doc";
-import { BOARD_SEED, BoardCode, type CodeState, type Evaluated } from "./code";
+import { BOARD_SEED, BoardCode, type CheckOps, type CodeState } from "./code";
 import { DOC_CAP, ENTRY_MAX, sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 import type { Preview } from "./preview";
 
@@ -171,14 +171,10 @@ export class BoardCodes {
   interrupt() {
     for (const e of this.engines.values()) e.interrupt();
   }
-  /** A board question's check, or a computed hint, in the language's interpreter (made if there is none yet). */
-  evaluate(mode: BoardMode, code: string, answer: unknown, ms: number): Promise<Evaluated> {
+  /** A board question's Check, whole, alone in its language's interpreter (BoardCode.exclusive; made if there is none yet). */
+  exclusive<T>(mode: BoardMode, f: (ops: CheckOps) => Promise<T>): Promise<T | null> {
     const e = this.engine(mode);
-    return e ? e.evaluate(code, answer, ms) : Promise.resolve({ ok: false, error: this.error ?? "no interpreter for this language" });
-  }
-  /** A language's interpreter made again, the board's code run in it (BoardCode.refresh). */
-  refresh(mode: BoardMode) {
-    return this.engines.get(mode)?.refresh() ?? Promise.resolve(null);
+    return e ? e.exclusive(f) : Promise.resolve(null);
   }
   close() {
     for (const e of this.engines.values()) e.close();
