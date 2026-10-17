@@ -338,6 +338,28 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
     // parser, Sage's one-time load, its first imports; so no item's time
     // pays for them, which a loaded machine makes long)
     if (worker && !dead) await send({ cell: "warm-up", code: "", opts: {} }, () => {}, START_GRACE_MS, true);
+    // (and the checks' own first run, `board try`'s: lib/_sb_check.py's
+    // import and the first compile of a check, the interpreter's one-time
+    // costs, which a loaded machine makes long and a fresh interpreter (one
+    // for each evaluation) pays each time; so a check's checkMs is its
+    // own, from its start.  Before any of the board's code, which could
+    // otherwise change what it runs and move its own work into this
+    // START_GRACE_MS (daybreak2's HARD-AE0-1); and its outcome checked: an
+    // interpreter that can't run it is stopped, its checks not run)
+    const warmChecks = async () => {
+      // (Magma's and MATLAB's checks aren't run yet, each saying so: nothing to warm)
+      if (!after || !worker || dead || mode === "magma" || mode === "matlab") return;
+      // (its code: True; another only for the tests, from the command's environment, never the board's)
+      const code = process.env.SAGEBRUSH_TEST_CHECK_WARMUP ?? "True";
+      const r = await send({ cell: "check-warm-up", code: "", opts: { evaluate: { code, answer: null }, seed: seedOf("check") } }, () => {}, START_GRACE_MS, true);
+      let v: any = null;
+      try { v = r.evaluated === undefined ? null : JSON.parse(r.evaluated); } catch {}
+      if (r.timedOut || r.dead || r.error || v?.ok !== true || v.value !== true) {
+        dead ??= `the interpreter could not run a question's check (its warm-up ${r.timedOut ? `did not finish within ${START_GRACE_MS / 1000} s` : "failed"})`;
+        await worker?.terminate();
+      }
+    };
+    await warmChecks();
     const timedOut = new Set<string>();
     const syntax = new Map<string, string>(); // (syntax errors, as the interpreter says them)
     const states = new Map<string, CellState>(); // (each item's last state, as the scheduler says it)
@@ -437,6 +459,9 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
           worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); });
           worker!.on("exit", () => { dead ??= "the interpreter stopped"; for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
         });
+        // (warmed up as the board's interpreter is: its parser and first imports, and its checks', untimed but for START_GRACE_MS)
+        if (worker && !dead) await send({ cell: "warm-up", code: "", opts: {} }, () => {}, START_GRACE_MS, true);
+        await warmChecks();
       }
       let n = 0;
       await after(async (code, answer, ms) => {
