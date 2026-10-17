@@ -648,24 +648,30 @@ function floatPow(x: number, y: number): any {
 }
 function powMod(a: any, b: any, m: any): any {
   if (!(isPyInt(a) && isPyInt(b) && isPyInt(m))) {
-    // CPython's ternary_op: the base's type, then the exponent's and the
-    // modulus's where they differ: an int NotImplemented (not all are ints),
-    // a float its TypeError, another type's __pow__(exp, mod) only for the
-    // base (a class's ternary slot answers only as the left operand)
-    const seen: PyType[] = [];
-    for (const [i, x] of [a, b, m].entries()) {
-      const t = typeOf(x);
-      if (seen.includes(t)) continue;
-      seen.push(t);
-      if (isPyInt(x)) continue;
-      if (isPyFloat(x)) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
-      if (i !== 0) continue;
-      const f = special(a, "__pow__");
-      if (f !== undefined) {
-        const r = settle(f, f(a, b, m));
-        if (r !== NotImplemented) return r;
-      }
+    // CPython 3.14's ternary_op: the base's __pow__(exp, mod), the
+    // exponent's __rpow__(base, mod) (first when its type is a subtype of
+    // the base's), each NotImplemented passing on; int's and float's own
+    // (an int NotImplemented unless all are ints, a float CPython's
+    // TypeError once base and exponent are numbers); then the modulus's
+    // type, which a float's refuses the same way
+    const ta = typeOf(a), tb = typeOf(b), tm = typeOf(m);
+    const pa = special(a, "__pow__");
+    let rb = tb !== ta ? special(b, "__rpow__") : undefined;
+    if (rb !== undefined && tb.$mro.includes(ta)) {
+      const r = settle(rb, rb(b, a, m));
+      if (r !== NotImplemented) return r;
+      rb = undefined;
     }
+    if (pa !== undefined) {
+      const r = settle(pa, pa(a, b, m));
+      if (r !== NotImplemented) return r;
+    }
+    if (rb !== undefined) {
+      const r = settle(rb, rb(b, a, m));
+      if (r !== NotImplemented) return r;
+    }
+    const num = (x: any) => isPyInt(x) || isPyFloat(x);
+    if (tm !== ta && tm !== tb && isPyFloat(m) && num(a) && num(b)) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
     raise(T.TypeError, `unsupported operand type(s) for ** or pow(): '${typeName(a)}', '${typeName(b)}', '${typeName(m)}'`);
   }
   let base = big(a), e = big(b), n = big(m);
