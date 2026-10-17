@@ -6,7 +6,7 @@ import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
-  bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
+  bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr,
 } from "./object";
 import * as O from "./ops";
@@ -65,7 +65,7 @@ export function getset(cls: PyType, name: string, get: (o: any) => any, set: ((o
 // A get/set descriptor applies only to an instance of the type it is for; a
 // wrong receiver reaches a JavaScript property of an opaque object otherwise
 // (design/security.md rule 6).
-function descrReceiver(d: GetSet, o: any): void {
+function descrReceiver(d: { owner: PyType; name: string }, o: any): void {
   if (!isinstance(o, d.owner)) raise(T.TypeError, `descriptor '${d.name}' for '${d.owner.$name}' objects doesn't apply to a '${typeName(o)}' object`);
 }
 
@@ -300,6 +300,45 @@ method(getsetType, "__set__", (d: GetSet, o: any, v: any) => {
   d.set(o, v);
   return null;
 });
+// A __slots__ entry: type `member_descriptor`, the value kept in the
+// instance's own runtime slot (a `$` key, never an attribute), as
+// CPython's member descriptors; each its own slot, so that a subclass's
+// slot of the same name as a base's is another (CORR-D77-1)
+let memberIds = 0;
+export class PyMember {
+  key: string;
+  constructor(public owner: PyType, public name: string) {
+    this.key = `$slot:${++memberIds}:${name}`;
+  }
+}
+const memberType = builtinType("member_descriptor", [object], () => raise(T.TypeError, "cannot create 'member_descriptor' instances"));
+bindClass(PyMember, memberType);
+const memberOf = (d: PyMember, o: any) => {
+  descrReceiver(d, o);
+  const v = o[d.key];
+  return v === undefined ? raise(T.AttributeError, `'${typeName(o)}' object has no attribute '${d.name}'`) : v;
+};
+method(memberType, "__get__", (d: PyMember, o: any = undefined, t: any = null) => {
+  if (o === undefined) raise(T.TypeError, "__get__ expected at least 1 argument, got 0");
+  if (o === null) return t === null ? raise(T.TypeError, "__get__(None, None) is invalid") : d;
+  return memberOf(d, o);
+});
+method(memberType, "__set__", (d: PyMember, o: any, v: any) => {
+  descrReceiver(d, o);
+  Object.defineProperty(o, d.key, { value: v, writable: true, configurable: true, enumerable: false });
+  return null;
+});
+method(memberType, "__delete__", (d: PyMember, o: any) => {
+  memberOf(d, o);
+  delete o[d.key];
+  return null;
+});
+method(memberType, "__repr__", (d: PyMember) => `<member '${d.name}' of '${d.owner.$name}' objects>`);
+getset(memberType, "__name__", (d: PyMember) => d.name);
+getset(memberType, "__qualname__", (d: PyMember) => `${d.owner.$qualname ?? d.owner.$name}.${d.name}`);
+getset(memberType, "__objclass__", (d: PyMember) => d.owner);
+memberType.$dict.set("__doc__", null);
+
 // (a get/set descriptor without a deleter cannot be deleted, as CPython's
 // read-only ones: del (1).real)
 method(getsetType, "__delete__", (d: GetSet, o: any) => {
@@ -312,6 +351,9 @@ method(getsetType, "__delete__", (d: GetSet, o: any) => {
 // ------------------------------------------------------------------ descriptors
 
 export class PyProperty {
+  // (name: __set_name__'s, as CPython's prop_name; kept by getter, setter
+  // and deleter)
+  name: any = null;
   constructor(public fget: any, public fset: any, public fdel: any, public doc: any) {}
 }
 const property = builtinType("property", [object], (fget: any = null, fset: any = null, fdel: any = null, doc: any = null) => new PyProperty(fget, fset, fdel, doc));
@@ -322,25 +364,43 @@ property.$kw = (pos, names, values) => {
   return new PyProperty(b[0] ?? null, b[1] ?? null, b[2] ?? null, b[3] ?? null);
 };
 bindClass(PyProperty, property);
+// (a property's missing accessor as CPython's: "property 'key' of 'X' object
+// has no setter", its name __set_name__'s or its getter's __name__, the
+// type's qualified name; unnamed, "property of 'X' object ...")
+const propName = (p: PyProperty): any => p.name ?? (p.fget !== null ? getattr(p.fget, "__name__", null) : null);
+const noAccessor = (p: PyProperty, o: any, what: string): never => {
+  const n = propName(p), t = `'${typeOf(o).$qualname ?? typeName(o)}'`;
+  return raise(T.AttributeError, n !== null && n !== undefined ? `property ${repr(n)} of ${t} object has no ${what}` : `property of ${t} object has no ${what}`);
+};
 method(property, "__get__", (p: PyProperty, o: any, _t: any = null) => {
   if (o === null) return p;
-  if (p.fget === null) raise(T.AttributeError, `property of '${typeName(o)}' object has no getter`);
+  if (p.fget === null) noAccessor(p, o, "getter");
   return callObj(p.fget, [o]);
 });
 method(property, "__set__", (p: PyProperty, o: any, v: any) => {
-  if (p.fset === null) raise(T.AttributeError, `property of '${typeName(o)}' object has no setter`);
+  if (p.fset === null) noAccessor(p, o, "setter");
   callObj(p.fset, [o, v]);
   return null;
 });
 method(property, "__delete__", (p: PyProperty, o: any) => {
-  if (p.fdel === null) raise(T.AttributeError, `property of '${typeName(o)}' object has no deleter`);
+  if (p.fdel === null) noAccessor(p, o, "deleter");
   callObj(p.fdel, [o]);
   return null;
 });
+method(property, "__set_name__", (p: PyProperty, _owner: any, name: any) => {
+  p.name = name;
+  return null;
+});
+getset(property, "__name__", (p: PyProperty) => propName(p) ?? raise(T.AttributeError, "'property' object has no attribute '__name__'"), (p: PyProperty, v: any) => void (p.name = v));
 // getter/setter/deleter(None) keep the existing function, as CPython does.
-method(property, "getter", (p: PyProperty, f: any) => new PyProperty(f ?? p.fget, p.fset, p.fdel, p.doc));
-method(property, "setter", (p: PyProperty, f: any) => new PyProperty(p.fget, f ?? p.fset, p.fdel, p.doc));
-method(property, "deleter", (p: PyProperty, f: any) => new PyProperty(p.fget, p.fset, f ?? p.fdel, p.doc));
+const propCopy = (p: PyProperty, fget: any, fset: any, fdel: any) => {
+  const q = new PyProperty(fget, fset, fdel, p.doc);
+  q.name = p.name;
+  return q;
+};
+method(property, "getter", (p: PyProperty, f: any) => propCopy(p, f ?? p.fget, p.fset, p.fdel));
+method(property, "setter", (p: PyProperty, f: any) => propCopy(p, p.fget, f ?? p.fset, p.fdel));
+method(property, "deleter", (p: PyProperty, f: any) => propCopy(p, p.fget, p.fset, f ?? p.fdel));
 getset(property, "fget", (p) => p.fget);
 getset(property, "fset", (p) => p.fset);
 getset(property, "fdel", (p) => p.fdel);
@@ -586,7 +646,29 @@ getset(bfType, "__module__", (f) => f.__module__ ?? null); // (a module's functi
 getset(bfType, "__doc__", (f) => f.__doc__ ?? null);
 callSlot(method(bfType, "__call__", (f: any, ...a: any[]) => f(...a)));
 
+// (pickled as CPython's: by name, getattr(obj, name) when bound)
+const builtinGetattr = () => getattr(hooks.importModule("builtins"), "getattr");
+method(bfType, "__reduce__", (f: any) => (f.$self !== undefined ? tuple([builtinGetattr(), tuple([f.$self, f.__name__ ?? f.name])]) : f.__qualname__ ?? f.__name__ ?? f.name));
+// A builtin type's method, unbound (typeOf): method_descriptor, or a slot's
+// wrapper_descriptor, as CPython's; pickled as getattr(type, name)
+for (const [tname, kind] of [["method_descriptor", "method"], ["wrapper_descriptor", "slot wrapper"]] as const) {
+  const dt = builtinType(tname, [object], () => raise(T.TypeError, `cannot create '${tname}' instances`));
+  (T as any)[tname] = dt;
+  getset(dt, "__name__", (f) => f.__name__ ?? f.name);
+  getset(dt, "__qualname__", (f) => f.__qualname__ ?? f.name);
+  getset(dt, "__doc__", (f) => f.__doc__ ?? null);
+  getset(dt, "__objclass__", (f) => f.$owner);
+  callSlot(method(dt, "__call__", (f: any, ...a: any[]) => f(...a)));
+  method(dt, "__get__", (f: any, o: any = undefined, t: any = null) => {
+    if (o === undefined) raise(T.TypeError, "__get__ expected at least 1 argument, got 0");
+    if (o === null) return t === null ? raise(T.TypeError, "__get__(None, None) is invalid") : f;
+    return bindMethod(selfChecked(f), o);
+  });
+  method(dt, "__repr__", (f: any) => `<${kind} '${f.__name__ ?? f.name}' of '${f.$owner?.$name}' objects>`);
+  method(dt, "__reduce__", (f: any) => tuple([builtinGetattr(), tuple([f.$owner, f.__name__ ?? f.name])]));
+}
 const methodType = builtinType("method", [object], (f: any, self: any) => bindMethod(f, self));
+method(methodType, "__reduce__", (m: any) => tuple([builtinGetattr(), tuple([m.$self, m.$func.__name__])]));
 getset(methodType, "__self__", (m) => m.$self);
 getset(methodType, "__func__", (m) => m.$func);
 getset(methodType, "__name__", (m) => m.$func.__name__);
@@ -836,8 +918,37 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
     ns.set("__annotate_func__", ns.get("__annotate__"));
     ns.delete("__annotate__");
   }
+  // __slots__, as CPython's type_new: its names, mangled, become member
+  // descriptors; the instances have no __dict__ unless a slot or a base
+  // gives them one
+  let slotNames: string[] | null = null, slotDict = false;
+  if (ns.has("__slots__")) {
+    const sv = ns.get("__slots__");
+    const items = typeof unbox(sv) === "string" ? [sv] : O.toArray(sv);
+    const baseDict = bases.some((b: any) => b.$heap === true && b.$noDict !== true);
+    slotNames = [];
+    for (const it of items) {
+      const n = unbox(it);
+      if (typeof n !== "string") raise(T.TypeError, `__slots__ items must be strings, not '${typeName(it)}'`);
+      if (!/^[\p{L}\p{Nl}_][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}]*$/u.test(n)) raise(T.TypeError, "__slots__ must be identifiers");
+      if (n === "__dict__") {
+        if (baseDict || slotDict) raise(T.TypeError, "__dict__ slot disallowed: we already got one");
+        slotDict = true;
+        continue;
+      }
+      if (n === "__weakref__") continue;
+      // (a private name mangled, as CPython's _Py_Mangle)
+      const owner = name.replace(/^_+/, "");
+      slotNames.push(n.startsWith("__") && !n.endsWith("__") && owner !== "" ? `_${owner}${n}` : n);
+    }
+    for (const n of slotNames) if (ns.has(n)) raise(T.ValueError, `'${n}' in __slots__ conflicts with class variable`);
+  }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
   (cls as any).$heap = true;
+  if (slotNames !== null) {
+    for (const n of slotNames) ns.set(n, new PyMember(cls, n));
+    if (!slotDict && bases.every((b: any) => b.$heap !== true || b.$noDict === true)) (cls as any).$noDict = true;
+  }
   if (cell !== undefined) cell.v = cls;
   if (dcell !== undefined) classDictHooks.bind!(dcell, cls);
   if (meta !== T.type) (cls as any).$meta = meta;
@@ -969,6 +1080,31 @@ exc("PermissionError", OSError);
 exc("IsADirectoryError", OSError);
 exc("NotADirectoryError", OSError);
 exc("TimeoutError", OSError);
+exc("BlockingIOError", OSError);
+exc("ChildProcessError", OSError);
+const ConnectionError = exc("ConnectionError", OSError);
+exc("BrokenPipeError", ConnectionError);
+exc("ConnectionAbortedError", ConnectionError);
+exc("ConnectionRefusedError", ConnectionError);
+exc("ConnectionResetError", ConnectionError);
+exc("InterruptedError", OSError);
+exc("ProcessLookupError", OSError);
+// OSError(errno, strerror, ...) is the subclass its errno names, as
+// CPython's OSError.__new__ (exceptions.c errnomap, Linux's numbers): only
+// OSError itself, with 2 to 5 arguments (as oserror_parse_args), an int errno
+const ERRNO_CLASS = new Map<number, PyType>(
+  ([[11, "BlockingIOError"], [114, "BlockingIOError"], [115, "BlockingIOError"], [32, "BrokenPipeError"], [108, "BrokenPipeError"],
+    [10, "ChildProcessError"], [103, "ConnectionAbortedError"], [111, "ConnectionRefusedError"], [104, "ConnectionResetError"],
+    [17, "FileExistsError"], [2, "FileNotFoundError"], [21, "IsADirectoryError"], [20, "NotADirectoryError"], [4, "InterruptedError"],
+    [13, "PermissionError"], [1, "PermissionError"], [3, "ProcessLookupError"], [110, "TimeoutError"]] as const).map(([n, c]) => [n, T[c]]),
+);
+const errnoClass = (cls: any, args: any[]): any => {
+  if (cls !== OSError || args.length < 2 || args.length > 5) return cls;
+  const v = unbox(args[0]);
+  const n = typeof v === "boolean" ? +v : typeof v === "bigint" ? (v >= 0n && v < 1024n ? Number(v) : -1) : typeof v === "number" && Number.isInteger(v) ? v : -1;
+  return ERRNO_CLASS.get(n) ?? cls;
+};
+allocator(OSError, (cls: any, ...args: any[]) => newException(errnoClass(cls, args), ...args), (pos: any[]) => newException(errnoClass(pos[0], pos.slice(1)), ...pos.slice(1)));
 const ReferenceError = exc("ReferenceError", Exception);
 void ReferenceError;
 const RuntimeError = exc("RuntimeError", Exception);
@@ -2172,18 +2308,26 @@ method(dict, "get", (d: PyDict, k: any, dflt: any = null) => {
   return v === undefined ? dflt : v;
 });
 method(dict, "setdefault", (d: PyDict, k: any, dflt: any = null) => {
-  const v = dictGet(d, k);
+  // (the key hashed once for both, as CPython's, CORR-D77-2)
+  const kh = dictKeyHash(d, k);
+  const v = dictGet(d, k, kh);
   if (v !== undefined) return v;
-  dictSet(d, k, dflt);
+  dictSet(d, k, dflt, kh);
   return dflt;
 });
 method(dict, "pop", (d: PyDict, k: any, dflt: any = undefined) => {
-  const v = dictGet(d, k);
+  // (an empty dict's: the default or KeyError, the key never hashed, as
+  // CPython's dict_pop)
+  // (but a class namespace's dict refuses a key other than a str even
+  // when empty, daybreak2's HARD-E4A-1)
+  const empty = d.$m.size === 0 && (d as any).$strOnly !== true;
+  const kh = empty ? undefined : dictKeyHash(d, k);
+  const v = empty ? undefined : dictGet(d, k, kh);
   if (v === undefined) {
     if (dflt !== undefined) return dflt;
     throw markRaised(T.KeyError(k));
   }
-  dictDelete(d, k);
+  dictDelete(d, k, kh);
   return v;
 });
 method(dict, "popitem", (d: PyDict) => {
@@ -3062,14 +3206,50 @@ getset(object, "__dict__", (o) => {
     if (O.truth(signed) && a.length && a[0] >= 128) v -= 1n << BigInt(8 * a.length);
     return O.normBig(v);
   }, "from_bytes", sig(["cls", "bytes", "byteorder"], { kwonly: ["signed"] }))));
+  // (as CPython's oserror_init: with 2 to 5 arguments, errno, strerror,
+  // filename, winerror and filename2, the args then only the first two
+  // once a filename is given; an exact BlockingIOError's numeric third
+  // argument is characters_written instead)
+  // (characters_written as PyNumber_AsSsize_t converts it: an index, and a
+  // ValueError past the signed 64-bit range, CORR-D77-5)
+  const writtenOf = (v: any): any => {
+    const k = O.index(v);
+    const b = typeof k === "bigint" ? k : BigInt(k);
+    if (b < -(2n ** 63n) || b >= 2n ** 63n) raise(T.ValueError, `cannot fit '${typeName(v)}' into an index-sized integer`);
+    return k;
+  };
   method(T.OSError, "__init__", (self: any, ...args: any[]) => {
     self.args = tuple(args);
-    self.errno = args.length >= 2 ? args[0] : null;
-    self.strerror = args.length >= 2 ? args[1] : null;
-    self.filename = args.length >= 3 ? args[2] : null;
+    self.errno = self.strerror = self.filename = null;
+    if (args.length >= 2 && args.length <= 5) {
+      self.errno = args[0];
+      self.strerror = args[1];
+      const f = args.length >= 3 ? args[2] : null;
+      if (f !== null) {
+        if (typeOf(self) === T.BlockingIOError && (O.isPyInt(unbox(f)) || O.isPyFloat(unbox(f)))) {
+          Object.defineProperty(self, "$written", { value: writtenOf(f), writable: true, configurable: true });
+        } else {
+          self.filename = f;
+          if (args.length >= 5 && args[4] !== null) Object.defineProperty(self, "$filename2", { value: args[4], writable: true, configurable: true });
+          self.args = tuple([args[0], args[1]]);
+        }
+      }
+    }
     return null;
   });
-  method(T.OSError, "__str__", (self: any) => (self.errno !== null && self.errno !== undefined ? `[Errno ${str(self.errno)}] ${str(self.strerror)}${self.filename !== null && self.filename !== undefined ? `: ${repr(self.filename)}` : ""}` : T.BaseException.$dict.get("__str__")(self)));
+  getset(T.OSError, "filename2", (self: any) => self.$filename2 ?? null, (self: any, v: any) => void Object.defineProperty(self, "$filename2", { value: v, writable: true, configurable: true }));
+  // (a C Py_ssize_t there: -1 is unset, as on reading, CORR-D77-5)
+  getset(
+    T.BlockingIOError,
+    "characters_written",
+    (self: any) => (self.$written === undefined || self.$written === -1 ? raise(T.AttributeError, "characters_written") : self.$written),
+    (self: any, v: any) => void Object.defineProperty(self, "$written", { value: writtenOf(v), writable: true, configurable: true }),
+  );
+  method(T.OSError, "__str__", (self: any) => {
+    if (self.errno === null || self.errno === undefined) return T.BaseException.$dict.get("__str__")(self);
+    const f = self.filename !== null && self.filename !== undefined ? `: ${repr(self.filename)}${self.$filename2 !== undefined && self.$filename2 !== null ? ` -> ${repr(self.$filename2)}` : ""}` : "";
+    return `[Errno ${str(self.errno)}] ${str(self.strerror)}${f}`;
+  });
 }
 
 // ------------------------------------------------------------------ subclassing builtin types
@@ -3589,12 +3769,29 @@ T.GenericAlias = genericAliasType;
 {
   const copyreg = () => hooks.importModule("copyreg");
   const getstate = method(object, "__getstate__", (self: any) => {
-    if (!hasInstanceDict(self)) return null;
-    const d = new PyDict();
-    // (the attribute dict: never a layout's own storage, as a bytes
-    // subclass's buffer, which a pickle would restore as attributes)
-    for (const k of attrNames(self)) dictSet(d, k, self[k]);
-    return d.$m.size ? d : null;
+    let state: any = null;
+    if (hasInstanceDict(self)) {
+      const d = new PyDict();
+      // (the attribute dict: never a layout's own storage, as a bytes
+      // subclass's buffer, which a pickle would restore as attributes)
+      for (const k of attrNames(self)) dictSet(d, k, self[k]);
+      if (d.$m.size) state = d;
+    }
+    // (__slots__' values as CPython's object_getstate_default: those set,
+    // by copyreg._slotnames, then (state, slots))
+    const cls = typeOf(self);
+    if (cls.$mro.some((c: any) => c.$dict.has("__slots__"))) {
+      const slots = new PyDict();
+      for (const n of O.toArray(callObj(getattr(copyreg(), "_slotnames"), [cls]))) {
+        try {
+          dictSet(slots, n, getattr(self, n));
+        } catch (e) {
+          if (!isinstance(e, T.AttributeError)) throw e;
+        }
+      }
+      if (slots.$m.size) state = tuple([state, slots]);
+    }
+    return state;
   });
   const reduceNewobj = (self: any) => {
     const cls = typeOf(self);
@@ -3625,4 +3822,11 @@ T.GenericAlias = genericAliasType;
     return callObj(getattr(copyreg(), "_reduce_ex"), [self, proto]);
   });
   void getstate;
+}
+
+// The dunders a builtin type defines as methods, not through its slot:
+// method_descriptor in CPython, not wrapper_descriptor (CORR-D77-3)
+for (const [t, name] of [[dict, "__getitem__"], [dict, "__contains__"], [list, "__getitem__"], [set, "__contains__"], [frozenset, "__contains__"]] as const) {
+  const f = t.$dict.get(name);
+  if (f !== undefined) f.$methodDescr = true;
 }
