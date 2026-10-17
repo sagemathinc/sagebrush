@@ -30,7 +30,8 @@ show("strftime %Z %z struct", lambda: time.strftime("%Z|%z", time.localtime(0)))
 show("strftime gmtime %Z %z", lambda: time.strftime("%Z|%z", time.gmtime(0)))
 for f in ["%Q", "%", "abc%", "%E", "%Ez", "%Oz", "%EY", "%OH", "%5", "%-", "%_", "%#", "%^", "%+", "%v", "%10Q", "%-10d", "%:z", "%::z", "%N", "%5%"]:
     show("strftime %r" % f, lambda: time.strftime(f, (2020,1,2,3,4,5,3,2,0)))
-for s in ["a", -1, float("nan"), float("inf"), None, 1e-9, 0]:
+for s in ["a", -1, float("nan"), float("inf"), None, 1e-9, 0, float("-inf"), 10**100, -10**100, 2**63, 9223372037, -9223372037,
+          1e10, -1e10, 1e300, -1e300, -0.5, __import__("fractions").Fraction(10**100), __import__("fractions").Fraction(-1, 2)]:
     show("sleep %r" % (s,), lambda: time.sleep(s))
 show("struct_time 3", lambda: time.struct_time((1,2,3)))
 show("struct_time 12", lambda: time.struct_time(range(12)))
