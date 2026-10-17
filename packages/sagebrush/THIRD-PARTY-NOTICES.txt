@@ -62,6 +62,13 @@ Copyright (c) 2001 Python Software Foundation. See
   CPython's `long_true_divide` (`Objects/longobject.c`): the shift, the two
   extra bits and the sticky bit, a single round to even at the result's
   precision (subnormals included), then exact scaling.
+- `src/runtime/re.ts`, `translate` and `fixFlags`: the parse errors of
+  CPython 3.14's `Lib/re/_parser.py` (`_parse_flags`, group references,
+  repeats, `fix_flags`, with their messages and positions) ported, and
+  `PatternError` as `Lib/re/_constants.py`'s; `src/runtime/re-shape.ts`
+  follows the repeat and look-around semantics of `Modules/_sre/sre_lib.h`
+  (`MAX_UNTIL`, `MIN_UNTIL`, `ASSERT`, `SUCCESS`'s `must_advance`) and the
+  widths of `_parser.py`'s `getwidth` (no code of them is used there).
 - `src/runtime/pygamma.ts`: `math.gamma` and `math.lgamma`, ported from
   CPython 3.14's `Modules/mathmodule.c` (`m_tgamma`, `m_lgamma`, `m_sinpi`,
   `lanczos_sum` and their Lanczos coefficients).
