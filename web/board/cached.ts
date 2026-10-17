@@ -19,6 +19,7 @@
 import { canonical, cleanDoc, type BoardDoc } from "./doc";
 import { fromRecords, toRecords } from "./history";
 import type { BoardStore } from "./mount";
+import { openDb } from "./idb-open";
 
 /** A document kept elsewhere: CoCalc's syncdb (later); a fake one in the tests. */
 export interface RemoteBoard {
@@ -66,6 +67,12 @@ export async function docHash(d: BoardDoc): Promise<string> {
 
 const req = <T>(r: IDBRequest<T>) => new Promise<T>((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
 
+// (after an open of the copies' database that failed, how long before one is tried again)
+const DOC_OPEN_RETRY_MS = 30_000;
+
+/** The caption's words when this browser's copy couldn't be opened, and the saved document is shown instead. */
+export const COPY_UNAVAILABLE = "**This browser's copy of the board couldn't be opened**, so the saved board is shown: edits made here and not saved yet aren't in it. Edits now go to the saved board.";
+
 /** Copies of documents in this browser's IndexedDB (database
  * sagebrush-board-docs-2), the least recently opened dropped beyond `max`.
  * (-2: copies whose pages have ids.  The first database's copies, from
@@ -74,14 +81,22 @@ const req = <T>(r: IDBRequest<T>) => new Promise<T>((ok, no) => { r.onsuccess = 
  * shipped with it.) */
 export class IdbDocCache implements DocCache {
   private db: Promise<IDBDatabase> | null = null;
-  constructor(private name = "sagebrush-board-docs-2", private max = 200) {}
-  private open() {
-    return (this.db ??= new Promise<IDBDatabase>((ok, no) => {
-      const r = indexedDB.open(this.name, 1);
-      r.onupgradeneeded = () => r.result.createObjectStore("docs", { keyPath: "key" }).createIndex("at", "at");
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => no(r.error);
-    }));
+  private failedAt = -Infinity;
+  /** @param openMs how long an open may take (idb-open.ts): one that doesn't answer fails */
+  constructor(private name = "sagebrush-board-docs-2", private max = 200, private openMs = 3000) {}
+  private open(): Promise<IDBDatabase> {
+    // (bounded, web/board/idb-open.ts: an open can stay unanswered for good,
+    // behind another page's upgrade, and the board would never open; one that
+    // fails is no copy, as the store's callers take it.  After one that failed,
+    // none tried for DOC_OPEN_RETRY_MS: each use fails at once.  Closed when
+    // another page asks for a version change: opened again by the next use)
+    if (!this.db && Date.now() - this.failedAt < DOC_OPEN_RETRY_MS) return Promise.reject(new Error(`${this.name}: not open (it did not open recently)`));
+    if (!this.db) {
+      const p: Promise<IDBDatabase> = openDb(this.name, 1, (db) => { db.createObjectStore("docs", { keyPath: "key" }).createIndex("at", "at"); }, () => { if (this.db === p) this.db = null; }, this.openMs);
+      this.db = p;
+      p.catch(() => { if (this.db === p) { this.db = null; this.failedAt = Date.now(); } });
+    }
+    return this.db;
   }
   async get(key: string): Promise<CachedDoc | null> {
     const db = await this.open(), st = db.transaction("docs", "readwrite").objectStore("docs");
@@ -559,7 +574,10 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
      * trying now: busy (opened busy, or its saves refused `tries` times). */
     busy: () => busy || !!pending,
     async load() {
-      const c = await step(async () => cache.get(key).catch(() => null)), copy = c && parse(c.json);
+      // (a copy that couldn't be read, as one whose database never opens: the remote's, and said so)
+      let unread = false;
+      const c = await step(async () => cache.get(key).catch((e) => { unread = true; console.warn("board: the copy:", e); return null; })), copy = c && parse(c.json);
+      const said = () => (unread ? { notice: COPY_UNAVAILABLE } : {});
       await step(async () => { ver = versionOf(c); });
       // (a copy whose pages have ids: shown at once, the remote asked meanwhile)
       if (c && copy && identified(copy) === copy) {
@@ -583,13 +601,13 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
           resolveSynced("busy");
           // (a change heard since it was asked for: as any)
           if (heard !== got.at) ask();
-          return { doc: view };
+          return { doc: view, ...said() };
         }
         view = (await keep(got.doc, got.hash)) ? got.doc : entry ? parse(entry.json) : got.doc;
         resolveSynced("fresh");
         // (a change since: as any)
         ask();
-        return { doc: view };
+        return { doc: view, ...said() };
       });
     },
     save(d) {
