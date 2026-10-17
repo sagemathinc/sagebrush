@@ -36,13 +36,17 @@ const no = (why: string): never => {
   throw new Refused(why);
 };
 const MAX_LABEL = 200;
+/** The longest graph text parsed: a graph at the caps, every label at
+ * MAX_LABEL, is under 6 million characters (HARD-4D6-1). */
+export const MAX_JSON = 8_000_000;
+const MAX_COLOR = 64;
 // (a CSS colour as Python's to_color gives it: a hex colour, a name, or rgb()/rgba() of numbers)
 const COLOR = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,30}|rgba?\(\s*[0-9.]+%?\s*(,\s*[0-9.]+%?\s*){2,3}\))$/;
 const DASHES: Record<string, number[]> = { "-": [], "--": [6, 4], ":": [1.5, 3], "-.": [6, 3, 1.5, 3] };
 
 const num = (v: unknown, what: string, lo = -1e12, hi = 1e12): number =>
   typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : no(what + " is not a number in range");
-const color = (v: unknown, what: string): string => (typeof v === "string" && COLOR.test(v) ? v : no(what + " is not a colour"));
+const color = (v: unknown, what: string): string => (typeof v === "string" && v.length <= MAX_COLOR && COLOR.test(v) ? v : no(what + " is not a colour"));
 const label = (v: unknown, what: string): string | null =>
   v === null ? null : typeof v === "string" && v.length <= MAX_LABEL ? v : no(what + " is not a short string");
 
@@ -80,7 +84,10 @@ const BOX = 20, SCALE = 64;
 const toSpring = (x: number, y: number) => ({ x: x * SCALE - BOX / 2, y: -y * SCALE - BOX / 2 });
 const fromSpring = (p: { x: number; y: number }) => ({ x: (p.x + BOX / 2) / SCALE, y: -(p.y + BOX / 2) / SCALE });
 
-export function mount(fig: HTMLElement, json: string): boolean {
+/** data: the graph's text (refused past MAX_JSON characters before it is
+ * parsed), or its JSON as a saved notebook keeps it, which check() reads
+ * property by property, never serialized. */
+export function mount(fig: HTMLElement, data: unknown): boolean {
   const fallback = fig.querySelector("svg") as SVGSVGElement | null;
   const explain = (why: string) => {
     const p = document.createElement("p");
@@ -92,7 +99,11 @@ export function mount(fig: HTMLElement, json: string): boolean {
   };
   let g: GraphData;
   try {
-    g = check(JSON.parse(json));
+    if (typeof data === "string") {
+      if (data.length > MAX_JSON) no("is more than " + MAX_JSON + " characters");
+      data = JSON.parse(data);
+    }
+    g = check(data);
   } catch (e) {
     return explain("This is a still picture: the interactive view was not shown, because the graph " + (e instanceof Refused ? e.message : "is malformed") + ".");
   }

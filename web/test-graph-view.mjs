@@ -108,6 +108,21 @@ try {
     return { out, fine };
   })()`);
   ok(refusals.fine && refusals.out.every((m) => m !== "accepted"), "check() accepts good data and refuses each malformed one: " + JSON.stringify(refusals.out));
+  // past the size cap (text) or with an oversized colour, refused before
+  // anything is parsed or matched: the SVG stays, no canvas (HARD-4D6-1);
+  // a graph as JSON (a saved notebook's) is read without serializing it
+  const big = await ev(`(() => {
+    const good = { format: 1, directed: false, nodes: [{ label: "0", x: 0, y: 0, color: "#fec7b8" }], edges: [], radius: 12, thickness: 1, dash: "-", loop: 0.1, offset: 0, label_background: null, spring: true, range: [-1, 1, -1, 1] };
+    const tryMount = (data) => { const f = document.createElement('figure'); f.innerHTML = '<svg></svg>'; document.body.append(f); const r = SagebrushGraphView.mount(f, data); return [r, !!f.querySelector('canvas'), f.querySelector('svg').style.display, f.querySelector('.sbgraph-why')?.textContent ?? ""]; };
+    return {
+      text: tryMount(JSON.stringify({ ...good, junk: "x".repeat(8_000_001) })),
+      colour: tryMount({ ...good, nodes: [{ ...good.nodes[0], color: "a".repeat(65) }] }),
+      object: tryMount({ ...good, junk: new Array(10).fill("y") }),
+    };
+  })()`);
+  ok(big.text[0] === false && !big.text[1] && big.text[2] === "" && /more than 8000000 characters/.test(big.text[3]), "a graph text past 8,000,000 characters is refused before it is parsed; the SVG stays, no canvas: " + big.text[3]);
+  ok(big.colour[0] === false && !big.colour[1] && /colour/.test(big.colour[3]), "a colour longer than 64 characters is refused before the pattern: " + big.colour[3]);
+  ok(big.object[0] === true && big.object[1], "a graph given as JSON (an .ipynb file's) is drawn, its other fields ignored");
   // a refused graph leaves the still picture, saying why
   const why = await ev(`(() => { const f = document.createElement('figure'); f.innerHTML = '<svg></svg>'; document.body.append(f); const r = SagebrushGraphView.mount(f, '{"format": 7}'); return [r, f.querySelector('.sbgraph-why')?.textContent, f.querySelector('svg').style.display]; })()`);
   ok(why[0] === false && /still picture/.test(why[1] ?? "") && why[2] === "", "refused data: the SVG stays, and it says why: " + why[1]);
