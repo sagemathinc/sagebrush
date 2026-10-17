@@ -210,6 +210,65 @@ report([str(M.Type(z)) for z in a[0]] == ["FldRatElt", "FldRatElt"] and len(a[2]
 a = seq([2.5, 0.125])
 report(all(isinstance(z, M.MReal) for z in a), "a sequence of doubles in Magma: reals")
 
+# ---- each sequence keeps its universe, an empty one's too, as Magma does (astra's CORR-695-3 at 9b49a99f)
+U = lambda q: str(M.Universe(q))
+a = seq([[1, 2], [Fraction(1, 3)], []])
+report([U(z) for z in a] == ["Rational Field"] * 3, "[[1, 2], [1/3], []]: each inner sequence's universe the Rational Field, the empty one's too:", [U(z) for z in a])
+b = M.Append(a[2], 1)
+report(str(M.Type(b[0])) == "FldRatElt" and U(b) == "Rational Field", "Append(the empty one, 1): a rational, FldRatElt, as Magma gives")
+for ring, want, el in [("QQ", "Rational Field", "FldRatElt"), ("ZZ", "Integer Ring", "RngIntElt")]:
+    z = _sbx.decode({"t": "matrix", "ring": ring, "shape": [0], "v": []}, "magma")
+    zb = M.Append(z, 1)
+    report(len(z) == 0 and U(z) == want and str(M.Type(zb[0])) == el, "an empty %s vector into Magma: its universe %s kept; Append(it, 1) is %s" % (ring, want, el))
+z = _sbx.decode({"t": "array", "dtype": "int64", "shape": [0], "v": []}, "magma")
+report(U(z) == "Integer Ring", "an empty int64 array into Magma: the Integer Ring")
+try:
+    M.Universe(_sbx.decode({"t": "list", "v": []}, "magma"))
+    report(False, "[] in Magma has a universe")
+except M.MagmaError as err:
+    report("Illegal null sequence" in str(err), "[] in Magma: a null sequence, as Magma's [ ] is:", err)
+for label, data in [("of reals", [[1.5], []]), ("of strings", [["a"], []]), ("of sequences", [[[1]], []])]:
+    try:
+        seq(data)
+        report(False, "an empty sequence", label, "beside a full one was made")
+    except _sbx.SbxError as err:
+        report("can't keep that universe" in str(err), "an empty sequence", label, "beside a full one: refused:", err)
+try:
+    _sbx.decode({"t": "array", "dtype": "float64", "shape": [0], "v": []}, "magma")
+    report(False, "an empty float64 array into Magma was made")
+except _sbx.SbxError as err:
+    report("can't keep that universe" in str(err), "an empty float64 array into Magma: refused:", err)
+
+# ---- linear in the checked data: universes found once, bottom-up, each
+# node built once (daybreak2's HARD-9B4-1).  A depth-32 nest: at its bottom
+# 10^5 integers (32 lists deep, the most _check admits), beside another of one rational, so that every
+# level unifies Z with Q and the integers are coerced into Q, once each.
+import time
+def nest(depth, inner):
+    for _ in range(depth):
+        inner = {"t": "list", "v": [inner]}
+    return inner
+N = 10 ** 5
+ints = {"t": "list", "v": [{"t": "int", "v": str(k)} for k in range(N)]}
+data = {"t": "list", "v": [nest(30, ints), nest(30, {"t": "list", "v": [{"t": "rat", "v": "1/3"}]})]}
+nodes = N + 2 * 31 + 2
+t0 = time.time()
+a = _sbx.decode(data, "magma")
+took = time.time() - t0
+inner = a[0]
+for _ in range(30):
+    inner = inner[0]
+report(len(inner) == N and str(M.Type(inner[7])) == "FldRatElt" and inner[7] == 7, "a depth-32 nest of 10^5 integers beside one of a rational: the integers coerced into Q")
+report(_sbx._magma_work <= 2 * nodes + 64, "its work linear: %d node visits for %d nodes (at most 2 x nodes + 64)" % (_sbx._magma_work, nodes))
+report(took < 60, "and within 60 s (here %.1f s)" % took)
+# (a list refused early: its first two elements already have no universe, the rest never visited)
+bad = {"t": "list", "v": [{"t": "int", "v": "1"}, {"t": "str", "v": "a"}, ints]}
+try:
+    _sbx.decode(bad, "magma")
+    report(False, "[1, \"a\", 10^5 integers] in Magma was made")
+except _sbx.SbxError as err:
+    report("valid universe" in str(err) and _sbx._magma_work <= 4, "[1, \"a\", 10^5 integers] refused after %d node visits:" % _sbx._magma_work, err)
+
 # ---- empty matrices: their shape and parent kept, or refused (astra's CORR-695-2)
 for data in [{"t": "matrix", "ring": "QQ", "shape": [0, 3], "v": []}, {"t": "matrix", "ring": "ZZ", "shape": [3, 0], "v": []}, {"t": "array", "dtype": "int64", "shape": [0, 3], "v": []}, {"t": "array", "dtype": "float64", "shape": [0, 0], "v": []}, {"t": "array", "dtype": "float64", "shape": [2, 0], "v": []}]:
     try:
