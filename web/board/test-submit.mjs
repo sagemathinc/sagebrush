@@ -106,7 +106,7 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
 const evalIn = async (expression, sessionId, contextId) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, sessionId);
-  if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
+  if (r?.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 300) + " in: " + expression.slice(0, 300));
   return r?.result?.value;
 };
 const top = (e) => evalIn(e);
@@ -216,32 +216,68 @@ try {
   check(!!(await until(async () => (await sent("decide")).length === 1)), "the request sent on the port");
   const d1 = decideRequest(posted, (await sent("decide"))[0]);
   check(d1.ok && d1.request.item === "q2" && d1.request.answer.includes("$g \\in G$"), "and it passes the host's check, the reader's words its answer" + (d1.ok ? "" : ": " + d1.message));
-  check(!!(await until(() => frame(`${fb}?.textContent.includes("Your words suggest") && !!${fb}.querySelector('.katex') && !!${fb}.querySelector('a.board-ref[href="#n1"]')`))), "an option: its about shown, typeset, with its next");
-  // (the link says where it goes: the item's title or first line, never its id)
-  const linkText = () => frame(`${fb}.querySelector('a.board-ref').textContent`);
-  check(await linkText() === "→ Transitive vs 2-transitive. G acts transitively when for…", "its next link says the item's first line, its Markdown and math signs dropped, cut short: " + JSON.stringify(await linkText()));
+  // (the host proposes, the reader confirms, William Oct 17: the option with Yes, to its next step, and No)
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("Your words suggest") && ${fb}.textContent.includes("Is that what you meant?") && !!${fb}.querySelector('.katex') && !!${fb}.querySelector('a.board-ask-yes[href="#n1"]') && ${fb}.querySelector('button.board-ask-no')?.textContent === "No"`))), "an option proposed: its about shown, typeset, with Yes (to its next) and No");
+  // (Yes says where it goes: the item's title or first line, never its id)
+  const linkText = () => frame(`${fb}.querySelector('a.board-ask-yes').title`);
+  check(await linkText() === "→ Transitive vs 2-transitive. G acts transitively when for…", "its Yes says where it goes, the item's first line, its Markdown and math signs dropped, cut short: " + JSON.stringify(await linkText()));
   check(!!(await until(() => frame(`(() => { const card = ${fb}.closest(".board-item"); return card.scrollHeight <= card.clientHeight + 1; })()`), 10000)), "and its card as tall as what it now shows");
   // (nothing over it: the tour's caption at the bottom never covers what the card now shows)
   const uncovered = (sel) => `(() => { const el = ${sel}; if (!el) return false; const r = el.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.width > 0 && r.bottom <= innerHeight && !!at && (at === el || el.contains(at)); })()`;
-  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('a.board-ref')`)), 10000)), "its next link is visible, nothing over it (elementFromPoint at its center)");
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('a.board-ask-yes')`)), 10000)) && !!(await frame(uncovered(`${fb}.querySelector('.board-ask-no')`))), "Yes and No are visible, nothing over them (elementFromPoint at their centers)");
   check(!!(await until(() => frame(uncovered(`document.querySelector('[data-ask="q2"] .board-ask-req')`)), 10000)), "and so is the question's \"required\"");
   await shot("submit-5-decided.png");
+  // No: every option, each to its own next step, and the reader's own words
+  await frame(`${fb}.querySelector('.board-ask-no').click()`);
+  const choices = () => frame(`[...${fb}.querySelectorAll('.board-ask-choice')].map((c) => (c.getAttribute('href') ?? '') + '|' + c.textContent.trim().slice(0, 30).trim())`);
+  check(!!(await until(async () => JSON.stringify(await choices()) === JSON.stringify(["#n1|Transitive asks only that one", "#s1|says every point reaches every", "|Something else: in my own word"]) && await frame(`${fb}.textContent.includes("Then which is closest") && !!${fb}.querySelector('.board-ask-choice .katex')`), 10000)), "No: every option, typeset, to its next step, and Something else: " + JSON.stringify(await choices()));
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('.board-ask-own')`)), 10000)), "...the last of them in view, nothing over it (No)");
+  await shot("submit-5b-no.png");
+  check(await frame(`${fb}.querySelector('a.board-ask-choice[href="#s1"]').title === "→ Go to the next step"`), "a next item with no title or text: \"Go to the next step\", not its id");
+  // Something else: the reader's own words, their field open and focused; Choose again: the options again
+  await frame(`${fb}.querySelector('.board-ask-own').click()`);
+  check(!!(await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand") && document.activeElement === document.querySelector('[data-ask="q2"] details textarea') && document.querySelector('[data-ask="q2"] details').open`))), "Something else: said, the reader's own words open and focused");
+  await shot("submit-5d-own.png");
+  check((await sent("decide")).length === 1, "...and nothing more asked of the host");
+  await frame(`${fb}.querySelector('.board-ask-clear').click()`);
+  check(!!(await until(async () => (await choices()).length === 3)), "Choose again: the options again");
+  // a choice with a next step: there, and said
+  const cam0 = await frame(`JSON.stringify(window.board.camera)`);
+  await frame(`${fb}.querySelector('a.board-ask-choice[href="#n1"]').click()`);
+  // (there: the camera moved to its next step, n1 in the middle of the view)
+  check(!!(await until(() => frame(`(() => { const r = window.board.clientRect("n1"); if (!r || JSON.stringify(window.board.camera) === ${JSON.stringify(cam0)}) return false; const x = r.left + r.width / 2, y = r.top + r.height / 2; return Math.abs(x - innerWidth / 2) < innerWidth / 4 && y > 0 && y < innerHeight; })()`), 10000)), "an option chosen: it goes to its next step: " + await frame(`JSON.stringify([${JSON.stringify(cam0)}, window.board.camera, window.board.clientRect("n1"), innerWidth, innerHeight])`));
+  // (back to the question, for what follows)
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("You chose:") && ${fb}.querySelector('a.board-ref[href="#n1"]')?.textContent === "→ Transitive vs 2-transitive. G acts transitively when for…"`))), "...and says it was chosen, with the way to its next step");
+  // Yes: the proposed option chosen, and its next step
   await top(`mode.decide = "says-every-point-reaches-every-other"`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}?.querySelector('a.board-ref[href="#s1"]')?.textContent === "→ Go to the next step"`))), "a next item with no title or text: \"Go to the next step\", not its id");
+  await until(() => frame(`!!${fb}?.querySelector('a.board-ask-yes[href="#s1"]')`));
+  await frame(`${fb}.querySelector('a.board-ask-yes').click()`);
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("You chose: says every point reaches every other") && ${fb}.querySelector('a.board-ref[href="#s1"]')?.textContent === "→ Go to the next step"`))), "Yes: the proposed option chosen, with its next step");
+  await shot("submit-5c-chosen.png");
+  // (back to the question, from its next step, for what follows)
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
   await top(`mode.decide = null`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}?.textContent.includes("didn't match any of the ideas")`))), "none: said honestly, and that submitting still reaches the board's maker");
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("didn't match any of the ideas")`))) && (await choices()).length === 3, "none: said honestly, and every option offered, and the reader's own words");
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('.board-ask-own')`)), 10000)), "...the last of them in view, nothing over it (6-none)");
   await shot("submit-6-none.png");
   await top(`mode.decide = "refused"; mode.message = "Too many requests: try again in a minute."`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}?.textContent.includes("Couldn't get feedback: Too many requests: try again in a minute. Your words")`))), "refused: the host's words shown");
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("Couldn't get feedback: Too many requests: try again in a minute. Choose what is closest yourself")`))) && (await choices()).length === 3, "refused: the host's words shown, and every option offered");
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('.board-ask-own')`)), 10000)), "...the last of them in view, nothing over it (7-refused)");
   await shot("submit-7-refused.png");
   await top(`mode.decide = "not-one-of-these-names"`);
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => frame(`${fb}?.textContent.includes("not one of this question's ideas")`))), "a name not among its options: not shown as one");
 
   // an answer to words since changed: dropped, never shown under the new ones (CORR-B21-1)
+  // (the question in view again: the options' card was kept clear of the caption by its bottom, its top above)
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
   await top(`mode.decide = "hold"`);
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => top("!!window.held"))), "(a request the host holds)");

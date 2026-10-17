@@ -537,7 +537,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (viewing) return;
     // (what the host decided was of the words before: gone with them)
     // (pending too: its answer, when it comes, is to words no longer there, and dropped, CORR-B21-1)
-    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") { board.askDecided.delete(askKey(pageIx + 1, id)); decidedSigs.delete(askKey(pageIx + 1, id)); }
+    // (but "Something else", the reader's own words chosen, stands as they write them)
+    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") {
+      const k = askKey(pageIx + 1, id);
+      if (board.askDecided.get(k)?.chosen === "") board.askDecided.set(k, { chosen: "" });
+      else board.askDecided.delete(k);
+      decidedSigs.delete(k);
+    }
     answering = editor.answer(id, patch).catch(fail);
   };
   board.onAnswer = answer;
@@ -768,7 +774,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const names = new Set(a?.decide?.map((o) => o.name) ?? []);
     board.askDecided.set(key, "refused" in r ? { refused: r.refused } : r.option === null || names.has(r.option) ? { option: r.option } : { refused: "the answer was not one of this question's ideas" });
     // (what it says, and where to go next, clear of the caption)
-    redraw().then((drawn) => { if (drawn && pageIx + 1 === page) board.keepClear(id); }).catch(fail);
+    redraw().then((drawn) => { if (drawn && pageIx + 1 === page) board.keepClear(id, true); }).catch(fail);
   };
   // (set as each document is shown: a host's channel comes with its board)
   function decideWords(id: string, words: string) {
@@ -783,7 +789,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
   // (and, grown, kept clear of the caption, which never covers it)
-  board.onAskResize = (id, grown) => { redraw().then((drawn) => { if (drawn && grown) board.keepClear(id); }).catch(fail); };
+  board.onAskResize = (id, grown, bottom) => { redraw().then((drawn) => { if (drawn && grown) board.keepClear(id, bottom); }).catch(fail); };
   board.onToggleCode = (id) => {
     if (editor.on) { flipped.delete(id); editor.toggleCode(id); return; }
     if (!flipped.delete(id)) flipped.add(id);

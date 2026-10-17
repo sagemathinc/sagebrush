@@ -371,13 +371,16 @@ export class Board {
   /** Keep item `id` clear of the bars over the board (the insets: the top
    * bar, the tour's caption): moved up just enough that its bottom is above
    * the caption, never so far that its top goes under the top bar; its
-   * zoom kept.  For a card grown under the caption (a question's feedback). */
-  keepClear(id: string) {
+   * zoom kept.  For a card grown under the caption (a question's feedback).
+   * `bottom`: what it now shows at its bottom is what matters (the options
+   * to choose from, William Oct 17): its bottom above the caption even if
+   * its top then goes under the top bar. */
+  keepClear(id: string, bottom = false) {
     const it = this.byId.get(id);
     if (!it) return;
     const H = this.canvas.height / this.dpr, i = this.insets, c = this.camera, m = 8;
     const below = (it.y + it.h - c.y) * c.z - (H - i.bottom - m), room = (it.y - c.y) * c.z - (i.top + m);
-    const dy = Math.min(below, room);
+    const dy = bottom ? below : Math.min(below, room);
     if (below > 0 && dy > 0) this.flyTo({ ...c, y: c.y + dy / c.z });
   }
 
@@ -627,49 +630,105 @@ export class Board {
   }
   /** Ask the host which of a question's `decide` options the reader's words show (mount.ts); none: no host to ask. */
   onDecide: ((id: string, words: string) => void) | null = null;
+  private askFocus: string | null = null; // (a question whose own words get the focus when it is next drawn)
   /** What the host decided each question's words show (mount.ts): `pending` while it is asked; `option` a name of its decide, or null for none; `refused`, why it couldn't. */
-  askDecided = new Map<string, { pending?: boolean; option?: string | null; refused?: string }>();
+  askDecided = new Map<string, { pending?: boolean; option?: string | null; refused?: string; list?: boolean; chosen?: string }>();  // (and the reader's answer to it: `list`, No pressed; `chosen`, the option they confirmed or chose, "" their own words)
   /** The page shown, as askDecided's keys begin with it ("p2/"): a question's id is its page's own (CORR-B21-2). */
   askScope = "";
 
-  // (the reader's words decided among the question's options: a button, then what the host said)
-  private askDecideEl(a: DocAsk, id: string, words: () => string): HTMLElement {
+  // The reader's words decided among the question's options: the host
+  // proposes, the reader confirms (William, Oct 17).  A button asks the host;
+  // the option it proposes is shown with Yes and No: Yes goes on to that
+  // option's next step, No shows every option and "Something else", in the
+  // reader's own words.  With no option proposed (none matched, the host
+  // couldn't say) or no host to ask, the options show at once.
+  private askDecideEl(a: DocAsk, id: string, words: () => string, own: () => void): HTMLElement {
     const box = document.createElement("div");
     box.className = "board-ask-decide";
-    const fb = this.askDecided.get(this.askScope + id);
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "board-ask-check";
-    b.textContent = fb?.pending ? "Asking…" : "Get feedback on my words";
-    b.title = "Asks which of the ideas this question looks for your words show (your words aren't sent to whoever made the board until you submit)";
-    b.disabled = !!fb?.pending;
-    const why = document.createElement("span");
-    why.className = "board-ask-why";
-    b.onclick = () => {
-      const v = words();
-      if (!v.trim()) { why.textContent = "Write something in your own words first"; return; }
-      if (v.length > ASK_LIMITS.text) { why.textContent = `Longer than ${ASK_LIMITS.text} characters`; return; }
-      this.onDecide?.(id, v);
+    const key = this.askScope + id, fb = this.askDecided.get(key), opts = a.decide ?? [];
+    // (the reader's answer, kept with the host's: drawn again with it)
+    const answer = (patch: { list?: boolean; chosen?: string | undefined }) => {
+      const cur = this.askDecided.get(key) ?? {};
+      if (!this.askDecided.has(key)) this.askDecided.set(key, cur);
+      Object.assign(cur, patch);
+      this.onAskResize?.(id, true, true);
     };
-    const row = document.createElement("div");
-    row.className = "board-ask-foot";
-    row.append(b, why);
-    for (const t of ["pointerdown", "mousedown", "dblclick", "click", "keydown"]) row.addEventListener(t, (e) => e.stopPropagation());
-    box.append(row);
+    const label = (o: { name: string; about?: string }) => o.about ?? o.name.replace(/-/g, " ");
+    const stop = (el: HTMLElement) => { for (const t of ["pointerdown", "mousedown", "dblclick", "click", "keydown"]) el.addEventListener(t, (e) => e.stopPropagation()); return el; };
     const md = (src: string) => { const d = document.createElement("div"); d.className = "board-text board-ask-message"; if (this.markdown) d.innerHTML = this.markdown(src); else d.textContent = src; glueMath(d); box.append(d); return d; };
-    if (fb?.refused !== undefined) md(`**Couldn't get feedback:** ${fb.refused.trim().replace(/[\\`*_[\]<>#!|~$]/g, "\\$&")}${/[.!?]$/.test(fb.refused.trim()) ? "" : "."} Your words are still yours to submit.`);
-    else if (fb?.option === null) md("Your words didn't match any of the ideas this question looks for. That's fine: submit them, and they reach whoever made the board.");
-    else if (fb?.option) {
-      const o = a.decide?.find((x) => x.name === fb.option);
-      md(`**Your words suggest:** ${o?.about ?? fb.option.replace(/-/g, " ")}`);
-      if (o?.next) {
-        const l = document.createElement("a");
-        l.className = "board-ref";
-        l.href = "#" + o.next;
-        l.textContent = "→ " + (this.linkLabel?.("#" + o.next) ?? "Go to the next step");
-        box.append(l);
-      }
+    const esc = (s: string) => s.trim().replace(/[\\`*_[\]<>#!|~$]/g, "\\$&");
+    // (a choice: a link to its option's next step, if it has one, else a button)
+    const choice = (text: string, name: string, next: string | undefined, cls: string, rich = false) => {
+      const c = next ? Object.assign(document.createElement("a"), { href: "#" + next }) : Object.assign(document.createElement("button"), { type: "button" });
+      c.className = cls;
+      // (where it goes, said: the item's title or first line, never its id)
+      if (next) c.title = "→ " + (this.linkLabel?.("#" + next) ?? "Go to the next step");
+      // (an option's words are the board's Markdown, math too, as the question's own)
+      if (rich && this.markdown) { const l = document.createElement("span"); l.className = "board-ask-label"; l.innerHTML = this.markdown(text); glueMath(l); c.append(l); }
+      else c.textContent = text;
+      c.addEventListener("click", () => answer({ chosen: name, list: false }));
+      return c;
+    };
+    if (this.onDecide) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "board-ask-check";
+      b.textContent = fb?.pending ? "Asking…" : "Get feedback on my words";
+      b.title = "Asks which of the ideas this question looks for your words show (your words aren't sent to whoever made the board until you submit)";
+      b.disabled = !!fb?.pending;
+      const why = document.createElement("span");
+      why.className = "board-ask-why";
+      b.onclick = () => {
+        const v = words();
+        if (!v.trim()) { why.textContent = "Write something in your own words first"; return; }
+        if (v.length > ASK_LIMITS.text) { why.textContent = `Longer than ${ASK_LIMITS.text} characters`; return; }
+        this.onDecide?.(id, v);
+      };
+      const row = document.createElement("div");
+      row.className = "board-ask-foot";
+      row.append(b, why);
+      box.append(stop(row));
     }
+    if (fb?.pending) return box;
+    const chosen = fb?.chosen !== undefined ? (fb.chosen === "" ? null : opts.find((o) => o.name === fb.chosen)) : undefined;
+    // (chosen: said, with its next step; a way to choose again)
+    if (chosen !== undefined) {
+      md(chosen ? `**You chose:** ${label(chosen)}` : "**Something else:** your own words stand. Submit them, and they reach whoever made the board.");
+      const row = document.createElement("div");
+      row.className = "board-ask-foot";
+      if (chosen?.next) row.append(choice("→ " + (this.linkLabel?.("#" + chosen.next) ?? "Go to the next step"), chosen.name, chosen.next, "board-ref"));
+      const again = Object.assign(document.createElement("button"), { type: "button", className: "board-ask-clear", textContent: "Choose again" });
+      again.onclick = () => answer({ chosen: undefined, list: true });
+      row.append(again);
+      box.append(stop(row));
+      return box;
+    }
+    const proposed = typeof fb?.option === "string" ? opts.find((o) => o.name === fb.option) : undefined;
+    if (proposed && !fb?.list) {
+      md(`**Your words suggest:** ${label(proposed)}\n\nIs that what you meant?`);
+      const row = document.createElement("div");
+      row.className = "board-ask-yesno";
+      const no = Object.assign(document.createElement("button"), { type: "button", className: "board-ask-no", textContent: "No" });
+      no.onclick = () => answer({ list: true });
+      row.append(choice("Yes", proposed.name, proposed.next, "board-ask-yes"), no);
+      box.append(stop(row));
+      return box;
+    }
+    // (every option, and the reader's own words)
+    if (fb?.refused !== undefined) md(`**Couldn't get feedback:** ${esc(fb.refused)}${/[.!?]$/.test(fb.refused.trim()) ? "" : "."} Choose what is closest yourself:`);
+    else if (fb?.option === null) md("Your words didn't match any of the ideas this question looks for. Which is closest to what you mean?");
+    else if (proposed) md("Then which is closest to what you mean?");
+    else if (!this.onDecide) md("Which is closest to what you mean?");
+    else return box;
+    const list = document.createElement("div");
+    list.className = "board-ask-choices";
+    list.setAttribute("role", "group");
+    list.setAttribute("aria-label", "Which is closest to what you mean?");
+    for (const o of opts) list.append(choice(label(o), o.name, o.next, "board-ask-choice", true));
+    const mine = Object.assign(document.createElement("button"), { type: "button", className: "board-ask-choice board-ask-own", textContent: "Something else: in my own words" });
+    mine.onclick = () => { own(); answer({ chosen: "", list: false }); };
+    list.append(mine);
+    box.append(stop(list));
     return box;
   }
   /** A question's answer checked by its check (mount.ts): the answer the controls hold. None: no Check (no interpreter). */
@@ -739,7 +798,7 @@ export class Board {
   /** Questions grown past their measured height: as tall as their open field, its preview, or a field made taller by hand needs. */
   askGrown = new Map<string, number>();
   /** A question's card needs another height: lay out again (mount.ts). */
-  onAskResize: ((id: string, grown: boolean) => void) | null = null;
+  onAskResize: ((id: string, grown: boolean, bottom?: boolean) => void) | null = null;
 
   /** A question's controls (doc.ts DocAsk), each answer given at once to
    * onAnswer: a choice when it is made, a text or a number when it is left
@@ -902,11 +961,14 @@ export class Board {
     w.placeholder = "Answer in your own words, if the choices don't fit (or to add something)";
     w.onchange = () => { if (within(w.value)) set({ note: w.value.trim() === "" ? null : w.value }); };
     words.append(sum, w, preview(w));
+    // (the card may be drawn more than once as it grows: the one still shown takes it)
+    if (this.askFocus === id) requestAnimationFrame(() => { if (w.isConnected && this.askFocus === id) { this.askFocus = null; w.focus({ preventScroll: true }); } });
     box.append(quiet(words));
     // (what the words show, asked of the host when the reader asks: the note's words, or a text question's answer)
-    if (can && this.onDecide && a.decide?.length) {
+    if (can && a.decide?.length) {
       const text = current;
-      box.append(this.askDecideEl(a, id, () => (w.value.trim() ? w.value : a.input === "text" ? String(text() ?? "") : "")));
+      // ("Something else": the reader's own words, open and focused once the card is drawn again)
+      box.append(this.askDecideEl(a, id, () => (w.value.trim() ? w.value : a.input === "text" ? String(text() ?? "") : ""), () => { this.askOpen.add(id); this.askFocus = id; }));
     }
     // its check: a button, then the verdict, the check's words, the hints
     // so far and where to go next (stream 5: teaching boards)
