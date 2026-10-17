@@ -20,7 +20,7 @@ import { join, dirname } from "path";
 import { homedir } from "os";
 import { Worker, parentPort } from "worker_threads";
 import { ZSocket } from "./zmtp";
-import { initParser, R, libDir } from "./compile";
+import { initParser, R, libDir, packageModuleNames } from "./compile";
 import { needsMore, complete, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -534,7 +534,7 @@ export function kernelWorker(mode: Mode) {
     return { main, host };
   })();
   const FLUSH = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n" + MAGIC_POST;
-  const moduleNames = () => [...R.builtinModuleNames(), ...Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k: string) => k.split("/")[0].replace(/\.py$/, ""))];
+  const moduleNames = () => [...R.builtinModuleNames(), ...Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k: string) => k.split("/")[0].replace(/\.py$/, "")), ...packageModuleNames()];
   port.on("message", async (m: any) => {
     const { main, host } = await ready;
     if (m.check !== undefined) {

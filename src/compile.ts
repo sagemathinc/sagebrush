@@ -12,6 +12,7 @@ import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
 import { classCellReport } from "./magic-syntax";
+import { sha256Hex } from "./runtime/sha256";
 
 const builtinNames = new Set(Object.keys(R.builtins));
 
@@ -153,7 +154,8 @@ function compileCached(source: string, filename: string, name: string, sage: boo
     recording[precompiledKey(name, sage)] = { ...compiled, path: libPath(filename)! };
     return { compiled, script: new Script(compiled.code, { filename: jsName }) };
   }
-  const dir = filename.startsWith(libDir()) ? compileCacheDir() : null;
+  // (a package's module too, by its checked bytes, which the key covers)
+  const dir = filename.startsWith(libDir()) || mounted.has(filename) ? compileCacheDir() : null;
   if (dir !== null) {
     const key = createHash("sha256").update(name + "\0" + (sage ? "1" : "0") + "\0" + source).digest("hex").slice(0, 32);
     const jsonPath = join(dir, key + ".json");
@@ -323,8 +325,14 @@ const safeExists = (p: string) => {
 };
 // (a file's presence is a property of its own: in the browser's worker,
 // reading one fetches its part of the library, web/lib-lazy.ts)
-const fileExists = (p: string) => (embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(p));
+const fileExists = (p: string) => {
+  // (a mounted package's directory holds exactly its checked files)
+  if (mountedBases.length && mountedBases.some((b) => p.startsWith(b + "/"))) return mounted.has(p);
+  return embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(p);
+};
 const fileRead = (p: string) => {
+  const checked = mounted.get(p);
+  if (checked !== undefined) return checked;
   if (embedded === undefined || !p.startsWith(LIB_VIRTUAL + "/")) return readFileSync(p, "utf8");
   try {
     return embedded[p.slice(LIB_VIRTUAL.length + 1)];
@@ -355,8 +363,128 @@ R.loader.load = (name: string) => {
     const file = join(d, leaf + ".py");
     if (fileExists(file)) return execModule(fileRead(file), file, name);
   }
-  return null;
+  // (not on sys.path: a package's, if the registry names one for it)
+  const found = packageModule(name, false);
+  return found === null ? null : execModule(found[0], found[1], name, found[1].endsWith("/__init__.py"));
 };
+
+// Packages (packages/<name>/sagebrush.json; scripts/packages.mjs): modules
+// kept outside lib/, each file pinned by its SHA-256 in the build's registry
+// (packages/registry.json, which the CLI bundle and the browser's worker
+// carry: __SAGEBRUSH_PACKAGES__ {registry, files}).  An import that sys.path
+// does not satisfy looks its full dotted name up in the registry; the
+// package's files are read once, each checked against its pin, and imported
+// from those same bytes.  sys.path is searched first, so a user's own file of
+// the same name comes first, as it does over lib/: moving a module from lib/
+// to a package changes no import's result.  The files come from the
+// directory SAGEBRUSH_PACKAGES, else the bundle's own copies, else the
+// repository's packages/.
+export const PKG_VIRTUAL = "/$pyjs/packages";
+type PackageEntry = { dir: string; root: string; manifest_sha256: string; files: Record<string, string> };
+type Registry = { format: number; modules: Record<string, string>; packages: Record<string, PackageEntry> };
+const embeddedPackages: { registry: Registry; files: Record<string, string> } | undefined = (globalThis as any).__SAGEBRUSH_PACKAGES__;
+let registry: Registry | null | undefined;
+function packageRegistry(): Registry | null {
+  if (registry !== undefined) return registry;
+  let r: Registry | null = null;
+  if (embeddedPackages !== undefined) r = embeddedPackages.registry;
+  else {
+    try {
+      r = JSON.parse(readFileSync(resolvePath(__dirname, "../../packages/registry.json"), "utf8"));
+    } catch {}
+  }
+  return (registry = r);
+}
+function packagesDir(): string {
+  const env = process.env.SAGEBRUSH_PACKAGES;
+  if (env) return resolvePath(env);
+  return embeddedPackages !== undefined ? PKG_VIRTUAL : resolvePath(__dirname, "../../packages");
+}
+// (checked files by path, and each mounted package's directory)
+const mounted = new Map<string, string>();
+const mountedBases: string[] = [];
+const mountedRoots = new Map<string, string>();
+// (the repository path of a mounted file, for the catalog's source links)
+const repoPaths = new Map<string, string>();
+const packageName = (id: string) => id.slice(0, id.lastIndexOf("@"));
+// A package's file: its bytes and text, or null if it isn't there
+function readPackageFile(dir: string, pkg: PackageEntry, path: string): { bytes: Uint8Array; text: string } | null {
+  if (dir === PKG_VIRTUAL) {
+    const files = embeddedPackages!.files, key = pkg.dir + "/" + path;
+    if (!Object.hasOwn(files, key)) return null;
+    let text: string;
+    try {
+      text = files[key];
+    } catch (e: any) {
+      // (the browser's worker: a chunk it could not fetch, web/lib-lazy.ts)
+      throw (R.T as any).ImportError(String(e?.message ?? e));
+    }
+    return { bytes: new TextEncoder().encode(text), text };
+  }
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(join(dir, pkg.dir, path));
+  } catch {
+    return null;
+  }
+  return { bytes, text: bytes.toString("utf8") };
+}
+// Mount package `id` (once): every file read and checked before any of it
+// runs.  Its Python root, as a directory.
+function mountPackage(id: string, name: string): string {
+  const done = mountedRoots.get(id);
+  if (done !== undefined) return done;
+  const pkg = packageRegistry()!.packages[id];
+  if (!pkg) throw (R.T as any).ImportError(`the registry names ${id} for '${name}' but has no entry for it`);
+  const dir = packagesDir(), base = join(dir, pkg.dir);
+  const got = new Map<string, string>();
+  for (const path of Object.keys(pkg.files).sort()) {
+    const f = readPackageFile(dir, pkg, path);
+    if (f === null) {
+      const e = R.T.ModuleNotFoundError(`No module named '${name}' (it is in ${packageName(id)}, which is not installed here)`);
+      e.name = name;
+      throw e;
+    }
+    if (sha256Hex(f.bytes) !== pkg.files[path]) throw (R.T as any).ImportError(`${packageName(id)}: ${path} is not the file this build pinned`);
+    if (path.endsWith(".py")) got.set(join(base, path), f.text);
+  }
+  for (const [p, text] of got) {
+    mounted.set(p, text);
+    repoPaths.set(p, "packages/" + pkg.dir + "/" + p.slice(base.length + 1));
+  }
+  mountedBases.push(base);
+  const root = join(base, pkg.root);
+  mountedRoots.set(id, root);
+  return root;
+}
+// The [source, filename] of module `name` from a package (with `main`, a
+// package's __main__ instead of its __init__), or null if no package has it
+function packageModule(name: string, main: boolean): [string, string] | null {
+  const reg = packageRegistry();
+  if (reg === null || !Object.hasOwn(reg.modules, name)) return null;
+  const id = reg.modules[name];
+  const at = join(mountPackage(id, name), ...name.split("."));
+  for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
+    const text = mounted.get(p);
+    if (text !== undefined) return [text, p];
+  }
+  throw (R.T as any).ImportError(`${packageName(id)} has no file for module '${name}'`);
+}
+/** The top-level module names the registry's packages provide. */
+export function packageModuleNames(): string[] {
+  const reg = packageRegistry();
+  return reg === null ? [] : Object.keys(reg.modules).filter((m) => !m.includes("."));
+}
+// (the catalog's source links, lib/_catalog.py: JSON of a mounted file's
+// path in the repository and its text, or null)
+R.builtins.__pyjs_package_file__ = (p: any) => {
+  const rel = repoPaths.get(String(p));
+  return rel === undefined ? null : JSON.stringify([rel, mounted.get(String(p))]);
+};
+/** Tests only: replace the registry (null: none). */
+export function setPackageRegistry(r: Registry | null): void {
+  registry = r;
+}
 
 // `python -m name`: the source of module `name` (a package runs its
 // __main__), found as an import would, without importing it.
@@ -375,7 +503,7 @@ export function findModuleSource(name: string): [string, string] | null {
     const file = join(d, leaf + ".py");
     if (fileExists(file)) return [fileRead(file), file];
   }
-  return null;
+  return packageModule(name, true);
 }
 
 export { initParser, R };

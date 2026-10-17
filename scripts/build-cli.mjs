@@ -46,6 +46,13 @@ writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JS
 // (the same without the library, for the browser's worker, which fetches it
 // in chunks: web/lib-lazy.ts)
 writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
+// The packages (packages/<name>/, scripts/packages.mjs): the registry and
+// their files, which src/compile.ts imports on a sys.path miss after
+// checking each against the registry's SHA-256
+const { readPackages } = await import("./packages.mjs");
+const packages = readPackages(root);
+if (JSON.stringify(packages.registry, null, 2) + "\n" !== readFileSync(join(root, "packages", "registry.json"), "utf8")) throw new Error("packages/registry.json is out of date: run node scripts/packages.mjs");
+writeFileSync(join(out, "packages.gen.js"), `globalThis.__SAGEBRUSH_PACKAGES__ = ${JSON.stringify(packages)};\n`);
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
 // first written or read: src/runtime/raster.ts)
@@ -95,7 +102,7 @@ try {
   // (no git: no links)
 }
 writeFileSync(join(out, "catalog.gen.js"), `globalThis.__SAGEBRUSH_CATALOG__ = ${JSON.stringify(JSON.stringify(catalog))};\nglobalThis.__SAGEBRUSH_COMMIT__ = ${JSON.stringify(commit)};\n`);
-writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./engine.gen.js";\nimport "./web.gen.js";\nimport "./catalog.gen.js";\nimport "../../src/cli";\n`);
+writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./packages.gen.js";\nimport "./engine.gen.js";\nimport "./web.gen.js";\nimport "./catalog.gen.js";\nimport "../../src/cli";\n`);
 
 // 2. One CommonJS file for Node 22+ and Bun.
 run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace",
