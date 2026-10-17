@@ -320,6 +320,8 @@ export class Emitter {
         return `yfr(yield* yieldFrom(${this.ex(e.value)}))`;
       case "Await":
         return `yfr(yield* awaitIter(${this.ex(e.value)}))`;
+      case "Intrinsic":
+        return e.args === null ? `R.$i.${e.name}` : `R.$i.${e.name}(${e.args.map((a) => this.ex(a)).join(", ")})`;
       case "NamedExpr": {
         const t = this.temp();
         let s: Scope = this.fn.scope;
