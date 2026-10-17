@@ -89,6 +89,12 @@ def build_index():
                 "examples": len(examples(doc)),
                 "open_problem": bool(open_problem_sections(doc)),
             })
+    # (the curated PyPI packages, importable in Sage mode too:
+    # lib/_python_docsearch.py)
+    try:
+        out += __import__("_python_docsearch")._pypi(seen)
+    except ImportError:
+        pass
     return out
 
 
