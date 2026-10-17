@@ -13,8 +13,10 @@ import type { BoardMode } from "./doc";
 
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
-/** A question's check, or a computed hint, as run (BoardCode.evaluate): its value, or why it has none. */
-export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean; isolated?: boolean; preserved?: boolean | null; reason?: string | null }
+/** A question's check, or a computed hint, as run (BoardCode.exclusive): its value, or why it has none. */
+export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean }
+/** What a Check is given to run (BoardCode.exclusive). */
+export interface CheckOps { evaluate: (code: string, answer: unknown, ms: number) => Promise<Evaluated>; refresh: (ms: number) => Promise<boolean> }
 
 /** Where a board's code engine comes from (design/engines.md): its notebook
  * module, the interpreter's worker, the reactive notebook's analyzer, and
@@ -509,52 +511,42 @@ export class BoardCode {
     return out;
   }
 
-  /** A board question's check, or a computed hint, in this interpreter,
-   * after what was asked to run (WorkerKernel.evaluate): its verdict. */
-  async evaluate(code: string, answer: unknown, ms: number): Promise<Evaluated> {
+  /** A board question's Check, whole: `f` runs alone in this interpreter's
+   * queue, no sync, run or other Check between its steps, given what it
+   * needs without queueing again: `evaluate` (a check or computed hint,
+   * WorkerKernel.evaluate, within `ms`) and `refresh` (a new interpreter,
+   * every item run in it, within `ms`: else what still runs is interrupted,
+   * false).  A check may change the board's names, so a Check refreshes
+   * after each evaluation (the coordinator's rule for CORR-A19-1); each
+   * step is bounded, so the queue is. */
+  exclusive<T>(f: (ops: CheckOps) => Promise<T>): Promise<T> {
+    return this.queued(() => f({ evaluate: (code, answer, ms) => this.evaluateNow(code, answer, ms), refresh: (ms) => this.refreshNow(ms) }));
+  }
+  private async evaluateNow(code: string, answer: unknown, ms: number): Promise<Evaluated> {
     if (!(await this.ready) || !this.kernel) return { ok: false, error: "the interpreter is not running" };
-    await this.last;
     return this.kernel.evaluate(code, answer, this.mode, ms);
   }
+  private async refreshNow(ms: number): Promise<boolean> {
+    if (!(await this.ready)) return false;
+    const k = this.kernel, ready = new Promise<void>((resolve) => { const off = k.on("ready", () => { off(); resolve(); }); });
+    k.restart("");
+    await ready;
+    if (this.closed) return false;
+    this.release(null);
+    this.started = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = this.nb.runAll().finally(() => this.changed());
+    const over = new Promise<"over">((res) => { timer = setTimeout(() => res("over"), Math.max(0, ms)); });
+    const got = await Promise.race([run, over]).finally(() => clearTimeout(timer));
+    if (got === "over") {
+      this.interrupt();
+      this.ran(await run.catch(() => null));
+      return false;
+    }
+    this.ran(got);
+    return true;
+  }
 
-  /** Run these code items, then what depends on them (resolves to the reactive notebook's report). */
-  run(ids: string[]): Promise<any> {
-    return this.queued(async () => {
-      if (!(await this.ready)) return null;
-      this.release(ids);
-      this.started = true;
-      const report = await this.nb.runCells(ids).finally(() => this.changed());
-      this.ran(report);
-      return report;
-    });
-  }
-  runAll(): Promise<any> {
-    return this.queued(async () => {
-      if (!(await this.ready)) return null;
-      this.release(null);
-      this.started = true;
-      const report = await this.nb.runAll().finally(() => this.changed());
-      this.ran(report);
-      return report;
-    });
-  }
-  /** The board's state as its code leaves it, made again: a new
-   * interpreter, and every item run in it.  After a check that may have
-   * changed the board's names (one not shown unchanged: CORR-A19-1). */
-  refresh(): Promise<any> {
-    return this.queued(async () => {
-      if (!(await this.ready)) return null;
-      const k = this.kernel, ready = new Promise<void>((resolve) => { const off = k.on("ready", () => { off(); resolve(); }); });
-      k.restart("");
-      await ready;
-      if (this.closed) return null;
-      this.release(null);
-      this.started = true;
-      const report = await this.nb.runAll().finally(() => this.changed());
-      this.ran(report);
-      return report;
-    });
-  }
   /** Resolves when what was asked for has run (syncs, and what they started). */
   async idle(): Promise<void> {
     await this.last;

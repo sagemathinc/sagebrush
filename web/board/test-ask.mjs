@@ -274,7 +274,7 @@ try {
   check(await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'right'", 30000), "after a check out of time: checks run again");
   // (one Check bounded as a whole: six computed hints that never end share
   // the check's 2 x checkMs, not checkMs each, HARD-A19-1)
-  await ev(`${B}.edit((d) => { d.nodes.push({ id: "many", kind: "ask", input: "text", text: "Many hints", check: "False", checkMs: 1000, answer: "a", attempts: 5, wrongAttempts: 5, result: "wrong",
+  await ev(`${B}.edit((d) => { d.nodes.push({ id: "many", kind: "ask", input: "text", text: "Many hints", check: "False", checkMs: 2000, answer: "a", attempts: 5, wrongAttempts: 5, result: "wrong",
     hints: Array.from({ length: 6 }, () => ({ code: "while True:\\n    pass" })) }); }).then(() => 1)`);
   await until(`!!document.querySelector('.board-ask[data-ask="many"] .board-ask-check')`, 10000);
   await ev("(() => { const it = window.board.item('many'); window.board.setCamera({ x: it.x - 40, y: it.y - 40, z: 1 }); window.board.render(); return 1; })()");
@@ -283,7 +283,8 @@ try {
   await press('.board-ask[data-ask="many"] .board-ask-check');
   await until("window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === 'many').attempts === 6", 30000);
   const took = Date.now() - t0, manyText = await ev(q$('.board-ask[data-ask="many"]', ".textContent"));
-  check(took < 4500 && /this check's time ran out/.test(manyText), `one Check with six endless computed hints ends within its 2 s budget (${took} ms): ` + manyText.slice(0, 300));
+  // (unbounded, six hints of 2 s each and the runs of the code before them: past 20 s; bounded, the check, the hints' 4 s and a run of the code at the end)
+  check(took < 12000 && /this check's time ran out/.test(manyText), `one Check with six endless computed hints ends within its budget (${took} ms): ` + manyText.slice(0, 300));
   // (right twice: no hint, which only wrong attempts reveal, CORR-A19-5)
   await ev(`${B}.edit((d) => { d.nodes.push({ id: "rr", kind: "ask", input: "number", text: "Right twice", check: "answer > 0", hints: ["HINT-A", "HINT-B", "HINT-C"] }); }).then(() => 1)`);
   await until(`!!document.querySelector('.board-ask[data-ask="rr"] .board-ask-check')`, 10000);
@@ -310,6 +311,17 @@ try {
   await sleep(3000);
   const pq = await node("pend");
   check(pq.answer === 2 && pq.result === undefined && !pq.attempts, "an answer changed while its check ran: the old completion dropped: " + JSON.stringify(pq));
+  // (the same, the answer changed and changed back meanwhile: 1 saved, 3 typed
+  // and checked, 2 then 1 saved during the check: still dropped, astra's CORR-A19-4 at cb1a5279)
+  await ev(`${B}.edit((d) => { const n = d.nodes.find((n) => n.id === "pend"); n.answer = 1; delete n.result; delete n.attempts; }).then(() => 1)`);
+  await sleep(500);
+  await ev(`(() => { const n = ${q$('.board-ask[data-ask="pend"] input[type=number]')}; n.value = "3"; return 1; })()`);
+  await press('.board-ask[data-ask="pend"] .board-ask-check');
+  await sleep(300);
+  for (const v of [2, 1]) { await ev(`${B}.edit((d) => { d.nodes.find((n) => n.id === "pend").answer = ${v}; }).then(() => 1)`); await sleep(200); }
+  await sleep(3000);
+  const pq2 = await node("pend");
+  check(pq2.answer === 1 && pq2.result === undefined && !pq2.attempts, "an answer changed and changed back while its check ran: the completion dropped: " + JSON.stringify(pq2));
   // (a check that changes the board's own state, through its function: the
   // board's code is run again, in a new interpreter, before the next check
   // runs; it starts from the state the code leaves, CORR-A19-1)
@@ -328,6 +340,45 @@ try {
   }
   const fq = await node("f");
   check(fq.attempts === 2 && fq.result === "right" && !fq.wrongAttempts, "a check that changed the board's state: the next one starts fresh (bump() is 1 again): " + JSON.stringify(fq));
+  // (a computed hint's text is this document's: another board with the same question, hint and answer computes its own, CORR-CB1-1)
+  const hintBoard = (n) => ({ title: "Hints " + n, layout: "grid", columns: 2, nodes: [
+    { id: "nc", code: `N = ${n}` },
+    { id: "h", kind: "ask", input: "number", text: "N?", check: "False", hints: [{ code: "'N is ' + str(N)" }] },
+  ] });
+  const hintShown = async (n) => {
+    await ev(`${B}.load(${JSON.stringify(hintBoard(n))}).then(() => 1)`);
+    await until(`!!document.querySelector('.board-ask[data-ask="h"] .board-ask-check')`, 20000);
+    await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+    await sleep(500);
+    await ev(`(() => { const n = ${q$('.board-ask[data-ask="h"] input[type=number]')}; n.value = "5"; return 1; })()`);
+    await press('.board-ask[data-ask="h"] .board-ask-check');
+    await until("window.sagebrush.board.snapshot().doc.nodes[1].attempts === 1", 30000);
+    await sleep(300);
+    return ev(q$('.board-ask[data-ask="h"]', ".textContent"));
+  };
+  const h10 = await hintShown(10), h20 = await hintShown(20);
+  check(/N is 10/.test(h10) && /N is 20/.test(h20), "a computed hint's text is its own board's: " + JSON.stringify([h10.slice(-60), h20.slice(-60)]));
+  // (a computed hint sees the state the board's code leaves, not the check's: astra's note at 7294c800)
+  await ev(`${B}.load(${JSON.stringify({ title: "Gen", layout: "grid", columns: 2, nodes: [
+    { id: "g0", code: "gen = (i for i in range(20))" },
+    { id: "g", kind: "ask", input: "number", text: "Next?", check: "next(gen) == answer", hints: [{ code: "'next is ' + str(next(gen))" }] },
+    { id: "g2", kind: "ask", input: "number", text: "Again?", check: "next(gen) == answer" },
+  ] })}).then(() => 1)`);
+  await until(`!!document.querySelector('.board-ask[data-ask="g"] .board-ask-check')`, 20000);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(500);
+  await ev(`(() => { const n = ${q$('.board-ask[data-ask="g"] input[type=number]')}; n.value = "5"; return 1; })()`);
+  await press('.board-ask[data-ask="g"] .board-ask-check');
+  await until("window.sagebrush.board.snapshot().doc.nodes[1].attempts === 1", 30000);
+  await sleep(300);
+  check(/next is 0/.test(await ev(q$('.board-ask[data-ask="g"]', ".textContent"))), "a computed hint from the state the code leaves (next is 0): " + (await ev(q$('.board-ask[data-ask="g"]', ".textContent"))).slice(-80));
+  // (two Checks at once, on two questions: one after the other, each from the state the code leaves, neither stopped by the other)
+  await ev(`(() => { for (const [q, v] of [["g", "0"], ["g2", "0"]]) { const n = document.querySelector('.board-ask[data-ask="' + q + '"] input[type=number]'); n.value = v; } return 1; })()`);
+  await ev(`(() => { for (const q of ["g", "g2"]) document.querySelector('.board-ask[data-ask="' + q + '"] .board-ask-check').click(); return 1; })()`);
+  await until("(() => { const ns = window.sagebrush.board.snapshot().doc.nodes; return ns[1].attempts === 2 && ns[2].attempts === 1; })()", 60000);
+  await sleep(300);
+  const [gq, g2q] = [await node("g"), await node("g2")];
+  check(gq.result === "right" && g2q.result === "right", "two Checks at once: each right from the state the code leaves: " + JSON.stringify([gq, g2q].map((q) => [q.answer, q.result, q.attempts])));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
