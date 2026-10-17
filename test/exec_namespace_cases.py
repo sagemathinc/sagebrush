@@ -31,3 +31,28 @@ try:
     exec("vars(__builtins__)", {})
 except TypeError as e:
     print(e)
+# vars() of objects with no __dict__ is a TypeError (a dict's, a list's,
+# an int's: object's generic __dict__ is not theirs), not an AttributeError
+# (object() and a slotted instance aside: Sagebrush's have a __dict__, a
+# divergence of their own);
+# of those with one, it is (a function's, a class's, a module's, an
+# instance's, a slotted instance's with __dict__ in its slots)
+def _f():
+    pass
+_f.tag = 7
+class _D:
+    __slots__ = ("a", "__dict__")
+class _P:
+    pass
+_p = _P()
+_p.x = 1
+_d = _D()
+_d.y = 2
+for _o in [{}, {1: 2}, [], 1, 2.5, "s", (), None, len]:
+    try:
+        vars(_o)
+        print("vars", type(_o).__name__, "ok")
+    except Exception as e:
+        print("vars", type(_o).__name__, type(e).__name__, e)
+import math
+print(vars(_f), vars(_p), vars(_d), "sqrt" in vars(math), "__init__" in vars(_P))

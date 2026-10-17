@@ -499,9 +499,15 @@ function allImpl(x: any): boolean {
 function varsImpl(o: any = undefined): PyDict {
   if (o === undefined) raise(T.NotImplementedError, "vars() without an argument is not supported");
   if (isType(o)) return getattr(o, "__dict__");
-  // (or a __dict__ its type defines: a function's, as CPython's)
-  if (!hasInstanceDict(o) && lookupType(typeOf(o), "__dict__") === undefined) raise(T.TypeError, "vars() argument must have __dict__ attribute");
-  return getattr(o, "__dict__");
+  // (as CPython's: o.__dict__, whatever defines it, a function's too; an
+  // AttributeError is the TypeError, so a dict's, object's generic
+  // __dict__ that it lacks, is not an AttributeError)
+  try {
+    return getattr(o, "__dict__");
+  } catch (e) {
+    if (isinstance(e, T.AttributeError)) raise(T.TypeError, "vars() argument must have __dict__ attribute");
+    throw e;
+  }
 }
 function hashImpl(x: any): any {
   return O.hashExact(x);
