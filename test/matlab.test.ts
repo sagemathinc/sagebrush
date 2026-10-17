@@ -2479,3 +2479,23 @@ test("polyval, conv and interp1 in single: a double query distance stays double,
     "interp1's 'pchip' method with 1000001 sample points for 1 column of values is not supported in Sagebrush: too much work.",
     "6.25", "[4500 4500]", "1", "[1 2 3 3]", "[9 4.5 9 9]"]);
 });
+
+test("spline and pchip refuse, before setting up slopes, more data sites times rows than they can set up and splines whose dense solve would be too much work", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, y = spline(1:1001, 1:1001, 1.5); catch e, disp(e.message), end",
+    "try, y = spline(1:1000, complex(1:1000, 1), 1.5); catch e, disp(e.message), end",
+    "try, y = spline(1:1001, [0 1:1001 0], 1.5); catch e, disp(e.message), end",
+    "try, y = spline(1:800, [1:800; 1:800], 1.5); catch e, disp(e.message), end",
+    "try, y = pchip(1:1000001, 1:1000001, 2.5); catch e, disp(e.message), end",
+    "try, y = pchip(1:500001, [1:500001; 1:500001], 2.5); catch e, disp(e.message), end",
+    "try, y = spline(1:3, 1:4, 2); catch e, disp(e.message), end",
+    "disp(sprintf('%.6g', spline(1:1000, (1:1000).^2, 2.5))); disp(sprintf('%.6g', spline(1:3, [1 4 9], 2.5))); disp(sprintf('%.6g', pchip(1:4, [1 2 3 4], 2.5)))",
+    "y = pchip(1:400000, 1:400000, [2.5 7]); disp(mat2str(y))",
+  ].join("\n")], { encoding: "utf8" });
+  const msg = (f: string, n: number, rows: string, dense: boolean) => f + " with " + n + " data sites for " + rows + " of values is not supported in Sagebrush: " +
+    (dense ? "its dense solve would be too much work." : "too much work.");
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [msg("spline", 1001, "1 row", true), msg("spline", 1000, "1 row", true),
+    msg("spline", 1001, "1 row", true), msg("spline", 800, "2 rows", true), msg("pchip", 1000001, "1 row", false), msg("pchip", 500001, "2 rows", false),
+    "The number of sites, 3, is incompatible with the number of values, 4.", "6.25", "6.25", "2.5", "[2.5 7]"]);
+});
