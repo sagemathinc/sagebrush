@@ -17,4 +17,7 @@ L<u> := GF(9); N := Matrix(L, 3, 3, [u, 1, 0, u^2, 2, u^7, 0, 0, 1]); N; Determi
 Matrix(GF(7), 2, 2, [1,2,3,4]) * Matrix(GF(7), 2, 2, [0,1,1,0]);
 D := Matrix(GF(101), 2, 2, [100, 3, 57, 2]); D; D^-1; Matrix(GF(101), 2, 2, [1, 2, 3, 4]); D[1];
 Matrix(GF(11), 1, 2, [10, 1]); Matrix(L, 1, 2, [1, 2]); Matrix(L, 1, 2, [1, u])[1];
+A := Matrix(GF(5), 2, 2, [1, 2, 3, 4]); [A, A]; [A, GF(5)!2]; [[A]]; Type([A, 1][2]); [A, 1][2];
+V := Matrix(GF(5), 1, 2, [1, 2]); [V, V]; [A[1], A[2]];
+P := PolynomialRing(GF(5)); CharacteristicPolynomial(A); R<t> := PolynomialRing(GF(5)); CharacteristicPolynomial(A); Parent(CharacteristicPolynomial(A)) eq R;
 "end";
