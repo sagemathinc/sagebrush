@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 // time (lib/_pytime.py over the _time builtin) and datetime (CPython 3.14's
 // datetime.py, and _pydatetime.py with the C module's messages and reprs),
@@ -9,10 +11,10 @@ import { execFileSync } from "node:child_process";
 // zone other than UTC or GMT, what is not known here is refused, checked
 // apart from CPython.
 const TEST = __dirname + "/../../test/";
-const run = (cmd: string, args: string[], tz: string) =>
-  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TZ: tz }, maxBuffer: 64 << 20 }).split("\n");
-const sagebrush = (file: string, tz: string) => run(process.execPath, [__dirname + "/../src/cli.js", TEST + file], tz);
-const cpython = (file: string, tz: string) => run("python3", [TEST + file], tz);
+const run = (cmd: string, args: string[], tz: string, more: Record<string, string> = {}) =>
+  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TZ: tz, ...more }, maxBuffer: 64 << 20 }).split("\n");
+const sagebrush = (file: string, tz: string, more: Record<string, string> = {}) => run(process.execPath, [__dirname + "/../src/cli.js", TEST + file], tz, more);
+const cpython = (file: string, tz: string, more: Record<string, string> = {}) => run("python3", [TEST + file], tz, more);
 function same(file: string, tz: string) {
   const want = cpython(file, tz), got = sagebrush(file, tz);
   for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${file} under TZ=${tz}, line ${i + 1}`);
@@ -84,4 +86,30 @@ for (const tz of ["EST5EDT,M3.2.0/2,M11.1.0/2", "/usr/share/zoneinfo/America/New
     assert.equal(local.length, 19);
     const name = "TZ='" + tz + "'";
     for (const l of local) assert.ok(l.includes(" raises NotImplementedError time: the host's time zone " + name + " ("), l);
+  });
+
+// (a TZDIR of its own, astra's repros: New York's name holding UTC's file,
+// UTC's name holding New York's; glibc reads them, Date cannot: every local
+// time refuses, naming TZDIR, UTC included. The system's TZDIR, written
+// out, is the system's: as CPython)
+test("time_tz_forms_cases.py under a TZDIR of its own: local times refuse, naming TZDIR; the rest as CPython's", () => {
+  const dir = mkdtempSync(tmpdir() + "/sagebrush-tzdir-");
+  try {
+    mkdirSync(dir + "/America");
+    copyFileSync("/usr/share/zoneinfo/Etc/UTC", dir + "/America/New_York");
+    copyFileSync("/usr/share/zoneinfo/America/New_York", dir + "/UTC");
+    for (const tz of ["America/New_York", "UTC", "Etc/GMT", ""]) {
+      const want = cpython("time_tz_forms_cases.py", tz, { TZDIR: dir }), got = sagebrush("time_tz_forms_cases.py", tz, { TZDIR: dir });
+      assert.deepEqual(got.filter((l) => !LOCAL.test(l)), want.filter((l) => !LOCAL.test(l)), tz);
+      const local = got.filter((l) => LOCAL.test(l));
+      assert.equal(local.length, 19);
+      for (const l of local) assert.ok(l.includes(" raises NotImplementedError time: the host's zoneinfo directory TZDIR='" + dir + "' "), l);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+for (const tzdir of ["/usr/share/zoneinfo", "/usr/share/zoneinfo/", ""])
+  test(`time_tz_forms_cases.py under TZ=America/New_York, TZDIR=${JSON.stringify(tzdir)}: CPython's output`, () => {
+    assert.deepEqual(sagebrush("time_tz_forms_cases.py", "America/New_York", { TZDIR: tzdir }), cpython("time_tz_forms_cases.py", "America/New_York", { TZDIR: tzdir }));
   });
