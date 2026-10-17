@@ -3,7 +3,7 @@
 // Indices are UTF-16 code units, like the rest of the runtime's strings.
 
 import * as SP from "./strpos";
-import { T, PyBytes, PyDict, raise, typeName, tuple, objectType, callObj, dictSet, isinstance, sig } from "./object";
+import { T, PyBytes, PyDict, StrLayout, raise, typeName, tuple, objectType, callObj, dictSet, isinstance, sig } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { repr } from "./format";
@@ -370,14 +370,19 @@ export class PyPattern {
     }
     this.groups = this.names.length - 1;
   }
+  // (the subject, as CPython's getstring reads it: a str, a str subclass by
+  // its payload, or a bytes-like object, else "expected string or
+  // bytes-like object"; then it must be the pattern's kind)
   str(x: any): string {
+    const text = typeof x === "string" ? x : x instanceof StrLayout ? (x.$v as string) : undefined;
+    const b = text === undefined ? O.bufferOf(x) : undefined;
+    if (text === undefined && b === undefined) raise(T.TypeError, `expected string or bytes-like object, got '${typeName(x)}'`);
     if (this.isBytes) {
-      const b = O.bufferOf(x);
-      if (b === undefined || typeof x === "string") raise(T.TypeError, "cannot use a bytes pattern on a string-like object");
-      return Buffer.from(b).toString("latin1");
+      if (text !== undefined) raise(T.TypeError, "cannot use a bytes pattern on a string-like object");
+      return Buffer.from(b!).toString("latin1");
     }
-    if (typeof x !== "string") raise(T.TypeError, `cannot use a string pattern on a bytes-like object`);
-    return x;
+    if (text === undefined) raise(T.TypeError, "cannot use a string pattern on a bytes-like object");
+    return text!;
   }
   out(s: string | undefined): any {
     if (s === undefined) return null;
@@ -477,7 +482,7 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
   const s = p.str(string);
   const n = Number(count ?? 0);
   let tmpl: string | null = null;
-  if (typeof repl === "string" || repl instanceof PyBytes) tmpl = p.isBytes ? Ty.decode(repl as any, "latin1") : p.str(repl);
+  if (typeof repl === "string" || repl instanceof StrLayout || repl instanceof PyBytes) tmpl = p.isBytes ? Ty.decode(repl as any, "latin1") : p.str(repl);
   let out = "", last = 0, k = 0;
   const rx = p.rx;
   rx.lastIndex = 0;

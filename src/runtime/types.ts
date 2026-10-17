@@ -681,18 +681,26 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
 
 const BaseException = objectType("BaseException", [object], new Map(), "builtins");
 T.BaseException = BaseException;
-allocator(BaseException, (cls: PyType, ...args: any[]) => {
+const newException = (cls: PyType, ...args: any[]) => {
   const o = new cls.$ctor!();
   o.args = tuple(args);
   // Exceptions raised by the runtime are thrown right after creation, so
   // capture the stack now; `raise` re-captures at the raise site.
   captureTraceback(o);
   return o;
-});
-method(BaseException, "__init__", (self: any, ...args: any[]) => {
+};
+// (as CPython's BaseException_new: keywords are ignored there, for a
+// subclass's __init__ that takes them; args are the positional ones)
+allocator(BaseException, newException, (pos: any[]) => newException(pos[0], ...pos.slice(1)));
+const baseInit = method(BaseException, "__init__", (self: any, ...args: any[]) => {
   self.args = tuple(args);
   return null;
 });
+// (...and BaseException_init refuses them, naming the type)
+baseInit.$kw = (pos: any[], names: string[], _values: any[]) => {
+  if (names.length) raise(T.TypeError, `${typeName(pos[0])}() takes no keyword arguments`);
+  return baseInit(...pos);
+};
 method(BaseException, "__str__", (self: any) => {
   const a = self.args;
   return a.length === 0 ? "" : a.length === 1 ? str(a[0]) : repr(a);
@@ -745,7 +753,27 @@ exc("AssertionError", Exception);
 exc("AttributeError", Exception);
 exc("BufferError", Exception);
 exc("EOFError", Exception);
-const ImportError = exc("ImportError", Exception);
+// (as CPython's ImportError_init: keyword-only name, path and name_from, and
+// msg, the message when there is exactly one argument; str() is msg when it
+// is a str. The runtime's own import errors set name the same way)
+const ImportError = exc("ImportError", Exception, (c) => {
+  for (const k of ["msg", "name", "path", "name_from"]) c.$dict.set(k, null);
+  const init = method(c, "__init__", (self: any, ...args: any[]) => {
+    self.args = tuple(args);
+    self.msg = args.length === 1 ? args[0] : null;
+    self.name = self.path = self.name_from = null;
+    return null;
+  });
+  init.$kw = (pos: any[], names: string[], values: any[]) => {
+    const [self, ...args] = pos;
+    // (the keywords parsed first, as PyArg_ParseTupleAndKeywords does)
+    for (const k of names) if (k !== "name" && k !== "path" && k !== "name_from") raise(T.TypeError, `ImportError() got an unexpected keyword argument '${k}'`);
+    init(self, ...args);
+    names.forEach((k, i) => (self[k] = values[i]));
+    return null;
+  };
+  method(c, "__str__", (self: any) => (typeof self.msg === "string" ? self.msg : BaseException.$dict.get("__str__")(self)));
+});
 exc("ModuleNotFoundError", ImportError);
 exc("MemoryError", Exception);
 const NameError = exc("NameError", Exception);
@@ -1208,8 +1236,9 @@ function rsplitWhitespace(s: string, maxsplit: number): string[] {
 function clampRange(s: string, start: any, end: any): [number, number] {
   const p = SP.pairs(s);
   const n = p === null ? s.length : s.length - p.n;
-  let a = start === undefined || start === null ? 0 : Number(start);
-  let b = end === undefined || end === null ? n : Number(end);
+  // (start and end as slice indices: CPython's _PyEval_SliceIndex)
+  let a = O.sliceIndex(start, 0);
+  let b = O.sliceIndex(end, n);
   if (a < 0) a = Math.max(0, a + n);
   if (b < 0) b = Math.max(0, b + n);
   b = Math.min(b, n);
@@ -1316,9 +1345,19 @@ method(S, "count", (s: string, sub: string, start: any = undefined, end: any = u
   const t = s.slice(a, b);
   return sub === "" ? SP.cpLen(t) + 1 : SP.split(t, sub).length - 1;
 });
+// (a str, a str subclass by its payload, or a tuple of them, each checked
+// only when reached, as CPython's tailmatch loop does: ("x", 5) is True)
 function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean {
-  if (Array.isArray(x)) return x.some((p) => affix(s, p, start, end, ends));
-  if (typeof x !== "string") raise(T.TypeError, `${ends ? "endswith" : "startswith"} first arg must be str or a tuple of str, not ${typeName(x)}`);
+  const name = ends ? "endswith" : "startswith";
+  if (isinstance(x, T.tuple)) {
+    for (const p of x as any[]) {
+      if (typeof p !== "string" && !(p instanceof StrLayout)) raise(T.TypeError, `tuple for ${name} must only contain str, not ${typeName(p)}`);
+      if (affix(s, p, start, end, ends)) return true;
+    }
+    return false;
+  }
+  if (x instanceof StrLayout) x = x.$v;
+  if (typeof x !== "string") raise(T.TypeError, `${name} first arg must be str or a tuple of str, not ${typeName(x)}`);
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return false;
   const t = s.slice(a, b);
@@ -2580,7 +2619,30 @@ getset(object, "__dict__", (o) => {
           if (!(v instanceof PyBytes)) raise(T.TypeError, `sequence item: expected a bytes-like object, ${typeName(v)} found`);
           return latin(v);
         })), Cls);
+        // (bytes' startswith and endswith: a bytes-like object or a tuple of
+        // them, each checked only when reached, with CPython's messages)
+        if (name === "startswith" || name === "endswith") {
+          const bytesLike = (x: any): string | undefined => {
+            const b = typeof x === "string" ? undefined : O.bufferOf(x);
+            return b === undefined ? undefined : Buffer.from(b.buffer, b.byteOffset, b.length).toString("latin1");
+          };
+          const [x, ...rest] = args;
+          if (isinstance(x, T.tuple)) {
+            for (const p of x as any[]) {
+              const t = bytesLike(p);
+              if (t === undefined) raise(T.TypeError, `a bytes-like object is required, not '${typeName(p)}'`);
+              if (f(latin(self), t, ...rest)) return true;
+            }
+            return false;
+          }
+          const t = bytesLike(x);
+          if (t === undefined) raise(T.TypeError, `${name} first arg must be bytes or a tuple of bytes, not ${typeName(x)}`);
+          return f(latin(self), t, ...rest);
+        }
         const conv = args.map((a, i) => {
+          // (find, rfind, index, rindex and count: after the subject, start
+          // and end, slice indices, which str's method checks)
+          if (intArg && i >= 1) return a;
           if (intArg && i === 0 && O.isPyInt(a)) {
             const v = Number(a);
             if (!(v >= 0 && v < 256)) raise(T.ValueError, "byte must be in range(0, 256)");
