@@ -1,6 +1,7 @@
 # Release on a version tag (v0.1.1, ...): check the tag matches the package
 # versions, publish `sagebrush` and `sagebrush-web` to npm with trusted
-# publishing (OIDC; no token), and attach self-contained executables for
+# publishing (OIDC; no token), then `@sagemathinc/sagebrush-board` when its
+# own version is new, and attach self-contained executables for
 # every platform (deno compile cross-compiles from Linux) to the GitHub
 # release.  R2 upload and macOS/Windows signing come later.
 name: release
@@ -51,6 +52,11 @@ jobs:
             v=$(node -p "require('./$p/package.json').version")
             [ "$v" = "$tag" ] || { echo "$p is $v, tag is $tag"; exit 1; }
           done
+          # (the board package has versions of its own; it names the CLI it
+          # pairs with, `sagebrush board answers`: ^MAJOR.MINOR.0 of the tag)
+          pin=$(node -p "require('./packages/sagebrush-board/package.json').peerDependencies.sagebrush")
+          want="^$(echo "$tag" | cut -d. -f1-2).0"
+          [ "$pin" = "$want" ] || { echo "packages/sagebrush-board pairs with sagebrush $pin, tag is $tag (want $want)"; exit 1; }
       - name: build the bundle and executables
         run: |
           # the bundle, the notebook page (which needs the bundle), then the
@@ -114,6 +120,16 @@ jobs:
           node cdn/smoke.mjs
           (cd packages/sagebrush && npm publish --provenance --access public)
           (cd cdn && npm publish --provenance --access public)
+          # the board package, after sagebrush (it pairs with that CLI); its
+          # version is its own, so a tag that doesn't change it publishes nothing
+          cd packages/sagebrush-board
+          bv=$(node -p "require('./package.json').version")
+          if npm view "@sagemathinc/sagebrush-board@$bv" version >/dev/null 2>&1; then
+            echo "@sagemathinc/sagebrush-board $bv is published already"
+          else
+            bun build.mjs
+            npm publish --provenance --access public
+          fi
       - name: GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
