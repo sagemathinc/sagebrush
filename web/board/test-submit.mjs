@@ -106,7 +106,7 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
 const evalIn = async (expression, sessionId, contextId) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, sessionId);
-  if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
+  if (r?.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 300) + " in: " + expression.slice(0, 300));
   return r?.result?.value;
 };
 const top = (e) => evalIn(e);
@@ -216,32 +216,115 @@ try {
   check(!!(await until(async () => (await sent("decide")).length === 1)), "the request sent on the port");
   const d1 = decideRequest(posted, (await sent("decide"))[0]);
   check(d1.ok && d1.request.item === "q2" && d1.request.answer.includes("$g \\in G$"), "and it passes the host's check, the reader's words its answer" + (d1.ok ? "" : ": " + d1.message));
-  check(!!(await until(() => frame(`${fb}?.textContent.includes("Your words suggest") && !!${fb}.querySelector('.katex') && !!${fb}.querySelector('a.board-ref[href="#n1"]')`))), "an option: its about shown, typeset, with its next");
-  // (the link says where it goes: the item's title or first line, never its id)
-  const linkText = () => frame(`${fb}.querySelector('a.board-ref').textContent`);
-  check(await linkText() === "→ Transitive vs 2-transitive. G acts transitively when for…", "its next link says the item's first line, its Markdown and math signs dropped, cut short: " + JSON.stringify(await linkText()));
+  // (the host proposes, the reader confirms, William Oct 17: the option with Yes, to its next step, and No)
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("Your words suggest") && ${fb}.textContent.includes("Is that what you meant?") && !!${fb}.querySelector('.katex') && !!${fb}.querySelector('a.board-ask-yes[href="#n1"]') && ${fb}.querySelector('button.board-ask-no')?.textContent === "No"`))), "an option proposed: its about shown, typeset, with Yes (to its next) and No");
+  // (Yes says where it goes: the item's title or first line, never its id)
+  const linkText = () => frame(`${fb}.querySelector('a.board-ask-yes').title`);
+  check(await linkText() === "→ Transitive vs 2-transitive. G acts transitively when for…", "its Yes says where it goes, the item's first line, its Markdown and math signs dropped, cut short: " + JSON.stringify(await linkText()));
   check(!!(await until(() => frame(`(() => { const card = ${fb}.closest(".board-item"); return card.scrollHeight <= card.clientHeight + 1; })()`), 10000)), "and its card as tall as what it now shows");
   // (nothing over it: the tour's caption at the bottom never covers what the card now shows)
   const uncovered = (sel) => `(() => { const el = ${sel}; if (!el) return false; const r = el.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.width > 0 && r.bottom <= innerHeight && !!at && (at === el || el.contains(at)); })()`;
-  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('a.board-ref')`)), 10000)), "its next link is visible, nothing over it (elementFromPoint at its center)");
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('a.board-ask-yes')`)), 10000)) && !!(await frame(uncovered(`${fb}.querySelector('.board-ask-no')`))), "Yes and No are visible, nothing over them (elementFromPoint at their centers)");
   check(!!(await until(() => frame(uncovered(`document.querySelector('[data-ask="q2"] .board-ask-req')`)), 10000)), "and so is the question's \"required\"");
   await shot("submit-5-decided.png");
+  // No: every option, each to its own next step, and the reader's own words
+  await frame(`${fb}.querySelector('.board-ask-no').click()`);
+  const choices = () => frame(`[...${fb}.querySelectorAll('.board-ask-choice')].map((c) => (c.getAttribute('href') ?? '') + '|' + c.textContent.trim().slice(0, 30).trim())`);
+  check(!!(await until(async () => JSON.stringify(await choices()) === JSON.stringify(["#n1|Transitive asks only that one", "#s1|Says every point reaches every", "|Something else: in my own word"]) && await frame(`${fb}.textContent.includes("Then which is closest") && !!${fb}.querySelector('.board-ask-choice .katex')`), 10000)), "No: every option, typeset, to its next step, and Something else: " + JSON.stringify(await choices()));
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('.board-ask-own')`)), 10000)), "...the last of them in view, nothing over it (No)");
+  await shot("submit-5b-no.png");
+  check(await frame(`${fb}.querySelector('a.board-ask-choice[href="#s1"]').title === "→ Go to the next step"`), "a next item with no title or text: \"Go to the next step\", not its id");
+  // Something else: the reader's own words, their field open and focused; Choose again: the options again
+  await frame(`${fb}.querySelector('.board-ask-own').click()`);
+  check(!!(await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand") && document.activeElement === document.querySelector('[data-ask="q2"] details textarea') && document.querySelector('[data-ask="q2"] details').open`))), "Something else: said, the reader's own words open and focused");
+  await shot("submit-5d-own.png");
+  check((await sent("decide")).length === 1, "...and nothing more asked of the host");
+  // (other words written: Something else stands; then Choose again: the options, whatever the host said of the words before, astra's UI-E29-1)
+  await frame(`(() => { const w = document.querySelector('[data-ask="q2"] details textarea'); w.value = "Each $x$ goes to each $y$ under some $g \\in G$."; w.dispatchEvent(new Event("change")); })()`);
+  await sleep(800);
+  check(await frame(`${fb}.textContent.includes("Something else: your own words stand")`), "...it stands as other words are written");
+  await frame(`${fb}.querySelector('.board-ask-clear').click()`);
+  check(!!(await until(async () => (await choices()).length === 3)) && (await sent("decide")).length === 1, "Choose again, after other words: the options again, nothing asked of the host: " + JSON.stringify(await choices()));
+  // a choice with a next step: there, and said
+  const cam0 = await frame(`JSON.stringify(window.board.camera)`);
+  await frame(`${fb}.querySelector('a.board-ask-choice[href="#n1"]').click()`);
+  // (there: the camera moved to its next step, n1 in the middle of the view)
+  check(!!(await until(() => frame(`(() => { const r = window.board.clientRect("n1"); if (!r || JSON.stringify(window.board.camera) === ${JSON.stringify(cam0)}) return false; const x = r.left + r.width / 2, y = r.top + r.height / 2; return Math.abs(x - innerWidth / 2) < innerWidth / 4 && y > 0 && y < innerHeight; })()`), 10000)), "an option chosen: it goes to its next step: " + await frame(`JSON.stringify([${JSON.stringify(cam0)}, window.board.camera, window.board.clientRect("n1"), innerWidth, innerHeight])`));
+  // (back to the question, for what follows)
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("You chose:") && ${fb}.querySelector('a.board-ref[href="#n1"]')?.textContent === "→ Transitive vs 2-transitive. G acts transitively when for…"`))), "...and says it was chosen, with the way to its next step");
+  // Yes: the proposed option chosen, and its next step
   await top(`mode.decide = "says-every-point-reaches-every-other"`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}?.querySelector('a.board-ref[href="#s1"]')?.textContent === "→ Go to the next step"`))), "a next item with no title or text: \"Go to the next step\", not its id");
+  await until(() => frame(`!!${fb}?.querySelector('a.board-ask-yes[href="#s1"]')`));
+  await frame(`${fb}.querySelector('a.board-ask-yes').click()`);
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("You chose: Says every point reaches every other") && ${fb}.querySelector('a.board-ref[href="#s1"]')?.textContent === "→ Go to the next step"`))), "Yes: the proposed option chosen, with its next step");
+  const linkFont = await frame(`(() => { const a = ${fb}.querySelector('a.board-ref'), m = ${fb}.querySelector('.board-ask-clear'); return [getComputedStyle(a).fontFamily, getComputedStyle(m).fontFamily, getComputedStyle(a).fontSize, getComputedStyle(m).fontSize]; })()`);
+  check(!/mono/i.test(linkFont[0]) && linkFont[0] === linkFont[1] && linkFont[2] === linkFont[3], "...its next step's link in the card's own type, as Choose again beside it, not monospace: " + JSON.stringify(linkFont));
+  await shot("submit-5c-chosen.png");
+  // (back to the question, from its next step, for what follows)
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
+  // a confirmation is of the words it was proposed for: they changed by
+  // any path (the API's here, as the store and Undo do), it is gone, and
+  // stays gone when they change back (astra's CORR-548-1)
+  const note2 = (v) => frame(`window.sagebrush.board.edit((d) => { d.pages[0].nodes.find((n) => n.id === "q2").note = ${JSON.stringify(v)}; }).then(() => 1)`);
+  const words0 = await frame(`document.querySelector('[data-ask="q2"] details textarea').value`);
+  const yes = async () => {
+    await frame(`${fb}.querySelector('button').click()`);
+    await until(() => frame(`!!${fb}?.querySelector('a.board-ask-yes')`));
+    await frame(`${fb}.querySelector('a.board-ask-yes').click()`);
+    await until(() => frame(`${fb}?.textContent.includes("You chose:")`));
+    await frame(`window.board.focus(["q2"], true), 1`);
+    await sleep(300);
+  };
+  await note2("API completely different words");
+  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API completely different words" && !${fb}.textContent.includes("You chose")`), 5000)), "Yes, then the words changed by the API: the confirmation is gone");
+  await note2(words0);
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)}`), 5000);
+  await yes();
+  await note2("API temporary words");
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API temporary words"`), 5000);
+  await note2(words0);
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)}`), 5000);
+  await sleep(500);
+  check(await frame(`!${fb}.textContent.includes("You chose")`), "...the words changed and changed back: still gone");
+  await yes();
+  await note2("API words to undo");
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API words to undo"`), 5000);
+  await frame(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1`);
+  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)} && !${fb}.textContent.includes("You chose")`), 5000)), "...the words changed, then Undo: still gone: " + await frame(`[document.querySelector('[data-ask="q2"] details textarea').value, ${fb}.textContent.slice(0, 120)].join(" | ")`));
+  // (Something else stands as the words change, the API's too)
+  await frame(`${fb}.querySelector('button').click()`);
+  await until(() => frame(`!!${fb}?.querySelector('.board-ask-no')`));
+  await frame(`${fb}.querySelector('.board-ask-no').click()`);
+  await until(() => frame(`!!${fb}?.querySelector('.board-ask-own')`));
+  await frame(`${fb}.querySelector('.board-ask-own').click()`);
+  await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand")`));
+  await note2("API own words, written on");
+  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API own words, written on" && ${fb}.textContent.includes("Something else: your own words stand")`), 5000)), "Something else, then the words changed by the API: it stands");
+  await note2(words0);
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
   await top(`mode.decide = null`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}?.textContent.includes("didn't match any of the ideas")`))), "none: said honestly, and that submitting still reaches the board's maker");
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("didn't match any of the ideas")`))) && (await choices()).length === 3, "none: said honestly, and every option offered, and the reader's own words");
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('.board-ask-own')`)), 10000)), "...the last of them in view, nothing over it (6-none)");
   await shot("submit-6-none.png");
   await top(`mode.decide = "refused"; mode.message = "Too many requests: try again in a minute."`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}?.textContent.includes("Couldn't get feedback: Too many requests: try again in a minute. Your words")`))), "refused: the host's words shown");
+  check(!!(await until(() => frame(`${fb}?.textContent.includes("Couldn't get feedback: Too many requests: try again in a minute. Choose what is closest yourself")`))) && (await choices()).length === 3, "refused: the host's words shown, and every option offered");
+  check(!!(await until(() => frame(uncovered(`${fb}.querySelector('.board-ask-own')`)), 10000)), "...the last of them in view, nothing over it (7-refused)");
   await shot("submit-7-refused.png");
   await top(`mode.decide = "not-one-of-these-names"`);
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => frame(`${fb}?.textContent.includes("not one of this question's ideas")`))), "a name not among its options: not shown as one");
 
   // an answer to words since changed: dropped, never shown under the new ones (CORR-B21-1)
+  // (the question in view again: the options' card was kept clear of the caption by its bottom, its top above)
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
   await top(`mode.decide = "hold"`);
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => top("!!window.held"))), "(a request the host holds)");
@@ -254,7 +337,7 @@ try {
   // (page 1's q2 with feedback of its own, before page 3's)
   await top(`mode.decide = "says-every-point-reaches-every-other"`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other")`))), "page 1's q2 decided again, on its new words");
+  check(!!(await until(() => frame(`${fb}.textContent.includes("Says every point reaches every other")`))), "page 1's q2 decided again, on its new words");
 
   // (the document changed by any path, the API's here, as Undo and Redo do:
   // a decision kept only while the question, as defined, has the words it
@@ -264,7 +347,7 @@ try {
   // (only the choice changed: the decision stays)
   await frame(`document.querySelector('[data-ask="q2"] input[type=checkbox]').click()`);
   await sleep(800);
-  check(await frame(`${fb}.textContent.includes("says every point reaches every other")`), "only the choice changed, the words and the question the same: the decision stays");
+  check(await frame(`${fb}.textContent.includes("Says every point reaches every other")`), "only the choice changed, the words and the question the same: the decision stays");
   // (1) done, then the words changed by the API: gone
   await editQ2(`n.note = "API NEW WORDS";`);
   check(!!(await until(() => frame(`${words}.value === "API NEW WORDS" && !${fb}.textContent.includes("Your words suggest")`))), "a decision done, its words changed by the API: gone");
@@ -291,7 +374,7 @@ try {
   // (and decided again, on these words and this question, for what follows)
   await top(`mode.decide = "says-every-point-reaches-every-other"`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other")`))), "decided again, on the question and words as they are now");
+  check(!!(await until(() => frame(`${fb}.textContent.includes("Says every point reaches every other")`))), "decided again, on the question and words as they are now");
 
   // a page with no questions: no Submit
   await frame(`document.querySelector('[data-sbb="pgnext"]').click()`);
@@ -300,7 +383,7 @@ try {
   // page 3's q2, the id of page 1's: its own options, its own feedback (CORR-B21-2)
   await frame(`document.querySelector('[data-sbb="pgnext"]').click()`);
   check(!!(await until(() => frame(`!!document.querySelector('[data-ask="q2"] input.board-ask-text') && !${$("submitbtn")}.hidden`))), "page 3, with its own q2");
-  check(await frame(`!document.querySelector('[data-ask="q2"] .board-ask-decide').textContent.includes("says every point")`), "page 1's feedback for its q2 is not shown on page 3's");
+  check(await frame(`!document.querySelector('[data-ask="q2"] .board-ask-decide').textContent.includes("Says every point")`), "page 1's feedback for its q2 is not shown on page 3's");
   await frame(`(() => { const t = document.querySelector('[data-ask="q2"] input.board-ask-text'); t.value = "All the points $g x$."; t.dispatchEvent(new Event("change")); })()`);
   await sleep(300);
   await top(`mode.decide = "says-the-set-of-images-of-a-point"`);
@@ -319,7 +402,7 @@ try {
   await sleep(300);
   await frame(`document.querySelector('[data-sbb="pgprev"]').click()`);
   check(!!(await until(() => frame(`!!document.querySelector('[data-ask="q2"] details textarea')`))), "back on page 1");
-  check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other") && !${fb}.textContent.includes("orbit") && !${fb}.textContent.includes("not one of")`))), "page 1's q2 shows its own feedback, none of page 3's");
+  check(!!(await until(() => frame(`${fb}.textContent.includes("Says every point reaches every other") && !${fb}.textContent.includes("orbit") && !${fb}.textContent.includes("not one of")`))), "page 1's q2 shows its own feedback, none of page 3's");
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
 } finally {
   ws.close(); chrome.kill(); parent.close();
