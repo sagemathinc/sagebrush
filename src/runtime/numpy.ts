@@ -1448,6 +1448,43 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
   return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => x + y, rt.kind === "f" ? pairwise : undefined), axis, keepdims);
 }
+// The product of a complex array (or of one into a complex dtype) over the
+// axes: each output element the product of its reduced elements, one at a
+// time from the first, in C order of the reduced axes, with NumPy's complex
+// product (ac - bd, ad + bc), rounded to complex64 at each step for that
+// dtype. NumPy walks a non-contiguous array in its memory order instead, so
+// when products under- or overflow on the way the two can differ: for
+// np.array([[1e-200, 1e200], [1e-200, 1e200]], dtype=complex).T NumPy gives
+// 1+0j and this 0j (as the real fold does for a real array), a known
+// traversal-order limitation.
+function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType): NDArray {
+  // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
+  if (a.dt.cplx && !rt.cplx) raise(T.TypeError, `prod: a complex array multiplied in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
+  const nd = a.ndim;
+  const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
+  const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
+  // (the kept axes first, the reduced ones after, in order; contiguous, in rt)
+  const t = copy(transpose(a, [...keep, ...ax]), rt);
+  const outShape = keep.map((i) => a.shape[i]);
+  const rn = ax.reduce((n, i) => n * a.shape[i], 1);
+  const out = empty(outShape, rt);
+  const rows = outShape.reduce((n, x) => n * x, 1);
+  const f32 = rt === D.complex64;
+  const d = t.data, o = out.data, base0 = t.offset;
+  for (let r = 0; r < rows; r++) {
+    // (from the first element, as NumPy's reduction: 1 only for none)
+    const k0 = 2 * (base0 + r * rn);
+    let re = rn ? d[k0] : 1, im = rn ? d[k0 + 1] : 0;
+    for (let i = 1; i < rn; i++) {
+      const k = 2 * (base0 + r * rn + i), xr = d[k], xi = d[k + 1];
+      [re, im] = [re * xr - im * xi, re * xi + im * xr];
+      if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
+    }
+    o[2 * r] = re;
+    o[2 * r + 1] = im;
+  }
+  return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
+}
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
   return r.ndim === 0 && !keepdims ? pyScalarOf(r.dt, r.data, r.offset) : r;
 }
@@ -2590,6 +2627,9 @@ newBuiltinModule("_numpy", (m) => {
   fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => {
     const x = asarray(a);
     const rt = dtype !== null ? toDtype(dtype) : sumType(x.dt);
+    // (complex: real and imaginary parts multiplied together; a real fold
+    // read only the real parts)
+    if (x.dt.cplx || rt.cplx) return finish(complexProd(x, axesArg(axis, x.ndim), !!keepdims, rt), axis, !!keepdims);
     return finish(reduceAxes(x, axesArg(axis, x.ndim), !!keepdims, rt, 1, (p, v) => p * v), axis, !!keepdims);
   });
   fn("amax", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true));
