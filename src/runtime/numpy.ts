@@ -2134,12 +2134,79 @@ function shortestDigits(x: number, f32 = printingF32): [string, number] {
   const [m, e] = s.split("e");
   return [m.replace(".", "").replace(/0+$/, ""), Number(e) + 1];
 }
+// The digits NumPy prints for a float32 x >= 0, as toExponential writes
+// them: Dragon4's unique mode (Ryan Juckett's, as NumPy's dragon4.c has
+// it), digit by digit until the rest is within the rounding margins (the
+// lower one half the upper at a power of two, the bounds inclusive for an
+// even mantissa), the last digit rounded by the remainder, a tie to even
+const dv32 = new DataView(new ArrayBuffer(4));
 function shortestF32(x: number): string {
-  for (let p = 1; p < 10; p++) {
-    const s = x.toExponential(p - 1);
-    if (Math.fround(Number(s)) === x) return s;
+  if (x === 0) return "0e+0";
+  dv32.setFloat32(0, x);
+  const bits = dv32.getUint32(0), fe = (bits >>> 23) & 0xff, fm = bits & 0x7fffff;
+  // (value = mantissa * 2^exponent; mbit the mantissa's highest bit)
+  const normal = fe !== 0;
+  const mant = normal ? (1 << 23) | fm : fm, exponent = normal ? fe - 150 : -149, mbit = normal ? 23 : 31 - Math.clz32(fm);
+  const unequal = normal && fe !== 1 && fm === 0, isEven = mant % 2 === 0;
+  const M = BigInt(mant);
+  let value: bigint, scale: bigint, mlow: bigint;
+  if (unequal) {
+    if (exponent > 0) [value, scale, mlow] = [M << BigInt(exponent + 2), 4n, 1n << BigInt(exponent)];
+    else [value, scale, mlow] = [M << 2n, 1n << BigInt(-exponent + 2), 1n];
+  } else {
+    if (exponent > 0) [value, scale, mlow] = [M << BigInt(exponent + 1), 2n, 1n << BigInt(exponent)];
+    else [value, scale, mlow] = [M << 1n, 1n << BigInt(-exponent + 1), 1n];
   }
-  return x.toExponential(8);
+  const high = () => (unequal ? 2n * mlow : mlow);
+  // (the first digit's exponent estimated, then corrected once)
+  let dexp = Math.ceil((mbit + exponent) * 0.30102999566398119521373889472449 - 0.69);
+  if (dexp > 0) scale *= 10n ** BigInt(dexp);
+  else if (dexp < 0) {
+    const p = 10n ** BigInt(-dexp);
+    value *= p;
+    mlow *= p;
+  }
+  if (value >= scale) dexp++;
+  else {
+    value *= 10n;
+    mlow *= 10n;
+  }
+  let outExp = dexp - 1;
+  const digits: number[] = [];
+  let d = 0, lo = false, hi = false;
+  for (;;) {
+    d = Number(value / scale);
+    value %= scale;
+    const vh = value + high();
+    lo = isEven ? value <= mlow : value < mlow;
+    hi = isEven ? vh >= scale : vh > scale;
+    if (lo || hi) break;
+    digits.push(d);
+    value *= 10n;
+    mlow *= 10n;
+  }
+  let roundDown = lo;
+  if (lo === hi) {
+    const c = 2n * value - scale;
+    roundDown = c < 0n || (c === 0n && (d & 1) === 0);
+  }
+  if (roundDown) digits.push(d);
+  else if (d < 9) digits.push(d + 1);
+  else {
+    // (a carry through the 9s, or a new leading 1)
+    let i = digits.length - 1;
+    while (i >= 0 && digits[i] === 9) i--;
+    if (i < 0) {
+      digits.length = 0;
+      digits.push(1);
+      outExp++;
+    } else {
+      digits[i]++;
+      digits.length = i + 1;
+    }
+  }
+  const s = digits.join("");
+  return `${s[0]}${s.length > 1 ? "." + s.slice(1) : ""}e${outExp < 0 ? "-" : "+"}${Math.abs(outExp)}`;
 }
 // The exact decimal digits of |x| (a double is a dyadic rational): [digits,
 // exponent] as above, without trailing zeros.
@@ -2367,7 +2434,10 @@ function floatFormatter(vals: number[], signMode = printopts.sign as string): Fm
   let expFormat = false;
   if (abs.length) {
     const mx = Math.max(...abs), mn = Math.min(...abs);
-    if (mx >= 1e8 || (!printopts.suppress && (mn < 0.0001 || mx / mn > 1000))) expFormat = true;
+    // (scientific from 10**min(8, finfo(dtype).precision) up: 1e6 for
+    // float32 and complex64, 1e8 for float64, as NumPy 2's fillFormat)
+    const cutoff = printingF32 ? 1e6 : 1e8;
+    if (mx >= cutoff || (!printopts.suppress && (mn < 0.0001 || mx / mn > 1000))) expFormat = true;
   }
   const plus = signMode === "+";
   const f32 = printingF32;
