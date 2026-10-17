@@ -170,14 +170,16 @@ export function complexRepr(c: PyComplex): string {
 
 function parseComplex(s: string): PyComplex {
   const bad = () => raise(T.ValueError, "complex() arg is a malformed string");
-  // (an underscore not between two digits is CPython's other error, found
-  // up to a non-ASCII character that is neither a digit nor a space, after
-  // which the string is just malformed)
+  // (CPython's underscore check, _Py_string_to_number_with_underscores,
+  // reads the text as a C string, up to a NUL: an underscore not between two
+  // digits there, or a NUL after an underscore, is "could not convert";
+  // without one, the text is just malformed if it isn't a literal)
   let t = Ty.stripAscii(Ty.asciiNumeral(s));
   const stop = t.indexOf("\0");
   const head = stop < 0 ? t : t.slice(0, stop);
-  if (/(?<!\d)_|_(?!\d)/.test(head)) raise(T.ValueError, `could not convert string to complex: ${repr(s)}`);
-  if (stop >= 0) bad();
+  if (head.includes("_")) {
+    if (/(?<!\d)_|_(?!\d)/.test(head) || stop >= 0) raise(T.ValueError, `could not convert string to complex: ${repr(s)}`);
+  } else if (stop >= 0) bad();
   t = t.replace(/_/g, "");
   if (t.startsWith("(") && t.endsWith(")")) t = Ty.stripAscii(t.slice(1, -1));
   const num = "(?:(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?|inf(?:inity)?|nan)";

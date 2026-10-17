@@ -808,8 +808,9 @@ const isInt = Number.isInteger;
 // A str as int(), float() and complex() read it, CPython's
 // _PyUnicode_TransformDecimalAndSpaceToASCII: each non-ASCII Unicode decimal
 // digit (Nd) its ASCII digit, each non-ASCII whitespace character
-// (str.isspace) a space, anything else non-ASCII NUL, which no literal has
-// (and which ends complex()'s underscore check, as in CPython).
+// (str.isspace) a space; at the first other non-ASCII character a "?", where
+// the text ends, as CPython's (no literal has a "?"; complex()'s underscore
+// check sees what is before it, CORR follow-up of fbb39db5).
 // (Then only ASCII whitespace is stripped, as CPython's Py_ISSPACE: not
 // \x1c-\x1f, nor U+FEFF.)
 const NON_ASCII_SPACE = /[\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
@@ -840,7 +841,8 @@ export function asciiNumeral(s: string): string {
     else if (NON_ASCII_SPACE.test(ch)) out += " ";
     else {
       const d = ndValue(ch);
-      out += d < 0 ? "\0" : String.fromCharCode(48 + d);
+      if (d < 0) return out + "?";
+      out += String.fromCharCode(48 + d);
     }
   }
   return out;
