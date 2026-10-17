@@ -106,10 +106,10 @@ ok((await get("/" + one, { method: "POST" })).status === 405, "a chunk: only GET
 // once, not with every engine): served only with the bytes its manifest
 // names; an engine published before that has its own copy, used when the
 // shared one is missing or not those bytes.
-const [zoneA, zoneB, zoneC] = zones.filter((f) => f.endsWith(".tzif"));
+const [zoneA, zoneB, zoneC, zoneD, zoneE] = zones.filter((f) => f.endsWith(".tzif"));
 const old = "e".repeat(20), bare = "d".repeat(20);
 for (const e of [old, bare]) await bucket.put(`engine/${e}/manifest.json`, readFileSync(join(dir, "manifest.json")));
-for (const z of [zoneA, zoneB]) await bucket.put(`engine/${old}/${z}`, readFileSync(join(dir, z)));
+for (const z of [zoneA, zoneB, zoneD, zoneE]) await bucket.put(`engine/${old}/${z}`, readFileSync(join(dir, z)));
 const fromShared = await get(`/engine/${bare}/${zoneC}`);
 ok(fromShared.status === 200 && Buffer.from(await fromShared.arrayBuffer()).equals(readFileSync(join(dir, zoneC))) && fromShared.headers.get("content-type") === "application/octet-stream" && /immutable/.test(fromShared.headers.get("cache-control")), "an engine's zone file from the shared copy, byte for byte, with its manifest's headers");
 const ix = zones.find((f) => f.endsWith(".json"));
@@ -120,6 +120,17 @@ const a = await get(`/engine/${old}/${zoneA}`), b = await get(`/engine/${old}/${
 ok(a.status === 200 && Buffer.from(await a.arrayBuffer()).equals(readFileSync(join(dir, zoneA))), "a shared copy with other bytes: the engine's own copy");
 ok(b.status === 200 && Buffer.from(await b.arrayBuffer()).equals(readFileSync(join(dir, zoneB))), "no shared copy: the engine's own copy");
 ok((await get(`/engine/${bare}/${zoneA}`)).status === 404 && (await get(`/engine/${bare}/${zoneB}`)).status === 404, "neither a shared copy with its bytes nor its own: 404");
+// (a shared object of another size is not read: 4 MB there, HARD-TZU-2;
+// one of the same size with other bytes fails its hash)
+await bucket.put(zoneD, new Uint8Array(4 << 20));
+const flipped = Buffer.from(readFileSync(join(dir, zoneE)));
+flipped[flipped.length - 1] ^= 1;
+await bucket.put(zoneE, flipped);
+for (const [z, what] of [[zoneD, "another size"], [zoneE, "the same size and other bytes"]]) {
+  const r = await get(`/engine/${old}/${z}`);
+  ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(readFileSync(join(dir, z))), `a shared copy of ${what}: the engine's own copy`);
+  ok((await get(`/engine/${bare}/${z}`)).status === 404, `a shared copy of ${what} and none of its own: 404`);
+}
 const h = await get(`/engine/${bare}/${zoneC}`, { method: "HEAD" });
 ok(h.status === 200 && h.headers.get("content-length") === String(man.files[zoneC].size), "HEAD of a shared zone file gives its size");
 await mf.dispose();
