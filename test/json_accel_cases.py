@@ -1,6 +1,6 @@
 # json.dumps and json.loads through the _json accelerator: compared with
 # CPython 3.14 (whose json uses its C _json) by test/json-accel.test.ts
-import json, collections
+import json, collections, _json
 from fractions import Fraction
 
 
@@ -124,3 +124,90 @@ def longer(o):
     l2.append(4)
     return "X"
 show(lambda: json.dumps(l2, default=longer))
+# nesting: 40000 levels pass both ways, as in CPython; far deeper is a
+# RecursionError (CPython's message there names its C stack, so only the
+# type is compared)
+show(lambda: len(json.loads("[" * 40000 + "]" * 40000)) == 1)
+deep = []
+for _ in range(39999):
+    deep = [deep]
+show(lambda: len(json.dumps(deep)))
+show(lambda: len(json.loads('{"a":' * 39999 + "{}" + "}" * 39999)))
+deep = {}
+for _ in range(39999):
+    deep = {"a": deep}
+show(lambda: len(json.dumps(deep)))
+for s in ["[" * 100000 + "]" * 100000, '{"a":' * 100000 + "1" + "}" * 100000]:
+    try:
+        json.loads(s)
+        print("no error")
+    except RecursionError:
+        print("RecursionError")
+deep = []
+for _ in range(100000):
+    deep = [deep]
+try:
+    json.dumps(deep)
+    print("no error")
+except RecursionError as e:
+    print("RecursionError", e.__notes__[0])
+# CORR-C0E-1: a float subclass's stored value, not its __float__
+class F(float):
+    def __float__(self): return float("inf")
+    def __repr__(self): return "F!"
+class G(float):
+    def __float__(self): return 0.0
+class H(float):
+    def __float__(self): raise RuntimeError("no")
+show(lambda: json.dumps(F(1.5)))
+show(lambda: json.dumps(G(float("inf")), allow_nan=False))
+show(lambda: json.dumps(F(float("nan")), allow_nan=False))
+show(lambda: json.dumps([H(2.0), G(-float("inf"))]))
+show(lambda: json.dumps({F(1.5): 1, G(float("inf")): 2, H(2.0): 3}))
+show(lambda: json.dumps({G(float("nan")): 1}, allow_nan=False))
+# CORR-C0E-2: separators must be str (subclasses by contents)
+class SS(str):
+    def __str__(self): return "?"
+show(lambda: json.dumps({"a": [1, 2]}, separators=(1, ":")))
+show(lambda: json.dumps({"a": [1, 2]}, separators=(",", None)))
+show(lambda: json.dumps({"a": [1, 2]}, separators=(SS(";"), SS("="))))
+show(lambda: json.dumps({"a": [1, 2]}, indent=SS("--")))
+mk = json.encoder.c_make_encoder
+show(lambda: mk(None, None, json.encoder.encode_basestring, 2, ":", ",", False, False, True)([1, [2]], 0))
+show(lambda: mk(None, None, json.encoder.encode_basestring, 2, ":", ",", False, False, True)([], 0))
+# CORR-C0E-3: offsets by the index protocol; past the end, not clamped
+class I:
+    def __index__(self): return 1
+dec = json.JSONDecoder()
+for at in [1.5, "1", None, 10**30, -10**30, I(), True]:
+    show(lambda: dec.raw_decode(" 1", at))
+    show(lambda: _json.scanstring('"x"', at))
+show(lambda: mk(None, None, json.encoder.encode_basestring, None, ":", ",", False, False, True)(1, 1.5))
+show(lambda: mk(None, None, json.encoder.encode_basestring, None, ":", ",", False, False, True)(1, I()))
+for at in [2, 3, 8, 10**18]:
+    show(lambda: dec.raw_decode("\U0001F6001", at))
+    show(lambda: dec.scan_once("\U0001F6001", at))
+show(lambda: dec.raw_decode("\U0001F600 1", 1))
+# CORR-C0E-4: the scanner reads a str subclass by its contents
+show(lambda: dec.raw_decode(SS('"abc"')))
+show(lambda: dec.raw_decode(SS('\U0001F600 [1, "x"]'), 1))
+show(lambda: dec.scan_once(SS('{"a": 1}'), 0))
+show(lambda: dec.raw_decode(b'"abc"'))
+# CORR-C0E-5: an empty dict subclass is {} without items(); a nonempty one uses it
+class D(dict):
+    def items(self): return [("x", 1)]
+show(lambda: json.dumps(D()))
+show(lambda: json.dumps(D(a=2)))
+show(lambda: json.dumps([D(), D(a=2)], indent=2))
+show(lambda: json.dumps(D(), sort_keys=True))
+show(lambda: json.dumps(D(a=2), sort_keys=True))
+# CORR-C0E-6: int digits within sys's int_max_str_digits, values and keys
+import sys
+class BI(int): pass
+for lim in [4300, 640, 0]:
+    sys.set_int_max_str_digits(lim)
+    for e in [639, 640, 4299, 4300, 5000]:
+        for v in [10**e, -10**e, BI(10**e)]:
+            show(lambda: len(json.dumps(v)))
+            show(lambda: len(json.dumps({v: 1})))
+sys.set_int_max_str_digits(4300)
