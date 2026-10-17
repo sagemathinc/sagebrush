@@ -387,7 +387,10 @@ def _local(n):
     if _bad is not None:
         _refuse()
     _broken(n, 0)  # (glibc's range first)
-    off, isdst, abbr = _zone.find(n)
+    try:
+        off, isdst, abbr = _zone.find(n)
+    except _tzrules.ZoneUnsupported as e:
+        raise NotImplementedError("time: %s" % e) from None
     b = _broken(n, off)
     _names = _zone.names_after(n, _names)
     return b, isdst, abbr, off
