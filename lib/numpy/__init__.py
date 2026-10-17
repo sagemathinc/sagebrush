@@ -201,12 +201,18 @@ _g = globals()
 
 
 def _int_new(cls, value=0):
-    # (np.int64(x) as array creation makes it: the dtype's range, NumPy's
-    # OverflowError, and for int64/uint64 the runtime's exactness check;
-    # a sequence an array, as NumPy's)
-    if type(value) is int and (value < -2**63 or value > (2**64 - 1 if cls.__name__ == "uint64" else 2**63 - 1)):
-        # (the scalar's own conversion, before the dtype's bounds)
-        raise OverflowError("Python int too large to convert to C long")
+    # (a Python int: the scalar holds it exactly, as NumPy's, past 2**53
+    # too (it is an int; only arrays of int64 are doubles), after NumPy's
+    # range checks; anything else as array creation makes it: the dtype's
+    # range, its one conversion protocol, a sequence an array)
+    if type(value) is int:
+        if value < -2**63 or value > (2**64 - 1 if cls.__name__ == "uint64" else 2**63 - 1):
+            # (the scalar's own conversion, before the dtype's bounds)
+            raise OverflowError("Python int too large to convert to C long")
+        if cls.__name__ in ("int64", "uint64"):
+            if value < 0 and cls.__name__ == "uint64":
+                raise OverflowError(f"Python integer {value} out of bounds for uint64")
+            return int.__new__(cls, value)
     r = array(value, dtype=cls)
     return r if r.ndim else r[()]
 

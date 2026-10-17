@@ -189,6 +189,9 @@ function pyScalar(x: any): Weak | null {
   if (x instanceof Obj.PrimBox) {
     const dt = typeDtypes.get(Obj.typeOf(x)) ?? null; // a NumPy scalar keeps its dtype
     const s = pyScalar(x.$v);
+    // (an int64 or uint64 scalar holds its Python int exactly; one a double
+    // does not hold enters no array, refused, never rounded)
+    if (s && dt && isWide(dt) && s.inexact) wideRefuse(dt);
     if (s && dt) s.dt = dt;
     return s;
   }
@@ -606,9 +609,23 @@ function fill(out: NDArray, x: any) {
 // Sagebrush's are doubles. A comparison takes any int, exactly: bigCompare)
 const I64MIN = -(2n ** 63n), I64MAX = 2n ** 63n - 1n, U64MAX = 2n ** 64n - 1n;
 function checkWeak(dt: DType, w: Weak) {
+  checkWeakRange(dt, w);
+  if (isWide(dt) && w.inexact) wideRefuse(dt);
+}
+function checkWeakRange(dt: DType, w: Weak) {
   if (w.big !== undefined && (dt.kind === "u" && dt.itemsize === 8 ? w.big < I64MIN || w.big > U64MAX : w.big < I64MIN || w.big > I64MAX)) raise(T.OverflowError, "Python int too large to convert to C long");
   checkPyInt(dt, w.v);
-  if (isWide(dt) && w.inexact) wideRefuse(dt);
+}
+const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true };
+function bigMinMax(op: string, ct: DType, arr: NDArray, big: bigint): NDArray {
+  const max = op === "maximum" || op === "fmax";
+  const res = empty(arr.shape, ct), od = res.data, d = arr.data;
+  loop1(arr.shape, arr.strides, arr.offset, (p, k) => {
+    const x = d[p];
+    if (max ? BigInt(x) >= big : BigInt(x) <= big) od[k] = x;
+    else wideRefuse(ct);
+  });
+  return res;
 }
 const CMP_OPS: Record<string, (a: bigint, b: bigint) => boolean> = {
   equal: (a, b) => a === b, not_equal: (a, b) => a !== b, less: (a, b) => a < b,
@@ -1184,6 +1201,16 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   if (CMP_OPS[op] && !out) {
     const w = A.weak ?? B.weak, o = A.weak ? B : A;
     if (w && w.kind === "i" && w.big !== undefined && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b") && (w.inexact || w.big < I64MIN || w.big > I64MAX)) return bigCompare(op, A, B);
+  }
+  // (minimum and maximum of an integer array and a Python int a double does
+  // not hold: compared exactly, the int refused only where it is chosen, so
+  // np.clip(a, 0, 2**63 - 1) of a uint64 array keeps its elements)
+  if (MINMAX_OPS[op] && !out && ct.isInt) {
+    const w = A.weak ?? B.weak, o = A.weak ? B : A;
+    if (w && w.kind === "i" && w.inexact && w.big !== undefined && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b")) {
+      checkWeakRange(ct, w);
+      return bigMinMax(op, ct, o.arr, w.big);
+    }
   }
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && ct.kind === "f") raise(T.OverflowError, "int too large to convert to float");
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
