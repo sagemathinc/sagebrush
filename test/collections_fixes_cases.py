@@ -383,3 +383,107 @@ for label, f in [('list.__mul__ float', lambda: [1].__mul__(1.5)), ('list.__rmul
                  ('bytearray.__mul__ I2', lambda: bytearray(b'a').__mul__(I2())), ('bytes.__rmul__ -1', lambda: b'ab'.__rmul__(-1)), ('tuple.__rmul__ 2', lambda: (1,).__rmul__(2)),
                  ('list *= float', lambda: mimul([1], 1.5)), ('list.__mul__ Big', lambda: [1].__mul__(Big()))]:
     print(label, mshow(f))
+
+
+# A builtin's own descriptor reassigned in a class body (`__mul__ =
+# list.__mul__`) keeps the sequence repeat, the right operand's __rmul__
+# first (astra's CORR-57F-1); repeat()'s argument errors in CPython's order
+from itertools import repeat
+
+events = []
+
+
+class R:
+    def __rmul__(self, left):
+        events.append('rmul')
+        return 'reflected'
+
+    def __index__(self):
+        events.append('index')
+        return 2
+
+
+class RN:
+    def __rmul__(self, left):
+        events.append('rmul')
+        return 'reflected'
+
+
+class LM(list):
+    __mul__ = list.__mul__
+
+
+class LR(list):
+    __rmul__ = list.__rmul__
+
+
+class SM(str):
+    __mul__ = str.__mul__
+
+
+class TM(tuple):
+    __mul__ = tuple.__mul__
+
+
+class BM(bytes):
+    __mul__ = bytes.__mul__
+
+
+class LI(list):
+    __imul__ = list.__imul__
+
+
+def show(f):
+    events.clear()
+    try:
+        r = repr(f())
+    except Exception as e:
+        r = type(e).__name__ + ': ' + str(e)
+    return r + ' ' + str(events)
+
+
+def imul(a, b):
+    a *= b
+    return a
+
+
+for name, mk in [('LM', lambda: LM([1])), ('LR', lambda: LR([1])), ('SM', lambda: SM('a')), ('TM', lambda: TM((1,))), ('BM', lambda: BM(b'a')), ('LI', lambda: LI([1]))]:
+    for rn, r in [('R', R), ('RN', RN), ('int', lambda: 2)]:
+        print(name, rn, 'mul', show(lambda: mk() * r()))
+        print(name, rn, 'rmul', show(lambda: r() * mk()))
+        print(name, rn, 'imul', show(lambda: imul(mk(), r())))
+print(show(lambda: LM.__mul__(LM([1]), R())), show(lambda: LM.__mul__(LM([1]), 1.5)))
+for f in [lambda: repeat(bad=1), lambda: repeat(1, bad=1), lambda: repeat(1, 2, bad=1), lambda: repeat(object=1, bad=1), lambda: repeat()]:
+    print(show(f))
+
+
+# bytearray *= n in place, as CPython's bytearray_irepeat; bytes past an
+# index-sized length
+class I2:
+    def __index__(self):
+        return 2
+
+
+def show(f):
+    try:
+        return repr(f())
+    except Exception as e:
+        return type(e).__name__ + ': ' + str(e)
+
+
+def imul(b, n):
+    a = b
+    a *= n
+    return a, a is b, b
+
+
+class BA(bytearray):
+    pass
+
+
+for label, mk, n in [('ba 2', lambda: bytearray(b'ab'), 2), ('ba I2', lambda: bytearray(b'ab'), I2()), ('ba 0', lambda: bytearray(b'ab'), 0), ('ba -1', lambda: bytearray(b'ab'), -1),
+                     ('ba 1', lambda: bytearray(b'ab'), 1), ('empty 5', lambda: bytearray(), 5), ('BA 3', lambda: BA(b'x'), 3), ('ba float', lambda: bytearray(b'a'), 1.5),
+                     ('ba 2**63', lambda: bytearray(b'a'), 2**63), ('ba huge', lambda: bytearray(b'a'), 2**62)]:
+    print(label, show(lambda: imul(mk(), n)))
+print(show(lambda: bytearray(b'a').__imul__(1.5)), show(lambda: bytearray(b'a').__imul__(I2())))
+print(show(lambda: b'ab' * 2**62), show(lambda: bytearray(b'ab') * 2**62))

@@ -2728,6 +2728,7 @@ for (const bt of [bytesType, bytearray]) {
   method(bt, "__len__", (b: PyBytes) => b.n);
   method(bt, "__mul__", (b: PyBytes, n: any) => O.repeatBytes(b, O.ssizeCount(n)));
   method(bt, "__rmul__", (b: PyBytes, n: any) => O.repeatBytes(b, O.ssizeCount(n)));
+  if (bt === bytearray) method(bt, "__imul__", (b: PyByteArray, n: any) => O.bytearrayInplaceRepeat(b, n, true));
   method(bt, "__iter__", (b: PyBytes) => new O.BytesIter(b));
   method(bt, "__getitem__", (b: PyBytes, k: any) => O.getitem(b, k));
   method(bt, "__repr__", (b: PyBytes) => repr(b));

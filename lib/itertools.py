@@ -369,9 +369,7 @@ endlessly."""
         # PyArg_ParseTupleAndKeywords "O|n:repeat" reads them)
         if len(args) + len(kwargs) > 2:
             raise TypeError("repeat() takes at most 2 arguments (%d given)" % (len(args) + len(kwargs)))
-        for k in kwargs:
-            if k not in ("object", "times"):
-                raise TypeError("repeat() got an unexpected keyword argument '%s'" % k)
+        # (each parameter in turn, then any other keyword, as its order)
         names = ("object", "times")
         for i in range(len(args)):
             if names[i] in kwargs:
@@ -382,6 +380,9 @@ endlessly."""
             object = kwargs["object"]
         else:
             raise TypeError("repeat() missing required argument 'object' (pos 1)")
+        for k in kwargs:
+            if k not in names:
+                raise TypeError("repeat() got an unexpected keyword argument '%s'" % k)
         times = args[1] if len(args) > 1 else kwargs.get("times", _NULL)
         self = super().__new__(cls)
         self._obj = object
