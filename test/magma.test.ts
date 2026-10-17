@@ -1370,6 +1370,20 @@ test("an image under a map whose codomain gives no universe Sagebrush has is ref
   const refused = run([q + "S:=f({}); Include(~S,2); Gcd(S);", "f:=map<Integers()->{\"a\",\"b\"}|x:->\"a\">; S:=f({1,2}); S;"].join("\n"));
   assert.equal((refused.replace(/\s+/g, " ").match(/the image of a set under a map to this codomain is not supported yet/g) ?? []).length, 2, refused);
   assert.doesNotMatch(refused, /Integer Ring|^2$/m);
+  // (the image's elements are the universe's, never integers labelled
+  // with the rationals, CORR-CBA-1; a sort by a comparison keeps the
+  // declared universe as the default sort does, CORR-CBA-2)
+  const els = run([q + "S:=Setseq(f({1,2})); Type(S[1]);", "g:=map<Integers()->{1/2,1}|x:->1>; S:=Setseq(g({1,2})); Universe(S); Type(S[1]);",
+    "h:=map<Integers()->Rationals()|x:->x>; S:=h({1,2}); Type(Setseq(S)[1]);",
+    r + "S:=Sort(Setseq(f({})),func<a,b|0>); Append(~S,2); S[1]+5;", "S:=Sort([Integers(5)|],func<a,b|0>); Append(~S,7); S;",
+    "S:=Sort([Rationals()|],func<a,b|a-b>); Append(~S,2); Type(S[1]);"].join("\n"));
+  assert.match(els, /^FldRatElt\nRational Field\nFldRatElt\nFldRatElt\n0\n\[ 2 \]\nFldRatElt\nend\n$/, els);
+  // (and the other functions making a sequence from one, as Magma's)
+  const audit = run(["S:=Reverse([Integers(5)|]); Append(~S,7); S;", "T:=[Integers(5)|1,2]; S:=T[2..1]; Append(~S,7); S;",
+    "S:=Exclude([Integers(5)|3],3); Append(~S,7); S;", "S:=Remove([Integers(5)|3],1); Append(~S,7); S;"].join("\n"));
+  assert.match(audit, /^\[ 2 \]\n\[ 2 \]\n\[ 2 \]\n\[ 2 \]\nend\n$/, audit);
+  const div = run(q + "S:=Setseq(f({1,2})); S[1] div 2;");
+  assert.ok(div.includes("Runtime error in 'div': Bad argument types\nArgument types given: FldRatElt, FldRatElt"), div);
 });
 
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
