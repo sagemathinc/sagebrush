@@ -69,7 +69,9 @@ The coordinator's conditions (Oct 17):
 ## Adding a package
 
 1. `node scripts/pypi-import.mjs PROJECT VERSION [SPDX]` (SPDX when PyPI's
-   license metadata is not one of the plain names), then `node scripts/packages.mjs`.
+   license metadata is not one of the plain names), then `node scripts/packages.mjs`
+   and `node scripts/third-party-notices.mjs` (the package's NOTICE.md section
+   is in the sagebrush package's generated notices; CI's checks compare them).
 2. Copy its upstream tests into `pypi-tests/<name>/upstream/` with SOURCE.json,
    and its LICENSE. Write expected.out with `python3 pypi-tests/run.py --refresh <name>`.
 3. `python3 pypi-tests/run.py <name>` must agree. Fix Sagebrush, or list a

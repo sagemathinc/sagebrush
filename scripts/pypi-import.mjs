@@ -366,7 +366,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const sections = [];
       for (const d of pypiDirs()) { const s = sourceOf(d); sections.push(derive(s, await wheelBytes(s)).notice); }
       writeFileSync(join(root, "NOTICE.md"), noticeWith(sections));
-      console.log(`packages/${dir}: ${source.project} ${version} (${license}), ${files.size} files; now run node scripts/packages.mjs`);
+      console.log(`packages/${dir}: ${source.project} ${version} (${license}), ${files.size} files; now run node scripts/packages.mjs and node scripts/third-party-notices.mjs`);
     }
   } catch (e) {
     console.error(e.message);
