@@ -25,6 +25,10 @@ test("an int's decimal conversions are limited to 4300 digits as in CPython, and
   cases("int_digits_cases.py");
 });
 
+test("int's real and numerator of a big int are the int itself, not an internal error (and Fraction compares with big ints)", () => {
+  cases("int_attr_cases.py");
+});
+
 test("vars(), dir(), globals() and locals() inside exec() and eval() see their namespaces (no internal error)", () => {
   cases("exec_namespace_cases.py");
 });
