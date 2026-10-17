@@ -786,5 +786,8 @@
  "lib/_sage_padic.py: padic_matrix :: call :: range(n)": 1,
  "lib/_sage_padic.py: padic_matrix :: comprehension :: range(m)": 2,
  "lib/_sage_padic.py: padic_matrix :: comprehension :: range(n)": 1,
- "lib/_sage_rdf.py: _from_array :: constructor :: _sage_ffmat.FFMatrix(b, rows, a.shape[1] if len(a.shape) > 1 else 0)": 1
+ "lib/_sage_rdf.py: _from_array :: constructor :: _sage_ffmat.FFMatrix(b, rows, a.shape[1] if len(a.shape) > 1 else 0)": 1,
+ "lib/_sbx.py: _dec_magma :: constructor :: M.Matrix(M.Integers() if x[\"ring\"] == \"ZZ\" else M.Rationals(), _rows(x[\"shape\"], flat))": 1,
+ "lib/_sbx.py: _dec_magma :: constructor :: M.Matrix(M.Integers(), _rows(shape, flat))": 1,
+ "lib/_sbx.py: _dec_magma :: constructor :: M.Matrix(_rows(shape, flat))": 1
 }
