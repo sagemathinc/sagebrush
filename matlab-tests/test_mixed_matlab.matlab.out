@@ -1,0 +1,31 @@
+single 1x1 -2.9802322831784522e-09
+single 1x1 2.9802322831784522e-09
+single 1x1 -2.9802322831784522e-09
+single 1x1 -2.9802322831784522e-09
+single 1x1 1.0000001192092896
+single 1x1 0.99999994039535522
+single 1x1 1.0000001192092896
+single 2x1 [3;7]
+single 1x1 1.7881393432617188e-07
+single 1x1 3
+single 1x1 1.7881393432617188e-07
+single 1x1 1.7881393432617188e-07
+single 1x1 1.1920928955078125e-07
+Integers can only be combined with integers of the same class, or scalar doubles.
+Integers can only be combined with integers of the same class, or scalar doubles.
+int8 1x1 5
+logical 1x1 false
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 1x1 false
+logical 1x1 true
+logical 1x1 true
+logical 1x2 [true false]
+logical 1x1 true
+intmax('int64') for int64 is not supported: Sagebrush's 64-bit integers are not exact at 9223372036854775807.
