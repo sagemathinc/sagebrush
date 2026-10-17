@@ -41,10 +41,13 @@ export function siteEngine(base: URL, runner = true): EngineParts {
 
 import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
 import { CACHE_MS, DOC_CAP, ENTRY_MAX, cachedLabel, sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
+import { within } from "./idb-open";
 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
 
+// (how long a read of the outputs' cache may take before the items run anyway)
+const CACHE_READ_MS = 2000;
 /** How long an interpreter may take to start, or its analyzer to answer,
  * before it is started (asked) again, once (40 s; a test may set less). */
 const startMs = () => Number((globalThis as any).__sbEngineStartMs) || 40_000;
@@ -291,7 +294,11 @@ export class BoardCode {
       if (this.cache && ns && fresh.length) {
         const keys = await nb.outputKeys();
         const want = new Map(fresh.map((it) => [keys?.[it.id]?.key, it.id]).filter(([k]) => !!k) as [string, string][]);
-        const got = await this.cache.get(ns, [...want.keys()]).catch(() => new Map<string, CachedOutputs>());
+        // (the cache is a shortcut: one that doesn't answer within
+        // CACHE_READ_MS is taken as empty, and the items run, rather than the
+        // board's code never running; an IndexedDB open can stay unanswered
+        // for good, web/board/idb-open.ts, test-idb-stall.mjs)
+        const got = await within(this.cache.get(ns, [...want.keys()]).catch(() => new Map<string, CachedOutputs>()), CACHE_READ_MS, new Map<string, CachedOutputs>());
         for (const [k, e] of got) hits.set(want.get(k)!, e);
       }
       if (hits.size) {
