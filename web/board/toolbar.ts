@@ -75,14 +75,15 @@ export class Toolbar {
       b.append(glyph(t, "tb-i"), t.label === t.icon ? glyph(t, "tb-l") : Object.assign(document.createElement("span"), { className: "tb-l", textContent: t.label }));
       // (a tool named by its glyph, as undo: named by its title, without its keys, to a screen reader)
       b.setAttribute("aria-label", t.label === t.icon ? t.title.replace(/\s*\([^)]*\)\s*$/, "") : t.label);
-      b.title = t.title;
+      // (its tooltip drawn in the page (board.css), not the browser's: see .board-toolbar [data-tip])
+      b.dataset.tip = t.title;
       b.dataset.tool = t.id;
       this.use(b, t);
       this.el.append(b);
     }
     const more = (this.more = document.createElement("button"));
     more.className = "tb-more";
-    more.title = "Every tool; check the ones to keep on the toolbar";
+    more.dataset.tip = "Every tool; check the ones to keep on the toolbar";
     more.setAttribute("aria-haspopup", "menu");
     more.setAttribute("aria-label", "More tools");
     // (a mode on that is not on the toolbar: its icon on "⋯")
