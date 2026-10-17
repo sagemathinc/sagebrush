@@ -178,11 +178,15 @@ test("a new equal string takes at most two probes, a comparison with the last st
     "const other = 'z'.repeat(1000) + '\\u{1F600}';",
     "const counts = {};",
     "const count = (k, s) => { const n = sp.probes.n; sp.pairs(s); (counts[k] ??= []).push(sp.probes.n - n); };",
+    "const lookups = {};",
     "for (const [k, N] of [['big', 2_000_000], ['cached', 300_000]]) {",
+    "  const l0 = sp.probes.lookups;",
     "  count(k + ' new', make(N));",
     "  for (let i = 0; i < 3; i++) count(k + ' last', make(N));",
     "  for (let i = 0; i < 3; i++) { sp.pairs(other); count(k + ' found', make(N)); count(k + ' last', make(N)); }",
     "  for (let i = 0; i < 3; i++) { sp.pairs(make(N, 'a')); sp.pairs(make(N, 'b')); count(k + ' after B', make(N, 'a')); }",
+    // (other, cached, is looked up each time it is asked about after another)
+    "  lookups[k] = sp.probes.lookups - l0;",
     "}",
     // (the cache's worst case: 26 keys as long, differing only at the end;
     // a new copy of the last costs at most what all of them do, timed
@@ -204,7 +208,7 @@ test("a new equal string takes at most two probes, a comparison with the last st
     "  sp.pairs(a);",
     "  t0 = process.hrtime.bigint(); sp.pairs(b); u.push(Number(process.hrtime.bigint() - t0));",
     "}",
-    "console.log(JSON.stringify({ counts, worst, compare: Math.min(...t), pairs: Math.min(...u.slice(1)) }));",
+    "console.log(JSON.stringify({ counts, lookups, worst, compare: Math.min(...t), pairs: Math.min(...u.slice(1)) }));",
   ].join("\n");
   const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 120000 }).trim());
   assert.deepEqual(r.counts, {
@@ -212,6 +216,10 @@ test("a new equal string takes at most two probes, a comparison with the last st
     "cached new": [0], "cached last": [1, 1, 1, 1, 1, 1], "cached found": [1, 1, 1], "cached after B": [2, 2, 2],
   });
   assert.ok(r.pairs < 2 * r.compare, `indexing a new equal string took ${r.pairs} ns, one comparison ${r.compare} ns`);
+  // (a string too long for the cache is never looked up in it, so neither
+  // hashed there, HARD-ABC-1: the big loop's lookups are only other's 3;
+  // the cached loop's 14 are each ask that is not of the last string)
+  assert.deepEqual(r.lookups, { big: 3, cached: 14 });
   // (at most two comparisons of our own and the cache's keys, each one length)
   assert.ok(r.worst.pairs < (2 + r.worst.keys) * r.worst.compare, `the cache's worst case took ${r.worst.pairs} ns, one comparison ${r.worst.compare} ns`);
   console.log(`cache worst case: ${(r.worst.pairs / r.worst.compare).toFixed(1)} comparisons' time`);
