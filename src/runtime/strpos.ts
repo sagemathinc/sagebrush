@@ -70,19 +70,23 @@ function scan(s: string): Pos | null {
   return n ? new Pos(s, c, n) : null;
 }
 
-// The comparisons of contents that can be full: of two strings of the same
-// length, and the cache's lookup when it finds one (the tests count them).
-export const compares = { n: 0 };
+// The probes a lookup makes, for the tests: each comparison here of two
+// strings of the same length (which can be full), failed or not, and each
+// cache lookup that finds the string, as one, whatever Map.get compares
+// inside it.
+export const probes = { n: 0 };
 
 // An equal string that is another object becomes the one every reference
 // here holds (lastKey, bigKey, its index's s, its cache key): one body is
 // kept alive, not two equal ones (HARD-3F4-1), and the next comparisons are
 // of pointers.  Where it was found says which of them hold it, so they are
-// assigned, not compared again (HARD-3F4-2).  A new object is compared in
-// full at most twice: with lastKey, which can fail late when it is as long
-// and differs near the end, then with what finds it (bigKey or the cache)
-// (HARD-3F4-3); bigKey is not compared again when it is lastKey.  (The
-// cache's lookup is V8's Map's: a key of the same hash is compared too.)
+// assigned, not compared again (HARD-3F4-2).  A new object costs at most
+// two comparisons here, each at most its length: with lastKey, which can
+// fail late when it is as long and differs near the end, then with bigKey
+// (not again when it is lastKey); and one cache lookup, at most CACHE_UNITS
+// units (HARD-3F4-3, HARD-F67-1): V8's Map compares only the resident keys
+// with the same hash, each at most once and at most its length, and the
+// keys hold at most CACHE_UNITS units.  Then its asks compare pointers.
 let lastKey: string | null = null;
 let lastVal: Pos | null = null;
 let lastBig = false; // lastKey is bigKey
@@ -94,10 +98,10 @@ export function pairs(s: string): Pos | null {
   if (s.length < SHORT) return SURROGATE.test(s) ? scan(s) : null;
   // (the string last asked about first: a loop over one string compares
   // its pointer, not its contents; an equal string that is another object is
-  // compared in full (at most twice, above), then kept as the key, so the next asks about it
+  // compared in full at most once here (with lastKey, above), then kept as the key, so the next asks about it
   // compare pointers again: json.loads of a new json.dumps result took a
   // full comparison per character)
-  if (lastKey !== null && s.length === lastKey.length) compares.n++;
+  if (lastKey !== null && s.length === lastKey.length) probes.n++;
   if (s === lastKey) {
     lastKey = s;
     if (lastBig) bigKey = s;
@@ -130,7 +134,7 @@ export function pairs(s: string): Pos | null {
 // (wasBig: lastKey, just found unequal to s, is bigKey; lastBig and
 // lastEntry are set only once s is found or indexed)
 function longPairs(s: string, wasBig: boolean): Pos | null {
-  if (!wasBig && bigKey !== null && s.length === bigKey.length) compares.n++;
+  if (!wasBig && bigKey !== null && s.length === bigKey.length) probes.n++;
   if (!wasBig && s === bigKey) {
     bigKey = s;
     if (bigVal !== null) bigVal.s = s;
@@ -139,7 +143,7 @@ function longPairs(s: string, wasBig: boolean): Pos | null {
   }
   const hit = cache.get(s);
   if (hit !== undefined) {
-    compares.n++;
+    probes.n++;
     // (re-inserted under the new object, which the index then holds too)
     cache.delete(hit.key);
     hit.key = s;

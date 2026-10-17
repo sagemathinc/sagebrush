@@ -160,28 +160,43 @@ test(`adopting an equal string keeps one body of it alive, not two${interrupted 
   assert.ok(r.one < 1.5 * r.body, `kept ${r.one} bytes for a ${r.body}-byte string`);
 });
 
-// ... and compared in full at most twice: where the string was found says
-// which references hold it, so they are assigned, not compared again
+// ... and probed at most twice: where the string was found says which
+// references hold it, so they are assigned, not compared again
 // (HARD-3F4-2). Each new equal object, found as the string last indexed, as
-// the big entry or in the cache, is compared once; found after another
-// string as long, differing only at its end (A, B, a new A), twice: the
-// failed comparison with B, then the one that finds A (HARD-3F4-3). And,
+// the big entry or in the cache, takes one probe; found after another
+// string as long, differing only at its end (A, B, a new A), two: the
+// failed comparison with B, then the comparison or cache lookup that finds
+// A (HARD-3F4-3; a cache lookup is one probe, whatever Map.get compares
+// inside it, HARD-F67-1). And,
 // timed, indexing a new equal 20-million-unit string costs about one
 // comparison of two of them.
-test("a new equal string is compared in full at most twice, wherever it is found", () => {
+test("a new equal string takes at most two probes, a comparison with the last string and one lookup, wherever it is found", () => {
   const code = [
     `const sp = require(${JSON.stringify(__dirname + "/../src/runtime/strpos.js")});`,
     // (a new flat object equal to the last one made of length N)
     "const make = (N, end = 'x') => ('y' + 'x'.repeat(N - 2) + end + '\\u{1F600}').replace('y', 'x');",
     "const other = 'z'.repeat(1000) + '\\u{1F600}';",
     "const counts = {};",
-    "const count = (k, s) => { const n = sp.compares.n; sp.pairs(s); (counts[k] ??= []).push(sp.compares.n - n); };",
+    "const count = (k, s) => { const n = sp.probes.n; sp.pairs(s); (counts[k] ??= []).push(sp.probes.n - n); };",
     "for (const [k, N] of [['big', 2_000_000], ['cached', 300_000]]) {",
     "  count(k + ' new', make(N));",
     "  for (let i = 0; i < 3; i++) count(k + ' last', make(N));",
     "  for (let i = 0; i < 3; i++) { sp.pairs(other); count(k + ' found', make(N)); count(k + ' last', make(N)); }",
     "  for (let i = 0; i < 3; i++) { sp.pairs(make(N, 'a')); sp.pairs(make(N, 'b')); count(k + ' after B', make(N, 'a')); }",
     "}",
+    // (the cache's worst case: 26 keys as long, differing only at the end;
+    // a new copy of the last costs at most what all of them do, timed
+    // against one comparison of two of them)
+    "const W = 300_000, keys = [...'abcdefghijklmnopqrstuvwxyz'];",
+    "for (const c of keys) sp.pairs(make(W, c));",
+    "const wt = [], wu = [];",
+    "for (let i = 0; i < 7; i++) {",
+    "  const a = make(W, 'z'), b = make(W, 'z');",
+    "  let t0 = process.hrtime.bigint(); if (a !== b) throw new Error('not equal'); wt.push(Number(process.hrtime.bigint() - t0));",
+    "  sp.pairs(other);",
+    "  t0 = process.hrtime.bigint(); sp.pairs(b); wu.push(Number(process.hrtime.bigint() - t0));",
+    "}",
+    "const worst = { compare: Math.min(...wt), pairs: Math.min(...wu), keys: keys.length };",
     "const N = 20_000_000, t = [], u = [];",
     "for (let i = 0; i < 7; i++) {",
     "  const a = make(N), b = make(N);",
@@ -189,7 +204,7 @@ test("a new equal string is compared in full at most twice, wherever it is found
     "  sp.pairs(a);",
     "  t0 = process.hrtime.bigint(); sp.pairs(b); u.push(Number(process.hrtime.bigint() - t0));",
     "}",
-    "console.log(JSON.stringify({ counts, compare: Math.min(...t), pairs: Math.min(...u.slice(1)) }));",
+    "console.log(JSON.stringify({ counts, worst, compare: Math.min(...t), pairs: Math.min(...u.slice(1)) }));",
   ].join("\n");
   const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 120000 }).trim());
   assert.deepEqual(r.counts, {
@@ -197,4 +212,7 @@ test("a new equal string is compared in full at most twice, wherever it is found
     "cached new": [0], "cached last": [1, 1, 1, 1, 1, 1], "cached found": [1, 1, 1], "cached after B": [2, 2, 2],
   });
   assert.ok(r.pairs < 2 * r.compare, `indexing a new equal string took ${r.pairs} ns, one comparison ${r.compare} ns`);
+  // (at most two comparisons of our own and the cache's keys, each one length)
+  assert.ok(r.worst.pairs < (2 + r.worst.keys) * r.worst.compare, `the cache's worst case took ${r.worst.pairs} ns, one comparison ${r.worst.compare} ns`);
+  console.log(`cache worst case: ${(r.worst.pairs / r.worst.compare).toFixed(1)} comparisons' time`);
 });
