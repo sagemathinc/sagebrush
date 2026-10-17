@@ -19,21 +19,41 @@ import { isDeepStrictEqual } from "node:util";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const apply = process.argv.includes("--apply");
 const BUCKET = "sagebrush-releases";
+// (as web/engines.ts's SHARED)
+const SHARED = /^lib\/tzdata\/(?:index-)?[0-9a-f]{64}\.(?:tzif|json)$/;
 const { id } = JSON.parse(readFileSync(join(root, "web/dist/engine/latest.json"), "utf8"));
 const dir = join(root, "web/dist/engine", id);
 const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
 const env = { ...process.env, NO_COLOR: "1", CF_SEND_TELEMETRY: "false" };
 const cf = (...args) => execFileSync("cf", args, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 });
 
+// The objects already at lib/ (key -> size), a page of R2's listing at a time.
+function listed(prefix) {
+  const have = new Map();
+  for (let after = null; ;) {
+    const page = JSON.parse(cf("r2", "objects", "list", "--bucket-name", BUCKET, "--prefix", prefix, "--per-page", "1000", ...(after ? ["--start-after", after] : [])));
+    for (const o of page) have.set(o.key, o.size);
+    if (page.length < 1000) return have;
+    after = page[page.length - 1].key;
+  }
+}
+
 // (the Python library's chunks also at lib/<name>, one namespace by content
 // that is never cleared, where the site's Worker finds a chunk a deploy took
 // out of the site's own lib/ for a page opened before it: web/engines.ts
-// handleLibChunk.  An existing one has these bytes: its name is its hash.
-// First, so an engine published before this was added gets them too.)
+// handleLibChunk.  An existing one has these bytes: its name is its hash, so
+// one there with this size is not uploaded again.  The pinned zone data's
+// files (lib/tzdata/, web/tzdata-chunks.mts) are kept only here: the Worker
+// serves an engine's from these, so each is uploaded once, not with every
+// engine.  First, so an engine published before this was added gets them too.)
+const have = listed("lib/");
+let kept = 0;
 for (const f of Object.keys(man.files).filter((f) => f.startsWith("lib/"))) {
+  if (have.get(f) === man.files[f].size) { kept++; continue; }
   console.log(`${apply ? "upload" : "would upload"} ${f}`);
-  if (apply) cf("r2", "objects", "put", f, "--bucket-name", BUCKET, "--file", join(dir, f), "--content-type", "application/json");
+  if (apply) cf("r2", "objects", "put", f, "--bucket-name", BUCKET, "--file", join(dir, f), "--content-type", man.files[f].headers["Content-Type"]);
 }
+console.log(`(${kept} of the library's files are there already)`);
 // (absent only when R2 says so: any other failure stops here)
 let published = null;
 try {
@@ -54,7 +74,8 @@ if (published !== null) {
   console.log(`engine ${id} is already published, with this manifest`);
   process.exit(0);
 }
-const files = [...Object.keys(man.files), "manifest.json"];
+// (not the zone data: the Worker serves an engine's from lib/tzdata/)
+const files = [...Object.keys(man.files).filter((f) => !SHARED.test(f)), "manifest.json"];
 for (const f of files) {
   const type = f === "manifest.json" ? "application/json" : man.files[f].headers["Content-Type"];
   console.log(`${apply ? "upload" : "would upload"} engine/${id}/${f} (${type})`);
