@@ -535,6 +535,8 @@ def _broadcast(f, A, B):
 
 def _elementwise(a, b, f, name):
     cls = _arith_class(a, b, name)
+    if f is _mul and cls == "single":
+        f = _mul_single
     r = _broadcast(f, _farr(a, name), _farr(b, name))
     return _finish(r, cls)
 
@@ -547,7 +549,7 @@ def _sub(A, B):
     return A - B
 
 
-def _mul(A, B):
+def _mul(A, B, single=False):
     if (A.dtype.kind == "c") != (B.dtype.kind == "c"):
         # (a real times a complex: each part on its own, so that a zero part stays zero)
         R, Z = (A, B) if B.dtype.kind == "c" else (B, A)
@@ -555,7 +557,16 @@ def _mul(A, B):
             re_ = np.where(Z.real == 0, 0.0, R * Z.real)
             im = np.where(Z.imag == 0, 0.0, R * Z.imag)
         return _cplx(re_, im)
+    if A.dtype.kind == "c":
+        # (two complex values: four products and two sums, as compiled complex arithmetic does)
+        return _cmul_arr(A, B, single)
     return A * B
+
+
+def _mul_single(A, B):
+    """_mul for a single result: complex products rounded to single at each step (one real
+    product rounds once, so the real cases need nothing more)"""
+    return _mul(A, B, True)
 
 
 def _cplx(re_, im):
@@ -2805,13 +2816,18 @@ def class_(v):
 # ------------------------------------------------------------------ concatenation
 
 
-def hcat(vals):
-    """[a, b, ...]"""
+def hcat(vals, narrow=True):
+    """[a, b, ...] (narrow false for a row of a matrix literal, which vcat finishes)"""
     if not vals:
         return np.zeros((0, 0))
     n = len(vals)
     if n == 1:
-        return cp(vals[0])
+        v = vals[0]
+        if narrow and type(v) is np.ndarray and v.dtype.kind == "c" and not np.any(v.imag):
+            # ([complex(1, 0)] is real: a literal of one complex value is made real as any is)
+            r = _contig(v.real)
+            return _box(r) if r.dtype == np.float64 else _canon(r)
+        return cp(v)
     allf = True
     for v in vals:
         if type(v) is not float:
@@ -2819,7 +2835,7 @@ def hcat(vals):
             break
     if allf:
         return np.array(vals).reshape((n, 1))
-    return _cat(vals, 2)
+    return _cat(vals, 2, narrow)
 
 
 def vcat(rows):
@@ -2854,8 +2870,9 @@ def _cat_class(vals):
     return "double"
 
 
-def _cat(vals, dim):
-    """concatenation along MATLAB dimension dim (1 or more)"""
+def _cat(vals, dim, narrow=True):
+    """concatenation along MATLAB dimension dim (1 or more); a complex result with no nonzero
+    imaginary part is made real unless narrow is false"""
     for v in vals:
         if type(v) is Sparse:
             r = _sp.cat(vals, dim)
@@ -2915,6 +2932,14 @@ def _cat(vals, dim):
     if anyc:
         dt = np.complex64 if cls == "single" else np.complex128
     out = np.concatenate([a.astype(dt) for a in arrs], axis=axis)
+    if anyc and not np.any(out.imag):
+        if not narrow:
+            # (a row of a matrix literal: it stays complex until the whole literal is joined,
+            # so that the signs of its zero imaginary parts survive in a complex result)
+            return _canon(out)
+        if cls == "single":
+            # (a finished join with no nonzero imaginary part is real, single as double)
+            return _canon(_contig(out.real))
     return _box(out) if cls == "double" else _canon(out)
 
 
@@ -5430,6 +5455,46 @@ def _prod_axis(A, ax):
     return np.array(out, dtype=np.complex128).reshape(B.shape[:-1])
 
 
+def _cumprod_axis(A, ax):
+    """the running products along axis ax: complex values multiplied one at a time by _cmul (in
+    single for complex64 values), each running product starting from the first value itself"""
+    if A.dtype.kind != "c":
+        return np.cumprod(A, axis=ax)
+    one = A.dtype == np.complex64
+    B = np.moveaxis(A, ax, -1)
+    flat = B.reshape((int(np.prod(B.shape[:-1])), B.shape[-1]))
+    out = np.empty(flat.shape, dtype=np.complex128)
+    for r in range(flat.shape[0]):
+        z = None
+        for k in range(flat.shape[1]):
+            v = complex(flat[r, k])
+            z = v if z is None else _cmul(z, v, one)
+            out[r, k] = z
+    return np.moveaxis(out.reshape(B.shape), -1, ax)
+
+
+def _cmul_arr(A, B, single):
+    """A .* B for complex arrays, each element as _cmul multiplies it: the four products and two
+    sums vectorized (rounded to single for single values), and the elements whose parts both
+    come out NaN redone one at a time by _cmul for the C standard's recovery"""
+    A, B = np.broadcast_arrays(A, B)
+    if single:
+        rnd = lambda t: t.astype(np.float32).astype(np.float64)
+    else:
+        rnd = lambda t: t
+    a, b, c, d = (np.asarray(t, dtype=np.float64) for t in (A.real, A.imag, B.real, B.imag))
+    with np.errstate(invalid="ignore", over="ignore"):
+        ac, bd, ad, bc = rnd(a * c), rnd(b * d), rnd(a * d), rnd(b * c)
+        x, y = rnd(ac - bd), rnd(ad + bc)
+    lost = np.isnan(x) & np.isnan(y)
+    if np.any(lost):
+        x, y = x.copy(), y.copy()
+        for i in zip(*np.nonzero(lost)):
+            z = _cmul(complex(A[i]), complex(B[i]), single)
+            x[i], y[i] = z.real, z.imag
+    return _cplx(x, y)
+
+
 @_bs("prod")
 def prod_(x, *args):
     if _nan_flags(args):
@@ -5937,7 +6002,7 @@ def cumsum_(x, *args):
 
 @_bs("cumprod")
 def cumprod_(x, *args):
-    return _cum(x, args, lambda A, ax: np.cumprod(A, axis=ax), "cumprod")
+    return _cum(x, args, _cumprod_axis, "cumprod")
 
 
 @_bs("cummax")
