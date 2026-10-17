@@ -136,6 +136,73 @@ test("_time._read and _time._tzfile called directly: a limit past _tzrules.MAX_F
   assert.deepEqual(out, [...want("_read"), ...want("_tzfile")]);
 });
 
+// (daybreak2's follow-up to HARD-ZI-1: available_timezones walks a TZPATH a
+// user may choose, so its walk has a budget of names across all of TZPATH,
+// each directory read at most that many names at a time (_time._zonedir);
+// past it, a refusal in words, never a partial set)
+test("available_timezones: a budget of names across all of TZPATH, refused past it, each directory read only as far as the budget", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-zoneinfo-walk-"));
+  try {
+    // two roots: a/ with 2 zones and a directory of 1 more (5 names in all),
+    // b/ with 1 zone and 1 file that is not one (2 names)
+    for (const d of ["a", "a/Sub", "b"]) mkdirSync(join(dir, d));
+    for (const f of ["a/One", "a/Two", "a/Sub/Three", "b/Four"]) copyFileSync(PINNED + "/Europe/London", join(dir, f));
+    writeFileSync(join(dir, "a/notes.txt"), "not a zone");
+    writeFileSync(join(dir, "b/x"), "x");
+    // (the big one: 65537 names, one past the default bound)
+    mkdirSync(join(dir, "big"));
+    for (let i = 0; i <= 65536; i++) writeFileSync(join(dir, "big", "f" + i), "");
+    const code = [
+      "import zoneinfo, zoneinfo._tzpath as T",
+      `d = ${JSON.stringify(dir)}`,
+      "zoneinfo.reset_tzpath([d + '/a', d + '/b'])",
+      "for bound in (7, 6, 5):",
+      "    T._MAX_ENTRIES = bound",
+      "    try: print(bound, sorted(zoneinfo.available_timezones()))",
+      "    except NotImplementedError as e: print(bound, e)",
+      "T._MAX_ENTRIES = 1 << 16",
+      "zoneinfo.reset_tzpath([d + '/big'])",
+      "try: zoneinfo.available_timezones()",
+      "except NotImplementedError as e: print('big', e)",
+    ].join("\n");
+    const out = run(process.execPath, ["--max-old-space-size=128", __dirname + "/../src/cli.js", "-c", code], {}).filter(Boolean);
+    assert.deepEqual(out, [
+      "7 ['Four', 'One', 'Sub/Three', 'Two']",
+      "6 zoneinfo: available_timezones() past Sagebrush's bound of 6 names on TZPATH",
+      "5 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      "big zoneinfo: available_timezones() past Sagebrush's bound of 65536 names on TZPATH",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("_time._zonedir called directly: at most limit names; a limit past the bound, negative or not an int refused before anything is read", () => {
+  const code = [
+    "import _time",
+    `names = _time._zonedir(${JSON.stringify(PINNED + "/Europe")}, 3)`,
+    "print(len(names), all(isinstance(n, str) for n in names), _time._zonedir('/', 0))",
+    "for limit in (2 ** 40, 65538, -1, 1.5, True, None):",
+    "    try: _time._zonedir('/', limit); print('listed')",
+    "    except (TypeError, ValueError) as e: print(type(e).__name__, e)",
+    `for p in ('/nonexistent-zonedir', ${JSON.stringify(PINNED + "/Europe/London")}):`,
+    "    try: _time._zonedir(p, 5)",
+    "    except OSError as e: print(type(e).__name__)",
+  ].join("\n");
+  const out = run(process.execPath, ["--max-old-space-size=64", __dirname + "/../src/cli.js", "-c", code], {}).filter(Boolean);
+  assert.deepEqual(out, [
+    "3 True []",
+    "ValueError _time._zonedir: the limit must be in 0..65537, not 1099511627776",
+    "ValueError _time._zonedir: the limit must be in 0..65537, not 65538",
+    "ValueError _time._zonedir: the limit must be in 0..65537, not -1",
+    "TypeError _time._zonedir: the limit must be an int, not float",
+    "TypeError _time._zonedir: the limit must be an int, not bool",
+    "TypeError _time._zonedir: the limit must be an int, not NoneType",
+    "FileNotFoundError",
+    "NotADirectoryError",
+  ]);
+});
+
 test("the tzdata package: the pinned one's version as a browser; none under Node, as on CPython without it", () => {
   const code = "import tzdata\nprint(tzdata.IANA_VERSION, tzdata.__version__, sorted(n for n in dir(tzdata) if not n.startswith('__')))";
   const as = (env: Record<string, string>) => run(process.execPath, [__dirname + "/../src/cli.js", "-c", code], env).filter(Boolean);
