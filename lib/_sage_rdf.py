@@ -284,15 +284,64 @@ class RealDoubleElement(float):
         if v is None:
             return NotImplemented
         if v == 0:
+            # (IEEE's: the zero's sign counts; NaN for 0/0 and NaN/0)
             x = float(self)
-            return RealDoubleElement(float("nan") if x == 0 else math.copysign(float("inf"), x))
+            return RealDoubleElement(float("nan") if x == 0 or x != x else math.copysign(float("inf"), x) * math.copysign(1.0, v))
         return RealDoubleElement(float(self) / v)
 
     def __rtruediv__(self, o):
         v = self._num(o)
         if v is None:
             return NotImplemented
-        return RealDoubleElement(v / float(self)) if float(self) else RealDoubleElement(math.copysign(float("inf"), v))
+        d = float(self)
+        if d:
+            return RealDoubleElement(v / d)
+        # (IEEE's, as __truediv__)
+        return RealDoubleElement(float("nan") if v == 0 or v != v else math.copysign(float("inf"), v) * math.copysign(1.0, d))
+
+    # %, // and divmod, as Sage's RDF: no %; // is the division; divmod is
+    # (x / y, 0).  (A coarser RealField(p) has its own %; a Python float's
+    # % is refused by type)
+    _NO_MOD = "unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'"
+    _GSL = "'sage.rings.real_double_element_gsl.RealDoubleElement_gsl'"
+
+    def __mod__(self, o):
+        if type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+            return NotImplemented
+        if type(o) in (float, bool):
+            raise TypeError("unsupported operand type(s) for %%: %s and '%s'" % (self._GSL, type(o).__name__))
+        if type(o).__name__ == "RealNumberMP" or self._num(o) is not None:
+            raise TypeError(self._NO_MOD)
+        return NotImplemented
+
+    def __rmod__(self, o):
+        if type(o) in (float, bool):
+            raise TypeError("unsupported operand type(s) for %%: '%s' and %s" % (type(o).__name__, self._GSL))
+        if self._num(o) is not None:
+            raise TypeError(self._NO_MOD)
+        return NotImplemented
+
+    def __floordiv__(self, o):
+        if type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+            return NotImplemented
+        return self / o
+
+    def __rfloordiv__(self, o):
+        return o / self if self._num(o) is not None else NotImplemented
+
+    def __divmod__(self, o):
+        if type(o).__name__ == "RealNumberMP":
+            o = RDF(o)
+        elif self._num(o) is None:
+            return NotImplemented
+        return self / o, _sa().ZZ(0)
+
+    def __rdivmod__(self, o):
+        if type(o) in (float, bool):
+            raise TypeError("unsupported operand type(s) for %%: '%s' and %s" % (type(o).__name__, self._GSL))
+        if self._num(o) is None:
+            return NotImplemented
+        return o / self, _sa().ZZ(0)
 
     def __neg__(self):
         return RealDoubleElement(-float(self))

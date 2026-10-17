@@ -184,6 +184,16 @@ class RealNumber(float):
         sage: x / 10, float(x), RR(2)^-1074 / 3
         (1.00000000000000e308, inf, 1.64688548613749e-324)
 
+    % is the remainder to the nearest quotient (ties to an even one), // is
+    refused, divmod is (x / y, 0) and x / 0 is IEEE's, as Sage::
+
+        sage: RR(7) % 2, RR(10)^400 % 3, RR(1) / 0, divmod(RR(7), 2)
+        (-1.00000000000000, 0.000000000000000, +infinity, (3.50000000000000, 0.000000000000000))
+        sage: RR(2)^1100 // 3
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand parent(s) for //: 'Real Field with 53 bits of precision' and 'Real Field with 53 bits of precision'
+
     Where sagebrush has no MP value, an error, never a double's infinity or
     zero (Sage has values for these)::
 
@@ -199,10 +209,6 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: the value of erfc(30) in RR (the doubles give 0.0): erfc at more than 53 bits is not available in sagebrush yet
-        sage: B % 3  # sagebrush only
-        Traceback (most recent call last):
-        ...
-        NotImplementedError: % with an RR element past the doubles is not available in sagebrush yet
         sage: zeta(RR(-261.5))  # sagebrush only
         Traceback (most recent call last):
         ...
@@ -211,10 +217,6 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: the sine and cosine of a number of magnitude 2^3321929 (above 2^65536) are not available in sagebrush yet
-        sage: RR(2)^1100 // 3  # sagebrush only
-        Traceback (most recent call last):
-        ...
-        NotImplementedError: // and divmod with an RR element past the doubles are not available in sagebrush yet
         sage: (-RR(2)^2200)^RR(0.5)  # sagebrush only
         Traceback (most recent call last):
         ...
@@ -312,6 +314,13 @@ class RealNumber(float):
                 r = f(float(self), *a)
             except OverflowError:
                 return _rr_edge(name, self, a, None)
+            except ZeroDivisionError:
+                if name not in ("__truediv__", "__rtruediv__"):
+                    raise
+                # (division by zero: IEEE's, as Sage: +-infinity, NaN for
+                # 0/0 or NaN; the zero's sign counts)
+                n, d = (float(self), float(a[0])) if name == "__truediv__" else (float(a[0]), float(self))
+                return new(RealNumber, n / d if d else (_m.nan if n != n or n == 0 else _m.copysign(inf, n) * _m.copysign(1.0, d)))
             if r != r and name == "__pow__" and float(self) < 0:
                 # (a negative base to a NaN power: a complex NaN, as Sage)
                 import _sage_matrix
@@ -345,11 +354,20 @@ class RealNumber(float):
     __rtruediv__ = _r(float.__rtruediv__)
     __pow__ = _r(float.__pow__)
     __rpow__ = _r(float.__rpow__)
-    __mod__ = _r(float.__mod__)
     __neg__ = _r(float.__neg__)
     __pos__ = _r(float.__pos__)
     __abs__ = _r(float.__abs__)
     del _r
+
+    # %, // and divmod, as Sage's: % is the remainder to the nearest
+    # quotient (ties to an even one), exact; // is refused; divmod is
+    # (x / y, 0).  A RealField(p) number or a rational has its own rules.
+    def __mod__(self, o): return _rr_divlike(self, o, "%", False)
+    def __rmod__(self, o): return _rr_divlike(self, o, "%", True)
+    def __floordiv__(self, o): return _rr_divlike(self, o, "//", False)
+    def __rfloordiv__(self, o): return _rr_divlike(self, o, "//", True)
+    def __divmod__(self, o): return _rr_divlike(self, o, "divmod", False)
+    def __rdivmod__(self, o): return _rr_divlike(self, o, "divmod", True)
 
     def __hash__(self):
         return float.__hash__(self)
@@ -793,10 +811,7 @@ class _RealBig(RealNumber):
     def hex(self):
         raise NotImplementedError("hex() of an RR element past the doubles is not available in sagebrush yet")
 
-    def __floordiv__(self, o):
-        raise NotImplementedError("// and divmod with an RR element past the doubles are not available in sagebrush yet")
-
-    __rfloordiv__ = __divmod__ = __rdivmod__ = __floordiv__
+    # (%, // and divmod: RealNumber's, exact past the doubles too)
 
     def __reduce__(self):
         return (_rr_from_mp, (self._mp,))
@@ -895,10 +910,6 @@ class _RealBig(RealNumber):
             return NotImplemented
         return _rr_real_pow(m, self._mp)
 
-    def __mod__(self, o):
-        raise NotImplementedError("% with an RR element past the doubles is not available in sagebrush yet")
-
-    __rmod__ = __mod__
 
     def __neg__(self):
         r = _rr_from_mp(-self._mp)
@@ -1043,6 +1054,47 @@ def _rr_arith(a, b, op):
     """a op b (53-bit MP values), rounded once."""
     import _sage_real
     return _sage_real._arith(a, b, op, _rr_mp())
+
+
+_RR_PARENT = "'Real Field with 53 bits of precision'"
+
+
+def _rr_divlike(x, o, op, rev):
+    """x % o, x // o or divmod(x, o) (o first if rev) for an RR element x,
+    as Sage: the other operand in RR (an integer, a Python float, an RDF
+    or RR element); NotImplemented for a RealField(p) number or a rational
+    (their own rules: the coarser field, Rational's remainder)."""
+    if type(o).__name__ == "RealNumberMP" or isinstance(o, _Fraction) and not isinstance(o, int) and o.denominator != 1:
+        return NotImplemented
+    if not isinstance(o, (int, float, _Fraction)):
+        return NotImplemented
+    if rev and type(o).__name__ == "RealDoubleElement":
+        # (RDF on the left: RDF's own rules and result conventions)
+        r = {"%": o.__mod__, "//": o.__floordiv__, "divmod": o.__divmod__}[op](x)
+        if r is not NotImplemented:
+            return r
+    if op != "%":
+        if type(o) in (float, bool):
+            # (a Python float or bool: refused by type, as Sage's; a
+            # decimal literal is Sage's RealLiteral.  An int is an Integer
+            # here, refused by parent below)
+            t, me = "'%s'" % type(o).__name__, "'sage.rings.real_mpfr.%s'" % ("RealLiteral" if type(x) is _RealLiteral else "RealNumber")
+            raise TypeError("unsupported operand type(s) for //: %s and %s" % ((t, me) if rev else (me, t)))
+        if op == "//":
+            raise TypeError("unsupported operand parent(s) for //: %s and %s" % (_RR_PARENT, _RR_PARENT))
+    y = o if isinstance(o, RealNumber) else _RealField()(o)
+    a, b = (y, x) if rev else (x, y)
+    if op == "%":
+        if isinstance(a, _RealBig) or isinstance(b, _RealBig):
+            import _sage_real
+            r = _rr_from_mp(_sage_real._mp_remainder(_rr_operand(a), _rr_operand(b), _rr_mp()))
+            # (a zero remainder has the sign of a)
+            return float.__new__(RealNumber, -0.0) if r == 0 and _m.copysign(1.0, float(a)) < 0 else r
+        import _sage_real
+        return float.__new__(RealNumber, _sage_real._double_remainder(float(a), float(b)))
+    if b == 0:
+        raise ZeroDivisionError("")
+    return a / b, _RealField()(0)
 
 
 # (arithmetic and the reflected method of the other operand)
@@ -1212,6 +1264,9 @@ class _RealField:
         except (TypeError, ValueError):
             if f is None:
                 raise
+            return RealNumber(f)
+        if f is not None and f == 0 and not v._special and not v._m:
+            # (an exact zero keeps its sign: RR('-0') is -0, as Sage)
             return RealNumber(f)
         return _rr_from_mp(v)
 
