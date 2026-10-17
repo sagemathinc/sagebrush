@@ -253,20 +253,69 @@ export interface Submission {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // (a board's questions, read once for each text posted: kept with that
 // text, and read again if the posted object now has another, HARD-A6E-2)
-const boards = new WeakMap<Posted, { text: string; d: BoardDoc | string }>();
+const boards = new WeakMap<Posted, { text: string; d: BoardDoc | string; raw: unknown }>();
 function boardOf(posted: Posted): BoardDoc | string {
+  return boardAndRaw(posted).d;
+}
+// (the board as cleanDoc leaves it, and as it was written: what a decision
+// is checked against, before any cleaning, CORR-F10-1)
+function boardAndRaw(posted: Posted): { d: BoardDoc | string; raw: unknown } {
   const kept = boards.get(posted);
-  if (kept && kept.text === posted.text) return kept.d;
-  let d: BoardDoc | string;
+  if (kept && kept.text === posted.text) return kept;
+  let d: BoardDoc | string, raw: unknown = null;
   try {
-    const raw = JSON.parse(posted.text);
+    raw = JSON.parse(posted.text);
     const bad = raw && typeof raw === "object" && !Array.isArray(raw) ? formatError(raw) : "not a board";
     d = bad ? `the board posted can't take answers: ${bad}` : isBoard(raw) ? cleanDoc(raw) : "the board posted can't take answers: it is not a board";
   } catch {
     d = "the board posted has no questions (it is not a board's JSON)";
   }
-  boards.set(posted, { text: posted.text, d });
-  return d;
+  boards.set(posted, { text: posted.text, d, raw });
+  return { d, raw };
+}
+
+/** Why a question's `decide`, as written in the board's JSON (before any
+ * cleaning), can't be decided among, or null: a list of at most 32
+ * objects, each with a name that says what it means (once), `about` a
+ * string of at most 2000 characters if given, `next` the id of an item of
+ * the question's page if given.  What `sagebrush board check` refuses,
+ * refused here, never cleaned into something else (astra's CORR-F10-1). */
+export function rawDecideProblem(decide: unknown, pageIds: Set<string>): string | null {
+  if (!Array.isArray(decide)) return "its decide is not a list";
+  if (decide.length > ASK_LIMITS.decide) return `more than ${ASK_LIMITS.decide} things to decide among`;
+  const seen = new Set<string>();
+  for (const [k, o] of decide.entries()) {
+    const at = `decide[${k}]`;
+    if (!isObj(o)) return `${at} is not an object`;
+    for (const key of Object.keys(o)) if (!["name", "about", "next"].includes(key)) return `${at} has a field it doesn't know, ${JSON.stringify(key.slice(0, 40))}`;
+    if (typeof o.name !== "string" || !DECIDE_NAME.test(o.name) || o.name.length > ASK_LIMITS.decideName) return `${at}.name is not a name that says what it means`;
+    if (seen.has(o.name)) return `${at}.name ${JSON.stringify(o.name)} is there twice`;
+    seen.add(o.name);
+    if (o.about !== undefined && (typeof o.about !== "string" || o.about.length > ASK_LIMITS.about)) return `${at}.about is not a string of at most ${ASK_LIMITS.about} characters`;
+    if (o.next !== undefined && (typeof o.next !== "string" || !pageIds.has(o.next))) return `${at}.next names no item of the question's page`;
+  }
+  return null;
+}
+
+/** Page `n` (from 1) of a board as written: its items, groups' members too, by id; and the question `id` among them (several: null). */
+function rawPage(raw: unknown, n: number, id: string): { ids: Set<string>; ask: Record<string, any> | null; count: number } {
+  const ids = new Set<string>();
+  let ask: Record<string, any> | null = null, count = 0;
+  const pages = isObj(raw) && Array.isArray(raw.pages) ? raw.pages : [raw];
+  const page = pages[n - 1];
+  // (bounded by the posted board's own size: each item once)
+  const walk = (ns: unknown) => {
+    if (!Array.isArray(ns)) return;
+    for (const x of ns) {
+      if (!isObj(x) || x.id == null) continue;
+      const xid = String(x.id);
+      ids.add(xid);
+      if (x.kind === "ask" && xid === id) { ask = x; count++; }
+      if (x.kind === "group") walk(x.children);
+    }
+  };
+  if (isObj(page)) walk(page.nodes);
+  return { ids, ask, count };
 }
 
 /** Why `m` is not plain JSON data of at most 64 KiB (as UTF-8) nested at
@@ -371,7 +420,7 @@ export function decideRequest(posted: Posted, m: unknown): Deciding {
   if (!id) return no("a request to decide has a UUID as its id");
   if ((m.name ?? null) !== (posted.name ?? null) || (m.revision ?? null) !== (posted.revision ?? null)) return no("a request to decide has the name and revision of the board posted on its channel");
   if (!isObj(m.page)) return no("a request to decide has a page, an object");
-  const d = boardOf(posted);
+  const { d, raw } = boardAndRaw(posted);
   if (typeof d === "string") return no(d);
   const n = m.page.number;
   if (!Number.isInteger(n) || n < 1 || n > pageCount(d)) return no(`its page.number is not a page of the board (from 1 to ${pageCount(d)})`);
@@ -382,6 +431,12 @@ export function decideRequest(posted: Posted, m: unknown): Deciding {
   const found = asksOf(d).filter((q) => q.page === n && q.ask.id === m.item);
   if (found.length !== 1) return no(found.length ? `two questions on page ${n} have the id ${JSON.stringify(m.item.slice(0, 60))}` : `${JSON.stringify(m.item.slice(0, 60))} is no question on page ${n}`);
   const a = found[0].ask;
+  // (its decide as written, before cleanDoc: refused as board check refuses it, never cleaned into another list)
+  const written = rawPage(raw, n, a.id);
+  if (written.count !== 1 || !written.ask) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} is not one question of page ${n} as written`);
+  if (written.ask.decide === undefined || (Array.isArray(written.ask.decide) && !written.ask.decide.length)) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} has nothing to decide among (no \`decide\`)`);
+  const badly = rawDecideProblem(written.ask.decide, written.ids);
+  if (badly) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} can't be decided as written (${badly}): sagebrush board check says what to fix`);
   if (!a.decide?.length) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} has nothing to decide among (no \`decide\`)`);
   const wrong = askProblems(a).find((x) => x.level === "error" && x.field.startsWith("decide"));
   if (wrong) return no(`the question ${JSON.stringify(a.id.slice(0, 60))} can't be decided as written (${wrong.field}: ${wrong.message}): sagebrush board check says what to fix`);
