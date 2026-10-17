@@ -612,3 +612,19 @@ N plain 53.9000000000000 -> 2.00000000000000 Real Field with 53 bits of precisio
 N plain 54.2000000000000 !! TypeError cannot approximate to a precision of 54.2000000000000 bits, use at most 53 bits
 N plain IntOnly -> 2.0000000 Real Field with 30 bits of precision
 N plain IndexOnly !! TypeError an integer is required
+digits static -> 2.00000000 Real Field with 33 bits of precision
+digits class -> 2.00000000 Real Field with 33 bits of precision
+digits index -> 2.0000000 Real Field with 30 bits of precision
+digits int-float -> 2.00000000 Real Field with 33 bits of precision
+digits int-int -> 2.0 Real Field with 10 bits of precision
+prec int-int -> 2.0000000 Real Field with 30 bits of precision
+changing float -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing RR -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing RDF -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing int -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']
+changing method -> 2.0000000 Real Field with 30 bits of precision
+calls ['int']

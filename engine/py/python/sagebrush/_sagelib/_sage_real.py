@@ -30,8 +30,9 @@ def digits_to_prec(d):
         sage: digits_to_prec(15), digits_to_prec(50)  # sagebrush only
         (54, 170)
     """
-    # (a fractional d is not truncated, as Sage: 15.9 digits are 57 bits)
-    x = ((int(d) if isinstance(d, int) else _real_double(d)) + 1) * _LOG2_10
+    # (a fractional d is not truncated, as Sage: 15.9 digits are 57 bits;
+    # d is read as a real number, an int subclass by its value)
+    x = (_real_double(d) + 1) * _LOG2_10
     return int(math.ceil(x - 1e-12))
 
 
@@ -2764,7 +2765,8 @@ def _prec_int(prec):
     or a number with __int__ (truncated: 53.9 is 53); a string, bytes or an
     object with only __index__ raises TypeError."""
     if isinstance(prec, int):
-        return int(prec)
+        # (an int's own value: a subclass's __int__ is not called, as Sage)
+        return int.__int__(prec)
     if isinstance(prec, (str, bytes, bytearray, memoryview)) or getattr(type(prec), "__int__", None) is None:
         raise TypeError("an integer is required")
     return int(prec)
@@ -2777,16 +2779,41 @@ def _real_double(x):
     TypeError."""
     if isinstance(x, float):
         return float.__float__(x)
-    f = getattr(type(x), "__float__", None)
+    f = _special(x, "__float__")
     if f is not None:
-        r = f(x)
+        r = f()
         if not isinstance(r, float):
             raise TypeError("%s.__float__ returned non-float (type %s)" % (type(x).__name__, type(r).__name__))
         return float.__float__(r)
-    if getattr(type(x), "__index__", None) is not None:
+    if _special(x, "__index__") is not None:
         import operator
         return float(operator.index(x))
     raise TypeError("must be real number, not %s" % type(x).__name__)
+
+
+def _special(x, name):
+    """The special method name of x bound as Python binds one: looked up on
+    its type, then the descriptor's __get__ (a staticmethod or classmethod
+    too); None if the type has none."""
+    for k in type(x).__mro__:
+        if name in k.__dict__:
+            f = k.__dict__[name]
+            get = getattr(type(f), "__get__", None)
+            return get(f, x, type(x)) if get is not None else f
+    return None
+
+
+class _Bits(int):
+    """A precision converted once (sage_all.n): its value, named as it was
+    given in a refusal (54.2000000000000 bits, not 54)."""
+
+    def __new__(cls, p, shown):
+        o = int.__new__(cls, p)
+        o._shown = shown
+        return o
+
+    def __repr__(self):
+        return repr(self._shown)
 
 
 def _approx_prec(prec, own):

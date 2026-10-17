@@ -1467,7 +1467,9 @@ def n(x, prec=None, digits=None, algorithm=None):
         # (the precision as given goes to N, which names it in a refusal:
         # 54.2 bits, not 54)
         q = _sage_real.digits_to_prec(digits) if digits is not None else prec
+        # (converted once: an __int__ is called once, as in Sage)
         p = _sage_real._prec_int(q)
+        q = _sage_real._Bits(p, q)
         if p != 53 or getattr(x, "_s", None) is None:
             if hasattr(x, "n") and not isinstance(x, (int, float, _Fraction)) and getattr(x, "_s", None) is None and not isinstance(x, (_sage_real.RealNumberMP, _sage_real.ComplexNumberMP)):
                 try:
