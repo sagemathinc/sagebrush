@@ -305,6 +305,8 @@ try {
   await note2("API own words, written on");
   check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API own words, written on" && ${fb}.textContent.includes("Something else: your own words stand")`), 5000)), "Something else, then the words changed by the API: it stands");
   await note2(words0);
+  // (the words back, in the field and the document, before what follows asks of them)
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)} && window.sagebrush.board.snapshot().doc.pages[0].nodes.find((n) => n.id === "q2").note === ${JSON.stringify(words0)}`), 10000);
   await frame(`window.board.focus(["q2"], true), 1`);
   await sleep(300);
   await top(`mode.decide = null`);
@@ -325,12 +327,14 @@ try {
   // (the question in view again: the options' card was kept clear of the caption by its bottom, its top above)
   await frame(`window.board.focus(["q2"], true), 1`);
   await sleep(300);
-  await top(`mode.decide = "hold"`);
+  await top(`window.held = null; mode.decide = "hold"`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => top("!!window.held"))), "(a request the host holds)");
+  // (the held request's id, read once it is there: what the host answers later)
+  const held1 = await until(() => top("window.held?.id ?? null"));
+  check(!!held1, "(a request the host holds)");
   await frame(`(() => { const w = document.querySelector('[data-ask="q2"] details textarea'); w.value = "Something else entirely."; w.dispatchEvent(new Event("change")); })()`);
   await sleep(500);
-  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: held.id, option: "confuses-transitive-with-two-transitive" })`);
+  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: ${JSON.stringify(held1)}, option: "confuses-transitive-with-two-transitive" })`);
   await sleep(1500);
   check(await frame(`!${fb}.textContent.includes("Your words suggest") && !${fb}.textContent.includes("not one of") && ${fb}.querySelector('button').textContent === "Get feedback on my words"`), "an answer to words changed since it was asked: dropped, not shown under the new words");
 
@@ -354,21 +358,23 @@ try {
   // (2) pending, the words changed and changed back (ABA): its answer dropped
   await top(`window.held = null; mode.decide = "hold"`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => top("!!window.held"))), "(a request for API NEW WORDS, held)");
+  const held2 = await until(() => top("window.held?.id ?? null"));
+  check(!!held2, "(a request for API NEW WORDS, held)");
   await editQ2(`n.note = "API temporary words";`);
   await until(() => frame(`${words}.value === "API temporary words"`));
   await editQ2(`n.note = "API NEW WORDS";`);
   await until(() => frame(`${words}.value === "API NEW WORDS"`));
-  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: held.id, option: "says-every-point-reaches-every-other" })`);
+  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: ${JSON.stringify(held2)}, option: "says-every-point-reaches-every-other" })`);
   await sleep(1500);
   check(await frame(`!${fb}.textContent.includes("Your words suggest") && ${fb}.querySelector('button').textContent === "Get feedback on my words"`), "a decision pending, its words changed and changed back: its answer dropped");
   // (3) pending, the question changed (its words the same): its answer dropped
   await top(`window.held = null`);
   await frame(`${fb}.querySelector('button').click()`);
-  check(!!(await until(() => top("!!window.held"))), "(another request, held)");
+  const held3 = await until(() => top("window.held?.id ?? null"));
+  check(!!held3, "(another request, held)");
   await editQ2(`n.text = "NEW QUESTION: explain a stabilizer instead.";`);
   await until(() => frame(`document.querySelector('[data-ask="q2"]').textContent.includes("NEW QUESTION")`));
-  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: held.id, option: "confuses-transitive-with-two-transitive" })`);
+  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: ${JSON.stringify(held3)}, option: "confuses-transitive-with-two-transitive" })`);
   await sleep(1500);
   check(await frame(`!${fb}.textContent.includes("Your words suggest") && !${fb}.textContent.includes("not one of")`), "a decision pending, the question's text changed: its answer dropped");
   // (and decided again, on these words and this question, for what follows)
