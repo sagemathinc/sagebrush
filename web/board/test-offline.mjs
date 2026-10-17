@@ -110,7 +110,7 @@ try {
   check(fromOwn === withPy, "with its engine not published (a dev site), the file with Python is made all the same: " + String(fromOwn).slice(0, 80));
   const fa = join(dir, "with-python.html"), fb = join(dir, "without-python.html");
   writeFileSync(fa, withPy); writeFileSync(fb, withoutPy);
-  check(libSrc.length > 5 && libSage.length === 3 && parts(withPy).sort().join() === [...libSage, ...libSrc, "sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-viewer3d.js", "sagebrush-worker.js"].sort().join(), "the file in offline mode carries every part, the whole Python library and Sage's compiled modules too (a Python board may become a Sage one): " + parts(withPy).join());
+  check(libSrc.length > 5 && libSage.length === 3 && parts(withPy).sort().join() === [...libSage, ...libSrc, "sagebrush-analyze.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-worker.js"].sort().join(), "the file in offline mode carries every part, the whole Python library and Sage's compiled modules too (a Python board may become a Sage one): " + parts(withPy).join());
   check(!parts(withoutPy).length && withoutPy.includes(`"id":"${own.id}"`) && withoutPy.includes(JSON.stringify(site)), "the file without carries none, only where its engine is: the site and the engine's id");
   console.log(`with Python ${(withPy.length / 1e6).toFixed(1)} MB, without ${(withoutPy.length / 1e3).toFixed(0)} KB`);
 
@@ -140,7 +140,7 @@ try {
   // engine's id
   await online(true);
   const older = withPy.replace(/<script type="application\/octet-stream" data-sb-engine="lib\/[\w.-]+\.pre\.[0-9a-f]+\.json">[^<]*<\/script>\n?/g, "");
-  check(!parts(older).some((p) => /\.pre\./.test(p)) && parts(older).length === 5 + libSrc.length, "(an older file: no Sage compiled modules)");
+  check(!parts(older).some((p) => /\.pre\./.test(p)) && parts(older).length === 6 + libSrc.length, "(an older file: no Sage compiled modules)");
   const fo = join(dir, "older.html");
   writeFileSync(fo, older.replace('"nodes":[', '"mode":"sage","nodes":['));
   await open(fo);
