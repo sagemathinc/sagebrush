@@ -140,3 +140,16 @@ class R(str):
 t("reason __str__", lambda: str(UnicodeEncodeError("ascii", "a", 0, 1, R("why"))))
 B = bytearray(b"ab")
 t("decode object bytes", lambda: (type(UnicodeDecodeError("a", B, 0, 1, "r").object), UnicodeDecodeError("a", b"ab", 0, 1, "r").object))
+# (astra CORR-30C-1: the object attribute's str check takes bytes and its
+# subclasses, not a bytearray, though the constructor converts one)
+class BS(bytes):
+    pass
+def obj_str(v):
+    e = UnicodeDecodeError("utf-8", b"a", 0, 1, "why")
+    e.object = v
+    return str(e)
+for v in (bytearray(b"Z"), bytearray(), BS(b"Z"), b"Z", memoryview(b"Z"), "Z"):
+    t("decode object " + type(v).__name__ + " " + str(len(v)), lambda: obj_str(v))
+class BA(bytearray):
+    pass
+t("decode constructor bytearray subclass", lambda: (type(UnicodeDecodeError("a", BA(b"ab"), 0, 1, "r").object), str(UnicodeDecodeError("a", BA(b"ab"), 0, 1, "r"))))
