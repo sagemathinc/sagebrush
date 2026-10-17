@@ -506,3 +506,26 @@ except StopIteration as e:
     print(e.value)
 import array
 print(seq(array.array("i", [1, 2])), seq(array.array("b")), keys(collections.ChainMap({"x": 0, "y": 9})))
+# the calls a wildcard-star pattern makes, as CPython's: len once for the
+# pattern, then for each item after the star len again and its getitem
+# (CPython's GET_LEN per suffix item); none for wildcards
+calls = []
+
+
+class Counted(collections.abc.Sequence):
+    def __len__(self):
+        calls.append("len")
+        return 5
+
+    def __getitem__(self, i):
+        calls.append(("get", i))
+        return i
+
+
+match Counted():
+    case [*_, a, b, c]: print(a, b, c)
+print(calls)
+calls.clear()
+match Counted():
+    case [x, *_, a, _, c]: print(x, a, c)
+print(calls)
