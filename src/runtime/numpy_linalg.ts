@@ -29,7 +29,7 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
 }
 function linalgError(msg: string): never {
   const E = (globalThis as any).__npLinAlgError;
-  if (E) throw Obj.callObj(E, [msg]);
+  if (E) throw Obj.markRaised(Obj.callObj(E, [msg]));
   return raise(T.ValueError, msg);
 }
 

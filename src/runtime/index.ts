@@ -201,7 +201,7 @@ export function yieldFrom(x: any): any {
       return step(() => {
         O.lastStop.e = null;
         const r = it.$next();
-        if (r === Obj.DONE) throw O.lastStop.e ?? T.StopIteration();
+        if (r === Obj.DONE) throw O.lastStop.e ?? Obj.markRaised(T.StopIteration());
         return r;
       });
     },
@@ -212,7 +212,7 @@ export function yieldFrom(x: any): any {
       if (raw !== undefined) {
         const t0 = Obj.getattr(target, "throw", null);
         if (t0 !== null) return step(() => Obj.callObj(t0, raw));
-        if (raw.invalid) throw Obj.T.TypeError(raw.invalid);
+        if (raw.invalid) throw Obj.markRaised(Obj.T.TypeError(raw.invalid));
       }
       if (Obj.isinstance(e, T.GeneratorExit)) {
         const c = Obj.getattr(target, "close", null);
@@ -348,6 +348,7 @@ Obj.hooks.genRaised = (e: any) => {
 // frames are refused from now on, never the stale ones it had.
 Obj.hooks.excThrown = (e: any) => {
   if (e === null || typeof e !== "object" || e.$cls === undefined) return;
+  Obj.markRaised(e);
   const tb: any = {};
   Error.captureStackTrace(tb);
   setFrames(e, tb, [], false, "it was thrown into a generator, at a yield whose line is not kept");
