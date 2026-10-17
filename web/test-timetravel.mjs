@@ -77,8 +77,16 @@ try {
   await sleep(1000);
   const t2 = await a.ev(topOf("#ttview"));
   ok(Math.abs(t1 - t0) <= 2 && Math.abs(t2 - t0) <= 2, `the cell in the middle stays put: in the notebook ${t0}, opening TimeTravel ${t1}, another version ${t2}`);
-  const bar = await a.ev("Math.round(document.querySelector('#timetravel .tthead').getBoundingClientRect().top)");
-  ok(bar === 0 && (await a.ev("scrollY")) > 100, "the TimeTravel bar sticks to the top of the window: " + bar);
+  // (TimeTravel's bar sticks right under the notebook's toolbar, which stays in view: as tall as it is, wrapped or not)
+  const bars = `(() => { const t = document.querySelector('#timetravel .tthead').getBoundingClientRect(), b = document.querySelector('.bar').getBoundingClientRect(); return { tt: Math.round(t.top), bar: [Math.round(b.top), Math.round(b.bottom)], h: Math.round(b.height), y: scrollY }; })()`;
+  const st = await a.ev(bars);
+  ok(st.bar[0] === 0 && Math.abs(st.tt - st.bar[1]) <= 1 && st.y > 100, "the TimeTravel bar sticks to the top of the window, under the toolbar: " + JSON.stringify(st));
+  await a.send("Emulation.setDeviceMetricsOverride", { width: 520, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
+  const sw = await a.ev(bars);
+  ok(sw.h > st.h && sw.bar[0] === 0 && Math.abs(sw.tt - sw.bar[1]) <= 1, "...the toolbar wrapped, taller: still right under it: " + JSON.stringify([st, sw]));
+  await a.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(500);
   await a.ev("document.querySelector('#ttclose').click()");
   await sleep(1000);
   const t3 = await a.ev(topOf("#cells"));
