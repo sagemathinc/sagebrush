@@ -57,3 +57,19 @@ show("RDF('-0')", lambda: RDF('-0'))
 show("RR(-0.0r)", lambda: RR(-0.0r))
 for lit in [5.5, 7.0, 1e300]:
     show("literal %s // True" % lit, lambda: lit // True)
+# divmod by an RDF zero is refused at any precision; RDF on the left keeps
+# RDF's rules in explicit reflected calls too; RR's -0 % a divisor past the
+# doubles is -0
+for p in (30, 53, 54, 100):
+    R = RealField(p)
+    for nm, x in [("2", R(2)), ("0", R(0)), ("inf", R('inf')), ("nan", R('nan'))]:
+        for z in (RDF(0), RDF(-0.0)):
+            show("divmod(R%d(%s),RDF(%s))" % (p, nm, z), lambda: divmod(x, z))
+    show("R%d(2).__rfloordiv__(RDF(7))" % p, lambda: R(2).__rfloordiv__(RDF(7)))
+    show("R%d(2).__rdivmod__(RDF(7))" % p, lambda: R(2).__rdivmod__(RDF(7)))
+    show("R%d(2).__rmod__(RDF(7))" % p, lambda: R(2).__rmod__(RDF(7)))
+    show("RDF(7)//R%d(2)" % p, lambda: RDF(7) // R(2))
+    show("divmod(RDF(7),R%d(2))" % p, lambda: divmod(RDF(7), R(2)))
+show("RR(-0) % RRbig", lambda: float(RR('-0') % (RR(2)^1100)).hex())
+show("RR(-0) % 2", lambda: float(RR('-0') % 2).hex())
+show("-(RR(2)^1100) % (RR(2)^1100)", lambda: float(-(RR(2)^1100) % (RR(2)^1100)).hex())

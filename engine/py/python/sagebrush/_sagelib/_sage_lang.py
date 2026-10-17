@@ -1043,6 +1043,11 @@ def _rr_divlike(x, o, op, rev):
         return NotImplemented
     if not isinstance(o, (int, float, _Fraction)):
         return NotImplemented
+    if rev and type(o).__name__ == "RealDoubleElement":
+        # (RDF on the left: RDF's own rules and result conventions)
+        r = {"%": o.__mod__, "//": o.__floordiv__, "divmod": o.__divmod__}[op](x)
+        if r is not NotImplemented:
+            return r
     if op != "%":
         if type(o) in (float, bool):
             # (a Python float or bool: refused by type, as Sage's; a
@@ -1059,7 +1064,7 @@ def _rr_divlike(x, o, op, rev):
             import _sage_real
             r = _rr_from_mp(_sage_real._mp_remainder(_rr_operand(a), _rr_operand(b), _rr_mp()))
             # (a zero remainder has the sign of a)
-            return float.__new__(RealNumber, -0.0) if r == 0 and a < 0 else r
+            return float.__new__(RealNumber, -0.0) if r == 0 and _m.copysign(1.0, float(a)) < 0 else r
         import _sage_real
         return float.__new__(RealNumber, _sage_real._double_remainder(float(a), float(b)))
     if b == 0:

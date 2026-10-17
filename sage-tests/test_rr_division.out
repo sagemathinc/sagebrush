@@ -443,3 +443,58 @@ RR(-0.0r) -> -0.000000000000000 Real Field with 53 bits of precision
 literal 5.50000000000000 // True !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
 literal 7.00000000000000 // True !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
 literal 1.00000000000000e300 // True !! TypeError unsupported operand type(s) for //: 'sage.rings.real_mpfr.RealLiteral' and 'bool'
+divmod(R30(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R30(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R30(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R30(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R30(nan),RDF(-0.0)) !! ZeroDivisionError 
+R30(2).__rfloordiv__(RDF(7)) !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+R30(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R30(2).__rmod__(RDF(7)) -> -1.0000000 Real Field with 30 bits of precision
+RDF(7)//R30(2) !! TypeError unsupported operand parent(s) for //: 'Real Field with 30 bits of precision' and 'Real Field with 30 bits of p
+divmod(RDF(7),R30(2)) -> (3.5, 0) tuple
+divmod(R53(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R53(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R53(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R53(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R53(nan),RDF(-0.0)) !! ZeroDivisionError 
+R53(2).__rfloordiv__(RDF(7)) -> 3.5 Real Double Field
+R53(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R53(2).__rmod__(RDF(7)) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF(7)//R53(2) -> 3.5 Real Double Field
+divmod(RDF(7),R53(2)) -> (3.5, 0) tuple
+divmod(R54(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R54(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R54(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R54(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R54(nan),RDF(-0.0)) !! ZeroDivisionError 
+R54(2).__rfloordiv__(RDF(7)) -> 3.5 Real Double Field
+R54(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R54(2).__rmod__(RDF(7)) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF(7)//R54(2) -> 3.5 Real Double Field
+divmod(RDF(7),R54(2)) -> (3.5, 0) tuple
+divmod(R100(2),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(2),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R100(0),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(0),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R100(inf),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(inf),RDF(-0.0)) !! ZeroDivisionError 
+divmod(R100(nan),RDF(0.0)) !! ZeroDivisionError 
+divmod(R100(nan),RDF(-0.0)) !! ZeroDivisionError 
+R100(2).__rfloordiv__(RDF(7)) -> 3.5 Real Double Field
+R100(2).__rdivmod__(RDF(7)) -> (3.5, 0) tuple
+R100(2).__rmod__(RDF(7)) !! TypeError unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'
+RDF(7)//R100(2) -> 3.5 Real Double Field
+divmod(RDF(7),R100(2)) -> (3.5, 0) tuple
+RR(-0) % RRbig -> '-0x0.0p+0' str
+RR(-0) % 2 -> '-0x0.0p+0' str
+-(RR(2)^1100) % (RR(2)^1100) -> '-0x0.0p+0' str

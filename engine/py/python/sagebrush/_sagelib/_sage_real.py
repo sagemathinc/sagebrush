@@ -1819,12 +1819,21 @@ class RealNumberMP:
     # remainder and quotient; RDF has no %, its // is its division)
     def _divlike(self, o, op, rev):
         from _sage_rdf import RealDoubleElement
+        if rev and isinstance(o, RealDoubleElement):
+            # (RDF on the left: RDF's own rules and result conventions,
+            # CORR-D6D-2; a coarser field's when RDF leaves it to us)
+            r = {"%": o.__mod__, "//": o.__floordiv__, "divmod": o.__divmod__}[op](self)
+            if r is not NotImplemented:
+                return r
         if self._R._prec > 53 and type(o) is float:
             a, b = (o, float(self)) if rev else (float(self), o)
             return a % b if op == "%" else a // b if op == "//" else divmod(a, b)
         if self._R._prec > 53 and isinstance(o, RealDoubleElement):
             if op == "%":
                 raise TypeError("unsupported operand parent(s) for %: 'Real Double Field' and 'Real Double Field'")
+            if op == "divmod" and float(o) == 0:
+                # (CORR-D6D-1: divmod by zero is refused, as in Sage)
+                raise ZeroDivisionError("")
             q = _sa().RDF(self) / o
             return q if op == "//" else (q, self._R(0))
         if type(o) in (float, bool) and op != "%":
