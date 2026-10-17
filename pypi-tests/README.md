@@ -33,6 +33,9 @@ Sagebrush with pypi-tests/harness.py, one line per test:
 
 - CPython must print the committed `expected.out`;
 - Sagebrush must print exactly the same, but for its known differences;
+- each must exit 0 with nothing on stderr (the harness writes only its
+  records, to stdout), `--refresh` included: a crash or fatal error after
+  the expected records fails the run;
 - traceback presentation is not compared: a package file's path (the
   repository's, or the CLI bundle's), and CPython's caret lines.
 
@@ -47,13 +50,16 @@ JavaScript engine cannot provide. Such a test may be listed in
 `packages/pypi-<name>/known.json`:
 
 ```json
-{"tests": [{"test": "module.test_function", "error": "AttributeError", "reason": "in plain words"}]}
+{"tests": [{"test": "module.test_function", "error": "AttributeError", "message": "module 'gc' has no attribute 'get_objects'", "reason": "in plain words"}]}
 ```
 
 The coordinator's conditions (Oct 17):
 - **Exactly that failure.** The runner requires Sagebrush's result for each
-  listed test to be a failure with exactly that exception type, where CPython
-  passes. It is an error, never a wrong answer.
+  listed test to be exactly that failure, where CPython passes: its line
+  `module.test_function: FAIL <error>: <message>`, the exception type and
+  its message's first line as the harness prints them. A failure of the
+  same type with another message fails the run. It is an error, never a
+  wrong answer.
 - **Nothing else.** Any other difference fails the run. So does a known test
   that starts passing, so that its entry gets removed.
 - **Visible.** The package's search entry shows each known difference in

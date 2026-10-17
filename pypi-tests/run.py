@@ -25,8 +25,14 @@ import tarfile
 import urllib.request
 import zlib
 
-here = os.path.dirname(os.path.abspath(__file__))
-root = os.path.dirname(here)
+script = os.path.dirname(os.path.abspath(__file__))
+root = os.path.dirname(script)
+# (where the tests and packages are, and the two interpreters: these, unless
+# test/pypi-tests-runner.test.ts gives others, to check this runner's gates)
+here = os.environ.get("PYPI_TESTS_DIR") or script
+packages = os.environ.get("PYPI_TESTS_PACKAGES") or os.path.join(root, "packages")
+CPYTHON = json.loads(os.environ["PYPI_TESTS_CPYTHON"]) if os.environ.get("PYPI_TESTS_CPYTHON") else [sys.executable]
+SAGEBRUSH = json.loads(os.environ["PYPI_TESTS_SAGEBRUSH"]) if os.environ.get("PYPI_TESTS_SAGEBRUSH") else ["node", os.path.join(root, "build", "cli", "pyjs.cjs")]
 args = [a for a in sys.argv[1:] if not a.startswith("-")]
 verbose = "-v" in sys.argv
 names = args or sorted(d for d in os.listdir(here) if os.path.exists(os.path.join(here, d, "SOURCE.json")))
@@ -44,6 +50,17 @@ FILE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\.py$")
 def run(cmd, env=None):
     p = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, timeout=3600)
     return p.stdout, p.stderr, p.returncode
+
+
+def exited(who, err, rc):
+    """Why a child's run does not count, or None: it must exit 0 with nothing
+    on stderr (the harness prints only its records, to stdout), so a crash or
+    a fatal error after the expected records is never accepted."""
+    if rc != 0:
+        return "%s exited with %d%s" % (who, rc, ": " + err.strip()[-500:] if err.strip() else "")
+    if err:
+        return "%s wrote to stderr: %s" % (who, err.strip()[-500:])
+    return None
 
 
 def normal(out, name):
@@ -103,23 +120,32 @@ for name in names:
                     problems.append("%s/%s: not a regular file of at most %d bytes in the archive" % (a["root"], f, MEMBER_BYTES))
                 elif sha(t.extractfile(i).read(MEMBER_BYTES + 1)) != h:
                     problems.append("upstream/%s is not the archive's %s/%s" % (f, a["root"], f))
-    pkgdir = os.path.join(root, "packages", "pypi-" + name.lower(), "py")
+    pkgdir = os.path.join(packages, "pypi-" + name.lower(), "py")
     env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0")
-    cp, cerr, _ = run([sys.executable, os.path.join(here, "harness.py"), d], env)
+    cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], env)
     cp = normal(cp, name)
+    why = exited("CPython", cerr, crc)
+    if why is not None:
+        print("%s %s: FAIL\n  %s" % (name, src["version"], why))
+        bad += 1
+        continue
     if "--refresh" in sys.argv:
         open(os.path.join(d, "expected.out"), "w").write(cp)
         print("%s: expected.out written (%d tests, %d not ok under CPython)" % (name, cp.count("\n"), cp.count(": FAIL")))
         continue
     want = open(os.path.join(d, "expected.out")).read()
     # (its known differences, packages/pypi-<name>/known.json: each test may
-    # fail here only with exactly that error where CPython passes; README.md)
-    kp = os.path.join(root, "packages", "pypi-" + name.lower(), "known.json")
+    # fail here only with exactly that error, its type and message, where
+    # CPython passes; README.md)
+    kp = os.path.join(packages, "pypi-" + name.lower(), "known.json")
     known = {t["test"]: t for t in json.load(open(kp))["tests"]} if os.path.exists(kp) else {}
     if cp != want:
         problems.append("CPython does not print expected.out:\n" + "".join("    " + l + "\n" for l in sorted(set(cp.splitlines()) ^ set(want.splitlines()))[:20]) + (cerr[-1000:] if verbose else ""))
-    sp, serr, _ = run(["node", os.path.join(root, "build", "cli", "pyjs.cjs"), os.path.join(here, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0"))
+    sp, serr, sbrc = run(SAGEBRUSH + [os.path.join(script, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0"))
     sp = normal(sp, name)
+    why = exited("Sagebrush", serr, sbrc)
+    if why is not None:
+        problems.append(why)
     # (a known test's line: CPython's "ok", Sagebrush's that FAIL; then the
     # same line on both sides for the comparison)
     sl = sp.splitlines(True)
@@ -135,8 +161,8 @@ for name in names:
         line = sl[hits[0]]
         if line == okline:
             problems.append("known.json lists %s, which now passes here: remove it" % t["test"])
-        elif not line.startswith("%s: FAIL %s:" % (t["test"], t["error"])):
-            problems.append("known.json lists %s as failing with %s, but here: %s" % (t["test"], t["error"], line.strip()))
+        elif line != "%s: FAIL %s: %s\n" % (t["test"], t["error"], t["message"]):
+            problems.append("known.json lists %s as failing with %s: %s, but here: %s" % (t["test"], t["error"], t["message"], line.strip()))
         else:
             sl[hits[0]] = okline
     sp = "".join(sl)
