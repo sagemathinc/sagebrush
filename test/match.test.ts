@@ -38,3 +38,29 @@ test("match: 5000 cases and an 80-deep pattern compile and run quickly", () => {
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim();
   assert.equal(out, "247499 7 None True True");
 });
+
+// ... and wide patterns (daybreak2, 23329bff): 3000 keyword attributes in a
+// class pattern, and an or-pattern of 3000 alternatives after 3000 captures,
+// compile and match linearly, well under the bounds here
+test("match: wide class keywords and or-patterns after many captures compile and run quickly", () => {
+  const code = [
+    "import time",
+    "n = 3000",
+    "class O: pass",
+    "o = O()",
+    "for i in range(n): setattr(o, f'a{i}', i)",
+    "t = time.perf_counter()",
+    "ns = {'O': O}",
+    "exec('def f(v):\\n match v:\\n  case O(' + ', '.join(f'a{i}=x{i}' for i in range(n)) + '): return x0 + x' + str(n - 1) + '\\n', ns)",
+    "caps = ', '.join(f'c{i}' for i in range(n))",
+    "alts = ' | '.join(f'[{i}, z]' for i in range(n))",
+    "exec('def g(v):\\n match v:\\n  case [' + caps + ', (' + alts + ')]: return z + c0\\n', ns)",
+    "compiled = time.perf_counter() - t",
+    "t = time.perf_counter()",
+    "r = (ns['f'](o), ns['g'](list(range(n)) + [[n - 1, 5]]), ns['g'](list(range(n)) + [[n, 5]]))",
+    "ran = time.perf_counter() - t",
+    "print(r, compiled < 10, ran < 5)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim();
+  assert.equal(out, "(2999, 5, None) True True");
+});
