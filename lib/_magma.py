@@ -1929,8 +1929,15 @@ class MMap:
 
     def __call__(self, x):
         if isinstance(x, MSet) and not _in(x, self.dom):
-            # the image of a set of elements
-            return _set([self(y) for y in x.ordered()], derived=True)
+            # the image of a set of elements: over the codomain, as Magma's,
+            # empty or not (f({Integers() | }) for f into the rationals is
+            # the rationals', never the integers' its elements would infer,
+            # astra2 on e0db098b); a codomain Sagebrush doesn't know as a
+            # universe leaves it unknown
+            t = _set([self(y) for y in x.ordered()], derived=True)
+            if _is_struct(self.cod) or isinstance(self.cod, _MFinField):
+                t.universe = self.cod
+            return t
         if self.parts is not None:
             return self.parts[1](self.parts[0](x))
         if self.inverse_of is not None:
