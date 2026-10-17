@@ -5,14 +5,16 @@ CPython's importlib is its import system written in Python (_bootstrap,
 _bootstrap_external); Sagebrush's import system is its own, so this module
 is not a copy: import_module() keeps CPython's checks, messages and
 relative-name resolution (import_module, _bootstrap._sanity_check and
-_bootstrap._resolve_name, ported), then imports with the runtime's
-__import__ and returns the named module from sys.modules, as
-_bootstrap._gcd_import does. What this runtime can't do is refused, never
+_bootstrap._resolve_name, ported), then imports with the runtime's own
+import operation (_pyjs_import.find_and_load), never through
+builtins.__import__ or importlib.__import__, whoever replaced them, and
+returns the module itself, as _bootstrap._gcd_import does. What this runtime can't do is refused, never
 approximated: reload() (a module is not re-executed here), and the
 submodules it does not have (util, machinery, abc, resources) are missing,
 an ImportError.
 """
 import sys
+from _pyjs_import import find_and_load as _find_and_load
 
 __all__ = ["__import__", "import_module", "invalidate_caches", "reload"]
 
@@ -23,7 +25,7 @@ from builtins import __import__
 def invalidate_caches():
     """Call the invalidate_caches() method on all meta path finders stored in
     sys.meta_path (where implemented)."""
-    for finder in getattr(sys, "meta_path", None) or ():
+    for finder in sys.meta_path:
         if hasattr(finder, "invalidate_caches"):
             finder.invalidate_caches()
 
@@ -75,8 +77,7 @@ def import_module(name, package=None):
     _sanity_check(name, package, level)
     if level > 0:
         name = _resolve_name(name, package, level)
-    __import__(name)
-    return sys.modules[name]
+    return _find_and_load(name)
 
 
 def reload(module):

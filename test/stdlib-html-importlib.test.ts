@@ -74,3 +74,57 @@ test("importlib.metadata.version() calls the registry reader once per call (dayb
   // read is the empty one. Read twice, the first call would parse the empty one)
   assert.deepEqual(cli(["-c", code]).trim().split("\n"), ["2.4.0 1", "not found 2", "no registry: not found"]);
 });
+
+// (astra's CORR-C0F-1..3, each in a fresh process on both sides, compared
+// with CPython: __import__'s fromlist imports a package's children; a
+// replaced importlib.__import__ or builtins.__import__ is not what
+// import_module uses (with builtins.__import__ replaced, only cached
+// modules: a fresh load goes through it in CPython too, its loader's and the
+// module's own imports); invalidate_caches iterates sys.meta_path as it is)
+const snippets: Record<string, string[]> = {
+  "fromlist imports a package's child": [
+    "import importlib, sys",
+    "m = importlib.__import__('importlib', fromlist=['metadata'])",
+    "print(m is importlib, hasattr(m, 'metadata'), 'importlib.metadata' in sys.modules)",
+    "j = __import__('importlib', fromlist=['import_module', 'no_such_child'])",
+    "print(j is importlib, 'importlib.no_such_child' in sys.modules)",
+    "for fl in [[5], ['*'], ('decoder',)]:",
+    "    try: print(fl, __import__('json', fromlist=fl).__name__)",
+    "    except Exception as e: print(fl, type(e).__name__, e)",
+    "sys.modules['json.blocked'] = None",
+    "try: __import__('json', fromlist=['blocked'])",
+    "except Exception as e: print(type(e).__name__, e)",
+    "print(__import__('json.decoder', fromlist=['x']).__name__)",
+  ],
+  "import_module does not go through a replaced __import__": [
+    "import importlib, builtins, importlib.metadata",
+    "def wrapper(*a, **k): raise RuntimeError('wrapper was called')",
+    "importlib.__import__ = wrapper",
+    "print(importlib.import_module('sys').__name__, importlib.import_module('colorsys').__name__)",
+    "real = builtins.__import__",
+    "builtins.__import__ = wrapper",
+    "try: print(importlib.import_module('importlib').__name__, importlib.import_module('importlib.metadata').__name__)",
+    "finally: builtins.__import__ = real",
+  ],
+  "invalidate_caches iterates a false-valued meta_path": [
+    "import importlib, sys",
+    "calls = []",
+    "class Finder:",
+    "    def invalidate_caches(self): calls.append('invalidate')",
+    "class Finders(list):",
+    "    def __bool__(self):",
+    "        calls.append('bool')",
+    "        return False",
+    "old = sys.meta_path",
+    "sys.meta_path = Finders([Finder(), object()])",
+    "try: importlib.invalidate_caches()",
+    "finally: sys.meta_path = old",
+    "print(calls)",
+  ],
+};
+for (const [name, lines] of Object.entries(snippets))
+  test(`importlib: ${name}, as CPython`, () => {
+    const code = lines.join("\n");
+    const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    assert.equal(cli(["-c", code]), want);
+  });
