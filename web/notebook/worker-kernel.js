@@ -37,6 +37,34 @@ const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 // (a test may set less: globalThis.__sbEvaluateStartMs)
 const evaluateStartMs = () => Number(globalThis.__sbEvaluateStartMs) || 30_000;
 
+// The library's chunks the worker fetched and installed (web/lib-lazy.ts),
+// for the service worker to keep (web/sw.js): it keeps a chunk as it passes
+// through it, and a page it did not control when it loaded (a first visit)
+// fetched its first chunks past it, so offline they would be missing.  Told
+// to the service worker once it controls the page; nothing to do if it
+// already did at load (every fetch then went through it).
+// (reading it throws in an opaque origin: a sandboxed frame, web/board's)
+let sw;
+try {
+  sw = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+} catch {}
+const controlledAtLoad = !!sw?.controller;
+const unkept = new Set();
+function flushChunks() {
+  const c = sw?.controller;
+  if (!c || !unkept.size) return;
+  try {
+    c.postMessage({ keep: [...unkept] });
+  } catch {}
+  unkept.clear();
+}
+function keepChunk(file) {
+  if (!sw || controlledAtLoad || typeof file !== "string") return;
+  unkept.add(file);
+  flushChunks();
+}
+sw?.addEventListener?.("controllerchange", flushChunks);
+
 export class WorkerKernel {
   static count = 0;
   /**
@@ -99,6 +127,7 @@ export class WorkerKernel {
       // a mode's library, fetched the first time it runs (web/lib-lazy.ts):
       // said once it has taken 300 ms, until it is here, in the status and
       // ("loading" event) on the cells waiting for it
+      if (m.libChunk !== undefined) return keepChunk(m.libChunk);
       if (m.libLoading !== undefined) {
         clearTimeout(this.libTimer);
         if (m.libLoading) this.libTimer = setTimeout(() => { this.libShown = true; this.emit("status", `loading ${m.libLoading}…`); this.emit("loading", m.libLoading); }, 300);
