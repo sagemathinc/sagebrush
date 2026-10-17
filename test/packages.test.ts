@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -163,6 +163,44 @@ test("scripts/packages.mjs: a well-formed package is registered, and each malfor
   assert.equal(check({ "packages/demo/sagebrush.json": manifest({ files: { "../x.py": sha("") } }), "packages/demo/py/demo.py": "D = 1\n" }), "packages/demo: py/demo.py is not in files (every file is pinned)");
   assert.equal(check({ "packages/demo/sagebrush.json": manifest({ files: { "py/demo.py": sha("D = 1\n"), "../x.py": sha("") } }), "packages/demo/py/demo.py": "D = 1\n" }), 'packages/demo: "../x.py" is not a path inside the package');
   assert.equal(check({ "packages/demo/sagebrush.json": manifest({ python: { root: "py", modules: ["demo", "gone"] } }), "packages/demo/py/demo.py": "D = 1\n" }), "packages/demo: it has no file for module gone");
+});
+
+test("scripts/packages.mjs: a symbolic link is refused, before it is followed (HARD-40C-1)", () => {
+  const url = pathToFileURL(join(repo, "scripts", "packages.mjs")).href;
+  const read = (root: string) => execFileSync(process.execPath, ["--input-type=module", "-e", `import { readPackages } from ${JSON.stringify(url)};\ntry { console.log(JSON.stringify(readPackages(${JSON.stringify(root)}).registry.modules)); } catch (e) { console.log(e.message); }`], { encoding: "utf8", timeout: 20000 }).trim();
+  // (a well-formed package, and a file and a directory outside it)
+  const make = () => {
+    const root = mkdtempSync(join(tmpdir(), "sb-pkglink-"));
+    mkdirSync(join(root, "packages", "demo", "py"), { recursive: true });
+    writeFileSync(join(root, "packages", "demo", "sagebrush.json"), manifest({}));
+    writeFileSync(join(root, "packages", "demo", "py", "demo.py"), "D = 1\n");
+    mkdirSync(join(root, "outside"));
+    writeFileSync(join(root, "outside", "secret.py"), "S = 1\n");
+    return root;
+  };
+  let root = make();
+  assert.equal(read(root), '{"demo":"@sagebrush/demo@0.1.0"}');
+  // a file linked from outside, pinned by its target's hash: still refused
+  symlinkSync(join(root, "outside", "secret.py"), join(root, "packages", "demo", "py", "secret.py"));
+  writeFileSync(join(root, "packages", "demo", "sagebrush.json"), manifest({ files: { "py/demo.py": sha("D = 1\n"), "py/secret.py": sha("S = 1\n") } }));
+  assert.equal(read(root), "packages/demo: py/secret.py is a symbolic link (a package's files are its own)");
+  // a directory linked from outside
+  root = make();
+  symlinkSync(join(root, "outside"), join(root, "packages", "demo", "py", "more"));
+  assert.equal(read(root), "packages/demo: py/more is a symbolic link (a package's files are its own)");
+  // a link back to an ancestor: refused, not followed for ever
+  root = make();
+  symlinkSync(join(root, "packages", "demo"), join(root, "packages", "demo", "py", "loop"));
+  assert.equal(read(root), "packages/demo: py/loop is a symbolic link (a package's files are its own)");
+  // the manifest, or the whole package directory, a link
+  root = make();
+  renameSync(join(root, "packages", "demo", "sagebrush.json"), join(root, "outside", "sagebrush.json"));
+  symlinkSync(join(root, "outside", "sagebrush.json"), join(root, "packages", "demo", "sagebrush.json"));
+  assert.equal(read(root), "packages/demo: sagebrush.json is a symbolic link");
+  root = make();
+  renameSync(join(root, "packages", "demo"), join(root, "outside", "demo"));
+  symlinkSync(join(root, "outside", "demo"), join(root, "packages", "demo"));
+  assert.equal(read(root), "packages/demo: is a symbolic link (a package is a directory of packages/)");
 });
 
 test("the repository's packages/registry.json is current", () => {
