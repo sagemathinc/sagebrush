@@ -653,7 +653,8 @@ export class Board {
       Object.assign(cur, patch);
       this.onAskResize?.(id, true, true);
     };
-    const label = (o: { name: string; about?: string }) => o.about ?? o.name.replace(/-/g, " ");
+    // (an option with no `about`: its name as words, a sentence's capital first)
+    const label = (o: { name: string; about?: string }) => o.about ?? o.name.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
     const stop = (el: HTMLElement) => { for (const t of ["pointerdown", "mousedown", "dblclick", "click", "keydown"]) el.addEventListener(t, (e) => e.stopPropagation()); return el; };
     const md = (src: string) => { const d = document.createElement("div"); d.className = "board-text board-ask-message"; if (this.markdown) d.innerHTML = this.markdown(src); else d.textContent = src; glueMath(d); box.append(d); return d; };
     const esc = (s: string) => s.trim().replace(/[\\`*_[\]<>#!|~$]/g, "\\$&");

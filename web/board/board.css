@@ -391,3 +391,5 @@
 .board-ask-choice { display: block; text-align: left; padding: 4px 10px; border: 1px solid #2a6f2f55; border-radius: 6px; background: #fff; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
 .board-ask-choice:hover { background: #eef2ea; }
 .board-ask-own { font-style: italic; color: #556; }
+/* (the way to a chosen option's next step: a link in the card's own type, not the item's monospace link line) */
+.board-ask-decide a.board-ref { display: inline; margin: 0; font: inherit; text-decoration: underline; white-space: normal; }
