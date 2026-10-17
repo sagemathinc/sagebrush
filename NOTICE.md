@@ -521,7 +521,7 @@ gives permission. Nothing else in PSAGE is covered.
 
 ## Data
 
-- `lib/_cremona_small.py`: elliptic curves of conductor below 1000 from John
+- `packages/cremona-small/py/_cremona_small.py`: elliptic curves of conductor below 1000 from John
   Cremona's ecdata (github.com/JohnCremona/ecdata), Artistic License 2.0
   ([LICENSE-Artistic-2.0.txt](LICENSE-Artistic-2.0.txt), ecdata's own
   LICENSE file). It is in the Python package and the `sagebrush` npm

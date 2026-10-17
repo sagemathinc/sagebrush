@@ -102,6 +102,10 @@ try {
   await sleep(500);
   const f = (await run("factor(2^64 + 1)")).trim();
   ok(f === "274177 * 67280421310721", "Sage mode and the engine work, with no network in the runner: " + f);
+  // (a package's module, packages/cremona-small: its chunk through the frame,
+  // checked against the registry, src/compile.ts)
+  const ec = (await run("EllipticCurve('11a1').ainvs()")).trim();
+  ok(ec === "(0, -1, 1, -10, -20)", "a package's module imports (Cremona's table, @sagebrush/cremona-small): " + ec);
 
   // Stop: a KeyboardInterrupt that keeps the variables (if the frame is cross-origin isolated)
   await run("kept = 42");
