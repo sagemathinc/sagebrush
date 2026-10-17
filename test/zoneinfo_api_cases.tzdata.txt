@@ -192,10 +192,16 @@ copy from_file !! PicklingError Cannot pickle a ZoneInfo file from a file stream
 from_file not cached -> False
 from_file custom -> 'zoneinfo.ZoneInfo.from_file(<Repr file>)'
 from_file read fails !! AttributeError 'int' object has no attribute 'read' | context: None
+copy of no_cache -> ("zoneinfo.ZoneInfo(key='UTC')", ('UTC', 0), "zoneinfo.ZoneInfo(key='UTC')", False)
+copy of cached -> True
+_unpickle uncached reduces -> ('UTC', 0)
+_unpickle cached reduces -> ('UTC', 1)
 subclass -> ("Z2(key='UTC')", True, False, 'WeakValueDictionary', 'Z2', "Z3(key='UTC')")
 subclass pickle -> True
 subclass from_file -> "Z2(key='k')"
 subclass after clear -> True
+subclass one-argument cache -> ("Z5(key='UTC')", True, [('get', 'UTC'), ('setdefault', 'UTC'), ('get', 'UTC'), ('get', 'UTC')])
+subclass cache with another class's zone !! RuntimeError Unexpected instance of zoneinfo.ZoneInfo in Z6 weak cache for key 'UTC' | context: None
 subclass __new__ -> "Z4(key='Europe/London')"
 NY 2026-03-08 01:59:59 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
 NY 2026-03-08 01:59:59 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
