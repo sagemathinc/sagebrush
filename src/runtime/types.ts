@@ -880,7 +880,7 @@ const UnicodeError = exc("UnicodeError", ValueError);
       method(c, "__str__", (self: any) => {
         if (self.object === undefined) return "";
         const ob = unbox(self.object);
-        if (bytesObj ? !(ob instanceof PyBytes) : typeof ob !== "string") raise(T.TypeError, `UnicodeError 'object' attribute must be a ${bytesObj ? "bytes" : "string"}`);
+        if (bytesObj ? !(ob instanceof PyBytes && !(ob instanceof PyByteArray)) : typeof ob !== "string") raise(T.TypeError, `UnicodeError 'object' attribute must be a ${bytesObj ? "bytes" : "string"}`);
         const len = BigInt(bytesObj ? ob.n : SP.cpLen(ob));
         const start = BigInt(self.$start), end = BigInt(self.$end);
         const what = name === "UnicodeEncodeError" ? "encode" : name === "UnicodeDecodeError" ? "decode" : "translate";
