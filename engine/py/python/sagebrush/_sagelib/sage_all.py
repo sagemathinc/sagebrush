@@ -449,6 +449,9 @@ def _lift(name):
     op = getattr(_Fraction, name)
 
     def f(a, b):
+        if _real_kind(b) in ("rr", "rdf"):
+            # (RR and RDF convert the rational: Fraction would use a float)
+            return NotImplemented
         try:
             return _q(op(_Fraction._from_coprime_ints(a._numerator, a._denominator), b))
         except ZeroDivisionError:
@@ -524,6 +527,8 @@ class Rational(_Fraction):
             raise TypeError("the 3-argument version of pow() is not supported")
         if isinstance(e, _Fraction) and e.denominator != 1:
             return _rational_power(self, e)
+        if _real_kind(e) in ("rr", "rdf"):
+            return NotImplemented
         return Rational._pow(self, e)
 
     def __rpow__(self, b):
