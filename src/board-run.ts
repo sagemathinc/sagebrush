@@ -437,7 +437,15 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
           worker!.on("error", (e: any) => { dead = String(e?.message ?? e); reject(e); });
           worker!.on("exit", () => { dead ??= "the interpreter stopped"; for (const f of [...sinks.values()]) f({ done: true, error: true, ms: 0, dead: true }); });
         });
+        // (warmed up as the board's interpreter is: its parser and first imports, untimed but for START_GRACE_MS)
+        if (worker && !dead) await send({ cell: "warm-up", code: "", opts: {} }, () => {}, START_GRACE_MS, true);
       }
+      // (and the checks' own first run, untimed but for START_GRACE_MS:
+      // lib/_sb_check.py's import and the first compile of a check, the
+      // interpreter's one-time costs, which a loaded machine makes long and
+      // a fresh interpreter (board try's, for each evaluation) pays each
+      // time; so a check's checkMs is its own, from its start)
+      if (worker && !dead) await send({ cell: "check-warm-up", code: "", opts: { evaluate: { code: "True", answer: null }, seed: seedOf("check") } }, () => {}, START_GRACE_MS, true);
       let n = 0;
       await after(async (code, answer, ms) => {
         const r = await send({ cell: `check${++n}`, code: "", opts: { evaluate: { code, answer }, seed: seedOf("check") } }, () => {}, ms);
