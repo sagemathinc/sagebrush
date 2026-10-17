@@ -13,6 +13,10 @@ import type { BoardMode } from "./doc";
 
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
+/** A question's check, or a computed hint, as run (BoardCode.exclusive): its value, or why it has none. */
+export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean }
+/** What a Check is given to run (BoardCode.exclusive). */
+export interface CheckOps { evaluate: (code: string, answer: unknown, ms: number, by?: number) => Promise<Evaluated>; refresh: (ms: number) => Promise<boolean> }
 
 /** Where a board's code engine comes from (design/engines.md): its notebook
  * module, the interpreter's worker, the reactive notebook's analyzer, and
@@ -535,6 +539,52 @@ export class BoardCode {
       return report;
     });
   }
+  /** A board question's Check, whole: `f` runs alone in this interpreter's
+   * queue, no sync, run or other Check between its steps, given what it
+   * needs without queueing again: `evaluate` (a check or computed hint,
+   * WorkerKernel.evaluate, within `ms`) and `refresh` (a new interpreter,
+   * every item run in it, the new interpreter's start included, within
+   * `ms`: else false, and what still runs is interrupted, which takes up to
+   * 2 s more before the interpreter is restarted instead).  A check may change the board's names, so a Check refreshes
+   * after each evaluation (the coordinator's rule for CORR-A19-1); each
+   * step is bounded, so the queue is. */
+  exclusive<T>(f: (ops: CheckOps) => Promise<T>): Promise<T> {
+    return this.queued(() => f({ evaluate: (code, answer, ms, by) => this.evaluateNow(code, answer, ms, by), refresh: (ms) => this.refreshNow(ms) }));
+  }
+  private async evaluateNow(code: string, answer: unknown, ms: number, by?: number): Promise<Evaluated> {
+    if (!(await this.ready) || !this.kernel) return { ok: false, error: "the interpreter is not running" };
+    return this.kernel.evaluate(code, answer, this.mode, ms, by);
+  }
+  private async refreshNow(ms: number): Promise<boolean> {
+    if (!(await this.ready)) return false;
+    // (the whole of it within `ms`: the new interpreter's start too, which
+    // may never come, HARD-729-1; past it, its listener is gone and false)
+    const until = Date.now() + Math.max(0, ms);
+    const k = this.kernel;
+    let off = () => {}, timer: ReturnType<typeof setTimeout> | undefined;
+    const ready = new Promise<boolean>((resolve) => {
+      off = k.on("ready", () => resolve(true));
+      timer = setTimeout(() => resolve(false), Math.max(0, until - Date.now()));
+    });
+    k.restart("");
+    const started = await ready.finally(() => { off(); clearTimeout(timer); });
+    if (!started || this.closed) return false;
+    this.release(null);
+    this.started = true;
+    const run = this.nb.runAll().finally(() => this.changed());
+    const over = new Promise<"over">((res) => { timer = setTimeout(() => res("over"), Math.max(0, until - Date.now())); });
+    const got = await Promise.race([run, over]).finally(() => clearTimeout(timer));
+    if (got === "over") {
+      // (what still runs interrupted: within 2 s, else the interpreter restarted, WorkerKernel.interrupt)
+      this.interrupt();
+      this.ran(await run.catch(() => null));
+      return false;
+    }
+    this.ran(got);
+    return true;
+  }
+
+
   /** Resolves when what was asked for has run (syncs, and what they started). */
   async idle(): Promise<void> {
     await this.last;
