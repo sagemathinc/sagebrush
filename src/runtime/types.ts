@@ -2010,7 +2010,7 @@ method(S, "__getitem__", (s: string, k: any) => O.getitem(s, k));
 method(S, "__add__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? SP.glue(s, x) : NotImplemented));
 // (a builtin sequence's own repeat takes an index, else a TypeError, never
 // NotImplemented, as CPython's wrapper of its sq_repeat)
-method(S, "__mul__", (s: string, x: any) => SP.repeatChecked(s, O.ssizeCount(x)));
+method(S, "__mul__", (s: string, x: any) => O.strRepeat(s, O.ssizeCount(x)));
 method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
@@ -3330,7 +3330,7 @@ getset(object, "__dict__", (o) => {
   method(S, "__le__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) <= 0 : NotImplemented));
   method(S, "__gt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) > 0 : NotImplemented));
   method(S, "__ge__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) >= 0 : NotImplemented));
-  method(S, "__rmul__", (s: string, x: any) => SP.repeatChecked(s, O.ssizeCount(unbox(x))));
+  method(S, "__rmul__", (s: string, x: any) => O.strRepeat(s, O.ssizeCount(unbox(x))));
 }
 
 // int, float, str: the subclass instance boxes the value.

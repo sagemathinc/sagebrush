@@ -487,3 +487,84 @@ for label, mk, n in [('ba 2', lambda: bytearray(b'ab'), 2), ('ba I2', lambda: by
     print(label, show(lambda: imul(mk(), n)))
 print(show(lambda: bytearray(b'a').__imul__(1.5)), show(lambda: bytearray(b'a').__imul__(I2())))
 print(show(lambda: b'ab' * 2**62), show(lambda: bytearray(b'ab') * 2**62))
+
+
+# Repeat lengths near Py_ssize_t, the count exact (sys.maxsize is not
+# 2**63): MemoryError or OverflowError as CPython's, before anything is
+# made (daybreak2's LIMIT-51B-2)
+import sys
+
+
+class I:
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        return self.v
+
+
+def lshow(f):
+    try:
+        r = f()
+        return type(r).__name__ + ' ' + str(len(r))
+    except Exception as e:
+        return type(e).__name__ + ': ' + str(e)
+
+
+def limul(a, n):
+    a *= n
+    return a
+
+
+M = sys.maxsize
+for n in [M, M // 2, M // 2 + 1, M // 3, M // 3 + 1, 2**53, 2**53 + 1]:
+    for seq in [b'a', b'ab', b'abc', 'a', 'ab', 'abc', '\U0001f600', [1], [1, 2], (1,), (1, 2)]:
+        # (bytearray by its in-place rows and those under an export: CPython
+        # 3.14.8 reports a spurious SystemError for some of its huge repeats)
+        print(repr(seq), n, lshow(lambda: seq * n), lshow(lambda: n * seq), lshow(lambda: seq * I(n)), lshow(lambda: type(seq).__mul__(seq, n)))
+    for mk in [lambda: bytearray(b'a'), lambda: bytearray(b'ab'), lambda: [1, 2], lambda: bytearray()]:
+        print('imul', repr(mk()), n, lshow(lambda: limul(mk(), n)), lshow(lambda: mk().__imul__(n)))
+print(lshow(lambda: b'' * M), lshow(lambda: '' * M), lshow(lambda: [] * M), lshow(lambda: limul(bytearray(), M)))
+
+
+# (daybreak2's LIMIT-51B-1)
+import binascii
+
+# bytearray *= n while its buffer is exported (binascii.b2a_base64 holds it
+# while newline's __bool__ runs): a resize is refused before anything is
+# made, the count converted first; a size it keeps is allowed
+
+
+class I:
+    def __init__(self, v, log):
+        self.v, self.log = v, log
+
+    def __index__(self):
+        self.log.append(('index', self.v))
+        return self.v
+
+
+def under_export(n, data=b'ab', direct=False):
+    b = bytearray(data)
+    log = []
+
+    class NL:
+        def __bool__(self):
+            try:
+                if direct:
+                    b.__imul__(I(n, log))
+                else:
+                    x = b
+                    x *= I(n, log)
+                log.append(('ok', bytes(b)))
+            except Exception as e:
+                log.append((type(e).__name__, str(e)))
+            return False
+
+    binascii.b2a_base64(b, newline=NL())
+    return log, bytes(b)
+
+
+for n in [2, 0, 1, -1, 2**40, sys.maxsize, sys.maxsize // 2 + 1, 2**63]:
+    print(n, under_export(n), under_export(n, direct=True))
+print(under_export(5, b''), under_export(sys.maxsize, b''))

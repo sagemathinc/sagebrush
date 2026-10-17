@@ -311,23 +311,40 @@ export function seqRepeats(x: any): boolean {
 // sequence by non-int"), index-sized (else OverflowError, naming its
 // type), then the sequence's own repeat, without going back to the
 // operator's dispatch (CORR-72B-3)
-function seqCount(n: any): number {
+function seqCount(n: any): Count {
   if (lookupType(typeOf(n), "__index__") === undefined) raise(T.TypeError, `can't multiply sequence by non-int of type '${typeName(n)}'`);
   return ssizeCount(n);
 }
 // The count a builtin sequence's own __mul__, __rmul__ or __imul__ takes,
 // as CPython's wrapper of its slot: an index (else "cannot be interpreted
 // as an integer"), index-sized, below 0 none
-export function ssizeCount(n: any): number {
+export function ssizeCount(n: any): Count {
   const k = index(n);
   if (typeof k === "bigint" && (k > 9223372036854775807n || k < -9223372036854775808n)) raise(T.OverflowError, `cannot fit '${typeName(n)}' into an index-sized integer`);
-  const c = Number(k);
-  return c < 0 ? 0 : c;
+  return exactCount(k);
+}
+// A repeat count, never below 0: a number while it is exact, else the
+// bigint itself, so a length past Py_ssize_t is told from one within it
+// exactly (sys.maxsize as a number is 2**63; daybreak2's LIMIT-51B-2)
+export type Count = number | bigint;
+function exactCount(k: number | bigint): Count {
+  if (k < 0) return 0;
+  return typeof k === "bigint" && k <= 9007199254740991n ? Number(k) : k;
+}
+// s * n as CPython's unicode_repeat: a length past Py_ssize_t an
+// OverflowError, one past what a JS string holds a MemoryError, both
+// before anything is made
+export function strRepeat(s: string, n: Count): string {
+  if (s.length === 0 || n <= 0) return "";
+  if (n === 1) return s;
+  if (BigInt(SP.cpLen(s)) * BigInt(n) > SSIZE_MAX) raise(T.OverflowError, "repeated string is too long");
+  if (typeof n === "bigint" || s.length * n > 536870888) raise(T.MemoryError);
+  return SP.repeatChecked(s, n);
 }
 function seqRepeat(seq: any, n: any): any {
   const c = seqCount(n);
   if (seq instanceof PrimBox) seq = seq.$v;
-  if (typeof seq === "string") return SP.repeatChecked(seq, c);
+  if (typeof seq === "string") return strRepeat(seq, c);
   if (Array.isArray(seq)) return repeatArray(seq, c);
   return repeatBytes(seq, c);
 }
@@ -458,7 +475,7 @@ export function mul(a: any, b: any): any {
   }
   return mulSlow(a, b);
 }
-function repeatCount(n: any): number | undefined {
+function repeatCount(n: any): Count | undefined {
   // (an int subclass that keeps int's __mul__ and __rmul__ repeats by its
   // own value, as CPython's sequence repetition: [0] * J(2) is [0, 0])
   // (int's own: int's, or the unboxing proxy's wrapper of it, types.ts)
@@ -472,15 +489,14 @@ function repeatCount(n: any): number | undefined {
   // (an index-sized count, as CPython's sequence repeat takes it: past it
   // an OverflowError, before anything is made, LIMIT-COL-1)
   if (typeof n === "bigint" && (n > 9223372036854775807n || n < -9223372036854775808n)) raise(T.OverflowError, `cannot fit '${typeName(orig)}' into an index-sized integer`);
-  const k = Number(n);
-  return k < 0 ? 0 : k;
+  return exactCount(typeof n === "boolean" ? +n : n);
 }
 function mulSlow(a: any, b: any): any {
   if (isPyInt(a) && isPyInt(b)) return normBig(big(a) * big(b));
   const [x, y] = fv2(a, b);
   if (x !== undefined && y !== undefined) return mkfloat(x * y);
-  if (typeof a === "string" && repeatCount(b) !== undefined) return SP.repeatChecked(a, repeatCount(b)!);
-  if (typeof b === "string" && repeatCount(a) !== undefined) return SP.repeatChecked(b, repeatCount(a)!);
+  if (typeof a === "string" && repeatCount(b) !== undefined) return strRepeat(a, repeatCount(b)!);
+  if (typeof b === "string" && repeatCount(a) !== undefined) return strRepeat(b, repeatCount(a)!);
   if (Array.isArray(a) && seqRepeats(a) && repeatCount(b) !== undefined) return repeatArray(a, repeatCount(b)!);
   // (a sequence's repeat only if its type keeps the builtin's __mul__ and
   // __rmul__, its sequence slot; a subclass's own either goes through
@@ -490,25 +506,28 @@ function mulSlow(a: any, b: any): any {
   if (b instanceof PyBytes && seqRepeats(b) && repeatCount(a) !== undefined) return repeatBytes(b, repeatCount(a)!);
   return binaryDunder(a, b, "mul");
 }
-export function repeatArray(a: any[], n: number): any[] {
+export function repeatArray(a: any[], n: Count): any[] {
   const len = a.length;
   // (nothing to repeat, or no copies: no loop over the count, an empty
   // sequence repeated 2**62 times is empty at once; a result past what an
   // array holds is a MemoryError before it is made, as CPython's)
   if (len === 0 || n <= 0) return (a as any).$t ? tuple([]) : [];
-  if (len * n > 4294967295) raise(T.MemoryError);
+  if (typeof n === "bigint" || len * n > 4294967295) raise(T.MemoryError);
   const r = new Array(len * n);
   for (let i = 0; i < n; i++) for (let j = 0; j < len; j++) r[i * len + j] = a[j];
   return (a as any).$t ? tuple(r) : r;
 }
 
-export function repeatBytes(a: PyBytes, n: number): PyBytes {
+export function repeatBytes(a: PyBytes, n: Count): PyBytes {
   // (a result past what a buffer holds: a MemoryError before it is made;
-  // past an index-sized length, bytes's OverflowError, as CPython's)
-  if (a.n > 0 && n > Math.floor(4294967295 / a.n)) {
-    if (!(a instanceof PyByteArray) && BigInt(a.n) * BigInt(n) > 9223372036854775807n) raise(T.OverflowError, "repeated bytes are too long");
+  // past an index-sized length, bytes's OverflowError, as CPython's, the
+  // length exact)
+  if (n < 0) n = 0;
+  if (a.n > 0 && (typeof n === "bigint" || n > Math.floor(4294967295 / a.n))) {
+    if (!(a instanceof PyByteArray) && BigInt(a.n) * BigInt(n) > SSIZE_MAX) raise(T.OverflowError, "repeated bytes are too long");
     raise(T.MemoryError);
   }
+  n = Number(n);
   const total = a.n * n;
   const r = new Uint8Array(total);
   if (total > 0) {
@@ -943,12 +962,16 @@ export function listInplaceRepeat(a: any[], n: any, direct = false): any[] {
   return a;
 }
 // bytearray *= n as CPython's bytearray_irepeat: in place, the count
-// converted first; a size it already has is no resize (so no export check)
+// converted first; a length past Py_ssize_t a MemoryError; then a resize
+// refused under an export, before the new contents are made (a size it
+// already has is no resize, so no export check; daybreak2's LIMIT-51B-1)
 export function bytearrayInplaceRepeat(b: PyByteArray, n: any, direct = false): PyByteArray {
   const c = direct ? ssizeCount(n) : seqCount(n);
   if (c === 1) return b;
+  const size = BigInt(b.n) * BigInt(c);
+  if (size > SSIZE_MAX) raise(T.MemoryError);
+  if (size !== BigInt(b.n)) checkResizable(b);
   const r = repeatBytes(b, c);
-  if (r.n !== b.n) checkResizable(b);
   b.a = r.a;
   b.n = r.n;
   return b;
