@@ -490,10 +490,18 @@ def _finish(r, cls):
     if cls == "double":
         return _box(r)
     if cls == "single":
+        if r.dtype.kind == "c" and not np.any(r.imag):
+            # (a computed complex result with no imaginary part is real, as _box makes doubles)
+            r = r.real
         return _canon(r.astype(np.complex64 if r.dtype.kind == "c" else np.float32))
     if cls == "logical":
         return _box(r.astype(bool))
     return _canon(_int_round(r, cls))
+
+
+def _float_class(*xs):
+    """the class of a floating result computed from xs: single when any of them is, else double"""
+    return "single" if any(class_(x) == "single" for x in xs) else "double"
 
 
 def _arith_class(a, b, name):
@@ -4850,8 +4858,15 @@ def complex_(a, b=0.0):
         # (complex integers, as complex(uint8(1), uint8(2)) makes in MATLAB, are not
         # represented: refused rather than made double)
         raise _err("complex of %s values is not supported in Sagebrush: complex integers are not represented." % (ca if ca in _INTS else cb))
-    r = _broadcast(lambda x, y: x + 1j * y, _farr(a), _farr(b))
-    r = np.asarray(r, dtype=np.complex128)
+    # (the parts set separately: x + 1j*y would add +0 to a -0 imaginary part, losing its sign,
+    # and with it the side of a branch cut log, sqrt and angle take)
+    def parts(x, y):
+        x, y = np.broadcast_arrays(x, y)
+        z = np.empty(x.shape, dtype=np.complex128)
+        z.real = x
+        z.imag = y
+        return z
+    r = np.asarray(_broadcast(parts, _farr(a), _farr(b)), dtype=np.complex128)
     if "single" in (ca, cb):
         return _canon(_contig(r.astype(np.complex64)))
     if r.size == 1:
@@ -5316,6 +5331,10 @@ def _reduce(x, args, f, name, empty_value=0.0, out_cls=None):
         oc = "double"
     if not [a for a in args if not _istext(a)] and d == (0, 0) and dim != "all":
         return _finish(np.array([[empty_value]]), oc)
+    if oc == "single" and name in ("sum", "prod"):
+        # (a single sum or product accumulates in single, as MATLAB's native single arithmetic
+        # does: sum(single([1e8 1 -1e8])) is 0, the 1 lost to rounding)
+        A = _single_work(A)
     if dim == "all":
         A = A.reshape((1, -1))
         dim = 1
@@ -5348,10 +5367,57 @@ def sum_(x, *args):
     return _reduce(x, args, lambda A, ax: np.sum(A, axis=ax), "sum")
 
 
+def _single_work(A):
+    """A as single-precision working values (complex64 for complex)"""
+    return A.astype(np.complex64 if A.dtype.kind == "c" else np.float32)
+
+
+def _cmul(z, w, single):
+    """z*w as compiled complex multiplication does it: four real products and two sums, each
+    rounded to single for single values, and when both parts come out NaN, the C standard's
+    (Annex G) recovery of an infinite operand or an overflowed product"""
+    if single:
+        # (a double product of two singles is exact, and so a double sum of two singles
+        # correctly rounds to single: rounding the double result is single arithmetic)
+        rnd = lambda *xs: np.array(xs, dtype=np.float32).tolist()
+    else:
+        rnd = lambda *xs: list(xs)
+    a, b, c, d = z.real, z.imag, w.real, w.imag
+    ac, bd, ad, bc = rnd(a * c, b * d, a * d, b * c)
+    x, y = rnd(ac - bd, ad + bc)
+    if x != x and y != y:
+        inf = _math.inf
+        box = lambda t: _math.copysign(1.0 if _math.isinf(t) else 0.0, t)
+        zero = lambda t: _math.copysign(0.0, t) if t != t else t
+        again = False
+        if _math.isinf(a) or _math.isinf(b):
+            a, b, c, d = box(a), box(b), zero(c), zero(d)
+            again = True
+        if _math.isinf(c) or _math.isinf(d):
+            c, d, a, b = box(c), box(d), zero(a), zero(b)
+            again = True
+        if not again and any(_math.isinf(t) for t in (ac, bd, ad, bc)):
+            a, b, c, d = zero(a), zero(b), zero(c), zero(d)
+            again = True
+        if again:
+            ac, bd, ad, bc = rnd(a * c, b * d, a * d, b * c)
+            x, y = rnd(ac - bd, ad + bc)
+            x, y = rnd(inf * x, inf * y)
+    return complex(x, y)
+
+
 def _prod_axis(A, ax):
-    """the product along axis ax, complex values multiplied as complex numbers"""
+    """the product along axis ax, complex values multiplied one at a time by _cmul (in single
+    for complex64 values)"""
+    if A.dtype == np.float32:
+        # (single values multiplied in single, each step rounded: the last running product, as
+        # cumprod rounds; an empty product is 1)
+        if A.shape[ax] == 0:
+            return np.ones([n for i, n in enumerate(A.shape) if i != ax], dtype=np.float32)
+        return np.take(np.cumprod(A, axis=ax), -1, axis=ax)
     if A.dtype.kind != "c":
         return np.prod(A, axis=ax)
+    one = A.dtype == np.complex64
     B = np.moveaxis(A, ax, -1)
     # (an explicit row count: with an empty axis, -1 is ambiguous)
     flat = B.reshape((int(np.prod(B.shape[:-1])), B.shape[-1]))
@@ -5359,7 +5425,7 @@ def _prod_axis(A, ax):
     for row in flat:
         z = complex(1.0)
         for v in row:
-            z *= complex(v)
+            z = _cmul(z, complex(v), one)
         out.append(z)
     return np.array(out, dtype=np.complex128).reshape(B.shape[:-1])
 
@@ -5591,6 +5657,9 @@ def _cum(x, args, f, name):
     cls = class_(x)
     oc = "double" if cls in ("logical", "char") else cls
     A = _farr(x, name)
+    if cls == "single":
+        # (running sums and products of single accumulate in single, as sum and prod do)
+        A = _single_work(A)
     if "omitnan" in flags:
         A = np.where(np.isnan(A), 1.0 if name == "cumprod" else 0.0, A)
     if dim > A.ndim:
@@ -5886,6 +5955,8 @@ def diff_(x, n=1.0, dim=None):
     if _istext(n) or _istext(dim):
         raise _err("diff: the order and dimension must be numbers.")
     n = _int_arg(n)
+    cls = class_(x)
+    cls = cls if cls in _INTS or cls == "single" else "double"
     r = x
     for _ in range(n):
         d = _dims(r)
@@ -5896,8 +5967,10 @@ def diff_(x, n=1.0, dim=None):
             shp = list(A.shape)
             if ax >= 0:
                 shp[ax] = 0
-            return np.zeros(tuple(shp)) if ax >= 0 else np.zeros((0, 0))
-        r = _box(_contig(np.diff(A, axis=ax)))
+            return _finish(np.zeros(tuple(shp)) if ax >= 0 else np.zeros((0, 0)), cls)
+        # (each order's differences in the input's class, an integer class saturating as its
+        # arithmetic does: diff(uint8([1 0])) is 0)
+        r = _finish(_contig(np.diff(A, axis=ax)), cls)
     return r
 
 
@@ -5980,6 +6053,15 @@ def _minmax(nargout, args, which):
     nan = np.isnan(key)
     filled = np.where(nan, -np.inf if big else np.inf, key)
     idx = np.argmax(filled, axis=ax) if big else np.argmin(filled, axis=ax)
+    if A2.dtype.kind == "c":
+        # (complex values compare by magnitude, then by phase angle in (-pi, pi], as sort orders
+        # them: of the elements tied for the extreme magnitude, the extreme angle)
+        best = _take_along(filled, np.expand_dims(idx, ax), ax)
+        ang = np.angle(A2)
+        ang = np.where(ang == -np.pi, np.pi, ang)
+        # (a NaN, filled with an infinity, is never one of the tied values)
+        ang = np.where((filled == best) & ~nan, ang, -np.inf if big else np.inf)
+        idx = np.argmax(ang, axis=ax) if big else np.argmin(ang, axis=ax)
     if include:
         anynan = np.any(nan, axis=ax)
         firstnan = np.argmax(nan, axis=ax)
@@ -6082,7 +6164,14 @@ def sort_(nargout, x, *args):
     if dim > A.ndim or A.size == 0:
         return cp(x) if nargout <= 1 else [cp(x), _box(np.ones(A.shape))]
     ax = A.ndim - dim
+    pre = None
     if A.dtype.kind == "c":
+        # (complex numbers by magnitude, then by phase angle in (-pi, pi]: first a stable sort by
+        # phase, then a stable sort by magnitude of that order)
+        ph = np.angle(A)
+        ph = np.where(np.isnan(ph), 0.0, np.where(ph == -np.pi, np.pi, ph))
+        pre = np.argsort(-ph if desc else ph, axis=ax, kind="stable")
+        A = _take_along(A, pre, axis=ax)
         key = np.abs(A)
     elif A.dtype.kind in "b":
         key = A.astype(np.float64)
@@ -6100,6 +6189,8 @@ def sort_(nargout, x, *args):
     else:
         order = np.argsort(-key.astype(np.float64) if desc else key, axis=ax, kind="stable")
     s = _contig(_take_along(A, order, axis=ax))
+    if pre is not None:
+        order = _take_along(pre, order, axis=ax)
     sv = Char(s) if cls == "char" else _box(s)
     if nargout <= 1:
         return sv
@@ -6971,8 +7062,7 @@ def polyval_(nargout, p, x, S=None, mu=None):
         y = y + c[0]
         for a in c[1:]:
             y = y * X + a
-    single = "single" in (class_(p), class_(x))
-    return _finish(y, "single") if single else _box(y)
+    return _finish(y, _float_class(p, x))
 
 
 @_bi("polyfit")
@@ -7069,7 +7159,7 @@ def conv_(a, b, shape=None):
     elif s != "full":
         raise _err("SHAPE must be 'full', 'same', or 'valid'.")
     col = _dims(a)[1] == 1 and _dims(a)[0] > 1
-    return _box(r.reshape((1, -1)) if col else r.reshape((-1, 1)))
+    return _finish(_contig(r.reshape((1, -1)) if col else r.reshape((-1, 1))), _float_class(a, b))
 
 
 # (the most multiply-adds one xcorr may do, lengths times lags, and the most lags)
@@ -11086,7 +11176,7 @@ def interp1_n(*args):
     for a in args[:3]:
         if class_(a) not in ("double", "single"):
             raise _err("interp1 of %s input is not supported; x, v and xq are double or single, as its page says." % class_(a))
-    single = any(class_(a) == "single" for a in args[:3])
+    single = _float_class(*args[:3]) == "single"
     if len(args) == 2:
         v, xq = args
         n = _dims(v)[0] if not _isvec(v) else _numel(v)
@@ -11779,23 +11869,39 @@ for _n in _PLOT_FNS:
     _B[_n] = _lazy_plot(_n)
 
 
-def _keep_single(name):
-    """a built-in whose result is single for single input (det, inv, norm, var, std, as their
-    pages say): its double result made single"""
+def _keep_single(name, data=(0,), keep=()):
+    """a built-in whose results are single when an input is single (as these functions' pages
+    say: a single input gives single output): when a data argument (the positions in data, not
+    an option such as norm's p, var's weight or ifft's n) is single, each double result, of one
+    output or several, made single, except the outputs at the positions in keep; other classes
+    (logical, integer, cell) are left as they are"""
     b = _B[name]
     f = b.f
 
+    def single(v):
+        return _finish(_farr(v), "single") if _isnumlike(v) and not _istext(v) and class_(v) == "double" else v
+
     def g(nargout, *args):
         r = f(nargout, *args)
-        if args and class_(args[0]) == "single" and type(r) is not list and class_(r) == "double":
-            return _finish(_farr(r), "single")
+        if any(k < len(args) and _isnumlike(args[k]) and not _istext(args[k]) and class_(args[k]) == "single" for k in data):
+            return [v if k in keep else single(v) for k, v in enumerate(r)] if type(r) is list else single(r)
         return r
     g.__doc__ = getattr(f, "__doc__", None)
     _B[name] = Builtin(g, name, (b.lo, b.hi))
 
 
-for _n in ("det", "inv", "norm", "var", "std"):
+# (the data arguments only: options such as norm(x, p), var(x, w, dim), ifft(x, n, dim),
+# svd(A, 0), pinv(A, tol) and dot(a, b, dim) do not decide the class)
+for _n in ("det", "inv", "norm", "real", "imag", "conj", "angle", "trace", "svd", "qr", "pinv", "ifft"):
     _keep_single(_n)
+# (var's and std's weight w is data, as Octave has it, var([1 3], single(0)) being single; their dim
+# is not)
+for _n in ("dot", "cross", "kron", "eig", "var", "std"):
+    _keep_single(_n, data=(0, 1))
+# (chol's failure index p stays double)
+_keep_single("chol", keep=(1,))
+# (lu's permutation P stays double, as Octave gives it: lu's page does not give P's class)
+_keep_single("lu", keep=(2,))
 
 
 def end_program():
