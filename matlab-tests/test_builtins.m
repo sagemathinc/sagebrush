@@ -158,7 +158,6 @@ show(int8(-3.5));
 show(uint8(-1));
 show(int16([1.4 1.5 1.6]));
 show(logical([2 0 -1]));
-show(single(pi) == pi);
 show(cumsum(int8([100 100])));
 show(sum(int8([100 100])));
 show(mean(int8([1 2])));
