@@ -50,21 +50,68 @@ export class Toolbar {
     this.el.setAttribute("role", "toolbar");
     this.el.setAttribute("aria-label", "Add to the board");
     parent.append(this.el);
+    // (its buttons' tooltips: one, drawn in the board below the button, never
+    // under the pointer nor taking it; the browser's title tooltip, which some
+    // Linux desktops open under the pointer, ends the hover and starts it
+    // again: a flicker, William Oct 17.  Kept within the board, the first and
+    // last buttons' too on a narrow screen, astra's UI-158-1)
+    this.tip.className = "board-tip";
+    this.tip.setAttribute("aria-hidden", "true");
+    this.tip.hidden = true;
+    parent.append(this.tip);
+    this.el.addEventListener("pointerover", (e) => {
+      const b = (e.target as Element).closest<HTMLElement>("[data-tip]");
+      if (b && b !== this.tipOn && e.pointerType !== "touch") this.tipFor(b);
+    });
+    this.el.addEventListener("pointerout", (e) => {
+      if (this.tipOn && !this.tipOn.contains(e.relatedTarget as Node | null)) this.hideTip();
+    });
+    this.el.addEventListener("pointerdown", () => this.hideTip());
     this.own.push(effect(() => {
       this.el.hidden = !editing.value;
-      if (!editing.value) this.closePanel();
+      if (!editing.value) { this.closePanel(); this.hideTip(); }
     }), effect(() => this.render(this.tools.value)));
+  }
+  private tip = document.createElement("div");
+  private tipOn: HTMLElement | null = null;
+  private tipTimer = 0;
+  // (shown after a moment, as the browser's are)
+  private tipFor(b: HTMLElement) {
+    this.hideTip();
+    this.tipOn = b;
+    this.tipTimer = window.setTimeout(() => this.showTip(b), 600);
+  }
+  private showTip(b: HTMLElement) {
+    const tip = this.tip, root = tip.parentElement;
+    if (!root || !b.isConnected || !b.dataset.tip) return;
+    const rr = root.getBoundingClientRect(), br = b.getBoundingClientRect();
+    const lo = Math.max(rr.left, 0) + 4, hi = Math.min(rr.right, innerWidth) - 4;
+    tip.textContent = b.dataset.tip;
+    tip.style.left = "0px";
+    tip.style.maxWidth = `${Math.max(80, Math.min(280, hi - lo))}px`;
+    tip.hidden = false;
+    const w = tip.offsetWidth, x = Math.max(lo, Math.min(hi - w, br.left + br.width / 2 - w / 2));
+    tip.style.left = `${x - rr.left}px`;
+    tip.style.top = `${br.bottom + 8 - rr.top}px`;
+  }
+  private hideTip() {
+    clearTimeout(this.tipTimer);
+    this.tipOn = null;
+    this.tip.hidden = true;
   }
   private own: (() => void)[] = []; // (its own effects)
   /** Take the toolbar away: its effects, its menu and its element. */
   destroy() {
     for (const d of [...this.own.splice(0), ...this.bound.splice(0)]) d();
     this.closePanel();
+    this.hideTip();
+    this.tip.remove();
     this.el.remove();
   }
 
   private render(ids: string[]) {
     for (const d of this.bound.splice(0)) d();
+    this.hideTip();
     this.el.replaceChildren();
     for (const id of ids) {
       const t = this.all.find((x) => x.id === id);
@@ -75,14 +122,15 @@ export class Toolbar {
       b.append(glyph(t, "tb-i"), t.label === t.icon ? glyph(t, "tb-l") : Object.assign(document.createElement("span"), { className: "tb-l", textContent: t.label }));
       // (a tool named by its glyph, as undo: named by its title, without its keys, to a screen reader)
       b.setAttribute("aria-label", t.label === t.icon ? t.title.replace(/\s*\([^)]*\)\s*$/, "") : t.label);
-      b.title = t.title;
+      // (its tooltip drawn in the board, not the browser's: see showTip)
+      b.dataset.tip = t.title;
       b.dataset.tool = t.id;
       this.use(b, t);
       this.el.append(b);
     }
     const more = (this.more = document.createElement("button"));
     more.className = "tb-more";
-    more.title = "Every tool; check the ones to keep on the toolbar";
+    more.dataset.tip = "Every tool; check the ones to keep on the toolbar";
     more.setAttribute("aria-haspopup", "menu");
     more.setAttribute("aria-label", "More tools");
     // (a mode on that is not on the toolbar: its icon on "⋯")

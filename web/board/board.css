@@ -104,6 +104,9 @@
 .board-toolbar[hidden] { display: none; }
 .board-toolbar button { border-color: transparent; }
 .board-toolbar button:hover { background: #eef2ea; }
+/* its buttons' tooltip: drawn in the board below the button, within it, never taking the pointer (toolbar.ts showTip) */
+.board-tip { position: absolute; z-index: 6; width: max-content; box-sizing: border-box; padding: 4px 8px; border-radius: 6px; background: #2f3530; color: #fff; font-size: 12px; line-height: 1.35; white-space: normal; overflow-wrap: break-word; pointer-events: none; box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.board-tip[hidden] { display: none; }
 .board-toolbar button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
 .board-toolbar .tb-more { color: #667; }
 .board-toolbar .tb-i { display: none; }
