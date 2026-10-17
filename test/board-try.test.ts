@@ -12,6 +12,8 @@ const dir = mkdtempSync(join(tmpdir(), "sb-board-try-"));
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
 const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", cwd: dir, timeout: 180_000 });
 const file = (name: string, d: unknown) => { const f = join(dir, name); writeFileSync(f, JSON.stringify(d)); return f; };
+// (a report's checks and sequences, with each one's error: what an assertion says when it fails, so a failure says why)
+const why = (j: any) => JSON.stringify({ checks: (j.checks ?? []).map((c: any) => [c.case_id, c.outcome, c.error, c.timed_out]), interaction: j.interaction, code: j.code });
 
 const BOARD = {
   format: "sagebrush-board", version: 1, title: "Sums",
@@ -67,7 +69,7 @@ test("board try: each case checked from the board's state, its verdict, message,
   assert.deepEqual([by.zero.outcome, by.zero.raw_result], ["error", null]);
   assert.match(by.zero.error, /ZeroDivisionError/);
   assert.deepEqual([by.slow.outcome, by.slow.timed_out], ["error", true]);
-  assert.equal(by["after-slow"].outcome, "right");
+  assert.equal(by["after-slow"].outcome, "right", why(j));
   assert.equal(by.none.outcome, "error");
   assert.match(by.none.error, /not True, False or a message/);
   // (a check that changes the board through a function it shares: never said to be preserved)
@@ -75,7 +77,7 @@ test("board try: each case checked from the board's state, its verdict, message,
   // hints: one record each, a computed one with the first wrong answer
   assert.deepEqual(j.hints.filter((h: any) => h.ask_id === "q1").map((h: any) => [h.index, h.rendered, h.error]), [[0, "Add them up.", null], [1, "You wrote 5.", null]]);
   // a sequence: wrong, wrong, right; the hints shown; its progress saved and read back
-  assert.deepEqual(j.interaction, [{ ask_id: "q1", sequence: ["wrong", "wrong", "right"], hints_shown: [0, 1], attempts_after_reload: 3, result_after_reload: "right", answer_preserved_after_reload: true }]);
+  assert.deepEqual(j.interaction, [{ ask_id: "q1", sequence: ["wrong", "wrong", "right"], hints_shown: [0, 1], attempts_after_reload: 3, result_after_reload: "right", answer_preserved_after_reload: true }], why(j));
 });
 
 test("board try: a case whose names can't be copied runs alone; inline --case; cases refused before anything runs", () => {
@@ -105,7 +107,8 @@ test("board try: with no cases, each question's example", () => {
     { id: "w", kind: "ask", text: "W", input: "text", check: "answer == 'yes'", example: "no" }, { id: "plain", kind: "ask", text: "P", input: "text" }] };
   const r = run(["board", "try", file("ex.board.json", b), "--json"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout).checks.map((c: any) => [c.case_id, c.ask_id, c.outcome]), [["example-q", "q", "right"], ["example-w", "w", "wrong"]]);
+  const j = JSON.parse(r.stdout);
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.ask_id, c.outcome]), [["example-q", "q", "right"], ["example-w", "w", "wrong"]], why(j));
 });
 
 // astra2's CORR-A19-1, -2: every evaluation starts from the board's state just after its code ran
@@ -116,16 +119,28 @@ const tryCases = (name: string, board: unknown, cases: unknown) => {
   return JSON.parse(r.stdout);
 };
 
+test("board try: a check's checkMs is its own, from its start: a fresh interpreter's one-time costs (its warm-up, the checks' first import) are not counted", () => {
+  // (each case in an interpreter of its own: before, each one's first check paid _sb_check's import and
+  // its first compile within checkMs, and a loaded machine made that past 300 ms; @sagebrush-sage's trace)
+  const q = (id: string) => ({ id, kind: "ask", text: id, input: "number", check: "answer == n", checkMs: 300 });
+  const b = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "n = 2" }, q("q"), q("s")] };
+  const j = tryCases("fresh-start", b, { checks: [{ case_id: "a", ask_id: "q", answer: 2 }, { case_id: "b", ask_id: "q", answer: 2 }, { case_id: "c", ask_id: "s", answer: 2 }, { case_id: "d", ask_id: "s", answer: 3 }] });
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome]), [["a", "right"], ["b", "right"], ["c", "right"], ["d", "wrong"]], why(j));
+  // (and a board with no code: its interpreter warmed up all the same)
+  const k = tryCases("fresh-start-nocode", { format: "sagebrush-board", version: 1, nodes: [{ id: "q", kind: "ask", text: "Q", input: "number", check: "answer == 2", checkMs: 300 }] }, { checks: [{ case_id: "a", ask_id: "q", answer: 2 }, { case_id: "b", ask_id: "q", answer: 1 }] });
+  assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome]), [["a", "right"], ["b", "wrong"]], why(k));
+});
+
 test("board try: a helper's change to an object inside the board is seen; the next case starts from the board's state", () => {
   const b = one("class Box:\n    pass\nb = Box()\nb.x = []\ndef grow():\n    b.x.append(1)\ndef size():\n    return len(b.x)", "grow() if answer == 1 else None\nsize() == 0 if answer == 0 else True");
   const k = tryCases("object2", b, { checks: [{ case_id: "grow", ask_id: "q", answer: 1 }, { case_id: "size", ask_id: "q", answer: 0 }] });
-  assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["grow", "right", "rerun", null], ["size", "right", "rerun", null]]);
+  assert.deepEqual(k.checks.map((c: any) => [c.case_id, c.outcome, c.isolation, c.scope_preserved]), [["grow", "right", "rerun", null], ["size", "right", "rerun", null]], why(k));
 });
 
 test("board try: a change the copy can't keep in (a method using the board's globals) is seen, and the board is run again before the next case", () => {
   const b = one("xs = []\nclass C:\n    def add(self):\n        xs.append(1)\nc = C()", "c.add() if answer == 1 else None\nxs == [] if answer == 0 else True");
   const j = tryCases("method", b, { checks: [{ case_id: "add", ask_id: "q", answer: 1 }, { case_id: "empty", ask_id: "q", answer: 0 }, { case_id: "again", ask_id: "q", answer: 0 }] });
-  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["add", "right", null], ["empty", "right", null], ["again", "right", null]]);
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["add", "right", null], ["empty", "right", null], ["again", "right", null]], why(j));
 });
 
 test("board try: state in the board's own classes, functions, closures, dict keys and list subclasses: a change seen, the next case fresh (astra2's CORR-A19-1, at cb1a5279)", () => {
@@ -139,14 +154,14 @@ test("board try: state in the board's own classes, functions, closures, dict key
   const grow: Record<string, string> = { class: "Box.xs.append(1)", function: "f.xs.append(1)", closure: "f(True)", "dict-key": "next(iter(holders)).xs.append(1)", "list-attribute": "b.xs.append(1)" };
   for (const [name, code, size] of boards) {
     const j = tryCases("state-" + name, one(code, `${grow[name]} if answer == 1 else None\n${size} == 0 if answer == 0 else True`), { checks: [{ case_id: "grow", ask_id: "q", answer: 1 }, { case_id: "size", ask_id: "q", answer: 0 }] });
-    assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["grow", "right", null], ["size", "right", null]], name);
+    assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["grow", "right", null], ["size", "right", null]], name + " " + why(j));
   }
 });
 
 test("board try: a board of plain values: shown unchanged (true), or changed (false), and then the next case fresh", () => {
   const b = one("xs = [1, (2, 'a')]\nd = {'k': 1.5, 2: None}", "__import__('__main__').xs.append(9) if answer == 1 else None\nxs == [1, (2, 'a')] if answer == 0 else True");
   const j = tryCases("plain", b, { checks: [{ case_id: "read", ask_id: "q", answer: 0 }, { case_id: "write", ask_id: "q", answer: 1 }, { case_id: "after", ask_id: "q", answer: 0 }] });
-  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["read", "right", null], ["write", "right", null], ["after", "right", null]]);
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.scope_preserved]), [["read", "right", null], ["write", "right", null], ["after", "right", null]], why(j));
 });
 
 test("board try: dict order, shared lists, the board's own dunder names: each case from the state the code leaves (astra2's CORR-A19-1, at 7294c800)", () => {
@@ -160,7 +175,7 @@ test("board try: dict order, shared lists, the board's own dunder names: each ca
     // (the change only when the answer is 1: an if block around all of it)
     const guarded = "if answer == 1:\n" + change.split("\n").map((l) => "    " + l).join("\n") + "\n";
     const j = tryCases("shape-" + name, one(code, `${guarded}${base} if answer == 0 else True`), { checks: [{ case_id: "change", ask_id: "q", answer: 1 }, { case_id: "base", ask_id: "q", answer: 0 }] });
-    assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome]), [["change", "right"], ["base", "right"]], name);
+    assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome]), [["change", "right"], ["base", "right"]], name + " " + why(j));
   }
 });
 
@@ -212,7 +227,7 @@ test("board try: the transitivity lesson (web/board/examples/teach-transitive.bo
   assert.equal(hint("q-h", 1), "The orbit of $1$ is $\\{1, 2\\}$, and the orbit of $3$ is $\\{3, 4\\}$.");
   assert.match(hint("q-prim", 0), /^Try \$\\\{1, 3\\\}\$/);
   const ex = JSON.parse(run(["board", "try", f, "--json"]).stdout);
-  assert.deepEqual(ex.checks.map((c: any) => [c.case_id, c.outcome]), [["example-q-c", "right"], ["example-q-h", "right"], ["example-q-stab", "right"], ["example-q-prim", "right"]]);
+  assert.deepEqual(ex.checks.map((c: any) => [c.case_id, c.outcome]), [["example-q-c", "right"], ["example-q-h", "right"], ["example-q-stab", "right"], ["example-q-prim", "right"]], why(ex));
 });
 
 test("board try: a check whose value is a verdict object (the board check helpers'): right, wrong with its reason, or can't decide, an error told apart", () => {
