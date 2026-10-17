@@ -115,5 +115,40 @@
     "tags": [
       "linear algebra"
     ]
+  },
+  {
+    "name": "qr",
+    "kind": "function",
+    "signature": "[Q, R] = qr(A)",
+    "summary": "An orthogonal-triangular factorization A = Q*R, with Q unitary and R upper triangular.",
+    "doc": "With one output, `qr(A)` is R. `[Q, R] = qr(A)` gives both factors, so that `Q*R` reproduces A. With `\"econ\"` (or 0) and a matrix of more rows than columns, Q keeps only as many columns, and R as many rows, as A has columns. `[C, R] = qr(A, B)` gives `C = Q'*B`, from which `R\\C` is the least-squares solution of `A*x = B`. Single input gives single output.",
+    "examples": [
+      {
+        "code": "A = [3 1; 4 2];\n[Q, R] = qr(A);\nnorm(Q*R - A) < 1e-12",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      },
+      {
+        "code": "size(qr(ones(4, 2), \"econ\"))",
+        "expected": "\nans =\n\n     2     2\n\n"
+      },
+      {
+        "code": "[Q, R] = qr([3 1; 4 2]);\nabs(R)",
+        "expected": "\nans =\n\n    5.0000    2.2000\n         0    0.4000\n\n"
+      }
+    ],
+    "differs": [
+      "The signs of Q's columns and R's rows can differ from MATLAB's. Where a column is already zero below the diagonal, Sagebrush still reflects it: qr(eye(2)) gives R = -eye(2), where MATLAB gives eye(2). Both are valid factorizations.",
+      "The column permutation, [Q, R, P] = qr(A), and its outputForm option are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "chol",
+      "lu",
+      "svd",
+      "mldivide"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
   }
 ]
