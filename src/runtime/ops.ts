@@ -1920,13 +1920,18 @@ function getitemSlow(o: any, k: any): any {
     }
     return o[seqIndex(k, o.length, "string")];
   }
-  if (isType(o)) {
-    const cg = lookupType(o, "__class_getitem__");
-    if (cg !== undefined) return cg(o, k);
-    if (o.$module === "builtins") return o; // list[int] and friends: annotations only
-  }
   const f = special(o, "__getitem__");
   if (f !== undefined) return f(o, k);
+  // (a class: its metaclass's __getitem__ first, then its own
+  // __class_getitem__ as an attribute, bound as a classmethod is, as
+  // CPython's PyObject_GetItem; one without either isn't generic: CPython's
+  // TypeError, never the class itself)
+  if (isType(o)) {
+    // (type[X] itself, as CPython's special case: type has no __class_getitem__)
+    if (o === T.type) return callObj(T.GenericAlias, [o, k]);
+    if (lookupType(o, "__class_getitem__") !== undefined) return callObj(getattr(o, "__class_getitem__"), [k]);
+    raise(T.TypeError, `type '${o.$name}' is not subscriptable`);
+  }
   raise(T.TypeError, `'${typeName(o)}' object is not subscriptable`);
 }
 
