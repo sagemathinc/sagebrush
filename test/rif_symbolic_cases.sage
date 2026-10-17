@@ -26,3 +26,18 @@ try:
     RealIntervalField(128)(x + 1)
 except Exception as err:
     print(type(err).__name__)
+# a deep chain: past 64 levels the coarse enclosure or a refusal, never a
+# RecursionError (HARD-33D-1); 20 levels still tight
+def chain(n):
+    v = SR(2)
+    for _ in range(n):
+        v = sqrt(v + 1)
+    return v
+print(width_bits(RealIntervalField(256)(chain(20))) <= -250)
+for n in [200, 2000]:
+    try:
+        v = RealIntervalField(256)(chain(n)); lo, hi = ends(v); print(n, lo <= hi and 1.6 < lo and hi < 1.7)
+    except RecursionError:
+        print(n, "RecursionError")
+    except Exception as err:
+        print(n, type(err).__name__)
