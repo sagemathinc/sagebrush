@@ -1,0 +1,148 @@
+{
+  "format": "sagebrush-board",
+  "version": 1,
+  "title": "What does transitive mean?",
+  "mode": "sage",
+  "layout": "column",
+  "nodes": [
+    {
+      "id": "intro",
+      "title": "Groups that move points",
+      "text": "A permutation group $G$ on $\\{1, \\dots, n\\}$ **acts** on the points: each $g \\in G$ sends a point $i$ to $g(i)$. The **orbit** of $i$ is every point $G$ can send it to, $G \\cdot i = \\{ g(i) : g \\in G \\}$. $G$ is **transitive** when there is one orbit: every point can be sent to every other."
+    },
+    {
+      "id": "groups",
+      "code": "C = CyclicPermutationGroup(4)   # turns a square: 1 -> 2 -> 3 -> 4 -> 1\nH = PermutationGroup([(1,2), (3,4)])   # swaps 1 and 2, and 3 and 4\nD = DihedralGroup(4)   # every symmetry of a square, corners 1, 2, 3, 4\nS = SymmetricGroup(4)   # every permutation of 1, 2, 3, 4\n[C.orbits(), H.orbits()]"
+    },
+    {
+      "id": "q-c",
+      "kind": "ask",
+      "input": "radio",
+      "title": "The turns",
+      "text": "Is $C$, the rotations of a square, transitive on its corners?",
+      "options": [
+        {
+          "value": "yes",
+          "label": "Yes"
+        },
+        {
+          "value": "no",
+          "label": "No"
+        }
+      ],
+      "check": "answer == ('yes' if C.is_transitive() else 'no') or 'A turn takes $1$ to $2$, two turns to $3$, three to $4$: where can $1$ not go?'",
+      "next": {
+        "right": "orbits",
+        "wrong": "intro"
+      },
+      "example": "yes"
+    },
+    {
+      "id": "q-h",
+      "kind": "ask",
+      "input": "number",
+      "title": "Two swaps",
+      "text": "How many orbits does $H = \\langle (1\\,2), (3\\,4) \\rangle$ have?",
+      "check": "answer == len(H.orbits())",
+      "hints": [
+        "Start with the point $1$: where can $H$ send it?",
+        {
+          "code": "'The orbit of $1$ is $\\\\{%s\\\\}$, and the orbit of $3$ is $\\\\{%s\\\\}$.' % (', '.join(map(str, H.orbit(1))), ', '.join(map(str, H.orbit(3))))"
+        }
+      ],
+      "next": {
+        "right": "orbits",
+        "wrong": "intro"
+      },
+      "example": 2
+    },
+    {
+      "id": "orbits",
+      "title": "Orbits split the points",
+      "text": "The orbits of $G$ split $\\{1, \\dots, n\\}$ into parts. $C$ has one part, so it is transitive; $H$ has two, $\\{1, 2\\}$ and $\\{3, 4\\}$, so it is not."
+    },
+    {
+      "id": "q-stab",
+      "kind": "ask",
+      "input": "number",
+      "title": "Orbit and stabilizer",
+      "text": "$S$ has $24$ elements and is transitive on $4$ points. How many elements of $S$ fix the point $1$?",
+      "check": "answer == S.stabilizer(1).order() or ('No: %s is not $24 / 4$.' % answer if answer != 24 // 4 else False)",
+      "hints": [
+        "$|G| = |G \\cdot i| \\cdot |G_i|$, where $G_i$ is the stabilizer of $i$: the elements with $g(i) = i$."
+      ],
+      "next": {
+        "right": "blocks",
+        "wrong": "stab"
+      },
+      "example": 6
+    },
+    {
+      "id": "stab",
+      "title": "The orbit-stabilizer theorem",
+      "text": "For every point $i$, $|G| = |G \\cdot i| \\cdot |G_i|$. So a transitive $G$ on $n$ points has $|G_i| = |G| / n$."
+    },
+    {
+      "id": "blocks",
+      "title": "Transitive, but in blocks",
+      "text": "A transitive group can still keep points together. $D$ sends opposite corners of the square to opposite corners: $\\{1, 3\\}$ and $\\{2, 4\\}$ are **blocks**. A transitive group with no blocks but the trivial ones is **primitive**."
+    },
+    {
+      "id": "q-prim",
+      "kind": "ask",
+      "input": "radio",
+      "title": "Primitive?",
+      "text": "Is $D$, the symmetries of the square, primitive?",
+      "options": [
+        {
+          "value": "yes",
+          "label": "Yes"
+        },
+        {
+          "value": "no",
+          "label": "No"
+        }
+      ],
+      "check": "answer == ('yes' if D.is_primitive() else 'no')",
+      "hints": [
+        {
+          "code": "'Try $\\\\{%s\\\\}$: $D$ sends it to a block of the same size, and those blocks never overlap.' % ', '.join(map(str, D.blocks_all()[0]))"
+        }
+      ],
+      "next": {
+        "right": "words",
+        "wrong": "blocks"
+      },
+      "example": "no"
+    },
+    {
+      "id": "words",
+      "kind": "ask",
+      "input": "text",
+      "title": "In your own words",
+      "text": "What does it mean for a group to act **transitively**?",
+      "decide": [
+        {
+          "name": "confuses-transitive-with-two-transitive",
+          "about": "Says every pair of points goes to every pair, which is 2-transitive, more than transitive.",
+          "next": "two"
+        },
+        {
+          "name": "thinks-transitive-means-abelian",
+          "about": "Mixes it up with a commutative group.",
+          "next": "orbits"
+        },
+        {
+          "name": "thinks-every-element-moves-every-point",
+          "about": "Says each element moves every point, rather than the group taking each point to each point.",
+          "next": "intro"
+        }
+      ]
+    },
+    {
+      "id": "two",
+      "title": "2-transitive is more",
+      "text": "$G$ is **2-transitive** when it sends every pair of distinct points to every other pair. $S$ is; $C$ is transitive but not 2-transitive: no rotation fixes $1$ and moves $2$."
+    }
+  ]
+}
