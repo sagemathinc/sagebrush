@@ -496,8 +496,7 @@ function expandTemplate(p: PyPattern, tmpl: string, m: PyMatch): string {
 // literal always there, empty or not, a later literal only if not empty, a
 // group only if it matched; with no group matched, the joined literals, a
 // piece of the wrong kind for the outer join)
-function expandOtherKind(p: PyPattern, tmpl: string, m: PyMatch): void {
-  const pieces = templatePieces(p, tmpl);
+function expandOtherKind(p: PyPattern, pieces: Piece[], m: PyMatch): void {
   let at = 1;
   for (const x of pieces.length && "lit" in pieces[0] ? pieces.slice(1) : pieces) {
     if ("lit" in x) at++;
@@ -512,7 +511,10 @@ function expandOtherKind(p: PyPattern, tmpl: string, m: PyMatch): void {
 // bytes one); else, of the other kind, a literal piece, refused only when
 // the pieces are joined, so not when nothing matched; anything else at once
 // ("decoding to str: need a bytes-like object, int found").
-type Repl = { call: any } | { tmpl: string } | { literal: any } | { other: string };
+// (an other-kind template is parsed once, here: its pieces, and its
+// literals joined in its own kind, kept for every match, daybreak2's
+// RE-LIMIT-C0D-1)
+type Repl = { call: any } | { tmpl: string } | { literal: any } | { other: Piece[]; lits: any };
 function replOf(p: PyPattern, repl: any): Repl {
   // (callable() as the builtin decides it)
   if (typeof repl === "function" || lookupType(typeOf(repl), "__call__") !== undefined) return { call: repl };
@@ -523,7 +525,10 @@ function replOf(p: PyPattern, repl: any): Repl {
   if (p.isBytes ? b !== undefined : text !== undefined) return { tmpl: own };
   // (the other kind: parsed as a template all the same; without groups it
   // is one literal piece, of its own kind)
-  return templatePieces(p, own).some((x) => "group" in x) ? { other: own } : { literal: repl };
+  const pieces = templatePieces(p, own);
+  if (!pieces.some((x) => "group" in x)) return { literal: repl };
+  const lits = pieces.map((x) => ("lit" in x ? x.lit : "")).join("");
+  return { other: pieces, lits: p.isBytes ? lits : new PyBytes(new Uint8Array(Buffer.from(lits, "latin1"))) };
 }
 
 function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number] {
@@ -566,7 +571,7 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
       expandOtherKind(p, r.other, pm);
       // (no group matched: the template's literals, joined in its kind, one
       // piece of the wrong kind, refused when the pieces are joined)
-      add(p.isBytes ? templatePieces(p, r.other).map((x) => ("lit" in x ? x.lit : "")).join("") : new PyBytes(new Uint8Array(Buffer.from(templatePieces(p, r.other).map((x) => ("lit" in x ? x.lit : "")).join(""), "latin1"))));
+      add(r.lits);
     }
     else {
       const v = callObj(r.call, [pm]);
