@@ -2698,7 +2698,7 @@ def _add(a, b, pos=None, op="+"):
         return _ffmat_op("+", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
-        return a + b
+        return _mod_result(a + b, "+", a, b)
     except TypeError:
         raise _bad_types(op, (a, b), pos)
 
@@ -2713,7 +2713,7 @@ def _sub(a, b, pos=None, op="-"):
         return _ffmat_op("-", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
-        return a - b
+        return _mod_result(a - b, "-", a, b)
     except TypeError:
         raise _bad_types(op, (a, b), pos)
 
@@ -2730,7 +2730,7 @@ def _mul(a, b, pos=None, op="*"):
         return _ffmat_op("*", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
-        return a * b
+        return _mod_result(a * b, "*", a, b)
     except TypeError:
         raise _bad_types(op, (a, b), pos)
 
@@ -2747,7 +2747,7 @@ def _neg(a, pos=None):
         return -a
     _arith("-", (a,), pos)
     try:
-        return -a
+        return _mod_result(-a, "-", a)
     except TypeError:
         raise _bad_types("-", (a,), pos)
 
@@ -2767,7 +2767,7 @@ def _div(a, b, pos=None, op="/"):
         a, b = _real_pair(a, b)
         return a / b
     a, b = _ff_operands(a, b)
-    return a / b
+    return _mod_result(a / b, "/", a, b)
 
 
 def _idiv(a, b, pos=None):
@@ -2823,7 +2823,7 @@ def _pow(a, b, pos=None, op="^"):
         if isinstance(b, MReal) and not isinstance(a, MReal):
             a = MReal.of(a, b.prec)  # (in the exponent's field, CORR-C682-1)
         return MReal.of(a) ** b
-    return a ** b
+    return _mod_result(a ** b, "^", a, b)
 
 
 def _rat_pow(a, b, op, pos):
@@ -3092,6 +3092,8 @@ def _struct_eq(a, b, op, pos):
 def _eq(a, b, pos=None, op="eq"):
     if _cyc_elt(a) or _cyc_elt(b):
         _cyc_check(op, a, b, pos)
+    if isinstance(a, _MModSpace) or isinstance(b, _MModSpace):
+        raise MagmaError("comparison of a module of matrices is not supported yet", "'%s'" % op, True, pos)
     if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
@@ -5011,6 +5013,10 @@ def _type_name(x):
         return "GrpPerm"
     if isinstance(x, _MResRing):
         return "RngIntRes"
+    if isinstance(x, _MModMat):
+        return "ModMatFldElt" if x._base is _sa.QQ else "ModMatRngElt"
+    if isinstance(x, _MModSpace):
+        return "ModMatFld" if x.base is _sa.QQ else "ModMatRng"
     if isinstance(x, _smat.Matrix) and (x._base is _sa.ZZ or x._base is _sa.QQ):
         # (a matrix Magma mode made, or one its arithmetic returned: A + A
         # is the underlying matrix class, CORR-803-1)
@@ -5074,6 +5080,8 @@ def _ext_type(x):
         return "%s[FldFin]" % _type_name(x)
     if isinstance(x, _MVector):
         return "%s[%s]" % (_type_name(x), _ring_cat(x._base))
+    if isinstance(x, _MModMat):
+        return "%s[%s]" % (_type_name(x), _ring_cat(x.base_ring()))
     if isinstance(x, _smat.Matrix):
         return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
     if isinstance(x, _Cat):
@@ -8246,6 +8254,55 @@ class _MMatrix(_smat.Matrix):
         return _MVector(self._rows[i - 1], self._base)
 
 
+class _MModMat(_MMatrix):
+    """A square matrix of a module of matrices, Magma's RMatrixSpace or
+    KMatrixSpace, not its matrix algebra: a product of matrices one of
+    which is not square (A * Transpose(A)), and what Magma keeps there
+    (checked against Magma 2.18, astra2's WA-026)."""
+    __slots__ = ()
+
+    def _magma_parent(self):
+        return _MModSpace(self._base, self.nrows())
+
+
+class _MModSpace:
+    """The parent of an _MModMat (printed only)."""
+
+    def __init__(self, base, n):
+        self.base, self.n = base, n
+
+    def __repr__(self):
+        if self.base is _sa.QQ:
+            return "Full KMatrixSpace of %d by %d matrices over Rational Field" % (self.n, self.n)
+        return "Full RMatrixSpace of %d by %d matrices over Integer Ring" % (self.n, self.n)
+
+
+def _mod_like(M, r):
+    """r, made from M by Transpose, HermiteForm or EchelonForm: of M's
+    module of matrices when M is (as Magma's)."""
+    return _MModMat(r._base, r._rows, r.ncols()) if isinstance(M, _MModMat) and r.is_square() else r
+
+
+def _mod_result(r, op, a, b=None):
+    """r = a op b (b None: -a), a square matrix result kept in a module of
+    matrices as Magma's (checked against Magma 2.18): a product with a
+    factor not square, or with one of a module (the other a matrix or a
+    scalar); a sum or difference of two of a module (with an algebra's
+    matrix it is the algebra's); -B, B^n, B / c of one."""
+    if not isinstance(r, _smat.Matrix) or r.nrows() != r.ncols():
+        return r
+    ma, mb = isinstance(a, _MModMat), isinstance(b, _MModMat)
+    if op == "*" and isinstance(a, _smat.Matrix) and isinstance(b, _smat.Matrix):
+        mod = ma or mb or a.nrows() != a.ncols() or b.nrows() != b.ncols()
+    elif op == "*":
+        mod = ma or mb
+    elif op in ("+", "-") and b is not None:
+        mod = ma and mb
+    else:
+        mod = ma
+    return _MModMat(r._base, r._rows, r.ncols()) if mod else r
+
+
 class _MVectorSpace:
     """The parent of a vector: Magma's full vector space (over the
     rationals) or RSpace (over the integers) of a degree."""
@@ -8894,6 +8951,11 @@ def _ffmat_op(o, a, b, pos):
     if isinstance(a, _MFFMat) and isinstance(b, _MFFMat):
         if o == "*":
             _ffm_admit(a.nrows() * a.ncols() * b.ncols(), F, "a product", "'*'")
+            if a.nrows() == b.ncols() and (a.nrows() != a.ncols() or b.nrows() != b.ncols()):
+                # (Magma's is a square matrix of a KMatrixSpace, ModMatFldElt,
+                # not of the matrix algebra: not modelled over a finite
+                # field, WA-026)
+                raise MagmaError("a square product of matrices over a finite field not square is not supported yet", "'*'", True)
             return _MFFMat(F, a.M * b.M)
         return _MFFMat(F, a.M + b.M if o == "+" else a.M - b.M)
     c = _ffm_scalar(F, b if x is a else a)
@@ -9124,15 +9186,21 @@ def _ff_admit_args(name, args, kw):
 
 
 def HermiteForm(M):
-    return _multi([_mmat(M.hermite_form())], show=1)
+    return _multi([_mod_like(M, _mmat(M.hermite_form()))], show=1)
 
 
 def EchelonForm(M):
     # over Z the Hermite form, over Q the reduced row echelon form
-    return _multi([_mmat(M.echelon_form())], show=1)
+    return _multi([_mod_like(M, _mmat(M.echelon_form()))], show=1)
+
+
+def _no_module(M, name):
+    if isinstance(M, _MModMat):
+        raise MagmaError("%s of a matrix of a module of matrices (a product of matrices not square) is not supported yet" % name, "'%s'" % name)
 
 
 def SmithForm(M):
+    _no_module(M, "SmithForm")
     D, U, V = M.smith_form()
     return _multi([_mmat(D), _mmat(U), _mmat(V)])
 
@@ -9145,6 +9213,7 @@ def LLL(M, *, Delta=None):
     if Delta is not None:
         # the reduced basis depends on Delta, which isn't passed on
         raise MagmaError("LLL with the parameter Delta is not supported yet")
+    _no_module(M, "LLL")
     return _multi([_mmat(M.LLL())], show=1)
 
 
@@ -9159,7 +9228,7 @@ def Determinant(M):
 def Transpose(M):
     if isinstance(M, _MFFMat):
         return _MFFMat(M.F, M.M.transpose())
-    return _mmat(M.transpose())
+    return _mod_like(M, _mmat(M.transpose()))
 
 
 def NumberOfRows(M):

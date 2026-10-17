@@ -1841,3 +1841,20 @@ test("a multiset operation whose coerced elements would coincide is refused, not
     "R:={*1,1*} join {*1*}; #R;"].join("\n"));
   assert.equal(ok, "2\n2\n3\nend\n", ok);
 });
+
+test("a square product of matrices not square is of a module of matrices, as Magma's (WA-026)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's: ModMatRngElt for A * Transpose(A)
+  // and what Magma keeps there; with an algebra's matrix a sum is the
+  // algebra's; astra2's WA-026)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(B); Parent(B); B; Type(Transpose(A)*A);", "A:=Matrix(Rationals(),2,3,[1..6]); B:=A*Transpose(A); Type(B); Parent(B); Type(B^-1);", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); I:=Matrix(Integers(),2,2,[1,0,0,1]); Type(B*B); Type(B+B); Type(B-B); Type(B^2); Type(B^0); Type(-B); Type(2*B); Type(B*2);", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); I:=Matrix(Integers(),2,2,[1,0,0,1]); Type(Transpose(B)); Type(B*I); Type(I*B); Type(B+I); Type(I-B); Determinant(B); B eq Matrix(Integers(),2,2,[14,32,32,77]);", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(HermiteForm(B)); Type(EchelonForm(B)); Type(Matrix(Integers(),3,3,[1..9])*Transpose(A)*A);", "Type(Matrix(Integers(),2,2,[1..4])*Matrix(Integers(),2,2,[1..4])); B:=Matrix(Integers(),1,2,[1,2]); Type(B*Transpose(B)); Type(Matrix(Integers(),1,1,[2]));"].join("\n"));
+  assert.equal(ok, "ModMatRngElt\nFull RMatrixSpace of 2 by 2 matrices over Integer Ring\n[14 32]\n[32 77]\nModMatRngElt\nModMatFldElt\nFull KMatrixSpace of 2 by 2 matrices over Rational Field\nModMatFldElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nAlgMatElt\nAlgMatElt\n54\ntrue\nModMatRngElt\nModMatRngElt\nModMatRngElt\nAlgMatElt\nModMatRngElt\nAlgMatElt\nend\n", ok);
+  // (over a finite field, and SmithForm and LLL of one: refused)
+  for (const [e, m] of [["A:=Matrix(GF(5),2,3,[1..6]); B:=A*Transpose(A);", "a square product of matrices over a finite field not square is not supported yet"],
+    ["A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); X:=SmithForm(B);", "SmithForm of a matrix of a module of matrices (a product of matrices not square) is not supported yet"]]) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + o);
+  }
+});
