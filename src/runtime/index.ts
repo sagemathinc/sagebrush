@@ -325,6 +325,24 @@ Obj.hooks.excResumed = (e: any) => {
   if (inner !== null && inner.length) Object.defineProperty(e, "$caught", { value: { tb, frame: inner[0] }, writable: true, enumerable: false, configurable: true });
   else if (c !== undefined) c.tb = tb;
 };
+// A StopIteration the generator's frame let out (PEP 479 makes it the
+// cause of a RuntimeError): the runtime caught it, as the generator's frame
+// ended, so its traceback is the frames from the generator's in, the
+// generator's being the one after the stack here (CORR-581-1). Where that
+// can't be told, it stays refused, as any the runtime caught.
+Obj.hooks.genRaised = (e: any) => {
+  if (e === null || typeof e !== "object" || e.$tb === undefined) return;
+  const { frames, cut } = raisedFrames(e);
+  if (cut) return;
+  const here: any = {};
+  Error.captureStackTrace(here);
+  const sites = sitesOf(here);
+  if (sites.length >= Error.stackTraceLimit) return;
+  const now = pyFrames(sites);
+  const gen = frames[now.length];
+  if (gen === undefined || (now.length && frames[now.length - 1].fn !== now[now.length - 1].fn)) return;
+  Object.defineProperty(e, "$caught", { value: { tb: e.$tb, frame: gen }, writable: true, enumerable: false, configurable: true });
+};
 // An exception thrown into a generator (throw(), close()'s GeneratorExit)
 // is raised at the generator's yield, whose line isn't known here: its
 // frames are refused from now on, never the stale ones it had.

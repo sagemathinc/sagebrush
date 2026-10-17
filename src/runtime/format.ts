@@ -1,6 +1,6 @@
 // repr(), str(), format() and `str % args`.
 
-import { T, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox } from "./object";
+import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -762,7 +762,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
 function getitemMapping(m: any, k: string): any {
   if (m instanceof PyDict) {
     const v = dictGet(m, k);
-    if (v === undefined) throw T.KeyError(k);
+    if (v === undefined) throw markRaised(T.KeyError(k));
     return v;
   }
   return lookupType(typeOf(m), "__getitem__")(m, k);
