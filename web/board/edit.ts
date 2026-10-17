@@ -10,7 +10,7 @@
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
 import { answerProblem, ASK_LIMITS } from "./ask";
-import { inkNode, isNote, STICKER_SIZE, GROUP_PAD, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { inkNode, isNote, pageOf, STICKER_SIZE, GROUP_PAD, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
@@ -985,9 +985,10 @@ export class Editor {
   /** A question's answer checked: the answer kept, with its attempt counted
    * and the verdict (an error, the check's own failure, is not the reader's
    * attempt: not counted); one step to undo. */
-  attempt(id: string, answer: AskAnswer, result: "right" | "wrong" | "error") {
+  attempt(id: string, answer: AskAnswer, result: "right" | "wrong" | "error", page?: number) {
     return this.commit((d) => {
-      const n = find(this.pg(d), id)?.node;
+      // (the question of the page it was asked on, `page` from 0: a question's id is its page's own)
+      const n = find(page === undefined ? this.pg(d) : pageOf(d, page), id)?.node;
       if (n?.kind !== "ask" || answerProblem(n, answer)) return;
       n.answer = answer;
       if (result !== "error") n.attempts = (n.attempts ?? 0) + 1;
