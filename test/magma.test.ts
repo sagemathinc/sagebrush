@@ -1218,6 +1218,27 @@ test("Gcd and Lcm of an empty collection: of the integers 0 and 1, of nothing Ma
   assert.match(out, /\nend\n$/);
 });
 
+test("an empty collection keeps what is known of its universe through copies, conversions and set operations (Gcd, Lcm)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (checked against Magma 2.18: values first, then Magma's null refusals)
+  // (one element too: Gcd([-5]) and Lcm([-5]) are 5, never a Python error)
+  const values = ["Gcd([1] cat []);", "S2 := []; Append(~S2, 1); Exclude(~S2, 1); Gcd(S2);", "Gcd([1, 2][[]]);",
+    "V := {}; Include(~V, 3); Exclude(~V, 3); Lcm(V);", "Gcd({1} diff {});", "Gcd({} join {Integers() | });",
+    "Gcd({Integers() | } join {});", "Gcd({1} sdiff {1});", "Gcd([] cat [Integers() | ]);", "Gcd([Integers() | ] cat []);",
+    "Gcd([-5]);", "Lcm([-5]);", "Lcm({7});", "Lcm([0]);", "Gcd([-4, 6]);", "Lcm([-4, 6]);"];
+  const nulls = ["Gcd(Setseq({}));", "Gcd(Seqset([]));", "Gcd(Sort([]));", "Gcd(Reverse([]));", "Gcd([] cat []);",
+    "Gcd({} join {});", "Gcd({} meet {1});", "S := []; Gcd(S);", "T := [x : x in [1..3] | x gt 5]; Gcd(T);",
+    "U := [[]]; Gcd(U[1]);", "Gcd([][[]]);", "Gcd({1} meet {});", "Gcd({} diff {1});", "Gcd({} sdiff {});",
+    "Gcd({Integers() | } meet {});"];
+  const src = values.join("\n") + "\n" + nulls.join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  assert.match(out, /^1\n0\n0\n1\n1\n0\n0\n0\n0\n0\n5\n5\n7\n0\n2\n12\n/);
+  assert.equal(out.split("Runtime error in 'Gcd': Illegal null set/sequence").length - 1, nulls.length, out);
+  assert.doesNotMatch(out, /doesn't know/);
+  assert.match(out, /\nend\n$/);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
