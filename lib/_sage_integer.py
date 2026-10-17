@@ -153,9 +153,13 @@ def divisors(n):
 
 
 def number_of_divisors(n):
-    """How many positive divisors n has.
+    """How many positive divisors n has.  (A Sagebrush method: in Sage, call
+    the function, number_of_divisors(n).)
 
     EXAMPLES::
+
+        sage: number_of_divisors(12)
+        6
 
         sage: ZZ(12).number_of_divisors()  # sagebrush only
         6
@@ -220,7 +224,9 @@ def sigma(n, k=1):
 
 
 def moebius(n):
-    """The Moebius function: 0 if a square divides n, else (-1)^r for r prime factors.
+    """The Moebius function: 0 if a square divides n, else (-1)^r for r prime
+    factors.  (The method is Sagebrush's: in Sage, call the function,
+    moebius(n).)
 
     EXAMPLES::
 
@@ -373,14 +379,15 @@ def isqrt(n):
 
 def nth_root(n, k, truncate_mode=False):
     """The integer k-th root of n; an error when n is not a k-th power, unless
-    truncate_mode, which gives (the floor of the root, whether it is exact).
+    truncate_mode, which gives (the root truncated toward zero, whether it
+    is exact).
 
     EXAMPLES::
 
         sage: ZZ(125).nth_root(3), ZZ(-32).nth_root(5)
         (5, -2)
-        sage: ZZ(10).nth_root(3, truncate_mode=True)
-        (2, False)
+        sage: ZZ(10).nth_root(3, truncate_mode=True), ZZ(-10).nth_root(3, truncate_mode=True)
+        ((2, False), (-2, False))
         sage: ZZ(10).nth_root(3)
         Traceback (most recent call last):
         ...
@@ -604,7 +611,9 @@ def round(n):
 
 
 def n(n, prec=None, digits=None):
-    """n as a real number, with 53 bits, or prec bits, or digits decimal digits.
+    """n as a real number, with 53 bits, or prec bits, or digits decimal
+    digits.  n.n() and n.numerical_approx() are Sage's methods too; n.N() is
+    Sagebrush's (in Sage, call the function, N(n), or use n.n()).
 
     EXAMPLES::
 
