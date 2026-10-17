@@ -66,3 +66,42 @@ test("traceback.format_exc refuses when the handler's function recurses through 
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim();
   assert.equal(out, "refused: which frame caught this exception is unknown: f, which caught it, is 3 of the frames it was raised through (recursion through the handler)");
 });
+
+// A bare raise records the frames the exception now has, kept to the 200
+// the JS stack keeps (HARD-96A-1): a generator that caught it 150 frames
+// above the raise, resumed 120 frames deep, re-raises it past that, and so
+// does a second one resumed as deep after it; the record stays at most 200
+// frames, cut, and format_exc refuses
+test("re-raised tracebacks stay within the stack limit, cut and refused past it", () => {
+  const code = [
+    `const c = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
+    "Promise.resolve(c.initParser && c.initParser()).then(() => {",
+    "  const m = c.execModule([",
+    "    'import traceback',",
+    "    'def deep(n):',",
+    "    '    if n: return deep(n - 1)',",
+    "    '    raise KeyError(n)',",
+    "    'def holder(f):',",
+    "    '    try: f()',",
+    "    '    except KeyError:',",
+    "    '        yield',",
+    "    '        raise',",
+    "    'def resume_at(n, g):',",
+    "    '    return resume_at(n - 1, g) if n else next(g)',",
+    "    'g1 = holder(lambda: deep(150)); next(g1)',",
+    "    'g2 = holder(lambda: resume_at(120, g1)); next(g2)',",
+    "    'try: resume_at(120, g2)',",
+    "    'except KeyError as e:',",
+    "    '    err = e',",
+    "    '    try: traceback.format_exc(); refused = None',",
+    "    '    except NotImplementedError as x: refused = str(x)',",
+    "  ].join('\\n'), '<reraise>', 'reraise_test');",
+    "  const r = m.err.$reraised;",
+    "  console.log(JSON.stringify({ frames: r.frames.length, cut: r.cut, refused: m.refused }));",
+    "});",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8" }).trim());
+  assert.ok(r.frames <= 200, `${r.frames} frames kept`);
+  assert.equal(r.cut, true);
+  assert.equal(r.refused, "which frame caught this exception is unknown: its traceback is deeper than the 200 JavaScript frames kept");
+});

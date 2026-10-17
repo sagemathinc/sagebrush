@@ -1060,8 +1060,11 @@ export function excEnter(e: any): void {
     const at: any = {};
     const limit = Error.stackTraceLimit;
     Error.stackTraceLimit = CATCH_FRAMES;
-    Error.captureStackTrace(at, excEnter);
-    Error.stackTraceLimit = limit;
+    try {
+      Error.captureStackTrace(at, excEnter);
+    } finally {
+      Error.stackTraceLimit = limit;
+    }
     if (e.$caught === undefined) Object.defineProperty(e, "$caught", { value: { tb: e.$tb, at }, writable: true, enumerable: false, configurable: true });
     else e.$caught = { tb: e.$tb, at };
   }
