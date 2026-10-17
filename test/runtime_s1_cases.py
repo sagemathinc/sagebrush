@@ -189,3 +189,115 @@ except ModuleNotFoundError as e:
     print("halted:", ascii(e.name), ascii(e.msg))
 sys.modules["json.blocked_child"] = None
 show("a blocked submodule of a real package", lambda: __import__("json.blocked_child"))
+
+
+# astra's CORR-5E9-1: slice.indices and range slices are exact; a concrete
+# container's slice clamps its step, as PySlice_Unpack does
+for step in [2**54, -2**54, 2**100, -2**100, 2**63, -2**63 - 1]:
+    show("slice(None, None, %d).indices(10)" % step, lambda: slice(None, None, step).indices(10))
+    show("range(10)[::%d]" % step, lambda: (lambda r: (r, r[0], type(r.step).__name__, list(r), len(r)))(range(10)[::step]))
+    show("list[::%d]" % step, lambda: [1, 2, 3][::step])
+    show("str[::%d]" % step, lambda: "abc"[::step])
+    show("bytes[::%d]" % step, lambda: b"abc"[::step])
+show("slice indices, big bounds", lambda: slice(-(2**100), 2**100, -3).indices(7))
+show("slice indices, big length", lambda: slice(None, None, 2).indices(2**80))
+show("range(2**70)[::2**60]", lambda: (lambda r: (r, len(r), r[3]))(range(2**70)[::2**60]))
+show("range(2**70)[2**69:]", lambda: range(2**70)[2**69:])
+show("range(10)[1.5:]", lambda: range(10)[1.5:])
+show("range big [1.5:]", lambda: range(2**70)[1.5:])
+show("slice indices negative length", lambda: slice(1).indices(-1))
+
+
+# astra's CORR-5E9-2: start and end converted once, before the prefix is
+# looked at, whatever the tuple holds
+class Moving:
+    def __init__(self):
+        self.n = -1
+
+    def __index__(self):
+        self.n += 1
+        return self.n
+
+
+class Counting:
+    def __init__(self, v):
+        self.v, self.calls = v, 0
+
+    def __index__(self):
+        self.calls += 1
+        return self.v
+
+
+for subj, alts, empty, bad in [("xy", ("q", "x"), (), 5), (b"xy", (b"q", b"x"), (), 5), (bytearray(b"xy"), (b"q", b"x"), (), 5)]:
+    kind = type(subj).__name__
+    show("%s.startswith(alts, Moving())" % kind, lambda: subj.startswith(alts, Moving()))
+    show("%s.endswith(alts, None, Moving())" % kind, lambda: subj.endswith(alts[::-1], None, Moving()))
+    show("%s.startswith((), 1.5)" % kind, lambda: subj.startswith(empty, 1.5))
+    show("%s.endswith((), None, 'a')" % kind, lambda: subj.endswith(empty, None, "a"))
+    show("%s.startswith(5, 1.5)" % kind, lambda: subj.startswith(bad, 1.5))
+
+    def counted():
+        a, b = Counting(0), Counting(1)
+        r = subj.startswith((alts[0], alts[0]), a, b)
+        return r, a.calls, b.calls
+
+    show("%s conversions per call" % kind, counted)
+
+
+# astra's CORR-5E9-3: a callable replacement is called, a str subclass
+# included; a replacement of the other kind fails only when joined
+class Repl(str):
+    def __call__(self, m):
+        calls.append(m.group())
+        return "CALL"
+
+
+class ReplB(str):
+    def __call__(self, m):
+        calls.append(m.group())
+        return b"CB"
+
+
+class SS(str):
+    pass
+
+
+for pat, subj in [("a", "aba"), ("q", "aba"), ("b", "abc"), (b"a", b"aba"), (b"q", b"aba"), (b"b", b"abc")]:
+    for name, repl in [("Repl", Repl("T")), ("ReplB", ReplB("T")), ("SS", SS("X")), ("str", "X"), ("bytes", b"X"),
+                       ("bytearray", bytearray(b"X")), ("memoryview", memoryview(b"X")), ("int", 5), ("None", None),
+                       ("lambda None", lambda m: None), ("lambda int", lambda m: 5), ("template", SS(r"<\g<0>>"))]:
+        calls = []
+        show("re.sub(%r, %s, %r)" % (pat, name, subj), lambda: (re.sub(pat, repl, subj), calls))
+        calls = []
+        show("re.subn(%r, %s, %r)" % (pat, name, subj), lambda: (re.compile(pat).subn(repl, subj), calls))
+
+
+# astra's CORR-5E9-4: a failed __init__ sets args and keeps the rest
+def reinit_bad():
+    e = ImportError("old", name="n", path="p", name_from="f")
+    try:
+        e.__init__("new", bad=1)
+    except TypeError as x:
+        print("reinit refused:", x)
+    return e.args, e.msg, e.name, e.path, e.name_from
+
+
+show("ImportError __init__ with a bad keyword", reinit_bad)
+
+
+def reinit_good():
+    e = ImportError("old", name="n", path="p", name_from="f")
+    e.__init__("new", path="q")
+    return e.args, e.msg, e.name, e.path, e.name_from
+
+
+show("ImportError __init__ again with keywords", reinit_good)
+
+
+# a template of the other kind: parsed all the same; its first matched group
+# refused by its place among its pieces, an unmatched one passed over
+for pat, subj, repl in [(b"(x)?a", b"aba", r"<\1>"), (b"(x)?a", b"aba", r"\1"), (b"(a)", b"aba", r"\1\1"), (b"(a)", b"aba", r"<<\g<1>"),
+                        ("(x)?a", "aba", rb"<\1>"), ("(a)", "aba", rb"[\1]"), ("(a)", "aba", rb"\n\1"), ("(a)", "qqq", rb"\1"),
+                        ("(x)?(a)", "a", rb"\1\2"), ("(x)?(a)", "a", rb"\1x\2"), ("(x)?(a)", "a", rb"\2\1\2"), ("(x)?(y)?(a)", "a", rb"\1\2\3"),
+                        ("(a)", "a", rb"\1\1\1"), ("(a)", "a", rb"ab\1cd\1")]:
+    show("re.sub(%r, %r, %r)" % (pat, repl, subj), lambda: re.sub(pat, repl, subj))

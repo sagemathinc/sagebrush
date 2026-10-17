@@ -3,7 +3,7 @@
 // Indices are UTF-16 code units, like the rest of the runtime's strings.
 
 import * as SP from "./strpos";
-import { T, PyBytes, PyDict, StrLayout, raise, typeName, tuple, objectType, callObj, dictSet, isinstance, sig } from "./object";
+import { T, PyBytes, PyDict, StrLayout, raise, typeName, tuple, objectType, callObj, dictSet, isinstance, sig, lookupType, typeOf } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { repr } from "./format";
@@ -444,12 +444,21 @@ export class PyMatch {
 }
 
 // Python replacement template -> function of a match.
-function expandTemplate(p: PyPattern, tmpl: string, m: PyMatch): string {
-  let out = "";
+// A template's pieces, as CPython's _parser.parse_template makes them:
+// literal chunks (escapes done, consecutive ones merged) and group numbers
+type Piece = { lit: string } | { group: number };
+function templatePieces(p: PyPattern, tmpl: string): Piece[] {
+  const out: Piece[] = [];
+  let lit = "";
+  const group = (k: number) => {
+    if (lit) out.push({ lit });
+    lit = "";
+    out.push({ group: k });
+  };
   for (let i = 0; i < tmpl.length; i++) {
     const c = tmpl[i];
     if (c !== "\\") {
-      out += c;
+      lit += c;
       continue;
     }
     const d = tmpl[++i];
@@ -460,30 +469,82 @@ function expandTemplate(p: PyPattern, tmpl: string, m: PyMatch): string {
       const name = g[1];
       const k = /^\d+$/.test(name) ? Number(name) : p.names.indexOf(name);
       if (k < 0 || k > p.groups) raise(/^\d+$/.test(name) ? ReError : T.IndexError, `invalid group reference ${name}`);
-      out += m.m[k] ?? "";
+      group(k);
       i += g[0].length;
     } else if (/\d/.test(d)) {
       let num = d;
       if (/\d/.test(tmpl[i + 1] ?? "")) num += tmpl[++i];
       const k = Number(num);
       if (k > p.groups) raise(ReError, `invalid group reference ${k}`);
-      out += m.m[k] ?? "";
+      group(k);
     } else {
       const map: Record<string, string> = { n: "\n", t: "\t", r: "\r", f: "\f", v: "\v", a: "\x07", b: "\b", "\\": "\\" };
-      if (map[d] !== undefined) out += map[d];
+      if (map[d] !== undefined) lit += map[d];
       else if (/[A-Za-z]/.test(d)) raise(ReError, `bad escape \\${d}`);
-      else out += "\\" + d;
+      else lit += "\\" + d;
     }
   }
+  if (lit) out.push({ lit });
   return out;
+}
+function expandTemplate(p: PyPattern, tmpl: string, m: PyMatch): string {
+  return templatePieces(p, tmpl).map((x) => ("lit" in x ? x.lit : (m.m[x.group] ?? ""))).join("");
+}
+// (a template of the other kind than the pattern: its pieces joined in its
+// own kind, as CPython's expand_template does, so the first matched group,
+// of the pattern's kind, is refused by its place in that join: the first
+// literal always there, empty or not, a later literal only if not empty, a
+// group only if it matched; with no group matched, the joined literals, a
+// piece of the wrong kind for the outer join)
+function expandOtherKind(p: PyPattern, tmpl: string, m: PyMatch): void {
+  const pieces = templatePieces(p, tmpl);
+  let at = 1;
+  for (const x of pieces.length && "lit" in pieces[0] ? pieces.slice(1) : pieces) {
+    if ("lit" in x) at++;
+    else if (m.m[x.group] !== undefined)
+      raise(T.TypeError, `sequence item ${at}: expected ${p.isBytes ? "str instance, bytes" : "a bytes-like object, str"} found`);
+  }
+}
+
+// The replacement, as CPython's pattern_subx takes it: a callable first
+// (a callable str subclass is called); else a template of the pattern's
+// kind (str or a str subclass for a str pattern, a bytes-like object for a
+// bytes one); else, of the other kind, a literal piece, refused only when
+// the pieces are joined, so not when nothing matched; anything else at once
+// ("decoding to str: need a bytes-like object, int found").
+type Repl = { call: any } | { tmpl: string } | { literal: any } | { other: string };
+function replOf(p: PyPattern, repl: any): Repl {
+  // (callable() as the builtin decides it)
+  if (typeof repl === "function" || lookupType(typeOf(repl), "__call__") !== undefined) return { call: repl };
+  const text = typeof repl === "string" ? repl : repl instanceof StrLayout ? (repl.$v as string) : undefined;
+  const b = text === undefined ? O.bufferOf(repl) : undefined;
+  if (text === undefined && b === undefined) raise(T.TypeError, `decoding to str: need a bytes-like object, ${typeName(repl)} found`);
+  const own = b !== undefined ? Buffer.from(b.buffer, b.byteOffset, b.length).toString("latin1") : text!;
+  if (p.isBytes ? b !== undefined : text !== undefined) return { tmpl: own };
+  // (the other kind: parsed as a template all the same; without groups it
+  // is one literal piece, of its own kind)
+  return templatePieces(p, own).some((x) => "group" in x) ? { other: own } : { literal: repl };
 }
 
 function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number] {
   const s = p.str(string);
   const n = Number(count ?? 0);
-  let tmpl: string | null = null;
-  if (typeof repl === "string" || repl instanceof StrLayout || repl instanceof PyBytes) tmpl = p.isBytes ? Ty.decode(repl as any, "latin1") : p.str(repl);
+  const r = replOf(p, repl);
   let out = "", last = 0, k = 0;
+  // (the pieces CPython joins: each non-empty stretch of the subject, and
+  // each replacement but a callable's None; the first of the wrong kind is
+  // refused after every match is made, as the join does, by its place)
+  let piece = 0, bad: { at: number; v: any } | null = null;
+  const add = (v: any) => {
+    if (bad === null) {
+      const text = p.isBytes ? undefined : typeof v === "string" ? v : v instanceof StrLayout ? (v.$v as string) : undefined;
+      const b = p.isBytes && typeof v !== "string" && !(v instanceof StrLayout) ? O.bufferOf(v) : undefined;
+      if (text !== undefined) out += text;
+      else if (b !== undefined) out += Buffer.from(b.buffer, b.byteOffset, b.length).toString("latin1");
+      else bad = { at: piece, v };
+    }
+    piece++;
+  };
   const rx = p.rx;
   rx.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -492,17 +553,33 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
     // (Stop, every 1024 matches: a long string has millions, HARD-978-1)
     if ((k & 1023) === 1023) O.pollInterrupt();
     const pm = new PyMatch(p, string, s, m, 0, s.length);
-    out += s.slice(last, m.index);
+    if (m.index > last) {
+      out += s.slice(last, m.index);
+      piece++;
+    }
     seams.push(out.length);
-    if (tmpl !== null) out += expandTemplate(p, tmpl, pm);
+    if ("tmpl" in r) {
+      out += expandTemplate(p, r.tmpl, pm);
+      piece++;
+    } else if ("literal" in r) add(r.literal);
+    else if ("other" in r) {
+      expandOtherKind(p, r.other, pm);
+      // (no group matched: the template's literals, joined in its kind, one
+      // piece of the wrong kind, refused when the pieces are joined)
+      add(p.isBytes ? templatePieces(p, r.other).map((x) => ("lit" in x ? x.lit : "")).join("") : new PyBytes(new Uint8Array(Buffer.from(templatePieces(p, r.other).map((x) => ("lit" in x ? x.lit : "")).join(""), "latin1"))));
+    }
     else {
-      const r = callObj(repl, [pm]);
-      out += p.isBytes ? Ty.decode(r, "latin1") : p.str(r);
+      const v = callObj(r.call, [pm]);
+      if (v !== null) add(v);
     }
     seams.push(out.length);
     last = m.index + m[0].length;
     k++;
     if (m[0].length === 0) rx.lastIndex = advance(s, m.index);
+  }
+  if (bad !== null) {
+    const { at, v } = bad;
+    raise(T.TypeError, `sequence item ${at}: expected ${p.isBytes ? "a bytes-like object" : "str instance"}, ${typeName(v)} found`);
   }
   out += s.slice(last);
   return [p.out(SP.checkSeams(out, seams)), k];

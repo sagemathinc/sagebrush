@@ -766,7 +766,10 @@ const ImportError = exc("ImportError", Exception, (c) => {
   });
   init.$kw = (pos: any[], names: string[], values: any[]) => {
     const [self, ...args] = pos;
-    // (the keywords parsed first, as PyArg_ParseTupleAndKeywords does)
+    // (as ImportError_init: args first, as BaseException_init sets them;
+    // then the keywords, a bad one refused with msg, name, path and
+    // name_from as they were; then those set)
+    self.args = tuple(args);
     for (const k of names) if (k !== "name" && k !== "path" && k !== "name_from") raise(T.TypeError, `ImportError() got an unexpected keyword argument '${k}'`);
     init(self, ...args);
     names.forEach((k, i) => (self[k] = values[i]));
@@ -1345,20 +1348,25 @@ method(S, "count", (s: string, sub: string, start: any = undefined, end: any = u
   const t = s.slice(a, b);
   return sub === "" ? SP.cpLen(t) + 1 : SP.split(t, sub).length - 1;
 });
-// (a str, a str subclass by its payload, or a tuple of them, each checked
-// only when reached, as CPython's tailmatch loop does: ("x", 5) is True)
+// (start and end converted once, before the prefix is looked at, as CPython
+// parses its arguments; then a str, a str subclass by its payload, or a
+// tuple of them, each checked only when reached, as CPython's tailmatch
+// loop does: ("x", 5) is True)
 function affix(s: string, x: any, start: any, end: any, ends: boolean): boolean {
   const name = ends ? "endswith" : "startswith";
+  const [a, b] = clampRange(s, start, end);
   if (isinstance(x, T.tuple)) {
     for (const p of x as any[]) {
       if (typeof p !== "string" && !(p instanceof StrLayout)) raise(T.TypeError, `tuple for ${name} must only contain str, not ${typeName(p)}`);
-      if (affix(s, p, start, end, ends)) return true;
+      if (affixAt(s, p instanceof StrLayout ? p.$v : p, a, b, ends)) return true;
     }
     return false;
   }
   if (x instanceof StrLayout) x = x.$v;
   if (typeof x !== "string") raise(T.TypeError, `${name} first arg must be str or a tuple of str, not ${typeName(x)}`);
-  const [a, b] = clampRange(s, start, end);
+  return affixAt(s, x, a, b, ends);
+}
+function affixAt(s: string, x: string, a: number, b: number, ends: boolean): boolean {
   if (a > s.length) return false;
   const t = s.slice(a, b);
   return ends ? t.endsWith(x) && SP.onBoundaries(t, t.length - x.length, x.length) : t.startsWith(x) && SP.onBoundaries(t, 0, x.length);
@@ -2094,6 +2102,12 @@ class BigRangeIter {
   }
 }
 const rangeArg = (v: any) => O.index(v);
+// (a range's slice, as CPython's compute_slice: exact, from the slice's
+// _PySlice_GetLongIndices, so a step past 2**53 stays an exact int)
+function rangeSlice(start: bigint, step: bigint, n: bigint, k: O.PySlice): any {
+  const [a, b, st] = O.sliceLongIndices(k, n);
+  return makeRange(O.normBig(start + a * step), O.normBig(start + b * step), O.normBig(st * step));
+}
 export function makeRange(a: any, b: any = undefined, c: any = undefined): any {
   const args = b === undefined ? [0, rangeArg(a), 1] : [rangeArg(a), rangeArg(b), c === undefined ? 1 : rangeArg(c)];
   if (Number(args[2]) === 0) raise(T.ValueError, "range() arg 3 must not be zero");
@@ -2116,19 +2130,7 @@ const bigRangeMethods: Record<string, (r: PyBigRange, ...a: any[]) => any> = {
   },
   __getitem__: (r, k) => {
     const n = r.length;
-    if (k instanceof O.PySlice) {
-      const st = k.step === null ? 1n : BigInt(O.index(k.step));
-      if (st === 0n) raise(T.ValueError, "slice step cannot be zero");
-      const lo = st < 0n ? -1n : 0n, hi = st < 0n ? n - 1n : n;
-      const fix = (v: any, d: bigint) => {
-        if (v === null) return d;
-        let x = BigInt(O.index(v));
-        if (x < 0n) x = x + n < lo ? lo : x + n;
-        return x > hi ? hi : x;
-      };
-      const a = fix(k.start, st < 0n ? hi : lo), b = fix(k.stop, st < 0n ? lo : hi);
-      return makeRange(O.normBig(r.start + a * r.step), O.normBig(r.start + b * r.step), O.normBig(st * r.step));
-    }
+    if (k instanceof O.PySlice) return rangeSlice(r.start, r.step, n, k);
     let i = BigInt(O.index(k));
     if (i < 0n) i += n;
     if (i < 0n || i >= n) raise(T.IndexError, "range object index out of range");
@@ -2160,10 +2162,7 @@ method(range, "__contains__", (r: PyRange, x: any) => {
   return inside && (x - r.start) % r.step === 0;
 });
 method(range, "__getitem__", (r: PyRange, k: any) => {
-  if (k instanceof O.PySlice) {
-    const [a, b, st] = O.sliceAdjust(k, r.length);
-    return new PyRange(r.start + a * r.step, r.start + b * r.step, st * r.step);
-  }
+  if (k instanceof O.PySlice) return rangeSlice(BigInt(r.start), BigInt(r.step), BigInt(r.length), k);
   return r.start + O.seqIndex(k, r.length, "range object") * r.step;
 });
 method(range, "index", (r: PyRange, x: any) => {
@@ -2185,10 +2184,11 @@ bindClass(O.PySlice, sliceType);
 getset(sliceType, "start", (s) => s.start);
 getset(sliceType, "stop", (s) => s.stop);
 getset(sliceType, "step", (s) => s.step);
+// (exact, as CPython's slice_indices: _PySlice_GetLongIndices)
 method(sliceType, "indices", (s: O.PySlice, n: any) => {
-  const len = Number(O.index(n));
-  if (len < 0) raise(T.ValueError, "length should not be negative");
-  return tuple(O.sliceAdjust(s, len));
+  const len = BigInt(O.index(n));
+  if (len < 0n) raise(T.ValueError, "length should not be negative");
+  return tuple(O.sliceLongIndices(s, len).map(O.normBig));
 });
 method(sliceType, "__repr__", (s: O.PySlice) => `slice(${repr(s.start)}, ${repr(s.stop)}, ${repr(s.step)})`);
 
@@ -2626,7 +2626,10 @@ getset(object, "__dict__", (o) => {
             const b = typeof x === "string" ? undefined : O.bufferOf(x);
             return b === undefined ? undefined : Buffer.from(b.buffer, b.byteOffset, b.length).toString("latin1");
           };
-          const [x, ...rest] = args;
+          // (start and end converted once, first, as for str: plain numbers
+          // after that, which str's method takes as they are)
+          const [x, ...raw] = args;
+          const rest = raw.map((v) => (v === undefined || v === null ? v : O.sliceIndex(v, 0)));
           if (isinstance(x, T.tuple)) {
             for (const p of x as any[]) {
               const t = bytesLike(p);
