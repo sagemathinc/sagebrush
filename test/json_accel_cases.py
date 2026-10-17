@@ -268,3 +268,41 @@ for f in [lambda: enc(1, None), lambda: enc(1), lambda: enc(), lambda: enc(1, 0,
           lambda: _json.scanstring(), lambda: _json.scanstring('"x"'), lambda: _json.scanstring('"x"', 1, True, 4),
           lambda: _json.scanstring('"x"', 1, strict=False), lambda: _json.scanstring('"\x01"', 1, False)]:
     show(f)
+# CORR-136-1: an iterator is one by its type's __next__, not by attribute
+# lookup; the iterator's own __iter__ failing keeps its error
+class Hidden:
+    def __init__(self): self.i = 0
+    def __iter__(self): return self
+    def __next__(self):
+        if self.i: raise StopIteration
+        self.i = 1
+        return 7
+    def __getattribute__(self, name):
+        if name == "__next__": raise AttributeError("private next")
+        return object.__getattribute__(self, name)
+class LH(list):
+    def __iter__(self): return Hidden()
+class TH(tuple):
+    def __iter__(self): return Hidden()
+show(lambda: next(Hidden()))
+show(lambda: list(Hidden()))
+for o in [LH([1]), TH([1])]:
+    for ind in [None, 0, 2]:
+        show(lambda: json.dumps(o, indent=ind))
+class BadSecond(Hidden):
+    def __getattribute__(self, name): return object.__getattribute__(self, name)
+    def __iter__(self): raise TypeError("second iter failed")
+class L2(list):
+    def __iter__(self): return BadSecond()
+show(lambda: json.dumps(L2([0])))
+class NextAttr:
+    def __init__(self): self.__next__ = lambda: 1
+class L3(list):
+    def __iter__(self): return NextAttr()
+show(lambda: json.dumps(L3([0])))
+def gen():
+    yield 5
+class L4(list):
+    def __iter__(self): return gen()
+show(lambda: json.dumps(L4([0])))
+show(lambda: json.dumps(type("L5", (list,), {"__iter__": lambda self: iter([1, 2])})([0])))

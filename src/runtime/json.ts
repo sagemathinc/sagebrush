@@ -9,7 +9,7 @@
 // Positions are Python's, code points: a string with astral characters is
 // indexed through strpos.
 
-import { T, DONE, positionalArray, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
+import { T, DONE, positionalArray, lookupType, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
 import { newBuiltinModule, importModule } from "./modules";
 import { mkfloat, iter, index, pollInterrupt } from "./ops";
 import { floatRepr, decimalOf, repr as pyRepr } from "./format";
@@ -56,15 +56,11 @@ function subclassItems(o: any): any[] {
     if (!isinstance(toPyExc(e), T.TypeError)) throw e;
     raise(T.TypeError, msg());
   }
-  // (an iterable that isn't an iterator: iter()'s TypeError)
-  let next = true;
-  try {
-    getattr(it, "__next__");
-  } catch {
-    next = false;
-  }
-  if (!next) raise(T.TypeError, msg());
-  return collect(it, msg);
+  // (an iterable that isn't an iterator, by its type's __next__ as iter()
+  // checks it, CORR-136-1: iter()'s TypeError; past that, the list's own
+  // iteration, the iterator's __iter__ included, raises unchanged)
+  if (!(it !== null && typeof it === "object" && typeof it.$next === "function") && lookupType(typeOf(it), "__next__") === undefined) raise(T.TypeError, msg());
+  return collect(it);
 }
 const scanPoll = (i: number) => {
   if ((i & 4095) === 0) pollInterrupt();
