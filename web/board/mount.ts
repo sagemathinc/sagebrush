@@ -325,6 +325,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let answering: Promise<unknown> = Promise.resolve();
   // (each decision's question as it was asked: its page, its id and askSig then)
   const decidedSigs = new Map<string, { page: number; id: string; sig: string | null }>();
+  // (each Check's question as it was checked, the same way: its page's
+  // identity and the question's definition; done, its answer and verdict
+  // too; one entry for each key, its own object, CORR-F11-1)
+  type CheckSig = { page: number; id: string; sig: string | null; done: boolean };
+  const checkSigs = new Map<string, CheckSig>();
   // The name of the shown document's output cache (outcache.ts): the host
   // store's, beside the document and not in it, since a document's seed is
   // portable and anyone can copy it (SEC-B88-1).  Another document shown
@@ -411,6 +416,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // removes it, drops it, so that changing them back doesn't bring it
       // back either, CORR-B21-1)
       for (const [key, was] of decidedSigs) if (askSig(d, was.page, was.id) !== was.sig) { decidedSigs.delete(key); board.askDecided.delete(key); }
+      // (and each Check's, pending or done: another page at its place (the pages reordered), or its question changed, drops it, CORR-F11-1)
+      for (const [key, was] of checkSigs) if (checkSig(d, was.page, was.id, was.done) !== was.sig) { checkSigs.delete(key); board.askFeedback.delete(key); }
       if (checking.size) {
         // (another version of the board's code: every check running is for the code before, CORR-729-1)
         const codeKey = (x: BoardDoc | null) => (x ? JSON.stringify([x.mode ?? null, x.seed ?? null, codeOrder(x).map((c) => [c.id, c.mode, c.code])]) : "");
@@ -565,9 +572,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     checking.set(key, run);
     const stale = () => {
       const now = askOn(page, id), ans = JSON.stringify(now?.answer ?? null);
-      return run.stale || loads !== loaded || code !== c || !!viewing || !now || now.check !== a.check || (ans !== was && ans !== checked) || codeOf(doc) !== ranWith;
+      return run.stale || checkSigs.get(key) !== mine || loads !== loaded || code !== c || !!viewing || !now || now.check !== a.check || (ans !== was && ans !== checked) || codeOf(doc) !== ranWith;
     };
     board.askFeedback.set(key, { pending: true });
+    const mine: CheckSig = { page, id, sig: checkSig(doc!, page, id, false), done: false };
+    checkSigs.set(key, mine);
     redraw().catch(fail);
     const done = await c.exclusive(mode, async (ops) => {
       const reset = async (within: number) => {
@@ -594,16 +603,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       await reset(REFRESH_MS);
       return { outcome, message, hints } as const;
     });
-    if (!done) { checking.delete(key); board.askFeedback.delete(key); redraw().catch(fail); return; }
+    if (!done) { checking.delete(key); board.askFeedback.delete(key); if (checkSigs.get(key) === mine) checkSigs.delete(key); redraw().catch(fail); return; }
     const { outcome, message, hints } = done;
     if (checking.get(key) === run) checking.delete(key);
-    if (stale()) { board.askFeedback.delete(key); redraw().catch(fail); return; }
+    if (stale()) { if (checkSigs.get(key) === mine) { checkSigs.delete(key); board.askFeedback.delete(key); } redraw().catch(fail); return; }
     board.askFeedback.set(key, { message, hints });
     // (kept with the question it checked, on its page, whichever page is shown now)
     await editor.attempt(id, given, outcome, page - 1).catch(fail);
+    // (what it said, kept while that page's question is as it was answered and checked)
+    if (checkSigs.get(key) === mine && doc) checkSigs.set(key, { page, id, sig: checkSig(doc, page, id, true), done: true });
     redraw().then((drawn) => { if (drawn && pageIx + 1 === page) board.keepClear(id); }).catch(fail);
   };
-  const checked = host.code ? (id: string, given: AskAnswer) => { const key = askKey(pageIx + 1, id); check(id, given).catch((e) => { board.askFeedback.delete(key); fail(e); }); } : null;
+  const checked = host.code ? (id: string, given: AskAnswer) => { const key = askKey(pageIx + 1, id); check(id, given).catch((e) => { board.askFeedback.delete(key); checkSigs.delete(key); fail(e); }); } : null;
   board.onCheck = checked;
 
   // The Submit bar, where the host takes answers (a frame's channel,
@@ -717,6 +728,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (a question's definition and words as a decision depends on them: its
   // page, all of it but its answer, note, verdict, attempts and place, and
   // its words; null if the page has no such question)
+  // (a question as its Check's feedback depends on it: its page's identity
+  // (its id), all of it but its note, verdict, attempts and place, and,
+  // done, its answer and verdict; null if the page has no such question)
+  function checkSig(d: BoardDoc, page: number, id: string, done: boolean): string | null {
+    if (page > pageCount(d)) return null;
+    const a = asksOf(d).find((q) => q.page === page && q.ask.id === id)?.ask;
+    if (!a) return null;
+    const { answer: _a, note: _n, result: _r, attempts: _t, wrongAttempts: _w, x: _x, y: _y, w: _ww, h: _h, ...def } = a as DocAsk & { x?: number; y?: number; w?: number; h?: number };
+    return JSON.stringify([pageOf(d, page - 1).id ?? null, def, done ? [a.answer ?? null, a.result ?? null] : null]);
+  }
   function askSig(d: BoardDoc, page: number, id: string): string | null {
     if (page > pageCount(d)) return null;
     const a = asksOf(d).find((q) => q.page === page && q.ask.id === id)?.ask;
@@ -758,6 +779,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     sub = null;
     board.askDecided.clear();
     decidedSigs.clear();
+    checkSigs.clear();
   }
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
   // (and, grown, kept clear of the caption, which never covers it)

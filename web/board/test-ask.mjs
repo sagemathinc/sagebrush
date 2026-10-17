@@ -430,6 +430,28 @@ try {
   await sleep(500);
   const [p1q, p2q] = [await pageQ(0), await pageQ(1)];
   check(p2q.answer === 2 && p2q.result === "right" && p1q.answer === 5 && p1q.result === "wrong" && p1q.attempts === 1, "a Check whose page is left while it runs: kept with its own page's q, page 1's untouched: " + JSON.stringify([p1q, p2q].map((x) => [x.answer, x.result, x.attempts])));
+  // (the pages reordered: no feedback goes with the place, to the other page's
+  // q now there; astra's CORR-F11-1 at f112eca4)
+  // (page one's q: 5, wrong, "page one says no"; page two's: 2, right; page 1 shown)
+  await onPage(1);
+  await ev(`window.sagebrush.board.edit((d) => { d.pages.reverse(); }).then(() => 1)`);
+  await onPage(2);
+  await sleep(500);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/Page two: 2\?/.test(pt) && /Right/.test(pt) && !/says no/.test(pt), "the pages reordered: page two's q, now first, shows none of page one's feedback: " + pt.slice(0, 160));
+  await ev(`document.querySelector('[data-sbb="pgnext"]').click(), 1`);
+  await until(`(${q$(Q, "?.textContent")} || "").includes("Page one")`, 20000);
+  await sleep(500);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/Page one: 1\?/.test(pt) && !/page two/.test(pt), "and page one's q, now second, none of page two's: " + pt.slice(0, 160));
+  // (a Check running when the pages are reordered: dropped, its verdict recorded on neither page's q; by page id, in id order)
+  const byPage = () => ev(`JSON.stringify(window.sagebrush.board.snapshot().doc.pages.map((p) => [p.id, p.nodes[0].answer, p.nodes[0].result, p.nodes[0].attempts]).sort())`);
+  await setQ("1");
+  const before = await byPage();
+  await ev(`(() => { ${q$(Q + " .board-ask-check")}.click(); window.sagebrush.board.edit((d) => { d.pages.reverse(); }); return 1; })()`);
+  await sleep(5000);
+  const after = await byPage();
+  check(after === before, "a Check running as the pages are reordered: dropped, neither page's q changed: " + after + " (before " + before + ")");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
