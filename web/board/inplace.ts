@@ -449,16 +449,25 @@ export class InPlace {
     list.className = "ip-docs-list";
     list.setAttribute("role", "listbox");
     list.hidden = true;
-    let found: DocEntry[] = [], sel = 0, seq = 0;
+    input.maxLength = 200;
+    let found: DocEntry[] = [], sel = 0, loading = false;
     const mark = () => [...list.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === sel)));
     const note = (s: string) => { found = []; list.replaceChildren(Object.assign(document.createElement("li"), { className: "ip-docs-note", textContent: s })); list.hidden = false; };
+    // (one index load waited on at a time, whatever is typed meanwhile; when
+    // it comes, what the box holds then is searched, if the box is still
+    // being used: nothing typed meanwhile is kept, and a search that Esc
+    // emptied, or whose box was left, shows nothing; astra's CORR-7A6-2,
+    // daybreak2's HARD-BEC-1)
     const search = async () => {
-      const q = input.value.trim(), n = ++seq;
-      if (!q) { list.hidden = true; found = []; return; }
+      if (!input.value.trim()) { list.hidden = true; found = []; return; }
+      if (loading) return;
+      loading = true;
+      // (how many index loads it has waited on, said for its tests)
+      box.dataset.loads = String(Number(box.dataset.loads ?? 0) + 1);
       let idx: DocEntry[] | null = null;
-      try { idx = await docs(this.language()); } catch { idx = null; }
-      // (another search since, Esc or the box left meanwhile: this one is not wanted, astra's CORR-7A6-2)
-      if (n !== seq || this.ended || input.value.trim() !== q || document.activeElement !== input) return;
+      try { idx = await docs(this.language()); } catch { idx = null; } finally { loading = false; }
+      const q = input.value.trim();
+      if (this.ended || !q || document.activeElement !== input) return;
       if (!idx) return note(`No function search for ${LANGUAGES[this.language()] ?? this.language()} here`);
       found = searchIndex(idx, q, 12);
       if (!found.length) return note("No function matches");
@@ -491,12 +500,11 @@ export class InPlace {
         e.preventDefault();
         e.stopPropagation();
         input.value = "";
-        seq++;
         list.hidden = true;
         found = [];
       }
     });
-    input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) { seq++; list.hidden = true; } }, 150));
+    input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) list.hidden = true; }, 150));
     input.addEventListener("focus", () => { if (found.length) list.hidden = false; else if (input.value.trim()) void search(); });
     list.addEventListener("mousedown", (e) => {
       const li = (e.target as Element).closest("li");

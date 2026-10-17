@@ -226,6 +226,10 @@ try {
   // during, doesn't come back when it arrives (astra's CORR-7A6-2)
   await ev("(() => { const f = window.fetch; window.__fetch = f; window.fetch = (u, ...a) => String(u).includes('docs-index') ? new Promise((r) => setTimeout(() => r(f(u, ...a)), 2500)) : f(u, ...a); return 1; })()");
   await ev("document.querySelector('.ip-bar .ip-docs-q').focus(), 1");
+  // (typed a character at a time while it loads: one load waited on, not one per character, daybreak2's HARD-BEC-1)
+  for (const ch of "factorial of a big number") await type(ch);
+  check(await ev("document.querySelector('.ip-bar .ip-docs').dataset.loads") === "1", "a slow index, 25 characters typed: one search waiting, not one each: " + await ev("document.querySelector('.ip-bar .ip-docs').dataset.loads"));
+  await ev("(() => { const q = document.querySelector('.ip-bar .ip-docs-q'); q.select(); return 1; })()");
   await type("factorial");
   await sleep(200);
   await key("Escape", { windowsVirtualKeyCode: 27 });
