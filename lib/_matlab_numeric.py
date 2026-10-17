@@ -569,6 +569,23 @@ def _xy_data(x, y):
     return X, Y, vec
 
 
+# (the most data sites times rows of values spline and pchip set up slopes for, one site at a
+# time, and the most n^3 times solves, for n sites, of the spline's dense systems)
+_CUBIC_SETUP_MAX = 1_000_000
+_SPLINE_SOLVE_WORK = 1_000_000_000
+
+
+def _cubic_admit(name, n, dim, setups, solves):
+    """refuse, before any slopes are set up, a spline or pchip whose setup (setups rows of n
+    sites) or dense solves (solves systems of n unknowns) would be too much work"""
+    rows = "%d row%s of values" % (dim, "s" * (dim != 1))
+    if n * setups > _CUBIC_SETUP_MAX:
+        raise _err("%s with %d data sites for %s is not supported in Sagebrush: too much work." % (name, n, rows))
+    if solves and n ** 3 * solves > _SPLINE_SOLVE_WORK:
+        raise _err("%s with %d data sites for %s is not supported in Sagebrush: its dense solve would be "
+                   "too much work." % (name, n, rows))
+
+
 def _spline_pp(x, y):
     """spline: the not-a-knot cubic spline, or clamped when y has two values
     more than x (the end slopes), as MATLAB documents; with 2 or 3 points,
@@ -580,6 +597,10 @@ def _spline_pp(x, y):
     clamped = Y.shape[1] == n + 2
     if not clamped and Y.shape[1] != n:
         raise _err("The number of sites, %d, is incompatible with the number of values, %d." % (n, Y.shape[1]))
+    # (a clamped spline solves once per row, complex or not; a not-a-knot one of more than three
+    # sites once per real row, a complex row being two)
+    parts = dim * (2 if np.iscomplexobj(Y) else 1)
+    _cubic_admit("spline", n, dim, parts, dim if clamped else (parts if n > 3 else 0))
     rows = []
     order = 4
     for di in range(dim):
@@ -635,6 +656,7 @@ def _pchip_pp(x, y):
     if Y.shape[1] != X.size:
         raise _err("The number of sites, %d, is incompatible with the number of values, %d." % (X.size, Y.shape[1]))
     dim = Y.shape[0]
+    _cubic_admit("pchip", X.size, dim, dim * (2 if np.iscomplexobj(Y) else 1), 0)
 
     def slopes(yv):
         # (complex values: the real and imaginary parts' own pchip slopes)
