@@ -1397,13 +1397,21 @@ function menuOf(btn, menu) {
     menu.hidden = !open;
     btn.setAttribute("aria-expanded", String(open));
     if (!open) return;
-    // (fixed, as its button is, in the toolbar that stays in view: it doesn't scroll away from it)
+    place();
+    menu.querySelector("button:not([hidden]), a")?.focus();
+  };
+  // (fixed, as its button is in the toolbar that stays in view: kept under it
+  // as the page scrolls or the window changes, and no taller than the window
+  // leaves, scrolling within itself, astra's UI-CA2-2)
+  const place = () => {
     const r = btn.getBoundingClientRect();
     menu.style.position = "fixed";
     menu.style.top = `${r.bottom + 4}px`;
+    menu.style.maxHeight = `${Math.max(120, innerHeight - r.bottom - 12)}px`;
+    menu.style.overflowY = "auto";
     menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
-    menu.querySelector("button:not([hidden]), a")?.focus();
   };
+  for (const t of ["scroll", "resize"]) addEventListener(t, () => { if (!menu.hidden) place(); }, { passive: true });
   btn.onclick = () => toggle();
   document.addEventListener("pointerdown", (e) => { if (!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target)) toggle(false); });
   menu.addEventListener("keydown", (e) => {
@@ -1691,6 +1699,14 @@ async function searchDocs(query, limit = 20) {
     .slice(0, limit).map(([, e]) => e);
 }
 const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
+// (the results under the search box, which is in the toolbar's middle: moved
+// right as far as needed to be within the window, astra's UI-CA2-1)
+function placeDocList() {
+  docList.style.right = "0px";
+  const r = docList.getBoundingClientRect();
+  if (r.left < 8) docList.style.right = `${r.left - 8}px`;
+}
+addEventListener("resize", () => { if (!docList.hidden) placeDocList(); });
 let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false;
 // (a signature that starts with "(" follows the name; any other, as MATLAB's
 // "M = max(A)", is a whole call form: catalog/SCHEMA.md; its first form here)
@@ -1700,6 +1716,7 @@ function showDocList() {
     ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
     : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${LANG_NAME[nb.mode] ?? nb.mode} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>`;
   docList.hidden = false;
+  placeDocList();
   docInput.setAttribute("aria-expanded", "true");
   if (docHits.length) docInput.setAttribute("aria-activedescendant", "doc" + docSel);
   docList.children[docSel]?.scrollIntoView({ block: "nearest" });
