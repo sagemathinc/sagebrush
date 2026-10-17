@@ -353,7 +353,15 @@ R.loader.load = (name: string) => {
   const parts = name.split(".");
   let dirs: string[];
   if (parts.length > 1) {
-    const parent = R.sysModules.$m.get(parts.slice(0, -1).join("."));
+    const parentName = parts.slice(0, -1).join(".");
+    const parent = R.sysModules.$m.get(parentName);
+    // (a module without __path__ is not a package: no submodules, from
+    // anywhere, and CPython's message; the review's astra HOLD on 40c6b962)
+    if (parent !== undefined && parent !== null && parent.__path__ === undefined) {
+      const e = R.T.ModuleNotFoundError(`No module named '${name}'; '${parentName}' is not a package`);
+      e.name = name;
+      throw e;
+    }
     dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
   } else dirs = R.toArray(sys.path);
   const leaf = parts[parts.length - 1];
@@ -462,6 +470,14 @@ function mountPackage(id: string, name: string): string {
 function packageModule(name: string, main: boolean): [string, string] | null {
   const reg = packageRegistry();
   if (reg === null || !Object.hasOwn(reg.modules, name)) return null;
+  // (a submodule only of a package, as CPython has it: a parent that is a
+  // module without __path__, a user's parent.py say, has no submodules, and
+  // a package's never attaches to it; an empty __path__ is a package's)
+  const dot = name.lastIndexOf(".");
+  if (dot > 0) {
+    const parent = R.sysModules.$m.get(name.slice(0, dot));
+    if (parent === undefined || parent === null || parent.__path__ === undefined) return null;
+  }
   const id = reg.modules[name];
   const at = join(mountPackage(id, name), ...name.split("."));
   for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
