@@ -1801,6 +1801,25 @@ class _SeriesExpr(Expression):
 
 
 class _SymbolicRing:
+    """The symbolic ring, SR: expressions in variables and constants (pi, e,
+    sqrt(2), sin(x), ...), kept exact and simplified on request.
+
+    SR(v) makes a symbolic expression from a number or a string; SR.var('t')
+    makes a variable without binding a name.  x is predefined; var('y')
+    declares more.
+
+    EXAMPLES::
+
+        sage: SR
+        Symbolic Ring
+        sage: SR(1)/3 + x, sin(x).parent()
+        (x + 1/3, Symbolic Ring)
+        sage: SR(pi).n(digits=10), sqrt(SR(8))
+        (3.141592654, 2*sqrt(2))
+        sage: t = SR.var('t'); (t^2 - 1).factor()
+        (t + 1)*(t - 1)
+    """
+
     def __repr__(self):
         return "Symbolic Ring"
 
