@@ -167,3 +167,31 @@ t(lambda: [n for n in dir(builtins) if isinstance(getattr(builtins, n), type) an
 t(lambda: "__class_getitem__" in type.__dict__)
 t(lambda: (type.__module__, type.__qualname__, types.FunctionType.__module__))
 t(lambda: dict[str, int](a=1))
+# (a list argument: its items at the top only; a list holding itself)
+t(lambda: (list[[[int]]], list[[int, [str]]], list[(int, str), ...]))
+x = []
+x.append(x)
+r = types.GenericAlias(list, x)
+t(lambda: r)
+t(lambda: types.GenericAlias(list, (x,)))
+try:
+    r.__parameters__
+except RecursionError as e:
+    print("RecursionError")
+t(lambda: r == types.GenericAlias(list, x))
+t(lambda: hash(list[[int]]))
+# (__mro_entries__ gets the same original bases tuple each time)
+seen_bases = []
+
+
+class E2:
+    def __mro_entries__(self, bases):
+        seen_bases.append(bases)
+        return ()
+
+
+class N5(E2(), E2(), int):
+    pass
+
+
+t(lambda: (len(seen_bases), seen_bases[0] is seen_bases[1], type(seen_bases[0]), len(seen_bases[0]), N5.__bases__))
