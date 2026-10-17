@@ -225,3 +225,22 @@ for lim in [4300, 640, 0]:
             show(lambda: len(json.dumps(v)))
             show(lambda: len(json.dumps({v: 1})))
 sys.set_int_max_str_digits(4300)
+# a subclass whose items() or __iter__ gives no iterable: CPython's messages
+class DN(dict):
+    def items(self): return 5
+class DI(dict):
+    def items(self): return iter([("a", 1)])
+class LN(list):
+    def __iter__(self): return 5
+class LR(list):
+    def __iter__(self): raise TypeError("mine")
+class LV(list):
+    def __iter__(self): raise ValueError("mine")
+class TI(tuple):
+    def __iter__(self): return iter([7, 8])
+class LL(list):
+    def __iter__(self): return [3]
+class LA(list):
+    def __iter__(self): raise AttributeError("mine")
+for o in [DN(a=1), DI(b=2), LN([1]), LR([1]), LV([1]), TI((1,)), [LN()], LL([1]), LA([1])]:
+    show(lambda: json.dumps(o))
