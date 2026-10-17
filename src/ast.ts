@@ -84,7 +84,9 @@ export type Stmt =
   | { k: "AugAssign"; line: number; target: Expr; op: string; value: Expr }
   // (simple: the target is a name, not in parentheses: only then is the
   // name annotated, and bound in a function by a bare annotation)
-  | { k: "AnnAssign"; line: number; target: Expr; value: Expr | null; simple: boolean }
+  // (stringized: under `from __future__ import annotations`, the annotation
+  // a str constant, its source as ast_unparse writes it)
+  | { k: "AnnAssign"; line: number; target: Expr; value: Expr | null; simple: boolean; annotation: Expr; stringized?: boolean }
   | { k: "Return"; line: number; value: Expr | null }
   | { k: "If"; line: number; test: Expr; body: Stmt[]; orelse: Stmt[] }
   | { k: "While"; line: number; test: Expr; body: Stmt[]; orelse: Stmt[] }
@@ -92,7 +94,9 @@ export type Stmt =
   | { k: "Break"; line: number }
   | { k: "Continue"; line: number }
   | { k: "Pass"; line: number }
-  | { k: "FunctionDef"; line: number; name: string; args: Params; body: Stmt[]; decorators: Expr[]; isAsync?: boolean }
+  // (annotations: the parameters' and the return's, in CPython's order, by
+  // name; evaluated only when the function's __annotate__ is called)
+  | { k: "FunctionDef"; line: number; name: string; args: Params; body: Stmt[]; decorators: Expr[]; isAsync?: boolean; annotations?: [string, Expr][] }
   | { k: "ClassDef"; line: number; name: string; bases: Expr[]; keywords: Keyword[]; body: Stmt[]; decorators: Expr[] }
   | { k: "Import"; line: number; names: Alias[] }
   | { k: "ImportFrom"; line: number; module: string; level: number; names: Alias[] }

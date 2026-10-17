@@ -7,6 +7,7 @@ import * as A from "./ast";
 import { parse as pyparse, PegenError } from "../pyparse/src/index";
 import { PySingleton } from "../pyparse/src/helpers";
 import { PyComplex } from "../pyparse/src/pegen";
+import { unparse, UnparseUnsupported } from "./unparse";
 
 export class PySyntaxError extends Error {
   constructor(
@@ -193,6 +194,85 @@ class Convert {
     throw new PySyntaxError(`${what} is not supported yet`, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
   }
 
+  // `from __future__ import annotations`: an annotation is then the str of
+  // its source, as CPython's ast_unparse writes it, never evaluated
+  futureAnnotations = false;
+  annot(n: any): A.Expr {
+    if (!this.futureAnnotations) return this.expr(n);
+    this.checkStringized(n, strScope("annot", null));
+    let v: string;
+    try {
+      v = unparse(n);
+    } catch (e) {
+      if (!(e instanceof UnparseUnsupported)) throw e;
+      return this.unsupported(n, `an annotation with ${e.message} under from __future__ import annotations`);
+    }
+    return { k: "Const", line: n.lineno ?? 1, value: { t: "str", v } };
+  }
+  // A stringized annotation is still checked as CPython's symtable checks it,
+  // in an annotation block that binds nothing. The scope an expression is
+  // in: the annotation's own ("annot"), a lambda's, or a comprehension's
+  // (its kind, the iteration variables bound so far and its walrus targets,
+  // CPython's DEF_COMP_ITER and named-expression marks); each scope's count
+  // of comprehension iterables being visited (ste_comp_iter_expr)
+  private checkStringized(n: any, sc: StrScope) {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach((x) => this.checkStringized(x, sc));
+    const err = (msg: string): never => {
+      const l = n.lineno ?? 1;
+      throw new PySyntaxError(msg, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
+    };
+    const COMP: Record<string, string> = { ListComp: "list comprehension", SetComp: "set comprehension", DictComp: "dict comprehension", GeneratorExp: "generator expression" };
+    const t = n._type;
+    if (t === "NamedExpr") {
+      if (sc.kind === "annot") err("named expression cannot be used within an annotation");
+      if (sc.iter > 0) err("assignment expression cannot be used in a comprehension iterable expression");
+      const id = n.target.id;
+      for (let c: StrScope | null = sc; c !== null && c.kind in COMP; c = c.parent) {
+        if (c.iterVars.has(id)) err(`assignment expression cannot rebind comprehension iteration variable '${id}'`);
+        c.walrus.add(id);
+      }
+    }
+    if (t === "Yield" || t === "YieldFrom") {
+      if (sc.kind === "annot") err("yield expression cannot be used within an annotation");
+      if (sc.kind !== "lambda") err(`'yield' inside ${COMP[sc.kind]}`);
+    }
+    if (t === "Await") {
+      if (sc.kind === "annot") err("await expression cannot be used within an annotation");
+      if (sc.kind === "lambda") err("'await' outside async function");
+      if (sc.kind !== "GeneratorExp") err("asynchronous comprehension outside of an asynchronous function");
+    }
+    if (t === "Lambda") {
+      this.checkStringized(n.args, sc);
+      return this.checkStringized(n.body, strScope("lambda", null, sc.iter));
+    }
+    if (t in COMP) {
+      // (the first iterable is visited in the enclosing scope, then each
+      // generator's target, iterable and conditions in the comprehension's,
+      // its element last)
+      const iterIn = (x: any, s: StrScope) => {
+        s.iter++;
+        this.checkStringized(x, s);
+        s.iter--;
+      };
+      iterIn(n.generators[0].iter, sc);
+      if (t !== "GeneratorExp" && n.generators.some((g: any) => g.is_async)) err("asynchronous comprehension outside of an asynchronous function");
+      const cs = strScope(t, sc, sc.iter);
+      n.generators.forEach((g: any, i: number) => {
+        for (const id of strTargetNames(g.target)) {
+          if (cs.walrus.has(id)) err(`comprehension inner loop cannot rebind assignment expression target '${id}'`);
+          cs.iterVars.add(id);
+        }
+        this.checkStringized(g.target, cs);
+        if (i) iterIn(g.iter, cs);
+        this.checkStringized(g.ifs, cs);
+      });
+      // (a dict comprehension's value before its key, as CPython's)
+      return this.checkStringized(t === "DictComp" ? [n.value, n.key] : n.elt, cs);
+    }
+    for (const k in n) if (k !== "_type") this.checkStringized(n[k], sc);
+  }
+
   // Whether the innermost function is an `async def` (await, async for and
   // async with are only allowed there), and a counter for desugaring temps.
   private inAsync = false;
@@ -336,7 +416,7 @@ class Convert {
       case "AugAssign":
         return { k: "AugAssign", line, target: this.expr(s.target), op: this.binop(s.op._type), value: this.expr(s.value) };
       case "AnnAssign":
-        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple };
+        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple, annotation: this.annot(s.annotation), stringized: this.futureAnnotations };
       case "Return":
         return { k: "Return", line, value: s.value ? this.expr(s.value) : null };
       case "If":
@@ -353,7 +433,7 @@ class Convert {
         return { k: "Pass", line };
       case "FunctionDef":
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)) };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), annotations: this.annotations(s) };
       case "ClassDef": {
         if (s.type_params.length) this.unsupported(s, "type parameters");
         return {
@@ -364,7 +444,12 @@ class Convert {
       case "Import":
         return { k: "Import", line, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ? this.m(a.asname) : this.m(a.name) !== a.name ? this.m(a.name) : null })) };
       case "ImportFrom":
-        if (s.module === "__future__") return null;
+        // (a future import changes the compiler: annotations is honoured,
+        // as strings; the others are Python 3's behaviour already)
+        if (s.module === "__future__") {
+          if (s.names.some((a: any) => a.name === "annotations")) this.futureAnnotations = true;
+          return null;
+        }
         return { k: "ImportFrom", line, module: s.module ?? "", level: s.level ?? 0, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ? this.m(a.asname) : this.m(a.name) !== a.name ? this.m(a.name) : null })) };
       case "Global":
         return { k: "Global", line, names: s.names.map((n: string) => this.m(n)) };
@@ -386,7 +471,7 @@ class Convert {
         return { k: "Delete", line, targets: s.targets.map((t: any) => this.expr(t)) };
       case "AsyncFunctionDef":
         if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true, annotations: this.annotations(s) };
       case "AsyncFor":
         return this.asyncFor(s);
       case "AsyncWith":
@@ -598,6 +683,24 @@ class Convert {
     return { arg: k.arg ?? null, value: this.expr(k.value) };
   }
 
+  // A def's annotations, in CPython's order: the parameters after the
+  // positional-only ones, the positional-only ones, *args, the keyword-only
+  // ones, **kwargs, the return (names mangled, as its keys are)
+  annotations(s: any): [string, A.Expr][] {
+    const a = s.args;
+    const out: [string, A.Expr][] = [];
+    const add = (p: any) => {
+      if (p && p.annotation) out.push([this.m(p.arg), this.annot(p.annotation)]);
+    };
+    a.args.forEach(add);
+    a.posonlyargs.forEach(add);
+    add(a.vararg);
+    a.kwonlyargs.forEach(add);
+    add(a.kwarg);
+    if (s.returns) out.push(["return", this.annot(s.returns)]);
+    return out;
+  }
+
   params(a: any): A.Params {
     const pos = [...a.posonlyargs, ...a.args];
     const nd = a.defaults.length;
@@ -724,4 +827,18 @@ class Convert {
         this.unsupported(e, e._type);
     }
   }
+}
+
+// (frontend.ts checkStringized: a scope of a stringized annotation)
+interface StrScope { kind: string; parent: StrScope | null; iter: number; iterVars: Set<string>; walrus: Set<string> }
+// (a new scope inside a comprehension iterable is in it too: CPython's
+// symtable_enter_block copies ste_comp_iter_expr, bpo-37757)
+function strScope(kind: string, parent: StrScope | null, iter = 0): StrScope {
+  return { kind, parent, iter, iterVars: new Set(), walrus: new Set() };
+}
+function strTargetNames(t: any): string[] {
+  if (t._type === "Name") return [t.id];
+  if (t._type === "Tuple" || t._type === "List") return t.elts.flatMap(strTargetNames);
+  if (t._type === "Starred") return strTargetNames(t.value);
+  return [];
 }

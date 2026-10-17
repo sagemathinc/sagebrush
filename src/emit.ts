@@ -2,11 +2,13 @@
 // the shapes of generated code.
 
 import * as A from "./ast";
-import { Scope, resolve, Resolution, SyntaxErr } from "./scope";
+import { Scope, resolve, Resolution, SyntaxErr, implicitClassDict } from "./scope";
 
 const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "truediv", "//": "floordiv", "%": "mod", "**": "pow", "<<": "lshift", ">>": "rshift", "&": "and", "|": "or", "^": "xor", "@": "matmul", "sage/": "sagediv", "sage**": "sagepow" };
 const CMP: Record<string, string> = { "<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne" };
 const UNARY: Record<string, string> = { "-": "neg", "+": "pos", "~": "invert" };
+// an __annotate__'s format parameter: a JS name no source name compiles to
+const ANNOT_FORMAT = "$afmt";
 
 const REUSING = new Set(["add", "sub", "mul", "truediv"]);
 const FRESH_OPS = new Set(["add", "sub", "mul", "truediv", "floordiv", "mod", "pow"]);
@@ -35,6 +37,10 @@ class Fn {
   assigned = new Set<string>();
   buf: Line[] = [];
   loops: { label: string | null }[] = [];
+  // a module's or class body's annotated names: each statement's index, and
+  // how one is marked executed (the module's __conditional_annotations__,
+  // or the class body's own set)
+  annots: { index: Map<A.Stmt, number>; mark: (i: number) => string } | null = null;
   constructor(
     public scope: Scope,
     public parent: Fn | null,
@@ -234,6 +240,50 @@ export class Emitter {
         // (nonlocal __class__)
         return `${this.cellOf(r.scope)}.v = ${value};`;
     }
+  }
+
+  // A lazy __annotate__(format, /) for `entries` (CPython 3.14's, PEP
+  // 649/749), in annotation scope `as` (src/scope.ts): its own JS function
+  // inside this one, its names resolved as CPython's annotation scope's (an
+  // enclosing function's locals as closures, the globals as a function's,
+  // a class's namespace first); an entry with a gate only if that is true
+  // (an annotated statement executed). Returns the temp holding it.
+  // (a function's is named for it: f.__annotate__, as CPython 3.14.8's; a
+  // class body's or module's for the scope)
+  annotateFn(as: Scope, entries: { key: string; expr: A.Expr; gate: string | null }[], owner: string | null = null): string {
+    const s = this.fn.scope;
+    const qual = owner !== null ? `${owner}.__annotate__` : (s.kind === "module" ? "" : s.kind === "function" ? `${s.qualname}.<locals>.` : `${s.qualname}.`) + "__annotate__";
+    const line = this.line;
+    const fmt = ANNOT_FORMAT;
+    // (a class's: its __classdict__, the class body's one cell's dict)
+    const cd = implicitClassDict(as) ? (as.parent!.classDictName ??= `$cd${this.cells++}`) : null;
+    const { lines, decls } = this.nested(as, "__annotate__$", null, [], () => {
+      this.w(`R.annotateFormat(${fmt});`);
+      if (cd !== null) this.w(`const ${js("__classdict__")} = R.classDict(${cd});`);
+      this.w("const $d = newDict();");
+      for (const e of entries) {
+        this.line = e.expr.line;
+        const set = `dictSet($d, ${q(e.key)}, ${this.ex(e.expr)});`;
+        this.w(e.gate === null ? set : `if (${e.gate}) ${set}`);
+      }
+      this.w("return $d;");
+    });
+    this.line = line;
+    const t = this.temp();
+    this.w(`${t} = defn(function __annotate__$(${fmt}) {`);
+    this.indent++;
+    if (decls.length) this.w(`let ${decls.join(", ")};`);
+    this.indent--;
+    this.splice(lines);
+    this.w(`}, "__annotate__", ${q(qual)}, $G.__name__, null, null, R.annotateSig, null, $g);`);
+    return t;
+  }
+
+  // (a stringized annotation stored as it executes: __annotations__[name] =
+  // its string, the name looked up as the body looks it up)
+  futureMark(index: Map<A.Stmt, number>, i: number): string {
+    const st = [...index].find(([, j]) => j === i)![0] as any;
+    return `setitem(${this.load("__annotations__")}, ${q(st.target.id)}, ${q(st.annotation.value.v)});`;
   }
 
   // A temp the front end made ("$" names: match's subject and captures) in
@@ -498,7 +548,15 @@ export class Emitter {
       if (scope.kind === "module") return "R.moduleLocals($g)";
       if (scope.kind === "class") return "R.classLocals($ns)";
       const ls = [...scope.bound].filter((x) => !scope.globals.has(x));
-      return `R.localsDict(${JSON.stringify(ls)}, [${ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x))).join(", ")}])`;
+      const vs = ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x)));
+      // (an annotation scope's: its format parameter, and in a class the
+      // class's namespace, __classdict__, as CPython's)
+      if (scope.annotation) {
+        const cd = implicitClassDict(scope);
+        ls.unshift(...(cd ? ["format", "__classdict__"] : ["format"]));
+        vs.unshift(...(cd ? [ANNOT_FORMAT, js("__classdict__")] : [ANNOT_FORMAT]));
+      }
+      return `R.localsDict(${JSON.stringify(ls)}, [${vs.join(", ")}])`;
     };
     if (f.id === "locals" || f.id === "vars") return n === 0 ? localsExpr() : null;
     if (f.id === "dir") return `sortedKeys(${localsExpr()})`;
@@ -759,6 +817,9 @@ export class Emitter {
         return this.augAssign(st);
       case "AnnAssign":
         if (st.value !== null) this.w(this.assignCode(st.target, this.valueFirst(st.target, st.value)));
+        // (an annotated name of a module or class body: marked executed, its
+        // annotation in the __annotate__ only then)
+        if (this.fn.annots?.index.has(st)) this.w(this.fn.annots.mark(this.fn.annots.index.get(st)!));
         // (alone, one of an attribute or an item evaluates the object and the
         // index, and fetches and stores nothing: REACT-44C5-3)
         else if (st.target.k === "Attribute") this.w(`void (${this.ex(st.target.value)});`);
@@ -1021,6 +1082,7 @@ export class Emitter {
     this.line = st.line;
     this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc}, $g);`);
     this.w(`${f}.$line = ${st.line};`);
+    if (st.annotations?.length) this.w(`${f}.$annotate = ${this.annotateFn(this.fn.scope.child(st.annotations), st.annotations.map(([key, expr]) => ({ key, expr, gate: null })), scope.qualname)};`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
   }
 
@@ -1043,7 +1105,26 @@ export class Emitter {
       const body = st.body;
       this.w(`$ns.set("__module__", R.classModuleIn($ns, $G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
       if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(body[0].value.value.v)});`);
+      // (annotated names: those executed, in the body's own set, then its
+      // __annotate__, the class's __annotate_func__, at the end)
+      const index = annotatedIn(body);
+      // (under `from __future__ import annotations`: __annotations__ made
+      // first and each executed annotation's string stored in it, as
+      // CPython's; no __annotate__)
+      const future = [...index.keys()].some((s) => (s as any).stringized);
+      const seen = index.size && !future ? this.classTemp("$ca") : "";
+      if (future) {
+        this.w(`if ($ns.get("__annotations__") === undefined) $ns.set("__annotations__", newDict());`);
+        this.fn.annots = { index, mark: (i) => this.futureMark(index, i) };
+      } else if (index.size) {
+        this.w(`${seen} = new Set();`);
+        this.fn.annots = { index, mark: (i) => `${seen}.add(${i});` };
+      }
       for (const s of body) this.stmt(s);
+      if (index.size && !future) {
+        const entries = [...index].map(([s, i]) => ({ key: ((s as any).target as any).id as string, expr: (s as any).annotation as A.Expr, gate: `${seen}.has(${i})` }));
+        this.w(`$ns.set("__annotate__", ${this.annotateFn(scope.annotScope!, entries)});`);
+      }
     });
     this.line = st.line;
     const c = this.temp();
@@ -1051,14 +1132,17 @@ export class Emitter {
     this.indent++;
     // the class cell, when its functions use __class__ or super()
     const cell = scope.cellName;
-    this.w(`const $ns = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});${cell ? ` const ${cell} = newCell();` : ""}`);
+    const cdc = scope.classDictName;
+    this.w(`const $ns = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});${cell ? ` const ${cell} = newCell();` : ""}${cdc ? ` const ${cdc} = R.classDictCell($ns);` : ""}`);
     if (decls.length) this.w(`let ${decls.join(", ")};`);
     this.indent--;
     this.splice(lines);
     this.line = st.line;
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
-    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc});`);
+    if (scope.classDictName) this.w(`$ns.set("__classdictcell__", ${scope.classDictName});`);
+    const made = `classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc})`;
+    this.w(`return ${made};`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
@@ -1173,7 +1257,22 @@ export class Emitter {
       if (body.length !== 1 || body[0].k !== "Expr") this.fail("invalid syntax", body[0]?.line ?? 1);
       this.line = body[0].line;
       this.w(`return ${this.ex((body[0] as Extract<A.Stmt, { k: "Expr" }>).value)};`);
-    } else for (const s of body) this.stmt(s);
+    } else {
+      // (a module's annotated names, as CPython 3.14's: its __annotate__
+      // first, and __conditional_annotations__, the indexes of those
+      // executed, read when __annotate__ is called)
+      const index = annotatedIn(body);
+      if ([...index.keys()].some((s) => (s as any).stringized)) {
+        this.w(`R.setupAnnotations($g);`);
+        this.fn.annots = { index, mark: (i) => this.futureMark(index, i) };
+      } else if (index.size) {
+        const entries = [...index].map(([s, i]) => ({ key: ((s as any).target as any).id as string, expr: (s as any).annotation as A.Expr, gate: `R.annotIn($g.__conditional_annotations__, ${i})` }));
+        this.w(`$g.__annotate__ = ${this.annotateFn(this.fn.scope.annotScope!, entries)};`);
+        this.w(`$g.__conditional_annotations__ = newSet();`);
+        this.fn.annots = { index, mark: (i) => `setAdd($g.__conditional_annotations__, ${i});` };
+      }
+      for (const s of body) this.stmt(s);
+    }
     const head = [
       "(function module$$($g, R) {",
       '"use strict";',
@@ -1195,6 +1294,39 @@ export class Emitter {
     return { code: out.join("\n"), lineMap };
   }
 
+}
+
+// A module's or class body's annotated names (`x: int`, a name not in
+// parentheses), its own statements' and those of its compound statements,
+// not of functions or classes in it: each with its index, in source order
+function annotatedIn(body: A.Stmt[]): Map<A.Stmt, number> {
+  const out = new Map<A.Stmt, number>();
+  const walk = (ss: A.Stmt[]): void => {
+    for (const s of ss) {
+      switch (s.k) {
+        case "AnnAssign":
+          if (s.target.k === "Name" && s.simple) out.set(s, out.size);
+          break;
+        case "If":
+        case "While":
+        case "For":
+          walk(s.body);
+          walk(s.orelse);
+          break;
+        case "Try":
+          walk(s.body);
+          s.handlers.forEach((h) => walk(h.body));
+          walk(s.orelse);
+          walk(s.finalbody);
+          break;
+        case "With":
+          walk(s.body);
+          break;
+      }
+    }
+  };
+  walk(body);
+  return out;
 }
 
 function* allScopes(s: Scope): Generator<Scope> {

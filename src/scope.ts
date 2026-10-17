@@ -30,6 +30,15 @@ export class Scope {
   // compiled; each class its own name, so an inner class's cell never hides
   // an outer one's)
   cellName: string | null = null;
+  // the JS name of this class's __classdict__ cell, once an annotation
+  // scope of the class sees it (src/emit.ts annotateFn)
+  classDictName: string | null = null;
+  // a lazy annotation's own scope (CPython 3.14's annotation scope): a
+  // function of one parameter, format; in a class, the class's namespace
+  // seen first (its __classdict__); and a module's or class body's one
+  // annotation scope, for its annotated names
+  annotation = false;
+  annotScope: Scope | null = null;
   children = new Map<object, Scope>();
   constructor(
     public kind: ScopeKind,
@@ -61,13 +70,20 @@ export function resolve(scope: Scope, name: string): Resolution {
     const s = findEnclosing(scope.parent, name);
     return s === null ? { kind: "global" } : { kind: "free", scope: s };
   }
-  if (scope.bound.has(name)) {
+  // (a class binding __classdict__ itself: its annotations' name is the
+  // namespace's entry first, the implicit cell after, as CPython's
+  // LOAD_FROM_DICT_OR_DEREF; its locals() and lambdas see the cell)
+  if (name === "__classdict__" && implicitClassDict(scope) && scope.parent!.bound.has(name)) return { kind: "class", outer: { kind: "local" } };
+  if (bindsName(scope, name)) {
     // A name bound in a class body is looked up in the class namespace and
     // then the globals, never in enclosing functions (LOAD_NAME).
     if (scope.kind === "class") return { kind: "class", outer: { kind: "global" } };
     return { kind: "local" };
   }
-  if (scope.kind === "class") return { kind: "class", outer: resolveFree(scope.parent!, name) };
+  // (a class's annotation scope: a name the class declares global is the
+  // globals', not looked up in its namespace, as CPython's)
+  if (scope.annotation && scope.parent!.kind === "class" && scope.parent!.globals.has(name)) return { kind: "global" };
+  if (scope.kind === "class" || (scope.annotation && scope.parent!.kind === "class")) return { kind: "class", outer: resolveFree(scope.parent!, name) };
   return resolveFree(scope.parent!, name);
 }
 
@@ -89,11 +105,22 @@ function resolveFree(scope: Scope, name: string): Resolution {
   return s === null ? { kind: "global" } : { kind: "free", scope: s };
 }
 
+// Whether scope s binds name: a class's annotation scope binds
+// __classdict__ too (CPython's implicit cell of the class's namespace,
+// which its lambdas and comprehensions capture), unless the class
+// declares that name global
+export function bindsName(s: Scope, name: string): boolean {
+  return s.bound.has(name) || (name === "__classdict__" && implicitClassDict(s));
+}
+export function implicitClassDict(s: Scope): boolean {
+  return s.annotation && s.parent!.kind === "class" && !s.parent!.globals.has("__classdict__");
+}
+
 function findEnclosing(scope: Scope | null, name: string): Scope | null {
   for (let s = scope; s !== null; s = s.parent) {
     if (s.kind === "class") continue;
     if (s.kind === "module" || s.globals.has(name)) return null;
-    if (s.bound.has(name) || s.nonlocals.has(name)) {
+    if (bindsName(s, name) || s.nonlocals.has(name)) {
       if (s.nonlocals.has(name)) return findEnclosing(s.parent, name);
       return s;
     }
@@ -211,6 +238,13 @@ class Collector {
       case "AnnAssign": {
         if (st.value) this.expr(st.value);
         const t = st.target;
+        // (a module's or class's annotation of a name: compiled into its
+        // lazy __annotate__, in the body's annotation scope; any other one,
+        // never evaluated, checked in a scope of its own, as CPython's)
+        if (t.k === "Name" && st.simple && (this.s.kind === "module" || this.s.kind === "class")) {
+          this.s.annotScope ??= this.annotationScope({});
+          this.annotation(this.s.annotScope, st.annotation);
+        } else this.annotation(this.annotationScope(st), st.annotation);
         // `(x): int`, not simple: x is neither annotated nor (without a value) bound
         if (t.k !== "Name" || !st.simple) {
           if (st.value || t.k !== "Name") this.bindTarget(t);
@@ -241,6 +275,12 @@ class Collector {
       case "FunctionDef":
         st.decorators.forEach((d) => this.expr(d));
         this.params(st.args);
+        // (its annotations, compiled into its lazy __annotate__ in their
+        // own scope, keyed by the list)
+        if (st.annotations?.length) {
+          const as = this.annotationScope(st.annotations);
+          st.annotations.forEach(([, e]) => this.annotation(as, e));
+        }
         this.bind(st.name);
         return this.func(st, st.name, st.args, () => {
           if (st.isAsync) this.s.isAsync = this.s.isGenerator = true;
@@ -379,10 +419,12 @@ class Collector {
       case "Starred":
         return this.expr(e.value);
       case "Await":
+        if (this.s.annotation) throw new SyntaxErr("await expression cannot be used within an annotation", e.line);
         if (!this.s.isAsync) throw new SyntaxErr(this.s.kind === "comp" ? "await in comprehensions is not supported yet" : "'await' outside async function", e.line);
         return this.expr(e.value);
       case "Yield":
       case "YieldFrom":
+        if (this.s.annotation) throw new SyntaxErr("yield expression cannot be used within an annotation", e.line);
         if (this.s.kind !== "function") throw new SyntaxErr("'yield' outside function", e.line);
         if (this.s.isAsync) throw new SyntaxErr(e.k === "YieldFrom" ? "'yield from' inside async function" : "async generators are not supported yet", e.line);
         this.s.isGenerator = true;
@@ -397,6 +439,7 @@ class Collector {
           if (s.iterVars.has(e.target)) throw new SyntaxErr(`assignment expression cannot rebind comprehension iteration variable '${e.target}'`, e.line);
           s = s.parent!;
         }
+        if (s.annotation) throw new SyntaxErr("named expression cannot be used within an annotation", e.line);
         if (s !== this.s) {
           if (s.kind === "class") throw new SyntaxErr("assignment expression within a comprehension cannot be used in a class body", e.line);
           for (let c: Scope = this.s; c !== s; c = c.parent!) c.nonlocals.add(e.target);
@@ -406,6 +449,27 @@ class Collector {
         if (s === this.s || s.kind !== "module") this.mark(s, e.target, BOUND);
         return this.expr(e.value);
       }
+    }
+  }
+
+  // A new annotation scope here. Its one parameter, format, binds no source
+  // name (an annotation's `format` is the enclosing scopes', as CPython's):
+  // src/emit.ts gives it a JS name of its own, ANNOT_FORMAT, which only
+  // its locals() shows
+  annotationScope(key: object): Scope {
+    const sc = this.newScope("function", "__annotate__", key);
+    sc.annotation = true;
+    return sc;
+  }
+  // An annotation's expression, in annotation scope `as`: its names that
+  // scope's uses, not this one's
+  annotation(as: Scope, e: A.Expr) {
+    const saved = this.s;
+    this.s = as;
+    try {
+      this.expr(e);
+    } finally {
+      this.s = saved;
     }
   }
 

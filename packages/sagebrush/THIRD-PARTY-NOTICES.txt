@@ -80,6 +80,9 @@ Copyright (c) 2001 Python Software Foundation. See
   `cmath_exp_impl`, the trigonometric, hyperbolic and inverse functions,
   `cmath_rect_impl`, `cmath_polar_impl`), with `_Py_c_quot` and `_Py_c_abs`
   (`Objects/complexobject.c`).
+- `src/unparse.ts`: an expression as text, ported from CPython 3.14's
+  `Python/ast_unparse.c` (its precedence levels and the spelling of each
+  node), for the annotations of `from __future__ import annotations`.
 
 ### NumPy (BSD 3-Clause)
 
