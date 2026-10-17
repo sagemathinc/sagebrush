@@ -159,11 +159,13 @@ class NumberField_absolute:
     # matrices over K by exact Gaussian elimination, as over QQbar
     _is_generic_field = True
 
-    def __init__(self, f, name, embedding_repr=None):
+    def __init__(self, f, name, embedding_repr=None, irreducible=False):
+        # (irreducible: known to be, not factored again, a cyclotomic
+        # polynomial in Magma mode)
         self._f, self._var = _int_coeffs(f)
         if len(self._f) < 2:
             raise ValueError("the defining polynomial must have degree at least 1")
-        if not _nf_irreducible(tuple(self._f)):
+        if not irreducible and not _nf_irreducible(tuple(self._f)):
             raise ValueError("defining polynomial (%s) must be irreducible" % _repr_poly(self._f, self._var))
         self._name = name
         self._n = len(self._f) - 1

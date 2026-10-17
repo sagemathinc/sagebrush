@@ -1713,3 +1713,45 @@ test("a multiset printed one element to a line shows each element's multiplicity
   const ok = run(["P<t>:=PolynomialRing(Rationals()); K<a>:=NumberField(t^2-2); {* a, a, a+1 *}; S:={* a, a *}; #S;", "{* [1,2], [1,2], [3] *};", "M:=Matrix(Integers(),2,2,[1,2,3,4]); {* M, M *}; [M, M];", "P<x>:=PolynomialRing(Integers()); {* x, x, x+1 *};", "P<t>:=PolynomialRing(Rationals()); K<a>:=NumberField(t^2-2); [ {* a, a *} ];", "{* <1,2>, <1,2> *}; {* 3, 3, 1 *};"].join("\n"));
   assert.equal(ok, "{*\n    a^^2,\n    a + 1\n*}\n2\n{*\n    [ 1, 2 ]^^2,\n    [ 3 ]\n*}\n{*\n    [1 2]\n    [3 4]^^2\n*}\n[\n    [1 2]\n    [3 4],\n\n    [1 2]\n    [3 4]\n]\n{*\n    x^^2,\n    x + 1\n*}\n[\n    {*\n        a^^2\n    *}\n]\n{* <1, 2>^^2 *}\n{* 1, 3^^2 *}\nend\n", ok);
 });
+
+test("BaseRing, CoefficientRing, CyclotomicField and a number field's Basis, as Magma's", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's for these lines; a cyclotomic field
+  // is one for each n, so a name given to it holds for every handle)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8", timeout: 60000 }).stdout as string;
+  const ok = run(["BaseRing(PolynomialRing(Integers())); BaseRing(PolynomialRing(GF(7))); BaseRing(Rationals());", "P<x>:=PolynomialRing(Rationals()); K<a>:=NumberField(x^3-2); BaseRing(K); CoefficientRing(K);", "BaseRing(Matrix(Integers(),2,3,[1..6])); BaseRing(MaximalOrder(QuadraticField(5))); CoefficientRing(Matrix(GF(5),2,2,[1,2,3,4]));", "P<x>:=PolynomialRing(Integers()); BaseRing(x^2+1); BaseRing(Parent(Matrix(Rationals(),2,2,[1,2,3,4])));", "K<z>:=CyclotomicField(5); K; z^5; z^4; Type(z); Type(K); BaseRing(K);", "K:=CyclotomicField(1); K; K.1; Degree(K); K:=CyclotomicField(2); K.1; Basis(K);", "K<z>:=CyclotomicField(5); L<w>:=CyclotomicField(5); z; K eq L;", "K:=CyclotomicField(9); K.1^3; K:=CyclotomicField(12); K; K.1^4;", "K<z>:=CyclotomicField(5); z^-1; (1+z)^-1; 1/2 + z; Norm(z+1); Eltseq(z^2+3);", "K<z>:=CyclotomicField(5); Basis(K);", "P<x>:=PolynomialRing(Rationals()); K<a>:=NumberField(x^3-2); Basis(K); Eltseq(a^2/3+1);", "P<x>:=PolynomialRing(Rationals()); K:=NumberField(x^3-2); Basis(K); K.1^2+1;", "K:=QuadraticField(5); Basis(K); [K.1, K.1+1]; Eltseq(K.1+1/2);", "K<a>:=QuadraticField(-3); Basis(K);", "K<z>:=CyclotomicField(4); z^2; [z, 1/2];"].join("\n"));
+  assert.equal(ok, "Integer Ring\nFinite field of size 7\nRational Field\nRational Field\nRational Field\nInteger Ring\nInteger Ring\nFinite field of size 5\nInteger Ring\nRational Field\nCyclotomic Field of order 5 and degree 4\n1\n-z^3 - z^2 - z - 1\nFldCycElt\nFldCyc\nRational Field\nCyclotomic Field of order 1 and degree 1\n1\n1\n-1\n[\n    1\n]\nw\ntrue\nzeta_9^3\nCyclotomic Field of order 12 and degree 4\nzeta_12^2 - 1\n-z^3 - z^2 - z - 1\n-z^3 - z\n1/2*(2*z + 1)\n1\n[ 3, 0, 1, 0 ]\n[\n    1,\n    z,\n    z^2,\n    z^3\n]\n[\n    1,\n    a,\n    a^2\n]\n[ 1, 0, 1/3 ]\n[\n    1,\n    K.1,\n    K.1^2\n]\nK.1^2 + 1\n[ 1, K.1 ]\n[ K.1, K.1 + 1 ]\n[ 1/2, 1 ]\n[ 1, a ]\n-1\n[\n    z,\n    1/2\n]\nend\n", ok);
+  // (Magma's errors, each line on its own)
+  const P = "P<t>:=PolynomialRing(Rationals()); L<b>:=NumberField(t^2-3); K<z>:=CyclotomicField(5); ";
+  const errs: [string, string][] = [
+    ["BaseRing(GF(9));", "Runtime error in 'BaseRing': Bad argument types Argument types given: FldFin"],
+    ["BaseRing(Integers(6));", "Runtime error in 'BaseRing': Bad argument types Argument types given: RngIntRes"],
+    ["BaseRing(3);", "Runtime error in 'BaseRing': Bad argument types Argument types given: RngIntElt"],
+    ["CoefficientRing(RealField(10));", "Runtime error in 'CoefficientRing': Bad argument types Argument types given: FldRe"],
+    [P + "BaseRing(b);", "Runtime error in 'BaseRing': Bad argument types Argument types given: FldNumElt[FldRat]"],
+    [P + "CoefficientRing(z);", "Runtime error in 'CoefficientRing': Bad argument types Argument types given: FldCycElt[FldRat]"],
+    ["CyclotomicField(0);", "Runtime error in 'CyclotomicField': Argument 1 (0) is not small and positive"],
+    ["CyclotomicField(2^30);", "Runtime error in 'CyclotomicField': Argument 1 (1073741824) is not small and positive"],
+    ["CyclotomicField(1/2);", "Runtime error in 'CyclotomicField': Bad argument types Argument types given: FldRatElt"],
+    ["Basis(3);", "Runtime error in 'Basis': Bad argument types Argument types given: RngIntElt"],
+    [P + "z+b;", "Runtime error in '+': Bad argument types Argument types given: FldCycElt[FldRat], FldNumElt[FldRat]"],
+    [P + "[z, b];", "Runtime error in [ ... ]: No valid universe containing all elements"],
+    [P + "z/0;", "Runtime error in '/': Argument 2 is not non-zero"],
+    [P + "z^2 div z;", "Runtime error in 'div': Bad argument types Argument types given: FldCycElt[FldRat], FldCycElt[FldRat]"],
+    [P + "Coefficients(z^2+3);", "Runtime error in 'Coefficients': Bad argument types Argument types given: FldCycElt[FldRat]"],
+    [P + "K!b;", "Runtime error in '!': Illegal coercion LHS: FldCyc RHS: FldNumElt"],
+    // (refused: Magma computes these in a larger cyclotomic field, or a
+    // field beyond the degree bound)
+    ["CyclotomicField(97);", "CyclotomicField of degree more than 24 is not supported yet"],
+    [P + "M<w>:=CyclotomicField(7); z+w;", "of a cyclotomic field's element and an element of another cyclotomic field is not supported yet"],
+    [P + "M<w>:=CyclotomicField(7); [z, w];", "a collection of a cyclotomic field's elements and another cyclotomic field's element is not supported yet"],
+    [P + "M<w>:=CyclotomicField(7); z eq w;", "of a cyclotomic field's element and an element of another cyclotomic field is not supported yet"],
+    ["Basis(MaximalOrder(QuadraticField(5)));", "Basis of a RngQuad is not supported yet"],
+    ["ClassNumber(CyclotomicField(17));", "the class group or units of a cyclotomic field of degree more than 12 are not supported yet"],
+  ];
+  for (const [e, m] of errs) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|ZeroDivision/.test(o), e + " => " + o);
+  }
+});

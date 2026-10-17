@@ -1,12 +1,16 @@
 aInvariants
 AssignNames
+BaseRing
+Basis
 ClassGroup
 ClassNumber
 Codomain
+CoefficientRing
 Conductor
 CremonaReference
 CuspForms
 CuspidalSubspace
+CyclotomicField
 Decomposition
 Denominator
 Dimension
