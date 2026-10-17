@@ -303,9 +303,10 @@ class RealNumber(float):
             if a and name == "__pow__" and type(a[0]).__name__ == "RealNumberMP":
                 # (a power is in the base's field, as Sage: RR(2)^RealField(100)(2))
                 return g(self, _RealField()(a[0]))
-            if a and isinstance(a[0], _Fraction):
+            if a and isinstance(a[0], _Fraction) and name in _RR_Q_OPS:
                 # a rational is converted to RR, as Sage: (float() would
-                # lose one past the doubles, and float + Fraction is a float)
+                # lose one past the doubles, and float + Fraction is a float;
+                # % and // stay Rational's, Sage's remainder)
                 return g(self, _RealField()(a[0]), *a[1:])
             try:
                 r = f(float(self), *a)
@@ -1016,6 +1017,8 @@ def _rr_arith(a, b, op):
     return _sage_real._arith(a, b, op, _rr_mp())
 
 
+# (the operations whose rational operand RealNumber converts to RR)
+_RR_Q_OPS = frozenset(("__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__", "__truediv__", "__rtruediv__", "__pow__", "__rpow__"))
 _RR_EXACT_ZERO_OPS = ("__add__", "__radd__", "__sub__", "__rsub__", "__mod__", "__rmod__")
 _RR_OPS = {"__add__": ("+", False), "__radd__": ("+", True), "__sub__": ("-", False), "__rsub__": ("-", True),
            "__mul__": ("*", False), "__rmul__": ("*", True), "__truediv__": ("/", False), "__rtruediv__": ("/", True)}
