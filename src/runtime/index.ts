@@ -750,6 +750,76 @@ export function classModuleIn(ns: Map<string, any> | Ty.PreparedNs, g: any, b: a
 export function classLocals(ns: Map<string, any> | Ty.PreparedNs): any {
   return ns instanceof Ty.PreparedNs ? ns.m : localsDict([...ns.keys()], [...ns.values()]);
 }
+// A class body's __classdict__, CPython's implicit cell of its annotation
+// scopes: one dict, the body's namespace while it runs (a prepared one's
+// mapping itself), then the class's own dict, as type_new sets the cell;
+// the same object every time it is read
+class ClassMap {
+  // (a dict's store over a class namespace: str keys only, the class's
+  // caches invalidated by each change, as a type's dict through
+  // __classdict__)
+  constructor(public m: Map<string, any>, public cls: any) {}
+  get size(): number {
+    return this.m.size;
+  }
+  keys() {
+    return this.m.keys();
+  }
+  values() {
+    return this.m.values();
+  }
+  entries() {
+    return this.m.entries();
+  }
+  [Symbol.iterator]() {
+    return this.m.entries();
+  }
+  get(k: any): any {
+    return typeof k === "string" ? this.m.get(k) : undefined;
+  }
+  has(k: any): boolean {
+    return typeof k === "string" && this.m.has(k);
+  }
+  set(k: any, v: any): this {
+    if (typeof k !== "string") raise(T.NotImplementedError, "a key other than a str in a class's __classdict__ is not supported yet");
+    this.m.set(k, v);
+    if (this.cls) Obj.bumpVersion(this.cls);
+    return this;
+  }
+  delete(k: any): boolean {
+    const r = typeof k === "string" && this.m.delete(k);
+    if (r && this.cls) Obj.bumpVersion(this.cls);
+    return r;
+  }
+  clear() {
+    this.m.clear();
+    if (this.cls) Obj.bumpVersion(this.cls);
+  }
+}
+export class ClassDictCell {
+  d: any = null;
+  constructor(public ns: Map<string, any> | Ty.PreparedNs) {}
+}
+export const classDictCell = (ns: Map<string, any> | Ty.PreparedNs) => new ClassDictCell(ns);
+function dictOver(m: Map<string, any>, cls: any): any {
+  const d = new Obj.PyDict();
+  (d as any).$m = new ClassMap(m, cls);
+  return d;
+}
+export function classDict(c: ClassDictCell): any {
+  if (c.d === null) c.d = c.ns instanceof Ty.PreparedNs ? c.ns.m : dictOver(c.ns, null);
+  return c.d;
+}
+// (the class made: the cell its dict's, the same dict object when that is
+// the body's namespace; returns the class)
+export function classDictBind(c: ClassDictCell, cls: any): any {
+  if (!Obj.isType(cls)) return cls;
+  const m = cls.$dict;
+  if (c.d !== null && (c.d as any).$m instanceof ClassMap && (c.d as any).$m.m === m) (c.d as any).$m.cls = cls;
+  else c.d = dictOver(m, cls);
+  c.ns = m;
+  return cls;
+}
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any> | Ty.PreparedNs, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
   const orig = (bases as any).$orig;
@@ -1016,6 +1086,9 @@ export const R: any = {
   classModuleIn,
   classLocals,
   setupAnnotations,
+  classDictCell,
+  classDict,
+  classDictBind,
   classModule,
   unboundName,
   execIn,

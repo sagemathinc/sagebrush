@@ -244,7 +244,7 @@ class Convert {
     }
     if (t === "Lambda") {
       this.checkStringized(n.args, sc);
-      return this.checkStringized(n.body, strScope("lambda", null));
+      return this.checkStringized(n.body, strScope("lambda", null, sc.iter));
     }
     if (t in COMP) {
       // (the first iterable is visited in the enclosing scope, then each
@@ -257,7 +257,7 @@ class Convert {
       };
       iterIn(n.generators[0].iter, sc);
       if (t !== "GeneratorExp" && n.generators.some((g: any) => g.is_async)) err("asynchronous comprehension outside of an asynchronous function");
-      const cs = strScope(t, sc);
+      const cs = strScope(t, sc, sc.iter);
       n.generators.forEach((g: any, i: number) => {
         for (const id of strTargetNames(g.target)) {
           if (cs.walrus.has(id)) err(`comprehension inner loop cannot rebind assignment expression target '${id}'`);
@@ -267,7 +267,8 @@ class Convert {
         if (i) iterIn(g.iter, cs);
         this.checkStringized(g.ifs, cs);
       });
-      return this.checkStringized(t === "DictComp" ? [n.key, n.value] : n.elt, cs);
+      // (a dict comprehension's value before its key, as CPython's)
+      return this.checkStringized(t === "DictComp" ? [n.value, n.key] : n.elt, cs);
     }
     for (const k in n) if (k !== "_type") this.checkStringized(n[k], sc);
   }
@@ -830,8 +831,10 @@ class Convert {
 
 // (frontend.ts checkStringized: a scope of a stringized annotation)
 interface StrScope { kind: string; parent: StrScope | null; iter: number; iterVars: Set<string>; walrus: Set<string> }
-function strScope(kind: string, parent: StrScope | null): StrScope {
-  return { kind, parent, iter: 0, iterVars: new Set(), walrus: new Set() };
+// (a new scope inside a comprehension iterable is in it too: CPython's
+// symtable_enter_block copies ste_comp_iter_expr, bpo-37757)
+function strScope(kind: string, parent: StrScope | null, iter = 0): StrScope {
+  return { kind, parent, iter, iterVars: new Set(), walrus: new Set() };
 }
 function strTargetNames(t: any): string[] {
   if (t._type === "Name") return [t.id];

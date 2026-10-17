@@ -30,6 +30,9 @@ export class Scope {
   // compiled; each class its own name, so an inner class's cell never hides
   // an outer one's)
   cellName: string | null = null;
+  // the JS name of this class's __classdict__ cell, once an annotation
+  // scope of the class sees it (src/emit.ts annotateFn)
+  classDictName: string | null = null;
   // a lazy annotation's own scope (CPython 3.14's annotation scope): a
   // function of one parameter, format; in a class, the class's namespace
   // seen first (its __classdict__); and a module's or class body's one
@@ -67,7 +70,11 @@ export function resolve(scope: Scope, name: string): Resolution {
     const s = findEnclosing(scope.parent, name);
     return s === null ? { kind: "global" } : { kind: "free", scope: s };
   }
-  if (scope.bound.has(name)) {
+  // (a class binding __classdict__ itself: its annotations' name is the
+  // namespace's entry first, the implicit cell after, as CPython's
+  // LOAD_FROM_DICT_OR_DEREF; its locals() and lambdas see the cell)
+  if (name === "__classdict__" && implicitClassDict(scope) && scope.parent!.bound.has(name)) return { kind: "class", outer: { kind: "local" } };
+  if (bindsName(scope, name)) {
     // A name bound in a class body is looked up in the class namespace and
     // then the globals, never in enclosing functions (LOAD_NAME).
     if (scope.kind === "class") return { kind: "class", outer: { kind: "global" } };
@@ -98,11 +105,22 @@ function resolveFree(scope: Scope, name: string): Resolution {
   return s === null ? { kind: "global" } : { kind: "free", scope: s };
 }
 
+// Whether scope s binds name: a class's annotation scope binds
+// __classdict__ too (CPython's implicit cell of the class's namespace,
+// which its lambdas and comprehensions capture), unless the class
+// declares that name global
+export function bindsName(s: Scope, name: string): boolean {
+  return s.bound.has(name) || (name === "__classdict__" && implicitClassDict(s));
+}
+export function implicitClassDict(s: Scope): boolean {
+  return s.annotation && s.parent!.kind === "class" && !s.parent!.globals.has("__classdict__");
+}
+
 function findEnclosing(scope: Scope | null, name: string): Scope | null {
   for (let s = scope; s !== null; s = s.parent) {
     if (s.kind === "class") continue;
     if (s.kind === "module" || s.globals.has(name)) return null;
-    if (s.bound.has(name) || s.nonlocals.has(name)) {
+    if (bindsName(s, name) || s.nonlocals.has(name)) {
       if (s.nonlocals.has(name)) return findEnclosing(s.parent, name);
       return s;
     }
