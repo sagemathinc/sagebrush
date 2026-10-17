@@ -33,3 +33,12 @@ export function openDb(name: string, version: number, upgrade: (db: IDBDatabase)
     };
   });
 }
+
+/** `p`, or `fallback` if `p` hasn't settled within `ms`; the timer is cleared
+ * as soon as either wins, so a fast `p` leaves nothing behind (the review's
+ * HARD-030-1: test-idb-within.mjs). */
+export function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((res) => { timer = setTimeout(() => res(fallback), ms); });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}

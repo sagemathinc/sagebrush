@@ -41,14 +41,15 @@ export function siteEngine(base: URL, runner = true): EngineParts {
 
 import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
 import { CACHE_MS, DOC_CAP, ENTRY_MAX, cachedLabel, sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
+import { within } from "./idb-open";
 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
 
-/** How long an interpreter may take to start, or its analyzer to answer,
- * before it is started (asked) again, once (40 s; a test may set less). */
 // (how long a read of the outputs' cache may take before the items run anyway)
 const CACHE_READ_MS = 2000;
+/** How long an interpreter may take to start, or its analyzer to answer,
+ * before it is started (asked) again, once (40 s; a test may set less). */
 const startMs = () => Number((globalThis as any).__sbEngineStartMs) || 40_000;
 /** Whether the kernel is ready within `ms`; `waits` holds its cancel
  * (false at once, its listener and timer gone), for close(), HARD-9BB-1. */
@@ -297,10 +298,7 @@ export class BoardCode {
         // CACHE_READ_MS is taken as empty, and the items run, rather than the
         // board's code never running; an IndexedDB open can stay unanswered
         // for good, web/board/idb-open.ts, test-idb-stall.mjs)
-        const got = await Promise.race([
-          this.cache.get(ns, [...want.keys()]).catch(() => new Map<string, CachedOutputs>()),
-          new Promise<Map<string, CachedOutputs>>((res) => setTimeout(() => res(new Map()), CACHE_READ_MS)),
-        ]);
+        const got = await within(this.cache.get(ns, [...want.keys()]).catch(() => new Map<string, CachedOutputs>()), CACHE_READ_MS, new Map<string, CachedOutputs>());
         for (const [k, e] of got) hits.set(want.get(k)!, e);
       }
       if (hits.size) {

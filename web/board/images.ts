@@ -31,7 +31,8 @@ function db(): Promise<IDBDatabase | null> {
   return (dbp ??= new Promise((resolve) => {
     try {
       // (bounded, web/board/idb-open.ts: one that never opens is no store, as none at all is)
-      openDb(DB, 1, (d) => d.createObjectStore(STORE), () => { dbp = null; }).then(resolve, () => resolve(null));
+      // (one that didn't open: none now, and tried again by a later use)
+      openDb(DB, 1, (d) => d.createObjectStore(STORE), () => { dbp = null; }).then(resolve, () => { dbp = null; resolve(null); });
     } catch {
       resolve(null); // (no IndexedDB here: an exported file opened from disk, say; pictures are kept in memory)
     }
