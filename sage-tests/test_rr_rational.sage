@@ -49,3 +49,7 @@ for n in [-1, -2, -3, -5, -7, -20]:
 for n in [2, 3, 5, 7, 13, 20, 33, 100, 1001]:
     print(n, " ".join(repr(RDF(b)^n) for b in [-3.5, 3.7, 1.1, -0.3, 1.0000001, -0.999999]))
 print(repr(RDF(1.0000001)^(2^70)), repr(RDF(0.9999999)^(2^70)), repr(RDF(-1)^(2^70+1)), repr(RDF(2)^(-(2^70))))
+# a negative base to a NaN power: a complex NaN in the complex field of the
+# lower precision
+for p, q in [(30, 30), (30, 100), (100, 30), (100, 100), (100, 200), (200, 100), (53, 100), (100, 53)]:
+    show("RealField(%d)(-2) ^ RealField(%d)(nan)" % (p, q), lambda: RealField(p)(-2) ^ RealField(q)("nan"))
