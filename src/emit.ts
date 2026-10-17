@@ -2,7 +2,7 @@
 // the shapes of generated code.
 
 import * as A from "./ast";
-import { Scope, resolve, Resolution, SyntaxErr } from "./scope";
+import { Scope, resolve, Resolution, SyntaxErr, implicitClassDict } from "./scope";
 
 const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "truediv", "//": "floordiv", "%": "mod", "**": "pow", "<<": "lshift", ">>": "rshift", "&": "and", "|": "or", "^": "xor", "@": "matmul", "sage/": "sagediv", "sage**": "sagepow" };
 const CMP: Record<string, string> = { "<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne" };
@@ -118,10 +118,6 @@ export class Emitter {
       const r = resolve(this.fn.scope, "__class__");
       if (r.kind === "classcell") this.cellOf(r.scope);
     }
-    // (a class's annotation scope sees the class's namespace as
-    // __classdict__, CPython's implicit cell)
-    const sc = this.fn.scope;
-    if (id === "__classdict__" && sc.annotation && sc.parent!.kind === "class" && !sc.bound.has(id)) return "R.classLocals($ns)";
     return this.loadRes(resolve(this.fn.scope, id), id);
   }
   // the JS name of a class's cell (scope.ts: cellName), the class now making one
@@ -259,8 +255,11 @@ export class Emitter {
     const qual = owner !== null ? `${owner}.__annotate__` : (s.kind === "module" ? "" : s.kind === "function" ? `${s.qualname}.<locals>.` : `${s.qualname}.`) + "__annotate__";
     const line = this.line;
     const fmt = ANNOT_FORMAT;
+    // (a class's: its __classdict__, the class body's one cell's dict)
+    const cd = implicitClassDict(as) ? (as.parent!.classDictName ??= `$cd${this.cells++}`) : null;
     const { lines, decls } = this.nested(as, "__annotate__$", null, [], () => {
       this.w(`R.annotateFormat(${fmt});`);
+      if (cd !== null) this.w(`const ${js("__classdict__")} = R.classDict(${cd});`);
       this.w("const $d = newDict();");
       for (const e of entries) {
         this.line = e.expr.line;
@@ -553,9 +552,9 @@ export class Emitter {
       // (an annotation scope's: its format parameter, and in a class the
       // class's namespace, __classdict__, as CPython's)
       if (scope.annotation) {
-        const cls = scope.parent!.kind === "class";
-        ls.unshift(...(cls ? ["format", "__classdict__"] : ["format"]));
-        vs.unshift(...(cls ? [ANNOT_FORMAT, "R.classLocals($ns)"] : [ANNOT_FORMAT]));
+        const cd = implicitClassDict(scope);
+        ls.unshift(...(cd ? ["format", "__classdict__"] : ["format"]));
+        vs.unshift(...(cd ? [ANNOT_FORMAT, js("__classdict__")] : [ANNOT_FORMAT]));
       }
       return `R.localsDict(${JSON.stringify(ls)}, [${vs.join(", ")}])`;
     };
@@ -1133,14 +1132,17 @@ export class Emitter {
     this.indent++;
     // the class cell, when its functions use __class__ or super()
     const cell = scope.cellName;
-    this.w(`const $ns = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});${cell ? ` const ${cell} = newCell();` : ""}`);
+    const cdc = scope.classDictName;
+    this.w(`const $ns = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});${cell ? ` const ${cell} = newCell();` : ""}${cdc ? ` const ${cdc} = R.classDictCell($ns);` : ""}`);
     if (decls.length) this.w(`let ${decls.join(", ")};`);
     this.indent--;
     this.splice(lines);
     this.line = st.line;
     this.indent++;
     if (cell) this.w(`$ns.set("__classcell__", ${cell});`);
-    this.w(`return classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc});`);
+    const made = `classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, $ns, [${kwNames.join(", ")}], ${kv}, ${cell ?? "undefined"}, ${bc})`;
+    // (the __classdict__ cell then the class's own dict, as CPython's type_new sets it)
+    this.w(cdc ? `return R.classDictBind(${cdc}, ${made});` : `return ${made};`);
     this.indent--;
     this.w("})();");
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
