@@ -1042,6 +1042,11 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["PolynomialRing(GF(5)) eq PolynomialRing(GF(25));", "'eq'", "Arguments are not compatible\nArgument types given: RngUPol[FldFin], RngUPol[FldFin]"],
     ["x eq y;", "'eq'", "Arguments are not compatible\nArgument types given: RngUPolElt[FldFin], RngUPolElt[FldFin]"],
     ["[x, 1/2];", "[ ... ]", "No valid universe containing all elements"],
+    // (AssignNames: a procedure of one name, checked: CORR-53E-1)
+    ["AssignNames(~R, [\"t\", \"u\"]);", "'AssignNames'", "Argument 2 must have length 1"],
+    ["AssignNames(~R, []);", "'AssignNames'", "Argument 2 must have length 1"],
+    ["AssignNames(~R, [1]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[RngIntElt]"],
+    ["AssignNames(R, [\"t\"]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt]"],
   ];
   // what Sagebrush doesn't do yet: refused in words, never computed wrongly
   const own = [
@@ -1054,10 +1059,20 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     ["T<u> := PolynomialRing(GF(49)); x + u;", "arithmetic of polynomials over two finite fields of one characteristic is not supported yet"],
     ["IsSquare([x]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
     ["Sort([x, x^2]);", "Sort of a polynomial over a finite field (or its ring) is not supported yet"],
+    // (wherever they are in the arguments: CORR-53E-2)
+    ["IsSquare([[], [x]]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["IsSquare([<1>, <x>]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["IsSquare([[[[[[[[[[x]]]]]]]]]]);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["RF := recformat<v>; r := rec<RF | v := x>; IsSquare(r);", "IsSquare of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["Gcd([[], [x]]);", "Gcd of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["IsZero([x]);", "IsZero of a polynomial over a finite field (or its ring) is not supported yet"],
+    ["d := x; for i in [1..40] do d := [d]; end for; IsSquare(d);", "IsSquare of a value too large or too deep for Sagebrush to check"],
   ];
   const src = "R<x> := PolynomialRing(GF(7)); S<y> := PolynomialRing(GF(5)); Z<z> := PolynomialRing(Integers()); f := x^2 + 1;\n" +
-    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\n\"end\";\n";
+    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nx;\n\"end\";\n";
   const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (the refused AssignNames left x's name)
+  assert.match(out, /\nx\nend\n$/);
   // (long messages wrap at 80 columns: compared unwrapped)
   const flat = out.replace(/\s+/g, " ");
   for (const [stmt, where, said] of cases)
@@ -1115,6 +1130,9 @@ test("matrices over a finite field refuse what Magma refuses, in its words, and 
     ["Gcd([A]);", "Gcd of a matrix or vector over a finite field is not supported yet"],
     ["[Parent(A) | 1, 2];", "a collection over a matrix or vector space over a finite field is not supported yet"],
     ["<A, 1>;", "printing a tuple or record holding a matrix over a finite field is not supported yet"],
+    ["RF := recformat<v>; r := rec<RF | v := A>; r;", "printing a tuple or record holding a matrix over a finite field is not supported yet"],
+    ["IsSquare([[], [A]]);", "IsSquare of a matrix or vector over a finite field is not supported yet"],
+    ["IsZero([A]);", "IsZero of a matrix or vector over a finite field is not supported yet"],
   ];
   const src = "F := GF(5); A := Matrix(F, 2, 2, [1, 2, 3, 4]); B := Matrix(F, 2, 3, [1, 2, 3, 4, 5, 6]); S := Matrix(F, 2, 2, [1, 2, 2, 4]);\n" +
     [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nA;\n\"end\";\n";
