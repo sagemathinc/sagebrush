@@ -108,19 +108,37 @@ show("sum initial exact", lambda: np.sum(np.array([2**52]), initial=2**52))
 # (float32 prod: NumPy's iterator order and initial= placement)
 f = np.float32
 a = np.array([[1e-30, 1e30], [1e-30, 1e30]], f)
-show("f32 prod T", lambda: np.prod(a.T))
 show("f32 prod T axis0", lambda: np.prod(a.T, axis=0))
 show("f32 prod T axis1", lambda: np.prod(a.T, axis=1))
-show("f32 prod F", lambda: np.prod(np.asfortranarray(a)))
-show("f32 prod neg stride", lambda: np.prod(a[::-1, ::-1]))
+show("f32 prod reversed 1-D", lambda: np.prod(np.array([1e-30, 1e-30, 1e30], f)[::-1]).item())
+show("f32 prod strided 1-D", lambda: np.prod(np.array([1e-30, 5, 1e-30, 5, 1e30], f)[::2]).item())
 show("f32 prod initial", lambda: np.prod(np.array([1e-30, 1e-30, 1e30], f), initial=1e30))
 show("f32 prod initial axis", lambda: np.prod(a, axis=1, initial=1e30))
 show("f32 prod initial empty", lambda: np.prod(np.array([], f), initial=3))
 show("i64 prod initial", lambda: np.prod(np.array([2**20, 2**20]), initial=2**20))
 b = (np.arange(24, dtype=f).reshape(2, 3, 4) + 1.1) * np.float32(0.37)
 # (float(): NumPy's float32 scalar repr is not Sagebrush's yet, separately)
-show("f32 prod 3d", lambda: (float(np.prod(b)), float(np.prod(b.transpose(2, 0, 1))), np.prod(b, axis=(0, 2)), np.prod(b.transpose(1, 2, 0), axis=1)))
+show("f32 prod 3d", lambda: (float(np.prod(b)), np.prod(b, axis=0), np.prod(b, axis=2), np.prod(b.transpose(1, 2, 0), axis=1), np.prod(b[::-1], axis=0)))
 show("compare inexact int", lambda: (np.array([2**62]) == 2**62 + 1, np.array([2**62]) < 2**62 + 1, np.array([2**53]) != 2**53 + 1))
 show("int scalars", lambda: (np.int64(5), np.int8(-128), np.uint8(255), np.int64(2**62), np.uint64(2**63), np.int32(3.7), np.int64(np.int8(7)), np.int64([1, 2])))
 for v, t in ((300, np.int8), (-1, np.uint8), (2**63, np.int64), (2**64, np.uint64), (-1, np.uint64)):
     show("int scalar %r %s" % (v, t.__name__), lambda v=v, t=t: t(v))
+# (astra's 3-D matrix on 1b413b8e: one reduced axis in its logical order,
+# and a C-contiguous array whole, compared; the rest refused in
+# test/numpy-int64.test.ts)
+c = np.array([1e-30, 1e30, 1e30, 1e-30, 1, 1e-30, 1e30, 1, 1e-30, 1e30, 1, 1], np.float32).reshape(2, 3, 2)
+for view in ("c", "c[::-1]", "c[:, ::-1]", "c[:, :, ::-1]", "c.transpose(1, 0, 2)", "c.transpose(2, 1, 0)[::-1]"):
+    v = eval(view)
+    for ax in (0, 1, 2, -1):
+        for init in (None, 1e30):
+            show("3d %s axis=%d initial=%s" % (view, ax, init), lambda v=v, ax=ax, init=init: np.prod(v, axis=ax, keepdims=True, initial=init).tolist())
+show("3d c whole", lambda: (np.prod(c, keepdims=True).tolist(), np.prod(c, initial=1e30).item()))
+class Both:
+    def __int__(self): return 5
+    def __index__(self): return 7
+    def __float__(self): return 3.0
+class IntSub(int):
+    def __int__(self): return 17
+show("conversion order", lambda: (np.array([Both()], dtype=np.int64).tolist(), int(np.int64(Both())), np.array([IntSub(11)], dtype=np.int64).tolist(), np.array([Both()], dtype=np.uint64).tolist(), np.int64(IntSub(11))))
+show("conversion setitem", lambda: (lambda a: (a.__setitem__(0, Both()), a.__setitem__(1, IntSub(3)), a.tolist())[2])(np.zeros(3, np.int64)))
+show("conversion full", lambda: np.full(2, Both(), dtype=np.int64).tolist())
