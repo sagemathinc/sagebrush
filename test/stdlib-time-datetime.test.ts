@@ -18,7 +18,7 @@ function same(file: string, tz: string) {
   for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${file} under TZ=${tz}, line ${i + 1}`);
 }
 
-for (const file of ["time_cases.py", "strftime_cases.py", "datetime_cases.py", "datetime_c_cases.py"])
+for (const file of ["time_cases.py", "strftime_cases.py", "datetime_cases.py", "datetime_c_cases.py", "time_payload_cases.py"])
   test(`${file}: CPython's output under TZ=UTC`, () => same(file, "UTC"));
 
 // (exact on any host: the offsets, so localtime()'s fields and tm_gmtoff,
@@ -68,3 +68,20 @@ test("time_refusals_cases.py under TZ=Europe/Berlin: each refusal names the zone
   assert.equal(line("import-star has tzname:"), "import-star has tzname: False dir has tzname: False");
   assert.equal(line("gmtime zone:"), "gmtime zone: GMT 0");
 });
+
+// (TZ in its forms: a zone name glibc and Date read alike, as CPython; a
+// POSIX rule, a path, a name with no zoneinfo file, an empty TZ: every local
+// time refuses, naming TZ, as astra's CORR-DCB-1 asks; UTC and the rest as
+// CPython's)
+for (const tz of [":America/New_York", "America/New_York"])
+  test(`time_tz_forms_cases.py: CPython's output under TZ=${tz}`, () => same("time_tz_forms_cases.py", tz));
+const LOCAL = /^(localtime|ctime|fromtimestamp|date\.fromtimestamp|timezone|altzone|daylight|mktime|timestamp|now type|localtime type) /;
+for (const tz of ["EST5EDT,M3.2.0/2,M11.1.0/2", "/usr/share/zoneinfo/America/New_York", ":/usr/share/zoneinfo/America/New_York", "UTC+05", "", "Foo/Bar"])
+  test(`time_tz_forms_cases.py under TZ=${JSON.stringify(tz)}: local times refuse, naming TZ; the rest as CPython's`, () => {
+    const want = cpython("time_tz_forms_cases.py", tz), got = sagebrush("time_tz_forms_cases.py", tz);
+    assert.deepEqual(got.filter((l) => !LOCAL.test(l)), want.filter((l) => !LOCAL.test(l)));
+    const local = got.filter((l) => LOCAL.test(l));
+    assert.equal(local.length, 19);
+    const name = "TZ='" + tz + "'";
+    for (const l of local) assert.ok(l.includes(" raises NotImplementedError time: the host's time zone " + name + " ("), l);
+  });

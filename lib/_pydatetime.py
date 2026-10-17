@@ -219,10 +219,11 @@ def _need_normalize_century():
 
 # Correctly substitute for %z and %Z escapes in strftime formats.
 def _wrap_strftime(object, format, timetuple):
-    # Sagebrush: as C _datetime
-    if not isinstance(format, str):
+    # Sagebrush: as C _datetime, the string's own value read
+    if not issubclass(type(format), str):
         raise TypeError("strftime() argument 1 must be str, not %s"
                         % ("None" if format is None else type(format).__name__))
+    format = str.__str__(format)
     # Don't call utcoffset() or tzname() unless actually needed.
     freplace = None  # the string to use for %f
     zreplace = None  # the string to use for %z
@@ -564,10 +565,36 @@ def _check_utc_offset(name, offset):
                          "strictly between -timedelta(hours=24) and "
                          f"timedelta(hours=24), not {offset!r}")
 
+# Sagebrush: as C _datetime's "i" arguments: an int's own value (an int
+# subclass's methods unused: int.__pos__ makes an exact int of it), else
+# __index__'s, in a C long, then a C int
+def _c_int(value):
+    n = value if issubclass(type(value), int) else _index(value)
+    if type(n) is not int:
+        n = int.__pos__(n)
+    if not -2**63 <= n < 2**63:
+        raise OverflowError("Python int too large to convert to C long")
+    if n > 2**31 - 1:
+        raise OverflowError("signed integer is greater than maximum")
+    if n < -2**31:
+        raise OverflowError("signed integer is less than minimum")
+    return n
+
+# Sagebrush: as C _datetime, replace()'s and combine()'s omitted argument:
+# an explicit None or True is a value, checked as any other
+class _Unchanged:
+    __slots__ = ()
+
+    def __repr__(self):
+        return "unchanged"
+
+_UNCHANGED = _Unchanged()
+
 def _check_date_fields(year, month, day):
-    year = _index(year)
-    month = _index(month)
-    day = _index(day)
+    # Sagebrush: as C _datetime
+    year = _c_int(year)
+    month = _c_int(month)
+    day = _c_int(day)
     if not MINYEAR <= year <= MAXYEAR:
         raise ValueError(f"year must be in {MINYEAR}..{MAXYEAR}, not {year}")
     if not 1 <= month <= 12:
@@ -578,10 +605,12 @@ def _check_date_fields(year, month, day):
     return year, month, day
 
 def _check_time_fields(hour, minute, second, microsecond, fold):
-    hour = _index(hour)
-    minute = _index(minute)
-    second = _index(second)
-    microsecond = _index(microsecond)
+    # Sagebrush: as C _datetime
+    hour = _c_int(hour)
+    minute = _c_int(minute)
+    second = _c_int(second)
+    microsecond = _c_int(microsecond)
+    fold = _c_int(fold)
     if not 0 <= hour <= 23:
         raise ValueError(f"hour must be in 0..23, not {hour}")
     if not 0 <= minute <= 59:
@@ -1047,8 +1076,10 @@ class date:
         January 1 of year 1 is day 1.  Only the year, month and day are
         non-zero in the result.
         """
-        # Sagebrush: as C _datetime, an ordinal below 1 refused as such
-        if _index(n) < 1:
+        # Sagebrush: as C _datetime, the ordinal a C int, below 1 refused
+        # as such
+        n = _c_int(n)
+        if n < 1:
             raise ValueError("ordinal must be >= 1")
         y, m, d = _ord2ymd(n)
         return cls(y, m, d)
@@ -1057,18 +1088,20 @@ class date:
     def fromisoformat(cls, date_string):
         """Construct a date from a string in ISO 8601 format."""
 
-        if not isinstance(date_string, str):
+        if not issubclass(type(date_string), str):
             # Sagebrush: as C _datetime
             raise TypeError('fromisoformat: argument must be str')
+        # Sagebrush: as C _datetime, the string's own value read
+        dstr = str.__str__(date_string)
 
-        if not date_string.isascii():
+        if not dstr.isascii():
             raise ValueError('Argument must be an ASCII str')
 
-        if len(date_string) not in (7, 8, 10):
+        if len(dstr) not in (7, 8, 10):
             raise ValueError(f'Invalid isoformat string: {date_string!r}')
 
         try:
-            return cls(*_parse_isoformat_date(date_string))
+            return cls(*_parse_isoformat_date(dstr))
         except Exception:
             raise ValueError(f'Invalid isoformat string: {date_string!r}')
 
@@ -1077,6 +1110,11 @@ class date:
         """Construct a date from the ISO year, week number and weekday.
 
         This is the inverse of the date.isocalendar() function"""
+        # Sagebrush: as C _datetime, each a C int, in order
+        try:
+            year, week, day = _c_int(year), _c_int(week), _c_int(day)
+        except OverflowError:
+            raise ValueError("ISO calendar component out of range") from None
         return cls(*_isoweek_to_gregorian(year, week, day))
 
     @classmethod
@@ -1124,6 +1162,8 @@ class date:
     def __format__(self, fmt):
         if not isinstance(fmt, str):
             raise TypeError("must be str, not %s" % type(fmt).__name__)
+        # Sagebrush: as C _datetime, the string's own value read
+        fmt = str.__str__(fmt)
         if len(fmt) != 0:
             return self.strftime(fmt)
         return str(self)
@@ -1173,13 +1213,14 @@ class date:
         """
         return _ymd2ord(self._year, self._month, self._day)
 
-    def replace(self, year=None, month=None, day=None):
+    # Sagebrush: as C _datetime, None a value, not an omission
+    def replace(self, year=_UNCHANGED, month=_UNCHANGED, day=_UNCHANGED):
         """Return a new date with new values for the specified fields."""
-        if year is None:
+        if year is _UNCHANGED:
             year = self._year
-        if month is None:
+        if month is _UNCHANGED:
             month = self._month
-        if day is None:
+        if day is _UNCHANGED:
             day = self._day
         return type(self)(year, month, day)
 
@@ -1637,18 +1678,20 @@ class time:
     @classmethod
     def fromisoformat(cls, time_string):
         """Construct a time from a string in one of the ISO 8601 formats."""
-        if not isinstance(time_string, str):
+        if not issubclass(type(time_string), str):
             raise TypeError('fromisoformat: argument must be str')
 
         # The spec actually requires that time-only ISO 8601 strings start with
         # T, but the extended format allows this to be omitted as long as there
         # is no ambiguity with date strings.
-        time_string = time_string.removeprefix('T')
+        # Sagebrush: as C _datetime, the string's own value read, and the
+        # argument itself, T and all, in the message
+        tstr = str.__str__(time_string).removeprefix('T')
 
         # Sagebrush: as C _datetime, a string that parses but whose fields
         # are out of range is refused by the fields' own check
         try:
-            fields = _parse_isoformat_time(time_string)[0]
+            fields = _parse_isoformat_time(tstr)[0]
         except Exception:
             raise ValueError(f'Invalid isoformat string: {time_string!r}')
         return cls(*fields)
@@ -1667,6 +1710,8 @@ class time:
     def __format__(self, fmt):
         if not isinstance(fmt, str):
             raise TypeError("must be str, not %s" % type(fmt).__name__)
+        # Sagebrush: as C _datetime, the string's own value read
+        fmt = str.__str__(fmt)
         if len(fmt) != 0:
             return self.strftime(fmt)
         return str(self)
@@ -1710,20 +1755,21 @@ class time:
         _check_utc_offset("dst", offset)
         return offset
 
-    def replace(self, hour=None, minute=None, second=None, microsecond=None,
-                tzinfo=True, *, fold=None):
+    # Sagebrush: as C _datetime, None and True values, not omissions
+    def replace(self, hour=_UNCHANGED, minute=_UNCHANGED, second=_UNCHANGED, microsecond=_UNCHANGED,
+                tzinfo=_UNCHANGED, *, fold=_UNCHANGED):
         """Return a new time with new values for the specified fields."""
-        if hour is None:
+        if hour is _UNCHANGED:
             hour = self.hour
-        if minute is None:
+        if minute is _UNCHANGED:
             minute = self.minute
-        if second is None:
+        if second is _UNCHANGED:
             second = self.second
-        if microsecond is None:
+        if microsecond is _UNCHANGED:
             microsecond = self.microsecond
-        if tzinfo is True:
+        if tzinfo is _UNCHANGED:
             tzinfo = self.tzinfo
-        if fold is None:
+        if fold is _UNCHANGED:
             fold = self._fold
         return type(self)(hour, minute, second, microsecond, tzinfo, fold=fold)
 
@@ -1849,15 +1895,21 @@ class datetime(date):
 
         A timezone info object may be passed in as well.
         """
-        # Sagebrush: as C _datetime's timestamp conversion
-        if isinstance(t, float):
+        # Sagebrush: as C _datetime's timestamp conversion, a float's or
+        # int's own value read (a subclass's methods unused)
+        if issubclass(type(t), float):
+            t = float.__float__(t)
             if t != t:
                 raise ValueError("Invalid value NaN (not a number)")
-        elif not isinstance(t, int):
+        elif issubclass(type(t), int):
+            t = int.__pos__(t)
+        else:
             try:
                 t = _index(t)
             except TypeError:
                 raise TypeError(f"argument must be int or float, not {type(t).__name__}") from None
+            if type(t) is not int:
+                t = int.__pos__(t)
         frac, t = _math.modf(t)
         us = round(frac * 1e6)
         if us >= 1000000:
@@ -1938,7 +1990,8 @@ class datetime(date):
         return cls._fromtimestamp(t, True, None)
 
     @classmethod
-    def combine(cls, date, time, tzinfo=True):
+    # Sagebrush: as C _datetime, True a value, not an omission
+    def combine(cls, date, time, tzinfo=_UNCHANGED):
         "Construct a datetime from a given date and a given time."
         if not isinstance(date, _date_class):
             # Sagebrush: as C _datetime
@@ -1946,7 +1999,7 @@ class datetime(date):
         if not isinstance(time, _time_class):
             # Sagebrush: as C _datetime
             raise TypeError(f"combine() argument 2 must be datetime.time, not {type(time).__name__}")
-        if tzinfo is True:
+        if tzinfo is _UNCHANGED:
             tzinfo = time.tzinfo
         return cls(date.year, date.month, date.day,
                    time.hour, time.minute, time.second, time.microsecond,
@@ -1955,17 +2008,19 @@ class datetime(date):
     @classmethod
     def fromisoformat(cls, date_string):
         """Construct a datetime from a string in one of the ISO 8601 formats."""
-        if not isinstance(date_string, str):
+        if not issubclass(type(date_string), str):
             raise TypeError('fromisoformat: argument must be str')
+        # Sagebrush: as C _datetime, the string's own value read
+        string = str.__str__(date_string)
 
-        if len(date_string) < 7:
+        if len(string) < 7:
             raise ValueError(f'Invalid isoformat string: {date_string!r}')
 
         # Split this at the separator
         try:
-            separator_location = _find_isoformat_datetime_separator(date_string)
-            dstr = date_string[0:separator_location]
-            tstr = date_string[(separator_location+1):]
+            separator_location = _find_isoformat_datetime_separator(string)
+            dstr = string[0:separator_location]
+            tstr = string[(separator_location+1):]
 
             date_components = _parse_isoformat_date(dstr)
         except ValueError:
@@ -2078,27 +2133,28 @@ class datetime(date):
         return time(self.hour, self.minute, self.second, self.microsecond,
                     self._tzinfo, fold=self.fold)
 
-    def replace(self, year=None, month=None, day=None, hour=None,
-                minute=None, second=None, microsecond=None, tzinfo=True,
-                *, fold=None):
+    # Sagebrush: as C _datetime, None and True values, not omissions
+    def replace(self, year=_UNCHANGED, month=_UNCHANGED, day=_UNCHANGED, hour=_UNCHANGED,
+                minute=_UNCHANGED, second=_UNCHANGED, microsecond=_UNCHANGED, tzinfo=_UNCHANGED,
+                *, fold=_UNCHANGED):
         """Return a new datetime with new values for the specified fields."""
-        if year is None:
+        if year is _UNCHANGED:
             year = self.year
-        if month is None:
+        if month is _UNCHANGED:
             month = self.month
-        if day is None:
+        if day is _UNCHANGED:
             day = self.day
-        if hour is None:
+        if hour is _UNCHANGED:
             hour = self.hour
-        if minute is None:
+        if minute is _UNCHANGED:
             minute = self.minute
-        if second is None:
+        if second is _UNCHANGED:
             second = self.second
-        if microsecond is None:
+        if microsecond is _UNCHANGED:
             microsecond = self.microsecond
-        if tzinfo is True:
+        if tzinfo is _UNCHANGED:
             tzinfo = self.tzinfo
-        if fold is None:
+        if fold is _UNCHANGED:
             fold = self.fold
         return type(self)(year, month, day, hour, minute, second,
                           microsecond, tzinfo, fold=fold)
