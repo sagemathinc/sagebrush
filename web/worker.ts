@@ -36,7 +36,7 @@ declare const __SB_RASTER_HASH__: string;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
-import { prefetchMode } from "./lib-lazy";
+import { onChunkInstalled, prefetchMode } from "./lib-lazy";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
@@ -115,6 +115,7 @@ const fetchBytes = async (url: string): Promise<ArrayBuffer | Uint8Array> => {
   return r.arrayBuffer();
 };
 const libLoading = (what: string | null) => postMessage({ libLoading: what });
+onChunkInstalled((file) => postMessage({ libChunk: file }));
 
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;

@@ -92,6 +92,39 @@ self.addEventListener("fetch", (ev) => {
   })());
 });
 
+// The library's chunks a page fetched before this script controlled it (a
+// first visit: they went past it), told by the page (web/notebook/
+// worker-kernel.js): kept now, so they are there offline.  Only a name of a
+// chunk of this build (content-addressed, lib/<group>.<kind>.<hash>.json, in
+// LAZY, with a digest), at most as many as there are; each fetched again (an
+// HTTP cache hit, usually: a chunk never changes) and kept only if its bytes
+// are the build's.  Anything else, and any failure, is ignored: this only
+// fills the cache, and a chunk not kept is fetched as before when needed.
+const CHUNK_PATH = new RegExp("^" + scope.pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "lib/[a-z0-9][a-z0-9-]*\\.(?:src|pre)\\.[0-9a-f]{16}\\.json$");
+const lazyChunks = new Set(LAZY.map((p) => new URL(p, scope).pathname).filter((p) => CHUNK_PATH.test(p) && wanted.has(p)));
+self.addEventListener("message", (ev) => {
+  const files = ev.data?.keep;
+  if (ev.origin !== scope.origin || !Array.isArray(files) || files.length > lazyChunks.size) return;
+  const paths = new Set();
+  for (const f of files) {
+    if (typeof f !== "string" || f.length > 200) return;
+    let u;
+    try { u = new URL(f, scope); } catch { return; }
+    if (u.origin !== scope.origin || u.search || u.hash || !lazyChunks.has(u.pathname)) return;
+    paths.add(u.pathname);
+  }
+  ev.waitUntil((async () => {
+    for (const p of paths) {
+      try {
+        const req = new Request(new URL(p, scope));
+        if (await kept(req, p)) continue;
+        const res = await fetch(req);
+        if (await verified(res, p)) await (await caches.open(CACHE)).put(req, res);
+      } catch {}
+    }
+  })());
+});
+
 async function fetchAndKeep(req, key) {
   const res = await fetch(req);
   if (res.ok && res.type === "basic") {
