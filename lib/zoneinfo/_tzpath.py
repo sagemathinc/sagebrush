@@ -152,11 +152,13 @@ def available_timezones():
         except Exception:  # pragma: nocover
             return False
 
+    # Sagebrush: the walk has a budget of entries, across all of TZPATH
+    budget = [_MAX_ENTRIES]
     for tz_root in TZPATH:
         if not os.path.exists(tz_root):
             continue
 
-        for root, dirnames, files in _walk(tz_root):
+        for root, dirnames, files in _walk(tz_root, budget):
             if root == tz_root:
                 # right/ and posix/ are special directories and shouldn't be
                 # included in the output of available zones
@@ -186,18 +188,32 @@ def available_timezones():
     return valid_zones
 
 
-def _walk(top):
+# Sagebrush: the most names available_timezones walks through on TZPATH, a
+# path a user may choose; past them it refuses, rather than read a tree of
+# any size (the host's /usr/share/zoneinfo has about 2000)
+_MAX_ENTRIES = 1 << 16
+
+
+def _walk(top, budget):
     # Sagebrush: os has no walk. os.walk(top)'s top-down walk: directories
     # (symbolic links to them included) apart from the other names, those
     # the caller leaves in dirnames walked into unless they are symbolic
-    # links, a directory that cannot be listed skipped
+    # links, a directory that cannot be listed skipped. Each directory is
+    # listed at most budget[0] + 1 names at a time, and each name spends one
+    # of budget[0]: past it, the walk is refused.
     stack = [top]
     while stack:
         root = stack.pop()
         try:
-            names = os.listdir(root)
+            names = _time._zonedir(root, budget[0] + 1)
         except OSError:
             continue
+        if len(names) > budget[0]:
+            raise NotImplementedError(
+                f"zoneinfo: available_timezones() past Sagebrush's bound of "
+                f"{_MAX_ENTRIES} names on TZPATH"
+            )
+        budget[0] -= len(names)
         dirnames, files = [], []
         for name in names:
             (dirnames if os.path.isdir(os.path.join(root, name)) else files).append(name)
