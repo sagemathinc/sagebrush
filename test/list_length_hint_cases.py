@@ -125,3 +125,24 @@ show('hint descriptor bound once', lambda: (list(type('C', (), {'__iter__': lamb
 show('hint a builtin function (len)', lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': len})()))
 show('hint a builtin type (int)', lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': int})()))
 show('hint a builtin bound method returning 3', lambda: list(type('C', (), {'__iter__': lambda self: iter([11]), '__length_hint__': (3).__int__})()))
+
+# ---- astra's CORR-ACE-1/2: a builtin type's method put on another class is
+# bound with its receiver check; the hint is looked up on x's type as it is
+# after __len__ (which may change x's __class__)
+show('hint list.__len__ on a non-list', lambda: list(type('D', (), {'__iter__': lambda self: iter([11]), '__length_hint__': list.__len__})()))
+show('hint str.join on a non-str', lambda: list(type('D', (), {'__iter__': lambda self: iter([11]), '__length_hint__': str.join})()))
+class LS(list):
+    __length_hint__ = list.__len__
+    def __iter__(self): return iter([11])
+    def __len__(self): raise TypeError('no len')
+show('hint list.__len__ on a list subclass', lambda: list(LS([1, 2, 3])))
+class B2:
+    def __iter__(self): return iter([11])
+    def __length_hint__(self): raise RuntimeError('new hint')
+class A2:
+    def __iter__(self): return iter([11])
+    def __len__(self):
+        self.__class__ = B2
+        raise TypeError('no length')
+    def __length_hint__(self): return 0
+show('hint after __len__ changed __class__', lambda: list(A2()))
