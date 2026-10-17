@@ -194,3 +194,10 @@ def descend(n):
 
 for n in [0, 10, 30]:
     print("depth", n, [line.split(", in ")[-1] for line in descend(n).splitlines() if line.startswith("  File ")])
+
+
+# a never-raised exception as a cause has no traceback of its own
+try:
+    raise RuntimeError("outer") from ValueError("never raised")
+except RuntimeError:
+    print(traceback.format_exc(), end="")

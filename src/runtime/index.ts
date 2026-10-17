@@ -757,7 +757,10 @@ function caughtFrames(e: any): Frame[] {
   const { frames, cut } = raisedFrames(e);
   const c = e.$caught;
   const unknown = (why: string) => raise(T.NotImplementedError, `which frame caught this exception is unknown: ${why}`);
-  if (c === undefined || c.tb !== e.$tb) unknown("it was not caught since it was raised");
+  // (never caught: never raised, as format_exception(ValueError("x")), so
+  // no traceback, as CPython's __traceback__ None)
+  if (c === undefined) return [];
+  if (c.tb !== e.$tb) unknown("it was raised again and not caught since");
   const near = pyFrames(sitesOf(c.at));
   const catcher = near[near.length - 1];
   if (catcher === undefined) unknown("it was not caught in Python code");
