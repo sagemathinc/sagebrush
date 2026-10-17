@@ -58,3 +58,44 @@ for ctor in (list, tuple):
     try: print(ctor.__name__, 'generator __iter__', ctor(G()))
     except BaseException as e: print(ctor.__name__, 'generator __iter__', type(e).__name__, e)
 print(list(range(3)), list({1: 2}), list('ab'), list(x for x in (1, 2)), list(iter([5])))
+
+# ---- astra's CORR-9AE-1..3: any special-method value is called as CPython
+# calls it; the hint is looked up only after len; len's result goes through
+# the index protocol, a hint's must be an int (a subclass's own value)
+def show(label, f):
+    try: print(label, '->', repr(f()))
+    except BaseException as e: print(label, 'raises', type(e).__name__, e)
+class Raiser:
+    def __init__(self, msg): self.msg = msg
+    def __call__(self, *a): raise RuntimeError(self.msg)
+def it(self): return iter([7, 8])
+show('callable-object hint', lambda: list(type('C', (), {'__iter__': it, '__length_hint__': Raiser('hint')})()))
+show('callable-object len', lambda: list(type('C', (), {'__iter__': it, '__len__': Raiser('len')})()))
+show('property len', lambda: list(type('C', (), {'__iter__': it, '__len__': property(lambda self: Raiser('prop len'))})()))
+show('property hint', lambda: list(type('C', (), {'__iter__': it, '__length_hint__': property(lambda self: Raiser('prop hint'))})()))
+show('staticmethod hint', lambda: list(type('C', (), {'__iter__': it, '__length_hint__': staticmethod(lambda: 3)})()))
+show('classmethod hint raising', lambda: list(type('C', (), {'__iter__': it, '__length_hint__': classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError('cm')))})()))
+class C2:
+    def __iter__(self): return iter([7, 8])
+    def __len__(self):
+        def new_hint(self): raise RuntimeError('new hint')
+        C2.__length_hint__ = new_hint
+        raise TypeError('no length')
+    def __length_hint__(self): return 0
+show('hint replaced by len', lambda: list(C2()))
+class I(int):
+    def __int__(self): raise RuntimeError('do not convert')
+    def __index__(self): raise RuntimeError('do not convert')
+    def __lt__(self, o): raise RuntimeError('do not compare')
+    def __gt__(self, o): raise RuntimeError('do not compare')
+for v in (I(2), I(-1), I(2**70), I(10**12), True, False):
+    show('hint %s(%d)' % (type(v).__name__, int.__pos__(v) if type(v) is I else v), lambda: list(type('C', (), {'__iter__': it, '__length_hint__': lambda self: v})()))
+class N:
+    def __init__(self, v): self.v = v
+    def __index__(self):
+        if self.v is None: raise RuntimeError('index length')
+        return self.v
+for v, label in ((N(None), 'N raising'), (N(3), 'N(3)'), (N(-1), 'N(-1)'), (N(2**70), 'N(2**70)'), (I(4), 'I(4)'), (N('x'), 'N bad'), (1.5, 'float')):
+    C3 = type('C', (), {'__iter__': it, '__len__': lambda self: v})
+    show('len result ' + label, lambda: list(C3()))
+    show('len() of ' + label, lambda: len(C3()))
