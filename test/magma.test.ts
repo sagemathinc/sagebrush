@@ -1288,10 +1288,20 @@ test("a collection made from one over a field stays over that field when integer
     "X:={Integers()|} join {Integers()|}; Include(~X,6); Include(~X,4); Gcd(X);");
   assert.match(universes, /^0\n\[ 3 \]\nRational Field\nRational Field\nFinite field of size 7\n\{ 4 \}\nFinite field of size 7\n\{ 4 \}\n\{@ 2, 3 @\}\nRational Field\n2\nend\n$/, universes);
   // (two fields, or the rationals and a finite field, meet in none: Magma's error)
+  // (an emptied one keeps the universe inferred for it: E's is the
+  // rationals', CORR-148-1)
+  const E = "E:={1/2}; Exclude(~E,1/2); ";
   const clash = ["{GF(7)|} join {GF(5)|};", "{Rationals()|} meet {GF(7)|};", "{GF(7)|} diff {Rationals()|};", "{GF(7)|} join {1/2};",
-    "Gcd({Rationals()|} join {GF(7)|});"];
+    "Gcd({Rationals()|} join {GF(7)|});", E + "Universe(E join {GF(7)|2});", E + "Universe({GF(7)|2} join E);",
+    E + "Universe(E sdiff {GF(7)|2});", E + "Characteristic(Universe({GF(7)|2} diff E));",
+    "E:=[1/2]; Exclude(~E,1/2); F:=Seqset(E); Universe(F join {GF(7)|2});"];
   const c = run(clash.join("\n")).replace(/\s+/g, " ");
-  assert.equal((c.match(/Runtime error in '(join|meet|diff)': No valid universe containing all elements/g) ?? []).length, clash.length, c);
+  assert.equal((c.match(/Runtime error in '(join|meet|diff|sdiff)': No valid universe containing all elements/g) ?? []).length, clash.length, c);
+  assert.doesNotMatch(c, /Finite field of size 7|^7$/m);
+  // (with the integers' it goes into the rationals; an empty one only
+  // written empty, or of the integers, into the field)
+  const u = run(E + "Universe(E join {Integers()|2});\nE:={4}; Exclude(~E,4); Universe(E join {GF(7)|2});\nUniverse({} join {GF(7)|2});");
+  assert.match(u, /^Rational Field\nFinite field of size 7\nFinite field of size 7\nend\n$/, u);
 });
 
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {

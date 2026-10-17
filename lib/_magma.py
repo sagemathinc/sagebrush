@@ -3227,7 +3227,20 @@ def _pair_universe(op, a, b, pos, message):
             return db if da is _ZZ else da
         return None
     d, other = (da, b) if da is not None else (db, a)
-    w = _infer_from(other.items)
+    # (the other's universe as fixed when it was made, an emptied one's
+    # too: E := {1/2}; Exclude(~E, 1/2) is still the rationals', and E join
+    # {GF(7) | 2} Magma's error, CORR-148-1; with none known, empty and not
+    # written empty, nothing is certified)
+    w = getattr(other, "_inf", None)
+    if w is None:
+        if other.items:
+            w = _infer_from(other.items)
+        else:
+            k = _provenance(other)
+            if k == "int":
+                w = _ZZ
+            elif k != "null":
+                return None
     if w is None or w is _ZZ:
         return d
     if w is _QQ:
