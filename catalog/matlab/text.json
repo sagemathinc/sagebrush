@@ -56,7 +56,10 @@
     ],
     "differs": [
       "The %b and %t subtypes and the %a conversion are refused, as is any % that begins no conversion.",
-      "A text conversion (%s, %c) of a value that is no character code is refused."
+      "A text conversion (%s, %c) of a value that is no character code is refused.",
+      "On some inputs its answer differs from Octave's: fprintf('%d %d\\n', 2.5) gives printed '2.500000e+00 ', then double 1x1 13 where Octave gives printed '2.5 ', then double 1x1 4.",
+      "It accepts some inputs Octave refuses: fprintf('%d %d\\n', 1 + 2i) gives printed '1 ', then double 1x1 2.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -92,8 +95,13 @@
         "expected": "\nans =\n\n    '3.142'\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "On some inputs its answer differs from Octave's: num2str(-0) gives char 1x1 ['0'] where Octave gives char 1x2 ['-0'].",
+      "It refuses some inputs Octave accepts, e.g. num2str(pi, 0).",
+      "It accepts some inputs Octave refuses: num2str(pi, true) gives char 1x1 ['3'].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "sprintf",
       "mat2str",
@@ -167,7 +175,11 @@
     "differs": [
       "The second output, an error message ([str, errmsg] = sprintf(...)), is not supported.",
       "The %b and %t subtypes, %a, and a % that begins no conversion are refused.",
-      "Integers past 2^53 (int64(2^53) and beyond) are refused."
+      "Integers past 2^53 (int64(2^53) and beyond) are refused.",
+      "On some inputs its answer differs from Octave's: sprintf('%s and %s', [], 'b') gives char 1x6 ['b and '] where Octave gives char 1x6 [' and b'].",
+      "It refuses some inputs Octave accepts, e.g. sprintf('%s and %s', -1, 'b').",
+      "It accepts some inputs Octave refuses: sprintf('%d,', 1 + 2i) gives char 1x2 ['1,'].",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [

@@ -46,7 +46,9 @@
     ],
     "differs": [
       "Eigenvectors are normalized as MATLAB's are, but their signs (and the phase of complex ones) can differ.",
-      "The 'qz' algorithm option is refused ('chol' is accepted)."
+      "The 'qz' algorithm option is refused ('chol' is accepted).",
+      "It refuses some inputs Octave accepts, e.g. eig(1 + 2i).",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
     "status": "partial",
     "see_also": [
@@ -74,9 +76,7 @@
         "expected": "\nans =\n\n   -2.0000    1.0000\n    1.5000   -0.5000\n\n"
       }
     ],
-    "differs": [
-      "Integer-class input is accepted (MATLAB refuses it) and inverted in double."
-    ],
+    "differs": [],
     "status": "full",
     "see_also": [
       "mldivide",
@@ -104,8 +104,7 @@
       }
     ],
     "differs": [
-      "N-D arrays are refused, as in MATLAB.",
-      "Integer-class input is accepted (MATLAB refuses it) and computed in double."
+      "N-D arrays are refused, as in MATLAB."
     ],
     "status": "full",
     "see_also": [
