@@ -79,7 +79,9 @@ for (const f of chunks) await bucket.put(f, readFileSync(join(dir, f)));
 for (const f of chunks) {
   const r = await get("/" + f);
   ok(r.status === 200 && Buffer.from(await r.arrayBuffer()).equals(readFileSync(join(dir, f))), `/${f}: the chunk, byte for byte`);
-  ok(r.headers.get("content-type") === "application/json" && /immutable/.test(r.headers.get("cache-control")) && r.headers.get("access-control-allow-origin") === "*" && r.headers.get("x-content-type-options") === "nosniff", `/${f}: JSON, immutable, CORS *, nosniff`);
+  // (a zone file is bytes; every other chunk is JSON)
+  const [type, kind] = f.endsWith(".tzif") ? ["application/octet-stream", "bytes"] : ["application/json", "JSON"];
+  ok(r.headers.get("content-type") === type && /immutable/.test(r.headers.get("cache-control")) && r.headers.get("access-control-allow-origin") === "*" && r.headers.get("x-content-type-options") === "nosniff", `/${f}: ${kind}, immutable, CORS *, nosniff`);
 }
 // (bytes that are not the ones its name says: not served; nor a name of
 // another shape, nor a chunk R2 doesn't have)
