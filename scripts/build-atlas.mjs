@@ -11,7 +11,7 @@
 // LMFDB.json (optional) is {lmfdb: {label: [dim, trace_ap]}, iso: {label:
 // isogeny class}} for weight 2 from the LMFDB mirror (atlas/, M0): every
 // weight-2 orbit is compared with it.  Elliptic curves are Cremona's
-// (lib/_cremona_small.py), matched to the dimension-1 orbits by a_p, p < 1000,
+// (packages/cremona-small/py/_cremona_small.py), matched to the dimension-1 orbits by a_p, p < 1000,
 // computed here with the engine.
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -103,7 +103,7 @@ if (lmfdbFile) {
 }
 
 // ---- Cremona's curves (conductor < 1000), matched by a_p
-const cremona = readFileSync(join(root, "lib", "_cremona_small.py"), "utf8").split('DATA = """\\\n')[1].split('"""')[0].trim().split("\n");
+const cremona = readFileSync(join(root, "packages", "cremona-small", "py", "_cremona_small.py"), "utf8").split('DATA = """\\\n')[1].split('"""')[0].trim().split("\n");
 const byLevel = new Map(spaces.filter((s) => s.weight === 2).map((s) => [s.level, s]));
 let matched = 0;
 const ps = primesUpTo(BOUND);
