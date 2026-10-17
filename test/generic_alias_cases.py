@@ -383,3 +383,73 @@ show('alias forwarded attribute',lambda:types.GenericAlias(HC,int).virtual)
 star=next(iter(tuple[int,...]))
 show('star iteration again',lambda:(repr(next(iter(star))),next(iter(star)).__unpacked__))
 show('star nested',lambda:list[star])
+
+
+# @sagebrush-astra's review probe of 6c84d71f (CORR-6C8-1), to its str
+# subclass names (refused: test/generic-alias.test.ts) and without the
+# wrong-receiver wording
+
+print('--- delegation controls ---')
+events=[]
+class Instance:
+    def __init__(self): self.real=51
+    def __getattribute__(self,name):
+        events.append(('ga',name))
+        return super().__getattribute__(name)
+    def __getattr__(self,name):
+        events.append(('gf',name))
+        if name=='fallback': return 52
+        raise AttributeError(name)
+    @property
+    def broken(self):
+        events.append(('prop','broken'))
+        raise AttributeError('descriptor')
+i=Instance()
+for name in ('real','fallback','missing','broken'):
+    events.clear()
+    show('instance '+name,lambda:getattr(i,name,'default'))
+    print('instance events',events)
+events.clear()
+show('object direct missing',lambda:object.__getattribute__(i,'missing'))
+print('object direct events',events)
+events.clear()
+show('object direct property',lambda:object.__getattribute__(i,'broken'))
+print('object direct property events',events)
+events.clear()
+show('type direct missing',lambda:type.__getattribute__(HC,'missing'))
+print('type direct events',events)
+show('type direct field',lambda:type.__getattribute__(HC,'real'))
+
+class Parent:
+    inherited=73
+class RawMeta(type): __getattribute__=object.__getattribute__
+class Raw(Parent,metaclass=RawMeta):
+    own=74
+    def func(self):return 75
+    @staticmethod
+    def static():return 76
+    @classmethod
+    def class_(cls):return 77
+show('raw own field',lambda:Raw.own)
+show('raw inherited field',lambda:getattr(Raw,'inherited','default'))
+show('raw descriptor untouched',lambda:(isinstance(Raw.static,staticmethod),isinstance(Raw.class_,classmethod)))
+show('type lookup override raw',lambda:type.__getattribute__(Raw,'inherited'))
+show('object lookup raw static',lambda:isinstance(object.__getattribute__(Raw,'static'),staticmethod))
+class DescriptorRaised:
+    def __get__(self,obj,owner): raise AttributeError('get descriptor')
+    def __set__(self,obj,value):pass
+class MetaDescriptor(type):
+    bad=DescriptorRaised()
+    def __getattribute__(cls,name):return super().__getattribute__(name)
+    def __getattr__(cls,name):events.append(name);return 'fallback'
+class MD(metaclass=MetaDescriptor):bad='class field'
+events.clear()
+show('meta data descriptor fallback',lambda:MD.bad)
+print('meta fallback events',events)
+events.clear()
+show('meta direct descriptor error',lambda:type.__getattribute__(MD,'bad'))
+print('meta direct events',events)
+for v in (1,None,b'x'):
+    show('type descriptor wrong name '+repr(v),lambda:type.__getattribute__(HC,v))
+for v in (1, None, b'x'):
+    show('object descriptor wrong name ' + repr(v), lambda: object.__getattribute__(HC, v))
