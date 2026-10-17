@@ -364,7 +364,25 @@ endlessly."""
     # a TypeError), a negative one none; its repr shows what is left)
     __slots__ = ("_obj", "_cnt")
 
-    def __new__(cls, object, times=_NULL):
+    def __new__(cls, *args, **kwargs):
+        # (object and times by position or by name, as CPython's
+        # PyArg_ParseTupleAndKeywords "O|n:repeat" reads them)
+        if len(args) + len(kwargs) > 2:
+            raise TypeError("repeat() takes at most 2 arguments (%d given)" % (len(args) + len(kwargs)))
+        for k in kwargs:
+            if k not in ("object", "times"):
+                raise TypeError("repeat() got an unexpected keyword argument '%s'" % k)
+        names = ("object", "times")
+        for i in range(len(args)):
+            if names[i] in kwargs:
+                raise TypeError("argument for repeat() given by name ('%s') and position (%d)" % (names[i], i + 1))
+        if args:
+            object = args[0]
+        elif "object" in kwargs:
+            object = kwargs["object"]
+        else:
+            raise TypeError("repeat() missing required argument 'object' (pos 1)")
+        times = args[1] if len(args) > 1 else kwargs.get("times", _NULL)
         self = super().__new__(cls)
         self._obj = object
         if times is _NULL:

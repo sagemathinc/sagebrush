@@ -116,3 +116,270 @@ def ba_imul_huge():
 for label, f in [('str * huge', lambda: 'ab' * 10**100), ('bytes * huge', lambda: b'ab' * 10**100), ('huge * tuple', lambda: 10**100 * (1,)),
                  ('str * -huge', lambda: 'ab' * -10**100), ('empty str * 2**62', lambda: '' * 2**62), ('bytearray *= huge', ba_imul_huge)]:
     print(label, rep(f))
+
+
+# astra's HOLD on 72be72fe: the count converted before the list is read
+# (CORR-72B-1); the right operand's __rmul__ before list's in-place
+# repeat (CORR-72B-2); no repeat for a subtype whose __mul__ declines, and
+# no second call of it (CORR-72B-3); index-sized counts for custom
+# indexes and deque.rotate and insert (CORR-72B-4)
+def hooked(action, explicit):
+    a = [1]
+
+    class I:
+        def __index__(self):
+            if action == 'append':
+                a.append(2)
+            elif action == 'clear':
+                a.clear()
+            elif action == 'replace':
+                a[:] = [7, 8, 9]
+            elif action == 'raise':
+                a.append(5)
+                raise ValueError('index')
+            return 2
+    try:
+        if explicit:
+            r = list.__imul__(a, I())
+        else:
+            b = a
+            b *= I()
+            r = b
+        return r, r is a, a
+    except ValueError as e:
+        return 'ValueError', a
+
+
+for action in ('append', 'clear', 'replace', 'raise'):
+    for explicit in (False, True):
+        print('index hook', action, explicit, hooked(action, explicit))
+events = []
+
+
+class R:
+    def __rmul__(self, other):
+        events.append('rmul')
+        return 'reflected'
+
+    def __index__(self):
+        events.append('index')
+        return 2
+
+
+def rimul():
+    a = [1]
+    a *= R()
+    return a
+
+
+print('rmul first', rep(rimul), rep(lambda: [1] * R()), rep(lambda: list.__imul__([1], R())), events)
+
+
+class I2:
+    def __index__(self):
+        return 2
+
+
+class S(str):
+    def __mul__(self, x):
+        return NotImplemented
+
+
+class B(bytes):
+    def __mul__(self, x):
+        return NotImplemented
+
+
+calls = []
+
+
+class L(list):
+    def __mul__(self, n):
+        calls.append(type(n).__name__)
+        return 'called again' if len(calls) > 1 else NotImplemented
+
+
+class T2(tuple):
+    def __mul__(self, n):
+        calls.append(('T2', type(n).__name__))
+        return NotImplemented
+
+
+class LR(list):
+    def __rmul__(self, n):
+        return NotImplemented
+
+
+def l_imul():
+    a = L([1])
+    a *= I2()
+    return a, type(a).__name__
+
+
+def t_imul():
+    a = T2((1,))
+    a *= I2()
+    return a
+
+
+for label, f in [('str subtype declines', lambda: S('a') * I2()), ('str subtype declines r', lambda: I2() * S('a')),
+                 ('bytes subtype declines', lambda: B(b'a') * I2()), ('list subtype declines', lambda: L([1]) * I2()),
+                 ('list subtype declines r', lambda: I2() * L([1])), ('tuple subtype declines', lambda: T2((1,)) * I2()),
+                 ('list subtype imul', l_imul), ('tuple subtype imul', t_imul), ('list rmul declines', lambda: 3 * LR([1])),
+                 ('list rmul declines l', lambda: LR([1]) * 3), ('str * I2', lambda: 'ab' * I2()), ('I2 * tuple', lambda: I2() * (1, 2))]:
+    print(label, rep(f), calls)
+    calls.clear()
+
+
+class Neg:
+    def __index__(self):
+        return -2**63 - 1
+
+
+class Edge:
+    def __index__(self):
+        return -2**63
+
+
+class Big:
+    def __index__(self):
+        return 2**63
+
+
+def neg_imul(n):
+    a = [1]
+    a *= n
+    return a
+
+
+for label, f in [('imul -2**63-1', lambda: neg_imul(Neg())), ('imul -2**63', lambda: neg_imul(Edge())), ('explicit -2**63-1', lambda: list.__imul__([1], Neg())),
+                 ('rotate 2**63', lambda: deque([1, 2]).rotate(Big())), ('rotate -2**63-1', lambda: deque([1, 2]).rotate(Neg())),
+                 ('rotate -2**63', lambda: (lambda d: (d.rotate(Edge()), list(d)))(deque([1, 2]))), ('insert 2**63', lambda: deque([1]).insert(Big(), 0)),
+                 ('rotate int 2**63', lambda: deque([1, 2]).rotate(2**63))]:
+    print(label, rep(f))
+
+
+# Multiplication of each kind of sequence, by each kind of count, as
+# CPython's dispatch: the numeric methods, then the sequence's repeat
+# (astra's CORR-72B-2 and CORR-72B-3)
+mlog = []
+class I2:
+    def __index__(self):
+        mlog.append('I2.index')
+        return 2
+
+
+class R:
+    def __rmul__(self, o):
+        mlog.append('R.rmul')
+        return 'reflected'
+
+    def __mul__(self, o):
+        mlog.append('R.mul')
+        return 'R.mul'
+
+    def __index__(self):
+        mlog.append('R.index')
+        return 2
+
+
+class L2(list):
+    pass
+
+
+class LM(list):
+    def __mul__(self, n):
+        mlog.append('LM.mul')
+        return NotImplemented
+
+
+class LR(list):
+    def __rmul__(self, n):
+        mlog.append('LR.rmul')
+        return NotImplemented
+
+
+class LMR(list):
+    def __mul__(self, n):
+        mlog.append('LMR.mul')
+        return NotImplemented
+
+    def __rmul__(self, n):
+        mlog.append('LMR.rmul')
+        return NotImplemented
+
+
+class SM(str):
+    def __mul__(self, n):
+        mlog.append('SM.mul')
+        return NotImplemented
+
+
+class SR(str):
+    def __rmul__(self, n):
+        mlog.append('SR.rmul')
+        return NotImplemented
+
+
+class S2(str):
+    pass
+
+
+class TM(tuple):
+    def __mul__(self, n):
+        mlog.append('TM.mul')
+        return NotImplemented
+
+
+class T3(tuple):
+    pass
+
+
+class B2(bytes):
+    pass
+
+
+class BM(bytes):
+    def __mul__(self, n):
+        mlog.append('BM.mul')
+        return NotImplemented
+
+
+def mshow(f):
+    mlog.clear()
+    try:
+        r = f()
+        r = repr(r)
+    except Exception as e:
+        r = type(e).__name__ + ': ' + str(e)
+    return r + ' ' + str(mlog)
+
+
+seqs = [('list', lambda: [1]), ('L2', lambda: L2([1])), ('LM', lambda: LM([1])), ('LR', lambda: LR([1])), ('LMR', lambda: LMR([1])),
+        ('str', lambda: 'a'), ('S2', lambda: S2('a')), ('SM', lambda: SM('a')), ('SR', lambda: SR('a')),
+        ('tuple', lambda: (1,)), ('T3', lambda: T3((1,))), ('TM', lambda: TM((1,))),
+        ('bytes', lambda: b'a'), ('B2', lambda: B2(b'a')), ('BM', lambda: BM(b'a')), ('bytearray', lambda: bytearray(b'a'))]
+nums = [('int', lambda: 2), ('I2', lambda: I2()), ('R', lambda: R())]
+
+
+def mimul(s, n):
+    x = s
+    x *= n
+    return x
+
+
+for sn, s in seqs:
+    for nn, n in nums:
+        print(sn, nn, 'mul', mshow(lambda: s() * n()))
+        print(sn, nn, 'rmul', mshow(lambda: n() * s()))
+        print(sn, nn, 'imul', mshow(lambda: mimul(s(), n())))
+
+
+# a builtin sequence's own __mul__, __rmul__ and __imul__ called itself:
+# its slot's wrapper, an index count or a TypeError, never NotImplemented
+for label, f in [('list.__mul__ float', lambda: [1].__mul__(1.5)), ('list.__rmul__ float', lambda: [1].__rmul__(1.5)), ('str.__mul__ float', lambda: 'a'.__mul__(1.5)),
+                 ('tuple.__mul__ float', lambda: (1,).__mul__(1.5)), ('bytes.__mul__ float', lambda: b'a'.__mul__(1.5)), ('list.__mul__ I2', lambda: [1].__mul__(I2())),
+                 ('str.__rmul__ I2', lambda: 'a'.__rmul__(I2())), ('list.__mul__ 2**63', lambda: [1].__mul__(2**63)), ('list.__imul__ float', lambda: [1].__imul__(1.5)),
+                 ('bytearray.__mul__ I2', lambda: bytearray(b'a').__mul__(I2())), ('bytes.__rmul__ -1', lambda: b'ab'.__rmul__(-1)), ('tuple.__rmul__ 2', lambda: (1,).__rmul__(2)),
+                 ('list *= float', lambda: mimul([1], 1.5)), ('list.__mul__ Big', lambda: [1].__mul__(Big()))]:
+    print(label, mshow(f))

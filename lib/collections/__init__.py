@@ -18,9 +18,24 @@ __all__ = ["ChainMap", "Counter", "OrderedDict", "UserDict", "UserList",
 from operator import index as _index
 
 
+def _ssize(x):
+    # (an argument CPython takes as a Py_ssize_t: an index, in its range,
+    # CORR-72B-4)
+    x = _index(x)
+    if not -9223372036854775808 <= x <= 9223372036854775807:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return x
+
+
+_mro = type.__dict__["__mro__"].__get__
+_tdict = type.__dict__["__dict__"].__get__
+
+
 def _slice_index(v):
-    # (an index bound as CPython's _PyEval_SliceIndexNotNone)
-    if not hasattr(type(v), "__index__"):
+    # (an index bound as CPython's _PyEval_SliceIndexNotNone: __index__ in
+    # the type's own slots, read from the classes' dicts, no metaclass
+    # __getattribute__ or __getattr__ run)
+    if not any("__index__" in _tdict(c) for c in _mro(type(v))):
         raise TypeError("slice indices must be integers or have an __index__ method")
     return _index(v)
 
@@ -192,7 +207,7 @@ class deque:
 
     def insert(self, i, x):
         # (the index converted first, then the size checked, as CPython's)
-        i = _index(i)
+        i = _ssize(i)
         if self._maxlen is not None and len(self) >= self._maxlen:
             raise IndexError("deque already at its maximum size")
         items = self._items()
@@ -211,7 +226,7 @@ class deque:
         self._l, self._r = self._r, self._l
 
     def rotate(self, n=1):
-        n = _index(n)
+        n = _ssize(n)
         k = len(self)
         if k <= 1:
             return
