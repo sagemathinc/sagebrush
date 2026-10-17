@@ -3607,6 +3607,57 @@ class RealIntervalField_:
     def __init__(self, prec):
         self._prec = prec
 
+    def _tree(self, x, count):
+        """x evaluated in this field: rationals, pi, e, sums, products,
+        quotients, integer powers and square roots (also x^(p/2)); anything
+        else, or more than 10000 nodes, raises _NoTree."""
+        import operator as o
+        count[0] += 1
+        if count[0] > 10000:
+            raise _NoTree()
+        q = _tree_q(x)
+        if q is not None:
+            return self._mk(q, q)
+        if str(x) in ("pi", "e"):
+            v = evaluate(x, self._prec + 40)
+            c = v._q()
+            err = abs(c) / (_F(2) ** (self._prec + 30))
+            return self._mk(c - err, c + err)
+        try:
+            op, args = x.operator(), x.operands()
+        except Exception:
+            raise _NoTree()
+        try:
+            if op is o.add and args:
+                r = self._tree(args[0], count)
+                for a in args[1:]:
+                    r = r + self._tree(a, count)
+                return r
+            if op is o.mul and args:
+                r = self._tree(args[0], count)
+                for a in args[1:]:
+                    r = r * self._tree(a, count)
+                return r
+            if op is o.pow and len(args) == 2:
+                e = _tree_q(args[1])
+                if e is None or e.denominator not in (1, 2) or abs(e.numerator) > 1000:
+                    raise _NoTree()
+                b = self._tree(args[0], count)
+                if e.denominator == 2:
+                    if b._lo < 0:
+                        raise _NoTree()
+                    b = b.sqrt()
+                n = e.numerator
+                return b ** n if n >= 0 else 1 / (b ** -n)
+            if getattr(op, "__name__", None) == "sqrt" and len(args) == 1:
+                b = self._tree(args[0], count)
+                if b._lo < 0:
+                    raise _NoTree()
+                return b.sqrt()
+        except (ZeroDivisionError, NotImplementedError, ArithmeticError, ValueError):
+            raise _NoTree()
+        raise _NoTree()
+
     def __repr__(self):
         return "Real Interval Field with %d bits of precision" % self._prec
 
@@ -3701,6 +3752,13 @@ class RealIntervalField_:
                 q = v._q()
                 err = abs(q) / (_F(2) ** (self._prec + 30))
                 return self._mk(q - err, q + err)
+            # (an expression of numbers, pi and e with + - * /, integer
+            # powers and square roots: evaluated in this field's interval
+            # arithmetic, so as tight as its precision, CORR-AA4-1)
+            try:
+                return self._tree(x, [0])
+            except _NoTree:
+                pass
             import _sage_expr
             r = _sage_expr._call("enclose", s)
             if len(r) == 2:
@@ -3708,6 +3766,21 @@ class RealIntervalField_:
             raise NotImplementedError("no certified enclosure of %r" % (x,))
         q = _F(x)
         return self._mk(q, q)
+
+
+class _NoTree(Exception):
+    """an expression RealIntervalField cannot evaluate in its own arithmetic"""
+
+
+def _tree_q(x):
+    """x as an exact Fraction if it is a rational literal, else None"""
+    s = x._s
+    if s.startswith("n") and s.endswith(";") and "/" in s:
+        try:
+            return _F(*map(int, s[1:-1].split("/")))
+        except ValueError:
+            return None
+    return None
 
 
 def _exact_lo(x, prec):
