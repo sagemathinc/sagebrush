@@ -732,7 +732,7 @@ export const BOARD_SCHEMA = {
     },
     "check": {
      "type": "string",
-     "description": "code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs`"
+     "description": "code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own that sees the board's names (the board's code runs again after it, so what it changes doesn't last); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs`"
     },
     "checkMs": {
      "type": "integer",

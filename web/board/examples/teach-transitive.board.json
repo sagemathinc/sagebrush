@@ -124,7 +124,7 @@
       "decide": [
         {
           "name": "confuses-transitive-with-two-transitive",
-          "about": "Says every pair of points goes to every pair, which is 2-transitive, more than transitive.",
+          "about": "Says any ordered pair of distinct points can be sent to any other, the two points moved simultaneously by one group element: that is 2-transitive, more than transitive.",
           "next": "two"
         },
         {
@@ -142,7 +142,7 @@
     {
       "id": "two",
       "title": "2-transitive is more",
-      "text": "$G$ is **2-transitive** when it sends every pair of distinct points to every other pair. $S$ is; $C$ is transitive but not 2-transitive: no rotation fixes $1$ and moves $2$."
+      "text": "$G$ is **2-transitive** when it sends any ordered pair of distinct points to any other, the two moved simultaneously by one group element. $S$ is; $C$ is transitive but not 2-transitive: no rotation fixes $1$ and moves $2$."
     }
   ]
 }

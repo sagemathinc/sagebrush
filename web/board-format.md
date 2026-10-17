@@ -186,8 +186,10 @@ options don't fit. Read the note as the answer whenever it is there.
 A question can also check its answer, for a reader learning something. Its
 `check` is code in the board's language (Python and Sage boards, for now),
 run in the page when the reader presses **Check**. It sees the board's
-names (what its code items made) in a copy of its own, so it can't change
-them, with the answer as `answer`. The value of its last line is the
+names (what its code items made), with the answer as `answer`. Every check
+and every computed hint runs on the board's code freshly re-run, in a new
+interpreter, so what one changes never reaches another; nothing is
+certified as preserved. The value of its last line is the
 verdict: `True` (right), `False` (wrong), or a string (wrong, and the
 string, Markdown with math, is shown to say why). A check that fails or
 runs past `checkMs` milliseconds (default 2000, at most 10000) decides
@@ -424,7 +426,7 @@ A question for the person reading the board: checkboxes, radio buttons, a list t
 | `lines` | number | `text`: how many lines its field shows (default 1) |
 | `note` | string | the reader's answer in their own words (plain text, English or any language): beside the answer, or in place of it. A question with a note that is not only spaces counts as answered |
 | `answer` | string \| number \| boolean \| [string] | the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number |
-| `check` | string | code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` |
+| `check` | string | code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own that sees the board's names (the board's code runs again after it, so what it changes doesn't last); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` |
 | `checkMs` | number | the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) |
 | `hints` | [string \| computed hint] | hints, one more shown after each wrong attempt: Markdown, or `{ "code": ... }`, run as the check is, its value a string (Markdown) |
 | `next` | next | where to go after an attempt: the id of a note on this page, for `right` and for `wrong` |

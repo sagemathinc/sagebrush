@@ -197,7 +197,7 @@ export interface DocAsk {
   note?: string;
   /** the answer given: for `check` the values chosen (a list; `true` or `false` without options), for `radio` and `choice` the value chosen, for `text` a string, for `number` and `scale` a number */
   answer?: AskAnswer;
-  /** code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own (a copy of the board's names); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` */
+  /** code in the board's language that decides whether an answer is right (Python and Sage boards): the answer is bound to `answer`, in a scope of its own that sees the board's names (the board's code runs again after it, so what it changes doesn't last); the value of its last expression is the verdict: `True` (right), `False` (wrong), or a string (wrong, and the string, Markdown with math, is shown). Run when the reader presses Check, within `checkMs` */
   check?: string;
   /** the most milliseconds its check, or a computed hint, may run (a whole number, 1 to 10000; default 2000) */
   checkMs?: number;
