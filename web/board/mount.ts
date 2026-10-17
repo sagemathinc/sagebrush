@@ -415,17 +415,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         // (another version of the board's code: every check running is for the code before, CORR-729-1)
         const codeKey = (x: BoardDoc | null) => (x ? JSON.stringify([x.mode ?? null, x.seed ?? null, codeOrder(x).map((c) => [c.id, c.mode, c.code])]) : "");
         if (codeKey(doc) !== codeKey(d)) for (const run of checking.values()) run.stale = true;
-        const was = new Map(doc ? asksOf(doc).map((q) => [q.ask.id, JSON.stringify(q.ask.answer ?? null)]) : []);
+        // (each question by its page and id: an id is its page's own)
+        const was = new Map(doc ? asksOf(doc).map((q) => [askKey(q.page, q.ask.id), JSON.stringify(q.ask.answer ?? null)]) : []);
         for (const q of asksOf(d)) {
-          const run = checking.get(q.ask.id), now = JSON.stringify(q.ask.answer ?? null);
-          if (run && now !== was.get(q.ask.id) && now !== run.given) run.stale = true;
+          const k = askKey(q.page, q.ask.id), run = checking.get(k), now = JSON.stringify(q.ask.answer ?? null);
+          if (run && now !== was.get(k) && now !== run.given) run.stale = true;
         }
       }
       doc = d;
     }
     board.onDecide = host.answers && !view ? decideWords : null;
     pageIx = Math.max(0, Math.min(pageCount(d) - 1, pageIx));
-    board.askScope = decidedKey(pageIx + 1, "");
+    board.askScope = askKey(pageIx + 1, "");
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
     board.markdown = (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" });
     if (host.math && hasMath(JSON.stringify(d))) {
@@ -529,7 +530,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (viewing) return;
     // (what the host decided was of the words before: gone with them)
     // (pending too: its answer, when it comes, is to words no longer there, and dropped, CORR-B21-1)
-    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") { board.askDecided.delete(decidedKey(pageIx + 1, id)); decidedSigs.delete(decidedKey(pageIx + 1, id)); }
+    if ("note" in patch || askOn(pageIx + 1, id)?.input === "text") { board.askDecided.delete(askKey(pageIx + 1, id)); decidedSigs.delete(askKey(pageIx + 1, id)); }
     answering = editor.answer(id, patch).catch(fail);
   };
   board.onAnswer = answer;
@@ -549,7 +550,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (the languages where something was evaluated since the board's code last ran in a new interpreter)
   const dirty = new Set<BoardMode>();
   const check = async (id: string, given: AskAnswer) => {
-    const c = engine(), a = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask;
+    // (the question of the page shown, by its page and id: another page may have a question of that id, CORR-B21-2's sibling)
+    const page = pageIx + 1, key = askKey(page, id);
+    const c = engine(), a = askOn(page, id);
     if (viewing || !c || !a?.check) return;
     const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000, test = a.check;
     // (what it ran on: a completion for another document, another engine, or
@@ -559,12 +562,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const codeOf = (d: BoardDoc | null) => (d ? JSON.stringify([d.mode ?? null, d.seed ?? null, codeOrder(d).map((x) => [x.id, x.mode, x.code])]) : "");
     const loaded = loads, was = JSON.stringify(a.answer ?? null), checked = JSON.stringify(given), ranWith = codeOf(doc);
     const run = { given: checked, stale: false };
-    checking.set(id, run);
+    checking.set(key, run);
     const stale = () => {
-      const now = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask, ans = JSON.stringify(now?.answer ?? null);
+      const now = askOn(page, id), ans = JSON.stringify(now?.answer ?? null);
       return run.stale || loads !== loaded || code !== c || !!viewing || !now || now.check !== a.check || (ans !== was && ans !== checked) || codeOf(doc) !== ranWith;
     };
-    board.askFeedback.set(id, { pending: true });
+    board.askFeedback.set(key, { pending: true });
     redraw().catch(fail);
     const done = await c.exclusive(mode, async (ops) => {
       const reset = async (within: number) => {
@@ -591,15 +594,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       await reset(REFRESH_MS);
       return { outcome, message, hints } as const;
     });
-    if (!done) { checking.delete(id); board.askFeedback.delete(id); redraw().catch(fail); return; }
+    if (!done) { checking.delete(key); board.askFeedback.delete(key); redraw().catch(fail); return; }
     const { outcome, message, hints } = done;
-    if (checking.get(id) === run) checking.delete(id);
-    if (stale()) { board.askFeedback.delete(id); redraw().catch(fail); return; }
-    board.askFeedback.set(id, { message, hints });
-    await editor.attempt(id, given, outcome).catch(fail);
-    redraw().then((drawn) => { if (drawn) board.keepClear(id); }).catch(fail);
+    if (checking.get(key) === run) checking.delete(key);
+    if (stale()) { board.askFeedback.delete(key); redraw().catch(fail); return; }
+    board.askFeedback.set(key, { message, hints });
+    // (kept with the question it checked, on its page, whichever page is shown now)
+    await editor.attempt(id, given, outcome, page - 1).catch(fail);
+    redraw().then((drawn) => { if (drawn && pageIx + 1 === page) board.keepClear(id); }).catch(fail);
   };
-  const checked = host.code ? (id: string, given: AskAnswer) => { check(id, given).catch((e) => { board.askFeedback.delete(id); fail(e); }); } : null;
+  const checked = host.code ? (id: string, given: AskAnswer) => { const key = askKey(pageIx + 1, id); check(id, given).catch((e) => { board.askFeedback.delete(key); fail(e); }); } : null;
   board.onCheck = checked;
 
   // The Submit bar, where the host takes answers (a frame's channel,
@@ -708,8 +712,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   $("subclose").onclick = () => { $("submit").hidden = true; };
   // (a question's words decided among its options: the host asked, its answer shown with the question; stale (another document, other words) dropped)
-  // (a decision's key: its page and its question, whose id is the page's own, CORR-B21-2)
-  const decidedKey = (page: number, id: string) => `p${page}/${id}`;
+  // (a question's key, for its decision and its check: its page and its id, which is the page's own, CORR-B21-2)
+  const askKey = (page: number, id: string) => `p${page}/${id}`;
   // (a question's definition and words as a decision depends on them: its
   // page, all of it but its answer, note, verdict, attempts and place, and
   // its words; null if the page has no such question)
@@ -726,7 +730,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const decide = async (id: string, words: string) => {
     const ch = host.answers, pa = pageAnswers();
     if (!ch || !pa || viewing) return;
-    const page = pa.page.number, key = decidedKey(page, id), g = loadGen, mark = { pending: true };
+    const page = pa.page.number, key = askKey(page, id), g = loadGen, mark = { pending: true };
     board.askDecided.set(key, mark);
     redraw().catch(fail);
     // (the words being kept first, as the field lost its focus to this press)
@@ -747,7 +751,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   // (set as each document is shown: a host's channel comes with its board)
   function decideWords(id: string, words: string) {
-    decide(id, words).catch((e) => { board.askDecided.delete(decidedKey(pageIx + 1, id)); decidedSigs.delete(decidedKey(pageIx + 1, id)); fail(e); });
+    decide(id, words).catch((e) => { board.askDecided.delete(askKey(pageIx + 1, id)); decidedSigs.delete(askKey(pageIx + 1, id)); fail(e); });
   }
   // (another document: what was sent and decided was the last one's)
   function forgetAnswered() {
@@ -765,7 +769,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
 
   // (a question's height also as its fields are open, as far as it has grown (UI-448-2) and with what its check said, and what the host decided its words show)
-  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0, board.askFeedback.get(a.id) ?? null, board.askDecided.get(board.askScope + a.id) ?? null] : null; };
+  const askState = (n: MeasuredNote) => { const a = (n as { ask?: DocAsk }).ask; return a ? [a, board.askOpen.has(a.id), board.askGrown.get(a.id) ?? 0, board.askFeedback.get(board.askScope + a.id) ?? null, board.askDecided.get(board.askScope + a.id) ?? null] : null; };
   const atLeastGrown = (n: MeasuredNote, h: number) => { const a = (n as { ask?: DocAsk }).ask; return a ? Math.max(h, board.askGrown.get(a.id) ?? 0) : h; };
   const heightKey = (n: MeasuredNote, w: number) => JSON.stringify([n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, w, askState(n)]);
   const widthKey = (n: MeasuredNote, max: number) => JSON.stringify(["w", n.title, n.text, n.detail, n.ref, n.shape, n.img?.w, n.img?.h, max]);
