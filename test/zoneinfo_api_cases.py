@@ -170,6 +170,13 @@ show("from_file custom", lambda: repr(ZoneInfo.from_file(Repr(data))) if data el
 show("from_file read fails", lambda: ZoneInfo.from_file(5))
 
 
+# (astra's CORR-1D0-1: a copy of a copy; _unpickle's uncached result reduces too)
+c = copy.copy(ZoneInfo.no_cache("UTC"))
+show("copy of no_cache", lambda: (repr(c), c.__reduce__()[1], repr(copy.copy(c)), copy.copy(c) is c))
+show("copy of cached", lambda: copy.copy(copy.copy(ZoneInfo("UTC"))) is ZoneInfo("UTC"))
+show("_unpickle uncached reduces", lambda: ZoneInfo._unpickle("UTC", 0).__reduce__()[1])
+show("_unpickle cached reduces", lambda: ZoneInfo._unpickle("UTC", 1).__reduce__()[1])
+
 # ------------------------------------------------------------------ subclasses
 class Z2(ZoneInfo):
     pass
@@ -185,6 +192,40 @@ show("subclass pickle", lambda: pickle.loads(pickle.dumps(Z2("UTC"))) is Z2("UTC
 show("subclass from_file", lambda: repr(Z2.from_file(io.BytesIO(data), key="k")) if data else "no data")
 Z2.clear_cache()
 show("subclass after clear", lambda: Z2("UTC") is Z2("UTC"))
+
+
+# (astra's CORR-1D0-2: a subclass's own weak cache, asked with get(key))
+class OneArgCache(dict):
+    calls = []
+
+    def get(self, key):
+        OneArgCache.calls.append(("get", key))
+        return dict.get(self, key)
+
+    def setdefault(self, key, value):
+        OneArgCache.calls.append(("setdefault", key))
+        return dict.setdefault(self, key, value)
+
+
+class Z5(ZoneInfo):
+    pass
+
+
+Z5._weak_cache = OneArgCache()
+show("subclass one-argument cache", lambda: (repr(Z5("UTC")), Z5("UTC") is Z5("UTC"), OneArgCache.calls))
+
+
+class WrongCache(dict):
+    def get(self, key):
+        return ZoneInfo("UTC")
+
+
+class Z6(ZoneInfo):
+    pass
+
+
+Z6._weak_cache = WrongCache()
+show("subclass cache with another class's zone", lambda: Z6("UTC"))
 
 
 class Z4(ZoneInfo):

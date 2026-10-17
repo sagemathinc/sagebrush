@@ -293,6 +293,7 @@ class ZoneInfo(_tzinfo):
         if key is _MISSING:
             key = None
         self = object.__new__(cls)
+        self._source = _SOURCE_NOCACHE
         file_repr = repr(file_obj)
         _load_data(self, file_obj)
         self._source = _SOURCE_FILE
@@ -396,7 +397,9 @@ def _zoneinfo_new(cls, key):
         return instance
 
     weak_cache = _get_weak_cache(cls)
-    instance = weak_cache.get(key, None)
+    # (the C module's PyObject_CallMethod(weak_cache, "get", "O", key, None):
+    # its format takes the key alone, so get(key): astra's CORR-1D0-2)
+    instance = weak_cache.get(key)
     if instance is None:
         tmp = _new_instance(cls, key)
         tmp._source = _SOURCE_CACHE
@@ -479,6 +482,10 @@ def _new_instance(cls, key):
         file_obj = _common.load_tzdata(key)
 
     self = object.__new__(cls)
+    # (the C type's allocation zeroes the object: its source is NOCACHE until
+    # a caller says otherwise, _unpickle's uncached branch included: astra's
+    # CORR-1D0-1)
+    self._source = _SOURCE_NOCACHE
     try:
         if file_obj is None:
             file_obj = _open_zone_file(file_path)
