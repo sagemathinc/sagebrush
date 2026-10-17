@@ -1,0 +1,519 @@
+RR + RDF -> 5.00000000000000 Real Field with 53 bits of precision
+RR - RDF -> 0.000000000000000 Real Field with 53 bits of precision
+RR * RDF -> 6.25000000000000 Real Field with 53 bits of precision
+RR / RDF -> 1.00000000000000 Real Field with 53 bits of precision
+RR ^ RDF -> 9.88211768802619 Real Field with 53 bits of precision
+RR == RDF -> True bool
+RR < RDF -> False bool
+RR + R30 -> 5.0000000 Real Field with 30 bits of precision
+RR - R30 -> 0.00000000 Real Field with 30 bits of precision
+RR * R30 -> 6.2500000 Real Field with 30 bits of precision
+RR / R30 -> 1.0000000 Real Field with 30 bits of precision
+RR ^ R30 -> 9.88211768802619 Real Field with 53 bits of precision
+RR == R30 -> True bool
+RR < R30 -> False bool
+RR + R100 -> 5.00000000000000 Real Field with 53 bits of precision
+RR - R100 -> 0.000000000000000 Real Field with 53 bits of precision
+RR * R100 -> 6.25000000000000 Real Field with 53 bits of precision
+RR / R100 -> 1.00000000000000 Real Field with 53 bits of precision
+RR ^ R100 -> 9.88211768802619 Real Field with 53 bits of precision
+RR == R100 -> True bool
+RR < R100 -> False bool
+RR + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RR - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+RR * RRbig -> 3.39574632262346e331 Real Field with 53 bits of precision
+RR / RRbig -> 1.84053795725572e-331 Real Field with 53 bits of precision
+RR ^ RRbig -> +infinity Real Field with 53 bits of precision
+RR == RRbig -> False bool
+RR < RRbig -> True bool
+RR + QQ -> 2.83333333333333 Real Field with 53 bits of precision
+QQ + RR -> 2.83333333333333 Real Field with 53 bits of precision
+RR - QQ -> 2.16666666666667 Real Field with 53 bits of precision
+QQ - RR -> -2.16666666666667 Real Field with 53 bits of precision
+RR * QQ -> 0.833333333333333 Real Field with 53 bits of precision
+QQ * RR -> 0.833333333333333 Real Field with 53 bits of precision
+RR / QQ -> 7.50000000000000 Real Field with 53 bits of precision
+QQ / RR -> 0.133333333333333 Real Field with 53 bits of precision
+RR ^ QQ -> 1.35720880829745 Real Field with 53 bits of precision
+QQ ^ RR -> 0.0641500299099584 Real Field with 53 bits of precision
+RR == QQ -> False bool
+QQ == RR -> False bool
+RR < QQ -> False bool
+QQ < RR -> True bool
+RR + ZZ -> 5.50000000000000 Real Field with 53 bits of precision
+ZZ + RR -> 5.50000000000000 Real Field with 53 bits of precision
+RR - ZZ -> -0.500000000000000 Real Field with 53 bits of precision
+ZZ - RR -> 0.500000000000000 Real Field with 53 bits of precision
+RR * ZZ -> 7.50000000000000 Real Field with 53 bits of precision
+ZZ * RR -> 7.50000000000000 Real Field with 53 bits of precision
+RR / ZZ -> 0.833333333333333 Real Field with 53 bits of precision
+ZZ / RR -> 1.20000000000000 Real Field with 53 bits of precision
+RR ^ ZZ -> 15.6250000000000 Real Field with 53 bits of precision
+ZZ ^ RR -> 15.5884572681199 Real Field with 53 bits of precision
+RR == ZZ -> False bool
+ZZ == RR -> False bool
+RR < ZZ -> True bool
+ZZ < RR -> False bool
+RR + int -> 5.50000000000000 Real Field with 53 bits of precision
+int + RR -> 5.50000000000000 Real Field with 53 bits of precision
+RR - int -> -0.500000000000000 Real Field with 53 bits of precision
+int - RR -> 0.500000000000000 Real Field with 53 bits of precision
+RR * int -> 7.50000000000000 Real Field with 53 bits of precision
+int * RR -> 7.50000000000000 Real Field with 53 bits of precision
+RR / int -> 0.833333333333333 Real Field with 53 bits of precision
+int / RR -> 1.20000000000000 Real Field with 53 bits of precision
+RR ^ int -> 15.6250000000000 Real Field with 53 bits of precision
+int ^ RR -> 15.5884572681199 Real Field with 53 bits of precision
+RR == int -> False bool
+int == RR -> False bool
+RR < int -> True bool
+int < RR -> False bool
+RR + float -> 3.00000000000000 Real Field with 53 bits of precision
+float + RR -> 3.00000000000000 Real Field with 53 bits of precision
+RR - float -> 2.00000000000000 Real Field with 53 bits of precision
+float - RR -> -2.00000000000000 Real Field with 53 bits of precision
+RR * float -> 1.25000000000000 Real Field with 53 bits of precision
+float * RR -> 1.25000000000000 Real Field with 53 bits of precision
+RR / float -> 5.00000000000000 Real Field with 53 bits of precision
+float / RR -> 0.200000000000000 Real Field with 53 bits of precision
+RR ^ float -> 1.58113883008419 Real Field with 53 bits of precision
+float ^ RR -> 0.176776695296637 Real Field with 53 bits of precision
+RR == float -> False bool
+float == RR -> False bool
+RR < float -> False bool
+float < RR -> True bool
+RR + bool -> 3.50000000000000 Real Field with 53 bits of precision
+bool + RR -> 3.50000000000000 Real Field with 53 bits of precision
+RR - bool -> 1.50000000000000 Real Field with 53 bits of precision
+bool - RR -> -1.50000000000000 Real Field with 53 bits of precision
+RR * bool -> 2.50000000000000 Real Field with 53 bits of precision
+bool * RR -> 2.50000000000000 Real Field with 53 bits of precision
+RR / bool -> 2.50000000000000 Real Field with 53 bits of precision
+bool / RR -> 0.400000000000000 Real Field with 53 bits of precision
+RR ^ bool -> 2.50000000000000 Real Field with 53 bits of precision
+bool ^ RR -> 1.00000000000000 Real Field with 53 bits of precision
+RR == bool -> False bool
+bool == RR -> False bool
+RR < bool -> False bool
+bool < RR -> True bool
+RDF + RR -> 5.0 Real Double Field
+RDF - RR -> 0.0 Real Double Field
+RDF * RR -> 6.25 Real Double Field
+RDF / RR -> 1.0 Real Double Field
+RDF ^ RR -> 9.882117688026186 Real Double Field
+RDF == RR -> True bool
+RDF < RR -> False bool
+RDF + R30 -> 5.0000000 Real Field with 30 bits of precision
+RDF - R30 -> 0.00000000 Real Field with 30 bits of precision
+RDF * R30 -> 6.2500000 Real Field with 30 bits of precision
+RDF / R30 -> 1.0000000 Real Field with 30 bits of precision
+RDF ^ R30 -> 9.8821177 Real Field with 30 bits of precision
+RDF == R30 -> True bool
+RDF < R30 -> False bool
+RDF + R100 -> 5.0 Real Double Field
+RDF - R100 -> 0.0 Real Double Field
+RDF * R100 -> 6.25 Real Double Field
+RDF / R100 -> 1.0 Real Double Field
+RDF ^ R100 -> 9.882117688026186 Real Double Field
+RDF == R100 -> True bool
+RDF < R100 -> False bool
+RDF + RRbig -> +infinity Real Double Field
+RDF - RRbig -> -infinity Real Double Field
+RDF * RRbig -> +infinity Real Double Field
+RDF / RRbig -> 0.0 Real Double Field
+RDF ^ RRbig -> +infinity Real Double Field
+RDF == RRbig -> False bool
+RDF < RRbig -> True bool
+RDF + QQ -> 2.8333333333333335 Real Double Field
+QQ + RDF -> 2.8333333333333335 Real Double Field
+RDF - QQ -> 2.1666666666666665 Real Double Field
+QQ - RDF -> -2.1666666666666665 Real Double Field
+RDF * QQ -> 0.8333333333333333 Real Double Field
+QQ * RDF -> 0.8333333333333333 Real Double Field
+RDF / QQ -> 7.5 Real Double Field
+QQ / RDF -> 0.13333333333333333 Real Double Field
+RDF ^ QQ -> 1.3572088082974534 Real Double Field
+QQ ^ RDF -> 0.0641500299099584 Real Double Field
+RDF == QQ -> False bool
+QQ == RDF -> False bool
+RDF < QQ -> False bool
+QQ < RDF -> True bool
+RDF + ZZ -> 5.5 Real Double Field
+ZZ + RDF -> 5.5 Real Double Field
+RDF - ZZ -> -0.5 Real Double Field
+ZZ - RDF -> 0.5 Real Double Field
+RDF * ZZ -> 7.5 Real Double Field
+ZZ * RDF -> 7.5 Real Double Field
+RDF / ZZ -> 0.8333333333333334 Real Double Field
+ZZ / RDF -> 1.2 Real Double Field
+RDF ^ ZZ -> 15.625 Real Double Field
+ZZ ^ RDF -> 15.588457268119901 Real Double Field
+RDF == ZZ -> False bool
+ZZ == RDF -> False bool
+RDF < ZZ -> True bool
+ZZ < RDF -> False bool
+RDF + int -> 5.5 Real Double Field
+int + RDF -> 5.5 Real Double Field
+RDF - int -> -0.5 Real Double Field
+int - RDF -> 0.5 Real Double Field
+RDF * int -> 7.5 Real Double Field
+int * RDF -> 7.5 Real Double Field
+RDF / int -> 0.8333333333333334 Real Double Field
+int / RDF -> 1.2 Real Double Field
+RDF ^ int -> 15.625 Real Double Field
+int ^ RDF -> 15.588457268119901 Real Double Field
+RDF == int -> False bool
+int == RDF -> False bool
+RDF < int -> True bool
+int < RDF -> False bool
+RDF + float -> 3.0 Real Double Field
+float + RDF -> 3.0 Real Double Field
+RDF - float -> 2.0 Real Double Field
+float - RDF -> -2.0 Real Double Field
+RDF * float -> 1.25 Real Double Field
+float * RDF -> 1.25 Real Double Field
+RDF / float -> 5.0 Real Double Field
+float / RDF -> 0.2 Real Double Field
+RDF ^ float -> 1.5811388300841898 Real Double Field
+float ^ RDF -> 0.1767766952966369 Real Double Field
+RDF == float -> False bool
+float == RDF -> False bool
+RDF < float -> False bool
+float < RDF -> True bool
+RDF + bool -> 3.5 Real Double Field
+bool + RDF -> 3.5 Real Double Field
+RDF - bool -> 1.5 Real Double Field
+bool - RDF -> -1.5 Real Double Field
+RDF * bool -> 2.5 Real Double Field
+bool * RDF -> 2.5 Real Double Field
+RDF / bool -> 2.5 Real Double Field
+bool / RDF -> 0.4 Real Double Field
+RDF ^ bool -> 2.5 Real Double Field
+bool ^ RDF -> 1.0 Real Double Field
+RDF == bool -> False bool
+bool == RDF -> False bool
+RDF < bool -> False bool
+bool < RDF -> True bool
+R30 + RR -> 5.0000000 Real Field with 30 bits of precision
+R30 - RR -> 0.00000000 Real Field with 30 bits of precision
+R30 * RR -> 6.2500000 Real Field with 30 bits of precision
+R30 / RR -> 1.0000000 Real Field with 30 bits of precision
+R30 ^ RR -> 9.8821177 Real Field with 30 bits of precision
+R30 == RR -> True bool
+R30 < RR -> False bool
+R30 + RDF -> 5.0000000 Real Field with 30 bits of precision
+R30 - RDF -> 0.00000000 Real Field with 30 bits of precision
+R30 * RDF -> 6.2500000 Real Field with 30 bits of precision
+R30 / RDF -> 1.0000000 Real Field with 30 bits of precision
+R30 ^ RDF -> 9.8821177 Real Field with 30 bits of precision
+R30 == RDF -> True bool
+R30 < RDF -> False bool
+R30 + R100 -> 5.0000000 Real Field with 30 bits of precision
+R30 - R100 -> 0.00000000 Real Field with 30 bits of precision
+R30 * R100 -> 6.2500000 Real Field with 30 bits of precision
+R30 / R100 -> 1.0000000 Real Field with 30 bits of precision
+R30 ^ R100 -> 9.8821177 Real Field with 30 bits of precision
+R30 == R100 -> True bool
+R30 < R100 -> False bool
+R30 + RRbig -> 1.3582985e331 Real Field with 30 bits of precision
+R30 - RRbig -> -1.3582985e331 Real Field with 30 bits of precision
+R30 * RRbig -> 3.3957463e331 Real Field with 30 bits of precision
+R30 / RRbig -> 1.8405380e-331 Real Field with 30 bits of precision
+R30 ^ RRbig -> +infinity Real Field with 30 bits of precision
+R30 == RRbig -> False bool
+R30 < RRbig -> True bool
+R30 + QQ -> 2.8333333 Real Field with 30 bits of precision
+QQ + R30 -> 2.8333333 Real Field with 30 bits of precision
+R30 - QQ -> 2.1666667 Real Field with 30 bits of precision
+QQ - R30 -> -2.1666667 Real Field with 30 bits of precision
+R30 * QQ -> 0.83333333 Real Field with 30 bits of precision
+QQ * R30 -> 0.83333333 Real Field with 30 bits of precision
+R30 / QQ -> 7.5000000 Real Field with 30 bits of precision
+QQ / R30 -> 0.13333333 Real Field with 30 bits of precision
+R30 ^ QQ -> 1.3572088 Real Field with 30 bits of precision
+QQ ^ R30 -> 0.064150030 Real Field with 30 bits of precision
+R30 == QQ -> False bool
+QQ == R30 -> False bool
+R30 < QQ -> False bool
+QQ < R30 -> True bool
+R30 + ZZ -> 5.5000000 Real Field with 30 bits of precision
+ZZ + R30 -> 5.5000000 Real Field with 30 bits of precision
+R30 - ZZ -> -0.50000000 Real Field with 30 bits of precision
+ZZ - R30 -> 0.50000000 Real Field with 30 bits of precision
+R30 * ZZ -> 7.5000000 Real Field with 30 bits of precision
+ZZ * R30 -> 7.5000000 Real Field with 30 bits of precision
+R30 / ZZ -> 0.83333333 Real Field with 30 bits of precision
+ZZ / R30 -> 1.2000000 Real Field with 30 bits of precision
+R30 ^ ZZ -> 15.625000 Real Field with 30 bits of precision
+ZZ ^ R30 -> 15.588457 Real Field with 30 bits of precision
+R30 == ZZ -> False bool
+ZZ == R30 -> False bool
+R30 < ZZ -> True bool
+ZZ < R30 -> False bool
+R30 + int -> 5.5000000 Real Field with 30 bits of precision
+int + R30 -> 5.5000000 Real Field with 30 bits of precision
+R30 - int -> -0.50000000 Real Field with 30 bits of precision
+int - R30 -> 0.50000000 Real Field with 30 bits of precision
+R30 * int -> 7.5000000 Real Field with 30 bits of precision
+int * R30 -> 7.5000000 Real Field with 30 bits of precision
+R30 / int -> 0.83333333 Real Field with 30 bits of precision
+int / R30 -> 1.2000000 Real Field with 30 bits of precision
+R30 ^ int -> 15.625000 Real Field with 30 bits of precision
+int ^ R30 -> 15.588457 Real Field with 30 bits of precision
+R30 == int -> False bool
+int == R30 -> False bool
+R30 < int -> True bool
+int < R30 -> False bool
+R30 + float -> 3.0000000 Real Field with 30 bits of precision
+float + R30 -> 3.0000000 Real Field with 30 bits of precision
+R30 - float -> 2.0000000 Real Field with 30 bits of precision
+float - R30 -> -2.0000000 Real Field with 30 bits of precision
+R30 * float -> 1.2500000 Real Field with 30 bits of precision
+float * R30 -> 1.2500000 Real Field with 30 bits of precision
+R30 / float -> 5.0000000 Real Field with 30 bits of precision
+float / R30 -> 0.20000000 Real Field with 30 bits of precision
+R30 ^ float -> 1.5811388 Real Field with 30 bits of precision
+float ^ R30 -> 0.17677670 Real Field with 30 bits of precision
+R30 == float -> False bool
+float == R30 -> False bool
+R30 < float -> False bool
+float < R30 -> True bool
+R30 + bool -> 3.5000000 Real Field with 30 bits of precision
+bool + R30 -> 3.5000000 Real Field with 30 bits of precision
+R30 - bool -> 1.5000000 Real Field with 30 bits of precision
+bool - R30 -> -1.5000000 Real Field with 30 bits of precision
+R30 * bool -> 2.5000000 Real Field with 30 bits of precision
+bool * R30 -> 2.5000000 Real Field with 30 bits of precision
+R30 / bool -> 2.5000000 Real Field with 30 bits of precision
+bool / R30 -> 0.40000000 Real Field with 30 bits of precision
+R30 ^ bool -> 2.5000000 Real Field with 30 bits of precision
+bool ^ R30 -> 1.0000000 Real Field with 30 bits of precision
+R30 == bool -> False bool
+bool == R30 -> False bool
+R30 < bool -> False bool
+bool < R30 -> True bool
+R100 + RR -> 5.00000000000000 Real Field with 53 bits of precision
+R100 - RR -> 0.000000000000000 Real Field with 53 bits of precision
+R100 * RR -> 6.25000000000000 Real Field with 53 bits of precision
+R100 / RR -> 1.00000000000000 Real Field with 53 bits of precision
+R100 ^ RR -> 9.8821176880261854124965423264 Real Field with 100 bits of precision
+R100 == RR -> True bool
+R100 < RR -> False bool
+R100 + RDF -> 5.0 Real Double Field
+R100 - RDF -> 0.0 Real Double Field
+R100 * RDF -> 6.25 Real Double Field
+R100 / RDF -> 1.0 Real Double Field
+R100 ^ RDF -> 9.882117688026186 Real Double Field
+R100 == RDF -> True bool
+R100 < RDF -> False bool
+R100 + R30 -> 5.0000000 Real Field with 30 bits of precision
+R100 - R30 -> 0.00000000 Real Field with 30 bits of precision
+R100 * R30 -> 6.2500000 Real Field with 30 bits of precision
+R100 / R30 -> 1.0000000 Real Field with 30 bits of precision
+R100 ^ R30 -> 9.8821176880261854124965423264 Real Field with 100 bits of precision
+R100 == R30 -> True bool
+R100 < R30 -> False bool
+R100 + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+R100 - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+R100 * RRbig -> 3.39574632262346e331 Real Field with 53 bits of precision
+R100 / RRbig -> 1.84053795725572e-331 Real Field with 53 bits of precision
+R100 ^ RRbig -> +infinity Real Field with 100 bits of precision
+R100 == RRbig -> False bool
+R100 < RRbig -> True bool
+R100 + QQ -> 2.8333333333333333333333333333 Real Field with 100 bits of precision
+QQ + R100 -> 2.8333333333333333333333333333 Real Field with 100 bits of precision
+R100 - QQ -> 2.1666666666666666666666666667 Real Field with 100 bits of precision
+QQ - R100 -> -2.1666666666666666666666666667 Real Field with 100 bits of precision
+R100 * QQ -> 0.83333333333333333333333333333 Real Field with 100 bits of precision
+QQ * R100 -> 0.83333333333333333333333333333 Real Field with 100 bits of precision
+R100 / QQ -> 7.5000000000000000000000000000 Real Field with 100 bits of precision
+QQ / R100 -> 0.13333333333333333333333333333 Real Field with 100 bits of precision
+R100 ^ QQ -> 1.3572088082974532857590447348 Real Field with 100 bits of precision
+QQ ^ R100 -> 0.064150029909958418278794308945 Real Field with 100 bits of precision
+R100 == QQ -> False bool
+QQ == R100 -> False bool
+R100 < QQ -> False bool
+QQ < R100 -> True bool
+R100 + ZZ -> 5.5000000000000000000000000000 Real Field with 100 bits of precision
+ZZ + R100 -> 5.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 - ZZ -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+ZZ - R100 -> 0.50000000000000000000000000000 Real Field with 100 bits of precision
+R100 * ZZ -> 7.5000000000000000000000000000 Real Field with 100 bits of precision
+ZZ * R100 -> 7.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 / ZZ -> 0.83333333333333333333333333333 Real Field with 100 bits of precision
+ZZ / R100 -> 1.2000000000000000000000000000 Real Field with 100 bits of precision
+R100 ^ ZZ -> 15.625000000000000000000000000 Real Field with 100 bits of precision
+ZZ ^ R100 -> 15.588457268119895641747017074 Real Field with 100 bits of precision
+R100 == ZZ -> False bool
+ZZ == R100 -> False bool
+R100 < ZZ -> True bool
+ZZ < R100 -> False bool
+R100 + int -> 5.5000000000000000000000000000 Real Field with 100 bits of precision
+int + R100 -> 5.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 - int -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+int - R100 -> 0.50000000000000000000000000000 Real Field with 100 bits of precision
+R100 * int -> 7.5000000000000000000000000000 Real Field with 100 bits of precision
+int * R100 -> 7.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 / int -> 0.83333333333333333333333333333 Real Field with 100 bits of precision
+int / R100 -> 1.2000000000000000000000000000 Real Field with 100 bits of precision
+R100 ^ int -> 15.625000000000000000000000000 Real Field with 100 bits of precision
+int ^ R100 -> 15.588457268119895641747017074 Real Field with 100 bits of precision
+R100 == int -> False bool
+int == R100 -> False bool
+R100 < int -> True bool
+int < R100 -> False bool
+R100 + float -> 3.0 float
+float + R100 -> 3.0 float
+R100 - float -> 2.0 float
+float - R100 -> -2.0 float
+R100 * float -> 1.25 float
+float * R100 -> 1.25 float
+R100 / float -> 5.0 float
+float / R100 -> 0.2 float
+R100 ^ float -> 1.5811388300841898 float
+float ^ R100 -> 0.1767766952966369 float
+R100 == float -> False bool
+float == R100 -> False bool
+R100 < float -> False bool
+float < R100 -> True bool
+R100 + bool -> 3.5000000000000000000000000000 Real Field with 100 bits of precision
+bool + R100 -> 3.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 - bool -> 1.5000000000000000000000000000 Real Field with 100 bits of precision
+bool - R100 -> -1.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 * bool -> 2.5000000000000000000000000000 Real Field with 100 bits of precision
+bool * R100 -> 2.5000000000000000000000000000 Real Field with 100 bits of precision
+R100 / bool -> 2.5000000000000000000000000000 Real Field with 100 bits of precision
+bool / R100 -> 0.40000000000000000000000000000 Real Field with 100 bits of precision
+R100 ^ bool -> 2.5000000000000000000000000000 Real Field with 100 bits of precision
+bool ^ R100 -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 == bool -> False bool
+bool == R100 -> False bool
+R100 < bool -> False bool
+bool < R100 -> True bool
+RRbig + RR -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - RR -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * RR -> 3.39574632262346e331 Real Field with 53 bits of precision
+RRbig / RR -> 5.43319411619754e330 Real Field with 53 bits of precision
+RRbig ^ RR -> 6.79967375465039e827 Real Field with 53 bits of precision
+RRbig == RR -> False bool
+RRbig < RR -> False bool
+RRbig + RDF -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - RDF -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * RDF -> 3.39574632262346e331 Real Field with 53 bits of precision
+RRbig / RDF -> 5.43319411619754e330 Real Field with 53 bits of precision
+RRbig ^ RDF -> 6.79967375465039e827 Real Field with 53 bits of precision
+RRbig == RDF -> False bool
+RRbig < RDF -> False bool
+RRbig + R30 -> 1.3582985e331 Real Field with 30 bits of precision
+RRbig - R30 -> 1.3582985e331 Real Field with 30 bits of precision
+RRbig * R30 -> 3.3957463e331 Real Field with 30 bits of precision
+RRbig / R30 -> 5.4331941e330 Real Field with 30 bits of precision
+RRbig ^ R30 -> 6.79967375465039e827 Real Field with 53 bits of precision
+RRbig == R30 -> False bool
+RRbig < R30 -> False bool
+RRbig + R100 -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - R100 -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * R100 -> 3.39574632262346e331 Real Field with 53 bits of precision
+RRbig / R100 -> 5.43319411619754e330 Real Field with 53 bits of precision
+RRbig ^ R100 -> 6.79967375465039e827 Real Field with 53 bits of precision
+RRbig == R100 -> False bool
+RRbig < R100 -> False bool
+RRbig + QQ -> 1.35829852904939e331 Real Field with 53 bits of precision
+QQ + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - QQ -> 1.35829852904939e331 Real Field with 53 bits of precision
+QQ - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * QQ -> 4.52766176349795e330 Real Field with 53 bits of precision
+QQ * RRbig -> 4.52766176349795e330 Real Field with 53 bits of precision
+RRbig / QQ -> 4.07489558714816e331 Real Field with 53 bits of precision
+QQ / RRbig -> 2.45405060967429e-332 Real Field with 53 bits of precision
+RRbig ^ QQ -> 2.38597053855184e110 Real Field with 53 bits of precision
+QQ ^ RRbig -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig == QQ -> False bool
+QQ == RRbig -> False bool
+RRbig < QQ -> False bool
+QQ < RRbig -> True bool
+RRbig + ZZ -> 1.35829852904939e331 Real Field with 53 bits of precision
+ZZ + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - ZZ -> 1.35829852904939e331 Real Field with 53 bits of precision
+ZZ - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * ZZ -> 4.07489558714816e331 Real Field with 53 bits of precision
+ZZ * RRbig -> 4.07489558714816e331 Real Field with 53 bits of precision
+RRbig / ZZ -> 4.52766176349795e330 Real Field with 53 bits of precision
+ZZ / RRbig -> 2.20864554870686e-331 Real Field with 53 bits of precision
+RRbig ^ ZZ -> 2.50602668467732e993 Real Field with 53 bits of precision
+ZZ ^ RRbig -> +infinity Real Field with 53 bits of precision
+RRbig == ZZ -> False bool
+ZZ == RRbig -> False bool
+RRbig < ZZ -> False bool
+ZZ < RRbig -> True bool
+RRbig + int -> 1.35829852904939e331 Real Field with 53 bits of precision
+int + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - int -> 1.35829852904939e331 Real Field with 53 bits of precision
+int - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * int -> 4.07489558714816e331 Real Field with 53 bits of precision
+int * RRbig -> 4.07489558714816e331 Real Field with 53 bits of precision
+RRbig / int -> 4.52766176349795e330 Real Field with 53 bits of precision
+int / RRbig -> 2.20864554870686e-331 Real Field with 53 bits of precision
+RRbig ^ int -> 2.50602668467732e993 Real Field with 53 bits of precision
+int ^ RRbig -> +infinity Real Field with 53 bits of precision
+RRbig == int -> False bool
+int == RRbig -> False bool
+RRbig < int -> False bool
+int < RRbig -> True bool
+RRbig + float -> 1.35829852904939e331 Real Field with 53 bits of precision
+float + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - float -> 1.35829852904939e331 Real Field with 53 bits of precision
+float - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * float -> 6.79149264524693e330 Real Field with 53 bits of precision
+float * RRbig -> 6.79149264524693e330 Real Field with 53 bits of precision
+RRbig / float -> 2.71659705809877e331 Real Field with 53 bits of precision
+float / RRbig -> 3.68107591451143e-332 Real Field with 53 bits of precision
+RRbig ^ float -> 3.68551018048979e165 Real Field with 53 bits of precision
+float ^ RRbig -> 0.000000000000000 Real Field with 53 bits of precision
+RRbig == float -> False bool
+float == RRbig -> False bool
+RRbig < float -> False bool
+float < RRbig -> True bool
+RRbig + bool -> 1.35829852904939e331 Real Field with 53 bits of precision
+bool + RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig - bool -> 1.35829852904939e331 Real Field with 53 bits of precision
+bool - RRbig -> -1.35829852904939e331 Real Field with 53 bits of precision
+RRbig * bool -> 1.35829852904939e331 Real Field with 53 bits of precision
+bool * RRbig -> 1.35829852904939e331 Real Field with 53 bits of precision
+RRbig / bool -> 1.35829852904939e331 Real Field with 53 bits of precision
+bool / RRbig -> 7.36215182902286e-332 Real Field with 53 bits of precision
+RRbig ^ bool -> 1.35829852904939e331 Real Field with 53 bits of precision
+bool ^ RRbig -> 1.00000000000000 Real Field with 53 bits of precision
+RRbig == bool -> False bool
+bool == RRbig -> False bool
+RRbig < bool -> False bool
+bool < RRbig -> True bool
+small + midpoint => 1 Real Field with 30 bits of precision
+midpoint + small => 1 Real Field with 30 bits of precision
+explicitly coerced control => 1 Real Field with 30 bits of precision
+(30, 'float', '0^0') => 1.0000000 Real Field with 30 bits of precision
+(30, 'float', '1^inf') => 1.0000000 Real Field with 30 bits of precision
+(30, 'float', '1^nan') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF', '0^0') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF', '1^inf') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF', '1^nan') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF(-inf)^2') => +infinity Real Field with 30 bits of precision
+(52, 'float', '0^0') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'float', '1^inf') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'float', '1^nan') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF', '0^0') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF', '1^inf') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF', '1^nan') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF(-inf)^2') => +infinity Real Field with 52 bits of precision
+54 R(1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+54 1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+54 R(-1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+54 -1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+54 R(1e200)^-inf -> 0.0 float
+54 R(-inf)^3.0 -> -inf float
+100 R(1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+100 1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+100 R(-1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+100 -1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+100 R(1e200)^-inf -> 0.0 float
+100 R(-inf)^3.0 -> -inf float
