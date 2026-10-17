@@ -266,6 +266,47 @@ try {
   // (back to the question, from its next step, for what follows)
   await frame(`window.board.focus(["q2"], true), 1`);
   await sleep(300);
+  // a confirmation is of the words it was proposed for: they changed by
+  // any path (the API's here, as the store and Undo do), it is gone, and
+  // stays gone when they change back (astra's CORR-548-1)
+  const note2 = (v) => frame(`window.sagebrush.board.edit((d) => { d.pages[0].nodes.find((n) => n.id === "q2").note = ${JSON.stringify(v)}; }).then(() => 1)`);
+  const words0 = await frame(`document.querySelector('[data-ask="q2"] details textarea').value`);
+  const yes = async () => {
+    await frame(`${fb}.querySelector('button').click()`);
+    await until(() => frame(`!!${fb}?.querySelector('a.board-ask-yes')`));
+    await frame(`${fb}.querySelector('a.board-ask-yes').click()`);
+    await until(() => frame(`${fb}?.textContent.includes("You chose:")`));
+    await frame(`window.board.focus(["q2"], true), 1`);
+    await sleep(300);
+  };
+  await note2("API completely different words");
+  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API completely different words" && !${fb}.textContent.includes("You chose")`), 5000)), "Yes, then the words changed by the API: the confirmation is gone");
+  await note2(words0);
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)}`), 5000);
+  await yes();
+  await note2("API temporary words");
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API temporary words"`), 5000);
+  await note2(words0);
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)}`), 5000);
+  await sleep(500);
+  check(await frame(`!${fb}.textContent.includes("You chose")`), "...the words changed and changed back: still gone");
+  await yes();
+  await note2("API words to undo");
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API words to undo"`), 5000);
+  await frame(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1`);
+  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)} && !${fb}.textContent.includes("You chose")`), 5000)), "...the words changed, then Undo: still gone: " + await frame(`[document.querySelector('[data-ask="q2"] details textarea').value, ${fb}.textContent.slice(0, 120)].join(" | ")`));
+  // (Something else stands as the words change, the API's too)
+  await frame(`${fb}.querySelector('button').click()`);
+  await until(() => frame(`!!${fb}?.querySelector('.board-ask-no')`));
+  await frame(`${fb}.querySelector('.board-ask-no').click()`);
+  await until(() => frame(`!!${fb}?.querySelector('.board-ask-own')`));
+  await frame(`${fb}.querySelector('.board-ask-own').click()`);
+  await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand")`));
+  await note2("API own words, written on");
+  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API own words, written on" && ${fb}.textContent.includes("Something else: your own words stand")`), 5000)), "Something else, then the words changed by the API: it stands");
+  await note2(words0);
+  await frame(`window.board.focus(["q2"], true), 1`);
+  await sleep(300);
   await top(`mode.decide = null`);
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => frame(`${fb}?.textContent.includes("didn't match any of the ideas")`))) && (await choices()).length === 3, "none: said honestly, and every option offered, and the reader's own words");

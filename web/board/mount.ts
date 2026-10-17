@@ -324,9 +324,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let sub: Sent | null = null;
   let answering: Promise<unknown> = Promise.resolve();
   // (each decision's question as it was asked: its page, its id and askSig then)
-  // (`choice`: the reader's own choice among the options, bound to the
+  // (`choice`: Something else, the reader's own words chosen, bound to the
   // question as defined (its page and all of it but the reader's answers),
-  // not to their words: astra's CORR-E29-2)
+  // not to their words: astra's CORR-E29-2, CORR-548-1)
   const decidedSigs = new Map<string, { page: number; id: string; sig: string | null; choice?: boolean }>();
   // (each Check's question as it was checked, the same way: its page's
   // identity and the question's definition; done, its answer and verdict
@@ -792,10 +792,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   // (a question's card grown or shrunk: laid out again, its element kept, so its field keeps its text and focus)
   // (and, grown, kept clear of the caption, which never covers it)
-  // (a reader's choice, or their asking for the options again: bound to the question as it is now)
+  // (a reader's choice, or their asking for the options again: bound to the
+  // question as it is now and to their words, as a host's decision is;
+  // Something else, their own words chosen, to the question only, as it
+  // stands while they write them: astra's CORR-548-1)
   board.onChoose = (id) => {
-    const page = pageIx + 1;
-    if (doc && !viewing) decidedSigs.set(askKey(page, id), { page, id, sig: checkSig(doc, page, id, false), choice: true });
+    const page = pageIx + 1, key = askKey(page, id);
+    if (!doc || viewing) return;
+    if (board.askDecided.get(key)?.chosen === "") decidedSigs.set(key, { page, id, sig: checkSig(doc, page, id, false), choice: true });
+    else decidedSigs.set(key, { page, id, sig: askSig(doc, page, id) });
   };
   board.onAskResize = (id, grown, bottom) => { redraw().then((drawn) => { if (drawn && grown) board.keepClear(id, bottom); }).catch(fail); };
   board.onToggleCode = (id) => {
