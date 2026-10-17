@@ -2,7 +2,7 @@
 
 import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
+import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
@@ -67,6 +67,14 @@ function checkModuleArity(m: any) {
   }
 }
 
+// (None in sys.modules stops an import, as CPython's _find_and_load: a way
+// to make a module unimportable)
+function halted(name: string): never {
+  const e = T.ModuleNotFoundError(`import of ${name} halted; None in sys.modules`);
+  e.name = name;
+  throw e;
+}
+
 export function importModule(name: string): any {
   // (a module's name is never one of the runtime's own, checked before the
   // lookup so a pre-seeded sys.modules entry cannot smuggle one in: rule 6)
@@ -77,13 +85,20 @@ export function importModule(name: string): any {
     throw e;
   }
   const existing = dictGet(sysModules, name);
-  if (existing !== undefined) return existing;
+  if (existing !== undefined) return existing === null ? halted(name) : existing;
   const dot = name.lastIndexOf(".");
   if (dot > 0) {
+    // (a parent that is None in sys.modules is not imported again: as
+    // CPython's _find_and_load_unlocked, it has no __path__, so not a package)
+    if (dictGet(sysModules, name.slice(0, dot)) === null) {
+      const e = T.ModuleNotFoundError(`No module named '${name}'; '${name.slice(0, dot)}' is not a package`);
+      e.name = name;
+      throw e;
+    }
     importModule(name.slice(0, dot));
     // The parent's __init__ may have imported this module already.
     const now = dictGet(sysModules, name);
-    if (now !== undefined) return now;
+    if (now !== undefined) return now === null ? halted(name) : now;
   }
   // sys.meta_path finders (find_spec -> loader.create_module/exec_module)
   const mp = dictGet(sysModules, "sys")?.meta_path;
@@ -125,6 +140,52 @@ function bindChild(name: string, dot: number, m: any) {
   if (parent !== undefined && parent !== null) setattr(parent, name.slice(dot + 1), m);
 }
 
+const hasAttr = (o: any, name: string): boolean => {
+  try {
+    getattr(o, name);
+    return true;
+  } catch (e) {
+    if (isinstance(e, T.AttributeError)) return false;
+    throw e;
+  }
+};
+// (a package's fromlist, as CPython's _handle_fromlist: each name it lacks
+// imported as its child; a child that does not exist is passed over, for
+// the from-import to report, unless it is None in sys.modules; '*' is its
+// __all__'s names)
+// (each item through the iterator protocol, a list subclass's __iter__
+// included, and validated and imported before the next is asked for, as
+// CPython's `for x in fromlist`: astra's CORR-C0F-1)
+function handleFromlist(m: any, fromlist: any, recursive: boolean): void {
+  const it = O.iter(fromlist);
+  for (let x = it.$next(); x !== DONE; x = it.$next()) {
+    if (!isinstance(x, T.str)) {
+      const where = recursive ? `${getattr(m, "__name__")}.__all__` : "``from list''";
+      raise(T.TypeError, `Item in ${where} must be str, not ${typeName(x)}`);
+    }
+    const name: string = unbox(x);
+    if (name === "*") {
+      if (!recursive && hasAttr(m, "__all__")) handleFromlist(m, getattr(m, "__all__"), true);
+    } else if (!hasAttr(m, name)) {
+      const from = `${unbox(getattr(m, "__name__"))}.${name}`;
+      try {
+        importModule(from);
+      } catch (e: any) {
+        if (isinstance(e, T.ModuleNotFoundError) && e.name === from && dictGet(sysModules, from) !== null) continue;
+        throw e;
+      }
+    }
+  }
+}
+
+// The import operation itself, for importlib.import_module, which (as
+// CPython's _bootstrap._gcd_import) does not go through builtins.__import__
+// or importlib.__import__, whoever replaced them: a checked absolute name
+// to the module itself, from sys.modules or loaded
+newBuiltinModule("_pyjs_import", (m) => {
+  m.find_and_load = builtin((name: any) => importModule(name), "find_and_load");
+});
+
 // builtins.__import__, and the import statements, which call a replaced
 // builtins.__import__ the way CPython does.
 export function defaultImport(name: any, globals: any = null, _locals: any = null, fromlist: any = null, level: any = 0): any {
@@ -136,7 +197,10 @@ export function defaultImport(name: any, globals: any = null, _locals: any = nul
     full = resolveRelative(name, lv, pkg);
   }
   const m = importModule(full);
-  if (fromlist !== null && O.truth(fromlist)) return m;
+  if (fromlist !== null && O.truth(fromlist)) {
+    if (hasAttr(m, "__path__")) handleFromlist(m, fromlist, false);
+    return m;
+  }
   if (lv === 0) return dictGet(sysModules, name.split(".")[0]);
   const base = full.slice(0, full.length - name.length);
   return dictGet(sysModules, base + name.split(".")[0]);
