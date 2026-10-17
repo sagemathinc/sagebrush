@@ -77,6 +77,22 @@ for kw in [dict(), dict(rotation=45), dict(horizontal_alignment='left'), dict(ho
     with_bg = text('hello', (0, 0), background_color='yellow', **kw)._svg()
     assert with_bg.count('<rect') == text('hello', (0, 0), **kw)._svg().count('<rect') + 1, ("CORR-896-6", kw)
     assert ('rotate(' in with_bg.split('<rect')[-1].split('/>')[0]) == ('rotation' in kw), ("CORR-896-6 rotation", kw)
+# the canvas view's data (CORR-4D6): a label function called once per
+# vertex, the SVG and the data the same text (1); a picture with options of
+# its own, or changed after, is the SVG only (2); the layout's iterations
+# carried (4)
+calls = []
+P = G3.plot(pos=p3, vertex_labels=lambda v: (calls.append(v), 'L%d' % len(calls))[1])
+assert calls == [0, 1, 2], calls
+assert [nd['label'] for nd in P._graph['nodes']] == ['L1', 'L2', 'L3'] and all('L%d' % i in P._svg() for i in (1, 2, 3))
+GRAPH = "application/vnd.sagebrush.graph+json"
+assert GRAPH in G3.plot(pos=p3)._repr_mimebundle_()
+for kw in [dict(title='t'), dict(graph_border=True), dict(figsize=4), dict(xmin=-3)]:
+    assert GRAPH not in getattr(G3.plot(pos=p3, **kw), '_repr_mimebundle_', lambda: {})(), kw
+Q = G3.plot(pos=p3)
+Q.set_axes_range(xmin=-9)
+assert GRAPH not in Q._repr_mimebundle_()
+assert G3.plot(iterations=60)._graph['iterations'] == 60.0 and G3.plot()._graph['iterations'] is None
 # edge_style
 assert 'stroke-dasharray' in Graph([(0, 1)]).plot(edge_style='dashed')._svg()
 for bad in [dict(vertex_shape='s'), dict(layout='planar'), dict(heights={0: [0]}), dict(by_component=False)]:

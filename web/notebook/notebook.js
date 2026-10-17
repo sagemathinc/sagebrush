@@ -23,6 +23,7 @@ import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
+export const GRAPH = "application/vnd.sagebrush.graph+json";
 const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
 
 // ------------------------------------------------------------ highlighting
@@ -305,6 +306,13 @@ export function createNotebook(root, opts = {}) {
     viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => window.SagebrushViewer3d);
     viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
   }
+  // A graph's picture (Graph.plot): a canvas whose vertices can be dragged
+  // (web/graph/view.ts, loaded on first use) over the SVG, which stays
+  let graphView = null;
+  function mountGraph(fig, graph) {
+    graphView ??= import(asset("sagebrush-graphview.js")).then(() => window.SagebrushGraphView);
+    graphView.then((v) => v?.mount(fig, graph)).catch(() => {});
+  }
   let mathModule = null;
   const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")));
   // Typeset math (show(expr), integrate_steps): text/latex through KaTeX,
@@ -392,6 +400,17 @@ export function createNotebook(root, opts = {}) {
       fig.appendChild(svg);
       box.appendChild(fig);
       mount3d(fig, b[SCENE3D]);
+      return;
+    }
+    // (as text, or as JSON when an .ipynb file kept it as JSON: passed as it
+    // is, the view checks its size or its fields before reading it, HARD-4D6-1)
+    const graph = typeof b[GRAPH] === "string" || (b[GRAPH] && typeof b[GRAPH] === "object") ? b[GRAPH] : null;
+    if (svg && graph !== null) {
+      fig.classList.add("plotgraph");
+      fig.sbBundle = { [GRAPH]: graph, "image/svg+xml": b["image/svg+xml"], "text/plain": b["text/plain"] ?? "graph" };
+      fig.appendChild(svg);
+      box.appendChild(fig);
+      mountGraph(fig, graph);
       return;
     }
     // (WebP: a board's previews of pictures, web/board/preview.ts)

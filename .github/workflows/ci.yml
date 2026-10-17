@@ -84,6 +84,7 @@ jobs:
           CHROME=google-chrome node web/test-replay.mjs
           CHROME=google-chrome node web/test-timetravel.mjs
           CHROME=google-chrome node web/test-widgets.mjs
+          CHROME=google-chrome node web/test-graph-view.mjs
           CHROME=google-chrome node web/test-kernels.mjs
           CHROME=google-chrome node web/test-reactive.mjs
           CHROME=google-chrome node web/test-notebook-blocks.mjs
