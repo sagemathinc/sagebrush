@@ -156,6 +156,11 @@ def available_timezones():
     # all of TZPATH and the keys it keeps
     budget = [_MAX_ENTRIES, _MAX_CHARS]
     for tz_root in TZPATH:
+        # (Sagebrush: each root spends a name and its characters before it
+        # is looked at, so that a TZPATH of many empty or missing roots is
+        # bounded too: daybreak2's HARD-TZB-2)
+        _spend_names(budget, 1)
+        _spend(budget, len(tz_root))
         if not os.path.exists(tz_root):
             continue
 
@@ -201,6 +206,15 @@ _MAX_ENTRIES = 1 << 16
 _MAX_CHARS = 1 << 21
 
 
+def _spend_names(budget, n):
+    if n > budget[0]:
+        raise NotImplementedError(
+            f"zoneinfo: available_timezones() past Sagebrush's bound of "
+            f"{_MAX_ENTRIES} names on TZPATH"
+        )
+    budget[0] -= n
+
+
 def _spend(budget, chars):
     if chars > budget[1]:
         raise NotImplementedError(
@@ -228,12 +242,7 @@ def _walk(top, budget):
             # (the names would cross the characters left)
             _spend(budget, budget[1] + 1)
         _spend(budget, sum(map(len, names)))
-        if len(names) > budget[0]:
-            raise NotImplementedError(
-                f"zoneinfo: available_timezones() past Sagebrush's bound of "
-                f"{_MAX_ENTRIES} names on TZPATH"
-            )
-        budget[0] -= len(names)
+        _spend_names(budget, len(names))
         dirnames, files = [], []
         for name in names:
             (dirnames if os.path.isdir(os.path.join(root, name)) else files).append(name)
