@@ -36,6 +36,10 @@ const BOARD = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Tr
     { id: "s1", kind: "sticker", emoji: "⭐", x: 900, y: 40 },
   ] },
   { id: "p2", title: "Notes", nodes: [{ id: "n2", text: "Nothing to answer here." }] },
+  // (a later page whose question has the id of page 1's, with ideas of its own: ids are their page's)
+  { id: "p3", title: "More", nodes: [
+    { id: "q2", kind: "ask", title: "Orbits", text: "What is an orbit?", input: "text", decide: [{ name: "says-the-set-of-images-of-a-point", about: "The orbit of $x$ is $\\{g x : g \\in G\\}$." }] },
+  ] },
 ] });
 const NONCE = crypto.randomUUID();
 // the host: the frame in an iframe, given the nonce (or not), the board and a port; its answers as `mode` says
@@ -56,7 +60,8 @@ window.answer = (m) => {
     if (mode.submit === "silent") return;
     reply(mode.submit === "received" ? { sagebrush: "received", version: 1, id: m.id } : { sagebrush: "refused", version: 1, id: m.id, message: mode.message });
   } else if (m.sagebrush === "decide") {
-    if (mode.decide === "refused") reply({ sagebrush: "refused", version: 1, id: m.id, message: mode.message });
+    if (mode.decide === "hold") window.held = m;
+    else if (mode.decide === "refused") reply({ sagebrush: "refused", version: 1, id: m.id, message: mode.message });
     else if (mode.decide !== "silent") reply({ sagebrush: "decided", version: 1, id: m.id, option: mode.decide });
   }
 };
@@ -236,9 +241,48 @@ try {
   await frame(`${fb}.querySelector('button').click()`);
   check(!!(await until(() => frame(`${fb}?.textContent.includes("not one of this question's ideas")`))), "a name not among its options: not shown as one");
 
+  // an answer to words since changed: dropped, never shown under the new ones (CORR-B21-1)
+  await top(`mode.decide = "hold"`);
+  await frame(`${fb}.querySelector('button').click()`);
+  check(!!(await until(() => top("!!window.held"))), "(a request the host holds)");
+  await frame(`(() => { const w = document.querySelector('[data-ask="q2"] details textarea'); w.value = "Something else entirely."; w.dispatchEvent(new Event("change")); })()`);
+  await sleep(500);
+  await top(`port.postMessage({ sagebrush: "decided", version: 1, id: held.id, option: "confuses-transitive-with-two-transitive" })`);
+  await sleep(1500);
+  check(await frame(`!${fb}.textContent.includes("Your words suggest") && !${fb}.textContent.includes("not one of") && ${fb}.querySelector('button').textContent === "Get feedback on my words"`), "an answer to words changed since it was asked: dropped, not shown under the new words");
+
+  // (page 1's q2 with feedback of its own, before page 3's)
+  await top(`mode.decide = "says-every-point-reaches-every-other"`);
+  await frame(`${fb}.querySelector('button').click()`);
+  check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other")`))), "page 1's q2 decided again, on its new words");
+
   // a page with no questions: no Submit
   await frame(`document.querySelector('[data-sbb="pgnext"]').click()`);
   check(!!(await until(() => frame(`${$("submitbtn")}.hidden`))), "a page with no questions has no Submit");
+
+  // page 3's q2, the id of page 1's: its own options, its own feedback (CORR-B21-2)
+  await frame(`document.querySelector('[data-sbb="pgnext"]').click()`);
+  check(!!(await until(() => frame(`!!document.querySelector('[data-ask="q2"] input.board-ask-text') && !${$("submitbtn")}.hidden`))), "page 3, with its own q2");
+  check(await frame(`!document.querySelector('[data-ask="q2"] .board-ask-decide').textContent.includes("says every point")`), "page 1's feedback for its q2 is not shown on page 3's");
+  await frame(`(() => { const t = document.querySelector('[data-ask="q2"] input.board-ask-text'); t.value = "All the points $g x$."; t.dispatchEvent(new Event("change")); })()`);
+  await sleep(300);
+  await top(`mode.decide = "says-the-set-of-images-of-a-point"`);
+  const before3 = (await sent("decide")).length;
+  await frame(`document.querySelector('[data-ask="q2"] .board-ask-decide button').click()`);
+  check(!!(await until(async () => (await sent("decide")).length === before3 + 1)), "page 3's request sent");
+  const d3 = (await sent("decide")).at(-1), r3 = decideRequest(posted, d3);
+  check(d3.page.number === 3 && r3.ok && r3.request.options.length === 1 && r3.request.options[0].name === "says-the-set-of-images-of-a-point" && r3.request.answer === "All the points $g x$.", "it names page 3, and the host's check finds page 3's question and options" + (r3.ok ? "" : ": " + r3.message));
+  const fb3 = `document.querySelector('[data-ask="q2"] .board-ask-decide')`;
+  check(!!(await until(() => frame(`${fb3}.textContent.includes("Your words suggest") && !!${fb3}.querySelector('.katex')`))), "page 3's own option accepted and shown");
+  await top(`mode.decide = "confuses-transitive-with-two-transitive"`);
+  await frame(`${fb3}.querySelector('button').click()`);
+  check(!!(await until(() => frame(`${fb3}.textContent.includes("not one of this question's ideas")`))), "page 1's option, for page 3's q2: refused, never shown");
+  // back on page 1: its q2's own feedback, not page 3's
+  await frame(`document.querySelector('[data-sbb="pgprev"]').click()`);
+  await sleep(300);
+  await frame(`document.querySelector('[data-sbb="pgprev"]').click()`);
+  check(!!(await until(() => frame(`!!document.querySelector('[data-ask="q2"] details textarea')`))), "back on page 1");
+  check(!!(await until(() => frame(`${fb}.textContent.includes("says every point reaches every other") && !${fb}.textContent.includes("orbit") && !${fb}.textContent.includes("not one of")`))), "page 1's q2 shows its own feedback, none of page 3's");
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
 } finally {
   ws.close(); chrome.kill(); parent.close();
