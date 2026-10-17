@@ -984,9 +984,27 @@ def _qr_solve(A, B):
     return X
 
 
+_NONFINITE_SOLVE = ("%s of values that include Inf or NaN is not supported in Sagebrush: "
+                    "its result for them is not certified. Solve with finite values.")
+
+
+def _solve_finite(name, *vals, rows=1, cols=1):
+    """refuse a linear solve or inverse (a non-scalar coefficient matrix) of values that include Inf
+    or NaN: no implementation's answer for them is certified, as for matrix products. A solve whose
+    result (rows by cols) is empty computes nothing, so it is not refused"""
+    if rows == 0 or cols == 0:
+        return
+    for v in vals:
+        x = v.pr if type(v) is Sparse else _farr(v, name)
+        if not np.all(np.isfinite(x)):
+            raise _err(_NONFINITE_SOLVE % name)
+
+
 def mldivide(a, b):
     if type(a) is float and type(b) is float:
         return _scalar_div(b, a)
+    if not _isscalar(a):
+        _solve_finite("A linear solve (\\)", a, b, rows=_dims(a)[1], cols=_dims(b)[1])
     if type(a) is Sparse or type(b) is Sparse:
         return _sp.binop("mldivide", a, b)
     if _isscalar(a):
@@ -998,6 +1016,8 @@ def mldivide(a, b):
 def mrdivide(a, b):
     if type(a) is float and type(b) is float:
         return _scalar_div(a, b)
+    if not _isscalar(b):
+        _solve_finite("A linear solve (/)", a, b, rows=_dims(a)[0], cols=_dims(b)[0])
     if type(a) is Sparse or type(b) is Sparse:
         return _sp.binop("mrdivide", a, b)
     if _isscalar(b):
@@ -6765,6 +6785,8 @@ def inv_(x):
         return 1.0 / x
     M = _mat(x)
     _square(M)
+    if M.size > 1 and not np.all(np.isfinite(M)):
+        raise _err(_NONFINITE_SOLVE % "inv")
     try:
         Mi = np.linalg.inv(M)
     except np.linalg.LinAlgError:
@@ -9371,8 +9393,10 @@ def _isequal2(a, b, nan_equal):
     A = _farr(a)
     B = _farr(b)
     if nan_equal:
-        both = np.isnan(A) & np.isnan(B) if A.dtype.kind != "c" else np.zeros(A.shape, dtype=bool)
-        return bool(np.all((A == B) | both))
+        # (isequaln compares numeric values part by part, a NaN equal to a NaN in the same part:
+        # complex(1, NaN) equals complex(1, NaN), and a real value's imaginary part is 0)
+        same = lambda X, Y: (X == Y) | (np.isnan(X) & np.isnan(Y))
+        return bool(np.all(same(np.real(A), np.real(B)) & same(np.imag(A), np.imag(B))))
     return bool(np.all(A == B))
 
 

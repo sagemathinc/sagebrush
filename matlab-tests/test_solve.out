@@ -16,7 +16,6 @@ double 1x2 [2 3]
 double 1x1 0.59999999999999998
 double 1x1 0.59999999999999998
 double 2x1 [1;0]
-double 1x1 NaN
 logical 1x1 true
 logical 1x1 true
 logical 1x1 true
