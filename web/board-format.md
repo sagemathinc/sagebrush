@@ -277,7 +277,7 @@ raises an error, and then the check decides nothing.
 
 | helper | right when |
 |---|---|
-| `close(answer, expected, rel=, abs=)` | $\lvert a - e\rvert \le \max(\mathrm{rel}\,\lvert e\rvert, \mathrm{abs})$. Give at least one tolerance. It is exact when every number is rational, complex ones included: `close(1.1, 1, abs=0.1)` is wrong, since the float $1.1$ is a little more than $11/10$. Sage reals count as the exact dyadic rationals they are. With an irrational ($\\pi$, $\\sqrt 2$) it uses certified interval enclosures, right or wrong only when the whole enclosure is, and otherwise can't decide (when the tolerance is finer than the enclosure). The tolerances are exact numbers, checked to be at least 0. nan is never close; an infinity is close only to itself. |
+| `close(answer, expected, rel=, abs=)` | $\lvert a - e\rvert \le \max(\mathrm{rel}\,\lvert e\rvert, \mathrm{abs})$. Give at least one tolerance. It is exact when every number is rational, complex ones included: `close(1.1, 1, abs=0.1)` is wrong, since the float $1.1$ is a little more than $11/10$. Sage reals count as the exact dyadic rationals they are. With an irrational ($\pi$, $\sqrt 2$) it uses certified interval enclosures, right or wrong only when the whole enclosure is, and otherwise can't decide (when the tolerance is finer than the enclosure). The tolerances are exact numbers, checked to be at least 0. nan is never close; an infinity is close only to itself. |
 | `same_set(answer, expected)` | they are equal as sets |
 | `same_multiset(answer, expected)` | they are equal with their repeats |
 | `same_sequence(answer, expected, ordered=True)` | they are equal item by item (`ordered=False`: as multisets) |
