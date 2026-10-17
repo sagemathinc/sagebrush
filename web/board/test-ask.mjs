@@ -505,6 +505,11 @@ try {
   await undoKey();
   const undone = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("What is an orbit?") && !${q$(D, ".textContent")}.includes("You chose") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000);
   check(undone, "...and after an undo, the old question back: no choice either, the options offered: " + await ev(`${q$('.board-ask[data-ask="d"]', ".textContent")}`));
+  // (a choice is of the words it was made with too: they changed by the API, it is gone; astra's CORR-548-1)
+  await press(D + " button.board-ask-choice");
+  await until(`${q$(D, ".textContent")}.includes("You chose: The set")`, 3000);
+  await ev(`${B}.edit((d) => { d.nodes.find((x) => x.id === "d").note = "API other words"; }).then(() => 1)`);
+  check(await until(`!${q$(D, ".textContent")}.includes("You chose") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000), "a choice, then the words changed by the API: gone, the options offered");
   // (Something else too: of the question as it was)
   await press(D + " .board-ask-own");
   await until(`${q$(D, ".textContent")}.includes("Something else: your own words stand")`, 3000);
