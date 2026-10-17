@@ -340,6 +340,10 @@ try {
   }
   const fq = await node("f");
   check(fq.attempts === 2 && fq.result === "right" && !fq.wrongAttempts, "a check that changed the board's state: the next one starts fresh (bump() is 1 again): " + JSON.stringify(fq));
+  // (the board's own Run, all its code and one item, beside the Checks: astra's CORR-AFB-1)
+  const ran = (args) => ev(`window.sagebrush.board.run(${args}).then((os) => JSON.stringify(os.map((o) => [o.id, o.state]))).catch((e) => "ERR " + e)`);
+  const all = await ran(""), one = await ran(`["s"]`);
+  check(all === '[["s",""]]' && one === '[["s",""]]', "board.run() and board.run([id]) run the code: " + JSON.stringify([all, one]));
   // (a computed hint's text is this document's: another board with the same question, hint and answer computes its own, CORR-CB1-1)
   const hintBoard = (n) => ({ title: "Hints " + n, layout: "grid", columns: 2, nodes: [
     { id: "nc", code: `N = ${n}` },

@@ -511,6 +511,27 @@ export class BoardCode {
     return out;
   }
 
+  /** Run these code items, then what depends on them (resolves to the reactive notebook's report). */
+  run(ids: string[]): Promise<any> {
+    return this.queued(async () => {
+      if (!(await this.ready)) return null;
+      this.release(ids);
+      this.started = true;
+      const report = await this.nb.runCells(ids).finally(() => this.changed());
+      this.ran(report);
+      return report;
+    });
+  }
+  runAll(): Promise<any> {
+    return this.queued(async () => {
+      if (!(await this.ready)) return null;
+      this.release(null);
+      this.started = true;
+      const report = await this.nb.runAll().finally(() => this.changed());
+      this.ran(report);
+      return report;
+    });
+  }
   /** A board question's Check, whole: `f` runs alone in this interpreter's
    * queue, no sync, run or other Check between its steps, given what it
    * needs without queueing again: `evaluate` (a check or computed hint,
