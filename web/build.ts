@@ -53,7 +53,8 @@ await Promise.all(Object.entries(STARTS).map(async ([mode, args]) => {
 rmSync(recDir, { recursive: true, force: true });
 const { libChunks } = await import("./lib-chunks.mts");
 const { libFiles } = await import("../scripts/build-id.mjs");
-const { manifest: libManifest, chunks: libChunkFiles } = libChunks(libFiles(join(here, "..")), recordings, buildId);
+const { readPackages } = await import("../scripts/packages.mjs");
+const { manifest: libManifest, chunks: libChunkFiles } = libChunks(libFiles(join(here, "..")), recordings, buildId, readPackages(join(here, "..")));
 rmSync(join(here, "dist", "lib"), { recursive: true, force: true });
 mkdirSync(join(here, "dist", "lib"), { recursive: true });
 for (const [f, bytes] of libChunkFiles) writeFileSync(join(here, "dist", f), bytes);

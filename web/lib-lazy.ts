@@ -10,8 +10,11 @@
 // a module; compiled code ("pre") is used when it is, and otherwise the
 // module compiles from its source.
 //
-// It must be imported before src/compile.ts, which reads __PYJS_LIB__ when it
-// is loaded.
+// The packages' files (packages/, src/compile.ts) are fetched the same way,
+// as globalThis.__SAGEBRUSH_PACKAGES__ {registry, files}.
+//
+// It must be imported before src/compile.ts, which reads __PYJS_LIB__ and
+// __SAGEBRUSH_PACKAGES__ when it is loaded.
 import { sha256Hex } from "../src/runtime/sha256";
 import type { LibManifest } from "./lib-chunks.mts";
 
@@ -20,6 +23,7 @@ const g = globalThis as any;
 const M = __SB_LIB__;
 type Kind = "src" | "pre";
 const sources: Record<string, string> = Object.create(null);
+const pkgSources: Record<string, string> = Object.create(null);
 const installed = new Set<string>(); // group + "." + kind
 const precompiled = { build: M.build, modules: Object.create(null) };
 g.__SAGEBRUSH_PRECOMPILED__ = precompiled;
@@ -58,7 +62,11 @@ function install(group: string, kind: Kind, bytes: Uint8Array) {
   const c = JSON.parse(new TextDecoder().decode(bytes));
   if (c?.build !== M.build || c.group !== group || c.kind !== kind) throw new Error("not this build's chunk");
   if (kind === "src") {
-    for (const [path, text] of Object.entries(c.files ?? {})) if (M.files[path] === group && typeof text === "string") sources[path] = text;
+    for (const [path, text] of Object.entries(c.files ?? {})) {
+      if (typeof text !== "string") continue;
+      if (Object.hasOwn(M.files, path) && M.files[path] === group) sources[path] = text;
+      else if (Object.hasOwn(M.packages.files, path) && M.packages.files[path] === group) pkgSources[path] = text;
+    }
   } else {
     for (const [key, m] of Object.entries<any>(c.modules ?? {})) if (m && M.files[m.path] === group) precompiled.modules[key] = m;
   }
@@ -110,6 +118,16 @@ for (const [path, group] of Object.entries(M.files))
     },
   });
 g.__PYJS_LIB__ = lib;
+const pkgFiles: Record<string, string> = {};
+for (const [path, group] of Object.entries(M.packages.files))
+  Object.defineProperty(pkgFiles, path, {
+    enumerable: true,
+    get() {
+      if (!(path in pkgSources)) loadSync(group);
+      return pkgSources[path];
+    },
+  });
+g.__SAGEBRUSH_PACKAGES__ = { registry: M.packages.registry, files: pkgFiles };
 
 const MODE_NAMES: Record<string, string> = { sage: "Sage", matlab: "MATLAB", magma: "Magma" };
 const pending = new Map<string, Promise<void>>();
