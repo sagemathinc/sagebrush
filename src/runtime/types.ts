@@ -11,6 +11,7 @@ import {
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
+import * as AC from "./argconv";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
@@ -1265,7 +1266,22 @@ method(T.bool, "__repr__", (x: any) => (x ? "True" : "False"));
 // ------------------------------------------------------------------ str
 
 const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, errors: any = undefined) => {
-  if (encoding !== undefined && x instanceof PyBytes) return decode(x, encoding, errors);
+  // (an encoding or errors: each a str, then the object decoded, which must
+  // be bytes-like, as CPython's unicode_new and PyUnicode_FromEncodedObject;
+  // astra3 A11)
+  if (encoding !== undefined || errors !== undefined) {
+    const strOf = (v: any, n: string): string => {
+      const u = unbox(v);
+      return typeof u === "string" ? u : raise(T.TypeError, `str() argument '${n}' must be str, not ${typeName(v)}`);
+    };
+    const enc = encoding === undefined ? "utf-8" : strOf(encoding, "encoding");
+    const err = errors === undefined ? "strict" : strOf(errors, "errors");
+    if (x instanceof PyBytes) return decode(x, enc, err);
+    if (typeof unbox(x) === "string") raise(T.TypeError, "decoding str is not supported");
+    const b = O.bufferOf(x);
+    if (b === undefined) raise(T.TypeError, `decoding to str: need a bytes-like object, ${typeName(x)} found`);
+    return decode(new PyBytes(b.slice()), enc, err);
+  }
   // (a __str__ returning a str subclass instance gives that instance, as
   // CPython's PyObject_Str; str's own __str__ gives an exact copy)
   if (x !== null && typeof x === "object" && !(x instanceof FloatBox)) {
@@ -1295,7 +1311,7 @@ function needStr(x: any, what = "must be str"): string {
   return x;
 }
 function stripChars(s: string, chars: any, left: boolean, right: boolean): string {
-  if (chars !== null && chars !== undefined && typeof chars !== "string") raise(T.TypeError, `strip arg must be None or str`);
+  if (chars !== null && chars !== undefined && typeof chars !== "string") raise(T.TypeError, `${left && right ? "strip" : left ? "lstrip" : "rstrip"} arg must be None or str`);
   let i = 0, j = s.length;
   const drop = chars === null || chars === undefined ? isWs : (c: string) => chars.includes(c);
   if (left) while (i < j && drop(s[i])) i++;
@@ -1362,8 +1378,10 @@ method(S, "join", (sep: string, items: any) => {
   }
   return SP.joinChecked(out, sep);
 });
+// (maxsplit through __index__, converted before sep is looked at, as
+// CPython's clinic does)
 method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
-  const m = Number(maxsplit);
+  const m = Number(AC.indexArg(maxsplit));
   if (sep === null) return splitWhitespace(s, m);
   if (typeof sep !== "string") raise(T.TypeError, `must be str or None, not ${typeName(sep)}`);
   if (sep === "") raise(T.ValueError, "empty separator");
@@ -1372,9 +1390,9 @@ method(S, "split", (s: string, sep: any = null, maxsplit: any = -1) => {
   return parts;
 }, sig(["self", "sep", "maxsplit"]));
 method(S, "rsplit", (s: string, sep: any = null, maxsplit: any = -1) => {
-  const m = Number(maxsplit);
+  const m = Number(AC.indexArg(maxsplit));
   if (sep === null) return m < 0 ? splitWhitespace(s, -1) : rsplitWhitespace(s, m);
-  needStr(sep);
+  needStr(sep, "must be str or None");
   if (sep === "") raise(T.ValueError, "empty separator");
   const parts = SP.split(s, sep);
   if (m >= 0 && parts.length > m + 1) return [parts.slice(0, parts.length - m).join(sep), ...parts.slice(parts.length - m)];
@@ -1399,7 +1417,7 @@ method(S, "rstrip", (s: string, chars: any = null) => stripChars(s, chars, false
 method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
   needStr(a, "replace() argument 1 must be str");
   needStr(b, "replace() argument 2 must be str");
-  let c = Number(count);
+  let c = Number(AC.indexArg(count));
   // (matches on code-point boundaries, and no lone surrogates joined: SP)
   if (c < 0 && a !== "") return SP.joinChecked(SP.split(s, a), b);
   if (c < 0) c = Infinity;
@@ -1423,8 +1441,9 @@ method(S, "replace", (s: string, a: string, b: string, count: any = -1) => {
   out.push(s.slice(i));
   return SP.joinChecked(out, "");
 });
-function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): number {
-  needStr(sub);
+// (sub a str, "find() argument 1 must be str, not int", as CPython's clinic)
+function findImpl(s: string, sub: any, start: any, end: any, rev: boolean, name: string): number {
+  sub = AC.strArg(name, "argument 1", sub);
   const [a, b] = clampRange(s, start, end);
   if (b - a < sub.length || a > s.length) return -1;
   const j = rev ? SP.lastIndexOf(s, sub, b - sub.length) : SP.indexOf(s, sub, a);
@@ -1432,20 +1451,20 @@ function findImpl(s: string, sub: string, start: any, end: any, rev: boolean): n
   const p = SP.pairs(s);
   return p === null ? j : SP.cpOf(p, j);
 }
-method(S, "find", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, false));
-method(S, "rfind", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, true));
+method(S, "find", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, false, "find"));
+method(S, "rfind", (s: string, sub: string, start: any = undefined, end: any = undefined) => findImpl(s, sub, start, end, true, "rfind"));
 method(S, "index", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
-  const j = findImpl(s, sub, start, end, false);
+  const j = findImpl(s, sub, start, end, false, "index");
   if (j < 0) raise(T.ValueError, "substring not found");
   return j;
 });
 method(S, "rindex", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
-  const j = findImpl(s, sub, start, end, true);
+  const j = findImpl(s, sub, start, end, true, "rindex");
   if (j < 0) raise(T.ValueError, "substring not found");
   return j;
 });
-method(S, "count", (s: string, sub: string, start: any = undefined, end: any = undefined) => {
-  needStr(sub);
+method(S, "count", (s: string, sub: any, start: any = undefined, end: any = undefined) => {
+  sub = AC.strArg("count", "argument 1", sub);
   const [a, b] = clampRange(s, start, end);
   if (a > s.length) return 0;
   const t = s.slice(a, b);
@@ -1529,12 +1548,14 @@ function padTo(s: string, w: any, fill: string, where: string): string {
   const left = Math.floor(n / 2) + (n & Number(w) & 1);
   return SP.glue(SP.glue(fill.repeat(left), s), fill.repeat(n - left));
 }
-method(S, "center", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "c"));
-method(S, "ljust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "l"));
-method(S, "rjust", (s: string, w: any, fill: string = " ") => padTo(s, w, fill, "r"));
+// (the width through __index__, then the fill character checked, padding
+// needed or not: astra3 A08)
+method(S, "center", (s: string, w: any, fill: any = " ") => padTo(s, AC.indexArg(w), AC.fillCharArg(fill), "c"));
+method(S, "ljust", (s: string, w: any, fill: any = " ") => padTo(s, AC.indexArg(w), AC.fillCharArg(fill), "l"));
+method(S, "rjust", (s: string, w: any, fill: any = " ") => padTo(s, AC.indexArg(w), AC.fillCharArg(fill), "r"));
 method(S, "zfill", (s: string, w: any) => {
   const sign = s[0] === "-" || s[0] === "+" ? s[0] : "";
-  const n = Number(w) - SP.cpLen(s);
+  const n = Number(AC.indexArg(w)) - SP.cpLen(s);
   return n > 0 ? sign + "0".repeat(n) + s.slice(sign.length) : s;
 });
 // str.translate and str.maketrans, as CPython's (their messages included);
@@ -1679,12 +1700,13 @@ method(S, "rpartition", (s: string, sep: string) => {
   const i = SP.lastIndexOf(s, sep, s.length);
   return i < 0 ? tuple(["", "", s]) : tuple([s.slice(0, i), sep, s.slice(i + sep.length)]);
 });
-method(S, "removeprefix", (s: string, p: string) => (s.startsWith(p) && SP.onBoundaries(s, 0, p.length) ? s.slice(p.length) : s));
-method(S, "removesuffix", (s: string, p: string) => (p && s.endsWith(p) && SP.onBoundaries(s, s.length - p.length, p.length) ? s.slice(0, -p.length) : s));
+// (a str argument only: astra3 A09)
+method(S, "removeprefix", (s: string, p: any) => ((p = AC.strArg("removeprefix", "argument", p)), s.startsWith(p) && SP.onBoundaries(s, 0, p.length) ? s.slice(p.length) : s));
+method(S, "removesuffix", (s: string, p: any) => ((p = AC.strArg("removesuffix", "argument", p)), p && s.endsWith(p) && SP.onBoundaries(s, s.length - p.length, p.length) ? s.slice(0, -p.length) : s));
 method(S, "encode", (s: string, encoding: any = "utf-8", errors: any = "strict") => encode(s, encoding, errors), sig(["self", "encoding", "errors"]));
 method(S, "expandtabs", (s: string, ts: any = 8) => {
   let out = "", col = 0;
-  const n = Number(ts);
+  const n = Number(AC.indexArg(ts));
   const seams: number[] = []; // (a tab expanded to nothing joins its neighbours: SP.checkSeams)
   for (const c of s) {
     if (c === "\t") {
@@ -2488,10 +2510,11 @@ export class Enumerate {
     return r;
   }
 }
-const enumerate = iteratorType("enumerate", Enumerate, (x: any, start: any = 0) => new Enumerate(O.iter(x), start));
+// (start an integer through __index__, as CPython's enumerate_new: astra3 A12)
+const enumerate = iteratorType("enumerate", Enumerate, (x: any, start: any = 0) => new Enumerate(O.iter(x), O.index(start)));
 enumerate.$kw = (pos, names, values) => {
   const [x, start] = bindArgs("enumerate", sig(["iterable", "start"]), pos, names, values);
-  return new Enumerate(O.iter(x), start ?? 0);
+  return new Enumerate(O.iter(x), O.index(start ?? 0));
 };
 
 export class Zip {
@@ -2725,6 +2748,18 @@ getset(object, "__dict__", (o) => {
     if (Array.isArray(x)) return (x as any).$t ? tuple(x.map((v) => back(v, Cls))) : x.map((v) => back(v, Cls));
     return x;
   };
+  const latinOf = (b: Uint8Array): string => Buffer.from(b.buffer, b.byteOffset, b.length).toString("latin1");
+  // (the methods' arguments by kind: b bytes-like, b? bytes-like or None, c
+  // a fill byte, * as it is)
+  // (the methods' arguments by kind, converted in CPython's clinic order: b
+  // bytes-like, b? bytes-like or None, c a fill byte, i an integer through
+  // __index__, * as it is; a kind ending in ! after all the others, as an
+  // object the method itself converts: split's sep after maxsplit)
+  const BYTES_ARGS: Record<string, string[]> = {
+    split: ["b?!", "i"], rsplit: ["b?!", "i"], strip: ["b?"], lstrip: ["b?"], rstrip: ["b?"], partition: ["b"], rpartition: ["b"],
+    replace: ["b", "b", "i"], removeprefix: ["b"], removesuffix: ["b"], center: ["i", "c"], ljust: ["i", "c"], rjust: ["i", "c"],
+    zfill: ["i"], expandtabs: ["i"], splitlines: ["*"],
+  };
   const names = ["split", "rsplit", "strip", "lstrip", "rstrip", "partition", "rpartition", "replace", "index", "rindex", "find", "rfind", "count", "startswith", "endswith", "upper", "lower", "splitlines", "center", "ljust", "rjust", "zfill", "isdigit", "isalpha", "isspace", "isalnum", "isupper", "islower", "title", "capitalize", "swapcase", "removeprefix", "removesuffix", "expandtabs", "join"];
   for (const [bt, Cls] of [[T.bytes, PyBytes], [T.bytearray, PyByteArray]] as const) {
     for (const name of names) {
@@ -2732,9 +2767,11 @@ getset(object, "__dict__", (o) => {
       if (f === undefined) throw new Error(`internal: str.${name} missing`);
       const intArg = ["index", "rindex", "find", "rfind", "count"].includes(name);
       const m = function (self: PyBytes, ...args: any[]) {
-        if (name === "join") return back(f(latin(self), O.toArray(args[0]).map((v) => {
-          if (!(v instanceof PyBytes)) raise(T.TypeError, `sequence item: expected a bytes-like object, ${typeName(v)} found`);
-          return latin(v);
+        // (each item bytes-like: a memoryview too)
+        if (name === "join") return back(f(latin(self), O.toArray(args[0]).map((v, i) => {
+          const b = typeof v === "string" ? undefined : O.bufferOf(v);
+          if (b === undefined) raise(T.TypeError, `sequence item ${i}: expected a bytes-like object, ${typeName(v)} found`);
+          return latinOf(b);
         })), Cls);
         // (bytes' startswith and endswith: a bytes-like object or a tuple of
         // them, each checked only when reached, with CPython's messages)
@@ -2759,6 +2796,48 @@ getset(object, "__dict__", (o) => {
           if (t === undefined) raise(T.TypeError, `${name} first arg must be bytes or a tuple of bytes, not ${typeName(x)}`);
           return f(latin(self), t, ...rest);
         }
+        // (each argument converted as CPython's clinic does, whether or not
+        // it is needed: bytes-like ones through the buffer protocol, a
+        // fill byte, None where it means the default; astra3 A08, A09)
+        const kinds = BYTES_ARGS[name];
+        if (kinds !== undefined) {
+          const out = args.slice();
+          const one = (i: number) => {
+            const a = args[i], k = (kinds[i] ?? "*").replace("!", "");
+            if (a === undefined || k === "*" || (k === "b?" && a === null)) return;
+            if (k === "i") out[i] = AC.indexArg(a);
+            else if (k === "c") out[i] = String.fromCharCode(AC.byteCharArg(name, `argument ${i + 1}`, a));
+            else out[i] = latinOf(AC.bufferArg(a));
+          };
+          for (let i = 0; i < args.length; i++) if (!(kinds[i] ?? "").endsWith("!")) one(i);
+          for (let i = 0; i < args.length; i++) if ((kinds[i] ?? "").endsWith("!")) one(i);
+          const r = f(latin(self), ...out);
+          if (Cls === PyBytes && typeof r === "string" && r.length === self.n && /strip|just|center|zfill|remove/.test(name)) return self;
+          return back(r, Cls);
+        }
+        // (find, rfind, index, rindex and count: start and end first, as
+        // slice indices, then the subject: an int byte or bytes-like; index's
+        // and rindex's "subsection not found")
+        if (intArg) {
+          for (const a of args.slice(1)) if (a !== undefined) O.sliceIndexExact(a);
+          const a = args[0];
+          let sub: string;
+          if (O.isPyInt(a)) {
+            const v = Number(a);
+            if (!(v >= 0 && v < 256)) raise(T.ValueError, "byte must be in range(0, 256)");
+            sub = String.fromCharCode(v);
+          } else {
+            const b = typeof a === "string" ? undefined : O.bufferOf(a);
+            if (b === undefined) raise(T.TypeError, `argument should be integer or bytes-like object, not '${typeName(a)}'`);
+            sub = latinOf(b);
+          }
+          if (name === "index" || name === "rindex") {
+            const j = S.$dict.get(name === "index" ? "find" : "rfind")(latin(self), sub, ...args.slice(1));
+            if (j < 0) raise(T.ValueError, "subsection not found");
+            return j;
+          }
+          return f(latin(self), sub, ...args.slice(1));
+        }
         const conv = args.map((a, i) => {
           // (find, rfind, index, rindex and count: after the subject, start
           // and end, slice indices, which str's method checks)
@@ -2768,6 +2847,7 @@ getset(object, "__dict__", (o) => {
             if (!(v >= 0 && v < 256)) raise(T.ValueError, "byte must be in range(0, 256)");
             return String.fromCharCode(v);
           }
+          if (intArg && i === 0) return latinOf(AC.bufferArg(a));
           if (typeof a === "string") raise(T.TypeError, `a bytes-like object is required, not 'str'`);
           return a === undefined ? a : latin(a);
         });
@@ -2833,8 +2913,25 @@ getset(object, "__dict__", (o) => {
     bin("floordiv", O.floordiv);
     bin("mod", O.mod);
     bin("divmod", O.divmod);
-    method(cls, "__pow__", (a: any, b: any, m: any = null) => ((b = unbox(b)), ok(b) ? (m === null ? O.pow(unbox(a), b) : O.pow(unbox(a), b, unbox(m))) : NotImplemented));
-    method(cls, "__rpow__", (a: any, b: any) => ((b = unbox(b)), ok(b) ? O.pow(b, unbox(a)) : NotImplemented));
+    // (a modulus: ints only, int's NotImplemented for another, float's
+    // CPython's TypeError; it recursed through the float's own __pow__,
+    // astra3 A13)
+    method(cls, "__pow__", (a: any, b: any, m: any = null) => {
+      b = unbox(b);
+      if (!ok(b)) return NotImplemented;
+      if (m === null) return O.pow(unbox(a), b);
+      if (!intOnly) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
+      m = unbox(m);
+      return O.isPyInt(m) ? O.pow(unbox(a), b, m) : NotImplemented;
+    });
+    method(cls, "__rpow__", (a: any, b: any, m: any = null) => {
+      b = unbox(b);
+      if (!ok(b)) return NotImplemented;
+      if (m === null) return O.pow(b, unbox(a));
+      if (!intOnly) raise(T.TypeError, "pow() 3rd argument not allowed unless all arguments are integers");
+      m = unbox(m);
+      return O.isPyInt(m) ? O.pow(b, unbox(a), m) : NotImplemented;
+    });
     if (intOnly) {
       bin("lshift", O.lshift);
       bin("rshift", O.rshift);
@@ -2843,8 +2940,10 @@ getset(object, "__dict__", (o) => {
       bin("xor", O.xor);
       method(cls, "__invert__", (a: any) => O.invert(unbox(a)));
     }
+    // (int's take only ints, float's ints and floats: int.__eq__(1, 1.0) is
+    // NotImplemented, as CPython's long_richcompare; astra3 A01)
     for (const [n, f] of [["eq", O.eq], ["ne", O.ne], ["lt", O.lt], ["le", O.le], ["gt", O.gt], ["ge", O.ge]] as const) {
-      method(cls, `__${n}__`, (a: any, b: any) => ((b = unbox(b)), isNum(b) ? f(unbox(a), b) : NotImplemented));
+      method(cls, `__${n}__`, (a: any, b: any) => ((b = unbox(b)), ok(b) ? f(unbox(a), b) : NotImplemented));
     }
     method(cls, "__neg__", (a: any) => O.neg(unbox(a)));
     method(cls, "__pos__", (a: any) => O.pos(unbox(a)));

@@ -393,7 +393,8 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
     }
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
     if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
-    raise(T.TypeError, `${f.__name__ ?? f.$name ?? f.name}() takes no keyword arguments`);
+    // (a builtin method by its qualified name, str.ljust(), as CPython 3.14's)
+    raise(T.TypeError, `${f.$builtinMethod && f.__qualname__ ? f.__qualname__ : (f.__name__ ?? f.$name ?? f.name)}() takes no keyword arguments`);
   }
   const c = lookupType(typeOf(f), "__call__");
   if (c !== undefined) return typeof c === "function" ? callKw(c, [f, ...pos], names, values) : callKw(callSlot(c, f), pos, names, values);

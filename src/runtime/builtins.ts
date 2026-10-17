@@ -143,6 +143,8 @@ function minmax(name: string, args: any[], key: any, dflt: any, wantMax: boolean
   if (args.length === 1) items = O.toArray(args[0]);
   else if (args.length === 0) raise(T.TypeError, `${name} expected at least 1 argument, got 0`);
   else items = args;
+  // (a default only with one iterable, as CPython's min_max: astra3 A10)
+  if (args.length > 1 && dflt !== undefined) raise(T.TypeError, `Cannot specify a default for ${name}() with multiple positional arguments`);
   if (items.length === 0) {
     if (dflt !== undefined) return dflt;
     raise(T.ValueError, `${name}() iterable argument is empty`);
@@ -335,10 +337,12 @@ function sorted(it: any, key: any = null, reverse: any = false) {
 }
 (sorted as any).$sig = sig(["iterable"], { posonly: 1, kwonly: ["key", "reverse"] });
 
+// (int's and float's __round__: ndigits None, or an integer through
+// __index__, never a float: astra3 A03)
 function roundImpl(x: any, nd: any = null): any {
   if (O.isPyInt(x)) {
     if (nd === null) return typeof x === "boolean" ? +x : x;
-    const n = Number(nd);
+    const n = Number(O.index(nd));
     if (n >= 0) return typeof x === "boolean" ? +x : x;
     const p = 10n ** BigInt(-n);
     const v = BigInt(x);
@@ -358,7 +362,7 @@ function roundImpl(x: any, nd: any = null): any {
       if (Math.abs(v - Math.trunc(v)) === 0.5) r = 2 * Math.round(v / 2);
       return Number.isSafeInteger(r) ? r + 0 : O.normBig(BigInt(r));
     }
-    const n = Number(nd);
+    const n = Number(O.index(nd));
     if (!Number.isFinite(v) || v === 0) return x;
     if (n >= 0) return O.mkfloat(n > 330 ? v : parseFloat(formatFixed(v, n)));
     if (n < -330) return O.mkfloat(0 * v);
@@ -571,6 +575,7 @@ define("max", (...a: any[]) => minmax("max", a, null, undefined, true));
 builtins.max.$kw = minmaxKw("max", true);
 define("sorted", sorted, [1, 1]);
 define("round", roundImpl, [1, 2]);
+builtins.round.$kw = (pos: any[], names: string[], values: any[]) => roundImpl(...(bindArgs("round", sig(["number", "ndigits"]), pos, names, values) as [any, any]));
 // int.__round__ and float.__round__: how a subclass of int or float (numpy's
 // float64, say) rounds, to an exact int or float, as in CPython
 for (const t of [T.int, T.float]) Ty.method(t, "__round__", (x: any, nd: any = null) => roundImpl(unbox(x), nd));

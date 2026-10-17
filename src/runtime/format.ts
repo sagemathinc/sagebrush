@@ -1,6 +1,6 @@
 // repr(), str(), format() and `str % args`.
 
-import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox } from "./object";
+import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
 import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -400,9 +400,10 @@ interface Spec {
   type: string;
 }
 
-function parseSpec(spec: string): Spec {
+// (tn: the type named in an invalid spec's error, as CPython 3.14's)
+function parseSpec(spec: string, tn: string): Spec {
   const m = /^(?:(.)?([<>=^]))?([-+ ])?(z)?(#)?(0)?(\d+)?([,_])?(?:\.(\d+))?([bcdeEfFgGnosxX%])?$/su.exec(spec);
-  if (m === null) raise(T.ValueError, "Invalid format specifier '" + spec + "'");
+  if (m === null) raise(T.ValueError, `Invalid format specifier '${spec}' for object of type '${tn}'`);
   return {
     fill: m[1] ?? (m[6] ? "0" : " "),
     align: m[2] ?? (m[6] ? "=" : ""),
@@ -457,7 +458,15 @@ function signOf(neg: boolean, s: Spec): string {
   return neg ? "-" : s.sign === "+" ? "+" : s.sign === " " ? " " : "";
 }
 
+// (CPython's format_long_internal: a float presentation type converts it;
+// otherwise no precision, no z, and for 'c' no sign or #, and a code point
+// in range(0x110000), a C long first)
+const LONG_MAX = 9223372036854775807n;
 function formatInt(v: bigint, s: Spec): string {
+  if ("eEfFgG%".includes(s.type) && s.type !== "") return formatFloat(Number(v), s);
+  if (!"bcdoxXn".includes(s.type)) raise(T.ValueError, `Unknown format code '${s.type}' for object of type 'int'`);
+  if (s.precision >= 0) raise(T.ValueError, "Precision not allowed in integer format specifier");
+  if (s.z) raise(T.ValueError, "Negative zero coercion (z) not allowed in integer format specifier");
   const neg = v < 0n;
   const a = neg ? -v : v;
   let digits: string, prefix = "";
@@ -467,70 +476,108 @@ function formatInt(v: bigint, s: Spec): string {
     case "x": digits = a.toString(16); prefix = "0x"; break;
     case "X": digits = a.toString(16).toUpperCase(); prefix = "0X"; break;
     case "c":
-      if (s.sign !== "-" || s.alt) raise(T.ValueError, `${s.alt ? "Alternate form (#)" : "Sign"} not allowed with integer format specifier 'c'`);
+      if (s.sign !== "-" || s.alt) raise(T.ValueError, `${s.alt && s.sign === "-" ? "Alternate form (#)" : "Sign"} not allowed with integer format specifier 'c'`);
+      if (v > LONG_MAX || v < -LONG_MAX - 1n) raise(T.OverflowError, "Python int too large to convert to C long");
+      if (neg || v >= 0x110000n) raise(T.OverflowError, "%c arg not in range(0x110000)");
       return pad(String.fromCodePoint(Number(v)), "", s, ">");
-    case "":
-    case "d":
-    case "n":
-      digits = decimalOf(a);
-      break;
     default:
-      return formatFloat(Number(v), s);
+      digits = decimalOf(a);
   }
-  if (s.precision >= 0) raise(T.ValueError, "Precision not allowed in integer format specifier");
   const sign = signOf(neg, s) + (s.alt ? prefix : "");
   const gn = s.type === "" || s.type === "d" || s.type === "n" ? 3 : 4;
   digits = s.grouping && s.zero && s.fill === "0" && s.align === "=" ? zeroGroup(digits, s.grouping, gn, s.width - sign.length) : group(digits, s.grouping, gn);
   return pad(digits, sign, s, ">");
 }
 
-function formatFloat(x: number, s: Spec): string {
+// A float's digits for spec s, without its sign or grouping, and whether it
+// is negative (not a z-coerced zero): the presentation type checked first,
+// for infinities and NaNs too (CPython's format_float_internal: "INF" for
+// F, E and G, "inf%" for %). complex: a complex's component, whose omitted
+// type is repr's digits without ".0" ('r'), or 'g' with a precision.
+function floatBody(x: number, s: Spec, tn: string, complex = false): [boolean, string] {
   const neg = x < 0 || Object.is(x, -0);
-  let a = Math.abs(x);
-  let body: string;
+  const a = Math.abs(x);
   const p = s.precision;
-  if (!Number.isFinite(a)) body = a !== a ? "nan" : "inf";
-  else {
-    switch (s.type) {
-      case "f":
-      case "F":
-        body = formatFixed(a, p < 0 ? 6 : p, s.alt);
-        break;
-      case "e":
-      case "E":
-        body = formatExp(a, p < 0 ? 6 : p, s.type === "E", s.alt);
-        break;
-      case "g":
-      case "G":
-      case "n":
-        body = formatGeneral(a, p < 0 ? 6 : p, s.type === "G", s.alt, false);
-        break;
-      case "%":
-        body = formatFixed(a * 100, p < 0 ? 6 : p, s.alt) + "%";
-        break;
-      case "":
-        body = p < 0 ? floatRepr(a) : formatGeneral(a, p, false, s.alt, true);
-        break;
-      default:
-        raise(T.ValueError, `Unknown format code '${s.type}' for object of type 'float'`);
-    }
+  if (!(complex ? "eEfFgGn" : "eEfFgGn%").includes(s.type)) raise(T.ValueError, `Unknown format code '${s.type}' for object of type '${tn}'`);
+  let body: string;
+  if (!Number.isFinite(a)) {
+    body = a !== a ? "nan" : "inf";
     if (s.type === "F" || s.type === "E" || s.type === "G") body = body.toUpperCase();
+    if (s.type === "%") body += "%";
+    return [neg, body];
   }
-  if (s.grouping) {
+  switch (s.type) {
+    case "f":
+    case "F":
+      body = formatFixed(a, p < 0 ? 6 : p, s.alt);
+      break;
+    case "e":
+    case "E":
+      body = formatExp(a, p < 0 ? 6 : p, s.type === "E", s.alt);
+      break;
+    case "g":
+    case "G":
+    case "n":
+      body = formatGeneral(a, p < 0 ? 6 : p, s.type === "G", s.alt, false);
+      break;
+    case "%":
+      body = formatFixed(a * 100, p < 0 ? 6 : p, s.alt) + "%";
+      break;
+    default:
+      if (!complex) body = p < 0 ? floatRepr(a) : formatGeneral(a, p, false, s.alt, true);
+      else if (p >= 0) body = formatGeneral(a, p, false, s.alt, false);
+      else {
+        body = floatRepr(a).replace(/\.0(?=e|$)/, "");
+        if (s.alt && !body.includes(".")) body = body.replace(/(?=e)|$/, ".");
+      }
+  }
+  if (s.type === "F" || s.type === "E" || s.type === "G") body = body.toUpperCase();
+  // (z: a negative value that shows as zero is shown as zero)
+  const negZero = s.z && neg && !/[1-9]/.test(body.replace(/e.*$/i, ""));
+  return [neg && !negZero, body];
+}
+
+function formatFloat(x: number, s: Spec): string {
+  let [neg, body] = floatBody(x, s, "float");
+  if (s.grouping && Number.isFinite(x)) {
     const [ip] = body.split(/(?=[.eE%])/, 2);
-    const negZero0 = s.z && neg && Number(body.replace(/[^0-9.e]/g, "")) === 0;
-    const signLen = signOf(neg && !negZero0, s).length;
+    const signLen = signOf(neg, s).length;
     const rest = body.slice(ip.length);
     body = (s.zero && s.fill === "0" && s.align === "=" && /^\d+$/.test(ip) ? zeroGroup(ip, s.grouping, 3, s.width - signLen - rest.length) : group(ip, s.grouping, 3)) + rest;
   }
-  const negZero = s.z && neg && Number(body.replace(/[^0-9.e]/g, "")) === 0;
-  return pad(body, signOf(neg && !negZero, s), s, ">");
+  return pad(body, signOf(neg, s), s, ">");
+}
+
+// format(z, spec), as CPython's format_complex_internal: no zero padding
+// and no '=' alignment; each component formatted without width (the
+// imaginary one always signed, but alone), then the width, fill and
+// alignment (right by default) applied to the whole; an omitted type
+// as str(), in parentheses unless the real part is +0.0 and omitted
+export function formatComplex(re: number, im: number, spec: string): string {
+  const s = parseSpec(spec, "complex");
+  if (s.fill === "0") raise(T.ValueError, "Zero padding is not allowed in complex format specifier");
+  if (s.align === "=") raise(T.ValueError, "'=' alignment flag is not allowed in complex format specifier");
+  const skipRe = s.type === "" && re === 0 && !Object.is(re, -0);
+  const parens = s.type === "" && !skipRe;
+  const part = (x: number, sign: string): string => {
+    const ps: Spec = { ...s, sign, width: 0, fill: " ", align: "" };
+    const [neg, body] = floatBody(x, ps, "complex", true);
+    let b = body;
+    if (s.grouping && Number.isFinite(x)) {
+      const [ip] = b.split(/(?=[.eE])/, 2);
+      b = group(ip, s.grouping, 3) + b.slice(ip.length);
+    }
+    return signOf(neg, ps) + b;
+  };
+  const reStr = skipRe ? "" : part(re, s.sign);
+  const imStr = part(im, skipRe ? s.sign : "+");
+  return pad(`${parens ? "(" : ""}${reStr}${imStr}j${parens ? ")" : ""}`, "", s, ">");
 }
 
 export function format(v: any, spec: string): string {
   if (typeof v === "string") {
     if (spec === "") return v;
-    const s = parseSpec(spec);
+    const s = parseSpec(spec, "str");
     if (s.type !== "" && s.type !== "s") raise(T.ValueError, `Unknown format code '${s.type}' for object of type 'str'`);
     if (s.sign !== "-" && spec.match(/[-+ ]/)) raise(T.ValueError, "Sign not allowed in string format specifier");
     if (s.alt) raise(T.ValueError, "Alternate form (#) not allowed in string format specifier");
@@ -544,12 +591,12 @@ export function format(v: any, spec: string): string {
   if (typeof v === "boolean" && spec === "") return v ? "True" : "False";
   if (isPyInt(v)) {
     if (spec === "") return typeof v === "bigint" ? decimalOf(v) : String(+v);
-    return formatInt(typeof v === "bigint" ? v : BigInt(+v), parseSpec(spec));
+    return formatInt(typeof v === "bigint" ? v : BigInt(+v), parseSpec(spec, typeof v === "boolean" ? "bool" : "int"));
   }
   if (typeof v === "number" || v instanceof FloatBox) {
     const x = fv(v)!;
     if (spec === "") return floatRepr(x);
-    return formatFloat(x, parseSpec(spec));
+    return formatFloat(x, parseSpec(spec, "float"));
   }
   const f = lookupType(typeOf(v), "__format__");
   if (f !== undefined) {
@@ -716,7 +763,14 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
           if ([...v].length !== 1) raise(T.TypeError, `%c requires an int or a unicode character, not a string of length ${[...v].length}`);
           c = v;
         } else {
-          const x = intOf(v, "c", true);
+          // (an int or an __index__ object, else CPython's formatchar message)
+          let x: bigint;
+          try {
+            x = intOf(v, "c", true);
+          } catch (e: any) {
+            if (!isinstance(toPyExc(e), T.TypeError)) throw e;
+            raise(T.TypeError, `%c requires an int or a unicode character, not ${typeName(v)}`);
+          }
           if (x < 0n || x >= 0x110000n) raise(T.OverflowError, "%c arg not in range(0x110000)");
           c = String.fromCodePoint(Number(x));
         }
