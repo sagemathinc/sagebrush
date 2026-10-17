@@ -99,7 +99,8 @@ def _underflow(neg, a, d, shift, rnd):
         up = rnd == "RNDA" or (rnd == "RNDU" and not neg) or (rnd == "RNDD" and neg)
     if up:
         return (-1 if neg else 1), _EMIN - 1
-    return 0, 0
+    # (a zero keeps the sign: RealNumberMP reads -0 from this exponent)
+    return 0, (_NEGZ_E if neg else 0)
 
 
 def _round_int(m, e, prec, rnd="RNDN"):
@@ -125,6 +126,9 @@ _EMIN = 1 - (1 << 62)
 # for binary exponents up to this size: beyond, _q() raises
 # NotImplementedError instead of building a multi-megabyte integer.
 _EXACT_BITS = 1 << 20
+# The exponent _underflow gives a zero rounded from a negative number, for
+# RealNumberMP to make it -0 (no number has it: it is below the range)
+_NEGZ_E = -(1 << 64)
 
 
 def _rational_bits(q):
@@ -429,9 +433,12 @@ def _special_op(a, b, op, R):
     # division
     if a._special and b._special:
         return nan
+    # (an infinity over a finite number, or a finite one over an infinity:
+    # the sign is the product of the signs, a zero's included)
+    neg = a._signbit() != b._signbit()
     if a._special:
-        return inf(sa * (sb if sb else 1))
-    return R(0)
+        return inf(-1 if neg else 1)
+    return RealNumberMP(R, 0, 0, None, neg)
 
 
 def _cmp_dyadic(m1, e1, n2, e2, d2):
@@ -1413,7 +1420,7 @@ def _to_real(R, x, base=10):
         if x._special:
             return RealNumberMP(R, 0, 0, x._special)
         m, e = _round_int(x._m, x._e, prec, rnd) if x._m else (0, 0)
-        return RealNumberMP(R, m, e)
+        return RealNumberMP(R, m, e, None, x._neg)
     if isinstance(x, bool):
         x = int(x)
     if isinstance(x, int):
@@ -1433,7 +1440,7 @@ def _to_real(R, x, base=10):
             return RealNumberMP(R, 0, 0, "+inf" if x > 0 else "-inf")
         q = _F(x)
         m, e = _round_q(q.numerator, q.denominator, prec, rnd) if q else (0, 0)
-        return RealNumberMP(R, m, e)
+        return RealNumberMP(R, m, e, None, not q and math.copysign(1.0, x) < 0)
     if isinstance(x, str):
         return _parse(R, x, base)
     if isinstance(x, ComplexNumberMP):
@@ -1507,6 +1514,9 @@ def _parse(R, s, base=10):
         q = _F(t)
     except ValueError:
         raise TypeError("unable to convert %r to a real number" % s)
+    if not q and t.startswith("-"):
+        # ("-0", "-0.0": a negative zero, as Sage's)
+        return RealNumberMP(R, 0, 0, None, True)
     return _to_real(R, q)
 
 
@@ -1532,12 +1542,24 @@ class RealNumberMP:
         (-1.1000000000000000000000000000, +infinity, -infinity)
     """
 
-    __slots__ = ("_R", "_m", "_e", "_special")
+    __slots__ = ("_R", "_m", "_e", "_special", "_neg")
 
-    def __init__(self, R, m, e, special=None):
+    def __init__(self, R, m, e, special=None, neg=False):
         if m and special is None:
+            # (an underflow to zero keeps the sign, as MPFR's)
+            neg = m < 0
             m, e, special = _range(R, m, e)
+        if not m:
+            # (a zero's exponent is 0; _underflow's -0 is marked by its)
+            neg, e = neg or e == _NEGZ_E, 0
         self._R, self._m, self._e, self._special = R, m, e, special
+        # the sign of a zero (-0 is MPFR's, as Sage prints it); False for
+        # every nonzero or special number
+        self._neg = bool(neg) and not m and not special
+
+    def _signbit(self):
+        """Whether the sign is negative, a zero's included (-0)."""
+        return self._m < 0 or self._neg or self._special == "-inf"
 
     # ---- data
     def parent(self):
@@ -1637,7 +1659,7 @@ class RealNumberMP:
             (1, 786432, -18)
         """
         Z = _sa().Integer
-        return Z(1 if self._m >= 0 else -1), Z(abs(self._m)), Z(self._e)
+        return Z(-1 if self._signbit() else 1), Z(abs(self._m)), Z(self._e)
 
     # ---- printing
     def __repr__(self):
@@ -1649,7 +1671,7 @@ class RealNumberMP:
             rnd = "U" if self._R._rnd == "RNDZ" else "D"
         if self._m and _huge(self._m, self._e):
             return _format_big(self._m, self._e, _digits(self._R._prec), rnd=rnd)
-        return _format(self._q(), _digits(self._R._prec), rnd=rnd)
+        return ("-" if self._neg else "") + _format(self._q(), _digits(self._R._prec), rnd=rnd)
 
     __str__ = __repr__
 
@@ -1671,7 +1693,7 @@ class RealNumberMP:
             D = _digits(self._R._prec)
         if self._m and _huge(self._m, self._e):
             return _format_big(self._m, self._e, D, no_sci)
-        return _format(self._q(), D, no_sci)
+        return ("-" if self._neg else "") + _format(self._q(), D, no_sci)
 
     def _latex_(self):
         return repr(self)
@@ -1707,7 +1729,7 @@ class RealNumberMP:
             return {"+inf": float("inf"), "-inf": float("-inf"), "nan": float("nan")}[self._special]
         m, e = self._m, self._e
         if not m:
-            return 0.0
+            return -0.0 if self._neg else 0.0
         neg, a = m < 0, abs(m)
         E = e + a.bit_length()
         if E > 1025:
@@ -1892,7 +1914,7 @@ class RealNumberMP:
     def __neg__(self):
         if self._special:
             return RealNumberMP(self._R, 0, 0, {"+inf": "-inf", "-inf": "+inf"}.get(self._special, "nan"))
-        return RealNumberMP(self._R, -self._m, self._e)
+        return RealNumberMP(self._R, -self._m, self._e, None, not self._m and not self._neg)
 
     def __pos__(self):
         return self
@@ -1905,7 +1927,7 @@ class RealNumberMP:
             sage: RealField(30)(-2).abs()
             2.0000000
         """
-        return -self if self._m < 0 or self._special == "-inf" else self
+        return -self if self._m < 0 or self._neg or self._special == "-inf" else self
 
     abs = __abs__
 
@@ -1918,9 +1940,12 @@ class RealNumberMP:
             if n == 0:
                 return R(1)
             if self._m == 0:
+                # (-0 to an odd power keeps its sign: -0^3 is -0, -0^-3 is
+                # -infinity)
+                neg = self._neg and n % 2 == 1
                 if n > 0:
-                    return self
-                return RealNumberMP(R, 0, 0, "+inf")
+                    return RealNumberMP(R, 0, 0, None, neg)
+                return RealNumberMP(R, 0, 0, "-inf" if neg else "+inf")
             # past the exponent range for certain: decided from bit lengths
             # before any powering (RR(3)^(2^20000) squared a 20000-bit
             # exponent's worth of big integers to reach infinity)
@@ -1975,8 +2000,18 @@ class RealNumberMP:
             # (bounded: a tiny exponent, e near -2^62, is no integer, HARD-FAB-1)
             odd = not y._special and y._e <= 0 and _mp_integral(y._m, y._e) and (y._m >> -y._e) % 2 == 1
             if not pos:
-                return RealNumberMP(R, 0, 0)
+                # (-infinity to a negative odd power: -0)
+                return RealNumberMP(R, 0, 0, None, x._special == "-inf" and odd)
             return RealNumberMP(R, 0, 0, "-inf" if x._special == "-inf" and odd else "+inf")
+        if x._m == 0:
+            # a zero base, as MPFR: 0 for a positive exponent, +infinity for
+            # a negative one; -0 to an odd integer keeps its sign
+            pos = y._special == "+inf" or (not y._special and y._m > 0)
+            odd = not y._special and y._e <= 0 and _mp_integral(y._m, y._e) and (y._m >> -y._e) % 2 == 1
+            neg = x._neg and odd
+            if pos:
+                return RealNumberMP(R, 0, 0, None, neg)
+            return RealNumberMP(R, 0, 0, "-inf" if neg else "+inf")
         if x._m < 0 and y._special:
             if y._special == "nan":
                 # (a complex NaN)
@@ -2527,6 +2562,9 @@ class RealNumberMP:
         R = self._R
         if self._special:
             return self._nan()
+        if self._m == 0:
+            # (+-0 itself: arcsin(-0) is -0)
+            return self
         c = abs(self)._cmpq(1)
         if c > 0:
             # (outside [-1, 1]: NaN, as Sage's real arcsin)
@@ -2912,7 +2950,8 @@ def _mp_remainder(a, b, R):
         return a
     m, e = _remainder_dyadic(a._m, a._e, b._m, b._e)
     if not m:
-        return RealNumberMP(R, 0, 0)
+        # (a zero remainder has the sign of a, as MPFR's: -3 % 3 is -0)
+        return RealNumberMP(R, 0, 0, None, a._m < 0)
     return RealNumberMP(R, *_round_int(m, e, R._prec, R._rnd))
 
 
@@ -3031,7 +3070,11 @@ def _arith(a, b, op, R):
     if op in "+-":
         mb = b._m if op == "+" else -b._m
         if a._m == 0:
-            m, e = _round_int(mb, b._e, p, rnd) if mb else (0, 0)
+            if not mb:
+                # (two zeros: their common sign, else +0, -0 rounding down)
+                nb = b._neg if op == "+" else not b._neg
+                return RealNumberMP(R, 0, 0, None, a._neg and nb or (a._neg != nb and rnd == "RNDD"))
+            m, e = _round_int(mb, b._e, p, rnd)
             return RealNumberMP(R, m, e)
         if mb == 0:
             m, e = _round_int(a._m, a._e, p, rnd)
@@ -3056,25 +3099,28 @@ def _arith(a, b, op, R):
         e = min(ea, eb)
         M = (a._m << (ea - e)) + (mb << (eb - e))
         if M == 0:
-            return RealNumberMP(R, 0, 0)
+            # (an exact cancellation: +0, -0 rounding down)
+            return RealNumberMP(R, 0, 0, None, rnd == "RNDD")
         m, e2 = _round_q(M, 1, p, rnd, e)
         return RealNumberMP(R, m, e2)
+    # (* and /: the sign is the product of the signs, a zero's included)
+    neg = a._signbit() != b._signbit()
     if op == "*":
         M = a._m * b._m
         if M == 0:
-            return RealNumberMP(R, 0, 0)
+            return RealNumberMP(R, 0, 0, None, neg)
         m, e = _round_q(M, 1, p, rnd, a._e + b._e)
         return RealNumberMP(R, m, e)
     if op == "/":
         if b._m == 0:
             if a._m == 0:
                 return RealNumberMP(R, 0, 0, "nan")
-            return RealNumberMP(R, 0, 0, "+inf" if a._m > 0 else "-inf")
+            return RealNumberMP(R, 0, 0, "-inf" if neg else "+inf")
         n, d = a._m, b._m
         if d < 0:
             n, d = -n, -d
         if n == 0:
-            return RealNumberMP(R, 0, 0)
+            return RealNumberMP(R, 0, 0, None, neg)
         m, e = _round_q(n, d, p, rnd, a._e - b._e)
         return RealNumberMP(R, m, e)
     raise ValueError(op)

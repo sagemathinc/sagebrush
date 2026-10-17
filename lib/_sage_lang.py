@@ -469,6 +469,9 @@ class RealNumber(float):
             sage: RR(10).log(), RR(8).log(2)
             (2.30258509299405, 3.00000000000000)
         """
+        if base is None and float.__float__(self) == 0:
+            # (log(+-0) is -infinity, as MPFR's)
+            return RealNumber(-_INF)
         return RealNumber(_m.log(self) if base is None else _m.log(self, base))
 
     def floor(self):
@@ -1058,7 +1061,7 @@ def _rr_from_mp(v):
         # +-infinity past MPFR's exponent range itself, or NaN
         return RealNumber(float(v))
     if not v._m:
-        return RealNumber(0.0)
+        return RealNumber(-0.0 if v._neg else 0.0)
     f = float(v)
     if f != 0 and -_INF < f < _INF and v._cmpq(f) == 0:
         return RealNumber(f)
