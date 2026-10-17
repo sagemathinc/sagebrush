@@ -2374,3 +2374,50 @@ test("edge values from the catalog probe: rem(x, 0), prod of complex, polyval wi
     "double [1 1] 1", "double [1 3] [1 1 1]", "double [3 1] [1;1;1]", "double [2 1] [3+6i;0+2i]",
     "double [1 1] 3", "double [1 1] 2"]);
 });
+
+test("a matrix product with an Inf or NaN is refused (dense, sparse, mixed and mpower), since where Inf and NaN land depends on how it is computed; a scalar factor, finite matrices and A^1 are not", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "try, x = complex([Inf 2; 3 4], [Inf 6; 7 8]) * eye(2); catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4] * eye(2); catch e, disp(e.message), end",
+    "try, x = eye(2) * [1 2; NaN 4]; catch e, disp(e.message), end",
+    "try, x = [Inf 0] * [0; 1]; catch e, disp(e.message), end",
+    "try, x = single([Inf 2; 3 4]) * eye(2); catch e, disp(e.message), end",
+    "disp(mat2str(Inf * eye(2))); disp(mat2str([1 2; 3 4] * [5; 6])); disp(mat2str(2 * [1 NaN]))",
+    "A = complex([Inf 2; 3 4], [Inf 6; 7 8]);",
+    "try, x = sparse(A) * speye(2); catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4] * speye(2); catch e, disp(e.message), end",
+    "try, x = speye(2) * [Inf 2; 3 4]; catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4]^2; catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4]^3; catch e, disp(e.message), end",
+    "disp(mat2str([Inf 2; 3 4]^1)); disp(mat2str([Inf 2; NaN 4]^0)); disp(mat2str([2 0; 0 4]^-1)); disp(mat2str([1 2; 3 4]^3))",
+    "disp(mat2str(full(sparse([1 2; 3 4]) * speye(2)))); disp(mat2str(full(2 * sparse([Inf 1]))))",
+    "disp(mat2str(size([Inf 1] * zeros(2, 0)))); disp(mat2str(zeros(2, 0) * zeros(0, 3))); disp(mat2str(size(zeros(0, 2) * [Inf 1; 2 3])))",
+    "warning('off', 'all'); disp(isequal([1 1; 1 1]^-1, inv([1 1; 1 1]))); disp(isequal([1 0; 0 0]^-1, inv([1 0; 0 0])));",
+    "disp(isequal(full(sparse(A)^1), A)); disp(mat2str(full(sparse([1 2; 3 4])^2))); disp(mat2str(full(sparse([1 2; 3 4])^0)))",
+    "try, x = sparse([Inf 2; 3 4])^sparse(2); catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4]^sparse(2); catch e, disp(e.message), end",
+    "try, x = [1e200 0; 0 1e200]^3; catch e, disp(e.message), end",
+    "try, x = sparse([1e200 0; 0 1e200])^3; catch e, disp(e.message), end",
+    "try, x = [1 1; 1 1]^-2; catch e, disp(e.message), end",
+    "try, x = [Inf 2; 3 4]^-1; catch e, disp(e.message), end",
+    "C = complex([1 2; 3 5], [1 0; 0 -1]); d = @(X) max(abs(X(:))); disp(d(C^-1 * C - eye(2)) < 1e-12); disp(d(C^-2 * C^2 - eye(2)) < 1e-12); disp(d(C^-3 * C^3 - eye(2)) < 1e-12)",
+    "disp(isequal(complex([1 1; 1 1], [1 1; 1 1])^-1, Inf(2)))",
+    "try, x = single([1e20 0; 0 1e20])^3; catch e, disp(e.message), end",
+    "try, x = single([1e20 0; 0 1e20])^4; catch e, disp(e.message), end",
+    "disp(class(single([1 2; 3 4])^3)); disp(mat2str(single([1 2; 3 4])^3))",
+    "try, x = single([1e-40 0; 0 1e-40])^-2; catch e, disp(e.message), end",
+    "Y = single(C)^-2; fprintf('%.17g %.17g\\n', imag(Y(1, 2)), imag(Y(2, 1)))",
+    "X = single([0.1 0.2; 0.3 0.5])^3; fprintf('%.17g\\n', double(X(2, 1)))",
+    "Z = [1 + 2^-24 0; 0 1]^single(2); fprintf('%s %.17g\\n', class(Z), double(Z(1, 1)))",
+    "S = single(C); disp(class(S^-2)); disp(d(double(S^-1 * S) - eye(2)) < 1e-5); disp(d(full(sparse(C)^-1 * C) - eye(2)) < 1e-12)",
+  ].join("\n")], { encoding: "utf8" });
+  const refused = "Matrix multiplication of values that include Inf or NaN is not supported in Sagebrush: " +
+    "where Inf and NaN appear in the result depends on how the product is computed. Multiply finite values, or write the sums out with .* and sum.";
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [refused, refused, refused, refused, refused,
+    "[Inf NaN;NaN Inf]", "[17;39]", "[2 NaN]", refused, refused, refused, refused, refused,
+    "[Inf 2;3 4]", "[1 0;0 1]", "[0.5 0;0 0.25]", "[37 54;81 118]", "[1 2;3 4]", "[Inf 2]", "[1 0]", "[0 0 0;0 0 0]", "[0 2]",
+    "1", "1", "1", "[7 10;15 22]", "[1 0;0 1]", refused, refused, refused, refused, refused,
+    "A negative matrix power of values that include Inf or NaN is not supported in Sagebrush: it is inv(A), whose result for them is not certified.",
+    "1", "1", "1", "1", refused, refused, "single", "[37 54;81 118]", refused, "-2.6367796834847468e-16 -4.163336342344337e-16", "0.11100000888109207", "single 1.0000001192092896", "single", "1", "1"]);
+});
