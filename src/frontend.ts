@@ -57,6 +57,33 @@ export function parse(source: string, filename: string, mode: "exec" | "eval" = 
 // Sage's preparser: src/sagepre.ts
 export { preparse as preparseSage } from "./sagepre";
 
+// what a value pattern or mapping key may be (the grammar has made sure of
+// the rest: a signed number, a complex literal)
+const LITERALISH = new Set(["Constant", "Attribute", "UnaryOp", "BinOp"]);
+interface MatchCtx {
+  n: number;
+  temps: Map<string, string>; // captured name -> its temp
+  bound: Set<string>; // names this pattern (alternative) binds so far
+  order: string[]; // the captured names, in first-capture order
+}
+// a literal mapping key, for the duplicate check: as Python's set sees it
+// (1, 1.0 and True are one key)
+function constKey(v: any): string {
+  if (v === null || v === undefined || v instanceof PySingleton) return "None";
+  if (typeof v === "boolean") return "n:" + (v ? 1 : 0);
+  if (typeof v === "number" || typeof v === "bigint") return "n:" + String(typeof v === "bigint" ? v : v);
+  if (typeof v === "string") return "s:" + v;
+  if (v instanceof Uint8Array || Array.isArray(v)) return "b:" + Array.from(v as any).join(",");
+  return "o:" + String(v);
+}
+function constRepr(v: any): string {
+  if (v === null || v === undefined || v instanceof PySingleton) return "None";
+  if (typeof v === "boolean") return v ? "True" : "False";
+  if (typeof v === "number") return Number.isInteger(v) ? v.toFixed(1) : String(v);
+  if (typeof v === "string") return v.includes("'") && !v.includes('"') ? JSON.stringify(v) : "'" + v.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+  return String(v);
+}
+
 class Convert {
   constructor(private filename: string, private lines: string[], private sage = false) {}
 
@@ -268,11 +295,167 @@ class Convert {
       case "TryStar":
         this.unsupported(s, "except*");
       case "Match":
-        this.unsupported(s, "match");
+        return this.matchStmt(s);
       case "TypeAlias":
         this.unsupported(s, "type alias");
       default:
         this.unsupported(s, s._type);
+    }
+  }
+
+  // match (PEP 634), lowered to an if chain over the subject, kept in a temp:
+  //   $s = subject
+  //   (each case, in order, until one matches) if <its test> [and <its guard>]: body
+  // A case's test checks its pattern, capturing values into temps as it
+  // goes, then binds the captured names all at once, as CPython binds them
+  // only when the whole pattern has matched (and before the guard):
+  // __pyjs_match_true__(x := $cx, ...), which is True. Sequence, mapping and
+  // class patterns check and unpack the subject with __pyjs_match_seq__,
+  // __pyjs_match_map__ and __pyjs_match_class__ (builtins.ts), CPython's
+  // MATCH_SEQUENCE/MATCH_KEYS/MATCH_CLASS. The SyntaxErrors past the
+  // grammar's (unreachable patterns, repeated names...) are CPython's
+  // compiler's, in its order.
+  matchStmt(s: any): A.Stmt {
+    const line = s.lineno;
+    const n = this.tmp++;
+    const subj = `$s${n}`;
+    const tests: (A.Expr | null)[] = [];
+    s.cases.forEach((c: any, i: number) => {
+      const ctx: MatchCtx = { n, temps: new Map(), bound: new Set(), order: [] };
+      const allow = !!c.guard || i === s.cases.length - 1;
+      const parts: A.Expr[] = [];
+      const t = this.pattern(c.pattern, this.name(subj, line), ctx, allow);
+      if (t !== null) parts.push(t);
+      if (ctx.order.length) parts.push(this.call("__pyjs_match_true__", ctx.order.map((nm) => ({ k: "NamedExpr", line, target: nm, value: this.name(ctx.temps.get(nm)!, line) }) as A.Expr), line));
+      if (c.guard) parts.push(this.expr(c.guard));
+      tests.push(parts.length === 0 ? null : parts.length === 1 ? parts[0] : { k: "BoolOp", line, op: "and", values: parts });
+    });
+    // a flat chain, however many cases (no nesting for the JS parser):
+    //   $d = False
+    //   if not $d and <test>: $d = True; body    (for each case)
+    const done = `$d${n}`;
+    const T = (b: boolean): A.Expr => ({ k: "Const", line, value: { t: "bool", v: b } });
+    const out: A.Stmt[] = [
+      { k: "Assign", line, targets: [this.name(subj, line)], value: this.expr(s.subject) },
+      { k: "Assign", line, targets: [this.name(done, line)], value: T(false) },
+    ];
+    s.cases.forEach((c: any, i: number) => {
+      const l = c.pattern.lineno;
+      const notDone: A.Expr = { k: "UnaryOp", line: l, op: "not", operand: this.name(done, l) };
+      const t = tests[i];
+      out.push({
+        k: "If", line: l, test: t === null ? notDone : { k: "BoolOp", line: l, op: "and", values: [notDone, t] },
+        body: [{ k: "Assign", line: l, targets: [this.name(done, l)], value: T(true) }, ...this.stmts(c.body)], orelse: [],
+      });
+    });
+    return { k: "If", line, test: T(true), body: out, orelse: [] };
+  }
+
+  matchError(p: any, msg: string): never {
+    const l = p.lineno ?? 1;
+    throw new PySyntaxError(msg, this.filename, l, this.lines[l - 1] ?? "", (p.col_offset ?? 0) + 1, p.end_lineno ?? null, p.end_col_offset !== undefined ? p.end_col_offset + 1 : null);
+  }
+
+  // A capture: the value into the name's temp (shared by an or-pattern's
+  // alternatives), its name bound when the case has matched.
+  capture(p: any, name: string, value: A.Expr, ctx: MatchCtx): A.Expr {
+    const line = p.lineno;
+    const nm = this.m(name);
+    if (ctx.bound.has(nm)) this.matchError(p, `multiple assignments to name '${name}' in pattern`);
+    ctx.bound.add(nm);
+    if (!ctx.temps.has(nm)) {
+      ctx.temps.set(nm, `$c${ctx.n}_${ctx.temps.size}`);
+      ctx.order.push(nm);
+    }
+    return this.call("__pyjs_match_true__", [{ k: "NamedExpr", line, target: ctx.temps.get(nm)!, value }], line);
+  }
+
+  // A pattern's test of `subj`, or null when it always matches. `allow`:
+  // whether it may be irrefutable (CPython's allow_irrefutable: not in a case
+  // that is neither last nor guarded, nor in an or-pattern's alternative
+  // but the last).
+  pattern(p: any, subj: A.Expr, ctx: MatchCtx, allow: boolean): A.Expr | null {
+    const line = p.lineno;
+    const and = (xs: (A.Expr | null)[]): A.Expr | null => {
+      const v = xs.filter((x): x is A.Expr => x !== null);
+      return v.length === 0 ? null : v.length === 1 ? v[0] : { k: "BoolOp", line, op: "and", values: v };
+    };
+    const none: A.Expr = { k: "Const", line, value: { t: "None" } };
+    const item = (t: string, i: number): A.Expr => ({ k: "Subscript", line, value: this.name(t, line), index: { k: "Const", line, value: { t: "int", v: BigInt(i) } } });
+    const unpacked = (helper: string, args: A.Expr[]): [string, A.Expr] => {
+      const t = `$m${ctx.n}_${this.tmp++}`;
+      return [t, { k: "Compare", line, left: { k: "NamedExpr", line, target: t, value: this.call(helper, args, line) }, ops: ["is not"], comparators: [none] }];
+    };
+    switch (p._type) {
+      case "MatchValue":
+        // (an f-string is a JoinedStr: no literal, CPython's compiler says)
+        if (!LITERALISH.has(p.value._type)) this.matchError(p, "patterns may only match literals and attribute lookups");
+        return { k: "Compare", line, left: subj, ops: ["=="], comparators: [this.expr(p.value)] };
+      case "MatchSingleton": {
+        const v = p.value;
+        const c: A.Constant = v === null || v === undefined || v instanceof PySingleton ? { t: "None" } : { t: "bool", v: !!v };
+        return { k: "Compare", line, left: subj, ops: ["is"], comparators: [{ k: "Const", line, value: c }] };
+      }
+      case "MatchAs": {
+        if (!p.pattern) {
+          if (!allow) this.matchError(p, p.name ? `name capture '${p.name}' makes remaining patterns unreachable` : "wildcard makes remaining patterns unreachable");
+          return p.name ? this.capture(p, p.name, subj, ctx) : null;
+        }
+        const t = this.pattern(p.pattern, subj, ctx, allow);
+        return and([t, p.name ? this.capture(p, p.name, subj, ctx) : null]);
+      }
+      case "MatchOr": {
+        const outer = new Set(ctx.bound);
+        let first: Set<string> | null = null;
+        const alts: A.Expr[] = [];
+        p.patterns.forEach((alt: any, j: number) => {
+          ctx.bound = new Set(outer);
+          const t = this.pattern(alt, subj, ctx, j === p.patterns.length - 1 ? allow : false);
+          const mine = new Set([...ctx.bound].filter((x) => !outer.has(x)));
+          if (first === null) first = mine;
+          else if (mine.size !== first.size || [...mine].some((x) => !first!.has(x))) this.matchError(p, "alternative patterns bind different names");
+          alts.push(t ?? { k: "Const", line, value: { t: "bool", v: true } });
+        });
+        ctx.bound = new Set([...outer, ...first!]);
+        return { k: "BoolOp", line, op: "or", values: alts };
+      }
+      case "MatchSequence": {
+        const pats = p.patterns;
+        const stars = pats.filter((x: any) => x._type === "MatchStar").length;
+        if (stars > 1) this.matchError(p, "multiple starred names in sequence pattern");
+        const star = pats.findIndex((x: any) => x._type === "MatchStar");
+        const fixed = pats.length - (star < 0 ? 0 : 1);
+        const [t, test] = unpacked("__pyjs_match_seq__", [{ k: "Const", line, value: { t: "int", v: BigInt(fixed) } }, { k: "Const", line, value: { t: "int", v: BigInt(star) } }].map((x) => x as A.Expr));
+        (test as any).left.value.args.unshift(subj);
+        return and([test, ...pats.map((x: any, i: number) => (x._type === "MatchStar" ? (x.name ? this.capture(x, x.name, item(t, i), ctx) : null) : this.pattern(x, item(t, i), ctx, true)))]);
+      }
+      case "MatchMapping": {
+        const seen = new Map<string, true>();
+        for (const k of p.keys) {
+          if (!LITERALISH.has(k._type)) this.matchError(p, "mapping pattern keys may only match literals and attribute lookups");
+          if (k._type !== "Constant") continue;
+          const key = constKey(k.value);
+          if (seen.has(key)) this.matchError(p, `mapping pattern checks duplicate key (${constRepr(k.value)})`);
+          seen.set(key, true);
+        }
+        const keys: A.Expr = { k: "Tuple", line, elts: p.keys.map((k: any) => this.expr(k)) };
+        const [t, test] = unpacked("__pyjs_match_map__", [subj, keys, { k: "Const", line, value: { t: "bool", v: !!p.rest } }]);
+        const subs = p.patterns.map((x: any, i: number) => this.pattern(x, item(t, i), ctx, true));
+        if (p.rest) subs.push(this.capture(p, p.rest, item(t, p.keys.length), ctx));
+        return and([test, ...subs]);
+      }
+      case "MatchClass": {
+        const kw: string[] = p.kwd_attrs;
+        kw.forEach((a, j) => {
+          if (kw.indexOf(a) !== j) this.matchError(p.kwd_patterns[j], `attribute name repeated in class pattern: ${a}`);
+        });
+        const names: A.Expr = { k: "Tuple", line, elts: kw.map((a) => ({ k: "Const", line, value: { t: "str", v: a } }) as A.Expr) };
+        const [t, test] = unpacked("__pyjs_match_class__", [subj, this.expr(p.cls), { k: "Const", line, value: { t: "int", v: BigInt(p.patterns.length) } }, names]);
+        const subs = [...p.patterns, ...p.kwd_patterns].map((x: any, i: number) => this.pattern(x, item(t, i), ctx, true));
+        return and([test, ...subs]);
+      }
+      default:
+        this.matchError(p, `${p._type} is not supported in match`);
     }
   }
 
