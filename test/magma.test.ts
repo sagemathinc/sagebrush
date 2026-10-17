@@ -1328,6 +1328,24 @@ test("GCD, GreatestCommonDivisor, LCM, LeastCommonMultiple, XGCD and ExtendedGre
   assert.doesNotMatch(out, /1\/2 1 0|TypeError|Traceback/);
 });
 
+test("the image of a set under a map is over the map's codomain, empty or not (Universe, Gcd)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const f = "f:=map<Integers()->Rationals()|x:->x>; ";
+  const src = [f + "S:=f({Integers()|}); Universe(S);", f + "S:=f({Integers()|}); Universe(S join {Integers()|});",
+    f + "S:=f({Integers()|}); Universe(S join {Integers()|2});", f + "S:=f({1,2}); Universe(S);",
+    "g:=map<Integers()->Integers()|x:->2*x>; S:=g({Integers()|}); Universe(S), Gcd(S), Lcm(S);",
+    "h:=map<Integers()->GF(7)|x:->x>; S:=h({1,8}); S, Universe(S);", "h:=map<Integers()->GF(7)|x:->x>; S:=h({Integers()|}); Universe(S join {Integers()|});",
+    f + "S:=f({}); Universe(S);", f + "S:=f({Integers()|}); Include(~S,3); Universe(S);",
+    f + "S:=f({1,2}); Gcd(S join {Integers()|});", f + "S:=Setseq(f({Integers()|})); Append(~S,2); Gcd(S);"].join("\n") + "\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  // (as Magma 2.18 has them: never the integers' for a map into the rationals)
+  assert.ok(out.startsWith("Rational Field\nRational Field\nRational Field\nRational Field\nInteger Ring\n0 1\n{ 1 }\nFinite field of size 7\n" +
+    "Finite field of size 7\nRational Field\nRational Field\n"), out);
+  assert.equal((out.match(/Runtime error in 'Gcd': GCD not defined for field/g) ?? []).length, 2, out);
+  assert.match(out, /\nend\n$/);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
