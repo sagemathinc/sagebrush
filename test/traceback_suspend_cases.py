@@ -153,3 +153,40 @@ g = twice()
 a(g)
 b(g)
 print(c(g), end="")
+
+
+# PEP 479: a StopIteration out of a generator, the cause of a RuntimeError;
+# a builtin's KeyError as a cause (CORR-581-1)
+def g():
+    yield 1
+    next(iter([]))
+try:
+    list(g())
+except RuntimeError:
+    print(traceback.format_exc(), end="")
+try:
+    try:
+        {}[1]
+    except KeyError as k:
+        raise ValueError("from builtin") from k
+except ValueError:
+    print(traceback.format_exc(), end="")
+def h():
+    yield 1
+    return 5
+def outer():
+    x = yield from h()
+    yield x
+print(list(outer()))
+def bad():
+    yield 1
+    raise StopIteration("explicit")
+try:
+    list(bad())
+except RuntimeError:
+    print(traceback.format_exc(), end="")
+# the bookkeeping is not among an exception's attributes
+try:
+    {}[2]
+except KeyError as e:
+    print([n for n in dir(e) if n.startswith("$")], [n for n in vars(e) if n.startswith("$")])

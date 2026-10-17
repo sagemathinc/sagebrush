@@ -1065,8 +1065,7 @@ export function excEnter(e: any): void {
     } finally {
       Error.stackTraceLimit = limit;
     }
-    if (e.$caught === undefined) Object.defineProperty(e, "$caught", { value: { tb: e.$tb, at }, writable: true, enumerable: false, configurable: true });
-    else e.$caught = { tb: e.$tb, at };
+    e.$caught = { tb: e.$tb, at };
   }
 }
 // (by identity: a generator resumed outside the frame that ran it may not
@@ -1114,6 +1113,17 @@ export function raise(cls: PyType, msg?: string): never {
 export function newException(cls: PyType, args: any[]): any {
   const e = cls(...args);
   captureTraceback(e);
+  return markRaised(e);
+}
+
+// An exception that is raised, by Python code (raiseExc) or by the runtime
+// (raise, newException, the few direct throws, toPyExc's conversions): it
+// has a traceback of its own even if only the runtime catches it, unlike
+// one never raised (CORR-581-1). O(1): a plain property (a "$" name, which
+// Python's attribute and __dict__ views leave out), far cheaper than
+// defineProperty on this path.
+export function markRaised(e: any): any {
+  if (e !== null && typeof e === "object") e.$raised = true;
   return e;
 }
 
@@ -1140,10 +1150,7 @@ export function raiseExc(x: any, cause?: any): any {
   }
   setContext(e);
   captureTraceback(e, true);
-  // (raised by Python code: a traceback of its own even if only the runtime
-  // catches it, as hasattr or next's default do, CORR-581-1)
-  if (e.$raised !== true) Object.defineProperty(e, "$raised", { value: true, writable: true, enumerable: false, configurable: true });
-  return e;
+  return markRaised(e);
 }
 
 // Convert anything caught by a JS `catch` into a Python exception.
@@ -1152,14 +1159,14 @@ export function toPyExc(e: any): any {
   if (e instanceof TypeError && /Generator is already running|Generator is executing/.test(e.message)) {
     const r = T.ValueError("generator already executing");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   // A sandboxed runtime refused an operation: Deno permissions (NotCapable,
   // PermissionDenied) or Node's permission model (ERR_ACCESS_DENIED).
   if (e instanceof Error && (e.name === "NotCapable" || e.name === "PermissionDenied" || (e as any).code === "ERR_ACCESS_DENIED")) {
     const r = T.PermissionError(e.message.split("\n")[0]);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   // An allocation JS can't make (a string or array past its maximum
   // length, an ArrayBuffer it can't allocate): MemoryError, as CPython's
@@ -1167,16 +1174,16 @@ export function toPyExc(e: any): any {
   if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length/.test(e.message)) {
     const r = T.MemoryError();
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   if (e instanceof RangeError && /call stack/.test(e.message)) {
     const r = T.RecursionError("maximum recursion depth exceeded");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   const r = T.SystemError(`internal error: ${e && e.stack ? e.stack : String(e)}`);
   Object.defineProperty(r, "$tb", { value: e instanceof Error ? e : {}, writable: true, enumerable: false });
-  return r;
+  return markRaised(r);
 }
 
 export function excMatch(e: any, spec: any): boolean {
@@ -1292,12 +1299,13 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void } = {
   typeCall: null,
   // (a generator's handled exception, as it resumes; one thrown into a
   // generator: the traceback bookkeeping, index.ts)
   excResumed: () => {},
   excThrown: () => {},
+  genRaised: () => {},
   importModule: () => null,
   callerModule: () => "__main__",
   hash: () => 0,
