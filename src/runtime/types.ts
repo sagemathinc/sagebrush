@@ -4,7 +4,7 @@ import * as SP from "./strpos";
 import { CASEFOLD } from "./casefold-data";
 import {
   checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
-  builtinType, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
+  builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray,
@@ -1588,7 +1588,7 @@ export function strFormat(s: string, args: any[], kw: any): string {
       if (first >= args.length) raise(T.IndexError, `Replacement index ${first} out of range for positional args tuple`);
       v = args[first];
     } else if (kw instanceof Map) {
-      if (!kw.has(first)) throw T.KeyError(first);
+      if (!kw.has(first)) throw markRaised(T.KeyError(first));
       v = kw.get(first);
     } else v = O.getitem(kw, first);
     let rest = m[2];
@@ -1851,13 +1851,13 @@ method(dict, "pop", (d: PyDict, k: any, dflt: any = undefined) => {
   const v = dictGet(d, k);
   if (v === undefined) {
     if (dflt !== undefined) return dflt;
-    throw T.KeyError(k);
+    throw markRaised(T.KeyError(k));
   }
   dictDelete(d, k);
   return v;
 });
 method(dict, "popitem", (d: PyDict) => {
-  if (d.$m.size === 0) throw T.KeyError("popitem(): dictionary is empty");
+  if (d.$m.size === 0) throw markRaised(T.KeyError("popitem(): dictionary is empty"));
   const mk = [...d.$m.keys()].pop();
   const k = dictKeyOf(d, mk);
   const v = d.$m.get(mk);
@@ -1889,7 +1889,7 @@ method(dict, "__len__", (d: PyDict) => d.$m.size);
 method(dict, "__getitem__", (d: PyDict, k: any) => O.dictGetitem(d, k));
 method(dict, "__setitem__", (d: PyDict, k: any, v: any) => (dictSet(d, k, v), null));
 method(dict, "__delitem__", (d: PyDict, k: any) => {
-  if (!dictDelete(d, k)) throw T.KeyError(k);
+  if (!dictDelete(d, k)) throw markRaised(T.KeyError(k));
   return null;
 });
 method(dict, "__contains__", (d: PyDict, k: any) => dictGet(d, k) !== undefined);
@@ -1986,12 +1986,12 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "add", (s: O.PySet, x: any) => (O.setAdd(s, x), null));
   method(cls, "discard", (s: O.PySet, x: any) => (dictDelete(s.$d, x), null));
   method(cls, "remove", (s: O.PySet, x: any) => {
-    if (!dictDelete(s.$d, x)) throw T.KeyError(x);
+    if (!dictDelete(s.$d, x)) throw markRaised(T.KeyError(x));
     return null;
   });
   method(cls, "pop", (s: O.PySet) => {
     const it = s.$d.$m.keys().next();
-    if (it.done) throw T.KeyError("pop from an empty set");
+    if (it.done) throw markRaised(T.KeyError("pop from an empty set"));
     const k = dictKeyOf(s.$d, it.value);
     dictDelete(s.$d, k);
     return k;

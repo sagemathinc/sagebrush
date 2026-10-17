@@ -258,9 +258,101 @@ export function withExit(m: any): (t: any, v: any, tb: any) => any {
 
 // A bare `raise` outside any except clause of its own function: the
 // exception being handled, as in CPython, if a caller is handling one.
+// A bare `raise`. The exception's traceback, from the frame that caught it,
+// goes on outward from the frame re-raising it, as CPython's: its frames now
+// are the stack's at the raise, but for the frame re-raising it, which
+// CPython doesn't add (in a helper the handler calls too), then those it had
+// from where it was caught in. (A generator resumed elsewhere since the
+// catch has new callers.) Where the frames it had can't be told, it keeps
+// its stack, as before.
 export function reraise(): any {
-  return Obj.currentExc() ?? Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
+  const e = Obj.currentExc();
+  if (e === null) return Obj.newException(T.RuntimeError, ["No active exception to reraise"]);
+  if (e.$tb !== undefined && e.$caught !== undefined && e.$caught.tb === e.$tb) {
+    let inner: Frame[] | null = null;
+    try {
+      inner = caughtFrames(e);
+    } catch {}
+    if (inner !== null) {
+      const tb: any = {};
+      Error.captureStackTrace(tb, reraise);
+      setFrames(e, tb, inner, true, null);
+    }
+  }
+  return e;
 }
+
+// An exception's frames from now on: the stack's (tb, captured) outside,
+// without its innermost frame if `drop` (the one re-raising it), then
+// `inner`; kept to the stack limit's frames, its innermost: past it, or
+// with the stack itself cut, the record is cut, and format_exc refuses
+// rather than show part of it (HARD-96A-1). A refusal's reason, `why`,
+// when its frames can't be known at all.
+function setFrames(e: any, tb: any, inner: Frame[], drop: boolean, why: string | null): void {
+  const sites = sitesOf(tb);
+  const now = pyFrames(sites);
+  let frames = (drop ? now.slice(0, -1) : now).concat(inner);
+  const max = Error.stackTraceLimit;
+  // (frames that can't be known are no less cut)
+  let cut = sites.length >= max || why !== null;
+  if (frames.length > max) {
+    frames = frames.slice(frames.length - max);
+    cut = true;
+  }
+  Object.defineProperty(e, "$tb", { value: tb, writable: true, enumerable: false, configurable: true });
+  Object.defineProperty(e, "$reraised", { value: { tb, frames, cut, why }, writable: true, enumerable: false, configurable: true });
+}
+
+// A generator resuming, with an exception it is handling (an except clause
+// or a finally it paused in): its traceback's outer frames are its new
+// callers', from here, as CPython's tb chain when it propagates on (by
+// itself, after a finally or an unmatched except, or re-raised): the
+// frames it had from the generator in, after the stack now; and the
+// generator stays the frame that caught it (CORR-6AF-2). Where its frames
+// can't be told, they are refused from now on, never left stale.
+Obj.hooks.excResumed = (e: any) => {
+  if (e === null || typeof e !== "object" || e.$tb === undefined) return;
+  const c = e.$caught;
+  let inner: Frame[] | null = null;
+  let why: string | null = null;
+  try {
+    inner = caughtFrames(e);
+  } catch (x: any) {
+    why = c === undefined ? "it was not caught since it was raised" : String(Obj.toPyExc(x).args?.[0] ?? "").replace(/^which frame caught this exception is unknown: /, "");
+  }
+  const tb: any = {};
+  Error.captureStackTrace(tb);
+  setFrames(e, tb, inner ?? [], false, inner === null ? why : null);
+  if (inner !== null && inner.length) Object.defineProperty(e, "$caught", { value: { tb, frame: inner[0] }, writable: true, enumerable: false, configurable: true });
+  else if (c !== undefined) c.tb = tb;
+};
+// A StopIteration the generator's frame let out (PEP 479 makes it the
+// cause of a RuntimeError): the runtime caught it, as the generator's frame
+// ended, so its traceback is the frames from the generator's in, the
+// generator's being the one after the stack here (CORR-581-1). Where that
+// can't be told, it stays refused, as any the runtime caught.
+Obj.hooks.genRaised = (e: any) => {
+  if (e === null || typeof e !== "object" || e.$tb === undefined) return;
+  const { frames, cut } = raisedFrames(e);
+  if (cut) return;
+  const here: any = {};
+  Error.captureStackTrace(here);
+  const sites = sitesOf(here);
+  if (sites.length >= Error.stackTraceLimit) return;
+  const now = pyFrames(sites);
+  const gen = frames[now.length];
+  if (gen === undefined || (now.length && frames[now.length - 1].fn !== now[now.length - 1].fn)) return;
+  Object.defineProperty(e, "$caught", { value: { tb: e.$tb, frame: gen }, writable: true, enumerable: false, configurable: true });
+};
+// An exception thrown into a generator (throw(), close()'s GeneratorExit)
+// is raised at the generator's yield, whose line isn't known here: its
+// frames are refused from now on, never the stale ones it had.
+Obj.hooks.excThrown = (e: any) => {
+  if (e === null || typeof e !== "object" || e.$cls === undefined) return;
+  const tb: any = {};
+  Error.captureStackTrace(tb);
+  setFrames(e, tb, [], false, "it was thrown into a generator, at a yield whose line is not kept");
+};
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
 
@@ -663,11 +755,25 @@ interface Frame {
   line: number;
   name: string;
   text: string;
+  fn: string; // which function: its compiled script and position there
 }
 
+// The frames an exception was raised through, outermost first, and whether
+// the JS stack limit may have cut outer ones off; after a bare re-raise, the
+// frames reraise recorded
+function raisedFrames(e: any): { frames: Frame[]; cut: boolean; why: string | null } {
+  if (e.$tb === undefined) return { frames: [], cut: false, why: null };
+  const r = e.$reraised;
+  if (r !== undefined && r.tb === e.$tb) return r;
+  const sites = sitesOf(e.$tb);
+  return { frames: pyFrames(sites), cut: sites.length >= Error.stackTraceLimit, why: null };
+}
 function framesOf(e: any): Frame[] {
-  const holder = e.$tb;
-  if (holder === undefined) return [];
+  return raisedFrames(e).frames;
+}
+
+// a captured stack's call sites, innermost first
+function sitesOf(holder: any): any[] {
   const prev = (Error as any).prepareStackTrace;
   (Error as any).prepareStackTrace = (_: any, cs: any[]) => cs;
   let sites: any;
@@ -686,6 +792,11 @@ function framesOf(e: any): Frame[] {
       if (m) sites.push({ getFileName: () => m[2], getLineNumber: () => Number(m[3]), getFunctionName: () => m[1] ?? "" });
     }
   }
+  return sites;
+}
+
+// the Python frames among call sites, outermost first
+function pyFrames(sites: any[]): Frame[] {
   const frames: Frame[] = [];
   for (const cs of sites) {
     // Evaluated code (the browser build) has no file name, only a sourceURL.
@@ -695,14 +806,57 @@ function framesOf(e: any): Frame[] {
     let name = String(cs.getFunctionName() ?? "");
     name = name.endsWith("$$") ? name.slice(0, -2) : name === "module$$" || name === "" ? "<module>" : name;
     if (name === "module") name = "<module>";
-    frames.push({ file: info.filename, line: pyLine, name, text: (info.lines[pyLine - 1] ?? "").trim() });
+    const at = cs.getEnclosingLineNumber?.();
+    const fn = at === undefined ? `${info.filename}:${name}` : `${info.filename}:${at}:${cs.getEnclosingColumnNumber?.()}`;
+    frames.push({ file: info.filename, line: pyLine, name, text: (info.lines[pyLine - 1] ?? "").trim(), fn });
   }
   return frames.reverse();
 }
 
-function formatOne(e: any): string {
+// The frames of a handled exception's traceback, as CPython's: from the
+// frame that caught it (excEnter records which function that was) to where
+// it was raised, however the stack has changed since. Refused, not guessed,
+// where that frame can't be told: the function isn't among the raise's
+// frames, or is there more than once (recursion through the handler), or
+// the JS stack limit may have cut the raise's outer frames off. (Every
+// exception format_exc shows, the chain's too, was caught or passed through
+// a finally; one never raised has no frames.)
+function caughtFrames(e: any): Frame[] {
+  if (e.$tb === undefined) return [];
+  const { frames, cut } = raisedFrames(e);
+  const c = e.$caught;
+  const unknown = (why: string) => raise(T.NotImplementedError, `which frame caught this exception is unknown: ${why}`);
+  // (not caught by Python code: never raised, as a cause made by
+  // ValueError("x"), so no traceback, as CPython's __traceback__ None; or
+  // raised, then consumed by the runtime (hasattr, next's default...),
+  // whose catches record nothing: refused, CORR-581-1)
+  if (c === undefined) {
+    if (e.$raised === true) unknown("it was caught by the runtime (as hasattr, or a default of getattr or next, does), which keeps no record of where");
+    return [];
+  }
+  if (c.tb !== e.$tb) unknown("it was raised again and not caught since");
+  const { why } = raisedFrames(e);
+  if (why !== null) unknown(why);
+  // (the catching frame: from the one JS frame excEnter kept, or, for a
+  // generator's exception as it resumed, the generator's own)
+  let catcher: Frame | undefined = c.frame;
+  if (catcher === undefined) {
+    const near = pyFrames(sitesOf(c.at));
+    catcher = near[near.length - 1];
+  }
+  if (catcher === undefined) unknown("it was not caught in Python code");
+  if (cut) unknown(`its traceback is deeper than the ${Error.stackTraceLimit} JavaScript frames kept`);
+  const at: number[] = [];
+  const fr = catcher!;
+  frames.forEach((f, i) => f.fn === fr.fn && at.push(i));
+  if (at.length === 0) unknown(`${fr.name} caught it, but is not among the frames it was raised through`);
+  if (at.length > 1) unknown(`${fr.name}, which caught it, is ${at.length} of the frames it was raised through (recursion through the handler)`);
+  return frames.slice(at[0]);
+}
+
+function formatOne(e: any, caught = false): string {
   let out = "";
-  const frames = framesOf(e);
+  const frames = caught ? caughtFrames(e) : framesOf(e);
   if (frames.length) {
     out += "Traceback (most recent call last):\n";
     for (const f of frames) {
@@ -723,13 +877,13 @@ function formatOne(e: any): string {
   return out;
 }
 
-export function formatException(e: any): string {
+export function formatException(e: any, caught = false): string {
   const parts: string[] = [];
   const seen = new Set<any>();
   let cur = e;
   while (cur !== null && cur !== undefined && !seen.has(cur)) {
     seen.add(cur);
-    parts.unshift(formatOne(cur));
+    parts.unshift(formatOne(cur, caught));
     if (cur.__cause__ !== null && cur.__cause__ !== undefined) {
       parts.unshift("\nThe above exception was the direct cause of the following exception:\n\n");
       cur = cur.__cause__;
@@ -877,7 +1031,19 @@ M.newBuiltinModule("traceback", (m) => {
     return [`${typeName(e)}${s ? ": " + s : ""}\n`];
   });
   fn("print_exception", (a: any, b: any = undefined, ..._r: any[]) => (B.stderr.write(formatException(exc(a, b))), null));
-  fn("format_exc", (..._a: any[]) => "NoneType: None\n");
+  // (the exception being handled, as sys.exc_info() has it; None's line
+  // outside any; a frame limit isn't implemented, so it is refused)
+  const formatExc = (limit: any = null, chain: any = true) => {
+    if (limit !== null) raise(T.NotImplementedError, "traceback.format_exc(limit=...) is not supported here");
+    const e = Obj.currentExc();
+    if (e === null) return "NoneType: None\n";
+    return O.truth(chain) ? formatException(e, true) : formatOne(e, true);
+  };
+  const excSig = Obj.sig(["limit", "chain"]);
+  const tooMany = (n: number) => raise(T.TypeError, `format_exc() takes from 0 to 2 positional arguments but ${n} were given`);
+  fn("format_exc", (...a: any[]) => (a.length > 2 ? tooMany(a.length) : formatExc(a[0], a[1])));
+  m.format_exc.$kw = (pos: any[], names: string[], values: any[]) => (pos.length > 2 ? tooMany(pos.length) : formatExc(...bindArgs("format_exc", excSig, pos, names, values)));
+  m.format_exc.$kwPos = true;
   fn("print_exc", (..._a: any[]) => null);
   fn("format_tb", (..._a: any[]) => []);
   fn("extract_tb", (..._a: any[]) => []);

@@ -420,15 +420,20 @@ export function constructPlain(cls: PyType, args: any[]): any {
   if (cls.$ctor === null) return cls(...args);
   let c = (cls as any).$ni;
   if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: effectiveNew(lookupType(cls, "__new__")), init: lookupType(cls, "__init__") };
-  const nw = c.nw;
+  let nw = c.nw;
   let o: any;
+  let init = c.init;
+  let sub: any = null;
   if (nw !== undefined && nw !== objectNew) {
     o = nw(cls, ...args);
     if (!isinstance(o, cls)) return o;
+    // (an instance of a subclass is initialized by its own type's __init__,
+    // as CPython's type.__call__ does: type(obj).__init__)
+    const t = typeOf(o);
+    if (t !== cls) ({ init, nw, sub } = subclassInit(t));
   } else o = new cls.$ctor!();
-  const init = c.init;
   if (init === objectInit) {
-    if (args.length && (nw === undefined || nw === objectNew)) raise(T.TypeError, `${cls.$name}() takes no arguments`);
+    if (args.length && (nw === undefined || nw === objectNew)) noArgs(cls, sub);
   } else {
     const r = init(o, ...args);
     if (r !== null) raise(T.TypeError, `__init__() should return None, not '${typeName(r)}'`);
@@ -444,17 +449,39 @@ function constructKw(cls: PyType, pos: any[], names: string[], values: any[]): a
   return constructPlainKw(cls, pos, names, values);
 }
 
+// the __init__ and __new__ that decide how type(obj) is initialized. Its
+// __new__ is CPython's tp_new slot: the __new__ its MRO finds, but where
+// that is object.__new__, set by a class (`__new__ = object.__new__`), the
+// slot the type inherits from its first base (CORR-6AF-1).
+function tpNew(t: any): any {
+  const e = effectiveNew(lookupType(t, "__new__"));
+  if (e !== objectNew || t === T.object) return e;
+  const base = t.$bases?.[0];
+  return base === undefined ? objectNew : tpNew(base);
+}
+function subclassInit(t: any): { init: any; nw: any; sub: any } {
+  return { init: lookupType(t, "__init__"), nw: tpNew(t), sub: t };
+}
+// arguments object.__init__ can't take: CPython's object_new's message, or,
+// for a returned subclass (its __new__ already ran), object_init's
+function noArgs(cls: any, sub: any): never {
+  raise(T.TypeError, sub === null ? `${cls.$name}() takes no arguments` : `${sub.$name}.__init__() takes exactly one argument (the instance to initialize)`);
+}
+
 export function constructPlainKw(cls: PyType, pos: any[], names: string[], values: any[]): any {
   if (cls.$ctor === null) return callKw(cls, pos, names, values);
-  const nw = effectiveNew(lookupType(cls, "__new__"));
+  let nw = effectiveNew(lookupType(cls, "__new__"));
   let o: any;
+  let init = lookupType(cls, "__init__");
+  let sub: any = null;
   if (nw !== undefined && nw !== objectNew) {
     o = callKw(nw, [cls, ...pos], names, values);
     if (!isinstance(o, cls)) return o;
+    const t = typeOf(o);
+    if (t !== cls) ({ init, nw, sub } = subclassInit(t));
   } else o = new cls.$ctor!();
-  const init = lookupType(cls, "__init__");
   if (init === objectInit) {
-    if (nw === undefined || nw === objectNew) raise(T.TypeError, `${cls.$name}() takes no arguments`);
+    if (nw === undefined || nw === objectNew) noArgs(cls, sub);
     return o;
   }
   const r = callKw(init, [o, ...pos], names, values);
@@ -1018,8 +1045,28 @@ ${ways}
 // A generator's entries are its own: genStep moves them off when it pauses
 // and back when it resumes, as CPython keeps them in each frame.
 export const handledExceptions: any[] = [];
+// Where each exception is caught, with the raise it belongs to: its
+// traceback runs from that frame to where it was raised, as CPython's tb
+// chain, however the stack changes after (CORR-6AF-2). Only the catching
+// frame is needed, so only the top JS frames are captured (a whole stack
+// costs as much as the raise's own capture); a later catch replaces the
+// record, one per exception. Runtime-internal catches (StopIteration ending
+// a loop, getattr's default...) don't come here: only compiled except,
+// finally and with do.
+const CATCH_FRAMES = 1;
 export function excEnter(e: any): void {
   handledExceptions.push(e);
+  if (e !== null && typeof e === "object" && e.$tb !== undefined) {
+    const at: any = {};
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = CATCH_FRAMES;
+    try {
+      Error.captureStackTrace(at, excEnter);
+    } finally {
+      Error.stackTraceLimit = limit;
+    }
+    e.$caught = { tb: e.$tb, at };
+  }
 }
 // (by identity: a generator resumed outside the frame that ran it may not
 // have its entries on top)
@@ -1066,6 +1113,17 @@ export function raise(cls: PyType, msg?: string): never {
 export function newException(cls: PyType, args: any[]): any {
   const e = cls(...args);
   captureTraceback(e);
+  return markRaised(e);
+}
+
+// An exception that is raised, by Python code (raiseExc) or by the runtime
+// (raise, newException, the few direct throws, toPyExc's conversions): it
+// has a traceback of its own even if only the runtime catches it, unlike
+// one never raised (CORR-581-1). O(1): a plain property (a "$" name, which
+// Python's attribute and __dict__ views leave out), far cheaper than
+// defineProperty on this path.
+export function markRaised(e: any): any {
+  if (e !== null && typeof e === "object") e.$raised = true;
   return e;
 }
 
@@ -1092,7 +1150,7 @@ export function raiseExc(x: any, cause?: any): any {
   }
   setContext(e);
   captureTraceback(e, true);
-  return e;
+  return markRaised(e);
 }
 
 // Convert anything caught by a JS `catch` into a Python exception.
@@ -1101,14 +1159,14 @@ export function toPyExc(e: any): any {
   if (e instanceof TypeError && /Generator is already running|Generator is executing/.test(e.message)) {
     const r = T.ValueError("generator already executing");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   // A sandboxed runtime refused an operation: Deno permissions (NotCapable,
   // PermissionDenied) or Node's permission model (ERR_ACCESS_DENIED).
   if (e instanceof Error && (e.name === "NotCapable" || e.name === "PermissionDenied" || (e as any).code === "ERR_ACCESS_DENIED")) {
     const r = T.PermissionError(e.message.split("\n")[0]);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   // An allocation JS can't make (a string or array past its maximum
   // length, an ArrayBuffer it can't allocate): MemoryError, as CPython's
@@ -1116,16 +1174,16 @@ export function toPyExc(e: any): any {
   if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length/.test(e.message)) {
     const r = T.MemoryError();
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   if (e instanceof RangeError && /call stack/.test(e.message)) {
     const r = T.RecursionError("maximum recursion depth exceeded");
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
-    return r;
+    return markRaised(r);
   }
   const r = T.SystemError(`internal error: ${e && e.stack ? e.stack : String(e)}`);
   Object.defineProperty(r, "$tb", { value: e instanceof Error ? e : {}, writable: true, enumerable: false });
-  return r;
+  return markRaised(r);
 }
 
 export function excMatch(e: any, spec: any): boolean {
@@ -1241,8 +1299,13 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void } = {
   typeCall: null,
+  // (a generator's handled exception, as it resumes; one thrown into a
+  // generator: the traceback bookkeeping, index.ts)
+  excResumed: () => {},
+  excThrown: () => {},
+  genRaised: () => {},
   importModule: () => null,
   callerModule: () => "__main__",
   hash: () => 0,
