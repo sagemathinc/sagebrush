@@ -57,7 +57,8 @@ function checkModuleArity(m: any) {
   const wrapped = new Map<any, any>(); // (an alias stays the same object)
   for (const k of Object.keys(m)) {
     const f = m[k];
-    if (typeof f !== "function" || isType(f) || f.$argRange !== undefined) continue;
+    // (a function written in Python checks its own arguments)
+    if (typeof f !== "function" || isType(f) || f.$argRange !== undefined || (f.$pyfn === true && f.$globals !== undefined)) continue;
     let w = wrapped.get(f);
     if (w === undefined) {
       w = checkArity(f, f.__name__ ?? k, false, table?.[k]);
@@ -459,17 +460,73 @@ dictSet(sysModules, "builtins", builtins);
 
 // ------------------------------------------------------------------ time
 
+// The time module is builtin, as CPython's: made from lib/_pytime.py's
+// public names (struct_time, gmtime, localtime, mktime, strftime and the
+// rest), so a script named time.py does not hide it
 newBuiltinModule("time", (m) => {
+  const py = importModule("_pytime");
+  for (const k of Object.keys(py)) {
+    if (k.startsWith("_") && k !== "__doc__" && k !== "__getattr__") continue;
+    m[k] = py[k];
+  }
+});
+
+// (the clocks, and the host's zone, for lib/_pytime.py)
+newBuiltinModule("_time", (m) => {
   const t0 = performance.now();
   const epochOffset = Date.now() / 1000 - t0 / 1000;
   fn(m, "perf_counter", () => performance.now() / 1000);
   fn(m, "perf_counter_ns", () => O.normBig(BigInt(Math.round(performance.now() * 1e6))));
   fn(m, "monotonic", () => performance.now() / 1000);
+  fn(m, "monotonic_ns", () => O.normBig(BigInt(Math.round(performance.now() * 1e6))));
   fn(m, "time", () => epochOffset + performance.now() / 1000);
   fn(m, "time_ns", () => O.normBig(BigInt(Date.now()) * 1000000n));
   fn(m, "process_time", () => {
     const u = process.cpuUsage();
     return (u.user + u.system) / 1e6;
+  });
+  fn(m, "process_time_ns", () => {
+    const u = process.cpuUsage();
+    return O.normBig(BigInt(u.user + u.system) * 1000n);
+  });
+  // (the clocks' docstrings, CPython 3.14's: time shows them)
+  const docs: Record<string, string> = {
+    monotonic: "monotonic() -> float\n\nMonotonic clock, cannot go backward.",
+    monotonic_ns: "monotonic_ns() -> int\n\nMonotonic clock, cannot go backward, as nanoseconds.",
+    perf_counter: "perf_counter() -> float\n\nPerformance counter for benchmarking.",
+    perf_counter_ns: "perf_counter_ns() -> int\n\nPerformance counter for benchmarking as nanoseconds.",
+    process_time: "process_time() -> float\n\nProcess time for profiling: sum of the kernel and user-space CPU time.",
+    process_time_ns: "process_time() -> int\n\nProcess time for profiling as nanoseconds:\nsum of the kernel and user-space CPU time.",
+    time: "time() -> floating-point number\n\nReturn the current time in seconds since the Epoch.\nFractions of a second may be present if the system clock provides them.",
+    time_ns: "time_ns() -> int\n\nReturn the current time in nanoseconds since the Epoch.",
+  };
+  for (const [k, d] of Object.entries(docs)) m[k].__doc__ = d;
+  // (the host's zone: (Intl's IANA name or None, the TZ variable as given
+  // or None). Intl canonicalizes Etc/GMT and UCT to "UTC", whose glibc
+  // abbreviations differ, so where TZ is set it decides; a browser has none)
+  fn(m, "_zone", () => {
+    let z: unknown;
+    try {
+      z = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      z = undefined;
+    }
+    const env = typeof process !== "undefined" ? process.env?.TZ : undefined;
+    return tuple([typeof z === "string" && z !== "" ? z : null, typeof env === "string" ? env : null]);
+  });
+  // (the host zone's local fields at a UTC second, from JS's Date (ICU's
+  // tzdata): (year, month, day, hour, minute, second, utcoffset), the offset
+  // in whole seconds from the fields themselves, as Date's own offset is in
+  // minutes; None outside the instants a Date holds)
+  fn(m, "_local", (s: any) => {
+    const n = Number(s);
+    if (!Number.isSafeInteger(n) || Math.abs(n) > 8.64e12) return null;
+    const d = new Date(n * 1000);
+    const f = [d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()];
+    const u = new Date(0);
+    u.setUTCFullYear(f[0], f[1], f[2]);
+    u.setUTCHours(f[3], f[4], f[5], 0);
+    return tuple([f[0], f[1] + 1, f[2], f[3], f[4], f[5], Math.round((u.getTime() - n * 1000) / 1000)]);
   });
   fn(m, "sleep", (s: any) => {
     const ms = O.fv(s)! * 1000;

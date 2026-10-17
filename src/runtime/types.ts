@@ -1709,7 +1709,11 @@ export function strFormat(s: string, args: any[], kw: any): string {
 // ------------------------------------------------------------------ list, tuple
 
 const list = builtinType("list", [object], (x: any = undefined) => (x === undefined ? [] : O.toArray(x)));
-const tupleType = builtinType("tuple", [object], (x: any = undefined) => (x === undefined ? tuple([]) : Array.isArray(x) && (x as any).$t === true ? x : tuple(O.toArray(x))));
+// (tuple(x) is x itself only for an exact tuple: a subclass's instance is
+// copied into a new exact tuple, as CPython's tuple_new does)
+const tupleType = builtinType("tuple", [object], (x: any = undefined) =>
+  x === undefined ? tuple([]) : Array.isArray(x) && (x as any).$t === true && typeOf(x) === tupleType ? x : tuple(O.toArray(x)),
+);
 
 // Stable sort using only `<`, like CPython.  reverse=True keeps equal
 // elements in their original order (reverse, sort, reverse).
