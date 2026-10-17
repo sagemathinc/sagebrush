@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 // every pattern kind, the binding and guard rules, the runtime TypeErrors and
 // ValueErrors, and the compile-time SyntaxErrors with their positions.
 const TEST = __dirname + "/../../test/";
-for (const name of ["match_cases.py", "match_review_delta_probe.py", "match_review_probe.py", "match_review_order_probe.py", "match_review_snapshot_probe.py", "match_review_or_probe.py"])
+for (const name of ["match_cases.py", "match_review_overflow_probe.py", "match_review_delta_probe.py", "match_review_probe.py", "match_review_order_probe.py", "match_review_snapshot_probe.py", "match_review_or_probe.py"])
 test(`match: CPython's results, errors and SyntaxErrors (${name})`, () => {
   const want = execFileSync("python3", [TEST + name], { encoding: "utf8" }).split("\n");
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", TEST + name], { encoding: "utf8" }).split("\n");
