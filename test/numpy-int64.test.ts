@@ -15,6 +15,16 @@ test("numpy int64 arithmetic wraps as NumPy's, exactly", () => {
   for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], `${name} line ${i + 1}`);
 });
 
+// (astra CORR-76A-1/2: the protocols a Python object is converted
+// through, counted, and the float64 products' order)
+test("a Python object into int64 or uint64 converts through NumPy's protocol, once", () => {
+  const name = "numpy_int64_protocol_cases.py";
+  const want = execFileSync("python3", [TEST + name], { encoding: "utf8" });
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", TEST + name], { encoding: "utf8" });
+  const w = want.split("\n"), g = got.split("\n");
+  for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], `${name} line ${i + 1}`);
+});
+
 // (each repro from the int64 report, and the paths that produce int64
 // values: creation, scalars, arithmetic, reductions, matmul, astype)
 test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never rounded", () => {

@@ -525,8 +525,11 @@ function seqItems(x: any): any[] {
   return Array.isArray(x) ? x : O.toArray(x);
 }
 
-// Shape and dtype of nested Python data.
-function discover(x: any, depth: number, shape: number[] & { leaf?: number }, kinds: { dt: DType | null }) {
+// Shape and dtype of nested Python data. (shapeOnly: a dtype was given, so
+// an element is converted once, by fill, through that dtype's protocol
+// alone, as NumPy's: no other numeric protocol called here first, astra
+// CORR-76A-1)
+function discover(x: any, depth: number, shape: number[] & { leaf?: number }, kinds: { dt: DType | null }, shapeOnly = false) {
   if (x instanceof NDArray) {
     const s = x.shape;
     for (let i = 0; i < s.length; i++) setDim(shape, depth + i, s[i]);
@@ -536,13 +539,14 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
   if (isSeq(x)) {
     const items = seqItems(x);
     setDim(shape, depth, items.length);
-    for (const it of items) discover(it, depth + 1, shape, kinds);
+    for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
     if (items.length === 0 && shape.length === depth + 1) return;
     return;
   }
   if (shape.length > depth) inhomogeneous(depth);
   shape.leaf ??= depth;
   if (shape.leaf !== depth) inhomogeneous(Math.min(depth, shape.leaf));
+  if (shapeOnly && typeof x !== "string") return;
   const w = pyScalar(x);
   if (w === null) {
     if (typeof x === "string") raise(T.NotImplementedError, "string arrays are not supported by sagebrush's numpy yet");
@@ -656,12 +660,10 @@ function admitWide(v: any, dt: DType): number {
   if (u !== v) return admitWide(u, dt);
   if (v !== null && typeof v === "object" && v.$npscalar !== undefined) return admitWide(v.$npscalar, dt);
   if (v instanceof PyComplex) raise(T.TypeError, "can't convert complex to float");
-  // (another object as int() converts it, NumPy's order: __int__, then
-  // __index__, then a float)
+  // (another object as NumPy converts it: __int__, then __index__; one
+  // with neither refused, its __float__ never called)
   if (ownInt !== undefined || Obj.lookupType(t, "__index__") !== undefined) return admitWide(Ty.intCall(v), dt);
-  const f = Ty.floatCallSafe(v);
-  if (f === undefined) return raise(T.TypeError, `int() argument must be a string, a bytes-like object or a real number, not '${typeName(v)}'`);
-  return castNum(dt, f);
+  return raise(T.TypeError, `int() argument must be a string, a bytes-like object or a real number, not '${typeName(v)}'`);
 }
 function toNum(v: any, dt?: DType): number {
   if (dt && isWide(dt)) return admitWide(v, dt);
@@ -698,8 +700,9 @@ export function asarray(x: any, dtype: any = null): NDArray {
 export function fromPy(x: any, dtype: any = null): NDArray {
   const shape: number[] & { leaf?: number } = [];
   const kinds = { dt: null as DType | null };
-  discover(x, 0, shape, kinds);
-  const dt = dtype !== null && dtype !== undefined ? toDtype(dtype) : (kinds.dt ?? D.float64);
+  const given = dtype !== null && dtype !== undefined;
+  discover(x, 0, shape, kinds, given);
+  const dt = given ? toDtype(dtype) : (kinds.dt ?? D.float64);
   const out = empty(shape, dt);
   fill(out, x);
   return out;
@@ -1658,28 +1661,35 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
-  // (the kept axes first, the reduced ones after, in order; contiguous, in rt)
-  const t = copy(transpose(a, [...keep, ...ax]), rt);
+  // (the reduced elements in prodOrder's order, each its value in rt)
+  const { off, rshape, rst } = prodOrder(a, ax, rt);
   const outShape = keep.map((i) => a.shape[i]);
-  const rn = ax.reduce((n, i) => n * a.shape[i], 1);
   const out = empty(outShape, rt);
-  const rows = outShape.reduce((n, x) => n * x, 1);
   const f32 = rt === D.complex64;
-  const d = t.data, o = out.data, base0 = t.offset;
-  for (let r = 0; r < rows; r++) {
-    // (from the first element, as NumPy's reduction: 1 only for none)
-    const k0 = 2 * (base0 + r * rn);
-    // (initial= starts the product, as NumPy's)
-    let re = init ? init[0] : rn ? d[k0] : 1, im = init ? init[1] : rn ? d[k0 + 1] : 0;
-    if (init && f32) [re, im] = [Math.fround(re), Math.fround(im)];
-    for (let i = init ? 0 : 1; i < rn; i++) {
-      const k = 2 * (base0 + r * rn + i), xr = d[k], xi = d[k + 1];
+  const cin = a.dt.cplx, d = a.data, o = out.data;
+  const val = (p: number): [number, number] => {
+    const xr = cin ? d[2 * p] : d[p], xi = cin ? d[2 * p + 1] : 0;
+    return f32 ? [Math.fround(xr), Math.fround(xi)] : [xr, xi];
+  };
+  const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]);
+  loop1(kshape, kst, off, (p0, r) => {
+    // (from the first element, as NumPy's reduction: 1 only for none;
+    // initial= starts the product, as NumPy's)
+    let re = 1, im = 0, first = init === null;
+    if (init) [re, im] = f32 ? [Math.fround(init[0]), Math.fround(init[1])] : init;
+    loop1(rshape, rst, p0, (p) => {
+      const [xr, xi] = val(p);
+      if (first) {
+        [re, im] = [xr, xi];
+        first = false;
+        return;
+      }
       [re, im] = [re * xr - im * xi, re * xi + im * xr];
       if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
-    }
+    });
     o[2 * r] = re;
     o[2 * r + 1] = im;
-  }
+  });
   return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
 }
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
@@ -1788,22 +1798,38 @@ function mulIn(rt: DType, what: string): (p: number, x: number) => number {
 // by decreasing stride, a negative stride walked forward), from 1 (or
 // initial: it starts the product, as NumPy's), each element cast to rt and
 // each product rounded or wrapped as mulIn
+// The order a product's reduced elements are multiplied in (it decides
+// overflow and underflow): float32, float16 and complex64, rounded at
+// each step, in their logical order (NumPy's inner loop over one axis,
+// and its order for a C-contiguous array reduced whole); over several
+// axes of another layout NumPy's iterator reorders axes, flips strides
+// and buffers: refused, never a product in another order. Every other
+// dtype the memory traversal NumPy's follows there (the reduced axes
+// outermost-first by stride, a negative one reversed: astra CORR-76A-2)
+function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: number[]; rst: number[] } {
+  if (rt === D.float32 || rt.name === "float16" || rt === D.complex64) {
+    const rshape = ax.map((i) => a.shape[i]), rst = ax.map((i) => a.strides[i]);
+    if (rshape.filter((n) => n > 1).length > 1 && !(ax.length === a.ndim && a.isC())) {
+      raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`);
+    }
+    return { off: a.offset, rshape, rst };
+  }
+  let off = a.offset;
+  const red = ax.map((i) => ({ n: a.shape[i], st: a.strides[i] }));
+  for (const r of red) if (r.st < 0 && r.n > 0) {
+    off += r.st * (r.n - 1);
+    r.st = -r.st;
+  }
+  red.sort((p, q) => q.st - p.st);
+  return { off, rshape: red.map((r) => r.n), rst: red.map((r) => r.st) };
+}
 function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, hasInitial: boolean): NDArray {
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
   const outShape = keep.map((i) => a.shape[i]);
   const out = empty(outShape, rt);
-  // (the reduced elements in their logical order: NumPy's inner loop over
-  // one axis, and its order for a C-contiguous array reduced whole; a
-  // float32 product over several axes of another layout follows NumPy's
-  // iterator, which reorders axes, flips strides and buffers: refused,
-  // never a product in another order)
-  const off = a.offset;
-  const rshape = ax.map((i) => a.shape[i]), rst = ax.map((i) => a.strides[i]);
-  if ((rt === D.float32 || rt.name === "float16") && rshape.filter((n) => n > 1).length > 1 && !(ax.length === nd && a.isC())) {
-    raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`);
-  }
+  const { off, rshape, rst } = prodOrder(a, ax, rt);
   const mul = mulIn(rt, "prod");
   const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : v);
   const d = a.data, od = out.data;
@@ -2824,6 +2850,12 @@ newBuiltinModule("_numpy", (m) => {
     return a;
   });
   fn("full", (shape: any, value: any, dtype: any = null) => {
+    // (a Python value into int64/uint64 converted once, by the admission)
+    if (dtype !== null && isWide(toDtype(dtype)) && !(value instanceof NDArray)) {
+      const a = empty(shapeArg(shape), toDtype(dtype));
+      assign(a, fromPy(value, a.dt));
+      return a;
+    }
     const v = operand(value);
     const dt = dtype !== null ? toDtype(dtype) : v.weak ? scalarDtype(v.weak) : v.arr.dt;
     const a = empty(shapeArg(shape), dt);
