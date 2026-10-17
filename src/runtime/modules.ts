@@ -538,7 +538,10 @@ newBuiltinModule("_time", (m) => {
     }
     const host = typeof z === "string" && z !== "" ? z : null;
     const tzdir = typeof process !== "undefined" ? process.env?.TZDIR : undefined;
-    return tuple([host, typeof env === "string" ? env : null, canon, file, host === null ? null : canonical(host), typeof tzdir === "string" ? tzdir : null]);
+    // (the host's canonical name only where TZ is set: it is compared with
+    // TZ's alone, and Intl's constructor costs every first `import time`)
+    const hostCanon = host === null || typeof env !== "string" ? null : canonical(host);
+    return tuple([host, typeof env === "string" ? env : null, canon, file, hostCanon, typeof tzdir === "string" ? tzdir : null]);
   });
   // (the host zone's local fields at a UTC second, from JS's Date (ICU's
   // tzdata): (year, month, day, hour, minute, second, utcoffset), the offset
