@@ -168,6 +168,44 @@ for lim in [2**100, -(2**100), 2**63 - 1, 2**63, -(2**63), 2.0, -2.0, True, Idx(
     show("limit %s" % (type(lim).__name__ if isinstance(lim, Idx) else repr(lim)), lambda: len(traceback.format_exception(exc, limit=lim)))
 show("format_exc limit 2**100 outside", lambda: traceback.format_exc(2**100))
 
+
+# a negative limit is deque's maxlen, -limit: an int or int subclass, by its
+# payload, within ssize_t either way, then non-negative (astra's CORR-484-3)
+class I(int):
+    pass
+
+
+class J(int):
+    def __index__(self):
+        return 99
+
+    def __int__(self):
+        return 99
+
+
+class Neg:
+    def __init__(self, m):
+        self.m = m
+
+    def __ge__(self, other):
+        return False
+
+    def __lt__(self, other):
+        return False
+
+    def __neg__(self):
+        return self.m
+
+
+negs = [("-1", -1), ("I(1)", I(1)), ("J(1)", J(1)), ("I(-1)", I(-1)), ("True", True), ("Idx", Idx()), ("2.0", 2.0),
+        ("-(2**63)", -(2**63)), ("-(2**63)-1", -(2**63) - 1), ("2**63-1", 2**63 - 1), ("2**63", 2**63), ("-(2**100)", -(2**100))]
+for name, m in negs:
+    show("-limit %s" % name, lambda: len(traceback.format_exception(exc, limit=Neg(m))))
+    show("format_exc outside, -limit %s" % name, lambda: traceback.format_exc(Neg(m)))
+    sys.tracebacklimit = Neg(m)
+    show("tracebacklimit, -limit %s" % name, lambda: len(traceback.format_exception(exc)))
+    del sys.tracebacklimit
+
 # sys.tracebacklimit, when limit is None
 sys.tracebacklimit = 1
 show("tracebacklimit 1", lambda: traceback.format_exception(exc))
