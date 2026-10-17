@@ -74,6 +74,13 @@ caption.
 - **The block Markdown editor:** `BlockEditor` (also used by the notebook's
   Markdown cells).
 
+## Versions
+
+The board package has versions of its own. `sagebrush-board/submission`
+checks what the `sagebrush` CLI's `board answers --apply` writes, so each
+version names the CLI it pairs with as an optional peer dependency: 0.2.x
+pairs with `sagebrush` 0.5.x.
+
 ## Build and test
 
 ```sh
