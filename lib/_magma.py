@@ -3642,10 +3642,8 @@ def _reduce(op, s, pos=None):
     if op in ("and", "or") and not all(isinstance(x, bool) for x in items):
         raise _bad_types("&" + op, (s,), pos)
     if not items:
-        if op == "+":
-            return 0
-        if op == "*":
-            return 1
+        if op in ("+", "*"):
+            return _empty_identity(op, s, pos)
         if op == "and":
             return True
         if op == "or":
@@ -3673,6 +3671,51 @@ def _reduce(op, s, pos=None):
         else:
             raise MagmaError("unknown reduction &%s" % op)
     return r
+
+
+def _empty_identity(op, s, pos):
+    """&+ and &* of the empty collection s: the zero or the one of its
+    universe, as Magma's (checked against Magma 2.18, astra2's WA-027): of
+    a declared one ([RealField(15) | ] gives 0.000000000000000, [K | ] K's
+    0), of the integers (a range, [Integers() | ], one emptied of its
+    integers), of the rationals one emptied of its rationals, of an emptied
+    one's witness (_remember); Magma's "Illegal null sequence" (set) for a
+    written empty one ([], {}, an empty comprehension); else refused."""
+    k = 0 if op == "+" else 1
+    where = "'&%s'" % op
+    unsupported = lambda: MagmaError("&%s of an empty collection of this universe is not supported yet" % op, where, True, pos)
+    if isinstance(s, MRange):
+        return k
+    u = getattr(s, "universe", None)
+    if u is _ZZ:
+        return k
+    if u is not None:
+        if u is _QQ:
+            return _qelt(k)
+        if isinstance(u, (RealField_, _snf.NumberField_absolute, _sp.PolynomialRing_)):
+            return u(k)
+        if isinstance(u, (_MFinField, _MFFPolyRing, _MResRing)):
+            return _coerce(u, k, pos)
+        if isinstance(u, _smat.MatrixSpace_):
+            m, n = u.nrows(), u.ncols()
+            if k and m != n:
+                raise MagmaError("Universe has no one element", where, True, pos)
+            return _MMatrix(u.base_ring(), [[k if i == j else 0 for j in range(n)] for i in range(m)], n)
+        raise unsupported()
+    w = getattr(s, "_wit", None)
+    if w is not None:
+        z = _elt_into(k, w)
+        if z is None or z is _NOCOERCE:
+            raise unsupported()
+        return z
+    p = _provenance(s)
+    if p == "int":
+        return k
+    if p == "field" and getattr(s, "_inf", None) is _QQ:
+        return _qelt(k)
+    if p == "null" and getattr(s, "kind", None) != "multi":
+        raise MagmaError("Illegal null set" if isinstance(s, MSet) else "Illegal null sequence", where, True, pos)
+    raise unsupported()
 
 
 def _gen(R, i):
