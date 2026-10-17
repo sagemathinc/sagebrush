@@ -501,49 +501,62 @@ newBuiltinModule("_time", (m) => {
     time_ns: "time_ns() -> int\n\nReturn the current time in nanoseconds since the Epoch.",
   };
   for (const [k, d] of Object.entries(docs)) m[k].__doc__ = d;
-  // (the host's zone: (Intl's IANA name or None, the TZ variable as given
-  // or None, TZ's zone name as Intl canonicalizes it or None where Intl
-  // does not take it, whether the host's zoneinfo has a file for that name
-  // or None where TZ is not a zone name, Intl's zone canonicalized the same
-  // way, the TZDIR variable or None). Intl canonicalizes Etc/GMT and UCT to "UTC", whose glibc
-  // abbreviations differ, so where TZ is set it decides; a browser has none)
+  // (the host's zone, as lib/_tzrules.py resolves it: (the TZ variable as
+  // given or None, TZDIR or None, whether this is Node, where glibc's files
+  // are read, Intl's IANA name or None, for a browser))
   fn(m, "_zone", () => {
+    const env = typeof process !== "undefined" ? process.env : undefined;
+    // (SAGEBRUSH_TIME_NO_ZONE_FILES=1: as a browser, without zone files, for
+    // the tests of that way under Node, whose Intl follows TZ)
+    const node = typeof process !== "undefined" && !!process.versions?.node && env?.SAGEBRUSH_TIME_NO_ZONE_FILES !== "1";
     let z: unknown;
-    try {
-      z = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      z = undefined;
-    }
-    const env = typeof process !== "undefined" ? process.env?.TZ : undefined;
-    const canonical = (name: string): string | null => {
+    if (!node) {
       try {
-        return new Intl.DateTimeFormat("en-US", { timeZone: name }).resolvedOptions().timeZone;
+        z = Intl.DateTimeFormat().resolvedOptions().timeZone;
       } catch {
-        return null;
-      }
-    };
-    let canon: string | null = null, file: boolean | null = null;
-    if (typeof env === "string") {
-      const name = env.startsWith(":") ? env.slice(1) : env;
-      if (/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(name)) {
-        canon = canonical(name);
-        try {
-          // (where glibc reads it: TZDIR, else /usr/share/zoneinfo)
-          const fs = require("fs");
-          file = fs.statSync((process.env.TZDIR || "/usr/share/zoneinfo") + "/" + name).isFile();
-        } catch {
-          file = false;
-        }
+        z = undefined;
       }
     }
-    const host = typeof z === "string" && z !== "" ? z : null;
-    const tzdir = typeof process !== "undefined" ? process.env?.TZDIR : undefined;
-    // (the host's canonical name only where TZ is set: it is compared with
-    // TZ's alone, and Intl's constructor costs every first `import time`)
-    const hostCanon = host === null || typeof env !== "string" ? null : canonical(host);
-    return tuple([host, typeof env === "string" ? env : null, canon, file, hostCanon, typeof tzdir === "string" ? tzdir : null]);
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
+    return tuple([str(env?.TZ), str(env?.TZDIR), node, typeof z === "string" && z !== "" ? z : null]);
   });
-  // (the host zone's local fields at a UTC second, from JS's Date (ICU's
+  // (a zone file's bytes, at most limit of them, as glibc reads one: None
+  // where it cannot be read (missing, not permitted, a directory: glibc then
+  // reads the TZ value as a rule), PermissionError where a sandbox refuses
+  // the read outright, OSError for anything else)
+  fn(m, "_read", (path: any, limit: any) => {
+    const fs = require("fs");
+    const p = at(String(path));
+    const max = Number(limit);
+    let fd: number | undefined;
+    try {
+      // (never blocking: a FIFO or another special file named by TZ or TZDIR
+      // would hang a plain open or read. A symbolic link is followed, as
+      // glibc follows it, and its target checked: a directory is as glibc
+      // reads one (None); anything but a regular file is refused)
+      fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const st = fs.fstatSync(fd);
+      if (st.isDirectory()) return null;
+      if (!st.isFile()) throw markRaised(callObj(T.OSError, [0, "not a regular file", String(path)]));
+      const buf = new Uint8Array(max);
+      let n = 0;
+      while (n < max) {
+        const k = fs.readSync(fd, buf, n, max - n, null);
+        if (k === 0) break;
+        n += k;
+      }
+      return new PyBytes(buf.slice(0, n));
+    } catch (e: any) {
+      if (e?.$cls !== undefined) throw e;
+      if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], String(path)]));
+      if (["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM", "ELOOP", "ENAMETOOLONG"].includes(e?.code)) return null;
+      throw markRaised(callObj(T.OSError, [e?.errno ? -e.errno : 0, String(e?.message ?? e), String(path)]));
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+    }
+  });
+  // (in a browser, which has no zone files (S2's way until pinned zone data
+  // comes): the host zone's local fields at a UTC second, from JS's Date (ICU's
   // tzdata): (year, month, day, hour, minute, second, utcoffset), the offset
   // in whole seconds from the fields themselves, as Date's own offset is in
   // minutes; None outside the instants a Date holds)
