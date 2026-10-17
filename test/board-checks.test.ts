@@ -63,7 +63,7 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False '$2$ appears 2 times, not 1'",
     "False 'item 2 is $2$, not $3$'",
     "True True",
-    "TypeError: same_set: items must be hashable (unhashable type: 'list')",
+    "TypeError: same_set: items must be hashable (cannot use 'list' as a set element (unhashable type: 'list'))",
     "ValueError: parse_list: a list inside a list is not read",
     "True True",
     "False '$(1,2)$ is in it, but not in the expected group'",

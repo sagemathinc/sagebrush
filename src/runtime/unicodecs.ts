@@ -13,7 +13,7 @@
 import { T, raise, PyBytes, typeName, unbox } from "./object";
 import * as SP from "./strpos";
 
-type Codec = { name: string; kind: "utf8" | "utf16" | "utf32" | "ascii" | "latin1" | "charmap"; le: boolean; bom: boolean; table?: number[] };
+type Codec = { name: string; kind: "utf8" | "utf16" | "utf32" | "ascii" | "latin1" | "charmap" | "rawesc"; le: boolean; bom: boolean; table?: number[] };
 // (cp1252: latin-1 but 0x80-0x9F, five of them undefined, -1)
 const CP1252 = Array.from({ length: 256 }, (_, i) => i);
 [0x20ac, -1, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152, -1, 0x17d, -1,
@@ -35,6 +35,7 @@ def("utf32be", { name: "utf-32-be", kind: "utf32", le: false, bom: false });
 def("ascii usascii 646 ansix3.41968 ansix3.41986 cp367 csascii ibm367 iso646us iso646.irv1991 isoir6 us", { name: "ascii", kind: "ascii", le: true, bom: false });
 def("cp1252 windows1252", { name: "cp1252", kind: "charmap", le: true, bom: false, table: CP1252 });
 def("latin1 latin iso88591 iso885911987 8859 cp819 l1 ibm819 isoir100 csisolatin1", { name: "latin-1", kind: "latin1", le: true, bom: false });
+def("rawunicodeescape", { name: "raw-unicode-escape", kind: "rawesc", le: true, bom: false });
 
 // (the codec an encoding names, as codecs.lookup's normalization; the
 // argument's type checked by the caller's clinic: what)
@@ -126,6 +127,7 @@ export function encodeStr(s: string, encoding: any = "utf-8", errors: any = "str
     out.set(body.a.subarray(0, body.n), 3);
     return new PyBytes(out);
   }
+  if (c.kind === "rawesc") return new PyBytes(rawEscEncode(s));
   // (fast paths: nothing for a handler)
   if (c.kind === "utf8" && !LONE.test(s)) return new PyBytes(new TextEncoder().encode(s));
   if (c.kind === "latin1" && !/[^\x00-\xff]/.test(s)) return new PyBytes(new Uint8Array(Buffer.from(s, "latin1")));
@@ -293,6 +295,7 @@ export function decodeBytes(bytes: Uint8Array, encoding: any = "utf-8", errors: 
     const b = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? bytes.subarray(3) : bytes;
     return decodeBytes(b, "utf-8", err);
   }
+  if (c.kind === "rawesc") return rawEscDecode(bytes, err);
   // (fast paths: valid input; TextDecoder's fatal UTF-8 accepts exactly
   // what CPython's does, a BOM kept)
   if (c.kind === "latin1") return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).toString("latin1");
@@ -435,3 +438,65 @@ export function decodeBytes(bytes: Uint8Array, encoding: any = "utf-8", errors: 
   return out;
 }
 void UTF8;
+
+// -------------------------------------------------------- raw-unicode-escape
+
+// (as CPython's PyUnicode_AsRawUnicodeEscapeString: a code point below 256
+// its byte, above it \uXXXX or \UXXXXXXXX, a lone surrogate its own \u;
+// nothing fails, so errors is never consulted)
+function rawEscEncode(s: string): Uint8Array {
+  const out = new ByteBuf();
+  for (let i = 0; i < s.length; ) {
+    const c = s.codePointAt(i)!;
+    i += c > 0xffff ? 2 : 1;
+    if (c < 0x100) out.push(c);
+    else for (const ch of c > 0xffff ? `\\U${hex(c, 8)}` : `\\u${hex(c, 4)}`) out.push(ch.charCodeAt(0));
+  }
+  return out.bytes();
+}
+// (as CPython's _PyUnicode_DecodeRawUnicodeEscapeStateful: each byte its
+// code point, but \uXXXX and \UXXXXXXXX after an odd run of backslashes;
+// a truncated or out-of-range escape from its backslash to the digits read
+// goes to the handler)
+function rawEscDecode(b: Uint8Array, errors: string): string {
+  const out: string[] = [];
+  const n = b.length;
+  const isHex = (x: number) => (x >= 48 && x <= 57) || (x >= 97 && x <= 102) || (x >= 65 && x <= 70);
+  for (let i = 0; i < n; ) {
+    if (b[i] !== 92) {
+      out.push(String.fromCharCode(b[i++]));
+      continue;
+    }
+    let j = i;
+    while (j < n && b[j] === 92) j++;
+    const run = j - i;
+    if (run % 2 === 0 || j >= n || (b[j] !== 117 && b[j] !== 85)) {
+      out.push("\\".repeat(run));
+      i = j;
+      continue;
+    }
+    if (run > 1) out.push("\\".repeat(run - 1));
+    const start = j - 1, big = b[j] === 85;
+    let count = big ? 8 : 4, k = j + 1, v = 0;
+    for (; count && k < n && isHex(b[k]); k++, count--) v = v * 16 + parseInt(String.fromCharCode(b[k]), 16);
+    // (a non-hex byte ends the digits, and is not part of the error)
+    const reason = count ? (big ? "truncated \\UXXXXXXXX escape" : "truncated \\uXXXX escape") : v > 0x10ffff ? "\\Uxxxxxxxx out of range" : null;
+    // (a lone low surrogate right after a lone high one would be one
+    // character in the joined string: refused, as SP.glue does, CORR-D77-4)
+    if (reason === null) {
+      const prev = out.length ? out[out.length - 1] : "";
+      if (v >= 0xdc00 && v < 0xe000 && prev.length === 1 && (prev.charCodeAt(0) & 0xfc00) === 0xd800) SP.refuseMerge();
+      out.push(String.fromCodePoint(v));
+    }
+    else if (errors === "ignore") {}
+    else if (errors === "replace") out.push("\ufffd");
+    else if (errors === "backslashreplace") for (let q = start; q < k; q++) out.push(`\\x${hex(b[q], 2)}`);
+    else if (errors === "xmlcharrefreplace" || errors === "namereplace") raise(T.TypeError, "don't know how to handle UnicodeDecodeError in error callback");
+    else {
+      handlerCheck(errors);
+      decodeError("rawunicodeescape", b, start, k, reason);
+    }
+    i = k;
+  }
+  return out.join("");
+}
