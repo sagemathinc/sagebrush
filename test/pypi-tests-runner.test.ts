@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // pypi-tests/run.py's gates (pypi-tests/README.md), on a made-up package
 // "demo" run by stand-ins for CPython and Sagebrush: Python wrappers around
@@ -106,4 +107,49 @@ test("pypi-tests/run.py: a child that exits nonzero, or writes to stderr, after 
     assert.match(r.out, why);
   }
   assert.equal(runner(["demo"]).status, 0);
+});
+
+// (--fetch on archives made here: the pinned files as regular members, then
+// one past the member ceiling, then a pinned file as a symbolic link)
+function archive(name: string, kind: "good" | "many" | "link"): { url: string; sha256: string } {
+  const path = join(top, name);
+  const py = `
+import hashlib, io, json, sys, tarfile
+files, kind = json.loads(sys.argv[2]), sys.argv[3]
+with tarfile.open(sys.argv[1], "w:gz") as t:
+    for f, text in files.items():
+        i = tarfile.TarInfo("demo-1.0.0/tests/" + f)
+        if kind == "link" and f == "test_demo.py":
+            i.type, i.linkname = tarfile.SYMTYPE, "../../../../etc/passwd"
+            t.addfile(i)
+        else:
+            b = text.encode(); i.size = len(b); t.addfile(i, io.BytesIO(b))
+    for k in range(20001 if kind == "many" else 0):
+        t.addfile(tarfile.TarInfo("demo-1.0.0/pad/%d" % k), io.BytesIO(b""))
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
+`;
+  const sha256 = execFileSync("python3", ["-c", py, path, JSON.stringify(upstream), kind], { encoding: "utf8" }).trim();
+  return { url: pathToFileURL(path).href, sha256 };
+}
+function pinArchive(a: { url: string; sha256: string }) {
+  const p = join(tests, "demo", "SOURCE.json"), src = JSON.parse(readFileSync(p, "utf8"));
+  src.archive = { ...src.archive, ...a };
+  writeFileSync(p, JSON.stringify(src));
+}
+
+test("pypi-tests/run.py --fetch: the pinned files from the pinned archive, a member count past its ceiling refused in one pass, links not followed (HARD-PYPI-2)", () => {
+  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  known("module 'gc' has no attribute 'get_objects'");
+  pinArchive(archive("good.tar.gz", "good"));
+  const ok = runner(["--fetch", "demo"]);
+  assert.equal(ok.status, 0, ok.out);
+  pinArchive(archive("many.tar.gz", "many"));
+  const many = runner(["--fetch", "demo"]);
+  assert.equal(many.status, 1, many.out);
+  assert.match(many.out, /many\.tar\.gz: more than 20000 members/);
+  pinArchive(archive("link.tar.gz", "link"));
+  const link = runner(["--fetch", "demo"]);
+  assert.equal(link.status, 1, link.out);
+  assert.match(link.out, /demo-1\.0\.0\/tests\/test_demo\.py: not one regular file of at most 16777216 bytes in the archive/);
+  pinArchive({ url: "https://example.invalid/demo.tar.gz", sha256: "0".repeat(64) });
 });
