@@ -31,7 +31,7 @@ export interface EngineRef { site: string; id: string }
  * modules too (those of Sage's start and the scientific modules', which it
  * waits for). */
 export const engineFiles = (sage: boolean, names: string[]) => [
-  "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js",
+  "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js",
   ...names.filter((n) => /^lib\/[\w.-]+\.src\.[0-9a-f]{16}\.json$/.test(n) || (sage && /^lib\/(core|sci|sage)\.pre\.[0-9a-f]{16}\.json$/.test(n))).sort(),
 ];
 
