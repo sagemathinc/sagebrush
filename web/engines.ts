@@ -14,6 +14,8 @@ interface Manifest { files: Record<string, { sha256: string; size: number; heade
 const manifests = new Map<string, Manifest>();
 // (an engine's zone data, read from the shared lib/ key: handleEngines)
 const SHARED = /^lib\/tzdata\/(?:index-)?[0-9a-f]{64}\.(?:tzif|json)$/;
+// (the largest such file: the index is 50 kB, a zone file at most 5 kB)
+const SHARED_MAX = 1 << 20;
 const sha256Hex = async (bytes: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 // (ids with no manifest, briefly: each would cost an R2 read (HARD-CAC-5),
 // and one may be published at any time)
@@ -70,10 +72,14 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   // served if its bytes have the manifest's SHA-256.  An engine published
   // before that has its own copy too)
   let body: ReadableStream | ArrayBuffer | null = null, size = 0;
-  if (SHARED.test(file) && "sha256" in entry) {
+  // (its body read only if it has the manifest's size, at most SHARED_MAX:
+  // another object there is not read at all, HARD-TZU-2)
+  if (SHARED.test(file) && "sha256" in entry && entry.size <= SHARED_MAX) {
     const s = await env.ENGINES.get(file);
-    const bytes = s ? await new Response(s.body).arrayBuffer() : null;
-    if (bytes && (await sha256Hex(bytes)) === entry.sha256) [body, size] = [bytes, bytes.byteLength];
+    if (s && s.size === entry.size) {
+      const bytes = await new Response(s.body).arrayBuffer();
+      if (bytes.byteLength === entry.size && (await sha256Hex(bytes)) === entry.sha256) [body, size] = [bytes, bytes.byteLength];
+    } else if (s) await s.body.cancel();
   }
   if (body === null) {
     const o = await env.ENGINES.get(`engine/${id}/${file}`);

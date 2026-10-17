@@ -27,15 +27,22 @@ const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
 const env = { ...process.env, NO_COLOR: "1", CF_SEND_TELEMETRY: "false" };
 const cf = (...args) => execFileSync("cf", args, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 });
 
-// The objects already at lib/ (key -> size), a page of R2's listing at a time.
-function listed(prefix) {
-  const have = new Map();
-  for (let after = null; ;) {
+// Which of the keys wanted are already in R2 (key -> size), a page of its
+// listing of prefix at a time.  lib/ is never cleared, so its listing grows
+// with every build's chunks: only the wanted keys are kept, the listing ends
+// once all are found, and after LIST_PAGES pages or LIST_MS it stops: a key
+// not seen by then is uploaded again, which is safe (a key is its content's
+// hash), HARD-TZU-1.
+const LIST_PAGES = 20, LIST_MS = 120_000;
+function listed(prefix, wanted) {
+  const have = new Map(), t0 = Date.now();
+  for (let after = null, pages = 0; have.size < wanted.size && pages < LIST_PAGES && Date.now() - t0 < LIST_MS; pages++) {
     const page = JSON.parse(cf("r2", "objects", "list", "--bucket-name", BUCKET, "--prefix", prefix, "--per-page", "1000", ...(after ? ["--start-after", after] : [])));
-    for (const o of page) have.set(o.key, o.size);
-    if (page.length < 1000) return have;
+    for (const o of page) if (wanted.has(o.key)) have.set(o.key, o.size);
+    if (page.length < 1000) break;
     after = page[page.length - 1].key;
   }
+  return have;
 }
 
 // (the Python library's chunks also at lib/<name>, one namespace by content
@@ -46,7 +53,7 @@ function listed(prefix) {
 // files (lib/tzdata/, web/tzdata-chunks.mts) are kept only here: the Worker
 // serves an engine's from these, so each is uploaded once, not with every
 // engine.  First, so an engine published before this was added gets them too.)
-const have = listed("lib/");
+const have = listed("lib/", new Set(Object.keys(man.files).filter((f) => f.startsWith("lib/"))));
 let kept = 0;
 for (const f of Object.keys(man.files).filter((f) => f.startsWith("lib/"))) {
   if (have.get(f) === man.files[f].size) { kept++; continue; }
