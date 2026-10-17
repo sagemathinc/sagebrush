@@ -497,6 +497,92 @@ class PermutationGroup:
 
     cardinality = order
 
+    def cayley_graph(self, side="right", simple=False, elements=None, generators=None, connecting_set=None):
+        """The Cayley graph: a DiGraph on the elements, with an edge from g to
+        g*s for each generator s (side='left': to s*g), labelled by s's label.
+        generators (or connecting_set) is a list, its generators their own
+        labels, or a dict {label: generator}. Without them, as Sage: a
+        symmetric group's adjacent transpositions (i, i+1), labelled i, and a
+        group made from generators its gens(), labelled 0, 1, ...; other
+        named groups need generators given. simple=True drops the loops and
+        the labels; without it, the identity as a generator is Sage's error
+        (a loop). Groups of more than 10000 elements, side='twosided',
+        elements= and repeated generators (a multigraph, which Sagebrush's
+        graphs do not have) are refused.
+
+        EXAMPLES::
+
+            sage: S = SymmetricGroup(4); C = S.cayley_graph(); C.order(), C.size()
+            (24, 72)
+            sage: sorted((str(v), l) for u, v, l in C.edges(sort=False) if u == S.identity())
+            [('(1,2)', 1), ('(2,3)', 2), ('(3,4)', 3)]
+            sage: SymmetricGroup(2).cayley_graph().size()
+            2
+            sage: P = PermutationGroup(['(1,2)', '(1,2,3,4)']); sorted(set(l for _, _, l in P.cayley_graph().edges(sort=False)))
+            [0, 1]
+            sage: G = SymmetricGroup(3); a, b = G('(1,2)'), G('(1,2,3)')
+            sage: [(str(v), str(l)) for u, v, l in G.cayley_graph(generators={a: b}).edges(sort=False) if u == G.identity()]
+            [('(1,2,3)', '(1,2)')]
+            sage: G.cayley_graph(generators={'swap': a, 'turn': b}).size()
+            12
+            sage: CyclicPermutationGroup(3).cayley_graph(generators=[()], simple=True).size()
+            0
+            sage: CyclicPermutationGroup(3).cayley_graph(generators=[()])
+            Traceback (most recent call last):
+            ...
+            ValueError: cannot add edge from () to () in graph without loops
+        """
+        from _sage_graph import DiGraph
+        import itertools
+        if side not in ("right", "left"):
+            raise NotImplementedError("cayley_graph with side=%r is not supported in Sagebrush (only 'right' and 'left')" % (side,))
+        if elements is not None:
+            raise NotImplementedError("cayley_graph with elements= is not supported in Sagebrush")
+        if generators is not None and connecting_set is not None:
+            raise ValueError("give generators or connecting_set, not both")
+        given = generators if generators is not None else connecting_set
+        if self.order() > 10000:
+            raise NotImplementedError("the Cayley graph of a group of more than 10000 elements is not supported in Sagebrush")
+
+        def bounded(xs):
+            out = list(itertools.islice(iter(xs), 10001))
+            if len(out) > 10000:
+                raise NotImplementedError("a Cayley graph with more than 10000 generators is not supported in Sagebrush")
+            return out
+        # (label, generator) pairs: Sage's defaults, a mapping, or a list
+        if given is None:
+            if isinstance(self, SymmetricGroup):
+                d = list(self.domain())
+                pairs = [(i + 1, self([(d[i], d[i + 1])])) for i in range(len(d) - 1)]
+            elif type(self) is PermutationGroup:
+                pairs = [(i, g) for i, g in enumerate(bounded(self.gens()))]
+            else:
+                raise NotImplementedError("the default generators of %s's Cayley graph are not Sage's in Sagebrush: give generators=" % type(self).__name__)
+        elif isinstance(given, dict):
+            pairs = [(k, self(v)) for k, v in bounded(given.items())]
+        else:
+            pairs = [(self(s), self(s)) for s in bounded(given)]
+        gens = [g for _, g in pairs]
+        if not simple and len(set(gens)) != len(gens):
+            raise NotImplementedError("a Cayley graph with a repeated generator has multiple edges, which Sagebrush's graphs do not have")
+        if len(gens) * self.order() > 200000:
+            raise NotImplementedError("a Cayley graph of more than 200000 edges is not supported in Sagebrush")
+        G = DiGraph()
+        elts = self.list()
+        for g in elts:
+            G.add_vertex(g)
+        for g in elts:
+            for label, s in pairs:
+                h = g * s if side == "right" else s * g
+                if simple:
+                    if h != g:
+                        G.add_edge(g, h)
+                elif h == g:
+                    raise ValueError("cannot add edge from %s to %s in graph without loops" % (g, h))
+                else:
+                    G.add_edge(g, h, label)
+        return G
+
     def __contains__(self, g):
         try:
             im = _images(g, self._n)
