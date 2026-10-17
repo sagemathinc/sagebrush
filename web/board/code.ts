@@ -14,7 +14,7 @@ import type { BoardMode } from "./doc";
 /** "": up to date; "error": cannot run (a syntax error, a name defined twice, a cycle); "failed": raised an exception; "cancelled": not run, as one it reads failed */
 export type CodeState = "" | "queued" | "running" | "stale" | "error" | "failed" | "cancelled" | "interrupted";
 /** A question's check, or a computed hint, as run (BoardCode.exclusive): its value, or why it has none. */
-export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean }
+export interface Evaluated { ok: boolean; value?: unknown; error?: string; timedOut?: boolean; undecided?: boolean }
 /** What a Check is given to run (BoardCode.exclusive). */
 export interface CheckOps { evaluate: (code: string, answer: unknown, ms: number, by?: number) => Promise<Evaluated>; refresh: (ms: number) => Promise<boolean> }
 

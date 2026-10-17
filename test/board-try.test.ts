@@ -198,3 +198,14 @@ test("board try: the contract's edges: --json refusals are reports; --case besid
   assert.deepEqual([j.checks.map((c: any) => c.outcome), j.interaction[0].sequence], [["right"], ["wrong", "right"]]);
   assert.match(j.runtime.engine, /^cli-[0-9a-f]{20}$/);
 });
+
+test("board try: a check whose value is a verdict object (the board check helpers'): right, wrong with its reason, or can't decide, an error told apart", () => {
+  const code = "class V:\n    def __init__(s, x):\n        s.x = x\n    def __sagebrush_verdict__(s):\n        if s.x == 'raise':\n            raise ValueError('bad')\n        return s.x";
+  const check = "V(True) if answer == 1 else V('it is $2$, not $1$') if answer == 2 else V({'undecided': 'no proof either way'}) if answer == 3 else V('raise') if answer == 4 else V(5)";
+  const j = tryCases("verdicts", one(code, check), { checks: [1, 2, 3, 4, 5].map((n) => ({ case_id: "c" + n, ask_id: "q", answer: n })) });
+  assert.deepEqual(j.checks.map((c: any) => [c.case_id, c.outcome, c.undecided]), [["c1", "right", false], ["c2", "wrong", false], ["c3", "error", true], ["c4", "error", false], ["c5", "error", false]]);
+  assert.equal(j.checks[1].message, "it is $2$, not $1$");
+  assert.equal(j.checks[2].error, "could not decide: no proof either way");
+  assert.match(j.checks[3].error, /its verdict failed: ValueError: bad/);
+  assert.match(j.checks[4].error, /not True, a message or/);
+});

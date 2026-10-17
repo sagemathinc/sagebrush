@@ -383,6 +383,20 @@ try {
   await sleep(300);
   const [gq, g2q] = [await node("g"), await node("g2")];
   check(gq.result === "right" && g2q.result === "right", "two Checks at once: each right from the state the code leaves: " + JSON.stringify([gq, g2q].map((q) => [q.answer, q.result, q.attempts])));
+  // (a check that can't decide, a verdict object's: an error, said so as such, not counted)
+  await ev(`${B}.load(${JSON.stringify({ title: "Undecided", layout: "grid", columns: 2, nodes: [
+    { id: "vc", code: "class V:\n    def __sagebrush_verdict__(s):\n        return {'undecided': 'no proof either way'}" },
+    { id: "u", kind: "ask", input: "number", text: "Equal?", check: "V()" },
+  ] })}).then(() => 1)`);
+  await until(`!!document.querySelector('.board-ask[data-ask="u"] .board-ask-check')`, 20000);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(500);
+  await ev(`(() => { const n = ${q$('.board-ask[data-ask="u"] input[type=number]')}; n.value = "1"; return 1; })()`);
+  await press('.board-ask[data-ask="u"] .board-ask-check');
+  await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'error'", 30000);
+  await sleep(300);
+  const ut = await ev(q$('.board-ask[data-ask="u"]', ".textContent")), uq = await node("u");
+  check(/The check could not decide: no proof either way/.test(ut) && !uq.attempts, "a check that can't decide: said so, not counted: " + ut.slice(-120));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

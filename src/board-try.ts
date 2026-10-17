@@ -102,11 +102,12 @@ function runtime(): { version: string; engine: string | null; build: string | nu
   return { version: g.__SAGEBRUSH_VERSION__ ?? "dev", engine, build: g.__SAGEBRUSH_BUILD_ID__ ?? null, commit };
 }
 
-type Verdict = { outcome: "right" | "wrong" | "error"; raw: unknown; message: string | null; error: string | null; timedOut: boolean };
+type Verdict = { outcome: "right" | "wrong" | "error"; raw: unknown; message: string | null; error: string | null; timedOut: boolean; undecided?: boolean };
 async function verdict(ev: Evaluate, a: DocAsk, answer: unknown): Promise<Verdict> {
   if (a.check === undefined) return { outcome: "error", raw: null, message: null, error: "the question has no check", timedOut: false };
   const r = await ev(a.check, answer, a.checkMs ?? 2000);
-  if (!r.ok) return { outcome: "error", raw: null, message: null, error: r.error ?? "it failed", timedOut: r.timedOut };
+  // (a check that can't decide, a board check helper's verdict: an error, said so, and told apart)
+  if (!r.ok) return { outcome: "error", raw: null, message: null, error: r.undecided ? "could not decide: " + (r.error ?? "") : r.error ?? "it failed", timedOut: r.timedOut, undecided: !!r.undecided };
   const v = r.value;
   return { outcome: v === true ? "right" : "wrong", raw: v, message: typeof v === "string" ? v : null, error: null, timedOut: false };
 }
@@ -214,13 +215,13 @@ export async function boardTry(argv: string[]): Promise<number> {
         if (outOfTime) return;
         const a = asks.get(c.ask_id)!, note = typeof c.note === "string" ? c.note : null;
         if (c.answer === undefined) {
-          report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: null, note, outcome: "in words", raw_result: null, message: null, error: null, timed_out: false, check_invoked: false, scope_preserved: null, scope_preserved_reason: "no check ran", isolation: null, note_preserved: note !== null, next: null });
+          report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: null, note, outcome: "in words", raw_result: null, message: null, error: null, timed_out: false, check_invoked: false, undecided: false, scope_preserved: null, scope_preserved_reason: "no check ran", isolation: null, note_preserved: note !== null, next: null });
           continue;
         }
         // ("rerun": in an interpreter of its own, the board's code run first; whether the board's names were left as they were is not said)
         const v = await verdict(ev, a, c.answer), isolation = "rerun";
         if (v.outcome === "wrong" && !firstWrong.has(c.ask_id)) firstWrong.set(c.ask_id, c.answer);
-        report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: c.answer, note, outcome: v.outcome, raw_result: v.outcome === "error" ? null : v.raw, message: v.message, error: v.error, timed_out: v.timedOut, check_invoked: true, scope_preserved: null, scope_preserved_reason: FRESH, isolation, note_preserved: note !== null || null, next: v.outcome === "right" ? a.next?.right ?? null : v.outcome === "wrong" ? a.next?.wrong ?? null : null });
+        report.checks.push({ case_id: c.case_id, ask_id: c.ask_id, answer: c.answer, note, outcome: v.outcome, raw_result: v.outcome === "error" ? null : v.raw, message: v.message, error: v.error, timed_out: v.timedOut, check_invoked: true, undecided: !!v.undecided, scope_preserved: null, scope_preserved_reason: FRESH, isolation, note_preserved: note !== null || null, next: v.outcome === "right" ? a.next?.right ?? null : v.outcome === "wrong" ? a.next?.wrong ?? null : null });
       }
       // each hint, as shown: a computed one with its question's first wrong answer
       for (const [id, a] of asks) {
