@@ -355,10 +355,7 @@ class RealNumber(float):
         if prec is None and digits is None:
             return self
         import _sage_real
-        p = _sage_real.digits_to_prec(digits) if digits is not None else prec
-        # (as Sage: no more precision than the number's own 53 bits)
-        if p > 53:
-            raise TypeError(f"cannot approximate to a precision of {p} bits, use at most 53 bits")
+        p = _sage_real._approx_prec(_sage_real.digits_to_prec(digits) if digits is not None else prec, 53)
         mp = getattr(self, "_mp", None)
         return _sage_real.RealField(p)(mp if mp is not None else float(self))
 
@@ -684,7 +681,7 @@ class RealNumber(float):
         """
         return float(self) == 0
 
-    def str(self, base=10, digits=0, no_sci=None, e=None, truncate=False, skip_zeroes=False):
+    def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         """The decimal string (with digits significant digits).
 
         EXAMPLES::
@@ -694,7 +691,7 @@ class RealNumber(float):
         """
         import _sage_real
         from fractions import Fraction
-        _sage_real._str_supported("RR", base, e, skip_zeroes)
+        _sage_real._str_supported("RR", base, e, skip_zeroes, args)
         _sage_real._str_digits(digits, truncate)
         D = int(digits) if digits else (_sage_real._digits(53) if truncate else 17)
         return _sage_real._format(Fraction(float(self)), D, no_sci)
@@ -971,9 +968,9 @@ class _RealBig(RealNumber):
     def is_zero(self):
         return False
 
-    def str(self, base=10, digits=0, no_sci=None, e=None, truncate=False, skip_zeroes=False):
-        # (by name: the MP real's str takes base first, as Sage's)
-        return self._mp.str(base=base, digits=digits, no_sci=no_sci, e=e, truncate=truncate, skip_zeroes=skip_zeroes)
+    def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
+        # (the MP real's str checks the arguments, as Sage's)
+        return self._mp.str(base, digits, *args, no_sci=no_sci, e=e, truncate=truncate, skip_zeroes=skip_zeroes)
 
 
 # (it is a RealNumber to the user: the same name in type())
