@@ -84,7 +84,16 @@ method(object, "__format__", (self: any, spec: string) => {
   if (spec !== "") raise(T.TypeError, `unsupported format string passed to ${typeName(self)}.__format__`);
   return str(self);
 });
-method(object, "__getattribute__", (self: any, name: string) => genericGetattr(self, name, typeOf(self), undefined, false));
+// (the name of type.__getattribute__ and object.__getattribute__ checked
+// first: an exact str; a str subclass refused, not looked up by a payload
+// its own __hash__ or __eq__ might disagree with; anything else CPython's
+// TypeError, before any lookup)
+function exactAttrName(name: any): string {
+  if (typeof name === "string") return name;
+  if (typeof unbox(name) === "string") raise(T.NotImplementedError, `attribute names of str subclasses ('${typeName(name)}') are not supported yet`);
+  return raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
+}
+method(object, "__getattribute__", (self: any, name: any) => genericGetattr(self, exactAttrName(name), typeOf(self), undefined, false));
 method(object, "__delattr__", (self: any, name: string) => {
   genericDelattr(self, name, typeOf(self));
   return null;
@@ -109,7 +118,7 @@ type.$customGet = true;
 // metaclass's data descriptors, the class's MRO through __get__(None, cls),
 // then the metaclass's other attributes), what a metaclass's
 // super().__getattribute__ reaches; never __getattr__ (the slot calls that)
-method(type, "__getattribute__", (c: any, name: string) => typeGetattr(c, name));
+method(type, "__getattribute__", (c: any, name: any) => typeGetattr(c, exactAttrName(name)));
 getset(type, "__name__", (c) => c.$name, (c, v) => void (c.$name = v));
 getset(type, "__qualname__", (c) => c.$qualname, (c, v) => void (c.$qualname = v));
 // (a class's __module__: its dict's, but not its instances' __module__
