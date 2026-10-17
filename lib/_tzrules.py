@@ -7,8 +7,10 @@ skipped or repeated hour and for an isdst the time does not have) was found
 by comparison with CPython 3.14 on glibc 2.39: no glibc source was read.
 Anything outside what was compared raises ZoneUnsupported, naming it.
 
-This module runs under CPython too (the comparison harness imports it), and
-zoneinfo is to read TZif data through parse_tzif and Zone.
+This module runs under CPython too (the comparison harness imports it).
+zoneinfo is not built on it: CPython's zoneinfo reads TZif files and TZ
+strings by rules of its own, not glibc's (lib/_zoneinfo.py); it shares only
+the bounds below.
 """
 
 # ------------------------------------------------------------------ errors
