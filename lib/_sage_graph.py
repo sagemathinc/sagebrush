@@ -784,7 +784,7 @@ class GenericGraph:
         Options: layout ('spring' or 'circular'), pos, iterations, save_pos,
         vertex_labels, vertex_size, vertex_color, vertex_colors, partition,
         edge_color, edge_colors, edge_style, edge_thickness, edge_labels,
-        color_by_label, loop_size, graph_border, and the picture's (figsize,
+        edge_labels_background, color_by_label, loop_size, graph_border, and the picture's (figsize,
         title, ...).  Others are refused.  Sagebrush's spring layout is its
         own (web/graph/spring.ts), the same every time; Sage's is random, so
         the positions differ.
@@ -976,7 +976,7 @@ def _isomorphism(G, H, labels):
 _PLOT_OPTIONS = {"layout", "pos", "iterations", "save_pos", "vertex_labels", "vertex_size",
                  "vertex_color", "vertex_colors", "partition", "edge_color", "edge_colors",
                  "edge_style", "edge_thickness", "edge_labels", "color_by_label", "loop_size",
-                 "graph_border"}
+                 "graph_border", "edge_labels_background"}
 
 
 def _rainbow(n):
@@ -1082,6 +1082,19 @@ def _plot_graph(G, options):
     r = math.sqrt(float(size)) * 0.9
     loop = float(options.get("loop_size", 0.075))
     g = sa.Graphics()
+    # (a directed edge whose reverse is an edge too: each drawn a little to
+    # its left, so that the two arrows and their labels are apart; by 1.2%
+    # of the layout's extent, within a vertex's marker at the default size)
+    xs, ys = [p[0] for p in pos.values()] or [0.0], [p[1] for p in pos.values()] or [0.0]
+    off = 0.012 * max(max(xs) - min(xs), max(ys) - min(ys), 1e-9)
+
+    def ends(u, v):
+        if not (G._directed and (v, u) in index):
+            return pos[u], pos[v]
+        (x0, y0), (x1, y1) = pos[u], pos[v]
+        L = math.hypot(x1 - x0, y1 - y0) or 1.0
+        nx, ny = -(y1 - y0) / L * off, (x1 - x0) / L * off
+        return (x0 + nx, y0 + ny), (x1 + nx, y1 + ny)
     for e in edges:
         u, v, _ = e
         c = colour_of.get(e, edge_color)
@@ -1091,7 +1104,8 @@ def _plot_graph(G, options):
             g += sa.line([(cx + rr * math.cos(2 * math.pi * k / 48), cy + rr * math.sin(2 * math.pi * k / 48)) for k in range(49)],
                          color=c, thickness=thickness, linestyle=style)
         elif G._directed:
-            g += sa.arrow(pos[u], pos[v], color=c, thickness=thickness, arrowshorten=r + 1, linestyle=style)
+            a, b = ends(u, v)
+            g += sa.arrow(a, b, color=c, thickness=thickness, arrowshorten=r + 1, linestyle=style)
         else:
             g += sa.line([pos[u], pos[v]], color=c, thickness=thickness, linestyle=style)
     # (every member read counted, repeats and others too, HARD-856-3)
@@ -1120,14 +1134,19 @@ def _plot_graph(G, options):
             t = labels.get(v) if isinstance(labels, dict) else str(v)
             if t is not None:
                 g += sa.text(str(t), pos[v], color="black", zorder=3)
+    # (on Sage's white, so that the line under a label does not cross it)
+    background = options.get("edge_labels_background", "white")
+    if background == "transparent":
+        background = None
     if options.get("edge_labels"):
         for u, v, l in edges:
             if u == v:
                 x, y = pos[u]
                 xy = (x - 2 * loop, y + 2 * loop)
             else:
-                xy = ((pos[u][0] + pos[v][0]) / 2, (pos[u][1] + pos[v][1]) / 2)
-            g += sa.text(str(l), xy, color="black", zorder=3)
+                a, b = ends(u, v)
+                xy = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+            g += sa.text(str(l), xy, color="black", zorder=3, background_color=background)
     g.axes(False)
     g.set_aspect_ratio(1)
     # (a margin, so that the vertices at the edge are whole)

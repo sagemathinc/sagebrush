@@ -678,7 +678,16 @@ class Text(Primitive):
         base = {"top": "hanging", "bottom": "auto", "center": "middle", "baseline": "auto"}.get(o.get("vertical_alignment", "center"), "middle")
         color = to_color(o.get("color"))
         rot = o.get("rotation", 0)
-        return '<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
+        # (background_color: a box behind the text, as wide as its
+        # characters at about 0.6 em each, the text centred on its point)
+        box = ""
+        bg = to_color(o.get("background_color"))
+        if bg and not rot and anchor == "middle" and base == "middle":
+            fs = float(o.get("fontsize", 11))
+            w, hh = 0.6 * fs * len(self.string) + 4, fs + 2
+            box = '<rect x="%s" y="%s" width="%s" height="%s" fill="%s"/>' % (
+                _fmt(p[0] - w / 2), _fmt(p[1] - hh / 2), _fmt(w), _fmt(hh), _esc(bg))
+        return box + '<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
             _fmt(p[0]), _fmt(p[1]), _fmt(o.get("fontsize", 11)), anchor, base,
             ' fill="%s"' % _esc(color) if color else "",
             ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "",

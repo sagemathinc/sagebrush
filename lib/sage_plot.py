@@ -547,7 +547,8 @@ def text(string, xy, **options):
     gopts, p = _split(options)
     o = {"fontsize": p.pop("fontsize", 11), "color": p.pop("color", p.pop("rgbcolor", None)),
          "horizontal_alignment": p.pop("horizontal_alignment", "center"),
-         "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0)}
+         "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0),
+         "background_color": p.pop("background_color", None)}
     return Graphics([Text(_tex(string), xy[0], xy[1], **o)], **gopts)
 
 

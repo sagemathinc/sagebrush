@@ -38,9 +38,16 @@ svg = DiGraph([(0, 1)]).plot(pos={0: (0, 0), 1: (1, 0)})._svg()
 cx = [float(c) for c in re.findall(r'<circle cx="([-0-9.]+)"', svg)]
 tip = float(re.search(r'<path d="M([-0-9.]+) [-0-9.]+L[-0-9.]+ [-0-9.]+L[-0-9.]+ [-0-9.]+Z" fill', svg).group(1))
 assert abs((max(cx) - tip) - (math.sqrt(200) * 0.9 + 1)) < 0.02, (cx, tip)
+# edge labels on a white box (edge_labels_background), or none
+_rects = lambda **kw: Graph([(0, 1, 'a')]).plot(edge_labels=True, **kw)._svg().count('<rect')
+assert _rects() == _rects(edge_labels_background='transparent') + 1, (_rects(), _rects(edge_labels_background='transparent'))
+# a directed edge and its reverse: two arrows apart, not one on the other
+svg = DiGraph([(0, 1), (1, 0)]).plot(pos={0: (0, 0), 1: (1, 0)})._svg()
+ys = sorted({m for m in re.findall(r'<path d="M[-0-9.]+ ([-0-9.]+)L', svg)})
+assert len(ys) >= 2 and abs(float(ys[0]) - float(ys[-1])) > 5, ys
 # edge_style
 assert 'stroke-dasharray' in Graph([(0, 1)]).plot(edge_style='dashed')._svg()
-for bad in [dict(vertex_shape='s'), dict(layout='planar'), dict(edge_labels_background='red'), dict(by_component=False)]:
+for bad in [dict(vertex_shape='s'), dict(layout='planar'), dict(heights={0: [0]}), dict(by_component=False)]:
     try:
         G.plot(**bad)
         print("not refused", bad)
