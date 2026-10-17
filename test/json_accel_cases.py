@@ -1,0 +1,308 @@
+# json.dumps and json.loads through the _json accelerator: compared with
+# CPython 3.14 (whose json uses its C _json) by test/json-accel.test.ts
+import json, collections, _json
+from fractions import Fraction
+
+
+def show(f):
+    try:
+        print(repr(f()))
+    except Exception as e:
+        print(type(e).__name__, e.args[0] if e.args else "", getattr(e, "pos", None), getattr(e, "__notes__", None))
+
+
+# dumps: scalars, containers, separators, indent, sort_keys, ensure_ascii
+x = [{"a": i, "b": [i, str(i), i / 2], "c": {"d": None, "e": True}} for i in range(3)]
+show(lambda: json.dumps(x))
+show(lambda: json.dumps(x, indent=2, sort_keys=True))
+show(lambda: json.dumps(x, indent="\t", separators=(",", ": ")))
+show(lambda: json.dumps(x, separators=(",", ":")))
+show(lambda: json.dumps([1.5, -0.0, 2.0, 1e300, 1e16, 1e-7, 0.1, 12345678901234567890, -(2**70), True, False, None]))
+show(lambda: json.dumps({"é": " \x00\x1f\x7f😀\ud800 \"\\/\b\f\n\r\t"}))
+show(lambda: json.dumps({"é": " \x00\x1f\x7f😀\ud800 \"\\"}, ensure_ascii=False))
+show(lambda: json.dumps({1: 1, 2.5: 2, None: 3, True: 4, False: 5, "s": 6}))
+show(lambda: json.dumps({1: 1, "a": 2}, sort_keys=True))
+show(lambda: json.dumps({(1, 2): 3, "a": 4}, skipkeys=True))
+show(lambda: json.dumps({(1, 2): 3}))
+show(lambda: json.dumps([[], {}, [[]], [{}]], indent=1))
+show(lambda: json.dumps((1, (2, 3))))
+show(lambda: json.dumps(float("nan")))
+show(lambda: json.dumps([float("inf"), -float("inf")]))
+show(lambda: json.dumps({"a": float("nan")}, allow_nan=False))
+show(lambda: json.dumps({1: object()}))
+show(lambda: json.dumps([[1, {"a": set()}]]))
+show(lambda: json.dumps({1.5: [1, object()]}))
+show(lambda: json.dumps(Fraction(1, 3), default=str))
+show(lambda: json.dumps([Fraction(1, 3)], default=lambda o: [o.numerator, o.denominator]))
+a = []
+a.append(a)
+show(lambda: json.dumps(a))
+show(lambda: json.dumps(a, check_circular=False) if False else "skipped")
+d = {}
+d["d"] = d
+show(lambda: json.dumps(d))
+
+
+class I(int):
+    def __repr__(self):
+        return "I!"
+
+
+class E:
+    A = I(1)
+
+
+class F(float):
+    def __repr__(self):
+        return "F!"
+
+
+class S(str):
+    def __str__(self):
+        return "S!"
+
+
+class D(dict):
+    def items(self):
+        return [("x", 1)]
+
+
+class L(list):
+    def __iter__(self):
+        return iter([9])
+
+
+show(lambda: json.dumps([E.A, F(2.5), S("s"), D(a=2), L([1, 2]), {E.A: 1, F(0.5): 2, S("k"): 3}]))
+show(lambda: json.dumps(collections.OrderedDict([("b", 1), ("a", 2)])))
+show(lambda: json.dumps("x" * 3, indent=0))
+show(lambda: json.dumps({"a": [1, 2]}, indent=0))
+
+# loads: values, whitespace, positions, hooks, errors
+for s in ['{"a": [1, 2.5, -0.0, 1e400, true, false, null, "s"]}', ' [1] ', '"\\ud83d\\ude00x"', '"\\ud800"',
+          '"\\u00e9\\n\\t\\"\\\\\\/"', '123456789012345678901234567890', '-0', '1E2', '0.5e-3', "NaN", "-Infinity", "[]",
+          "{}", '{"a":1,"a":2}', '["😀", 1]', '"😀\\u0041"']:
+    show(lambda: json.loads(s))
+for s in ['"abc', '"a\x01b"', '"a\\qb"', '"\\u12"', '"\\u12zz"', '"\\ud800\\u12"', "[1,]", '{"a":1,}', '{"a" 1}', "{1:2}",
+          "[1 2]", '{"a":1 "b":2}', "", "-", "nul", "[", "{", '{"a"', '{"a":', "[1,", "01", "1.", "[1] x", '"\t"',
+          "[1,\n2,]", '{"😀":1,}', '["😀", 1 2]', "1" * 5000]:
+    show(lambda: json.loads(s))
+show(lambda: json.loads('"a\x01b"', strict=False))
+show(lambda: json.loads('{"a": 1, "b": [2]}', object_hook=lambda d: sorted(d)))
+show(lambda: json.loads('{"a": 1, "b": 2}', object_pairs_hook=lambda p: p))
+show(lambda: json.loads("[1.5, 2, 1e2]", parse_float=Fraction, parse_int=lambda s: "i" + s))
+show(lambda: json.loads("[NaN, Infinity]", parse_constant=lambda s: s.lower()))
+show(lambda: json.JSONDecoder().raw_decode("  [1]", 2))
+show(lambda: json.JSONDecoder().raw_decode("😀[1]", 1))
+show(lambda: json.loads(json.dumps(x)) == x)
+show(lambda: json.loads("[" * 3000 + "]" * 3000) is not None)
+deep = []
+for _ in range(3000):
+    deep = [deep]
+show(lambda: len(json.dumps(deep)))
+
+# the module's functions themselves
+from json import decoder, encoder
+show(lambda: decoder.scanstring('abc"x', 0))
+show(lambda: decoder.scanstring('"😀b"', 1))
+show(lambda: decoder.scanstring('a\x01b"', 0, False))
+show(lambda: decoder.scanstring('a\x01b"', 0, True))
+show(lambda: encoder.encode_basestring_ascii("é😀\""))
+show(lambda: encoder.encode_basestring("é😀\"\n"))
+# a dict or list changed by default() while it is encoded: as CPython, live
+d2 = {"a": 1, "b": object(), "c": 3}
+def grow(o):
+    d2["z"] = 9
+    return "X"
+show(lambda: json.dumps(d2, default=grow))
+d3 = {"a": 1, "b": object(), "c": 3}
+def shrink(o):
+    del d3["c"]
+    return "X"
+show(lambda: json.dumps(d3, default=shrink))
+l2 = [1, object(), 3]
+def longer(o):
+    l2.append(4)
+    return "X"
+show(lambda: json.dumps(l2, default=longer))
+# nesting: 40000 levels pass both ways, as in CPython; far deeper is a
+# RecursionError (CPython's message there names its C stack, so only the
+# type is compared)
+show(lambda: len(json.loads("[" * 40000 + "]" * 40000)) == 1)
+deep = []
+for _ in range(39999):
+    deep = [deep]
+show(lambda: len(json.dumps(deep)))
+show(lambda: len(json.loads('{"a":' * 39999 + "{}" + "}" * 39999)))
+show(lambda: len(json.dumps(deep, indent=0)))
+deep = {}
+for _ in range(9999):
+    deep = {"a": deep}
+show(lambda: len(json.dumps(deep)))
+for s in ["[" * 100000 + "]" * 100000, '{"a":' * 100000 + "1" + "}" * 100000]:
+    try:
+        json.loads(s)
+        print("no error")
+    except RecursionError:
+        print("RecursionError")
+deep = []
+for _ in range(100000):
+    deep = [deep]
+try:
+    json.dumps(deep)
+    print("no error")
+except RecursionError as e:
+    print("RecursionError", e.__notes__[0])
+# CORR-C0E-1: a float subclass's stored value, not its __float__
+class F(float):
+    def __float__(self): return float("inf")
+    def __repr__(self): return "F!"
+class G(float):
+    def __float__(self): return 0.0
+class H(float):
+    def __float__(self): raise RuntimeError("no")
+show(lambda: json.dumps(F(1.5)))
+show(lambda: json.dumps(G(float("inf")), allow_nan=False))
+show(lambda: json.dumps(F(float("nan")), allow_nan=False))
+show(lambda: json.dumps([H(2.0), G(-float("inf"))]))
+show(lambda: json.dumps({F(1.5): 1, G(float("inf")): 2, H(2.0): 3}))
+show(lambda: json.dumps({G(float("nan")): 1}, allow_nan=False))
+# CORR-C0E-2: separators must be str (subclasses by contents)
+class SS(str):
+    def __str__(self): return "?"
+class SN(str):
+    n = 0
+    def __str__(self):
+        SN.n += 1
+        return str(SN.n)
+class SR(str):
+    def __str__(self): raise RuntimeError("boom")
+show(lambda: json.dumps({"a": [1, 2]}, separators=(1, ":")))
+show(lambda: json.dumps([1, 2, 3, {"a": 1, "b": 2}], separators=(SN(","), SN(":"))))
+show(lambda: json.dumps([1, 2, 3, {"a": 1, "b": 2}], separators=(SN(","), SN(":")), indent=2))
+show(lambda: json.dumps([1, {"a" * 100: 1, 5: 2}], separators=(SN(","), SN(":")), sort_keys=True))
+show(lambda: json.dumps([[], {}, 1], separators=(SR(","), SR(":"))))
+show(lambda: json.dumps([1, 2], separators=(",", SR(":"))))
+show(lambda: json.dumps({"a": 1}, separators=(SR(","), ":")))
+show(lambda: json.dumps({"a": [1, 2]}, separators=(",", None)))
+show(lambda: json.dumps({"a": [1, 2]}, separators=(SS(";"), SS("="))))
+show(lambda: json.dumps({"a": [1, 2]}, indent=SS("--")))
+mk = json.encoder.c_make_encoder
+show(lambda: mk(None, None, json.encoder.encode_basestring, 2, ":", ",", False, False, True)([1, [2]], 0))
+show(lambda: mk(None, None, json.encoder.encode_basestring, 2, ":", ",", False, False, True)([], 0))
+# CORR-C0E-3: offsets by the index protocol; past the end, not clamped
+class I:
+    def __index__(self): return 1
+dec = json.JSONDecoder()
+for at in [1.5, "1", None, 10**30, -10**30, I(), True]:
+    show(lambda: dec.raw_decode(" 1", at))
+    show(lambda: _json.scanstring('"x"', at))
+show(lambda: mk(None, None, json.encoder.encode_basestring, None, ":", ",", False, False, True)(1, 1.5))
+show(lambda: mk(None, None, json.encoder.encode_basestring, None, ":", ",", False, False, True)(1, I()))
+for at in [2, 3, 8, 10**18]:
+    show(lambda: dec.raw_decode("\U0001F6001", at))
+    show(lambda: dec.scan_once("\U0001F6001", at))
+show(lambda: dec.raw_decode("\U0001F600 1", 1))
+# CORR-C0E-4: the scanner reads a str subclass by its contents
+show(lambda: dec.raw_decode(SS('"abc"')))
+show(lambda: dec.raw_decode(SS('\U0001F600 [1, "x"]'), 1))
+show(lambda: dec.scan_once(SS('{"a": 1}'), 0))
+show(lambda: dec.raw_decode(b'"abc"'))
+# CORR-C0E-5: an empty dict subclass is {} without items(); a nonempty one uses it
+class D(dict):
+    def items(self): return [("x", 1)]
+show(lambda: json.dumps(D()))
+show(lambda: json.dumps(D(a=2)))
+show(lambda: json.dumps([D(), D(a=2)], indent=2))
+show(lambda: json.dumps(D(), sort_keys=True))
+show(lambda: json.dumps(D(a=2), sort_keys=True))
+# CORR-C0E-6: int digits within sys's int_max_str_digits, values and keys
+import sys
+class BI(int): pass
+for lim in [4300, 640, 0]:
+    sys.set_int_max_str_digits(lim)
+    for e in [639, 640, 4299, 4300, 5000]:
+        for v in [10**e, -10**e, BI(10**e)]:
+            show(lambda: len(json.dumps(v)))
+            show(lambda: len(json.dumps({v: 1})))
+sys.set_int_max_str_digits(4300)
+# a subclass whose items() or __iter__ gives no iterable: CPython's messages
+class DN(dict):
+    def items(self): return 5
+class DI(dict):
+    def items(self): return iter([("a", 1)])
+class LN(list):
+    def __iter__(self): return 5
+class LR(list):
+    def __iter__(self): raise TypeError("mine")
+class LV(list):
+    def __iter__(self): raise ValueError("mine")
+class TI(tuple):
+    def __iter__(self): return iter([7, 8])
+class LL(list):
+    def __iter__(self): return [3]
+class LA(list):
+    def __iter__(self): raise AttributeError("mine")
+for o in [DN(a=1), DI(b=2), LN([1]), LR([1]), LV([1]), TI((1,)), [LN()], LL([1]), LA([1])]:
+    show(lambda: json.dumps(o))
+# CORR-C0E-3 (a7326e7d): offsets past 2**53 reported exactly; the
+# accelerator's argument binding
+sc = json.scanner.c_make_scanner(dec)
+for at in [9007199254740993, 10**18 + 1, 2**63 - 1, I()]:
+    for s in ["", "\U0001F600"]:
+        show(lambda: dec.raw_decode(s, at))
+        show(lambda: sc(s, at))
+        show(lambda: _json.scanstring(s, at))
+show(lambda: _json.scanstring('"x"', -2**63))
+show(lambda: sc("1", -2**63))
+enc = mk(None, None, json.encoder.encode_basestring, None, ":", ",", False, False, True)
+enci = mk(None, None, json.encoder.encode_basestring, "ab", ":", ",", False, False, True)
+enc0 = mk(None, None, json.encoder.encode_basestring, "", ":", ",", False, False, True)
+for f in [lambda: enc(1, None), lambda: enc(1), lambda: enc(), lambda: enc(1, 0, 2), lambda: enc(1, 2**63), lambda: enc(1, -1),
+          lambda: enc(1, 10**18 + 1), lambda: enc(1, _current_indent_level=0), lambda: enc(obj=1, _current_indent_level=0),
+          lambda: enc(1, 0, obj=1), lambda: enc(1, x=1), lambda: enc(_current_indent_level=I(), obj=[1]),
+          lambda: enci([1, [2]], -3), lambda: enci([1, [2]], -1), lambda: enci([1, [2]], 2), lambda: enci({"a": [1]}, -2),
+          lambda: enci([1], 2**40), lambda: enci([1], 2**63), lambda: enci([1, [2]], -(2**63)), lambda: enci([1, [2]], -(2**53 + 1)),
+          lambda: enci([1], -(2**63) - 1), lambda: enci([1], 2**53 + 1), lambda: enc0([1, [2]], 2**62), lambda: enc([1, [2]], 2**62),
+          lambda: sc(), lambda: sc("1"), lambda: sc("1", 0, 1), lambda: sc("1", x=0), lambda: sc("1", 0, idx=0),
+          lambda: sc("1", string="1"), lambda: sc(idx=0), lambda: sc(string="1", idx=0), lambda: sc(*["1"], **{"idx": 0}),
+          lambda: _json.scanstring(), lambda: _json.scanstring('"x"'), lambda: _json.scanstring('"x"', 1, True, 4),
+          lambda: _json.scanstring('"x"', 1, strict=False), lambda: _json.scanstring('"\x01"', 1, False)]:
+    show(f)
+# CORR-136-1: an iterator is one by its type's __next__, not by attribute
+# lookup; the iterator's own __iter__ failing keeps its error
+class Hidden:
+    def __init__(self): self.i = 0
+    def __iter__(self): return self
+    def __next__(self):
+        if self.i: raise StopIteration
+        self.i = 1
+        return 7
+    def __getattribute__(self, name):
+        if name == "__next__": raise AttributeError("private next")
+        return object.__getattribute__(self, name)
+class LH(list):
+    def __iter__(self): return Hidden()
+class TH(tuple):
+    def __iter__(self): return Hidden()
+show(lambda: next(Hidden()))
+show(lambda: list(Hidden()))
+for o in [LH([1]), TH([1])]:
+    for ind in [None, 0, 2]:
+        show(lambda: json.dumps(o, indent=ind))
+class BadSecond(Hidden):
+    def __getattribute__(self, name): return object.__getattribute__(self, name)
+    def __iter__(self): raise TypeError("second iter failed")
+class L2(list):
+    def __iter__(self): return BadSecond()
+show(lambda: json.dumps(L2([0])))
+class NextAttr:
+    def __init__(self): self.__next__ = lambda: 1
+class L3(list):
+    def __iter__(self): return NextAttr()
+show(lambda: json.dumps(L3([0])))
+def gen():
+    yield 5
+class L4(list):
+    def __iter__(self): return gen()
+show(lambda: json.dumps(L4([0])))
+show(lambda: json.dumps(type("L5", (list,), {"__iter__": lambda self: iter([1, 2])})([0])))
