@@ -1373,6 +1373,12 @@ newBuiltinModule("_fs", (m) => {
   };
   fn(m, "exists", (path: string) => quiet(() => fs.existsSync(at(path))));
   fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(at(path)) && fs.statSync(at(path)).isDirectory()));
+  // (posixpath's isfile, islink and lexists, as CPython's stat and lstat
+  // answer them: a regular file (a symbolic link followed); a symbolic link;
+  // anything there, a dangling link included)
+  fn(m, "isfile", (path: string) => quiet(() => fs.statSync(at(path)).isFile()));
+  fn(m, "islink", (path: string) => quiet(() => fs.lstatSync(at(path)).isSymbolicLink()));
+  fn(m, "lexists", (path: string) => quiet(() => (fs.lstatSync(at(path)), true)));
 });
 
 // ------------------------------------------------------------------ os
@@ -1435,10 +1441,14 @@ newBuiltinModule("os", (m) => {
   fn(m, "cpu_count", () => nodeOs.cpus().length);
   fn(m, "urandom", (n: any) => new PyBytes(new Uint8Array(require("crypto").randomBytes(Number(n)))));
   fn(m, "fspath", (p: any) => {
-    if (typeof p === "string" || p instanceof PyBytes) return p;
+    // (a str or bytes, subclasses included, as it is; a bytearray is neither)
+    if (isinstance(p, T.str) || isinstance(p, T.bytes)) return p;
     const f = Ty.lookupDunder(p, "__fspath__");
     if (f === undefined) raise(T.TypeError, `expected str, bytes or os.PathLike object, not ${typeName(p)}`);
-    return f(p);
+    // (what __fspath__ returns must be a str or bytes, subclasses included)
+    const r = f(p);
+    if (!isinstance(r, T.str) && !isinstance(r, T.bytes)) raise(T.TypeError, `expected ${typeName(p)}.__fspath__() to return str or bytes, not ${typeName(r)}`);
+    return r;
   });
   m.path = importModule("posixpath");
   dictSet(sysModules, "os.path", m.path);
