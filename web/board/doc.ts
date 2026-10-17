@@ -11,6 +11,7 @@ import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
 import { inkOutline } from "./ink";
+import { springLayout } from "../graph/spring";
 
 // A stroke's outline, made once: by its id, size and points (a hash of
 // them), not again at each layout (5000 strokes: 90 ms each time).  At
@@ -94,8 +95,8 @@ export interface DocGroup {
   title?: string;
   /** Markdown with math, under the title */
   text?: string;
-  /** how its items are laid out (default `graph`: in layers along the edges among them) */
-  layout?: "row" | "column" | "grid" | "graph";
+  /** how its items are laid out (default `graph`: in layers along the edges among them; `spring`: pulled together along the edges, pushed apart elsewhere) */
+  layout?: "row" | "column" | "grid" | "graph" | "spring";
   /** `grid` layout: how many columns (default: as square as can be) */
   columns?: number;
   /** `graph` layout: layers top to bottom (`TB`, the default) or left to right (`LR`) */
@@ -455,7 +456,8 @@ export function refLabel(ref: string): string {
 export function pageView(d: BoardDoc, i: number): BoardDoc {
   const p = pageOf(d, i);
   if (p === (d as BoardPage)) return d;
-  return { title: d.title, mode: d.mode, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
+  // (the seed too: a page's spring layout is the board's, every page alike, CORR-874-1)
+  return { title: d.title, mode: d.mode, seed: d.seed, refBase: d.refBase, images: d.images, intro: p.intro ?? (i === 0 ? d.intro : undefined), layout: p.layout, columns: p.columns, direction: p.direction, slide: p.slide, background: p.background, nodes: p.nodes, edges: p.edges, steps: p.steps };
 }
 
 /** Whether something is a board document. */
@@ -472,7 +474,7 @@ const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : u
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? undefined : String(v));
 const one = <T extends string>(v: unknown, of: readonly T[]): T | undefined => (of.includes(v as T) ? (v as T) : undefined);
 const strip = <T extends object>(o: T): T => { for (const k of Object.keys(o)) if ((o as any)[k] === undefined) delete (o as any)[k]; return o; };
-const LAYOUTS = ["row", "column", "grid", "graph"] as const, DIRS = ["TB", "LR"] as const;
+const LAYOUTS = ["row", "column", "grid", "graph", "spring"] as const, DIRS = ["TB", "LR"] as const;
 export const ASK_INPUTS = ["check", "radio", "choice", "text", "number", "scale"] as const;
 // (an option: a string, or an object with a string value and, if any, a string label)
 const askOption = (o: any): AskOption | undefined =>
@@ -659,6 +661,8 @@ export function formatError(d: any, o: { reader?: string; remedy?: string } = {}
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
+// (the "spring" layout: how far apart linked items' edges are drawn to, spring.ts `length`)
+const SPRING_LENGTH = GAP * 1.5;
 // (a group's size as a person made it: a positive number of units, at most a large board's)
 const groupSide = (v: unknown) => { const n = num(v); return n !== undefined && n > 0 && n <= 100000 ? n : undefined; };
 /** A group's padding, and its title's height (its members' origin is below them). */
@@ -852,6 +856,8 @@ export function askNote(a: DocAsk): DocNote & { ask: DocAsk } {
  * edges, in world coordinates.
  */
 export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: boolean } = {}): { items: Item[]; edges: Edge[]; routing: Generator<void, void> } {
+  // (the "spring" layout's seed: the board's, its first 32 bits; none, 0)
+  const springSeed = typeof doc.seed === "string" && /^[0-9a-f]{8}/.test(doc.seed) ? parseInt(doc.seed.slice(0, 8), 16) : 0;
   if (doc.pages?.length) doc = pageView(doc, 0);
   const roots = doc.nodes ?? [];
   const items: Item[] = [];
@@ -905,7 +911,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
       edges.flatMap((e) => {
         const a = memberOf(e.from, members), b = memberOf(e.to, members);
         return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
-      }));
+      }), springSeed);
     // (a group's members start at its origin: all of them, strokes too, as
     // the editor keeps a group around its members, Editor.contain, UI-FD2-1;
     // but in a group a person sized, members placed stay where they are in
@@ -937,7 +943,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   const topPos = arrange(top, doc.layout ?? "graph", doc.direction ?? "TB", doc.columns, edges.flatMap((e) => {
     const a = memberOf(e.from, rootIds), b = memberOf(e.to, rootIds);
     return a && b && a !== b ? [[a, b, labelWidth(e)] as Link] : [];
-  }));
+  }), springSeed);
 
   // absolute positions, and the items
   const place = (n: DocNode, x: number, y: number, depth: number, parent?: string) => {
@@ -1000,12 +1006,24 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
     return { x0: it.x, y0: it.y, x1: it.x + Math.min(it.w, w), y1: it.inner.y - 10 };
   };
   const reqs: RouteRequest[] = [];
+  // (the edges drawn straight, spring containers': their points and label)
+  const lines = new Map<string, { points: number[]; label: { x: number; y: number } }>();
   let made = 0;
   for (const e of edges) {
     // (between frames, a large board's every 32: each scans the page)
     if (++made % 32 === 0) yield;
     const A = ancestors(e.from), B = ancestors(e.to);
     if (A.has(e.to) || B.has(e.from)) continue; // a group and its member: no line
+    // the smallest group holding both: its layout's axis
+    let common: string | undefined;
+    for (const p of A) if (B.has(p)) { common = p; break; }
+    const container = common ? groups.get(common)! : doc;
+    // (in a "spring" container: a straight line between the two boxes, as
+    // William chose; laid out by no layer direction, it has no axis to bend along)
+    if (container.layout === "spring") {
+      const line = straight(rect(e.from), rect(e.to));
+      if (line) { lines.set(e.id, line); continue; }
+    }
     const obstacles: Rect[] = [];
     const scan = (ns: DocNode[]) => {
       for (const n of ns) {
@@ -1020,10 +1038,7 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
       }
     };
     scan(roots);
-    // the smallest group holding both: its layout's axis
-    let common: string | undefined;
-    for (const p of A) if (B.has(p)) { common = p; break; }
-    const axis = axisOf(common ? groups.get(common)! : doc);
+    const axis = axisOf(container);
     reqs.push({ id: e.id, a: rect(e.from), b: rect(e.to), obstacles, axis, label: e.label ? { w: e.label.length * 6.8 + 14, h: 20 } : undefined });
   }
   const keepClear = items.filter((it) => it.kind === "note").map((it) => ({ x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h }) as Rect);
@@ -1031,12 +1046,34 @@ function* routeEdges(doc: BoardDoc, items: Item[], edges: Edge[], parentOf: Map<
   const routes = yield* routeSteps(reqs, keepClear);
   // (all at once: an edge keeps the route it was given until now, if any)
   for (const e of edges) {
-    const r = routes.get(e.id);
+    const r = routes.get(e.id) ?? lines.get(e.id);
     delete e.points; delete e.lx; delete e.ly;
     if (!r) continue;
     e.points = r.points;
     if (r.label) { e.lx = r.label.x; e.ly = r.label.y; }
   }
+}
+
+/** A straight edge from box `a` to box `b`: the segment between their
+ * centres, from where it leaves `a` to where it enters `b`, so an
+ * arrowhead touches the box; its label at the segment's middle.  Null when
+ * there is no such segment (the boxes overlap, or share a centre): the edge
+ * is then routed as any other. */
+export function straight(a: Rect, b: Rect): { points: number[]; label: { x: number; y: number } } | null {
+  const ca = [(a.x0 + a.x1) / 2, (a.y0 + a.y1) / 2], cb = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const dx = cb[0] - ca[0], dy = cb[1] - ca[1];
+  if (!(Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9)) return null;
+  // (how far along from centre c, towards (sx, sy), the box's border is: the nearer of its two crossings)
+  const out = (r: Rect, c: number[], sx: number, sy: number) => {
+    const tx = Math.abs(sx) > 1e-9 ? ((sx > 0 ? r.x1 : r.x0) - c[0]) / sx : Infinity;
+    const ty = Math.abs(sy) > 1e-9 ? ((sy > 0 ? r.y1 : r.y0) - c[1]) / sy : Infinity;
+    return Math.min(tx, ty);
+  };
+  const ta = out(a, ca, dx, dy), tb = 1 - out(b, cb, -dx, -dy);
+  // (the boxes meet or overlap along the line: no segment between them)
+  if (!(ta < tb)) return null;
+  const p = [ca[0] + dx * ta, ca[1] + dy * ta, ca[0] + dx * tb, ca[1] + dy * tb];
+  return { points: p, label: { x: (p[0] + p[2]) / 2, y: (p[1] + p[3]) / 2 } };
 }
 
 // (`ink`: a pen stroke, which takes no part in the layout: where it was
@@ -1049,7 +1086,7 @@ type Link = [string, string, number];
 /** The width an edge's label takes (12 px text). */
 export const labelWidth = (e: { label?: string; hidden?: boolean }) => (e.label && !e.hidden ? e.label.length * 6.8 + 14 : 0);
 
-function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: Link[]): Map<string, { x: number; y: number }> {
+function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" | "LR", columns: number | undefined, allLinks: Link[], seed = 0): Map<string, { x: number; y: number }> {
   const out = new Map<string, { x: number; y: number }>();
   // (positioned boxes keep their places; the others are laid out among themselves)
   const nodes = all.filter((n) => !n.fixed && !n.ink), free = new Set(nodes.map((n) => n.id));
@@ -1062,6 +1099,11 @@ function arrange(all: Node[], kind: NonNullable<DocGroup["layout"]>, dir: "TB" |
     }
   } else if (kind === "grid") {
     for (const [id, p] of grid(nodes, Math.max(1, columns ?? Math.ceil(Math.sqrt(nodes.length))))) out.set(id, p);
+  } else if (kind === "spring" && nodes.length) {
+    // (web/graph/spring.ts, the board's seed: the same board, the same
+    // places, on every runtime; past its caps, null: laid out as a graph)
+    const p = springLayout(nodes.map((n) => ({ id: n.id, w: n.w, h: n.h })), links.map(([a, b]) => [a, b] as [string, string]), { seed, gap: GAP, length: SPRING_LENGTH });
+    for (const [id, q] of p ?? graph(nodes, links, dir)) out.set(id, q);
   } else {
     for (const [id, p] of graph(nodes, links, dir)) out.set(id, p);
   }
