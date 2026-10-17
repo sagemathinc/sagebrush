@@ -634,3 +634,27 @@ digits __mro__ property -> 2.00000000 Real Field with 33 bits of precision
 ['real-get']
 digits __dict__ property -> 2.00000000 Real Field with 33 bits of precision
 ['real-get']
+Real Field with 53 bits of precision changing-index -> 2.0000000 Real Field with 30 bits of precision
+calls ['index-get']
+Real Field with 53 bits of precision none-float !! TypeError 'NoneType' object is not callable
+calls []
+Real Field with 53 bits of precision float-control -> 2.00000000 Real Field with 33 bits of precision
+calls ['float-get']
+Real Field with 53 bits of precision descriptor-none !! TypeError 'NoneType' object is not callable
+calls ['float-get']
+Real Double Field changing-index -> 2.0000000 Real Field with 30 bits of precision
+calls ['index-get']
+Real Double Field none-float !! TypeError 'NoneType' object is not callable
+calls []
+Real Double Field float-control -> 2.00000000 Real Field with 33 bits of precision
+calls ['float-get']
+Real Double Field descriptor-none !! TypeError 'NoneType' object is not callable
+calls ['float-get']
+Real Field with 100 bits of precision changing-index -> 2.0000000 Real Field with 30 bits of precision
+calls ['index-get']
+Real Field with 100 bits of precision none-float !! TypeError 'NoneType' object is not callable
+calls []
+Real Field with 100 bits of precision float-control -> 2.00000000 Real Field with 33 bits of precision
+calls ['float-get']
+Real Field with 100 bits of precision descriptor-none !! TypeError 'NoneType' object is not callable
+calls ['float-get']

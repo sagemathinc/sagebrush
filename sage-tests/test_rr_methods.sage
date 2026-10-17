@@ -155,3 +155,33 @@ for fake in ("__mro__", "__dict__"):
     V2 = type("V2", (), {"__float__": Desc2()})
     show2("digits " + fake + " property", lambda: RealField(100)(2).n(digits=V2()))
     print(calls)
+# each special method is bound once (an __index__ descriptor's __get__ runs
+# once); a __float__ present in the type is called even when it is None
+calls=[]
+class Ix:
+    def __get__(self,obj,owner):
+        calls.append('index-get')
+        return lambda:int(8 if len(calls)==1 else 9)
+class ChangingIndex:
+    __index__=Ix()
+class NoneFloat:
+    __float__=None
+    def __index__(self):
+        calls.append('index');return int(8)
+class FloatGet:
+    def __get__(self,obj,owner):
+        calls.append('float-get')
+        return lambda:float(8.9)
+class ChangingFloat:
+    __float__=FloatGet()
+class FloatNoneGet:
+    def __get__(self,obj,owner):
+        calls.append('float-get');return None
+class DescriptorNone:
+    __float__=FloatNoneGet()
+    def __index__(self):
+        calls.append('index');return int(8)
+for R in [RR,RDF,RealField(100)]:
+    for nm,v in [('changing-index',ChangingIndex()),('none-float',NoneFloat()),('float-control',ChangingFloat()),('descriptor-none',DescriptorNone())]:
+        calls.clear();show2(str(R)+' '+nm,lambda:R(2).n(digits=v));print('calls',calls)
+
