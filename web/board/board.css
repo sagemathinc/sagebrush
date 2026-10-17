@@ -210,6 +210,27 @@
 /* on a phone: a thin row of buttons under the Edit toolbar */
 .ip-bar.ip-dock { box-sizing: border-box; max-width: 100vw; flex-wrap: nowrap; gap: 0; padding: 1px 2px; border-top: 0; border-radius: 0 0 9px 9px; box-shadow: 0 2px 6px rgba(0, 0, 0, .1); }
 .ip-bar.ip-dock > button { flex: none; min-width: 34px; height: 34px; padding: 0 4px; }
+/* the function search, while a code item is edited (not on a phone's thin row) */
+.ip-docs { position: relative; margin-left: 6px; }
+.ip-docs[hidden], .ip-dock .ip-docs { display: none; }
+.ip-docs-q { width: 13em; height: 28px; box-sizing: border-box; padding: 0 8px; font: inherit; font-size: 13px; border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; }
+.ip-docs-list, .be-completer { list-style: none; margin: 0; padding: 4px 0; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); overflow-y: auto; }
+.ip-docs-list { position: absolute; top: calc(100% + 4px); right: 0; width: 26em; max-height: 50vh; }
+.ip-docs-list[hidden], .be-completer[hidden] { display: none; }
+.ip-docs-list li { padding: 4px 10px; cursor: pointer; font-size: 13px; line-height: 1.35; }
+.ip-docs-list li code { display: block; font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: #1d2330; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-docs-list li span { display: block; color: #5f665f; }
+.ip-docs-list li.ip-docs-note { cursor: default; color: #5f665f; }
+:is(.ip-docs-list, .be-completer) li[aria-selected="true"], :is(.ip-docs-list, .be-completer) li:hover { background: #eef2ea; }
+.ip-doc { box-sizing: border-box; position: absolute; top: calc(100% + 4px); right: 0; width: min(36em, 90vw); max-height: 60vh; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #fff; border: 1px solid rgba(0, 0, 0, .15); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
+.ip-doc-head { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ip-doc-body { margin: 0; overflow: auto; white-space: pre-wrap; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #1d2330; background: #f6f6f2; padding: 6px 8px; border-radius: 5px; }
+.ip-doc-row { display: flex; gap: 6px; justify-content: flex-end; }
+.ip-doc-insert { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }
+/* Tab's completions, at the caret */
+.be-completer { position: fixed; z-index: 5; max-height: 14em; min-width: 8em; max-width: 24em; }
+.be-completer li.be-comp-more { cursor: default; color: #5f665f; font-style: italic; }
+.be-completer li { padding: 2px 10px; cursor: pointer; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .be-row { display: flex; gap: 6px; }
 .be-row span { flex: 1; }
 .be-done { background: #2a6f2f; color: #fff; border-color: #2a6f2f; }

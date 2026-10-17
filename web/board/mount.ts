@@ -39,6 +39,7 @@ import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
 import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode, Evaluated } from "./code";
+import type { DocEntry } from "../docsearch";
 import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
 import { sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
@@ -139,6 +140,9 @@ export interface BoardHost {
   duplicate?(d: BoardDoc): void;
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
+  /** the function search's index of a language (web/docsearch.ts), shown
+   * beside a code item being written; none (or null for a language): no search */
+  docs?: (lang: string) => Promise<DocEntry[] | null>;
   /** where the reader's answers go (web/board-host-protocol.md: a frame's
    * channel to its host): a page with questions then has Submit, and a
    * question with `decide`, "Get feedback on my words".  Read once the board
@@ -1239,6 +1243,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
   editor.onRun = (id) => { code?.run([cell(id)]); };
   editor.highlight = (id) => { const c = code; return c && c.highlight("", cell(id)) !== null ? (src: string) => c.highlight(src, cell(id))! : null; };
+  // (Tab's completions, from the interpreter of the code's language, as the notebook's; and the host's function search)
+  editor.complete = (mode, before) => code?.complete(mode as BoardMode, before) ?? Promise.resolve(null);
+  editor.docs = host.docs ?? null;
   editor.images = images;
   const editBtn = $("edit");
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
