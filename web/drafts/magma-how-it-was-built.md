@@ -219,8 +219,7 @@ and says so in words.** Some examples:
   browser's memory, but they are checks on known paths, not a guarantee
   for every program.
 
-Where Sagebrush does answer, the answer is meant to be Magma's, and on the
-inputs tested it is. A refusal
+Where Sagebrush does answer, the answer is meant to be Magma's. A refusal
 is a known gap. A different answer is a bug.
 
 ## 6. What is not there
