@@ -3747,12 +3747,29 @@ T.GenericAlias = genericAliasType;
 {
   const copyreg = () => hooks.importModule("copyreg");
   const getstate = method(object, "__getstate__", (self: any) => {
-    if (!hasInstanceDict(self)) return null;
-    const d = new PyDict();
-    // (the attribute dict: never a layout's own storage, as a bytes
-    // subclass's buffer, which a pickle would restore as attributes)
-    for (const k of attrNames(self)) dictSet(d, k, self[k]);
-    return d.$m.size ? d : null;
+    let state: any = null;
+    if (hasInstanceDict(self)) {
+      const d = new PyDict();
+      // (the attribute dict: never a layout's own storage, as a bytes
+      // subclass's buffer, which a pickle would restore as attributes)
+      for (const k of attrNames(self)) dictSet(d, k, self[k]);
+      if (d.$m.size) state = d;
+    }
+    // (__slots__' values as CPython's object_getstate_default: those set,
+    // by copyreg._slotnames, then (state, slots))
+    const cls = typeOf(self);
+    if (cls.$mro.some((c: any) => c.$dict.has("__slots__"))) {
+      const slots = new PyDict();
+      for (const n of O.toArray(callObj(getattr(copyreg(), "_slotnames"), [cls]))) {
+        try {
+          dictSet(slots, n, getattr(self, n));
+        } catch (e) {
+          if (!isinstance(e, T.AttributeError)) throw e;
+        }
+      }
+      if (slots.$m.size) state = tuple([state, slots]);
+    }
+    return state;
   });
   const reduceNewobj = (self: any) => {
     const cls = typeOf(self);
