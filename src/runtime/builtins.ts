@@ -451,6 +451,7 @@ function iterImpl(x: any, sentinel: any = undefined): any {
   // (an object's own iterator, the one its __iter__ returned, as
   // CPython's: iter(it) is it, type(iter(d)) its type, not a wrapper)
   const it = O.iter(x);
+  if (it instanceof O.GenIter && it !== x) return it.g; // (a generator __iter__ returned)
   return it instanceof O.ProtoIter ? it.o : it;
 }
 

@@ -2837,6 +2837,10 @@ function strictEnd(name: string, its: any[], i: number): any {
   const of = (k: number) => `argument${k === 1 ? " " : "s 1-"}${k}`;
   if (i > 0) raise(T.ValueError, `${name}() argument ${i + 1} is shorter than ${of(i)}`);
   for (let j = 1; j < its.length; j++) if (its[j].$next() !== DONE) raise(T.ValueError, `${name}() argument ${j + 1} is longer than ${of(j)}`);
+  // (all ended together: the sources' StopIterations are cleared, as
+  // CPython's check clears them, so the one raised carries no value,
+  // CORR-28A-5)
+  O.lastStop.e = null;
   return DONE;
 }
 

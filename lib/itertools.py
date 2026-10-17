@@ -5,10 +5,19 @@ takewhile, filterfalse, starmap, tee) are objects whose state survives it;
 the others end, as generators do."""
 
 
+_mro = type.__dict__["__mro__"].__get__
+_dict = type.__dict__["__dict__"].__get__
+
+
 def _is_number(x):
-    # (CPython's PyNumber_Check: __index__, __int__ or __float__, or complex)
-    t = type(x)
-    return hasattr(t, "__index__") or hasattr(t, "__int__") or hasattr(t, "__float__") or isinstance(x, complex)
+    # (CPython's PyNumber_Check: __index__, __int__ or __float__ in the
+    # type's own slots, or a complex; read from the classes' dicts, so no
+    # metaclass __getattribute__ or __getattr__ runs, CORR-28A-3)
+    for c in _mro(type(x)):
+        d = _dict(c)
+        if "__index__" in d or "__int__" in d or "__float__" in d or c is complex:
+            return True
+    return False
 
 
 def count(start=0, step=1):

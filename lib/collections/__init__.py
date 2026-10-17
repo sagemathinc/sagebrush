@@ -40,18 +40,38 @@ def _slice_index(v):
     return _index(v)
 
 
+def _dlen(d):
+    # (a deque's own length, never a subclass's __len__, as CPython's)
+    return len(d._l) + len(d._r)
+
+
 class _deque_iterator:
     # (as CPython's dequeiter: the deque's mutation count when it was made,
     # a change of it a RuntimeError; reading by position, so reverse() and
     # item assignment, which change no count, are seen: astra3 A28)
     __slots__ = ("_d", "_i", "_n", "_state", "_step")
 
-    def __init__(self, d, reverse=False):
-        self._d = d
-        self._n = len(d)
-        self._i = self._n - 1 if reverse else 0
-        self._step = -1 if reverse else 1
-        self._state = d._state
+    def __new__(cls, d, index=0):
+        # (as CPython's dequeiter_new: a deque, and how many of its items
+        # are taken already, CORR-28A-4)
+        if not isinstance(d, deque):
+            raise TypeError("argument 1 must be collections.deque, not %s" % type(d).__name__)
+        index = _ssize(index)
+        it = cls._make(d)
+        for _ in range(min(index, it._n)):
+            next(it)
+        return it
+
+    @classmethod
+    def _make(cls, d):
+        it = object.__new__(cls)
+        it._d = d
+        it._n = _dlen(d)
+        reverse = cls is _deque_reverse_iterator
+        it._i = it._n - 1 if reverse else 0
+        it._step = -1 if reverse else 1
+        it._state = d._state
+        return it
 
     def __iter__(self):
         return self
@@ -82,9 +102,6 @@ _deque_iterator.__module__ = "collections"
 class _deque_reverse_iterator(_deque_iterator):
     __slots__ = ()
 
-    def __init__(self, d):
-        super().__init__(d, True)
-
 
 _deque_reverse_iterator.__module__ = "collections"
 
@@ -108,11 +125,18 @@ class deque:
                 raise TypeError("an integer is required")
             if maxlen < 0:
                 raise ValueError("maxlen must be non-negative")
-        self._l = []
-        self._r = []
+        # (as CPython's deque_init: a new deque's count starts at 0; a deque
+        # made again is cleared, which counts, then extended, CORR-28A-2)
+        try:
+            self._state
+        except AttributeError:
+            self._l = []
+            self._r = []
+            self._state = 0
+        else:
+            deque.clear(self)
         self._maxlen = maxlen
-        self._state = 0
-        self.extend(iterable)
+        deque.extend(self, iterable)
 
     @property
     def maxlen(self):
@@ -137,10 +161,10 @@ class deque:
         return self._l[nl - 1 - i] if i < nl else self._r[i - nl]
 
     def __iter__(self):
-        return _deque_iterator(self)
+        return _deque_iterator._make(self)
 
     def __reversed__(self):
-        return _deque_reverse_iterator(self)
+        return _deque_reverse_iterator._make(self)
 
     def __repr__(self):
         if self._maxlen is None:
@@ -178,7 +202,7 @@ class deque:
     # identity first, and stop on a mutation by a comparison, as CPython's:
     # a RuntimeError, but an IndexError for remove, astra3 A31)
     def __contains__(self, x):
-        n, state = len(self), self._state
+        n, state = _dlen(self), self._state
         for i in range(n):
             if _same(self._get(i), x):
                 return True
@@ -189,7 +213,7 @@ class deque:
     def _index(self, i):
         if not isinstance(i, int):
             raise TypeError("sequence index must be integer, not '%s'" % type(i).__name__)
-        n = len(self)
+        n = _dlen(self)
         if i < 0:
             i += n
         if i < 0 or i >= n:
@@ -197,10 +221,10 @@ class deque:
         return i
 
     def __getitem__(self, i):
-        return self._get(self._index(i))
+        return self._get(deque._index(self, i))
 
     def __setitem__(self, i, v):
-        i = self._index(i)
+        i = deque._index(self, i)
         nl = len(self._l)
         if i < nl:
             self._l[nl - 1 - i] = v
@@ -208,7 +232,7 @@ class deque:
             self._r[i - nl] = v
 
     def __delitem__(self, i):
-        i = self._index(i)
+        i = deque._index(self, i)
         items = self._items()
         del items[i]
         self._set(items)
@@ -216,14 +240,14 @@ class deque:
     def append(self, x):
         self._r.append(x)
         self._state += 1
-        if self._maxlen is not None and len(self) > self._maxlen:
-            self.popleft()
+        if self._maxlen is not None and _dlen(self) > self._maxlen:
+            deque.popleft(self)
 
     def appendleft(self, x):
         self._l.append(x)
         self._state += 1
-        if self._maxlen is not None and len(self) > self._maxlen:
-            self.pop()
+        if self._maxlen is not None and _dlen(self) > self._maxlen:
+            deque.pop(self)
 
     def pop(self):
         if not self._r:
@@ -254,7 +278,7 @@ class deque:
                 pass
             return
         for x in iterable:
-            self.append(x)
+            deque.append(self, x)
 
     def extendleft(self, iterable):
         if iterable is self:
@@ -264,7 +288,7 @@ class deque:
                 pass
             return
         for x in iterable:
-            self.appendleft(x)
+            deque.appendleft(self, x)
 
     def clear(self):
         if self._l or self._r:
@@ -278,7 +302,7 @@ class deque:
     __copy__ = copy
 
     def count(self, x):
-        n, state, k = len(self), self._state, 0
+        n, state, k = _dlen(self), self._state, 0
         for i in range(n):
             k += _same(self._get(i), x)
             if self._state != state:
@@ -288,7 +312,7 @@ class deque:
     def index(self, x, start=0, stop=_sys.maxsize):
         # (start and stop as CPython's: slice indices, through __index__)
         start, stop = _slice_index(start), _slice_index(stop)
-        n, state = len(self), self._state
+        n, state = _dlen(self), self._state
         if start < 0:
             start = max(start + n, 0)
         if stop < 0:
@@ -304,20 +328,20 @@ class deque:
     def insert(self, i, x):
         # (the index converted first, then the size checked, as CPython's)
         i = _ssize(i)
-        if self._maxlen is not None and len(self) >= self._maxlen:
+        if self._maxlen is not None and _dlen(self) >= self._maxlen:
             raise IndexError("deque already at its maximum size")
         items = self._items()
         items.insert(i, x)
         self._set(items)
 
     def remove(self, x):
-        n, state = len(self), self._state
+        n, state = _dlen(self), self._state
         for i in range(n):
             found = _same(self._get(i), x)
             if self._state != state:
                 raise IndexError("deque mutated during iteration")
             if found:
-                del self[i]
+                deque.__delitem__(self, i)
                 return
         raise ValueError("deque.remove(x): x not in deque")
 
@@ -327,7 +351,7 @@ class deque:
 
     def rotate(self, n=1):
         n = _ssize(n)
-        k = len(self)
+        k = _dlen(self)
         if k <= 1:
             return
         # (a count even for rotate(0), as CPython's _deque_rotate)
@@ -341,12 +365,12 @@ class deque:
     def __add__(self, other):
         if not isinstance(other, deque):
             raise TypeError('can only concatenate deque (not "%s") to deque' % type(other).__name__)
-        d = self.copy()
+        d = deque.copy(self)
         d.extend(other)
         return d
 
     def __iadd__(self, other):
-        self.extend(other)
+        deque.extend(self, other)
         return self
 
     def __mul__(self, n):
@@ -359,10 +383,10 @@ class deque:
     def __imul__(self, n):
         items = self._items() * n
         # (an empty deque, or a repeat by 1, is not changed, as CPython's)
-        if len(items) == len(self):
+        if len(items) == _dlen(self):
             return self
-        self.clear()
-        self.extend(items)
+        deque.clear(self)
+        deque.extend(self, items)
         return self
 
     __class_getitem__ = classmethod(_GenericAlias)
