@@ -831,7 +831,7 @@ def _dec_magma(x):
     if t in ("bool", "str"):
         return x["v"]
     if t == "list":
-        return _magma_seq([_dec_magma(y) for y in x["v"]])
+        return _magma_list(x)
     if t == "dict":
         raise _err("a dict can't be imported in Magma mode yet: import its keys and values as two sequences")
     # (an array's or a matrix's shape checked by _check before this: at most
@@ -846,14 +846,14 @@ def _dec_magma(x):
         dt, shape = x["dtype"], x["shape"]
         if len(shape) not in (1, 2) or dt in ("complex128", "bool"):
             raise _err("an array of %s%s can't be imported in Magma mode yet" % (dt, "" if len(shape) in (1, 2) else " with %d dimensions" % len(shape)))
-        flat = [int(e) for e in x["v"]] if dt == "int64" else [M.MReal.of(_float(e), _MAGMA_DOUBLE_DIGITS) if _math.isfinite(_float(e)) else _bad_real(e) for e in x["v"]]
         if len(shape) == 1:
-            return _magma_seq(flat)
+            return _magma_list(x)
+        flat = [int(e) for e in x["v"]] if dt == "int64" else [_magma_real(e) for e in x["v"]]
         return M.Matrix(M.Integers(), _rows(shape, flat)) if dt == "int64" else M.Matrix(_rows(shape, flat))
     if t == "matrix":
-        flat = [int(e) for e in x["v"]] if x["ring"] == "ZZ" else [S.QQ(_Fraction(e)) for e in x["v"]]
         if len(x["shape"]) == 1:
-            return _magma_seq(flat)
+            return _magma_list(x)
+        flat = [int(e) for e in x["v"]] if x["ring"] == "ZZ" else [S.QQ(_Fraction(e)) for e in x["v"]]
         return M.Matrix(M.Integers() if x["ring"] == "ZZ" else M.Rationals(), _rows(x["shape"], flat))
     if t == "poly":
         if len(x["vars"]) != 1:
@@ -868,78 +868,155 @@ def _dec_magma(x):
     raise _err("no tag %r" % t)
 
 
-def _magma_universe(v):
-    """the universe a value of Magma's goes in, as _magma_seq unifies them:
-    "Z", "Q", "R", "B", "S", ("seq", u) (u None: an empty sequence), or
-    another type's name with its parent's"""
-    import _magma as M
-    if isinstance(v, bool):
-        return "B"
-    if isinstance(v, int):
-        return "Z"
-    if isinstance(v, _Fraction):
-        return "Q"
-    if isinstance(v, M.MReal):
-        return ("R", v.prec)
-    if isinstance(v, str):
-        return "S"
-    if isinstance(v, M.MSeq):
-        return ("seq", _unify([_magma_universe(y) for y in v]))
-    parent = v.parent() if hasattr(v, "parent") else None
-    return (str(M.Type(v)), str(parent))
-
-
+# Magma's sequences, from sbx data already checked (_check): their
+# universes found bottom-up once, each subtree's from its children's, then
+# each node built once, top-down, coerced into its universe as it is built:
+# linear in the checked tree (daybreak2's HARD-9B4-1).  A universe is a
+# string ("Z", "Q", "R", "B", "S"), a small tuple for a matrix's or a
+# polynomial's parent, or an int: a sequence's, interned with its
+# elements' universe, so universes compare in constant time.
 class _NoUniverse(Exception):
     pass
 
 
-def _unify(us):
-    """the common universe of these, or _NoUniverse: equal ones; Z with Q is
-    Q (an integer coerced exactly); sequences by their elements'; an empty
-    sequence goes with any.  Never exact into real: that would round"""
-    out = None
-    for u in us:
-        out = u if out is None else _unify2(out, u)
-    return out
+class _Universes:
+    def __init__(self):
+        self.seqs = {}     # element universe (None: empty) -> its sequence's int
+        self.elem = {}     # a sequence's int -> its element universe
+        self.unified = {}  # (a, b) -> a and b's common universe (or _NoUniverse)
+        self.work = 0      # nodes visited, both passes (the tests' bound)
 
+    def of_seq(self, u):
+        n = self.seqs.get(u)
+        if n is None:
+            n = self.seqs[u] = len(self.seqs)
+            self.elem[n] = u
+        return n
 
-def _unify2(a, b):
-    if a == b:
-        return a
-    if {a, b} == {"Z", "Q"}:
-        return "Q"
-    if isinstance(a, tuple) and isinstance(b, tuple) and a[0] == "seq" and b[0] == "seq":
-        if a[1] is None:
-            return b
-        if b[1] is None:
+    def unify2(self, a, b):
+        if a == b:
             return a
-        return ("seq", _unify2(a[1], b[1]))
-    raise _NoUniverse()
+        key = (a, b)
+        if key in self.unified:
+            r = self.unified[key]
+            if r is _NoUniverse:
+                raise _NoUniverse()
+            return r
+        try:
+            if {a, b} == {"Z", "Q"}:
+                r = "Q"
+            elif isinstance(a, int) and isinstance(b, int):
+                ea, eb = self.elem[a], self.elem[b]
+                r = self.of_seq(eb if ea is None else ea if eb is None else self.unify2(ea, eb))
+            else:
+                raise _NoUniverse()
+        except _NoUniverse:
+            self.unified[key] = _NoUniverse
+            raise
+        self.unified[key] = r
+        return r
+
+    def of(self, x):
+        """the universe of checked sbx data x, as Magma would put it in a sequence"""
+        self.work += 1
+        t = x["t"]
+        if t in ("int", "rat", "float", "bool", "str"):
+            return {"int": "Z", "rat": "Q", "float": "R", "bool": "B", "str": "S"}[t]
+        if t == "list":
+            u = None
+            for y in x["v"]:
+                v = self.of(y)
+                u = v if u is None else self.unify2(u, v)
+            return self.of_seq(u)
+        if t in ("matrix", "array") and len(x["shape"]) == 1:
+            self.work += len(x["v"])
+            if t == "array" and x["dtype"] not in ("int64", "float64"):
+                raise _err("an array of %s can't be imported in Magma mode yet" % x["dtype"])
+            # (its universe its declared one, empty too, CORR-695-3)
+            return self.of_seq(("Z" if x["ring"] == "ZZ" else "Q") if t == "matrix" else "Z" if x["dtype"] == "int64" else "R")
+        if t in ("matrix", "array"):
+            return (t, x.get("ring") or x.get("dtype"), tuple(x["shape"]))
+        if t == "poly":
+            return ("poly", x["ring"], tuple(x["vars"]))
+        return (t,)
+
+    def build(self, x, u):
+        """x decoded in Magma, in universe u: an integer into Q exactly, a
+        sequence's elements into its elements' universe, and each sequence
+        with its universe recorded as Magma keeps it, an empty one's too"""
+        self.work += 1
+        t = x["t"]
+        if t == "list":
+            e = self.elem[u]
+            return self.seq([self.build(y, e) for y in x["v"]], e)
+        if t in ("matrix", "array") and len(x["shape"]) == 1:
+            e = self.elem[u]
+            self.work += len(x["v"])
+            if t == "matrix" and x["ring"] == "QQ" or e == "Q":
+                S = _sage()
+                flat = [S.QQ(_Fraction(z)) for z in x["v"]]
+            elif x.get("dtype") == "float64":
+                flat = [_magma_real(z) for z in x["v"]]
+            else:
+                flat = [int(z) for z in x["v"]]
+            return self.seq(flat, e)
+        v = _dec_magma(x)
+        if u == "Q" and t == "int":
+            return _sage().QQ(v)
+        return v
+
+    def seq(self, items, e):
+        """a Magma sequence of these items, whose elements' universe is e
+        (None: no element, nor any known): its universe recorded as Magma
+        mode's own [ ... ] records it (_inf), so Universe, Append and the
+        rest see it; empty, with a universe it can't record, refused"""
+        import _magma as M
+        s = M.MSeq(items)
+        inf = M._ZZ if e == "Z" else M._QQ if e == "Q" else None
+        if not items:
+            if e is None:
+                s._null = True  # (as [ ]: no universe)
+            elif inf is None:
+                raise _err("an empty sequence of %s can't be imported in Magma mode yet: it can't keep that universe" % _universe_name(e, self))
+            else:
+                s._inf = inf
+            return s
+        s._inf = inf if inf is not None else M._infer_from(items)
+        return s
 
 
-def _coerce(v, u):
-    """v in universe u, exactly: an integer into Q, a sequence's elements into its universe"""
+def _universe_name(e, U):
+    if isinstance(e, int):
+        return "sequences"
+    return {"R": "reals", "B": "booleans", "S": "strings"}.get(e, e[0] + "s" if isinstance(e, tuple) else str(e))
+
+
+def _magma_real(z):
     import _magma as M
-    if u == "Q" and isinstance(v, int) and not isinstance(v, bool):
-        return _sage().QQ(v)
-    if isinstance(u, tuple) and u[0] == "seq" and isinstance(v, M.MSeq) and u[1] is not None:
-        return M.MSeq([_coerce(y, u[1]) for y in v])
-    return v
+    v = _float(z)
+    if not _math.isfinite(v):
+        raise _err("%s has no Magma real: Magma's reals are finite" % z)
+    return M.MReal.of(v, _MAGMA_DOUBLE_DIGITS)
 
 
-def _magma_seq(items):
-    """a sequence, as Magma makes one: its elements in one universe, coerced
-    exactly into it, or refused as Magma refuses them (CORR-695-3)"""
-    import _magma as M
+def _magma_list(x):
+    """a list as Magma makes a sequence: its elements in one universe,
+    coerced exactly into it, or refused as Magma refuses them (CORR-695-3);
+    linear in the checked data (HARD-9B4-1)"""
+    global _magma_work
+    U = _Universes()
     try:
-        u = _unify([_magma_universe(y) for y in items])
-    except _NoUniverse:
-        raise _err("Could not find a valid universe for the sequence: its elements are of kinds Magma can't put in one sequence (or only by rounding exact values into reals)")
-    return M.MSeq([_coerce(y, u) for y in items])
+        try:
+            u = U.of(x)
+        except _NoUniverse:
+            raise _err("Could not find a valid universe for the sequence: its elements are of kinds Magma can't put in one sequence (or only by rounding exact values into reals)")
+        return U.build(x, u)
+    finally:
+        _magma_work = U.work
 
 
-def _bad_real(e):
-    raise _err("%s has no Magma real: Magma's reals are finite" % e)
+# (the nodes the last Magma list visited, both passes: the tests' bound)
+_magma_work = 0
 
 
 def _dec_matlab(x):
