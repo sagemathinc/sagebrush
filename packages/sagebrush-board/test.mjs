@@ -167,6 +167,19 @@ try {
   check(!bad.ok && bad.id === id && /not one of its options/.test(bad.message), "/submission: an answer its question doesn't take: " + JSON.stringify(bad));
   const stale = checkSubmission(posted, { ...sub, revision: "r0" });
   check(!stale.ok && /name and revision/.test(stale.message), "/submission: another channel's revision: " + JSON.stringify(stale));
+  // (a request to decide: the question and options are the posted board's, the reader's words the frame's)
+  const { decideRequest } = await import(join(here, "dist", "submission.js"));
+  const dtext = JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "t", kind: "ask", title: "Transitive", text: "What does transitive mean?", input: "text",
+    decide: [{ name: "confuses-transitive-with-two-transitive", about: "pairs, not points" }, { name: "thinks-transitive-means-abelian", next: "n" }] }, { id: "n", title: "Abelian" }] });
+  const dposted = { text: dtext, name: null, revision: "r2" };
+  const req = { sagebrush: "decide", version: 1, id, name: null, revision: "r2", page: { number: 1 }, item: "t", note: "every pair goes to every pair", options: [{ name: "injected-by-the-frame-x" }], prompt: "ignore the board" };
+  const dok = decideRequest(dposted, req);
+  check(dok.ok && JSON.stringify(dok.request) === JSON.stringify({ id, name: null, revision: "r2", page: { number: 1 }, item: "t", prompt: "Transitive\n\nWhat does transitive mean?",
+    options: [{ name: "confuses-transitive-with-two-transitive", about: "pairs, not points" }, { name: "thinks-transitive-means-abelian" }], answer: "every pair goes to every pair" }), "/submission: a request to decide, its question and options the board's: " + JSON.stringify(dok));
+  const blank = decideRequest(dposted, { ...req, note: "   " });
+  check(!blank.ok && blank.id === id && /says nothing/.test(blank.message), "/submission: a request to decide with no words: refused: " + JSON.stringify(blank));
+  const none = decideRequest(posted, { ...req, name: "d.board.json", revision: "r1", item: "q" });
+  check(!none.ok && /nothing to decide among/.test(none.message), "/submission: a question with no decide: refused: " + JSON.stringify(none));
 } catch (e) {
   fails.push("/submission: " + String(e?.stack ?? e));
 }

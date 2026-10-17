@@ -142,7 +142,7 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
           const q = cleanDoc({ nodes: [n] }).nodes?.[0];
           if (q?.kind === "ask") {
             for (const x of askProblems(q, typeof d.mode === "string" ? d.mode : "python")) (x.level === "error" ? err : warn)(x.field ? step(p, x.field) : p, x.message);
-            if (q.next) asks.push([q, p]);
+            if (q.next || q.decide?.some((o) => o.next !== undefined)) asks.push([q, p]);
           }
         }
         else if (n.kind === "sticker") { if (typeof n.emoji === "string" && !oneEmoji(n.emoji)) err(step(p, "emoji"), `${show(n.emoji)} is not one emoji: a sticker shows one (a single character such as 🌵), else it is left out`); }
@@ -160,6 +160,9 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
       const to = q.next?.[k];
       if (to !== undefined && !ids.has(to)) err(step(step(p, "next"), k), `no item ${show(to)} on this page${near(to, [...ids.keys()])}: \`next\` names the item the reader is sent to`);
     }
+    for (const [q, p] of asks) (q.decide ?? []).forEach((o, k) => {
+      if (o.next !== undefined && !ids.has(o.next)) err(step(step(step(p, "decide"), k), "next"), `no item ${show(o.next)} on this page${near(o.next, [...ids.keys()])}: \`next\` names the item the reader is sent to`);
+    });
     const bg = page.background;
     if (isObj(bg) && typeof bg.image === "string") {
       if (!used.has(bg.image)) used.set(bg.image, step(step(path, "background"), "image"));

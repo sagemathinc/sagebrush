@@ -205,6 +205,8 @@ export interface DocAsk {
   hints?: AskHint[];
   /** where to go after an attempt: the id of a note on this page, for `right` and for `wrong` */
   next?: AskNext;
+  /** what the reader's own words (`note`) may show, for the host to decide among (at most 32): each a self-describing name, such as a misconception, and where to go if it is the one (web/board-host-protocol.md, "Deciding") */
+  decide?: AskDecide[];
   /** an answer to try its check with (`sagebrush board try` runs it) */
   example?: AskAnswer;
   /** how many times its answer was checked (written by Sagebrush) */
@@ -248,6 +250,15 @@ export interface AskNext {
   right?: string;
   /** the note to go to after a wrong one */
   wrong?: string;
+}
+/** One of the things a reader's own words may show, which the host decides among. */
+export interface AskDecide {
+  /** required: what it is, in words joined by hyphens, at least three (`confuses-transitive-with-2-transitive`): the name says what it means */
+  name: string;
+  /** Markdown that makes the name clearer (a rubric), if it needs that */
+  about?: string;
+  /** the id of an item on this page to go to when it is the one */
+  next?: string;
 }
 export type AskResult = "right" | "wrong" | "error";
 export type AskAnswer = string | number | boolean | string[];
@@ -563,6 +574,7 @@ export function cleanDoc(d: any): BoardDoc {
         check: typeof n.check === "string" ? n.check : undefined, checkMs: Number.isInteger(n.checkMs) && n.checkMs >= 1 && n.checkMs <= 10000 ? n.checkMs : undefined,
         hints: Array.isArray(n.hints) ? n.hints.filter((h: unknown) => typeof h === "string" || (!!h && typeof h === "object" && typeof (h as any).code === "string")).map((h: any) => (typeof h === "string" ? h : { code: h.code })) : undefined,
         next: n.next && typeof n.next === "object" && !Array.isArray(n.next) ? strip({ right: typeof n.next.right === "string" ? n.next.right : undefined, wrong: typeof n.next.wrong === "string" ? n.next.wrong : undefined }) : undefined,
+        decide: Array.isArray(n.decide) ? n.decide.filter((o: any) => !!o && typeof o === "object" && typeof o.name === "string").map((o: any) => strip({ name: o.name, about: str(o.about), next: str(o.next) })) : undefined,
         example: askAnswer(n.example), attempts: Number.isInteger(n.attempts) && n.attempts >= 0 ? n.attempts : undefined, wrongAttempts: Number.isInteger(n.wrongAttempts) && n.wrongAttempts >= 0 ? n.wrongAttempts : undefined, result: one(n.result, ["right", "wrong", "error"] as const), detail: str(n.detail),
         color: safeColor(n.color), x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h) });
     }

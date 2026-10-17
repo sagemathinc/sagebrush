@@ -97,7 +97,7 @@ test("every type the reference writes in words is a section's, item, or object (
   const r = run(["--stdout"]);
   assert.match(r.stdout, /`item` is any of note, group, ink, sticker or question;/);
   assert.match(r.stdout, /\| `preview` \| object \| a slow code item's output, kept to show before it runs \(written by Sagebrush\) \|/);
-  const sections = new Set(["note", "group", "edge", "step", "page", "card", "background", "picture", "sticker", "ink", "question", "option", "computed", "hint", "next"]);
+  const sections = new Set(["note", "group", "edge", "step", "page", "card", "background", "picture", "sticker", "ink", "question", "option", "computed", "hint", "next", "decision"]);
   for (const row of r.stdout.split("\n").filter((l) => /^\| `\w+` \|/.test(l))) {
     const type = row.split(/(?<!\\)\|/)[2].replace(/`[^`]*`/g, "");
     for (const w of type.match(/[a-z]+/g) ?? []) assert.ok(["string", "number", "boolean", "object", "item", "name"].includes(w) || sections.has(w), `${w} in ${row}`);
