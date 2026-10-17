@@ -1105,11 +1105,30 @@ export function lengthHint(x: any): void {
     }
   }
   if (n === undefined) {
-    const hf = special(x, "__length_hint__");
-    if (hf === undefined) return;
+    // (looked up and bound as CPython's _PyObject_LookupSpecial: a
+    // function as itself, any other value through its type's __get__,
+    // whose errors are raised; then called without arguments, where a
+    // TypeError, from the call alone, means no guess)
+    let f = lookupType(t, "__length_hint__");
+    if (f === undefined) return;
+    let method = builtinSlot(t, "__length_hint__") || (typeof f === "function" && f.$pyfn === true);
+    if (f !== null && typeof f === "object" && f.asDunder !== undefined) {
+      f = f.asDunder();
+      method = true;
+    }
+    let call: () => any;
+    // (a Python function, a staticmethod or classmethod, or a builtin type's
+    // method, bound without fail; anything else (a class, a builtin
+    // function, a callable object, a descriptor) as CPython binds it)
+    if (method) call = () => f(x);
+    else {
+      const get = lookupType(typeOf(f), "__get__");
+      const bound = get !== undefined ? callObj(get, [f, x, t]) : f;
+      call = () => callObj(bound, []);
+    }
     let v: any;
     try {
-      v = hf(x);
+      v = call();
     } catch (e: any) {
       if (isExc(e, T.TypeError)) return;
       throw e;
