@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -174,14 +174,14 @@ function classAttrOpt(cls: any, name: string): any {
       const gf = metaHook(meta, "__getattr__");
       if (own || gf !== undefined) {
         try {
-          return own ? callObj(metaHook(meta, "__getattribute__"), [cls, name]) : getattr(cls, name);
+          return own ? callObj(metaHook(meta, "__getattribute__"), [cls, name]) : typeGetattr(cls, name);
         } catch (e) {
           if (gf === undefined || !isinstance(e, T.AttributeError)) throw e;
           return callObj(gf, [cls, name]);
         }
       }
     }
-    return getattr(cls, name);
+    return typeGetattr(cls, name);
   } catch (e) {
     if (isinstance(e, T.AttributeError)) return ABSENT;
     throw e;
@@ -1881,6 +1881,7 @@ export function bufferOf(x: any): Uint8Array | undefined {
   return undefined;
 }
 
+const NO_ATTR = {};
 function getitemSlow(o: any, k: any): any {
   if (o !== null && typeof o === "object") {
     const c = o.$cls;
@@ -1920,13 +1921,21 @@ function getitemSlow(o: any, k: any): any {
     }
     return o[seqIndex(k, o.length, "string")];
   }
-  if (isType(o)) {
-    const cg = lookupType(o, "__class_getitem__");
-    if (cg !== undefined) return cg(o, k);
-    if (o.$module === "builtins") return o; // list[int] and friends: annotations only
-  }
   const f = special(o, "__getitem__");
   if (f !== undefined) return f(o, k);
+  // (a class: its metaclass's __getitem__ first, then its own
+  // __class_getitem__ as an attribute, bound as a classmethod is, as
+  // CPython's PyObject_GetItem; one without either isn't generic: CPython's
+  // TypeError, never the class itself)
+  if (isType(o)) {
+    // (type[X] itself, as CPython's special case: type has no __class_getitem__)
+    if (o === T.type) return callObj(T.GenericAlias, [o, k]);
+    // (an attribute lookup, the metaclass's __getattribute__ too; None or
+    // none, not subscriptable)
+    const cg = getattr(o, "__class_getitem__", NO_ATTR);
+    if (cg !== NO_ATTR && cg !== null) return callObj(cg, [k]);
+    raise(T.TypeError, `type '${o.$name}' is not subscriptable`);
+  }
   raise(T.TypeError, `'${typeName(o)}' object is not subscriptable`);
 }
 
