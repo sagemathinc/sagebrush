@@ -41,7 +41,7 @@ TABLE = {
     "PreviousPrime": (["integers"], "The greatest prime less than n."),
     "PrimesUpTo": (["integers"], "The primes up to n, as a sequence."),
     "PrimesInInterval": (["integers"], "The primes in an interval [a, b]."),
-    "NthPrime": (["integers"], "The n-th prime."),
+    "NthPrime": (["integers"], "The n-th prime number, counting 2 as the first."),
     "PrimeDivisors": (["integers"], "The distinct primes dividing n, in increasing order."),
     "Divisors": (["integers"], "The positive divisors of n, in increasing order."),
     "NumberOfDivisors": (["integers"], "The number of positive divisors of n."),
@@ -53,20 +53,20 @@ TABLE = {
     "Factorization": (["integers", "polynomials"], "The factorization of an integer or a polynomial, as a sequence of <factor, exponent> pairs."),
     "Factorisation": (["integers", "polynomials"], "The same as Factorization."),
     "Gcd": (["integers", "polynomials"], "The greatest common divisor of integers or polynomials."),
-    "GCD": (["integers", "polynomials"], "The same as Gcd."),
-    "GreatestCommonDivisor": (["integers", "polynomials"], "The same as Gcd."),
+    "GCD": (["integers", "polynomials"], "The greatest common divisor of two integers or polynomials, or of a sequence of them: the same as Gcd."),
+    "GreatestCommonDivisor": (["integers", "polynomials"], "The greatest common divisor of two integers or polynomials, or of a sequence of them: the same as Gcd."),
     "Lcm": (["integers"], "The least common multiple of integers."),
-    "LCM": (["integers"], "The same as Lcm."),
-    "LeastCommonMultiple": (["integers"], "The same as Lcm."),
+    "LCM": (["integers"], "The least common multiple of two integers or of a sequence of them: the same as Lcm."),
+    "LeastCommonMultiple": (["integers"], "The least common multiple of two integers or of a sequence of them: the same as Lcm."),
     "Xgcd": (["integers"], "The gcd g of a and b with x and y such that a*x + b*y = g."),
-    "XGCD": (["integers"], "The same as Xgcd."),
-    "ExtendedGreatestCommonDivisor": (["integers"], "The same as Xgcd."),
+    "XGCD": (["integers"], "The gcd g of a and b with s and t such that s*a + t*b = g: the same as Xgcd."),
+    "ExtendedGreatestCommonDivisor": (["integers"], "The gcd g of a and b with s and t such that s*a + t*b = g: the same as Xgcd."),
     "Quotrem": (["integers"], "The quotient and remainder of integer division."),
-    "Modexp": (["integers"], "a^k modulo m."),
+    "Modexp": (["integers"], "a^k reduced modulo m, computed without forming a^k itself."),
     "Modinv": (["integers"], "The inverse of a modulo m."),
     "InverseMod": (["integers"], "The same as Modinv."),
     "Binomial": (["integers"], "The binomial coefficient n choose k."),
-    "Factorial": (["integers"], "n factorial."),
+    "Factorial": (["integers"], "The factorial n! = 1 * 2 * ... * n of a non-negative integer n."),
     "Fibonacci": (["integers"], "The n-th Fibonacci number."),
     "IsSquare": (["integers", "rationals and reals"], "Whether a number is a square (and a square root)."),
     "Isqrt": (["integers"], "The integer part of the square root of n."),
@@ -163,8 +163,8 @@ TABLE = {
     "Rank": (["elliptic curves", "matrices"], "The rank of an elliptic curve or a matrix."),
     # finite fields
     "GF": (["finite fields"], "The finite field with q = p^n elements, GF(q) or GF(p, n), defined by the Conway polynomial."),
-    "FiniteField": (["finite fields"], "The same as GF."),
-    "GaloisField": (["finite fields"], "The same as GF."),
+    "FiniteField": (["finite fields"], "The finite field with q elements: the same as GF(q) or GF(p, n)."),
+    "GaloisField": (["finite fields"], "The finite field with q elements: the same as GF(q) or GF(p, n)."),
     "Characteristic": (["finite fields"], "The characteristic of a finite field."),
     "PrimitiveElement": (["finite fields"], "A generator of a finite field's multiplicative group."),
     "IsPrimitive": (["finite fields"], "Whether an element generates its finite field's multiplicative group."),
@@ -241,7 +241,11 @@ true""",
 > F;
 Finite field of size 3^2
 > w^4;
-2""",
+2
+> #F, Characteristic(F);
+9 3
+> GF(7) ! 10;
+3""",
     "FiniteField": """\
 > FiniteField(7);
 Finite field of size 7""",
@@ -258,29 +262,56 @@ Finite field of size 2^3""",
 > IsPrimitive(GF(7)!3);
 true""",
     "Order": """\
-> Order(GF(7)!2);
-3""",
+> Order(GF(7) ! 2);
+3
+> Order(GF(7) ! 3);
+6
+> F<w> := GF(16);
+> Order(w);
+15""",
     "Integers": """\
 > Z := Integers();
 > Z ! 17;
-17""",
+17
+> Z ! (6/3);
+2
+> R := Integers(12);
+> R ! 17;
+5
+> (R ! 5)^2;
+1""",
     "IntegerRing": """\
 > IntegerRing() eq Integers();
 true""",
     "Rationals": """\
 > Q := Rationals();
 > Q ! (6/8);
-3/4""",
+3/4
+> Parent(1/2) eq Q;
+true
+> Type(Q ! 3);
+FldRatElt
+> Q ! 2 eq 2;
+true""",
     "RationalField": """\
 > RationalField() eq Rationals();
-true""",
+true
+> Type(RationalField() ! 3);
+FldRatElt""",
     "RealField": """\
 > R := RealField(10);
 > R ! (2/7);
 0.2857142857""",
     "Parent": """\
 > Parent(5/3);
-Rational Field""",
+Rational Field
+> Parent(5);
+Integer Ring
+> Parent(GF(7) ! 3);
+Finite field of size 7
+> P<x> := PolynomialRing(Integers());
+> Parent(x^2);
+Univariate Polynomial Ring in x over Integer Ring""",
     "Type": """\
 > Type([1, 2]);
 SeqEnum""",
@@ -338,7 +369,16 @@ true""",
 true 3 5""",
     "Factorization": """\
 > Factorization(720);
-[ <2, 4>, <3, 2>, <5, 1> ]""",
+[ <2, 4>, <3, 2>, <5, 1> ]
+> Factorization(-12);
+[ <2, 2>, <3, 1> ]
+> P<x> := PolynomialRing(Rationals());
+> Factorization(x^4 - 1);
+[
+    <x - 1, 1>,
+    <x + 1, 1>,
+    <x^2 + 1, 1>
+]""",
     "Factorisation": """\
 > Factorisation(1001);
 [ <7, 1>, <11, 1>, <13, 1> ]""",
@@ -553,8 +593,11 @@ true false""",
 > Universe([1/2, 3]);
 Rational Field""",
     "Random": """\
-> Random([7]);
-7""",
+> x := Random([1..10]);
+> x in [1..10];
+true
+> Random({3});
+3""",
     "Names": """\
 > F := recformat< a, b >;
 > Names(F);
@@ -566,12 +609,27 @@ Rational Field""",
 [ a, b ]""",
     "PolynomialRing": """\
 > P<t> := PolynomialRing(Rationals());
-> (t + 1)^3;
-t^3 + 3*t^2 + 3*t + 1""",
+> f := (t + 1)^3;
+> f;
+t^3 + 3*t^2 + 3*t + 1
+> Degree(f), Coefficients(f);
+3 [ 1, 3, 3, 1 ]
+> Evaluate(f, 1/2);
+27/8
+> Q<y> := PolynomialRing(GF(5));
+> (y + 1)^5;
+y^5 + 1""",
     "Degree": """\
 > P<x> := PolynomialRing(Integers());
 > Degree(x^5 - x);
-5""",
+5
+> Degree(P ! 7);
+0
+> Degree(P ! 0);
+-1
+> K<a> := NumberField(x^2 + 1);
+> Degree(K);
+2""",
     "Coefficients": """\
 > P<x> := PolynomialRing(Integers());
 > Coefficients(2*x^3 - x + 7);
@@ -586,8 +644,13 @@ t^3 + 3*t^2 + 3*t + 1""",
 5""",
     "Evaluate": """\
 > P<x> := PolynomialRing(Integers());
-> Evaluate(x^2 + 1, 3);
-10""",
+> f := x^2 + 1;
+> Evaluate(f, 3);
+10
+> Evaluate(f, 1/2);
+5/4
+> Evaluate(f, GF(5) ! 2);
+0""",
     "Derivative": """\
 > P<x> := PolynomialRing(Integers());
 > Derivative(x^4 + 3*x);
@@ -616,7 +679,12 @@ Gamma_0(11)""",
 > Dimension(M);
 3""",
     "Dimension": """\
-> Dimension(CuspidalSubspace(ModularSymbols(37, 2, 1)));
+> M := ModularSymbols(37, 2, 1);
+> Dimension(M);
+3
+> Dimension(CuspidalSubspace(M));
+2
+> Dimension(CuspForms(23));
 2""",
     "CuspidalSubspace": """\
 > S := CuspidalSubspace(ModularSymbols(11, 2, 1));
@@ -664,7 +732,15 @@ q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)""",
     "EllipticCurve": """\
 > E := EllipticCurve([0, 0, 1, -1, 0]);
 > Conductor(E);
-37""",
+37
+> aInvariants(E);
+[ 0, 0, 1, -1, 0 ]
+> jInvariant(E);
+110592/37
+> Discriminant(E);
+37
+> Conductor(EllipticCurve("11a1"));
+11""",
     "TraceOfFrobenius": """\
 > E := EllipticCurve([0, -1, 1, 0, 0]);
 > TraceOfFrobenius(E, 7);
@@ -693,7 +769,11 @@ q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)""",
 > P<x> := PolynomialRing(Integers());
 > K<a> := NumberField(x^3 - 2);
 > a^4;
-2*a""",
+2*a
+> Degree(K);
+3
+> Norm(a + 1);
+3""",
     "QuadraticField": """\
 > K<w> := QuadraticField(-5);
 > w^2;
@@ -749,9 +829,20 @@ q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)""",
 > MinimalPolynomial(1 + w);
 $.1^2 - 2*$.1 - 6""",
     "Matrix": """\
-> Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]);
+> A := Matrix(Integers(), 2, 3, [1, 2, 3, 4, 5, 6]);
+> A;
 [1 2 3]
-[4 5 6]""",
+[4 5 6]
+> Transpose(A);
+[1 4]
+[2 5]
+[3 6]
+> B := Matrix(Rationals(), [[1, 2], [3, 4]]);
+> Determinant(B);
+-2
+> B^-1;
+[  -2    1]
+[ 3/2 -1/2]""",
     "HermiteForm": """\
 > HermiteForm(Matrix(Integers(), 2, 2, [2, 4, 3, 1]));
 [ 1  7]
