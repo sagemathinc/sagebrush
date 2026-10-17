@@ -14,6 +14,14 @@ cases = [
     'x: lambda *a, **k: 0', 'x: lambda **k: 0', 'x: lambda a, *b: 0',
     'x: lambda: (y := a + b)', 'x: lambda: (yield from z)', 'x: lambda: (yield a, b)',
     'x: [((y := a), b) for a in c]', 'x: f(lambda: (y := 1))', 'x: lambda: [y := 1, 2]',
+    # (astra CORR-A2A-3: the comprehension restrictions on walrus still apply)
+    'x: [(a := 1) for a in b]', 'x: lambda: [a for a in (b := c)]', 'x: lambda: [(a := 1) for a in b]',
+    'x: [a for c in d for a in (b := e)]', 'x: [(a := 1) for b in c]', 'x: [[(a := 1) for c in d] for a in b]',
+    'x: [[(c := 1) for c in d] for a in b]', 'x: [i for i in b if (j := 0) for j in c]', 'x: [lambda: (a := 1) for a in b]',
+    'x: [(a := 1) for (a, b) in c]', 'x: [(a := 1) for [*a] in c]', 'x: lambda: [x for x in [(y := 1)]]', 'x: {(a := 1): 2 for a in b}',
+    'x: [a for a in b if [(a := 1) for c in d]]', 'x: [(lambda: [y for y in (z := 1)]) for a in b]', 'x: (a for a in b if (a := 1))',
+    'x: [a for a in [b for b in (c := d)]]', 'x: lambda: [[c for c in (d := e)] for a in b]', 'x: [j for i in b if (j := 0) for k in c]',
+    "x: u'hello'", "x: (u'a', 'b', f'{u\"c\"}')",
 ]
 for c in cases:
     src = 'from __future__ import annotations\n' + c + '\n'

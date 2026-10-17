@@ -452,6 +452,15 @@ function mappingNamespace(m: any): any {
     },
   });
 }
+const NS_FRONT = Symbol("the locals of a layered namespace, as a namespace");
+// `from __future__ import annotations` at a module's top level: its
+// __annotations__ made only if its namespace (exec's locals, when separate)
+// has none, as CPython's SETUP_ANNOTATIONS; an existing mapping kept
+export function setupAnnotations(g: any): void {
+  const ns = g[NS_FRONT] ?? g;
+  const v = ns[NS_MAPPING] === true ? ns.__annotations__ : Object.prototype.hasOwnProperty.call(ns, "__annotations__") ? ns.__annotations__ : undefined;
+  if (v === undefined) g.__annotations__ = Obj.newDict();
+}
 // Reads see `front` then `back`; writes go to `front`.
 function layered(front: any, back: any): any {
   // (a mapping's binding: one __getitem__, not one for `in` and another)
@@ -461,7 +470,7 @@ function layered(front: any, back: any): any {
     return v !== undefined ? v : back[k];
   };
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === Obj.NS_DICT ? undefined : read(k)),
+    get: (_t, k) => (k === Obj.NS_GLOBALS ? back : k === Obj.NS_LOCALS ? Obj.globalsDict(front) : k === NS_FRONT ? front : k === Obj.NS_DICT ? undefined : read(k)),
     set: (_t, k, v) => { if (typeof k === "string" && k.charCodeAt(0) === 36) raise(T.TypeError, `name '${k}' is reserved`); front[k] = v; return true; },
     has: (_t, k) => k in front || k in back,
     // (del deletes from the locals only: unbound there, the NameError even
@@ -1006,6 +1015,7 @@ export const R: any = {
   classNamespace,
   classModuleIn,
   classLocals,
+  setupAnnotations,
   classModule,
   unboundName,
   execIn,

@@ -7,6 +7,8 @@ import { Scope, resolve, Resolution, SyntaxErr } from "./scope";
 const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "truediv", "//": "floordiv", "%": "mod", "**": "pow", "<<": "lshift", ">>": "rshift", "&": "and", "|": "or", "^": "xor", "@": "matmul", "sage/": "sagediv", "sage**": "sagepow" };
 const CMP: Record<string, string> = { "<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne" };
 const UNARY: Record<string, string> = { "-": "neg", "+": "pos", "~": "invert" };
+// an __annotate__'s format parameter: a JS name no source name compiles to
+const ANNOT_FORMAT = "$afmt";
 
 const REUSING = new Set(["add", "sub", "mul", "truediv"]);
 const FRESH_OPS = new Set(["add", "sub", "mul", "truediv", "floordiv", "mod", "pow"]);
@@ -116,6 +118,10 @@ export class Emitter {
       const r = resolve(this.fn.scope, "__class__");
       if (r.kind === "classcell") this.cellOf(r.scope);
     }
+    // (a class's annotation scope sees the class's namespace as
+    // __classdict__, CPython's implicit cell)
+    const sc = this.fn.scope;
+    if (id === "__classdict__" && sc.annotation && sc.parent!.kind === "class" && !sc.bound.has(id)) return "R.classLocals($ns)";
     return this.loadRes(resolve(this.fn.scope, id), id);
   }
   // the JS name of a class's cell (scope.ts: cellName), the class now making one
@@ -252,8 +258,8 @@ export class Emitter {
     const s = this.fn.scope;
     const qual = owner !== null ? `${owner}.__annotate__` : (s.kind === "module" ? "" : s.kind === "function" ? `${s.qualname}.<locals>.` : `${s.qualname}.`) + "__annotate__";
     const line = this.line;
-    const fmt = js("format");
-    const { lines, decls } = this.nested(as, "__annotate__$", null, ["format"], () => {
+    const fmt = ANNOT_FORMAT;
+    const { lines, decls } = this.nested(as, "__annotate__$", null, [], () => {
       this.w(`R.annotateFormat(${fmt});`);
       this.w("const $d = newDict();");
       for (const e of entries) {
@@ -543,7 +549,15 @@ export class Emitter {
       if (scope.kind === "module") return "R.moduleLocals($g)";
       if (scope.kind === "class") return "R.classLocals($ns)";
       const ls = [...scope.bound].filter((x) => !scope.globals.has(x));
-      return `R.localsDict(${JSON.stringify(ls)}, [${ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x))).join(", ")}])`;
+      const vs = ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x)));
+      // (an annotation scope's: its format parameter, and in a class the
+      // class's namespace, __classdict__, as CPython's)
+      if (scope.annotation) {
+        const cls = scope.parent!.kind === "class";
+        ls.unshift(...(cls ? ["format", "__classdict__"] : ["format"]));
+        vs.unshift(...(cls ? [ANNOT_FORMAT, "R.classLocals($ns)"] : [ANNOT_FORMAT]));
+      }
+      return `R.localsDict(${JSON.stringify(ls)}, [${vs.join(", ")}])`;
     };
     if (f.id === "locals" || f.id === "vars") return n === 0 ? localsExpr() : null;
     if (f.id === "dir") return `sortedKeys(${localsExpr()})`;
@@ -1101,7 +1115,7 @@ export class Emitter {
       const future = [...index.keys()].some((s) => (s as any).stringized);
       const seen = index.size && !future ? this.classTemp("$ca") : "";
       if (future) {
-        this.w(`$ns.set("__annotations__", newDict());`);
+        this.w(`if ($ns.get("__annotations__") === undefined) $ns.set("__annotations__", newDict());`);
         this.fn.annots = { index, mark: (i) => this.futureMark(index, i) };
       } else if (index.size) {
         this.w(`${seen} = new Set();`);
@@ -1247,7 +1261,7 @@ export class Emitter {
       // executed, read when __annotate__ is called)
       const index = annotatedIn(body);
       if ([...index.keys()].some((s) => (s as any).stringized)) {
-        this.w(`$g.__annotations__ = newDict();`);
+        this.w(`R.setupAnnotations($g);`);
         this.fn.annots = { index, mark: (i) => this.futureMark(index, i) };
       } else if (index.size) {
         const entries = [...index].map(([s, i]) => ({ key: ((s as any).target as any).id as string, expr: (s as any).annotation as A.Expr, gate: `R.annotIn($g.__conditional_annotations__, ${i})` }));

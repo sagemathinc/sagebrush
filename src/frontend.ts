@@ -199,7 +199,7 @@ class Convert {
   futureAnnotations = false;
   annot(n: any): A.Expr {
     if (!this.futureAnnotations) return this.expr(n);
-    this.checkStringized(n, "annot");
+    this.checkStringized(n, strScope("annot", null));
     let v: string;
     try {
       v = unparse(n);
@@ -210,43 +210,66 @@ class Convert {
     return { k: "Const", line: n.lineno ?? 1, value: { t: "str", v } };
   }
   // A stringized annotation is still checked as CPython's symtable checks it,
-  // in an annotation block that binds nothing: where it is directly in the
-  // annotation ("annot"), in a lambda, or in a comprehension of a kind
-  private checkStringized(n: any, ctx: string) {
+  // in an annotation block that binds nothing. The scope an expression is
+  // in: the annotation's own ("annot"), a lambda's, or a comprehension's
+  // (its kind, the iteration variables bound so far and its walrus targets,
+  // CPython's DEF_COMP_ITER and named-expression marks); each scope's count
+  // of comprehension iterables being visited (ste_comp_iter_expr)
+  private checkStringized(n: any, sc: StrScope) {
     if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) return n.forEach((x) => this.checkStringized(x, ctx));
+    if (Array.isArray(n)) return n.forEach((x) => this.checkStringized(x, sc));
     const err = (msg: string): never => {
       const l = n.lineno ?? 1;
       throw new PySyntaxError(msg, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
     };
     const COMP: Record<string, string> = { ListComp: "list comprehension", SetComp: "set comprehension", DictComp: "dict comprehension", GeneratorExp: "generator expression" };
     const t = n._type;
-    if (t === "NamedExpr" && ctx === "annot") err("named expression cannot be used within an annotation");
+    if (t === "NamedExpr") {
+      if (sc.kind === "annot") err("named expression cannot be used within an annotation");
+      if (sc.iter > 0) err("assignment expression cannot be used in a comprehension iterable expression");
+      const id = n.target.id;
+      for (let c: StrScope | null = sc; c !== null && c.kind in COMP; c = c.parent) {
+        if (c.iterVars.has(id)) err(`assignment expression cannot rebind comprehension iteration variable '${id}'`);
+        c.walrus.add(id);
+      }
+    }
     if (t === "Yield" || t === "YieldFrom") {
-      if (ctx === "annot") err("yield expression cannot be used within an annotation");
-      if (ctx !== "lambda") err(`'yield' inside ${COMP[ctx]}`);
+      if (sc.kind === "annot") err("yield expression cannot be used within an annotation");
+      if (sc.kind !== "lambda") err(`'yield' inside ${COMP[sc.kind]}`);
     }
     if (t === "Await") {
-      if (ctx === "annot") err("await expression cannot be used within an annotation");
-      if (ctx === "lambda") err("'await' outside async function");
-      if (ctx !== "GeneratorExp") err("asynchronous comprehension outside of an asynchronous function");
+      if (sc.kind === "annot") err("await expression cannot be used within an annotation");
+      if (sc.kind === "lambda") err("'await' outside async function");
+      if (sc.kind !== "GeneratorExp") err("asynchronous comprehension outside of an asynchronous function");
     }
     if (t === "Lambda") {
-      this.checkStringized(n.args, ctx);
-      return this.checkStringized(n.body, "lambda");
+      this.checkStringized(n.args, sc);
+      return this.checkStringized(n.body, strScope("lambda", null));
     }
     if (t in COMP) {
-      // (the first iterable is evaluated where the comprehension is)
-      this.checkStringized(n.generators[0].iter, ctx);
+      // (the first iterable is visited in the enclosing scope, then each
+      // generator's target, iterable and conditions in the comprehension's,
+      // its element last)
+      const iterIn = (x: any, s: StrScope) => {
+        s.iter++;
+        this.checkStringized(x, s);
+        s.iter--;
+      };
+      iterIn(n.generators[0].iter, sc);
       if (t !== "GeneratorExp" && n.generators.some((g: any) => g.is_async)) err("asynchronous comprehension outside of an asynchronous function");
+      const cs = strScope(t, sc);
       n.generators.forEach((g: any, i: number) => {
-        this.checkStringized(g.target, t);
-        if (i) this.checkStringized(g.iter, t);
-        this.checkStringized(g.ifs, t);
+        for (const id of strTargetNames(g.target)) {
+          if (cs.walrus.has(id)) err(`comprehension inner loop cannot rebind assignment expression target '${id}'`);
+          cs.iterVars.add(id);
+        }
+        this.checkStringized(g.target, cs);
+        if (i) iterIn(g.iter, cs);
+        this.checkStringized(g.ifs, cs);
       });
-      return this.checkStringized(t === "DictComp" ? [n.key, n.value] : n.elt, t);
+      return this.checkStringized(t === "DictComp" ? [n.key, n.value] : n.elt, cs);
     }
-    for (const k in n) if (k !== "_type") this.checkStringized(n[k], ctx);
+    for (const k in n) if (k !== "_type") this.checkStringized(n[k], sc);
   }
 
   // Whether the innermost function is an `async def` (await, async for and
@@ -803,4 +826,16 @@ class Convert {
         this.unsupported(e, e._type);
     }
   }
+}
+
+// (frontend.ts checkStringized: a scope of a stringized annotation)
+interface StrScope { kind: string; parent: StrScope | null; iter: number; iterVars: Set<string>; walrus: Set<string> }
+function strScope(kind: string, parent: StrScope | null): StrScope {
+  return { kind, parent, iter: 0, iterVars: new Set(), walrus: new Set() };
+}
+function strTargetNames(t: any): string[] {
+  if (t._type === "Name") return [t.id];
+  if (t._type === "Tuple" || t._type === "List") return t.elts.flatMap(strTargetNames);
+  if (t._type === "Starred") return strTargetNames(t.value);
+  return [];
 }
