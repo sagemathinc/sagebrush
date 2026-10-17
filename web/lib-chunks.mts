@@ -10,7 +10,8 @@
 // recordings, SAGEBRUSH_PRECOMPILE_OUT): a file goes to the first of
 //   core    what plain Python imports first, and what Sage and the
 //           scientific modules share
-//   sci     numpy, matplotlib, scipy.io, k3d, ipywidgets (MATLAB's start too)
+//   sci     numpy, matplotlib, k3d, ipywidgets (MATLAB's start too; scipy.io
+//           is a package's, @sagebrush/scipy-io)
 //   sage    Sage mode's start (Magma's too)
 //   matlab  MATLAB mode's start
 //   magma   Magma mode's start

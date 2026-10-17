@@ -1,7 +1,8 @@
 {
   "format": 1,
   "modules": {
-    "_cremona_small": "@sagebrush/cremona-small@0.1.0"
+    "_cremona_small": "@sagebrush/cremona-small@0.1.0",
+    "scipy.io": "@sagebrush/scipy-io@0.1.0"
   },
   "packages": {
     "@sagebrush/cremona-small@0.1.0": {
@@ -10,6 +11,15 @@
       "manifest_sha256": "c6ba837360d549c96dfc3a24acc8570e6b714689c29ca645e2d38d185307f471",
       "files": {
         "py/_cremona_small.py": "9e23de6f201a2ccc0eef91d017c2eb2323f589b97144a648a4b40b5b0a38d707"
+      }
+    },
+    "@sagebrush/scipy-io@0.1.0": {
+      "dir": "scipy-io",
+      "root": "py",
+      "manifest_sha256": "22d916cfaf91f7a299ec490fa6a6a977ad3240d6f831ca1ea01d6d93999e44cb",
+      "files": {
+        "py/scipy/io/__init__.py": "6a0086e0e1da3c723e81d02e9ea73605b532831a0dd735cf1b1d387983f4d4fe",
+        "py/scipy/io/matlab.py": "c2de4e27db72ec16d86150256dd08f96f88e627dac926dbf8b4a897c6ea591f9"
       }
     }
   }
