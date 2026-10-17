@@ -265,6 +265,48 @@ sees nothing else.
 }
 ```
 
+#### Check helpers
+
+A check can use the helpers of `board_checks`. They are in a check's names
+already, unless the board defines the same name, and `answer` always wins.
+Each helper returns a verdict: right, wrong with a short reason, or "can't
+decide". "Can't decide" is shown as "The check could not decide: …"; it isn't
+an attempt and reveals no hint. A helper never guesses. Anything it can't
+handle (a type it doesn't know, a missing tolerance, text it can't read)
+raises an error, and then the check decides nothing.
+
+| helper | right when |
+|---|---|
+| `close(answer, expected, rel=, abs=)` | $\lvert a - e\rvert \le \max(\mathrm{rel}\,\lvert e\rvert, \mathrm{abs})$. Give at least one tolerance. It is exact when every number is rational: `close(1.1, 1, abs=0.1)` is wrong, since the float $1.1$ is a little more than $11/10$. nan is never close; an infinity is close only to itself. |
+| `same_set(answer, expected)` | they are equal as sets |
+| `same_multiset(answer, expected)` | they are equal with their repeats |
+| `same_sequence(answer, expected, ordered=True)` | they are equal item by item (`ordered=False`: as multisets) |
+| `same_permutation(answer, expected)` | they are the same permutation (`'(1,2,3)'`, cycles, a list of images, a group element) |
+| `same_group(answer, expected)` | they are the same permutation group, the same elements (a list of generators is the group they generate). Isomorphic is not enough. |
+| `symbolic_equal(answer, expected)` | (Sage) $a - e$ simplifies to exactly $0$ |
+
+`symbolic_equal` is an equality of expressions:
+- Cancellation counts, so $x^2/x$ equals $x$; it doesn't compare functions on a domain.
+- It is wrong only with a proof: a point with positive rational coordinates where each side, on its own, is an exact rational, and the two differ.
+- Otherwise it can't decide; trying points never makes it right.
+- With assumptions in force (`assume(...)`), it only simplifies.
+
+A text answer (`"input": "text"`) is a string. The helpers read strings with parsers that never run them as code:
+- `parse_number` reads an integer, a decimal or a fraction, exactly;
+- `parse_list` reads `1, 2, 3` or `{1, 2, 3}` (one level);
+- `parse_expression` (Sage) reads `2x^2 + 3(x - 1)`, with `sin`, `sqrt`, `pi`, … At most 1000 characters, 100 levels of parentheses, and no number to a power above 1000.
+
+A reason reports one bounded difference ("it is missing $2$", "item 3 is $4$, not $3$", "they differ at $x = 1/2$"). For a small answer that can show much of the expected one.
+
+```json
+{ "id": "roots", "kind": "ask", "input": "text", "text": "The roots of $x^2 - 5x + 6$?",
+  "check": "same_set(answer, [2, 3])", "example": "{2, 3}" }
+{ "id": "area", "kind": "ask", "input": "number", "text": "The area of the unit disk, to 4 places?",
+  "check": "close(answer, pi, abs=5e-5)", "example": 3.1416 }
+{ "id": "expand", "kind": "ask", "input": "text", "text": "Expand $(x + 1)^2$.",
+  "check": "symbolic_equal(answer, (x + 1)^2)", "example": "x^2 + 2x + 1" }
+```
+
 `sagebrush board check FILE` lints these (a check in another language, an
 empty one, `next` naming no item of the page). `sagebrush board try FILE
 --json` runs every question's check, with its `example` or with `--case
