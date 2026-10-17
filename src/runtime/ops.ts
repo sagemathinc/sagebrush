@@ -1323,9 +1323,11 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
   // runs, and come off with it when it pauses (CPython's per-frame exc_info).
   const base = handledExceptions.length;
   if (g.$exc !== undefined) {
+    for (const e of g.$exc) hooks.excResumed(e);
     handledExceptions.push(...g.$exc);
     g.$exc = undefined;
   }
+  if (isThrow) hooks.excThrown(arg);
   let paused = false;
   try {
     const r = isThrow ? g.throw(arg) : g.next(arg);
@@ -1352,6 +1354,7 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
 export function genReturn(g: any, v: any): IteratorResult<any> {
   const base = handledExceptions.length;
   if (g.$exc !== undefined) {
+    for (const e of g.$exc) hooks.excResumed(e);
     handledExceptions.push(...g.$exc);
     g.$exc = undefined;
   }

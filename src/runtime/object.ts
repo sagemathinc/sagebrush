@@ -1140,6 +1140,9 @@ export function raiseExc(x: any, cause?: any): any {
   }
   setContext(e);
   captureTraceback(e, true);
+  // (raised by Python code: a traceback of its own even if only the runtime
+  // catches it, as hasattr or next's default do, CORR-581-1)
+  if (e.$raised !== true) Object.defineProperty(e, "$raised", { value: true, writable: true, enumerable: false, configurable: true });
   return e;
 }
 
@@ -1289,8 +1292,12 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string } = {
+export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void } = {
   typeCall: null,
+  // (a generator's handled exception, as it resumes; one thrown into a
+  // generator: the traceback bookkeeping, index.ts)
+  excResumed: () => {},
+  excThrown: () => {},
   importModule: () => null,
   callerModule: () => "__main__",
   hash: () => 0,
