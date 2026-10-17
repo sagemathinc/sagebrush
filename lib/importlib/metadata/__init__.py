@@ -50,8 +50,10 @@ def _curated():
     import builtins
     import json
 
+    # (the reader called once: it is a builtin anyone can replace)
     reader = getattr(builtins, "__pyjs_package_registry__", None)
-    reg = json.loads(reader()) if reader is not None and reader() is not None else {}
+    raw = reader() if reader is not None else None
+    reg = json.loads(raw) if raw is not None else {}
     out = {}
     for pkg in (reg.get("packages") or {}).values():
         info = pkg.get("pypi")
