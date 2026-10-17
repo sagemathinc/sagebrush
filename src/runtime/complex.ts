@@ -5,7 +5,7 @@
 import { T, FloatBox, NotImplemented, PyBytes, raise, typeName, tuple, unbox, typeOf, lookupType, bindArgs, sig, pyfn } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
-import { floatRepr, format } from "./format";
+import { floatRepr, format, repr } from "./format";
 import { newBuiltinModule } from "./modules";
 import * as FD from "./fdlibm";
 import * as CR from "./crmath";
@@ -170,8 +170,11 @@ export function complexRepr(c: PyComplex): string {
 
 function parseComplex(s: string): PyComplex {
   const bad = () => raise(T.ValueError, "complex() arg is a malformed string");
-  let t = s.trim().replace(/_/g, (m, i, all) => (/\d/.test(all[i - 1] ?? "") && /\d/.test(all[i + 1] ?? "") ? "" : "!"));
-  if (t.startsWith("(") && t.endsWith(")")) t = t.slice(1, -1).trim();
+  // (an underscore not between two digits is CPython's other error)
+  let t = Ty.stripAscii(Ty.asciiNumeral(s));
+  if (/(?<!\d)_|_(?!\d)/.test(t)) raise(T.ValueError, `could not convert string to complex: ${repr(s)}`);
+  t = t.replace(/_/g, "");
+  if (t.startsWith("(") && t.endsWith(")")) t = Ty.stripAscii(t.slice(1, -1));
   const num = "(?:(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?|inf(?:inity)?|nan)";
   let m = new RegExp(`^([+-]?${num})$`, "i").exec(t);
   if (m) return new PyComplex(parseF(m[1]), 0);
