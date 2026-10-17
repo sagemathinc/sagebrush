@@ -79,11 +79,14 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
 // only if its bytes have the SHA-256 its name begins (the worker checks the
 // whole hash too), immutable, readable from anywhere.
 const CHUNK = /^\/lib\/([a-z0-9][a-z0-9-]*\.(?:src|pre)\.([0-9a-f]{16})\.json)$/;
+// (and the pinned zone data's files, web/tzdata-chunks.mts: a zone's TZif
+// file and the index, each named by its whole SHA-256)
+const TZDATA = /^\/lib\/(tzdata\/(?:index-)?([0-9a-f]{64})\.(tzif|json))$/;
 
 /** The response for a library chunk the site's files don't have, or null if the request is not for one. */
 export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response | null> {
   const url = new URL(req.url);
-  const m = url.pathname.match(CHUNK);
+  const m = url.pathname.match(CHUNK) ?? url.pathname.match(TZDATA);
   if (!m || !env.ENGINES) return null;
   if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
   const [, name, hash] = m;
@@ -99,7 +102,8 @@ export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitU
   const bytes = await new Response(o.body).arrayBuffer();
   const sum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
   if (!sum.startsWith(hash)) return none();
-  const res = new Response(req.method === "HEAD" ? null : bytes, { headers: { "Content-Type": "application/json", ...COMMON, "Content-Length": String(bytes.byteLength) } });
+  const type = m[3] === "tzif" ? "application/octet-stream" : "application/json";
+  const res = new Response(req.method === "HEAD" ? null : bytes, { headers: { "Content-Type": type, ...COMMON, "Content-Length": String(bytes.byteLength) } });
   if (req.method === "GET" && cache) ctx.waitUntil(cache.put(key, res.clone()));
   return res;
 }

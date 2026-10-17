@@ -89,6 +89,13 @@ ok((await get("/" + forged)).status === 404, "a chunk whose bytes don't have its
 await bucket.put("lib/Bad_Name.src.0000000000000000.json", "{}");
 ok((await get("/lib/Bad_Name.src.0000000000000000.json")).status === 418 && (await get("/lib/x.src.123.json")).status === 418 && (await get("/lib/../engine/latest.json")).status === 418, "names of another shape are not the route's");
 ok((await get("/lib/nothing.src.0123456789abcdef.json")).status === 404, "a chunk R2 doesn't have: 404");
+// (the pinned zone data's files, web/tzdata-chunks.mts: by their whole SHA-256)
+const zones = chunks.filter((f) => f.startsWith("lib/tzdata/"));
+ok(zones.some((f) => /^lib\/tzdata\/index-[0-9a-f]{64}\.json$/.test(f)) && zones.filter((f) => f.endsWith(".tzif")).length > 300, `(the engine has the zone data: ${zones.length} files)`);
+const zone = zones.find((f) => f.endsWith(".tzif"));
+await bucket.put("lib/tzdata/" + "0".repeat(64) + ".tzif", readFileSync(join(dir, zone)));
+ok((await get("/lib/tzdata/" + "0".repeat(64) + ".tzif")).status === 404, "a zone file whose bytes don't have its name's hash: 404");
+ok((await get("/" + zone)).headers.get("content-type") === "application/octet-stream", "a zone file is served as bytes");
 ok((await get("/" + one, { method: "POST" })).status === 405, "a chunk: only GET and HEAD");
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
