@@ -81,7 +81,7 @@ test("a negative base to the smallest positive exponent builds no 2^-e-bit integ
   // whether it is an integer was decided with 1 << -e)
   const r = run(
     "R = RealField(30, rnd='RNDU')\ny = R(2)^(-(2^61))\nprint(y > 0, y < 2^-1000)\n" +
-    "z = R(-2)^y\nprint(z.parent())\n");
+    "z = R(-2)^y\nprint(z.parent())\nprint(R('-inf')^y, R('-inf')^(-y))\n");
   assert.equal(r.status, 0, r.stderr.slice(-400));
-  assert.equal(r.stdout, "True True\nComplex Field with 30 bits of precision\n");
+  assert.equal(r.stdout, "True True\nComplex Field with 30 bits of precision\n+infinity 0.00000000\n");
 });
