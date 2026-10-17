@@ -10,6 +10,7 @@ import {
   hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray,
 } from "./object";
 import * as O from "./ops";
+import * as UC from "./unicodecs";
 import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
@@ -213,7 +214,13 @@ export function bindClass(jsClass: any, cls: PyType) {
 
 const getsetType = builtinType("getset_descriptor", [object], () => raise(T.TypeError, "cannot create 'getset_descriptor' instances"));
 bindClass(GetSet, getsetType);
-method(getsetType, "__get__", (d: GetSet, o: any, _t: any) => { if (o === null) return d; descrReceiver(d, o); return d.get(o); });
+// (the owner optional, as CPython's wrap_descr_get; __get__(None, None) refused)
+method(getsetType, "__get__", (d: GetSet, o: any = undefined, t: any = null) => {
+  if (o === undefined) raise(T.TypeError, "__get__ expected at least 1 argument, got 0");
+  if (o === null) return t === null ? raise(T.TypeError, "__get__(None, None) is invalid") : d;
+  descrReceiver(d, o);
+  return d.get(o);
+});
 method(getsetType, "__set__", (d: GetSet, o: any, v: any) => {
   // (the receiver first, as CPython: nothing about the descriptor is used on a wrong one)
   descrReceiver(d, o);
@@ -827,8 +834,56 @@ exc("SystemError", Exception);
 exc("TypeError", Exception);
 const ValueError = exc("ValueError", Exception);
 const UnicodeError = exc("UnicodeError", ValueError);
-exc("UnicodeDecodeError", UnicodeError);
-exc("UnicodeEncodeError", UnicodeError);
+// UnicodeEncodeError(encoding, object, start, end, reason), and Decode's
+// and Translate's, as CPython's (Objects/exceptions.c): the arguments
+// parsed as "UOnnU" (Decode's object any bytes-like, kept as bytes;
+// Translate's without the encoding), the five attributes, and __str__
+// naming the character (or byte) at start when the range is one long,
+// else "characters in position start-end-1"
+{
+  const kinds: [string, boolean, boolean][] = [["UnicodeEncodeError", true, false], ["UnicodeDecodeError", true, true], ["UnicodeTranslateError", false, false]];
+  for (const [name, hasEnc, bytesObj] of kinds) {
+    exc(name, UnicodeError, (c) => {
+      const n = hasEnc ? 5 : 4;
+      const strArg = (i: number, v: any): string => {
+        const u = unbox(v);
+        return typeof u === "string" ? u : raise(T.TypeError, `argument ${i} must be str, not ${typeName(v)}`);
+      };
+      method(c, "__init__", (self: any, ...args: any[]) => {
+        self.args = tuple(args);
+        if (args.length !== n) raise(T.TypeError, `function takes exactly ${n} arguments (${args.length} given)`);
+        let i = 0;
+        if (hasEnc) self.encoding = strArg(1, args[i++]);
+        const o = args[i++];
+        if (bytesObj) {
+          const b = O.bufferOf(o);
+          if (b === undefined) raise(T.TypeError, `a bytes-like object is required, not '${typeName(o)}'`);
+          self.object = new PyBytes(b.slice());
+        } else self.object = strArg(hasEnc ? 2 : 1, o);
+        self.start = O.index(args[i++]);
+        self.end = O.index(args[i++]);
+        self.reason = strArg(n, args[i++]);
+        return null;
+      });
+      method(c, "__str__", (self: any) => {
+        if (self.object === undefined) return "";
+        const isBytes = self.object instanceof PyBytes;
+        const len = isBytes ? self.object.n : SP.cpLen(self.object);
+        // (the one-character form only for a range of one inside the object)
+        const start = Number(self.start), end = Number(self.end);
+        const what = name === "UnicodeEncodeError" ? "encode" : name === "UnicodeDecodeError" ? "decode" : "translate";
+        const pre = hasEnc ? `'${str(self.encoding)}' codec can't ${what}` : `can't ${what}`;
+        if (start >= 0 && start < len && end <= len && end === start + 1) {
+          if (isBytes) return `${pre} byte 0x${self.object.a[start].toString(16).padStart(2, "0")} in position ${start}: ${str(self.reason)}`;
+          const ch = [...self.object][start].codePointAt(0)!;
+          const esc = ch <= 0xff ? `\\x${ch.toString(16).padStart(2, "0")}` : ch <= 0xffff ? `\\u${ch.toString(16).padStart(4, "0")}` : `\\U${ch.toString(16).padStart(8, "0")}`;
+          return `${pre} character '${esc}' in position ${start}: ${str(self.reason)}`;
+        }
+        return `${pre} ${isBytes ? "bytes" : "characters"} in position ${start}-${end - 1}: ${str(self.reason)}`;
+      });
+    });
+  }
+}
 const Warning = exc("Warning", Exception);
 for (const w of ["UserWarning", "DeprecationWarning", "PendingDeprecationWarning", "SyntaxWarning", "RuntimeWarning", "FutureWarning", "ImportWarning", "UnicodeWarning", "BytesWarning", "ResourceWarning", "EncodingWarning"]) exc(w, Warning);
 
@@ -984,11 +1039,19 @@ method(int, "bit_length", (x: any) => {
 });
 method(int, "bit_count", (x: any) => [...absBig(x).toString(2)].filter((c) => c === "1").length);
 method(int, "conjugate", (x: any) => +x);
-method(int, "__index__", (x: any) => (typeof x === "boolean" ? +x : x));
+// (an exact int, for a bool or an int subclass instance too, as CPython's)
+const exactInt = (x: any) => {
+  const v = unbox(x);
+  return typeof v === "boolean" ? +v : v;
+};
+method(int, "__index__", exactInt);
+method(int, "__trunc__", exactInt);
+method(int, "__floor__", exactInt);
+method(int, "__ceil__", exactInt);
 // (pickling a subclass instance keeps its value: an int/float/str/bytes/tuple
 // subclass, a Sage RealNumber among them, was pickled without it)
 method(int, "__getnewargs__", (x: any) => tuple([unbox(x)]));
-method(int, "__int__", (x: any) => (typeof x === "boolean" ? +x : x));
+method(int, "__int__", exactInt);
 method(int, "__float__", (x: any) => O.mkfloat(O.fv(x)!));
 method(int, "__repr__", (x: any) => repr(unbox(x)));
 method(int, "__hash__", (x: any) => O.hashExact(unbox(x)));
@@ -1153,40 +1216,12 @@ const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, 
 });
 S.$kw = (pos, names, values) => S(...bindArgs("str", sig(["object", "encoding", "errors"]), pos, names, values));
 
+// (the Unicode codecs, src/runtime/unicodecs.ts)
 export function decode(b: PyBytes, encoding: any = "utf-8", errors: any = "strict"): string {
-  const enc = String(encoding).toLowerCase().replace(/[-_]/g, "");
-  const bytes = b.a.subarray(0, b.n);
-  if (enc === "ascii" || enc === "latin1" || enc === "iso88591") {
-    if (enc === "ascii" && errors === "strict") {
-      const i = bytes.findIndex((c) => c > 127);
-      if (i >= 0) raise(T.UnicodeDecodeError, `'ascii' codec can't decode byte 0x${bytes[i].toString(16)} in position ${i}: ordinal not in range(128)`);
-    }
-    return Buffer.from(bytes).toString("latin1");
-  }
-  if (enc === "utf8") {
-    try {
-      return new TextDecoder("utf-8", { fatal: errors === "strict" }).decode(bytes);
-    } catch {
-      raise(T.UnicodeDecodeError, "'utf-8' codec can't decode bytes");
-    }
-  }
-  raise(T.LookupError, `unknown encoding: ${encoding}`);
+  return UC.decodeBytes(b.a.subarray(0, b.n), encoding, errors);
 }
 export function encode(s: string, encoding: any = "utf-8", errors: any = "strict"): PyBytes {
-  const enc = String(encoding).toLowerCase().replace(/[-_]/g, "");
-  if (enc === "utf8") return new PyBytes(new TextEncoder().encode(s));
-  if (enc === "ascii" || enc === "latin1" || enc === "iso88591") {
-    const lim = enc === "ascii" ? 128 : 256;
-    const out: number[] = [];
-    for (const ch of s) {
-      const c = ch.codePointAt(0)!;
-      if (c < lim) out.push(c);
-      else if (errors === "replace") out.push(63);
-      else if (errors !== "ignore") raise(T.UnicodeEncodeError, `'${enc === "ascii" ? "ascii" : "latin-1"}' codec can't encode character ${repr(ch).slice(1, -1)}`);
-    }
-    return new PyBytes(Uint8Array.from(out));
-  }
-  raise(T.LookupError, `unknown encoding: ${encoding}`);
+  return UC.encodeStr(s, encoding, errors);
 }
 
 const isWs = (c: string) => /[\s\x1c-\x1f\x85]/.test(c);
