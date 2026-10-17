@@ -3,14 +3,18 @@
 // Indices are UTF-16 code units, like the rest of the runtime's strings.
 
 import * as SP from "./strpos";
-import { T, PyBytes, PyDict, StrLayout, raise, typeName, tuple, objectType, callObj, dictSet, isinstance, sig, lookupType, typeOf } from "./object";
+import { T, PyBytes, PyDict, StrLayout, raise, raiseExc, typeName, tuple, objectType, callObj, dictSet, isinstance, sig, lookupType, typeOf } from "./object";
+import * as Shape from "./re-shape";
 import * as O from "./ops";
 import * as Ty from "./types";
-import { repr } from "./format";
+import { repr, str } from "./format";
 import { newBuiltinModule } from "./modules";
 
 const I = 2, L = 4, M = 8, S = 16, U = 32, X = 64, A = 256;
 let ReError: any;
+// (_sre.MAXREPEAT, and a {m,n} repeat as CPython's parser reads one)
+const MAXREPEAT = 4294967295;
+const BRACE = /\{(\d*)(?:,(\d*))?\}/y;
 
 // ------------------------------------------------------------------ translation
 
@@ -22,12 +26,43 @@ const SPACE = "\\t\\n\\v\\f\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028
 // from re._casefix; JS's simple case folding joins only I and i)
 const DOTTED_I = "Ii\\u0130\\u0131";
 
-function translate(p: string, flags: number, bytes = false): { src: string; flags: number } {
-  // Leading global inline flags: (?aiLmsux)
+// A PatternError as CPython's: the message, and with the pattern and a
+// position, "at position N", and its line and column when the pattern has
+// more than one line (Lib/re/_constants.py)
+function patternError(msg: string, pattern: any = null, pos: number | null = null): never {
+  throw raiseExc(ReError(msg, pattern, pos));
+}
+
+function translate(p: string, flags: number, bytes = false, pattern: any = null): { src: string; flags: number; groups: number } {
+  // (positions in errors are the pattern's own: base is the length of the
+  // leading flags taken off p)
+  // (pos counts code points, as CPython's: at is a UTF-16 offset into p,
+  // after the flags taken off, CORR-079-2)
+  let base = 0;
+  const whole = p;
+  const perr = (msg: string, at: number): never => {
+    const u = base + at;
+    let cp = 0;
+    for (let k = 0; k < u && k < whole.length; k++) if ((whole.charCodeAt(k) & 0xfc00) !== 0xdc00 || k === 0 || (whole.charCodeAt(k - 1) & 0xfc00) !== 0xd800) cp++;
+    return patternError(msg, pattern, cp + Math.max(0, u - whole.length));
+  };
+  // Leading global inline flags: (?aiLmsux), as CPython's _parse_flags
+  // reads them: L only in a bytes pattern, u only in a str one, and one of
+  // a, u and L in each group (a and u in two groups: fix_flags, later)
   let m: RegExpExecArray | null;
   while ((m = /^\(\?([aiLmsux]+)\)/.exec(p)) !== null) {
-    for (const c of m[1]) flags |= { a: A, i: I, L, m: M, s: S, u: U, x: X }[c]!;
+    let own = 0;
+    for (let k = 0; k < m[1].length; k++) {
+      const c = m[1][k];
+      const f = { a: A, i: I, L, m: M, s: S, u: U, x: X }[c]!;
+      if (c === "L" && !bytes) perr("bad inline flags: cannot use 'L' flag with a str pattern", k + 3);
+      if (c === "u" && bytes) perr("bad inline flags: cannot use 'u' flag with a bytes pattern", k + 3);
+      own |= f;
+      if (f & (A | L | U) && (own & (A | L | U)) !== f) perr("bad inline flags: flags 'a', 'u' and 'L' are incompatible", k + 3);
+      flags |= f;
+    }
     p = p.slice(m[0].length);
+    base += m[0].length;
   }
   // (ASCII matching, \w \d \s \b and IGNORECASE: the pattern's, or a
   // scoped group's own, (?a:...), as the flags in force say)
@@ -50,8 +85,28 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
   // so in one under IGNORECASE it is off)
   let jsI = (flags & I) !== 0 && !((flags & A) !== 0 || bytes);
   const jsScopes: boolean[] = [];
-  let classAt = 0, classNeg = false;
+  let classAt = 0, classNeg = false, classPos = 0;
   let negSets: string[] = [];
+  // The groups as CPython's parser counts them: how many are opened so far,
+  // the open ones, the named ones, and for each open "(" its group (0 if
+  // it captures none), where it is, and whether it starts the outermost
+  // look-behind; behind is the number of groups before that look-behind
+  // (state.lookbehindgroups), or -1 outside one
+  let ngroups = 0, behind = -1;
+  const open = new Set<number>();
+  const byName = new Map<string, number>();
+  const groups: { g: number; behind: boolean; at: number }[] = [];
+  // What a repeat would repeat, as CPython's parser sees it: nothing (the
+  // start of the pattern, a group or a branch), an AT code (^ $ \A \Z \b
+  // \B), a repeat (and whether its ? was read), or any other item
+  let last: "none" | "at" | "rep" | "item" = "none";
+  let lazyRead = false;
+  const repeat = (at: number) => {
+    if (last === "none" || last === "at") perr("nothing to repeat", at);
+    if (last === "rep") perr("multiple repeat", at);
+    last = "rep";
+    lazyRead = false;
+  };
   // A literal character under IGNORECASE (JS's i flag folds by Unicode, so
   // ASCII and bytes patterns never have it: their letters are written as
   // both cases, CORR-BD8-1), escaped or not (CORR-BD8-2)
@@ -98,17 +153,24 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
     if (c === "\\") {
       classStart = false;
       const d = p[i + 1];
-      if (d === undefined) raise(ReError, "bad escape (end of pattern)");
+      if (d === undefined) perr("bad escape (end of pattern)", i);
+      const esc = i;
       i += 2;
+      if (!inClass) last = "item";
       switch (d) {
         // (the JS regex never has the m flag, so ^ and $ are the input's
-        // ends; V8 misplaces (?![\s\S]) beside a surrogate pair in u mode)
+        // ends; V8 misplaces (?![\s\S]) beside a surrogate pair in u mode;
+        // in a class they are bad escapes, as CPython's _class_escape says)
         case "A":
-          out += inClass ? "" : "^";
+          if (inClass) perr("bad escape \\A", esc);
+          out += "^";
+          last = "at";
           continue;
         case "Z":
         case "z":
-          out += inClass ? "" : "$";
+          if (inClass) perr(`bad escape \\${d}`, esc);
+          out += "$";
+          last = "at";
           continue;
         case "w":
           out += inClass ? Wf() : `[${Wf()}]`;
@@ -134,11 +196,15 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         // (word boundaries by \w's own characters: JS's \b knows only ASCII)
         case "b":
           if (inClass) out += "\\x08";
-          else out += asc() ? "\\b" : `(?:(?<=[${Wf()}])(?![${Wf()}])|(?<![${Wf()}])(?=[${Wf()}]))`;
+          else {
+            out += asc() ? "\\b" : `(?:(?<=[${Wf()}])(?![${Wf()}])|(?<![${Wf()}])(?=[${Wf()}]))`;
+            last = "at";
+          }
           continue;
         case "B":
-          if (inClass) raise(ReError, "bad escape \\B");
+          if (inClass) perr("bad escape \\B", esc);
           out += asc() ? "\\B" : `(?:(?<=[${Wf()}])(?=[${Wf()}])|(?<![${Wf()}])(?![${Wf()}]))`;
+          last = "at";
           continue;
         case "n":
         case "t":
@@ -151,24 +217,27 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
           out += "\\x07";
           continue;
         case "x": {
-          const h = p.slice(i, i + 2);
-          if (!/^[0-9a-fA-F]{2}$/.test(h)) raise(ReError, `incomplete escape \\x${h}`);
+          const h = /^[0-9a-fA-F]{0,2}/.exec(p.slice(i, i + 2))![0];
+          if (h.length < 2) perr(`incomplete escape \\x${h}`, esc);
           out += inClass ? "\\x" + h : lit(String.fromCharCode(parseInt(h, 16)), "\\x" + h);
           i += 2;
           continue;
         }
+        // (\u and \U only in a str pattern)
         case "u": {
-          const h = p.slice(i, i + 4);
-          if (!/^[0-9a-fA-F]{4}$/.test(h)) raise(ReError, `incomplete escape \\u${h}`);
+          if (bytes) perr("bad escape \\u", esc);
+          const h = /^[0-9a-fA-F]{0,4}/.exec(p.slice(i, i + 4))![0];
+          if (h.length < 4) perr(`incomplete escape \\u${h}`, esc);
           out += inClass ? "\\u" + h : lit(String.fromCharCode(parseInt(h, 16)), "\\u" + h);
           i += 4;
           continue;
         }
         case "U": {
-          const h = p.slice(i, i + 8);
-          if (!/^[0-9a-fA-F]{8}$/.test(h)) raise(ReError, `incomplete escape \\U${h}`);
+          if (bytes) perr("bad escape \\U", esc);
+          const h = /^[0-9a-fA-F]{0,8}/.exec(p.slice(i, i + 8))![0];
+          if (h.length < 8) perr(`incomplete escape \\U${h}`, esc);
           const cp = parseInt(h, 16);
-          if (cp > 0x10ffff) raise(ReError, `bad escape \\U${h}`);
+          if (cp > 0x10ffff) perr(`bad escape \\U${h}`, esc);
           out += inClass ? `\\u{${cp.toString(16)}}` : lit(String.fromCodePoint(cp), `\\u{${cp.toString(16)}}`);
           i += 8;
           continue;
@@ -182,21 +251,37 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         }
       }
       if (/[1-9]/.test(d)) {
-        // backreference, or an octal escape of three digits
-        const o3 = /^[0-7]{2}/.exec(p.slice(i));
-        if (/[0-7]/.test(d) && o3) {
-          i += 2;
-          const cp = parseInt(d + o3[0], 8);
-          out += inClass ? `\\u{${cp.toString(16)}}` : lit(String.fromCodePoint(cp), `\\u{${cp.toString(16)}}`);
+        // (in a class, an octal escape of up to three digits, and \8 and \9
+        // bad escapes, as CPython's _class_escape reads them)
+        if (inClass) {
+          if (!/[0-7]/.test(d)) perr(`bad escape \\${d}`, esc);
+          const o = /^[0-7]{0,2}/.exec(p.slice(i, i + 2))![0];
+          i += o.length;
+          const cp = parseInt(d + o, 8);
+          if (cp > 0o377) perr(`octal escape value \\${d}${o} outside of range 0-0o377`, esc);
+          out += `\\u{${cp.toString(16)}}`;
           continue;
         }
-        const num = /^\d?/.exec(p.slice(i))![0];
+        // backreference, or an octal escape of three digits
+        if (/[0-7]/.test(d) && /^[0-7]{2}$/.test(p.slice(i, i + 2))) {
+          const o = p.slice(i, i + 2);
+          i += 2;
+          const cp = parseInt(d + o, 8);
+          if (cp > 0o377) perr(`octal escape value \\${d}${o} outside of range 0-0o377`, esc);
+          out += lit(String.fromCodePoint(cp), `\\u{${cp.toString(16)}}`);
+          continue;
+        }
+        const num = /^\d?/.exec(p.slice(i, i + 1))![0];
         i += num.length;
-        if (!inClass && asc() && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
-        out += inClass ? "" : `\\${d}${num}`;
+        const g = Number(d + num);
+        if (g > ngroups) perr(`invalid group reference ${g}`, esc + 1);
+        if (open.has(g)) perr("cannot refer to an open group", esc);
+        if (behind >= 0 && g > behind) perr("cannot refer to group defined in the same lookbehind subpattern", i);
+        if (asc() && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
+        out += `\\${g}`;
         continue;
       }
-      if (/[A-Za-z]/.test(d)) raise(ReError, `bad escape \\${d}`);
+      if (/[A-Za-z]/.test(d)) perr(`bad escape \\${d}`, esc);
       // Escaped punctuation: only escape what JS (in u mode) allows.
       out += SPECIAL_JS.has(d) || (inClass && d === "-") ? "\\" + d : d;
       continue;
@@ -223,6 +308,8 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
         inClass = true;
         classStart = true;
         classAt = out.length;
+        classPos = i;
+        last = "item";
         classNeg = p[i + 1] === "^";
         out += c;
         i++;
@@ -239,65 +326,167 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
       case "$":
         out += cur & M ? "(?=\\n|$)" : "(?=\\n?$)";
         i++;
+        last = "at";
         continue;
       case "^":
         out += cur & M ? "(?:^|(?<=\\n))" : "^";
         i++;
+        last = "at";
         continue;
       // (Python's . is every character but \n, or every one with DOTALL;
       // JS's also leaves out \r, U+2028 and U+2029)
       case ".":
         out += cur & S ? "[\\s\\S]" : "[^\\n]";
         i++;
+        last = "item";
         continue;
-      case ")":
+      case ")": {
+        const gr = groups.pop();
+        if (gr === undefined) perr("unbalanced parenthesis", i);
+        if (gr!.g) open.delete(gr!.g);
+        if (gr!.behind) behind = -1;
         cur = scopes.pop() ?? cur;
         jsI = jsScopes.pop() ?? jsI;
         out += c;
         i++;
-        continue;
-      case "{": {
-        const q = /^\{(\d*)(?:,(\d*))?\}/.exec(p.slice(i));
-        if (q === null) {
-          out += "\\{";
-          i++;
-          continue;
-        }
-        out += q[2] === undefined ? `{${q[1] || "0"}}` : `{${q[1] || "0"},${q[2]}}`;
-        i += q[0].length;
-        if (p[i] === "+") raise(ReError, "possessive quantifiers are not supported");
+        last = "item";
         continue;
       }
-      case "}":
-        out += "\\}";
+      // Repeats, as CPython's parser reads them: of the item before, not
+      // of nothing, an AT code or another repeat; {} and an unclosed { are
+      // literal; then ? for a lazy one (+, possessive, is not implemented)
+      case "{": {
+        BRACE.lastIndex = i;
+        const q = BRACE.exec(p);
+        if (q === null || q[0] === "{}") {
+          out += "\\{";
+          i++;
+          last = "item";
+          continue;
+        }
+        repeat(i);
+        const lo = q[1] === "" ? 0 : Number(q[1]), hi = q[2] === undefined ? lo : q[2] === "" ? Infinity : Number(q[2]);
+        if (lo >= MAXREPEAT || (hi !== Infinity && hi >= MAXREPEAT)) raise(T.OverflowError, "the repetition number is too large");
+        if (hi < lo) perr("min repeat greater than max repeat", i + 1);
+        out += q[2] === undefined ? `{${lo}}` : `{${lo},${hi === Infinity ? "" : hi}}`;
+        i += q[0].length;
+        continue;
+      }
+      case "*":
+      case "+":
+      case "?":
+        if (last === "rep" && !lazyRead && c !== "*") {
+          if (c === "+") raise(T.NotImplementedError, "possessive repeats (*+, ++, ?+ and {m,n}+) are not supported");
+          lazyRead = true;
+        } else repeat(i);
+        out += c;
         i++;
+        continue;
+      case "}":
+      case "]":
+        out += "\\" + c;
+        i++;
+        last = "item";
+        continue;
+      case "|":
+        out += c;
+        i++;
+        last = "none";
         continue;
       case "/":
         out += "\\/";
         i++;
+        last = "item";
         continue;
-      case "(":
+      case "(": {
+        // (a comment leaves what a repeat after it would repeat)
+        const before = last;
+        last = "none";
         if (p[i + 1] === "?") {
-          const rest = p.slice(i);
           let g: RegExpExecArray | null;
-          if ((g = /^\(\?P<([A-Za-z_]\w*)>/.exec(rest))) {
+          const at = (rx: RegExp) => ((rx.lastIndex = i), rx.exec(p));
+          if ((g = at(/\(\?P<([A-Za-z_]\w*)>/y))) {
+            ngroups++;
+            byName.set(g[1], ngroups);
+            open.add(ngroups);
+            groups.push({ g: ngroups, behind: false, at: i });
             scopes.push(cur);
             jsScopes.push(jsI);
             out += `(?<${g[1]}>`;
             i += g[0].length;
             continue;
           }
-          if ((g = /^\(\?P=([A-Za-z_]\w*)\)/.exec(rest))) {
+          if ((g = at(/\(\?P=([A-Za-z_]\w*)\)/y))) {
+            // (CPython's checks: a name not yet defined, an open group, one
+            // in the same look-behind)
+            const k = byName.get(g[1]);
+            if (k === undefined) perr(`unknown group name '${g[1]}'`, i + 4);
+            if (open.has(k!)) perr("cannot refer to an open group", i + 4);
+            if (behind >= 0 && k! > behind) perr("cannot refer to group defined in the same lookbehind subpattern", i + g[0].length);
             if (asc() && cur & I) raise(T.NotImplementedError, "IGNORECASE backreferences in ASCII or bytes patterns are not supported");
             out += `\\k<${g[1]}>`;
             i += g[0].length;
+            last = "item";
             continue;
           }
-          if ((g = /^\(\?#[^)]*\)/.exec(rest))) {
+          if ((g = at(/\(\?#[^)]*\)/y))) {
+            i += g[0].length;
+            last = before;
+            continue;
+          }
+          if ((g = at(/\(\?(=|!|<=|<!)/y))) {
+            // (a look-behind: the groups before it, for CPython's
+            // checklookbehindgroup)
+            const lb = g[1][0] === "<" && behind < 0;
+            if (lb) behind = ngroups;
+            groups.push({ g: 0, behind: lb, at: i });
+            scopes.push(cur);
+            jsScopes.push(jsI);
+            out += g[0];
             i += g[0].length;
             continue;
           }
-          if ((g = /^\(\?([aiLmsux]*)(?:-([imsx]+))?:/.exec(rest)) && (g[1] || g[2])) {
+          if (p[i + 2] === "<") {
+            if (i + 3 >= p.length) perr("unexpected end of pattern", p.length);
+            perr(`unknown extension ?<${String.fromCodePoint(p.codePointAt(i + 3)!)}`, i + 1);
+          }
+          if (/[aiLmsux-]/.test(p[i + 2] ?? "")) {
+            // (flags, read as CPython's _parse_flags reads them, for its
+            // errors: positions are where its source is when it raises)
+            const F: Record<string, number> = { a: A, i: I, L, m: M, s: S, u: U, x: X };
+            const alpha = (ch: string) => /\p{L}/u.test(ch);
+            let k = i + 2, ch: string | undefined = p[k++], add = 0, del = 0;
+            if (ch !== "-") {
+              for (;;) {
+                const f = F[ch!];
+                if (ch === "L" && !bytes) perr("bad inline flags: cannot use 'L' flag with a str pattern", k);
+                if (ch === "u" && bytes) perr("bad inline flags: cannot use 'u' flag with a bytes pattern", k);
+                add |= f;
+                if (f & (A | L | U) && (add & (A | L | U)) !== f) perr("bad inline flags: flags 'a', 'u' and 'L' are incompatible", k);
+                ch = p[k++];
+                if (ch === undefined) perr("missing -, : or )", p.length);
+                if (ch === ")" || ch === "-" || ch === ":") break;
+                if (F[ch!] === undefined) perr(alpha(ch!) ? "unknown flag" : "missing -, : or )", k - 1);
+              }
+            }
+            if (ch === ")") perr("global flags not at the start of the expression", i);
+            if (ch === "-") {
+              ch = p[k++];
+              if (ch === undefined) perr("missing flag", p.length);
+              if (F[ch!] === undefined) perr(alpha(ch!) ? "unknown flag" : "missing flag", k - 1);
+              for (;;) {
+                const f = F[ch!];
+                if (f & (A | L | U)) perr("bad inline flags: cannot turn off flags 'a', 'u' and 'L'", k);
+                del |= f;
+                ch = p[k++];
+                if (ch === undefined) perr("missing :", p.length);
+                if (ch === ":") break;
+                if (F[ch!] === undefined) perr(alpha(ch!) ? "unknown flag" : "missing :", k - 1);
+              }
+            }
+            if (add & del) perr("bad inline flags: flag turned on and off", k - 1);
+          }
+          if ((g = at(/\(\?([aiLmsux]*)(?:-([imsx]+))?:/y)) && (g[1] || g[2])) {
             // scoped flags: m and s are this translation's own (^, $ and .);
             // i is JS's modifier, and is in force for the class rules too;
             // a makes the group's \w \d \s \b and IGNORECASE ASCII's
@@ -306,7 +495,7 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
             // u is a str pattern's default, and refused inside an ASCII one,
             // CORR-6A0-1, or beside a, which CPython refuses too)
             if (/[Lx]/.test(g[1] + (g[2] ?? "")) || (asc() && g[1].includes("u"))) raise(T.NotImplementedError, `scoped flags (?${g[1]}${g[2] ? "-" + g[2] : ""}:...) are not supported`);
-            if (g[1].includes("a") && g[1].includes("u")) raise(ReError, `bad inline flags: flags 'a', 'u' and 'L' are incompatible at position ${i + 2 + g[1].length}`);
+            groups.push({ g: 0, behind: false, at: i });
             scopes.push(cur);
             jsScopes.push(jsI);
             for (const f of g[1]) if (f === "i" || f === "m" || f === "s" || f === "a") cur |= { i: I, m: M, s: S, a: A }[f]!;
@@ -319,56 +508,121 @@ function translate(p: string, flags: number, bytes = false): { src: string; flag
             i += g[0].length;
             continue;
           }
-          if (/^\(\?\(/.test(rest)) raise(ReError, "conditional groups are not supported");
-          if (/^\(\?>/.test(rest)) raise(ReError, "atomic groups are not supported");
-          if (/^\(\?[aiLmsux]+\)/.test(rest)) raise(ReError, "global flags not at the start of the expression");
+          if (p[i + 2] === ":") {
+            groups.push({ g: 0, behind: false, at: i });
+            scopes.push(cur);
+            jsScopes.push(jsI);
+            out += "(?:";
+            i += 3;
+            continue;
+          }
+          if (p[i + 2] === "(") raise(T.NotImplementedError, "conditional groups, (?(1)...|...), are not supported");
+          if (p[i + 2] === ">") raise(T.NotImplementedError, "atomic groups, (?>...), are not supported");
+          if (i + 2 >= p.length) perr("unexpected end of pattern", p.length);
+          if (p[i + 2] === "P") perr(i + 3 >= p.length ? "unexpected end of pattern" : `unknown extension ?P${String.fromCodePoint(p.codePointAt(i + 3)!)}`, i + 3 >= p.length ? p.length : i + 1);
+          perr(`unknown extension ?${String.fromCodePoint(p.codePointAt(i + 2)!)}`, i + 1);
+        } else {
+          ngroups++;
+          open.add(ngroups);
+          groups.push({ g: ngroups, behind: false, at: i });
         }
         scopes.push(cur);
         jsScopes.push(jsI);
         out += c;
         i++;
         continue;
+      }
       default:
         out += lit(c, c);
         i++;
+        last = "item";
     }
   }
-  if (inClass) raise(ReError, `unterminated character set at position ${p.lastIndexOf("[")}`);
-  return { src: out, flags };
+  if (inClass) perr("unterminated character set", classPos);
+  if (groups.length) perr("missing ), unterminated subpattern", groups[groups.length - 1].at);
+  return { src: out, flags, groups: ngroups };
 }
 
 // ------------------------------------------------------------------ Pattern
 
 export class PyPattern {
-  rx: RegExp; // global search
-  sticky: RegExp; // match at a position
-  full: RegExp; // fullmatch at a position
+  rx!: RegExp; // global search
+  sticky!: RegExp; // match at a position
+  full!: RegExp; // fullmatch at a position
   groups: number;
   names: string[]; // group index -> name ("" if unnamed), index 0 unused
+  shape: Shape.Shape; // the groups as JS has them, and what must_advance needs
+  private jf: string;
+  private nonEmpty = new Map<string, RegExp>();
   constructor(public pattern: any, public flags: number, public isBytes: boolean) {
     const text = isBytes ? Ty.decode(pattern, "latin1") : pattern;
-    const t = translate(text, flags, isBytes);
-    this.flags = t.flags | (isBytes ? 0 : U);
+    const t = translate(text, flags, isBytes, pattern);
+    this.flags = fixFlags(t.flags, isBytes);
     let jf = "dgu";
     // (JS's i folds by Unicode: ASCII and bytes patterns write out their
     // letters' cases instead, CORR-BD8-1)
     if (t.flags & I && !(t.flags & A) && !isBytes) jf += "i";
     if (t.flags & S) jf += "s";
+    this.jf = jf;
+    const jsError = (e: any): never => raise(ReError, String(e.message).replace(/^Invalid regular expression: /, ""));
+    // (the source as re-shape.ts writes it again: where JS and sre would
+    // disagree, rewritten or refused)
+    const sh = Shape.shape(t.src, (msg) => raise(T.NotImplementedError, msg), (msg) => patternError(msg));
+    if (sh === null) {
+      try {
+        new RegExp(t.src, jf);
+      } catch (e: any) {
+        jsError(e);
+      }
+      raise(T.NotImplementedError, "this pattern could not be read back after its translation to a JavaScript regular expression (a limit of Sagebrush's re)");
+    }
+    this.shape = sh;
     try {
-      this.rx = new RegExp(t.src, jf);
-      this.sticky = new RegExp(t.src, jf.replace("g", "y"));
-      this.full = new RegExp(`(?:${t.src})$`, jf.replace("g", "y"));
+      this.rx = new RegExp(sh.src, jf);
+      this.sticky = new RegExp(sh.src, jf.replace("g", "y"));
+      this.full = new RegExp(`(?:${sh.src})$`, jf.replace("g", "y"));
     } catch (e: any) {
-      raise(ReError, String(e.message).replace(/^Invalid regular expression: /, ""));
+      jsError(e);
     }
-    // Count groups and their names from the JS source.
-    this.names = [""];
-    const re = /\\.|\[(?:\\.|[^\]])*\]|\((\?<([A-Za-z_]\w*)>|\?)?/g;
-    let mm: RegExpExecArray | null;
-    while ((mm = re.exec(t.src)) !== null) {
-      if (mm[0].startsWith("(") && (mm[1] === undefined || mm[2] !== undefined)) this.names.push(mm[2] ?? "");
+    this.names = sh.names;
+    this.groups = sh.groups;
+  }
+  // A match at i that is not empty: what CPython's scan looks for at i
+  // after an empty match there (state->must_advance: SRE_OP_SUCCESS fails
+  // the match where it ends, at toplevel, so the pattern backtracks for a
+  // longer one, in its own order). The same pattern, ended by a look-behind
+  // that fails at i, run sticky on a slice of s that starts as far before
+  // i as the pattern can look back (so the look-behind costs that much, not
+  // i), with ^ never matching when the slice starts after 0.
+  nonEmptyAt(s: string, i: number): RegExpExecArray | null {
+    const sh = this.shape;
+    if (!sh.canConsume || i >= s.length) return null;
+    let j = i, k = 0;
+    while (k < sh.back && j > 0) {
+      j -= j >= 2 && (s.charCodeAt(j - 1) & 0xfc00) === 0xdc00 && (s.charCodeAt(j - 2) & 0xfc00) === 0xd800 ? 2 : 1;
+      k++;
     }
-    this.groups = this.names.length - 1;
+    const key = `${k}${j > 0 && sh.caret ? "^" : ""}`;
+    let rx = this.nonEmpty.get(key);
+    if (rx === undefined) {
+      const src = j > 0 && sh.caret ? sh.variant : sh.src;
+      rx = new RegExp(`(?:${src})(?<!^[\\s\\S]{${k}})`, this.jf.replace("g", "y"));
+      // (one per distance from the start within the look-behind's reach,
+      // and one past it: a long look-behind's are not all kept)
+      if (this.nonEmpty.size >= 64) this.nonEmpty.clear();
+      this.nonEmpty.set(key, rx);
+    }
+    const t = j === 0 ? s : s.slice(j);
+    rx.lastIndex = i - j;
+    const m = rx.exec(t);
+    if (m === null) return null;
+    if (j === 0) return midPair(s, m.index + m[0].length) ? null : m;
+    // (the match on s: its indices shifted back by where the slice starts)
+    const out: any = [...m];
+    out.index = m.index + j;
+    out.input = s;
+    out.indices = (m as any).indices.map((x: [number, number] | undefined) => (x === undefined ? undefined : [x[0] + j, x[1] + j]));
+    return midPair(s, out.index + m[0].length) ? null : out;
   }
   // (the subject, as CPython's getstring reads it: a str, a str subclass by
   // its payload, or a bytes-like object, else "expected string or
@@ -413,7 +667,14 @@ function bounds(s: string, pos: any, endpos: any): [number, number] {
 }
 
 export class PyMatch {
-  constructor(public re: PyPattern, public string: any, public s: string, public m: RegExpExecArray, public pos: number, public endpos: number) {}
+  m: RegExpExecArray; // the match by Python's groups
+  // (raw: the match as JS made it, by its own groups)
+  constructor(public re: PyPattern, public string: any, public s: string, public raw: RegExpExecArray, public pos: number, public endpos: number) {
+    this.m = Shape.normalize(re.shape, raw);
+  }
+  lastIndex(): number | null {
+    return Shape.lastIndex(this.re.shape, this.raw);
+  }
   index(g: any): number {
     if (typeof g === "string") {
       const k = this.re.names.indexOf(g);
@@ -550,11 +811,9 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
     }
     piece++;
   };
-  const rx = p.rx;
-  rx.lastIndex = 0;
-  let m: RegExpExecArray | null;
   const seams: number[] = []; // (a replacement's ends: no lone surrogates joined, SP.checkSeams)
-  while ((n === 0 || k < n) && (m = execAt(rx, s)) !== null) {
+  scan(p, s, 0, (m) => {
+    if (n !== 0 && k >= n) return false;
     // (Stop, every 1024 matches: a long string has millions, HARD-978-1)
     if ((k & 1023) === 1023) O.pollInterrupt();
     const pm = new PyMatch(p, string, s, m, 0, s.length);
@@ -580,8 +839,8 @@ function subImpl(p: PyPattern, repl: any, string: any, count: any): [any, number
     seams.push(out.length);
     last = m.index + m[0].length;
     k++;
-    if (m[0].length === 0) rx.lastIndex = advance(s, m.index);
-  }
+    return true;
+  });
   if (bad !== null) {
     const { at, v } = bad;
     raise(T.TypeError, `sequence item ${at}: expected ${p.isBytes ? "a bytes-like object" : "str instance"}, ${typeName(v)} found`);
@@ -603,20 +862,59 @@ function execAt(rx: RegExp, s: string): RegExpExecArray | null {
   return m;
 }
 
+// The matches of a scan from `from`, in order, to each until it returns
+// false, as CPython's scans find them (pattern_findall, pattern_subx and
+// the scanner): after a match the next starts where it ended; after an
+// empty one at i, the next is one at i that is not empty if there is one
+// (must_advance), else the next from i + 1 (A22)
+function scan(p: PyPattern, s: string, from: number, each: (m: RegExpExecArray) => boolean): void {
+  const rx = p.rx;
+  let at = from;
+  for (;;) {
+    rx.lastIndex = at;
+    const m = execAt(rx, s);
+    if (m === null || !each(m)) return;
+    if (m[0].length !== 0) {
+      at = m.index + m[0].length;
+      continue;
+    }
+    const n = p.nonEmptyAt(s, m.index);
+    if (n !== null) {
+      if (!each(n)) return;
+      at = n.index + n[0].length;
+      continue;
+    }
+    if (m.index >= s.length) return;
+    at = advance(s, m.index);
+  }
+}
+
 function allMatches(p: PyPattern, string: any, pos: any = 0, endpos: any = null): PyMatch[] {
   const s0 = p.str(string);
   const [ps, e] = bounds(s0, pos, endpos);
   const s = s0.slice(0, e);
   const out: PyMatch[] = [];
-  const rx = p.rx;
-  rx.lastIndex = ps;
-  let m: RegExpExecArray | null;
-  while ((m = execAt(rx, s)) !== null) {
+  scan(p, s, ps, (m) => {
     if ((out.length & 1023) === 1023) O.pollInterrupt();
     out.push(new PyMatch(p, string, s0, m, ps, e));
-    if (m[0].length === 0) rx.lastIndex = advance(s, m.index);
-  }
+    return true;
+  });
   return out;
+}
+
+// The flags as CPython's _parser.fix_flags checks them, the pattern read:
+// a str pattern is UNICODE unless ASCII, and never LOCALE; a bytes one is
+// never UNICODE, nor both ASCII and LOCALE
+function fixFlags(flags: number, bytes: boolean): number {
+  if (!bytes) {
+    if (flags & L) raise(T.ValueError, "cannot use LOCALE flag with a str pattern");
+    if (!(flags & A)) return flags | U;
+    if (flags & U) raise(T.ValueError, "ASCII and UNICODE flags are incompatible");
+    return flags;
+  }
+  if (flags & U) raise(T.ValueError, "cannot use UNICODE flag with a bytes pattern");
+  if (flags & L && flags & A) raise(T.ValueError, "ASCII and LOCALE flags are incompatible");
+  return flags;
 }
 
 const cache = new Map<string, PyPattern>();
@@ -628,7 +926,6 @@ function compile(pattern: any, flags: any = 0): PyPattern {
   const f = Number(O.index(typeof flags === "object" && flags !== null && "$v" in flags ? flags.$v : flags));
   const isBytes = pattern instanceof PyBytes;
   if (!isBytes && typeof pattern !== "string") raise(T.TypeError, "first argument must be string or compiled pattern");
-  if (isBytes && f & U) raise(T.ValueError, "cannot use UNICODE flag with a bytes pattern");
   const key = (isBytes ? "b" : "s") + f + ":" + (isBytes ? Ty.decode(pattern, "latin1") : pattern);
   let p = cache.get(key);
   if (p === undefined) {
@@ -640,7 +937,31 @@ function compile(pattern: any, flags: any = 0): PyPattern {
 }
 
 newBuiltinModule("re", (mod) => {
-  ReError = objectType("error", [T.Exception], new Map(), "re");
+  // (PatternError, error its old name, as Lib/re/_constants.py has it)
+  ReError = objectType("PatternError", [T.Exception], new Map(), "re");
+  Ty.method(
+    ReError,
+    "__init__",
+    (self: any, msg: any, pattern: any = null, pos: any = null) => {
+      self.msg = msg;
+      self.pattern = pattern;
+      self.pos = pos;
+      let text = msg;
+      if (pattern !== null && pos !== null) {
+        text = `${str(msg)} at position ${str(pos)}`;
+        // (lineno and colno counted in code points, as CPython's are)
+        const s = pattern instanceof PyBytes ? Ty.decode(pattern, "latin1") : typeof pattern === "string" ? pattern : str(pattern);
+        const k = Number(pos);
+        const before = Array.from(s).slice(0, k);
+        self.lineno = before.filter((ch) => ch === "\n").length + 1;
+        self.colno = k - before.lastIndexOf("\n");
+        if (s.includes("\n")) text = `${text} (line ${self.lineno}, column ${self.colno})`;
+      } else self.lineno = self.colno = null;
+      self.args = tuple([text]);
+      return null;
+    },
+    sig(["self", "msg", "pattern", "pos"]),
+  );
   mod.error = ReError;
   mod.PatternError = ReError;
   for (const [k, v] of Object.entries({ I, IGNORECASE: I, L, LOCALE: L, M, MULTILINE: M, S, DOTALL: S, U, UNICODE: U, X, VERBOSE: X, A, ASCII: A, NOFLAG: 0, T: 1, TEMPLATE: 1, DEBUG: 128 })) mod[k] = v;
@@ -725,29 +1046,11 @@ newBuiltinModule("re", (mod) => {
   Ty.getset(Match, "re", (m: PyMatch) => m.re);
   Ty.getset(Match, "pos", (m: PyMatch) => m.cp(m.pos));
   Ty.getset(Match, "endpos", (m: PyMatch) => m.cp(m.endpos));
-  Ty.getset(Match, "lastindex", (m: PyMatch) => {
-    let best: number | null = null, end = -1;
-    for (let k = 1; k <= m.re.groups; k++) {
-      const sp = m.span(k);
-      if (sp[0] >= 0 && sp[1] >= end) {
-        if (best === null || sp[1] > end || k < best) best = k;
-        end = sp[1];
-      }
-    }
-    return best;
-  });
+  // (sre's lastindex, the group that closed last, and its name, A25)
+  Ty.getset(Match, "lastindex", (m: PyMatch) => m.lastIndex());
   Ty.getset(Match, "lastgroup", (m: PyMatch) => {
-    const li = Ty.lookupDunder(m, "lastindex");
-    void li;
-    let best: number | null = null, end = -1;
-    for (let k = 1; k <= m.re.groups; k++) {
-      const sp = m.span(k);
-      if (sp[0] >= 0 && sp[1] >= end) {
-        best = k;
-        end = sp[1];
-      }
-    }
-    return best === null ? null : m.re.names[best] || null;
+    const k = m.lastIndex();
+    return k === null ? null : m.re.names[k] || null;
   });
 
   const fn = (name: string, f: any, sg: string[]) => {
