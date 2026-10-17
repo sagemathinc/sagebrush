@@ -4,10 +4,12 @@ compares them), so that a graph's picture made here (Graph.plot, in the
 browser's worker or the CPython package) and the canvas that animates it
 there end in the same place.
 
-    spring_layout(nodes, edges, seed, iterations=None, gap=24)
+    spring_layout(nodes, edges, seed, iterations=None, gap=24, length=None)
         nodes: [(id, w, h, fixed)] with fixed None or (x, y), a top-left
         corner; edges: [(from, to)]; ids are strings.  Returns {id: (x, y)}
         top-left corners, or None past the caps (as springLayout's null).
+        length: spring.ts's, the distance between linked boxes' edges the
+        forces aim at; None for the mean box size plus gap.
 
 Every operation follows spring.ts's in the same order: IEEE doubles, the same
 square roots, the same mulberry32 (32-bit integer arithmetic masked to
@@ -25,6 +27,8 @@ PART_COST = 64
 DEFAULT_ITERATIONS = 300
 FINAL_SWEEPS = 60
 MARGIN = 1e-3
+MIN_LENGTH = 1
+MAX_LENGTH = 1e5
 _M = 0xFFFFFFFF
 
 # the final sweeps run by every layout so far (spring.ts's springWork.sweeps)
@@ -93,7 +97,7 @@ def _separate(B, gap):
 
 
 class _Part:
-    def __init__(self, bodies, links, iterations, gap):
+    def __init__(self, bodies, links, iterations, gap, length):
         self.bodies = bodies
         self.links = links
         self.iterations = iterations
@@ -102,7 +106,7 @@ class _Part:
         for b in bodies:
             size += max(b.w, b.h)
         size = size / max(len(bodies), 1)
-        self.L = max(40, size) + gap
+        self.L = float(length) if length is not None else max(40, size) + gap
         self.t0 = (self.L * math.sqrt(len(bodies))) / 4
 
     def step(self, gap):
@@ -156,8 +160,12 @@ def _round(v):
     return r + 0.0 if r != 0 else 0.0
 
 
-def _plan(nodes, edges, seed, iterations, gap):
+def _plan(nodes, edges, seed, iterations, gap, length):
     if len(nodes) > MAX_NODES or len(edges) > MAX_EDGES:
+        return None
+    # (spring.ts's length: a number from MIN_LENGTH to MAX_LENGTH, else None)
+    if length is not None and not (isinstance(length, (int, float)) and not isinstance(length, bool)
+                                   and MIN_LENGTH <= length <= MAX_LENGTH):
         return None
     index = {}
     for i, nd in enumerate(nodes):
@@ -216,7 +224,7 @@ def _plan(nodes, edges, seed, iterations, gap):
         part_links.setdefault(find(a), []).append((where[a], where[b]))
     parts = []
     for r in order:
-        part = _Part([all_[i] for i in groups[r]], part_links.get(r, []), iters if len(groups[r]) > 1 else 0, gap)
+        part = _Part([all_[i] for i in groups[r]], part_links.get(r, []), iters if len(groups[r]) > 1 else 0, gap, length)
         side = part.L * math.sqrt(len(groups[r]))
         for b in part.bodies:
             if not b.fixed:
@@ -332,8 +340,8 @@ def gap_violations(nodes, pos, gap):
     return out
 
 
-def spring_layout(nodes, edges, seed, iterations=None, gap=24):
-    p = _plan(nodes, edges, seed, iterations, gap)
+def spring_layout(nodes, edges, seed, iterations=None, gap=24, length=None):
+    p = _plan(nodes, edges, seed, iterations, gap, length)
     if p is None:
         return None
     parts, all_, gap, work_left = p

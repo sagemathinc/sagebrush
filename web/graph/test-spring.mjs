@@ -3,7 +3,7 @@
 // Node and Deno too), linked boxes end nearer than others, and past its caps
 // it refuses. With bun:
 //   bun web/graph/test-spring.mjs
-import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES } from "./spring.ts";
+import { springLayout, springSteps, gapViolations, springWork, WORK, MAX_NODES, MAX_EDGES, MAX_FRAMES, MIN_LENGTH, MAX_LENGTH } from "./spring.ts";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -121,6 +121,23 @@ check(springLayout(pts(10), Array.from({ length: MAX_EDGES + 1 }, () => ["v0", "
   check(springWork.pairs <= WORK, `forced sweeps, ${MAX_EDGES} links: ${springWork.pairs} evaluations, within WORK`);
   check(pos !== null && gapViolations(nodes, pos, 24).length === 0, `forced sweeps, ${MAX_EDGES} links: no two boxes closer than the gap`);
 }
+// length: the edge-to-edge distance the forces aim at, in place of the
+// mean size plus gap (the board's request): big notes on a cycle sit much
+// closer with a short length; without it nothing changes; out of
+// [MIN_LENGTH, MAX_LENGTH] or not a number, refused
+{
+  const notes = pts(8, 200, 120), ring = Array.from({ length: 8 }, (_, i) => ["v" + i, "v" + ((i + 1) % 8)]);
+  const gapOf = (pos) => {
+    const d = ring.map(([a, b]) => { const p = pos.get(a), q = pos.get(b); return Math.max(Math.abs(p.x - q.x) - 200, Math.abs(p.y - q.y) - 120); });
+    return d.reduce((s, x) => s + x, 0) / d.length;
+  };
+  const wide = springLayout(notes, ring, { seed: 1 }), close = springLayout(notes, ring, { seed: 1, length: 36 });
+  check(close !== null && gapOf(close) < gapOf(wide) / 2, `length 36: linked notes closer (mean edge gap ${gapOf(close).toFixed(0)} px, ${gapOf(wide).toFixed(0)} without)`);
+  check(close !== null && gapViolations(notes, close, 24).length === 0, "length 36: still none closer than the gap");
+  check(JSON.stringify([...springLayout(notes, ring, { seed: 1, length: undefined })]) === JSON.stringify([...wide]), "length undefined: the layout without it");
+  for (const bad of [0, MIN_LENGTH - 0.5, -1, NaN, Infinity, MAX_LENGTH * 2, "36"])
+    check(springLayout(notes, ring, { seed: 1, length: bad }) === null, `length ${String(bad)}: refused (null)`);
+}
 check(springLayout([], [], { seed: 1 }).size === 0, "no nodes: an empty layout");
 // huge iterations, many parts: bounded (HARD-828-1)
 {
@@ -213,6 +230,7 @@ for (const c of CASES) {
   cases.push(["fixed", fixedCase, Array.from({ length: 11 }, (_, i) => ["v" + i, "v" + (i + 1)])]);
   cases.push(["lone", pts(6, 10, 10), [["v0", "v1"]]]);
   for (const c of CASES) cases.push([c.label, c.nodes, c.edges, c.opts]);
+  cases.push(["length", pts(8, 200, 120), Array.from({ length: 8 }, (_, i) => ["v" + i, "v" + ((i + 1) % 8)]), { seed: 1, length: 36 }]);
   const want = cases.map(([, nodes, edges, opts]) => Object.fromEntries([...springLayout(nodes, edges, opts ?? { seed: 5 })].map(([k, v]) => [k, [v.x, v.y]])));
   const py = [
     "import json, sys",
@@ -224,7 +242,7 @@ for (const c of CASES) {
     "    name, nodes, edges = case[:3]",
     "    opts = case[3] if len(case) > 3 and case[3] else {'seed': 5}",
     "    ns = [(n['id'], n['w'], n['h'], (n['fixed']['x'], n['fixed']['y']) if n.get('fixed') else None) for n in nodes]",
-    "    out.append({k: list(v) for k, v in g.spring_layout(ns, [tuple(e) for e in edges], opts['seed'], opts.get('iterations'), opts.get('gap', 24)).items()})",
+    "    out.append({k: list(v) for k, v in g.spring_layout(ns, [tuple(e) for e in edges], opts['seed'], opts.get('iterations'), opts.get('gap', 24), opts.get('length')).items()})",
     "print(json.dumps(out))",
   ].join("\n");
   const input = JSON.stringify(cases);
