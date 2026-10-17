@@ -186,17 +186,22 @@ getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.
 // a class statement only (the builtins have none)
 const noAnnot = (c: any, name: string): never => raise(T.AttributeError, `type object '${c.$name}' has no attribute '${name}'`);
 const immutableAnnot = (c: any, name: string): never => raise(T.TypeError, `cannot set '${name}' attribute of immutable type '${c.$name}'`);
+// (none yet: None, kept as __annotate_func__, as CPython's type_get_annotate)
 getset(type, "__annotate__", (c) => {
   if (!c.$heap) noAnnot(c, "__annotate__");
   if (c.$dict.has("__annotate__")) return c.$dict.get("__annotate__");
-  return c.$dict.get("__annotate_func__") ?? null;
+  if (!c.$dict.has("__annotate_func__")) {
+    c.$dict.set("__annotate_func__", null);
+    bumpVersion(c);
+  }
+  return c.$dict.get("__annotate_func__");
 }, (c, v) => {
   if (!c.$heap) immutableAnnot(c, "__annotate__");
   checkAnnotate(v);
   c.$dict.set("__annotate_func__", v);
   if (v !== null) c.$dict.delete("__annotations_cache__");
   bumpVersion(c);
-});
+}, () => raise(T.TypeError, "cannot delete __annotate__ attribute"));
 getset(type, "__annotations__", (c) => {
   if (!c.$heap) noAnnot(c, "__annotations__");
   if (c.$dict.has("__annotations__")) return c.$dict.get("__annotations__");
@@ -210,15 +215,21 @@ getset(type, "__annotations__", (c) => {
   if (!c.$heap) immutableAnnot(c, "__annotations__");
   c.$dict.delete("__annotations__");
   c.$dict.set("__annotations_cache__", v);
-  c.$dict.set("__annotate_func__", null);
-  bumpVersion(c);
+  dropAnnotate(c);
 }, (c) => {
-  if (!c.$heap) raise(T.TypeError, `cannot delete '__annotations__' attribute of immutable type '${c.$name}'`);
+  // (what is kept deleted, and the provider with it: the next read {}, as
+  // CPython's type_set_annotations; nothing kept, AttributeError)
+  if (!c.$heap) immutableAnnot(c, "__annotations__");
   if (c.$dict.has("__annotations__")) c.$dict.delete("__annotations__");
   else if (c.$dict.has("__annotations_cache__")) c.$dict.delete("__annotations_cache__");
   else raise(T.AttributeError, "__annotations__");
-  bumpVersion(c);
+  dropAnnotate(c);
 });
+function dropAnnotate(c: any): void {
+  c.$dict.delete("__annotate_func__");
+  c.$dict.delete("__annotate__");
+  bumpVersion(c);
+}
 method(type, "__repr__", (c: any) => repr(c));
 method(type, "mro", (c: any) => c.$mro.slice());
 method(type, "__subclasses__", (c: any) => c.$subclasses.slice());
@@ -533,7 +544,7 @@ getset(fnType, "__annotate__", (f) => f.$annotate ?? null, (f, v) => {
   checkAnnotate(v);
   f.$annotate = v;
   if (v !== null) f.$annotations = undefined;
-});
+}, () => raise(T.TypeError, "__annotate__ cannot be deleted"));
 getset(fnType, "__annotations__", (f) => {
   if (f.$annotations !== undefined && f.$annotations !== null) return f.$annotations;
   const a = f.$annotate ?? null;
@@ -597,20 +608,24 @@ method(moduleType, "__init__", (m: any, name: string, doc: any = null) => {
 });
 // A module's annotations (PEP 649/749): its __annotations__ if set, else
 // what its __annotate__ gives (the module body's), kept in its namespace
-getset(moduleType, "__annotate__", (m) => (Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : null), (m, v) => {
+// (none yet: None, kept in its namespace, as CPython's module_get_annotate;
+// setting __annotations__ or deleting it makes it None)
+getset(moduleType, "__annotate__", (m) => (Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : (m.__annotate__ = null)), (m, v) => {
   checkAnnotate(v);
   m.__annotate__ = v;
   if (v !== null) delete m.__annotations__;
-});
+}, () => raise(T.TypeError, "cannot delete __annotate__ attribute"));
 getset(moduleType, "__annotations__", (m) => {
   if (Object.prototype.hasOwnProperty.call(m, "__annotations__")) return m.__annotations__;
   const a = Object.prototype.hasOwnProperty.call(m, "__annotate__") ? m.__annotate__ : null;
   return (m.__annotations__ = a !== null ? callAnnotate(a) : new PyDict());
 }, (m, v) => {
   m.__annotations__ = v;
+  m.__annotate__ = null;
 }, (m) => {
   if (!Object.prototype.hasOwnProperty.call(m, "__annotations__")) raise(T.AttributeError, "__annotations__");
   delete m.__annotations__;
+  m.__annotate__ = null;
 });
 export function newModule(name: string): any {
   const m = new moduleType.$ctor!();
