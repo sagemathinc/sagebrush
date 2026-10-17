@@ -104,6 +104,13 @@
 .board-toolbar[hidden] { display: none; }
 .board-toolbar button { border-color: transparent; }
 .board-toolbar button:hover { background: #eef2ea; }
+/* its tooltips: drawn in the page below the button, never under the pointer
+   nor taking it (the browser's title tooltip, which some Linux desktops open
+   under the pointer, ends the hover and starts it again: a flicker, William
+   Oct 17); shown after a moment, as the browser's are */
+.board-toolbar button[data-tip] { position: relative; }
+.board-toolbar button[data-tip]::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 280px; padding: 4px 8px; border-radius: 6px; background: #2f3530; color: #fff; font-size: 12px; font-weight: 400; line-height: 1.35; text-align: left; white-space: normal; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .12s, visibility 0s linear .12s; z-index: 5; }
+.board-toolbar button[data-tip]:hover::after { opacity: 1; visibility: visible; transition-delay: .6s, .6s; }
 .board-toolbar button[aria-pressed="true"] { background: #2a6f2f; color: #fff; }
 .board-toolbar .tb-more { color: #667; }
 .board-toolbar .tb-i { display: none; }
