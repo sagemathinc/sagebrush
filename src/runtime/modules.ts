@@ -1146,7 +1146,7 @@ function chdir(p: string) {
 newBuiltinModule("_fs", (m) => {
   const fs = require("fs");
   const oserr = (e: any, path: string): never => {
-    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]);
+    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
     throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : String(e.message), path]));
   };
@@ -1185,7 +1185,7 @@ newBuiltinModule("os", (m) => {
   const fs = require("fs");
   const nodeOs = require("os");
   const oserr = (e: any, path: any): never => {
-    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]);
+    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EEXIST" ? T.FileExistsError : e.code === "EACCES" || e.code === "EPERM" ? T.PermissionError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
     throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]));
   };
