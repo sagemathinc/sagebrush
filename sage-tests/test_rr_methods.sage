@@ -140,3 +140,18 @@ class V:
     __float__ = Desc()
 show2("digits descriptor", lambda: RealField(100)(2).n(digits=V()))
 print(calls)
+# the MRO and class dicts are the type's own: a metaclass property named
+# __mro__ or __dict__ is not consulted
+for fake in ("__mro__", "__dict__"):
+    calls = []
+    def fake_attr(cls):
+        calls.append('fake-' + fake)
+        return (object,) if fake == "__mro__" else {}
+    Meta2 = type("Meta2", (type,), {fake: property(fake_attr)})
+    def real_get(self, obj, owner):
+        calls.append('real-get')
+        return lambda *args: float(8.9)
+    Desc2 = Meta2("Desc2", (), {"__get__": real_get})
+    V2 = type("V2", (), {"__float__": Desc2()})
+    show2("digits " + fake + " property", lambda: RealField(100)(2).n(digits=V2()))
+    print(calls)
