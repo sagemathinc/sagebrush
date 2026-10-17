@@ -144,7 +144,7 @@ test("the size a board opens is the board's (web/board/mount.ts FILE_MAX)", () =
 test("board: a command this sagebrush doesn't have is said so, not taken as a file (agent-UX R0-3)", () => {
   const r = run(["board", "frobnicate", "x.board.json"]);
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /^sagebrush board: unknown board command "frobnicate": this sagebrush \(dev\) has render, run, check, answers\n/);
+  assert.match(r.stderr, /^sagebrush board: unknown board command "frobnicate": this sagebrush \(dev\) has render, run, check, answers, try\n/);
   assert.equal(run(["board", "check", "--help"]).status, 0);
   assert.match(run(["board", "check", "--help"]).stdout, /^usage: sagebrush board check FILE/);
   // (a script named board, here, still runs as before)

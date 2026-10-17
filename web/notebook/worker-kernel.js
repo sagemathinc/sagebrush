@@ -32,6 +32,11 @@ function hashEnd(h) {
 // (a display bundle with its keys in order)
 const canon = (o) => JSON.stringify(o, Object.keys(o ?? {}).sort());
 
+// (how long a check may wait for the interpreter to take it up: what runs
+// before it is the board's code, which has its own bounds)
+// (a test may set less: globalThis.__sbEvaluateStartMs)
+const evaluateStartMs = () => Number(globalThis.__sbEvaluateStartMs) || 30_000;
+
 export class WorkerKernel {
   static count = 0;
   /**
@@ -128,7 +133,7 @@ export class WorkerKernel {
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
     };
     // (a worker that failed may never answer: what waits on it is told, and a
@@ -199,6 +204,45 @@ export class WorkerKernel {
     // notebook keeps changing its own values object)
     this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
     this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) });
+  }
+
+  /**
+   * A board question's check, or a computed hint (src/notebook-session.ts
+   * `evaluate`): `code` run seeing the board's names, with `answer` bound;
+   * resolves to its verdict ({ok, value | error, timedOut?}).  Within `ms` of
+   * its start (else interrupted: out of time), and all of it, its wait to be
+   * taken up too, by `by` (an absolute Date.now deadline) if given, else
+   * that wait within 30 s.  Not a run of the notebook's: not in the journal.
+   */
+  evaluate(code, answer, mode, ms, by) {
+    return new Promise((resolve) => {
+      if (!this.worker) return resolve({ ok: false, error: "the interpreter is not running" });
+      const id = this.nextId++;
+      let timer = null, over = false, waiting = null;
+      const finish = (r) => { clearTimeout(timer); clearTimeout(waiting); resolve(r); };
+      const nothing = () => {};
+      this.pending.set(id, {
+        // (its deadline from when it starts: not while the board's own code still runs before it)
+        start: () => {
+          clearTimeout(waiting);
+          // (within `ms` of its start, and by `by` if given)
+          const left = by === undefined ? ms : Math.min(ms, by - Date.now());
+          if (ms > 0 && !timer) timer = setTimeout(() => { over = true; this.interrupt(); }, Math.max(0, left));
+        },
+        out: nothing, display: nothing, interact: nothing, clear: nothing,
+        done: (_ms, x) => {
+          if (over) return finish({ ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true });
+          try { finish(x?.evaluated ? JSON.parse(x.evaluated) : { ok: false, error: "it could not run" }); } catch { finish({ ok: false, error: "it could not run" }); }
+        },
+        stopped: () => finish(over ? { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true } : { ok: false, error: "the interpreter stopped" }),
+      });
+      this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" });
+      // (an interpreter that never takes it up: given up after evaluateStartMs,
+      // or at `by`, an absolute deadline (Date.now) for the whole of it, the
+      // caller's remaining allowance, HARD-729-1)
+      const pickup = by === undefined ? evaluateStartMs() : Math.max(0, by - Date.now());
+      waiting = setTimeout(() => { this.pending.delete(id); finish({ ok: false, error: "the interpreter did not take it up" }); }, pickup);
+    });
   }
 
   /** Send the worker anything else (files). */

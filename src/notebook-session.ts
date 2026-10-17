@@ -18,6 +18,13 @@
 //                                 the run's entropy (RunHooks), and Python's
 //                                 random and numpy.random are reseeded from it)
 //      {id, interact, values}     an @interact control changed: rerun it
+//      {id, evaluate: {code, answer}, sage?, magma?, matlab?, seed?}  a board
+//                                 question's check, or a computed hint
+//                                 (lib/_sb_check.py): `code` run seeing the
+//                                 board's names, with `answer` (JSON) bound;
+//                                 `done` then has `evaluated`, its verdict as
+//                                 JSON {ok, value | error}; the caller runs
+//                                 the board's code again after it
 //      {id, check, sage?, magma?, matlab?}  -> {id, more}: is this input incomplete?
 //      {id, complete}             -> {id, matches, prefix}: Tab completion
 // Out: {id, start}, then any of
@@ -276,6 +283,38 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   // (and %autoreload's record of the modules the cell imported)
   const FLUSH_FIGURES = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n" + MAGIC_POST;
 
+  // A board question's check, or a computed hint (lib/_sb_check.py): its
+  // code, in the board's language, run in a copy of the board's names with
+  // `answer` bound; its last expression's value kept (as `__sb_value__`):
+  // the verdict, as JSON.  Python and Sage boards (Magma's and MATLAB's
+  // come later: said so).
+  function evaluate(m: any, host: any): string {
+    const e = m.evaluate ?? {}, finish = (error: string | null) => {
+      run(`import _sb_check, json as _j\n_sb_check.finish(_j.loads(${JSON.stringify(JSON.stringify(error))}))\ndel _j\n`, host, "exec", "<check>");
+      return String(R.getattr(R.importModule("_sb_check"), "out"));
+    };
+    if (m.magma || m.matlab) return finish("a question's check runs in Python and Sage boards (Magma and MATLAB come later)");
+    if (typeof e.code !== "string") return finish("no code");
+    let answer: string;
+    try { answer = JSON.stringify(e.answer ?? null); } catch { return finish("its answer is not JSON data"); }
+    if (!run(`import _sb_check\n_sb_check.prepare(${JSON.stringify(answer)})\n`, host, "exec", "<check>")) return finish("its answer could not be given to it");
+    // (the value of its last expression kept: an expression statement at its end assigned to __sb_value__)
+    const keep = (t: any) => {
+      const last = t.body?.[t.body.length - 1];
+      if (last?._type !== "Expr") return;
+      const pos = { lineno: last.lineno, col_offset: last.col_offset, end_lineno: last.end_lineno, end_col_offset: last.end_col_offset };
+      t.body[t.body.length - 1] = { _type: "Assign", targets: [{ _type: "Name", id: "__sb_value__", ctx: { _type: "Store" }, ...pos }], value: last.value, type_comment: null, ...pos };
+    };
+    try {
+      R.loader.exec(e.code + "\n", R.getattr(R.importModule("_sb_check"), "ns"), "exec", "<check>", { sage: !!m.sage, transform: keep });
+    } catch (x) {
+      const exc = R.toPyExc(x);
+      const lines = String(R.formatException(exc)).trim().split("\n"), last = lines[lines.length - 1] || "an exception";
+      return finish(/^KeyboardInterrupt\b/.test(last) ? "it was stopped (out of time)" : last);
+    }
+    return finish(null);
+  }
+
   async function handle(m: any) {
     const { id } = m;
     const { main, host } = await ready;
@@ -305,7 +344,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // counting Sage's one-time load below, which is the interpreter's, not the cell's)
     let t0 = performance.now();
     opts.runs?.begin(m);
-    let ok = true;
+    let ok = true, evaluated: string | null = null;
     changedNames = new Set();
     scopedNames = m.scoped && typeof m.scoped === "object" ? Object.entries(m.scoped).filter((e): e is [string, string] => typeof e[1] === "string") : [];
     // A seeded run (the reactive notebook's per-cell seeds): Python's random
@@ -335,6 +374,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         sageLoaded = true;
         t0 = performance.now();
       }
+      if (m.evaluate !== undefined) {
+        evaluated = evaluate(m, host);
+      } else
       if (m.magma) {
         // Magma: translated to Python (src/magma.ts); Magma prints its own values
         let py: string | null = null;
@@ -407,7 +449,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     flush();
     target = null;
     const more = opts.runs?.end() ?? {};
-    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(changedNames.size ? { names: [...changedNames] } : {}), ...more });
+    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(changedNames.size ? { names: [...changedNames] } : {}), ...(evaluated !== null ? { evaluated } : {}), ...more });
     current = null;
   }
 
