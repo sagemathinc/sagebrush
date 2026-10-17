@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -1322,18 +1322,16 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
   // The generator's own handled exceptions go above its caller's while it
   // runs, and come off with it when it pauses (CPython's per-frame exc_info).
   const base = handledExceptions.length;
-  if (g.$exc !== undefined) {
-    handledExceptions.push(...g.$exc);
-    g.$exc = undefined;
-  }
+  if (g.$exc !== undefined) resumeOwn(g);
   let paused = false;
   try {
-    const r = isThrow ? g.throw(arg) : g.next(arg);
+    const r = isThrow ? thrown(g, arg) : g.next(arg);
     if (r.done && r.value === undefined) r.value = null;
     paused = !r.done;
     return r;
   } catch (e: any) {
     if (isExc(e, T.StopIteration)) {
+      hooks.genRaised(e);
       const err = T.RuntimeError(g.$async ? "coroutine raised StopIteration" : "generator raised StopIteration");
       err.__cause__ = e;
       throw err;
@@ -1347,14 +1345,23 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
     }
   }
 }
+// (out of genStep's line, the rare work: a generator resuming with its own
+// handled exceptions, their tracebacks' new outer frames; an exception
+// thrown into one)
+function resumeOwn(g: any) {
+  for (const e of g.$exc) hooks.excResumed(e);
+  handledExceptions.push(...g.$exc);
+  g.$exc = undefined;
+}
+function thrown(g: any, arg: any): IteratorResult<any> {
+  hooks.excThrown(arg);
+  return g.throw(arg);
+}
 // A generator's return(v) (JS's, when the frame delegating to it is
 // returned from), with its own handled exceptions around it, as genStep.
 export function genReturn(g: any, v: any): IteratorResult<any> {
   const base = handledExceptions.length;
-  if (g.$exc !== undefined) {
-    handledExceptions.push(...g.$exc);
-    g.$exc = undefined;
-  }
+  if (g.$exc !== undefined) resumeOwn(g);
   let paused = false;
   try {
     const r = g.return(v);
@@ -1459,7 +1466,7 @@ export function next(it: any, dflt?: any): any {
     const v = it.$next();
     if (v !== DONE) return v;
     if (dflt !== undefined) return dflt;
-    throw lastStop.e ?? T.StopIteration();
+    throw lastStop.e ?? markRaised(T.StopIteration());
   }
   if (isGen(it)) {
     const r = genStep(it, false, undefined);
@@ -1479,7 +1486,7 @@ export function next(it: any, dflt?: any): any {
 }
 
 export function stopIteration(value: any): any {
-  return T.StopIteration(...(value === undefined || value === null ? [] : [value]));
+  return markRaised(T.StopIteration(...(value === undefined || value === null ? [] : [value])));
 }
 
 // (Stop is polled every 1024 items: a builtin consuming a long iterable,
@@ -1779,7 +1786,7 @@ export function getitem(o: any, k: any): any {
   if (o instanceof PyDict && o.$cls === T.dict) {
     const v = dictGet(o, k);
     if (v !== undefined) return v;
-    throw T.KeyError(k);
+    throw markRaised(T.KeyError(k));
   }
   return getitemSlow(o, k);
 }
@@ -1872,7 +1879,7 @@ function dictMissing(d: PyDict, k: any): any {
     const m = typeDunder(t, "__missing__");
     if (m !== undefined) return m(d, k);
   }
-  throw T.KeyError(k);
+  throw markRaised(T.KeyError(k));
 }
 
 function byteValue(v: any): number {
@@ -1958,7 +1965,7 @@ function setSlice(o: any[], k: PySlice, v: any) {
 export function delitem(o: any, k: any): void {
   if (Array.isArray(o) && (o as any).$t !== true && (o as any).$cls === undefined) return arrDel(o, k);
   if (o instanceof PyDict && o.$cls === T.dict) {
-    if (!dictDelete(o, k)) throw T.KeyError(k);
+    if (!dictDelete(o, k)) throw markRaised(T.KeyError(k));
     return;
   }
   const f = special(o, "__delitem__");
