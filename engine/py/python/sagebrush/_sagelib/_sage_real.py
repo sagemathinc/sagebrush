@@ -2802,12 +2802,18 @@ def _special(x, name):
     return get(f, x, type(x)) if get is not None else f
 
 
+_TYPE_MRO = type.__dict__["__mro__"]
+_TYPE_DICT = type.__dict__["__dict__"]
+
+
 def _type_lookup(t, name):
     """name in the dicts of t's MRO, as the interpreter's slot lookup reads
     it: type's own __mro__ and __dict__, so no metaclass __getattribute__ is
     called (CORR-8C8-1)."""
-    for k in type.__getattribute__(t, "__mro__"):
-        d = type.__getattribute__(k, "__dict__")
+    # (type's own descriptors for both: a metaclass property named __mro__
+    # or __dict__ is not consulted either, CORR-93C-1)
+    for k in _TYPE_MRO.__get__(t, type):
+        d = _TYPE_DICT.__get__(k, type)
         if name in d:
             return d[name]
     return None

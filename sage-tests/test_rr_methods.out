@@ -630,3 +630,7 @@ changing method -> 2.0000000 Real Field with 30 bits of precision
 calls ['int']
 digits descriptor -> 2.00000000 Real Field with 33 bits of precision
 ['real-get']
+digits __mro__ property -> 2.00000000 Real Field with 33 bits of precision
+['real-get']
+digits __dict__ property -> 2.00000000 Real Field with 33 bits of precision
+['real-get']
